@@ -4,7 +4,7 @@ export default function Footer() {
   return (
     <footer id="contact" className="py-16 mx-auto max-w-3xl px-6 text-center">
       <h2 className="text-4xl sm:text-5xl md:text-6xl font-extrabold tracking-tight">
-        Let's Talk About Your PC
+        {"Let's Talk About Your PC"}
       </h2>
 
       <p className="mt-3 text-sm text-slate-300/80">
