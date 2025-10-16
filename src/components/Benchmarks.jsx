@@ -10,6 +10,25 @@ export default function Benchmarks() {
     else setFadeIn(false);
   }, [selectedImage]);
 
+  // Escape key & scroll lock
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") setSelectedImage(null);
+    };
+
+    if (selectedImage) {
+      document.body.style.overflow = "hidden";
+      window.addEventListener("keydown", handleKeyDown);
+    } else {
+      document.body.style.overflow = "auto";
+    }
+
+    return () => {
+      document.body.style.overflow = "auto";
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [selectedImage]);
+
   return (
     <div className="relative py-12 px-4 max-w-7xl mx-auto text-white">
       {/* Image Modal */}

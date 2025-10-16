@@ -4,9 +4,29 @@ export default function Reviews() {
   const [selectedImage, setSelectedImage] = useState(null);
   const [fadeIn, setFadeIn] = useState(false);
 
+  // Fade-in effect
   useEffect(() => {
     if (selectedImage) setFadeIn(true);
     else setFadeIn(false);
+  }, [selectedImage]);
+
+  // Escape key & scroll lock
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") setSelectedImage(null);
+    };
+
+    if (selectedImage) {
+      document.body.style.overflow = "hidden";
+      window.addEventListener("keydown", handleKeyDown);
+    } else {
+      document.body.style.overflow = "auto";
+    }
+
+    return () => {
+      document.body.style.overflow = "auto";
+      window.removeEventListener("keydown", handleKeyDown);
+    };
   }, [selectedImage]);
 
   return (
@@ -18,7 +38,6 @@ export default function Reviews() {
         Feedback from clients I've had the pleasure of helping.
       </p>
 
-      {/* Image container */}
       <div className="flex justify-center">
         <div
           className="relative rounded-2xl overflow-hidden max-w-5xl border-2 cursor-pointer"
@@ -33,7 +52,7 @@ export default function Reviews() {
         </div>
       </div>
 
-      {/* Image Modal */}
+      {/* Modal */}
       {selectedImage && (
         <div
           className={`fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 transition-opacity duration-300 ${
