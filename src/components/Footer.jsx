@@ -28,7 +28,21 @@ export default function Footer() {
       <p className="mt-8 text-xs text-slate-400">
         Available for consultations • Let's chat
       </p>
+
       <div className="h-3" />
+
+      {/* Designed by Nerky */}
+      <p className="mt-4 text-xs text-slate-400">
+        Designed by{" "}
+        <a
+          href="https://discord.com/users/286457824081346570"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-cyan-400 hover:text-cyan-300 underline transition-colors"
+        >
+          Nerky
+        </a>
+      </p>
     </footer>
   );
 }
