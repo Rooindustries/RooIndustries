@@ -331,7 +331,9 @@ export default function Benchmarks() {
                 src="/Benchmark/Kyorisk/afterMod.png"
                 alt="After Image"
                 className="rounded w-full h-64 object-cover cursor-pointer shadow-lg border border-cyan-600 hover:border-cyan-500 hover:shadow-cyan-500/40 transition duration-300"
-                onClick={() => setSelectedImage("/Benchmark/Kyorisk/1.png")}
+                onClick={() =>
+                  setSelectedImage("/Benchmark/Kyorisk/afterMod.png")
+                }
               />
             </div>
           </div>
