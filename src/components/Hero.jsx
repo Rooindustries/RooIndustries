@@ -38,11 +38,17 @@ export default function Hero() {
             View My Reviews →
           </a>
           <a
-            href="mailto:serviroo@rooindustries.com"
-            className="rounded-md bg-sky-600/20 px-5 py-3 text-sm font-semibold text-white ring-1 ring-sky-700/50 hover:bg-sky-600/30 hover:shadow-[0_0_20px_rgba(56,189,248,0.5)] active:translate-y-px transition-all duration-300"
+            href="https://mail.google.com/mail/?view=cm&to=serviroo@rooindustries.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-md bg-sky-600/20 px-5 py-3 text-sm font-semibold text-white 
+             ring-1 ring-sky-700/50 hover:bg-sky-600/30 
+             hover:shadow-[0_0_20px_rgba(56,189,248,0.7)] active:translate-y-px 
+             transition-all duration-300"
           >
             Contact Me
           </a>
+
           <Link
             to="/Benchmarks"
             className="rounded-md bg-sky-500 px-5 py-3 text-sm font-semibold text-white hover:bg-sky-400 hover:shadow-[0_0_20px_rgba(56,189,248,0.7)] active:translate-y-px transition-all duration-300"
@@ -63,7 +69,7 @@ export default function Hero() {
           </div>
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-green-400"></span>
-            <span>50+ Happy Customers</span>
+            <span>150+ Happy Customers</span>
           </div>
         </div>
       </section>

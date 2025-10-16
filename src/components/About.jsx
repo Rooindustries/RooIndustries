@@ -9,8 +9,8 @@ export default function About() {
 
       <div className="mx-auto mt-6 max-w-2xl rounded-md bg-[#1b2430] p-6 ring-1 ring-[#2b3a4a] text-left text-[13px] leading-6 text-slate-200/90">
         I’ve spent years optimizing PCs and helping people unlock the full
-        potential of their systems. Over 50+ satisfied customers have trusted me
-        to fix their lag, boost performance, and solve issues that others
+        potential of their systems. Over 150+ satisfied customers have trusted
+        me to fix their lag, boost performance, and solve issues that others
         couldn’t. I focus on what matters: speed, reliability, and peak
         performance. Every system is different, and I take pride in finding the
         right solution for each one. If your PC isn’t running at 100%, I’m here
