@@ -17,7 +17,11 @@ export default function Hero() {
         <h1 className="mt-8 text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-tight tracking-tight">
           Get Your PC Running
         </h1>
-        <div className="mt-1 text-4xl sm:text-5xl lg:text-6xl font-extrabold text-sky-400 leading-tight drop-shadow-[0_0_10px_rgba(56,189,248,0.7)]">
+        <div
+          className="mt-1 text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-tight 
+  bg-gradient-to-r from-sky-400 to-blue-500 text-transparent 
+  bg-clip-text drop-shadow-[0_0_10px_rgba(56,189,248,0.7)]"
+        >
           Like New
         </div>
 
@@ -33,23 +37,21 @@ export default function Hero() {
         <div className="mt-7 flex items-center justify-center gap-4">
           <a
             href="#reviews"
-            className="rounded-md bg-sky-500 px-5 py-3 text-sm font-semibold text-white hover:bg-sky-400 hover:shadow-[0_0_20px_rgba(56,189,248,0.7)] active:translate-y-px transition-all duration-300"
+            className="rounded-md bg-gradient-to-r from-sky-400 to-sky-400 px-5 py-3 text-sm font-semibold text-white hover:from-sky-500 hover:to-blue-600 hover:shadow-[0_0_20px_rgba(56,189,248,0.7)] active:translate-y-px transition-all duration-300"
           >
             View My Reviews →
           </a>
+
           <Link
             to="/Contact"
-            className="rounded-md bg-sky-600/20 px-5 py-3 text-sm font-semibold text-white 
-             ring-1 ring-sky-700/50 hover:bg-sky-600/30 
-             hover:shadow-[0_0_20px_rgba(56,189,248,0.7)] active:translate-y-px 
-             transition-all duration-300"
+            className="rounded-md bg-gradient-to-r from-sky-400 to-sky-600 px-5 py-3 text-sm font-semibold text-white ring-1 ring-sky-700/50 hover:from-sky-600/50 hover:to-sky-500/50 hover:shadow-[0_0_20px_rgba(56,189,248,0.7)] active:translate-y-px transition-all duration-300"
           >
             Contact Me
           </Link>
 
           <Link
             to="/Benchmarks"
-            className="rounded-md bg-sky-500 px-5 py-3 text-sm font-semibold text-white hover:bg-sky-400 hover:shadow-[0_0_20px_rgba(56,189,248,0.7)] active:translate-y-px transition-all duration-300"
+            className="rounded-md bg-gradient-to-r from-sky-600 to-blue-700 px-5 py-3 text-sm font-semibold text-white hover:from-sky-500 hover:to-blue-600 hover:shadow-[0_0_20px_rgba(56,189,248,0.7)] active:translate-y-px transition-all duration-300"
           >
             View My Benchmarks →
           </Link>
