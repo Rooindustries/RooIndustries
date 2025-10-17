@@ -37,17 +37,15 @@ export default function Hero() {
           >
             View My Reviews →
           </a>
-          <a
-            href="https://mail.google.com/mail/?view=cm&to=serviroo@rooindustries.com"
-            target="_blank"
-            rel="noopener noreferrer"
+          <Link
+            to="/Contact"
             className="rounded-md bg-sky-600/20 px-5 py-3 text-sm font-semibold text-white 
              ring-1 ring-sky-700/50 hover:bg-sky-600/30 
              hover:shadow-[0_0_20px_rgba(56,189,248,0.7)] active:translate-y-px 
              transition-all duration-300"
           >
             Contact Me
-          </a>
+          </Link>
 
           <Link
             to="/Benchmarks"

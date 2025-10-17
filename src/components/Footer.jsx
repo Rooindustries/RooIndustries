@@ -1,5 +1,5 @@
 import React from "react";
-
+import { Link } from "react-router-dom";
 export default function Footer() {
   return (
     <footer id="contact" className="py-16 mx-auto max-w-3xl px-6 text-center">
@@ -17,17 +17,15 @@ export default function Footer() {
       </p>
 
       <div className="mt-6">
-        <a
-          href="https://mail.google.com/mail/?view=cm&to=serviroo@rooindustries.com"
-          target="_blank"
-          rel="noopener noreferrer"
+        <Link
+          to="/Contact"
           className="rounded-md bg-sky-600/20 px-5 py-3 text-sm font-semibold text-white 
              ring-1 ring-sky-700/50 hover:bg-sky-600/30 
              hover:shadow-[0_0_20px_rgba(56,189,248,0.7)] active:translate-y-px 
              transition-all duration-300"
         >
           Contact Me
-        </a>
+        </Link>
       </div>
 
       <p className="mt-8 text-xs text-slate-400">

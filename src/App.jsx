@@ -3,7 +3,8 @@ import React from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import Home from "./pages/Home";
 import Benchmarks from "./pages/Benchmarks";
-
+import Contact from "./pages/Contact";
+import { FaDiscord } from "react-icons/fa";
 function App() {
   return (
     <Router>
@@ -21,8 +22,17 @@ function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/benchmarks" element={<Benchmarks />} />
+            <Route path="/contact" element={<Contact />} />
           </Routes>
         </main>
+        <a
+          href="https://discord.gg/M7nTkn9dxE" // replace with your server link
+          target="_blank"
+          rel="noopener noreferrer"
+          className="fixed bottom-4 right-4 z-50 bg-blue-800 text-white p-4 rounded-full shadow-lg hover:bg-blue-500 transition-colors"
+        >
+          <FaDiscord size={24} />
+        </a>
       </div>
     </Router>
   );
