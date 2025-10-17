@@ -97,10 +97,12 @@ export default function Benchmarks() {
             </div>
             <div className="mt-6 text-center">
               <img
-                src="/Benchmark/Bul/discord.png"
+                src="/Benchmark/Bul/discordMod.png"
                 alt="Customer Discord Review"
                 className="rounded-lg shadow-lg mx-auto cursor-pointer border border-gray-500 hover:border-green-500 hover:shadow-green-500/40 transition duration-300"
-                onClick={() => setSelectedImage("/Benchmark/Bul/discord.png")}
+                onClick={() =>
+                  setSelectedImage("/Benchmark/Bul/discordMod.png")
+                }
               />
             </div>
           </div>
@@ -136,10 +138,12 @@ export default function Benchmarks() {
             </div>
             <div className="mt-6 text-center">
               <img
-                src="/Benchmark/Cata/discord.png"
+                src="/Benchmark/Cata/discordMod.png"
                 alt="Customer Discord Review"
                 className="rounded-lg shadow-lg mx-auto cursor-pointer border border-gray-500 hover:border-green-500 hover:shadow-green-500/40 transition duration-300"
-                onClick={() => setSelectedImage("/Benchmark/Cata/discord.png")}
+                onClick={() =>
+                  setSelectedImage("/Benchmark/Cata/discordMod.png")
+                }
               />
             </div>
           </div>
@@ -173,10 +177,12 @@ export default function Benchmarks() {
             </div>
             <div className="mt-6 text-center">
               <img
-                src="/Benchmark/Rsk/discord.png"
+                src="/Benchmark/Rsk/discordMod.png"
                 alt="Customer Discord Review"
                 className="rounded-lg shadow-lg mx-auto cursor-pointer border border-gray-500 hover:border-green-500 hover:shadow-green-500/40 transition duration-300"
-                onClick={() => setSelectedImage("/Benchmark/Rsk/discord.png")}
+                onClick={() =>
+                  setSelectedImage("/Benchmark/Rsk/discordMod.png")
+                }
               />
             </div>
           </div>
@@ -214,11 +220,11 @@ export default function Benchmarks() {
             </div>
             <div className="mt-6 text-center">
               <img
-                src="/Benchmark/Benzah/discord.png"
+                src="/Benchmark/Benzah/discordMod.png"
                 alt="Customer Discord Review"
                 className="rounded-lg shadow-lg mx-auto cursor-pointer border border-gray-500 hover:border-green-500 hover:shadow-green-500/40 transition duration-300"
                 onClick={() =>
-                  setSelectedImage("/Benchmark/Benzah/discord.png")
+                  setSelectedImage("/Benchmark/Benzah/discordMod.png")
                 }
               />
             </div>
@@ -253,10 +259,12 @@ export default function Benchmarks() {
             </div>
             <div className="mt-6 text-center">
               <img
-                src="/Benchmark/Aum/discord.png"
+                src="/Benchmark/Aum/discordMod.png"
                 alt="Customer Discord Review"
                 className="rounded-lg shadow-lg mx-auto cursor-pointer border border-gray-500 hover:border-green-500 hover:shadow-green-500/40 transition duration-300"
-                onClick={() => setSelectedImage("/Benchmark/Aum/discord.png")}
+                onClick={() =>
+                  setSelectedImage("/Benchmark/Aum/discordMod.png")
+                }
               />
             </div>
           </div>
@@ -290,10 +298,10 @@ export default function Benchmarks() {
             </div>
             <div className="mt-6 text-center">
               <img
-                src="/Benchmark/Jx/discord.png"
+                src="/Benchmark/Jx/discordMod.png"
                 alt="Customer Discord Review"
                 className="rounded-lg shadow-lg mx-auto cursor-pointer border border-gray-500 hover:border-green-500 hover:shadow-green-500/40 transition duration-300"
-                onClick={() => setSelectedImage("/Benchmark/Jx/discord.png")}
+                onClick={() => setSelectedImage("/Benchmark/Jx/discordMod.png")}
               />
             </div>
           </div>
@@ -327,10 +335,12 @@ export default function Benchmarks() {
             </div>
             <div className="mt-6 text-center">
               <img
-                src="/Benchmark/Void/discord.png"
+                src="/Benchmark/Void/discordMod.png"
                 alt="Customer Discord Review"
                 className="rounded-lg shadow-lg mx-auto cursor-pointer border border-gray-500 hover:border-green-500 hover:shadow-green-500/40 transition duration-300"
-                onClick={() => setSelectedImage("/Benchmark/Void/discord.png")}
+                onClick={() =>
+                  setSelectedImage("/Benchmark/Void/discordMod.png")
+                }
               />
             </div>
           </div>
@@ -368,11 +378,11 @@ export default function Benchmarks() {
             </div>
             <div className="mt-6 text-center">
               <img
-                src="/Benchmark/Kyorisk/discord.png"
+                src="/Benchmark/Kyorisk/discordMod.png"
                 alt="Customer Discord Review"
                 className="rounded-lg shadow-lg mx-auto cursor-pointer border border-gray-500 hover:border-green-500 hover:shadow-green-500/40 transition duration-300"
                 onClick={() =>
-                  setSelectedImage("/Benchmark/Kyorisk/discord.png")
+                  setSelectedImage("/Benchmark/Kyorisk/discordMod.png")
                 }
               />
             </div>

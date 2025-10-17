@@ -34,7 +34,10 @@ export default function Footer() {
       <a href="/privacy" className="mt-3 text-xs text-slate-400">
         Privacy and Policy
       </a>
-
+      <a href="/terms" className="mt-3 text-xs text-slate-400">
+        {" "}
+        • Terms And Condition
+      </a>
       <div className="h-3" />
 
       {/* Designed by Nerky */}
