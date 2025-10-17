@@ -1,10 +1,16 @@
-import React from "react";
+import React, { useState } from "react";
 import { useForm, ValidationError } from "@formspree/react";
 import { Link } from "react-router-dom";
 
 export default function Services() {
   const [state, handleSubmit] = useForm("mpwybpen"); // form id
+  const [copied, setCopied] = useState(false); // copy state
 
+  const handleCopy = () => {
+    navigator.clipboard.writeText("serviroo@rooindustries.com");
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
   return (
     <section className="text-white px-4 py-12 flex flex-col items-center">
       {/* Heading */}
@@ -39,11 +45,9 @@ export default function Services() {
         </div>
         <button
           className="text-cyan-400 hover:text-cyan-300 transition duration-200"
-          onClick={() =>
-            navigator.clipboard.writeText("serviroo@rooindustries.com")
-          }
+          onClick={handleCopy}
         >
-          Copy
+          {copied ? "Copied!" : "Copy"}
         </button>
       </div>
 
