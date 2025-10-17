@@ -31,6 +31,9 @@ export default function Footer() {
       <p className="mt-8 text-xs text-slate-400">
         Available for consultations • Let's chat
       </p>
+      <a href="/privacy" className="mt-3 text-xs text-slate-400">
+        Privacy and Policy
+      </a>
 
       <div className="h-3" />
 

@@ -4,6 +4,7 @@ import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import Home from "./pages/Home";
 import Benchmarks from "./pages/Benchmarks";
 import Contact from "./pages/Contact";
+import Privacy from "./pages/PrivacyPolicy";
 import { FaDiscord } from "react-icons/fa";
 function App() {
   return (
@@ -23,6 +24,7 @@ function App() {
             <Route path="/" element={<Home />} />
             <Route path="/benchmarks" element={<Benchmarks />} />
             <Route path="/contact" element={<Contact />} />
+            <Route path="/privacy" element={<Privacy />} />
           </Routes>
         </main>
         <a
