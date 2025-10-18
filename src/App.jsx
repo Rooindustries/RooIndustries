@@ -7,6 +7,8 @@ import Contact from "./pages/Contact";
 import Terms from "./pages/Terms";
 import Privacy from "./pages/PrivacyPolicy";
 import { FaDiscord } from "react-icons/fa";
+import Reviews from "./pages/Reviews";
+import Navbar from "./components/Navbar";
 function App() {
   return (
     <Router>
@@ -21,21 +23,23 @@ function App() {
         ></div>
 
         <main className="relative z-10">
+          <Navbar />
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/benchmarks" element={<Benchmarks />} />
             <Route path="/contact" element={<Contact />} />
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/terms" element={<Terms />} />
+            <Route path="/morereviews" element={<Reviews />} />
           </Routes>
         </main>
         <a
           href="https://discord.gg/M7nTkn9dxE" // replace with your server link
           target="_blank"
           rel="noopener noreferrer"
-          className="fixed bottom-4 right-4 z-50 bg-blue-800 text-white p-4 rounded-full shadow-lg hover:bg-blue-500 transition-colors"
+          className="fixed bottom-12 right-12 z-50 bg-blue-800 text-white p-4 rounded-full shadow-lg hover:bg-blue-500 transition-colors"
         >
-          <FaDiscord size={24} />
+          <FaDiscord size={34} />
         </a>
       </div>
     </Router>

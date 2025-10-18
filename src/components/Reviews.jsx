@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 
 export default function Reviews() {
   const [selectedImage, setSelectedImage] = useState(null);
@@ -30,7 +31,7 @@ export default function Reviews() {
   }, [selectedImage]);
 
   return (
-    <section id="reviews" className="py-20 text-center">
+    <section id="homepage-reviews" className="py-20 text-center">
       <h2 className="text-4xl font-extrabold text-white mb-3">
         What People Say
       </h2>
@@ -38,7 +39,8 @@ export default function Reviews() {
         Feedback from clients I've had the pleasure of helping.
       </p>
 
-      <div className="flex justify-center">
+      <div className="flex flex-col items-center">
+        {/* Review Image */}
         <div
           className="relative rounded-2xl overflow-hidden max-w-5xl border-2 cursor-pointer"
           style={{ borderColor: "#1f657e" }}
@@ -50,6 +52,14 @@ export default function Reviews() {
             className="w-full h-auto block"
           />
         </div>
+
+        {/* More Reviews Button */}
+        <Link
+          to="/morereviews"
+          className="mt-8 rounded-md bg-gradient-to-r from-sky-600 to-blue-700 px-5 py-3 text-sm font-semibold text-white hover:from-sky-500 hover:to-blue-600 hover:shadow-[0_0_20px_rgba(56,189,248,0.7)] active:translate-y-px transition-all duration-300"
+        >
+          More Reviews →
+        </Link>
       </div>
 
       {/* Modal */}

@@ -12,7 +12,7 @@ export default function Services() {
     setTimeout(() => setCopied(false), 2000);
   };
   return (
-    <section className="text-white px-4 py-12 flex flex-col items-center">
+    <section className="text-white px-4 py-28 flex flex-col items-center">
       {/* Heading */}
       <div className="text-center mb-10">
         <h2 className="text-4xl font-bold mb-2">Get In Touch</h2>

@@ -14,7 +14,20 @@ export default function About() {
         couldn’t. I focus on what matters: speed, reliability, and peak
         performance. Every system is different, and I take pride in finding the
         right solution for each one. If your PC isn’t running at 100%, I’m here
-        to help you get it there.
+        to help you get it to 110%.
+      </div>
+
+      <div className="mt-8 flex justify-center">
+        <a
+          href="https://www.3dmark.com/hall-of-fame-2/cpu+profile+16+threads+score/version+1.0"
+          target="_blank"
+        >
+          <img
+            src="/servitop.png"
+            alt="System Benchmark Result"
+            className="rounded-lg shadow-lg border border-[#2b3a4a] hover:border-cyan-500 transition-all duration-300"
+          />
+        </a>
       </div>
 
       {/* spacing to next section */}

@@ -19,7 +19,7 @@ export default function Footer() {
       <div className="mt-6">
         <Link
           to="/Contact"
-          className="rounded-md bg-sky-600/20 px-5 py-3 text-sm font-semibold text-white 
+          className="rounded-md bg-gradient-to-r from-sky-400 to-sky-600 px-5 py-3 text-sm font-semibold text-white 
              ring-1 ring-sky-700/50 hover:bg-sky-600/30 
              hover:shadow-[0_0_20px_rgba(56,189,248,0.7)] active:translate-y-px 
              transition-all duration-300"

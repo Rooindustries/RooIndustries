@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 
 export default function Hero() {
   return (
-    <header className="pt-24" id="top">
+    <header className="pt-28" id="top">
       <section className="mx-auto max-w-3xl px-6 text-center">
         <div
           className="inline-flex items-center rounded-full border border-slate-700/80 bg-slate-900/70 px-5 py-2
@@ -22,7 +22,7 @@ export default function Hero() {
   bg-gradient-to-r from-sky-400 to-blue-500 text-transparent 
   bg-clip-text drop-shadow-[0_0_10px_rgba(56,189,248,0.7)]"
         >
-          Like New
+          Better Than New
         </div>
 
         <p className="mt-4 text-sm text-slate-300/80 leading-relaxed">
@@ -36,7 +36,7 @@ export default function Hero() {
 
         <div className="mt-7 flex items-center justify-center gap-4">
           <a
-            href="#reviews"
+            href="#homepage-reviews"
             className="rounded-md bg-gradient-to-r from-sky-400 to-sky-400 px-5 py-3 text-sm font-semibold text-white hover:from-sky-500 hover:to-blue-600 hover:shadow-[0_0_20px_rgba(56,189,248,0.7)] active:translate-y-px transition-all duration-300"
           >
             View My Reviews →

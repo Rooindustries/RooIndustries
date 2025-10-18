@@ -40,7 +40,7 @@ export default function Benchmarks() {
         </Link>
       )}
 
-      <div className="relative py-12 px-4 max-w-7xl mx-auto text-white">
+      <div className="relative py-28 px-4 max-w-7xl mx-auto text-white">
         {/* Image Modal */}
         {selectedImage && (
           <div
@@ -138,12 +138,10 @@ export default function Benchmarks() {
             </div>
             <div className="mt-6 text-center">
               <img
-                src="/Benchmark/Cata/discordMod.png"
+                src="/Benchmark/Cata/discord.png"
                 alt="Customer Discord Review"
                 className="rounded-lg shadow-lg mx-auto cursor-pointer border border-gray-500 hover:border-green-500 hover:shadow-green-500/40 transition duration-300"
-                onClick={() =>
-                  setSelectedImage("/Benchmark/Cata/discordMod.png")
-                }
+                onClick={() => setSelectedImage("/Benchmark/Cata/discord.png")}
               />
             </div>
           </div>
