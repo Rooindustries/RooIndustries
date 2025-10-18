@@ -44,10 +44,10 @@ export default function Reviews() {
         <div
           className="relative rounded-2xl overflow-hidden max-w-5xl border-2 cursor-pointer"
           style={{ borderColor: "#1f657e" }}
-          onClick={() => setSelectedImage("/reviews.png")}
+          onClick={() => setSelectedImage("/reviews_mod.png")}
         >
           <img
-            src="/reviews.png"
+            src="/reviews_mod.png"
             alt="Client Discord Reviews"
             className="w-full h-auto block"
           />

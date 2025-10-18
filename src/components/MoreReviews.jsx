@@ -84,10 +84,10 @@ export default function Reviews() {
           onClick={() => setSelectedImage("/All_reviews/frost2.png")}
         />
         <img
-          src="/All_reviews/honf.png"
+          src="/All_reviews/honf_mod.png"
           alt="Review honf"
           className="w-full mb-4 cursor-pointer rounded-xl shadow-lg break-inside"
-          onClick={() => setSelectedImage("/All_reviews/honf.png")}
+          onClick={() => setSelectedImage("/All_reviews/honf_mod.png")}
         />
         <img
           src="/All_reviews/jack.png"

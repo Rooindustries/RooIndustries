@@ -2,6 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
+/* float animation for the discord icon :D */
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
 html {
   scroll-behavior: smooth;
 }
