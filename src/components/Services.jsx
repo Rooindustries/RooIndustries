@@ -1,5 +1,6 @@
 import React from "react";
-import { Clock, Shield, Wrench, Zap } from "lucide-react";
+import { Clock, Shield, Wrench, Zap, Video } from "lucide-react";
+
 export default function Services() {
   return (
     <section className="mx-auto max-w-6xl pt-24">
@@ -15,8 +16,8 @@ export default function Services() {
 
       <div className="h-10" />
 
-      {/* 4 static service cards */}
-      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-2">
+      {/* Top 4 service cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
         {/* Speed & Performance */}
         <div className="rounded-md bg-[#121821] ring-1 ring-[#2b3a4a] p-6 hover:ring-[#19c5ff]/60 transition">
           <div className="mb-3">
@@ -26,8 +27,8 @@ export default function Services() {
             Speed & Performance
           </h4>
           <p className="mt-2 text-[12px] leading-5 text-slate-200/90">
-            Eliminate lag, freezing, and slow boots. Your PC will feel brand new
-            with optimized performance.
+            Eliminate lag, freezing, and slow boots. Your PC will feel faster,
+            smoother, and more powerful than ever.
           </p>
           <div className="mt-5 border-t border-[#2b3a4a]" />
         </div>
@@ -41,8 +42,8 @@ export default function Services() {
             Gaming Optimization
           </h4>
           <p className="mt-2 text-[12px] leading-5 text-slate-200/90">
-            Maximize FPS, reduce stuttering, and unlock your PC’s full gaming
-            potential for a competitive edge.
+            Maximize FPS, reduce stutters, and achieve fluid, competitive-level
+            gameplay across every title.
           </p>
           <div className="mt-5 border-t border-[#2b3a4a]" />
         </div>
@@ -56,8 +57,8 @@ export default function Services() {
             System Reliability
           </h4>
           <p className="mt-2 text-[12px] leading-5 text-slate-200/90">
-            Fix crashes, errors, and instability. Rock-solid performance you can
-            count on every day.
+            Fix crashes, errors, and instability. Get a stable, clean system you
+            can rely on every single day.
           </p>
           <div className="mt-5 border-t border-[#2b3a4a]" />
         </div>
@@ -71,8 +72,25 @@ export default function Services() {
             Expert Troubleshooting
           </h4>
           <p className="mt-2 text-[12px] leading-5 text-slate-200/90">
-            Complex issues? I solve what others can’t. Every PC is different — I
-            find the fix.
+            From hidden issues to complex bugs, I track down problems others
+            miss and bring your system back to perfection.
+          </p>
+          <div className="mt-5 border-t border-[#2b3a4a]" />
+        </div>
+      </div>
+
+      {/* Streamers & Content Creators */}
+      <div className="mt-6 flex justify-center">
+        <div className="rounded-md bg-[#121821] ring-1 ring-[#2b3a4a] p-6 w-full sm:w-[80%] md:w-[60%] hover:ring-[#19c5ff]/60 transition text-center">
+          <div className="mb-3 flex justify-center">
+            <Video className="w-6 h-6 text-cyan-400 drop-shadow-[0_0_8px_rgba(14,165,233,0.7)]" />
+          </div>
+          <h4 className="text-[15px] font-bold tracking-tight">
+            Streamers & Content Creators
+          </h4>
+          <p className="mt-2 text-[12px] leading-5 text-slate-200/90">
+            Tailored performance tuning for creators who demand flawless
+            recording, editing, and live performance — all at once.
           </p>
           <div className="mt-5 border-t border-[#2b3a4a]" />
         </div>

@@ -13,17 +13,20 @@ import Navbar from "./components/Navbar";
 function App() {
   return (
     <Router>
-      <div className="relative min-h-screen text-white overflow-hidden bg-gradient-to-br from-[#1a2335] via-[#0b1120] to-[#030712]">
+      <div
+        className="relative min-h-screen text-white overflow-hidden 
+                      bg-gradient-to-br from-[#1f2a44] via-[#0b1120] to-[#030712]"
+      >
         {/* Subtle grid overlay */}
         <div
-          className="absolute inset-0 bg-[linear-gradient(45deg,rgba(255,255,255,0.03)_1px,transparent_1px)] 
-                      bg-[size:40px_40px] opacity-40 animate-pulse"
+          className="absolute inset-0 bg-[linear-gradient(45deg,rgba(255,255,255,0.05)_1px,transparent_1px)] 
+                     bg-[size:40px_40px] opacity-50 animate-pulse"
         ></div>
 
-        {/* Soft cyan glow at center */}
+        {/* Stronger cyan radial glow at center */}
         <div
-          className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(14,165,233,0.12),transparent_45%)] 
-                      animate-pulse"
+          className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(14,165,233,0.25),rgba(3,7,18,1) 80%)] 
+                     animate-pulse"
         ></div>
 
         <main className="relative z-10">
@@ -38,17 +41,17 @@ function App() {
           </Routes>
         </main>
 
-        {/* discord icon  */}
+        {/* Discord icon */}
         <a
           href="https://discord.gg/M7nTkn9dxE"
           target="_blank"
           rel="noopener noreferrer"
-          className="fixed bottom-8 sm:bottom-12 right-6 sm:right-12 z-50 
-             bg-blue-800 text-white p-4 sm:p-5 rounded-full shadow-2xl 
-             hover:bg-blue-500 transition-transform duration-300 hover:scale-110 
-             animate-[float_3s_ease-in-out_infinite]"
+          className="fixed bottom-6 sm:bottom-12 right-6 sm:right-12 z-50 
+                     bg-blue-800 text-white p-4 sm:p-5 rounded-full shadow-2xl 
+                     hover:bg-blue-500 transition-transform duration-300 hover:scale-110 
+                     animate-[float_3s_ease-in-out_infinite]"
         >
-          <FaDiscord size={34} className="sm:size-[44px]" />
+          <FaDiscord className="w-8 h-8 sm:w-11 sm:h-11" />
         </a>
       </div>
     </Router>

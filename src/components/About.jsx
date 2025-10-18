@@ -1,9 +1,10 @@
 import React from "react";
+import { Zap } from "lucide-react";
 
 export default function About() {
   return (
     <section id="about" className="mx-auto max-w-4xl pt-24 text-center">
-      <h2 className="text-5xl sm:text-6xl font-extrabold tracking-tight">
+      <h2 className="text-5xl sm:text-6xl font-extrabold tracking-tight text-white">
         About Me
       </h2>
 
@@ -14,10 +15,19 @@ export default function About() {
         couldn’t. I focus on what matters: speed, reliability, and peak
         performance. Every system is different, and I take pride in finding the
         right solution for each one. If your PC isn’t running at 100%, I’m here
-        to help you get it to 110%.
+        to help you get it to 110%.
       </div>
 
-      <div className="mt-8 flex justify-center">
+      {/* Leaderboard section */}
+      <div className="mt-10 flex flex-col items-center">
+        <div className="flex items-center gap-2 mb-3">
+          <Zap className="text-cyan-500 w-5 h-5 animate-pulse drop-shadow-[0_0_6px_#00ffff]" />
+          <h3 className="text-cyan-400 font-semibold text-lg sm:text-xl tracking-wide drop-shadow-[0_0_8px_#00ffff]">
+            Global Leaderboard Position
+          </h3>
+          <Zap className="text-cyan-500 w-5 h-5 animate-pulse drop-shadow-[0_0_6px_#00ffff]" />
+        </div>
+
         <a
           href="https://www.3dmark.com/hall-of-fame-2/cpu+profile+16+threads+score/version+1.0"
           target="_blank"
@@ -30,7 +40,6 @@ export default function About() {
         </a>
       </div>
 
-      {/* spacing to next section */}
       <div className="h-3" />
     </section>
   );
