@@ -46,10 +46,12 @@ function App() {
           href="https://discord.gg/M7nTkn9dxE"
           target="_blank"
           rel="noopener noreferrer"
-          className="fixed bottom-6 sm:bottom-12 right-6 sm:right-12 z-50 
-                     bg-blue-800 text-white p-4 sm:p-5 rounded-full shadow-2xl 
-                     hover:bg-blue-500 transition-transform duration-300 hover:scale-110 
-                     animate-[float_3s_ease-in-out_infinite]"
+          className="fixed bottom-6 sm:bottom-12 right-6 sm:right-12 z-50
+             bg-blue-800 text-white p-4 sm:p-5 rounded-full
+             shadow-2xl hover:bg-blue-500
+             transition-transform duration-300 hover:scale-110
+             animate-[float_3s_ease-in-out_infinite]
+             drop-shadow-[0_0_15px_rgba(14,165,233,0.35)]"
         >
           <FaDiscord className="w-8 h-8 sm:w-11 sm:h-11" />
         </a>

@@ -7,10 +7,10 @@ export default function Home() {
   return (
     <>
       <Hero />
-      {<About />}
-      {<Services />}
-      {<Reviews />}
-      {<Footer />}
+      <About />
+      <Services />
+      <Reviews />
+      <Footer />
     </>
   );
 }

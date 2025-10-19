@@ -19,8 +19,8 @@ export default function Services() {
       {/* Top 4 service cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
         {/* Speed & Performance */}
-        <div className="rounded-md bg-[#121821] ring-1 ring-[#2b3a4a] p-6 hover:ring-[#19c5ff]/60 transition">
-          <div className="mb-3">
+        <div className="rounded-md bg-[#121821] ring-1 ring-[#2b3a4a] p-6 text-center hover:ring-[#19c5ff]/60 transition">
+          <div className="mb-3 flex justify-center">
             <Zap className="w-5 h-5 text-cyan-400 drop-shadow-[0_0_8px_rgba(14,165,233,0.7)]" />
           </div>
           <h4 className="text-[15px] font-bold tracking-tight">
@@ -34,8 +34,8 @@ export default function Services() {
         </div>
 
         {/* Gaming Optimization */}
-        <div className="rounded-md bg-[#121821] ring-1 ring-[#2b3a4a] p-6 hover:ring-[#19c5ff]/60 transition">
-          <div className="mb-3">
+        <div className="rounded-md bg-[#121821] ring-1 ring-[#2b3a4a] p-6 text-center hover:ring-[#19c5ff]/60 transition">
+          <div className="mb-3 flex justify-center">
             <Clock className="text-cyan-400 w-5 h-5 drop-shadow-[0_0_6px_rgba(14,165,233,0.6)]" />
           </div>
           <h4 className="text-[15px] font-bold tracking-tight">
@@ -49,8 +49,8 @@ export default function Services() {
         </div>
 
         {/* System Reliability */}
-        <div className="rounded-md bg-[#121821] ring-1 ring-[#2b3a4a] p-6 hover:ring-[#19c5ff]/60 transition">
-          <div className="mb-3">
+        <div className="rounded-md bg-[#121821] ring-1 ring-[#2b3a4a] p-6 text-center hover:ring-[#19c5ff]/60 transition">
+          <div className="mb-3 flex justify-center">
             <Shield className="text-cyan-400 w-5 h-5 drop-shadow-[0_0_6px_rgba(14,165,233,0.6)]" />
           </div>
           <h4 className="text-[15px] font-bold tracking-tight">
@@ -64,8 +64,8 @@ export default function Services() {
         </div>
 
         {/* Expert Troubleshooting */}
-        <div className="rounded-md bg-[#121821] ring-1 ring-[#2b3a4a] p-6 hover:ring-[#19c5ff]/60 transition">
-          <div className="mb-3">
+        <div className="rounded-md bg-[#121821] ring-1 ring-[#2b3a4a] p-6 text-center hover:ring-[#19c5ff]/60 transition">
+          <div className="mb-3 flex justify-center">
             <Wrench className="w-5 h-5 text-cyan-400 drop-shadow-[0_0_8px_rgba(14,165,233,0.7)]" />
           </div>
           <h4 className="text-[15px] font-bold tracking-tight">
@@ -81,7 +81,7 @@ export default function Services() {
 
       {/* Streamers & Content Creators */}
       <div className="mt-6 flex justify-center">
-        <div className="rounded-md bg-[#121821] ring-1 ring-[#2b3a4a] p-6 w-full sm:w-[80%] md:w-[60%] hover:ring-[#19c5ff]/60 transition text-center">
+        <div className="rounded-md bg-[#121821] ring-1 ring-[#2b3a4a] p-6 w-full sm:w-[80%] md:w-[60%] text-center hover:ring-[#19c5ff]/60 transition">
           <div className="mb-3 flex justify-center">
             <Video className="w-6 h-6 text-cyan-400 drop-shadow-[0_0_8px_rgba(14,165,233,0.7)]" />
           </div>

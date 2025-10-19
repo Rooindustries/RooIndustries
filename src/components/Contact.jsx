@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useForm, ValidationError } from "@formspree/react";
 import { Link } from "react-router-dom";
-
+import BackButton from "./BackButton";
 export default function Services() {
   const [state, handleSubmit] = useForm("mpwybpen"); // form id
   const [copied, setCopied] = useState(false); // copy state
@@ -22,12 +22,7 @@ export default function Services() {
         </p>
       </div>
 
-      <Link
-        to="/"
-        className="inline-block absolute top-12 left-12 bg-cyan-600 border-2 border-cyan-500 text-black font-semibold py-2 px-5 rounded-md hover:bg-cyan-400 hover:border-cyan-400 transition duration-300 shadow-md hover:shadow-cyan-500/50"
-      >
-        ← Back to Home
-      </Link>
+      <BackButton />
 
       {/* Email block */}
       <div className="p-4 rounded-lg flex items-center justify-between w-full max-w-xl mb-8 border border-gray-700 bg-opacity-0">

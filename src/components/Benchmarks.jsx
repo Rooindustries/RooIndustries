@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-
+import BackButton from "./BackButton";
 export default function Benchmarks() {
   const [selectedImage, setSelectedImage] = useState(null);
   const [fadeIn, setFadeIn] = useState(false);
@@ -31,15 +31,6 @@ export default function Benchmarks() {
 
   return (
     <>
-      {!selectedImage && (
-        <Link
-          to="/"
-          className="inline-block absolute top-12 left-12 bg-cyan-600 border-2 border-cyan-500 text-black font-semibold py-2 px-5 rounded-md hover:bg-cyan-400 hover:border-cyan-400 transition duration-300 shadow-md hover:shadow-cyan-500/50"
-        >
-          ← Back to Home
-        </Link>
-      )}
-
       <div className="relative py-28 px-4 max-w-7xl mx-auto text-white">
         {/* Image Modal */}
         {selectedImage && (
@@ -56,9 +47,7 @@ export default function Benchmarks() {
             />
           </div>
         )}
-
-        {/* Back to Home button */}
-
+        <BackButton hidden={!!selectedImage} />
         {/* Title */}
         <h1 className="text-4xl font-extrabold text-center mb-2">
           Performance Benchmarks

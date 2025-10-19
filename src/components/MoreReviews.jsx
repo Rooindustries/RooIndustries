@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import BackButton from "./BackButton";
 
 export default function Reviews() {
   const [selectedImage, setSelectedImage] = useState(null);
@@ -30,6 +31,7 @@ export default function Reviews() {
 
   return (
     <section className="px-4 mt-20 py-12 max-w-7xl mx-auto">
+      <BackButton hidden={!!selectedImage} />
       <h1 className="text-3xl md:text-4xl font-bold mb-12 text-center text-white">
         Community Reviews
       </h1>
