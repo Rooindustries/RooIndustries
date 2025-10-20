@@ -23,7 +23,7 @@ export default function About() {
         <div className="flex items-center gap-2 mb-3">
           <Zap className="text-cyan-500 w-5 h-5 animate-pulse drop-shadow-[0_0_6px_#00ffff]" />
           <h3 className="text-cyan-400 font-semibold text-lg sm:text-xl tracking-wide drop-shadow-[0_0_8px_#00ffff]">
-            Global Leaderboard Position
+            Global CPU Overclocking Record Position
           </h3>
           <Zap className="text-cyan-500 w-5 h-5 animate-pulse drop-shadow-[0_0_6px_#00ffff]" />
         </div>

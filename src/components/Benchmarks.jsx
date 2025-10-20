@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import BackButton from "./BackButton";
 export default function Benchmarks() {
   const [selectedImage, setSelectedImage] = useState(null);
   const [fadeIn, setFadeIn] = useState(false);
@@ -47,7 +46,6 @@ export default function Benchmarks() {
             />
           </div>
         )}
-        <BackButton hidden={!!selectedImage} />
         {/* Title */}
         <h1 className="text-4xl font-extrabold text-center mb-2">
           Performance Benchmarks

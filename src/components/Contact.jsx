@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { useForm, ValidationError } from "@formspree/react";
 import { Link } from "react-router-dom";
-import BackButton from "./BackButton";
 export default function Services() {
   const [state, handleSubmit] = useForm("mpwybpen"); // form id
   const [copied, setCopied] = useState(false); // copy state
@@ -21,8 +20,6 @@ export default function Services() {
           system's performance.
         </p>
       </div>
-
-      <BackButton />
 
       {/* Email block */}
       <div className="p-4 rounded-lg flex items-center justify-between w-full max-w-xl mb-8 border border-gray-700 bg-opacity-0">

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { FaArrowLeft } from "react-icons/fa"; // arrow icon
 
-export default function BackButton({ hidden }) {
+export default function BackButton({ hidden, inline = false }) {
   const navigate = useNavigate();
 
   const [isVisible, setIsVisible] = useState(true);
@@ -27,15 +28,16 @@ export default function BackButton({ hidden }) {
   return (
     <button
       onClick={() => navigate(-1)}
-      className={`fixed top-[80px] left-20 bg-cyan-600 border-2 border-cyan-500 text-black font-semibold py-2 px-5 rounded-md 
-                 hover:bg-cyan-400 hover:border-cyan-400 transition-all duration-500 ease-in-out shadow-md hover:shadow-cyan-500/50 
-                 z-40 hidden sm:block ${
-                   isVisible
-                     ? "translate-y-0 opacity-100"
-                     : "-translate-y-20 opacity-0"
-                 }`}
+      aria-label="Go Back"
+      className={`${inline ? "" : "fixed top-[80px] left-20"} 
+        bg-cyan-500 hover:bg-cyan-400 text-black p-2 sm:p-3 rounded-full border border-cyan-400 
+        transition-all duration-500 ease-in-out shadow-[0_0_15px_rgba(0,255,255,0.3)] 
+        hover:shadow-[0_0_20px_rgba(0,255,255,0.5)] 
+        z-40 hidden sm:flex items-center justify-center ${
+          isVisible ? "translate-y-0 opacity-100" : "-translate-y-10 opacity-0"
+        }`}
     >
-      ← Back
+      <FaArrowLeft className="text-lg sm:text-xl" />
     </button>
   );
 }

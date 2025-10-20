@@ -44,7 +44,10 @@ export default function Hero() {
 
           <Link
             to="/Contact"
-            className="rounded-md bg-gradient-to-r from-sky-400 to-sky-600 px-5 py-3 text-sm font-semibold text-white ring-1 ring-sky-700/50 hover:from-sky-600/50 hover:to-sky-500/50 hover:shadow-[0_0_20px_rgba(56,189,248,0.7)] active:translate-y-px transition-all duration-300"
+            className="rounded-md bg-gradient-to-r from-sky-400 to-sky-600 px-5 py-3 text-sm font-semibold text-white 
+             ring-1 ring-sky-700/50 hover:from-cyan-400 hover:to-sky-500 
+             hover:shadow-[0_0_20px_rgba(56,189,248,0.6)] active:translate-y-px 
+             transition-all duration-300"
           >
             Contact Me
           </Link>
