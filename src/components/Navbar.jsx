@@ -8,15 +8,22 @@ export default function Navbar() {
 
   const [isVisible, setIsVisible] = useState(true);
   const [lastScrollY, setLastScrollY] = useState(0);
+  const [isPastLogo, setIsPastLogo] = useState(false);
 
   useEffect(() => {
     const handleScroll = () => {
       const currentScrollY = window.scrollY;
+
+      // show/hide logic
       if (currentScrollY > lastScrollY && currentScrollY > 50) {
         setIsVisible(false);
       } else {
         setIsVisible(true);
       }
+
+      // toggle when scrolled past logo
+      setIsPastLogo(currentScrollY > 120);
+
       setLastScrollY(currentScrollY);
     };
 
@@ -26,24 +33,28 @@ export default function Navbar() {
 
   return (
     <nav
-      className={`fixed top-0 w-full z-50 px-2 sm:px-8 
-              pt-4 max-[480px]:pt-14
-              transition-transform duration-500 ease-in-out ${
-                isVisible ? "translate-y-0" : "-translate-y-full"
-              }`}
+      className={`
+    w-full z-50 px-2 sm:px-8 transition-all duration-500 ease-in-out
+    ${isVisible ? "translate-y-0 opacity-100" : "-translate-y-full opacity-0"}
+    ${
+      isPastLogo
+        ? "fixed top-5"
+        : "absolute top-[7.2rem] max-[639px]:top-[6.5rem] max-[479px]:top-[3rem]"
+    }
+  `}
     >
       <div
         className="
-      relative mx-auto 
-      max-w-md sm:max-w-3xl 
-      md:max-w-[80%] xl:max-w-3xl  /* Tablet + laptop smaller */
-      flex items-center justify-center
-      px-3 sm:px-6 md:px-4 py-2 sm:py-3 md:py-2
-      rounded-full bg-[#0f172a]/80 backdrop-blur-md
-      shadow-[0_0_25px_rgba(0,255,255,0.2)]
-      border border-cyan-400/10 overflow-hidden
-      transition-all duration-300
-    "
+          relative mx-auto 
+          max-w-md sm:max-w-3xl 
+          md:max-w-[80%] xl:max-w-3xl
+          flex items-center justify-center
+          px-3 sm:px-6 md:px-4 py-2 sm:py-3 md:py-2
+          rounded-full bg-[#0f172a]/80 backdrop-blur-md
+          shadow-[0_0_25px_rgba(0,255,255,0.2)]
+          border border-cyan-400/10 overflow-hidden
+          transition-all duration-300
+        "
       >
         {/* Back Button (left) */}
         {location.pathname !== "/" && (
@@ -52,7 +63,7 @@ export default function Navbar() {
           </div>
         )}
 
-        {/* Nav Links (centered) */}
+        {/* Nav Links */}
         <div className="flex justify-center space-x-2 sm:space-x-4 text-white text-xs sm:text-sm md:text-[13px] font-medium">
           <Link
             to="/"

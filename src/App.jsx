@@ -33,21 +33,22 @@ function App() {
         {/* Roo Industries Logo */}
         <a
           href="/"
-          className="fixed top-6 left-4 sm:top-6 sm:left-8 md:top-1 md:left-10 z-50 flex items-center 
+          className="z-50 flex justify-center sm:justify-start items-center 
              transition-transform duration-300 hover:scale-105
-             max-[450px]:hidden"
+             absolute sm:fixed md:absolute 
+             top-6 left-0 sm:left-8 md:left-10 w-full sm:w-auto
+             max-[480px]:relative max-[480px]:top-6 max-[480px]:mb-4"
         >
           <img
             src="/logo.png"
             alt="Roo Industries Logo"
-            className="w-24 pt-5 sm:w-36 sm:pt-1 md:w-52 lg:w-60 drop-shadow-[0_0_25px_rgba(14,165,233,0.4)] 
-               hover:drop-shadow-[0_0_35px_rgba(14,165,233,0.6)] transition-all duration-500
-               max-[640px]:top-10 max-[640px]:mt-4" // moves it slightly down on small screens
+            className="w-40 sm:w-48 md:w-56 drop-shadow-[0_0_25px_rgba(14,165,233,0.4)] 
+               hover:drop-shadow-[0_0_35px_rgba(14,165,233,0.6)] transition-all duration-500"
           />
         </a>
 
         {/* Navbar */}
-        <main className="relative z-10">
+        <main className="relative z-10 pt-10 sm:pt-24">
           <Navbar />
           <Routes>
             <Route path="/" element={<Home />} />
