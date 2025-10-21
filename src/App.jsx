@@ -15,8 +15,8 @@ function App() {
     <Router>
       <div
         className="relative min-h-screen text-white overflow-hidden 
-              bg-[linear-gradient(to_bottom,#00d5df_0%,#0072a0_30%,#002c73_65%,#000058_100%)]
-              bg-fixed"
+        bg-[linear-gradient(to_top,#00b7c0_0%,#006185_30%,#001f5a_65%,#000040_100%)]
+        bg-fixed"
       >
         {/* Subtle grid overlay */}
         <div

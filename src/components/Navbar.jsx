@@ -39,7 +39,7 @@ export default function Navbar() {
     ${
       isPastLogo
         ? "fixed top-5"
-        : "absolute top-[7.2rem] max-[639px]:top-[6.5rem] max-[479px]:top-[3rem]"
+        : "absolute top-[2.8rem] max-[639px]:top-[6.5rem] max-[479px]:top-[3rem]"
     }
   `}
     >
