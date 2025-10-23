@@ -4,6 +4,8 @@ import { Link } from "react-router-dom";
 export default function Reviews() {
   const [selectedImage, setSelectedImage] = useState(null);
   const [fadeIn, setFadeIn] = useState(false);
+  const [isZoomed, setIsZoomed] = useState(false);
+  const [zoomOrigin, setZoomOrigin] = useState({ x: "50%", y: "50%" });
 
   // Fade-in effect
   useEffect(() => {
@@ -29,6 +31,22 @@ export default function Reviews() {
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [selectedImage]);
+
+  // handle zoom when clicking the image
+  const handleImageClick = (e) => {
+    e.stopPropagation();
+    const rect = e.target.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    setZoomOrigin({ x: `${x}%`, y: `${y}%` });
+    setIsZoomed((prev) => !prev);
+  };
+
+  // reset zoom when closing
+  const handleClose = () => {
+    setIsZoomed(false);
+    setSelectedImage(null);
+  };
 
   return (
     <section id="homepage-reviews" className="py-20 text-center">
@@ -68,12 +86,19 @@ export default function Reviews() {
           className={`fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 transition-opacity duration-300 ${
             fadeIn ? "opacity-100" : "opacity-0"
           }`}
-          onClick={() => setSelectedImage(null)}
+          onClick={handleClose}
         >
           <img
             src={selectedImage}
             alt="Enlarged Review"
-            className="max-w-[90%] max-h-[90%] rounded-lg shadow-lg object-contain transition-transform duration-300 scale-95 hover:scale-100"
+            onClick={handleImageClick}
+            className="rounded-lg shadow-lg object-contain transition-transform duration-300 
+                       w-[95%] sm:max-w-[90%] sm:max-h-[90%] max-w-none max-h-none"
+            style={{
+              transformOrigin: `${zoomOrigin.x} ${zoomOrigin.y}`,
+              transform: isZoomed ? "scale(1.6)" : "scale(1)",
+              cursor: isZoomed ? "zoom-out" : "zoom-in",
+            }}
           />
         </div>
       )}

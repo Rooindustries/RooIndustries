@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
+
 export default function Benchmarks() {
   const [selectedImage, setSelectedImage] = useState(null);
   const [fadeIn, setFadeIn] = useState(false);
+  const [isZoomed, setIsZoomed] = useState(false);
+  const [zoomOrigin, setZoomOrigin] = useState({ x: "50%", y: "50%" });
 
   useEffect(() => {
     if (selectedImage) setFadeIn(true);
@@ -28,6 +31,21 @@ export default function Benchmarks() {
     };
   }, [selectedImage]);
 
+  // Handle zoom click
+  const handleImageClick = (e) => {
+    e.stopPropagation();
+    const rect = e.target.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    setZoomOrigin({ x: `${x}%`, y: `${y}%` });
+    setIsZoomed((prev) => !prev);
+  };
+
+  const handleClose = () => {
+    setIsZoomed(false);
+    setSelectedImage(null);
+  };
+
   return (
     <>
       <div className="relative py-28 px-4 max-w-7xl mx-auto text-white">
@@ -37,15 +55,23 @@ export default function Benchmarks() {
             className={`fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 transition-opacity duration-300 ${
               fadeIn ? "opacity-100" : "opacity-0"
             }`}
-            onClick={() => setSelectedImage(null)}
+            onClick={handleClose}
           >
             <img
               src={selectedImage}
               alt="Enlarged"
-              className="max-w-[90%] max-h-[90%] rounded-lg shadow-lg object-contain transition-transform duration-300 scale-95 hover:scale-100"
+              onClick={handleImageClick}
+              className="rounded-lg shadow-lg object-contain transition-transform duration-300 
+           w-[90%] h-auto sm:max-w-[90%] sm:max-h-[90%] max-w-none max-h-none"
+              style={{
+                transformOrigin: `${zoomOrigin.x} ${zoomOrigin.y}`,
+                transform: isZoomed ? "scale(1.6)" : "scale(1)",
+                cursor: isZoomed ? "zoom-out" : "zoom-in",
+              }}
             />
           </div>
         )}
+
         {/* Title */}
         <h1 className="text-4xl font-extrabold text-center mb-2">
           Performance Benchmarks

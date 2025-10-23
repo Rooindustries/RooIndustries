@@ -66,13 +66,18 @@ function App() {
           target="_blank"
           rel="noopener noreferrer"
           className="fixed bottom-6 sm:bottom-12 right-6 sm:right-12 z-50
-                     bg-blue-800 text-white p-4 sm:p-5 rounded-full
-                     shadow-2xl hover:bg-blue-500
-                     transition-transform duration-300 hover:scale-110
-                     animate-[float_3s_ease-in-out_infinite]
-                     drop-shadow-[0_0_15px_rgba(14,165,233,0.35)]"
+             group bg-gradient-to-br from-[#3b82f6] via-[#2563eb] to-[#1e40af]
+             text-white p-4 sm:p-5 rounded-full
+             shadow-[0_0_25px_rgba(56,189,248,0.6),0_0_50px_rgba(56,189,248,0.3)]
+             transition-all duration-300 hover:scale-125 hover:shadow-[0_0_45px_rgba(56,189,248,0.9),0_0_90px_rgba(56,189,248,0.4)]
+             before:absolute before:inset-0 before:rounded-full
+             before:bg-[radial-gradient(circle_at_center,rgba(56,189,248,0.35),transparent_70%)]
+             before:blur-xl before:-z-10 animate-[float_3s_ease-in-out_infinite]"
         >
-          <FaDiscord className="w-8 h-8 sm:w-11 sm:h-11" />
+          <FaDiscord
+            className="w-8 h-8 sm:w-11 sm:h-11 text-white drop-shadow-[0_0_15px_rgba(56,189,248,0.9)]
+               group-hover:drop-shadow-[0_0_25px_rgba(56,189,248,1)] transition-all duration-300"
+          />
         </a>
       </div>
     </Router>

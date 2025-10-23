@@ -33,11 +33,12 @@ export default function BackButton({ hidden, inline = false }) {
         bg-cyan-500 hover:bg-cyan-400 text-black p-2 sm:p-3 rounded-full border border-cyan-400 
         transition-all duration-500 ease-in-out shadow-[0_0_15px_rgba(0,255,255,0.3)] 
         hover:shadow-[0_0_20px_rgba(0,255,255,0.5)] 
-        z-40 hidden sm:flex items-center justify-center ${
-          isVisible ? "translate-y-0 opacity-100" : "-translate-y-10 opacity-0"
-        }`}
+        z-40 flex items-center justify-center
+        ${isVisible ? "translate-y-0 opacity-100" : "-translate-y-10 opacity-0"}
+        scale-90 active:scale-95
+      `}
     >
-      <FaArrowLeft className="text-lg sm:text-xl" />
+      <FaArrowLeft className="text-base sm:text-lg" />
     </button>
   );
 }

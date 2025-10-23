@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useForm, ValidationError } from "@formspree/react";
 import { Link } from "react-router-dom";
+
 export default function Services() {
   const [state, handleSubmit] = useForm("mpwybpen"); // form id
   const [copied, setCopied] = useState(false); // copy state
@@ -10,6 +11,7 @@ export default function Services() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
   return (
     <section className="text-white px-4 py-28 flex flex-col items-center">
       {/* Heading */}
@@ -22,7 +24,7 @@ export default function Services() {
       </div>
 
       {/* Email block */}
-      <div className="p-4 rounded-lg flex items-center justify-between w-full max-w-xl mb-8 border border-gray-700 bg-opacity-0">
+      <div className="p-4 rounded-lg flex items-center justify-between w-full max-w-xl mb-8 border border-cyan-400/20 bg-[#152238]/70 backdrop-blur-sm">
         <div className="flex items-center space-x-3">
           <svg
             className="w-6 h-6 text-cyan-400"
@@ -45,13 +47,13 @@ export default function Services() {
 
       {/* Contact Form */}
       {state.succeeded ? (
-        <div className="w-full max-w-xl p-6 rounded-lg border border-gray-700 bg-gray-900 text-center text-green-400 font-semibold">
+        <div className="w-full max-w-xl p-6 rounded-lg border border-cyan-400/20 bg-[#152238]/70 backdrop-blur-sm text-center text-green-400 font-semibold">
           Thank you! Your message has been sent.
         </div>
       ) : (
         <form
           onSubmit={handleSubmit}
-          className="p-6 rounded-lg w-full max-w-xl space-y-5 border border-gray-700"
+          className="p-6 rounded-lg w-full max-w-xl space-y-5 border border-cyan-400/20 bg-[#152238]/70 backdrop-blur-sm"
         >
           <div>
             <label className="block mb-1 font-semibold">Name</label>
