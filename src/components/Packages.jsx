@@ -68,7 +68,7 @@ export default function Packages() {
             <p className="mt-6 text-5xl font-bold text-sky-400">$199.99</p>
 
             <ul className="mt-6 space-y-2 text-left text-sm text-slate-300 leading-relaxed">
-              <li>✔ Includes everything from Prime Performance Optimization</li>
+              <li>✔ Includes everything from Performance Vertex Overhaul</li>
               <li>
                 ✔ 3 days of extensive RAM overclocking (frequency & timings)
                 with full stress testing
@@ -91,15 +91,10 @@ export default function Packages() {
             </ul>
           </div>
           <Link
-            to="/contact"
-            className="mt-8 w-full inline-block text-center px-8 py-3 text-[15px] font-semibold rounded-md 
-                       bg-gradient-to-r from-sky-500 to-blue-700 text-white 
-                       shadow-[0_0_25px_rgba(56,189,248,0.6)] 
-                       hover:from-sky-400 hover:to-blue-600 
-                       hover:shadow-[0_0_35px_rgba(56,189,248,0.8)] 
-                       transition-all duration-300 hover:scale-105"
+            to="/discord"
+            className="mt-8 w-full bg-sky-600 hover:bg-sky-500 text-white py-3 rounded-md font-semibold shadow-[0_0_20px_rgba(56,189,248,0.4)] transition-all duration-300 text-center"
           >
-            Contact Us For More Info
+            Contact for more info
           </Link>
         </div>
       </div>

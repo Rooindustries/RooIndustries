@@ -11,6 +11,13 @@ import Navbar from "./components/Navbar";
 import Packages from "./pages/Packages";
 import Faq from "./pages/Faq";
 
+function RedirectToDiscord() {
+  React.useEffect(() => {
+    window.location.href = "https://discord.gg/M7nTkn9dxE";
+  }, []);
+  return null; // nothing is rendered
+}
+
 function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -68,6 +75,7 @@ function App() {
               element={<Reviews setIsModalOpen={setIsModalOpen} />}
             />
             <Route path="/faq" element={<Faq />} />
+            <Route path="/discord" element={<RedirectToDiscord />} />
           </Routes>
         </main>
 
