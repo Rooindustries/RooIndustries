@@ -14,6 +14,12 @@
   }
 }
 
+.is-modal-open .roo-logo {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: opacity 300ms ease;
+}
+
 html {
   scroll-behavior: smooth;
 }

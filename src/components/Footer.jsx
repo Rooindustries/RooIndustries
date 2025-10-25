@@ -12,11 +12,11 @@ export default function Footer() {
         {"Let's Talk About Your PC"}
       </h2>
 
-      <p className="mt-3 text-sm text-slate-100/90">
+      <p className="mt-3 text-sm text-slate-10">
         I'm always open to helping new clients optimize their systems.
       </p>
 
-      <p className="mt-4 text-[15px] sm:text-base font-semibold text-sky-200/90">
+      <p className="mt-4 text-[15px] sm:text-base font-semibold text-white-300">
         Whether it's gaming, work, or everyday use — let's get your PC running
         at its best.
       </p>
@@ -35,8 +35,7 @@ export default function Footer() {
         </Link>
       </div>
 
-      {/* Extra Info */}
-      <p className="mt-8 text-xs text-sky-100/90">
+      <p className="mt-8 text-xs text-white-400">
         Available for consultations • Let's chat
       </p>
 
@@ -59,7 +58,7 @@ export default function Footer() {
       <div className="h-4" />
 
       {/* Credit */}
-      <p className="mt-4 text-xs text-sky-100/90">
+      <p className="mt-4 text-xs text-white-300">
         Designed by{" "}
         <a
           href="https://discord.com/users/286457824081346570"

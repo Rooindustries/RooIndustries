@@ -53,7 +53,7 @@ export default function Reviews() {
       <h2 className="text-4xl font-extrabold text-white mb-3">
         What People Say
       </h2>
-      <p className="text-slate-400 mb-10">
+      <p className="text-slate-200 mb-10">
         Feedback from clients I've had the pleasure of helping.
       </p>
 
@@ -92,8 +92,8 @@ export default function Reviews() {
             src={selectedImage}
             alt="Enlarged Review"
             onClick={handleImageClick}
-            className="rounded-lg shadow-lg object-contain transition-transform duration-300 
-                       w-[95%] sm:max-w-[90%] sm:max-h-[90%] max-w-none max-h-none"
+            className="rounded-lg shadow-lg transition-transform duration-300 
+                       w-[75%] sm:max-w-[70%] sm:max-h-[70%] max-w-none max-h-none"
             style={{
               transformOrigin: `${zoomOrigin.x} ${zoomOrigin.y}`,
               transform: isZoomed ? "scale(1.6)" : "scale(1)",

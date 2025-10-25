@@ -9,7 +9,7 @@ export default function Services() {
         <h3 className="text-4xl sm:text-5xl font-extrabold tracking-tight">
           What I Do
         </h3>
-        <p className="mt-2 text-slate-300/70 text-sm">
+        <p className="mt-2 text-slate-200 text-sm">
           Real, hands-on PC optimization that makes a difference.
         </p>
       </div>

@@ -17,7 +17,7 @@ export default function Services() {
       {/* Heading */}
       <div className="text-center mb-10">
         <h2 className="text-4xl font-bold mb-2">Get In Touch</h2>
-        <p className="text-gray-300 text-lg">
+        <p className="text-gray-200 text-lg">
           Ready to optimize your PC? Let's discuss how I can help improve your
           system's performance.
         </p>

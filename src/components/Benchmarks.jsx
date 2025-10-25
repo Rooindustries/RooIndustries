@@ -1,16 +1,24 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 
-export default function Benchmarks() {
+export default function Benchmarks({ setIsModalOpen = () => {} }) {
   const [selectedImage, setSelectedImage] = useState(null);
   const [fadeIn, setFadeIn] = useState(false);
   const [isZoomed, setIsZoomed] = useState(false);
   const [zoomOrigin, setZoomOrigin] = useState({ x: "50%", y: "50%" });
 
   useEffect(() => {
-    if (selectedImage) setFadeIn(true);
-    else setFadeIn(false);
-  }, [selectedImage]);
+    const hasModal = Boolean(selectedImage);
+    if (hasModal) {
+      setFadeIn(true);
+      setIsModalOpen(true);
+      document.body.classList.add("is-modal-open");
+    } else {
+      setFadeIn(false);
+      setIsModalOpen(false);
+      document.body.classList.remove("is-modal-open");
+    }
+  }, [selectedImage, setIsModalOpen]);
 
   // Escape key & scroll lock
   useEffect(() => {
@@ -28,6 +36,7 @@ export default function Benchmarks() {
     return () => {
       document.body.style.overflow = "auto";
       window.removeEventListener("keydown", handleKeyDown);
+      document.body.classList.remove("is-modal-open");
     };
   }, [selectedImage]);
 
@@ -44,6 +53,8 @@ export default function Benchmarks() {
   const handleClose = () => {
     setIsZoomed(false);
     setSelectedImage(null);
+    setIsModalOpen(false);
+    document.body.classList.remove("is-modal-open");
   };
 
   return (
@@ -52,7 +63,7 @@ export default function Benchmarks() {
         {/* Image Modal */}
         {selectedImage && (
           <div
-            className={`fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 transition-opacity duration-300 ${
+            className={`fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-[9999] transition-opacity duration-300 ${
               fadeIn ? "opacity-100" : "opacity-0"
             }`}
             onClick={handleClose}
@@ -61,8 +72,8 @@ export default function Benchmarks() {
               src={selectedImage}
               alt="Enlarged"
               onClick={handleImageClick}
-              className="rounded-lg shadow-lg object-contain transition-transform duration-300 
-           w-[90%] h-auto sm:max-w-[90%] sm:max-h-[90%] max-w-none max-h-none"
+              className="rounded-lg shadow-lg transition-transform duration-300 
+           w-[70%] h-auto sm:max-w-70%] sm:max-h-[70%] max-w-none max-h-none"
               style={{
                 transformOrigin: `${zoomOrigin.x} ${zoomOrigin.y}`,
                 transform: isZoomed ? "scale(1.6)" : "scale(1)",
