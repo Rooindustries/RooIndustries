@@ -275,10 +275,14 @@ export default function Faq() {
       {/* CTA */}
       <div className="mt-16 flex justify-center">
         <Link
-          to="/contact"
-          className="px-8 py-3 text-[15px] font-semibold rounded-md bg-gradient-to-r from-sky-400 to-blue-700 hover:from-sky-400 hover:to-blue-600 text-white shadow-[0_0_25px_rgba(56,189,248,0.6)] transition-all duration-300 hover:scale-105"
+          to="/packages"
+          className="rounded-md bg-gradient-to-r from-sky-400 to-blue-600 
+                               px-3 sm:px-5 py-2 sm:py-3 text-[11px] sm:text-sm font-semibold text-white 
+                               ring-1 ring-sky-700/50 hover:from-cyan-400 hover:to-sky-500 
+                               hover:shadow-[0_0_20px_rgba(56,189,248,0.6)] 
+                               active:translate-y-px transition-all duration-300"
         >
-          Contact Us For More Info
+          Supercharge Your Performance Now
         </Link>
       </div>
     </section>
