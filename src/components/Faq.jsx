@@ -8,7 +8,7 @@ export default function Faq() {
       <h2 className="text-4xl sm:text-5xl font-extrabold text-center tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
         Frequently Asked Questions
       </h2>
-      <p className="mt-3 text-slate-300/90 text-center text-sm sm:text-base">
+      <p className="mt-3 text-slate-150 text-center text-sm sm:text-base">
         Everything you need to know before booking your optimization
       </p>
 
