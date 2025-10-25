@@ -94,7 +94,7 @@ export default function Packages() {
             to="/discord"
             className="mt-8 w-full bg-sky-600 hover:bg-sky-500 text-white py-3 rounded-md font-semibold shadow-[0_0_20px_rgba(56,189,248,0.4)] transition-all duration-300 text-center"
           >
-            Contact for more info
+            Contact Us For More Info
           </Link>
         </div>
       </div>
