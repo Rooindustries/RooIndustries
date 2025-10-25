@@ -1,5 +1,6 @@
 import React from "react";
 import { Link } from "react-router-dom";
+import { Zap } from "lucide-react";
 
 export default function Hero() {
   return (
@@ -42,12 +43,13 @@ export default function Hero() {
         <div className="mt-7 flex items-center justify-center gap-3 sm:gap-4 flex-wrap">
           <Link
             to="/packages"
-            className="rounded-md bg-gradient-to-r from-sky-400 to-sky-600 
+            className="inline-flex items-center justify-center gap-2 rounded-md bg-gradient-to-r from-sky-400 to-sky-600 
                        px-3 sm:px-5 py-2 sm:py-3 text-[11px] sm:text-sm font-semibold text-white 
                        ring-1 ring-sky-700/50 hover:from-cyan-400 hover:to-sky-500 
                        hover:shadow-[0_0_20px_rgba(56,189,248,0.6)] 
                        active:translate-y-px transition-all duration-300"
           >
+            <Zap className="w-4 h-4 sm:w-5 sm:h-5 text-white drop-shadow-[0_0_6px_rgba(56,189,248,0.8)]" />
             Supercharge Your Performance Now
           </Link>
 

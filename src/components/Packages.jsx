@@ -18,7 +18,7 @@ export default function Packages() {
         <div className="w-full sm:w-[520px] bg-[#0b1120]/90 border border-sky-600/40 rounded-xl p-6 shadow-[0_0_25px_rgba(14,165,233,0.25)] hover:shadow-[0_0_35px_rgba(14,165,233,0.4)] transition-all duration-500 flex flex-col justify-between">
           <div>
             <h3 className="text-2xl font-semibold">
-              Standard Performance Optimization
+              Performance Vertex Overhaul
             </h3>
             <p className="mt-6 text-5xl font-bold text-sky-400">$79.99</p>
 
@@ -77,6 +77,7 @@ export default function Packages() {
                 ✔ 3 days of CPU overclocking using all high-end motherboard
                 tools
               </li>
+              <li>✔ 3 day availability</li>
               <li>
                 ✔ 1 full day of GPU overclocking, curve building, and voltage
                 tuning
@@ -89,21 +90,18 @@ export default function Packages() {
               <li>✔ Exclusively for Ryzen systems above AM5</li>
             </ul>
           </div>
-
-          <button className="mt-8 w-full bg-gradient-to-r from-sky-500 to-blue-700 hover:from-sky-400 hover:to-blue-600 text-white py-3 rounded-md font-semibold shadow-[0_0_25px_rgba(56,189,248,0.6)] transition-all duration-300">
-            Book Now
-          </button>
+          <Link
+            to="/contact"
+            className="mt-8 w-full inline-block text-center px-8 py-3 text-[15px] font-semibold rounded-md 
+                       bg-gradient-to-r from-sky-500 to-blue-700 text-white 
+                       shadow-[0_0_25px_rgba(56,189,248,0.6)] 
+                       hover:from-sky-400 hover:to-blue-600 
+                       hover:shadow-[0_0_35px_rgba(56,189,248,0.8)] 
+                       transition-all duration-300 hover:scale-105"
+          >
+            Contact Us For More Info
+          </Link>
         </div>
-      </div>
-
-      {/* Contact Us button */}
-      <div className="mt-14 flex justify-center">
-        <Link
-          to="/contact"
-          className="px-8 py-3 text-[15px] font-semibold rounded-md bg-gradient-to-r from-sky-400 to-blue-700 hover:from-sky-400 hover:to-blue-600 text-white shadow-[0_0_25px_rgba(56,189,248,0.6)] transition-all duration-300 hover:scale-105"
-        >
-          Contact Us For More Info
-        </Link>
       </div>
     </section>
   );
