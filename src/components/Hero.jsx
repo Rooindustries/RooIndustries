@@ -29,7 +29,7 @@ export default function Hero() {
         </div>
 
         {/* Description */}
-        <p className="mt-4 text-xs sm:text-sm text-slate-300/80 leading-relaxed">
+        <p className="mt-4 text-xs sm:text-sm text-slate-160 leading-relaxed">
           I fix lag, boost gaming performance, and solve the issues other techs
           can't.
         </p>

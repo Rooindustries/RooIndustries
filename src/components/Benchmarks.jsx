@@ -87,7 +87,7 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
         <h1 className="text-4xl font-extrabold text-center mb-2">
           Performance Benchmarks
         </h1>
-        <p className="text-center text-gray-300 mb-12">
+        <p className="text-center text-gray-100 mb-12">
           Real results from real optimizations.
         </p>
 

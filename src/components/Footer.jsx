@@ -42,14 +42,14 @@ export default function Footer() {
       <div className="mt-3 space-x-1">
         <a
           href="/privacy"
-          className="text-xs text-sky-200 hover:text-cyan-300 transition"
+          className="text-xs text-white-300 hover:text-cyan-300 transition"
         >
           Privacy and Policy
         </a>
         <span className="text-sky-400">•</span>
         <a
           href="/terms"
-          className="text-xs text-sky-200 hover:text-cyan-300 transition"
+          className="text-xs text-white-300 hover:text-cyan-300 transition"
         >
           Terms And Condition
         </a>
