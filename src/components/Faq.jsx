@@ -16,7 +16,7 @@ export default function Faq() {
         {/* SECTION 1 */}
         <div className="backdrop-blur-sm bg-[#0b1120]/80 border border-sky-700/30 rounded-2xl shadow-[0_0_25px_rgba(14,165,233,0.15)] p-8">
           <h3 className="text-2xl font-bold text-sky-400 border-b border-sky-600/30 pb-2 mb-6">
-            ⚙️ General & Experience
+            General & Experience
           </h3>
 
           <div className="space-y-6 text-slate-300 leading-relaxed">
@@ -62,7 +62,7 @@ export default function Faq() {
         {/* SECTION 2 */}
         <div className="backdrop-blur-sm bg-[#0b1120]/80 border border-sky-700/30 rounded-2xl shadow-[0_0_25px_rgba(14,165,233,0.15)] p-8">
           <h3 className="text-2xl font-bold text-sky-400 border-b border-sky-600/30 pb-2 mb-6">
-            ⚡ Performance & Results
+            Performance & Results
           </h3>
           <div className="space-y-6 text-slate-300 leading-relaxed">
             <div>
@@ -104,7 +104,7 @@ export default function Faq() {
         {/* SECTION 3 */}
         <div className="backdrop-blur-sm bg-[#0b1120]/80 border border-sky-700/30 rounded-2xl shadow-[0_0_25px_rgba(14,165,233,0.15)] p-8">
           <h3 className="text-2xl font-bold text-sky-400 border-b border-sky-600/30 pb-2 mb-6">
-            💸 Plans, Refunds & Warranties
+            Plans, Refunds & Warranties
           </h3>
           <div className="space-y-6 text-slate-300 leading-relaxed">
             <div>
@@ -158,7 +158,7 @@ export default function Faq() {
         {/* SECTION 4 */}
         <div className="backdrop-blur-sm bg-[#0b1120]/80 border border-sky-700/30 rounded-2xl shadow-[0_0_25px_rgba(14,165,233,0.15)] p-8">
           <h3 className="text-2xl font-bold text-sky-400 border-b border-sky-600/30 pb-2 mb-6">
-            🧠 Technical Details & Process
+            Technical Details & Process
           </h3>
           <div className="space-y-6 text-slate-300 leading-relaxed">
             <div>
@@ -222,7 +222,7 @@ export default function Faq() {
         {/* SECTION 5 */}
         <div className="backdrop-blur-sm bg-[#0b1120]/80 border border-sky-700/30 rounded-2xl shadow-[0_0_25px_rgba(14,165,233,0.15)] p-8">
           <h3 className="text-2xl font-bold text-sky-400 border-b border-sky-600/30 pb-2 mb-6">
-            🧩 Compatibility & Benchmarks
+            Compatibility & Benchmarks
           </h3>
           <div className="space-y-6 text-slate-300 leading-relaxed">
             <div>
