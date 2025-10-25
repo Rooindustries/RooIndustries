@@ -8,6 +8,7 @@ import Terms from "./pages/Terms";
 import Privacy from "./pages/PrivacyPolicy";
 import Reviews from "./pages/Reviews";
 import Navbar from "./components/Navbar";
+import Packages from "./pages/Packages";
 
 function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -51,6 +52,8 @@ function App() {
         <main className="relative z-10 pt-10 sm:pt-24">
           <Navbar />
           <Routes>
+            <Route path="/packages" element={<Packages />} />
+
             <Route path="/" element={<Home />} />
             <Route
               path="/benchmarks"

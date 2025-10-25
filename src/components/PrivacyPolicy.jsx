@@ -69,15 +69,11 @@ export default function PrivacyPolicy() {
         personal data, you can reach us at:
         <a
           href="mailto:serviroo@rooindustries.com"
-          className="text-blue-600 underline"
+          className="text-black underline"
         >
           serviroo@rooindustries.com
         </a>
       </p>
-
-      <div className="text-blue-900 opacity-40 hover:opacity-100 transition-opacity select-text cursor-text">
-        Palash Rajput
-      </div>
 
       <p className="mt-6 text-sm text-gray-600">
         Last updated: October 16, 2025
