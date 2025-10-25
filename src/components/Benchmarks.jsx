@@ -6,6 +6,9 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
   const [fadeIn, setFadeIn] = useState(false);
   const [isZoomed, setIsZoomed] = useState(false);
   const [zoomOrigin, setZoomOrigin] = useState({ x: "50%", y: "50%" });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
     const hasModal = Boolean(selectedImage);
@@ -43,17 +46,47 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
   // Handle zoom click
   const handleImageClick = (e) => {
     e.stopPropagation();
-    const rect = e.target.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * 100;
-    const y = ((e.clientY - rect.top) / rect.height) * 100;
-    setZoomOrigin({ x: `${x}%`, y: `${y}%` });
-    setIsZoomed((prev) => !prev);
+
+    if (isZoomed) {
+      // Zoom out - reset everything
+      setIsZoomed(false);
+      setPanOffset({ x: 0, y: 0 });
+    } else {
+      // Zoom in
+      const rect = e.currentTarget.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) / rect.width) * 100;
+      const y = ((e.clientY - rect.top) / rect.height) * 100;
+      setZoomOrigin({ x: `${x}%`, y: `${y}%` });
+      setIsZoomed(true);
+    }
+  };
+
+  // Pan handlers
+  const handleMouseDown = (e) => {
+    if (!isZoomed) return;
+    e.preventDefault();
+    setIsPanning(true);
+    setPanStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
+  };
+
+  const handleMouseMove = (e) => {
+    if (!isPanning || !isZoomed) return;
+    e.preventDefault();
+    setPanOffset({
+      x: e.clientX - panStart.x,
+      y: e.clientY - panStart.y,
+    });
+  };
+
+  const handleMouseUp = () => {
+    setIsPanning(false);
   };
 
   const handleClose = () => {
     setIsZoomed(false);
     setSelectedImage(null);
     setIsModalOpen(false);
+    setPanOffset({ x: 0, y: 0 });
     document.body.classList.remove("is-modal-open");
   };
 
@@ -67,18 +100,32 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
               fadeIn ? "opacity-100" : "opacity-0"
             }`}
             onClick={handleClose}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
           >
             <img
               src={selectedImage}
               alt="Enlarged"
               onClick={handleImageClick}
-              className="rounded-lg shadow-lg transition-transform duration-300 
-           w-[70%] h-auto sm:max-w-70%] sm:max-h-[70%] max-w-none max-h-none"
+              onMouseDown={handleMouseDown}
+              className={`rounded-lg shadow-lg w-[70%] h-auto sm:max-w-70%] sm:max-h-[70%] max-w-none max-h-none select-none ${
+                isPanning ? "" : "transition-transform duration-300"
+              }`}
               style={{
                 transformOrigin: `${zoomOrigin.x} ${zoomOrigin.y}`,
-                transform: isZoomed ? "scale(1.6)" : "scale(1)",
-                cursor: isZoomed ? "zoom-out" : "zoom-in",
+                transform: isZoomed
+                  ? `scale(1.6) translate(${panOffset.x / 1.6}px, ${
+                      panOffset.y / 1.6
+                    }px)`
+                  : "scale(1)",
+                cursor: isZoomed
+                  ? isPanning
+                    ? "grabbing"
+                    : "grab"
+                  : "zoom-in",
               }}
+              draggable="false"
             />
           </div>
         )}
