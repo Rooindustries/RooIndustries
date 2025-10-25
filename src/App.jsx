@@ -9,6 +9,7 @@ import Privacy from "./pages/PrivacyPolicy";
 import Reviews from "./pages/Reviews";
 import Navbar from "./components/Navbar";
 import Packages from "./pages/Packages";
+import Faq from "./pages/Faq";
 
 function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -66,6 +67,7 @@ function App() {
               path="/morereviews"
               element={<Reviews setIsModalOpen={setIsModalOpen} />}
             />
+            <Route path="/faq" element={<Faq />} />
           </Routes>
         </main>
 

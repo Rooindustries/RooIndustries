@@ -96,12 +96,15 @@ export default function Packages() {
         </div>
       </div>
 
-      <Link
-        to="/"
-        className="inline-block mt-10 text-blue-200 hover:text-sky-400 transition-colors text-sm"
-      >
-        ← Back to Home
-      </Link>
+      {/* Contact Us button */}
+      <div className="mt-14 flex justify-center">
+        <Link
+          to="/contact"
+          className="px-8 py-3 text-[15px] font-semibold rounded-md bg-gradient-to-r from-sky-400 to-blue-700 hover:from-sky-400 hover:to-blue-600 text-white shadow-[0_0_25px_rgba(56,189,248,0.6)] transition-all duration-300 hover:scale-105"
+        >
+          Contact Us For More Info
+        </Link>
+      </div>
     </section>
   );
 }

@@ -29,7 +29,7 @@ export default function Hero() {
         </div>
 
         {/* Description */}
-        <p className="mt-4 text-xs sm:text-sm text-slate-160 leading-relaxed">
+        <p className="mt-4 text-xs sm:text-sm text-slate-300/80 leading-relaxed">
           I fix lag, boost gaming performance, and solve the issues other techs
           can't.
         </p>
@@ -39,38 +39,27 @@ export default function Hero() {
         </p>
 
         {/* Buttons */}
-        <div className="mt-7 flex items-center justify-center gap-3 sm:gap-4">
-          <a
-            href="#homepage-reviews"
-            className="rounded-md bg-gradient-to-r from-sky-400 to-sky-400 
-                       px-3 sm:px-5 py-2 sm:py-3 text-[11px] sm:text-sm font-semibold text-white 
-                       hover:from-sky-500 hover:to-blue-600 
-                       hover:shadow-[0_0_20px_rgba(56,189,248,0.7)] 
-                       active:translate-y-px transition-all duration-300"
-          >
-            View My Reviews →
-          </a>
-
+        <div className="mt-7 flex items-center justify-center gap-3 sm:gap-4 flex-wrap">
           <Link
-            to="/Contact"
+            to="/packages"
             className="rounded-md bg-gradient-to-r from-sky-400 to-sky-600 
                        px-3 sm:px-5 py-2 sm:py-3 text-[11px] sm:text-sm font-semibold text-white 
                        ring-1 ring-sky-700/50 hover:from-cyan-400 hover:to-sky-500 
                        hover:shadow-[0_0_20px_rgba(56,189,248,0.6)] 
                        active:translate-y-px transition-all duration-300"
           >
-            Contact Me
+            Supercharge Your Performance Now
           </Link>
 
           <Link
-            to="/Benchmarks"
+            to="/faq"
             className="rounded-md bg-gradient-to-r from-sky-600 to-blue-700 
                        px-3 sm:px-5 py-2 sm:py-3 text-[11px] sm:text-sm font-semibold text-white 
                        hover:from-sky-500 hover:to-blue-600 
                        hover:shadow-[0_0_20px_rgba(56,189,248,0.7)] 
                        active:translate-y-px transition-all duration-300"
           >
-            View My Benchmarks →
+            Got Questions? We Have Answers
           </Link>
         </div>
 
