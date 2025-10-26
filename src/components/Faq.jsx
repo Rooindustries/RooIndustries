@@ -114,9 +114,9 @@ export default function Faq() {
                 1) Do you offer refunds? What is the warranty?
               </h4>
               <p className="mt-1">
-                I offer a 3-day refund window in case no measurable improvement
-                is achieved. Standard Performance Boost includes a 30-day
-                warranty, while XOC has a lifetime warranty with 24–48h
+                I offer a 3-day refund window in case no measurable synthetic
+                improvement is achieved. Standard Performance Boost includes a
+                30-day warranty, while XOC has a lifetime warranty with 24–48h
                 turnaround. Even after that, I’ll help guide you — no man left
                 behind.
               </p>

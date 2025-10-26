@@ -4,13 +4,6 @@ import { Link } from "react-router-dom";
 export default function Terms() {
   return (
     <section className="max-w-4xl mx-auto px-6 py-28 text-white">
-      <Link
-        to="/"
-        className="inline-block absolute top-12 left-12 bg-cyan-600 border-2 border-cyan-500 text-black font-semibold py-2 px-5 rounded-md hover:bg-cyan-400 hover:border-cyan-400 transition duration-300 shadow-md hover:shadow-cyan-500/50"
-      >
-        ← Back to Home
-      </Link>
-
       <h1 className="text-3xl font-bold mb-6">Terms and Conditions</h1>
 
       <p className="text-white mb-6">Last Updated: October 2025</p>
