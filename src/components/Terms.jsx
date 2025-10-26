@@ -36,7 +36,19 @@ export default function Terms() {
           service has been successfully completed or partially fulfilled.
         </p>
 
-        <h2 className="text-xl font-semibold mt-6">3. User Responsibilities</h2>
+        <h2 className="text-xl font-semibold mt-6">3. Rescheduling Policy</h2>
+        <p>
+          Clients may <strong>reschedule their session once for free</strong> if
+          the request is made at least <strong>24 hours prior</strong> to the
+          allotted time. Any subsequent reschedules will incur a{" "}
+          <strong>$15 fee per session</strong> for up to two additional
+          reschedules. After two paid reschedules, the session will be{" "}
+          <strong>canceled automatically</strong>, and a{" "}
+          <strong>70% refund of the total payment</strong> will be issued, which{" "}
+          <u>does not include any previously paid rescheduling fees</u>.
+        </p>
+
+        <h2 className="text-xl font-semibold mt-6">4. User Responsibilities</h2>
         <p>
           You agree to use our services and website lawfully and responsibly.
           You may not attempt to disrupt, reverse-engineer, or misuse our
@@ -44,7 +56,7 @@ export default function Terms() {
         </p>
 
         <h2 className="text-xl font-semibold mt-6">
-          4. Limitation of Liability
+          5. Limitation of Liability
         </h2>
         <p>
           Roo Industries is not liable for any indirect, incidental, or
@@ -54,21 +66,21 @@ export default function Terms() {
           acknowledge that you use our services at your own risk.
         </p>
 
-        <h2 className="text-xl font-semibold mt-6">5. Intellectual Property</h2>
+        <h2 className="text-xl font-semibold mt-6">6. Intellectual Property</h2>
         <p>
           All website content, including text, images, logos, and service names,
           is the property of Roo Industries and may not be reproduced or
           distributed without written permission.
         </p>
 
-        <h2 className="text-xl font-semibold mt-6">6. Changes to Terms</h2>
+        <h2 className="text-xl font-semibold mt-6">7. Changes to Terms</h2>
         <p>
           We may update these Terms and Conditions from time to time. Continued
           use of our website or services after any changes constitutes your
           acceptance of the revised terms.
         </p>
 
-        <h2 className="text-xl font-semibold mt-6">7. Contact</h2>
+        <h2 className="text-xl font-semibold mt-6">8. Contact</h2>
         <p>
           For questions or concerns about these Terms, please contact us at{" "}
           <a href="mailto:serviroo@rooindustries.com" className="underline">
@@ -77,7 +89,7 @@ export default function Terms() {
           .
         </p>
 
-        <h2 className="text-xl font-semibold mt-6">8. Governing Law</h2>
+        <h2 className="text-xl font-semibold mt-6">9. Governing Law</h2>
         <p>
           These Terms and Conditions are governed by the laws of{" "}
           <strong>India</strong>. Any disputes shall be resolved under the
