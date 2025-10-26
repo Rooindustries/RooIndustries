@@ -26,7 +26,9 @@ export default function Faq() {
               </h4>
               <p className="mt-1">
                 As seen on the front page and reviews page, I have vast
-                knowledge about PC hardware. I’ve worked with companies like
+                knowledge about PC hardware. I am ahead of the game as I receive
+                exclusive products from companies for testing such as
+                motherboard, memory and CPUs.I’ve worked with companies like
                 Gigabyte and helped them test their products while also
                 achieving a global spot for overclocking.
               </p>
@@ -67,7 +69,7 @@ export default function Faq() {
           <div className="space-y-6 text-slate-300 leading-relaxed">
             <div>
               <h4 className="text-lg font-semibold text-sky-100">
-                4) What are expected results?
+                1) What are expected results?
               </h4>
               <p className="mt-1">
                 You can expect a good performance boost up to 92%. On average my
@@ -78,7 +80,7 @@ export default function Faq() {
 
             <div>
               <h4 className="text-lg font-semibold text-sky-100">
-                5) Will this optimization improve my skills?
+                2) Will this optimization improve my skills?
               </h4>
               <p className="mt-1">
                 Frankly speaking, getting optimized can change how your
@@ -90,7 +92,7 @@ export default function Faq() {
 
             <div>
               <h4 className="text-lg font-semibold text-sky-100">
-                6) Which games does your optimization work on?
+                3) Which games does your optimization work on?
               </h4>
               <p className="mt-1">
                 Optimizations work system-wide for latency. FPS gains vary
@@ -109,7 +111,7 @@ export default function Faq() {
           <div className="space-y-6 text-slate-300 leading-relaxed">
             <div>
               <h4 className="text-lg font-semibold text-sky-100">
-                7) Do you offer refunds? What is the warranty?
+                1) Do you offer refunds? What is the warranty?
               </h4>
               <p className="mt-1">
                 I offer a 3-day refund window in case no measurable improvement
@@ -122,7 +124,7 @@ export default function Faq() {
 
             <div>
               <h4 className="text-lg font-semibold text-sky-100">
-                8) Why is XOC not readily purchasable?
+                2) Why is XOC not readily purchasable?
               </h4>
               <p className="mt-1">
                 XOC is a highly specialized plan which requires you to be on the
@@ -133,23 +135,27 @@ export default function Faq() {
 
             <div>
               <h4 className="text-lg font-semibold text-sky-100">
-                9) What does “Upgrade PC each 6 months and get reXOC’d for free”
+                3) What does “Upgrade PC each 6 months and get reXOC’d for free”
                 mean?
               </h4>
               <p className="mt-1">
-                If you upgrade your CPU, RAM, or motherboard within 6 months,
-                you can get one free reXOC under the terms. Buy once and never
-                again — lifetime support.
+                Let’s say James buys XOC on his 7800X3D, ASUS ROG X870-F
+                motherboard and 32GB of 6000CL30 RAM. He also purchases XOC on
+                1st January 2025. James decides on August 30th 2025, he wants a
+                9950X3D and 6400CL32 RAM for editing videos and photoshop. James
+                can then proceed to contact me directly and ask me to provide
+                him with a FREE XOC as per the applied terms. Buy once and never
+                again!
               </p>
             </div>
 
             <div>
               <h4 className="text-lg font-semibold text-sky-100">
-                10) What if I want to change a part before the 6-month period?
+                4) What if I want to change a part before the 6-month period?
               </h4>
               <p className="mt-1">
-                No problem at all — a one-time $50 fee applies for a reXOC
-                outside the 6-month window.
+                No problem at all — a one-time $50 fee applies for a reXOC prior
+                to the the 6-month cooldown window.
               </p>
             </div>
           </div>
@@ -163,7 +169,7 @@ export default function Faq() {
           <div className="space-y-6 text-slate-300 leading-relaxed">
             <div>
               <h4 className="text-lg font-semibold text-sky-100">
-                11) Do I have to know how computers work?
+                1) Do I have to know how computers work?
               </h4>
               <p className="mt-1">
                 Although knowledge helps, I guide and teach you through the
@@ -174,18 +180,18 @@ export default function Faq() {
 
             <div>
               <h4 className="text-lg font-semibold text-sky-100">
-                12) What if my BIOS gets reset?
+                2) What if my BIOS gets reset?
               </h4>
               <p className="mt-1">
                 You’ll be provided with all major settings and instructions to
                 save a profile. If you ever lose them, you can restore them
-                easily with my guidance.
+                easily without my guidance.
               </p>
             </div>
 
             <div>
               <h4 className="text-lg font-semibold text-sky-100">
-                13) Can’t I just do this myself?
+                3) Can’t I just do this myself?
               </h4>
               <p className="mt-1">
                 Yes, but it took me over 9 months to learn and a year to
@@ -196,7 +202,7 @@ export default function Faq() {
 
             <div>
               <h4 className="text-lg font-semibold text-sky-100">
-                14) How long does the session take?
+                4) How long does the session take?
               </h4>
               <p className="mt-1">
                 The Standard Performance Boost takes around 3–4 hours with full
@@ -207,7 +213,7 @@ export default function Faq() {
 
             <div>
               <h4 className="text-lg font-semibold text-sky-100">
-                15) What software do you use? Is it trusted?
+                5) What software do you use? Is it trusted?
               </h4>
               <p className="mt-1">
                 I use RustDesk for remote control, ZenTimings for memory timing
@@ -227,7 +233,7 @@ export default function Faq() {
           <div className="space-y-6 text-slate-300 leading-relaxed">
             <div>
               <h4 className="text-lg font-semibold text-sky-100">
-                16) What kind of hardware is not supported?
+                1) What kind of hardware is not supported?
               </h4>
               <p className="mt-1">
                 Currently I do not work with laptops or Intel locked CPUs (F
@@ -238,7 +244,7 @@ export default function Faq() {
 
             <div>
               <h4 className="text-lg font-semibold text-sky-100">
-                17) Why synthetic benchmarks and not CapFrameX or LatencyMon?
+                2) Why synthetic benchmarks and not CapFrameX or LatencyMon?
               </h4>
               <p className="mt-1">
                 CapFrameX and LatencyMon can sometimes produce inconsistent
@@ -249,7 +255,7 @@ export default function Faq() {
 
             <div>
               <h4 className="text-lg font-semibold text-sky-100">
-                18) Why are OS optimizations limited?
+                3) Why are OS optimizations limited?
               </h4>
               <p className="mt-1">
                 Any custom OS with small fine-tuned tweaks is more than enough.
@@ -260,7 +266,7 @@ export default function Faq() {
 
             <div>
               <h4 className="text-lg font-semibold text-sky-100">
-                19) Why is my process count still high?
+                4) Why is my process count still high?
               </h4>
               <p className="mt-1">
                 Process count has minimal impact on real performance. Still, I
