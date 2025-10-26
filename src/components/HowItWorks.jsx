@@ -1,4 +1,3 @@
-// src/pages/HowItWorks.jsx
 import React from "react";
 import { FaDiscord, FaDownload, FaMicrochip, FaWindows } from "react-icons/fa";
 
@@ -9,7 +8,6 @@ export default function HowItWorks() {
       text: "Join our Discord and I will be in touch with you as soon as I see your booking.",
       icon: <FaDiscord className="w-6 h-6" />,
       badge: "Step 1",
-      cta: { label: "Open /discord", to: "/discord" },
     },
     {
       title: "Install a few apps",
@@ -34,13 +32,13 @@ export default function HowItWorks() {
   return (
     <section
       id="how-it-works"
-      className="relative z-10 pt-32 pb-24 px-6 text-white max-w-6xl mx-auto"
+      className="relative z-10  pb-24 px-6 text-white max-w-6xl mx-auto"
     >
       {/* Heading */}
       <h2 className="text-4xl sm:text-5xl font-extrabold text-center tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
         How It Works
       </h2>
-      <p className="mt-3 text-slate-300/90 text-center text-sm sm:text-base">
+      <p className="mt-3 text-slate-150 text-center text-sm sm:text-base">
         A simple, battle-tested flow—fast communication, safe access, and
         laser-focused tuning.
       </p>
@@ -74,27 +72,9 @@ export default function HowItWorks() {
             {/* Content */}
             <h3 className="mt-4 text-xl font-bold text-white">{s.title}</h3>
             <p className="mt-2 text-slate-300/90 leading-relaxed">{s.text}</p>
-
-            {/* Optional CTA (for Step 1) */}
-            {s.cta && (
-              <a
-                href={s.cta.to}
-                className="inline-block mt-5 rounded-lg border border-sky-600/60
-                           bg-gradient-to-r from-sky-700/30 to-cyan-700/20
-                           px-4 py-2 text-sm font-semibold text-white
-                           shadow-[0_0_18px_rgba(14,165,233,0.25)]
-                           hover:shadow-[0_0_28px_rgba(14,165,233,0.35)]
-                           transition-all duration-300"
-              >
-                {s.cta.label}
-              </a>
-            )}
           </div>
         ))}
       </div>
-
-      {/* Subtle divider glow */}
-      <div className="pointer-events-none mt-14 h-px w-full bg-gradient-to-r from-transparent via-sky-500/40 to-transparent"></div>
     </section>
   );
 }

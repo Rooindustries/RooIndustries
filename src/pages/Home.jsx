@@ -3,6 +3,7 @@ import About from "../components/About";
 import Services from "../components/Services";
 import Reviews from "../components/Reviews";
 import Footer from "../components/Footer";
+import HowItWorks from "../components/HowItWorks";
 export default function Home() {
   return (
     <>
@@ -10,6 +11,7 @@ export default function Home() {
       <About />
       <Services />
       <Reviews />
+      <HowItWorks />
       <Footer />
     </>
   );
