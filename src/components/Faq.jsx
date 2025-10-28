@@ -1,7 +1,33 @@
-import React from "react";
-import { Link } from "react-router-dom";
+import React, { useEffect } from "react";
+import { Link, useLocation } from "react-router-dom";
 
 export default function Faq() {
+  const location = useLocation();
+
+  useEffect(() => {
+    // scroll and highlight
+
+    //if someone ever comes across this after me, dont come ask me. thank you, (Checking times and confusion: 6)
+    setTimeout(() => {
+      if (location.hash) {
+        const id = location.hash.replace("#", "");
+        const el = document.getElementById(id);
+        if (el) {
+          const yOffset = -80;
+          const y =
+            el.getBoundingClientRect().top + window.pageYOffset + yOffset;
+          window.scrollTo({ top: y, behavior: "smooth" });
+
+          // Highlight animation
+          el.classList.add("faq-highlight");
+          setTimeout(() => el.classList.remove("faq-highlight"), 5000);
+        }
+      } else {
+        window.scrollTo({ top: 0 });
+      }
+    }, 200);
+  }, [location]);
+
   return (
     <section className="relative z-10 pt-32 pb-24 px-6 text-white max-w-5xl mx-auto">
       {/* Heading */}
@@ -18,7 +44,6 @@ export default function Faq() {
           <h3 className="text-2xl font-bold text-sky-400 border-b border-sky-600/30 pb-2 mb-6">
             General & Experience
           </h3>
-
           <div className="space-y-6 text-slate-300 leading-relaxed">
             <div>
               <h4 className="text-lg font-semibold text-sky-100">
@@ -28,7 +53,7 @@ export default function Faq() {
                 As seen on the front page and reviews page, I have vast
                 knowledge about PC hardware. I am ahead of the game as I receive
                 exclusive products from companies for testing such as
-                motherboard, memory and CPUs.I’ve worked with companies like
+                motherboards, memory and CPUs. I’ve worked with companies like
                 Gigabyte and helped them test their products while also
                 achieving a global spot for overclocking.
               </p>
@@ -155,7 +180,7 @@ export default function Faq() {
               </h4>
               <p className="mt-1">
                 No problem at all — a one-time $50 fee applies for a reXOC prior
-                to the the 6-month cooldown window.
+                to the 6-month cooldown window.
               </p>
             </div>
           </div>
@@ -222,6 +247,21 @@ export default function Faq() {
                 community.
               </p>
             </div>
+
+            <div id="trust" className="transition-all duration-500 rounded-lg">
+              <h4 className="text-lg font-semibold text-sky-100">
+                6) How can I trust giving you remote access? Is this secure?
+              </h4>
+              <p className="mt-1">
+                This is something many people wonder! The answer is simple, I
+                always recommend doing a FRESH Windows install which wipes the
+                slate clean and to back your data up to a secure physical drive
+                before allowing me access. If you choose not to do that, you can
+                still monitor everything I do on your computer! If you feel like
+                your data is being stolen, you may unplug power and ask me about
+                what I was doing!
+              </p>
+            </div>
           </div>
         </div>
 
@@ -283,10 +323,10 @@ export default function Faq() {
         <Link
           to="/packages"
           className="rounded-md bg-gradient-to-r from-sky-400 to-blue-600 
-                               px-3 sm:px-5 py-2 sm:py-3 text-[11px] sm:text-sm font-semibold text-white 
-                               ring-1 ring-sky-700/50 hover:from-cyan-400 hover:to-sky-500 
-                               hover:shadow-[0_0_20px_rgba(56,189,248,0.6)] 
-                               active:translate-y-px transition-all duration-300"
+          px-3 sm:px-5 py-2 sm:py-3 text-[11px] sm:text-sm font-semibold text-white 
+          ring-1 ring-sky-700/50 hover:from-cyan-400 hover:to-sky-500 
+          hover:shadow-[0_0_20px_rgba(56,189,248,0.6)] 
+          active:translate-y-px transition-all duration-300"
         >
           Supercharge Your Performance Now
         </Link>

@@ -23,3 +23,22 @@
 html {
   scroll-behavior: smooth;
 }
+
+@keyframes faqHighlight {
+  0% {
+    background-color: rgba(56, 189, 248, 0.15);
+    box-shadow: 0 0 25px rgba(56, 189, 248, 0.3);
+  }
+  50% {
+    background-color: rgba(56, 189, 248, 0.25);
+    box-shadow: 0 0 35px rgba(56, 189, 248, 0.5);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
+}
+
+.faq-highlight {
+  animation: faqHighlight 2s ease-out;
+}

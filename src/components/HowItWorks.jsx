@@ -1,5 +1,8 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import { FaDiscord, FaDownload, FaMicrochip, FaWindows } from "react-icons/fa";
+import { useEffect } from "react";
+import { useLocation } from "react-router-dom";
 
 export default function HowItWorks() {
   const steps = [
@@ -11,7 +14,24 @@ export default function HowItWorks() {
     },
     {
       title: "Install a few apps",
-      text: "You will be given a few apps to install (also mentioned in the FAQ). Install those and send me your “RustDesk ID”.",
+      text: (
+        <>
+          You will be given a few apps to install (also mentioned in the FAQ)
+          <span className="text-slate-400/90 font-medium">
+            {" "}
+            (
+            <Link
+              to="/faq#trust"
+              className="bg-gradient-to-r from-sky-400 to-cyan-400 bg-clip-text text-transparent font-semibold 
+                hover:from-cyan-300 hover:to-sky-300 transition-all duration-300 
+                hover:drop-shadow-[0_0_6px_rgba(56,189,248,0.8)]"
+            >
+              Read How can I trust you? Is this secure?
+            </Link>
+            )
+          </span>
+        </>
+      ),
       icon: <FaDownload className="w-6 h-6" />,
       badge: "Step 2",
     },
@@ -32,7 +52,7 @@ export default function HowItWorks() {
   return (
     <section
       id="how-it-works"
-      className="relative z-10  pb-24 px-6 text-white max-w-6xl mx-auto"
+      className="relative z-10 pb-24 px-6 text-white max-w-6xl mx-auto"
     >
       {/* Heading */}
       <h2 className="text-4xl sm:text-5xl font-extrabold text-center tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
@@ -49,21 +69,21 @@ export default function HowItWorks() {
           <div
             key={i}
             className="group backdrop-blur-sm bg-[#0b1120]/80 border border-sky-700/30 rounded-2xl p-6
-                       shadow-[0_0_25px_rgba(14,165,233,0.15)] hover:shadow-[0_0_35px_rgba(14,165,233,0.25)]
-                       transition-all duration-300"
+            shadow-[0_0_25px_rgba(14,165,233,0.15)] hover:shadow-[0_0_35px_rgba(14,165,233,0.25)]
+            transition-all duration-300"
           >
             {/* Badge + Icon */}
             <div className="flex items-center justify-between">
               <span
                 className="inline-flex items-center gap-2 text-xs font-semibold tracking-wide
-                               text-sky-200/90 bg-sky-900/30 border border-sky-700/40 px-3 py-1 rounded-full
-                               shadow-[0_0_12px_rgba(14,165,233,0.3)]"
+                text-sky-200/90 bg-sky-900/30 border border-sky-700/40 px-3 py-1 rounded-full
+                shadow-[0_0_12px_rgba(14,165,233,0.3)]"
               >
                 {s.badge}
               </span>
               <div
                 className="grid place-items-center w-11 h-11 rounded-xl border border-sky-700/40
-                           bg-[#081225]/70 shadow-[0_0_18px_rgba(14,165,233,0.25)]"
+                bg-[#081225]/70 shadow-[0_0_18px_rgba(14,165,233,0.25)]"
               >
                 {s.icon}
               </div>

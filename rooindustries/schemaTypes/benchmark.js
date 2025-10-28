@@ -7,6 +7,13 @@ export default {
       name: 'title',
       title: 'Benchmark Name',
       type: 'string',
+      description: 'Name of the benchmark',
+    },
+    {
+      name: 'subtitle',
+      title: 'Subtitle / Small Description',
+      type: 'string',
+      description: 'Short optional description under the title.',
     },
     {
       name: 'beforeImage',
@@ -22,7 +29,7 @@ export default {
     },
     {
       name: 'reviewImage',
-      title: 'Review Image',
+      title: 'Review Image (Discord Screenshot)',
       type: 'image',
       options: {hotspot: true},
     },
