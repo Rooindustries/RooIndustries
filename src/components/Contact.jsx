@@ -1,13 +1,31 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useForm, ValidationError } from "@formspree/react";
-import { Link } from "react-router-dom";
+import { client } from "../sanityClient";
 
 export default function Services() {
-  const [state, handleSubmit] = useForm("mpwybpen"); // form id
-  const [copied, setCopied] = useState(false); // copy state
+  const [contactData, setContactData] = useState(null);
+  const [copied, setCopied] = useState(false);
+
+  const [state, handleSubmit] = useForm("mpwybpen");
+
+  useEffect(() => {
+    client
+      .fetch(
+        `*[_type == "contact"][0]{
+          title,
+          subtitle,
+          email,
+          formId
+        }`
+      )
+      .then(setContactData)
+      .catch(console.error);
+  }, []);
 
   const handleCopy = () => {
-    navigator.clipboard.writeText("serviroo@rooindustries.com");
+    navigator.clipboard.writeText(
+      contactData?.email || "serviroo@rooindustries.com"
+    );
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -16,15 +34,17 @@ export default function Services() {
     <section className="text-white px-4 py-28 flex flex-col items-center">
       {/* Heading */}
       <div className="text-center mb-10">
-        <h2 className="text-4xl font-bold mb-2">Get In Touch</h2>
+        <h2 className="text-4xl font-bold mb-2">
+          {contactData?.title || "Get In Touch"}
+        </h2>
         <p className="text-gray-200 text-lg">
-          Ready to optimize your PC? Let's discuss how I can help improve your
-          system's performance.
+          {contactData?.subtitle ||
+            "Ready to optimize your PC? Let's discuss how I can help improve your system's performance."}
         </p>
       </div>
 
       {/* Email block */}
-      <div className="p-4 rounded-lg flex items-center justify-between w-full max-w-xl mb-8 border border-cyan-400/20 bg-[#152238]/70 backdrop-blur-sm">
+      <div className="p-4 rounded-lg flex items-center justify-between w-full max-w-xl mb-8 border border-cyan-400/20 bg-[#0e1623]/90 backdrop-blur-sm">
         <div className="flex items-center space-x-3">
           <svg
             className="w-6 h-6 text-cyan-400"
@@ -34,7 +54,7 @@ export default function Services() {
             <path d="M2 4a2 2 0 012-2h16a2 2 0 012 2v1.8l-10 6.25L2 5.8V4zm0 4.2V20a2 2 0 002 2h16a2 2 0 002-2V8.2l-10 6.25L2 8.2z" />
           </svg>
           <span className="text-lg font-medium">
-            serviroo@rooindustries.com
+            {contactData?.email || "serviroo@rooindustries.com"}
           </span>
         </div>
         <button
@@ -47,13 +67,13 @@ export default function Services() {
 
       {/* Contact Form */}
       {state.succeeded ? (
-        <div className="w-full max-w-xl p-6 rounded-lg border border-cyan-400/20 bg-[#152238]/70 backdrop-blur-sm text-center text-green-400 font-semibold">
+        <div className="w-full max-w-xl p-6 rounded-lg border border-cyan-400/20 bg-[#0e1623]/90 backdrop-blur-sm text-center text-green-400 font-semibold">
           Thank you! Your message has been sent.
         </div>
       ) : (
         <form
           onSubmit={handleSubmit}
-          className="p-6 rounded-lg w-full max-w-xl space-y-5 border border-cyan-400/20 bg-[#152238]/70 backdrop-blur-sm"
+          className="p-6 rounded-lg w-full max-w-xl space-y-5 border border-cyan-400/20 bg-[#0e1623]/90 backdrop-blur-sm"
         >
           <div>
             <label className="block mb-1 font-semibold">Name</label>
@@ -107,8 +127,8 @@ export default function Services() {
 
           <p className="text-sm text-gray-400 text-center pt-2">
             Your message will be sent{" "}
-            <span className="text-white font-medium">directly</span> to
-            serviroo@rooindustries.com
+            <span className="text-white font-medium">directly</span> to{" "}
+            {contactData?.email || "serviroo@rooindustries.com"}
           </p>
         </form>
       )}
