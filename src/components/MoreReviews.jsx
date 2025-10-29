@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { client, urlFor } from "../sanityClient";
 
 export default function Reviews() {
   const [selectedImage, setSelectedImage] = useState(null);
@@ -7,6 +8,14 @@ export default function Reviews() {
   const [zoomOrigin, setZoomOrigin] = useState({ x: "50%", y: "50%" });
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [dragStart, setDragStart] = useState(null);
+  const [reviews, setReviews] = useState([]);
+
+  useEffect(() => {
+    client
+      .fetch(`*[_type == "review"] | order(_createdAt asc){ image, alt }`)
+      .then(setReviews)
+      .catch(console.error);
+  }, []);
 
   useEffect(() => setFadeIn(Boolean(selectedImage)), [selectedImage]);
 
@@ -64,50 +73,15 @@ export default function Reviews() {
         Community Reviews
       </h1>
 
+      {/* ✅ same layout as before: masonry-style columns */}
       <div className="columns-1 sm:columns-2 lg:columns-3 gap-4 space-y-4">
-        {[
-          "alexn",
-          "aum",
-          "bloomy",
-          "borakan",
-          "coerbii",
-          "cosmiic",
-          "cyerx",
-          "dot",
-          "easyclutch",
-          "frost",
-          "frost2",
-          "fuga",
-          "honf_mod",
-          "jack",
-          "jahamez",
-          "jay4a1",
-          "jayy",
-          "junnsot",
-          "justin",
-          "jx",
-          "ktag",
-          "locked",
-          "matthew",
-          "mmrtzgr",
-          "muzexx",
-          "neuro",
-          "prexys",
-          "sexyboy",
-          "steal",
-          "stefan",
-          "turkey",
-          "ultimate",
-          "yiwol",
-          "zo_omless",
-          "mfbuddy",
-        ].map((name) => (
+        {reviews.map((rev, i) => (
           <img
-            key={name}
-            src={`/All_reviews/${name}.png`}
-            alt={name}
+            key={i}
+            src={urlFor(rev.image).url()}
+            alt={rev.alt || "Client Review"}
             className="w-full mb-4 cursor-pointer rounded-xl shadow-lg break-inside hover:shadow-cyan-400/30 transition duration-300"
-            onClick={() => setSelectedImage(`/All_reviews/${name}.png`)}
+            onClick={() => setSelectedImage(urlFor(rev.image).url())}
           />
         ))}
       </div>

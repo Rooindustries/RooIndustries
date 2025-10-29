@@ -1,5 +1,5 @@
 import benchmark from './benchmark'
 import packageSchema from './package'
 import faqSection from './faq'
-
-export const schemaTypes = [benchmark, packageSchema, faqSection]
+import review from './review'
+export const schemaTypes = [benchmark, packageSchema, faqSection, review]
