@@ -1,8 +1,25 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Zap } from "lucide-react";
+import { client } from "../sanityClient";
 
 export default function Footer() {
+  const [footerData, setFooterData] = useState(null);
+
+  useEffect(() => {
+    client
+      .fetch(
+        `*[_type == "footer"][0]{
+          title,
+          subtitle,
+          description,
+          availability
+        }`
+      )
+      .then(setFooterData)
+      .catch(console.error);
+  }, []);
+
   return (
     <footer
       id="contact"
@@ -10,16 +27,17 @@ export default function Footer() {
     >
       {/* Heading */}
       <h2 className="text-4xl sm:text-5xl md:text-6xl font-extrabold tracking-tight drop-shadow-[0_0_10px_rgba(56,189,248,0.4)]">
-        {"Let's Talk About Your PC"}
+        {footerData?.title || "Let's Talk About Your PC"}
       </h2>
 
       <p className="mt-3 text-sm text-slate-10">
-        I'm always open to helping new clients optimize their systems.
+        {footerData?.subtitle ||
+          "I'm always open to helping new clients optimize their systems."}
       </p>
 
       <p className="mt-4 text-[15px] sm:text-base font-semibold text-white-300">
-        Whether it's gaming, work, or everyday use — let's get your PC running
-        at its best.
+        {footerData?.description ||
+          "Whether it's gaming, work, or everyday use — let's get your PC running at its best."}
       </p>
 
       {/* Buttons */}
@@ -49,7 +67,7 @@ export default function Footer() {
       </div>
 
       <p className="mt-8 text-xs text-white-400">
-        Available for consultations • Let's chat
+        {footerData?.availability || "Available for consultations • Let's chat"}
       </p>
 
       <div className="mt-3 space-x-1">
