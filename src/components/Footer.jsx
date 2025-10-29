@@ -1,5 +1,6 @@
 import React from "react";
 import { Link } from "react-router-dom";
+import { Zap } from "lucide-react";
 
 export default function Footer() {
   return (
@@ -21,17 +22,29 @@ export default function Footer() {
         at its best.
       </p>
 
-      {/* Contact Button */}
-      <div className="mt-6">
+      {/* Buttons */}
+      <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
+        <Link
+          to="/packages"
+          className="inline-flex items-center justify-center gap-2 rounded-md bg-gradient-to-r from-sky-400 to-sky-600 
+                       px-4 sm:px-5 py-3 text-sm font-semibold text-white 
+                       ring-1 ring-sky-700/50 hover:from-cyan-400 hover:to-sky-500 
+                       hover:shadow-[0_0_20px_rgba(56,189,248,0.6)] 
+                       active:translate-y-px transition-all duration-300 w-full sm:w-auto"
+        >
+          <Zap className="w-4 h-4 sm:w-5 sm:h-5 text-white drop-shadow-[0_0_6px_rgba(56,189,248,0.8)]" />
+          Supercharge Your Performance
+        </Link>
+
         <Link
           to="/Contact"
           className="rounded-md bg-gradient-to-r from-sky-400 to-sky-600 
                      px-6 py-3 text-sm font-semibold text-white 
                      ring-1 ring-sky-700/50 hover:from-cyan-400 hover:to-sky-500 
                      hover:shadow-[0_0_20px_rgba(56,189,248,0.6)] 
-                     active:translate-y-px transition-all duration-300"
+                     active:translate-y-px transition-all duration-300 w-full sm:w-auto"
         >
-          Contact Me
+          Contact Us
         </Link>
       </div>
 
