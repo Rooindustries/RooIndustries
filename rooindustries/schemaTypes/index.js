@@ -9,6 +9,7 @@ import hero from './hero'
 import howItWorks from './howItWorks'
 import privacyPolicy from './privacyPolicy'
 import services from './services'
+import terms from './terms'
 export const schemaTypes = [
   benchmark,
   packageSchema,
@@ -21,4 +22,5 @@ export const schemaTypes = [
   howItWorks,
   privacyPolicy,
   services,
+  terms,
 ]
