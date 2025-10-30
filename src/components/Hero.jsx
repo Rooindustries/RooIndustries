@@ -98,7 +98,7 @@ export default function Hero() {
 
         {/* Bullets */}
         {heroData.bullets?.length > 0 && (
-          <div className="mt-8 flex items-center justify-center gap-5 sm:gap-8 text-[10px] sm:text-xs text-slate-300/90 flex-wrap">
+          <div className="mt-8 flex items-center justify-center gap-5 sm:gap-8 text-[12px] sm:text-sm font-medium text-slate-200 flex-wrap">
             {heroData.bullets.map((text, i) => (
               <div key={i} className="flex items-center gap-1.5 sm:gap-2">
                 <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-green-400"></span>
