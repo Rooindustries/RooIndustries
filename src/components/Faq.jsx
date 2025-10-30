@@ -6,14 +6,15 @@ export default function Faq() {
   const location = useLocation();
   const [sections, setSections] = useState([]);
 
-  // Fetch FAQ data from Sanity
   useEffect(() => {
     client
       .fetch(
         `*[_type == "faqSection"] | order(_createdAt asc) {
           sectionTitle,
           questions[]{question, answer}
-        }`
+        }`,
+        {},
+        { cache: "no-store" }
       )
       .then(setSections)
       .catch(console.error);
