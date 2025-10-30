@@ -75,45 +75,58 @@ export default function Reviews() {
 
       <div className="columns-1 sm:columns-2 lg:columns-3 gap-4 space-y-4">
         {reviews.map((rev, i) => (
-          <img
+          <div
             key={i}
-            src={urlFor(rev.image).url()}
-            alt={rev.alt || "Client Review"}
-            className="w-full mb-4 cursor-pointer rounded-xl shadow-lg break-inside hover:shadow-cyan-400/30 transition duration-300"
-            onClick={() => setSelectedImage(urlFor(rev.image).url())}
-          />
+            className="break-inside-avoid overflow-hidden rounded-xl"
+          >
+            <img
+              src={urlFor(rev.image).url()}
+              alt={rev.alt || "Client Review"}
+              className="w-full h-auto rounded-xl cursor-pointer shadow-lg hover:shadow-cyan-400/30 transition duration-300 object-contain"
+              onClick={() => setSelectedImage(urlFor(rev.image).url())}
+            />
+          </div>
         ))}
       </div>
 
       {selectedImage && (
         <div
-          className={`fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 p-4 transition-opacity duration-300 ${
+          className={`fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 transition-opacity duration-300 ${
             fadeIn ? "opacity-100" : "opacity-0"
           }`}
           onClick={handleClose}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
         >
-          <img
-            src={selectedImage}
-            alt="Selected review"
-            onClick={handleImageClick}
-            onMouseDown={handleMouseDown}
-            className={`rounded-lg shadow-lg select-none ${
-              dragStart ? "" : "transition-transform duration-300"
-            } w-[50%] sm:max-w-[90%] sm:max-h-[90%] max-w-none max-h-none`}
-            style={{
-              transformOrigin: `${zoomOrigin.x} ${zoomOrigin.y}`,
-              transform: isZoomed
-                ? `translate(${offset.x / 1.6}px, ${
-                    offset.y / 1.6
-                  }px) scale(1.6)`
-                : "scale(1)",
-              cursor: isZoomed ? (dragStart ? "grabbing" : "grab") : "zoom-in",
-            }}
-            draggable="false"
-          />
+          <div
+            className="relative max-w-[70%] sm:max-w-[60%] max-h-[85vh] flex items-center justify-center p-0"
+            onClick={(e) => e.stopPropagation()}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+          >
+            <img
+              src={selectedImage}
+              alt="Selected review"
+              onClick={handleImageClick}
+              onMouseDown={handleMouseDown}
+              className={`rounded-lg shadow-lg select-none ${
+                dragStart ? "" : "transition-transform duration-300"
+              } object-contain max-h-[85vh] w-auto`}
+              style={{
+                transformOrigin: `${zoomOrigin.x} ${zoomOrigin.y}`,
+                transform: isZoomed
+                  ? `translate(${offset.x / 1.6}px, ${
+                      offset.y / 1.6
+                    }px) scale(1.6)`
+                  : "scale(1)",
+                cursor: isZoomed
+                  ? dragStart
+                    ? "grabbing"
+                    : "grab"
+                  : "zoom-in",
+              }}
+              draggable="false"
+            />
+          </div>
         </div>
       )}
     </section>
