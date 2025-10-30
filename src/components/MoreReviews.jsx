@@ -73,7 +73,6 @@ export default function Reviews() {
         Community Reviews
       </h1>
 
-      {/* ✅ same layout as before: masonry-style columns */}
       <div className="columns-1 sm:columns-2 lg:columns-3 gap-4 space-y-4">
         {reviews.map((rev, i) => (
           <img

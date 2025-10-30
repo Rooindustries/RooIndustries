@@ -4,6 +4,7 @@
   "private": true,
   "dependencies": {
     "@formspree/react": "^3.0.0",
+    "@portabletext/react": "^4.0.3",
     "@sanity/client": "^7.12.0",
     "@sanity/image-url": "^1.2.0",
     "@testing-library/dom": "^10.4.1",
