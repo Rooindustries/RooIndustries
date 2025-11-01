@@ -10,6 +10,7 @@ import howItWorks from './howItWorks'
 import privacyPolicy from './privacyPolicy'
 import services from './services'
 import terms from './terms'
+import reviewsCarousel from './reviewsCarousel'
 export const schemaTypes = [
   benchmark,
   packageSchema,
@@ -23,4 +24,5 @@ export const schemaTypes = [
   privacyPolicy,
   services,
   terms,
+  reviewsCarousel,
 ]

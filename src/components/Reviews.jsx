@@ -1,125 +1,124 @@
 import React, { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { client } from "../sanityClient";
 
 export default function Reviews() {
-  const [selectedImage, setSelectedImage] = useState(null);
-  const [fadeIn, setFadeIn] = useState(false);
-  const [isZoomed, setIsZoomed] = useState(false);
-  const [zoomOrigin, setZoomOrigin] = useState({ x: "50%", y: "50%" });
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const [dragStart, setDragStart] = useState(null);
-
-  useEffect(() => setFadeIn(Boolean(selectedImage)), [selectedImage]);
+  const [data, setData] = useState(null);
+  const [index, setIndex] = useState(0);
+  const [paused, setPaused] = useState(false);
 
   useEffect(() => {
-    const handleKeyDown = (e) => e.key === "Escape" && setSelectedImage(null);
-    if (selectedImage) {
-      document.body.style.overflow = "hidden";
-      document.body.classList.add("is-modal-open");
-      window.addEventListener("keydown", handleKeyDown);
-    } else {
-      document.body.style.overflow = "auto";
-      document.body.classList.remove("is-modal-open");
-    }
-    return () => {
-      document.body.style.overflow = "auto";
-      document.body.classList.remove("is-modal-open");
-      window.removeEventListener("keydown", handleKeyDown);
+    const query = `*[_type == "reviewsCarousel"][0]{
+      title,
+      subtitle,
+      reviews[]{ name, text }
+    }`;
+
+    const fetchData = async () => {
+      const res = await client.fetch(query);
+      setData(res);
     };
-  }, [selectedImage]);
 
-  const handleImageClick = (e) => {
-    e.stopPropagation();
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * 100;
-    const y = ((e.clientY - rect.top) / rect.height) * 100;
-    setZoomOrigin({ x: `${x}%`, y: `${y}%` });
-    setIsZoomed((z) => !z);
-    if (!isZoomed) setOffset({ x: 0, y: 0 });
+    fetchData();
+
+    const subscription = client
+      .listen(query, {}, { visibility: "query" })
+      .subscribe((update) => {
+        if (update.result) setData(update.result);
+        else setData(null); // handle deletions
+      });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleNext = () => {
+    if (!data?.reviews?.length) return;
+    setIndex((prev) => (prev + 1) % data.reviews.length);
   };
 
-  const handleMouseDown = (e) => {
-    if (!isZoomed) return;
-    e.preventDefault();
-    setDragStart({ x: e.clientX, y: e.clientY });
+  const handlePrev = () => {
+    if (!data?.reviews?.length) return;
+    setIndex((prev) => (prev - 1 + data.reviews.length) % data.reviews.length);
   };
 
-  const handleMouseMove = (e) => {
-    if (!isZoomed || !dragStart) return;
-    const dx = e.clientX - dragStart.x;
-    const dy = e.clientY - dragStart.y;
-    setOffset((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
-    setDragStart({ x: e.clientX, y: e.clientY });
-  };
+  // Auto slide every 2 seconds
+  useEffect(() => {
+    if (paused || !data?.reviews?.length) return;
+    const interval = setInterval(handleNext, 2000);
+    return () => clearInterval(interval);
+  }, [paused, data]);
 
-  const handleMouseUp = () => setDragStart(null);
-  const handleClose = () => {
-    setIsZoomed(false);
-    setSelectedImage(null);
-    setOffset({ x: 0, y: 0 });
-  };
+  if (!data) return null;
 
   return (
-    <section id="homepage-reviews" className="py-20 text-center">
-      <h2 className="text-4xl font-extrabold text-white mb-3">
-        What People Say
+    <section className="py-32 text-center text-white relative overflow-hidden">
+      <h2 className="text-4xl font-extrabold mb-3 drop-shadow-[0_0_15px_rgba(56,189,248,0.4)]">
+        {data.title || "What People Say"}
       </h2>
-      <p className="text-slate-200 mb-10">
-        Feedback from clients I've had the pleasure of helping.
+      <p className="text-slate-200 mb-12">
+        {data.subtitle ||
+          "Feedback from clients I’ve had the pleasure of helping."}
       </p>
 
-      <div className="flex flex-col items-center">
+      {/* Review Carousel */}
+      <div
+        className="relative mx-auto max-w-[900px] overflow-hidden rounded-3xl"
+        onMouseEnter={() => setPaused(true)}
+        onMouseLeave={() => setPaused(false)}
+      >
         <div
-          className="relative rounded-2xl overflow-hidden max-w-5xl border-2 cursor-pointer"
-          style={{ borderColor: "#1f657e" }}
-          onClick={() => setSelectedImage("/reviews_mod.png")}
+          className="flex transition-transform duration-700 ease-in-out"
+          style={{
+            transform: `translateX(-${index * 100}%)`,
+          }}
         >
-          <img
-            src="/reviews_mod.png"
-            alt="Client Discord Reviews"
-            className="w-full h-auto block"
-          />
+          {data.reviews?.map((review, i) => (
+            <div
+              key={i}
+              className="flex-shrink-0 w-full h-[380px] sm:h-[220px] md:h-[240px]
+                         flex flex-col items-center 
+                         bg-[#0b1120]/90 rounded-3xl 
+                         shadow-[0_0_25px_rgba(14,165,233,0.25)] 
+                         border border-sky-700/30 px-10 py-10 relative"
+            >
+              {/* Reviewer Name */}
+              <h3 className="text-3xl font-semibold text-sky-300 mb-6 absolute top-8">
+                {review.name}
+              </h3>
+
+              {/* Review Text */}
+              <div className="flex-grow flex items-center justify-center mt-6">
+                <p className="text-slate-100 text-lg sm:text-xl leading-relaxed max-w-2xl">
+                  {review.text}
+                </p>
+              </div>
+            </div>
+          ))}
         </div>
 
-        <Link
-          to="/morereviews"
-          className="mt-8 rounded-md bg-gradient-to-r from-sky-600 to-blue-700 px-5 py-3 text-sm font-semibold text-white hover:from-sky-500 hover:to-blue-600 hover:shadow-[0_0_20px_rgba(56,189,248,0.7)] active:translate-y-px transition-all duration-300"
+        {/* Navigation Buttons */}
+        <button
+          onClick={handlePrev}
+          className="absolute left-6 top-1/2 -translate-y-1/2 
+                     bg-slate-900/80 hover:bg-slate-800 
+                     border border-sky-600/40 
+                     p-3 rounded-full shadow-md 
+                     transition z-10"
         >
-          More Reviews →
-        </Link>
+          <ChevronLeft className="w-6 h-6 text-cyan-300" />
+        </button>
+
+        <button
+          onClick={handleNext}
+          className="absolute right-6 top-1/2 -translate-y-1/2 
+                     bg-slate-900/80 hover:bg-slate-800 
+                     border border-sky-600/40 
+                     p-3 rounded-full shadow-md 
+                     transition z-10"
+        >
+          <ChevronRight className="w-6 h-6 text-cyan-300" />
+        </button>
       </div>
-
-      {selectedImage && (
-        <div
-          className={`fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 transition-opacity duration-300 ${
-            fadeIn ? "opacity-100" : "opacity-0"
-          }`}
-          onClick={handleClose}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-        >
-          <img
-            src={selectedImage}
-            alt="Enlarged Review"
-            onClick={handleImageClick}
-            onMouseDown={handleMouseDown}
-            className={`rounded-lg shadow-lg select-none ${
-              dragStart ? "" : "transition-transform duration-300"
-            } w-[75%] sm:max-w-[70%] sm:max-h-[70%] max-w-none max-h-none`}
-            style={{
-              transformOrigin: `${zoomOrigin.x} ${zoomOrigin.y}`,
-              transform: isZoomed
-                ? `translate(${offset.x / 1.6}px, ${
-                    offset.y / 1.6
-                  }px) scale(1.6)`
-                : "scale(1)",
-              cursor: isZoomed ? (dragStart ? "grabbing" : "grab") : "zoom-in",
-            }}
-            draggable="false"
-          />
-        </div>
-      )}
     </section>
   );
 }
