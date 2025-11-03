@@ -82,7 +82,7 @@ export default function Footer() {
           href="/terms"
           className="text-xs text-white-300 hover:text-cyan-300 transition"
         >
-          Terms And Condition
+          Terms And Conditions
         </a>
       </div>
 
