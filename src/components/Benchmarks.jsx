@@ -30,7 +30,7 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
         Performance Benchmarks
       </h1>
       <p className="text-center text-gray-100 mb-12">
-        Real results from real optimizations.
+        Real results from real tuning.
       </p>
 
       <div className="py-5 px-4 max-w-7xl mx-auto text-white">
