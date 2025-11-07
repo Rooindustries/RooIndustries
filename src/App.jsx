@@ -10,7 +10,7 @@ import Reviews from "./pages/Reviews";
 import Navbar from "./components/Navbar";
 import Packages from "./pages/Packages";
 import Faq from "./pages/Faq";
-
+import Book from "./pages/Book";
 function RedirectToDiscord() {
   React.useEffect(() => {
     window.location.href = "https://discord.gg/M7nTkn9dxE";
@@ -74,6 +74,8 @@ function App() {
               path="/morereviews"
               element={<Reviews setIsModalOpen={setIsModalOpen} />}
             />
+            <Route path="/booking" element={<Book />} />
+
             <Route path="/faq" element={<Faq />} />
             <Route path="/discord" element={<RedirectToDiscord />} />
           </Routes>

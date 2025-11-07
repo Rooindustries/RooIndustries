@@ -53,7 +53,7 @@ export default function Faq() {
         Frequently Asked Questions
       </h2>
       <p className="mt-3 text-slate-150 text-center text-sm sm:text-base">
-        Everything you need to know before booking your optimization
+        Everything you need to know before scheduling your session
       </p>
 
       {/* FAQ Sections */}
