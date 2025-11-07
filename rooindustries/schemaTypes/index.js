@@ -13,6 +13,7 @@ import terms from './terms'
 import reviewsCarousel from './reviewsCarousel'
 import booking from './booking'
 import bookingSettings from './bookingSettings'
+
 export const schemaTypes = [
   benchmark,
   packageSchema,

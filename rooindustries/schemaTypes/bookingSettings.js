@@ -11,6 +11,13 @@ export default {
         'Users can only book up to this many hours ahead of the current time (e.g., 2 = only within the next 2 hours).',
     },
     {
+      name: 'maxDaysAheadBooking',
+      title: 'Maximum Days Ahead Booking',
+      type: 'number',
+      description: 'Users can only book this many days into the future (e.g., 7 = one week ahead).',
+      initialValue: 7,
+    },
+    {
       name: 'openHour',
       title: 'Opening Hour',
       type: 'number',

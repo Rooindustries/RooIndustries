@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { client } from "../lib/sanityClient";
+import { client } from "../sanityClient";
 import { useLocation, useNavigate } from "react-router-dom";
 
 // read query params
@@ -37,7 +37,7 @@ export default function BookingForm() {
     notes: "",
   });
 
-  // ---------- FETCH SETTINGS (read-only) ----------
+  // ---------- FETCH SETTINGS----------
   useEffect(() => {
     client
       .fetch(`*[_type == "bookingSettings"][0]`)
@@ -125,7 +125,7 @@ export default function BookingForm() {
         status: "pending",
       };
 
-      // write to Sanity + send emails on the server (secure)
+      // write to Sanity + send emails on the server
       const res = await fetch("/api/createBooking", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -139,7 +139,7 @@ export default function BookingForm() {
 
       const { bookingId } = await res.json();
 
-      // go to your payment page (you’ll wire real payments later)
+      // go to your payment page
       navigate(
         `/payment?package=${encodeURIComponent(
           selectedPackage.title
@@ -190,12 +190,16 @@ export default function BookingForm() {
             </div>
           )}
 
-          {/* STEP 1 — Calendar + Time */}
+          {/* Calendar + Time */}
           {step === 1 && (
             <div className="max-w-3xl mx-auto backdrop-blur-sm bg-[#0b1120]/80 border border-sky-700/30 rounded-2xl p-8 text-center shadow-[0_0_25px_rgba(14,165,233,0.15)]">
-              <h3 className="text-sky-300 text-lg font-semibold mb-8">
+              <h3 className="text-sky-300 text-lg font-semibold mb-5">
                 Select a Date and Time for Your Session
               </h3>
+              <p className="text-sky-400/70 text-sm mb-4">
+                You can book up to {settings.maxDaysAheadBooking} days in
+                advance.
+              </p>
 
               <div className="flex flex-col sm:flex-row gap-8 justify-center">
                 {/* Calendar */}
@@ -250,8 +254,12 @@ export default function BookingForm() {
                         day
                       );
                       date.setHours(0, 0, 0, 0);
-                      const isToday = isSameDay(date, startOfToday);
-                      const disabled = !isToday;
+                      const now = new Date();
+                      const maxDate = new Date();
+                      maxDate.setDate(
+                        maxDate.getDate() + settings.maxDaysAheadBooking
+                      );
+                      const disabled = date < startOfToday || date > maxDate;
                       const isSelected =
                         selectedDate && isSameDay(date, new Date());
                       return (
@@ -323,7 +331,7 @@ export default function BookingForm() {
             </div>
           )}
 
-          {/* STEP 2 — Info */}
+          {/*Info */}
           {step === 2 && (
             <div className="max-w-2xl mx-auto bg-[#0b1120]/80 border border-sky-700/30 rounded-2xl p-8 shadow-[0_0_25px_rgba(14,165,233,0.15)] space-y-6">
               <input

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { client } from "../lib/sanityClient";
+import { client } from "../sanityClient";
 
 export default function Packages() {
   const [packages, setPackages] = useState([]);
