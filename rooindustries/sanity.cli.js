@@ -1,15 +1,8 @@
-import {defineCliConfig} from 'sanity/cli'
+import sanityClient from '@sanity/client'
 
-export default defineCliConfig({
-  api: {
-    projectId: '9g42k3ur',
-    dataset: 'production'
-  },
-  deployment: {
-    /**
-     * Enable auto-updates for studios.
-     * Learn more at https://www.sanity.io/docs/cli#auto-updates
-     */
-    autoUpdates: true,
-  }
+export const client = sanityClient({
+  projectId: '9g42k3ur', // public
+  dataset: 'production', // public
+  apiVersion: '2023-10-01',
+  useCdn: true, // fast reads
 })

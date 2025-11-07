@@ -11,6 +11,8 @@ import privacyPolicy from './privacyPolicy'
 import services from './services'
 import terms from './terms'
 import reviewsCarousel from './reviewsCarousel'
+import booking from './booking'
+import bookingSettings from './bookingSettings'
 export const schemaTypes = [
   benchmark,
   packageSchema,
@@ -25,4 +27,6 @@ export const schemaTypes = [
   services,
   terms,
   reviewsCarousel,
+  booking,
+  bookingSettings,
 ]

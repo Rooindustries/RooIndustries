@@ -1,0 +1,138 @@
+// Vercel Serverless Function: writes to Sanity and sends emails (Resend)
+import { Resend } from "resend";
+import sanityClient from "@sanity/client";
+
+const writeClient = sanityClient({
+  projectId: process.env.SANITY_PROJECT_ID,
+  dataset: process.env.SANITY_DATASET || "production",
+  apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
+  token: process.env.SANITY_WRITE_TOKEN, // NEVER expose this to the client
+  useCdn: false,
+});
+
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+const emailHtml = ({ logoUrl, siteName, heading, intro, fields }) => `
+  <div style="font-family:Inter,Arial,sans-serif;background:#0b1120;padding:24px;color:#e5f2ff">
+    <table width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;margin:0 auto;background:#0f172a;border:1px solid rgba(56,189,248,.2);border-radius:16px;overflow:hidden">
+      <tr>
+        <td style="padding:24px;text-align:center;border-bottom:1px solid rgba(56,189,248,.15)">
+          <img src="${logoUrl}" alt="${siteName}" style="height:48px;display:block;margin:0 auto 8px"/>
+          <div style="font-weight:700;font-size:18px;color:#7dd3fc">${siteName}</div>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:24px">
+          <h1 style="margin:0 0 8px;font-size:20px;color:#a5e8ff">${heading}</h1>
+          <p style="margin:0 0 16px;opacity:.85">${intro}</p>
+          <table cellpadding="0" cellspacing="0" style="width:100%;background:#0b1120;border:1px solid rgba(56,189,248,.15);border-radius:12px">
+            <tbody>
+              ${fields
+                .map(
+                  (f) => `
+                <tr>
+                  <td style="padding:10px 14px;color:#93c5fd;width:40%">${f.label}</td>
+                  <td style="padding:10px 14px;color:#e5f2ff">${f.value}</td>
+                </tr>`
+                )
+                .join("")}
+            </tbody>
+          </table>
+          <p style="margin:18px 0 0;font-size:12px;color:#94a3b8">This is an automatic email from ${siteName}.</p>
+        </td>
+      </tr>
+    </table>
+  </div>
+`;
+
+export default async function handler(req, res) {
+  if (req.method !== "POST")
+    return res.status(405).json({ error: "Method not allowed" });
+
+  try {
+    const {
+      date,
+      time,
+      discord,
+      email,
+      specs,
+      mainGame,
+      message,
+      packageTitle,
+      packagePrice,
+      status = "pending",
+    } = req.body || {};
+
+    // 1) Write the booking to Sanity (server-side, secure)
+    const doc = await writeClient.create({
+      _type: "booking",
+      date,
+      time,
+      discord,
+      email,
+      specs,
+      mainGame,
+      message,
+      packageTitle,
+      packagePrice,
+      status,
+    });
+
+    // 2) Send emails via Resend (customer + owner)
+    const siteName = process.env.SITE_NAME || "Roo Industries";
+    const logoUrl =
+      process.env.LOGO_URL || "https://rooindustries.com/embed_logo.png"; // change to your hosted logo
+    const from = process.env.FROM_EMAIL; // e.g. bookings@rooindustries.com (must be verified in Resend)
+    const owner = process.env.OWNER_EMAIL; // your inbox
+
+    const baseFields = [
+      { label: "Package", value: `${packageTitle || "—"}` },
+      { label: "Price", value: `${packagePrice || "—"}` },
+      { label: "Date", value: date },
+      { label: "Time", value: time },
+      { label: "Discord", value: discord || "—" },
+      { label: "Email", value: email || "—" },
+      { label: "Main Game", value: mainGame || "—" },
+      { label: "PC Specs", value: specs || "—" },
+      { label: "Notes", value: message || "—" },
+    ];
+
+    // customer email
+    if (from && email && process.env.RESEND_API_KEY) {
+      await resend.emails.send({
+        from,
+        to: email,
+        subject: `Your ${siteName} booking request`,
+        html: emailHtml({
+          logoUrl,
+          siteName,
+          heading: "Booking Received ✨",
+          intro:
+            "Thanks for booking! Here’s a copy of your details. I’ll reach out on Discord/email to confirm the exact time.",
+          fields: baseFields,
+        }),
+      });
+    }
+
+    // owner email
+    if (from && owner && process.env.RESEND_API_KEY) {
+      await resend.emails.send({
+        from,
+        to: owner,
+        subject: `New booking — ${packageTitle || ""} (${date} ${time})`,
+        html: emailHtml({
+          logoUrl,
+          siteName,
+          heading: "New Booking Received",
+          intro: "A new booking was submitted via the website:",
+          fields: baseFields,
+        }),
+      });
+    }
+
+    return res.status(200).json({ bookingId: doc._id });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: err.message || "Server error" });
+  }
+}
