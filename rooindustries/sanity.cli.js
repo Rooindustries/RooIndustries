@@ -1,8 +1,8 @@
-import sanityClient from '@sanity/client'
+import {defineCliConfig} from 'sanity/cli'
 
-export const client = sanityClient({
-  projectId: '9g42k3ur', // public
-  dataset: 'production', // public
-  apiVersion: '2023-10-01',
-  useCdn: true, // fast reads
+export default defineCliConfig({
+  api: {
+    projectId: '9g42k3ur',
+    dataset: 'production',
+  },
 })
