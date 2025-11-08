@@ -1,17 +1,19 @@
-// Vercel Serverless Function: writes to Sanity and sends emails (Resend)
 import { Resend } from "resend";
-import sanityClient from "@sanity/client";
+import { createClient } from "@sanity/client"; // ✅ only this import
 
-const writeClient = sanityClient({
+// ✅ Initialize Sanity client
+const writeClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
   dataset: process.env.SANITY_DATASET || "production",
   apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
-  token: process.env.SANITY_WRITE_TOKEN, // NEVER expose this to the client
+  token: process.env.SANITY_WRITE_TOKEN,
   useCdn: false,
 });
 
+// ✅ Initialize Resend
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+// ✅ Email template
 const emailHtml = ({ logoUrl, siteName, heading, intro, fields }) => `
   <div style="font-family:Inter,Arial,sans-serif;background:#0b1120;padding:24px;color:#e5f2ff">
     <table width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;margin:0 auto;background:#0f172a;border:1px solid rgba(56,189,248,.2);border-radius:16px;overflow:hidden">
@@ -50,6 +52,8 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
 
   try {
+    console.log("🟢 Incoming booking request:", req.body);
+
     const {
       date,
       time,
@@ -63,7 +67,8 @@ export default async function handler(req, res) {
       status = "pending",
     } = req.body || {};
 
-    // 1) Write the booking to Sanity (server-side, secure)
+    // 1️⃣ Write booking to Sanity
+    console.log("📝 Writing booking to Sanity...");
     const doc = await writeClient.create({
       _type: "booking",
       date,
@@ -77,13 +82,20 @@ export default async function handler(req, res) {
       packagePrice,
       status,
     });
+    console.log("✅ Booking saved to Sanity:", doc._id);
 
-    // 2) Send emails via Resend (customer + owner)
+    // 2️⃣ Send emails
     const siteName = process.env.SITE_NAME || "Roo Industries";
     const logoUrl =
-      process.env.LOGO_URL || "https://rooindustries.com/embed_logo.png"; // change to your hosted logo
-    const from = process.env.FROM_EMAIL; // e.g. bookings@rooindustries.com (must be verified in Resend)
-    const owner = process.env.OWNER_EMAIL; // your inbox
+      process.env.LOGO_URL || "https://rooindustries.com/embed_logo.png";
+    const from = process.env.FROM_EMAIL;
+    const owner = process.env.OWNER_EMAIL;
+
+    console.log("📧 Email setup:", {
+      from,
+      owner,
+      resendKeySet: !!process.env.RESEND_API_KEY,
+    });
 
     const baseFields = [
       { label: "Package", value: `${packageTitle || "—"}` },
@@ -97,42 +109,58 @@ export default async function handler(req, res) {
       { label: "Notes", value: message || "—" },
     ];
 
-    // customer email
+    // 💌 Customer email
     if (from && email && process.env.RESEND_API_KEY) {
-      await resend.emails.send({
-        from,
-        to: email,
-        subject: `Your ${siteName} booking request`,
-        html: emailHtml({
-          logoUrl,
-          siteName,
-          heading: "Booking Received ✨",
-          intro:
-            "Thanks for booking! Here’s a copy of your details. I’ll reach out on Discord/email to confirm the exact time.",
-          fields: baseFields,
-        }),
-      });
+      try {
+        console.log("📨 Sending customer email to:", email);
+        const result = await resend.emails.send({
+          from,
+          to: email,
+          subject: `Your ${siteName} booking request`,
+          html: emailHtml({
+            logoUrl,
+            siteName,
+            heading: "Booking Received ✨",
+            intro:
+              "Thanks for booking! Here’s a copy of your details. I’ll reach out on Discord/email to confirm the exact time.",
+            fields: baseFields,
+          }),
+        });
+        console.log("✅ Customer email sent:", result);
+      } catch (err) {
+        console.error("❌ Error sending customer email:", err);
+      }
+    } else {
+      console.warn("⚠️ Customer email skipped:", { from, email });
     }
 
-    // owner email
+    // 📩 Owner email
     if (from && owner && process.env.RESEND_API_KEY) {
-      await resend.emails.send({
-        from,
-        to: owner,
-        subject: `New booking — ${packageTitle || ""} (${date} ${time})`,
-        html: emailHtml({
-          logoUrl,
-          siteName,
-          heading: "New Booking Received",
-          intro: "A new booking was submitted via the website:",
-          fields: baseFields,
-        }),
-      });
+      try {
+        console.log("📨 Sending owner email to:", owner);
+        const result = await resend.emails.send({
+          from,
+          to: owner,
+          subject: `New booking — ${packageTitle || ""} (${date} ${time})`,
+          html: emailHtml({
+            logoUrl,
+            siteName,
+            heading: "New Booking Received",
+            intro: "A new booking was submitted via the website:",
+            fields: baseFields,
+          }),
+        });
+        console.log("✅ Owner email sent:", result);
+      } catch (err) {
+        console.error("❌ Error sending owner email:", err);
+      }
+    } else {
+      console.warn("⚠️ Owner email skipped:", { from, owner });
     }
 
     return res.status(200).json({ bookingId: doc._id });
   } catch (err) {
-    console.error(err);
+    console.error("❌ Booking API error:", err);
     return res.status(500).json({ error: err.message || "Server error" });
   }
 }

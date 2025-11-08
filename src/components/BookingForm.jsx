@@ -39,18 +39,31 @@ export default function BookingForm() {
 
   // ---------- FETCH SETTINGS----------
   useEffect(() => {
-    client
-      .fetch(`*[_type == "bookingSettings"][0]`)
-      .then((s) => {
+    const fetchData = async () => {
+      try {
+        const [s, booked] = await Promise.all([
+          client.fetch(`*[_type == "bookingSettings"][0]`),
+          client.fetch(`*[_type == "booking"]{date, time}`),
+        ]);
+
         if (!s) throw new Error("Missing bookingSettings in Sanity.");
+
+        // Convert numeric fields safely
         s.openHour = Number(s.openHour ?? 9);
         s.closeHour = Number(s.closeHour ?? 21);
         s.windowHours = Number(
           s.maxHoursAheadBooking ?? s.minHoursBeforeBooking ?? 2
         );
+
+        s.bookedSlots = booked;
+
         setSettings(s);
-      })
-      .catch(console.error);
+      } catch (err) {
+        console.error("Error fetching booking data:", err);
+      }
+    };
+
+    fetchData();
   }, []);
 
   // ---------- MEMOS ----------
@@ -71,18 +84,33 @@ export default function BookingForm() {
 
   const times = useMemo(() => {
     if (!settings || !selectedDate) return [];
-    const now = new Date();
-    const windowEnd = new Date(now.getTime() + settings.windowHours * 3600000);
+
+    const dayName = selectedDate
+      .toLocaleDateString("en-US", { weekday: "long" })
+      .toLowerCase();
+
+    const allowed = settings.availableTimes?.[dayName] || [];
+
+    const open = settings.openHour ?? 0;
+    const close = settings.closeHour ?? 23;
+
+    const dateLabel = selectedDate.toDateString();
+    const bookedForDay =
+      settings.bookedSlots
+        ?.filter((b) => b.date === dateLabel)
+        .map((b) => b.time) || [];
+
     const slots = [];
-    for (let h = settings.openHour; h <= settings.closeHour; h++) {
-      const slot = new Date(selectedDate);
-      slot.setHours(h, 0, 0, 0);
-      let disabled = true;
-      if (isSameDay(selectedDate, now)) {
-        disabled = !(slot >= now && slot <= windowEnd);
-      }
-      slots.push({ label: hLabel(h), hour: h, disabled });
+    for (let h = open; h <= close; h++) {
+      const label = hLabel(h);
+      const isAllowed = allowed.includes(h);
+      const isBooked = bookedForDay.includes(label);
+
+      const disabled = !isAllowed || isBooked;
+
+      slots.push({ label, hour: h, disabled, isBooked, isAllowed });
     }
+
     return slots;
   }, [settings, selectedDate]);
 
@@ -101,10 +129,21 @@ export default function BookingForm() {
   const handleDayClick = (day) => {
     const date = new Date(month.getFullYear(), month.getMonth(), day);
     date.setHours(0, 0, 0, 0);
-    if (settings && isSameDay(date, startOfToday)) {
-      setSelectedDate(new Date());
-      setSelectedTime("");
+
+    // check allowed range
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // remove time
+    const maxDate = new Date();
+    maxDate.setDate(maxDate.getDate() + (settings.maxDaysAheadBooking || 7));
+    maxDate.setHours(0, 0, 0, 0);
+
+    if (date < today || date > maxDate) {
+      console.warn("Day out of allowed range:", date.toDateString());
+      return;
     }
+
+    setSelectedDate(date);
+    setSelectedTime("");
   };
 
   // ---------- SUBMIT ----------
@@ -261,7 +300,8 @@ export default function BookingForm() {
                       );
                       const disabled = date < startOfToday || date > maxDate;
                       const isSelected =
-                        selectedDate && isSameDay(date, new Date());
+                        selectedDate && isSameDay(date, selectedDate);
+
                       return (
                         <button
                           key={day}
@@ -302,8 +342,10 @@ export default function BookingForm() {
                           }
                           disabled={t.disabled}
                           className={`py-2 rounded-lg border transition-all duration-200 ${
-                            t.disabled
-                              ? "text-slate-500 border-slate-700/50 cursor-not-allowed"
+                            t.isBooked
+                              ? "bg-red-900/40 border-red-700/40 text-red-400 cursor-not-allowed"
+                              : t.disabled
+                              ? "bg-slate-800/40 text-slate-500 border-slate-700/50 cursor-not-allowed"
                               : selectedTime === t.label
                               ? "bg-sky-600 text-white border-sky-400 shadow-[0_0_15px_rgba(56,189,248,0.6)]"
                               : "border-sky-700/40 hover:border-sky-500/60 hover:bg-sky-700/20"
