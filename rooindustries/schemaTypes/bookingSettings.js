@@ -4,32 +4,40 @@ export default {
   type: 'document',
   fields: [
     {
-      name: 'maxHoursAheadBooking',
-      title: 'Maximum Hours Ahead Booking',
-      type: 'number',
-      description:
-        'Users can only book up to this many hours ahead of the current time (e.g., 2 = only within the next 2 hours).',
-    },
-    {
       name: 'maxDaysAheadBooking',
       title: 'Maximum Days Ahead Booking',
       type: 'number',
-      description: 'Users can only book this many days into the future (e.g., 7 = one week ahead).',
       initialValue: 7,
     },
     {
       name: 'openHour',
-      title: 'Opening Hour',
+      title: 'Opening Hour (24h)',
       type: 'number',
-      description: 'Hour of day bookings open (24h format, e.g., 16 = 4pm).',
-      initialValue: 16,
+      description: 'First hour shown in the booking list (e.g. 0 = midnight, 9 = 9 AM).',
+      initialValue: 0,
     },
     {
       name: 'closeHour',
-      title: 'Closing Hour',
+      title: 'Closing Hour (24h)',
       type: 'number',
-      description: 'Hour of day bookings close (24h format, e.g., 23 = 11pm).',
+      description: 'Last hour shown (e.g. 23 = 11 PM).',
       initialValue: 23,
+    },
+    {
+      name: 'availableTimes',
+      title: 'Weekly Time Slots',
+      type: 'object',
+      description:
+        'Allowed hours per weekday (24h numbers, e.g. 16 = 4 PM, 17 = 5 PM). Empty = closed.',
+      fields: [
+        {name: 'sunday', type: 'array', of: [{type: 'number'}], options: {layout: 'tags'}},
+        {name: 'monday', type: 'array', of: [{type: 'number'}], options: {layout: 'tags'}},
+        {name: 'tuesday', type: 'array', of: [{type: 'number'}], options: {layout: 'tags'}},
+        {name: 'wednesday', type: 'array', of: [{type: 'number'}], options: {layout: 'tags'}},
+        {name: 'thursday', type: 'array', of: [{type: 'number'}], options: {layout: 'tags'}},
+        {name: 'friday', type: 'array', of: [{type: 'number'}], options: {layout: 'tags'}},
+        {name: 'saturday', type: 'array', of: [{type: 'number'}], options: {layout: 'tags'}},
+      ],
     },
   ],
 }
