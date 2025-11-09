@@ -11,11 +11,14 @@ import Navbar from "./components/Navbar";
 import Packages from "./pages/Packages";
 import Faq from "./pages/Faq";
 import Book from "./pages/Book";
+import Payment from "./pages/Payment";
+import PaymentSuccess from "./components/PaymentSuccess";
+
 function RedirectToDiscord() {
   React.useEffect(() => {
     window.location.href = "https://discord.gg/M7nTkn9dxE";
   }, []);
-  return null; // nothing is rendered
+  return null;
 }
 
 function App() {
@@ -78,6 +81,8 @@ function App() {
 
             <Route path="/faq" element={<Faq />} />
             <Route path="/discord" element={<RedirectToDiscord />} />
+            <Route path="/payment" element={<Payment />} />
+            <Route path="/payment-success" element={<PaymentSuccess />} />
           </Routes>
         </main>
 

@@ -149,49 +149,21 @@ export default function BookingForm() {
   // ---------- SUBMIT ----------
   const handleSubmit = async () => {
     if (!selectedDate || !selectedTime) return;
-    setLoading(true);
-    try {
-      const payload = {
-        date: selectedDate.toDateString(),
-        time: selectedTime,
-        discord: form.discord,
-        email: form.email,
-        specs: form.specs,
-        mainGame: form.mainGame,
-        message: form.notes,
-        packageTitle: selectedPackage.title,
-        packagePrice: selectedPackage.price,
-        status: "pending",
-      };
 
-      // write to Sanity + send emails on the server
-      const res = await fetch("/api/createBooking", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+    const payload = {
+      date: selectedDate.toDateString(),
+      time: selectedTime,
+      discord: form.discord,
+      email: form.email,
+      specs: form.specs,
+      mainGame: form.mainGame,
+      message: form.notes,
+      packageTitle: selectedPackage.title,
+      packagePrice: selectedPackage.price,
+      status: "pending",
+    };
 
-      if (!res.ok) {
-        const { error } = await res.json();
-        throw new Error(error || "Failed to create booking");
-      }
-
-      const { bookingId } = await res.json();
-
-      // go to your payment page
-      navigate(
-        `/payment?package=${encodeURIComponent(
-          selectedPackage.title
-        )}&price=${encodeURIComponent(
-          selectedPackage.price
-        )}&bookingId=${bookingId}`
-      );
-    } catch (err) {
-      console.error(err);
-      alert("Error submitting booking.");
-    } finally {
-      setLoading(false);
-    }
+    navigate(`/payment?data=${encodeURIComponent(JSON.stringify(payload))}`);
   };
 
   // ---------- RENDER ----------

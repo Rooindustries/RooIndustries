@@ -1,7 +1,7 @@
 import { Resend } from "resend";
-import { createClient } from "@sanity/client"; // ✅ only this import
+import { createClient } from "@sanity/client";
 
-// ✅ Initialize Sanity client
+// Sanity client
 const writeClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
   dataset: process.env.SANITY_DATASET || "production",
@@ -10,10 +10,9 @@ const writeClient = createClient({
   useCdn: false,
 });
 
-// ✅ Initialize Resend
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// ✅ Email template
+// Email template
 const emailHtml = ({ logoUrl, siteName, heading, intro, fields }) => `
   <div style="font-family:Inter,Arial,sans-serif;background:#0b1120;padding:24px;color:#e5f2ff">
     <table width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;margin:0 auto;background:#0f172a;border:1px solid rgba(56,189,248,.2);border-radius:16px;overflow:hidden">
@@ -67,7 +66,7 @@ export default async function handler(req, res) {
       status = "pending",
     } = req.body || {};
 
-    // 1️⃣ Write booking to Sanity
+    // 1️Write booking to Sanity
     console.log("📝 Writing booking to Sanity...");
     const doc = await writeClient.create({
       _type: "booking",
@@ -84,7 +83,7 @@ export default async function handler(req, res) {
     });
     console.log("✅ Booking saved to Sanity:", doc._id);
 
-    // 2️⃣ Send emails
+    // Send emails
     const siteName = process.env.SITE_NAME || "Roo Industries";
     const logoUrl =
       process.env.LOGO_URL || "https://rooindustries.com/embed_logo.png";
@@ -109,7 +108,7 @@ export default async function handler(req, res) {
       { label: "Notes", value: message || "—" },
     ];
 
-    // 💌 Customer email
+    // Customer email
     if (from && email && process.env.RESEND_API_KEY) {
       try {
         console.log("📨 Sending customer email to:", email);
@@ -134,7 +133,7 @@ export default async function handler(req, res) {
       console.warn("⚠️ Customer email skipped:", { from, email });
     }
 
-    // 📩 Owner email
+    // Owner email
     if (from && owner && process.env.RESEND_API_KEY) {
       try {
         console.log("📨 Sending owner email to:", owner);
