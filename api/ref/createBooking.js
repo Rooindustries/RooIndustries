@@ -1,7 +1,8 @@
+// /api/createBooking.js
 import { Resend } from "resend";
 import { createClient } from "@sanity/client";
 
-// Sanity client
+// Sanity write client (server-only)
 const writeClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
   dataset: process.env.SANITY_DATASET || "production",
@@ -51,8 +52,6 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
 
   try {
-    console.log("🟢 Incoming booking request:", req.body);
-
     const {
       date,
       time,
@@ -64,10 +63,24 @@ export default async function handler(req, res) {
       packageTitle,
       packagePrice,
       status = "pending",
+
+      referralId,
+      referralCode,
+      discountPercent = 0,
+      discountAmount = 0,
+      grossAmount = 0,
+      netAmount = 0,
+      commissionPercent = 0,
+
+      paypalOrderId = "",
+      payerEmail = "",
     } = req.body || {};
 
-    // 1️Write booking to Sanity
-    console.log("📝 Writing booking to Sanity...");
+    const commissionAmount = +(
+      (netAmount || grossAmount || 0) *
+      ((commissionPercent || 0) / 100)
+    ).toFixed(2);
+
     const doc = await writeClient.create({
       _type: "booking",
       date,
@@ -80,39 +93,62 @@ export default async function handler(req, res) {
       packageTitle,
       packagePrice,
       status,
-    });
-    console.log("✅ Booking saved to Sanity:", doc._id);
 
-    // Send emails
+      referralCode,
+      discountPercent,
+      discountAmount,
+      grossAmount,
+      netAmount,
+      commissionPercent,
+      commissionAmount,
+      paypalOrderId,
+      payerEmail,
+      ...(referralId
+        ? { referral: { _type: "reference", _ref: referralId } }
+        : {}),
+    });
+
     const siteName = process.env.SITE_NAME || "Roo Industries";
     const logoUrl =
       process.env.LOGO_URL || "https://rooindustries.com/embed_logo.png";
     const from = process.env.FROM_EMAIL;
     const owner = process.env.OWNER_EMAIL;
 
-    console.log("📧 Email setup:", {
-      from,
-      owner,
-      resendKeySet: !!process.env.RESEND_API_KEY,
-    });
-
     const baseFields = [
       { label: "Package", value: `${packageTitle || "—"}` },
       { label: "Price", value: `${packagePrice || "—"}` },
-      { label: "Date", value: date },
-      { label: "Time", value: time },
+      { label: "Date", value: date || "—" },
+      { label: "Time", value: time || "—" },
       { label: "Discord", value: discord || "—" },
       { label: "Email", value: email || "—" },
       { label: "Main Game", value: mainGame || "—" },
       { label: "PC Specs", value: specs || "—" },
       { label: "Notes", value: message || "—" },
+      ...(referralCode
+        ? [
+            { label: "Referral Code", value: referralCode },
+            {
+              label: "Discount",
+              value: `${discountPercent}% (−$${
+                discountAmount.toFixed?.(2) || discountAmount
+              })`,
+            },
+            {
+              label: "Commission",
+              value: `${commissionPercent}% ($${
+                commissionAmount.toFixed?.(2) || commissionAmount
+              })`,
+            },
+          ]
+        : []),
+      ...(paypalOrderId
+        ? [{ label: "PayPal Order", value: paypalOrderId }]
+        : []),
     ];
 
-    // Customer email
     if (from && email && process.env.RESEND_API_KEY) {
       try {
-        console.log("📨 Sending customer email to:", email);
-        const result = await resend.emails.send({
+        await resend.emails.send({
           from,
           to: email,
           subject: `Your ${siteName} booking request`,
@@ -121,11 +157,10 @@ export default async function handler(req, res) {
             siteName,
             heading: "Booking Received ✨",
             intro:
-              "Thanks for booking! Here’s a copy of your details. I’ll reach out on Discord/email to confirm the exact time.",
+              "Thanks for booking! Here’s a copy of your details. I’ll reach out on Discord/email to confirm the time.",
             fields: baseFields,
           }),
         });
-        console.log("✅ Customer email sent:", result);
       } catch (err) {
         console.error("❌ Error sending customer email:", err);
       }
@@ -133,11 +168,10 @@ export default async function handler(req, res) {
       console.warn("⚠️ Customer email skipped:", { from, email });
     }
 
-    // Owner email
+    // 4) Owner email
     if (from && owner && process.env.RESEND_API_KEY) {
       try {
-        console.log("📨 Sending owner email to:", owner);
-        const result = await resend.emails.send({
+        await resend.emails.send({
           from,
           to: owner,
           subject: `New booking — ${packageTitle || ""} (${date} ${time})`,
@@ -149,7 +183,6 @@ export default async function handler(req, res) {
             fields: baseFields,
           }),
         });
-        console.log("✅ Owner email sent:", result);
       } catch (err) {
         console.error("❌ Error sending owner email:", err);
       }

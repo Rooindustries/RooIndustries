@@ -6,6 +6,13 @@ export default function Packages() {
   const [packages, setPackages] = useState([]);
 
   useEffect(() => {
+    // 🔹 Capture referral query param and store it
+    const params = new URLSearchParams(window.location.search);
+    const ref = params.get("ref");
+    if (ref) {
+      localStorage.setItem("referral", ref);
+    }
+
     client
       .fetch(
         `*[_type == "package"] | order(_createdAt asc) {
@@ -58,7 +65,6 @@ export default function Packages() {
               </ul>
             </div>
 
-            {/* ✅ Link to /booking */}
             <Link
               to={`/booking?title=${encodeURIComponent(
                 p.title
