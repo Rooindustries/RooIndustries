@@ -13,6 +13,7 @@ import terms from './terms'
 import reviewsCarousel from './reviewsCarousel'
 import booking from './booking'
 import bookingSettings from './bookingSettings'
+import referral from './referral'
 
 export const schemaTypes = [
   benchmark,
@@ -30,4 +31,5 @@ export const schemaTypes = [
   reviewsCarousel,
   booking,
   bookingSettings,
+  referral,
 ]

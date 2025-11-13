@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from "react";
+// /src/pages/Payment.jsx
+import React, { useState, useMemo, useEffect } from "react";
 import { useLocation, Link } from "react-router-dom";
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 
@@ -14,16 +15,51 @@ export default function Payment() {
     }
   }, [q]);
 
-  //values from bookingData
   const packageTitle = bookingData.packageTitle || "—";
   const packagePrice = bookingData.packagePrice || "$0";
   const date = bookingData.date || "—";
   const time = bookingData.time || "—";
-  const amount = parseFloat(packagePrice.replace(/[^0-9.]/g, "")) || 0;
+  const baseAmount = parseFloat(packagePrice.replace(/[^0-9.]/g, "")) || 0;
+
+  const [referralInput, setReferralInput] = useState("");
+  const [referral, setReferral] = useState(null); // { _id, name, code, commissionPercent, discountPercent }
+  const [validating, setValidating] = useState(false);
+
+  const discountPercent = referral?.discountPercent || 0;
+  const discountAmount = +(baseAmount * (discountPercent / 100)).toFixed(2);
+  const finalAmount = Math.max(0, +(baseAmount - discountAmount).toFixed(2));
+
+  useEffect(() => {
+    const stored = localStorage.getItem("referral");
+    if (stored) {
+      setReferralInput(stored);
+      validateReferral(stored);
+    }
+  }, []);
+
+  async function validateReferral(code) {
+    if (!code) {
+      setReferral(null);
+      return;
+    }
+    try {
+      setValidating(true);
+      const r = await fetch(
+        `/api/validateReferral?code=${encodeURIComponent(code)}`
+      );
+      const data = await r.json();
+      if (data.ok) setReferral(data.referral);
+      else setReferral(null);
+    } catch (e) {
+      console.error(e);
+      setReferral(null);
+    } finally {
+      setValidating(false);
+    }
+  }
 
   return (
     <section className="relative z-10 pt-32 pb-24 px-6 max-w-3xl mx-auto text-white">
-      {/* Heading */}
       <h2 className="text-4xl sm:text-5xl font-extrabold text-center text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
         Complete Payment
       </h2>
@@ -41,22 +77,56 @@ export default function Payment() {
 
           <div className="mt-6">
             <p className="font-semibold text-lg text-white">{packageTitle}</p>
-            <p className="text-3xl font-extrabold text-sky-400 mt-1">
-              {packagePrice} USD
-            </p>
+            <div className="mt-2 space-y-1">
+              {discountPercent > 0 && (
+                <p className="text-xl text-slate-300 line-through">
+                  ${baseAmount.toFixed(2)}
+                </p>
+              )}
+              <p className="text-3xl font-extrabold text-sky-400">
+                ${finalAmount.toFixed(2)} USD
+              </p>
+              {discountPercent > 0 && (
+                <p className="text-sm text-green-300">
+                  You saved {discountPercent}% (−${discountAmount.toFixed(2)})
+                  via {referral?.name}
+                </p>
+              )}
+            </div>
           </div>
 
           <div className="mt-6 h-px w-full bg-sky-800/40" />
 
-          <div className="mt-6 grid gap-3 text-slate-300 text-sm">
-            <div className="flex items-center gap-2">
-              <span className="text-sky-400">📅</span>
-              <span>{date}</span>
+          {/* Referral input */}
+          <div className="mt-6">
+            <label className="block text-sm font-semibold mb-1">
+              Referral Code (optional)
+            </label>
+            <div className="flex gap-2 items-center">
+              <input
+                value={referralInput}
+                onChange={(e) => setReferralInput(e.target.value.trim())}
+                placeholder="e.g. vouch"
+                className="w-60 bg-[#0c162a] border border-sky-800/40 rounded-md px-3 py-2 outline-none"
+              />
+              <button
+                onClick={() => validateReferral(referralInput)}
+                disabled={validating}
+                className="px-3 py-2 rounded-md bg-sky-600 hover:bg-sky-500 font-semibold"
+              >
+                {validating ? "Checking..." : "Apply"}
+              </button>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-sky-400">⏰</span>
-              <span>{time}</span>
-            </div>
+            {referralInput && !referral && !validating && (
+              <p className="text-sm text-red-300 mt-2">
+                Invalid or inactive referral code.
+              </p>
+            )}
+            {referral && (
+              <p className="text-sm text-green-300 mt-2">
+                Applied <b>{referral.name}</b> — {discountPercent}% off
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -69,7 +139,6 @@ export default function Payment() {
             Secure payment via PayPal
           </p>
 
-          {/* PayPal header row */}
           <div className="mt-6 flex items-center justify-start gap-4 border border-sky-800/30 bg-[#0c162a]/80 rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(14,165,233,0.15)]">
             <img
               src="https://www.paypalobjects.com/webstatic/mktg/Logo/pp-logo-100px.png"
@@ -81,7 +150,6 @@ export default function Payment() {
             </p>
           </div>
 
-          {/* PayPal Button */}
           <div className="mt-6 w-full sm:w-[400px]">
             <PayPalScriptProvider
               options={{
@@ -105,18 +173,37 @@ export default function Payment() {
                     purchase_units: [
                       {
                         description: `${packageTitle} booking`,
-                        amount: { value: amount.toFixed(2) },
+                        amount: { value: finalAmount.toFixed(2) },
                       },
                     ],
                   })
                 }
                 onApprove={async (data, actions) => {
                   const details = await actions.order.capture();
+
                   try {
+                    const payload = {
+                      ...bookingData,
+
+                      // referral
+                      referralCode: referral?.code || referralInput || "",
+                      referralId: referral?._id || null,
+                      discountPercent,
+                      discountAmount,
+                      grossAmount: baseAmount,
+                      netAmount: finalAmount,
+                      commissionPercent: referral?.commissionPercent || 0,
+
+                      // payment metadata
+                      paypalOrderId: details?.id || "",
+                      payerEmail: details?.payer?.email_address || "",
+                      status: "captured",
+                    };
+
                     const res = await fetch("/api/createBooking", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify(bookingData),
+                      body: JSON.stringify(payload),
                     });
 
                     if (!res.ok)
@@ -124,7 +211,7 @@ export default function Payment() {
                     const { bookingId } = await res.json();
 
                     alert(
-                      `✅ Payment successful! Booking confirmed (${bookingId})`
+                      ` Payment successful! Booking confirmed (${bookingId})`
                     );
                     window.location.href = "/payment-success";
                   } catch (err) {
@@ -136,7 +223,7 @@ export default function Payment() {
                 }}
                 onError={(err) => {
                   console.error(err);
-                  alert("❌ Payment could not be processed. Please try again.");
+                  alert(" Payment could not be processed. Please try again.");
                 }}
               />
             </PayPalScriptProvider>
@@ -144,7 +231,6 @@ export default function Payment() {
         </div>
       </div>
 
-      {/* Back Link */}
       <div className="mt-8 text-center">
         <Link
           to="/booking"

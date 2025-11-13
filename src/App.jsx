@@ -13,7 +13,8 @@ import Faq from "./pages/Faq";
 import Book from "./pages/Book";
 import Payment from "./pages/Payment";
 import PaymentSuccess from "./components/PaymentSuccess";
-
+import RefLogin from "./pages/RefLogin";
+import RefDashboard from "./pages/RefDashboard";
 function RedirectToDiscord() {
   React.useEffect(() => {
     window.location.href = "https://discord.gg/M7nTkn9dxE";
@@ -83,6 +84,8 @@ function App() {
             <Route path="/discord" element={<RedirectToDiscord />} />
             <Route path="/payment" element={<Payment />} />
             <Route path="/payment-success" element={<PaymentSuccess />} />
+            <Route path="/referrals/login" element={<RefLogin />} />
+            <Route path="/referrals/dashboard" element={<RefDashboard />} />
           </Routes>
         </main>
 
