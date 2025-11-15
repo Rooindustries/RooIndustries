@@ -76,7 +76,7 @@ function App() {
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/terms" element={<Terms />} />
             <Route
-              path="/morereviews"
+              path="/reviews"
               element={<Reviews setIsModalOpen={setIsModalOpen} />}
             />
             <Route path="/booking" element={<Book />} />
