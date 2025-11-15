@@ -29,6 +29,9 @@ export default function BookingForm() {
   const [selectedTime, setSelectedTime] = useState("");
   const [month, setMonth] = useState(new Date());
   const [loading, setLoading] = useState(false);
+  const [errorStep1, setErrorStep1] = useState("");
+  const [errorStep2, setErrorStep2] = useState("");
+
   const [form, setForm] = useState({
     discord: "",
     email: "",
@@ -37,7 +40,7 @@ export default function BookingForm() {
     notes: "",
   });
 
-  // ---------- FETCH SETTINGS----------
+  // ---------- FETCH SETTINGS ----------
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -89,7 +92,6 @@ export default function BookingForm() {
       .toLocaleDateString("en-US", { weekday: "long" })
       .toLowerCase();
 
-    // FIX: Convert allowed hours from strings → numbers
     const allowedRaw = settings.availableTimes?.[dayName] || [];
     const allowed = allowedRaw.map((x) => Number(x));
 
@@ -116,7 +118,7 @@ export default function BookingForm() {
     return slots;
   }, [settings, selectedDate]);
 
-  // ---------- EFFECTS ----------
+  // ---------- INITIAL DATE ----------
   useEffect(() => {
     if (settings && !selectedDate) {
       setSelectedDate(new Date());
@@ -132,17 +134,14 @@ export default function BookingForm() {
     const date = new Date(month.getFullYear(), month.getMonth(), day);
     date.setHours(0, 0, 0, 0);
 
-    // check allowed range
     const today = new Date();
-    today.setHours(0, 0, 0, 0); // remove time
+    today.setHours(0, 0, 0, 0);
+
     const maxDate = new Date();
     maxDate.setDate(maxDate.getDate() + (settings.maxDaysAheadBooking || 7));
     maxDate.setHours(0, 0, 0, 0);
 
-    if (date < today || date > maxDate) {
-      console.warn("Day out of allowed range:", date.toDateString());
-      return;
-    }
+    if (date < today || date > maxDate) return;
 
     setSelectedDate(date);
     setSelectedTime("");
@@ -150,8 +149,6 @@ export default function BookingForm() {
 
   // ---------- SUBMIT ----------
   const handleSubmit = async () => {
-    if (!selectedDate || !selectedTime) return;
-
     const payload = {
       date: selectedDate.toDateString(),
       time: selectedTime,
@@ -168,7 +165,7 @@ export default function BookingForm() {
     navigate(`/payment?data=${encodeURIComponent(JSON.stringify(payload))}`);
   };
 
-  // ---------- RENDER ----------
+  // ---------- CALENDAR DATA ----------
   const startOfMonth = new Date(month.getFullYear(), month.getMonth(), 1);
   const endOfMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0);
   const daysInMonth = Array.from(
@@ -203,17 +200,12 @@ export default function BookingForm() {
             </div>
           )}
 
-          {/* Calendar + Time */}
+          {/* STEP 1 -- Calendar & Time */}
           {step === 1 && (
             <div className="max-w-3xl mx-auto backdrop-blur-sm bg-[#0b1120]/80 border border-sky-700/30 rounded-2xl p-8 text-center shadow-[0_0_25px_rgba(14,165,233,0.15)]">
               <h3 className="text-sky-300 text-lg font-semibold mb-5">
                 Select a Date and Time for Your Session
               </h3>
-              <p className="text-sky-400/70 text-sm mb-4">
-                You can book up to {settings.maxDaysAheadBooking} days in
-                advance.
-              </p>
-
               <div className="flex flex-col sm:flex-row gap-8 justify-center">
                 {/* Calendar */}
                 <div>
@@ -260,6 +252,7 @@ export default function BookingForm() {
                       .map((_, i) => (
                         <div key={`empty-${i}`} />
                       ))}
+
                     {daysInMonth.map((day) => {
                       const date = new Date(
                         month.getFullYear(),
@@ -267,11 +260,13 @@ export default function BookingForm() {
                         day
                       );
                       date.setHours(0, 0, 0, 0);
+
                       const now = new Date();
                       const maxDate = new Date();
                       maxDate.setDate(
                         maxDate.getDate() + settings.maxDaysAheadBooking
                       );
+
                       const disabled = date < startOfToday || date > maxDate;
                       const isSelected =
                         selectedDate && isSameDay(date, selectedDate);
@@ -333,9 +328,18 @@ export default function BookingForm() {
                 )}
               </div>
 
+              {/* NEXT BUTTON */}
               <button
-                onClick={() => setStep(2)}
-                disabled={!selectedDate || !selectedTime}
+                onClick={() => {
+                  if (!selectedDate || !selectedTime) {
+                    setErrorStep1(
+                      "Please select a date and time before continuing."
+                    );
+                    return;
+                  }
+                  setErrorStep1("");
+                  setStep(2);
+                }}
                 className={`mt-10 w-full sm:w-64 mx-auto py-3 rounded-lg font-semibold text-lg transition-all duration-300 ${
                   !selectedDate || !selectedTime
                     ? "bg-sky-800 text-sky-200/70 cursor-not-allowed"
@@ -344,10 +348,15 @@ export default function BookingForm() {
               >
                 Next
               </button>
+
+              {/* ERROR MESSAGE */}
+              {errorStep1 && (
+                <p className="text-red-400 mt-3 text-sm">{errorStep1}</p>
+              )}
             </div>
           )}
 
-          {/*Info */}
+          {/* STEP 2 -- USER INFO */}
           {step === 2 && (
             <div className="max-w-2xl mx-auto bg-[#0b1120]/80 border border-sky-700/30 rounded-2xl p-8 shadow-[0_0_25px_rgba(14,165,233,0.15)] space-y-6">
               <input
@@ -375,12 +384,19 @@ export default function BookingForm() {
                 onChange={handleChange}
                 className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 focus:outline-none focus:border-sky-500 transition"
               />
+
               <textarea
                 name="notes"
                 placeholder="Any extra requirements?"
                 onChange={handleChange}
                 className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 h-24 focus:outline-none focus:border-sky-500 transition"
               ></textarea>
+
+              {/* FAQ MESSAGE */}
+              <p className="text-sky-400/60 text-xs">
+                Please read the FAQ before booking — it answers everything you
+                need to know.
+              </p>
 
               <div className="flex justify-between gap-4">
                 <button
@@ -389,14 +405,32 @@ export default function BookingForm() {
                 >
                   Back
                 </button>
+
                 <button
-                  onClick={handleSubmit}
+                  onClick={() => {
+                    if (
+                      !form.discord.trim() ||
+                      !form.email.trim() ||
+                      !form.specs.trim() ||
+                      !form.mainGame.trim()
+                    ) {
+                      setErrorStep2("Please fill out all required fields.");
+                      return;
+                    }
+                    setErrorStep2("");
+                    handleSubmit();
+                  }}
                   disabled={loading}
                   className="w-1/2 bg-gradient-to-r from-sky-500 to-blue-700 hover:from-sky-400 hover:to-blue-600 py-3 rounded-lg font-semibold transition"
                 >
                   {loading ? "Submitting..." : "Submit & Pay"}
                 </button>
               </div>
+
+              {/* ERROR MESSAGE */}
+              {errorStep2 && (
+                <p className="text-red-400 text-sm mt-3">{errorStep2}</p>
+              )}
             </div>
           )}
         </>
