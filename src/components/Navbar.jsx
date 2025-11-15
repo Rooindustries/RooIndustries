@@ -72,16 +72,15 @@ export default function Navbar() {
           `}
         >
           <Link
-            to="/packages"
-            className={`px-2 sm:px-4 py-1.5 rounded-full transition ${
-              isActive("/packages")
+            to="/faq"
+            className={`hidden sm:inline px-2 sm:px-4 py-1.5 rounded-full transition ${
+              isActive("/faq")
                 ? "bg-cyan-400 text-black"
                 : "hover:text-cyan-400"
             }`}
           >
-            Book
+            FAQ
           </Link>
-
           <Link
             to="/benchmarks"
             className={`px-2 sm:px-4 py-1.5 rounded-full transition ${
@@ -105,16 +104,15 @@ export default function Navbar() {
           </Link>
 
           <Link
-            to="/faq"
-            className={`hidden sm:inline px-2 sm:px-4 py-1.5 rounded-full transition ${
-              isActive("/faq")
+            to="/packages"
+            className={`px-2 sm:px-4 py-1.5 rounded-full transition ${
+              isActive("/packages")
                 ? "bg-cyan-400 text-black"
                 : "hover:text-cyan-400"
             }`}
           >
-            FAQ
+            Book
           </Link>
-
           <Link
             to="/contact"
             className={`px-2 sm:px-4 py-1.5 rounded-full transition ${
