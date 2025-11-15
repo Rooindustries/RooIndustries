@@ -89,7 +89,9 @@ export default function BookingForm() {
       .toLocaleDateString("en-US", { weekday: "long" })
       .toLowerCase();
 
-    const allowed = settings.availableTimes?.[dayName] || [];
+    // FIX: Convert allowed hours from strings → numbers
+    const allowedRaw = settings.availableTimes?.[dayName] || [];
+    const allowed = allowedRaw.map((x) => Number(x));
 
     const open = settings.openHour ?? 0;
     const close = settings.closeHour ?? 23;
@@ -369,7 +371,7 @@ export default function BookingForm() {
               />
               <input
                 name="mainGame"
-                placeholder="Main Game"
+                placeholder="Main use case (Game/Apps)"
                 onChange={handleChange}
                 className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 focus:outline-none focus:border-sky-500 transition"
               />

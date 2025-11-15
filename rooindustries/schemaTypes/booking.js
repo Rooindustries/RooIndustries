@@ -21,7 +21,7 @@ export default {
     {name: 'packageTitle', title: 'Package Title', type: 'string'},
     {name: 'packagePrice', title: 'Package Price', type: 'string'},
 
-    // 🔽 NEW: referral + payout
+    // referral + payout
     {name: 'referralCode', title: 'Referral Code', type: 'string'},
     {
       name: 'referral',
@@ -36,7 +36,7 @@ export default {
     {name: 'commissionPercent', title: 'Commission %', type: 'number'},
     {name: 'commissionAmount', title: 'Commission Amount (USD)', type: 'number'},
 
-    // 🔽 NEW: payment metadata
+    // payment metadata
     {name: 'paypalOrderId', title: 'PayPal Order ID', type: 'string'},
     {name: 'payerEmail', title: 'Payer Email', type: 'string'},
   ],

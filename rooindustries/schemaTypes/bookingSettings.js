@@ -1,3 +1,8 @@
+const hourOptions = Array.from({length: 24}, (_, i) => ({
+  title: `${i}:00`,
+  value: `${i}`,
+}))
+
 export default {
   name: 'bookingSettings',
   title: 'Booking Settings',
@@ -13,30 +18,89 @@ export default {
       name: 'openHour',
       title: 'Opening Hour (24h)',
       type: 'number',
-      description: 'First hour shown in the booking list (e.g. 0 = midnight, 9 = 9 AM).',
       initialValue: 0,
     },
     {
       name: 'closeHour',
       title: 'Closing Hour (24h)',
       type: 'number',
-      description: 'Last hour shown (e.g. 23 = 11 PM).',
       initialValue: 23,
     },
     {
       name: 'availableTimes',
       title: 'Weekly Time Slots',
       type: 'object',
-      description:
-        'Allowed hours per weekday (24h numbers, e.g. 16 = 4 PM, 17 = 5 PM). Empty = closed.',
       fields: [
-        {name: 'sunday', type: 'array', of: [{type: 'number'}], options: {layout: 'tags'}},
-        {name: 'monday', type: 'array', of: [{type: 'number'}], options: {layout: 'tags'}},
-        {name: 'tuesday', type: 'array', of: [{type: 'number'}], options: {layout: 'tags'}},
-        {name: 'wednesday', type: 'array', of: [{type: 'number'}], options: {layout: 'tags'}},
-        {name: 'thursday', type: 'array', of: [{type: 'number'}], options: {layout: 'tags'}},
-        {name: 'friday', type: 'array', of: [{type: 'number'}], options: {layout: 'tags'}},
-        {name: 'saturday', type: 'array', of: [{type: 'number'}], options: {layout: 'tags'}},
+        {
+          name: 'sunday',
+          title: 'Sunday',
+          type: 'array',
+          of: [{type: 'string'}],
+          options: {
+            layout: 'grid',
+            list: hourOptions,
+          },
+        },
+        {
+          name: 'monday',
+          title: 'Monday',
+          type: 'array',
+          of: [{type: 'string'}],
+          options: {
+            layout: 'grid',
+            list: hourOptions,
+          },
+        },
+        {
+          name: 'tuesday',
+          title: 'Tuesday',
+          type: 'array',
+          of: [{type: 'string'}],
+          options: {
+            layout: 'grid',
+            list: hourOptions,
+          },
+        },
+        {
+          name: 'wednesday',
+          title: 'Wednesday',
+          type: 'array',
+          of: [{type: 'string'}],
+          options: {
+            layout: 'grid',
+            list: hourOptions,
+          },
+        },
+        {
+          name: 'thursday',
+          title: 'Thursday',
+          type: 'array',
+          of: [{type: 'string'}],
+          options: {
+            layout: 'grid',
+            list: hourOptions,
+          },
+        },
+        {
+          name: 'friday',
+          title: 'Friday',
+          type: 'array',
+          of: [{type: 'string'}],
+          options: {
+            layout: 'grid',
+            list: hourOptions,
+          },
+        },
+        {
+          name: 'saturday',
+          title: 'Saturday',
+          type: 'array',
+          of: [{type: 'string'}],
+          options: {
+            layout: 'grid',
+            list: hourOptions,
+          },
+        },
       ],
     },
   ],
