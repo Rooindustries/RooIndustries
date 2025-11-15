@@ -72,12 +72,14 @@ export default function Navbar() {
           `}
         >
           <Link
-            to="/"
+            to="/packages"
             className={`px-2 sm:px-4 py-1.5 rounded-full transition ${
-              isActive("/") ? "bg-cyan-400 text-black" : "hover:text-cyan-400"
+              isActive("/packages")
+                ? "bg-cyan-400 text-black"
+                : "hover:text-cyan-400"
             }`}
           >
-            Home
+            Book
           </Link>
 
           <Link

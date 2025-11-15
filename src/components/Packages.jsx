@@ -6,7 +6,6 @@ export default function Packages() {
   const [packages, setPackages] = useState([]);
 
   useEffect(() => {
-    // 🔹 Capture referral query param and store it
     const params = new URLSearchParams(window.location.search);
     const ref = params.get("ref");
     if (ref) {
@@ -60,7 +59,10 @@ export default function Packages() {
               <p className="mt-6 text-5xl font-bold text-sky-400">{p.price}</p>
               <ul className="mt-6 space-y-2 text-left text-sm text-slate-300 leading-relaxed">
                 {p.features?.map((f, idx) => (
-                  <li key={idx}>✔ {f}</li>
+                  <li key={idx} className="flex items-start gap-2">
+                    <span className="text-sky-400 mt-1">✔</span>
+                    <span className="flex-1">{f}</span>
+                  </li>
                 ))}
               </ul>
             </div>
