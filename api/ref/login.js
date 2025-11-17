@@ -1,8 +1,6 @@
 import { createClient } from "@sanity/client";
 import bcrypt from "bcryptjs";
 
-console.log("💡 Login API loaded");
-
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
   dataset: process.env.SANITY_DATASET,
@@ -12,8 +10,6 @@ const client = createClient({
 });
 
 export default async function handler(req, res) {
-  console.log("📥 Incoming request:", req.method, req.body);
-
   if (req.method !== "POST")
     return res.status(405).json({ ok: false, error: "Method not allowed" });
 
