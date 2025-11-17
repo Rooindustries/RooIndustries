@@ -1,4 +1,3 @@
-// /src/pages/Payment.jsx
 import React, { useState, useMemo, useEffect } from "react";
 import { useLocation, Link } from "react-router-dom";
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";

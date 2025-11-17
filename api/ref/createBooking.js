@@ -1,8 +1,6 @@
-// /api/createBooking.js
 import { Resend } from "resend";
 import { createClient } from "@sanity/client";
 
-// Sanity write client (server-only)
 const writeClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
   dataset: process.env.SANITY_DATASET || "production",

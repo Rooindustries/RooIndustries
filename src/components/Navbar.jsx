@@ -93,7 +93,7 @@ export default function Navbar() {
           </Link>
 
           <Link
-            to="/morereviews"
+            to="/reviews"
             className={`px-2 sm:px-4 py-1.5 rounded-full transition ${
               isActive("/morereviews")
                 ? "bg-cyan-400 text-black"
