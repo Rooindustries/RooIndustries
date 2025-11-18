@@ -9,7 +9,6 @@ export default {
       type: 'string',
       validation: (Rule) => Rule.required(),
     },
-
     {
       name: 'slug',
       title: 'Referral Code',
@@ -23,9 +22,8 @@ export default {
             .replace(/[^\w-]+/g, '')
             .slice(0, 50),
       },
+      validation: (Rule) => Rule.required(),
     },
-
-    // Owner sets how much max value this creator can control
     {
       name: 'maxCommissionPercent',
       title: 'Max Total % Allowed',
@@ -33,40 +31,55 @@ export default {
       initialValue: 15,
       description: 'Creator can divide this between commission and discount',
     },
-
-    // Creator chosen % (updated by their dashboard)
     {
       name: 'currentCommissionPercent',
       title: 'Creator Commission %',
       type: 'number',
-      description: 'Creator chosen percentage from the max allowed',
       initialValue: 10,
     },
-
     {
       name: 'currentDiscountPercent',
       title: 'Viewer Discount %',
       type: 'number',
-      description: 'Percentage viewers get from the max allowed',
       initialValue: 5,
     },
-
     {
       name: 'paypalEmail',
       title: 'PayPal Email',
       type: 'string',
     },
-
     {
       name: 'notes',
       title: 'Notes',
       type: 'text',
     },
+    {
+      name: 'creatorEmail',
+      title: 'Creator Email',
+      type: 'string',
+      description: 'Used for password reset emails.',
+      validation: (Rule) => Rule.required().regex(/.+@.+\..+/, 'Enter a valid email'),
+    },
+
+    {
+      name: 'resetToken',
+      title: 'Password Reset Token',
+      type: 'string',
+      hidden: true,
+    },
+
+    {
+      name: 'resetTokenExpiresAt',
+      title: 'Password Reset Expiry',
+      type: 'datetime',
+      hidden: true,
+    },
 
     {
       name: 'creatorPassword',
-      title: 'Password (for dashboard login)',
+      title: 'Password (plain or hashed)',
       type: 'string',
+      description: 'You can type a normal password here. It will be auto-hashed on first login.',
     },
   ],
 }

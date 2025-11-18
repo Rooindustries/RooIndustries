@@ -166,7 +166,6 @@ export default async function handler(req, res) {
       console.warn("⚠️ Customer email skipped:", { from, email });
     }
 
-    // 4) Owner email
     if (from && owner && process.env.RESEND_API_KEY) {
       try {
         await resend.emails.send({

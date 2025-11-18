@@ -26,10 +26,32 @@ export default async function handler(req, res) {
       return res.status(404).json({ ok: false });
     }
 
-    const valid = await bcrypt.compare(
-      password,
-      referral.creatorPassword || ""
-    );
+    const stored = referral.creatorPassword || "";
+    let valid = false;
+
+    // If stored looks like a bcrypt hash → compare using bcrypt
+    const looksHashed = stored.startsWith("$2a$") || stored.startsWith("$2b$");
+
+    if (looksHashed) {
+      valid = await bcrypt.compare(password, stored);
+    } else {
+      // Treat stored as plain text password (first-time setup)
+      valid = password === stored;
+
+      if (valid && stored) {
+        // Auto-hash on first successful login
+        const hash = await bcrypt.hash(password, 10);
+        try {
+          await client
+            .patch(referral._id)
+            .set({ creatorPassword: hash })
+            .commit();
+          console.log("🔐 Auto-hashed password on first login");
+        } catch (e) {
+          console.error("Failed to auto-hash password:", e);
+        }
+      }
+    }
 
     console.log("🔐 Password match:", valid);
 
