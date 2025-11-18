@@ -15,6 +15,10 @@ import Payment from "./pages/Payment";
 import PaymentSuccess from "./components/PaymentSuccess";
 import RefLogin from "./pages/RefLogin";
 import RefDashboard from "./pages/RefDashboard";
+import RefChangePassword from "./pages/RefChangePassword";
+import RefForgot from "./pages/RefForgot";
+import RefReset from "./pages/RefReset";
+
 function RedirectToDiscord() {
   React.useEffect(() => {
     window.location.href = "https://discord.gg/M7nTkn9dxE";
@@ -65,9 +69,9 @@ function App() {
         <main className="relative z-10 pt-10 sm:pt-24">
           <Navbar />
           <Routes>
-            <Route path="/packages" element={<Packages />} />
-
             <Route path="/" element={<Home />} />
+
+            <Route path="/packages" element={<Packages />} />
             <Route
               path="/benchmarks"
               element={<Benchmarks setIsModalOpen={setIsModalOpen} />}
@@ -80,13 +84,20 @@ function App() {
               element={<Reviews setIsModalOpen={setIsModalOpen} />}
             />
             <Route path="/booking" element={<Book />} />
-
             <Route path="/faq" element={<Faq />} />
             <Route path="/discord" element={<RedirectToDiscord />} />
-            {/* <Route path="/payment" element={<Payment />} />
-            <Route path="/payment-success" element={<PaymentSuccess />} /> */}
+            <Route path="/payment" element={<Payment />} />
+            <Route path="/payment-success" element={<PaymentSuccess />} />
+
+            {/* Referral system routes */}
             <Route path="/referrals/login" element={<RefLogin />} />
             <Route path="/referrals/dashboard" element={<RefDashboard />} />
+            <Route
+              path="/referrals/change-password"
+              element={<RefChangePassword />}
+            />
+            <Route path="/referrals/forgot" element={<RefForgot />} />
+            <Route path="/referrals/reset" element={<RefReset />} />
           </Routes>
         </main>
 

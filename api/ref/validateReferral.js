@@ -4,14 +4,14 @@ const readClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
   dataset: process.env.SANITY_DATASET || "production",
   apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
-  useCdn: false, // 🔧 avoid CDN staleness for validation
-  perspective: "published", // 🔧 ensure only published docs are read
+  useCdn: false,
+  perspective: "published",
 });
 
 export default async function handler(req, res) {
   try {
     const raw = (req.query.code || "").trim();
-    const code = raw.toLowerCase(); // 🔧 normalize to match slug.current
+    const code = raw.toLowerCase();
 
     // quick sanity check of envs
     if (!readClient.config().projectId || !readClient.config().dataset) {
