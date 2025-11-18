@@ -83,8 +83,8 @@ function App() {
 
             <Route path="/faq" element={<Faq />} />
             <Route path="/discord" element={<RedirectToDiscord />} />
-            <Route path="/payment" element={<Payment />} />
-            <Route path="/payment-success" element={<PaymentSuccess />} />
+            {/* <Route path="/payment" element={<Payment />} />
+            <Route path="/payment-success" element={<PaymentSuccess />} /> */}
             <Route path="/referrals/login" element={<RefLogin />} />
             <Route path="/referrals/dashboard" element={<RefDashboard />} />
           </Routes>
