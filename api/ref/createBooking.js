@@ -11,7 +11,6 @@ const writeClient = createClient({
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// Email template
 const emailHtml = ({ logoUrl, siteName, heading, intro, fields }) => `
   <div style="font-family:Inter,Arial,sans-serif;background:#0b1120;padding:24px;color:#e5f2ff">
     <table width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;margin:0 auto;background:#0f172a;border:1px solid rgba(56,189,248,.2);border-radius:16px;overflow:hidden">
@@ -79,6 +78,7 @@ export default async function handler(req, res) {
       ((commissionPercent || 0) / 100)
     ).toFixed(2);
 
+    // 📌 CREATE BOOKING DOCUMENT
     const doc = await writeClient.create({
       _type: "booking",
       date,
@@ -106,6 +106,27 @@ export default async function handler(req, res) {
         : {}),
     });
 
+    if (referralId && status === "captured") {
+      // 1) Increase successful referrals
+      const updated = await writeClient
+        .patch(referralId)
+        .inc({ successfulReferrals: 1 })
+        .commit();
+
+      // 2) Unlock system when they reach 5
+      if (updated.successfulReferrals >= 5 && updated.isFirstTime) {
+        await writeClient
+          .patch(referralId)
+          .set({
+            isFirstTime: false,
+            currentDiscountPercent: updated.currentDiscountPercent || 0,
+          })
+          .commit();
+      }
+    }
+
+    // ------------------------------------------------------------------
+
     const siteName = process.env.SITE_NAME || "Roo Industries";
     const logoUrl =
       process.env.LOGO_URL || "https://rooindustries.com/embed_logo.png";
@@ -127,15 +148,13 @@ export default async function handler(req, res) {
             { label: "Referral Code", value: referralCode },
             {
               label: "Discount",
-              value: `${discountPercent}% (−$${
-                discountAmount.toFixed?.(2) || discountAmount
-              })`,
+              value: `${discountPercent}% (−$${discountAmount.toFixed?.(2)})`,
             },
             {
               label: "Commission",
-              value: `${commissionPercent}% ($${
-                commissionAmount.toFixed?.(2) || commissionAmount
-              })`,
+              value: `${commissionPercent}% ($${commissionAmount.toFixed?.(
+                2
+              )})`,
             },
           ]
         : []),
@@ -144,6 +163,7 @@ export default async function handler(req, res) {
         : []),
     ];
 
+    // SEND EMAILS
     if (from && email && process.env.RESEND_API_KEY) {
       try {
         await resend.emails.send({
@@ -155,15 +175,13 @@ export default async function handler(req, res) {
             siteName,
             heading: "Booking Received ✨",
             intro:
-              "Thanks for booking! Here’s a copy of your details. I’ll reach out on Discord/email to confirm the time.",
+              "Thanks for booking! I’ll reach out on Discord/email to confirm your time.",
             fields: baseFields,
           }),
         });
       } catch (err) {
         console.error("❌ Error sending customer email:", err);
       }
-    } else {
-      console.warn("⚠️ Customer email skipped:", { from, email });
     }
 
     if (from && owner && process.env.RESEND_API_KEY) {
@@ -171,20 +189,18 @@ export default async function handler(req, res) {
         await resend.emails.send({
           from,
           to: owner,
-          subject: `New booking — ${packageTitle || ""} (${date} ${time})`,
+          subject: `New booking — ${packageTitle} (${date} ${time})`,
           html: emailHtml({
             logoUrl,
             siteName,
             heading: "New Booking Received",
-            intro: "A new booking was submitted via the website:",
+            intro: "A new booking was submitted:",
             fields: baseFields,
           }),
         });
       } catch (err) {
         console.error("❌ Error sending owner email:", err);
       }
-    } else {
-      console.warn("⚠️ Owner email skipped:", { from, owner });
     }
 
     return res.status(200).json({ bookingId: doc._id });
