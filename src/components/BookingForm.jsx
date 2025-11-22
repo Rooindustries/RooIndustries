@@ -2,21 +2,48 @@ import React, { useEffect, useMemo, useState } from "react";
 import { client } from "../sanityClient";
 import { useLocation, useNavigate } from "react-router-dom";
 
-// read query params
+// ---------- CONSTANTS ----------
+const HOST_TZ_NAME = "Asia/Kolkata"; // Host is in India (IST)
+const IST_OFFSET_MINUTES = 330; // +5:30
+
+// Read query params
 function useQuery() {
   const { search } = useLocation();
   return new URLSearchParams(search);
 }
 
+// Compare only Y/M/D
 const isSameDay = (a, b) =>
   a.getFullYear() === b.getFullYear() &&
   a.getMonth() === b.getMonth() &&
   a.getDate() === b.getDate();
 
-const hLabel = (h) => {
+// Host label in IST (what you store in Sanity as "time" originally)
+const hostTimeLabel = (h) => {
   const ampm = h >= 12 ? "PM" : "AM";
   const disp = ((h + 11) % 12) + 1;
   return `${disp}:00 ${ampm}`;
+};
+
+// Create a UTC timestamp for a given "host day in IST" + hostHour
+// We treat Y/M/D as host-local, then shift by IST offset to UTC.
+const getUtcFromHostLocal = (year, monthIndex, day, hostHour) => {
+  const utcMs =
+    Date.UTC(year, monthIndex, day, hostHour, 0) -
+    IST_OFFSET_MINUTES * 60 * 1000;
+  return new Date(utcMs);
+};
+
+// Format a UTC Date into the user's local time string
+const formatLocalTime = (utcDate) => {
+  try {
+    return utcDate.toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return utcDate.toISOString();
+  }
 };
 
 export default function BookingForm() {
@@ -25,12 +52,16 @@ export default function BookingForm() {
 
   const [step, setStep] = useState(1);
   const [settings, setSettings] = useState(null);
+
   const [selectedDate, setSelectedDate] = useState(null);
-  const [selectedTime, setSelectedTime] = useState("");
+  const [selectedSlot, setSelectedSlot] = useState(null);
+
   const [month, setMonth] = useState(new Date());
   const [loading, setLoading] = useState(false);
   const [errorStep1, setErrorStep1] = useState("");
   const [errorStep2, setErrorStep2] = useState("");
+
+  const [userTimeZone, setUserTimeZone] = useState("UTC");
 
   const [form, setForm] = useState({
     discord: "",
@@ -40,13 +71,23 @@ export default function BookingForm() {
     notes: "",
   });
 
+  // ---------- DETECT USER TIME ZONE ----------
+  useEffect(() => {
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      setUserTimeZone(tz);
+    } catch {
+      setUserTimeZone("UTC");
+    }
+  }, []);
+
   // ---------- FETCH SETTINGS ----------
   useEffect(() => {
     const fetchData = async () => {
       try {
         const [s, booked] = await Promise.all([
           client.fetch(`*[_type == "bookingSettings"][0]`),
-          client.fetch(`*[_type == "booking"]{date, time}`),
+          client.fetch(`*[_type == "booking"]{date, time, startTimeUTC}`),
         ]);
 
         if (!s) throw new Error("Missing bookingSettings in Sanity.");
@@ -57,7 +98,7 @@ export default function BookingForm() {
           s.maxHoursAheadBooking ?? s.minHoursBeforeBooking ?? 2
         );
 
-        s.bookedSlots = booked;
+        s.bookedSlots = booked || [];
         setSettings(s);
       } catch (err) {
         console.error("Error fetching booking data:", err);
@@ -86,6 +127,10 @@ export default function BookingForm() {
   const times = useMemo(() => {
     if (!settings || !selectedDate) return [];
 
+    const hostYear = selectedDate.getFullYear();
+    const hostMonth = selectedDate.getMonth();
+    const hostDay = selectedDate.getDate();
+
     const dayName = selectedDate
       .toLocaleDateString("en-US", { weekday: "long" })
       .toLowerCase();
@@ -96,21 +141,32 @@ export default function BookingForm() {
     const open = settings.openHour ?? 0;
     const close = settings.closeHour ?? 23;
 
-    const dateLabel = selectedDate.toDateString();
-    const bookedForDay =
+    const hostDateLabel = selectedDate.toDateString();
+    const bookedForDayHost =
       settings.bookedSlots
-        ?.filter((b) => b.date === dateLabel)
+        ?.filter((b) => b.date === hostDateLabel)
         .map((b) => b.time) || [];
 
     const slots = [];
     for (let h = open; h <= close; h++) {
-      const label = hLabel(h);
+      const hostLabel = hostTimeLabel(h);
       const isAllowed = allowed.includes(h);
-      const isBooked = bookedForDay.includes(label);
-
+      const isBooked = bookedForDayHost.includes(hostLabel);
       const disabled = !isAllowed || isBooked;
 
-      slots.push({ label, hour: h, disabled, isBooked, isAllowed });
+      const utcStart = getUtcFromHostLocal(hostYear, hostMonth, hostDay, h);
+
+      const localLabel = formatLocalTime(utcStart);
+
+      slots.push({
+        hostHour: h,
+        hostLabel,
+        localLabel,
+        utcStart,
+        disabled,
+        isBooked,
+        isAllowed,
+      });
     }
 
     return slots;
@@ -119,8 +175,10 @@ export default function BookingForm() {
   // ---------- INITIAL DATE ----------
   useEffect(() => {
     if (settings && !selectedDate) {
-      setSelectedDate(new Date());
-      setMonth(new Date());
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      setSelectedDate(today);
+      setMonth(today);
     }
   }, [settings, selectedDate]);
 
@@ -142,23 +200,44 @@ export default function BookingForm() {
     if (date < today || date > maxDate) return;
 
     setSelectedDate(date);
-    setSelectedTime("");
+    setSelectedSlot(null);
   };
 
   // ---------- SUBMIT ----------
-  const handleSubmit = async () => {
-    if (!selectedDate || !selectedTime) return;
+  const handleSubmit = () => {
+    if (!selectedDate || !selectedSlot) return;
+
+    const displayDate = selectedDate.toLocaleDateString(undefined, {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
+
+    const displayTime = selectedSlot.localLabel;
 
     const payload = {
-      date: selectedDate.toDateString(),
-      time: selectedTime,
+      displayDate,
+      displayTime,
+
+      hostDate: selectedDate.toDateString(),
+      hostTime: selectedSlot.hostLabel,
+      hostTimeZone: HOST_TZ_NAME,
+
+      localTimeZone: userTimeZone,
+      localTimeLabel: selectedSlot.localLabel,
+
+      startTimeUTC: selectedSlot.utcStart.toISOString(),
+
       discord: form.discord.trim(),
       email: form.email.trim(),
       specs: form.specs.trim(),
       mainGame: form.mainGame.trim(),
       message: form.notes.trim(),
+
       packageTitle: selectedPackage.title,
       packagePrice: selectedPackage.price,
+
       status: "pending",
     };
 
@@ -181,7 +260,6 @@ export default function BookingForm() {
         </div>
       ) : (
         <>
-          {/* PACKAGE SUMMARY */}
           {selectedPackage.title && (
             <div className="mb-8 max-w-lg mx-auto bg-[#0b1120]/70 border border-sky-700/40 rounded-xl p-6 text-center shadow-[0_0_15px_rgba(14,165,233,0.25)]">
               {selectedPackage.tag && (
@@ -200,14 +278,19 @@ export default function BookingForm() {
             </div>
           )}
 
-          {/* STEP 1 -- Calendar & Time */}
           {step === 1 && (
             <div className="max-w-3xl mx-auto backdrop-blur-sm bg-[#0b1120]/80 border border-sky-700/30 rounded-2xl p-8 text-center shadow-[0_0_25px_rgba(14,165,233,0.15)]">
-              <h3 className="text-sky-300 text-lg font-semibold mb-5">
+              <h3 className="text-sky-300 text-lg font-semibold mb-2">
                 Select a Date and Time for Your Session
               </h3>
+              <p className="text-xs text-sky-400/70 mb-5">
+                Times are shown in{" "}
+                <span className="font-semibold">your local time</span> (
+                {userTimeZone}), based on host availability in{" "}
+                <span className="font-semibold">India (IST)</span>.
+              </p>
+
               <div className="flex flex-col sm:flex-row gap-8 justify-center">
-                {/* Calendar */}
                 <div>
                   <div className="flex justify-between items-center mb-4">
                     <button
@@ -221,7 +304,9 @@ export default function BookingForm() {
                       ‹
                     </button>
                     <h4 className="text-xl font-semibold text-sky-200">
-                      {month.toLocaleString("default", { month: "long" })}{" "}
+                      {month.toLocaleString("default", {
+                        month: "long",
+                      })}{" "}
                       {month.getFullYear()}
                     </h4>
                     <button
@@ -263,8 +348,9 @@ export default function BookingForm() {
 
                       const maxDate = new Date();
                       maxDate.setDate(
-                        maxDate.getDate() + settings.maxDaysAheadBooking
+                        maxDate.getDate() + (settings.maxDaysAheadBooking || 7)
                       );
+                      maxDate.setHours(0, 0, 0, 0);
 
                       const disabled = date < startOfToday || date > maxDate;
                       const isSelected =
@@ -290,7 +376,6 @@ export default function BookingForm() {
                   </div>
                 </div>
 
-                {/* Time selection */}
                 {selectedDate && (
                   <div className="flex-1">
                     <p className="text-sky-200 mb-3 font-semibold">
@@ -301,25 +386,27 @@ export default function BookingForm() {
                         day: "numeric",
                       })}
                     </p>
+
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                       {times.map((t) => (
                         <button
-                          key={t.label}
-                          onClick={() =>
-                            !t.disabled && setSelectedTime(t.label)
-                          }
+                          key={t.hostLabel}
+                          onClick={() => !t.disabled && setSelectedSlot(t)}
                           disabled={t.disabled}
                           className={`py-2 rounded-lg border transition-all duration-200 ${
                             t.isBooked
                               ? "bg-red-900/40 border-red-700/40 text-red-400 cursor-not-allowed"
                               : t.disabled
                               ? "bg-slate-800/40 text-slate-500 border-slate-700/50 cursor-not-allowed"
-                              : selectedTime === t.label
+                              : selectedSlot?.hostLabel === t.hostLabel
                               ? "bg-sky-600 text-white border-sky-400 shadow-[0_0_15px_rgba(56,189,248,0.6)]"
                               : "border-sky-700/40 hover:border-sky-500/60 hover:bg-sky-700/20"
                           }`}
                         >
-                          {t.label}
+                          {t.localLabel}
+                          <span className="block text-[10px] text-sky-400/70 mt-1">
+                            ({t.hostLabel} IST)
+                          </span>
                         </button>
                       ))}
                     </div>
@@ -327,10 +414,9 @@ export default function BookingForm() {
                 )}
               </div>
 
-              {/* NEXT BUTTON */}
               <button
                 onClick={() => {
-                  if (!selectedDate || !selectedTime) {
+                  if (!selectedDate || !selectedSlot) {
                     setErrorStep1(
                       "Please select a date and time before continuing."
                     );
@@ -340,7 +426,7 @@ export default function BookingForm() {
                   setStep(2);
                 }}
                 className={`mt-10 w-full sm:w-64 mx-auto py-3 rounded-lg font-semibold text-lg transition-all duration-300 ${
-                  !selectedDate || !selectedTime
+                  !selectedDate || !selectedSlot
                     ? "bg-sky-800 text-sky-200/70 cursor-not-allowed"
                     : "bg-gradient-to-r from-sky-500 to-blue-700 hover:from-sky-400 hover:to-blue-600 shadow-[0_0_20px_rgba(14,165,233,0.4)]"
                 }`}
@@ -354,7 +440,6 @@ export default function BookingForm() {
             </div>
           )}
 
-          {/* STEP 2 -- USER INFO */}
           {step === 2 && (
             <div className="max-w-2xl mx-auto bg-[#0b1120]/80 border border-sky-700/30 rounded-2xl p-8 shadow-[0_0_25px_rgba(14,165,233,0.15)] space-y-6">
               <input
@@ -415,7 +500,9 @@ export default function BookingForm() {
                       return;
                     }
                     setErrorStep2("");
+                    setLoading(true);
                     handleSubmit();
+                    setLoading(false);
                   }}
                   disabled={loading}
                   className="w-1/2 bg-gradient-to-r from-sky-500 to-blue-700 hover:from-sky-400 hover:to-blue-600 py-3 rounded-lg font-semibold transition"

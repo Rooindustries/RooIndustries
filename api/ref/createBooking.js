@@ -50,6 +50,7 @@ export default async function handler(req, res) {
 
   try {
     const {
+      // booking fields
       date,
       time,
       discord,
@@ -71,6 +72,16 @@ export default async function handler(req, res) {
 
       paypalOrderId = "",
       payerEmail = "",
+
+      // time metadata
+      hostDate,
+      hostTime,
+      hostTimeZone,
+      localTimeZone,
+      localTimeLabel,
+      startTimeUTC,
+      displayDate,
+      displayTime,
     } = req.body || {};
 
     const commissionAmount = +(
@@ -78,11 +89,32 @@ export default async function handler(req, res) {
       ((commissionPercent || 0) / 100)
     ).toFixed(2);
 
+    // ---------- Derived date/time variants ----------
+    // What we treat as "local" (user) view:
+    const localDate = displayDate || date || hostDate || "—";
+    const localTime = displayTime || localTimeLabel || time || "—";
+
+    // What we treat as IST (host) view:
+    const istDate = hostDate || date || displayDate || "—";
+    const istTime = hostTime || time || displayTime || "—";
+
     // CREATE BOOKING DOCUMENT
     const doc = await writeClient.create({
       _type: "booking",
+      // original for backwards compatibility
       date,
       time,
+
+      // richer time data
+      hostDate,
+      hostTime,
+      hostTimeZone,
+      localTimeZone,
+      localTimeLabel,
+      startTimeUTC,
+      displayDate,
+      displayTime,
+
       discord,
       email,
       specs,
@@ -108,30 +140,19 @@ export default async function handler(req, res) {
 
     // REFERRAL LOGIC
     if (referralId && status === "captured") {
-      try {
-        const updated = await writeClient
+      const updated = await writeClient
+        .patch(referralId)
+        .inc({ successfulReferrals: 1 })
+        .commit();
+
+      if (updated.successfulReferrals >= 5 && updated.isFirstTime) {
+        await writeClient
           .patch(referralId)
-          .setIfMissing({
-            successfulReferrals: 0,
-            isFirstTime: true,
+          .set({
+            isFirstTime: false,
+            currentDiscountPercent: updated.currentDiscountPercent || 0,
           })
-          .inc({ successfulReferrals: 1 })
           .commit();
-
-        const successful = updated.successfulReferrals || 0;
-
-        if (successful >= 5 && updated.isFirstTime) {
-          await writeClient
-            .patch(referralId)
-            .set({
-              isFirstTime: false,
-              currentDiscountPercent: updated.currentDiscountPercent || 0,
-            })
-            .commit();
-        }
-      } catch (err) {
-        console.error("❌ Referral update error:", err);
-        // Don't throw – booking is already saved
       }
     }
 
@@ -142,64 +163,138 @@ export default async function handler(req, res) {
       process.env.LOGO_URL || "https://rooindustries.com/embed_logo.png";
     const from = process.env.FROM_EMAIL;
     const owner = process.env.OWNER_EMAIL;
-    const discordLink =
-      process.env.DISCORD_LINK || "https://discord.gg/M7nTkn9dxE";
 
-    const shortId = (doc && doc._id && String(doc._id).slice(-6)) || "";
-
-    // Full fields
-    const baseFields = [
-      { label: "Order ID", value: doc._id || "—" },
+    // Shared non-money, non-referral fields
+    const sharedCoreFields = [
       { label: "Package", value: `${packageTitle || "—"}` },
       { label: "Price", value: `${packagePrice || "—"}` },
-      { label: "Date", value: date || "—" },
-      { label: "Time", value: time || "—" },
       { label: "Discord", value: discord || "—" },
       { label: "Email", value: email || "—" },
       { label: "Main Game", value: mainGame || "—" },
       { label: "PC Specs", value: specs || "—" },
       { label: "Notes", value: message || "—" },
+    ];
+
+    // CLIENT EMAIL FIELDS
+    const clientMoneyAndReferral = [
       ...(referralCode
+        ? [{ label: "Referral Code", value: referralCode }]
+        : []),
+      ...(discountPercent || discountAmount
         ? [
-            { label: "Referral Code", value: referralCode },
             {
               label: "Discount",
-              value: `${discountPercent}% (−$${discountAmount.toFixed?.(2)})`,
-            },
-            {
-              label: "Commission",
-              value: `${commissionPercent}% ($${commissionAmount.toFixed?.(
-                2
-              )})`,
+              value: `${discountPercent}% (-$${discountAmount.toFixed(2)})`,
             },
           ]
         : []),
-      ...(paypalOrderId
-        ? [{ label: "PayPal Order", value: paypalOrderId }]
-        : []),
-      { label: "Discord Server", value: discordLink },
+      {
+        label: "Order ID",
+        value: doc._id || "—",
+      },
     ];
 
-    // Client fields
-    const customerFields = baseFields.filter(
-      (f) => !["Discount", "Commission", "PayPal Order"].includes(f.label)
-    );
+    const clientFields = [
+      {
+        label: "Discord Server",
+        value:
+          '<a href="https://discord.gg/M7nTkn9dxE" style="color:#7dd3fc;text-decoration:underline">Join the Roo Industries Discord</a>',
+      },
+      { label: "Date", value: localDate },
+      {
+        label: "Your Time",
+        value:
+          localTime && localTime !== "—"
+            ? localTimeZone
+              ? `${localTime} (${localTimeZone})`
+              : localTime
+            : "—",
+      },
+      {
+        label: "Host Time",
+        value:
+          istTime && istTime !== "—"
+            ? hostTimeZone
+              ? `${istTime} (${hostTimeZone})`
+              : `${istTime} (host)`
+            : "—",
+      },
+      ...sharedCoreFields,
+      ...clientMoneyAndReferral, // referral, discount, order id at the bottom
+    ];
 
-    // SEND EMAIL TO CLIENT
+    // OWNER EMAIL FIELDS
+    const ownerMoneyAndReferral = [
+      ...(referralCode
+        ? [{ label: "Referral Code", value: referralCode }]
+        : []),
+      ...(discountPercent || discountAmount
+        ? [
+            {
+              label: "Discount",
+              value: `${discountPercent}% (-$${discountAmount.toFixed(2)})`,
+            },
+          ]
+        : []),
+      ...(typeof grossAmount === "number"
+        ? [
+            {
+              label: "Gross Amount",
+              value: `$${grossAmount.toFixed(2)}`,
+            },
+          ]
+        : []),
+      ...(typeof netAmount === "number"
+        ? [
+            {
+              label: "Net Amount",
+              value: `$${netAmount.toFixed(2)}`,
+            },
+          ]
+        : []),
+      ...(commissionPercent || commissionAmount
+        ? [
+            {
+              label: "Commission",
+              value: `${commissionPercent}% ($${commissionAmount.toFixed(2)})`,
+            },
+          ]
+        : []),
+      {
+        label: "Order ID",
+        value: doc._id || "—",
+      },
+    ];
+
+    const ownerFields = [
+      { label: "Date", value: istDate },
+      {
+        label: "Time / Timezones",
+        value:
+          istTime && localTime && istTime !== "—" && localTime !== "—"
+            ? `${istTime} (${hostTimeZone || "host"}) — ${localTime} (${
+                localTimeZone || "client"
+              })`
+            : istTime || localTime || "—",
+      },
+      ...sharedCoreFields,
+      ...ownerMoneyAndReferral,
+    ];
+
+    // SEND EMAILS
     if (from && email && process.env.RESEND_API_KEY) {
       try {
         await resend.emails.send({
           from,
           to: email,
-          subject: `Your ${siteName} booking${
-            shortId ? ` (ID: ${shortId})` : ""
-          }`,
+          subject: `Your ${siteName} booking request`,
           html: emailHtml({
             logoUrl,
             siteName,
             heading: "Booking Received ✨",
-            intro: `Thanks for booking! I’ll reach out on Discord/email to confirm your time.\n\nYour order ID is ${doc._id}.\nJoin the Discord here: ${discordLink}`,
-            fields: customerFields,
+            intro:
+              "Thanks for booking! I’ll reach out on Discord/email to confirm your time.",
+            fields: clientFields,
           }),
         });
       } catch (err) {
@@ -207,19 +302,18 @@ export default async function handler(req, res) {
       }
     }
 
-    // SEND EMAIL TO OWNER (FULL INFO)
     if (from && owner && process.env.RESEND_API_KEY) {
       try {
         await resend.emails.send({
           from,
           to: owner,
-          subject: `New booking — ${packageTitle} (${date} ${time})`,
+          subject: `New booking — ${packageTitle} (${istDate} ${istTime})`,
           html: emailHtml({
             logoUrl,
             siteName,
             heading: "New Booking Received",
             intro: "A new booking was submitted:",
-            fields: baseFields,
+            fields: ownerFields,
           }),
         });
       } catch (err) {

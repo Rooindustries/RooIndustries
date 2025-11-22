@@ -16,8 +16,8 @@ export default function Payment() {
 
   const packageTitle = bookingData.packageTitle || "—";
   const packagePrice = bookingData.packagePrice || "$0";
-  const date = bookingData.date || "—";
-  const time = bookingData.time || "—";
+  const date = bookingData.displayDate || "--";
+  const time = bookingData.displayTime || "--";
   const baseAmount = parseFloat(packagePrice.replace(/[^0-9.]/g, "")) || 0;
 
   const [referralInput, setReferralInput] = useState("");
@@ -33,6 +33,10 @@ export default function Payment() {
   const discountAmount = +(baseAmount * (discountPercent / 100)).toFixed(2);
   const finalAmount = Math.max(0, +(baseAmount - discountAmount).toFixed(2));
 
+  //Razorpay state
+  const [rzpReady, setRzpReady] = useState(false);
+  const [payingRzp, setPayingRzp] = useState(false);
+
   useEffect(() => {
     const stored = localStorage.getItem("referral");
     if (stored) {
@@ -40,6 +44,23 @@ export default function Payment() {
       validateReferral(stored);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  //Load Razorpay checkout script
+  useEffect(() => {
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.async = true;
+    script.onload = () => setRzpReady(true);
+    script.onerror = () => {
+      console.error("Failed to load Razorpay SDK");
+      setRzpReady(false);
+    };
+    document.body.appendChild(script);
+
+    return () => {
+      document.body.removeChild(script);
+    };
   }, []);
 
   async function validateReferral(code) {
@@ -67,6 +88,125 @@ export default function Payment() {
       localStorage.removeItem("referral");
     } finally {
       setValidating(false);
+    }
+  }
+
+  //Razorpay payment flow
+  async function handleRazorpayPay() {
+    if (!rzpReady || !window.Razorpay) {
+      alert("Payment system is still loading. Please try again in a moment.");
+      return;
+    }
+
+    try {
+      setPayingRzp(true);
+
+      // 1) Ask backend to create Razorpay order
+      const orderRes = await fetch("/api/razorpay/createOrder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: finalAmount, // normal amount, backend converts to subunits
+          currency: "USD", // or "INR" if you want rupees
+          notes: {
+            packageTitle,
+            date,
+            time,
+            referralCode: referral?.code || referralInput || "",
+          },
+        }),
+      });
+
+      const orderData = await orderRes.json();
+
+      if (!orderRes.ok || !orderData.ok) {
+        throw new Error(orderData.message || "Failed to create Razorpay order");
+      }
+
+      // 2) Open Razorpay popup
+      const options = {
+        key: orderData.key,
+        amount: orderData.amount,
+        currency: orderData.currency,
+        name: "Roo Industries",
+        description: `${packageTitle} booking`,
+        order_id: orderData.orderId,
+        prefill: {
+          name: bookingData.fullName || "",
+          email: bookingData.email || "",
+          contact: bookingData.phone || "",
+        },
+        theme: {
+          color: "#0ea5e9",
+        },
+        handler: async function (response) {
+          // response = { razorpay_payment_id, razorpay_order_id, razorpay_signature }
+          try {
+            // 3) Verify signature on backend
+            const verifyRes = await fetch("/api/razorpay/verify", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(response),
+            });
+
+            const verifyData = await verifyRes.json();
+
+            if (!verifyRes.ok || !verifyData.ok) {
+              alert("Payment verification failed. Please contact support.");
+              return;
+            }
+
+            // 4) After verification → create booking (same style as PayPal)
+            const payload = {
+              ...bookingData,
+              referralCode: referral?.code || referralInput || "",
+              referralId: referral?._id || null,
+              discountPercent,
+              discountAmount,
+              grossAmount: baseAmount,
+              netAmount: finalAmount,
+              commissionPercent,
+              razorpayOrderId: response.razorpay_order_id,
+              razorpayPaymentId: response.razorpay_payment_id,
+              status: "captured",
+              paymentProvider: "razorpay",
+            };
+
+            const res = await fetch("/api/ref/createBooking", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+
+            if (!res.ok) throw new Error("Failed to create booking in Sanity");
+
+            const { bookingId } = await res.json();
+
+            alert(
+              `Payment successful via Razorpay! Booking confirmed (${bookingId})`
+            );
+            window.location.href = "/payment-success";
+          } catch (err) {
+            console.error("Razorpay post-payment error:", err);
+            alert(
+              "Payment succeeded but booking could not be saved. Contact support."
+            );
+          }
+        },
+        modal: {
+          ondismiss: function () {
+            console.log("Razorpay popup closed by user");
+          },
+        },
+      };
+
+      const rzp = new window.Razorpay(options);
+      rzp.open();
+    } catch (err) {
+      console.error("Razorpay error:", err);
+      alert("Payment could not be processed. Please try again.");
+    } finally {
+      setPayingRzp(false);
     }
   }
 
@@ -110,12 +250,6 @@ export default function Payment() {
               </p>
             </div>
           </div>
-          {referral && (
-            <p className="text-sm text-green-300 mt-2">
-              Applied <b>{referral.name}</b>
-              {discountPercent > 0 && ` — ${discountPercent}% off`}
-            </p>
-          )}
 
           <div className="mt-6 h-px w-full bg-sky-800/40" />
 
@@ -154,10 +288,30 @@ export default function Payment() {
         <div className="p-6 sm:p-7">
           <h3 className="text-[20px] font-bold text-white">Payment Method</h3>
           <p className="text-slate-400 text-sm mt-1">
-            Secure payment via PayPal
+            Secure payment via Razorpay or PayPal
           </p>
 
-          <div className="mt-6 flex items-center justify-start gap-4 border border-sky-800/30 bg-[#0c162a]/80 rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(14,165,233,0.15)]">
+          {/* Razorpay option */}
+          <div className="mt-6 flex items-center justify-between gap-4 border border-sky-800/30 bg-[#0c162a]/80 rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(14,165,233,0.15)]">
+            <div>
+              <p className="text-slate-300 text-sm font-medium">
+                Pay with Razorpay
+              </p>
+              <p className="text-slate-400 text-xs">
+                Cards / UPI / Netbanking (if enabled)
+              </p>
+            </div>
+            <button
+              onClick={handleRazorpayPay}
+              disabled={!rzpReady || payingRzp}
+              className="px-4 py-2 rounded-lg bg-sky-500 hover:bg-sky-400 disabled:opacity-60 text-sm font-semibold"
+            >
+              {payingRzp ? "Processing..." : "Pay with Razorpay"}
+            </button>
+          </div>
+
+          {/* PayPal option */}
+          <div className="mt-4 flex items-center justify-start gap-4 border border-sky-800/30 bg-[#0c162a]/80 rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(14,165,233,0.15)]">
             <img
               src="https://www.paypalobjects.com/webstatic/mktg/Logo/pp-logo-100px.png"
               alt="PayPal"
@@ -212,6 +366,7 @@ export default function Payment() {
                       paypalOrderId: details?.id || "",
                       payerEmail: details?.payer?.email_address || "",
                       status: "captured",
+                      paymentProvider: "paypal",
                     };
                     const res = await fetch("/api/ref/createBooking", {
                       method: "POST",
