@@ -18,7 +18,7 @@ import RefDashboard from "./pages/RefDashboard";
 import RefChangePassword from "./pages/RefChangePassword";
 import RefForgot from "./pages/RefForgot";
 import RefReset from "./pages/RefReset";
-
+import RefRegister from "./components/RefRegister";
 function RedirectToDiscord() {
   React.useEffect(() => {
     window.location.href = "https://discord.gg/M7nTkn9dxE";
@@ -98,6 +98,7 @@ function App() {
             />
             <Route path="/referrals/forgot" element={<RefForgot />} />
             <Route path="/referrals/reset" element={<RefReset />} />
+            <Route path="/referrals/Register" element={<RefRegister />} />
           </Routes>
         </main>
 

@@ -21,10 +21,15 @@ export default function Payment() {
   const baseAmount = parseFloat(packagePrice.replace(/[^0-9.]/g, "")) || 0;
 
   const [referralInput, setReferralInput] = useState("");
-  const [referral, setReferral] = useState(null); // { _id, name, code, commissionPercent, discountPercent }
+  const [referral, setReferral] = useState(null);
   const [validating, setValidating] = useState(false);
 
-  const discountPercent = referral?.discountPercent || 0;
+  const discountPercent = referral?.isFirstTime
+    ? 0
+    : referral?.currentDiscountPercent || 0;
+
+  const commissionPercent = referral?.currentCommissionPercent || 0;
+
   const discountAmount = +(baseAmount * (discountPercent / 100)).toFixed(2);
   const finalAmount = Math.max(0, +(baseAmount - discountAmount).toFixed(2));
 
@@ -34,24 +39,32 @@ export default function Payment() {
       setReferralInput(stored);
       validateReferral(stored);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function validateReferral(code) {
     if (!code) {
       setReferral(null);
+      localStorage.removeItem("referral");
       return;
     }
     try {
       setValidating(true);
       const r = await fetch(
-        `/api/validateReferral?code=${encodeURIComponent(code)}`
+        `/api/ref/validateReferral?code=${encodeURIComponent(code)}`
       );
       const data = await r.json();
-      if (data.ok) setReferral(data.referral);
-      else setReferral(null);
+      if (data.ok) {
+        setReferral(data.referral);
+        localStorage.setItem("referral", data.referral.code);
+      } else {
+        setReferral(null);
+        localStorage.removeItem("referral");
+      }
     } catch (e) {
       console.error(e);
       setReferral(null);
+      localStorage.removeItem("referral");
     } finally {
       setValidating(false);
     }
@@ -91,8 +104,18 @@ export default function Payment() {
                   via {referral?.name}
                 </p>
               )}
+              <p className="text-sm text-slate-400 mt-1">
+                Date: <span className="text-sky-300">{date}</span> — Time:{" "}
+                <span className="text-sky-300">{time}</span>
+              </p>
             </div>
           </div>
+          {referral && (
+            <p className="text-sm text-green-300 mt-2">
+              Applied <b>{referral.name}</b>
+              {discountPercent > 0 && ` — ${discountPercent}% off`}
+            </p>
+          )}
 
           <div className="mt-6 h-px w-full bg-sky-800/40" />
 
@@ -108,6 +131,7 @@ export default function Payment() {
                 placeholder="e.g. vouch"
                 className="w-60 bg-[#0c162a] border border-sky-800/40 rounded-md px-3 py-2 outline-none"
               />
+
               <button
                 onClick={() => validateReferral(referralInput)}
                 disabled={validating}
@@ -119,11 +143,6 @@ export default function Payment() {
             {referralInput && !referral && !validating && (
               <p className="text-sm text-red-300 mt-2">
                 Invalid or inactive referral code.
-              </p>
-            )}
-            {referral && (
-              <p className="text-sm text-green-300 mt-2">
-                Applied <b>{referral.name}</b> — {discountPercent}% off
               </p>
             )}
           </div>
@@ -183,23 +202,18 @@ export default function Payment() {
                   try {
                     const payload = {
                       ...bookingData,
-
-                      // referral
                       referralCode: referral?.code || referralInput || "",
                       referralId: referral?._id || null,
                       discountPercent,
                       discountAmount,
                       grossAmount: baseAmount,
                       netAmount: finalAmount,
-                      commissionPercent: referral?.commissionPercent || 0,
-
-                      // payment metadata
+                      commissionPercent,
                       paypalOrderId: details?.id || "",
                       payerEmail: details?.payer?.email_address || "",
                       status: "captured",
                     };
-
-                    const res = await fetch("/api/createBooking", {
+                    const res = await fetch("/api/ref/createBooking", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify(payload),
@@ -207,10 +221,11 @@ export default function Payment() {
 
                     if (!res.ok)
                       throw new Error("Failed to create booking in Sanity");
+
                     const { bookingId } = await res.json();
 
                     alert(
-                      ` Payment successful! Booking confirmed (${bookingId})`
+                      `Payment successful! Booking confirmed (${bookingId})`
                     );
                     window.location.href = "/payment-success";
                   } catch (err) {
@@ -222,7 +237,7 @@ export default function Payment() {
                 }}
                 onError={(err) => {
                   console.error(err);
-                  alert(" Payment could not be processed. Please try again.");
+                  alert("Payment could not be processed. Please try again.");
                 }}
               />
             </PayPalScriptProvider>

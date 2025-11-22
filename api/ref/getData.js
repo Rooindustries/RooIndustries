@@ -1,41 +1,49 @@
 import { createClient } from "@sanity/client";
 
-const client = createClient({
+const readClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET,
+  dataset: process.env.SANITY_DATASET || "production",
   apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
-  token: process.env.SANITY_WRITE_TOKEN,
   useCdn: false,
+  perspective: "published",
 });
 
 export default async function handler(req, res) {
-  try {
-    const creatorId = req.query.id;
+  if (req.method !== "GET") {
+    return res.status(405).json({ ok: false, error: "Method not allowed" });
+  }
 
-    if (!creatorId) {
-      return res.status(400).json({ ok: false, error: "Missing creator ID" });
+  try {
+    const { id } = req.query;
+
+    if (!id) {
+      return res.status(400).json({ ok: false, error: "Missing creator id" });
     }
 
-    const referral = await client.fetch(
+    const referral = await readClient.fetch(
       `*[_type == "referral" && _id == $id][0]{
         _id,
         name,
         slug,
-        maxCommissionPercent,
+        creatorEmail,
         currentCommissionPercent,
         currentDiscountPercent,
-        paypalEmail
+        maxCommissionPercent,
+        successfulReferrals,
+        isFirstTime
       }`,
-      { id: creatorId }
+      { id }
     );
 
+    console.log("GETDATA REFERRAL:", referral);
+
     if (!referral) {
-      return res.status(404).json({ ok: false, error: "Creator not found" });
+      return res.status(404).json({ ok: false, error: "Referral not found" });
     }
 
-    return res.json({ ok: true, referral });
+    return res.status(200).json({ ok: true, referral });
   } catch (err) {
-    console.error("GETDATA ERROR:", err);
+    console.error("💥 getData ERROR:", err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
 }

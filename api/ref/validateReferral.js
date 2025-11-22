@@ -13,7 +13,6 @@ export default async function handler(req, res) {
     const raw = (req.query.code || "").trim();
     const code = raw.toLowerCase();
 
-    // quick sanity check of envs
     if (!readClient.config().projectId || !readClient.config().dataset) {
       console.error("Sanity env missing:", {
         projectId: readClient.config().projectId,
@@ -25,19 +24,20 @@ export default async function handler(req, res) {
     if (!code)
       return res.status(400).json({ ok: false, error: "Missing code" });
 
+    // return fields used in the frontend/payment logic
     const ref = await readClient.fetch(
       `*[_type == "referral" && slug.current == $code][0]{
         _id,
         name,
         "code": slug.current,
-        commissionPercent,
-        discountPercent
+        currentCommissionPercent,
+        currentDiscountPercent,
+        isFirstTime
       }`,
       { code }
     );
 
     if (!ref) {
-      console.log("Referral not found:", { code });
       return res.status(404).json({ ok: false, error: "Not found" });
     }
 

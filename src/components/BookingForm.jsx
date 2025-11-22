@@ -51,7 +51,6 @@ export default function BookingForm() {
 
         if (!s) throw new Error("Missing bookingSettings in Sanity.");
 
-        // Convert numeric fields safely
         s.openHour = Number(s.openHour ?? 9);
         s.closeHour = Number(s.closeHour ?? 21);
         s.windowHours = Number(
@@ -59,7 +58,6 @@ export default function BookingForm() {
         );
 
         s.bookedSlots = booked;
-
         setSettings(s);
       } catch (err) {
         console.error("Error fetching booking data:", err);
@@ -149,14 +147,16 @@ export default function BookingForm() {
 
   // ---------- SUBMIT ----------
   const handleSubmit = async () => {
+    if (!selectedDate || !selectedTime) return;
+
     const payload = {
       date: selectedDate.toDateString(),
       time: selectedTime,
-      discord: form.discord,
-      email: form.email,
-      specs: form.specs,
-      mainGame: form.mainGame,
-      message: form.notes,
+      discord: form.discord.trim(),
+      email: form.email.trim(),
+      specs: form.specs.trim(),
+      mainGame: form.mainGame.trim(),
+      message: form.notes.trim(),
       packageTitle: selectedPackage.title,
       packagePrice: selectedPackage.price,
       status: "pending",
@@ -261,7 +261,6 @@ export default function BookingForm() {
                       );
                       date.setHours(0, 0, 0, 0);
 
-                      const now = new Date();
                       const maxDate = new Date();
                       maxDate.setDate(
                         maxDate.getDate() + settings.maxDaysAheadBooking
@@ -349,7 +348,6 @@ export default function BookingForm() {
                 Next
               </button>
 
-              {/* ERROR MESSAGE */}
               {errorStep1 && (
                 <p className="text-red-400 mt-3 text-sm">{errorStep1}</p>
               )}
@@ -392,7 +390,6 @@ export default function BookingForm() {
                 className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 h-24 focus:outline-none focus:border-sky-500 transition"
               ></textarea>
 
-              {/* FAQ MESSAGE */}
               <p className="text-sky-400/60 text-xs">
                 Please read the FAQ before booking — it answers everything you
                 need to know.
@@ -427,7 +424,6 @@ export default function BookingForm() {
                 </button>
               </div>
 
-              {/* ERROR MESSAGE */}
               {errorStep2 && (
                 <p className="text-red-400 text-sm mt-3">{errorStep2}</p>
               )}

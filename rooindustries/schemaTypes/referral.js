@@ -29,19 +29,20 @@ export default {
       title: 'Max Total % Allowed',
       type: 'number',
       initialValue: 15,
-      description: 'Creator can divide this between commission and discount',
     },
+
     {
       name: 'currentCommissionPercent',
       title: 'Creator Commission %',
       type: 'number',
       initialValue: 10,
     },
+
     {
       name: 'currentDiscountPercent',
       title: 'Viewer Discount %',
       type: 'number',
-      initialValue: 5,
+      initialValue: 0,
     },
     {
       name: 'paypalEmail',
@@ -59,6 +60,21 @@ export default {
       type: 'string',
       description: 'Used for password reset emails.',
       validation: (Rule) => Rule.required().regex(/.+@.+\..+/, 'Enter a valid email'),
+    },
+
+    {
+      name: 'successfulReferrals',
+      title: 'Successful Referrals',
+      type: 'number',
+      initialValue: 0,
+    },
+
+    {
+      name: 'isFirstTime',
+      title: 'First Time Creator',
+      type: 'boolean',
+      initialValue: true,
+      hidden: true,
     },
 
     {
