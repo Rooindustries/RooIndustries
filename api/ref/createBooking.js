@@ -78,7 +78,7 @@ export default async function handler(req, res) {
       ((commissionPercent || 0) / 100)
     ).toFixed(2);
 
-    // 📌 CREATE BOOKING DOCUMENT
+    // CREATE BOOKING DOCUMENT
     const doc = await writeClient.create({
       _type: "booking",
       date,
@@ -106,22 +106,32 @@ export default async function handler(req, res) {
         : {}),
     });
 
+    // REFERRAL LOGIC
     if (referralId && status === "captured") {
-      // 1) Increase successful referrals
-      const updated = await writeClient
-        .patch(referralId)
-        .inc({ successfulReferrals: 1 })
-        .commit();
-
-      // 2) Unlock system when they reach 5
-      if (updated.successfulReferrals >= 5 && updated.isFirstTime) {
-        await writeClient
+      try {
+        const updated = await writeClient
           .patch(referralId)
-          .set({
-            isFirstTime: false,
-            currentDiscountPercent: updated.currentDiscountPercent || 0,
+          .setIfMissing({
+            successfulReferrals: 0,
+            isFirstTime: true,
           })
+          .inc({ successfulReferrals: 1 })
           .commit();
+
+        const successful = updated.successfulReferrals || 0;
+
+        if (successful >= 5 && updated.isFirstTime) {
+          await writeClient
+            .patch(referralId)
+            .set({
+              isFirstTime: false,
+              currentDiscountPercent: updated.currentDiscountPercent || 0,
+            })
+            .commit();
+        }
+      } catch (err) {
+        console.error("❌ Referral update error:", err);
+        // Don't throw – booking is already saved
       }
     }
 
@@ -132,8 +142,14 @@ export default async function handler(req, res) {
       process.env.LOGO_URL || "https://rooindustries.com/embed_logo.png";
     const from = process.env.FROM_EMAIL;
     const owner = process.env.OWNER_EMAIL;
+    const discordLink =
+      process.env.DISCORD_LINK || "https://discord.gg/M7nTkn9dxE";
 
+    const shortId = (doc && doc._id && String(doc._id).slice(-6)) || "";
+
+    // Full fields
     const baseFields = [
+      { label: "Order ID", value: doc._id || "—" },
       { label: "Package", value: `${packageTitle || "—"}` },
       { label: "Price", value: `${packagePrice || "—"}` },
       { label: "Date", value: date || "—" },
@@ -161,22 +177,29 @@ export default async function handler(req, res) {
       ...(paypalOrderId
         ? [{ label: "PayPal Order", value: paypalOrderId }]
         : []),
+      { label: "Discord Server", value: discordLink },
     ];
 
-    // SEND EMAILS
+    // Client fields
+    const customerFields = baseFields.filter(
+      (f) => !["Discount", "Commission", "PayPal Order"].includes(f.label)
+    );
+
+    // SEND EMAIL TO CLIENT
     if (from && email && process.env.RESEND_API_KEY) {
       try {
         await resend.emails.send({
           from,
           to: email,
-          subject: `Your ${siteName} booking request`,
+          subject: `Your ${siteName} booking${
+            shortId ? ` (ID: ${shortId})` : ""
+          }`,
           html: emailHtml({
             logoUrl,
             siteName,
             heading: "Booking Received ✨",
-            intro:
-              "Thanks for booking! I’ll reach out on Discord/email to confirm your time.",
-            fields: baseFields,
+            intro: `Thanks for booking! I’ll reach out on Discord/email to confirm your time.\n\nYour order ID is ${doc._id}.\nJoin the Discord here: ${discordLink}`,
+            fields: customerFields,
           }),
         });
       } catch (err) {
@@ -184,6 +207,7 @@ export default async function handler(req, res) {
       }
     }
 
+    // SEND EMAIL TO OWNER (FULL INFO)
     if (from && owner && process.env.RESEND_API_KEY) {
       try {
         await resend.emails.send({
