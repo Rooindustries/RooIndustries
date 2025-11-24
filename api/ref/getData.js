@@ -30,7 +30,8 @@ export default async function handler(req, res) {
         currentDiscountPercent,
         maxCommissionPercent,
         successfulReferrals,
-        isFirstTime
+        isFirstTime,
+        bypassUnlock
       }`,
       { id }
     );
