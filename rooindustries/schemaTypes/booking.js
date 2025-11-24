@@ -1,4 +1,3 @@
-// /sanity/schemas/booking.js
 export default {
   name: 'booking',
   title: 'Booking',
