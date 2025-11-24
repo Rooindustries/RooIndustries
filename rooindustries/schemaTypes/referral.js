@@ -70,6 +70,15 @@ export default {
     },
 
     {
+      name: 'bypassUnlock',
+      title: 'Bypass 5 Referral Requirement',
+      type: 'boolean',
+      description:
+        'If enabled, this creator can adjust commission & discount without needing 5 successful referrals.',
+      initialValue: false,
+    },
+
+    {
       name: 'isFirstTime',
       title: 'First Time Creator',
       type: 'boolean',

@@ -40,8 +40,10 @@ export default function RefDashboard() {
         setCreator(normalized);
         setMax(normalized.maxCommissionPercent ?? 15);
 
-        // Lock before 5 successful referrals
-        if (successfulReferrals < 5) {
+        const bypass = normalized.bypassUnlock === true;
+        const isUnlocked = successfulReferrals >= 5 || bypass;
+
+        if (!isUnlocked) {
           setCommission(10);
           setDiscount(0);
         } else {
@@ -64,7 +66,8 @@ export default function RefDashboard() {
     setTimeout(() => setToast(null), 2500);
   }
 
-  const unlocked = (creator?.successfulReferrals || 0) >= 5;
+  const unlocked =
+    (creator?.successfulReferrals || 0) >= 5 || creator?.bypassUnlock === true;
 
   const total = commission + discount;
   const invalid = total > max;
