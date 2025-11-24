@@ -1,5 +1,5 @@
 const dotenv = require("dotenv");
-dotenv.config({ path: ".env.local" }); // 👈 load vars for local dev
+dotenv.config({ path: ".env.local" });
 
 const Razorpay = require("razorpay");
 

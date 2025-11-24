@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
 export default function RefLogin() {
@@ -6,6 +6,7 @@ export default function RefLogin() {
 
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
 
@@ -13,6 +14,23 @@ export default function RefLogin() {
     setToast({ type, message });
     setTimeout(() => setToast(null), 2500);
   }
+
+  // Load saved referral code
+  useEffect(() => {
+    const creatorId = localStorage.getItem("creatorId");
+    const remembered = localStorage.getItem("refRememberMe") === "true";
+
+    if (creatorId && remembered) {
+      nav("/referrals/dashboard");
+      return;
+    }
+
+    const savedCode = localStorage.getItem("refLoginCode");
+    if (savedCode) {
+      setCode(savedCode);
+      setRememberMe(true);
+    }
+  }, [nav]);
 
   async function handleLogin(e) {
     e.preventDefault();
@@ -41,6 +59,16 @@ export default function RefLogin() {
       }
 
       localStorage.setItem("creatorId", data.creatorId);
+
+      //Handle remember me
+      if (rememberMe) {
+        localStorage.setItem("refLoginCode", code);
+        localStorage.setItem("refRememberMe", "true");
+      } else {
+        localStorage.removeItem("refLoginCode");
+        localStorage.removeItem("refRememberMe");
+      }
+
       showToast("success", "Logging in...");
 
       setTimeout(() => nav("/referrals/dashboard"), 500);
@@ -99,19 +127,44 @@ export default function RefLogin() {
           />
         </div>
 
-        <button
-          type="button"
-          onClick={() => nav("/referrals/forgot")}
-          className="w-full text-sm text-sky-400 opacity-80 hover:opacity-100 mt-3"
-        >
-          Forgot your password?
-        </button>
+        {/* Remember Me */}
+        <div className="flex items-center justify-between mt-1">
+          <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+            <div
+              className={`w-4 h-4 rounded-[6px] border transition-all flex items-center justify-center
+                ${
+                  rememberMe
+                    ? "border-sky-400 bg-sky-500/80 shadow-[0_0_10px_rgba(56,189,248,0.7)]"
+                    : "border-sky-700 bg-[#020617]"
+                }`}
+            >
+              {rememberMe && (
+                <span className="block w-2 h-2 rounded-[4px] bg-white" />
+              )}
+            </div>
+            <span className="text-xs text-slate-300">Remember me</span>
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+              className="hidden"
+            />
+          </label>
+
+          <button
+            type="button"
+            onClick={() => nav("/referrals/forgot")}
+            className="text-xs text-sky-400 opacity-80 hover:opacity-100"
+          >
+            Forgot your password?
+          </button>
+        </div>
 
         {/* Submit Button */}
         <button
           type="submit"
           disabled={loading}
-          className={`w-full py-4 rounded-xl font-bold text-lg transition-all
+          className={`w-full mt-4 py-4 rounded-xl font-bold text-lg transition-all
             ${
               loading
                 ? "bg-gray-700 opacity-40 cursor-not-allowed"
