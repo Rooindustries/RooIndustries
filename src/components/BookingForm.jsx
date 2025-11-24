@@ -3,8 +3,8 @@ import { client } from "../sanityClient";
 import { useLocation, useNavigate } from "react-router-dom";
 
 // ---------- CONSTANTS ----------
-const HOST_TZ_NAME = "Asia/Kolkata"; // Host is in India (IST)
-const IST_OFFSET_MINUTES = 330; // +5:30
+const HOST_TZ_NAME = "Asia/Kolkata";
+const IST_OFFSET_MINUTES = 330;
 
 // Read query params
 function useQuery() {
@@ -67,6 +67,21 @@ export default function BookingForm() {
     notes: "",
   });
 
+  // Package from URL
+  const selectedPackage = useMemo(
+    () => ({
+      title: q.get("title") || "",
+      price: q.get("price") || "",
+      tag: q.get("tag") || "",
+    }),
+    [q]
+  );
+
+  // is this XOC?
+  const isXoc =
+    q.get("xoc") === "1" ||
+    selectedPackage.title === "XOC / Extreme Overclocking";
+
   // ---------- DETECT USER TIME ZONE ----------
   useEffect(() => {
     try {
@@ -77,22 +92,36 @@ export default function BookingForm() {
     }
   }, []);
 
+  const startOfToday = useMemo(() => {
+    const t = new Date();
+    t.setHours(0, 0, 0, 0);
+    return t;
+  }, []);
+
   // ---------- FETCH SETTINGS ----------
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [s, booked] = await Promise.all([
+        const [sRaw, booked] = await Promise.all([
           client.fetch(`*[_type == "bookingSettings"][0]`),
-          client.fetch(`*[_type == "booking"]{date, time, startTimeUTC}`),
+          client.fetch(
+            `*[_type == "booking"]{date, time, startTimeUTC, packageTitle}`
+          ),
         ]);
 
-        if (!s) throw new Error("Missing bookingSettings in Sanity.");
+        if (!sRaw) throw new Error("Missing bookingSettings in Sanity.");
+
+        const s = { ...sRaw };
 
         s.openHour = Number(s.openHour ?? 9);
         s.closeHour = Number(s.closeHour ?? 21);
-        s.windowHours = Number(
-          s.maxHoursAheadBooking ?? s.minHoursBeforeBooking ?? 2
-        );
+
+        if (s.xocOpenHour !== undefined && s.xocOpenHour !== null) {
+          s.xocOpenHour = Number(s.xocOpenHour);
+        }
+        if (s.xocCloseHour !== undefined && s.xocCloseHour !== null) {
+          s.xocCloseHour = Number(s.xocCloseHour);
+        }
 
         s.bookedSlots = booked || [];
         setSettings(s);
@@ -102,22 +131,6 @@ export default function BookingForm() {
     };
 
     fetchData();
-  }, []);
-
-  // ---------- MEMOS ----------
-  const selectedPackage = useMemo(
-    () => ({
-      title: q.get("title") || "",
-      price: q.get("price") || "",
-      tag: q.get("tag") || "",
-    }),
-    [q]
-  );
-
-  const startOfToday = useMemo(() => {
-    const t = new Date();
-    t.setHours(0, 0, 0, 0);
-    return t;
   }, []);
 
   const times = useMemo(() => {
@@ -131,11 +144,22 @@ export default function BookingForm() {
       .toLocaleDateString("en-US", { weekday: "long" })
       .toLowerCase();
 
-    const allowedRaw = settings.availableTimes?.[dayName] || [];
+    // choose correct weekly slots
+    const weeklyObj = isXoc
+      ? settings.xocAvailableTimes || {}
+      : settings.availableTimes || {};
+
+    const allowedRaw = weeklyObj[dayName] || [];
     const allowed = allowedRaw.map((x) => Number(x));
 
-    const open = settings.openHour ?? 0;
-    const close = settings.closeHour ?? 23;
+    // choose open/close hours
+    const open = isXoc
+      ? settings.xocOpenHour ?? settings.openHour ?? 0
+      : settings.openHour ?? 0;
+
+    const close = isXoc
+      ? settings.xocCloseHour ?? settings.closeHour ?? 23
+      : settings.closeHour ?? 23;
 
     const hostDateLabel = selectedDate.toDateString();
     const bookedForDayHost =
@@ -151,7 +175,6 @@ export default function BookingForm() {
       const disabled = !isAllowed || isBooked;
 
       const utcStart = getUtcFromHostLocal(hostYear, hostMonth, hostDay, h);
-
       const localLabel = formatLocalTime(utcStart);
 
       slots.push({
@@ -166,7 +189,7 @@ export default function BookingForm() {
     }
 
     return slots;
-  }, [settings, selectedDate]);
+  }, [settings, selectedDate, isXoc]);
 
   // ---------- INITIAL DATE ----------
   useEffect(() => {
@@ -200,7 +223,7 @@ export default function BookingForm() {
   };
 
   // ---------- SUBMIT ----------
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!selectedDate || !selectedSlot) return;
 
     const displayDate = selectedDate.toLocaleDateString(undefined, {
@@ -237,7 +260,33 @@ export default function BookingForm() {
       status: "pending",
     };
 
-    navigate(`/payment?data=${encodeURIComponent(JSON.stringify(payload))}`);
+    if (isXoc) {
+      // XOC flow: just create booking + send email, no payment
+      try {
+        const res = await fetch("/api/ref/createBooking", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+          throw new Error("Failed to send booking request");
+        }
+
+        alert(
+          "Your XOC booking request has been sent! I’ll contact you on Discord/email to confirm details."
+        );
+        navigate("/"); // or a thank-you page
+      } catch (err) {
+        console.error("Error sending XOC enquiry:", err);
+        setErrorStep2(
+          "Could not send your request. Please try again or reach out on Discord."
+        );
+      }
+    } else {
+      // Normal flow: go to payment page
+      navigate(`/payment?data=${encodeURIComponent(JSON.stringify(payload))}`);
+    }
   };
 
   // ---------- CALENDAR DATA ----------
@@ -485,7 +534,7 @@ export default function BookingForm() {
                 </button>
 
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     if (
                       !form.discord.trim() ||
                       !form.email.trim() ||
@@ -497,13 +546,19 @@ export default function BookingForm() {
                     }
                     setErrorStep2("");
                     setLoading(true);
-                    handleSubmit();
+                    await handleSubmit();
                     setLoading(false);
                   }}
                   disabled={loading}
                   className="w-1/2 bg-gradient-to-r from-sky-500 to-blue-700 hover:from-sky-400 hover:to-blue-600 py-3 rounded-lg font-semibold transition"
                 >
-                  {loading ? "Submitting..." : "Submit & Pay"}
+                  {loading
+                    ? isXoc
+                      ? "Sending..."
+                      : "Submitting..."
+                    : isXoc
+                    ? "Send Request"
+                    : "Submit & Pay"}
                 </button>
               </div>
 
