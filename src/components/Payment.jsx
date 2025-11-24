@@ -156,7 +156,6 @@ export default function Payment() {
               return;
             }
 
-            // 4) After verification → create booking (same style as PayPal)
             const payload = {
               ...bookingData,
               referralCode: referral?.code || referralInput || "",

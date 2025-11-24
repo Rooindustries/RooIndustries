@@ -12,21 +12,17 @@ function useQuery() {
   return new URLSearchParams(search);
 }
 
-// Compare only Y/M/D
 const isSameDay = (a, b) =>
   a.getFullYear() === b.getFullYear() &&
   a.getMonth() === b.getMonth() &&
   a.getDate() === b.getDate();
 
-// Host label in IST (what you store in Sanity as "time" originally)
 const hostTimeLabel = (h) => {
   const ampm = h >= 12 ? "PM" : "AM";
   const disp = ((h + 11) % 12) + 1;
   return `${disp}:00 ${ampm}`;
 };
 
-// Create a UTC timestamp for a given "host day in IST" + hostHour
-// We treat Y/M/D as host-local, then shift by IST offset to UTC.
 const getUtcFromHostLocal = (year, monthIndex, day, hostHour) => {
   const utcMs =
     Date.UTC(year, monthIndex, day, hostHour, 0) -
