@@ -1,11 +1,11 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { useLocation, Link } from "react-router-dom";
+import { useLocation, Link, Navigate, useNavigate } from "react-router-dom";
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 
 export default function Payment() {
   const location = useLocation();
   const q = new URLSearchParams(location.search);
-
+  const navigate = useNavigate();
   const bookingData = useMemo(() => {
     try {
       return JSON.parse(q.get("data") || "{}");
@@ -184,7 +184,7 @@ export default function Payment() {
             alert(
               `Payment successful via Razorpay! Booking confirmed (${bookingId})`
             );
-            window.location.href = "/payment-success";
+            navigate("/payment-success");
           } catch (err) {
             console.error("Razorpay post-payment error:", err);
             alert(
@@ -381,7 +381,7 @@ export default function Payment() {
                     alert(
                       `Payment successful! Booking confirmed (${bookingId})`
                     );
-                    window.location.href = "/payment-success";
+                    navigate("/payment-success");
                   } catch (err) {
                     console.error("Booking creation error:", err);
                     alert(

@@ -84,6 +84,10 @@ export default async function handler(req, res) {
       displayTime,
     } = req.body || {};
 
+    // Normalize booking date/time to the host view so availability can be marked as booked
+    const bookingDate = hostDate || date || displayDate || "";
+    const bookingTime = hostTime || time || displayTime || "";
+
     const commissionAmount = +(
       (netAmount || grossAmount || 0) *
       ((commissionPercent || 0) / 100)
@@ -102,8 +106,8 @@ export default async function handler(req, res) {
     const doc = await writeClient.create({
       _type: "booking",
       // original for backwards compatibility
-      date,
-      time,
+      date: bookingDate,
+      time: bookingTime,
 
       // richer time data
       hostDate,

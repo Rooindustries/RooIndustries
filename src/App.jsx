@@ -12,7 +12,8 @@ import Packages from "./pages/Packages";
 import Faq from "./pages/Faq";
 import Book from "./pages/Book";
 import Payment from "./pages/Payment";
-import PaymentSuccess from "./components/PaymentSuccess";
+import PaymentSuccess from "./pages/PaymentSuccess";
+import Thankyou from "./pages/Thankyou";
 import RefLogin from "./pages/RefLogin";
 import RefDashboard from "./pages/RefDashboard";
 import RefChangePassword from "./pages/RefChangePassword";
@@ -88,6 +89,7 @@ function App() {
             <Route path="/discord" element={<RedirectToDiscord />} />
             <Route path="/payment" element={<Payment />} />
             <Route path="/payment-success" element={<PaymentSuccess />} />
+            <Route path="/thank-you" element={<Thankyou />} />
 
             {/* Referral system routes */}
             <Route path="/referrals/login" element={<RefLogin />} />
