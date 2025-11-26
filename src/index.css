@@ -2,8 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
-/* float animation for the discord icon :D */
+html {
+  font-family: "Roboto Flex", system-ui, sans-serif;
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+}
 
+/* Your animations */
 @keyframes float {
   0%,
   100% {
@@ -20,10 +25,7 @@
   transition: opacity 300ms ease;
 }
 
-html {
-  scroll-behavior: smooth;
-}
-
+/* FAQ glow animation */
 @keyframes faqHighlight {
   0% {
     background-color: rgba(56, 189, 248, 0.15);
