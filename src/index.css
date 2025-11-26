@@ -2,14 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Fix CLS by ensuring the fallback font size matches Roboto Flex */
 html {
   font-family: "Roboto Flex", system-ui, sans-serif;
   scroll-behavior: smooth;
   -webkit-font-smoothing: antialiased;
 }
 
-/* Your animations (unchanged) */
 @keyframes float {
   0%,
   100% {
@@ -71,11 +69,15 @@ html {
   }
 }
 
-/* Animated gradient button + border sweep */
-/* ⬇️ CLS-safe, and doesn't override Tailwind gradient colors */
 .glow-button {
   position: relative;
   overflow: hidden;
+  background: linear-gradient(
+    90deg,
+    rgba(56, 189, 248, 1) 0%,
+    rgba(2, 132, 199, 1) 38%,
+    rgba(29, 78, 216, 1) 100%
+  );
   background-size: 400% 400%;
   animation: gradientA 6s ease infinite;
   box-shadow: 0 0 15px rgba(3, 233, 244, 0.25), 0 0 30px rgba(3, 233, 244, 0.15);
