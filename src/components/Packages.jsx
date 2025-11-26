@@ -80,9 +80,13 @@ export default function Packages() {
                 )}&tag=${encodeURIComponent(p.tag || "")}&xoc=${
                   isXoc ? "1" : "0"
                 }`}
-                className="mt-8 w-full bg-sky-600 hover:bg-sky-500 text-white py-3 rounded-md font-semibold shadow-[0_0_20px_rgba(56,189,248,0.4)] transition-all duration-300 text-center"
+                className="glow-button mt-8 w-full text-white py-3 rounded-md font-semibold shadow-[0_0_20px_rgba(56,189,248,0.4)] transition-all duration-300 text-center inline-flex items-center justify-center gap-2"
               >
                 {p.buttonText}
+                <span className="glow-line glow-line-top" />
+                <span className="glow-line glow-line-right" />
+                <span className="glow-line glow-line-bottom" />
+                <span className="glow-line glow-line-left" />
               </Link>
             </div>
           );
