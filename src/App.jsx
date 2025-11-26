@@ -1,25 +1,30 @@
-import React, { useState } from "react";
+import React, { useState, Suspense, lazy } from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import { FaDiscord } from "react-icons/fa";
-import Home from "./pages/Home";
-import Benchmarks from "./pages/Benchmarks";
-import Contact from "./pages/Contact";
-import Terms from "./pages/Terms";
-import Privacy from "./pages/PrivacyPolicy";
-import Reviews from "./pages/Reviews";
 import Navbar from "./components/Navbar";
-import Packages from "./pages/Packages";
-import Faq from "./pages/Faq";
-import Book from "./pages/Book";
-import Payment from "./pages/Payment";
-import PaymentSuccess from "./pages/PaymentSuccess";
-import Thankyou from "./pages/Thankyou";
-import RefLogin from "./pages/RefLogin";
-import RefDashboard from "./pages/RefDashboard";
-import RefChangePassword from "./pages/RefChangePassword";
-import RefForgot from "./pages/RefForgot";
-import RefReset from "./pages/RefReset";
-import RefRegister from "./components/RefRegister";
+
+// Lazy-loaded pages
+const Home = lazy(() => import("./pages/Home"));
+const Benchmarks = lazy(() => import("./pages/Benchmarks"));
+const Contact = lazy(() => import("./pages/Contact"));
+const Terms = lazy(() => import("./pages/Terms"));
+const Privacy = lazy(() => import("./pages/PrivacyPolicy"));
+const Reviews = lazy(() => import("./pages/Reviews"));
+const Packages = lazy(() => import("./pages/Packages"));
+const Faq = lazy(() => import("./pages/Faq"));
+const Book = lazy(() => import("./pages/Book"));
+const Payment = lazy(() => import("./pages/Payment"));
+const PaymentSuccess = lazy(() => import("./pages/PaymentSuccess"));
+const Thankyou = lazy(() => import("./pages/Thankyou"));
+
+// Referral system (also lazy)
+const RefLogin = lazy(() => import("./pages/RefLogin"));
+const RefDashboard = lazy(() => import("./pages/RefDashboard"));
+const RefChangePassword = lazy(() => import("./pages/RefChangePassword"));
+const RefForgot = lazy(() => import("./pages/RefForgot"));
+const RefReset = lazy(() => import("./pages/RefReset"));
+const RefRegister = lazy(() => import("./components/RefRegister"));
+
 function RedirectToDiscord() {
   React.useEffect(() => {
     window.location.href = "https://discord.gg/M7nTkn9dxE";
@@ -71,39 +76,48 @@ function App() {
         {/* Navbar and pages */}
         <main className="relative z-10 pt-10 sm:pt-24">
           <Navbar />
-          <Routes>
-            <Route path="/" element={<Home />} />
 
-            <Route path="/packages" element={<Packages />} />
-            <Route
-              path="/benchmarks"
-              element={<Benchmarks setIsModalOpen={setIsModalOpen} />}
-            />
-            <Route path="/contact" element={<Contact />} />
-            <Route path="/privacy" element={<Privacy />} />
-            <Route path="/terms" element={<Terms />} />
-            <Route
-              path="/reviews"
-              element={<Reviews setIsModalOpen={setIsModalOpen} />}
-            />
-            <Route path="/booking" element={<Book />} />
-            <Route path="/faq" element={<Faq />} />
-            <Route path="/discord" element={<RedirectToDiscord />} />
-            <Route path="/payment" element={<Payment />} />
-            <Route path="/payment-success" element={<PaymentSuccess />} />
-            <Route path="/thank-you" element={<Thankyou />} />
+          <Suspense
+            fallback={
+              <div className="pt-32 text-center text-slate-300 text-sm">
+                Loading…
+              </div>
+            }
+          >
+            <Routes>
+              <Route path="/" element={<Home />} />
 
-            {/* Referral system routes */}
-            <Route path="/referrals/login" element={<RefLogin />} />
-            <Route path="/referrals/dashboard" element={<RefDashboard />} />
-            <Route
-              path="/referrals/change-password"
-              element={<RefChangePassword />}
-            />
-            <Route path="/referrals/forgot" element={<RefForgot />} />
-            <Route path="/referrals/reset" element={<RefReset />} />
-            <Route path="/referrals/Register" element={<RefRegister />} />
-          </Routes>
+              <Route path="/packages" element={<Packages />} />
+              <Route
+                path="/benchmarks"
+                element={<Benchmarks setIsModalOpen={setIsModalOpen} />}
+              />
+              <Route path="/contact" element={<Contact />} />
+              <Route path="/privacy" element={<Privacy />} />
+              <Route path="/terms" element={<Terms />} />
+              <Route
+                path="/reviews"
+                element={<Reviews setIsModalOpen={setIsModalOpen} />}
+              />
+              <Route path="/booking" element={<Book />} />
+              <Route path="/faq" element={<Faq />} />
+              <Route path="/discord" element={<RedirectToDiscord />} />
+              <Route path="/payment" element={<Payment />} />
+              <Route path="/payment-success" element={<PaymentSuccess />} />
+              <Route path="/thank-you" element={<Thankyou />} />
+
+              {/* Referral system routes */}
+              <Route path="/referrals/login" element={<RefLogin />} />
+              <Route path="/referrals/dashboard" element={<RefDashboard />} />
+              <Route
+                path="/referrals/change-password"
+                element={<RefChangePassword />}
+              />
+              <Route path="/referrals/forgot" element={<RefForgot />} />
+              <Route path="/referrals/reset" element={<RefReset />} />
+              <Route path="/referrals/Register" element={<RefRegister />} />
+            </Routes>
+          </Suspense>
         </main>
 
         {/* Discord Icon */}
