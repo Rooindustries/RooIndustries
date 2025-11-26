@@ -59,10 +59,12 @@ function App() {
      outline-none focus:outline-none border-none`}
         >
           <img
-            src="/logo.png"
+            src="/logo.webp"
             alt="Roo Industries Logo"
             className="w-40 sm:w-48 md:w-56 drop-shadow-[0_0_25px_rgba(14,165,233,0.4)] 
                hover:drop-shadow-[0_0_35px_rgba(14,165,233,0.6)] transition-all duration-500"
+            loading="eager"
+            fetchPriority="high"
           />
         </a>
 
