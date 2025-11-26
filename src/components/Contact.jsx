@@ -120,9 +120,13 @@ export default function Services() {
           <button
             type="submit"
             disabled={state.submitting}
-            className="w-full bg-cyan-400 hover:bg-cyan-300 text-black font-semibold py-3 rounded transition duration-200"
+            className="glow-button w-full text-white font-semibold py-3 rounded transition duration-200 inline-flex items-center justify-center gap-2"
           >
             Send Message
+            <span className="glow-line glow-line-top" />
+            <span className="glow-line glow-line-right" />
+            <span className="glow-line glow-line-bottom" />
+            <span className="glow-line glow-line-left" />
           </button>
 
           <p className="text-sm text-gray-400 text-center pt-2">
@@ -145,6 +149,15 @@ export default function Services() {
           className="text-cyan-400 hover:text-cyan-300 underline transition-colors"
         >
           Nerky
+        </a>{" "}
+        &{" "}
+        <a
+          href="https://discord.com/users/1074948989083979837"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-cyan-400 hover:text-cyan-300 underline transition-colors"
+        >
+          Exyy
         </a>
       </p>
     </section>

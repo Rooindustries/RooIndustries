@@ -13,9 +13,13 @@ export default function ThankYou() {
       </p>
       <Link
         to="/"
-        className="mt-8 inline-block bg-gradient-to-r from-sky-500 to-blue-700 hover:from-sky-400 hover:to-blue-600 py-3 px-6 rounded-lg font-semibold shadow-[0_0_20px_rgba(14,165,233,0.4)] transition-all"
+        className="glow-button mt-8 inline-flex items-center justify-center gap-2 py-3 px-6 rounded-lg font-semibold transition-all"
       >
         Back to Home
+        <span className="glow-line glow-line-top" />
+        <span className="glow-line glow-line-right" />
+        <span className="glow-line glow-line-bottom" />
+        <span className="glow-line glow-line-left" />
       </Link>
     </section>
   );

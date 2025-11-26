@@ -94,13 +94,15 @@ export default function Faq() {
       <div className="mt-16 flex justify-center">
         <Link
           to="/packages"
-          className="rounded-md bg-gradient-to-r from-sky-400 to-blue-600 
+          className="glow-button inline-flex items-center justify-center gap-2 rounded-md 
           px-3 sm:px-5 py-2 sm:py-3 text-[11px] sm:text-sm font-semibold text-white 
-          ring-1 ring-sky-700/50 hover:from-cyan-400 hover:to-sky-500 
-          hover:shadow-[0_0_20px_rgba(56,189,248,0.6)] 
-          active:translate-y-px transition-all duration-300"
+          ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
         >
           Supercharge Your Performance Now
+          <span className="glow-line glow-line-top" />
+          <span className="glow-line glow-line-right" />
+          <span className="glow-line glow-line-bottom" />
+          <span className="glow-line glow-line-left" />
         </Link>
       </div>
     </section>

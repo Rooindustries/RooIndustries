@@ -43,6 +43,7 @@ export default function Payment() {
       setReferralInput(stored);
       validateReferral(stored);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   //Load Razorpay checkout script
@@ -105,8 +106,8 @@ export default function Payment() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          amount: finalAmount,
-          currency: "USD",
+          amount: finalAmount, // normal amount, backend converts to subunits
+          currency: "USD", // or "INR" if you want rupees
           notes: {
             packageTitle,
             date,
@@ -267,9 +268,13 @@ export default function Payment() {
               <button
                 onClick={() => validateReferral(referralInput)}
                 disabled={validating}
-                className="px-3 py-2 rounded-md bg-sky-600 hover:bg-sky-500 font-semibold"
+                className="glow-button px-3 py-2 rounded-md font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60"
               >
                 {validating ? "Checking..." : "Apply"}
+                <span className="glow-line glow-line-top" />
+                <span className="glow-line glow-line-right" />
+                <span className="glow-line glow-line-bottom" />
+                <span className="glow-line glow-line-left" />
               </button>
             </div>
             {referralInput && !referral && !validating && (
@@ -302,9 +307,13 @@ export default function Payment() {
             <button
               onClick={handleRazorpayPay}
               disabled={!rzpReady || payingRzp}
-              className="px-4 py-2 rounded-lg bg-sky-500 hover:bg-sky-400 disabled:opacity-60 text-sm font-semibold"
+              className="glow-button px-4 py-2 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60"
             >
               {payingRzp ? "Processing..." : "Pay with Razorpay"}
+              <span className="glow-line glow-line-top" />
+              <span className="glow-line glow-line-right" />
+              <span className="glow-line glow-line-bottom" />
+              <span className="glow-line glow-line-left" />
             </button>
           </div>
 
