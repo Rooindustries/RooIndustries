@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { client } from "../sanityClient";
 
@@ -7,6 +7,8 @@ export default function Reviews() {
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
 
+  const containerRef = useRef(null);
+
   useEffect(() => {
     const query = `*[_type == "reviewsCarousel"][0]{
       title,
@@ -14,21 +16,28 @@ export default function Reviews() {
       reviews[]{ name, text }
     }`;
 
+    let cancelled = false;
+
     const fetchData = async () => {
       const res = await client.fetch(query);
-      setData(res);
+      if (!cancelled) setData(res);
     };
 
     fetchData();
 
+    // Live sanity listener
     const subscription = client
       .listen(query, {}, { visibility: "query" })
       .subscribe((update) => {
+        if (cancelled) return;
         if (update.result) setData(update.result);
-        else setData(null); // handle deletions
+        else setData(null);
       });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const handleNext = () => {
@@ -41,38 +50,38 @@ export default function Reviews() {
     setIndex((prev) => (prev - 1 + data.reviews.length) % data.reviews.length);
   };
 
-  // Auto slide every 2 seconds
+  // Auto slide — stabilized interval
   useEffect(() => {
     if (paused || !data?.reviews?.length) return;
     const interval = setInterval(handleNext, 2000);
     return () => clearInterval(interval);
   }, [paused, data]);
 
-  if (!data) return null;
+  const fixedHeight = "380px";
 
   return (
     <section className="py-32 text-center text-white relative overflow-hidden">
       <h2 className="text-4xl font-extrabold mb-3 drop-shadow-[0_0_15px_rgba(56,189,248,0.4)]">
-        {data.title || "What People Say"}
+        {data?.title || "What People Say"}
       </h2>
+
       <p className="text-slate-200 mb-12">
-        {data.subtitle ||
+        {data?.subtitle ||
           "Feedback from clients I’ve had the pleasure of helping."}
       </p>
 
-      {/* Review Carousel */}
       <div
         className="relative mx-auto max-w-[900px] overflow-hidden rounded-3xl"
         onMouseEnter={() => setPaused(true)}
         onMouseLeave={() => setPaused(false)}
+        ref={containerRef}
+        style={{ height: fixedHeight }}
       >
         <div
           className="flex transition-transform duration-700 ease-in-out"
-          style={{
-            transform: `translateX(-${index * 100}%)`,
-          }}
+          style={{ transform: `translateX(-${index * 100}%)` }}
         >
-          {data.reviews?.map((review, i) => (
+          {(data?.reviews || []).map((review, i) => (
             <div
               key={i}
               className="flex-shrink-0 w-full h-[380px] sm:h-[220px] md:h-[240px]
@@ -81,12 +90,10 @@ export default function Reviews() {
                          shadow-[0_0_25px_rgba(14,165,233,0.25)] 
                          border border-sky-700/30 px-10 py-10 relative"
             >
-              {/* Reviewer Name */}
               <h3 className="text-3xl font-semibold text-sky-300 mb-6 absolute top-8">
                 {review.name}
               </h3>
 
-              {/* Review Text */}
               <div className="flex-grow flex items-center justify-center mt-6">
                 <p className="text-slate-100 text-lg sm:text-xl leading-relaxed max-w-2xl">
                   {review.text}

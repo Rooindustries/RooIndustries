@@ -43,7 +43,6 @@ export default function Payment() {
       setReferralInput(stored);
       validateReferral(stored);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   //Load Razorpay checkout script
@@ -106,8 +105,8 @@ export default function Payment() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          amount: finalAmount, // normal amount, backend converts to subunits
-          currency: "USD", // or "INR" if you want rupees
+          amount: finalAmount,
+          currency: "USD",
           notes: {
             packageTitle,
             date,
