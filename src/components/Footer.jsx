@@ -44,25 +44,29 @@ export default function Footer() {
       <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
         <Link
           to="/packages"
-          className="inline-flex items-center justify-center gap-2 rounded-md bg-gradient-to-r from-sky-400 to-sky-600 
+          className="glow-button inline-flex items-center justify-center gap-2 rounded-md 
                        px-4 sm:px-5 py-3 text-sm font-semibold text-white 
-                       ring-1 ring-sky-700/50 hover:from-cyan-400 hover:to-sky-500 
-                       hover:shadow-[0_0_20px_rgba(56,189,248,0.6)] 
-                       active:translate-y-px transition-all duration-300 w-full sm:w-auto"
+                       ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300 w-full sm:w-auto"
         >
           <Zap className="w-4 h-4 sm:w-5 sm:h-5 text-white drop-shadow-[0_0_6px_rgba(56,189,248,0.8)]" />
           Supercharge Your Performance
+          <span className="glow-line glow-line-top" />
+          <span className="glow-line glow-line-right" />
+          <span className="glow-line glow-line-bottom" />
+          <span className="glow-line glow-line-left" />
         </Link>
 
         <Link
           to="/Contact"
-          className="rounded-md bg-gradient-to-r from-sky-400 to-sky-600 
+          className="glow-button inline-flex items-center justify-center gap-2 rounded-md 
                      px-6 py-3 text-sm font-semibold text-white 
-                     ring-1 ring-sky-700/50 hover:from-cyan-400 hover:to-sky-500 
-                     hover:shadow-[0_0_20px_rgba(56,189,248,0.6)] 
-                     active:translate-y-px transition-all duration-300 w-full sm:w-auto"
+                     ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300 w-full sm:w-auto"
         >
           Contact Us
+          <span className="glow-line glow-line-top" />
+          <span className="glow-line glow-line-right" />
+          <span className="glow-line glow-line-bottom" />
+          <span className="glow-line glow-line-left" />
         </Link>
       </div>
 
@@ -98,6 +102,15 @@ export default function Footer() {
           className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition-colors"
         >
           Nerky
+        </a>{" "}
+        &{" "}
+        <a
+          href="https://discord.com/users/1074948989083979837"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition-colors"
+        >
+          Exyy
         </a>
       </p>
     </footer>

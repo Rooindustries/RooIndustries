@@ -470,13 +470,16 @@ export default function BookingForm() {
                   setErrorStep1("");
                   setStep(2);
                 }}
-                className={`mt-10 w-full sm:w-64 mx-auto py-3 rounded-lg font-semibold text-lg transition-all duration-300 ${
-                  !selectedDate || !selectedSlot
-                    ? "bg-sky-800 text-sky-200/70 cursor-not-allowed"
-                    : "bg-gradient-to-r from-sky-500 to-blue-700 hover:from-sky-400 hover:to-blue-600 shadow-[0_0_20px_rgba(14,165,233,0.4)]"
+                aria-disabled={!selectedDate || !selectedSlot}
+                className={`glow-button mt-10 w-full sm:w-64 mx-auto py-3 rounded-lg font-semibold text-lg transition-all duration-300 ${
+                  !selectedDate || !selectedSlot ? "opacity-60" : ""
                 }`}
               >
                 Next
+                <span className="glow-line glow-line-top" />
+                <span className="glow-line glow-line-right" />
+                <span className="glow-line glow-line-bottom" />
+                <span className="glow-line glow-line-left" />
               </button>
 
               {errorStep1 && (
@@ -550,7 +553,7 @@ export default function BookingForm() {
                     setLoading(false);
                   }}
                   disabled={loading}
-                  className="w-1/2 bg-gradient-to-r from-sky-500 to-blue-700 hover:from-sky-400 hover:to-blue-600 py-3 rounded-lg font-semibold transition"
+                  className="glow-button w-1/2 py-3 rounded-lg font-semibold transition inline-flex items-center justify-center gap-2"
                 >
                   {loading
                     ? isXoc
@@ -559,6 +562,10 @@ export default function BookingForm() {
                     : isXoc
                     ? "Send Request"
                     : "Submit & Pay"}
+                  <span className="glow-line glow-line-top" />
+                  <span className="glow-line glow-line-right" />
+                  <span className="glow-line glow-line-bottom" />
+                  <span className="glow-line glow-line-left" />
                 </button>
               </div>
 
