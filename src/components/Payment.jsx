@@ -1,11 +1,12 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { useLocation, Link, Navigate, useNavigate } from "react-router-dom";
+import { useLocation, Link, useNavigate } from "react-router-dom";
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 
 export default function Payment() {
   const location = useLocation();
   const q = new URLSearchParams(location.search);
   const navigate = useNavigate();
+
   const bookingData = useMemo(() => {
     try {
       return JSON.parse(q.get("data") || "{}");
@@ -24,16 +25,13 @@ export default function Payment() {
   const [referral, setReferral] = useState(null);
   const [validating, setValidating] = useState(false);
 
-  const discountPercent = referral?.isFirstTime
-    ? 0
-    : referral?.currentDiscountPercent || 0;
-
+  const discountPercent = referral?.currentDiscountPercent || 0;
   const commissionPercent = referral?.currentCommissionPercent || 0;
 
   const discountAmount = +(baseAmount * (discountPercent / 100)).toFixed(2);
   const finalAmount = Math.max(0, +(baseAmount - discountAmount).toFixed(2));
 
-  //Razorpay state
+  // Razorpay state
   const [rzpReady, setRzpReady] = useState(false);
   const [payingRzp, setPayingRzp] = useState(false);
 
@@ -57,7 +55,7 @@ export default function Payment() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.search]);
 
-  //Load Razorpay checkout script
+  // Load Razorpay checkout script
   useEffect(() => {
     const script = document.createElement("script");
     script.src = "https://checkout.razorpay.com/v1/checkout.js";
@@ -86,9 +84,17 @@ export default function Payment() {
         `/api/ref/validateReferral?code=${encodeURIComponent(code)}`
       );
       const data = await r.json();
-      if (data.ok) {
+      console.log("validateReferral result:", data);
+
+      if (data.ok && data.referral) {
         setReferral(data.referral);
-        localStorage.setItem("referral", data.referral.code);
+
+        // ✅ backend returns "code": slug.current
+        if (data.referral.code) {
+          localStorage.setItem("referral", data.referral.code);
+        } else {
+          localStorage.removeItem("referral");
+        }
       } else {
         setReferral(null);
         localStorage.removeItem("referral");
@@ -102,7 +108,7 @@ export default function Payment() {
     }
   }
 
-  //Razorpay payment flow
+  // Razorpay payment flow
   async function handleRazorpayPay() {
     if (!rzpReady || !window.Razorpay) {
       alert("Payment system is still loading. Please try again in a moment.");
@@ -123,6 +129,7 @@ export default function Payment() {
             packageTitle,
             date,
             time,
+            // ✅ Use referral.code from backend or raw input
             referralCode: referral?.code || referralInput || "",
           },
         }),
@@ -151,7 +158,6 @@ export default function Payment() {
           color: "#0ea5e9",
         },
         handler: async function (response) {
-          // response = { razorpay_payment_id, razorpay_order_id, razorpay_signature }
           try {
             // 3) Verify signature on backend
             const verifyRes = await fetch("/api/razorpay/verify", {
