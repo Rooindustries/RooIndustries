@@ -121,6 +121,20 @@ export default function RefDashboard() {
   const currentRefs = creator.successfulReferrals ?? 0;
   const refsLeft = Math.max(0, 5 - currentRefs);
 
+  // referral code + link
+  const referralCode = creator.slug?.current || "";
+  const referralLink = `${window.location.origin}/packages?ref=${referralCode}`;
+
+  async function copyReferralLink() {
+    try {
+      await navigator.clipboard.writeText(referralLink);
+      showToast("success", "Referral link copied!");
+    } catch (err) {
+      console.error(err);
+      showToast("error", "Failed to copy link");
+    }
+  }
+
   return (
     <section className="pt-28 px-6 max-w-xl mx-auto text-white mb-20">
       <h1 className="text-4xl font-extrabold text-center text-sky-300 drop-shadow">
@@ -128,8 +142,36 @@ export default function RefDashboard() {
       </h1>
 
       <p className="mt-1 text-center opacity-70">
-        Referral Code: <b className="text-sky-400">{creator.slug.current}</b>
+        Referral Code: <b className="text-sky-400">{referralCode}</b>
       </p>
+
+      {/* 🔗 Referral Link */}
+      <div className="mt-8 bg-[#0a1324]/80 border border-sky-700/40 rounded-2xl p-4">
+        <p className="text-sm font-semibold text-sky-200 mb-2">
+          Your referral link
+        </p>
+
+        <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+          <input
+            type="text"
+            value={referralLink}
+            readOnly
+            className="flex-1 bg-[#050b16] border border-sky-800/40 rounded-md px-3 py-2 text-xs sm:text-sm text-slate-100 truncate"
+          />
+
+          <button
+            onClick={copyReferralLink}
+            className="px-4 py-2 bg-sky-600 hover:bg-sky-500 rounded-md text-xs sm:text-sm font-semibold"
+          >
+            Copy
+          </button>
+        </div>
+
+        <p className="mt-2 text-[11px] text-slate-400">
+          Share this link with your viewers. Anyone who books through it will
+          use your code.
+        </p>
+      </div>
 
       <div className="mt-12 bg-[#0a1324]/80 p-6 rounded-2xl border border-sky-700/40 shadow-[0_0_25px_rgba(56,189,248,0.3)] space-y-8 backdrop-blur-md">
         {/* STATS CARD */}

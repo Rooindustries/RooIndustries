@@ -38,13 +38,24 @@ export default function Payment() {
   const [payingRzp, setPayingRzp] = useState(false);
 
   useEffect(() => {
-    const stored = localStorage.getItem("referral");
+    const params = new URLSearchParams(location.search);
+    const fromUrl = params.get("ref");
+
+    let stored = fromUrl;
+    if (!stored) {
+      try {
+        stored = localStorage.getItem("referral");
+      } catch (e) {
+        console.error("Failed to read referral from localStorage:", e);
+      }
+    }
+
     if (stored) {
       setReferralInput(stored);
       validateReferral(stored);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [location.search]);
 
   //Load Razorpay checkout script
   useEffect(() => {

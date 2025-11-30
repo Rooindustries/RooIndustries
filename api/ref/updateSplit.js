@@ -9,31 +9,39 @@ const client = createClient({
 });
 
 export default async function handler(req, res) {
-  if (req.method !== "POST")
+  if (req.method !== "POST") {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
+  }
 
   try {
     const { id, commissionPercent, discountPercent } = req.body;
 
     console.log("💾 Update request:", req.body);
 
-    if (!id)
+    if (!id) {
       return res.status(400).json({ ok: false, error: "Missing creator ID" });
+    }
 
-    // Fetch current max limit
+    // Fetch current data for this creator
     const creator = await client.fetch(
       `*[_type == "referral" && _id == $id][0]{
-        maxCommissionPercent
+        maxCommissionPercent,
+        successfulReferrals,
+        bypassUnlock,
+        isFirstTime
       }`,
       { id }
     );
 
-    if (!creator)
+    if (!creator) {
       return res.status(404).json({ ok: false, error: "Creator not found" });
+    }
 
     const max = creator.maxCommissionPercent;
+    const successfulReferrals = creator.successfulReferrals ?? 0;
+    const bypassUnlock = creator.bypassUnlock === true;
 
-    // Validate the sum
+    // Same validation as before
     if (commissionPercent + discountPercent > max) {
       return res.status(400).json({
         ok: false,
@@ -41,14 +49,19 @@ export default async function handler(req, res) {
       });
     }
 
-    // Update sanity doc
-    await client
-      .patch(id)
-      .set({
-        currentCommissionPercent: commissionPercent,
-        currentDiscountPercent: discountPercent,
-      })
-      .commit();
+    const unlocked = successfulReferrals >= 5 || bypassUnlock;
+
+    // Build patch
+    let patch = client.patch(id).set({
+      currentCommissionPercent: commissionPercent,
+      currentDiscountPercent: discountPercent,
+    });
+
+    if (unlocked && creator.isFirstTime) {
+      patch = patch.set({ isFirstTime: false });
+    }
+
+    await patch.commit();
 
     return res.json({ ok: true });
   } catch (err) {
