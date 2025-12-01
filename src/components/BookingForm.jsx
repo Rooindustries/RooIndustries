@@ -235,12 +235,16 @@ export default function BookingForm() {
 
     const displayTime = selectedSlot.localLabel;
 
-    let storedReferralCode = "";
+    // Try to get referral from URL (?ref=...) OR localStorage("referral")
+    const referralFromQuery = q.get("ref") || "";
+    let referralFromStorage = "";
     try {
-      storedReferralCode = localStorage.getItem("referral") || "";
+      referralFromStorage = localStorage.getItem("referral") || "";
     } catch (e) {
       console.error("Failed to read referral from localStorage:", e);
     }
+
+    const finalReferralCode = referralFromQuery || referralFromStorage;
 
     const payload = {
       displayDate,
@@ -266,7 +270,8 @@ export default function BookingForm() {
 
       status: "pending",
 
-      ...(storedReferralCode ? { referralCode: storedReferralCode } : {}),
+      // Only send referralCode if we actually have one
+      ...(finalReferralCode ? { referralCode: finalReferralCode } : {}),
     };
 
     if (isXoc) {
