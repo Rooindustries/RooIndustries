@@ -25,6 +25,15 @@ export default function Payment() {
   const [referral, setReferral] = useState(null);
   const [validating, setValidating] = useState(false);
 
+  const [banner, setBanner] = useState(null); // { type: "success" | "error" | "info", text: string }
+
+  const showBanner = (type, text) => {
+    setBanner({ type, text });
+    setTimeout(() => {
+      setBanner((prev) => (prev?.text === text ? null : prev));
+    }, 4000);
+  };
+
   const discountPercent = referral?.currentDiscountPercent || 0;
   const commissionPercent = referral?.currentCommissionPercent || 0;
 
@@ -64,12 +73,17 @@ export default function Payment() {
     script.onerror = () => {
       console.error("Failed to load Razorpay SDK");
       setRzpReady(false);
+      showBanner(
+        "error",
+        "Payment system failed to load. Please refresh the page and try again."
+      );
     };
     document.body.appendChild(script);
 
     return () => {
       document.body.removeChild(script);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function validateReferral(code) {
@@ -89,7 +103,6 @@ export default function Payment() {
       if (data.ok && data.referral) {
         setReferral(data.referral);
 
-        // ✅ backend returns "code": slug.current
         if (data.referral.code) {
           localStorage.setItem("referral", data.referral.code);
         } else {
@@ -98,11 +111,16 @@ export default function Payment() {
       } else {
         setReferral(null);
         localStorage.removeItem("referral");
+        showBanner("error", "Invalid or inactive referral code.");
       }
     } catch (e) {
       console.error(e);
       setReferral(null);
       localStorage.removeItem("referral");
+      showBanner(
+        "error",
+        "We couldn’t validate that referral code. Please try again."
+      );
     } finally {
       setValidating(false);
     }
@@ -111,12 +129,16 @@ export default function Payment() {
   // Razorpay payment flow
   async function handleRazorpayPay() {
     if (!rzpReady || !window.Razorpay) {
-      alert("Payment system is still loading. Please try again in a moment.");
+      showBanner(
+        "error",
+        "Payment system is still loading. Please wait a few seconds and try again."
+      );
       return;
     }
 
     try {
       setPayingRzp(true);
+      showBanner("info", "Opening Razorpay checkout…");
 
       // 1) Ask backend to create Razorpay order
       const orderRes = await fetch("/api/razorpay/createOrder", {
@@ -124,12 +146,12 @@ export default function Payment() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           amount: finalAmount, // normal amount, backend converts to subunits
-          currency: "USD", // or "INR" if you want rupees
+          // NOTE: if you want UPI/netbanking etc you probably want "INR" here
+          currency: "USD",
           notes: {
             packageTitle,
             date,
             time,
-            // ✅ Use referral.code from backend or raw input
             referralCode: referral?.code || referralInput || "",
           },
         }),
@@ -138,7 +160,13 @@ export default function Payment() {
       const orderData = await orderRes.json();
 
       if (!orderRes.ok || !orderData.ok) {
-        throw new Error(orderData.message || "Failed to create Razorpay order");
+        console.error("Razorpay order error:", orderData);
+        showBanner(
+          "error",
+          orderData.message ||
+            "Couldn’t start the payment. Please try again or use PayPal."
+        );
+        return;
       }
 
       // 2) Open Razorpay popup
@@ -149,14 +177,18 @@ export default function Payment() {
         name: "Roo Industries",
         description: `${packageTitle} booking`,
         order_id: orderData.orderId,
-        prefill: {
-          name: bookingData.fullName || "",
-          email: bookingData.email || "",
-          contact: bookingData.phone || "",
+
+        method: {
+          card: true,
+          netbanking: true,
+          upi: true,
+          wallet: true,
         },
+
         theme: {
           color: "#0ea5e9",
         },
+
         handler: async function (response) {
           try {
             // 3) Verify signature on backend
@@ -169,7 +201,11 @@ export default function Payment() {
             const verifyData = await verifyRes.json();
 
             if (!verifyRes.ok || !verifyData.ok) {
-              alert("Payment verification failed. Please contact support.");
+              console.error("Razorpay verify failed:", verifyData);
+              showBanner(
+                "error",
+                "Payment verification failed. Please contact support or try another method."
+              );
               return;
             }
 
@@ -194,24 +230,30 @@ export default function Payment() {
               body: JSON.stringify(payload),
             });
 
-            if (!res.ok) throw new Error("Failed to create booking in Sanity");
+            if (!res.ok) {
+              console.error("Booking create error:", await res.text());
+              showBanner(
+                "error",
+                "Payment succeeded but booking could not be saved. Please contact support with your payment ID."
+              );
+              return;
+            }
 
-            const { bookingId } = await res.json();
-
-            alert(
-              `Payment successful via Razorpay! Booking confirmed (${bookingId})`
-            );
+            // all good -> go to success page
             navigate("/payment-success");
           } catch (err) {
             console.error("Razorpay post-payment error:", err);
-            alert(
-              "Payment succeeded but booking could not be saved. Contact support."
+            showBanner(
+              "error",
+              "Payment succeeded but something went wrong saving your booking. Please contact support."
             );
           }
         },
+
         modal: {
           ondismiss: function () {
             console.log("Razorpay popup closed by user");
+            showBanner("info", "Payment cancelled before completion.");
           },
         },
       };
@@ -220,7 +262,10 @@ export default function Payment() {
       rzp.open();
     } catch (err) {
       console.error("Razorpay error:", err);
-      alert("Payment could not be processed. Please try again.");
+      showBanner(
+        "error",
+        "Payment could not be processed. Please try again or use PayPal."
+      );
     } finally {
       setPayingRzp(false);
     }
@@ -235,8 +280,35 @@ export default function Payment() {
         Review your booking details and proceed to payment
       </p>
 
+      {banner && banner.text && (
+        <div
+          className={`mt-6 rounded-xl border px-4 py-3 text-sm flex items-center gap-3 shadow-[0_0_25px_rgba(15,23,42,0.8)] ${
+            banner.type === "error"
+              ? "border-red-500/60 bg-red-500/10 text-red-200"
+              : banner.type === "success"
+              ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-200"
+              : "border-sky-500/60 bg-sky-500/10 text-sky-100"
+          }`}
+        >
+          <span className="text-lg">
+            {banner.type === "error"
+              ? "⚠️"
+              : banner.type === "success"
+              ? "✅"
+              : "💬"}
+          </span>
+          <p className="flex-1">{banner.text}</p>
+          <button
+            onClick={() => setBanner(null)}
+            className="text-xs uppercase tracking-wide opacity-70 hover:opacity-100"
+          >
+            Close
+          </button>
+        </div>
+      )}
+
       {/* Booking Summary */}
-      <div className="mt-10 rounded-2xl border border-sky-700/40 bg-[#0a1324]/90 shadow-[0_0_35px_rgba(14,165,233,0.15)] backdrop-blur-md">
+      <div className="mt-8 rounded-2xl border border-sky-700/40 bg-[#0a1324]/90 shadow-[0_0_35px_rgba(14,165,233,0.15)] backdrop-blur-md">
         <div className="p-6 sm:p-7">
           <h3 className="text-[20px] font-bold text-white">Booking Summary</h3>
           <p className="text-slate-400 text-sm mt-1">
@@ -318,7 +390,7 @@ export default function Payment() {
                 Pay with Razorpay
               </p>
               <p className="text-slate-400 text-xs">
-                Cards / UPI / Netbanking (if enabled)
+                Cards / local methods (based on your region & currency)
               </p>
             </div>
             <button
@@ -342,7 +414,7 @@ export default function Payment() {
               className="w-24 sm:w-28"
             />
             <p className="text-slate-300 text-sm font-medium">
-              Secure payment processing
+              Secure global payment processing
             </p>
           </div>
 
@@ -398,25 +470,30 @@ export default function Payment() {
                       body: JSON.stringify(payload),
                     });
 
-                    if (!res.ok)
-                      throw new Error("Failed to create booking in Sanity");
+                    if (!res.ok) {
+                      console.error("Booking create error:", await res.text());
+                      showBanner(
+                        "error",
+                        "Payment succeeded but booking could not be saved. Please contact support."
+                      );
+                      return;
+                    }
 
-                    const { bookingId } = await res.json();
-
-                    alert(
-                      `Payment successful! Booking confirmed (${bookingId})`
-                    );
                     navigate("/payment-success");
                   } catch (err) {
                     console.error("Booking creation error:", err);
-                    alert(
-                      "Payment succeeded but booking could not be saved. Contact support."
+                    showBanner(
+                      "error",
+                      "Payment succeeded but something went wrong saving your booking. Please contact support."
                     );
                   }
                 }}
                 onError={(err) => {
                   console.error(err);
-                  alert("Payment could not be processed. Please try again.");
+                  showBanner(
+                    "error",
+                    "PayPal could not process your payment. Please try again or use another card."
+                  );
                 }}
               />
             </PayPalScriptProvider>

@@ -5,7 +5,7 @@ export default function PaymentSuccess() {
   return (
     <section className="pt-40 text-center text-white max-w-lg mx-auto">
       <h1 className="text-4xl font-bold text-sky-300 drop-shadow-[0_0_20px_rgba(56,189,248,0.5)]">
-        Payment Successful :white_check_mark:
+        Payment Successful ✅
       </h1>
       <p className="mt-4 text-slate-300">
         Your booking has been confirmed. You’ll receive a confirmation email

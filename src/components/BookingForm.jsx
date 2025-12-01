@@ -274,7 +274,7 @@ export default function BookingForm() {
         }
 
         alert(
-          "Your XOC booking request has been sent! I’ll contact you on Discord/email to confirm details."
+          "Your XOC booking request has been sent! I’ll contact you on Discord/Email to confirm details."
         );
         navigate("/thank-you");
       } catch (err) {

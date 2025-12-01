@@ -297,7 +297,7 @@ export default async function handler(req, res) {
             siteName,
             heading: "Booking Received ✨",
             intro:
-              "Thanks for booking! I’ll reach out on Discord/email to confirm your time.",
+              "Thanks for booking! I’ll reach out on Discord/Email to confirm your time.",
             fields: clientFields,
           }),
         });

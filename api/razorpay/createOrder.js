@@ -57,6 +57,7 @@ module.exports = async function handler(req, res) {
       currency,
       receipt: `booking_${Date.now()}`,
       notes: notes || {},
+      checkout_config_id: "config_Rm7exJgvjrWbQ8",
     };
 
     const order = await razorpay.orders.create(options);
