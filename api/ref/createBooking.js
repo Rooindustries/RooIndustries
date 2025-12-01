@@ -84,14 +84,18 @@ export default async function handler(req, res) {
       displayTime,
     } = req.body || {};
 
+    // 🔵 Make everything mutable so we can override / fill it server-side
+    let effectiveReferralId = referralId || null;
+    let effectiveReferralCode = referralCode || "";
+    let effectiveDiscountPercent = discountPercent || 0;
+    let effectiveDiscountAmount = discountAmount || 0;
+    let effectiveGrossAmount = grossAmount || 0;
+    let effectiveNetAmount = netAmount || 0;
+    let effectiveCommissionPercent = commissionPercent || 0;
+
     // Normalize booking date/time to the host view so availability can be marked as booked
     const bookingDate = hostDate || date || displayDate || "";
     const bookingTime = hostTime || time || displayTime || "";
-
-    const commissionAmount = +(
-      (netAmount || grossAmount || 0) *
-      ((commissionPercent || 0) / 100)
-    ).toFixed(2);
 
     // ---------- Derived date/time variants ----------
     // What we treat as "local" (user) view:
@@ -101,6 +105,83 @@ export default async function handler(req, res) {
     // What we treat as IST (host) view:
     const istDate = hostDate || date || displayDate || "—";
     const istTime = hostTime || time || displayTime || "—";
+
+    if (effectiveReferralCode) {
+      try {
+        const refDoc = await writeClient.fetch(
+          `*[_type == "referral" && slug.current == $code][0]{
+            _id,
+            currentDiscountPercent,
+            currentCommissionPercent,
+            maxCommissionPercent,
+            bypassUnlock,
+            successfulReferrals
+          }`,
+          { code: effectiveReferralCode }
+        );
+
+        if (refDoc) {
+          if (!effectiveReferralId) {
+            effectiveReferralId = refDoc._id;
+          }
+
+          // same unlock logic you use on the dashboard:
+          const successfulReferrals = refDoc.successfulReferrals ?? 0;
+          const unlocked =
+            successfulReferrals >= 5 || refDoc.bypassUnlock === true;
+
+          const defaultCommission = 10;
+          const defaultDiscount = 0;
+
+          const refCommission = unlocked
+            ? refDoc.currentCommissionPercent ?? defaultCommission
+            : defaultCommission;
+
+          const refDiscount = unlocked
+            ? refDoc.currentDiscountPercent ?? defaultDiscount
+            : defaultDiscount;
+
+          if (!effectiveCommissionPercent) {
+            effectiveCommissionPercent = refCommission;
+          }
+
+          if (!effectiveDiscountPercent) {
+            effectiveDiscountPercent = refDiscount;
+          }
+
+          // derive base price from packagePrice if grossAmount wasn't provided
+          if (!effectiveGrossAmount) {
+            const numericPrice =
+              parseFloat(String(packagePrice || "").replace(/[^0-9.]/g, "")) ||
+              0;
+            effectiveGrossAmount = numericPrice;
+          }
+
+          // derive discount/net amounts if missing
+          if (!effectiveDiscountAmount && effectiveDiscountPercent) {
+            effectiveDiscountAmount = +(
+              effectiveGrossAmount *
+              (effectiveDiscountPercent / 100)
+            ).toFixed(2);
+          }
+
+          if (!effectiveNetAmount) {
+            effectiveNetAmount = +(
+              effectiveGrossAmount - (effectiveDiscountAmount || 0)
+            ).toFixed(2);
+          }
+        }
+      } catch (lookupErr) {
+        console.error("❌ Error fetching referral for booking:", lookupErr);
+      }
+    }
+
+    const commissionBase = effectiveNetAmount || effectiveGrossAmount || 0;
+
+    const commissionAmount = +(
+      commissionBase *
+      ((effectiveCommissionPercent || 0) / 100)
+    ).toFixed(2);
 
     // CREATE BOOKING DOCUMENT
     const doc = await writeClient.create({
@@ -128,30 +209,30 @@ export default async function handler(req, res) {
       packagePrice,
       status,
 
-      referralCode,
-      discountPercent,
-      discountAmount,
-      grossAmount,
-      netAmount,
-      commissionPercent,
+      referralCode: effectiveReferralCode,
+      discountPercent: effectiveDiscountPercent,
+      discountAmount: effectiveDiscountAmount,
+      grossAmount: effectiveGrossAmount,
+      netAmount: effectiveNetAmount,
+      commissionPercent: effectiveCommissionPercent,
       commissionAmount,
       paypalOrderId,
       payerEmail,
-      ...(referralId
-        ? { referral: { _type: "reference", _ref: referralId } }
+      ...(effectiveReferralId
+        ? { referral: { _type: "reference", _ref: effectiveReferralId } }
         : {}),
     });
 
-    // REFERRAL LOGIC
-    if (referralId && status === "captured") {
+    // REFERRAL LOGIC (only increment on real captured payments)
+    if (effectiveReferralId && status === "captured") {
       const updated = await writeClient
-        .patch(referralId)
+        .patch(effectiveReferralId)
         .inc({ successfulReferrals: 1 })
         .commit();
 
       if (updated.successfulReferrals >= 5 && updated.isFirstTime) {
         await writeClient
-          .patch(referralId)
+          .patch(effectiveReferralId)
           .set({
             isFirstTime: false,
             currentDiscountPercent: updated.currentDiscountPercent || 0,
@@ -181,14 +262,16 @@ export default async function handler(req, res) {
 
     // CLIENT EMAIL FIELDS
     const clientMoneyAndReferral = [
-      ...(referralCode
-        ? [{ label: "Referral Code", value: referralCode }]
+      ...(effectiveReferralCode
+        ? [{ label: "Referral Code", value: effectiveReferralCode }]
         : []),
-      ...(discountPercent || discountAmount
+      ...(effectiveDiscountPercent || effectiveDiscountAmount
         ? [
             {
               label: "Discount",
-              value: `${discountPercent}% (-$${discountAmount.toFixed(2)})`,
+              value: `${effectiveDiscountPercent}% (-$${effectiveDiscountAmount.toFixed(
+                2
+              )})`,
             },
           ]
         : []),
@@ -224,43 +307,49 @@ export default async function handler(req, res) {
             : "—",
       },
       ...sharedCoreFields,
-      ...clientMoneyAndReferral, // referral, discount, order id at the bottom
+      ...clientMoneyAndReferral,
     ];
 
     // OWNER EMAIL FIELDS
     const ownerMoneyAndReferral = [
-      ...(referralCode
-        ? [{ label: "Referral Code", value: referralCode }]
+      ...(effectiveReferralCode
+        ? [{ label: "Referral Code", value: effectiveReferralCode }]
         : []),
-      ...(discountPercent || discountAmount
+      ...(effectiveDiscountPercent || effectiveDiscountAmount
         ? [
             {
               label: "Discount",
-              value: `${discountPercent}% (-$${discountAmount.toFixed(2)})`,
+              value: `${effectiveDiscountPercent}% (-$${effectiveDiscountAmount.toFixed(
+                2
+              )})`,
             },
           ]
         : []),
-      ...(typeof grossAmount === "number"
+      ...(typeof effectiveGrossAmount === "number" &&
+      !Number.isNaN(effectiveGrossAmount)
         ? [
             {
               label: "Gross Amount",
-              value: `$${grossAmount.toFixed(2)}`,
+              value: `$${effectiveGrossAmount.toFixed(2)}`,
             },
           ]
         : []),
-      ...(typeof netAmount === "number"
+      ...(typeof effectiveNetAmount === "number" &&
+      !Number.isNaN(effectiveNetAmount)
         ? [
             {
               label: "Net Amount",
-              value: `$${netAmount.toFixed(2)}`,
+              value: `$${effectiveNetAmount.toFixed(2)}`,
             },
           ]
         : []),
-      ...(commissionPercent || commissionAmount
+      ...(effectiveCommissionPercent || commissionAmount
         ? [
             {
               label: "Commission",
-              value: `${commissionPercent}% ($${commissionAmount.toFixed(2)})`,
+              value: `${effectiveCommissionPercent}% ($${commissionAmount.toFixed(
+                2
+              )})`,
             },
           ]
         : []),
