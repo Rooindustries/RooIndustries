@@ -106,6 +106,12 @@ export default async function handler(req, res) {
     const istDate = hostDate || date || displayDate || "—";
     const istTime = hostTime || time || displayTime || "—";
 
+    if (!effectiveGrossAmount) {
+      const numericPrice =
+        parseFloat(String(packagePrice || "").replace(/[^0-9.]/g, "")) || 0;
+      effectiveGrossAmount = numericPrice;
+    }
+
     if (effectiveReferralCode) {
       try {
         const refDoc = await writeClient.fetch(
@@ -148,32 +154,23 @@ export default async function handler(req, res) {
           if (!effectiveDiscountPercent) {
             effectiveDiscountPercent = refDiscount;
           }
-
-          // derive base price from packagePrice if grossAmount wasn't provided
-          if (!effectiveGrossAmount) {
-            const numericPrice =
-              parseFloat(String(packagePrice || "").replace(/[^0-9.]/g, "")) ||
-              0;
-            effectiveGrossAmount = numericPrice;
-          }
-
-          // derive discount/net amounts if missing
-          if (!effectiveDiscountAmount && effectiveDiscountPercent) {
-            effectiveDiscountAmount = +(
-              effectiveGrossAmount *
-              (effectiveDiscountPercent / 100)
-            ).toFixed(2);
-          }
-
-          if (!effectiveNetAmount) {
-            effectiveNetAmount = +(
-              effectiveGrossAmount - (effectiveDiscountAmount || 0)
-            ).toFixed(2);
-          }
         }
       } catch (lookupErr) {
         console.error("❌ Error fetching referral for booking:", lookupErr);
       }
+    }
+
+    if (!effectiveDiscountAmount && effectiveDiscountPercent) {
+      effectiveDiscountAmount = +(
+        effectiveGrossAmount *
+        (effectiveDiscountPercent / 100)
+      ).toFixed(2);
+    }
+
+    if (!effectiveNetAmount) {
+      effectiveNetAmount = +(
+        effectiveGrossAmount - (effectiveDiscountAmount || 0)
+      ).toFixed(2);
     }
 
     const commissionBase = effectiveNetAmount || effectiveGrossAmount || 0;
@@ -249,10 +246,19 @@ export default async function handler(req, res) {
     const from = process.env.FROM_EMAIL;
     const owner = process.env.OWNER_EMAIL;
 
-    // Shared non-money, non-referral fields
     const sharedCoreFields = [
       { label: "Package", value: `${packageTitle || "—"}` },
-      { label: "Price", value: `${packagePrice || "—"}` },
+      {
+        label: "Price",
+        value:
+          (effectiveDiscountPercent || effectiveDiscountAmount) &&
+          typeof effectiveNetAmount === "number" &&
+          !Number.isNaN(effectiveNetAmount)
+            ? `$${effectiveNetAmount.toFixed(
+                2
+              )} (was $${effectiveGrossAmount.toFixed(2)})`
+            : `${packagePrice || "—"}`,
+      },
       { label: "Discord", value: discord || "—" },
       { label: "Email", value: email || "—" },
       { label: "Main Game", value: mainGame || "—" },
