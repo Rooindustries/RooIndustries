@@ -60,7 +60,7 @@ export default function RefLogin() {
 
       localStorage.setItem("creatorId", data.creatorId);
 
-      //Handle remember me
+      // Handle remember me
       if (rememberMe) {
         localStorage.setItem("refLoginCode", code);
         localStorage.setItem("refRememberMe", "true");
@@ -175,6 +175,21 @@ export default function RefLogin() {
           {loading ? "Logging in..." : "Login"}
         </button>
       </form>
+
+      {/* Register Button */}
+      <div className="mt-4 flex flex-col items-center gap-2">
+        <p className="text-xs text-slate-400">
+          Don&apos;t have a creator account yet?
+        </p>
+        <button
+          type="button"
+          onClick={() => nav("/referrals/register")}
+          className="px-5 py-2 rounded-xl text-sm font-semibold bg-sky-700 hover:bg-sky-600
+                     shadow-[0_0_20px_rgba(56,189,248,0.5)] transition-all"
+        >
+          Create an account
+        </button>
+      </div>
 
       {/* Toast Notification */}
       {toast && (
