@@ -235,6 +235,13 @@ export default function BookingForm() {
 
     const displayTime = selectedSlot.localLabel;
 
+    let storedReferralCode = "";
+    try {
+      storedReferralCode = localStorage.getItem("referral") || "";
+    } catch (e) {
+      console.error("Failed to read referral from localStorage:", e);
+    }
+
     const payload = {
       displayDate,
       displayTime,
@@ -258,6 +265,8 @@ export default function BookingForm() {
       packagePrice: selectedPackage.price,
 
       status: "pending",
+
+      ...(storedReferralCode ? { referralCode: storedReferralCode } : {}),
     };
 
     if (isXoc) {
