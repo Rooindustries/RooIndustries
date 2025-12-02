@@ -18,16 +18,19 @@ export default function RefReset() {
 
   function showToast(type, message) {
     setToast({ type, message });
-    setTimeout(() => setToast(null), 2500);
+    setTimeout(() => setToast(null), 3000);
   }
 
   if (!token) {
     return (
       <section className="pt-32 px-6 min-h-screen text-white flex flex-col items-center">
-        <h1 className="text-3xl font-bold text-red-400">Invalid reset link</h1>
+        <h1 className="text-3xl font-bold text-red-400">Invalid Link</h1>
+        <p className="text-slate-400 mt-2">
+          This password reset link is missing a token.
+        </p>
         <button
           onClick={() => nav("/referrals/login")}
-          className="mt-6 px-6 py-3 rounded-xl bg-sky-600 hover:bg-sky-500 font-semibold"
+          className="mt-6 px-6 py-3 rounded-xl bg-sky-600 hover:bg-sky-500 font-semibold text-white"
         >
           Go to Login
         </button>
@@ -54,8 +57,8 @@ export default function RefReset() {
       if (!data.ok) {
         showToast("error", data.error || "Reset failed");
       } else {
-        showToast("success", "Password updated! You can log in now.");
-        setTimeout(() => nav("/referrals/login"), 1200);
+        showToast("success", "Password updated! Redirecting...");
+        setTimeout(() => nav("/referrals/login"), 1500);
       }
     } catch (err) {
       console.error(err);
@@ -86,7 +89,7 @@ export default function RefReset() {
           <input
             type="password"
             className="w-full p-4 mt-1 bg-[#0c162a] border border-sky-800/40 rounded-xl
-                       outline-none focus:border-sky-500 transition text-base"
+                       outline-none focus:border-sky-500 transition text-base text-white"
             placeholder="Enter new password"
             value={pass1}
             onChange={(e) => setPass1(e.target.value)}
@@ -100,7 +103,7 @@ export default function RefReset() {
           <input
             type="password"
             className="w-full p-4 mt-1 bg-[#0c162a] border border-sky-800/40 rounded-xl
-                       outline-none focus:border-sky-500 transition text-base"
+                       outline-none focus:border-sky-500 transition text-base text-white"
             placeholder="Confirm new password"
             value={pass2}
             onChange={(e) => setPass2(e.target.value)}
@@ -110,12 +113,11 @@ export default function RefReset() {
         <button
           type="submit"
           disabled={loading}
-          className={`w-full py-4 rounded-xl font-bold text-lg transition-all
-            ${
-              loading
-                ? "bg-gray-700 opacity-40 cursor-not-allowed"
-                : "bg-sky-600 hover:bg-sky-500 shadow-[0_0_25px_rgba(56,189,248,0.5)]"
-            }`}
+          className={`w-full py-4 rounded-xl font-bold text-lg transition-all ${
+            loading
+              ? "bg-gray-700 opacity-40 cursor-not-allowed"
+              : "bg-sky-600 hover:bg-sky-500 shadow-[0_0_25px_rgba(56,189,248,0.5)]"
+          }`}
         >
           {loading ? "Updating..." : "Update Password"}
         </button>
@@ -123,8 +125,7 @@ export default function RefReset() {
 
       {toast && (
         <div
-          className={`fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-xl text-white text-sm font-semibold shadow-lg transition-all
-          ${
+          className={`fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-xl text-white text-sm font-semibold shadow-lg transition-all ${
             toast.type === "success"
               ? "bg-green-600 shadow-[0_0_25px_rgba(34,197,94,0.5)]"
               : "bg-red-600 shadow-[0_0_25px_rgba(239,68,68,0.5)]"
