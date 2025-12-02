@@ -1,122 +1,87 @@
 import { createClient } from "@sanity/client";
 import { Resend } from "resend";
+import crypto from "crypto";
 
-const readClient = createClient({
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || "production",
-  apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
-  useCdn: false,
-  perspective: "published",
-});
-
+// 1. Initialize Resend
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-const SITE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL || "https://your-site-domain.com";
+// 2. Initialize Sanity with WRITE permissions
+const client = createClient({
+  projectId: process.env.SANITY_PROJECT_ID,
+  dataset: process.env.SANITY_DATASET || "production",
+  apiVersion: "2023-10-01",
+  token: process.env.SANITY_WRITE_TOKEN,
+  useCdn: false,
+});
 
 export default async function handler(req, res) {
-  // --------- GET: your old logic (by id) ---------
-  if (req.method === "GET") {
-    try {
-      const { id } = req.query;
-
-      if (!id) {
-        return res.status(400).json({ ok: false, error: "Missing creator id" });
-      }
-
-      const referral = await readClient.fetch(
-        `*[_type == "referral" && _id == $id][0]{
-          _id,
-          name,
-          slug,
-          creatorEmail,
-          currentCommissionPercent,
-          currentDiscountPercent,
-          maxCommissionPercent,
-          successfulReferrals,
-          isFirstTime
-        }`,
-        { id }
-      );
-
-      if (!referral) {
-        return res.status(404).json({ ok: false, error: "Referral not found" });
-      }
-
-      return res.status(200).json({ ok: true, referral });
-    } catch (err) {
-      console.error("💥 getData ERROR:", err);
-      return res.status(500).json({ ok: false, error: "Server error" });
-    }
+  if (req.method !== "POST") {
+    return res.status(405).json({ ok: false, error: "Method not allowed" });
   }
 
-  // --------- POST: forgot password by email ---------
-  if (req.method === "POST") {
-    try {
-      const { email } = req.body || {};
+  try {
+    const { email } = req.body;
 
-      if (!email) {
-        return res.status(400).json({ ok: false, error: "Email is required" });
-      }
+    if (!email) {
+      return res.status(400).json({ ok: false, error: "Missing email" });
+    }
 
-      // Find referral by creatorEmail
-      const referral = await readClient.fetch(
-        `*[_type == "referral" && creatorEmail == $email][0]{
-          _id,
-          name,
-          creatorEmail
-        }`,
-        { email }
-      );
+    // 3. Find the user by Email
+    const referral = await client.fetch(
+      `*[_type == "referral" && creatorEmail == $email][0]{ _id, name }`,
+      { email }
+    );
 
-      // For security, don't reveal whether email exists
-      if (!referral) {
-        console.log("🔍 No referral found for email:", email);
-        return res
-          .status(200)
-          .json({ ok: true, message: "If the email exists, a link was sent." });
-      }
-
-      const resetLink = `${SITE_URL}/referrals/reset?id=${referral._id}`;
-
-      await resend.emails.send({
-        from: "Roo Industries <no-reply@rooindustries.com>",
-        to: [referral.creatorEmail],
-        subject: "Reset your referral password",
-        html: `
-          <div style="font-family: Inter, Arial, sans-serif; background: #020617; padding: 32px; color: #e5f2ff;">
-            <div style="max-width: 480px; margin: 0 auto; background: #020617; border-radius: 16px; border: 1px solid rgba(56,189,248,0.4); padding: 24px;">
-              <h1 style="font-size: 22px; margin-bottom: 12px; color: #7dd3fc;">
-                Reset your password
-              </h1>
-              <p style="font-size: 14px; color: #cbd5f5; line-height: 1.6;">
-                Hi ${referral.name || "there"},<br/><br/>
-                We received a request to reset the password for your referral account.
-              </p>
-              <p style="margin: 20px 0;">
-                <a href="${resetLink}" 
-                   style="display:inline-block;background:#0ea5e9;color:white;padding:10px 18px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px;">
-                  Reset Password
-                </a>
-              </p>
-              <p style="font-size: 12px; color: #94a3b8; line-height: 1.6;">
-                If you didn’t request this, you can safely ignore this email.
-              </p>
-            </div>
-          </div>
-        `,
-      });
-
+    if (!referral) {
+      // Security: Don't reveal if email exists or not
       return res
         .status(200)
-        .json({ ok: true, message: "Reset email sent if account exists." });
-    } catch (err) {
-      console.error("💥 forgot POST ERROR:", err);
-      return res.status(500).json({ ok: false, error: "Server error" });
+        .json({ ok: true, message: "If email exists, link sent." });
     }
-  }
 
-  // --------- Other methods ---------
-  res.setHeader("Allow", ["GET", "POST"]);
-  return res.status(405).json({ ok: false, error: "Method not allowed" });
+    // 4. Generate Token & Expiration (1 hour)
+    const resetToken = crypto.randomBytes(32).toString("hex");
+    const resetTokenExpiresAt = new Date(
+      Date.now() + 60 * 60 * 1000
+    ).toISOString();
+
+    // 5. Save Token to Sanity
+    await client
+      .patch(referral._id)
+      .set({
+        resetToken: resetToken,
+        resetTokenExpiresAt: resetTokenExpiresAt,
+      })
+      .commit();
+
+    // 6. Send Email via Resend
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+    const resetLink = `${baseUrl}/referrals/reset?token=${resetToken}`;
+
+    // --- FIX IS HERE: USE YOUR ENV VARIABLE ---
+    const fromAddress = process.env.FROM_EMAIL || "onboarding@resend.dev";
+
+    const { data, error } = await resend.emails.send({
+      from: fromAddress, // Now uses "Roo Industries <no-reply@updates.rooindustries.com>"
+      to: [email],
+      subject: "Reset your Password",
+      html: `
+        <p>Hi ${referral.name || "there"},</p>
+        <p>You requested a password reset. Click the link below to set a new password:</p>
+        <p><a href="${resetLink}"><strong>Reset Password</strong></a></p>
+        <p>Or copy this link: ${resetLink}</p>
+        <p>This link expires in 1 hour.</p>
+      `,
+    });
+
+    if (error) {
+      console.error("Resend Error:", error);
+      return res.status(500).json({ ok: false, error: "Failed to send email" });
+    }
+
+    return res.status(200).json({ ok: true, message: "Reset link sent" });
+  } catch (err) {
+    console.error("FORGOT API ERROR:", err);
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
 }
