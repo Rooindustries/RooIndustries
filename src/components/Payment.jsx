@@ -145,8 +145,7 @@ export default function Payment() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          amount: finalAmount, // normal amount, backend converts to subunits
-          // NOTE: if you want UPI/netbanking etc you probably want "INR" here
+          amount: finalAmount,
           currency: "USD",
           notes: {
             packageTitle,
@@ -389,9 +388,7 @@ export default function Payment() {
               <p className="text-slate-300 text-sm font-medium">
                 Pay with Razorpay
               </p>
-              <p className="text-slate-400 text-xs">
-                Cards / local methods (based on your region & currency)
-              </p>
+              <p className="text-slate-400 text-xs">Cards / local methods</p>
             </div>
             <button
               onClick={handleRazorpayPay}
@@ -406,97 +403,105 @@ export default function Payment() {
             </button>
           </div>
 
-          {/* PayPal option */}
-          <div className="mt-4 flex items-center justify-start gap-4 border border-sky-800/30 bg-[#0c162a]/80 rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(14,165,233,0.15)]">
-            <img
-              src="https://www.paypalobjects.com/webstatic/mktg/Logo/pp-logo-100px.png"
-              alt="PayPal"
-              className="w-24 sm:w-28"
-            />
-            <p className="text-slate-300 text-sm font-medium">
-              Secure global payment processing
-            </p>
-          </div>
+          {/* PayPal option - RESTRUCTURED */}
+          <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-4 border border-sky-800/30 bg-[#0c162a]/80 rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(14,165,233,0.15)]">
+            {/* Left Side: Logo & Text */}
+            <div className="flex items-center gap-4">
+              <img
+                src="https://www.paypalobjects.com/webstatic/mktg/Logo/pp-logo-100px.png"
+                alt="PayPal"
+                className="w-20"
+              />
+              <p className="text-slate-300 text-sm font-medium hidden sm:block">
+                Secure global payment
+              </p>
+            </div>
 
-          <div className="mt-6 w-full sm:w-[400px]">
-            <PayPalScriptProvider
-              options={{
-                "client-id": process.env.REACT_APP_PAYPAL_CLIENT_ID || "test",
-                currency: "USD",
-                intent: "capture",
-              }}
-            >
-              <PayPalButtons
-                fundingSource="paypal"
-                style={{
-                  layout: "horizontal",
-                  color: "blue",
-                  shape: "rect",
-                  label: "pay",
-                  height: 50,
-                  tagline: false,
+            {/* Right Side: The Buttons */}
+            {/* We constrain the width (w-40 or w-48) so it looks like a button */}
+            <div className="w-full sm:w-48 relative z-0">
+              <PayPalScriptProvider
+                options={{
+                  "client-id": process.env.REACT_APP_PAYPAL_CLIENT_ID || "test",
+                  currency: "USD",
+                  intent: "capture",
                 }}
-                createOrder={(data, actions) =>
-                  actions.order.create({
-                    purchase_units: [
-                      {
-                        description: `${packageTitle} booking`,
-                        amount: { value: finalAmount.toFixed(2) },
-                      },
-                    ],
-                  })
-                }
-                onApprove={async (data, actions) => {
-                  const details = await actions.order.capture();
+              >
+                <PayPalButtons
+                  fundingSource="paypal"
+                  style={{
+                    layout: "horizontal",
+                    color: "blue",
+                    shape: "rect",
+                    label: "pay",
+                    height: 40,
+                    tagline: false,
+                  }}
+                  createOrder={(data, actions) =>
+                    actions.order.create({
+                      purchase_units: [
+                        {
+                          description: `${packageTitle} booking`,
+                          amount: { value: finalAmount.toFixed(2) },
+                        },
+                      ],
+                    })
+                  }
+                  onApprove={async (data, actions) => {
+                    const details = await actions.order.capture();
 
-                  try {
-                    const payload = {
-                      ...bookingData,
-                      referralCode: referral?.code || referralInput || "",
-                      referralId: referral?._id || null,
-                      discountPercent,
-                      discountAmount,
-                      grossAmount: baseAmount,
-                      netAmount: finalAmount,
-                      commissionPercent,
-                      paypalOrderId: details?.id || "",
-                      payerEmail: details?.payer?.email_address || "",
-                      status: "captured",
-                      paymentProvider: "paypal",
-                    };
-                    const res = await fetch("/api/ref/createBooking", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify(payload),
-                    });
+                    try {
+                      const payload = {
+                        ...bookingData,
+                        referralCode: referral?.code || referralInput || "",
+                        referralId: referral?._id || null,
+                        discountPercent,
+                        discountAmount,
+                        grossAmount: baseAmount,
+                        netAmount: finalAmount,
+                        commissionPercent,
+                        paypalOrderId: details?.id || "",
+                        payerEmail: details?.payer?.email_address || "",
+                        status: "captured",
+                        paymentProvider: "paypal",
+                      };
+                      const res = await fetch("/api/ref/createBooking", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload),
+                      });
 
-                    if (!res.ok) {
-                      console.error("Booking create error:", await res.text());
+                      if (!res.ok) {
+                        console.error(
+                          "Booking create error:",
+                          await res.text()
+                        );
+                        showBanner(
+                          "error",
+                          "Payment succeeded but booking could not be saved. Please contact support."
+                        );
+                        return;
+                      }
+
+                      navigate("/payment-success");
+                    } catch (err) {
+                      console.error("Booking creation error:", err);
                       showBanner(
                         "error",
-                        "Payment succeeded but booking could not be saved. Please contact support."
+                        "Payment succeeded but something went wrong saving your booking. Please contact support."
                       );
-                      return;
                     }
-
-                    navigate("/payment-success");
-                  } catch (err) {
-                    console.error("Booking creation error:", err);
+                  }}
+                  onError={(err) => {
+                    console.error(err);
                     showBanner(
                       "error",
-                      "Payment succeeded but something went wrong saving your booking. Please contact support."
+                      "PayPal could not process your payment. Please try again."
                     );
-                  }
-                }}
-                onError={(err) => {
-                  console.error(err);
-                  showBanner(
-                    "error",
-                    "PayPal could not process your payment. Please try again or use another card."
-                  );
-                }}
-              />
-            </PayPalScriptProvider>
+                  }}
+                />
+              </PayPalScriptProvider>
+            </div>
           </div>
         </div>
       </div>
