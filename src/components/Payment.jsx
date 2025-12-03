@@ -403,9 +403,7 @@ export default function Payment() {
             </button>
           </div>
 
-          {/* PayPal option - RESTRUCTURED */}
           <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-4 border border-sky-800/30 bg-[#0c162a]/80 rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(14,165,233,0.15)]">
-            {/* Left Side: Logo & Text */}
             <div className="flex items-center gap-4">
               <img
                 src="https://www.paypalobjects.com/webstatic/mktg/Logo/pp-logo-100px.png"
@@ -417,8 +415,6 @@ export default function Payment() {
               </p>
             </div>
 
-            {/* Right Side: The Buttons */}
-            {/* We constrain the width (w-40 or w-48) so it looks like a button */}
             <div className="w-full sm:w-48 relative z-0">
               <PayPalScriptProvider
                 options={{
