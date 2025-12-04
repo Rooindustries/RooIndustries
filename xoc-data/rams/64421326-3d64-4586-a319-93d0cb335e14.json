@@ -1,0 +1,32 @@
+{
+  "opendb_id": "64421326-3d64-4586-a319-93d0cb335e14",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "HP V10 RGB Silver / Black DDR4-3200 CL14 32GB (2x16GB)",
+    "manufacturer": "HP",
+    "part_numbers": [
+      "48U45AA#ABC"
+    ],
+    "series": "V10",
+    "variant": "3200 CL14"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "GREY",
+    "BLACK"
+  ],
+  "cas_latency": 14,
+  "timings": "14-14-14-34",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

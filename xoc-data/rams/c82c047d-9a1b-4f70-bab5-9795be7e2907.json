@@ -1,0 +1,33 @@
+{
+  "opendb_id": "c82c047d-9a1b-4f70-bab5-9795be7e2907",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Silicon Power DDR5 64GB (2x32GB) XPOWER Zenith 6000MHz CL30 White",
+    "manufacturer": "Silicon Power",
+    "part_numbers": [
+      "SU064GXLWU60AFDEBH"
+    ],
+    "series": "XPOWER Zenith",
+    "variant": "6000 CL30"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 30,
+  "timings": "30-38-38-96",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "height": 38.5,
+  "general_product_information": {
+    "manufacturer_url": "https://www.silicon-power.com/product-detail/XPOWER_Zenith_DDR5_Gaming_UDIMM/"
+  }
+}

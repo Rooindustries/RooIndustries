@@ -1,0 +1,35 @@
+{
+  "opendb_id": "6e633a97-ab51-42c4-a221-0ec9b37ee511",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Corsair Vengeance LP Black / Yellow DDR3-1600 CL10 16GB (2x8GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CML16GX3M2A1600C10"
+    ],
+    "series": "Vengeance",
+    "variant": "1600 CL10"
+  },
+  "speed": 1600,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 16,
+  "color": [
+    "BLACK",
+    "YELLOW"
+  ],
+  "cas_latency": 10,
+  "timings": "10-10-10-27",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B007TG8QRW",
+    "walmart_sku": 52944903
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "opendb_id": "dd95dbfd-bc3d-4f7f-b18e-34760bbc99c1",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws Black / Silver DDR5-4800 SODIMM CL34 32GB (2x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-4800S3434A16GA2-RS                                                    F5-4800S3434A16GX2-RS"
+    ],
+    "series": "Ripjaws",
+    "variant": "4800 CL34"
+  },
+  "speed": 4800,
+  "ram_type": "DDR5",
+  "form_factor": "262-pin SODIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 34,
+  "timings": "34-34-34-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0B1GMD6SB",
+    "newegg_sku": "N82E16820374388"
+  }
+}

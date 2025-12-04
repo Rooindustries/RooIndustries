@@ -1,0 +1,35 @@
+{
+  "opendb_id": "54c16ece-5711-4d41-af86-940895d23f4b",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z Royal Silver DDR4-3200 CL16 32GB (2x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-3200C16D-32GTRS"
+    ],
+    "series": "Trident",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "GREY"
+  ],
+  "cas_latency": 16,
+  "timings": "16-18-18-38",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B07N7SBSF4",
+    "newegg_sku": "N82E16820232795",
+    "walmart_sku": 902499301
+  }
+}

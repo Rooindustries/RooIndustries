@@ -1,0 +1,34 @@
+{
+  "opendb_id": "e831457f-8490-4700-be38-f334b261e767",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Vulcan Z Gray DDR4-4000 CL18 16GB (2x8GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TLZGD416G4000HC18JDC01"
+    ],
+    "series": "T-Force",
+    "variant": "4000 CL18"
+  },
+  "speed": 4000,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "GREY"
+  ],
+  "cas_latency": 18,
+  "timings": "18-22-22-42",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B09Y95QGCN",
+    "walmart_sku": 681496963
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "opendb_id": "3bd2e869-1d39-4be8-a3a5-a60ad705ccd6",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston FURY Beast Black / Silver DDR5-6000 CL40 16GB (1x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF560C40BB-16"
+    ],
+    "series": "FURY",
+    "variant": "6000 CL40"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 40,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B09N5HNT9C",
+    "newegg_sku": "9SIA12KJBX2236",
+    "walmart_sku": 848599644
+  }
+}

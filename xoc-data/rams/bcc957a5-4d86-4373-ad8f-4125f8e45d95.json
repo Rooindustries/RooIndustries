@@ -1,0 +1,33 @@
+{
+  "opendb_id": "bcc957a5-4d86-4373-ad8f-4125f8e45d95",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB DDR4 8GB (1x8GB) 3200MHz CL16 WHITE",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TF4D48G3200HC16F01"
+    ],
+    "series": "T-Force",
+    "variant": "Delta RGB White DDR4"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 8,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 16,
+  "timings": "16-20-20-40",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "manufacturer_url": "https://www.teamgroupinc.com/en/product-category/memory/desktop/?filter=ZmlsdGVyLTIyMT0yNTE4"
+  }
+}

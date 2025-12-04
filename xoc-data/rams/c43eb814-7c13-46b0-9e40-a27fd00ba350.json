@@ -1,0 +1,35 @@
+{
+  "opendb_id": "c43eb814-7c13-46b0-9e40-a27fd00ba350",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB RT DDR4-4600 CL18 32GB (2x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMN32GX4M2Z4600C18"
+    ],
+    "series": "Vengeance",
+    "variant": "4600 CL18"
+  },
+  "speed": 4600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "timings": "18-26-26-46",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B09C5TVH3V",
+    "newegg_sku": "N82E16820236792",
+    "walmart_sku": 906245792
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "opendb_id": "28517f34-feaf-4bdf-9231-a00c4f6e58ec",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Patriot Viper Elite II Red / Black DDR4-4000 CL20 16GB (1x16GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PVE2416G400C0"
+    ],
+    "series": "Viper",
+    "variant": "4000 CL20"
+  },
+  "speed": 4000,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "RED",
+    "BLACK"
+  ],
+  "cas_latency": 20,
+  "timings": "20-26-26-46",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0957X19RN",
+    "walmart_sku": 513107185
+  }
+}

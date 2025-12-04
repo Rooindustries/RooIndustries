@@ -1,0 +1,36 @@
+{
+  "opendb_id": "1e7ea9cc-8e5b-4d51-a516-b871f8b84d4e",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB Black DDR5-6000 CL30 64GB (2x32GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMH64GX5M2B6000Z30"
+    ],
+    "series": "Vengeance",
+    "variant": "6000 CL30"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 30,
+  "timings": "30-36-36-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0C5M9P5GK",
+    "newegg_sku": "N82E16820982027",
+    "bestbuy_sku": 6637757,
+    "walmart_sku": 2789268471
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "opendb_id": "55eb22bc-78d0-4269-a79d-7bfed09b902f",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Acer Predator Vesta II RGB Black DDR5-6000 CL34 32GB (2x16GB)",
+    "manufacturer": "Acer",
+    "part_numbers": [
+      "BL.9BWWR.370                                                    VESTA2-32GB-6800-1R8-V4"
+    ],
+    "series": "Predator",
+    "variant": "6000 CL34"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 34,
+  "timings": "34-45-45-108",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

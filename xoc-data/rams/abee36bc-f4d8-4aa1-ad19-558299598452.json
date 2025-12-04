@@ -1,0 +1,32 @@
+{
+  "opendb_id": "abee36bc-f4d8-4aa1-ad19-558299598452",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "PNY XLR8 Gaming RGB DDR5-6000 CL36 32GB (2x16GB)",
+    "manufacturer": "PNY",
+    "part_numbers": [
+      "MD32GK2D5600036XRGB"
+    ],
+    "series": "XLR8",
+    "variant": "6000 CL36"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 36,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "newegg_sku": "N82E16820177172"
+  }
+}

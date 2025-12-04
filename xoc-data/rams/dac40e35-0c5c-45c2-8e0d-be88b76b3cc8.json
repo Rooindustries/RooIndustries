@@ -1,0 +1,35 @@
+{
+  "opendb_id": "dac40e35-0c5c-45c2-8e0d-be88b76b3cc8",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z5 Royal Gold DDR5-7200 CL34 32GB (2x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-7200J3445G16GX2-TR5G"
+    ],
+    "series": "Trident",
+    "variant": "7200 CL34"
+  },
+  "speed": 7200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "GOLD"
+  ],
+  "cas_latency": 34,
+  "timings": "34-45-45-115",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0D7QY8919",
+    "newegg_sku": "N82E16820374603",
+    "walmart_sku": 7025620368
+  }
+}

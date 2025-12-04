@@ -1,0 +1,32 @@
+{
+  "opendb_id": "990793f6-94ab-4d7e-a7c4-2ef70e0859e3",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Klevv CRAS XR5 RGB White / Black DDR5-6000 CL32 32GB (2x16GB)",
+    "manufacturer": "Klevv",
+    "part_numbers": [
+      "KD5AGUA80-60A320S"
+    ],
+    "series": "CRAS",
+    "variant": "6000 CL32"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE",
+    "BLACK"
+  ],
+  "cas_latency": 32,
+  "timings": "32-38-38-78",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

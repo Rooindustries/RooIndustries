@@ -1,0 +1,37 @@
+{
+  "opendb_id": "b84aa92e-0bcd-40d2-a955-5bfabb70ba69",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "OLOy Black DDR4-3600 CL18 32GB (2x16GB) MD4U1636181CHKDA",
+    "manufacturer": "OLOy",
+    "part_numbers": [
+      "MD4U1636181CHKDA"
+    ],
+    "series": "MD4U1636181CHKDA",
+    "variant": "3600 CL18",
+    "releaseYear": 2020
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "timings": "18-22-22-42",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "height": 38.862,
+  "general_product_information": {
+    "amazon_sku": "B08543K4HY",
+    "newegg_sku": "N82E16820821222",
+    "manufacturer_url": "https://www.oloymemory.com/products.html"
+  }
+}

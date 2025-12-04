@@ -1,0 +1,29 @@
+{
+  "opendb_id": "d601d6ff-eb14-42b5-a916-9fa493351d15",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 64
+  },
+  "metadata": {
+    "name": "Kingston KSM26RD4/64HAR Registered DDR4-2666 CL19 64GB (1x64GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KSM26RD4",
+      "64HAR"
+    ],
+    "series": "KSM26RD4/64HAR",
+    "variant": "2666 CL19"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 64,
+  "color": [],
+  "cas_latency": 19,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {}
+}

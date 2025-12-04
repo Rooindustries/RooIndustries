@@ -1,0 +1,32 @@
+{
+  "opendb_id": "a93afd55-7d60-4276-b88e-a7c66ce9e050",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": " GIGASTONE Game PRO 64GB Kit (4x16GB) DDR4 3600 MHz CL18 BLACK",
+    "manufacturer": "Gigastone",
+    "series": "Game PRO",
+    "variant": "3600 CL18",
+    "part_numbers": []
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "timings": "18-22-22-42",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "height": 14.896,
+  "general_product_information": {
+    "amazon_sku": "B0DCBNHB3W",
+    "manufacturer_url": "https://www.gigastone.com/en/products-detail/47"
+  }
+}

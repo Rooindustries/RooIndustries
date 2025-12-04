@@ -1,0 +1,31 @@
+{
+  "opendb_id": "ac7fcf18-7707-4476-aaee-13955a6d08e1",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "GeIL Dragon White / Gold DDR4-3333 CL16 8GB (2x4GB)",
+    "manufacturer": "GeIL",
+    "part_numbers": [
+      "GWW48GB3333C16DC"
+    ],
+    "series": "Dragon",
+    "variant": "3333 CL16"
+  },
+  "speed": 3333,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 8,
+  "color": [
+    "WHITE",
+    "GOLD"
+  ],
+  "cas_latency": 16,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

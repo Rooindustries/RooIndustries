@@ -1,0 +1,33 @@
+{
+  "opendb_id": "16609a71-a47a-4085-9f24-0ce4ffe22ac0",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 24
+  },
+  "metadata": {
+    "name": "Corsair Dominator Titanium Black DDR5-7200 CL36 48GB (2x24GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMP48GX5M2X7200C36"
+    ],
+    "series": "Dominator",
+    "variant": "7200 CL36"
+  },
+  "speed": 7200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 48,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 36,
+  "timings": "36-46-46-116",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "newegg_sku": "N82E16820982072"
+  }
+}

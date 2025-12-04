@@ -1,0 +1,33 @@
+{
+  "opendb_id": "4c88611b-5419-4ae2-b174-4300cb74b2e8",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB Black DDR4-2666 CL18 32GB (1x32GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TF3D432G2666HC18H01"
+    ],
+    "series": "T-Force",
+    "variant": "2666 CL18"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "timings": "18-18-18-43",
+  "voltage": 1.2,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "manufacturer_url": "https://www.teamgroupinc.com/en/product-category/memory/desktop/?filter=ZmlsdGVyLTIyMT0yNTE4"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "opendb_id": "62802b95-2d60-4303-b25e-10e1f7148f70",
+  "modules": {
+    "quantity": 8,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "V-Color TRA516G68S834O Registered Black DDR5-6800 CL34 128GB (8x16GB)",
+    "manufacturer": "v-color",
+    "part_numbers": [
+      "TRA516G68S834O"
+    ],
+    "series": "TRA516G68S834O",
+    "variant": "6800 CL34"
+  },
+  "speed": 6800,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 128,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 34,
+  "timings": "34-46-46-92",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0CY57279Y",
+    "newegg_sku": "2SJ-004R-00049"
+  }
+}

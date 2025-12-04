@@ -1,0 +1,31 @@
+{
+  "opendb_id": "da177bd7-b25b-45a9-a8c9-8232c20a33a4",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Vulcan Z Gray DDR4-3200 CL16 8GB (1x8GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TLZGD48G3200HC16F01"
+    ],
+    "series": "T-Force",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 8,
+  "color": [
+    "GREY"
+  ],
+  "cas_latency": 16,
+  "timings": "16-20-20-40",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

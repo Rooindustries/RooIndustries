@@ -1,0 +1,34 @@
+{
+  "opendb_id": "7278b984-63fb-4306-9b28-ac1cb762d539",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 64
+  },
+  "metadata": {
+    "name": "Kingston KTH-PL426LQ/64G Green / Black Registered DDR4-2666 CL19 64GB (1x64GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KTH-PL426LQ",
+      "64G"
+    ],
+    "series": "KTH-PL426LQ/64G",
+    "variant": "2666 CL19"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 64,
+  "color": [
+    "GREEN",
+    "BLACK"
+  ],
+  "cas_latency": 19,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B075L85P41"
+  }
+}

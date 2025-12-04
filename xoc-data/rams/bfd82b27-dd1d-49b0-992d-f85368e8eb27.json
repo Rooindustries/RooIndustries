@@ -1,0 +1,34 @@
+{
+  "opendb_id": "bfd82b27-dd1d-49b0-992d-f85368e8eb27",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Kingston FURY Beast RGB Black DDR5-5200 CL36 16GB (2x8GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF552C36BBEAK2-16"
+    ],
+    "series": "FURY",
+    "variant": "5200 CL36"
+  },
+  "speed": 5200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 36,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0BRTKH5R9",
+    "newegg_sku": "0RN-001J-014H7",
+    "walmart_sku": 2949075736
+  }
+}

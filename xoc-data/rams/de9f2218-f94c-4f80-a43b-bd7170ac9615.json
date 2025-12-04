@@ -1,0 +1,34 @@
+{
+  "opendb_id": "de9f2218-f94c-4f80-a43b-bd7170ac9615",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "TeamGroup T-Force DELTA RGB DDR4 64GB(2x32GB)\t3000MHz CL16",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TF3D464G3000HC16CDC01\t"
+    ],
+    "series": "T-Force",
+    "variant": "Delta RGB BLACK DDR4"
+  },
+  "speed": 3000,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "voltage": 1.35,
+  "heat_spreader": true,
+  "height": 49,
+  "timings": "16-18-18-38",
+  "general_product_information": {
+    "amazon_sku": "B0937GY2LV",
+    "newegg_sku": "N82E16820331858",
+    "walmart_sku": 267702303,
+    "manufacturer_url": "https://www.teamgroupinc.com/en/product-category/memory/desktop/?filter=ZmlsdGVyLTIyMT0yNTE4"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "opendb_id": "a6008e60-a0f2-4e1a-a09f-3604923c7f94",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston FURY Impact Black DDR5-6400 SODIMM CL38 16GB (1x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF564S38IB-16"
+    ],
+    "series": "FURY",
+    "variant": "6400 CL38"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "262-pin SODIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 38,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0C3HTXDDB"
+  }
+}

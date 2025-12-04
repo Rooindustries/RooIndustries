@@ -1,0 +1,32 @@
+{
+  "opendb_id": "3e99548c-2166-4997-a95e-ec5c21dd753b",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Apacer Panther RGB Silver / Black DDR5-5200 CL38 32GB (2x16GB)",
+    "manufacturer": "Apacer",
+    "part_numbers": [
+      "AH5U32G52C5029BAA-2"
+    ],
+    "series": "Panther",
+    "variant": "5200 CL38"
+  },
+  "speed": 5200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "GREY",
+    "BLACK"
+  ],
+  "cas_latency": 38,
+  "timings": "38-38-38-84",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

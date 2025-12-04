@@ -1,0 +1,36 @@
+{
+  "opendb_id": "415a7e5b-fb9b-4b9b-a643-3855850d07e0",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws M5 RGB White DDR5-6000 CL30 64GB (2x32GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-6000J3040G32GX2-RM5RW"
+    ],
+    "series": "Ripjaws",
+    "variant": "6000 CL30"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 30,
+  "timings": "30-40-40-96",
+  "voltage": 1.4,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0D4TDGNB7",
+    "newegg_sku": "N82E16820374561",
+    "walmart_sku": 6057600156,
+    "manufacturer_url": "https://www.gskill.com/products/3/165/Desktop-Memory-U-DIMM-CU-DIMM"
+  }
+}

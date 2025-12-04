@@ -1,0 +1,35 @@
+{
+  "opendb_id": "2573b64b-6a26-41da-ad31-bcbe8a92335f",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Patriot Viper Steel RGB Black DDR4-3200 CL18 64GB (2x32GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PVSR464G320C8K"
+    ],
+    "series": "Viper",
+    "variant": "3200 CL18"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "timings": "18-22-22-42",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B08N68SS6T",
+    "newegg_sku": "N82E16820225255",
+    "walmart_sku": 670420209
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "opendb_id": "1fb0770b-45b3-48a0-afb8-43558dad9597",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Crucial CT2K32G3ELSLQ4160B Blue / Silver DDR3-1600 CL11 64GB (2x32GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "CT2K32G3ELSLQ4160B"
+    ],
+    "series": "CT2K32G3ELSLQ4160B",
+    "variant": "1600 CL11"
+  },
+  "speed": 1600,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 64,
+  "color": [
+    "BLUE",
+    "GREY"
+  ],
+  "cas_latency": 11,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

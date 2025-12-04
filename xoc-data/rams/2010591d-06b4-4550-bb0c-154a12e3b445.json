@@ -1,0 +1,35 @@
+{
+  "opendb_id": "2010591d-06b4-4550-bb0c-154a12e3b445",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Silicon Power XPOWER Zenith RGB Gaming White DDR5-6000 CL30 32GB (2x16GB)",
+    "manufacturer": "Silicon Power",
+    "part_numbers": [
+      "SP032GXLWU60AFDH"
+    ],
+    "series": "XPOWER Zenith RGB",
+    "variant": "6000 CL30"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 30,
+  "timings": "30-38-38-96",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "height": 38.6,
+  "general_product_information": {
+    "amazon_sku": "B0CLVBQWDL",
+    "manufacturer_url": "https://www.silicon-power.com/product-detail/XPOWER_Zenith_DDR5_RGB_Gaming_UDIMM/"
+  }
+}

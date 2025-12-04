@@ -1,0 +1,33 @@
+{
+  "opendb_id": "7130fa01-9d39-42cc-b66e-e5f56558075a",
+  "modules": {
+    "quantity": 8,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB Pro Black DDR4-3000 CL16 256GB (8x32GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMW256GX4M8D3000C16"
+    ],
+    "series": "Vengeance",
+    "variant": "3000 CL16"
+  },
+  "speed": 3000,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 256,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "timings": "16-20-20-38",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B08354MJ8X"
+  }
+}

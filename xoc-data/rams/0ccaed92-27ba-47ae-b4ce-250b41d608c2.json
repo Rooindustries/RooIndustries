@@ -1,0 +1,30 @@
+{
+  "opendb_id": "0ccaed92-27ba-47ae-b4ce-250b41d608c2",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "G.Skill Value Green DDR3-1333 CL9 8GB (2x4GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F3-10600CL9D-8GBNT"
+    ],
+    "series": "Value",
+    "variant": "1333 CL9"
+  },
+  "speed": 1333,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 8,
+  "color": [
+    "GREEN"
+  ],
+  "cas_latency": 9,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {}
+}

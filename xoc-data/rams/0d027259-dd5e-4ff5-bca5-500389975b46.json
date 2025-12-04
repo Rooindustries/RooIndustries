@@ -1,0 +1,31 @@
+{
+  "opendb_id": "0d027259-dd5e-4ff5-bca5-500389975b46",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Klevv Urbane V RGB White DDR5-6000 CL30 64GB (2x32GB)",
+    "manufacturer": "Klevv",
+    "part_numbers": [
+      "KD5BGUA80-60A300M"
+    ],
+    "series": "Urbane",
+    "variant": "6000 CL30"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 30,
+  "timings": "30-36-36-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

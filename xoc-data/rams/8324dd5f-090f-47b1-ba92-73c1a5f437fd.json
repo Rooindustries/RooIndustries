@@ -1,0 +1,32 @@
+{
+  "opendb_id": "8324dd5f-090f-47b1-ba92-73c1a5f437fd",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "ADATA XPG LANCER RGB White 64GB (2x32GB) DDR5 6000 CL30",
+    "manufacturer": "ADATA",
+    "part_numbers": [
+      "AX5U6000C3032G-DCLARWH"
+    ],
+    "series": "XPG Lancer",
+    "variant": "6000 CL30"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 30,
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0C69Z1VHQ"
+  }
+}

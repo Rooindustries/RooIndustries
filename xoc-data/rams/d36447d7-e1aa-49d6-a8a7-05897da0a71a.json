@@ -1,0 +1,36 @@
+{
+  "opendb_id": "d36447d7-e1aa-49d6-a8a7-05897da0a71a",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "GIGASTONE Game PRO 16GB Kit (2x8GB) DDR4 3200MHz CL16 WHITE",
+    "manufacturer": "Gigastone",
+    "part_numbers": [
+      "DDR4-3200-8U-2-GST-Game Pro-White"
+    ],
+    "series": "Game PRO",
+    "variant": "3200 CL16",
+    "releaseYear": null
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 16,
+  "timings": "16-18-18-38",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "height": 14.986,
+  "general_product_information": {
+    "amazon_sku": "B0CB2VNFDH",
+    "newegg_sku": "9SIAGDFK6H9739",
+    "manufacturer_url": "https://www.gigastone.com/en/products-detail/47"
+  }
+}

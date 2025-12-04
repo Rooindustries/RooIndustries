@@ -1,0 +1,33 @@
+{
+  "opendb_id": "ae4d587f-532f-486e-8faa-5e76a6ace1f1",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Kingston ValueRAM DDR4-3200 CL22 8GB (1x8GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KVR32N22S8",
+      "8"
+    ],
+    "series": "ValueRAM",
+    "variant": "3200 CL22"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 8,
+  "color": [],
+  "cas_latency": 22,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B07V4JD9SV",
+    "newegg_sku": "0RN-00F1-00065",
+    "walmart_sku": 706170934
+  }
+}

@@ -51,7 +51,7 @@ export default function Packages() {
             >
               {p.tag && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                  <span className="bg-sky-500 text-xs font-bold px-4 py-1 rounded-full shadow-[0_0_15px_rgba(56,189,248,0.6)]">
+                  <span className="inline-block whitespace-nowrap bg-sky-500 text-xs font-bold px-4 py-1 rounded-full shadow-[0_0_15px_rgba(56,189,248,0.6)]">
                     {p.tag}
                   </span>
                 </div>

@@ -1,0 +1,33 @@
+{
+  "opendb_id": "6b847347-1cc1-45e5-9109-5d3f21f818d8",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z Royal Elite Silver DDR4-3600 CL16 16GB (2x8GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-3600C16D-16GTESC"
+    ],
+    "series": "Trident",
+    "variant": "3600 CL16"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "GREY"
+  ],
+  "cas_latency": 16,
+  "timings": "16-19-19-39",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B09FWS11QT"
+  }
+}

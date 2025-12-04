@@ -1,0 +1,34 @@
+{
+  "opendb_id": "900b7f3e-7531-4f59-b74d-fbe308c7d9bf",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 48
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z5 Neo RGB Silver / Black DDR5-6000 CL26 96GB (2x48GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-6000J2636H48GX2-TZ5NRW"
+    ],
+    "series": "Trident",
+    "variant": "6000 CL26"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 96,
+  "color": [
+    "GREY",
+    "BLACK"
+  ],
+  "cas_latency": 26,
+  "timings": "26-36-36-96",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "newegg_sku": "N82E16820374759"
+  }
+}

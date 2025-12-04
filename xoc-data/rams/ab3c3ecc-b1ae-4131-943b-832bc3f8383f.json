@@ -1,0 +1,34 @@
+{
+  "opendb_id": "ab3c3ecc-b1ae-4131-943b-832bc3f8383f",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "G.Skill Trident X Black / Red DDR3-2400 CL10 32GB (4x8GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F3-2400C10Q-32GTX"
+    ],
+    "series": "Trident",
+    "variant": "2400 CL10"
+  },
+  "speed": 2400,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "RED"
+  ],
+  "cas_latency": 10,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0080GKCV8",
+    "walmart_sku": 131988036
+  }
+}

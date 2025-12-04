@@ -1,0 +1,34 @@
+{
+  "opendb_id": "ad02512b-d8c2-4c38-b5f3-95351e15be99",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Kingston FURY Renegade Pro Black Registered DDR5-6800 CL34 128GB (4x32GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF568R34RB2K4-128"
+    ],
+    "series": "FURY",
+    "variant": "6800 CL34"
+  },
+  "speed": 6800,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 128,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 34,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0CVRXD884",
+    "newegg_sku": "N82E16820242854",
+    "walmart_sku": 5475914660
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "opendb_id": "6174dc1b-a2af-4ca2-8ba4-80aa5b8e9dd1",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Crucial CT2K8G4DFS8266 Green DDR4-2666 CL19 16GB (2x8GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "CT2K8G4DFS8266"
+    ],
+    "series": "CT2K8G4DFS8266",
+    "variant": "2666 CL19"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "GREEN"
+  ],
+  "cas_latency": 19,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0734WQXT6",
+    "walmart_sku": 720017542
+  }
+}

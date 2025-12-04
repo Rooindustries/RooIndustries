@@ -1,0 +1,35 @@
+{
+  "opendb_id": "05934359-fa05-4878-9ab5-c4006557b0f9",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Thermaltake TOUGHRAM XG RGB Black / Silver DDR4-4400 CL19 16GB (2x8GB)",
+    "manufacturer": "Thermaltake",
+    "part_numbers": [
+      "R016D408GX2-4400C19A"
+    ],
+    "series": "TOUGHRAM",
+    "variant": "4400 CL19"
+  },
+  "speed": 4400,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 19,
+  "timings": "19-25-25-45",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B08XWKK7G4",
+    "newegg_sku": "0RN-009B-00085"
+  }
+}

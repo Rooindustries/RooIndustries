@@ -1,0 +1,33 @@
+{
+  "opendb_id": "ec1cade8-fa01-4f2b-8c6b-1072473fb0d4",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Xtreem ARGB White DDR4-3200 CL14 16GB (2x8GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TF13D416G3200HC14BDC01"
+    ],
+    "series": "T-Force",
+    "variant": "3200 CL14"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 14,
+  "timings": "14-14-14-34",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B08T1KPB52"
+  }
+}

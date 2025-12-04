@@ -1,0 +1,34 @@
+{
+  "opendb_id": "107f911e-0c72-4634-9676-5adc57cbae70",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Patriot Venom Black DDR5-6000 CL30 64GB (2x32GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PVV564G600C30K"
+    ],
+    "series": "Venom",
+    "variant": "6000 CL30"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 30,
+  "timings": "30-40-40-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0D4NLY7ZY",
+    "newegg_sku": "N82E16820225339"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "opendb_id": "a2a6a444-a528-4c3f-a04b-92a0eb98aaf0",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston FURY Renegade Silver / White DDR5-8000 CL38 32GB (2x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF580C38RWK2-32"
+    ],
+    "series": "FURY",
+    "variant": "8000 CL38"
+  },
+  "speed": 8000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE",
+    "GREY"
+  ],
+  "cas_latency": 38,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0CKZ8M4M8",
+    "newegg_sku": "N82E16820242859",
+    "walmart_sku": 5136680099
+  }
+}

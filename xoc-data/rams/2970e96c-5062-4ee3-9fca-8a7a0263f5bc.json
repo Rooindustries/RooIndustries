@@ -1,0 +1,31 @@
+{
+  "opendb_id": "2970e96c-5062-4ee3-9fca-8a7a0263f5bc",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB DDR5-7000 CL32 32GB (2x16GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "FF4D532G7000HC32CDC01"
+    ],
+    "series": "T-Force",
+    "variant": "7000 CL32"
+  },
+  "speed": 7000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 32,
+  "timings": "32-42-42-84",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

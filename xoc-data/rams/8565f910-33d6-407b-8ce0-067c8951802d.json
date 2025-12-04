@@ -1,0 +1,31 @@
+{
+  "opendb_id": "8565f910-33d6-407b-8ce0-067c8951802d",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "GeIL ORION V Red DDR5-8000 CL38 32GB (2x16GB)",
+    "manufacturer": "GeIL",
+    "part_numbers": [
+      "GVR532GB8000C38ADC"
+    ],
+    "series": "ORION",
+    "variant": "8000 CL38"
+  },
+  "speed": 8000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "RED"
+  ],
+  "cas_latency": 38,
+  "timings": "38-48-48-100",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

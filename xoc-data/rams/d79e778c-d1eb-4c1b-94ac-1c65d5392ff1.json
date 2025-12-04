@@ -1,0 +1,34 @@
+{
+  "opendb_id": "d79e778c-d1eb-4c1b-94ac-1c65d5392ff1",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Crucial Ballistix Sport AT Silver / Black DDR4-2666 CL16 16GB (1x16GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "BLS16G4D26BFST"
+    ],
+    "series": "Ballistix",
+    "variant": "2666 CL16"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "GREY",
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B07F6JCHQ4",
+    "newegg_sku": "9SIAKXTBWT8936"
+  }
+}

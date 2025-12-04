@@ -1,0 +1,33 @@
+{
+  "opendb_id": "fbde78ba-ab4d-444d-b134-3143b409bab1",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Kingston FURY Beast RGB Black DDR5-6000 CL30 8GB (1x8GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF560C30BBEA-8"
+    ],
+    "series": "FURY",
+    "variant": "6000 CL30"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 8,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 30,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0CYM3TYCR",
+    "walmart_sku": 5559167802
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "opendb_id": "036150d0-853f-4be1-9e2f-57ed32bb1095",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Mushkin Redline Lumina White DDR4-3600 CL16 32GB (2x16GB)",
+    "manufacturer": "Mushkin",
+    "part_numbers": [
+      "MLB4C360GKKP16GX2"
+    ],
+    "series": "Redline",
+    "variant": "3600 CL16"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 16,
+  "timings": "16-19-19-39",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B09LSXBNY7",
+    "walmart_sku": 5308164884
+  }
+}

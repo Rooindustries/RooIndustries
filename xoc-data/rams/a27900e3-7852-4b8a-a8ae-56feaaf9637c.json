@@ -1,0 +1,34 @@
+{
+  "opendb_id": "a27900e3-7852-4b8a-a8ae-56feaaf9637c",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 64
+  },
+  "metadata": {
+    "name": "Corsair Vengeance Black DDR5-6400 CL42 128GB (2x64GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMK128GX5M2B6400C42"
+    ],
+    "series": "Vengeance",
+    "variant": "6400 CL42"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 128,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 42,
+  "timings": "42-52-52-104",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0F943FMNC",
+    "newegg_sku": "N82E16820982274"
+  }
+}

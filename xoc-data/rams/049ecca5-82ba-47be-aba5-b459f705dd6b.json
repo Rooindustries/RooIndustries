@@ -1,0 +1,34 @@
+{
+  "opendb_id": "049ecca5-82ba-47be-aba5-b459f705dd6b",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Silicon Power DDR5 32GB (2x16GB) Zenith RGB 6000MHz CL40 WHITE",
+    "manufacturer": "Silicon Power",
+    "part_numbers": [
+      "SP032GXLWU600FSH"
+    ],
+    "series": "XPOWER Zenith RGB",
+    "variant": "6000 CL40"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-76",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "height": 38.6,
+  "general_product_information": {
+    "manufacturer_url": "https://www.silicon-power.com/product-detail/XPOWER_Zenith_DDR5_RGB_Gaming_UDIMM/"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "opendb_id": "bd7a4b4b-8ecf-4910-8571-6bd7387cbf8a",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Silicon Power DDR5 64GB (2x32GB) Zenith RGB 6000MHz CL30 BLACK",
+    "manufacturer": "Silicon Power",
+    "part_numbers": [
+      "SU064GXLWU60AFDFAB"
+    ],
+    "series": "XPOWER Zenith RGB",
+    "variant": "CL30 6000"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 30,
+  "timings": "30-38-38-96",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "height": 38.5,
+  "general_product_information": {
+    "walmart_sku": 17897523881,
+    "manufacturer_url": "https://www.silicon-power.com/en/product-detail/XPOWER_Zenith_DDR5_RGB_Gaming_UDIMM/"
+  }
+}

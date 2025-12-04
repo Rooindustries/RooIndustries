@@ -1,0 +1,36 @@
+{
+  "opendb_id": "cd2a0bff-347e-4ff8-afd8-c9c45f12f16d",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Patriot Viper Venom RGB Black / White DDR5-6200 CL40 32GB (2x16GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PVVR532G620C40K"
+    ],
+    "series": "Viper",
+    "variant": "6200 CL40"
+  },
+  "speed": 6200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "WHITE"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B09XYTJ9ZH",
+    "newegg_sku": "N82E16820225311",
+    "walmart_sku": 2113355911
+  }
+}

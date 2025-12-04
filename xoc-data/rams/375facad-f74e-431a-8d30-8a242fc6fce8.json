@@ -1,0 +1,33 @@
+{
+  "opendb_id": "375facad-f74e-431a-8d30-8a242fc6fce8",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "G.Skill Sniper Black / Red DDR3-2400 CL11 8GB (2x4GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F3-2400C11D-8GSR"
+    ],
+    "series": "Sniper",
+    "variant": "2400 CL11"
+  },
+  "speed": 2400,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 8,
+  "color": [
+    "BLACK",
+    "RED"
+  ],
+  "cas_latency": 11,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B00CKNL310"
+  }
+}

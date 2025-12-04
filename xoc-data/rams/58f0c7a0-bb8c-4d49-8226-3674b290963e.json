@@ -1,0 +1,32 @@
+{
+  "opendb_id": "58f0c7a0-bb8c-4d49-8226-3674b290963e",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Gigabyte GP-GR26C16S8K2HU416 Black / White DDR4-2666 CL16 16GB (2x8GB)",
+    "manufacturer": "GIGABYTE",
+    "part_numbers": [
+      "GP-GR26C16S8K2HU416"
+    ],
+    "series": "GP-GR26C16S8K2HU416",
+    "variant": "2666 CL16"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK",
+    "WHITE"
+  ],
+  "cas_latency": 16,
+  "timings": "16-16-16-35",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

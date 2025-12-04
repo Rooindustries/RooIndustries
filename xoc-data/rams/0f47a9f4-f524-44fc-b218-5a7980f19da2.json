@@ -1,0 +1,35 @@
+{
+  "opendb_id": "0f47a9f4-f524-44fc-b218-5a7980f19da2",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 48
+  },
+  "metadata": {
+    "name": "Corsair Vengeance Black / Silver DDR5-6600 CL32 96GB (2x48GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMK96GX5M2B6600C32"
+    ],
+    "series": "Vengeance",
+    "variant": "6600 CL32"
+  },
+  "speed": 6600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 96,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 32,
+  "timings": "32-39-39-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0CCXVXYQW",
+    "newegg_sku": "N82E16820982057"
+  }
+}

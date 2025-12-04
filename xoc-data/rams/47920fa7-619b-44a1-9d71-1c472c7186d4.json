@@ -1,0 +1,34 @@
+{
+  "opendb_id": "47920fa7-619b-44a1-9d71-1c472c7186d4",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Patriot Viper Elite 5 RGB White DDR5-6200 CL42 64GB (2x32GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PVER564G62C42KW"
+    ],
+    "series": "Viper",
+    "variant": "6200 CL42"
+  },
+  "speed": 6200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 42,
+  "timings": "42-46-46-86",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0CBMQLDWZ",
+    "newegg_sku": "N82E16820225331"
+  }
+}

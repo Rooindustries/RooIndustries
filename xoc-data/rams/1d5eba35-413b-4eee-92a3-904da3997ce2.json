@@ -1,0 +1,34 @@
+{
+  "opendb_id": "1d5eba35-413b-4eee-92a3-904da3997ce2",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Silicon Power GAMING Red / Black DDR4-3200 CL16 32GB (2x16GB)",
+    "manufacturer": "Silicon Power",
+    "part_numbers": [
+      "SP032GXLZU320FDAAD"
+    ],
+    "series": "GAMING",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "RED",
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "timings": "16-18-18-38",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B095HTC9S6"
+  }
+}

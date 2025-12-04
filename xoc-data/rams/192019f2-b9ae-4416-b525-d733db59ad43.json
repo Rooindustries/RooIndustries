@@ -1,0 +1,35 @@
+{
+  "opendb_id": "192019f2-b9ae-4416-b525-d733db59ad43",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Kingston HyperX Fury Black / Silver DDR4-3600 CL18 64GB (2x32GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "HX436C18FB3K2",
+      "64"
+    ],
+    "series": "HyperX",
+    "variant": "3600 CL18"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 64,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 18,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B089QV3HX2",
+    "walmart_sku": 406933818
+  }
+}

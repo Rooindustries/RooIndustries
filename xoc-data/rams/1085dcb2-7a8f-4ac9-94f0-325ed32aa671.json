@@ -1,0 +1,36 @@
+{
+  "opendb_id": "1085dcb2-7a8f-4ac9-94f0-325ed32aa671",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Vengeance Black DDR5-6600 CL32 64GB (4x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMK64GX5M4B6600C32"
+    ],
+    "series": "Vengeance",
+    "variant": "6600 CL32"
+  },
+  "speed": 6600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 32,
+  "timings": "32-39-39-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0BVKY252S",
+    "newegg_sku": "N82E16820236963",
+    "walmart_sku": 1076548562
+  }
+}

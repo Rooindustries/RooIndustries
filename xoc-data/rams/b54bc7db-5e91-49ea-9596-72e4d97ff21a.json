@@ -1,0 +1,34 @@
+{
+  "opendb_id": "b54bc7db-5e91-49ea-9596-72e4d97ff21a",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston FURY Beast RGB White DDR5-6400 CL32 32GB (2x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF564C32BWEAK2-32"
+    ],
+    "series": "FURY",
+    "variant": "6400 CL32"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 32,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0CYM28H35",
+    "newegg_sku": "N82E16820242871",
+    "walmart_sku": 5595364627
+  }
+}

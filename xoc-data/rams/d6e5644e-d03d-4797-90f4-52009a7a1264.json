@@ -1,0 +1,32 @@
+{
+  "opendb_id": "d6e5644e-d03d-4797-90f4-52009a7a1264",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Kingston ValueRAM DDR4-3200 CL22 32GB (1x32GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KVR32N22D8",
+      "32"
+    ],
+    "series": "ValueRAM",
+    "variant": "3200 CL22"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [],
+  "cas_latency": 22,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B084GKDJ6M",
+    "newegg_sku": "1B4-00M4-003S6"
+  }
+}

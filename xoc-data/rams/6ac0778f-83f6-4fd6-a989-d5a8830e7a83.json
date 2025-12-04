@@ -1,0 +1,35 @@
+{
+  "opendb_id": "6ac0778f-83f6-4fd6-a989-d5a8830e7a83",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z RGB Black DDR4-3600 CL18 128GB (4x32GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-3600C18Q-128GTZR"
+    ],
+    "series": "Trident",
+    "variant": "3600 CL18"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 128,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "timings": "18-22-22-42",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B08924XR69",
+    "newegg_sku": "N82E16820232992",
+    "walmart_sku": 590956149
+  }
+}

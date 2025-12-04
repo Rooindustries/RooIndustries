@@ -1,0 +1,34 @@
+{
+  "opendb_id": "d04dd981-e1e8-45a0-84c5-66fb32ddfd69",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "V-Color TRA516G76S838Q Registered White DDR5-7600 CL38 64GB (4x16GB)",
+    "manufacturer": "v-color",
+    "part_numbers": [
+      "TRA516G76S838Q"
+    ],
+    "series": "TRA516G76S838Q",
+    "variant": "7600 CL38"
+  },
+  "speed": 7600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 38,
+  "timings": "38-48-48-122",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0CSK267LH",
+    "newegg_sku": "2SJ-004R-00038"
+  }
+}

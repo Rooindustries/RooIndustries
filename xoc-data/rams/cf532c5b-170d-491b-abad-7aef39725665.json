@@ -1,0 +1,34 @@
+{
+  "opendb_id": "cf532c5b-170d-491b-abad-7aef39725665",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Silicon Power XPOWER Zenith RGB Gaming Black DDR5-6000 CL30 64GB (2x32GB)",
+    "manufacturer": "Silicon Power",
+    "part_numbers": [
+      "SP064GXLWU60AFDF"
+    ],
+    "series": "XPOWER",
+    "variant": "6000 CL30"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 30,
+  "timings": "30-38-38-96",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "height": 38.5,
+  "general_product_information": {
+    "amazon_sku": "B0CLVCR3N4"
+  }
+}

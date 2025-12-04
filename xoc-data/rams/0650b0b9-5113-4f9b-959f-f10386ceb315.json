@@ -1,0 +1,35 @@
+{
+  "opendb_id": "0650b0b9-5113-4f9b-959f-f10386ceb315",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z5 RGB Black / Silver DDR5-6800 CL34 32GB (2x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-6800J3445G16GX2-TZ5RK"
+    ],
+    "series": "Trident",
+    "variant": "6800 CL34"
+  },
+  "speed": 6800,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 34,
+  "timings": "34-45-45-108",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0BJ7Y3V6W",
+    "newegg_sku": "N82E16820374434"
+  }
+}

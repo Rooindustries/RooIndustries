@@ -1,0 +1,34 @@
+{
+  "opendb_id": "04177551-f58f-49ff-8056-dd209c49a79c",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Patriot Viper Elite 5 RGB DDR5-6000 CL42 32GB (1x32GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PVER532G60C42W"
+    ],
+    "series": "Viper",
+    "variant": "6000 CL42"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 42,
+  "timings": "42-42-42-82",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0CC3WQHWS",
+    "newegg_sku": "N82E16820225325"
+  }
+}

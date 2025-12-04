@@ -1,0 +1,35 @@
+{
+  "opendb_id": "220a5fa7-a83b-41cc-bcf3-414937b022a5",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB DDR5-6600 CL34 32GB (2x16GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "FF4D532G6600HC34DC01"
+    ],
+    "series": "T-Force",
+    "variant": "6600 CL34"
+  },
+  "speed": 6600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 34,
+  "timings": "34-40-40-84",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0BR911184",
+    "newegg_sku": "N82E16820331977",
+    "walmart_sku": 3424330444
+  }
+}

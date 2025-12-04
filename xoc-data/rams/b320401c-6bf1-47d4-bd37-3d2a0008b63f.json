@@ -1,0 +1,35 @@
+{
+  "opendb_id": "b320401c-6bf1-47d4-bd37-3d2a0008b63f",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB Black DDR5-6000 CL38 64GB (2x32GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "FF3D564G6000HC38GDC01"
+    ],
+    "series": "T-Force",
+    "variant": "6000 CL38"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 38,
+  "timings": "38-46-46-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0D8BB3DV5",
+    "newegg_sku": "N82E16820985219",
+    "walmart_sku": 1040334239
+  }
+}

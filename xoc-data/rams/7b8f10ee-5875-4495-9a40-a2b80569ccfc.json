@@ -1,0 +1,34 @@
+{
+  "opendb_id": "7b8f10ee-5875-4495-9a40-a2b80569ccfc",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws M5 RGB DDR5-6000 CL36 32GB (2x16GB) White",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-6000J3648D16GX2-RM5RW"
+    ],
+    "series": "Ripjaws",
+    "variant": "M5 RGB"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 36,
+  "timings": "36-48-48-96",
+  "voltage": 1.25,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0DDXFC63M",
+    "manufacturer_url": "https://www.gskill.com/product/165/421/1719298353/F5-6000J3648D16GX2-RM5RW"
+  }
+}

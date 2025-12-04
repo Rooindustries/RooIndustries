@@ -1,0 +1,31 @@
+{
+  "opendb_id": "911a845e-0658-4be7-9a1d-46f8f971dd34",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Patriot Viper 4 Blackout DDR4-3600 CL17 16GB (2x8GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PVB416G360C7K"
+    ],
+    "series": "Viper",
+    "variant": "3600 CL17"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 17,
+  "timings": "17-19-19-39",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

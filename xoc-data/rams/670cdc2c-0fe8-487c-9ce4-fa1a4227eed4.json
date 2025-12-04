@@ -1,0 +1,35 @@
+{
+  "opendb_id": "670cdc2c-0fe8-487c-9ce4-fa1a4227eed4",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 48
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB Black DDR5-5200 CL38 192GB (4x48GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMH192GX5M4B5200C38"
+    ],
+    "series": "Vengeance",
+    "variant": "5200 CL38"
+  },
+  "speed": 5200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 192,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 38,
+  "timings": "38-38-38-84",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0BY6Y85PZ",
+    "newegg_sku": "N82E16820236983",
+    "walmart_sku": 2172925933
+  }
+}

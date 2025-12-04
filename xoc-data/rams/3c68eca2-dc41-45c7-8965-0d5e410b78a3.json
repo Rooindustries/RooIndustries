@@ -1,0 +1,35 @@
+{
+  "opendb_id": "3c68eca2-dc41-45c7-8965-0d5e410b78a3",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Patriot Viper Red / Black DDR4-2666 CL16 16GB (1x16GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PVE2416G266C6"
+    ],
+    "series": "Viper",
+    "variant": "2666 CL16"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "RED",
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "timings": "16-17-17-36",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0957YPRDM",
+    "walmart_sku": 652176928
+  }
+}

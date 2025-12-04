@@ -1,0 +1,31 @@
+{
+  "opendb_id": "9b5dbd0b-b1e8-435e-947d-aeec9279df5c",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z RGB Black DDR4-5066 CL20 16GB (2x8GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-5066C20D-16GTZR"
+    ],
+    "series": "Trident",
+    "variant": "5066 CL20"
+  },
+  "speed": 5066,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 20,
+  "timings": "20-30-30-50",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

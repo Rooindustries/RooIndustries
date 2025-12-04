@@ -1,0 +1,36 @@
+{
+  "opendb_id": "a9f470c2-f4b3-4fad-bfeb-bbd180bac8e9",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z Neo Black / Silver DDR4-3600 CL16 32GB (2x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-3600C16D-32GTZNC"
+    ],
+    "series": "Trident",
+    "variant": "3600 CL16"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 16,
+  "timings": "16-19-19-39",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B07WTS8T2W",
+    "newegg_sku": "N82E16820232861",
+    "walmart_sku": 863150788
+  }
+}

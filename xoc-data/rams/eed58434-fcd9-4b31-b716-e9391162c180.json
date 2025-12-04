@@ -1,0 +1,36 @@
+{
+  "opendb_id": "eed58434-fcd9-4b31-b716-e9391162c180",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Kingston HyperX Fury Black / Silver DDR4-3200 CL18 8GB (1x8GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "HX432C18FB2",
+      "8"
+    ],
+    "series": "HyperX",
+    "variant": "3200 CL18"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 8,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 18,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B07WJJ9CNG",
+    "newegg_sku": "9SIBM1SKAH7682",
+    "walmart_sku": 316097119
+  }
+}

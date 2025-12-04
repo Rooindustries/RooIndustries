@@ -1,0 +1,33 @@
+{
+  "opendb_id": "c70a7fc5-1a82-43f9-b176-40dd238bbe78",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Kingston ValueRAM SODIMM DDR4-3200 CL22 32GB (1x32GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KVR32S22D8",
+      "32"
+    ],
+    "series": "ValueRAM",
+    "variant": "3200 CL22"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "260-pin SODIMM (DDR4)",
+  "capacity": 32,
+  "color": [],
+  "cas_latency": 22,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B08K5H4HBQ",
+    "newegg_sku": "N82E16820242587",
+    "walmart_sku": 995774123
+  }
+}

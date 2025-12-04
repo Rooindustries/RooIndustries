@@ -1,0 +1,31 @@
+{
+  "opendb_id": "79fb5043-f3b8-4eca-956a-3b0d6c65b33a",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP Elite Black DDR5-6400 CL52 32GB (2x16GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TED516G6400C52DC01"
+    ],
+    "series": "Elite",
+    "variant": "6400 CL52"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 52,
+  "timings": "52-52-52-103",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {}
+}

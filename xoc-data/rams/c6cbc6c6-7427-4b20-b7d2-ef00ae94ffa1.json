@@ -1,0 +1,31 @@
+{
+  "opendb_id": "c6cbc6c6-7427-4b20-b7d2-ef00ae94ffa1",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Crucial CT4K16G4VFS4266 Green / Black Registered DDR4-2666 CL19 64GB (4x16GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "CT4K16G4VFS4266"
+    ],
+    "series": "CT4K16G4VFS4266",
+    "variant": "2666 CL19"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 64,
+  "color": [
+    "GREEN",
+    "BLACK"
+  ],
+  "cas_latency": 19,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {}
+}

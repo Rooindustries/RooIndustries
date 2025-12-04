@@ -1,0 +1,34 @@
+{
+  "opendb_id": "548a1379-3ab5-4c94-96d9-b307b6f8953e",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Patriot Viper Venom Black / Red DDR5-6400 CL32 16GB (2x8GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PVV516G640C32GK"
+    ],
+    "series": "Viper",
+    "variant": "6400 CL32"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "BLACK",
+    "RED"
+  ],
+  "cas_latency": 32,
+  "timings": "32-40-40-84",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "newegg_sku": "N82E16820225341"
+  }
+}

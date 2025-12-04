@@ -1,0 +1,31 @@
+{
+  "opendb_id": "12562543-e1aa-4271-afbf-cba9e90212cb",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Create Expert Black / Gold DDR5-6000 CL28 32GB (2x16GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "CTCED532G6000HC28ADC01"
+    ],
+    "series": "T-Create",
+    "variant": "6000 CL28"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "GOLD"
+  ],
+  "cas_latency": 28,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

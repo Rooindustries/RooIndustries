@@ -1,0 +1,36 @@
+{
+  "opendb_id": "e3376586-f9c5-47a7-94b0-f2c02fcb51bf",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB White / Silver DDR5-6000 CL36 32GB (2x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMH32GX5M2B6000C36W"
+    ],
+    "series": "Vengeance",
+    "variant": "6000 CL36"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE",
+    "GREY"
+  ],
+  "cas_latency": 36,
+  "timings": "36-38-38-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0CCXT24ZN",
+    "walmart_sku": 3488987541,
+    "ibuypower_sku": "28982"
+  }
+}

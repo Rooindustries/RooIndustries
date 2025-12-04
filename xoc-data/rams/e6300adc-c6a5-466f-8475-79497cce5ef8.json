@@ -1,0 +1,36 @@
+{
+  "opendb_id": "e6300adc-c6a5-466f-8475-79497cce5ef8",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 24
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws M5 RGB White DDR5-5200 CL40 48GB (2x24GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-5200J4040A24GX2-RM5RW"
+    ],
+    "series": "Ripjaws",
+    "variant": "5200 CL40"
+  },
+  "speed": 5200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 48,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-83",
+  "voltage": 1.1,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0D7JYF9WX",
+    "newegg_sku": "N82E16820374585",
+    "walmart_sku": 6656865083,
+    "manufacturer_url": "https://www.gskill.com/products/1/165/Desktop-Memory-U-DIMM-CU-DIMM"
+  }
+}

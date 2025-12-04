@@ -1,0 +1,36 @@
+{
+  "opendb_id": "9d9c45ef-ff72-4be8-86ec-8eb476db5fae",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 48
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB Black / Silver DDR5-6000 CL30 96GB (2x48GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMH96GX5M2B6000C30"
+    ],
+    "series": "Vengeance",
+    "variant": "6000 CL30"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 96,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 30,
+  "timings": "30-36-36-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0CCXSRKZT",
+    "newegg_sku": "N82E16820982050",
+    "walmart_sku": 3611562799
+  }
+}

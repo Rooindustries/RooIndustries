@@ -1,0 +1,35 @@
+{
+  "opendb_id": "adc26208-0988-453f-b734-8d8265d2051c",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston FURY Beast RGB Black DDR5-6000 CL36 32GB (2x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF560C36BBEAK2-32"
+    ],
+    "series": "FURY",
+    "variant": "6000 CL36"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 36,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0BD5XBFS6",
+    "newegg_sku": "9SIBFJRJEK2208",
+    "walmart_sku": 1948039764,
+    "ibuypower_sku": "28741"
+  }
+}

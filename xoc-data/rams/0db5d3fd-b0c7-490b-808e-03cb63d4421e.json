@@ -1,0 +1,35 @@
+{
+  "opendb_id": "0db5d3fd-b0c7-490b-808e-03cb63d4421e",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP Elite Black DDR5-6000 CL48 16GB (1x16GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TED516G6000C4801"
+    ],
+    "series": "Elite",
+    "variant": "6000 CL48"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 48,
+  "timings": "48-48-48-96",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0B7WNHMLD",
+    "newegg_sku": "N82E16820331860",
+    "walmart_sku": 1875184657
+  }
+}

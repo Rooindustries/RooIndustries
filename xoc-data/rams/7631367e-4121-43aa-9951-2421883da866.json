@@ -1,0 +1,34 @@
+{
+  "opendb_id": "7631367e-4121-43aa-9951-2421883da866",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Patriot Viper Steel Silver / Black DDR4-3000 CL16 16GB (2x8GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PVS416G300C6K"
+    ],
+    "series": "Viper",
+    "variant": "3000 CL16"
+  },
+  "speed": 3000,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "GREY",
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "timings": "16-18-18-36",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "newegg_sku": "2R8-000B-00025"
+  }
+}

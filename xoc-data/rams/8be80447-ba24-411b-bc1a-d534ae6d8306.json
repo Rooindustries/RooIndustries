@@ -1,0 +1,34 @@
+{
+  "opendb_id": "8be80447-ba24-411b-bc1a-d534ae6d8306",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Crucial CT8G4DFRA32A DDR4-3200 CL22 8GB (1x8GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "CT8G4DFRA32A"
+    ],
+    "series": "CT8G4DFRA32A",
+    "variant": "3200 CL22"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 8,
+  "color": [
+    "GREEN"
+  ],
+  "cas_latency": 22,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B08C4VHQV2",
+    "newegg_sku": "N82E16820156264",
+    "walmart_sku": 375711423
+  }
+}

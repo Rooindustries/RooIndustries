@@ -1,0 +1,30 @@
+{
+  "opendb_id": "0b986b8b-81f8-43e9-af0b-7f0a351a5254",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Silicon Power SP032GBSFU320X22 SODIMM DDR4-3200 CL22 32GB (2x16GB)",
+    "manufacturer": "Silicon Power",
+    "part_numbers": [
+      "SP032GBSFU320X22"
+    ],
+    "series": "SP032GBSFU320X22",
+    "variant": "3200 CL22"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "260-pin SODIMM (DDR4)",
+  "capacity": 32,
+  "color": [],
+  "cas_latency": 22,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B09C8NP2FD"
+  }
+}

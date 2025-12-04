@@ -1,0 +1,35 @@
+{
+  "opendb_id": "484b8ddc-089f-4062-8edf-85447cbb3095",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws S5 Black DDR5-5600 CL28 32GB (2x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-5600J2834F16GX2-RS5K"
+    ],
+    "series": "Ripjaws",
+    "variant": "5600 CL28"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 28,
+  "timings": "28-34-34-89",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0C4G554KL",
+    "newegg_sku": "N82E16820374401",
+    "walmart_sku": 1002665830
+  }
+}

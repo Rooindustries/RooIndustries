@@ -1,0 +1,31 @@
+{
+  "opendb_id": "d80953ad-c766-4525-9a6a-2eef7856a4a8",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 2
+  },
+  "metadata": {
+    "name": "Corsair VS2GB1333D3 Black / White DDR3-1333 CL9 2GB (1x2GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "VS2GB1333D3 G                                                    VS2GB1333D3"
+    ],
+    "series": "VS2GB1333D3",
+    "variant": "1333 CL9"
+  },
+  "speed": 1333,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 2,
+  "color": [
+    "BLACK",
+    "WHITE"
+  ],
+  "cas_latency": 9,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {}
+}

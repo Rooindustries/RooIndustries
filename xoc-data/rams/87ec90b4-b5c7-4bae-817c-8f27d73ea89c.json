@@ -1,0 +1,35 @@
+{
+  "opendb_id": "87ec90b4-b5c7-4bae-817c-8f27d73ea89c",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston ValueRAM Black / Green DDR4-2400 CL17 16GB (1x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KVR24N17D8",
+      "16"
+    ],
+    "series": "ValueRAM",
+    "variant": "2400 CL17"
+  },
+  "speed": 2400,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK",
+    "GREEN"
+  ],
+  "cas_latency": 17,
+  "timings": "17-17-17-32",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B01GCWQEOK"
+  }
+}

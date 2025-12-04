@@ -1,0 +1,35 @@
+{
+  "opendb_id": "1555eede-7e03-4038-824d-91d8fb21a6e2",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws S5 Black DDR5-6000 CL36 32GB (2x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-6000J3636F16GX2-RS5K"
+    ],
+    "series": "Ripjaws",
+    "variant": "6000 CL36"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 36,
+  "timings": "36-36-36-96",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0BJ181PX7",
+    "newegg_sku": "N82E16820374430",
+    "walmart_sku": 1301958958
+  }
+}

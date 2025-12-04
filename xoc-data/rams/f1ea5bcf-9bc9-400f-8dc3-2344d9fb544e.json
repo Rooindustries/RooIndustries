@@ -1,0 +1,33 @@
+{
+  "opendb_id": "f1ea5bcf-9bc9-400f-8dc3-2344d9fb544e",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": " TEAMGROUP T-Force Delta RGB Black DDR4 8GB(1x8GB) 3600MHz CL18",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TF3D48G3600HC18J01"
+    ],
+    "series": "T-Force",
+    "variant": "Delta RGB BLACK DDR4"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 8,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "voltage": 1.35,
+  "heat_spreader": true,
+  "height": 49,
+  "timings": "18-22-22-42",
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "general_product_information": {
+    "manufacturer_url": "https://www.teamgroupinc.com/en/product-category/memory/desktop/?filter=ZmlsdGVyLTIyMT0yNTE4"
+  }
+}

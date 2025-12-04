@@ -1,0 +1,31 @@
+{
+  "opendb_id": "8ce01df3-9cca-4c8a-aed7-1e985e2cda26",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Gigabyte AORUS RGB DDR5-4800 CL40 32GB (2x16GB)",
+    "manufacturer": "GIGABYTE",
+    "part_numbers": [
+      "GP-ARS32G60D5R"
+    ],
+    "series": "AORUS",
+    "variant": "4800 CL40"
+  },
+  "speed": 4800,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "GREY"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

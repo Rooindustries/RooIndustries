@@ -1,0 +1,33 @@
+{
+  "opendb_id": "4acb3432-5376-4653-9dd2-de3d15444ea6",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "OLOy OWL Orange DDR4-3600 CL18 16GB (2x8GB)",
+    "manufacturer": "OLOy",
+    "part_numbers": [
+      "ND4U0836180BHTDA"
+    ],
+    "series": "DDR4",
+    "variant": "3600 CL18",
+    "releaseYear": 2020
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "ORANGE"
+  ],
+  "cas_latency": 18,
+  "timings": "18-20-20-40",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "height": 38.836,
+  "general_product_information": {}
+}

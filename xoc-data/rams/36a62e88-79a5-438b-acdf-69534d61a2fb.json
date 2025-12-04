@@ -1,0 +1,30 @@
+{
+  "opendb_id": "36a62e88-79a5-438b-acdf-69534d61a2fb",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Apacer AU Black DDR4-2666 CL19 8GB (1x8GB)",
+    "manufacturer": "Apacer",
+    "part_numbers": [
+      "AU08GGB26CQYBGH"
+    ],
+    "series": "AU",
+    "variant": "2666 CL19"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 8,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 19,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {}
+}

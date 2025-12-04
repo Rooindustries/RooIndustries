@@ -1,0 +1,36 @@
+{
+  "opendb_id": "384ac340-547a-4b4a-8d11-8c41693bfdb7",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Patriot Viper Venom RGB Black / White DDR5-6000 CL36 32GB (2x16GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PVVR532G600C36K"
+    ],
+    "series": "Viper",
+    "variant": "6000 CL36"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "WHITE"
+  ],
+  "cas_latency": 36,
+  "timings": "36-36-36-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B09XZ6VVY9",
+    "newegg_sku": "N82E16820225310",
+    "walmart_sku": 2126389786
+  }
+}

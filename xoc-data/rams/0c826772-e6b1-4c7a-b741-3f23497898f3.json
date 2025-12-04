@@ -1,0 +1,30 @@
+{
+  "opendb_id": "0c826772-e6b1-4c7a-b741-3f23497898f3",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "G.Skill Value Black DDR3-1600 CL11 8GB (2x4GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F3-1600C11D-8GNT"
+    ],
+    "series": "Value",
+    "variant": "1600 CL11"
+  },
+  "speed": 1600,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 8,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 11,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {}
+}

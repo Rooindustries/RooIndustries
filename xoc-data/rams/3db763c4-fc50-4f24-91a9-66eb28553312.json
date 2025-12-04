@@ -1,0 +1,33 @@
+{
+  "opendb_id": "3db763c4-fc50-4f24-91a9-66eb28553312",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Kingston HX426C13PBK4/32 Black DDR4-2666 CL13 32GB (4x8GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "HX426C13PBK4",
+      "32"
+    ],
+    "series": "HX426C13PBK4/32",
+    "variant": "2666 CL13"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 13,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B097RHB8RR"
+  }
+}

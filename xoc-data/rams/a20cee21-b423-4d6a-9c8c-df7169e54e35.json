@@ -1,0 +1,36 @@
+{
+  "opendb_id": "a20cee21-b423-4d6a-9c8c-df7169e54e35",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "PNY XLR8 Gaming Black / Red DDR4-3200 CL16 16GB (2x8GB)",
+    "manufacturer": "PNY",
+    "part_numbers": [
+      "MD16GK2D4320016AXR"
+    ],
+    "series": "XLR8",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK",
+    "RED"
+  ],
+  "cas_latency": 16,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B077YCSHFV",
+    "newegg_sku": "9SIAKVHKAV1435",
+    "bestbuy_sku": 5878702,
+    "walmart_sku": 819634031
+  }
+}

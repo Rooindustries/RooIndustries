@@ -1,0 +1,32 @@
+{
+  "opendb_id": "b7e4e450-a53d-470e-a997-6c4f03495f05",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 2
+  },
+  "metadata": {
+    "name": "Crucial CT25664AA667 DDR2-667 CL5 2GB (1x2GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "CT25664AA667"
+    ],
+    "series": "CT25664AA667",
+    "variant": "667 CL5"
+  },
+  "speed": 667,
+  "ram_type": "DDR2",
+  "form_factor": "240-pin DIMM (DDR2)",
+  "capacity": 2,
+  "color": [
+    "GREEN"
+  ],
+  "cas_latency": 5,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B000FGD3WQ"
+  }
+}

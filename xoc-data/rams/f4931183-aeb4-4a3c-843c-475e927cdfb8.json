@@ -1,0 +1,34 @@
+{
+  "opendb_id": "f4931183-aeb4-4a3c-843c-475e927cdfb8",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB Black / Silver DDR5-7000 CL34 32GB (2x16GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "FF4D532G7000HC34ADC01"
+    ],
+    "series": "T-Force",
+    "variant": "7000 CL34"
+  },
+  "speed": 7000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 34,
+  "timings": "34-42-42-84",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0BJ2LXJ91"
+  }
+}

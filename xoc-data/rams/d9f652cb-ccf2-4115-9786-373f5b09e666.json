@@ -1,0 +1,30 @@
+{
+  "opendb_id": "d9f652cb-ccf2-4115-9786-373f5b09e666",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Mushkin Redline Pro Black DDR5-5600 SODIMM CL46 32GB (2x16GB)",
+    "manufacturer": "Mushkin",
+    "part_numbers": [
+      "MRP5T560LKKD16G18X2"
+    ],
+    "series": "Redline",
+    "variant": "5600 CL46"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "262-pin SODIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 46,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {}
+}

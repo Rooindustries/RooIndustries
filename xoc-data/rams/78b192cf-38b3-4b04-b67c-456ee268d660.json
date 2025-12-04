@@ -1,0 +1,31 @@
+{
+  "opendb_id": "78b192cf-38b3-4b04-b67c-456ee268d660",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "OLOy Blade RGB DDR5-5600 CL36 16GB (2x8GB)",
+    "manufacturer": "OLOy",
+    "part_numbers": [
+      "ND5U0856360BRSDE"
+    ],
+    "series": "Blade",
+    "variant": "5600 CL36"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "GREY"
+  ],
+  "cas_latency": 36,
+  "timings": "36-38-38-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

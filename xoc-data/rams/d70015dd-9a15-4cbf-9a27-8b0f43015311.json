@@ -1,0 +1,34 @@
+{
+  "opendb_id": "d70015dd-9a15-4cbf-9a27-8b0f43015311",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston FURY Renegade Pro Registered Black DDR5-6400 CL32 64GB (4x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF564R32RBK4-64"
+    ],
+    "series": "FURY",
+    "variant": "6400 CL32"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 32,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0CN3DM7SD",
+    "newegg_sku": "N82E16820242818",
+    "walmart_sku": 5205663183
+  }
+}

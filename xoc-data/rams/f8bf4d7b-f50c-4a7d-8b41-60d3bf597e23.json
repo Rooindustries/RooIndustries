@@ -1,0 +1,33 @@
+{
+  "opendb_id": "f8bf4d7b-f50c-4a7d-8b41-60d3bf597e23",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Patriot Viper Elite 5 RGB White DDR5-5600 CL38 32GB (1x32GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PVER532G56C38W"
+    ],
+    "series": "Viper",
+    "variant": "5600 CL38"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 38,
+  "timings": "38-48-48-78",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0CBMQ899S"
+  }
+}

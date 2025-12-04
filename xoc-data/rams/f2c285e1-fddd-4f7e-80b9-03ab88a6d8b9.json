@@ -1,0 +1,34 @@
+{
+  "opendb_id": "f2c285e1-fddd-4f7e-80b9-03ab88a6d8b9",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 1
+  },
+  "metadata": {
+    "name": "Crucial Ballistix Sport Black / Silver DDR3-1600 CL10 1GB (1x1GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "BL12864BA160A"
+    ],
+    "series": "Ballistix",
+    "variant": "1600 CL10"
+  },
+  "speed": 1600,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 1,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 10,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B004UPHOHI",
+    "newegg_sku": "9SIAKXTJ613760"
+  }
+}

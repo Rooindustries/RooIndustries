@@ -1,0 +1,31 @@
+{
+  "opendb_id": "f29126e7-e70d-4955-91d3-4d697cf1b6a7",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Acer Predator Pallas II Silver DDR5-6000 CL30 32GB (2x16GB)",
+    "manufacturer": "Acer",
+    "part_numbers": [
+      "BL.9BWWR.374                                                    VESTA2-32GB-6000-1R8-V6"
+    ],
+    "series": "Predator",
+    "variant": "6000 CL30"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "GREY"
+  ],
+  "cas_latency": 30,
+  "timings": "30-38-38-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

@@ -1,0 +1,34 @@
+{
+  "opendb_id": "04561272-3266-4c3e-ac61-e370dfa4ff2c",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Mushkin Redline Lumina Black DDR4-4133 CL19 32GB (2x16GB)",
+    "manufacturer": "Mushkin",
+    "part_numbers": [
+      "MLA4C413KOOP16GX2"
+    ],
+    "series": "Redline",
+    "variant": "4133 CL19"
+  },
+  "speed": 4133,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 19,
+  "timings": "19-23-23-43",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B08XYT2WCD",
+    "walmart_sku": 5302560433
+  }
+}

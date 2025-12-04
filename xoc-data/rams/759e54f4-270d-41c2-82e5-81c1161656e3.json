@@ -1,0 +1,33 @@
+{
+  "opendb_id": "759e54f4-270d-41c2-82e5-81c1161656e3",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Crucial CT32G3ELSDQ4186D Blue / Silver DDR3-1866 CL11 32GB (1x32GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "CT32G3ELSDQ4186D"
+    ],
+    "series": "CT32G3ELSDQ4186D",
+    "variant": "1866 CL11"
+  },
+  "speed": 1866,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 32,
+  "color": [
+    "BLUE",
+    "GREY"
+  ],
+  "cas_latency": 11,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B00MILC1DS"
+  }
+}

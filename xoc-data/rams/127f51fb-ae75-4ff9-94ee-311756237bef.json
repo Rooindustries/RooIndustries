@@ -1,0 +1,32 @@
+{
+  "opendb_id": "127f51fb-ae75-4ff9-94ee-311756237bef",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "OLOy Black DDR4-3000 CL16 16GB (2x8GB) MD4U083016BJDA",
+    "manufacturer": "OLOy",
+    "part_numbers": [
+      "MD4U083016BJDA"
+    ],
+    "series": "DDR4",
+    "variant": "3000 CL16",
+    "releaseYear": 2020
+  },
+  "speed": 3000,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "timings": "16-18-18-36",
+  "voltage": 1.35,
+  "heat_spreader": true,
+  "height": 38.862,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "general_product_information": {}
+}

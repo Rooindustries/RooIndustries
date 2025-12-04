@@ -1,0 +1,31 @@
+{
+  "opendb_id": "f502525b-4ddc-4a9d-8a45-fd9c42ba8379",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Klevv CRAS X RGB DDR4-3200 CL16 16GB (1x16GB)",
+    "manufacturer": "Klevv",
+    "part_numbers": [
+      "KD4AGU880-32A160W"
+    ],
+    "series": "CRAS",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "timings": "16-18-18-38",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

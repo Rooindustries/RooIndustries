@@ -1,0 +1,33 @@
+{
+  "opendb_id": "9fba0f39-b562-4220-9a30-867cddd64cc5",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Patriot Signature Line Black SODIMM DDR5-4800 CL46 8GB (1x8GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PSD58G480041S"
+    ],
+    "series": "Signature",
+    "variant": "4800 CL46"
+  },
+  "speed": 4800,
+  "ram_type": "DDR5",
+  "form_factor": "262-pin SODIMM (DDR5)",
+  "capacity": 8,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 46,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0BL5G7CHL",
+    "newegg_sku": "N82E16820225358"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "opendb_id": "1766e715-0716-4e2b-9b17-3291e9aa6e65",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "OLOy OWL RGB White DDR4-3200 CL16 16GB (2x8GB)",
+    "manufacturer": "OLOy",
+    "part_numbers": [
+      "ND4U0832160BHVDA"
+    ],
+    "series": "DDR4",
+    "variant": "3200 CL16",
+    "releaseYear": 2020
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 16,
+  "timings": "16-20-20-38",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "height": 38.862,
+  "general_product_information": {
+    "manufacturer_url": "https://www.oloymemory.com/products.html"
+  }
+}

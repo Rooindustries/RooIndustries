@@ -1,0 +1,32 @@
+{
+  "opendb_id": "f47677c2-0293-4a66-8bd9-ad71afaea9f8",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "GIGASTONE Black Game PRO 32GB (2x16GB) DDR4 RAM 32GB 3200MHz CL16 BLACK",
+    "manufacturer": "Gigastone",
+    "series": "Game PRO",
+    "variant": "3200 CL16",
+    "part_numbers": []
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "timings": "16-18-18-40",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "height": 14.896,
+  "general_product_information": {
+    "newegg_sku": "9SIAGDFK6H9773",
+    "manufacturer_url": "https://www.gigastone.com/en/products-detail/47"
+  }
+}

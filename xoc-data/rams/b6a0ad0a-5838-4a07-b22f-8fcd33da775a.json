@@ -1,0 +1,34 @@
+{
+  "opendb_id": "b6a0ad0a-5838-4a07-b22f-8fcd33da775a",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "Kingston HyperX DDR3-1600 CL9 8GB (2x4GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KHX1600C9D3K2",
+      "8GX"
+    ],
+    "series": "HyperX",
+    "variant": "1600 CL9"
+  },
+  "speed": 1600,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 8,
+  "color": [
+    "BLUE",
+    "GREY"
+  ],
+  "cas_latency": 9,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0037TO5C0"
+  }
+}

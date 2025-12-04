@@ -1,0 +1,35 @@
+{
+  "opendb_id": "9e00b901-32ca-4074-8b8a-fc61b7f7ec87",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Kingston FURY Beast RGB Black / Silver DDR4-3200 CL16 32GB (1x32GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF432C16BBA",
+      "32"
+    ],
+    "series": "FURY",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 16,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B097HPXJCB",
+    "walmart_sku": 194894377
+  }
+}

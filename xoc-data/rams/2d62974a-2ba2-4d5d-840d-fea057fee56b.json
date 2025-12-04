@@ -1,0 +1,35 @@
+{
+  "opendb_id": "2d62974a-2ba2-4d5d-840d-fea057fee56b",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Kingston Fury Renegade RGB Black DDR4-3600 CL18 32GB (1x32GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF436C18RBA",
+      "32"
+    ],
+    "series": "Fury",
+    "variant": "3600 CL18"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B097TQ2PHF",
+    "newegg_sku": "0RN-001J-01065",
+    "walmart_sku": 854938647
+  }
+}

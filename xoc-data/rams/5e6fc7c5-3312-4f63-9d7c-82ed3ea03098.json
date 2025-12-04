@@ -1,0 +1,34 @@
+{
+  "opendb_id": "5e6fc7c5-3312-4f63-9d7c-82ed3ea03098",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Corsair Vengeance LPX White DDR4-3000 CL16 16GB (2x8GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMK16GX4M2D3000C16W"
+    ],
+    "series": "Vengeance",
+    "variant": "3000 CL16"
+  },
+  "speed": 3000,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 16,
+  "timings": "16-20-20-38",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B07B4G525F",
+    "walmart_sku": 280846524
+  }
+}

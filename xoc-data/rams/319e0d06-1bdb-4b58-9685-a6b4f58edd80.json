@@ -1,0 +1,34 @@
+{
+  "opendb_id": "319e0d06-1bdb-4b58-9685-a6b4f58edd80",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Crucial CT16G48C40S5 Black SODIMM DDR5-4800 CL40 16GB (1x16GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "CT16G48C40S5"
+    ],
+    "series": "CT16G48C40S5",
+    "variant": "4800 CL40"
+  },
+  "speed": 4800,
+  "ram_type": "DDR5",
+  "form_factor": "262-pin SODIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B09S2MN8JH",
+    "newegg_sku": "N82E16820156290",
+    "walmart_sku": 459469291
+  }
+}

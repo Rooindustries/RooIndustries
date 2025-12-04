@@ -1,0 +1,35 @@
+{
+  "opendb_id": "5954c0d1-9d1b-4966-94f3-af19e435eeb1",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB RT Black DDR4-3600 CL16 32GB (2x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMN32GX4M2Z3600C16"
+    ],
+    "series": "Vengeance",
+    "variant": "3600 CL16"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "timings": "16-20-20-38",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B09C5VRSRG",
+    "newegg_sku": "N82E16820236788",
+    "walmart_sku": 873933959
+  }
+}

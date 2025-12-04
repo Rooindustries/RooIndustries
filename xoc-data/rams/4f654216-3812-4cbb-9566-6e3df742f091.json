@@ -1,0 +1,31 @@
+{
+  "opendb_id": "4f654216-3812-4cbb-9566-6e3df742f091",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "ADATA AD4U266638G19-S Green / Black DDR4-2666 CL19 8GB (1x8GB)",
+    "manufacturer": "ADATA",
+    "part_numbers": [
+      "AD4U266638G19-S"
+    ],
+    "series": "AD4U266638G19-S",
+    "variant": "2666 CL19"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 8,
+  "color": [
+    "GREEN",
+    "BLACK"
+  ],
+  "cas_latency": 19,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {}
+}

@@ -1,0 +1,34 @@
+{
+  "opendb_id": "e1566e5c-f5df-4940-abba-6c9f1e9cc601",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Create Classic Black DDR5 SODIMM-5600 CL46 64GB (2x32GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "CTCCD564G5600HC46ADC-S01"
+    ],
+    "series": "T-Create",
+    "variant": "5600 CL46"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "262-pin SODIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 46,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0CQP4ZLYL",
+    "newegg_sku": "N82E16820985079",
+    "walmart_sku": 5536879870
+  }
+}

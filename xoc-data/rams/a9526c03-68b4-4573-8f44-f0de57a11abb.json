@@ -1,0 +1,35 @@
+{
+  "opendb_id": "a9526c03-68b4-4573-8f44-f0de57a11abb",
+  "modules": {
+    "quantity": 8,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Zeta R5 Black / White Registered DDR5-6400 CL32 128GB (8x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-6400R3239G16GE8-ZR5K"
+    ],
+    "series": "Zeta",
+    "variant": "6400 CL32"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 128,
+  "color": [
+    "BLACK",
+    "WHITE"
+  ],
+  "cas_latency": 32,
+  "timings": "32-39-39-102",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0C313Y5N4",
+    "newegg_sku": "N82E16820374467"
+  }
+}

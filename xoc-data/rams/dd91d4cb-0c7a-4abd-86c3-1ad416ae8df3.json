@@ -1,0 +1,32 @@
+{
+  "opendb_id": "dd91d4cb-0c7a-4abd-86c3-1ad416ae8df3",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Kingston HyperX Savage Black / Red DDR3-2400 CL11 8GB (1x8GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "HX324C11SR",
+      "8"
+    ],
+    "series": "HyperX",
+    "variant": "2400 CL11"
+  },
+  "speed": 2400,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 8,
+  "color": [
+    "BLACK",
+    "RED"
+  ],
+  "cas_latency": 11,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

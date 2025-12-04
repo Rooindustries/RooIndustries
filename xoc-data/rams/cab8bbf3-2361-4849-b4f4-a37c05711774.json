@@ -1,0 +1,35 @@
+{
+  "opendb_id": "cab8bbf3-2361-4849-b4f4-a37c05711774",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 48
+  },
+  "metadata": {
+    "name": "Corsair Dominator Titanium DDR5-6400 CL32 96GB (2x48GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMP96GX5M2B6400C32W"
+    ],
+    "series": "Dominator",
+    "variant": "6400 CL32"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 96,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 32,
+  "timings": "32-40-40-84",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0CHSFVKNL",
+    "newegg_sku": "N82E16820982085",
+    "walmart_sku": 5192910726
+  }
+}

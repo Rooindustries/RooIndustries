@@ -1,0 +1,35 @@
+{
+  "opendb_id": "01d28304-01a0-4d29-85c4-f9f5f8daed14",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Corsair Dominator Platinum RGB Black DDR4-3600 CL18 16GB (2x8GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMT16GX4M2C3600C18"
+    ],
+    "series": "Dominator",
+    "variant": "3600 CL18"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "timings": "18-19-19-39",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B07N3HCWJG",
+    "newegg_sku": "N82E16820236497",
+    "walmart_sku": 230626394
+  }
+}

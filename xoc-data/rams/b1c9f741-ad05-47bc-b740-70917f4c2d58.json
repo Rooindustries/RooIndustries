@@ -1,0 +1,31 @@
+{
+  "opendb_id": "b1c9f741-ad05-47bc-b740-70917f4c2d58",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 2
+  },
+  "metadata": {
+    "name": "Patriot Viper Black / Silver DDR2-1066 CL5 4GB (2x2GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PVS24G8500ELKR2"
+    ],
+    "series": "Viper",
+    "variant": "1066 CL5"
+  },
+  "speed": 1066,
+  "ram_type": "DDR2",
+  "form_factor": "240-pin DIMM (DDR2)",
+  "capacity": 4,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 5,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

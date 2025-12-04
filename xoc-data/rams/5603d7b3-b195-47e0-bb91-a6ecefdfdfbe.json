@@ -1,0 +1,33 @@
+{
+  "opendb_id": "5603d7b3-b195-47e0-bb91-a6ecefdfdfbe",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Corsair ValueSelect Black DDR4-2666 CL18 32GB (1x32GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMV32GX4M1A2666C18"
+    ],
+    "series": "ValueSelect",
+    "variant": "2666 CL18"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "timings": "18-18-18-43",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B07WVS5RBX"
+  }
+}

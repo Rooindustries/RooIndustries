@@ -1,0 +1,34 @@
+{
+  "opendb_id": "2afa26fd-f3d9-43aa-a270-1d964cb5dd63",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "Corsair Vengeance LPX DDR4-2400 CL16 4GB (1x4GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMK4GX4M1A2400C16"
+    ],
+    "series": "Vengeance",
+    "variant": "2400 CL16"
+  },
+  "speed": 2400,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 4,
+  "color": [
+    "BLACK",
+    "YELLOW"
+  ],
+  "cas_latency": 16,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B01ARGXM0Q",
+    "walmart_sku": 162496591
+  }
+}

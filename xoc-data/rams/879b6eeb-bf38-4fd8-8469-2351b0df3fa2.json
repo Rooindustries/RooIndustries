@@ -1,0 +1,34 @@
+{
+  "opendb_id": "879b6eeb-bf38-4fd8-8469-2351b0df3fa2",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Kingston FURY Renegade Pro Black Registered DDR5-6000 CL32 128GB (4x32GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF560R32RBK4-128"
+    ],
+    "series": "FURY",
+    "variant": "6000 CL32"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 128,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 32,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0CN3C7F8C",
+    "newegg_sku": "N82E16820242845",
+    "walmart_sku": 5200702518
+  }
+}

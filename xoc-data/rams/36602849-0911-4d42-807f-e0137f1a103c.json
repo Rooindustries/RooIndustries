@@ -1,0 +1,35 @@
+{
+  "opendb_id": "36602849-0911-4d42-807f-e0137f1a103c",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB DDR4-3600 CL18 64GB (2x32GB) WHITE",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TF4D464G3600HC18JDC01"
+    ],
+    "series": "T-Force",
+    "variant": "3600 CL18"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 64,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 18,
+  "timings": "18-22-22-42",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "newegg_sku": "N82E16820331729",
+    "walmart_sku": 827371178,
+    "manufacturer_url": "https://www.teamgroupinc.com/en/product-category/memory/desktop/?filter=ZmlsdGVyLTIyMT0yNTE4"
+  }
+}

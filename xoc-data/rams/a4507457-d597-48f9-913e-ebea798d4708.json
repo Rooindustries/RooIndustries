@@ -1,0 +1,31 @@
+{
+  "opendb_id": "a4507457-d597-48f9-913e-ebea798d4708",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "OLOy WarHawk RGB White DDR4-3200 CL16 128GB (4x32GB)",
+    "manufacturer": "OLOy",
+    "part_numbers": [
+      "ND4U3232161DCWQX"
+    ],
+    "series": "WarHawk",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 128,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 16,
+  "timings": "16-20-20-38",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

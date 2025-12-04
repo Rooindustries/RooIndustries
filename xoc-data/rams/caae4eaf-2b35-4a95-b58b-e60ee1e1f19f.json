@@ -1,0 +1,34 @@
+{
+  "opendb_id": "caae4eaf-2b35-4a95-b58b-e60ee1e1f19f",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Kingston KSM48E40BD8KM-32HM Green DDR5-4800 CL40 32GB (1x32GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KSM48E40BD8KM-32HM"
+    ],
+    "series": "KSM48E40BD8KM-32HM",
+    "variant": "4800 CL40"
+  },
+  "speed": 4800,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "GREEN"
+  ],
+  "cas_latency": 40,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0BH95T7K7",
+    "newegg_sku": "N82E16820242792",
+    "walmart_sku": 2563063349
+  }
+}

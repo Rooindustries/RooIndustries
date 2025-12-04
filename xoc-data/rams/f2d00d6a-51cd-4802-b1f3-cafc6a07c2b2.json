@@ -1,0 +1,35 @@
+{
+  "opendb_id": "f2d00d6a-51cd-4802-b1f3-cafc6a07c2b2",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston Fury Renegade RGB DDR5-8000 CL38 32GB (2x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF580C38RSAK2-32"
+    ],
+    "series": "Fury",
+    "variant": "8000 CL38"
+  },
+  "speed": 8000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "GREY",
+    "BLACK"
+  ],
+  "cas_latency": 38,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0CKZ9SGFY",
+    "newegg_sku": "N82E16820242829",
+    "walmart_sku": 5147899684
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "opendb_id": "53c21a8d-a300-4ac6-885f-c2d55330d283",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "Corsair Vengeance Black / Blue DDR3-2133 CL9 8GB (2x4GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMZ8GX3M2A2133C11B"
+    ],
+    "series": "Vengeance",
+    "variant": "2133 CL9"
+  },
+  "speed": 2133,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 8,
+  "color": [
+    "BLACK",
+    "BLUE"
+  ],
+  "cas_latency": 9,
+  "timings": "9-9-9-24",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

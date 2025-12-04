@@ -1,0 +1,36 @@
+{
+  "opendb_id": "c4887598-9648-4d4b-a4dc-a593d756d448",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB DDR5-5600 CL40 32GB (2x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMH32GX5M2B5600C40W"
+    ],
+    "series": "Vengeance",
+    "variant": "5600 CL40"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE",
+    "GREY"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-77",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0CJ8ZT9S1",
+    "newegg_sku": "N82E16820982112",
+    "walmart_sku": 5129260695
+  }
+}

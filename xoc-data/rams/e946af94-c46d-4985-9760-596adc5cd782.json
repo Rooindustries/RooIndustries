@@ -1,0 +1,34 @@
+{
+  "opendb_id": "e946af94-c46d-4985-9760-596adc5cd782",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z5 RGB Black DDR5-7800 CL36 32GB (2x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-7800J3646H16GX2-TZ5RK"
+    ],
+    "series": "Trident",
+    "variant": "7800 CL36"
+  },
+  "speed": 7800,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 36,
+  "timings": "36-46-46-125",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0BNYW8868",
+    "newegg_sku": "N82E16820374446"
+  }
+}

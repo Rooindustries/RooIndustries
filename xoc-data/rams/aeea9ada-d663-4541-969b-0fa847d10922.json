@@ -1,0 +1,33 @@
+{
+  "opendb_id": "aeea9ada-d663-4541-969b-0fa847d10922",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Silicon Power DDR5 32GB (2x16GB) Zenith 6800MHz CL40 White",
+    "manufacturer": "Silicon Power",
+    "part_numbers": [
+      "SP032GXLWU680FDG"
+    ],
+    "series": "XPOWER Zenith",
+    "variant": "6800 CL40"
+  },
+  "speed": 6800,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-77",
+  "voltage": 1.4,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "height": 38.6,
+  "general_product_information": {
+    "manufacturer_url": "https://www.silicon-power.com/product-detail/XPOWER_Zenith_DDR5_Gaming_UDIMM/"
+  }
+}

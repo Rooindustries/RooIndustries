@@ -1,0 +1,37 @@
+{
+  "opendb_id": "1f4676ba-7f9f-4bee-be67-99610c89107d",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Silicon Power XPOWER Zenith RGB Gaming Black DDR4-3200 CL16 32GB (2x16GB)",
+    "manufacturer": "Silicon Power",
+    "part_numbers": [
+      "SP032GXLZU320BDD"
+    ],
+    "series": "XPOWER Zenith RGB",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 16,
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "timings": "16-18-18-38",
+  "height": 38.5,
+  "general_product_information": {
+    "amazon_sku": "B098XD7NZZ",
+    "newegg_sku": "9SIBDGPHWT4458",
+    "manufacturer_url": "https://www.silicon-power.com/product-detail/XPOWER_Zenith_DDR4_Gaming_UDIMM/"
+  }
+}

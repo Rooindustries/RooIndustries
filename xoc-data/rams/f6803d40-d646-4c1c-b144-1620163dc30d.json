@@ -1,0 +1,36 @@
+{
+  "opendb_id": "f6803d40-d646-4c1c-b144-1620163dc30d",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Silicon Power XPOWER Turbine RGB Silver / Black DDR4-3200 CL16 32GB (2x16GB)",
+    "manufacturer": "Silicon Power",
+    "part_numbers": [
+      "SP032GXLZU320BDB"
+    ],
+    "series": "XPOWER",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "GREY",
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "timings": "16-18-18-36",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B07RWMKX94",
+    "newegg_sku": "9SIBDGPHWN7319",
+    "walmart_sku": 913595813
+  }
+}

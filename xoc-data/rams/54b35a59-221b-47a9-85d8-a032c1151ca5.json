@@ -1,0 +1,31 @@
+{
+  "opendb_id": "54b35a59-221b-47a9-85d8-a032c1151ca5",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 64
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z5 Neo Black DDR5-6000 CL32 128GB (2x64GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-6000J3244G64GX2-TZ5NR"
+    ],
+    "series": "Trident",
+    "variant": "6000 CL32"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 128,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 32,
+  "timings": "32-44-44-96",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

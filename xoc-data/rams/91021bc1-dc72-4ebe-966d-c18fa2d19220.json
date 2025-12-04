@@ -1,0 +1,36 @@
+{
+  "opendb_id": "91021bc1-dc72-4ebe-966d-c18fa2d19220",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "OLOy  Black DDR4-3200 CL16 64GB (2x32GB) MD4U083016BJDA",
+    "manufacturer": "OLOy",
+    "part_numbers": [
+      "MD4U323216DJDA"
+    ],
+    "series": "DDR4",
+    "variant": "3200 CL16",
+    "releaseYear": 2020
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "timings": "16-20-20-38",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "height": 38.862,
+  "general_product_information": {
+    "amazon_sku": "B0836NZHWR",
+    "manufacturer_url": "https://www.oloymemory.com/products.html"
+  }
+}

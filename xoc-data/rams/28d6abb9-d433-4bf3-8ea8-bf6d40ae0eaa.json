@@ -1,0 +1,36 @@
+{
+  "opendb_id": "28d6abb9-d433-4bf3-8ea8-bf6d40ae0eaa",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "OLOy  Black DDR4-3600 CL18 16GB (2x8GB) MD4U0836180BHKDA",
+    "manufacturer": "OLOy",
+    "part_numbers": [
+      "MD4U0836180BHKDA"
+    ],
+    "series": "MD4U0836180BHKDA",
+    "variant": "3600 CL18",
+    "releaseYear": 2020
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "timings": "18-20-20-40",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "height": 38.862,
+  "general_product_information": {
+    "amazon_sku": "B085FY18JT",
+    "manufacturer_url": "https://www.oloymemory.com/products.html"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "opendb_id": "6b58884e-f15f-460f-94c4-83ce9b4914a7",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws X DDR3-2400 CL11 32GB (4x8GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F3-2400C11Q-32GXM"
+    ],
+    "series": "Ripjaws",
+    "variant": "2400 CL11"
+  },
+  "speed": 2400,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 32,
+  "color": [],
+  "cas_latency": 11,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B00DH9HYF0"
+  }
+}

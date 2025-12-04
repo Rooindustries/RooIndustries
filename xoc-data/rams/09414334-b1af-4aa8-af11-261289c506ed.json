@@ -1,0 +1,32 @@
+{
+  "opendb_id": "09414334-b1af-4aa8-af11-261289c506ed",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "ADATA XPG LANCER RGB White 32GB (2x16GB) DDR5 5200 CL38",
+    "manufacturer": "ADATA",
+    "part_numbers": [
+      "AX5U5200C3816G-DCLARWH"
+    ],
+    "series": "XPG Lancer",
+    "variant": "5200 CL38"
+  },
+  "speed": 5200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 38,
+  "voltage": 1.25,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B09TG5PFTB"
+  }
+}

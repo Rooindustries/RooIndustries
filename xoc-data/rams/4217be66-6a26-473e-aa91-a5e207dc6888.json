@@ -1,0 +1,32 @@
+{
+  "opendb_id": "4217be66-6a26-473e-aa91-a5e207dc6888",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Vulcan Z Red / Black DDR4-3000 CL16 8GB (1x8GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TLZRD48G3000HC16C01"
+    ],
+    "series": "T-Force",
+    "variant": "3000 CL16"
+  },
+  "speed": 3000,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 8,
+  "color": [
+    "RED",
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "timings": "16-18-18-38",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

@@ -1,0 +1,31 @@
+{
+  "opendb_id": "61d156eb-3883-4a0e-800f-51623f270264",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston HyperX Fury RGB Black DDR4-3200 CL16 32GB (2x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "HX432C16FB3AK2",
+      "32"
+    ],
+    "series": "HyperX",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

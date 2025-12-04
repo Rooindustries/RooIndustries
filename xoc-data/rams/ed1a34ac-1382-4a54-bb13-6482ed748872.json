@@ -1,0 +1,35 @@
+{
+  "opendb_id": "ed1a34ac-1382-4a54-bb13-6482ed748872",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Dominator Platinum RGB Black DDR5-7200 CL34 32GB (2x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMT32GX5M2X7200C34"
+    ],
+    "series": "Dominator",
+    "variant": "7200 CL34"
+  },
+  "speed": 7200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 34,
+  "timings": "34-44-44-96",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0BRJ7XQNX",
+    "newegg_sku": "N82E16820982010",
+    "walmart_sku": 1772160387
+  }
+}

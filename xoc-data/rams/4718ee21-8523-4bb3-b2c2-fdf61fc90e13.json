@@ -1,0 +1,34 @@
+{
+  "opendb_id": "4718ee21-8523-4bb3-b2c2-fdf61fc90e13",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 24
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z5 Royal Neo RGB DDR5-8000 CL40 48GB (2x24GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-8000J4048G24GX2-TR5NS"
+    ],
+    "series": "Trident",
+    "variant": "8000 CL40"
+  },
+  "speed": 8000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 48,
+  "color": [
+    "GREY"
+  ],
+  "cas_latency": 40,
+  "timings": "40-48-48-128",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0DSPY5SJV",
+    "newegg_sku": "N82E16820374638"
+  }
+}

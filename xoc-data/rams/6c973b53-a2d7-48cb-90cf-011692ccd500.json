@@ -1,0 +1,35 @@
+{
+  "opendb_id": "6c973b53-a2d7-48cb-90cf-011692ccd500",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Kingston FURY Beast RGB Black DDR4-3600 CL17 16GB (2x8GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF436C17BB2AK2",
+      "16"
+    ],
+    "series": "FURY",
+    "variant": "3600 CL17"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 17,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0CGLTKJCZ",
+    "newegg_sku": "N82E16820242802",
+    "walmart_sku": 5062138509
+  }
+}

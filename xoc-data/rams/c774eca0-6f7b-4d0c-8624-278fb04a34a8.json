@@ -1,0 +1,33 @@
+{
+  "opendb_id": "c774eca0-6f7b-4d0c-8624-278fb04a34a8",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws M5 RGB Black DDR5-5600 CL46 64GB (2x32GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-5600J4645A32GX2-RM5RK"
+    ],
+    "series": "Ripjaws",
+    "variant": "5600 CL46"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 46,
+  "timings": "46-45-45-89",
+  "voltage": 1.1,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "manufacturer_url": "https://www.gskill.com/products/2/165/Desktop-Memory-U-DIMM-CU-DIMM"
+  }
+}

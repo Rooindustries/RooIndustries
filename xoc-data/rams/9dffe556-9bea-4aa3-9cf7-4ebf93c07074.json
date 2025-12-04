@@ -1,0 +1,35 @@
+{
+  "opendb_id": "9dffe556-9bea-4aa3-9cf7-4ebf93c07074",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston FURY Renegade Silver / White DDR5-6800 CL36 32GB (2x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF568C36RWK2-32"
+    ],
+    "series": "FURY",
+    "variant": "6800 CL36"
+  },
+  "speed": 6800,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE",
+    "GREY"
+  ],
+  "cas_latency": 36,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0BZJGYLBS",
+    "newegg_sku": "0RM-001W-006Z7",
+    "walmart_sku": 3241063800
+  }
+}

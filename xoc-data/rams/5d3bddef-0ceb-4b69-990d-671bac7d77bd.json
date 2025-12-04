@@ -1,0 +1,32 @@
+{
+  "opendb_id": "5d3bddef-0ceb-4b69-990d-671bac7d77bd",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Kingston Fury Renegade RGB Black / Silver DDR4-4600 CL19 16GB (2x8GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF446C19RBAK2",
+      "16"
+    ],
+    "series": "Fury",
+    "variant": "4600 CL19"
+  },
+  "speed": 4600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 19,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

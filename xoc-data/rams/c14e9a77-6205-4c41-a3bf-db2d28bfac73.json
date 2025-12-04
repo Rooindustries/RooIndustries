@@ -1,0 +1,31 @@
+{
+  "opendb_id": "c14e9a77-6205-4c41-a3bf-db2d28bfac73",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "ADATA XPG GAMMIX D10 Red / White DDR4-2666 CL16 8GB (1x8GB)",
+    "manufacturer": "ADATA",
+    "part_numbers": [
+      "AX4U266638G16-SRG"
+    ],
+    "series": "XPG",
+    "variant": "2666 CL16"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 8,
+  "color": [
+    "RED",
+    "WHITE"
+  ],
+  "cas_latency": 16,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

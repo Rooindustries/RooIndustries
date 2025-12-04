@@ -1,0 +1,33 @@
+{
+  "opendb_id": "8603f4e2-3196-4f61-9a69-6841105c738c",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Silicon Power DDR5 16GB (2x8GB) Zenith 6000MHz CL36 WHITE",
+    "manufacturer": "Silicon Power",
+    "part_numbers": [
+      "SP016GXLWU60FFSG"
+    ],
+    "series": "XPOWER Zenith",
+    "variant": "6000 CL36"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 36,
+  "timings": "36-46-46-86",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "height": 38.5,
+  "general_product_information": {
+    "manufacturer_url": "https://www.silicon-power.com/product-detail/XPOWER_Zenith_DDR5_Gaming_UDIMM/"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "opendb_id": "da96e2ab-1041-4905-9095-2e4724536bfa",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB RT Black DDR4-4000 CL18 16GB (2x8GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMN16GX4M2Z4000C18"
+    ],
+    "series": "Vengeance",
+    "variant": "4000 CL18"
+  },
+  "speed": 4000,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "timings": "18-22-22-42",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B09C5SZL17",
+    "walmart_sku": 461980076
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "opendb_id": "8fe170c4-d5a6-4680-bcd3-37ab3cad92ce",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Vengeance LPX Black / Yellow DDR4-2400 CL14 32GB (2x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMK32GX4M2A2400C14"
+    ],
+    "series": "Vengeance",
+    "variant": "2400 CL14"
+  },
+  "speed": 2400,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "YELLOW"
+  ],
+  "cas_latency": 14,
+  "timings": "14-16-16-31",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0134EU9YA",
+    "newegg_sku": "N82E16820233854",
+    "walmart_sku": 47424519
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "opendb_id": "a48e7582-4835-4ab2-8875-87e6eaf6e53e",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "PNY XLR8 Gaming Black / Red DDR4-2666 CL16 16GB (2x8GB)",
+    "manufacturer": "PNY",
+    "part_numbers": [
+      "MD16GK2D4266616XR"
+    ],
+    "series": "XLR8",
+    "variant": "2666 CL16"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK",
+    "RED"
+  ],
+  "cas_latency": 16,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

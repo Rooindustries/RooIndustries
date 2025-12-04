@@ -1,0 +1,33 @@
+{
+  "opendb_id": "d594cd19-c900-4337-9fd9-919e5ec0ddd5",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Kingston FURY Beast RGB Black DDR5-5600 CL40 8GB (1x8GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF556C40BBA-8"
+    ],
+    "series": "FURY",
+    "variant": "5600 CL40"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 8,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0B1QLB37N",
+    "walmart_sku": 1270979457
+  }
+}

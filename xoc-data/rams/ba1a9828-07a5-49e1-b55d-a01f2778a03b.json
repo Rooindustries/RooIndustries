@@ -1,0 +1,35 @@
+{
+  "opendb_id": "ba1a9828-07a5-49e1-b55d-a01f2778a03b",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 24
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB Black DDR5-8200 CL38 48GB (2x24GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "FF3D548G8200HC38EDC01"
+    ],
+    "series": "T-Force",
+    "variant": "8200 CL38"
+  },
+  "speed": 8200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 48,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 38,
+  "timings": "38-49-49-84",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0C4N11D1Q",
+    "newegg_sku": "N82E16820985032",
+    "walmart_sku": 3943732991
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "opendb_id": "17b68d64-6eb1-4b38-b35a-3fc33a54613d",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "ADATA XPG SPECTRIX D35G RGB DDR4-3200 CL16 16GB (2x8GB)",
+    "manufacturer": "ADATA",
+    "part_numbers": [
+      "AX4U32008G16A-DTBKD35G"
+    ],
+    "series": "XPG",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0CB1SDD6W"
+  }
+}

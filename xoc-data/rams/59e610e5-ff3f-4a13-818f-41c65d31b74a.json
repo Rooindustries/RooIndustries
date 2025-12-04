@@ -1,0 +1,33 @@
+{
+  "opendb_id": "59e610e5-ff3f-4a13-818f-41c65d31b74a",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 64
+  },
+  "metadata": {
+    "name": "Kingston FURY Beast RGB DDR5-5600 CL40 128GB (2x64GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF556C40BBAK2-128"
+    ],
+    "series": "FURY",
+    "variant": "5600 CL40"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 128,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0F8P6VRQT",
+    "walmart_sku": 16795767642
+  }
+}

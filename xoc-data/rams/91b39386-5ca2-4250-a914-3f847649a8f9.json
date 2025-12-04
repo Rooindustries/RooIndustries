@@ -1,0 +1,35 @@
+{
+  "opendb_id": "91b39386-5ca2-4250-a914-3f847649a8f9",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Vengeance LPX Black / Yellow DDR4-2666 CL16 64GB (4x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMK64GX4M4A2666C16"
+    ],
+    "series": "Vengeance",
+    "variant": "2666 CL16"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 64,
+  "color": [
+    "BLACK",
+    "YELLOW"
+  ],
+  "cas_latency": 16,
+  "timings": "16-18-18-35",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B016ORTR1U",
+    "walmart_sku": 100600464
+  }
+}

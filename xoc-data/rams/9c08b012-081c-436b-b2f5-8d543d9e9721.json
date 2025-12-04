@@ -1,0 +1,35 @@
+{
+  "opendb_id": "9c08b012-081c-436b-b2f5-8d543d9e9721",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Patriot Signature Premium Black DDR4-2666 CL19 16GB (1x16GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PSP416G26662H1"
+    ],
+    "series": "Signature",
+    "variant": "2666 CL19"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 19,
+  "timings": "19-19-19-43",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B07PX23ZLS",
+    "newegg_sku": "N82E16820225162",
+    "walmart_sku": 179178279
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "opendb_id": "29f4389d-cbed-47e8-87ae-83f7dfae2bc5",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "Patriot Signature Black / Green DDR4-2400 CL16 4GB (1x4GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PSD44G240081"
+    ],
+    "series": "Signature",
+    "variant": "2400 CL16"
+  },
+  "speed": 2400,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 4,
+  "color": [
+    "BLACK",
+    "GREEN"
+  ],
+  "cas_latency": 16,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B07Q8JRF2F",
+    "newegg_sku": "N82E16820220980"
+  }
+}

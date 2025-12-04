@@ -1,0 +1,35 @@
+{
+  "opendb_id": "f38bd95c-566f-4724-adff-25f8e51d2254",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws M5 RGB DDR5-6000 CL32 32GB (2x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-6000J3238F16GX2-RM5RK"
+    ],
+    "series": "Ripjaws",
+    "variant": "6000 CL32"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 32,
+  "timings": "32-38-38-96",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0D58MSGFV",
+    "newegg_sku": "N82E16820374554",
+    "manufacturer_url": "https://www.gskill.com/products/4/165/Desktop-Memory-U-DIMM-CU-DIMM"
+  }
+}

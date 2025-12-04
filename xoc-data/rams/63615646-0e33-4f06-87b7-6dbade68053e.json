@@ -1,0 +1,31 @@
+{
+  "opendb_id": "63615646-0e33-4f06-87b7-6dbade68053e",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "V-Color Prism Pro White DDR4-3600 CL18 32GB (2x16GB)",
+    "manufacturer": "v-color",
+    "part_numbers": [
+      "TL1636818A-E6PRWWK"
+    ],
+    "series": "Prism",
+    "variant": "3600 CL18"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 18,
+  "timings": "18-22-22-42",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

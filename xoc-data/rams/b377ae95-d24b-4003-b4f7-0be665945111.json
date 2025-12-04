@@ -1,0 +1,30 @@
+{
+  "opendb_id": "b377ae95-d24b-4003-b4f7-0be665945111",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Apacer AU Black DDR4-3200 CL22 8GB (1x8GB)",
+    "manufacturer": "Apacer",
+    "part_numbers": [
+      "AU08GGB32CSYBGH"
+    ],
+    "series": "AU",
+    "variant": "3200 CL22"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 8,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 22,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {}
+}

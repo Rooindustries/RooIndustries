@@ -1,0 +1,33 @@
+{
+  "opendb_id": "f095766f-fbcf-4309-abc6-ecde94145694",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "GeIL Orion AMD Edition Gray DDR4-3200 CL16 16GB (2x8GB)",
+    "manufacturer": "GeIL",
+    "part_numbers": [
+      "GAOG416GB3200C16ADC"
+    ],
+    "series": "Orion",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "GREY"
+  ],
+  "cas_latency": 16,
+  "timings": "16-18-18-36",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B08T91JTFJ"
+  }
+}

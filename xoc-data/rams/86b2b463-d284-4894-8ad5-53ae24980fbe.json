@@ -1,0 +1,35 @@
+{
+  "opendb_id": "86b2b463-d284-4894-8ad5-53ae24980fbe",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB Black DDR5-6600 CL38 32GB (2x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMH32GX5M2B6600C38"
+    ],
+    "series": "Vengeance",
+    "variant": "6600 CL38"
+  },
+  "speed": 6600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 38,
+  "timings": "38-48-48-106",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0C4Y2774G",
+    "newegg_sku": "N82E16820982020",
+    "walmart_sku": 1395313557
+  }
+}

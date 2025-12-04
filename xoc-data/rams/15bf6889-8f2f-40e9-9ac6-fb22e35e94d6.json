@@ -1,0 +1,34 @@
+{
+  "opendb_id": "15bf6889-8f2f-40e9-9ac6-fb22e35e94d6",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "V-Color TRA532G64D832Q Registered White DDR5-6400 CL32 128GB (4x32GB)",
+    "manufacturer": "v-color",
+    "part_numbers": [
+      "TRA532G64D832Q"
+    ],
+    "series": "TRA532G64D832Q",
+    "variant": "6400 CL32"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 128,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 32,
+  "timings": "32-39-39-102",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0CQJJDCX3",
+    "newegg_sku": "2SJ-004R-00019"
+  }
+}

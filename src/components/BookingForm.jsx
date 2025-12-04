@@ -1,8 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import { client } from "../sanityClient";
 import { useLocation, useNavigate } from "react-router-dom";
 
-// ---------- CONSTANTS ----------
 const HOST_TZ_NAME = "Asia/Kolkata";
 const IST_OFFSET_MINUTES = 330;
 
@@ -42,6 +41,120 @@ const formatLocalTime = (utcDate) => {
   }
 };
 
+/**
+ * Generic dropdown with built-in search.
+ * - items: array of objects
+ * - value: currently selected id
+ * - onChange: (id) => void
+ * - getId: (item) => string
+ * - getLabel: (item) => string
+ */
+function XocDropdown({
+  label,
+  items,
+  value,
+  onChange,
+  placeholder = "Select...",
+  emptyMessage = "No options found",
+  getId,
+  getLabel,
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const wrapperRef = useRef(null);
+
+  // close on outside click
+  useEffect(() => {
+    function handleClick(e) {
+      if (!wrapperRef.current) return;
+      if (!wrapperRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    }
+    if (open) {
+      document.addEventListener("mousedown", handleClick);
+    } else {
+      document.removeEventListener("mousedown", handleClick);
+    }
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return items;
+    const q = search.toLowerCase();
+    return items.filter((item) => getLabel(item).toLowerCase().includes(q));
+  }, [items, search, getLabel]);
+
+  const selectedItem = items.find((i) => getId(i) === value);
+
+  return (
+    <div className="text-left relative" ref={wrapperRef}>
+      {label && (
+        <label className="block text-xs font-semibold text-sky-400 mb-1">
+          {label}
+        </label>
+      )}
+
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full bg-[#020617] border border-sky-700/60 rounded-lg px-3 py-2.5 text-sm flex items-center justify-between gap-2 focus:outline-none focus:border-sky-400"
+      >
+        <span className={selectedItem ? "" : "text-slate-500"}>
+          {selectedItem ? getLabel(selectedItem) : placeholder}
+        </span>
+        <span className="text-sky-400 text-xs">▾</span>
+      </button>
+
+      {open && (
+        <div className="absolute mt-1 w-full bg-[#020617] border border-sky-700/70 rounded-lg shadow-xl z-30 overflow-hidden">
+          <div className="border-b border-sky-800/60">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              autoFocus
+              placeholder="Search..."
+              className="w-full bg-transparent px-3 py-2 text-xs text-sky-100 placeholder-slate-500 focus:outline-none"
+            />
+          </div>
+
+          <div className="max-h-56 overflow-y-auto text-sm">
+            {filtered.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-slate-400">
+                {emptyMessage}
+              </div>
+            ) : (
+              filtered.map((item) => {
+                const id = getId(item);
+                const labelText = getLabel(item);
+                const isSelected = id === value;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => {
+                      onChange(id);
+                      setOpen(false);
+                    }}
+                    className={`w-full text-left px-3 py-2 text-xs sm:text-sm transition ${
+                      isSelected
+                        ? "bg-sky-700/70 text-sky-50"
+                        : "hover:bg-sky-700/40 text-sky-100"
+                    }`}
+                  >
+                    {labelText}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function BookingForm() {
   const q = useQuery();
   const navigate = useNavigate();
@@ -66,6 +179,12 @@ export default function BookingForm() {
     mainGame: "",
     notes: "",
   });
+
+  // XOC hardware data loaded from /api/xocParts
+  const [xocMotherboards, setXocMotherboards] = useState([]);
+  const [xocRams, setXocRams] = useState([]);
+  const [xocMoboId, setXocMoboId] = useState("");
+  const [xocRamId, setXocRamId] = useState("");
 
   // Package from URL
   const selectedPackage = useMemo(
@@ -132,6 +251,40 @@ export default function BookingForm() {
 
     fetchData();
   }, []);
+
+  // ---------- LOAD XOC PARTS FROM LOCAL OPENDB (API) ----------
+  useEffect(() => {
+    if (!isXoc) return;
+
+    const loadXocParts = async () => {
+      try {
+        const res = await fetch("/api/xocParts");
+        if (!res.ok) {
+          console.error("Failed to load XOC parts:", res.status);
+          return;
+        }
+        const data = await res.json();
+        if (!data.ok) {
+          console.error("XOC parts error:", data.error);
+          return;
+        }
+
+        const sortedMobos = (data.motherboards || [])
+          .slice()
+          .sort((a, b) => a.name.localeCompare(b.name));
+        const sortedRams = (data.rams || [])
+          .slice()
+          .sort((a, b) => a.name.localeCompare(b.name));
+
+        setXocMotherboards(sortedMobos);
+        setXocRams(sortedRams);
+      } catch (err) {
+        console.error("Error fetching /api/xocParts:", err);
+      }
+    };
+
+    loadXocParts();
+  }, [isXoc]);
 
   const times = useMemo(() => {
     if (!settings || !selectedDate) return [];
@@ -235,7 +388,6 @@ export default function BookingForm() {
 
     const displayTime = selectedSlot.localLabel;
 
-    // Try to get referral from URL (?ref=...) OR localStorage("referral")
     const referralFromQuery = q.get("ref") || "";
     let referralFromStorage = "";
     try {
@@ -245,6 +397,11 @@ export default function BookingForm() {
     }
 
     const finalReferralCode = referralFromQuery || referralFromStorage;
+
+    const selectedMobo = isXoc
+      ? xocMotherboards.find((m) => m.id === xocMoboId)
+      : null;
+    const selectedRam = isXoc ? xocRams.find((r) => r.id === xocRamId) : null;
 
     const payload = {
       displayDate,
@@ -270,37 +427,24 @@ export default function BookingForm() {
 
       status: "pending",
 
-      // Only send referralCode if we actually have one
       ...(finalReferralCode ? { referralCode: finalReferralCode } : {}),
+
+      ...(isXoc && selectedMobo && selectedRam
+        ? {
+            xocMotherboardId: selectedMobo.id,
+            xocMotherboardName: selectedMobo.name,
+            xocMotherboardSocket: selectedMobo.socket,
+            xocMotherboardRamType: selectedMobo.ram_type,
+            xocRamId: selectedRam.id,
+            xocRamName: selectedRam.name,
+            xocRamSpeedMtps: selectedRam.speed,
+            xocRamCl: selectedRam.cas_latency,
+            xocRamCapacityGb: selectedRam.capacityGb,
+          }
+        : {}),
     };
 
-    if (isXoc) {
-      // XOC flow: just create booking + send email, no payment
-      try {
-        const res = await fetch("/api/ref/createBooking", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-
-        if (!res.ok) {
-          throw new Error("Failed to send booking request");
-        }
-
-        alert(
-          "Your XOC booking request has been sent! I’ll contact you on Discord/Email to confirm details."
-        );
-        navigate("/thank-you");
-      } catch (err) {
-        console.error("Error sending XOC enquiry:", err);
-        setErrorStep2(
-          "Could not send your request. Please try again or reach out on Discord."
-        );
-      }
-    } else {
-      // Normal flow: go to payment page
-      navigate(`/payment?data=${encodeURIComponent(JSON.stringify(payload))}`);
-    }
+    navigate(`/payment?data=${encodeURIComponent(JSON.stringify(payload))}`);
   };
 
   // ---------- CALENDAR DATA ----------
@@ -504,6 +648,59 @@ export default function BookingForm() {
 
           {step === 2 && (
             <div className="max-w-2xl mx-auto bg-[#0b1120]/80 border border-sky-700/30 rounded-2xl p-8 shadow-[0_0_25px_rgba(14,165,233,0.15)] space-y-6">
+              {isXoc && (
+                <div className="space-y-4 border border-sky-700/50 rounded-xl p-4 bg-slate-900/40">
+                  <h4 className="text-sky-300 font-semibold text-sm sm:text-base">
+                    XOC Hardware Eligibility
+                  </h4>
+                  <p className="text-xs text-sky-400/80">
+                    Choose your motherboard and RAM kit from the supported list
+                    below. Component data powered by the BuildCores open
+                    database.
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <XocDropdown
+                      label="Motherboard"
+                      items={xocMotherboards}
+                      value={xocMoboId}
+                      onChange={setXocMoboId}
+                      placeholder={
+                        xocMotherboards.length === 0
+                          ? "No supported boards loaded"
+                          : "Select your motherboard"
+                      }
+                      emptyMessage="No supported boards found"
+                      getId={(m) => m.id}
+                      getLabel={(m) => m.name}
+                    />
+
+                    <XocDropdown
+                      label="RAM Kit"
+                      items={xocRams}
+                      value={xocRamId}
+                      onChange={setXocRamId}
+                      placeholder={
+                        xocRams.length === 0
+                          ? "No eligible RAM kits loaded"
+                          : "Select your RAM kit"
+                      }
+                      emptyMessage="No eligible RAM kits found"
+                      getId={(r) => r.id}
+                      getLabel={(r) =>
+                        `${r.name} — ${r.speed} MT/s, CL${r.cas_latency}, ${r.capacityGb}GB`
+                      }
+                    />
+                  </div>
+
+                  <p className="text-[11px] text-sky-400/70">
+                    Only DDR5 AM5 boards and RAM kits that meet the XOC
+                    requirements (6000 MT/s+ with CL limits) are shown here.
+                  </p>
+                </div>
+              )}
+
+              {/* ---------- NORMAL FORM FIELDS ---------- */}
               <input
                 name="discord"
                 placeholder="Discord (e.g. Servi#1234)"
@@ -561,6 +758,16 @@ export default function BookingForm() {
                       setErrorStep2("Please fill out all required fields.");
                       return;
                     }
+
+                    if (isXoc) {
+                      if (!xocMoboId || !xocRamId) {
+                        setErrorStep2(
+                          "Please select your motherboard and RAM kit for XOC."
+                        );
+                        return;
+                      }
+                    }
+
                     setErrorStep2("");
                     setLoading(true);
                     await handleSubmit();
@@ -569,13 +776,7 @@ export default function BookingForm() {
                   disabled={loading}
                   className="glow-button w-1/2 py-3 rounded-lg font-semibold transition inline-flex items-center justify-center gap-2"
                 >
-                  {loading
-                    ? isXoc
-                      ? "Sending..."
-                      : "Submitting..."
-                    : isXoc
-                    ? "Send Request"
-                    : "Submit & Pay"}
+                  {loading ? "Submitting..." : "Submit & Pay"}
                   <span className="glow-line glow-line-top" />
                   <span className="glow-line glow-line-right" />
                   <span className="glow-line glow-line-bottom" />

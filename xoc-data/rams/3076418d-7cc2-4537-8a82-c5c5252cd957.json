@@ -1,0 +1,35 @@
+{
+  "opendb_id": "3076418d-7cc2-4537-8a82-c5c5252cd957",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Corsair Vengeance Black DDR5-5600 CL40 64GB (2x32GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMK64GX5M2B5600C40"
+    ],
+    "series": "Vengeance",
+    "variant": "5600 CL40"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-77",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B09WN2H42Y",
+    "newegg_sku": "N82E16820236848",
+    "walmart_sku": 989499909
+  }
+}

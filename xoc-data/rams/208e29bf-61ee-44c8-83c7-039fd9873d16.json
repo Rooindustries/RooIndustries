@@ -1,0 +1,35 @@
+{
+  "opendb_id": "208e29bf-61ee-44c8-83c7-039fd9873d16",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Vulcan Black DDR5-5600 CL36 32GB (2x16GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "FLBD532G5600HC36BDC01"
+    ],
+    "series": "T-Force",
+    "variant": "5600 CL36"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 36,
+  "timings": "36-36-36-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B09YTTCQKT",
+    "newegg_sku": "N82E16820331839",
+    "walmart_sku": 1893984112
+  }
+}

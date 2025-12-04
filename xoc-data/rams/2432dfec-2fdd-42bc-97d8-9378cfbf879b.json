@@ -1,0 +1,32 @@
+{
+  "opendb_id": "2432dfec-2fdd-42bc-97d8-9378cfbf879b",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Xtreem Pink DDR5-7200 CL34 32GB (2x16GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "FFPD532G7200HC34ADC01"
+    ],
+    "series": "T-Force",
+    "variant": "7200 CL34"
+  },
+  "speed": 7200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "PINK"
+  ],
+  "cas_latency": 34,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "newegg_sku": "N82E16820985261"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "opendb_id": "be617b59-42f5-448b-921d-dfe287a7c2b3",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 48
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB Black DDR5-5200 CL38 96GB (2x48GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMH96GX5M2B5200C38"
+    ],
+    "series": "Vengeance",
+    "variant": "5200 CL38"
+  },
+  "speed": 5200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 96,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 38,
+  "timings": "38-38-38-84",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0BVN19P9B",
+    "walmart_sku": 2422154480
+  }
+}

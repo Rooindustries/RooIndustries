@@ -1,0 +1,34 @@
+{
+  "opendb_id": "9ebda5a3-cf8c-4776-acf7-fd2a3cc91441",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Trident RGB (For AMD) Black DDR4-2400 CL15 64GB (4x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-2400C15Q-64GTZRX"
+    ],
+    "series": "Trident",
+    "variant": "2400 CL15"
+  },
+  "speed": 2400,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 15,
+  "timings": "15-15-15-35",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B078BR8SJR",
+    "walmart_sku": 464034557
+  }
+}

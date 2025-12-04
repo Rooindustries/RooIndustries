@@ -1,0 +1,31 @@
+{
+  "opendb_id": "70ce9055-58e8-46b5-a7f0-6330601d4fec",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 2
+  },
+  "metadata": {
+    "name": "Crucial CT25664BA1339A Black / Green DDR3-1333 CL9 2GB (1x2GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "CT25664BA1339A"
+    ],
+    "series": "CT25664BA1339A",
+    "variant": "1333 CL9"
+  },
+  "speed": 1333,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 2,
+  "color": [
+    "BLACK",
+    "GREEN"
+  ],
+  "cas_latency": 9,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {}
+}

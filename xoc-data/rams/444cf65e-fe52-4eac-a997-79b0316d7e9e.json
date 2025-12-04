@@ -1,0 +1,35 @@
+{
+  "opendb_id": "444cf65e-fe52-4eac-a997-79b0316d7e9e",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws X Black / Red DDR3-1600 CL10 16GB (2x8GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F3-12800CL10D-16GBXL"
+    ],
+    "series": "Ripjaws",
+    "variant": "1600 CL10"
+  },
+  "speed": 1600,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 16,
+  "color": [
+    "BLACK",
+    "RED"
+  ],
+  "cas_latency": 10,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0064DQR9U",
+    "newegg_sku": "N82E16820231489",
+    "walmart_sku": 47313099
+  }
+}

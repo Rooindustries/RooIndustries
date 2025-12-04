@@ -1,0 +1,28 @@
+{
+  "opendb_id": "f943bd76-fcdc-43f9-8767-82340961206b",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Kingston KSM24RD4/32HAI Registered DDR4-2400 CL17 32GB (1x32GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KSM24RD4",
+      "32HAI"
+    ],
+    "series": "KSM24RD4/32HAI",
+    "variant": "2400 CL17"
+  },
+  "speed": 2400,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [],
+  "cas_latency": 17,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "general_product_information": {}
+}

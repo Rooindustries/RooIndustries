@@ -1,0 +1,34 @@
+{
+  "opendb_id": "6ce72cbf-e084-4d84-b42a-407cd418e9ca",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Dominator Platinum RGB Black DDR4-4000 CL18 32GB (2x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMT32GX4M2G4000C18"
+    ],
+    "series": "Dominator",
+    "variant": "4000 CL18"
+  },
+  "speed": 4000,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "timings": "18-22-22-42",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B09DNF2MVQ",
+    "walmart_sku": 296473701
+  }
+}

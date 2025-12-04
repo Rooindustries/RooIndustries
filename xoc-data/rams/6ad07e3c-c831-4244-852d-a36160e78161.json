@@ -1,0 +1,33 @@
+{
+  "opendb_id": "6ad07e3c-c831-4244-852d-a36160e78161",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "PNY Performance Black SODIMM DDR4-2666 CL19 8GB (1x8GB)",
+    "manufacturer": "PNY",
+    "part_numbers": [
+      "MN8GSD42666"
+    ],
+    "series": "Performance",
+    "variant": "2666 CL19"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "260-pin SODIMM (DDR4)",
+  "capacity": 8,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 19,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B07YNGGV8G",
+    "walmart_sku": 747412313
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "opendb_id": "470744c2-0c33-4cf2-b510-ba1b070970fb",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Mushkin Redline Lumina White DDR5-5600 CL28 32GB (2x16GB)",
+    "manufacturer": "Mushkin",
+    "part_numbers": [
+      "MLB5C5609CCM16GX2"
+    ],
+    "series": "Redline",
+    "variant": "5600 CL28"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 28,
+  "timings": "28-34-34-30",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

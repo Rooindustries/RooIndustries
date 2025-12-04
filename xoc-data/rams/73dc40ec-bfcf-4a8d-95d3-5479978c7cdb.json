@@ -1,0 +1,31 @@
+{
+  "opendb_id": "73dc40ec-bfcf-4a8d-95d3-5479978c7cdb",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "GeIL EVO V RGB Black DDR5-8000 CL38 32GB (2x16GB)",
+    "manufacturer": "GeIL",
+    "part_numbers": [
+      "GESG532GB8000C38ADC"
+    ],
+    "series": "EVO",
+    "variant": "8000 CL38"
+  },
+  "speed": 8000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 38,
+  "timings": "38-48-48-100",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

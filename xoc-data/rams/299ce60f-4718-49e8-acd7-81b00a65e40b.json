@@ -1,0 +1,31 @@
+{
+  "opendb_id": "299ce60f-4718-49e8-acd7-81b00a65e40b",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 48
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB White DDR5-6400 CL32 96GB (2x48GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "FF4D596G6400HC32ADC01"
+    ],
+    "series": "T-Force",
+    "variant": "6400 CL32"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 96,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 32,
+  "timings": "32-39-39-84",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

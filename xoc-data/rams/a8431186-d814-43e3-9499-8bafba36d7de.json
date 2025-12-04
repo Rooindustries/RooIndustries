@@ -1,0 +1,32 @@
+{
+  "opendb_id": "a8431186-d814-43e3-9499-8bafba36d7de",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Patriot Viper Elite II Red / Black DDR4-2666 CL16 32GB (2x16GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PVE2432G266C6K"
+    ],
+    "series": "Viper",
+    "variant": "2666 CL16"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "RED",
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "timings": "16-17-17-36",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

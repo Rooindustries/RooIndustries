@@ -1,0 +1,34 @@
+{
+  "opendb_id": "c28383d3-8da1-40cc-90c9-c72ade8eeafe",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Mushkin Redline Lumina White DDR4-3600 CL18 64GB (2x32GB)",
+    "manufacturer": "Mushkin",
+    "part_numbers": [
+      "MLB4C360JNNM32GX2"
+    ],
+    "series": "Redline",
+    "variant": "3600 CL18"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 64,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 18,
+  "timings": "18-22-22-42",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B09HZ3FWT7",
+    "walmart_sku": 827251858
+  }
+}

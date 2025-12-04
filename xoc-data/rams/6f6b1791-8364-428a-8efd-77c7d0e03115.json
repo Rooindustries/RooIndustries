@@ -1,0 +1,34 @@
+{
+  "opendb_id": "6f6b1791-8364-428a-8efd-77c7d0e03115",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Gigabyte DESIGNARE White / Black DDR4-3200 CL16 64GB (2x32GB)",
+    "manufacturer": "GIGABYTE",
+    "part_numbers": [
+      "GP-DSG64G32"
+    ],
+    "series": "DESIGNARE",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 64,
+  "color": [
+    "WHITE",
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "timings": "16-18-18-38",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B08FW3LS54"
+  }
+}

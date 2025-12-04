@@ -1,0 +1,31 @@
+{
+  "opendb_id": "0143caa5-8110-44a3-adf8-b6d4b1398722",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 48
+  },
+  "metadata": {
+    "name": "GeIL EVO V RGB Black DDR5-6800 CL36 96GB (2x48GB)",
+    "manufacturer": "GeIL",
+    "part_numbers": [
+      "GESG596GB6800C36BDC"
+    ],
+    "series": "EVO",
+    "variant": "6800 CL36"
+  },
+  "speed": 6800,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 96,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 36,
+  "timings": "36-44-44-86",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

@@ -1,0 +1,31 @@
+{
+  "opendb_id": "6338287c-7df8-4cc3-8d6a-f95c3d799bf5",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB Black DDR4-4000 MHz 8GB(1x8GB) CL20 ",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TF3D48G4000HC20C01"
+    ],
+    "series": "T-Force",
+    "variant": "4000 CL20"
+  },
+  "speed": 4000,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 8,
+  "cas_latency": 20,
+  "voltage": 1.4,
+  "heat_spreader": true,
+  "height": 49,
+  "color": [],
+  "timings": "20-26-26-46",
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "general_product_information": {
+    "manufacturer_url": "https://www.teamgroupinc.com/en/product-category/memory/desktop/?filter=ZmlsdGVyLTIyMT0yNTE4"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "opendb_id": "732fef92-95ea-4d19-a625-f8d65971ff5d",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "ADATA XPG GAMMIX D45 White DDR4-3200 CL16 16GB (2x8GB)",
+    "manufacturer": "ADATA",
+    "part_numbers": [
+      "AX4U32008G16A-DCWHD45"
+    ],
+    "series": "XPG",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 16,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B094WZGFCL"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "opendb_id": "3cef94bd-b20e-43ae-8f90-afad05c4063b",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Crucial CT32G4DFD832A Green / Black DDR4-3200 CL22 32GB (1x32GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "CT32G4DFD832A"
+    ],
+    "series": "CT32G4DFD832A",
+    "variant": "3200 CL22"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "GREEN",
+    "BLACK"
+  ],
+  "cas_latency": 22,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B07ZLHD4F8",
+    "newegg_sku": "N82E16820156237",
+    "walmart_sku": 989493112
+  }
+}

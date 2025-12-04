@@ -1,0 +1,33 @@
+{
+  "opendb_id": "11acd369-4f5f-4417-a15f-aee9da8e65b2",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Patriot Viper Xtreme 5 Black DDR5-8200 CL38 32GB (2x16GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PVX532G82C38K"
+    ],
+    "series": "Viper",
+    "variant": "8200 CL38"
+  },
+  "speed": 8200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 38,
+  "timings": "38-48-48-84",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0CT8ZG6YF"
+  }
+}

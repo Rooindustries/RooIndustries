@@ -1,0 +1,34 @@
+{
+  "opendb_id": "f884b07e-2d9d-4f6d-b588-d5462c28896a",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Dominator Titanium DDR5-6000 CL36 64GB (4x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMP64GX5M4B6000C36"
+    ],
+    "series": "Dominator",
+    "variant": "6000 CL36"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 36,
+  "timings": "36-36-36-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0CHSG1HZ5",
+    "newegg_sku": "N82E16820982099"
+  }
+}

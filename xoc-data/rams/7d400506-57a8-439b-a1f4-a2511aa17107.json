@@ -1,0 +1,31 @@
+{
+  "opendb_id": "7d400506-57a8-439b-a1f4-a2511aa17107",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z Royal Silver DDR4-3600 CL16 32GB (4x8GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-3600C16Q-32GTRS"
+    ],
+    "series": "Trident",
+    "variant": "3600 CL16"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "GREY"
+  ],
+  "cas_latency": 16,
+  "timings": "16-16-16-36",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

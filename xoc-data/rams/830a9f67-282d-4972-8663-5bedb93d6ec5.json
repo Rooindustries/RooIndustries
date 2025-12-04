@@ -1,0 +1,34 @@
+{
+  "opendb_id": "830a9f67-282d-4972-8663-5bedb93d6ec5",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Corsair Vengeance Black DDR5-5600 CL40 32GB (1x32GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMK32GX5M1B5600C40"
+    ],
+    "series": "Vengeance",
+    "variant": "5600 CL40"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-78",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0BLKBQB6P"
+  }
+}

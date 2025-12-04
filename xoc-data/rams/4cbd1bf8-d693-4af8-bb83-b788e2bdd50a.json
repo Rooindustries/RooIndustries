@@ -1,0 +1,32 @@
+{
+  "opendb_id": "4cbd1bf8-d693-4af8-bb83-b788e2bdd50a",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.SKILL TridentZ RGB Series 32GB (2 x 16GB) 288-Pin PC RAM DDR4 3600 (PC4 28800) Desktop Memory Model F4-3600C18D-32GTZR",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [],
+    "series": "TridentZ RGB Series",
+    "variant": "3600 (PC4 28800)",
+    "releaseYear": 0
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM",
+  "capacity": 32,
+  "cas_latency": 18,
+  "timings": "18-22-22-42",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "height": 0,
+  "color": [],
+  "general_product_information": {
+    "amazon_sku": "B07Z87ZMN3",
+    "walmart_sku": 225823726
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "opendb_id": "dd132e9a-6875-40f6-bd40-248bd2632e05",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Kingston KSM48R40BS8KMM-16HMR Registered Green DDR5-4800 CL40 32GB (1x32GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KSM48R40BS8KMM-16HMR"
+    ],
+    "series": "KSM48R40BS8KMM-16HMR",
+    "variant": "4800 CL40"
+  },
+  "speed": 4800,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "GREEN"
+  ],
+  "cas_latency": 40,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "newegg_sku": "N82E16820242773"
+  }
+}

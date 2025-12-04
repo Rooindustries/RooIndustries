@@ -1,0 +1,34 @@
+{
+  "opendb_id": "3a32e248-41b9-4517-bf5f-489860947990",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Dominator Platinum RGB White DDR5-5200 CL40 32GB (2x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMT32GX5M2B5200C40W"
+    ],
+    "series": "Dominator",
+    "variant": "5200 CL40"
+  },
+  "speed": 5200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-77",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B09Y9F6ZWP",
+    "newegg_sku": "N82E16820236858"
+  }
+}

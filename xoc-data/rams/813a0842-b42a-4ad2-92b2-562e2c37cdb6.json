@@ -1,0 +1,34 @@
+{
+  "opendb_id": "813a0842-b42a-4ad2-92b2-562e2c37cdb6",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston Fury Renegade RGB Silver / Black DDR5-6800 CL36 16GB (1x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF568C36RSA-16"
+    ],
+    "series": "Fury",
+    "variant": "6800 CL36"
+  },
+  "speed": 6800,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "GREY",
+    "BLACK"
+  ],
+  "cas_latency": 36,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0BMQT2LHZ",
+    "walmart_sku": 2261763788
+  }
+}

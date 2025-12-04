@@ -1,0 +1,33 @@
+{
+  "opendb_id": "8d51a3e6-1a5a-4854-b74e-1249dff56be6",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "ADATA XPG LANCER RGB Black 32GB (2x16GB) DDR5 7200 CL34",
+    "manufacturer": "ADATA",
+    "part_numbers": [
+      "AX5U7200C3416G-DCLARBK"
+    ],
+    "series": "XPG Lancer",
+    "variant": "7200 CL34"
+  },
+  "speed": 7200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 34,
+  "voltage": 1.4,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0BSVSZ8JD",
+    "newegg_sku": "N82E16820246058"
+  }
+}

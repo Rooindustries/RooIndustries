@@ -5,7 +5,6 @@ import crypto from "crypto";
 // 1. Initialize Resend
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// 2. Initialize Sanity with WRITE permissions
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
   dataset: process.env.SANITY_DATASET || "production",
@@ -33,7 +32,6 @@ export default async function handler(req, res) {
     );
 
     if (!referral) {
-      // Security: Don't reveal if email exists or not
       return res
         .status(200)
         .json({ ok: true, message: "If email exists, link sent." });
