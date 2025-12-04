@@ -1,0 +1,33 @@
+{
+  "opendb_id": "42bb6b85-bec0-4fd7-ac0d-6ea680ac04f1",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB RS DDR4-3600 CL18 64GB (2x32GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMG64GX4M2D3600C18"
+    ],
+    "series": "Vengeance",
+    "variant": "3600 CL18"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "timings": "18-22-22-42",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B09C5VPZN4"
+  }
+}

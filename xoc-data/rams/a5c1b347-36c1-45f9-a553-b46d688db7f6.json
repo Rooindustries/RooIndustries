@@ -1,0 +1,33 @@
+{
+  "opendb_id": "a5c1b347-36c1-45f9-a553-b46d688db7f6",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "VisionTek Adrenaline DDR2-800 CL6 4GB (1x4GB)",
+    "manufacturer": "VisionTek",
+    "part_numbers": [
+      "900559"
+    ],
+    "series": "Adrenaline",
+    "variant": "800 CL6"
+  },
+  "speed": 800,
+  "ram_type": "DDR2",
+  "form_factor": "240-pin DIMM (DDR2)",
+  "capacity": 4,
+  "color": [
+    "GREEN"
+  ],
+  "cas_latency": 6,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B00C1TDVRC",
+    "walmart_sku": 26464020
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "opendb_id": "ed385892-a405-43d9-aaca-66da5cbeabee",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 24
+  },
+  "metadata": {
+    "name": "Patriot Viper Elite 5 RGB TUF GAMING ALLIANCE White DDR5-6600 CL34 48GB (2x24GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PVER548G66C34KT"
+    ],
+    "series": "Viper",
+    "variant": "6600 CL34"
+  },
+  "speed": 6600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 48,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 34,
+  "timings": "34-40-40-84",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0CVFP6VSM"
+  }
+}

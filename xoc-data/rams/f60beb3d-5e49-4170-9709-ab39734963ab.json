@@ -1,0 +1,35 @@
+{
+  "opendb_id": "f60beb3d-5e49-4170-9709-ab39734963ab",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws M5 RGB DDR5-6800 CL34 64GB (2x32GB) Black",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-6800J3445G32GX2-RM5RK"
+    ],
+    "series": "Ripjaws",
+    "variant": "M5 RGB"
+  },
+  "speed": 6800,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 34,
+  "timings": "34-45-45-108",
+  "voltage": 1.4,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0F6VQM3T2",
+    "newegg_sku": "N82E16820374756",
+    "manufacturer_url": "https://www.gskill.com/product/165/421/1747210532/F5-6800J3445G32GX2-RM5RK"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "opendb_id": "6cc43b5e-482e-4ae0-b33c-819ac49e9c1a",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Silicon Power DDR5 32GB (2x16GB) Zenith RGB 5600MHz CL40 BLACK",
+    "manufacturer": "Silicon Power",
+    "part_numbers": [
+      "SP032GXLWU560FSF"
+    ],
+    "series": "XPOWER Zenith RGB",
+    "variant": "5600 CL40"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-76",
+  "voltage": 1.25,
+  "ecc": "Non-ECC",
+  "heat_spreader": true,
+  "rgb": true,
+  "height": 38.6,
+  "registered": "Unbuffered",
+  "general_product_information": {
+    "amazon_sku": "B0B7JFMVVD",
+    "manufacturer_url": "https://www.silicon-power.com/product-detail/XPOWER_Zenith_DDR5_RGB_Gaming_UDIMM/"
+  }
+}

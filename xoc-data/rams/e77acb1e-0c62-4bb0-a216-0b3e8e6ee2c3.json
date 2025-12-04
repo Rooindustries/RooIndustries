@@ -1,0 +1,35 @@
+{
+  "opendb_id": "e77acb1e-0c62-4bb0-a216-0b3e8e6ee2c3",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Patriot Viper Elite II Red / Black DDR4-3200 CL18 16GB (1x16GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PVE2416G320C8"
+    ],
+    "series": "Viper",
+    "variant": "3200 CL18"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "RED",
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "timings": "18-22-22-42",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0957XCGM6",
+    "walmart_sku": 337924683
+  }
+}

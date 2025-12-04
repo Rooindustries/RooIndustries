@@ -1,0 +1,32 @@
+{
+  "opendb_id": "6a2c7128-baa8-4cb4-8647-b3bdb27519da",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Corsair Vengeance LPX Black / Yellow DDR4-3600 CL18 32GB (4x8GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMK32GX4M4B3600C18"
+    ],
+    "series": "Vengeance",
+    "variant": "3600 CL18"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "YELLOW"
+  ],
+  "cas_latency": 18,
+  "timings": "18-19-19-39",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

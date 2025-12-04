@@ -1,0 +1,30 @@
+{
+  "opendb_id": "bd26decb-d6cb-4f10-9cf9-6c1af9216099",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Crucial Ballistix RGB Red DDR4-3600 CL16 16GB (2x8GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "BL2K8G36C16U4RL"
+    ],
+    "series": "Ballistix",
+    "variant": "3600 CL16"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "RED"
+  ],
+  "cas_latency": 16,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

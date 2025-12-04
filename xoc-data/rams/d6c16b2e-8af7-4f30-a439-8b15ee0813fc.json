@@ -1,0 +1,30 @@
+{
+  "opendb_id": "d6c16b2e-8af7-4f30-a439-8b15ee0813fc",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Mushkin Redline Pro Black SODIMM DDR5-4800 CL40 64GB (2x32GB)",
+    "manufacturer": "Mushkin",
+    "part_numbers": [
+      "MRP5T480FGGD32G28X2"
+    ],
+    "series": "Redline",
+    "variant": "4800 CL40"
+  },
+  "speed": 4800,
+  "ram_type": "DDR5",
+  "form_factor": "262-pin SODIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {}
+}

@@ -1,0 +1,33 @@
+{
+  "opendb_id": "632c3c6c-d0dd-4947-8034-e553af5429dc",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston KVR16R11D4K4/64 Registered Green DDR3-1600 CL11 64GB (4x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KVR16R11D4K4",
+      "64"
+    ],
+    "series": "KVR16R11D4K4/64",
+    "variant": "1600 CL11"
+  },
+  "speed": 1600,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 64,
+  "color": [
+    "GREEN"
+  ],
+  "cas_latency": 11,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0088SSV6G"
+  }
+}

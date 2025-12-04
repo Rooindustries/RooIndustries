@@ -1,0 +1,33 @@
+{
+  "opendb_id": "bf4bcfc9-2276-4ec2-b59f-e8dcd74784e1",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 48
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB Black DDR5-6800 CL36 96GB (2x48GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "FF3D596G6800HC36DDC01"
+    ],
+    "series": "T-Force",
+    "variant": "6800 CL36"
+  },
+  "speed": 6800,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 96,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 36,
+  "timings": "36-46-46-84",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "newegg_sku": "N82E16820985028"
+  }
+}

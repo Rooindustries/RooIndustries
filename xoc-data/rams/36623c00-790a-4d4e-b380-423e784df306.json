@@ -1,0 +1,32 @@
+{
+  "opendb_id": "36623c00-790a-4d4e-b380-423e784df306",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP Xtreem ARGB Black DDR5-7600 CL36 32GB (2x16GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "FF9D532G7600HC36FDC01"
+    ],
+    "series": "Xtreem",
+    "variant": "7600 CL36"
+  },
+  "speed": 7600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 36,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0CW1J934L"
+  }
+}

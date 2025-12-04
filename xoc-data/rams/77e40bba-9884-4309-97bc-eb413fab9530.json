@@ -1,0 +1,34 @@
+{
+  "opendb_id": "77e40bba-9884-4309-97bc-eb413fab9530",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 24
+  },
+  "metadata": {
+    "name": "V-Color TRA524G70S834R3Q Registered White DDR5-7000 CL34 96GB (4x24GB)",
+    "manufacturer": "v-color",
+    "part_numbers": [
+      "TRA524G70S834R3Q"
+    ],
+    "series": "TRA524G70S834R3Q",
+    "variant": "7000 CL34"
+  },
+  "speed": 7000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 96,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 34,
+  "timings": "34-42-42-102",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0CQJDQ3LR",
+    "newegg_sku": "2SJ-004R-00032"
+  }
+}

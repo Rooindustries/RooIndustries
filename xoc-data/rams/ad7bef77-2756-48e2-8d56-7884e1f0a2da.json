@@ -1,0 +1,33 @@
+{
+  "opendb_id": "ad7bef77-2756-48e2-8d56-7884e1f0a2da",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 48
+  },
+  "metadata": {
+    "name": "G.Skill Flare X5 Black DDR5-5600 CL40 96GB (2x48GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-5600J4040D48GX2-FX5"
+    ],
+    "series": "Flare",
+    "variant": "5600 CL40"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 96,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-89",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0C4WWTTPZ"
+  }
+}

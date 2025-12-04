@@ -1,0 +1,36 @@
+{
+  "opendb_id": "3390566c-158e-4dde-acd6-c40c5f7e52f1",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z5 Neo RGB Silver / Black DDR5-7200 CL34 32GB (2x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-7200J3445G16GX2-TZ5NRW"
+    ],
+    "series": "Trident",
+    "variant": "7200 CL34"
+  },
+  "speed": 7200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "GREY",
+    "BLACK"
+  ],
+  "cas_latency": 34,
+  "timings": "34-45-45-115",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0DD243MYB",
+    "newegg_sku": "N82E16820374623",
+    "walmart_sku": 9962369649
+  }
+}

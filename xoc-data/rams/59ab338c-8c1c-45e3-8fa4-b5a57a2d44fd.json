@@ -1,0 +1,32 @@
+{
+  "opendb_id": "59ab338c-8c1c-45e3-8fa4-b5a57a2d44fd",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB Black DDR4- 16GB(1x16GB) 2666MHz CL16",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TF3D416G2666HC16C01"
+    ],
+    "series": "T-Force",
+    "variant": "Delta RGB BLACK DDR4",
+    "releaseYear": 4
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "voltage": 1.2,
+  "heat_spreader": true,
+  "height": 49,
+  "timings": "16-18-18-38",
+  "general_product_information": {
+    "manufacturer_url": "https://www.teamgroupinc.com/en/product-category/memory/desktop/?filter=ZmlsdGVyLTIyMT0yNTE4"
+  }
+}

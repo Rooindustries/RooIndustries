@@ -1,0 +1,36 @@
+{
+  "opendb_id": "434acbd6-0660-42b2-8baa-cadd708d6850",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Corsair WS Registered Black / Green DDR5-5600 CL40 128GB (4x32GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMA128GX5M4B5600Z40"
+    ],
+    "series": "WS",
+    "variant": "5600 CL40"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 128,
+  "color": [
+    "BLACK",
+    "GREEN"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-77",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0CYZJY786",
+    "newegg_sku": "N82E16820982164",
+    "walmart_sku": 5916262582
+  }
+}

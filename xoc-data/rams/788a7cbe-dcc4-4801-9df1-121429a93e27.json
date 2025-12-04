@@ -1,0 +1,35 @@
+{
+  "opendb_id": "788a7cbe-dcc4-4801-9df1-121429a93e27",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Patriot Signature Blue / Silver DDR3-1600 CL11 8GB (1x8GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PSD38G16002H"
+    ],
+    "series": "Signature",
+    "variant": "1600 CL11"
+  },
+  "speed": 1600,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 8,
+  "color": [
+    "BLUE",
+    "GREY"
+  ],
+  "cas_latency": 11,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B007URNIBE",
+    "newegg_sku": "N82E16820220670",
+    "walmart_sku": 45079925
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "opendb_id": "30b2869a-e6d3-4a85-9cfb-4210a9f92f48",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws V Black DDR4-3600 CL18 128GB (4x32GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-3600C18Q-128GVK"
+    ],
+    "series": "Ripjaws",
+    "variant": "3600 CL18"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 128,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "timings": "18-22-22-42",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B08B87BM4K",
+    "newegg_sku": "N82E16820374005",
+    "walmart_sku": 533509946
+  }
+}

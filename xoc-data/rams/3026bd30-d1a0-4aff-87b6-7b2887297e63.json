@@ -1,0 +1,33 @@
+{
+  "opendb_id": "3026bd30-d1a0-4aff-87b6-7b2887297e63",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "G.Skill Value Green DDR3-1333 CL9 4GB (1x4GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F3-10600CL9S-4GBNT"
+    ],
+    "series": "Value",
+    "variant": "1333 CL9"
+  },
+  "speed": 1333,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 4,
+  "color": [
+    "GREEN"
+  ],
+  "cas_latency": 9,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B004RPBA2Q",
+    "walmart_sku": 100217703
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "opendb_id": "42379b54-ed8c-4fe4-88e5-4ebb93597883",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Crucial CT16G52C42S5 Black SODIMM DDR5-5200 CL42 16GB (1x16GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "CT16G52C42S5"
+    ],
+    "series": "CT16G52C42S5",
+    "variant": "5200 CL42"
+  },
+  "speed": 5200,
+  "ram_type": "DDR5",
+  "form_factor": "262-pin SODIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 42,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0BNXXFSBR",
+    "walmart_sku": 1398588357
+  }
+}

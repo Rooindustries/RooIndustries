@@ -1,0 +1,34 @@
+{
+  "opendb_id": "d01eada7-7963-4e14-96f2-5d6b853e7f79",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Kingston KVR16N11K2/16 Green DDR3-1600 CL11 16GB (2x8GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KVR16N11K2",
+      "16"
+    ],
+    "series": "KVR16N11K2/16",
+    "variant": "1600 CL11"
+  },
+  "speed": 1600,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 16,
+  "color": [
+    "GREEN"
+  ],
+  "cas_latency": 11,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B008C4LITS",
+    "walmart_sku": 26966368
+  }
+}

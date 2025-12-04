@@ -1,0 +1,33 @@
+{
+  "opendb_id": "938423cb-bded-4676-bd12-37a219496860",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Vengeance LPX White DDR4-2666 CL16 64GB (4x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMK64GX4M4A2666C16W"
+    ],
+    "series": "Vengeance",
+    "variant": "2666 CL16"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 64,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 16,
+  "timings": "16-18-18-35",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B01EI5ZK7K"
+  }
+}

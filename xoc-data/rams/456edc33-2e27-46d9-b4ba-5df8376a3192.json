@@ -1,0 +1,30 @@
+{
+  "opendb_id": "456edc33-2e27-46d9-b4ba-5df8376a3192",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 2
+  },
+  "metadata": {
+    "name": "Crucial CT25664AA1067 Green DDR2-1066 CL7 2GB (1x2GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "CT25664AA1067"
+    ],
+    "series": "CT25664AA1067",
+    "variant": "1066 CL7"
+  },
+  "speed": 1066,
+  "ram_type": "DDR2",
+  "form_factor": "240-pin DIMM (DDR2)",
+  "capacity": 2,
+  "color": [
+    "GREEN"
+  ],
+  "cas_latency": 7,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {}
+}

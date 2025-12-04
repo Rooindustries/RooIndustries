@@ -1,0 +1,31 @@
+{
+  "opendb_id": "ce4bee0f-3bb0-41f9-86d5-e72dc0a67a2d",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "GeIL Polaris RGB DDR5-4800 CL40 32GB (1x32GB)",
+    "manufacturer": "GeIL",
+    "part_numbers": [
+      "GOSW532GB4800C40SC"
+    ],
+    "series": "Polaris",
+    "variant": "4800 CL40"
+  },
+  "speed": 4800,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-77",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

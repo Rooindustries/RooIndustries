@@ -1,0 +1,34 @@
+{
+  "opendb_id": "33a6f2c2-8500-4cb0-8c03-1d3cd4cb4c15",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws V Black DDR4-3200 CL16 16GB (1x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-3200C16S-16GVK"
+    ],
+    "series": "Ripjaws",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0171GQXME",
+    "newegg_sku": "N82E16820232090",
+    "walmart_sku": 51028927
+  }
+}

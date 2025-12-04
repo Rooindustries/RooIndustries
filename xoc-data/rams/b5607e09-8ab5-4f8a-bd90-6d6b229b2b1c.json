@@ -1,0 +1,35 @@
+{
+  "opendb_id": "b5607e09-8ab5-4f8a-bd90-6d6b229b2b1c",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Kingston FURY Beast Black / Silver DDR5-6000 CL36 16GB (2x8GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF560C36BBEK2-16"
+    ],
+    "series": "FURY",
+    "variant": "6000 CL36"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 36,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0BRTJFFBW",
+    "newegg_sku": "0RN-001J-014J1",
+    "walmart_sku": 2903797189
+  }
+}

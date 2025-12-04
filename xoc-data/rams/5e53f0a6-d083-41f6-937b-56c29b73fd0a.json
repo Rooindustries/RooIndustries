@@ -1,0 +1,31 @@
+{
+  "opendb_id": "5e53f0a6-d083-41f6-937b-56c29b73fd0a",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Corsair Dominator Platinum RGB Black DDR5-5600 CL40 64GB (2x32GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMT64GX5M2B5600Z40"
+    ],
+    "series": "Dominator",
+    "variant": "5600 CL40"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-77",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

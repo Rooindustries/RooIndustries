@@ -1,0 +1,35 @@
+{
+  "opendb_id": "facc555c-e598-4884-9445-065fe4085d16",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Corsair Dominator Platinum RGB Black DDR5-6000 CL30 64GB (2x32GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMT64GX5M2B6000Z30"
+    ],
+    "series": "Dominator",
+    "variant": "6000 CL30"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 30,
+  "timings": "30-36-36-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0C5M5P3N4",
+    "newegg_sku": "N82E16820982026",
+    "walmart_sku": 3086056400
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "opendb_id": "b009d19c-c236-4013-9228-c419a80c26f3",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z White / Black DDR5-6400 CL32 32GB (2x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-6400J3239G16GA2-TZ5S"
+    ],
+    "series": "Trident",
+    "variant": "6400 CL32"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE",
+    "BLACK"
+  ],
+  "cas_latency": 32,
+  "timings": "32-39-39-102",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

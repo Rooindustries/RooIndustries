@@ -1,0 +1,35 @@
+{
+  "opendb_id": "2de8f904-5876-43cc-af98-bb9cb8268714",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "Crucial CT4G4DFS824A Black / Green DDR4-2400 CL17 4GB (1x4GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "CT4G4DFS824A"
+    ],
+    "series": "CT4G4DFS824A",
+    "variant": "2400 CL17"
+  },
+  "speed": 2400,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 4,
+  "color": [
+    "BLACK",
+    "GREEN"
+  ],
+  "cas_latency": 17,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B019FRDFU0",
+    "newegg_sku": "9SIAWKTK8Y1834",
+    "walmart_sku": 124649127
+  }
+}

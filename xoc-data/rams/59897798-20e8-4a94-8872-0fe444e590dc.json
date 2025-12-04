@@ -1,0 +1,34 @@
+{
+  "opendb_id": "59897798-20e8-4a94-8872-0fe444e590dc",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z5 RGB White / Black DDR5-5600 CL30 32GB (2x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-5600J3036D16GA2-TZ5RS"
+    ],
+    "series": "Trident",
+    "variant": "5600 CL30"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE",
+    "BLACK"
+  ],
+  "cas_latency": 30,
+  "timings": "30-36-36-89",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B09XZ1369Q"
+  }
+}

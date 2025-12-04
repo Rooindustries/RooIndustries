@@ -1,0 +1,32 @@
+{
+  "opendb_id": "174c060c-fe79-4b86-84b2-ce1633eed29e",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Klevv CRAS XR5 RGB DDR5-6000 CL40 32GB (2x16GB)",
+    "manufacturer": "Klevv",
+    "part_numbers": [
+      "KD5AGUA80-60E400S"
+    ],
+    "series": "CRAS",
+    "variant": "6000 CL40"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE",
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

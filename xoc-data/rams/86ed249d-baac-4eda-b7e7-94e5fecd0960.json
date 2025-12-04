@@ -1,0 +1,33 @@
+{
+  "opendb_id": "86ed249d-baac-4eda-b7e7-94e5fecd0960",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston FURY Beast RGB White DDR5-6000 CL30 16GB (1x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF560C30BWA-16"
+    ],
+    "series": "FURY",
+    "variant": "6000 CL30"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 30,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0CYM2XT7C",
+    "walmart_sku": 5595862745
+  }
+}

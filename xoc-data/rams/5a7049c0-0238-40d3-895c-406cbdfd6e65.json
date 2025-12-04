@@ -1,0 +1,33 @@
+{
+  "opendb_id": "5a7049c0-0238-40d3-895c-406cbdfd6e65",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB White DDR4-3600 CL14 32GB (2x16GB) WHITE",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TF4D432G3600HC14CDC01"
+    ],
+    "series": "T-Force",
+    "variant": "3600 CL14"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 14,
+  "timings": "14-15-15-35",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "manufacturer_url": "https://www.teamgroupinc.com/en/product-category/memory/desktop/?filter=ZmlsdGVyLTIyMT0yNTE4"
+  }
+}

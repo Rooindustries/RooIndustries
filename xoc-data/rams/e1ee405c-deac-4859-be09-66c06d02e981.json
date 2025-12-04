@@ -1,0 +1,30 @@
+{
+  "opendb_id": "e1ee405c-deac-4859-be09-66c06d02e981",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "ADATA XPG GAMMIX D45 White DDR4-3600 CL18 8GB (1x8GB)",
+    "manufacturer": "ADATA",
+    "part_numbers": [
+      "AX4U36008G18I-CWHD45"
+    ],
+    "series": "XPG",
+    "variant": "3600 CL18"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 8,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 18,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

@@ -1,0 +1,33 @@
+{
+  "opendb_id": "3e6e61ab-e936-4ef1-a68a-1036ed8f5b8f",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Samsung M393A4K40CB2-CTD Registered Green / Black DDR4-2666 CL19 32GB (1x32GB)",
+    "manufacturer": "Samsung",
+    "part_numbers": [
+      "M393A4K40CB2-CTD"
+    ],
+    "series": "M393A4K40CB2-CTD",
+    "variant": "2666 CL19"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "GREEN",
+    "BLACK"
+  ],
+  "cas_latency": 19,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B09TQ6BPGP"
+  }
+}

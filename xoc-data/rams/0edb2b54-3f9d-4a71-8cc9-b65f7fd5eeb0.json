@@ -1,0 +1,35 @@
+{
+  "opendb_id": "0edb2b54-3f9d-4a71-8cc9-b65f7fd5eeb0",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Vengeance LPX Black / Yellow DDR4-2133 CL13 32GB (2x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMK32GX4M2A2133C13"
+    ],
+    "series": "Vengeance",
+    "variant": "2133 CL13"
+  },
+  "speed": 2133,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "YELLOW"
+  ],
+  "cas_latency": 13,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0196QNBU4",
+    "newegg_sku": "N82E16820233924",
+    "walmart_sku": 963251369
+  }
+}

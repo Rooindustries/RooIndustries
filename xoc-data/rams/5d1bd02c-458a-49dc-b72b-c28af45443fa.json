@@ -1,0 +1,33 @@
+{
+  "opendb_id": "5d1bd02c-458a-49dc-b72b-c28af45443fa",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB DDR4-3000 CL16 32GB (4x8GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMR32GX4M4D3000C16W"
+    ],
+    "series": "Vengeance",
+    "variant": "3000 CL16"
+  },
+  "speed": 3000,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 16,
+  "timings": "16-20-20-38",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B07B4G5M87"
+  }
+}

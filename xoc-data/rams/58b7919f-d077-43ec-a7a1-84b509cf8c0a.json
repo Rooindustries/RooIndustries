@@ -1,0 +1,34 @@
+{
+  "opendb_id": "58b7919f-d077-43ec-a7a1-84b509cf8c0a",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Vengeance Gray DDR5-7200 CL34 32GB (2x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMK32GX5M2X7200C34"
+    ],
+    "series": "Vengeance",
+    "variant": "7200 CL34"
+  },
+  "speed": 7200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "GREY"
+  ],
+  "cas_latency": 34,
+  "timings": "34-44-44-96",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0BLSW14F9",
+    "newegg_sku": "N82E16820236932"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "opendb_id": "969cf043-992c-44f6-98e5-de11fd3073c6",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "OLOy Blade RGB White DDR4-3200 CL16 32GB (2x16GB)",
+    "manufacturer": "OLOy",
+    "part_numbers": [
+      "MD4U1632162BRWDE"
+    ],
+    "series": "Blade",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 16,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

@@ -1,0 +1,33 @@
+{
+  "opendb_id": "aaf31e47-0d81-47ad-bf10-b1e61e9ec432",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Lexar Ares RGB Black DDR4-3600 CL18 32GB (2x16GB)",
+    "manufacturer": "Lexar",
+    "part_numbers": [
+      "LD4BU016G-R3600GDLA"
+    ],
+    "series": "Ares",
+    "variant": "3600 CL18"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "timings": "18-22-22-42",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0C3XKH4QQ"
+  }
+}

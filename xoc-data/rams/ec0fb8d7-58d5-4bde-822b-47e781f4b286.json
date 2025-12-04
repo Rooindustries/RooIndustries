@@ -1,0 +1,31 @@
+{
+  "opendb_id": "ec0fb8d7-58d5-4bde-822b-47e781f4b286",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "GeIL EVO V RGB White DDR5-4800 CL40 8GB (1x8GB)",
+    "manufacturer": "GeIL",
+    "part_numbers": [
+      "GESW58GB4800C40SC"
+    ],
+    "series": "EVO",
+    "variant": "4800 CL40"
+  },
+  "speed": 4800,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 8,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-77",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

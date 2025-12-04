@@ -1,0 +1,33 @@
+{
+  "opendb_id": "ac9e1a20-28ad-4a72-b96f-6627bc1a2129",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 48
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws M5 RGB DDR5-6000 CL30 96GB (2x48GB) White",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-6000J3036F48GX2-RM5RW"
+    ],
+    "series": "Ripjaws",
+    "variant": "M5 RGB"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 96,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 30,
+  "timings": "30-36-36-96",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "manufacturer_url": "https://www.gskill.com/product/165/421/1731652692/F5-6000J3036F48GX2-RM5RW"
+  }
+}

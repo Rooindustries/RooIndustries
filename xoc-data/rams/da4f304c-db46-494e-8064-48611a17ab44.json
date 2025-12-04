@@ -1,0 +1,34 @@
+{
+  "opendb_id": "da4f304c-db46-494e-8064-48611a17ab44",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Kingston FURY Beast Black DDR4-3600 CL18 128GB (4x32GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF436C18BBK4",
+      "128"
+    ],
+    "series": "FURY",
+    "variant": "3600 CL18"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 128,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B097K4KXSG",
+    "walmart_sku": 170312668
+  }
+}

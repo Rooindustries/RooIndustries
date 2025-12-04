@@ -1,0 +1,33 @@
+{
+  "opendb_id": "d39fb1ef-e85f-4567-85d9-ee95baff35a9",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 1
+  },
+  "metadata": {
+    "name": "Kingston ValueRAM Green DDR2-533 CL4 1GB (1x1GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KVR533D2N4",
+      "1G"
+    ],
+    "series": "ValueRAM",
+    "variant": "533 CL4"
+  },
+  "speed": 533,
+  "ram_type": "DDR2",
+  "form_factor": "240-pin DIMM (DDR2)",
+  "capacity": 1,
+  "color": [
+    "GREEN"
+  ],
+  "cas_latency": 4,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0002H0CQS"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "opendb_id": "262a2d15-2f28-49d6-85ad-1c6303e9a7fe",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB Black / Silver DDR5-6200 CL32 64GB (2x32GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMH64GX5M2B6200C32"
+    ],
+    "series": "Vengeance",
+    "variant": "6200 CL32"
+  },
+  "speed": 6200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 32,
+  "timings": "32-38-38-80",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0CBRKL5L4",
+    "walmart_sku": 3434421206
+  }
+}

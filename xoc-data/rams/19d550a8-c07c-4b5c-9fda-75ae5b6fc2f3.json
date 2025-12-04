@@ -1,0 +1,31 @@
+{
+  "opendb_id": "19d550a8-c07c-4b5c-9fda-75ae5b6fc2f3",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "PNY XLR8 Gaming MAKO Black / Silver DDR5-5600 CL36 32GB (2x16GB)",
+    "manufacturer": "PNY",
+    "part_numbers": [
+      "MD32GK2D5600036MXR"
+    ],
+    "series": "XLR8",
+    "variant": "5600 CL36"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 36,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

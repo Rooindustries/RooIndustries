@@ -1,0 +1,32 @@
+{
+  "opendb_id": "953ef88d-4b12-48b3-b0e9-0ce3f963b0b5",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "OLOy Blade RGB Black / Silver DDR5-4800 CL40 32GB (2x16GB)",
+    "manufacturer": "OLOy",
+    "part_numbers": [
+      "ND5U1648400BRKDE"
+    ],
+    "series": "Blade",
+    "variant": "4800 CL40"
+  },
+  "speed": 4800,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-77",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

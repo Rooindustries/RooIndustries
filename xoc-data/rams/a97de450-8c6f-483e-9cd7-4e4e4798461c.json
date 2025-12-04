@@ -1,0 +1,33 @@
+{
+  "opendb_id": "a97de450-8c6f-483e-9cd7-4e4e4798461c",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws S5 White DDR5-5600 CL30 64GB (2x32GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-5600J3036D32GA2-RS5W"
+    ],
+    "series": "Ripjaws",
+    "variant": "5600 CL30"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 30,
+  "timings": "30-36-36-89",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B09XYSXQ2T"
+  }
+}

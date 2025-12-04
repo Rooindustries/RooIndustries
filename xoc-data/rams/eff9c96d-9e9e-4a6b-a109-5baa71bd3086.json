@@ -1,0 +1,34 @@
+{
+  "opendb_id": "eff9c96d-9e9e-4a6b-a109-5baa71bd3086",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Corsair Vengeance LPX Black DDR4-2666 CL16 16GB (2x8GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMK16GX4M2Z2666C16"
+    ],
+    "series": "Vengeance",
+    "variant": "2666 CL16"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "timings": "16-18-18-35",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B06XRDVY76",
+    "walmart_sku": 960457267
+  }
+}

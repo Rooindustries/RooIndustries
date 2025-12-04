@@ -1,0 +1,33 @@
+{
+  "opendb_id": "fe8899c7-b034-43d3-a47d-528a06c98e1f",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 1
+  },
+  "metadata": {
+    "name": "Kingston ValueRAM DDR2-800 CL5 1GB (1x1GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KVR800D2N5",
+      "1G"
+    ],
+    "series": "ValueRAM",
+    "variant": "800 CL5"
+  },
+  "speed": 800,
+  "ram_type": "DDR2",
+  "form_factor": "240-pin DIMM (DDR2)",
+  "capacity": 1,
+  "color": [
+    "GREEN"
+  ],
+  "cas_latency": 5,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B000FVTPF0"
+  }
+}

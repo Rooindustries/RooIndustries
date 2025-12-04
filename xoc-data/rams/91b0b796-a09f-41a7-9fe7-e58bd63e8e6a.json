@@ -1,0 +1,34 @@
+{
+  "opendb_id": "91b0b796-a09f-41a7-9fe7-e58bd63e8e6a",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Patriot Viper Venom RGB Black / White DDR5-7200 CL40 32GB (2x16GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PVVR532G720C34K"
+    ],
+    "series": "Viper",
+    "variant": "7200 CL40"
+  },
+  "speed": 7200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "WHITE"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-77",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0BT867HD6"
+  }
+}

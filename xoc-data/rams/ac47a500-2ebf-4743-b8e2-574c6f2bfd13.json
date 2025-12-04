@@ -1,0 +1,33 @@
+{
+  "opendb_id": "ac47a500-2ebf-4743-b8e2-574c6f2bfd13",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Dominator Platinum RGB DDR5-6000 CL36 32GB (2x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMT32GX5M2E6000C36"
+    ],
+    "series": "Dominator",
+    "variant": "6000 CL36"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [],
+  "cas_latency": 36,
+  "timings": "36-44-44-96",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0BZHYYW6R",
+    "newegg_sku": "N82E16820236996",
+    "walmart_sku": 1437049773
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "opendb_id": "7ac627bc-9ec9-4bbf-be07-dd084f3319f4",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws M5 RGB DDR5-6000 CL30 64GB (2x32GB) White",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-6000J3040G32GX2-RM5RW"
+    ],
+    "series": "Ripjaws",
+    "variant": "M5 RGB"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "White"
+  ],
+  "cas_latency": 30,
+  "timings": "30-40-40-96",
+  "voltage": 1.4,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0D4TDGNB7",
+    "newegg_sku": "N82E16820374561",
+    "walmart_sku": 6057600156,
+    "manufacturer_url": "https://www.gskill.com/product/165/421/1716886963/F5-6000J3040G32GX2-RM5RW"
+  }
+}

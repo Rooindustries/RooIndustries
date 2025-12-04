@@ -1,0 +1,33 @@
+{
+  "opendb_id": "f7cefbf7-c8d8-43cd-a4bf-d54316e132ad",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston FURY Renegade Pro Registered Black DDR5-5600 CL38 16GB (1x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF556R28RBE-16"
+    ],
+    "series": "FURY",
+    "variant": "5600 CL38"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 38,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0CN3DMTGJ",
+    "walmart_sku": 5164084859
+  }
+}

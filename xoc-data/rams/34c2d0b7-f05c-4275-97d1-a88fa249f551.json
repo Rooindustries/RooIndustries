@@ -1,0 +1,36 @@
+{
+  "opendb_id": "34c2d0b7-f05c-4275-97d1-a88fa249f551",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws RGB White DDR5-6400 CL36 32GB (2x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-6400J3648F16GX2-RM5RW"
+    ],
+    "series": "Ripjaws",
+    "variant": "6400 CL36"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 36,
+  "timings": "36-48-48-102",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0D7NTKJYK",
+    "newegg_sku": "N82E16820374599",
+    "walmart_sku": 7028010619,
+    "manufacturer_url": "https://www.gskill.com/products/5/165/Desktop-Memory-U-DIMM-CU-DIMM"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "opendb_id": "3bc2d984-6a34-4a13-a75f-cfdffbebe14e",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Kingston HyperX Fury Black DDR4-3466 CL17 64GB (2x32GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "HX434C17FB3K2",
+      "64"
+    ],
+    "series": "HyperX",
+    "variant": "3466 CL17"
+  },
+  "speed": 3466,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 17,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B089QT2XHQ",
+    "walmart_sku": 263312700
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "opendb_id": "fdd76266-1902-4907-a6be-bb3a8c312788",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 1
+  },
+  "metadata": {
+    "name": "Crucial CT2KIT12864AA800 Green DDR2-800 CL6 2GB (2x1GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "CT2KIT12864AA800"
+    ],
+    "series": "CT2KIT12864AA800",
+    "variant": "800 CL6"
+  },
+  "speed": 800,
+  "ram_type": "DDR2",
+  "form_factor": "240-pin DIMM (DDR2)",
+  "capacity": 2,
+  "color": [
+    "GREEN"
+  ],
+  "cas_latency": 6,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B004Y3BIO6",
+    "walmart_sku": 13213300
+  }
+}

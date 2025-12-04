@@ -1,0 +1,32 @@
+{
+  "opendb_id": "0646d74a-8da3-47c0-a355-76e5ba2d4f0b",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Avexir Core Black / Red DDR4-2400 CL16 16GB (2x8GB)",
+    "manufacturer": "Avexir",
+    "part_numbers": [
+      "AVD4UZ124001608G-2COR"
+    ],
+    "series": "Core",
+    "variant": "2400 CL16"
+  },
+  "speed": 2400,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK",
+    "RED"
+  ],
+  "cas_latency": 16,
+  "timings": "16-16-16-36",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

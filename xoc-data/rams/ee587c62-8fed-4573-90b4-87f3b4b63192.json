@@ -1,0 +1,31 @@
+{
+  "opendb_id": "ee587c62-8fed-4573-90b4-87f3b4b63192",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "Samsung MV-3V4G3D/US Black DDR3-1600 CL11 8GB (2x4GB)",
+    "manufacturer": "Samsung",
+    "part_numbers": [
+      "MV-3V4G3D",
+      "US"
+    ],
+    "series": "MV-3V4G3D/US",
+    "variant": "1600 CL11"
+  },
+  "speed": 1600,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 8,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 11,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {}
+}

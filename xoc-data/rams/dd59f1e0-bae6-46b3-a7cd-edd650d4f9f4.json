@@ -1,0 +1,35 @@
+{
+  "opendb_id": "dd59f1e0-bae6-46b3-a7cd-edd650d4f9f4",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB Black DDR5-6400 CL36 32GB (2x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMH32GX5M2B6400C36"
+    ],
+    "series": "Vengeance",
+    "variant": "6400 CL36"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 36,
+  "timings": "36-48-48-104",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0BXHC74WD",
+    "newegg_sku": "N82E16820236982",
+    "walmart_sku": 1030382531
+  }
+}

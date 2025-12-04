@@ -1,0 +1,31 @@
+{
+  "opendb_id": "8d56f075-86c8-42cd-9d02-1f2d3e3579a8",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "PNY Anarchy Black / Red DDR3-1600 CL9 8GB (1x8GB)",
+    "manufacturer": "PNY",
+    "part_numbers": [
+      "MD8GSD316009AR"
+    ],
+    "series": "Anarchy",
+    "variant": "1600 CL9"
+  },
+  "speed": 1600,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 8,
+  "color": [
+    "BLACK",
+    "RED"
+  ],
+  "cas_latency": 9,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

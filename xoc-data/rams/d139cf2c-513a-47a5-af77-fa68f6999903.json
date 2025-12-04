@@ -1,0 +1,35 @@
+{
+  "opendb_id": "d139cf2c-513a-47a5-af77-fa68f6999903",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston KVR21R15D4/16 Registered Black / Green DDR4-2133 CL15 16GB (1x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KVR21R15D4",
+      "16"
+    ],
+    "series": "KVR21R15D4/16",
+    "variant": "2133 CL15"
+  },
+  "speed": 2133,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK",
+    "GREEN"
+  ],
+  "cas_latency": 15,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B00NLZANBC",
+    "walmart_sku": 40668459
+  }
+}

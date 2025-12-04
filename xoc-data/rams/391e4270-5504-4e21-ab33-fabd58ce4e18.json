@@ -1,0 +1,36 @@
+{
+  "opendb_id": "391e4270-5504-4e21-ab33-fabd58ce4e18",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB RS Black Gray DDR4-3600 CL18 16GB (2x8GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMG16GX4M2D3600C18"
+    ],
+    "series": "Vengeance",
+    "variant": "3600 CL18"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 18,
+  "timings": "18-22-22-42",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B09C5TW31M",
+    "newegg_sku": "N82E16820236767",
+    "walmart_sku": 996239853
+  }
+}

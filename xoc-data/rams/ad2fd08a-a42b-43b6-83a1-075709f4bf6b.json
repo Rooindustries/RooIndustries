@@ -1,0 +1,35 @@
+{
+  "opendb_id": "ad2fd08a-a42b-43b6-83a1-075709f4bf6b",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 24
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB White DDR5-7200 CL34 48GB (2x24GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "FF4D548G7200HC34ADC01"
+    ],
+    "series": "T-Force",
+    "variant": "7200 CL34"
+  },
+  "speed": 7200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 48,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 34,
+  "timings": "34-42-42-84",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0C4673M2L",
+    "newegg_sku": "N82E16820985029",
+    "walmart_sku": 3560483324
+  }
+}

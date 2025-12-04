@@ -1,0 +1,35 @@
+{
+  "opendb_id": "77266899-679f-4148-a35b-055d4e3e4ea5",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Patriot Signature Line Black DDR5-4800 CL40 8GB (1x8GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PSD58G480041"
+    ],
+    "series": "Signature",
+    "variant": "4800 CL40"
+  },
+  "speed": 4800,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 8,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-77",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B09P3SKG91",
+    "newegg_sku": "N82E16820225294",
+    "walmart_sku": 264680609
+  }
+}

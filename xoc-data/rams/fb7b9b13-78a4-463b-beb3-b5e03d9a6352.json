@@ -1,0 +1,35 @@
+{
+  "opendb_id": "fb7b9b13-78a4-463b-beb3-b5e03d9a6352",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Vengeance Black / Silver DDR5-6600 CL38 32GB (2x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMK32GX5M2B6600C38"
+    ],
+    "series": "Vengeance",
+    "variant": "6600 CL38"
+  },
+  "speed": 6600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 38,
+  "timings": "38-48-48-106",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0CBRHX1KT",
+    "walmart_sku": 1563624412
+  }
+}

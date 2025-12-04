@@ -1,0 +1,30 @@
+{
+  "opendb_id": "ce3e6f16-a883-4d7d-843c-15498cfa7da4",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "ADATA XPG LANCER NEON RGB Black DDR5-6400 CL32 32GB (2x16GB)",
+    "manufacturer": "ADATA",
+    "part_numbers": [
+      "AX5U6400C3216G-DCLANRSG"
+    ],
+    "series": "XPG",
+    "variant": "6400 CL32"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 32,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

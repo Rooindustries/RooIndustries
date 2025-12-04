@@ -1,0 +1,33 @@
+{
+  "opendb_id": "638345d4-dac6-444e-95fc-006482e9d0fe",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB Black DDR5-5600 CL36 64GB (2x32GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "FF3D564G5600HC36BDC01"
+    ],
+    "series": "T-Force",
+    "variant": "5600 CL36"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 36,
+  "timings": "36-36-36-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "newegg_sku": "N82E16820331980"
+  }
+}

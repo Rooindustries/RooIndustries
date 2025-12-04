@@ -1,0 +1,34 @@
+{
+  "opendb_id": "ca2a167c-ea4a-42d0-a45e-250bb44b74e9",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 64
+  },
+  "metadata": {
+    "name": "G.Skill Flare X5 Black DDR5-6000 CL36 256GB (4x64GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-6000J3644D64GX4-FX5"
+    ],
+    "series": "Flare",
+    "variant": "6000 CL36"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 256,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 36,
+  "timings": "36-44-44-96",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0FFKFCLLL",
+    "newegg_sku": "N82E16820374764"
+  }
+}

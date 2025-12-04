@@ -1,0 +1,35 @@
+{
+  "opendb_id": "9816fd4a-5d66-4e5f-9a8c-bf1f19b6d6d5",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws Black DDR4-4400 CL19 64GB (2x32GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-4400C19D-64GVK"
+    ],
+    "series": "Ripjaws",
+    "variant": "4400 CL19"
+  },
+  "speed": 4400,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 19,
+  "timings": "19-26-26-46",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B09KZLBG4B",
+    "newegg_sku": "N82E16820374174",
+    "walmart_sku": 670352202
+  }
+}

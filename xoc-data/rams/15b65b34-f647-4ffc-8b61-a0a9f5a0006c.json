@@ -1,0 +1,35 @@
+{
+  "opendb_id": "15b65b34-f647-4ffc-8b61-a0a9f5a0006c",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws V Black DDR4-3600 CL18 32GB (2x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-3600C18D-32GVK"
+    ],
+    "series": "Ripjaws",
+    "variant": "3600 CL18"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "timings": "18-22-22-42",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B07Z86WC1Z",
+    "newegg_sku": "N82E16820232928",
+    "walmart_sku": 362749984
+  }
+}

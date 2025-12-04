@@ -1,0 +1,32 @@
+{
+  "opendb_id": "cd7b781a-3744-4878-83ce-be2a5fca3925",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Crucial CT2K8G56C46S5 Black DDR5-5600 SODIMM CL46 16GB (2x8GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "CT2K8G56C46S5"
+    ],
+    "series": "CT2K8G56C46S5",
+    "variant": "5600 CL46"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "262-pin SODIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 46,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "newegg_sku": "N82E16820156356"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "opendb_id": "357a7037-517a-482b-bd1d-1b72edcf2d38",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 64
+  },
+  "metadata": {
+    "name": "Kingston Server Premier Registered DDR4-2666 CL19 64GB (1x64GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KSM26RD4",
+      "64HCR"
+    ],
+    "series": "Server",
+    "variant": "2666 CL19"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 64,
+  "color": [],
+  "cas_latency": 19,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "newegg_sku": "0RN-001J-013X5"
+  }
+}

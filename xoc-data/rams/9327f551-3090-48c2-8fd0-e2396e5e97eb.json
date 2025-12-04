@@ -1,0 +1,30 @@
+{
+  "opendb_id": "9327f551-3090-48c2-8fd0-e2396e5e97eb",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Crucial Ballistix Black DDR4-3200 CL16 32GB (2x16GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "BL2K16G32C16U4BL"
+    ],
+    "series": "Ballistix",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

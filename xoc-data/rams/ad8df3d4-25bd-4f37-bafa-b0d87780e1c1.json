@@ -1,0 +1,31 @@
+{
+  "opendb_id": "ad8df3d4-25bd-4f37-bafa-b0d87780e1c1",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB Valkyrie Edition Black DDR5-5600 CL40 32GB (2x16GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "FF6D532G6000HC38ADC01"
+    ],
+    "series": "T-Force",
+    "variant": "5600 CL40"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-84",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

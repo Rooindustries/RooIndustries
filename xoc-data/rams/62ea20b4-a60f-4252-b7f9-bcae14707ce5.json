@@ -1,0 +1,34 @@
+{
+  "opendb_id": "62ea20b4-a60f-4252-b7f9-bcae14707ce5",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 2
+  },
+  "metadata": {
+    "name": "Corsair XMS2 Black / White DDR2-800 CL5 4GB (2x2GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "TWIN2X4096-6400C5DHX"
+    ],
+    "series": "XMS2",
+    "variant": "800 CL5"
+  },
+  "speed": 800,
+  "ram_type": "DDR2",
+  "form_factor": "240-pin DIMM (DDR2)",
+  "capacity": 4,
+  "color": [
+    "BLACK",
+    "WHITE"
+  ],
+  "cas_latency": 5,
+  "timings": "5-5-5-18",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B000Q061WU"
+  }
+}

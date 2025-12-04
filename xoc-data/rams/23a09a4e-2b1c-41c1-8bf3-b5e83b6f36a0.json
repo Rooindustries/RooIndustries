@@ -1,0 +1,33 @@
+{
+  "opendb_id": "23a09a4e-2b1c-41c1-8bf3-b5e83b6f36a0",
+  "modules": {
+    "quantity": 8,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston FURY Renegade Pro Black Registered DDR5-5600 CL28 128GB (8x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF556R28RBEK8-128"
+    ],
+    "series": "FURY",
+    "variant": "5600 CL28"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 128,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 28,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0CVSHYYFQ",
+    "walmart_sku": 5370444294
+  }
+}

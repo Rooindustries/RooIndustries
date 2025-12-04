@@ -1,0 +1,36 @@
+{
+  "opendb_id": "18326edc-4aa4-4ed4-a78a-07457e7267b0",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Patriot Viper Steel Silver / Black DDR4-3733 CL17 16GB (2x8GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PVS416G373C7K"
+    ],
+    "series": "Viper",
+    "variant": "3733 CL17"
+  },
+  "speed": 3733,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "GREY",
+    "BLACK"
+  ],
+  "cas_latency": 17,
+  "timings": "17-21-21-41",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B07N43CYMS",
+    "newegg_sku": "9SIA17PHFP2299",
+    "walmart_sku": 714367352
+  }
+}

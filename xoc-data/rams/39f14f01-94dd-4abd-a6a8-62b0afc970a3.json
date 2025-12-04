@@ -1,0 +1,35 @@
+{
+  "opendb_id": "39f14f01-94dd-4abd-a6a8-62b0afc970a3",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Timetec PINNACLE Konduit Black RGB DDR4-3200 CL16 16GB (2x8GB)",
+    "manufacturer": "Timetec",
+    "part_numbers": [
+      "PKMD4U32C16CNHW8GK2"
+    ],
+    "series": "PINNACLE",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 16,
+  "timings": "16-18-18-38",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B09JF7S3C3",
+    "newegg_sku": "0RN-00A3-001C0",
+    "walmart_sku": 971339731
+  }
+}

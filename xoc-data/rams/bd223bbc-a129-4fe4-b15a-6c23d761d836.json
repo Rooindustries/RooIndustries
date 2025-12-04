@@ -1,0 +1,34 @@
+{
+  "opendb_id": "bd223bbc-a129-4fe4-b15a-6c23d761d836",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 24
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB Black DDR5-6000 CL30 96GB (4x24GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMH96GX5M4B6000C30"
+    ],
+    "series": "Vengeance",
+    "variant": "6000 CL30"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 96,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 30,
+  "timings": "30-36-36-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0CG11B7RR",
+    "walmart_sku": 5081715624
+  }
+}

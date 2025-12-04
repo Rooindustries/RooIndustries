@@ -1,0 +1,32 @@
+{
+  "opendb_id": "3783fe59-a0d9-48df-a72f-b22d9621b003",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "G.Skill Aegis Black / Red DDR4-2800 CL17 16GB (2x8GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-2800C17D-16GIS"
+    ],
+    "series": "Aegis",
+    "variant": "2800 CL17"
+  },
+  "speed": 2800,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK",
+    "RED"
+  ],
+  "cas_latency": 17,
+  "timings": "17-17-17-37",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {}
+}

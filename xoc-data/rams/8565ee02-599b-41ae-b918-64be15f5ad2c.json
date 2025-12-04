@@ -1,0 +1,35 @@
+{
+  "opendb_id": "8565ee02-599b-41ae-b918-64be15f5ad2c",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB White DDR5-6400 CL40 32GB (2x16GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "FF4D532G6400HC40BDC01"
+    ],
+    "series": "T-Force",
+    "variant": "6400 CL40"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-84",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B09LHNPVLS",
+    "newegg_sku": "N82E16820331746",
+    "walmart_sku": 746322459
+  }
+}

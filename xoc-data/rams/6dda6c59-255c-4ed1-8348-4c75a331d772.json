@@ -1,0 +1,32 @@
+{
+  "opendb_id": "6dda6c59-255c-4ed1-8348-4c75a331d772",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Silicon Power SP016GBLTU160ND2J7 Gray DDR3-1600 CL11 16GB (2x8GB)",
+    "manufacturer": "Silicon Power",
+    "part_numbers": [
+      "SP016GBLTU160ND2J7"
+    ],
+    "series": "SP016GBLTU160ND2J7",
+    "variant": "1600 CL11"
+  },
+  "speed": 1600,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 16,
+  "color": [
+    "GREY"
+  ],
+  "cas_latency": 11,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B093H3GVQV"
+  }
+}

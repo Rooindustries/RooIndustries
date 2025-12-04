@@ -1,0 +1,33 @@
+{
+  "opendb_id": "75bf0286-5de7-422c-9139-7f8033ca830c",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "Crucial Ballistix Tactical Black / Yellow DDR3-1600 CL8 8GB (2x4GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "BLT2K4G3D1608ET3LX0"
+    ],
+    "series": "Ballistix",
+    "variant": "1600 CL8"
+  },
+  "speed": 1600,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 8,
+  "color": [
+    "BLACK",
+    "YELLOW"
+  ],
+  "cas_latency": 8,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B00A14ZT8S"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "opendb_id": "ee846e98-c73b-4a67-9a6f-74d1178f0639",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws X Black / Red DDR3-1333 CL9 8GB (2x4GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F3-10666CL9D-8GBXL"
+    ],
+    "series": "Ripjaws",
+    "variant": "1333 CL9"
+  },
+  "speed": 1333,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 8,
+  "color": [
+    "BLACK",
+    "RED"
+  ],
+  "cas_latency": 9,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B004ISXB4C",
+    "walmart_sku": 47313348
+  }
+}

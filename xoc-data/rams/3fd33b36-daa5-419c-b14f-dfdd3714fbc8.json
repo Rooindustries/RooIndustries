@@ -1,0 +1,33 @@
+{
+  "opendb_id": "3fd33b36-daa5-419c-b14f-dfdd3714fbc8",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston FURY Beast RGB White DDR5-5200 CL40 16GB (1x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF552C40BWA-16"
+    ],
+    "series": "FURY",
+    "variant": "5200 CL40"
+  },
+  "speed": 5200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 40,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0BZJBWC4R",
+    "walmart_sku": 1834165421
+  }
+}

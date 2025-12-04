@@ -1,0 +1,31 @@
+{
+  "opendb_id": "72abaf22-95c4-4493-8a7e-b9f93d74f3b7",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Kingston ValueRAM SODIMM DDR5-4800 CL40 8GB (1x8GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KVR48S40BS6-8"
+    ],
+    "series": "ValueRAM",
+    "variant": "4800 CL40"
+  },
+  "speed": 4800,
+  "ram_type": "DDR5",
+  "form_factor": "262-pin SODIMM (DDR5)",
+  "capacity": 8,
+  "color": [],
+  "cas_latency": 40,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B09TWKP72G",
+    "walmart_sku": 267189917
+  }
+}

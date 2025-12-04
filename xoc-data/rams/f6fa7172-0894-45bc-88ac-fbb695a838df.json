@@ -1,0 +1,34 @@
+{
+  "opendb_id": "f6fa7172-0894-45bc-88ac-fbb695a838df",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Thermaltake TOUGHRAM RGB White / Silver DDR4-4400 CL19 16GB (2x8GB)",
+    "manufacturer": "Thermaltake",
+    "part_numbers": [
+      "R022D408GX2-4400C19A"
+    ],
+    "series": "TOUGHRAM",
+    "variant": "4400 CL19"
+  },
+  "speed": 4400,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "WHITE",
+    "GREY"
+  ],
+  "cas_latency": 19,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0837K61F2",
+    "newegg_sku": "2R8-001C-00013"
+  }
+}

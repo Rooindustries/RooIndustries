@@ -1,0 +1,35 @@
+{
+  "opendb_id": "c71b2af6-0536-455d-8943-a51680bd929d",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z5 Royal Neo RGB Silver DDR5-6400 CL30 32GB (2x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-6400J3039G16GX2-TR5NS"
+    ],
+    "series": "Trident",
+    "variant": "6400 CL30"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "GREY"
+  ],
+  "cas_latency": 30,
+  "timings": "30-39-39-102",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0DD27F6SY",
+    "newegg_sku": "N82E16820374628",
+    "walmart_sku": 9962369651
+  }
+}

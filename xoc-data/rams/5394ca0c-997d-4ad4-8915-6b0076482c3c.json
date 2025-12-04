@@ -1,0 +1,28 @@
+{
+  "opendb_id": "5394ca0c-997d-4ad4-8915-6b0076482c3c",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Silicon Power SP064GBLVU480F22 DDR5-4800 CL40 64GB (2x32GB)",
+    "manufacturer": "Silicon Power",
+    "part_numbers": [
+      "SP064GBLVU480F22"
+    ],
+    "series": "SP064GBLVU480F22",
+    "variant": "4800 CL40"
+  },
+  "speed": 4800,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [],
+  "cas_latency": 40,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {}
+}

@@ -1,0 +1,32 @@
+{
+  "opendb_id": "be3ba6ac-f6e5-4d18-851b-0b83618b649e",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "DOMINATOR TITANIUM RGB 64GB (4x16GB) DDR5 DRAM 6400MT/s CL32 Intel XMP Memory Kit",
+    "manufacturer": "Corsair",
+    "part_numbers": [],
+    "series": "Dominator Titanium",
+    "variant": "6400MT/s CL32",
+    "releaseYear": null
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "DIMM",
+  "capacity": 64,
+  "cas_latency": 32,
+  "timings": "32-40-40-84",
+  "voltage": 1.4,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "height": 0,
+  "color": [],
+  "general_product_information": {
+    "amazon_sku": "B0CHSHWPRK",
+    "newegg_sku": "N82E16820982088"
+  }
+}

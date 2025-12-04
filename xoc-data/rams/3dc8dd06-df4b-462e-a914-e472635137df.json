@@ -1,0 +1,31 @@
+{
+  "opendb_id": "3dc8dd06-df4b-462e-a914-e472635137df",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Patriot Viper Elite 5 RGB DDR5-6600 CL36 32GB (2x16GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PVER532G66C36KW"
+    ],
+    "series": "Viper",
+    "variant": "6600 CL36"
+  },
+  "speed": 6600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 36,
+  "timings": "36-46-46-86",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

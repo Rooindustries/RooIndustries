@@ -1,0 +1,31 @@
+{
+  "opendb_id": "f522335e-720e-49d7-8226-b25a5a971277",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "G.Skill F2-6400CL6Q-16GBMQ Orange / White DDR2-800 CL6 16GB (4x4GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F2-6400CL6Q-16GBMQ"
+    ],
+    "series": "F2-6400CL6Q-16GBMQ",
+    "variant": "800 CL6"
+  },
+  "speed": 800,
+  "ram_type": "DDR2",
+  "form_factor": "240-pin DIMM (DDR2)",
+  "capacity": 16,
+  "color": [
+    "ORANGE",
+    "WHITE"
+  ],
+  "cas_latency": 6,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

@@ -1,0 +1,35 @@
+{
+  "opendb_id": "3deecb8e-68aa-44ce-b437-095826b1203d",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston FURY Impact Black SODIMM DDR4-3200 CL20 32GB (2x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF432S20IBK2",
+      "32"
+    ],
+    "series": "FURY",
+    "variant": "3200 CL20"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "260-pin SODIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 20,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B097QJ25NY",
+    "newegg_sku": "0RM-001W-005Z3",
+    "walmart_sku": 438363926
+  }
+}

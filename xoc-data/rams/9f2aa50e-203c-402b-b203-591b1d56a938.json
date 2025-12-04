@@ -1,0 +1,35 @@
+{
+  "opendb_id": "9f2aa50e-203c-402b-b203-591b1d56a938",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB RS Black / Gray DDR4-3200 CL16 8GB (1x8GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMG8GX4M1E3200C16"
+    ],
+    "series": "Vengeance",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 8,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 16,
+  "timings": "16-20-20-38",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B09C69MFPR",
+    "walmart_sku": 756366070
+  }
+}

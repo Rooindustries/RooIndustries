@@ -1,0 +1,34 @@
+{
+  "opendb_id": "e2301f2b-d70c-424a-861f-5bf0f960c81f",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 24
+  },
+  "metadata": {
+    "name": "Corsair Vengeance Black DDR5-5600 CL40 48GB (2x24GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMK48GX5M2B5600C40"
+    ],
+    "series": "Vengeance",
+    "variant": "5600 CL40"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 48,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-77",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0BVN1YZKV",
+    "walmart_sku": 3992704046
+  }
+}

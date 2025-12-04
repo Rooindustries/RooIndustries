@@ -1,0 +1,33 @@
+{
+  "opendb_id": "c4b15873-102e-489c-84df-5d141d76bce4",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Crucial Ballistix RGB Red DDR4-3200 CL16 16GB (2x8GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "BL2K8G32C16U4RL"
+    ],
+    "series": "Ballistix",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "RED"
+  ],
+  "cas_latency": 16,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B083VN5CQJ",
+    "walmart_sku": 995994101
+  }
+}

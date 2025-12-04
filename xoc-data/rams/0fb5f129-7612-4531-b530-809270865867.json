@@ -1,0 +1,34 @@
+{
+  "opendb_id": "0fb5f129-7612-4531-b530-809270865867",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z Red / Silver DDR4-3200 CL16 32GB (4x8GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-3200C16Q-32GTZB"
+    ],
+    "series": "Trident",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "RED",
+    "GREY"
+  ],
+  "cas_latency": 16,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B015FXWIEC",
+    "walmart_sku": 53977091
+  }
+}

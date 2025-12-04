@@ -1,0 +1,33 @@
+{
+  "opendb_id": "525b98cc-a665-418e-a95e-fac3fca114db",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "Patriot Signature Premium Black DDR4-2400 CL17 8GB (2x4GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PSP48G2400KH1"
+    ],
+    "series": "Signature",
+    "variant": "2400 CL17"
+  },
+  "speed": 2400,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 8,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 17,
+  "timings": "17-17-17-39",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B07Q8JTLYF"
+  }
+}

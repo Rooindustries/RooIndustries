@@ -1,0 +1,35 @@
+{
+  "opendb_id": "5ff31cb8-5604-4ff6-9e7c-2c0f32162918",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws M5 Neo RGB Black DDR5-6000 CL36 32GB (2x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-6000J3636F16GX2-RM5NRK"
+    ],
+    "series": "Ripjaws",
+    "variant": "6000 CL36"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 36,
+  "timings": "36-36-36-96",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0DN5NCP7G",
+    "newegg_sku": "N82E16820374642",
+    "manufacturer_url": "https://www.gskill.com/products/4/165/Desktop-Memory-U-DIMM-CU-DIMM"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "opendb_id": "75417e0f-9e52-4713-9cc7-28d668484408",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "PNY Anarchy Black / Blue DDR3-2133 CL10 16GB (4x4GB)",
+    "manufacturer": "PNY",
+    "part_numbers": [
+      "MD16GK4D3213310AB-Z"
+    ],
+    "series": "Anarchy",
+    "variant": "2133 CL10"
+  },
+  "speed": 2133,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 16,
+  "color": [
+    "BLACK",
+    "BLUE"
+  ],
+  "cas_latency": 10,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

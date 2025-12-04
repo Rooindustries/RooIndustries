@@ -1,0 +1,33 @@
+{
+  "opendb_id": "f0c04286-ef87-41a6-b4ac-a5bf24a4a6ab",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Silicon Power DDR5 64GB (2x32GB) Zenith 6000MHz CL38 White",
+    "manufacturer": "Silicon Power",
+    "part_numbers": [
+      "SP064GXLWU60BFDG"
+    ],
+    "series": "XPOWER Zenith",
+    "variant": "6000 CL38"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 38,
+  "timings": "38-38-38-78",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "height": 38.5,
+  "general_product_information": {
+    "manufacturer_url": "https://www.silicon-power.com/product-detail/XPOWER_Zenith_DDR5_Gaming_UDIMM/"
+  }
+}

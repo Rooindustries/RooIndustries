@@ -1,0 +1,36 @@
+{
+  "opendb_id": "ce1f33d4-daf6-4d68-94d3-40a7c0b4f5db",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB Black DDR4-3600 CL18 16GB (2x8GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TF3D416G3600HC18JDC01"
+    ],
+    "series": "T-Force",
+    "variant": "3600 CL18"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "timings": "18-22-22-42",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B08FBGJ4KG",
+    "newegg_sku": "N82E16820331512",
+    "walmart_sku": 679918312,
+    "manufacturer_url": "https://www.teamgroupinc.com/en/product-category/memory/desktop/?filter=ZmlsdGVyLTIyMT0yNTE4"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "opendb_id": "e4af7c5b-639b-4ee6-aacd-a0808d959fe9",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "PNY Anarchy Black / Red DDR3-2800 CL12 8GB (2x4GB)",
+    "manufacturer": "PNY",
+    "part_numbers": [
+      "MD8GK2D3280012AXB-Z"
+    ],
+    "series": "Anarchy",
+    "variant": "2800 CL12"
+  },
+  "speed": 2800,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 8,
+  "color": [
+    "BLACK",
+    "RED"
+  ],
+  "cas_latency": 12,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B012AS9Z2I"
+  }
+}

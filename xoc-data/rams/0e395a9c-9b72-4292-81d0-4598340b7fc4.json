@@ -1,0 +1,33 @@
+{
+  "opendb_id": "0e395a9c-9b72-4292-81d0-4598340b7fc4",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Crucial CT32G52C42S5 Black SODIMM DDR5-5200 CL42 32GB (1x32GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "CT32G52C42S5"
+    ],
+    "series": "CT32G52C42S5",
+    "variant": "5200 CL42"
+  },
+  "speed": 5200,
+  "ram_type": "DDR5",
+  "form_factor": "262-pin SODIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 42,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0BNXYRR9Y",
+    "walmart_sku": 1072828213
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "opendb_id": "a9d2ee70-51a7-4e44-86ab-37b308170231",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB Black DDR5-6000 CL30 32GB (2x16GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "FF3D532G6000HC30DC01"
+    ],
+    "series": "T-Force",
+    "variant": "6000 CL30"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 30,
+  "timings": "30-36-36-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0B3HHB3Z9",
+    "newegg_sku": "N82E16820331845",
+    "walmart_sku": 1080638727
+  }
+}

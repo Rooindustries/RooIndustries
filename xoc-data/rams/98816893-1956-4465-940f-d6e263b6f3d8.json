@@ -1,0 +1,33 @@
+{
+  "opendb_id": "98816893-1956-4465-940f-d6e263b6f3d8",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston FURY Beast RGB Black DDR5-5600 CL40 16GB (1x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF556C40BBA-16"
+    ],
+    "series": "FURY",
+    "variant": "5600 CL40"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0B1QP3XFY",
+    "walmart_sku": 1574727862
+  }
+}

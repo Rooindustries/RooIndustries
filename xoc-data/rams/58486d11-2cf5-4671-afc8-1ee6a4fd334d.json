@@ -1,0 +1,35 @@
+{
+  "opendb_id": "58486d11-2cf5-4671-afc8-1ee6a4fd334d",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 48
+  },
+  "metadata": {
+    "name": "Corsair Dominator Titanium Black DDR5-6600 CL32 96GB (2x48GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMP96GX5M2B6600C32"
+    ],
+    "series": "Dominator",
+    "variant": "6600 CL32"
+  },
+  "speed": 6600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 96,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 32,
+  "timings": "32-39-39-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0CHSDT7MC",
+    "newegg_sku": "N82E16820982078",
+    "walmart_sku": 5156079048
+  }
+}

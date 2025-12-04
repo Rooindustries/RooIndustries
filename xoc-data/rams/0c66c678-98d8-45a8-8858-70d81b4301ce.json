@@ -1,0 +1,32 @@
+{
+  "opendb_id": "0c66c678-98d8-45a8-8858-70d81b4301ce",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "ADATA XPG RGB Black DDR5-6400 CL32 64GB (2x32GB)",
+    "manufacturer": "ADATA",
+    "part_numbers": [
+      "AX5U6400C3232G-DCLARBK"
+    ],
+    "series": "XPG",
+    "variant": "6400 CL32"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 32,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0C6HW2G8C"
+  }
+}

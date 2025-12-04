@@ -1,0 +1,32 @@
+{
+  "opendb_id": "b0f468e2-4e69-4f17-85b3-a2422185013b",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Kingston ValueRAM SODIMM DDR5-4800 CL40 32GB (1x32GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KVR48S40BD8-32"
+    ],
+    "series": "ValueRAM",
+    "variant": "4800 CL40"
+  },
+  "speed": 4800,
+  "ram_type": "DDR5",
+  "form_factor": "262-pin SODIMM (DDR5)",
+  "capacity": 32,
+  "color": [],
+  "cas_latency": 40,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B09TWJLY2C",
+    "newegg_sku": "N82E16820242693",
+    "walmart_sku": 785466576
+  }
+}

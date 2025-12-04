@@ -1,0 +1,33 @@
+{
+  "opendb_id": "88256aab-21d8-46ac-a2c7-eae0daa22d73",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston FURY White DDR5-5600 CL40 16GB (1x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF560C40BWA-16"
+    ],
+    "series": "FURY",
+    "variant": "5600 CL40"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 40,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0BZJ9FTJL",
+    "walmart_sku": 1942093918
+  }
+}

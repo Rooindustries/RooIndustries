@@ -1,0 +1,34 @@
+{
+  "opendb_id": "5f2c7cbe-a2c4-4759-8d05-00ca751104cf",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "PNY XLR8 Gaming EPIC-X RGB Black DDR4-3200 CL16 16GB (2x8GB)",
+    "manufacturer": "PNY",
+    "part_numbers": [
+      "MD16GK2D4320016XRGB"
+    ],
+    "series": "XLR8",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B08B9KQDK5",
+    "newegg_sku": "N82E16820177105",
+    "bestbuy_sku": 6441734
+  }
+}

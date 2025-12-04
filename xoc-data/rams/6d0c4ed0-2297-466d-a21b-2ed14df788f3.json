@@ -1,0 +1,34 @@
+{
+  "opendb_id": "6d0c4ed0-2297-466d-a21b-2ed14df788f3",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston FURY Renegade Silver / White DDR5-6400 CL32 16GB (1x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF564C32RW-16"
+    ],
+    "series": "FURY",
+    "variant": "6400 CL32"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "WHITE",
+    "GREY"
+  ],
+  "cas_latency": 32,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0BZJG8RKZ",
+    "walmart_sku": 3441408155
+  }
+}

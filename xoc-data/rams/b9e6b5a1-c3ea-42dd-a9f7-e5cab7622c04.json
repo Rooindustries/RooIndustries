@@ -1,0 +1,33 @@
+{
+  "opendb_id": "b9e6b5a1-c3ea-42dd-a9f7-e5cab7622c04",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 2
+  },
+  "metadata": {
+    "name": "G.Skill F3-12800CL9S-2GBSQ Green SODIMM DDR3-1600 CL9 2GB (1x2GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F3-12800CL9S-2GBSQ"
+    ],
+    "series": "F3-12800CL9S-2GBSQ",
+    "variant": "1600 CL9"
+  },
+  "speed": 1600,
+  "ram_type": "DDR3",
+  "form_factor": "204-pin SODIMM (DDR3)",
+  "capacity": 2,
+  "color": [
+    "GREEN"
+  ],
+  "cas_latency": 9,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B00569LZHM",
+    "walmart_sku": 168640244
+  }
+}

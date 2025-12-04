@@ -1,0 +1,32 @@
+{
+  "opendb_id": "7422881c-90f4-446b-920b-3f0c45481e0b",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Thermaltake TOUGHRAM XG RGB Black / Silver DDR5-5600 CL36 32GB (2x16GB)",
+    "manufacturer": "Thermaltake",
+    "part_numbers": [
+      "RG33D516GX2-5600C36B"
+    ],
+    "series": "TOUGHRAM",
+    "variant": "5600 CL36"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 36,
+  "timings": "36-36-36-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

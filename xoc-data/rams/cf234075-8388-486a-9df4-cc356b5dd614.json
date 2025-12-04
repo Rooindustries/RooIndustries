@@ -1,0 +1,35 @@
+{
+  "opendb_id": "cf234075-8388-486a-9df4-cc356b5dd614",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws 4 Black / Green DDR4-2400 CL15 8GB (1x8GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "8GB DDR4 2400 GSKILL"
+    ],
+    "series": "Ripjaws",
+    "variant": "2400 CL15"
+  },
+  "speed": 2400,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 8,
+  "color": [
+    "BLACK",
+    "GREEN"
+  ],
+  "cas_latency": 15,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B00NJR74HI",
+    "newegg_sku": "9SIA1K6JHK7735",
+    "walmart_sku": 109391053
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "opendb_id": "312bb888-8ef9-4dec-ac0e-e79f672ad60b",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB RT White / Black DDR4-3600 CL18 32GB (2x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMN32GX4M2Z3600C18W"
+    ],
+    "series": "Vengeance",
+    "variant": "3600 CL18"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "WHITE",
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "timings": "18-22-22-42",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B09C5TJ633",
+    "walmart_sku": 832627910
+  }
+}

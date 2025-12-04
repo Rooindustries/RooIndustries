@@ -1,0 +1,34 @@
+{
+  "opendb_id": "1f0e7561-d22e-4403-8633-af5159580178",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Mushkin Enhanced Redline Stiletto DDR4-3200 CL16 16GB (2x8GB)",
+    "manufacturer": "Mushkin",
+    "part_numbers": [
+      "MRF4U320GJJM8GX2"
+    ],
+    "series": "Enhanced",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "timings": "16-18-18-38",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0BK5FYBY3",
+    "walmart_sku": 1342933723
+  }
+}

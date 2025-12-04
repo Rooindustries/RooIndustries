@@ -1,0 +1,36 @@
+{
+  "opendb_id": "31acd888-f9cc-4175-9a0e-7e3837ca5cba",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB Black / Silver DDR5-6800 CL34 32GB (2x16GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "FF3D532G6800HC34BDC01"
+    ],
+    "series": "T-Force",
+    "variant": "6800 CL34"
+  },
+  "speed": 6800,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 34,
+  "timings": "34-44-44-84",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0BJ2NCJS5",
+    "newegg_sku": "N82E16820331927",
+    "walmart_sku": 1686156160
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "opendb_id": "52d434ef-5ec1-4cdb-b64b-49c45d8990d9",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB Pro SL White / Black DDR4-3200 CL16 16GB (2x8GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMH16GX4M2E3200C16W"
+    ],
+    "series": "Vengeance",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "WHITE",
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "timings": "16-20-20-38",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B08SQL9PZC",
+    "newegg_sku": "N82E16820236704",
+    "bestbuy_sku": 6457794,
+    "walmart_sku": 256400542
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "opendb_id": "b0643ac5-d7e8-4c9f-a7be-ed385bfe2a3d",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 2
+  },
+  "metadata": {
+    "name": "G.Skill NS Green DDR3-1333 CL9 4GB (2x2GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F3-10600CL9D-4GBNS"
+    ],
+    "series": "NS",
+    "variant": "1333 CL9"
+  },
+  "speed": 1333,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 4,
+  "color": [
+    "GREEN"
+  ],
+  "cas_latency": 9,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B004WQP12A"
+  }
+}

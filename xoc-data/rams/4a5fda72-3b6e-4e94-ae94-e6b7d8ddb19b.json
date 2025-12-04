@@ -1,0 +1,33 @@
+{
+  "opendb_id": "4a5fda72-3b6e-4e94-ae94-e6b7d8ddb19b",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB Pro White DDR4-3000 CL15 64GB (4x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMW64GX4M4C3000C15W"
+    ],
+    "series": "Vengeance",
+    "variant": "3000 CL15"
+  },
+  "speed": 3000,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 64,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 15,
+  "timings": "15-17-17-35",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B07HKG6T71"
+  }
+}

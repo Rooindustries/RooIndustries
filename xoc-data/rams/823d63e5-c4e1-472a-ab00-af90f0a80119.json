@@ -1,0 +1,34 @@
+{
+  "opendb_id": "823d63e5-c4e1-472a-ab00-af90f0a80119",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws 4 Red DDR4-2400 CL15 8GB (2x4GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-2400C15D-8GRR"
+    ],
+    "series": "Ripjaws",
+    "variant": "2400 CL15"
+  },
+  "speed": 2400,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 8,
+  "color": [
+    "RED"
+  ],
+  "cas_latency": 15,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B00RLV0Q9G",
+    "newegg_sku": "9SIA4YU2EN4736",
+    "walmart_sku": 49467400
+  }
+}

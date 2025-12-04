@@ -1,0 +1,35 @@
+{
+  "opendb_id": "c94d6258-4f3b-48df-abbc-f0c07a2586e6",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z Neo Black / Silver DDR4-3800 CL14 16GB (2x8GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-3800C14D-16GTZN"
+    ],
+    "series": "Trident",
+    "variant": "3800 CL14"
+  },
+  "speed": 3800,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 14,
+  "timings": "14-16-16-36",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B07ZTNFGSK",
+    "walmart_sku": 230200669
+  }
+}

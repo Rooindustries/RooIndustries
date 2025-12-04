@@ -1,0 +1,38 @@
+{
+  "opendb_id": "cc95cdbf-62eb-4090-8369-e6a7707edad2",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "OLOy  Black DDR4-3200 CL16 16GB (2x8GB) MD4U083216BJDA",
+    "manufacturer": "OLOy",
+    "part_numbers": [
+      "MD4U0832160BJDA",
+      "MD4U083216BJDA"
+    ],
+    "series": "DDR4",
+    "variant": "3200 CL16",
+    "releaseYear": 2020
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "timings": "16-20-20-38",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "height": 38.862,
+  "general_product_information": {
+    "amazon_sku": "B088T2KNZ4",
+    "newegg_sku": "N82E16820821248",
+    "manufacturer_url": "https://www.oloymemory.com/products.html"
+  }
+}

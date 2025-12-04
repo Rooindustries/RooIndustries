@@ -1,0 +1,36 @@
+{
+  "opendb_id": "c6c42f59-aad2-4842-b16b-7c2790d1bbd6",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Corsair Vengeance LPX Black / Yellow DDR4-3200 CL16 128GB (4x32GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMK128GX4M4E3200C16"
+    ],
+    "series": "Vengeance",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 128,
+  "color": [
+    "BLACK",
+    "YELLOW"
+  ],
+  "cas_latency": 16,
+  "timings": "16-20-20-38",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B085WQXKM2",
+    "newegg_sku": "N82E16820236622",
+    "walmart_sku": 326789447
+  }
+}

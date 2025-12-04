@@ -1,0 +1,30 @@
+{
+  "opendb_id": "d41ee433-8c46-4cf2-83ce-d561cee4f141",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Silicon Power SP016GBLFU320B22 DDR4-3200 CL22 16GB (2x8GB)",
+    "manufacturer": "Silicon Power",
+    "part_numbers": [
+      "SP016GBLFU320B22"
+    ],
+    "series": "SP016GBLFU320B22",
+    "variant": "3200 CL22"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [],
+  "cas_latency": 22,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0924LFB3Z"
+  }
+}

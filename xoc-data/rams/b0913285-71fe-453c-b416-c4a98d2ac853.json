@@ -1,0 +1,33 @@
+{
+  "opendb_id": "b0913285-71fe-453c-b416-c4a98d2ac853",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 2
+  },
+  "metadata": {
+    "name": "Kingston ValueRAM DDR2-667 CL5 2GB (1x2GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KVR667D2N5",
+      "2G"
+    ],
+    "series": "ValueRAM",
+    "variant": "667 CL5"
+  },
+  "speed": 667,
+  "ram_type": "DDR2",
+  "form_factor": "240-pin DIMM (DDR2)",
+  "capacity": 2,
+  "color": [
+    "GREEN"
+  ],
+  "cas_latency": 5,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B000JJR8I4"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "opendb_id": "887a7c62-78cb-4d15-9cc8-284d29ba9b2c",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB Black DDR5-5200 CL40 16GB (1x16GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "FF3D516G5200HC40C01"
+    ],
+    "series": "T-Force",
+    "variant": "5200 CL40"
+  },
+  "speed": 5200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

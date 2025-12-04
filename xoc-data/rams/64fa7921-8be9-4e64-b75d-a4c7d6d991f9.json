@@ -1,0 +1,34 @@
+{
+  "opendb_id": "64fa7921-8be9-4e64-b75d-a4c7d6d991f9",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Crucial CT8G48C40S5 Black SODIMM DDR5-4800 CL40 8GB (1x8GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "CT8G48C40S5"
+    ],
+    "series": "CT8G48C40S5",
+    "variant": "4800 CL40"
+  },
+  "speed": 4800,
+  "ram_type": "DDR5",
+  "form_factor": "262-pin SODIMM (DDR5)",
+  "capacity": 8,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B09S2QT75C",
+    "newegg_sku": "N82E16820156289",
+    "walmart_sku": 405434848
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "opendb_id": "63938698-1360-42ff-b7df-5834788391fb",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB DDR4 16GB (2x8GB) 4000MHz CL16 WHITE",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TF4D416G4000HC16ADC01"
+    ],
+    "series": "T-Force",
+    "variant": "Delta RGB White DDR4"
+  },
+  "speed": 4000,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 16,
+  "timings": "16-16-16-36",
+  "voltage": 1.4,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "manufacturer_url": "https://www.teamgroupinc.com/en/product-category/memory/desktop/?filter=ZmlsdGVyLTIyMT0yNTE4"
+  }
+}

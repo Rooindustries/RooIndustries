@@ -1,0 +1,35 @@
+{
+  "opendb_id": "a88de75a-5c01-474a-a193-aad5930799e0",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 24
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z5 RGB White / Black DDR5-8200 CL40 48GB (2x24GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-8200J4052F24GX2-TZ5RW"
+    ],
+    "series": "Trident",
+    "variant": "8200 CL40"
+  },
+  "speed": 8200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 48,
+  "color": [
+    "WHITE",
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "timings": "40-52-52-131",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0CBLFCZQH",
+    "newegg_sku": "N82E16820374517"
+  }
+}

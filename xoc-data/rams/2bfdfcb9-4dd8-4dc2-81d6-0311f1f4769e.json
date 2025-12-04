@@ -1,0 +1,33 @@
+{
+  "opendb_id": "2bfdfcb9-4dd8-4dc2-81d6-0311f1f4769e",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z5 Neo RGB DDR5-6400 CL32 32GB (2x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-6400J3239G16GX2-TZ5NR"
+    ],
+    "series": "Trident",
+    "variant": "6400 CL32"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [],
+  "cas_latency": 32,
+  "timings": "32-39-39-102",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0CHDBYRLM",
+    "newegg_sku": "N82E16820374519",
+    "walmart_sku": 5029339307
+  }
+}

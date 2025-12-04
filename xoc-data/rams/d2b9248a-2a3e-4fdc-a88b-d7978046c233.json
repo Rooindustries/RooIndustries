@@ -1,0 +1,30 @@
+{
+  "opendb_id": "d2b9248a-2a3e-4fdc-a88b-d7978046c233",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB DDR5-6000 CL38 16GB (1x16GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "FF3D516G6000HC38G01"
+    ],
+    "series": "T-Force",
+    "variant": "6000 CL38"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 38,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

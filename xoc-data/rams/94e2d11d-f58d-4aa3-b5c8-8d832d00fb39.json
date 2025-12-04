@@ -1,0 +1,33 @@
+{
+  "opendb_id": "94e2d11d-f58d-4aa3-b5c8-8d832d00fb39",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "GeIL Orion RGB AMD Edition DDR4-3200 CL16 32GB (2x16GB)",
+    "manufacturer": "GeIL",
+    "part_numbers": [
+      "GAOSR432GB3200C16BDC"
+    ],
+    "series": "Orion",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "RED"
+  ],
+  "cas_latency": 16,
+  "timings": "16-20-20-40",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "newegg_sku": "N82E16820158903"
+  }
+}

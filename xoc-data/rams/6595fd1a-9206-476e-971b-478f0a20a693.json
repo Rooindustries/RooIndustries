@@ -1,0 +1,30 @@
+{
+  "opendb_id": "6595fd1a-9206-476e-971b-478f0a20a693",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Crucial Ballistix Black DDR4-2666 CL16 16GB (2x8GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "BL2K8G26C16U4B"
+    ],
+    "series": "Ballistix",
+    "variant": "2666 CL16"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

@@ -1,0 +1,32 @@
+{
+  "opendb_id": "ccf2cda3-3495-4e9a-a702-f238accda0b9",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "G.Skill Aegis Red / Black DDR4-2666 CL19 16GB (2x8GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-2666C19D-16GIS"
+    ],
+    "series": "Aegis",
+    "variant": "2666 CL19"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "RED",
+    "BLACK"
+  ],
+  "cas_latency": 19,
+  "timings": "19-19-19-43",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {}
+}

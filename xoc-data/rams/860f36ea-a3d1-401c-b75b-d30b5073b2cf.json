@@ -1,0 +1,30 @@
+{
+  "opendb_id": "860f36ea-a3d1-401c-b75b-d30b5073b2cf",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Kingston FURY White DDR5-5600 CL40 64GB (2x32GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF560C40BWAK2-64"
+    ],
+    "series": "FURY",
+    "variant": "5600 CL40"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 40,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

@@ -1,0 +1,31 @@
+{
+  "opendb_id": "09c3176d-2591-42c9-8e7d-1f72c6d5d84d",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB Black DDR4- 32GB(2x16GB)\t 4000MHz CL18",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TF3D432G4000HC18LDC01"
+    ],
+    "series": "T-Force",
+    "variant": "Delta RGB BLACK DDR4"
+  },
+  "speed": 4000,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "cas_latency": 18,
+  "timings": "18-24-24-46",
+  "voltage": 1.4,
+  "heat_spreader": true,
+  "height": 49,
+  "color": [
+    "WHITE"
+  ],
+  "general_product_information": {
+    "manufacturer_url": "https://www.teamgroupinc.com/en/product-category/memory/desktop/?filter=ZmlsdGVyLTIyMT0yNTE4"
+  }
+}

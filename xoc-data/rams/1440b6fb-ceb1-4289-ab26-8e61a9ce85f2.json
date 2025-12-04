@@ -1,0 +1,35 @@
+{
+  "opendb_id": "1440b6fb-ceb1-4289-ab26-8e61a9ce85f2",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "KINGBANK DDR5 Soarblade Heatsink UDIMM 6400MHz - 32GB (16Gx2) Grey",
+    "manufacturer": "KINGBANK",
+    "part_numbers": [
+      "K5.01.FPA5FD9401"
+    ],
+    "series": "KRXB",
+    "variant": "6400 CL32"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 32,
+  "timings": "32-39-39-80",
+  "voltage": 1.4,
+  "heat_spreader": true,
+  "height": 41.8,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "general_product_information": {
+    "amazon_sku": "B0DF7JRV3H",
+    "newegg_sku": "9SIBW2BK9J5176",
+    "manufacturer_url": "https://www.kingbank.com/en/h-pd-127.html"
+  }
+}

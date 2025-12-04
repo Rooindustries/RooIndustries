@@ -1,0 +1,35 @@
+{
+  "opendb_id": "13d279d3-88b2-4f9e-9aae-68a1117835d3",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Vulcan Z Red DDR4-3200 CL16 16GB (2x8GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TLZRD416G3200HC16FDC01"
+    ],
+    "series": "T-Force",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "RED"
+  ],
+  "cas_latency": 16,
+  "timings": "16-20-20-40",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B08PKVMY3C",
+    "newegg_sku": "N82E16820331615",
+    "walmart_sku": 684296236
+  }
+}

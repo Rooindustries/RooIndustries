@@ -1,0 +1,34 @@
+{
+  "opendb_id": "5169566e-66ba-4d22-a6cb-0316389b13be",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Crucial Ballistix Sport Black / Silver DDR3-1600 CL9 8GB (1x8GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "BLS8G3D1609DS1S00                                                    BLS8G3D1609DS1S00CEU"
+    ],
+    "series": "Ballistix",
+    "variant": "1600 CL9"
+  },
+  "speed": 1600,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 8,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 9,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B006YG9E7O",
+    "walmart_sku": 33384864
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "opendb_id": "2e676d69-1eaa-40af-b124-cea2b059048b",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Kingston FURY Beast RGB DDR5-5600 CL36 32GB (1x32GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF556C36BBEA-32"
+    ],
+    "series": "FURY",
+    "variant": "5600 CL36"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 36,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0BRTJ42FG",
+    "walmart_sku": 2184693616
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "opendb_id": "a743f7bd-bdaf-4d25-820b-96e9b3293d34",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z5 Neo Black DDR5-6000 CL30 32GB (2x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-6000J3038F16GX2-TZ5N"
+    ],
+    "series": "Trident",
+    "variant": "6000 CL30"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 30,
+  "timings": "30-38-38-96",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0BFCV7JZ8",
+    "newegg_sku": "N82E16820374422",
+    "walmart_sku": 1865220693
+  }
+}

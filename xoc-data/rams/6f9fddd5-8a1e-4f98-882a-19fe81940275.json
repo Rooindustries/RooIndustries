@@ -1,0 +1,33 @@
+{
+  "opendb_id": "6f9fddd5-8a1e-4f98-882a-19fe81940275",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Corsair Dominator Platinum RGB White DDR4-3200 CL16 16GB (2x8GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMT16GX4M2C3200C16W"
+    ],
+    "series": "Dominator",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 16,
+  "timings": "16-18-18-36",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B088MWPC18"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "opendb_id": "195b1c9f-2063-4e4a-aee6-330e0c09ec24",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Crucial CT4K8G4DFS8266 Green DDR4-2666 CL19 32GB (4x8GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "CT4K8G4DFS8266"
+    ],
+    "series": "CT4K8G4DFS8266",
+    "variant": "2666 CL19"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "GREEN"
+  ],
+  "cas_latency": 19,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0734W8D7L"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "opendb_id": "adbba406-4dbd-4160-b533-02af967ec1b6",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB Black / Gray DDR5-5600 CL36 64GB (4x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMH64GX5M4B5600Z36"
+    ],
+    "series": "Vengeance",
+    "variant": "5600 CL36"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 36,
+  "timings": "36-36-36-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0BPTLTY4T",
+    "newegg_sku": "N82E16820236943",
+    "walmart_sku": 2104399644
+  }
+}

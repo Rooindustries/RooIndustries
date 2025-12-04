@@ -1,0 +1,33 @@
+{
+  "opendb_id": "4639aa66-a1c6-48b9-9ec9-3e67b506c301",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Flare X5 Black DDR5-5600 CL36 16GB (1x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-5600J3636C16GX1-FX5"
+    ],
+    "series": "Flare",
+    "variant": "5600 CL36"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 36,
+  "timings": "36-36-36-89",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0C8ZSPWG5"
+  }
+}

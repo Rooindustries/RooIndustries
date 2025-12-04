@@ -1,0 +1,33 @@
+{
+  "opendb_id": "db3c8e15-2c3a-4979-bba2-bfefb9f8f182",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Kingston FURY Beast RGB Black DDR5-4800 CL38 64GB (2x32GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF548C38BBAK2-64"
+    ],
+    "series": "FURY",
+    "variant": "4800 CL38"
+  },
+  "speed": 4800,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 38,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0B1QR8LMP",
+    "walmart_sku": 1489926369
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "opendb_id": "d2ac994c-0cea-434b-bca6-e89eb92afd8c",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Dominator Platinum RGB Black DDR5-5600 CL36 64GB (4x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMT64GX5M4B5600Z36"
+    ],
+    "series": "Dominator",
+    "variant": "5600 CL36"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 36,
+  "timings": "36-36-36-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0BPTLPGYM"
+  }
+}

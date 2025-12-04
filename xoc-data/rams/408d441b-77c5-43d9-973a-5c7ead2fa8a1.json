@@ -1,0 +1,31 @@
+{
+  "opendb_id": "408d441b-77c5-43d9-973a-5c7ead2fa8a1",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston FURY Beast Black DDR4-3733 CL19 32GB (2x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF437C19BB1K2",
+      "32"
+    ],
+    "series": "FURY",
+    "variant": "3733 CL19"
+  },
+  "speed": 3733,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 19,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

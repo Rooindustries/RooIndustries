@@ -1,0 +1,36 @@
+{
+  "opendb_id": "c91767dc-7b96-4353-9f06-5b1aed638a11",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB Black DDR4-3200 CL16 16GB (2x8GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TF3D416G3200HC16FDC01"
+    ],
+    "series": "T-Force",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "timings": "16-20-20-40",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0937GY2LV",
+    "newegg_sku": "N82E16820331858",
+    "walmart_sku": 267702303,
+    "manufacturer_url": "https://www.teamgroupinc.com/en/product-category/memory/desktop/?filter=ZmlsdGVyLTIyMT0yNTE4"
+  }
+}

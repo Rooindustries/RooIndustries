@@ -1,0 +1,35 @@
+{
+  "opendb_id": "46a1d6ec-ce0f-407a-ba21-d200e431e719",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP Elite Black DDR5-4800 CL40 16GB (1x16GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TED516G4800C4001"
+    ],
+    "series": "Elite",
+    "variant": "4800 CL40"
+  },
+  "speed": 4800,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-77",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0B6HPKDVC",
+    "newegg_sku": "N82E16820331972",
+    "walmart_sku": 3214463578
+  }
+}

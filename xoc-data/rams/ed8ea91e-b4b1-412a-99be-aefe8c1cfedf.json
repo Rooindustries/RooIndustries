@@ -1,0 +1,35 @@
+{
+  "opendb_id": "ed8ea91e-b4b1-412a-99be-aefe8c1cfedf",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Kingston Server Premier Green / Black DDR5-5600 CL46 32GB (1x32GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KSM56E46BD8KM-32HA"
+    ],
+    "series": "Server",
+    "variant": "5600 CL46"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "GREEN",
+    "BLACK"
+  ],
+  "cas_latency": 46,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0C7W4GK6R",
+    "newegg_sku": "3C6-0083-00169",
+    "walmart_sku": 3994886431
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "opendb_id": "84d43907-7d77-4814-bae1-c896aa97e85c",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z5 RGB Black DDR5-8000 CL38 32GB (2x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-8000J3848H16GX2-TZ5RK"
+    ],
+    "series": "Trident",
+    "variant": "8000 CL38"
+  },
+  "speed": 8000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 38,
+  "timings": "38-38-48-128",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "newegg_sku": "N82E16820374449"
+  }
+}

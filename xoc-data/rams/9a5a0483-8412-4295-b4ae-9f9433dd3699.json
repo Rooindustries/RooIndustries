@@ -1,0 +1,33 @@
+{
+  "opendb_id": "9a5a0483-8412-4295-b4ae-9f9433dd3699",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Crucial CT8G4DFRA266 Green DDR4-2666 CL19 8GB (1x8GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "CT8G4DFRA266"
+    ],
+    "series": "CT8G4DFRA266",
+    "variant": "2666 CL19"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 8,
+  "color": [
+    "GREEN"
+  ],
+  "cas_latency": 19,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B08C4QF5N4",
+    "walmart_sku": 492548312
+  }
+}

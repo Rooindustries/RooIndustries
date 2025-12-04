@@ -1,0 +1,35 @@
+{
+  "opendb_id": "f9cbc749-3e9c-4804-aee3-9bc2175dd08e",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Vulcan Red DDR5-6400 CL40 32GB (2x16GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "FLRD532G6400HC40BDC01"
+    ],
+    "series": "T-Force",
+    "variant": "6400 CL40"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "RED"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-84",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0BVZM9XH8",
+    "newegg_sku": "N82E16820331991",
+    "walmart_sku": 3236943830
+  }
+}

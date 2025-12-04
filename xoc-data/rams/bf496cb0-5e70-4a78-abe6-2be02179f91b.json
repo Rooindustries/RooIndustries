@@ -1,0 +1,36 @@
+{
+  "opendb_id": "bf496cb0-5e70-4a78-abe6-2be02179f91b",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Crucial Pro White DDR5-6400 CL38 32GB (2x16GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "CP2K16G64C38U5W"
+    ],
+    "series": "Pro",
+    "variant": "6400 CL38"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 38,
+  "timings": "38-40-40-84",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0DHFB8BTT",
+    "newegg_sku": "N82E16820156415",
+    "bestbuy_sku": 6604865,
+    "walmart_sku": 13684606145
+  }
+}

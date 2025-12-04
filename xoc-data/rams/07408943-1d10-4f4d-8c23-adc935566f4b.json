@@ -1,0 +1,31 @@
+{
+  "opendb_id": "07408943-1d10-4f4d-8c23-adc935566f4b",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB Black DDR4 16GB(2x8GB) 4000MHz CL18",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TF3D416G4000HC18JDC01"
+    ],
+    "series": "T-Force",
+    "variant": "Delta RGB BLACK DDR4"
+  },
+  "speed": 4000,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "voltage": 1.35,
+  "heat_spreader": true,
+  "height": 49,
+  "timings": "18-22-22-42",
+  "general_product_information": {
+    "manufacturer_url": "https://www.teamgroupinc.com/en/product-category/memory/desktop/?filter=ZmlsdGVyLTIyMT0yNTE4"
+  }
+}

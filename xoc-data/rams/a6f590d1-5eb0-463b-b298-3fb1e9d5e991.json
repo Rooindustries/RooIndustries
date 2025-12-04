@@ -1,0 +1,30 @@
+{
+  "opendb_id": "a6f590d1-5eb0-463b-b298-3fb1e9d5e991",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Crucial CT32G4RFD424A Registered DDR4-2400 CL17 32GB (1x32GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "CT32G4RFD424A"
+    ],
+    "series": "CT32G4RFD424A",
+    "variant": "2400 CL17"
+  },
+  "speed": 2400,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [],
+  "cas_latency": 17,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B015BJ35GU"
+  }
+}

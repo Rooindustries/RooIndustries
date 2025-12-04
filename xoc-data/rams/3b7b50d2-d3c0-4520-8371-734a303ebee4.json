@@ -1,0 +1,36 @@
+{
+  "opendb_id": "3b7b50d2-d3c0-4520-8371-734a303ebee4",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z5 Neo RGB Black / Silver DDR5-6000 CL30 64GB (2x32GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-6000J3040G32GX2-TZ5NR"
+    ],
+    "series": "Trident",
+    "variant": "6000 CL30"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 30,
+  "timings": "30-40-40-96",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0BJNTLJ5X",
+    "newegg_sku": "N82E16820374445",
+    "walmart_sku": 2963386468
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "opendb_id": "dbe0b8d5-0672-411d-aad7-bb36d33f404e",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "ADATA XPG SPECTRIX D35G RGB Black DDR4-3600 CL18 32GB (2x16GB)",
+    "manufacturer": "ADATA",
+    "part_numbers": [
+      "AX4U360016G18I-DTBKD35G"
+    ],
+    "series": "XPG",
+    "variant": "3600 CL18"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0CB1RPDWN"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "opendb_id": "65efce9e-ce60-4e4b-a73b-fd6b745a0b42",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 24
+  },
+  "metadata": {
+    "name": "Kingston Fury Renegade RGB Silver / Black DDR5-7200 CL38 48GB (2x24GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF572C38RSAK2-48"
+    ],
+    "series": "Fury",
+    "variant": "7200 CL38"
+  },
+  "speed": 7200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 48,
+  "color": [
+    "GREY",
+    "BLACK"
+  ],
+  "cas_latency": 38,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0CJC5VX4J",
+    "walmart_sku": 5122906912
+  }
+}

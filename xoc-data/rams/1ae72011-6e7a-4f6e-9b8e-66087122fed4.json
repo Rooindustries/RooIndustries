@@ -1,0 +1,35 @@
+{
+  "opendb_id": "1ae72011-6e7a-4f6e-9b8e-66087122fed4",
+  "modules": {
+    "quantity": 8,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair WS Registered Black / Green DDR5-5600 CL40 128GB (8x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMA128GX5M8B5600C40"
+    ],
+    "series": "WS",
+    "variant": "5600 CL40"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 128,
+  "color": [
+    "BLACK",
+    "GREEN"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-77",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0CYZK6DW9",
+    "newegg_sku": "N82E16820982160"
+  }
+}

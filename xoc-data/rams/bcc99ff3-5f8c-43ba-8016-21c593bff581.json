@@ -1,0 +1,36 @@
+{
+  "opendb_id": "bcc99ff3-5f8c-43ba-8016-21c593bff581",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 48
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws M5 RGB Black DDR5-5600 CL40 96GB (2x48GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-5600J4040D48GX2-RM5RK"
+    ],
+    "series": "Ripjaws",
+    "variant": "5600 CL40"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 96,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-89",
+  "voltage": 1.25,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0D4SGD2B7",
+    "newegg_sku": "N82E16820374548",
+    "walmart_sku": 6120157551,
+    "manufacturer_url": "https://www.gskill.com/products/2/165/Desktop-Memory-U-DIMM-CU-DIMM"
+  }
+}

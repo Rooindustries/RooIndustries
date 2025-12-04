@@ -1,0 +1,33 @@
+{
+  "opendb_id": "95dd1ef0-aeb1-4c22-9d4c-7f24fa58c277",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Vengeance Gray DDR5-5600 CL36 64GB (4x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMK64GX5M4B5600C36"
+    ],
+    "series": "Vengeance",
+    "variant": "5600 CL36"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "GREY"
+  ],
+  "cas_latency": 36,
+  "timings": "36-36-36-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0BLHG7FX5"
+  }
+}

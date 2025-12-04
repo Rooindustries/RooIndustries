@@ -1,0 +1,33 @@
+{
+  "opendb_id": "c694e620-f461-4614-a8fa-179a31f1b960",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB DDR4 32GB (1x32GB) 3000MHz CL16 WHITE",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TF4D432G3000HC16C01"
+    ],
+    "series": "T-Force",
+    "variant": "Delta RGB White DDR4"
+  },
+  "speed": 3000,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 16,
+  "timings": "16-18-18-38",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "manufacturer_url": "https://www.teamgroupinc.com/en/product-category/memory/desktop/?filter=ZmlsdGVyLTIyMT0yNTE4"
+  }
+}

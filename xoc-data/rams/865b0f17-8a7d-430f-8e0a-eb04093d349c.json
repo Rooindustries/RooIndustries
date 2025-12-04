@@ -1,0 +1,36 @@
+{
+  "opendb_id": "865b0f17-8a7d-430f-8e0a-eb04093d349c",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "Patriot Viper Silver / Black DDR4-3200 CL16 8GB (2x4GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PVS48G320C6K"
+    ],
+    "series": "Viper",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 8,
+  "color": [
+    "GREY",
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "timings": "16-18-18-36",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B07WMSJGS1",
+    "newegg_sku": "9SIA8UCK8V1257",
+    "walmart_sku": 629498734
+  }
+}

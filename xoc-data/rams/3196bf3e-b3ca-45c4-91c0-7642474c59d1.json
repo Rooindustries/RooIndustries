@@ -1,0 +1,30 @@
+{
+  "opendb_id": "3196bf3e-b3ca-45c4-91c0-7642474c59d1",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "ADATA XPG Lancer Blade RGB White DDR5-6000 CL30 16GB (1x16GB)",
+    "manufacturer": "ADATA",
+    "part_numbers": [
+      "AX5U6000C3016G-SLABRWH"
+    ],
+    "series": "XPG",
+    "variant": "6000 CL30"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 30,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

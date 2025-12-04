@@ -1,0 +1,35 @@
+{
+  "opendb_id": "0a32ecfc-90a0-4e40-bbaa-3aa92a4ef0e0",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws Black DDR4-4000 CL18 64GB (2x32GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-4000C18D-64GVK"
+    ],
+    "series": "Ripjaws",
+    "variant": "4000 CL18"
+  },
+  "speed": 4000,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "timings": "18-22-22-42",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0927ZHRSD",
+    "newegg_sku": "N82E16820374047",
+    "walmart_sku": 396696246
+  }
+}

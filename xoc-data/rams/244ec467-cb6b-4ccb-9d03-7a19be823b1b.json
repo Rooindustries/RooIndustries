@@ -1,0 +1,33 @@
+{
+  "opendb_id": "244ec467-cb6b-4ccb-9d03-7a19be823b1b",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB Black DDR4-3000 CL15 32GB (4x8GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMR32GX4M4C3000C15"
+    ],
+    "series": "Vengeance",
+    "variant": "3000 CL15"
+  },
+  "speed": 3000,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 15,
+  "timings": "15-17-17-35",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B06XRG59PK"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "opendb_id": "2ef6e88d-457b-4152-bcbd-40233b8e7511",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "Kingston KVR16E11/4 Green DDR3-1600 CL11 4GB (1x4GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KVR16E11",
+      "4"
+    ],
+    "series": "KVR16E11/4",
+    "variant": "1600 CL11"
+  },
+  "speed": 1600,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 4,
+  "color": [
+    "GREEN"
+  ],
+  "cas_latency": 11,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0080K6ZP6"
+  }
+}

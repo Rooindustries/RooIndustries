@@ -1,0 +1,35 @@
+{
+  "opendb_id": "8d812519-8817-455f-a931-a8661ab6a825",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 48
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws S5 Black DDR5-5200 CL40 96GB (2x48GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-5200J4040A48GX2-RS5K"
+    ],
+    "series": "Ripjaws",
+    "variant": "5200 CL40"
+  },
+  "speed": 5200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 96,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-83",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0D2888BLV",
+    "newegg_sku": "N82E16820374540",
+    "walmart_sku": 5522883206
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "opendb_id": "ba8c8cff-d530-4875-9100-87fa2e56b968",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston Fury Renegade RGB Black / Silver DDR4-3600 CL16 32GB (2x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF436C16RB1AK2",
+      "32"
+    ],
+    "series": "Fury",
+    "variant": "3600 CL16"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 16,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B097RJSVGX",
+    "newegg_sku": "9SIA8UCK8D5639",
+    "walmart_sku": 843088723
+  }
+}

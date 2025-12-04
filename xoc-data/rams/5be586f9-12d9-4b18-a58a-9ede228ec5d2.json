@@ -1,0 +1,33 @@
+{
+  "opendb_id": "5be586f9-12d9-4b18-a58a-9ede228ec5d2",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Kingston FURY Beast RGB Black DDR5-6000 CL30 32GB (1x32GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF560C30BBA-32"
+    ],
+    "series": "FURY",
+    "variant": "6000 CL30"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 30,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0CYM4Y8QZ",
+    "walmart_sku": 5570568071
+  }
+}

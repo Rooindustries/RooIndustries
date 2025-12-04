@@ -1,0 +1,32 @@
+{
+  "opendb_id": "1800bb07-3507-4b7d-8b16-9b7a4f65ec1f",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Silicon Power SU016GLSTU160N22AH Green SODIMM DDR3-1600 CL11 16GB (2x8GB)",
+    "manufacturer": "Silicon Power",
+    "part_numbers": [
+      "SU016GLSTU160N22AH"
+    ],
+    "series": "SU016GLSTU160N22AH",
+    "variant": "1600 CL11"
+  },
+  "speed": 1600,
+  "ram_type": "DDR3",
+  "form_factor": "204-pin SODIMM (DDR3)",
+  "capacity": 16,
+  "color": [
+    "GREEN"
+  ],
+  "cas_latency": 11,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B07L8C37DH"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "opendb_id": "a3f1dac9-d657-450d-b8e3-fe9a2a3412cd",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP Elite Black DDR4-2666 CL19 16GB (1x16GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TED416G2666C1901"
+    ],
+    "series": "Elite",
+    "variant": "2666 CL19"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 19,
+  "timings": "19-19-19-43",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B07PLN8YMS",
+    "newegg_sku": "N82E16820331697",
+    "walmart_sku": 979041862
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "opendb_id": "5bc305eb-5cbb-4261-a582-f2b011958882",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Kingston HyperX Fury Black / Silver DDR4-3200 CL16 16GB (2x8GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "HX432C16FB3K2",
+      "16"
+    ],
+    "series": "HyperX",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 16,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B07WF9M2PK",
+    "newegg_sku": "9SIBM1SKAD7919",
+    "walmart_sku": 410917761
+  }
+}

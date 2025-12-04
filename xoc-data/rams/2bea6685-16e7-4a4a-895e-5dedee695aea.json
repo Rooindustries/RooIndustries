@@ -1,0 +1,36 @@
+{
+  "opendb_id": "2bea6685-16e7-4a4a-895e-5dedee695aea",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Crucial Pro Black DDR5-6000 CL40 64GB (2x32GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "CP2K32G60C40U5B"
+    ],
+    "series": "Pro",
+    "variant": "6000 CL40"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-80",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0DSQVNBD5",
+    "newegg_sku": "N82E16820156419",
+    "bestbuy_sku": 6637057,
+    "walmart_sku": 15299158661
+  }
+}

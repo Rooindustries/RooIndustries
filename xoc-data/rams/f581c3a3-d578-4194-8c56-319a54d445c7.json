@@ -1,0 +1,32 @@
+{
+  "opendb_id": "f581c3a3-d578-4194-8c56-319a54d445c7",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Kingston Server Premier DDR4-3200 CL22 32GB (1x32GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KSM32ED8",
+      "32ME"
+    ],
+    "series": "Server",
+    "variant": "3200 CL22"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [],
+  "cas_latency": 22,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B08GKVFMGN",
+    "walmart_sku": 280233218
+  }
+}

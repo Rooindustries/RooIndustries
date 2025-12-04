@@ -1,0 +1,34 @@
+{
+  "opendb_id": "3efc6c72-971f-4da1-8a8a-0b3e2045e543",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Kingston HyperX Fury RGB Black DDR4-2666 CL16 8GB (1x8GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "HX426C16FB3A",
+      "8"
+    ],
+    "series": "HyperX",
+    "variant": "2666 CL16"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 8,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B07WHF6YDL",
+    "walmart_sku": 700263753
+  }
+}

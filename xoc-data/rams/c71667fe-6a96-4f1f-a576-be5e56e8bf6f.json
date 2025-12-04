@@ -1,0 +1,35 @@
+{
+  "opendb_id": "c71667fe-6a96-4f1f-a576-be5e56e8bf6f",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston FURY Renegade Silver / Black DDR5-7600 CL38 32GB (2x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF576C38RSK2-32"
+    ],
+    "series": "FURY",
+    "variant": "7600 CL38"
+  },
+  "speed": 7600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "GREY",
+    "BLACK"
+  ],
+  "cas_latency": 38,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0CKZ8B1CQ",
+    "newegg_sku": "N82E16820242857",
+    "walmart_sku": 5181563867
+  }
+}

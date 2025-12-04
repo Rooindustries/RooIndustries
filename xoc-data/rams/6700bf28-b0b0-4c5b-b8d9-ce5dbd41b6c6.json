@@ -1,0 +1,36 @@
+{
+  "opendb_id": "6700bf28-b0b0-4c5b-b8d9-ce5dbd41b6c6",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Aegis Red / Black DDR4-2400 CL17 32GB (2x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-2400C17D-32GIS"
+    ],
+    "series": "Aegis",
+    "variant": "2400 CL17"
+  },
+  "speed": 2400,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "RED",
+    "BLACK"
+  ],
+  "cas_latency": 17,
+  "timings": "17-17-17-39",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0778P3ZN4",
+    "newegg_sku": "N82E16820232624",
+    "walmart_sku": 881722688
+  }
+}

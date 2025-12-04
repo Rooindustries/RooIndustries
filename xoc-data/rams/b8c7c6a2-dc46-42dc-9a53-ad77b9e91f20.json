@@ -1,0 +1,31 @@
+{
+  "opendb_id": "b8c7c6a2-dc46-42dc-9a53-ad77b9e91f20",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston ValueRAM SODIMM DDR5-4800 CL40 16GB (1x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KVR48S40BS8-16"
+    ],
+    "series": "ValueRAM",
+    "variant": "4800 CL40"
+  },
+  "speed": 4800,
+  "ram_type": "DDR5",
+  "form_factor": "262-pin SODIMM (DDR5)",
+  "capacity": 16,
+  "color": [],
+  "cas_latency": 40,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B09TWJXG89",
+    "walmart_sku": 353414168
+  }
+}

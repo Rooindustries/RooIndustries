@@ -1,0 +1,35 @@
+{
+  "opendb_id": "bb778dc2-33e4-4855-ac2c-c50158ab56ee",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "Patriot Viper Black / Silver DDR3-1600 CL9 8GB (2x4GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PV38G160C9K"
+    ],
+    "series": "Viper",
+    "variant": "1600 CL9"
+  },
+  "speed": 1600,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 8,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 9,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B008LTJJM2",
+    "newegg_sku": "N82E16820220685",
+    "walmart_sku": 43441113
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "opendb_id": "36eb0449-c7c7-4bfb-8b8f-5c3a3c0eb066",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Kingston FURY Beast Black DDR5-5600 CL36 64GB (2x32GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF556C36BBEK2-64"
+    ],
+    "series": "FURY",
+    "variant": "5600 CL36"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 36,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0BRTK3R15",
+    "newegg_sku": "N82E16820242767",
+    "walmart_sku": 2262046569
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "opendb_id": "34a48356-1b95-4114-8f39-6c8556653c09",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Vulcan Z Gray DDR4-3200 CL16 16GB (1x16GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TLZGD416G3200HC16F01"
+    ],
+    "series": "T-Force",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "GREY"
+  ],
+  "cas_latency": 16,
+  "timings": "16-20-20-40",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B08R65P4S6",
+    "walmart_sku": 1046699783
+  }
+}

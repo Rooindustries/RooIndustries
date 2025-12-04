@@ -1,0 +1,32 @@
+{
+  "opendb_id": "17d40b5e-2b5a-4ae1-8d38-f01a7fa1d7ee",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "ADATA XPG LANCER RGB White 32GB (2x16GB) DDR5 6400 CL32",
+    "manufacturer": "ADATA",
+    "part_numbers": [
+      "AX5U6400C3216G-DCLARWH"
+    ],
+    "series": "XPG Lancer",
+    "variant": "6400 CL32"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 32,
+  "voltage": 1.4,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0BSVSS5QP"
+  }
+}

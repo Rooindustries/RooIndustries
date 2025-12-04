@@ -1,0 +1,31 @@
+{
+  "opendb_id": "6f78f61e-7a19-4dc6-9544-030cd60c900d",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "TEAMGROUP Elite Black DDR5-6400 CL52 32GB (1x32GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TED532G6400C5201"
+    ],
+    "series": "Elite",
+    "variant": "6400 CL52"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 52,
+  "timings": "52-52-52-103",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {}
+}

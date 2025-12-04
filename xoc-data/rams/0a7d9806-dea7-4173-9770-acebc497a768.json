@@ -1,0 +1,35 @@
+{
+  "opendb_id": "0a7d9806-dea7-4173-9770-acebc497a768",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "Corsair Vengeance Black / Blue DDR3-1600 CL9 8GB (2x4GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMZ8GX3M2A1600C9B"
+    ],
+    "series": "Vengeance",
+    "variant": "1600 CL9"
+  },
+  "speed": 1600,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 8,
+  "color": [
+    "BLACK",
+    "BLUE"
+  ],
+  "cas_latency": 9,
+  "timings": "9-9-9-24",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B004QBUL1C",
+    "walmart_sku": 135398544
+  }
+}

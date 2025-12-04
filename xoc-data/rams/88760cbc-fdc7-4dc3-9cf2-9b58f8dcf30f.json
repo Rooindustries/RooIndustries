@@ -1,0 +1,29 @@
+{
+  "opendb_id": "88760cbc-fdc7-4dc3-9cf2-9b58f8dcf30f",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "G.Skill NT DDR4-2400 CL17 16GB (2x8GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-2400C17D-16GNT"
+    ],
+    "series": "NT",
+    "variant": "2400 CL17"
+  },
+  "speed": 2400,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [],
+  "cas_latency": 17,
+  "timings": "17-17-17-39",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {}
+}

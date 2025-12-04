@@ -1,0 +1,33 @@
+{
+  "opendb_id": "27dffe1a-9705-4446-931d-9004fff5ad43",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "G.Skill Value Black DDR4-2400 CL17 8GB (1x8GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-2400C17S-8GNT"
+    ],
+    "series": "Value",
+    "variant": "2400 CL17"
+  },
+  "speed": 2400,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 8,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 17,
+  "timings": "17-17-17-39",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0748PFTG7"
+  }
+}

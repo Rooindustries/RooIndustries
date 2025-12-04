@@ -1,0 +1,35 @@
+{
+  "opendb_id": "471b6a93-e34e-485b-a625-4e98a712a37e",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "Patriot Signature Line Green DDR4-2666 CL19 4GB (1x4GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PSD44G266681"
+    ],
+    "series": "Signature",
+    "variant": "2666 CL19"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 4,
+  "color": [
+    "GREEN"
+  ],
+  "cas_latency": 19,
+  "timings": "19-19-19-43",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B07H9253N9",
+    "newegg_sku": "9SIB698K3D9629",
+    "walmart_sku": 487539108
+  }
+}

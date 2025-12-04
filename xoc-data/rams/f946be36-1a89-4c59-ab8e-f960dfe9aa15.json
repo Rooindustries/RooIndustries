@@ -1,0 +1,28 @@
+{
+  "opendb_id": "f946be36-1a89-4c59-ab8e-f960dfe9aa15",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "G.Skill Aegis DDR3-1600 CL11 16GB (2x8GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F3-1600C11D-16GISL"
+    ],
+    "series": "Aegis",
+    "variant": "1600 CL11"
+  },
+  "speed": 1600,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 16,
+  "color": [],
+  "cas_latency": 11,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {}
+}

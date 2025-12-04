@@ -1,0 +1,33 @@
+{
+  "opendb_id": "a994a450-7062-4ff9-8dc8-056d20122414",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Mushkin Essentials Black / Green DDR4-2133 CL15 32GB (2x16GB)",
+    "manufacturer": "Mushkin",
+    "part_numbers": [
+      "MES4U213FF16G28X2"
+    ],
+    "series": "Essentials",
+    "variant": "2133 CL15"
+  },
+  "speed": 2133,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "GREEN"
+  ],
+  "cas_latency": 15,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B01ACI51YO"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "opendb_id": "7f500d5b-9670-43e6-a842-d679a9d7af26",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 2
+  },
+  "metadata": {
+    "name": "Mushkin 996573 Green DDR3-1066 CL7 4GB (2x2GB)",
+    "manufacturer": "Mushkin",
+    "part_numbers": [
+      "996573"
+    ],
+    "series": "996573",
+    "variant": "1066 CL7"
+  },
+  "speed": 1066,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 4,
+  "color": [
+    "GREEN"
+  ],
+  "cas_latency": 7,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B00176DLYS",
+    "walmart_sku": 49330341
+  }
+}

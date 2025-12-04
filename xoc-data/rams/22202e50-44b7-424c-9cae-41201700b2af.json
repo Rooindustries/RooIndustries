@@ -1,0 +1,31 @@
+{
+  "opendb_id": "22202e50-44b7-424c-9cae-41201700b2af",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Silicon Power XPOWER Storm RGB Black DDR5-7600 CL36 64GB (2x32GB)",
+    "manufacturer": "Silicon Power",
+    "part_numbers": [
+      "SP064GXLWU760FDK"
+    ],
+    "series": "XPOWER",
+    "variant": "7600 CL36"
+  },
+  "speed": 7600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 36,
+  "timings": "36-46-46-121",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

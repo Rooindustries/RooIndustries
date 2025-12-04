@@ -1,0 +1,35 @@
+{
+  "opendb_id": "99826041-66b7-4275-b411-709984a4a464",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB White DDR5-6000 CL30 32GB (2x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMH32GX5M2B6000Z30W"
+    ],
+    "series": "Vengeance",
+    "variant": "6000 CL30"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 30,
+  "timings": "30-36-36-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0DPJ9DJ3D",
+    "newegg_sku": "N82E16820982236",
+    "walmart_sku": 2937765383
+  }
+}

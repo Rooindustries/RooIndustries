@@ -1,0 +1,35 @@
+{
+  "opendb_id": "ebbfbea3-1907-471b-9445-6f319d7c6988",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Silicon Power XPOWER Zenith RGB Gaming Black DDR4-3600 CL18 32GB (2x16GB)",
+    "manufacturer": "Silicon Power",
+    "part_numbers": [
+      "SU032GXLZU360BDDSN"
+    ],
+    "series": "XPOWER Zenith RGB",
+    "variant": "3600 CL18"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "timings": "18-22-22-42",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "height": 38.5,
+  "general_product_information": {
+    "newegg_sku": "N82E16820301511",
+    "manufacturer_url": "https://www.silicon-power.com/product-detail/XPOWER_Zenith_RGB_DDR4_Gaming_UDIMM/"
+  }
+}

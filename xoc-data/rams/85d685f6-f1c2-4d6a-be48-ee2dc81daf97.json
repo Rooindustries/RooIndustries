@@ -1,0 +1,35 @@
+{
+  "opendb_id": "85d685f6-f1c2-4d6a-be48-ee2dc81daf97",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB DDR5-5600 CL32 32GB (2x16GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "FF3D532G5600HC32DC01"
+    ],
+    "series": "T-Force",
+    "variant": "5600 CL32"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 32,
+  "timings": "32-36-36-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0B3HHNK8Q",
+    "newegg_sku": "N82E16820331841",
+    "walmart_sku": 1137635203
+  }
+}

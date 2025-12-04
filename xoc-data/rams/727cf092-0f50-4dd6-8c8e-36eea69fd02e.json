@@ -1,0 +1,33 @@
+{
+  "opendb_id": "727cf092-0f50-4dd6-8c8e-36eea69fd02e",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston Server Premier DDR4-2666 CL19 16GB (1x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KSM26ED8",
+      "16HD"
+    ],
+    "series": "Server",
+    "variant": "2666 CL19"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [],
+  "cas_latency": 19,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B08GKVTVP9",
+    "newegg_sku": "1B4-00M4-003Y9",
+    "walmart_sku": 765125008
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "opendb_id": "c1f6f208-3caa-4d97-bb0d-6248d9f95481",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Vengeance LPX Black / Yellow DDR4-3200 CL16 64GB (4x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMK64GX4M4D3200C16"
+    ],
+    "series": "CORSAIR",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 64,
+  "color": [
+    "BLACK",
+    "YELLOW"
+  ],
+  "cas_latency": 16,
+  "timings": "16-18-18-36",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

@@ -1,0 +1,31 @@
+{
+  "opendb_id": "d07f07f6-e9fb-43ab-951d-c39fa0ebba96",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "PNY Anarchy Black / Blue DDR3-1600 CL9 4GB (1x4GB)",
+    "manufacturer": "PNY",
+    "part_numbers": [
+      "MD4GSD316009AB-Z"
+    ],
+    "series": "Anarchy",
+    "variant": "1600 CL9"
+  },
+  "speed": 1600,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 4,
+  "color": [
+    "BLACK",
+    "BLUE"
+  ],
+  "cas_latency": 9,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

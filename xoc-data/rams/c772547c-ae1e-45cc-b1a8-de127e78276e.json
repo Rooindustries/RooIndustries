@@ -1,0 +1,37 @@
+{
+  "opendb_id": "c772547c-ae1e-45cc-b1a8-de127e78276e",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB Pro SL White / Black DDR4-3600 CL18 32GB (2x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMH32GX4M2D3600C18W"
+    ],
+    "series": "Vengeance",
+    "variant": "3600 CL18"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "WHITE",
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "timings": "18-22-22-42",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B08SQRF8MJ",
+    "newegg_sku": "N82E16820236708",
+    "bestbuy_sku": 6457798,
+    "walmart_sku": 563986205
+  }
+}

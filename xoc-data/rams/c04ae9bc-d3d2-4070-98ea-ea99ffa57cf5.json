@@ -1,0 +1,31 @@
+{
+  "opendb_id": "c04ae9bc-d3d2-4070-98ea-ea99ffa57cf5",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Thermaltake TOUGHRAM RGB White / Silver DDR4-3600 CL18 16GB (2x8GB)",
+    "manufacturer": "Thermaltake",
+    "part_numbers": [
+      "R022D408GX2-3600C18A"
+    ],
+    "series": "TOUGHRAM",
+    "variant": "3600 CL18"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "WHITE",
+    "GREY"
+  ],
+  "cas_latency": 18,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

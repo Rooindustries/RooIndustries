@@ -1,0 +1,33 @@
+{
+  "opendb_id": "dfa77fcf-6d4b-40c3-8c1d-037962f88ef5",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Silicon Power DDR5 64GB (2x32GB) Zenith 5200MHz CL40 BLACK",
+    "manufacturer": "Silicon Power",
+    "part_numbers": [
+      "SP064GXLWU520FDE"
+    ],
+    "series": "XPOWER Zenith",
+    "variant": "5200 CL40"
+  },
+  "speed": 5200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "timings": "40-40-40-76",
+  "voltage": 1.25,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "height": 38.5,
+  "general_product_information": {
+    "manufacturer_url": "https://www.silicon-power.com/product-detail/XPOWER_Zenith_DDR5_Gaming_UDIMM/"
+  }
+}

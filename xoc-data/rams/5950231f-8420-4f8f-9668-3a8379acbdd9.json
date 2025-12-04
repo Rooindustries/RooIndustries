@@ -1,0 +1,35 @@
+{
+  "opendb_id": "5950231f-8420-4f8f-9668-3a8379acbdd9",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Patriot Viper Venom RGB Black / Silver DDR5-6000 CL30 32GB (2x16GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PVVR532G600C30K"
+    ],
+    "series": "Viper",
+    "variant": "6000 CL30"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 30,
+  "timings": "30-40-40-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0D4NLTM6R",
+    "newegg_sku": "0RN-002U-004U6"
+  }
+}

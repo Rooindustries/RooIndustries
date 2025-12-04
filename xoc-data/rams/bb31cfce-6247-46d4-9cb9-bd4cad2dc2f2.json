@@ -1,0 +1,32 @@
+{
+  "opendb_id": "bb31cfce-6247-46d4-9cb9-bd4cad2dc2f2",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z Neo Black / Silver DDR4-3200 CL14 32GB (4x8GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-3200C14Q-32GTZN"
+    ],
+    "series": "Trident",
+    "variant": "3200 CL14"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 14,
+  "timings": "14-14-14-34",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

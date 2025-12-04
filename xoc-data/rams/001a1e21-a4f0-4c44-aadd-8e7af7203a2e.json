@@ -1,0 +1,30 @@
+{
+  "opendb_id": "001a1e21-a4f0-4c44-aadd-8e7af7203a2e",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 24
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Xtreem Pink DDR5-6800 CL34 48GB (2x24GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "FFPD548G6800HC34ADC01"
+    ],
+    "series": "T-Force",
+    "variant": "6800 CL34"
+  },
+  "speed": 6800,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 48,
+  "color": [
+    "PINK"
+  ],
+  "cas_latency": 34,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

@@ -1,0 +1,33 @@
+{
+  "opendb_id": "9bd9587f-ff78-4059-846b-118f0205b2c9",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Create Expert Gray DDR4-3200 CL16 64GB (2x32GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TTCED464G3200HC16FDC01"
+    ],
+    "series": "T-Create",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 64,
+  "color": [
+    "GREY"
+  ],
+  "cas_latency": 16,
+  "timings": "16-20-20-40",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B09GX8JRM5"
+  }
+}

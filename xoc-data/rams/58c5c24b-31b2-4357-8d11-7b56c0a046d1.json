@@ -1,0 +1,34 @@
+{
+  "opendb_id": "58c5c24b-31b2-4357-8d11-7b56c0a046d1",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston Fury Renegade RGB Silver / White DDR5-7600 CL38 16GB (1x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF576C38RWA-16"
+    ],
+    "series": "Fury",
+    "variant": "7600 CL38"
+  },
+  "speed": 7600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "WHITE",
+    "GREY"
+  ],
+  "cas_latency": 38,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0CKZ8N7NP",
+    "walmart_sku": 5181405292
+  }
+}

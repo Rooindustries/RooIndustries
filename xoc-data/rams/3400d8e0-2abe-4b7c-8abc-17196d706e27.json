@@ -1,0 +1,35 @@
+{
+  "opendb_id": "3400d8e0-2abe-4b7c-8abc-17196d706e27",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Flare X5 Black DDR5-6000 CL36 32GB (2x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-6000J3636F16GX2-FX5"
+    ],
+    "series": "Flare",
+    "variant": "6000 CL36"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 36,
+  "timings": "36-36-36-96",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0BFGB2D2Z",
+    "newegg_sku": "N82E16820374419",
+    "walmart_sku": 1301958958
+  }
+}

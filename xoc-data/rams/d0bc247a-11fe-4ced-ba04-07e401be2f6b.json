@@ -1,0 +1,33 @@
+{
+  "opendb_id": "d0bc247a-11fe-4ced-ba04-07e401be2f6b",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 48
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Create Expert Black / Gold DDR5-6400 CL32 96GB (2x48GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "CTCED596G6400HC32ADC01"
+    ],
+    "series": "T-Create",
+    "variant": "6400 CL32"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 96,
+  "color": [
+    "BLACK",
+    "GOLD"
+  ],
+  "cas_latency": 32,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "newegg_sku": "N82E16820985240"
+  }
+}

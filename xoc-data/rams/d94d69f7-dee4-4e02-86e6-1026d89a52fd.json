@@ -1,0 +1,33 @@
+{
+  "opendb_id": "d94d69f7-dee4-4e02-86e6-1026d89a52fd",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Silicon Power DDR5 32GB (2x16GB) Zenith 6000MHz CL36 Black",
+    "manufacturer": "Silicon Power",
+    "part_numbers": [
+      "SP032GXLWU60CFDE"
+    ],
+    "series": "XPOWER Zenith",
+    "variant": "6000 CL30"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 36,
+  "timings": "36-36-36-96",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "height": 38.5,
+  "general_product_information": {
+    "manufacturer_url": "https://www.silicon-power.com/product-detail/XPOWER_Zenith_DDR5_Gaming_UDIMM/"
+  }
+}

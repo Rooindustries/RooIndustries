@@ -1,0 +1,30 @@
+{
+  "opendb_id": "80c79808-aa3b-40c2-b485-b63e4dbad2bd",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 48
+  },
+  "metadata": {
+    "name": "Mushkin Redline Black DDR5-4800 CL40 96GB (2x48GB)",
+    "manufacturer": "Mushkin",
+    "part_numbers": [
+      "MRE5U480FGGD48GX2"
+    ],
+    "series": "Redline",
+    "variant": "4800 CL40"
+  },
+  "speed": 4800,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 96,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

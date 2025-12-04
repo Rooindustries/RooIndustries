@@ -1,0 +1,30 @@
+{
+  "opendb_id": "58a03749-41fa-4232-bb57-08865d78bd1f",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Kingston Server Premier Registered DDR4-3200 CL22 32GB (1x32GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KSM32RD8",
+      "32HCR"
+    ],
+    "series": "Server",
+    "variant": "3200 CL22"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [],
+  "cas_latency": 22,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "general_product_information": {
+    "newegg_sku": "0RN-001J-013X2"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "opendb_id": "4497ea70-a966-4eb1-b591-5833769cdc93",
+  "modules": {
+    "quantity": 8,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z RGB Black DDR4-2666 CL18 256GB (8x32GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-2666C18Q2-256GTZR"
+    ],
+    "series": "Trident",
+    "variant": "2666 CL18"
+  },
+  "speed": 2666,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 256,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "timings": "18-18-18-43",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0892TKN3F"
+  }
+}

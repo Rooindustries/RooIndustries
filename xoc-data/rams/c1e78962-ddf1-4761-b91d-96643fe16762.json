@@ -1,0 +1,33 @@
+{
+  "opendb_id": "c1e78962-ddf1-4761-b91d-96643fe16762",
+  "modules": {
+    "quantity": 8,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Kingston FURY Renegade Pro Registered Black DDR5-6400 CL32 256GB (8x32GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF564R32RBE2K8-256"
+    ],
+    "series": "FURY",
+    "variant": "6400 CL32"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 256,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 32,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0CVS1JF8J",
+    "walmart_sku": 5517109215
+  }
+}

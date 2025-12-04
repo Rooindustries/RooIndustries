@@ -1,0 +1,35 @@
+{
+  "opendb_id": "709f860e-656d-46a6-8adb-950635e1610b",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston FURY Beast Black / Silver DDR5-5200 CL40 32GB (2x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF552C40BBK2-32"
+    ],
+    "series": "FURY",
+    "variant": "5200 CL40"
+  },
+  "speed": 5200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 40,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B09KCLP63B",
+    "newegg_sku": "N82E16820242648",
+    "walmart_sku": 119727050
+  }
+}

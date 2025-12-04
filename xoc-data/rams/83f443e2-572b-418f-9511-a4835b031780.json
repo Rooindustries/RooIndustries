@@ -1,0 +1,32 @@
+{
+  "opendb_id": "83f443e2-572b-418f-9511-a4835b031780",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "GIGASTONE Game PRO 32GB Kit (4x8GB) DDR4 3200MHz CL16 RED",
+    "manufacturer": "Gigastone",
+    "series": "Game PRO",
+    "variant": "3200 CL16",
+    "part_numbers": []
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "RED"
+  ],
+  "timings": "16-18-18-40",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "cas_latency": 16,
+  "height": 14.896,
+  "general_product_information": {
+    "amazon_sku": "B0D5R5WLQ9",
+    "manufacturer_url": "https://www.gigastone.com/en/products-detail/47"
+  }
+}

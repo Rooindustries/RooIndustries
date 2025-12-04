@@ -1,0 +1,33 @@
+{
+  "opendb_id": "b3d3fd31-5844-46cd-8f00-89c7bc86aa62",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z Royal Silver DDR4-4400 CL19 64GB (2x32GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-4400C19D-64GTRS"
+    ],
+    "series": "Trident",
+    "variant": "4400 CL19"
+  },
+  "speed": 4400,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 64,
+  "color": [
+    "GREY"
+  ],
+  "cas_latency": 19,
+  "timings": "19-26-26-46",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B09RQ6D4DV"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "opendb_id": "4f61f185-996e-46ef-a415-dae86aeec690",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "ADATA XPG LANCER RGB White 16GB (1x16GB) DDR5 6000 CL40",
+    "manufacturer": "ADATA",
+    "part_numbers": [
+      "AX5U6000C4016G-CLARWH"
+    ],
+    "series": "XPG Lancer",
+    "variant": "6000 CL40"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 40,
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0B2X6XRGV"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "opendb_id": "29e4e9df-64ca-4290-ac5a-e0667defc6fc",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP Xtreem ARGB DDR4-3200 CL14 32GB (2x16GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TF13D432G3200HC14BDC01"
+    ],
+    "series": "Xtreem",
+    "variant": "3200 CL14"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 14,
+  "timings": "14-14-14-34",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

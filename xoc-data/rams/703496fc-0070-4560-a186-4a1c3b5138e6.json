@@ -1,0 +1,35 @@
+{
+  "opendb_id": "703496fc-0070-4560-a186-4a1c3b5138e6",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws V Red / Black DDR4-3600 CL19 32GB (2x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-3600C19D-32GVRB"
+    ],
+    "series": "Ripjaws",
+    "variant": "3600 CL19"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "RED",
+    "BLACK"
+  ],
+  "cas_latency": 19,
+  "timings": "19-20-20-40",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B07FSWN49R",
+    "walmart_sku": 502696249
+  }
+}

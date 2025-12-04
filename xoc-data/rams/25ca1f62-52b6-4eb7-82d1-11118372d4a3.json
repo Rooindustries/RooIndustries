@@ -1,0 +1,35 @@
+{
+  "opendb_id": "25ca1f62-52b6-4eb7-82d1-11118372d4a3",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 24
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z5 RGB Black DDR5-7200 CL36 48GB (2x24GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-7200J3646F24GX2-TZ5RK"
+    ],
+    "series": "Trident",
+    "variant": "7200 CL36"
+  },
+  "speed": 7200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 48,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 36,
+  "timings": "36-46-46-115",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0C2B1GB7H",
+    "newegg_sku": "N82E16820374458",
+    "walmart_sku": 3072198298
+  }
+}

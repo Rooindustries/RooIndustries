@@ -1,0 +1,35 @@
+{
+  "opendb_id": "aff3f6fe-c349-413f-be23-c8cd2ce76823",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "Kingston KCP424NS6/4 Green / Black DDR4-2400 CL17 4GB (1x4GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KCP424NS6",
+      "4"
+    ],
+    "series": "KCP424NS6/4",
+    "variant": "2400 CL17"
+  },
+  "speed": 2400,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 4,
+  "color": [
+    "GREEN",
+    "BLACK"
+  ],
+  "cas_latency": 17,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B076Q3T1LJ",
+    "walmart_sku": 824411865
+  }
+}

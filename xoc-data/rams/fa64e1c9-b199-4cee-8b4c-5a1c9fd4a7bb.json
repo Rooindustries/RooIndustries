@@ -1,0 +1,33 @@
+{
+  "opendb_id": "fa64e1c9-b199-4cee-8b4c-5a1c9fd4a7bb",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Lexar Ares RGB Black DDR5-6000 CL34 32GB (2x16GB)",
+    "manufacturer": "Lexar",
+    "part_numbers": [
+      "LD5FU016G-R6000GDGA"
+    ],
+    "series": "Ares",
+    "variant": "6000 CL34"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 34,
+  "timings": "34-38-38-76",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0BXH3CMJK"
+  }
+}

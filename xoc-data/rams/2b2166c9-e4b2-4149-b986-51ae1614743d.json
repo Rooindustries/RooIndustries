@@ -1,0 +1,35 @@
+{
+  "opendb_id": "2b2166c9-e4b2-4149-b986-51ae1614743d",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "OLOy DDR4 RAM 16GB (2x8GB) 3200 MHz CL16 1.35V 288-Pin Desktop Gaming UDIMM Black",
+    "part_numbers": [
+      "MD4U0832160BJ0DA"
+    ],
+    "series": "DDR4",
+    "variant": "3200 CL16 ",
+    "releaseYear": 2020,
+    "manufacturer": "OLOy"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "timings": "16-20-20-38",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "height": 38.862,
+  "general_product_information": {
+    "newegg_sku": "9SIBRESKGN7646",
+    "manufacturer_url": "https://www.oloymemory.com/products.html"
+  }
+}

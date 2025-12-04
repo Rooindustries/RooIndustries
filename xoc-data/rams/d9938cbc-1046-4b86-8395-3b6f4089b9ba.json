@@ -1,0 +1,28 @@
+{
+  "opendb_id": "d9938cbc-1046-4b86-8395-3b6f4089b9ba",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 2
+  },
+  "metadata": {
+    "name": "G.Skill F2-9600CL5D-4GBPI DDR2-1200 CL5 4GB (2x2GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F2-9600CL5D-4GBPI"
+    ],
+    "series": "F2-9600CL5D-4GBPI",
+    "variant": "1200 CL5"
+  },
+  "speed": 1200,
+  "ram_type": "DDR2",
+  "form_factor": "240-pin DIMM (DDR2)",
+  "capacity": 4,
+  "color": [],
+  "cas_latency": 5,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

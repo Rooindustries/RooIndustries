@@ -1,0 +1,33 @@
+{
+  "opendb_id": "8ce5cb30-d72a-4e14-b4d0-e50ef8f98a24",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws M5 RGB DDR5-6000 CL28 64GB (2x32GB) White ",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-6000J2836G32GX2-RM5RW"
+    ],
+    "series": "Ripjaws",
+    "variant": "M5 RGB"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "White"
+  ],
+  "cas_latency": 28,
+  "timings": "28-36-36-96",
+  "voltage": 1.4,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "manufacturer_url": "https://www.gskill.com/product/165/421/1731652581/F5-6000J2836G32GX2-RM5RW"
+  }
+}

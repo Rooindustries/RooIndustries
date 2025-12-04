@@ -1,0 +1,32 @@
+{
+  "opendb_id": "7815d710-71f0-4c76-87f6-fab1e3dec64b",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Corsair Vengeance LPX Black / Yellow DDR4-3000 CL16 16GB (2x8GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMK16GX4M2C3000C16"
+    ],
+    "series": "Vengeance",
+    "variant": "3000 CL16"
+  },
+  "speed": 3000,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK",
+    "YELLOW"
+  ],
+  "cas_latency": 16,
+  "timings": "16-18-18-36",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

@@ -1,0 +1,35 @@
+{
+  "opendb_id": "5b2d8f19-53aa-48b2-98cd-dd96828e03fd",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Silicon Power XPOWER Zenith Gaming Black DDR5-5600 CL40 32GB (2x16GB)",
+    "manufacturer": "Silicon Power",
+    "part_numbers": [
+      "SP032GXLWU560FDE"
+    ],
+    "series": "XPOWER Zenith",
+    "variant": "5600 CL40"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "voltage": 1.25,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "height": 38.5,
+  "timings": "40-40-40-76",
+  "general_product_information": {
+    "amazon_sku": "B0B7JG21LW",
+    "manufacturer_url": "https://www.silicon-power.com/en/product-detail/XPOWER_Zenith_DDR5_Gaming_UDIMM/"
+  }
+}

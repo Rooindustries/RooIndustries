@@ -1,0 +1,36 @@
+{
+  "opendb_id": "e0745afd-3a5a-4402-bb74-75700cb977a1",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Corsair Vengeance White Gray DDR5-6000 CL36 32GB (2x16GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMK32GX5M2E6000C36W"
+    ],
+    "series": "Vengeance",
+    "variant": "6000 CL36"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "WHITE",
+    "GREY"
+  ],
+  "cas_latency": 36,
+  "timings": "36-44-44-96",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0CJ8Z3PMK",
+    "newegg_sku": "N82E16820982110",
+    "walmart_sku": 5123899530
+  }
+}

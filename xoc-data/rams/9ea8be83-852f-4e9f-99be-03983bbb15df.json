@@ -1,0 +1,31 @@
+{
+  "opendb_id": "9ea8be83-852f-4e9f-99be-03983bbb15df",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Silicon Power XPOWER Storm RGB Black DDR5-7200 CL34 64GB (2x32GB)",
+    "manufacturer": "Silicon Power",
+    "part_numbers": [
+      "SP064GXLWU720FDK"
+    ],
+    "series": "XPOWER",
+    "variant": "7200 CL34"
+  },
+  "speed": 7200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 34,
+  "timings": "34-42-42-84",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

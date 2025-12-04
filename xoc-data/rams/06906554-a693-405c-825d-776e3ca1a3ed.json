@@ -1,0 +1,32 @@
+{
+  "opendb_id": "06906554-a693-405c-825d-776e3ca1a3ed",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "Crucial CT51264BA160B Green DDR3-1600 CL11 4GB (1x4GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "CT51264BA160B"
+    ],
+    "series": "CT51264BA160B",
+    "variant": "1600 CL11"
+  },
+  "speed": 1600,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 4,
+  "color": [
+    "GREEN"
+  ],
+  "cas_latency": 11,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B006YG89Q6"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "opendb_id": "e453ce41-4b08-4245-9fea-e4b3eb8edd13",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB Black DDR4 32GB(2x16GB) 3200MHz CL16",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TF3D432G3200HC16GDC01"
+    ],
+    "series": "T-Force",
+    "variant": "Delta RGB BLACK DDR4"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "height": 49,
+  "general_product_information": {
+    "manufacturer_url": "https://www.teamgroupinc.com/en/product-detail/memory/T-FORCE/delta-rgb-ddr4-black/delta-rgb-ddr4-black-TF3D464G3200HC16CDC01/"
+  }
+}

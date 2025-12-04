@@ -26,7 +26,6 @@ export default async function handler(req, res) {
 
     const now = new Date().toISOString();
 
-    // 1. Find user with matching token and ensure it hasn't expired
     const referral = await client.fetch(
       `*[_type == "referral" && resetToken == $token && resetTokenExpiresAt > $now][0]{ _id }`,
       { token, now }

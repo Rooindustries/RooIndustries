@@ -1,0 +1,34 @@
+{
+  "opendb_id": "2c2b2cf0-5317-4d37-a9ec-25830045216c",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 64
+  },
+  "metadata": {
+    "name": "Crucial CT64G56C46U5 Black DDR5-5600 CL46 64GB (1x64GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "CT64G56C46U5"
+    ],
+    "series": "CT64G56C46U5",
+    "variant": "5600 CL46"
+  },
+  "speed": 5600,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 64,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 46,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0DSQP6YR9",
+    "newegg_sku": "N82E16820156423",
+    "walmart_sku": 15488264203
+  }
+}

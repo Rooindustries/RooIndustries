@@ -1,0 +1,32 @@
+{
+  "opendb_id": "e88bdb76-bdd4-4a22-a806-7066a6cc4cb8",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "ADATA XPG LANCER RGB Black 16GB (1x16GB) DDR5 7200 CL34",
+    "manufacturer": "ADATA",
+    "part_numbers": [
+      "AX5U7200C3416G-CLARBK"
+    ],
+    "series": "XPG Lancer",
+    "variant": "7200 CL34"
+  },
+  "speed": 7200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 34,
+  "voltage": 1.4,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0C85K4LF5"
+  }
+}

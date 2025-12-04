@@ -1,0 +1,34 @@
+{
+  "opendb_id": "2bae8cc4-d247-487f-88ea-efad70e226b7",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Corsair Vengeance RGB Pro DDR4-2933 CL16 16GB (2x8GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMW16GX4M2Z2933C16"
+    ],
+    "series": "Vengeance",
+    "variant": "2933 CL16"
+  },
+  "speed": 2933,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "timings": "16-18-18-36",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B07FBP815T",
+    "walmart_sku": 859993798
+  }
+}

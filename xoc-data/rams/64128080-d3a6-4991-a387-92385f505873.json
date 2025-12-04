@@ -1,0 +1,33 @@
+{
+  "opendb_id": "64128080-d3a6-4991-a387-92385f505873",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Crucial CT32G4LFD424A Registered Green / Black DDR4-2400 CL17 32GB (1x32GB)",
+    "manufacturer": "Crucial",
+    "part_numbers": [
+      "CT32G4LFD424A"
+    ],
+    "series": "CT32G4LFD424A",
+    "variant": "2400 CL17"
+  },
+  "speed": 2400,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "GREEN",
+    "BLACK"
+  ],
+  "cas_latency": 17,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B019HKO2SE"
+  }
+}

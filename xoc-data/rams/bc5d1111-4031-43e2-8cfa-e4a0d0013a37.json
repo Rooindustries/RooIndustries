@@ -1,0 +1,35 @@
+{
+  "opendb_id": "bc5d1111-4031-43e2-8cfa-e4a0d0013a37",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 48
+  },
+  "metadata": {
+    "name": "Corsair Vengeance Black DDR5-6400 CL32 96GB (2x48GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMK96GX5M2B6400C32"
+    ],
+    "series": "Vengeance",
+    "variant": "6400 CL32"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 96,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 32,
+  "timings": "32-40-40-84",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0C5XL213T",
+    "newegg_sku": "N82E16820982024",
+    "walmart_sku": 3880441855
+  }
+}

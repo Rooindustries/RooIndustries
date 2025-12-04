@@ -1,0 +1,32 @@
+{
+  "opendb_id": "6efa3bc0-3277-475b-ac18-0defda3f17ce",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Patriot Signature Line DDR4-3200 CL22 8GB (1x8GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PSD48G320081"
+    ],
+    "series": "Signature",
+    "variant": "3200 CL22"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 8,
+  "color": [],
+  "cas_latency": 22,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0887VLQPB",
+    "newegg_sku": "9SIAD7HHSZ2608",
+    "walmart_sku": 449963675
+  }
+}

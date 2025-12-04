@@ -1,0 +1,35 @@
+{
+  "opendb_id": "8001e4c1-3147-4147-8302-a0d719fbca7f",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "Corsair Mac Black / Green SODIMM DDR3-1333 CL9 4GB (1x4GB)",
+    "manufacturer": "Corsair",
+    "part_numbers": [
+      "CMSA4GX3M1A1333C9"
+    ],
+    "series": "Mac",
+    "variant": "1333 CL9"
+  },
+  "speed": 1333,
+  "ram_type": "DDR3",
+  "form_factor": "204-pin SODIMM (DDR3)",
+  "capacity": 4,
+  "color": [
+    "BLACK",
+    "GREEN"
+  ],
+  "cas_latency": 9,
+  "timings": "9-9-9-24",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B005JRH9TE",
+    "walmart_sku": 17694162
+  }
+}

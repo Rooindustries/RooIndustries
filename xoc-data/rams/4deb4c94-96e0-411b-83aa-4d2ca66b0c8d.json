@@ -1,0 +1,35 @@
+{
+  "opendb_id": "4deb4c94-96e0-411b-83aa-4d2ca66b0c8d",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Trident Z RGB Black DDR4-3600 CL16 32GB (2x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F4-3600C16D-32GTZRC"
+    ],
+    "series": "Trident",
+    "variant": "3600 CL16"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "timings": "16-19-19-39",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B084M6S4VQ",
+    "newegg_sku": "N82E16820232906",
+    "walmart_sku": 633515903
+  }
+}

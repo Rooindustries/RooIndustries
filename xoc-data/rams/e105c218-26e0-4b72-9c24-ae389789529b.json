@@ -1,0 +1,31 @@
+{
+  "opendb_id": "e105c218-26e0-4b72-9c24-ae389789529b",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "GOODRAM IRDM PRO Black DDR4-3600 CL18 16GB (2x8GB)",
+    "manufacturer": "GOODRAM",
+    "part_numbers": [
+      "IRP-K3600D4V64L18S",
+      "16GDC"
+    ],
+    "series": "IRDM",
+    "variant": "3600 CL18"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 18,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {}
+}

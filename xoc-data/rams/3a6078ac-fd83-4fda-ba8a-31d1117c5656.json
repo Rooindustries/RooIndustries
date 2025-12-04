@@ -1,0 +1,34 @@
+{
+  "opendb_id": "3a6078ac-fd83-4fda-ba8a-31d1117c5656",
+  "modules": {
+    "quantity": 4,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "Kingston FURY Beast RGB DDR5-5200 CL40 128GB (4x32GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF552C40BBAK4-128"
+    ],
+    "series": "FURY",
+    "variant": "5200 CL40"
+  },
+  "speed": 5200,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 128,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0C34BM8QW",
+    "newegg_sku": "0RM-001W-006M7",
+    "walmart_sku": 3382996188
+  }
+}

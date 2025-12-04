@@ -1,0 +1,35 @@
+{
+  "opendb_id": "75054e7d-629a-41bf-8017-69794e3d9d02",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 48
+  },
+  "metadata": {
+    "name": "Kingston Fury Renegade RGB Silver / Black DDR5-6000 CL32 96GB (2x48GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF560C32RSAK2-96"
+    ],
+    "series": "Fury",
+    "variant": "6000 CL32"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 96,
+  "color": [
+    "GREY",
+    "BLACK"
+  ],
+  "cas_latency": 32,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0CJC7QC8R",
+    "newegg_sku": "N82E16820242825",
+    "walmart_sku": 5083948539
+  }
+}

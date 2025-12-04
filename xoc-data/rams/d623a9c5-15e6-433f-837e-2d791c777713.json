@@ -1,0 +1,36 @@
+{
+  "opendb_id": "d623a9c5-15e6-433f-837e-2d791c777713",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB Black / Silver DDR5-8000 CL38 32GB (2x16GB)",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "FF3D532G8000HC38DDC01"
+    ],
+    "series": "T-Force",
+    "variant": "8000 CL38"
+  },
+  "speed": 8000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK",
+    "GREY"
+  ],
+  "cas_latency": 38,
+  "timings": "38-48-48-84",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0BWM1JQKH",
+    "newegg_sku": "N82E16820985017",
+    "walmart_sku": 3898047467
+  }
+}

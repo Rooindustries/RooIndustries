@@ -1,0 +1,35 @@
+{
+  "opendb_id": "fa729886-24f4-435e-93d0-1b7c8c0902dc",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 8
+  },
+  "metadata": {
+    "name": "Patriot Viper Steel RGB DDR4-3600 CL20 16GB (2x8GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PVSR416G360C0K"
+    ],
+    "series": "Viper",
+    "variant": "3600 CL20"
+  },
+  "speed": 3600,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 20,
+  "timings": "20-26-26-46",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B08N678TW4",
+    "newegg_sku": "9SIB7RAJK69069",
+    "walmart_sku": 926028348
+  }
+}

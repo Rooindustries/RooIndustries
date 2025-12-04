@@ -1,0 +1,33 @@
+{
+  "opendb_id": "50755df4-0c5d-48cb-8b0c-8d13804cec75",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 32
+  },
+  "metadata": {
+    "name": "TEAMGROUP T-Force Delta RGB DDR4 64GB (2x32GB) 3200MHz CL16 WHITE",
+    "manufacturer": "TEAMGROUP",
+    "part_numbers": [
+      "TF4D464G3200HC16FDC01"
+    ],
+    "series": "T-Force",
+    "variant": "Delta RGB White DDR4"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 64,
+  "color": [
+    "WHITE"
+  ],
+  "cas_latency": 16,
+  "timings": "16-20-20-40",
+  "voltage": 1.35,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "manufacturer_url": "https://www.teamgroupinc.com/en/product-category/memory/desktop/?filter=ZmlsdGVyLTIyMT0yNTE4"
+  }
+}

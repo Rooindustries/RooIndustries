@@ -1,0 +1,30 @@
+{
+  "opendb_id": "06bb9f8e-a1e4-4d07-8dd0-f3dfe55dd581",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "PNY XLR8 Gaming EPIC-X RGB Black DDR4-3200 CL16 16GB (1x16GB)",
+    "manufacturer": "PNY",
+    "part_numbers": [
+      "MD16GD4320016XRGB"
+    ],
+    "series": "XLR8",
+    "variant": "3200 CL16"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 16,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {}
+}

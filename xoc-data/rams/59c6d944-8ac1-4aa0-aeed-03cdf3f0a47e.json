@@ -1,0 +1,34 @@
+{
+  "opendb_id": "59c6d944-8ac1-4aa0-aeed-03cdf3f0a47e",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 4
+  },
+  "metadata": {
+    "name": "G.Skill Ripjaws Black / Red DDR3-1600 CL9 4GB (1x4GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F3-12800CL9S-4GBRL"
+    ],
+    "series": "Ripjaws",
+    "variant": "1600 CL9"
+  },
+  "speed": 1600,
+  "ram_type": "DDR3",
+  "form_factor": "240-pin DIMM (DDR3)",
+  "capacity": 4,
+  "color": [
+    "BLACK",
+    "RED"
+  ],
+  "cas_latency": 9,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B002X578SM",
+    "walmart_sku": 47313439
+  }
+}

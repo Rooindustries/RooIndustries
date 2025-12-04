@@ -1,0 +1,33 @@
+{
+  "opendb_id": "2b8f90af-1cce-425b-8282-30c5652344bb",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Kingston FURY Beast RGB Black DDR5-6000 CL40 32GB (2x16GB)",
+    "manufacturer": "Kingston",
+    "part_numbers": [
+      "KF560C40BBAK2-32"
+    ],
+    "series": "FURY",
+    "variant": "6000 CL40"
+  },
+  "speed": 6000,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 40,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": true,
+  "general_product_information": {
+    "amazon_sku": "B0B1QQ6QXM",
+    "walmart_sku": 1166833806
+  }
+}

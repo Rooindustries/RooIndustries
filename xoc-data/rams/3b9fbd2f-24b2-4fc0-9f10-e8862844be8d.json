@@ -1,0 +1,31 @@
+{
+  "opendb_id": "3b9fbd2f-24b2-4fc0-9f10-e8862844be8d",
+  "modules": {
+    "quantity": 1,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "Patriot Signature Line DDR4-3200 CL22 16GB (1x16GB)",
+    "manufacturer": "Patriot",
+    "part_numbers": [
+      "PSD416G320081"
+    ],
+    "series": "Signature",
+    "variant": "3200 CL22"
+  },
+  "speed": 3200,
+  "ram_type": "DDR4",
+  "form_factor": "288-pin DIMM (DDR4)",
+  "capacity": 16,
+  "color": [],
+  "cas_latency": 22,
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": false,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0887XY12C",
+    "walmart_sku": 298464618
+  }
+}

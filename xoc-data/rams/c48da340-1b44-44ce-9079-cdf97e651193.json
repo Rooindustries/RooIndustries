@@ -1,0 +1,34 @@
+{
+  "opendb_id": "c48da340-1b44-44ce-9079-cdf97e651193",
+  "modules": {
+    "quantity": 2,
+    "capacity_gb": 16
+  },
+  "metadata": {
+    "name": "G.Skill Flare X5 Black DDR5-6400 CL32 32GB (2x16GB)",
+    "manufacturer": "G.SKILL",
+    "part_numbers": [
+      "F5-6400J3239G16GX2-FX5"
+    ],
+    "series": "Flare",
+    "variant": "6400 CL32"
+  },
+  "speed": 6400,
+  "ram_type": "DDR5",
+  "form_factor": "288-pin DIMM (DDR5)",
+  "capacity": 32,
+  "color": [
+    "BLACK"
+  ],
+  "cas_latency": 32,
+  "timings": "32-39-39-102",
+  "voltage": null,
+  "ecc": "Non-ECC",
+  "registered": "Unbuffered",
+  "heat_spreader": true,
+  "rgb": false,
+  "general_product_information": {
+    "amazon_sku": "B0DD26RPXL",
+    "newegg_sku": "N82E16820374631"
+  }
+}
