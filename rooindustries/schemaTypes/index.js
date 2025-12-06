@@ -11,6 +11,7 @@ import privacyPolicy from './privacyPolicy'
 import services from './services'
 import terms from './terms'
 import reviewsCarousel from './reviewsCarousel'
+import proReviewsCarousel from './proReviewsCarousel'
 import booking from './booking'
 import bookingSettings from './bookingSettings'
 import referral from './referral'
@@ -29,6 +30,7 @@ export const schemaTypes = [
   services,
   terms,
   reviewsCarousel,
+  proReviewsCarousel,
   booking,
   bookingSettings,
   referral,

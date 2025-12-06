@@ -1,7 +1,7 @@
 import Hero from "../components/Hero";
 import About from "../components/About";
 import Services from "../components/Services";
-import Reviews from "../components/Reviews";
+import StreamerYoutuberReviews from "../components/StreamerYoutuberReviews";
 import Footer from "../components/Footer";
 import HowItWorks from "../components/HowItWorks";
 export default function Home() {
@@ -10,7 +10,7 @@ export default function Home() {
       <Hero />
       <About />
       <Services />
-      <Reviews />
+      <StreamerYoutuberReviews />
       <HowItWorks />
       <Footer />
     </>
