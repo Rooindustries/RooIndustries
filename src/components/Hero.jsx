@@ -98,12 +98,12 @@ export default function Hero() {
           </Link>
 
           <Link
-            to="/faq"
+            to="/benchmarks"
             className="glow-button inline-flex items-center justify-center gap-2 rounded-md 
                        px-3 sm:px-5 py-2 sm:py-3 text-[11px] sm:text-sm font-semibold text-white 
                        ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
           >
-            Got Questions? We Have Answers
+            View Results
             <span className="glow-line glow-line-top" />
             <span className="glow-line glow-line-right" />
             <span className="glow-line glow-line-bottom" />
