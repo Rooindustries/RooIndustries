@@ -103,13 +103,22 @@ export default function Navbar() {
             Reviews
           </Link>
 
+          {/* BOOK — ALWAYS HIGHLIGHTED, ALL ROUTES INCLUDING HOME */}
           <Link
             to="/packages"
-            className={`px-2 sm:px-4 py-1.5 rounded-full transition ${
-              isActive("/packages")
-                ? "bg-cyan-400 text-black"
-                : "hover:text-cyan-400"
-            }`}
+            className="
+              px-3 sm:px-5 py-1.5
+              rounded-full font-semibold
+              bg-cyan-400
+              text-slate-950
+              border border-cyan-300
+              shadow-[0_0_22px_rgba(34,211,238,0.9)]
+              outline outline-2 outline-cyan-200/90 outline-offset-2
+              hover:bg-cyan-300
+              hover:shadow-[0_0_30px_rgba(34,211,238,1)]
+              hover:-translate-y-[1px]
+              transition
+            "
           >
             Book
           </Link>

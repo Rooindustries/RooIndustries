@@ -1,6 +1,6 @@
 import React from "react";
 import BookingForm from "../components/BookingForm";
-
+import Footer from "../components/Footer";
 export default function Book() {
   return (
     <section className="relative z-10 pt-32 pb-24 px-6 text-white text-center">
@@ -8,6 +8,7 @@ export default function Book() {
         Schedule Your Session
       </h2>
       <BookingForm />
+      <Footer />
     </section>
   );
 }
