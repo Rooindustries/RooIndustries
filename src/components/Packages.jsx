@@ -32,6 +32,13 @@ export default function Packages() {
       <h2 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
         Choose Your Package
       </h2>
+      <div className="mt-4 flex justify-center">
+        <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs sm:text-sm font-semibold bg-slate-900/80 text-cyan-100 border border-cyan-400/40 shadow-[0_0_18px_rgba(56,189,248,0.7)]">
+          <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]" />
+          Fully Online
+        </span>
+      </div>
+
       <p className="mt-3 text-slate-300/80 text-sm sm:text-base">
         Select the tuning package that best fits your needs
       </p>
