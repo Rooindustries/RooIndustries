@@ -356,6 +356,76 @@ export default function BookingForm() {
     return slots;
   }, [settings, selectedDate, isXoc]);
 
+  const getDaySlotInfo = (dateObj) => {
+    if (!settings) return null;
+
+    const d = new Date(dateObj);
+    d.setHours(0, 0, 0, 0);
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const maxDate = new Date();
+    maxDate.setDate(maxDate.getDate() + (settings.maxDaysAheadBooking || 7));
+    maxDate.setHours(0, 0, 0, 0);
+
+    if (d < today || d > maxDate) return null;
+
+    const hostYear = d.getFullYear();
+    const hostMonth = d.getMonth();
+    const hostDay = d.getDate();
+
+    const dayName = d
+      .toLocaleDateString("en-US", { weekday: "long" })
+      .toLowerCase();
+
+    const weeklyObj = isXoc
+      ? settings.xocAvailableTimes || {}
+      : settings.availableTimes || {};
+
+    const allowedRaw = weeklyObj[dayName] || [];
+    const allowed = allowedRaw.map((x) => Number(x));
+
+    const open = isXoc
+      ? settings.xocOpenHour ?? settings.openHour ?? 0
+      : settings.openHour ?? 0;
+
+    const close = isXoc
+      ? settings.xocCloseHour ?? settings.closeHour ?? 23
+      : settings.closeHour ?? 23;
+
+    const hostDateLabel = d.toDateString();
+    const bookedForDayHost =
+      settings.bookedSlots
+        ?.filter((b) => b.date === hostDateLabel)
+        .map((b) => b.time) || [];
+
+    let availableCount = 0;
+    let totalConsidered = 0;
+
+    for (let h = open; h <= close; h++) {
+      const hostLabel = hostTimeLabel(h);
+      const isAllowed = allowed.includes(h);
+      const isBooked = bookedForDayHost.includes(hostLabel);
+      const disabled = !isAllowed || isBooked;
+
+      if (isAllowed) {
+        totalConsidered++;
+        if (!disabled) availableCount++;
+      }
+    }
+
+    if (totalConsidered === 0) {
+      return { color: "red" };
+    }
+
+    if (availableCount === 0) return { color: "red" };
+    if (availableCount <= 5) return { color: "yellow" };
+    if (availableCount > 5) return { color: "green" };
+
+    return null;
+  };
+
   // ---------- INITIAL DATE ----------
   useEffect(() => {
     if (settings && !selectedDate) {
@@ -588,12 +658,25 @@ export default function BookingForm() {
                       const isSelected =
                         selectedDate && isSameDay(date, selectedDate);
 
+                      const slotInfo = getDaySlotInfo(date);
+                      let dotClass = "";
+                      if (slotInfo?.color === "red") {
+                        dotClass =
+                          "bg-red-500 shadow-[0_0_6px_rgba(248,113,113,0.9)]";
+                      } else if (slotInfo?.color === "yellow") {
+                        dotClass =
+                          "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.9)]";
+                      } else if (slotInfo?.color === "green") {
+                        dotClass =
+                          "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)]";
+                      }
+
                       return (
                         <button
                           key={day}
                           disabled={disabled}
                           onClick={() => handleDayClick(day)}
-                          className={`p-2 rounded-lg transition-all duration-200 ${
+                          className={`p-2 rounded-lg transition-all duration-200 flex flex-col items-center justify-center ${
                             isSelected
                               ? "bg-sky-600 text-white shadow-[0_0_12px_rgba(56,189,248,0.6)]"
                               : disabled
@@ -601,7 +684,12 @@ export default function BookingForm() {
                               : "hover:bg-sky-700/40 text-sky-200"
                           }`}
                         >
-                          {day}
+                          <span>{day}</span>
+                          {slotInfo?.color && (
+                            <span
+                              className={`mt-0.5 h-1.5 w-1.5 rounded-full ${dotClass}`}
+                            />
+                          )}
                         </button>
                       );
                     })}
