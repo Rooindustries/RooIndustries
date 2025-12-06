@@ -694,6 +694,20 @@ export default function BookingForm() {
                       );
                     })}
                   </div>
+                  <div className="mt-3 flex justify-center gap-3 text-[10px] text-sky-300">
+                    <div className="flex items-center gap-1 whitespace-nowrap">
+                      <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)]" />
+                      <span>Fully Available</span>
+                    </div>
+                    <div className="flex items-center gap-1 whitespace-nowrap">
+                      <span className="h-2 w-2 rounded-full bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.9)]" />
+                      <span>Limited Slots</span>
+                    </div>
+                    <div className="flex items-center gap-1 whitespace-nowrap">
+                      <span className="h-2 w-2 rounded-full bg-red-500 shadow-[0_0_6px_rgba(248,113,113,0.9)]" />
+                      <span>Fully Booked</span>
+                    </div>
+                  </div>
                 </div>
 
                 {selectedDate && (
