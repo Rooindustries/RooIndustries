@@ -6,7 +6,7 @@ import {
   useLocation,
 } from "react-router-dom";
 import { FaDiscord } from "react-icons/fa";
-import { AnimatePresence, motion } from "framer-motion"; // Import Framer Motion
+import { AnimatePresence, motion } from "framer-motion";
 import Navbar from "./components/Navbar";
 
 // Lazy-loaded pages

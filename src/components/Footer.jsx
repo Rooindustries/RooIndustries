@@ -88,6 +88,12 @@ export default function Footer() {
         >
           Terms And Conditions
         </a>
+        <p className="mt-2 text-[11px] text-sky-400/60">
+          Refunds will not be issued in case you proceed with unsupported/custom
+          parts. Please join the Discord and open a ticket or DM{" "}
+          <span className="font-semibold">serviroo</span> to check for
+          eligibility or switch to one of our other specialized plans.
+        </p>
       </div>
 
       <div className="h-4" />

@@ -41,14 +41,6 @@ const formatLocalTime = (utcDate) => {
   }
 };
 
-/**
- * Generic dropdown with built-in search.
- * - items: array of objects
- * - value: currently selected id
- * - onChange: (id) => void
- * - getId: (item) => string
- * - getLabel: (item) => string
- */
 function XocDropdown({
   label,
   items,
@@ -58,6 +50,8 @@ function XocDropdown({
   emptyMessage = "No options found",
   getId,
   getLabel,
+  customOptionId,
+  customOptionLabel,
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -121,9 +115,23 @@ function XocDropdown({
 
           <div className="max-h-56 overflow-y-auto text-sm">
             {filtered.length === 0 ? (
-              <div className="px-3 py-2 text-xs text-slate-400">
-                {emptyMessage}
-              </div>
+              <>
+                <div className="px-3 py-2 text-xs text-slate-400 border-b border-sky-800/60">
+                  {emptyMessage}
+                </div>
+                {customOptionId && customOptionLabel && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onChange(customOptionId);
+                      setOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-2 text-xs sm:text-sm text-sky-100 hover:bg-sky-700/40 transition"
+                  >
+                    {customOptionLabel}
+                  </button>
+                )}
+              </>
             ) : (
               filtered.map((item) => {
                 const id = getId(item);
@@ -185,6 +193,10 @@ export default function BookingForm() {
   const [xocRams, setXocRams] = useState([]);
   const [xocMoboId, setXocMoboId] = useState("");
   const [xocRamId, setXocRamId] = useState("");
+
+  // custom XOC fields
+  const [xocCustomMobo, setXocCustomMobo] = useState("");
+  const [xocCustomRam, setXocCustomRam] = useState("");
 
   // Package from URL
   const selectedPackage = useMemo(
@@ -398,10 +410,15 @@ export default function BookingForm() {
 
     const finalReferralCode = referralFromQuery || referralFromStorage;
 
-    const selectedMobo = isXoc
-      ? xocMotherboards.find((m) => m.id === xocMoboId)
-      : null;
-    const selectedRam = isXoc ? xocRams.find((r) => r.id === xocRamId) : null;
+    const isCustomMobo = isXoc && xocMoboId === "__CUSTOM_MOBO__";
+    const isCustomRam = isXoc && xocRamId === "__CUSTOM_RAM__";
+
+    const selectedMobo =
+      isXoc && !isCustomMobo
+        ? xocMotherboards.find((m) => m.id === xocMoboId)
+        : null;
+    const selectedRam =
+      isXoc && !isCustomRam ? xocRams.find((r) => r.id === xocRamId) : null;
 
     const payload = {
       displayDate,
@@ -440,6 +457,18 @@ export default function BookingForm() {
             xocRamSpeedMtps: selectedRam.speed,
             xocRamCl: selectedRam.cas_latency,
             xocRamCapacityGb: selectedRam.capacityGb,
+          }
+        : {}),
+
+      // extra fields if they used custom entries
+      ...(isXoc && isCustomMobo && xocCustomMobo.trim()
+        ? {
+            xocCustomMotherboard: xocCustomMobo.trim(),
+          }
+        : {}),
+      ...(isXoc && isCustomRam && xocCustomRam.trim()
+        ? {
+            xocCustomRam: xocCustomRam.trim(),
           }
         : {}),
     };
@@ -655,8 +684,7 @@ export default function BookingForm() {
                   </h4>
                   <p className="text-xs text-sky-400/80">
                     Choose your motherboard and RAM kit from the supported list
-                    below. Component data powered by the BuildCores open
-                    database.
+                    below.
                   </p>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -673,6 +701,8 @@ export default function BookingForm() {
                       emptyMessage="No supported boards found"
                       getId={(m) => m.id}
                       getLabel={(m) => m.name}
+                      customOptionId="__CUSTOM_MOBO__"
+                      customOptionLabel="+ Add your own motherboard"
                     />
 
                     <XocDropdown
@@ -690,12 +720,69 @@ export default function BookingForm() {
                       getLabel={(r) =>
                         `${r.name} — ${r.speed} MT/s, CL${r.cas_latency}, ${r.capacityGb}GB`
                       }
+                      customOptionId="__CUSTOM_RAM__"
+                      customOptionLabel="+ Add your own RAM kit"
                     />
+
+                    {xocMoboId === "__CUSTOM_MOBO__" && (
+                      <div className="sm:col-span-2">
+                        <input
+                          type="text"
+                          value={xocCustomMobo}
+                          onChange={(e) => setXocCustomMobo(e.target.value)}
+                          placeholder="Type your motherboard model (e.g. ASUS ROG STRIX X670E-E)"
+                          className="w-full bg-[#020617] border border-sky-700/60 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400"
+                        />
+                      </div>
+                    )}
+
+                    {xocRamId === "__CUSTOM_RAM__" && (
+                      <div className="sm:col-span-2">
+                        <input
+                          type="text"
+                          value={xocCustomRam}
+                          onChange={(e) => setXocCustomRam(e.target.value)}
+                          placeholder="Type your RAM kit (e.g. 32GB 6000MT/s CL30, brand/model)"
+                          className="w-full bg-[#020617] border border-sky-700/60 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400"
+                        />
+                      </div>
+                    )}
+
+                    {(xocMoboId === "__CUSTOM_MOBO__" ||
+                      xocRamId === "__CUSTOM_RAM__") && (
+                      <div className="sm:col-span-2">
+                        <div className="mt-1 rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-2">
+                          <p className="text-[11px] text-sky-100 leading-snug">
+                            Custom motherboards and RAM kits may not fully meet
+                            our XOC stability and compatibility criteria. For
+                            the best results and safety, please reach out on
+                            Discord so we can double-check your parts before the
+                            session.
+                          </p>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
-                  <p className="text-[11px] text-sky-400/70">
+                  <p className="text-[11px] text-sky-400/70 mt-2">
                     Only DDR5 AM5 boards and RAM kits that meet the XOC
-                    requirements (6000 MT/s+ with CL limits) are shown here.
+                    requirements (6000 MT/s+ with CL limits) are shown in the
+                    supported list.
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      navigate("/packages#performance-vertex-overhaul")
+                    }
+                    className="mt-3 inline-flex items-center justify-center px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold bg-sky-500/90 hover:bg-sky-400 text-slate-900 shadow-[0_0_12px_rgba(56,189,248,0.6)] transition"
+                  >
+                    Switch to Performance Vertex Overhaul
+                  </button>
+                  <p className="mt-2 text-[11px] font-bold bg-gradient-to-r from-sky-300 via-cyan-300 to-indigo-300 bg-clip-text text-transparent">
+                    If your PC is found to be XOC eligible after booking
+                    Performance Vertex Overhaul, you may pay the difference in
+                    price to upgrade.
                   </p>
                 </div>
               )}
@@ -763,6 +850,26 @@ export default function BookingForm() {
                       if (!xocMoboId || !xocRamId) {
                         setErrorStep2(
                           "Please select your motherboard and RAM kit for XOC."
+                        );
+                        return;
+                      }
+
+                      if (
+                        xocMoboId === "__CUSTOM_MOBO__" &&
+                        !xocCustomMobo.trim()
+                      ) {
+                        setErrorStep2(
+                          "Please type your motherboard model for XOC."
+                        );
+                        return;
+                      }
+
+                      if (
+                        xocRamId === "__CUSTOM_RAM__" &&
+                        !xocCustomRam.trim()
+                      ) {
+                        setErrorStep2(
+                          "Please type your RAM kit details for XOC."
                         );
                         return;
                       }
