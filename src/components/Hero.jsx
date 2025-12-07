@@ -30,7 +30,7 @@ export default function Hero() {
   const bullets = heroData?.bullets || [];
 
   return (
-    <header id="top" className="py-24 flex justify-center">
+    <header id="top" className="py-16 flex justify-center">
       <section className="mx-auto max-w-3xl px-6 text-center">
         <div className="h-[30px] sm:h-[36px] flex justify-center items-center">
           {tagline && (

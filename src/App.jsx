@@ -23,6 +23,8 @@ const Payment = lazy(() => import("./pages/Payment"));
 const PaymentSuccess = lazy(() => import("./pages/PaymentSuccess"));
 const Thankyou = lazy(() => import("./pages/Thankyou"));
 
+const UpgradeXoc = lazy(() => import("./pages/UpgradeXoc"));
+
 // Referral system (also lazy)
 const RefLogin = lazy(() => import("./pages/RefLogin"));
 const RefDashboard = lazy(() => import("./pages/RefDashboard"));
@@ -71,6 +73,9 @@ function AnimatedRoutes({ setIsModalOpen }) {
           <Route path="/payment" element={<Payment />} />
           <Route path="/payment-success" element={<PaymentSuccess />} />
           <Route path="/thank-you" element={<Thankyou />} />
+
+          {/* 🔥 NEW: secret upgrade route (only share the URL manually) */}
+          <Route path="/upgrade-xoc" element={<UpgradeXoc />} />
 
           {/* Referral system routes */}
           <Route path="/referrals/login" element={<RefLogin />} />
@@ -143,7 +148,6 @@ function App() {
               </div>
             }
           >
-            {/* WE CALL THE NEW COMPONENT HERE */}
             <AnimatedRoutes setIsModalOpen={setIsModalOpen} />
           </Suspense>
         </main>

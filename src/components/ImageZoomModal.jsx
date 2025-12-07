@@ -40,6 +40,7 @@ export default function ImageZoomModal({
     };
     scrollLockRef.current = original;
     body.classList.add("is-modal-open");
+    body.classList.add("is-modal-blur");
     body.style.overflow = "hidden";
     html.style.overflow = "hidden";
     setFadeIn(true);
@@ -48,6 +49,7 @@ export default function ImageZoomModal({
       setIsModalOpen(false);
       const stored = scrollLockRef.current || original;
       body.classList.remove("is-modal-open");
+      body.classList.remove("is-modal-blur");
       body.style.overflow = stored.overflow || "";
       html.style.overflow = stored.htmlOverflow || "";
       window.scrollTo(0, stored.scrollY || 0);

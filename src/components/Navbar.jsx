@@ -32,7 +32,8 @@ export default function Navbar() {
   return (
     <nav
       className={`
-        w-full z-50 px-2 sm:px-8 transition-all duration-500 ease-in-out
+        site-nav
+        w-full z-40 px-2 sm:px-8 transition-all duration-500 ease-in-out
         ${
           isVisible
             ? "translate-y-0 opacity-100"

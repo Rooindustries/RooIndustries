@@ -57,6 +57,7 @@ function XocDropdown({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const wrapperRef = useRef(null);
+  const isCustomSelected = value === customOptionId;
 
   // close on outside click
   useEffect(() => {
@@ -76,16 +77,17 @@ function XocDropdown({
 
   const filtered = useMemo(() => {
     if (!search.trim()) return items;
-
-    const tokens = search.toLowerCase().split(/\s+/).filter(Boolean);
-
-    return items.filter((item) => {
-      const label = getLabel(item).toLowerCase();
-      return tokens.every((t) => label.includes(t));
-    });
+    const q = search.toLowerCase();
+    return items.filter((item) => getLabel(item).toLowerCase().includes(q));
   }, [items, search, getLabel]);
 
   const selectedItem = items.find((i) => getId(i) === value);
+  const hasSelection = Boolean(selectedItem || isCustomSelected);
+  const displayText = selectedItem
+    ? getLabel(selectedItem)
+    : isCustomSelected
+    ? customOptionLabel
+    : placeholder;
 
   return (
     <div className="text-left relative" ref={wrapperRef}>
@@ -100,8 +102,8 @@ function XocDropdown({
         onClick={() => setOpen((o) => !o)}
         className="w-full bg-[#020617] border border-sky-700/60 rounded-lg px-3 py-2.5 text-sm flex items-center justify-between gap-2 focus:outline-none focus:border-sky-400"
       >
-        <span className={selectedItem ? "" : "text-slate-500"}>
-          {selectedItem ? getLabel(selectedItem) : placeholder}
+        <span className={hasSelection ? "" : "text-slate-500"}>
+          {displayText}
         </span>
         <span className="text-sky-400 text-xs">▾</span>
       </button>
@@ -401,11 +403,13 @@ export default function BookingForm() {
       };
       scrollLockRef.current = original;
       body.classList.add("is-modal-open");
+      body.classList.add("is-modal-blur");
       body.style.overflow = "hidden";
       html.style.overflow = "hidden";
       return () => {
         const stored = scrollLockRef.current || original;
         body.classList.remove("is-modal-open");
+        body.classList.remove("is-modal-blur");
         body.style.overflow = stored.overflow || "";
         html.style.overflow = stored.htmlOverflow || "";
         window.scrollTo(0, stored.scrollY || 0);
@@ -1033,13 +1037,13 @@ export default function BookingForm() {
                       placeholder={
                         xocMotherboards.length === 0
                           ? "No supported boards loaded"
-                          : "Select your motherboard"
+                          : "Select Your Motherboard"
                       }
                       emptyMessage="No supported boards found"
                       getId={(m) => m.id}
                       getLabel={(m) => m.name}
                       customOptionId="__CUSTOM_MOBO__"
-                      customOptionLabel="+ Add your own motherboard"
+                      customOptionLabel="+ Add Your Own Motherboard"
                     />
 
                     <XocDropdown
@@ -1086,7 +1090,7 @@ export default function BookingForm() {
                               xocCustomRam
                             );
                           }}
-                          placeholder="Type your motherboard model (e.g. ASUS ROG STRIX X670E-E)"
+                          placeholder="Type your Motherboard Model (e.g. ASUS ROG STRIX X670E-E)"
                           className="w-full bg-[#020617] border border-sky-700/60 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400"
                         />
                       </div>
@@ -1260,7 +1264,7 @@ export default function BookingForm() {
 
       {showVertexModal && (
         <div
-          className={`fixed inset-0 z-50 bg-black/60 backdrop-blur-lg flex items-center justify-center px-4 transition-opacity duration-200 ${
+          className={`fixed inset-0 z-[45] bg-black/60 backdrop-blur-lg flex items-center justify-center px-4 transition-opacity duration-200 ${
             vertexFadeOut
               ? "opacity-0 pointer-events-none"
               : vertexFadeIn
@@ -1268,12 +1272,13 @@ export default function BookingForm() {
               : "opacity-0"
           }`}
           onClick={() => {
+            document.body.classList.remove("is-modal-blur");
             setVertexFadeOut(true);
             setVertexFadeIn(false);
             setTimeout(() => {
               setShowVertexModal(false);
               setVertexFadeOut(false);
-            }, 180);
+            }, 200);
           }}
         >
           <div
@@ -1284,12 +1289,13 @@ export default function BookingForm() {
               aria-label="Close"
               className="absolute right-3 top-3 text-sky-200 hover:text-white transition text-2xl"
               onClick={() => {
+                document.body.classList.remove("is-modal-blur");
                 setVertexFadeOut(true);
                 setVertexFadeIn(false);
                 setTimeout(() => {
                   setShowVertexModal(false);
                   setVertexFadeOut(false);
-                }, 180);
+                }, 200);
               }}
             >
               ×
@@ -1336,6 +1342,7 @@ export default function BookingForm() {
               <button
                 type="button"
                 onClick={() => {
+                  document.body.classList.remove("is-modal-blur");
                   setVertexFadeOut(true);
                   setVertexFadeIn(false);
                   setTimeout(() => {
@@ -1368,7 +1375,7 @@ export default function BookingForm() {
                       )}&xoc=0&prefillFromXoc=1`
                     );
                     setVertexFadeOut(false);
-                  }, 180);
+                  }, 200);
                 }}
                 className="glow-button w-full mt-6 py-3 rounded-lg font-semibold text-white shadow-[0_0_20px_rgba(56,189,248,0.4)] inline-flex items-center justify-center gap-2 opacity-90 hover:opacity-100"
                 style={{ transition: "opacity 0.9s ease-in-out" }}
