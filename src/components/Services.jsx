@@ -42,7 +42,7 @@ export default function Services() {
   };
 
   return (
-    <section className="mx-auto max-w-6xl py-24 px-4 sm:px-6">
+    <section className="mx-auto max-w-6xl py-16 px-4 sm:px-6">
       {/* Heading */}
       <div className="text-center">
         {data.heading && (
@@ -55,7 +55,7 @@ export default function Services() {
         )}
       </div>
 
-      <div className="h-10" />
+      <div className="h-6" />
 
       {/* Services Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">

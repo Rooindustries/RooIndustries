@@ -34,7 +34,7 @@ export default function HowItWorks() {
   return (
     <section
       id="how-it-works"
-      className="relative z-10 py-24 px-4 sm:px-6 text-white max-w-6xl mx-auto"
+      className="relative z-10 py-16 px-4 sm:px-6 text-white max-w-6xl mx-auto"
     >
       {data.title && (
         <h2 className="text-4xl sm:text-5xl font-extrabold text-center tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">

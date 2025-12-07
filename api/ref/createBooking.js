@@ -1,3 +1,4 @@
+// pages/api/ref/createBooking.js
 import { Resend } from "resend";
 import { createClient } from "@sanity/client";
 
@@ -72,6 +73,9 @@ export default async function handler(req, res) {
 
       paypalOrderId = "",
       payerEmail = "",
+
+      // NEW: original booking id for upgrades (optional)
+      originalOrderId = "",
 
       // time metadata
       hostDate,
@@ -215,6 +219,9 @@ export default async function handler(req, res) {
       commissionAmount,
       paypalOrderId,
       payerEmail,
+
+      ...(originalOrderId ? { originalOrderId } : {}),
+
       ...(effectiveReferralId
         ? { referral: { _type: "reference", _ref: effectiveReferralId } }
         : {}),
@@ -278,6 +285,14 @@ export default async function handler(req, res) {
               value: `${effectiveDiscountPercent}% (-$${effectiveDiscountAmount.toFixed(
                 2
               )})`,
+            },
+          ]
+        : []),
+      ...(originalOrderId
+        ? [
+            {
+              label: "Upgrade From Order",
+              value: originalOrderId,
             },
           ]
         : []),
@@ -356,6 +371,14 @@ export default async function handler(req, res) {
               value: `${effectiveCommissionPercent}% ($${commissionAmount.toFixed(
                 2
               )})`,
+            },
+          ]
+        : []),
+      ...(originalOrderId
+        ? [
+            {
+              label: "Upgrade From Order",
+              value: originalOrderId,
             },
           ]
         : []),
