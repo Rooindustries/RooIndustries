@@ -4,7 +4,6 @@ import ImageZoomModal from "./ImageZoomModal";
 
 export default function Reviews() {
   const [selectedImage, setSelectedImage] = useState(null);
-  const [fadeIn, setFadeIn] = useState(false);
   const [reviews, setReviews] = useState([]);
 
   useEffect(() => {
@@ -14,13 +13,11 @@ export default function Reviews() {
       .catch(console.error);
   }, []);
 
-  useEffect(() => setFadeIn(Boolean(selectedImage)), [selectedImage]);
-
   const handleClose = () => setSelectedImage(null);
 
   return (
     <section className="px-4 mt-20 py-12 max-w-7xl mx-auto">
-      <h1 className="text-3xl md:text-4xl font-bold mb-12 text-center text-white">
+      <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-center text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)] mb-12">
         Community Reviews
       </h1>
 
@@ -41,13 +38,7 @@ export default function Reviews() {
       </div>
 
       {selectedImage && (
-        <div
-          className={`transition-opacity duration-300 ${
-            fadeIn ? "opacity-100" : "opacity-0"
-          }`}
-        >
-          <ImageZoomModal src={selectedImage} onClose={handleClose} />
-        </div>
+        <ImageZoomModal src={selectedImage} onClose={handleClose} />
       )}
     </section>
   );

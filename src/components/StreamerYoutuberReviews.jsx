@@ -2,11 +2,15 @@ import React, { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import { client } from "../sanityClient";
 
+const titleClass =
+  "text-[48px] leading-tight font-extrabold text-center tracking-tight " +
+  "text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]";
+
 export default function StreamerYoutuberReviews() {
   const [entries, setEntries] = useState([]);
 
   const sectionClass =
-    "py-20 px-4 sm:px-6 text-center text-white relative overflow-hidden";
+    "py-24 px-4 sm:px-6 text-center text-white relative overflow-hidden";
 
   useEffect(() => {
     const query = `*[_type == "proReviewsCarousel"]{
@@ -110,7 +114,6 @@ function Carousel({
   glowEnabled,
 }) {
   const [index, setIndex] = useState(0);
-  const [paused, setPaused] = useState(false);
   const containerRef = useRef(null);
 
   const handleNext = () => {
@@ -124,10 +127,10 @@ function Carousel({
   };
 
   useEffect(() => {
-    if (paused || !reviews?.length || reviews.length < 2) return;
+    if (!reviews?.length || reviews.length < 2) return;
     const interval = setInterval(handleNext, intervalMs);
     return () => clearInterval(interval);
-  }, [paused, reviews, intervalMs]);
+  }, [reviews, intervalMs]);
 
   const CornerSparkle = ({ className, delay }) => (
     <div className={`absolute z-30 pointer-events-none ${className}`}>
@@ -154,14 +157,14 @@ function Carousel({
       <div className="w-full mx-auto px-4">
         {/* REMOVED 'truncate' CLASS BELOW */}
         <h3
-          className="text-xl md:text-2xl font-bold mb-1 w-full"
+          className={`${titleClass} mb-2 w-full`}
           title={title || defaultTitle}
         >
           {title || defaultTitle}
         </h3>
       </div>
 
-      <p className="text-slate-300 mb-5 text-sm md:text-base">
+      <p className="text-slate-300 mb-5 text-[14px]">
         {subtitle || defaultSubtitle}
       </p>
 
@@ -194,12 +197,7 @@ function Carousel({
         )}
 
         {/* INNER INTERACTIVE CONTAINER */}
-        <div
-          className="relative rounded-3xl h-full"
-          onMouseEnter={() => setPaused(true)}
-          onMouseLeave={() => setPaused(false)}
-          ref={containerRef}
-        >
+        <div className="relative rounded-3xl h-full" ref={containerRef}>
           <div
             className="relative overflow-hidden rounded-3xl bg-[#0b1120]/90 
                        shadow-[0_0_20px_rgba(56,189,248,0.2)] 

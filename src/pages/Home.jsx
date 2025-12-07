@@ -9,8 +9,8 @@ export default function Home() {
     <>
       <Hero />
       <About />
-      <Services />
       <StreamerYoutuberReviews />
+      <Services />
       <HowItWorks />
       <Footer />
     </>

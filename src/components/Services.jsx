@@ -42,11 +42,11 @@ export default function Services() {
   };
 
   return (
-    <section className="mx-auto max-w-6xl pt-24">
+    <section className="mx-auto max-w-6xl py-24 px-4 sm:px-6">
       {/* Heading */}
       <div className="text-center">
         {data.heading && (
-          <h3 className="text-4xl sm:text-5xl font-extrabold tracking-tight">
+          <h3 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
             {data.heading}
           </h3>
         )}

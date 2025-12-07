@@ -10,7 +10,6 @@ import howItWorks from './howItWorks'
 import privacyPolicy from './privacyPolicy'
 import services from './services'
 import terms from './terms'
-import reviewsCarousel from './reviewsCarousel'
 import proReviewsCarousel from './proReviewsCarousel'
 import booking from './booking'
 import bookingSettings from './bookingSettings'
@@ -29,7 +28,6 @@ export const schemaTypes = [
   privacyPolicy,
   services,
   terms,
-  reviewsCarousel,
   proReviewsCarousel,
   booking,
   bookingSettings,

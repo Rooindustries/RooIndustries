@@ -26,7 +26,7 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
         />
       )}
 
-      <h1 className="text-4xl font-extrabold text-center mb-2">
+      <h1 className="text-4xl sm:text-5xl font-extrabold text-center mb-2 text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
         Performance Benchmarks
       </h1>
       <p className="text-center text-gray-100 mb-12">
