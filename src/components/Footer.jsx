@@ -28,7 +28,7 @@ export default function Footer() {
   return (
     <footer
       id="contact"
-      className="relative py-16 mx-auto max-w-3xl px-6 text-center text-white"
+      className="relative py-24 mx-auto max-w-3xl px-6 text-center text-white"
     >
       {/* Heading */}
       <h2 className="text-4xl sm:text-5xl md:text-6xl font-extrabold tracking-tight drop-shadow-[0_0_10px_rgba(56,189,248,0.4)]">
