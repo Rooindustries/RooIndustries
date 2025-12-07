@@ -18,6 +18,36 @@ export default function Terms() {
       .catch(console.error);
   }, []);
 
+  // Helper: Manually processes text to find the email and apply the link + style
+  const renderTextWithLinks = (text) => {
+    if (typeof text !== "string") return text;
+
+    // 1. Clean up markdown artifacts like [email](mailto:...) -> email
+    let cleanText = text.replace(
+      /\[(serviroo@rooindustries\.com)\]\(.*?\)/gi,
+      "$1"
+    );
+
+    // 2. Split text to isolate the email
+    const parts = cleanText.split(/(serviroo@rooindustries\.com)/gi);
+
+    return parts.map((part, i) => {
+      // 3. Apply the specific Cyan styling to the email part
+      if (part.toLowerCase() === "serviroo@rooindustries.com") {
+        return (
+          <a
+            key={i}
+            href="/contact"
+            className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition-colors"
+          >
+            {part}
+          </a>
+        );
+      }
+      return part;
+    });
+  };
+
   if (!data) return null;
 
   return (
@@ -41,26 +71,39 @@ export default function Terms() {
                 value={sec.content}
                 components={{
                   marks: {
-                    link: ({ value, children }) => (
-                      <a
-                        href={value?.href}
-                        className="underline text-white hover:text-cyan-400 transition-colors"
-                        target={
-                          value?.href?.startsWith("http") ? "_blank" : undefined
-                        }
-                        rel={
-                          value?.href?.startsWith("http")
-                            ? "noopener noreferrer"
-                            : undefined
-                        }
-                      >
-                        {children}
-                      </a>
-                    ),
+                    link: ({ value, children }) => {
+                      const href = (value?.href || "").toLowerCase();
+                      const isEmail =
+                        href.includes("rooindustries.com") ||
+                        href.startsWith("mailto");
+
+                      const finalHref = isEmail ? "/contact" : value?.href;
+
+                      // Apply Cyan style if it's an email, otherwise keep standard white style
+                      const linkClasses = isEmail
+                        ? "text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition-colors"
+                        : "underline text-white hover:text-cyan-400 transition-colors";
+
+                      return (
+                        <a
+                          href={finalHref}
+                          className={linkClasses}
+                          target={!isEmail ? "_blank" : undefined}
+                          rel={!isEmail ? "noopener noreferrer" : undefined}
+                        >
+                          {children}
+                        </a>
+                      );
+                    },
                   },
                   block: {
                     normal: ({ children }) => (
-                      <p className="text-white">{children}</p>
+                      <p className="text-white">
+                        {/* Map over children to intercept the email string */}
+                        {React.Children.map(children, (child) =>
+                          renderTextWithLinks(child)
+                        )}
+                      </p>
                     ),
                   },
                 }}

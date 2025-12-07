@@ -8,6 +8,20 @@ html {
   -webkit-font-smoothing: antialiased;
 }
 
+html,
+body {
+  overflow-x: hidden;
+  scrollbar-width: none;
+}
+
+body::-webkit-scrollbar {
+  display: none;
+}
+
+body.is-modal-open {
+  overflow: hidden !important;
+}
+
 @keyframes float {
   0%,
   100% {

@@ -5,6 +5,38 @@ import { client } from "../sanityClient";
 export default function PrivacyPolicy() {
   const [data, setData] = useState(null);
 
+  // Helper function to process text strings within paragraphs, converting the specific email to a link
+  const renderTextWithLinks = (text) => {
+    if (typeof text !== "string") return text;
+
+    // 1. Clean up markdown artifacts like [email](mailto:...) -> email
+    // This addresses the issue where the link is displayed twice due to bad formatting in Sanity.
+    let cleanText = text.replace(
+      /\[(serviroo@rooindustries\.com)\]\(.*?\)/gi,
+      "$1"
+    );
+
+    // 2. Split text to isolate the email
+    const parts = cleanText.split(/(serviroo@rooindustries\.com)/gi);
+
+    return parts.map((part, i) => {
+      // 3. If this part is the email, apply the contact link and style
+      if (part.toLowerCase() === "serviroo@rooindustries.com") {
+        return (
+          <a
+            key={i}
+            href="/contact"
+            // Applied the requested cyan styling
+            className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition-colors"
+          >
+            {part}
+          </a>
+        );
+      }
+      return part;
+    });
+  };
+
   // Fetch from Sanity
   useEffect(() => {
     client
@@ -38,22 +70,38 @@ export default function PrivacyPolicy() {
             <PortableText
               value={section.content}
               components={{
-                // custom link, bullet list, and paragraph styles
                 marks: {
                   link: ({ value, children }) => {
-                    const target = value?.href?.startsWith("http")
+                    const href = (value?.href || "").toLowerCase();
+                    // Check if the link is our target email (including typos or missing mailto)
+                    const isTargetEmail =
+                      href.includes("rooindustries.com") ||
+                      href.startsWith("mailto");
+
+                    const finalHref = isTargetEmail
+                      ? "/contact" // Redirect email clicks to contact page
+                      : value?.href;
+
+                    // Apply specific styles if it's the target email, otherwise use standard link style
+                    // Note: Changed the original text-black to text-slate-200 for visibility on dark background
+                    const linkClasses = isTargetEmail
+                      ? "text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition-colors"
+                      : "underline hover:text-cyan-400 transition-colors text-slate-200";
+
+                    const target = finalHref?.startsWith("http")
                       ? "_blank"
                       : undefined;
+
                     return (
                       <a
-                        href={value?.href}
+                        href={finalHref}
                         target={target}
                         rel={
                           target === "_blank"
                             ? "noopener noreferrer"
                             : undefined
                         }
-                        className="text-black underline hover:text-cyan-400 transition-colors"
+                        className={linkClasses}
                       >
                         {children}
                       </a>
@@ -63,7 +111,10 @@ export default function PrivacyPolicy() {
                 block: {
                   normal: ({ children }) => (
                     <p className="mb-4 leading-relaxed text-slate-200">
-                      {children}
+                      {/* Use the helper function here to process plain text children */}
+                      {React.Children.map(children, (child) =>
+                        renderTextWithLinks(child)
+                      )}
                     </p>
                   ),
                 },

@@ -34,7 +34,7 @@ export default function Services() {
     <section className="text-white px-4 py-28 flex flex-col items-center">
       {/* Heading */}
       <div className="text-center mb-10">
-        <h2 className="text-4xl font-bold mb-2">
+        <h2 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)] mb-2">
           {contactData?.title || "Get In Touch"}
         </h2>
         <p className="text-gray-200 text-lg">

@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 const HOST_TZ_NAME = "Asia/Kolkata";
 const IST_OFFSET_MINUTES = 330;
+const FORM_PREFILL_KEY = "booking_form_prefill";
 
 // Read query params
 function useQuery() {
@@ -115,23 +116,9 @@ function XocDropdown({
 
           <div className="max-h-56 overflow-y-auto text-sm">
             {filtered.length === 0 ? (
-              <>
-                <div className="px-3 py-2 text-xs text-slate-400 border-b border-sky-800/60">
-                  {emptyMessage}
-                </div>
-                {customOptionId && customOptionLabel && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onChange(customOptionId);
-                      setOpen(false);
-                    }}
-                    className="w-full text-left px-3 py-2 text-xs sm:text-sm text-sky-100 hover:bg-sky-700/40 transition"
-                  >
-                    {customOptionLabel}
-                  </button>
-                )}
-              </>
+              <div className="px-3 py-2 text-xs text-slate-400 border-b border-sky-800/60">
+                {emptyMessage}
+              </div>
             ) : (
               filtered.map((item) => {
                 const id = getId(item);
@@ -156,6 +143,19 @@ function XocDropdown({
                 );
               })
             )}
+
+            {customOptionId && customOptionLabel && (
+              <button
+                type="button"
+                onClick={() => {
+                  onChange(customOptionId);
+                  setOpen(false);
+                }}
+                className="w-full text-left px-3 py-2 text-xs sm:text-sm text-sky-100 hover:bg-sky-700/40 transition border-t border-sky-800/60"
+              >
+                {customOptionLabel}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -164,6 +164,7 @@ function XocDropdown({
 }
 
 export default function BookingForm() {
+  const location = useLocation();
   const q = useQuery();
   const navigate = useNavigate();
 
@@ -193,6 +194,42 @@ export default function BookingForm() {
   const [xocRams, setXocRams] = useState([]);
   const [xocMoboId, setXocMoboId] = useState("");
   const [xocRamId, setXocRamId] = useState("");
+  const [showVertexModal, setShowVertexModal] = useState(false);
+  const [vertexFadeOut, setVertexFadeOut] = useState(false);
+  const [vertexFadeIn, setVertexFadeIn] = useState(false);
+  const [vertexPackage, setVertexPackage] = useState(null);
+  const [planPackage, setPlanPackage] = useState(null);
+  const [modalPackage, setModalPackage] = useState(null);
+  const [modalMode, setModalMode] = useState("switch");
+  const [pageFadeIn, setPageFadeIn] = useState(false);
+  const scrollLockRef = useRef(null);
+
+  const clearErrorIfResolved = (
+    nextForm = form,
+    nextMobo = xocMoboId,
+    nextRam = xocRamId,
+    nextCustomMobo = xocCustomMobo,
+    nextCustomRam = xocCustomRam
+  ) => {
+    if (!errorStep2) return;
+
+    const baseFilled =
+      nextForm.discord.trim() &&
+      nextForm.email.trim() &&
+      nextForm.specs.trim() &&
+      nextForm.mainGame.trim();
+
+    const xocFieldsOk =
+      !isXoc ||
+      (nextMobo &&
+        nextRam &&
+        (nextMobo !== "__CUSTOM_MOBO__" || nextCustomMobo.trim()) &&
+        (nextRam !== "__CUSTOM_RAM__" || nextCustomRam.trim()));
+
+    if (baseFilled && xocFieldsOk) {
+      setErrorStep2("");
+    }
+  };
 
   // custom XOC fields
   const [xocCustomMobo, setXocCustomMobo] = useState("");
@@ -212,6 +249,65 @@ export default function BookingForm() {
   const isXoc =
     q.get("xoc") === "1" ||
     selectedPackage.title === "XOC / Extreme Overclocking";
+
+  const displayPackage = modalPackage || vertexPackage;
+  const isStep2Complete = useMemo(() => {
+    const baseFilled =
+      form.discord.trim() &&
+      form.email.trim() &&
+      form.specs.trim() &&
+      form.mainGame.trim();
+
+    const xocFilled = !isXoc
+      ? true
+      : xocMoboId &&
+        xocRamId &&
+        (xocMoboId !== "__CUSTOM_MOBO__" || xocCustomMobo.trim()) &&
+        (xocRamId !== "__CUSTOM_RAM__" || xocCustomRam.trim());
+
+    return Boolean(baseFilled && xocFilled);
+  }, [
+    form.discord,
+    form.email,
+    form.specs,
+    form.mainGame,
+    isXoc,
+    xocMoboId,
+    xocRamId,
+    xocCustomMobo,
+    xocCustomRam,
+  ]);
+
+  const getStep2Error = () => {
+    if (
+      !form.discord.trim() ||
+      !form.email.trim() ||
+      !form.specs.trim() ||
+      !form.mainGame.trim()
+    ) {
+      return "Please fill out all required fields.";
+    }
+
+    if (isXoc) {
+      if (!xocMoboId && !xocRamId) {
+        return "Please select your motherboard and RAM kit for XOC.";
+      }
+      if (!xocMoboId) {
+        return "Please select your motherboard for XOC.";
+      }
+      if (!xocRamId) {
+        return "Please select your RAM kit for XOC.";
+      }
+      if (xocMoboId === "__CUSTOM_MOBO__" && !xocCustomMobo.trim()) {
+        return "Please type your motherboard model for XOC.";
+      }
+      if (xocRamId === "__CUSTOM_RAM__" && !xocCustomRam.trim()) {
+        return "Please type your RAM kit details for XOC.";
+      }
+    }
+
+    return "";
+  };
 
   // ---------- DETECT USER TIME ZONE ----------
   useEffect(() => {
@@ -263,6 +359,98 @@ export default function BookingForm() {
 
     fetchData();
   }, []);
+
+  // page fade-in on route change
+  useEffect(() => {
+    setPageFadeIn(false);
+    const t = setTimeout(() => setPageFadeIn(true), 50);
+    return () => clearTimeout(t);
+  }, [location.key]);
+
+  // Prefill form if coming from XOC switch
+  useEffect(() => {
+    if (q.get("prefillFromXoc") === "1") {
+      try {
+        const stored = localStorage.getItem(FORM_PREFILL_KEY);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          setForm((prev) => ({ ...prev, ...parsed }));
+          localStorage.removeItem(FORM_PREFILL_KEY);
+        }
+      } catch (err) {
+        console.error("Failed to prefill form from storage:", err);
+      }
+    }
+  }, [location.search]);
+
+  // Lock body scroll when modal is open
+  useEffect(() => {
+    if (showVertexModal) {
+      const body = document.body;
+      const html = document.documentElement;
+      const scrollY = window.scrollY;
+      const original = {
+        overflow: body.style.overflow,
+        htmlOverflow: html.style.overflow,
+        scrollY,
+      };
+      scrollLockRef.current = original;
+      body.classList.add("is-modal-open");
+      body.style.overflow = "hidden";
+      html.style.overflow = "hidden";
+      return () => {
+        const stored = scrollLockRef.current || original;
+        body.classList.remove("is-modal-open");
+        body.style.overflow = stored.overflow || "";
+        html.style.overflow = stored.htmlOverflow || "";
+        window.scrollTo(0, stored.scrollY || 0);
+      };
+    }
+  }, [showVertexModal]);
+
+  // ---------- FETCH PERFORMANCE VERTEX PACKAGE (for modal) ----------
+  useEffect(() => {
+    const fetchVertex = async () => {
+      try {
+        const data = await client.fetch(
+          `*[_type == "package" && title match "Performance Vertex Overhaul"][0]{
+            title,
+            price,
+            tag,
+            features,
+            buttonText
+          }`
+        );
+        setVertexPackage(data);
+      } catch (err) {
+        console.error("Error fetching Performance Vertex package:", err);
+      }
+    };
+    fetchVertex();
+  }, []);
+
+  // ---------- FETCH CURRENT PLAN PACKAGE (for view plan modal) ----------
+  useEffect(() => {
+    if (!selectedPackage.title) return;
+    const fetchPlan = async () => {
+      try {
+        const data = await client.fetch(
+          `*[_type == "package" && title == $title][0]{
+            title,
+            price,
+            tag,
+            features,
+            buttonText
+          }`,
+          { title: selectedPackage.title }
+        );
+        setPlanPackage(data);
+      } catch (err) {
+        console.error("Error fetching current package:", err);
+      }
+    };
+    fetchPlan();
+  }, [selectedPackage.title]);
 
   // ---------- LOAD XOC PARTS FROM LOCAL OPENDB (API) ----------
   useEffect(() => {
@@ -437,8 +625,18 @@ export default function BookingForm() {
   }, [settings, selectedDate]);
 
   // ---------- HELPERS ----------
-  const handleChange = (e) =>
-    setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    const nextForm = { ...form, [name]: value };
+    setForm(nextForm);
+    clearErrorIfResolved(
+      nextForm,
+      xocMoboId,
+      xocRamId,
+      xocCustomMobo,
+      xocCustomRam
+    );
+  };
 
   const handleDayClick = (day) => {
     const date = new Date(month.getFullYear(), month.getMonth(), day);
@@ -555,11 +753,13 @@ export default function BookingForm() {
   );
 
   return (
-    <div className="text-white">
+    <div
+      className={`text-white transition-opacity duration-300 ${
+        pageFadeIn ? "opacity-100" : "opacity-0"
+      }`}
+    >
       {!settings ? (
-        <div className="text-center text-sky-300 mt-20">
-          Loading booking settings...
-        </div>
+        <div className="text-center text-sky-300 mt-20">Loading...</div>
       ) : (
         <>
           {selectedPackage.title && (
@@ -748,28 +948,49 @@ export default function BookingForm() {
                 )}
               </div>
 
-              <button
-                onClick={() => {
-                  if (!selectedDate || !selectedSlot) {
-                    setErrorStep1(
-                      "Please select a date and time before continuing."
-                    );
-                    return;
-                  }
-                  setErrorStep1("");
-                  setStep(2);
-                }}
-                aria-disabled={!selectedDate || !selectedSlot}
-                className={`glow-button mt-10 w-full sm:w-64 mx-auto py-3 rounded-lg font-semibold text-lg transition-all duration-300 ${
-                  !selectedDate || !selectedSlot ? "opacity-60" : ""
-                }`}
-              >
-                Next
-                <span className="glow-line glow-line-top" />
-                <span className="glow-line glow-line-right" />
-                <span className="glow-line glow-line-bottom" />
-                <span className="glow-line glow-line-left" />
-              </button>
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mt-10">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setModalMode("view");
+                    setModalPackage(planPackage || selectedPackage);
+                    setVertexFadeOut(false);
+                    setVertexFadeIn(false);
+                    setShowVertexModal(true);
+                    setTimeout(() => setVertexFadeIn(true), 20);
+                  }}
+                  className="glow-button w-full sm:w-64 py-3 rounded-lg font-semibold text-lg transition-all duration-300 inline-flex items-center justify-center gap-2"
+                >
+                  View My Plan
+                  <span className="glow-line glow-line-top" />
+                  <span className="glow-line glow-line-right" />
+                  <span className="glow-line glow-line-bottom" />
+                  <span className="glow-line glow-line-left" />
+                </button>
+
+                <button
+                  onClick={() => {
+                    if (!selectedDate || !selectedSlot) {
+                      setErrorStep1(
+                        "Please select a date and time before continuing."
+                      );
+                      return;
+                    }
+                    setErrorStep1("");
+                    setStep(2);
+                  }}
+                  aria-disabled={!selectedDate || !selectedSlot}
+                  className={`glow-button w-full sm:w-64 py-3 rounded-lg font-semibold text-lg transition-all duration-300 ${
+                    !selectedDate || !selectedSlot ? "opacity-60" : ""
+                  }`}
+                >
+                  Next
+                  <span className="glow-line glow-line-top" />
+                  <span className="glow-line glow-line-right" />
+                  <span className="glow-line glow-line-bottom" />
+                  <span className="glow-line glow-line-left" />
+                </button>
+              </div>
 
               {errorStep1 && (
                 <p className="text-red-400 mt-3 text-sm">{errorStep1}</p>
@@ -794,7 +1015,16 @@ export default function BookingForm() {
                       label="Motherboard"
                       items={xocMotherboards}
                       value={xocMoboId}
-                      onChange={setXocMoboId}
+                      onChange={(val) => {
+                        setXocMoboId(val);
+                        clearErrorIfResolved(
+                          form,
+                          val,
+                          xocRamId,
+                          xocCustomMobo,
+                          xocCustomRam
+                        );
+                      }}
                       placeholder={
                         xocMotherboards.length === 0
                           ? "No supported boards loaded"
@@ -811,7 +1041,16 @@ export default function BookingForm() {
                       label="RAM Kit"
                       items={xocRams}
                       value={xocRamId}
-                      onChange={setXocRamId}
+                      onChange={(val) => {
+                        setXocRamId(val);
+                        clearErrorIfResolved(
+                          form,
+                          xocMoboId,
+                          val,
+                          xocCustomMobo,
+                          xocCustomRam
+                        );
+                      }}
                       placeholder={
                         xocRams.length === 0
                           ? "No eligible RAM kits loaded"
@@ -831,7 +1070,17 @@ export default function BookingForm() {
                         <input
                           type="text"
                           value={xocCustomMobo}
-                          onChange={(e) => setXocCustomMobo(e.target.value)}
+                          onChange={(e) => {
+                            const next = e.target.value;
+                            setXocCustomMobo(next);
+                            clearErrorIfResolved(
+                              form,
+                              xocMoboId,
+                              xocRamId,
+                              next,
+                              xocCustomRam
+                            );
+                          }}
                           placeholder="Type your motherboard model (e.g. ASUS ROG STRIX X670E-E)"
                           className="w-full bg-[#020617] border border-sky-700/60 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400"
                         />
@@ -843,7 +1092,17 @@ export default function BookingForm() {
                         <input
                           type="text"
                           value={xocCustomRam}
-                          onChange={(e) => setXocCustomRam(e.target.value)}
+                          onChange={(e) => {
+                            const next = e.target.value;
+                            setXocCustomRam(next);
+                            clearErrorIfResolved(
+                              form,
+                              xocMoboId,
+                              xocRamId,
+                              xocCustomMobo,
+                              next
+                            );
+                          }}
                           placeholder="Type your RAM kit (e.g. 32GB 6000MT/s CL30, brand/model)"
                           className="w-full bg-[#020617] border border-sky-700/60 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400"
                         />
@@ -872,28 +1131,43 @@ export default function BookingForm() {
                     supported list.
                   </p>
 
-                  <button
-                    type="button"
-                    onClick={() =>
-                      navigate("/packages#performance-vertex-overhaul")
-                    }
-                    className="mt-3 inline-flex items-center justify-center px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold bg-sky-500/90 hover:bg-sky-400 text-slate-900 shadow-[0_0_12px_rgba(56,189,248,0.6)] transition"
-                  >
-                    Switch to Performance Vertex Overhaul
-                  </button>
-                  <p className="mt-2 text-[11px] font-bold bg-gradient-to-r from-sky-300 via-cyan-300 to-indigo-300 bg-clip-text text-transparent">
-                    If your PC is found to be XOC eligible after booking
-                    Performance Vertex Overhaul, you may pay the difference in
-                    price to upgrade.
-                  </p>
+                  {(xocMoboId === "__CUSTOM_MOBO__" ||
+                    xocRamId === "__CUSTOM_RAM__") && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setModalMode("switch");
+                          setModalPackage(vertexPackage);
+                          setVertexFadeOut(false);
+                          setVertexFadeIn(false);
+                          setShowVertexModal(true);
+                          setTimeout(() => setVertexFadeIn(true), 20);
+                        }}
+                        className="glow-button mt-3 inline-flex items-center justify-center px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold text-white transition"
+                      >
+                        Switch to Performance Vertex Overhaul
+                        <span className="glow-line glow-line-top" />
+                        <span className="glow-line glow-line-right" />
+                        <span className="glow-line glow-line-bottom" />
+                        <span className="glow-line glow-line-left" />
+                      </button>
+                      <p className="mt-2 text-[11px] font-bold bg-gradient-to-r from-sky-300 via-cyan-300 to-indigo-300 bg-clip-text text-transparent">
+                        If your PC is found to be XOC eligible after booking
+                        Performance Vertex Overhaul, you may pay the difference
+                        in price to upgrade.
+                      </p>
+                    </>
+                  )}
                 </div>
               )}
 
               {/* ---------- NORMAL FORM FIELDS ---------- */}
               <input
                 name="discord"
-                placeholder="Discord (e.g. Servi#1234)"
+                placeholder="Discord (e.g. Servi#1234 or @Servi)"
                 onChange={handleChange}
+                value={form.discord}
                 className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 focus:outline-none focus:border-sky-500 transition"
               />
               <input
@@ -901,18 +1175,23 @@ export default function BookingForm() {
                 type="email"
                 placeholder="Email"
                 onChange={handleChange}
+                value={form.email}
                 className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 focus:outline-none focus:border-sky-500 transition"
               />
               <input
                 name="specs"
-                placeholder="PC Specs"
+                placeholder={
+                  isXoc ? "PC Specs (e.g. GPU, CPU, Cooling)" : "PC Specs"
+                }
                 onChange={handleChange}
+                value={form.specs}
                 className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 focus:outline-none focus:border-sky-500 transition"
               />
               <input
                 name="mainGame"
                 placeholder="Main use case (Game/Apps)"
                 onChange={handleChange}
+                value={form.mainGame}
                 className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 focus:outline-none focus:border-sky-500 transition"
               />
 
@@ -920,6 +1199,7 @@ export default function BookingForm() {
                 name="notes"
                 placeholder="Any extra requirements?"
                 onChange={handleChange}
+                value={form.notes}
                 className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 h-24 focus:outline-none focus:border-sky-500 transition"
               ></textarea>
 
@@ -938,43 +1218,12 @@ export default function BookingForm() {
 
                 <button
                   onClick={async () => {
-                    if (
-                      !form.discord.trim() ||
-                      !form.email.trim() ||
-                      !form.specs.trim() ||
-                      !form.mainGame.trim()
-                    ) {
-                      setErrorStep2("Please fill out all required fields.");
+                    if (loading) return;
+
+                    const validationError = getStep2Error();
+                    if (validationError) {
+                      setErrorStep2(validationError);
                       return;
-                    }
-
-                    if (isXoc) {
-                      if (!xocMoboId || !xocRamId) {
-                        setErrorStep2(
-                          "Please select your motherboard and RAM kit for XOC."
-                        );
-                        return;
-                      }
-
-                      if (
-                        xocMoboId === "__CUSTOM_MOBO__" &&
-                        !xocCustomMobo.trim()
-                      ) {
-                        setErrorStep2(
-                          "Please type your motherboard model for XOC."
-                        );
-                        return;
-                      }
-
-                      if (
-                        xocRamId === "__CUSTOM_RAM__" &&
-                        !xocCustomRam.trim()
-                      ) {
-                        setErrorStep2(
-                          "Please type your RAM kit details for XOC."
-                        );
-                        return;
-                      }
                     }
 
                     setErrorStep2("");
@@ -982,8 +1231,11 @@ export default function BookingForm() {
                     await handleSubmit();
                     setLoading(false);
                   }}
-                  disabled={loading}
-                  className="glow-button w-1/2 py-3 rounded-lg font-semibold transition inline-flex items-center justify-center gap-2"
+                  className={`glow-button w-1/2 py-3 rounded-lg font-semibold transition inline-flex items-center justify-center gap-2 ${
+                    loading || !isStep2Complete
+                      ? "opacity-60 cursor-not-allowed"
+                      : ""
+                  }`}
                 >
                   {loading ? "Submitting..." : "Submit & Pay"}
                   <span className="glow-line glow-line-top" />
@@ -999,6 +1251,132 @@ export default function BookingForm() {
             </div>
           )}
         </>
+      )}
+
+      {showVertexModal && (
+        <div
+          className={`fixed inset-0 z-50 bg-black/60 backdrop-blur-lg flex items-center justify-center px-4 transition-opacity duration-200 ${
+            vertexFadeOut
+              ? "opacity-0 pointer-events-none"
+              : vertexFadeIn
+              ? "opacity-100"
+              : "opacity-0"
+          }`}
+          onClick={() => {
+            setVertexFadeOut(true);
+            setVertexFadeIn(false);
+            setTimeout(() => {
+              setShowVertexModal(false);
+              setVertexFadeOut(false);
+            }, 180);
+          }}
+        >
+          <div
+            className="relative w-full max-w-md bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 border border-sky-400/60 rounded-2xl shadow-[0_0_35px_rgba(56,189,248,0.4)] p-6 text-center transition-all duration-500 ease-in-out hover:shadow-[0_0_42px_rgba(56,189,248,0.5)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              aria-label="Close"
+              className="absolute right-3 top-3 text-sky-200 hover:text-white transition text-2xl"
+              onClick={() => {
+                setVertexFadeOut(true);
+                setVertexFadeIn(false);
+                setTimeout(() => {
+                  setShowVertexModal(false);
+                  setVertexFadeOut(false);
+                }, 180);
+              }}
+            >
+              ×
+            </button>
+
+            <div className="inline-flex items-center px-4 py-1.5 rounded-full text-xs font-semibold text-white bg-[#1fa7ff] shadow-[0_0_18px_rgba(31,167,255,0.6)] mb-4">
+              {displayPackage?.tag ||
+                "For All Budget, Mid-Ranged and High End PCs"}
+            </div>
+            <h3 className="text-2xl font-bold text-sky-100">
+              {displayPackage?.title || "Performance Vertex Overhaul"}
+            </h3>
+            <p className="text-4xl font-bold text-sky-300 mt-2">
+              {displayPackage?.price || "$84.99"}
+            </p>
+
+            <ul className="mt-4 space-y-2 text-sm text-sky-100 text-left">
+              {(displayPackage?.features && displayPackage.features.length > 0
+                ? displayPackage.features
+                : [
+                    "Guaranteed boost in performance (latency, 1% lows, or average FPS)",
+                    "30 day warranty",
+                    "2-4 hour completion time",
+                    "Same day availability",
+                    "Overclocking of CPU, GPU, and RAM (Timings)",
+                    "Diagnosing issues and full system inspection",
+                    "Hidden BIOS tuning",
+                    "Smooth frametimes",
+                    "Benchmark guaranteed results",
+                    "Fan curves, sound tuning, and input latency–based adjustments",
+                    "Proper core allocation and game process prioritization",
+                    "Network driver tuning",
+                    "90 day warranty plus future support at discretion",
+                  ]
+              ).map((text) => (
+                <li key={text} className="flex items-start gap-2">
+                  <span className="text-sky-400 mt-0.5">✓</span>
+                  <span>{text}</span>
+                </li>
+              ))}
+            </ul>
+
+            {modalMode !== "view" && (
+              <button
+                type="button"
+                onClick={() => {
+                  setVertexFadeOut(true);
+                  setVertexFadeIn(false);
+                  setTimeout(() => {
+                    setShowVertexModal(false);
+                    setErrorStep2("");
+                    setStep(1);
+                    setSelectedDate(null);
+                    setSelectedSlot(null);
+                    try {
+                      localStorage.setItem(
+                        FORM_PREFILL_KEY,
+                        JSON.stringify({
+                          discord: form.discord,
+                          email: form.email,
+                          specs: form.specs,
+                          mainGame: form.mainGame,
+                          notes: form.notes,
+                        })
+                      );
+                    } catch (err) {
+                      console.error("Failed to store form draft:", err);
+                    }
+                    navigate(
+                      `/booking?title=${encodeURIComponent(
+                        displayPackage?.title || "Performance Vertex Overhaul"
+                      )}&price=${encodeURIComponent(
+                        displayPackage?.price || "$84.99"
+                      )}&tag=${encodeURIComponent(
+                        displayPackage?.tag || ""
+                      )}&xoc=0&prefillFromXoc=1`
+                    );
+                    setVertexFadeOut(false);
+                  }, 180);
+                }}
+                className="glow-button w-full mt-6 py-3 rounded-lg font-semibold text-white shadow-[0_0_20px_rgba(56,189,248,0.4)] inline-flex items-center justify-center gap-2 opacity-90 hover:opacity-100"
+                style={{ transition: "opacity 0.9s ease-in-out" }}
+              >
+                {displayPackage?.buttonText || "Book Now"}
+                <span className="glow-line glow-line-top" />
+                <span className="glow-line glow-line-right" />
+                <span className="glow-line glow-line-bottom" />
+                <span className="glow-line glow-line-left" />
+              </button>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

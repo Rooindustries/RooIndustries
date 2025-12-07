@@ -51,7 +51,7 @@ export default function Packages() {
           return (
             <div
               key={i}
-              className={`relative w-full sm:w-[520px] bg-[#0b1120]/90 border rounded-xl p-6 transition-all duration-500 flex flex-col justify-between ${
+              className={`relative w-full sm:w-[520px] border rounded-xl p-6 transition-all duration-500 flex flex-col justify-between bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 ${
                 p.isHighlighted
                   ? "border-sky-400/60 shadow-[0_0_35px_rgba(56,189,248,0.4)] hover:shadow-[0_0_50px_rgba(56,189,248,0.6)]"
                   : "border-sky-600/40 shadow-[0_0_25px_rgba(14,165,233,0.25)] hover:shadow-[0_0_35px_rgba(14,165,233,0.4)]"

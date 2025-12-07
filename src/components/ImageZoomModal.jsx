@@ -12,6 +12,8 @@ export default function ImageZoomModal({
   const [currentOffset, setCurrentOffset] = useState({ x: 0, y: 0 });
   const [dragStart, setDragStart] = useState(null);
   const animationRef = useRef(null);
+  const scrollLockRef = useRef(null);
+  const [fadeIn, setFadeIn] = useState(false);
 
   useEffect(() => {
     const animate = () => {
@@ -28,13 +30,27 @@ export default function ImageZoomModal({
   // Hide logo + disable scroll when open
   useEffect(() => {
     setIsModalOpen(true);
-    document.body.classList.add("is-modal-open");
-    document.body.style.overflow = "hidden";
+    const body = document.body;
+    const html = document.documentElement;
+    const scrollY = window.scrollY;
+    const original = {
+      overflow: body.style.overflow,
+      htmlOverflow: html.style.overflow,
+      scrollY,
+    };
+    scrollLockRef.current = original;
+    body.classList.add("is-modal-open");
+    body.style.overflow = "hidden";
+    html.style.overflow = "hidden";
+    setFadeIn(true);
 
     return () => {
       setIsModalOpen(false);
-      document.body.classList.remove("is-modal-open");
-      document.body.style.overflow = "auto";
+      const stored = scrollLockRef.current || original;
+      body.classList.remove("is-modal-open");
+      body.style.overflow = stored.overflow || "";
+      html.style.overflow = stored.htmlOverflow || "";
+      window.scrollTo(0, stored.scrollY || 0);
     };
   }, [setIsModalOpen]);
 
@@ -77,13 +93,26 @@ export default function ImageZoomModal({
   };
 
   const handleClose = (e) => {
-    e.stopPropagation();
+    e?.stopPropagation?.();
     onClose();
   };
 
+  // Close on Escape
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        handleClose(e);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   return (
     <div
-      className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-[9999]"
+      className={`fixed inset-0 bg-black/60 backdrop-blur-lg flex items-center justify-center z-[9999] transition-opacity duration-200 ${
+        fadeIn ? "opacity-100" : "opacity-0"
+      }`}
       onClick={handleClose}
     >
       {/* Close Button */}
