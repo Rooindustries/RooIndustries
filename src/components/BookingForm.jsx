@@ -76,8 +76,13 @@ function XocDropdown({
 
   const filtered = useMemo(() => {
     if (!search.trim()) return items;
-    const q = search.toLowerCase();
-    return items.filter((item) => getLabel(item).toLowerCase().includes(q));
+
+    const tokens = search.toLowerCase().split(/\s+/).filter(Boolean);
+
+    return items.filter((item) => {
+      const label = getLabel(item).toLowerCase();
+      return tokens.every((t) => label.includes(t));
+    });
   }, [items, search, getLabel]);
 
   const selectedItem = items.find((i) => getId(i) === value);
