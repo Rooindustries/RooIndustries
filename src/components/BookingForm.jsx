@@ -571,7 +571,6 @@ export default function BookingForm() {
 
     const hostDateLabel = selectedDate.toDateString();
 
-    // EXCLUDE MY OWN HOLD FROM "BOOKED" LIST SO I CAN SEE IT AS AVAILABLE/YELLOW
     const bookedForDayHost =
       settings.bookedSlots
         ?.filter((b) => {
@@ -580,7 +579,7 @@ export default function BookingForm() {
             b.date === myHold.hostDate &&
             b.time === myHold.hostTime
           ) {
-            return false; // Don't count my own hold as "booked" visually
+            return false;
           }
           return b.date === hostDateLabel;
         })
