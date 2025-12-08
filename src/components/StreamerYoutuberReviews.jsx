@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import { client } from "../sanityClient";
 
 const titleClass =
-  "text-[48px] leading-tight font-extrabold text-center tracking-tight " +
+  "text-3xl sm:text-[40px] md:text-[48px] leading-tight font-extrabold text-center tracking-tight " +
   "text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]";
 
 export default function StreamerYoutuberReviews() {
@@ -14,7 +14,7 @@ export default function StreamerYoutuberReviews() {
   );
 
   const sectionClass =
-    "py-16 px-4 sm:px-6 text-center text-white relative overflow-hidden";
+    "py-12 sm:py-16 px-4 sm:px-6 text-center text-white relative overflow-hidden";
 
   useEffect(() => {
     const query = `*[_type == "proReviewsCarousel"]{
@@ -88,11 +88,20 @@ export default function StreamerYoutuberReviews() {
 
   const leftReviews = normalizeReviews(left?.reviews);
   const rightReviews = normalizeReviews(right?.reviews);
-  const lockHeight = viewportWidth >= 640;
+
+  const lockHeight = true;
 
   return (
     <section className={sectionClass}>
-      <div className="grid gap-6 md:grid-cols-2 max-w-6xl mx-auto px-4">
+      <div
+        className="
+          flex flex-col items-center gap-12
+          md:grid md:grid-cols-2 md:gap-8 md:items-start
+          w-full 
+          max-w-6xl 
+          mx-auto 
+        "
+      >
         <Carousel
           side="left"
           title={left?.title}
@@ -156,9 +165,11 @@ function Carousel({
   const containerRef = useRef(null);
   const cardRefs = useRef([]);
 
-  const heightToUse = lockHeight ? fixedHeight || localHeight : 0;
+  const heightToUse = lockHeight ? fixedHeight || localHeight : undefined;
 
   const measureHeights = useCallback(() => {
+    if (!lockHeight) return;
+
     const heights =
       cardRefs.current
         ?.map((card) => card?.offsetHeight || 0)
@@ -169,7 +180,7 @@ function Carousel({
     const tallest = Math.max(...heights);
     setLocalHeight((prev) => (prev === tallest ? prev : tallest));
     onMeasureHeight?.(tallest);
-  }, [onMeasureHeight]);
+  }, [onMeasureHeight, lockHeight]);
 
   const handleNext = useCallback(() => {
     if (!hasMultipleSlides || isTransitioningRef.current) return;
@@ -203,10 +214,11 @@ function Carousel({
 
   useEffect(() => {
     measureHeights();
+    if (!lockHeight) return;
     const onResize = () => measureHeights();
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [measureHeights, extendedReviews]);
+  }, [measureHeights, extendedReviews, lockHeight]);
 
   useEffect(() => {
     if (isAnimating) return;
@@ -256,8 +268,8 @@ function Carousel({
   );
 
   return (
-    <div className="text-center text-white relative">
-      <div className="w-full mx-auto px-4">
+    <div className="text-center text-white relative w-full flex flex-col items-center">
+      <div className="w-full mx-auto px-2">
         <h3
           className={`${titleClass} mb-3 w-full`}
           title={title || defaultTitle}
@@ -266,23 +278,19 @@ function Carousel({
         </h3>
       </div>
 
-      <p className="text-slate-300 mb-6 text-[14px]">
+      <p className="text-slate-300 mb-6 text-sm sm:text-[14px]">
         {subtitle || defaultSubtitle}
       </p>
 
-      {/* OUTER SHELL */}
-      <div className="relative mx-auto max-w-[550px]">
+      <div className="relative w-[90vw] max-w-md md:w-full md:max-w-[550px] mx-auto">
         {glowEnabled && (
           <>
-            {/* Moving glow border */}
             <div className="glow-box">
               <div className="glow-beam" />
             </div>
 
-            {/* Sparkles layout based on side */}
             {side === "left" && (
               <>
-                {/* top-left & bottom-right */}
                 <CornerSparkle className="-top-2 -left-2" delay={0} />
                 <CornerSparkle className="-bottom-2 -right-2" delay={1.5} />
               </>
@@ -290,7 +298,6 @@ function Carousel({
 
             {side === "right" && (
               <>
-                {/* bottom-left & top-right */}
                 <CornerSparkle className="-bottom-2 -left-2" delay={0.5} />
                 <CornerSparkle className="-top-2 -right-2" delay={2} />
               </>
@@ -298,12 +305,11 @@ function Carousel({
           </>
         )}
 
-        {/* INNER INTERACTIVE CONTAINER */}
         <div className="relative rounded-3xl h-full" ref={containerRef}>
           <div
             className="relative overflow-hidden rounded-3xl bg-[#0b1120]/90 
-                       shadow-[0_0_20px_rgba(56,189,248,0.2)] 
-                       border border-transparent"
+                        shadow-[0_0_20px_rgba(56,189,248,0.2)] 
+                        border border-transparent"
           >
             <div
               className="flex"
@@ -331,8 +337,9 @@ function Carousel({
                   }
                 >
                   <div
-                    className="grid h-full grid-rows-[auto,1fr] rounded-3xl 
-                               bg-[#0b1120]/90 px-7 py-8 text-center gap-1"
+                    className="flex h-full flex-col rounded-3xl 
+                               bg-[#0b1120]/90 px-5 py-7 text-center gap-4
+                               sm:px-7 sm:py-8 md:grid md:grid-rows-[auto,1fr] md:gap-1"
                   >
                     <div className="flex flex-col items-center justify-start gap-3">
                       <h3 className="text-2xl font-semibold text-sky-300 leading-snug">
@@ -346,8 +353,8 @@ function Carousel({
                       ) : null}
                     </div>
 
-                    <div className="flex items-center justify-center">
-                      <p className="text-slate-100 text-base leading-relaxed max-w-sm">
+                    <div className="flex flex-1 items-center justify-center">
+                      <p className="text-slate-100 text-base sm:text-lg leading-relaxed max-w-sm">
                         {review.text}
                       </p>
                     </div>
@@ -358,22 +365,22 @@ function Carousel({
 
             <button
               onClick={handlePrev}
-              className="absolute left-3 top-1/2 -translate-y-1/2 
-                         bg-slate-900/80 hover:bg-slate-800 
-                         border border-sky-600/40 
-                         p-2 rounded-full shadow-md 
-                         transition z-10"
+              className="absolute left-3 bottom-3 md:bottom-auto md:top-1/2 md:-translate-y-1/2 
+                           bg-slate-900/80 hover:bg-slate-800 
+                           border border-sky-600/40 
+                           p-2 rounded-full shadow-md 
+                           transition z-10"
             >
               <ChevronLeft className="w-5 h-5 text-cyan-300" />
             </button>
 
             <button
               onClick={handleNext}
-              className="absolute right-3 top-1/2 -translate-y-1/2 
-                         bg-slate-900/80 hover:bg-slate-800 
-                         border border-sky-600/40 
-                         p-2 rounded-full shadow-md 
-                         transition z-10"
+              className="absolute right-3 bottom-3 md:bottom-auto md:top-1/2 md:-translate-y-1/2 
+                           bg-slate-900/80 hover:bg-slate-800 
+                           border border-sky-600/40 
+                           p-2 rounded-full shadow-md 
+                           transition z-10"
             >
               <ChevronRight className="w-5 h-5 text-cyan-300" />
             </button>
