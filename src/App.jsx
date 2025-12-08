@@ -74,7 +74,6 @@ function AnimatedRoutes({ setIsModalOpen }) {
           <Route path="/payment-success" element={<PaymentSuccess />} />
           <Route path="/thank-you" element={<Thankyou />} />
 
-          {/* 🔥 NEW: secret upgrade route (only share the URL manually) */}
           <Route path="/upgrade-xoc" element={<UpgradeXoc />} />
 
           {/* Referral system routes */}
