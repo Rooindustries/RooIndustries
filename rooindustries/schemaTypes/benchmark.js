@@ -16,6 +16,13 @@ export default {
       description: 'Short optional description under the title.',
     },
     {
+      name: 'sortOrder',
+      title: 'Sort Order',
+      type: 'number',
+      description: 'Lower numbers appear first on the site (0, 1, 2, ...).',
+      initialValue: 0,
+    },
+    {
       name: 'beforeImage',
       title: 'Before Image',
       type: 'image',
@@ -32,6 +39,19 @@ export default {
       title: 'Review Image (Discord Screenshot)',
       type: 'image',
       options: {hotspot: true},
+    },
+  ],
+
+  orderings: [
+    {
+      title: 'Sort Order (low → high)',
+      name: 'sortOrderAsc',
+      by: [{field: 'sortOrder', direction: 'asc'}],
+    },
+    {
+      title: 'Newest first',
+      name: 'createdAtDesc',
+      by: [{field: '_createdAt', direction: 'desc'}],
     },
   ],
 }
