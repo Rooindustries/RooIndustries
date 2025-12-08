@@ -15,17 +15,21 @@ export default function Payment() {
     }
   }, [q]);
 
+  const isUpgrade = !!bookingData.originalOrderId; // 🔵 upgrade mode flag
+
   const packageTitle = bookingData.packageTitle || "—";
   const packagePrice = bookingData.packagePrice || "$0";
   const date = bookingData.displayDate || "--";
   const time = bookingData.displayTime || "--";
-  const baseAmount = parseFloat(packagePrice.replace(/[^0-9.]/g, "")) || 0;
+  const baseAmount =
+    parseFloat(String(packagePrice).replace(/[^0-9.]/g, "")) || 0;
 
+  // Referral state (used only when NOT upgrade)
   const [referralInput, setReferralInput] = useState("");
   const [referral, setReferral] = useState(null);
   const [validating, setValidating] = useState(false);
 
-  // 🔵 Coupon states
+  // Coupon state (used only when NOT upgrade)
   const [couponInput, setCouponInput] = useState("");
   const [coupon, setCoupon] = useState(null);
   const [validatingCoupon, setValidatingCoupon] = useState(false);
@@ -40,11 +44,13 @@ export default function Payment() {
   };
 
   // Referral discount
-  const referralPercent = referral?.currentDiscountPercent || 0;
-  const commissionPercent = referral?.currentCommissionPercent || 0;
+  const referralPercent = isUpgrade ? 0 : referral?.currentDiscountPercent || 0;
+  const commissionPercent = isUpgrade
+    ? 0
+    : referral?.currentCommissionPercent || 0;
 
   // Coupon discount
-  const couponPercent = coupon?.discountPercent || 0;
+  const couponPercent = isUpgrade ? 0 : coupon?.discountPercent || 0;
   const canStackCouponWithReferral =
     coupon?.canCombineWithReferral === true || false;
 
@@ -52,8 +58,7 @@ export default function Payment() {
   let referralDiscountAmount = 0;
   let couponDiscountAmount = 0;
 
-  if (baseAmount > 0) {
-    // Referral always based on baseAmount
+  if (!isUpgrade && baseAmount > 0) {
     if (referralPercent > 0) {
       referralDiscountAmount = +(baseAmount * (referralPercent / 100)).toFixed(
         2
@@ -62,10 +67,8 @@ export default function Payment() {
 
     if (couponPercent > 0 && coupon) {
       if (canStackCouponWithReferral && referralPercent > 0) {
-        // 💡 Option A: coupon also on full baseAmount (simpler)
         couponDiscountAmount = +(baseAmount * (couponPercent / 100)).toFixed(2);
       } else {
-        // No stacking or no referral
         couponDiscountAmount = +(baseAmount * (couponPercent / 100)).toFixed(2);
       }
     }
@@ -75,13 +78,12 @@ export default function Payment() {
     (referralDiscountAmount || 0) + (couponDiscountAmount || 0)
   ).toFixed(2);
 
-  const finalAmount = Math.max(
-    0,
-    +(baseAmount - totalDiscountAmount).toFixed(2)
-  );
+  const finalAmount = isUpgrade
+    ? baseAmount // 🔒 upgrades use exact upgrade price, no extra discounts
+    : Math.max(0, +(baseAmount - totalDiscountAmount).toFixed(2));
 
   const discountPercentCombined =
-    baseAmount > 0
+    !isUpgrade && baseAmount > 0
       ? +((totalDiscountAmount / baseAmount) * 100 || 0).toFixed(2)
       : 0;
 
@@ -89,7 +91,10 @@ export default function Payment() {
   const [rzpReady, setRzpReady] = useState(false);
   const [payingRzp, setPayingRzp] = useState(false);
 
+  // Auto-load referral from URL/localStorage ONLY if not upgrade
   useEffect(() => {
+    if (isUpgrade) return; // 🔒 no referrals on upgrade
+
     const params = new URLSearchParams(location.search);
     const fromUrl = params.get("ref");
 
@@ -107,7 +112,7 @@ export default function Payment() {
       validateReferral(stored);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.search]);
+  }, [location.search, isUpgrade]);
 
   // Load Razorpay checkout script
   useEffect(() => {
@@ -133,6 +138,7 @@ export default function Payment() {
 
   // ----------------- REFERRAL VALIDATION -----------------
   async function validateReferral(code) {
+    if (isUpgrade) return; // safety
     if (!code) {
       setReferral(null);
       try {
@@ -161,7 +167,6 @@ export default function Payment() {
           } catch {}
         }
 
-        // If we already have a coupon that can't stack, clear it
         if (
           coupon &&
           coupon.canCombineWithReferral === false &&
@@ -198,6 +203,7 @@ export default function Payment() {
 
   // ----------------- COUPON VALIDATION -----------------
   async function validateCoupon(code) {
+    if (isUpgrade) return; // safety
     if (!code) {
       setCoupon(null);
       return;
@@ -211,7 +217,6 @@ export default function Payment() {
       console.log("validateCoupon result:", data);
 
       if (data.ok && data.coupon) {
-        // If coupon can't be combined and there's already a referral, block it
         if (data.coupon.canCombineWithReferral === false && referral) {
           setCoupon(null);
           showBanner(
@@ -274,8 +279,11 @@ export default function Payment() {
             packageTitle,
             date,
             time,
-            referralCode: referral?.code || referralInput || "",
-            couponCode: coupon?.code || couponInput || "",
+            // For upgrades, these will be blank because UI is disabled
+            referralCode: isUpgrade
+              ? ""
+              : referral?.code || referralInput || "",
+            couponCode: isUpgrade ? "" : coupon?.code || couponInput || "",
           },
         }),
       });
@@ -332,22 +340,24 @@ export default function Payment() {
 
             const payload = {
               ...bookingData,
-              referralCode: referral?.code || referralInput || "",
-              referralId: referral?._id || null,
 
-              // coupon details
-              couponCode: coupon?.code || couponInput || "",
-              couponDiscountPercent: couponPercent,
-              couponDiscountAmount: couponDiscountAmount,
+              // For normal bookings we send discounts; for upgrades we send none
+              referralCode: isUpgrade
+                ? ""
+                : referral?.code || referralInput || "",
+              referralId: isUpgrade ? null : referral?._id || null,
 
-              // combined discount data
-              discountPercent: discountPercentCombined,
-              discountAmount: totalDiscountAmount,
+              couponCode: isUpgrade ? "" : coupon?.code || couponInput || "",
+              couponDiscountPercent: isUpgrade ? 0 : couponPercent,
+              couponDiscountAmount: isUpgrade ? 0 : couponDiscountAmount,
+
+              discountPercent: isUpgrade ? 0 : discountPercentCombined,
+              discountAmount: isUpgrade ? 0 : totalDiscountAmount,
 
               grossAmount: baseAmount,
               netAmount: finalAmount,
 
-              commissionPercent,
+              commissionPercent: isUpgrade ? 0 : commissionPercent,
 
               razorpayOrderId: response.razorpay_order_id,
               razorpayPaymentId: response.razorpay_payment_id,
@@ -404,10 +414,12 @@ export default function Payment() {
   return (
     <section className="relative z-10 pt-32 pb-24 px-6 max-w-3xl mx-auto text-white">
       <h2 className="text-4xl sm:text-5xl font-extrabold text-center text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
-        Complete Payment
+        {isUpgrade ? "Complete Upgrade Payment" : "Complete Payment"}
       </h2>
       <p className="mt-3 text-slate-300/80 text-center text-sm sm:text-base">
-        Review your booking details and proceed to payment
+        {isUpgrade
+          ? "Review your upgrade details and proceed to payment"
+          : "Review your booking details and proceed to payment"}
       </p>
 
       {banner && banner.text && (
@@ -440,15 +452,17 @@ export default function Payment() {
       {/* Booking Summary */}
       <div className="mt-8 rounded-2xl border border-sky-700/40 bg-[#0a1324]/90 shadow-[0_0_35px_rgba(14,165,233,0.15)] backdrop-blur-md">
         <div className="p-6 sm:p-7">
-          <h3 className="text-[20px] font-bold text-white">Booking Summary</h3>
+          <h3 className="text-[20px] font-bold text-white">
+            {isUpgrade ? "Upgrade Summary" : "Booking Summary"}
+          </h3>
           <p className="text-slate-400 text-sm mt-1">
-            Please review your booking details
+            Please review your {isUpgrade ? "upgrade" : "booking"} details
           </p>
 
           <div className="mt-6">
             <p className="font-semibold text-lg text-white">{packageTitle}</p>
             <div className="mt-2 space-y-1">
-              {(referralPercent > 0 || couponPercent > 0) && (
+              {!isUpgrade && (referralPercent > 0 || couponPercent > 0) && (
                 <p className="text-xl text-slate-300 line-through">
                   ${baseAmount.toFixed(2)}
                 </p>
@@ -457,15 +471,14 @@ export default function Payment() {
                 ${finalAmount.toFixed(2)} USD
               </p>
 
-              {/* Detailed discount breakdown */}
-              {referralPercent > 0 && (
+              {!isUpgrade && referralPercent > 0 && (
                 <p className="text-sm text-green-300">
                   Referral: {referralPercent}% (−$
                   {referralDiscountAmount.toFixed(2)}
                   {referral?.name ? ` via ${referral.name}` : ""})
                 </p>
               )}
-              {couponPercent > 0 && coupon && (
+              {!isUpgrade && couponPercent > 0 && coupon && (
                 <p className="text-sm text-emerald-300">
                   Coupon "{coupon.code}": {couponPercent}% (−$
                   {couponDiscountAmount.toFixed(2)})
@@ -474,7 +487,7 @@ export default function Payment() {
                     : ""}
                 </p>
               )}
-              {totalDiscountAmount > 0 && (
+              {!isUpgrade && totalDiscountAmount > 0 && (
                 <p className="text-xs text-slate-300">
                   Total savings: {discountPercentCombined}% (−$
                   {totalDiscountAmount.toFixed(2)})
@@ -485,86 +498,101 @@ export default function Payment() {
                 Date: <span className="text-sky-300">{date}</span> — Time:{" "}
                 <span className="text-sky-300">{time}</span>
               </p>
+
+              {isUpgrade && (
+                <p className="text-xs text-slate-400 mt-2">
+                  Upgrades do not accept new coupons or referral discounts. The
+                  price above is already calculated as the difference between
+                  full XOC and what you previously paid.
+                </p>
+              )}
             </div>
           </div>
 
           <div className="mt-6 h-px w-full bg-sky-800/40" />
 
-          {/* Referral input */}
-          <div className="mt-6">
-            <label className="block text-sm font-semibold mb-1">
-              Referral Code (optional)
-            </label>
-            <div className="flex flex-wrap gap-2 items-center">
-              <input
-                value={referralInput}
-                onChange={(e) => setReferralInput(e.target.value.trim())}
-                placeholder="e.g. vouch"
-                className="w-60 bg-[#0c162a] border border-sky-800/40 rounded-md px-3 py-2 outline-none text-sm"
-              />
+          {/* Referral & Coupon inputs - ONLY for normal bookings */}
+          {!isUpgrade && (
+            <>
+              {/* Referral input */}
+              <div className="mt-6">
+                <label className="block text-sm font-semibold mb-1">
+                  Referral Code (optional)
+                </label>
+                <div className="flex flex-wrap gap-2 items-center">
+                  <input
+                    value={referralInput}
+                    onChange={(e) => setReferralInput(e.target.value.trim())}
+                    placeholder="e.g. vouch"
+                    className="w-60 bg-[#0c162a] border border-sky-800/40 rounded-md px-3 py-2 outline-none text-sm"
+                  />
 
-              <button
-                onClick={() => validateReferral(referralInput)}
-                disabled={validating}
-                className="glow-button px-3 py-2 rounded-md font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 text-sm"
-              >
-                {validating ? "Checking..." : "Apply"}
-                <span className="glow-line glow-line-top" />
-                <span className="glow-line glow-line-right" />
-                <span className="glow-line glow-line-bottom" />
-                <span className="glow-line glow-line-left" />
-              </button>
-            </div>
-            {referralInput && !referral && !validating && (
-              <p className="text-sm text-red-300 mt-2">
-                Invalid or inactive referral code.
-              </p>
-            )}
-          </div>
+                  <button
+                    onClick={() => validateReferral(referralInput)}
+                    disabled={validating}
+                    className="glow-button px-3 py-2 rounded-md font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 text-sm"
+                  >
+                    {validating ? "Checking..." : "Apply"}
+                    <span className="glow-line glow-line-top" />
+                    <span className="glow-line glow-line-right" />
+                    <span className="glow-line glow-line-bottom" />
+                    <span className="glow-line glow-line-left" />
+                  </button>
+                </div>
+                {referralInput && !referral && !validating && (
+                  <p className="text-sm text-red-300 mt-2">
+                    Invalid or inactive referral code.
+                  </p>
+                )}
+              </div>
 
-          {/* Coupon input - right under referral */}
-          <div className="mt-5">
-            <label className="block text-sm font-semibold mb-1">
-              Coupon Code (optional)
-            </label>
-            <div className="flex flex-wrap gap-2 items-center">
-              <input
-                value={couponInput}
-                onChange={(e) => setCouponInput(e.target.value.trim())}
-                placeholder="e.g. BF10"
-                className="w-60 bg-[#0c162a] border border-sky-800/40 rounded-md px-3 py-2 outline-none text-sm"
-              />
+              {/* Coupon input */}
+              <div className="mt-5">
+                <label className="block text-sm font-semibold mb-1">
+                  Coupon Code (optional)
+                </label>
+                <div className="flex flex-wrap gap-2 items-center">
+                  <input
+                    value={couponInput}
+                    onChange={(e) => setCouponInput(e.target.value.trim())}
+                    placeholder="e.g. BF10"
+                    className="w-60 bg-[#0c162a] border border-sky-800/40 rounded-md px-3 py-2 outline-none text-sm"
+                  />
 
-              <button
-                onClick={() => validateCoupon(couponInput)}
-                disabled={validatingCoupon}
-                className="glow-button px-3 py-2 rounded-md font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 text-sm"
-              >
-                {validatingCoupon ? "Checking..." : "Apply"}
-                <span className="glow-line glow-line-top" />
-                <span className="glow-line glow-line-right" />
-                <span className="glow-line glow-line-bottom" />
-                <span className="glow-line glow-line-left" />
-              </button>
+                  <button
+                    onClick={() => validateCoupon(couponInput)}
+                    disabled={validatingCoupon}
+                    className="glow-button px-3 py-2 rounded-md font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 text-sm"
+                  >
+                    {validatingCoupon ? "Checking..." : "Apply"}
+                    <span className="glow-line glow-line-top" />
+                    <span className="glow-line glow-line-right" />
+                    <span className="glow-line glow-line-bottom" />
+                    <span className="glow-line glow-line-left" />
+                  </button>
 
-              {coupon && (
-                <button
-                  onClick={() => {
-                    setCoupon(null);
-                    setCouponInput("");
-                  }}
-                  className="text-xs text-slate-300 underline underline-offset-2"
-                >
-                  Remove coupon
-                </button>
-              )}
-            </div>
-            {coupon && coupon.canCombineWithReferral === false && referral && (
-              <p className="text-xs text-amber-300 mt-1">
-                This coupon cannot be clubbed with a referral discount.
-              </p>
-            )}
-          </div>
+                  {coupon && (
+                    <button
+                      onClick={() => {
+                        setCoupon(null);
+                        setCouponInput("");
+                      }}
+                      className="text-xs text-slate-300 underline underline-offset-2"
+                    >
+                      Remove coupon
+                    </button>
+                  )}
+                </div>
+                {coupon &&
+                  coupon.canCombineWithReferral === false &&
+                  referral && (
+                    <p className="text-xs text-amber-300 mt-1">
+                      This coupon cannot be clubbed with a referral discount.
+                    </p>
+                  )}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -643,18 +671,26 @@ export default function Payment() {
                     try {
                       const payload = {
                         ...bookingData,
-                        referralCode: referral?.code || referralInput || "",
-                        referralId: referral?._id || null,
+                        referralCode: isUpgrade
+                          ? ""
+                          : referral?.code || referralInput || "",
+                        referralId: isUpgrade ? null : referral?._id || null,
 
-                        couponCode: coupon?.code || couponInput || "",
-                        couponDiscountPercent: couponPercent,
-                        couponDiscountAmount: couponDiscountAmount,
+                        couponCode: isUpgrade
+                          ? ""
+                          : coupon?.code || couponInput || "",
+                        couponDiscountPercent: isUpgrade ? 0 : couponPercent,
+                        couponDiscountAmount: isUpgrade
+                          ? 0
+                          : couponDiscountAmount,
 
-                        discountPercent: discountPercentCombined,
-                        discountAmount: totalDiscountAmount,
+                        discountPercent: isUpgrade
+                          ? 0
+                          : discountPercentCombined,
+                        discountAmount: isUpgrade ? 0 : totalDiscountAmount,
                         grossAmount: baseAmount,
                         netAmount: finalAmount,
-                        commissionPercent,
+                        commissionPercent: isUpgrade ? 0 : commissionPercent,
 
                         paypalOrderId: details?.id || "",
                         payerEmail: details?.payer?.email_address || "",
@@ -704,10 +740,10 @@ export default function Payment() {
 
       <div className="mt-8 text-center">
         <Link
-          to="/booking"
+          to={isUpgrade ? "/packages" : "/booking"}
           className="text-sky-400 hover:text-sky-300 transition-colors duration-300 text-sm"
         >
-          ← Back to Booking
+          ← {isUpgrade ? "Back to Packages" : "Back to Booking"}
         </Link>
       </div>
     </section>
