@@ -1,4 +1,3 @@
-// api/createBooking.js
 import { Resend } from "resend";
 import { createClient } from "@sanity/client";
 

@@ -1,3 +1,4 @@
+// rooidustries/schemaTypes/slotHold.js
 export default {
   name: 'slotHold',
   title: 'Slot Hold',
