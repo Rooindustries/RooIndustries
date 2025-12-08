@@ -1,4 +1,3 @@
-// pages/api/ref/createBooking.js
 import { Resend } from "resend";
 import { createClient } from "@sanity/client";
 
@@ -74,8 +73,13 @@ export default async function handler(req, res) {
       paypalOrderId = "",
       payerEmail = "",
 
-      // NEW: original booking id for upgrades (optional)
+      // upgrades
       originalOrderId = "",
+
+      // coupon fields
+      couponCode = "",
+      couponDiscountPercent = 0,
+      couponDiscountAmount = 0,
 
       // time metadata
       hostDate,
@@ -135,7 +139,6 @@ export default async function handler(req, res) {
             effectiveReferralId = refDoc._id;
           }
 
-          // same unlock logic you use on the dashboard:
           const successfulReferrals = refDoc.successfulReferrals ?? 0;
           const unlocked =
             successfulReferrals >= 5 || refDoc.bypassUnlock === true;
@@ -155,6 +158,8 @@ export default async function handler(req, res) {
             effectiveCommissionPercent = refCommission;
           }
 
+          // ⚠️ IMPORTANT:
+          // Only override discountPercent if the client didn't send one (no coupons, basic flow).
           if (!effectiveDiscountPercent) {
             effectiveDiscountPercent = refDiscount;
           }
@@ -220,7 +225,17 @@ export default async function handler(req, res) {
       paypalOrderId,
       payerEmail,
 
+      // upgrade info
       ...(originalOrderId ? { originalOrderId } : {}),
+
+      // coupon info
+      ...(couponCode
+        ? {
+            couponCode,
+            couponDiscountPercent,
+            couponDiscountAmount,
+          }
+        : {}),
 
       ...(effectiveReferralId
         ? { referral: { _type: "reference", _ref: effectiveReferralId } }
@@ -281,8 +296,26 @@ export default async function handler(req, res) {
       ...(effectiveDiscountPercent || effectiveDiscountAmount
         ? [
             {
-              label: "Discount",
+              label: "Total Discount",
               value: `${effectiveDiscountPercent}% (-$${effectiveDiscountAmount.toFixed(
+                2
+              )})`,
+            },
+          ]
+        : []),
+      ...(couponCode
+        ? [
+            {
+              label: "Coupon Code",
+              value: couponCode,
+            },
+          ]
+        : []),
+      ...(couponCode && (couponDiscountPercent || couponDiscountAmount)
+        ? [
+            {
+              label: "Coupon Discount",
+              value: `${couponDiscountPercent}% (-$${couponDiscountAmount.toFixed(
                 2
               )})`,
             },
@@ -339,8 +372,26 @@ export default async function handler(req, res) {
       ...(effectiveDiscountPercent || effectiveDiscountAmount
         ? [
             {
-              label: "Discount",
+              label: "Total Discount",
               value: `${effectiveDiscountPercent}% (-$${effectiveDiscountAmount.toFixed(
+                2
+              )})`,
+            },
+          ]
+        : []),
+      ...(couponCode
+        ? [
+            {
+              label: "Coupon Code",
+              value: couponCode,
+            },
+          ]
+        : []),
+      ...(couponCode && (couponDiscountPercent || couponDiscountAmount)
+        ? [
+            {
+              label: "Coupon Discount",
+              value: `${couponDiscountPercent}% (-$${couponDiscountAmount.toFixed(
                 2
               )})`,
             },

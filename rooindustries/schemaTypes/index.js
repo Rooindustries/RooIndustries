@@ -14,6 +14,7 @@ import proReviewsCarousel from './proReviewsCarousel'
 import booking from './booking'
 import bookingSettings from './bookingSettings'
 import referral from './referral'
+import coupon from './coupon'
 
 export const schemaTypes = [
   benchmark,
@@ -32,4 +33,5 @@ export const schemaTypes = [
   booking,
   bookingSettings,
   referral,
+  coupon,
 ]

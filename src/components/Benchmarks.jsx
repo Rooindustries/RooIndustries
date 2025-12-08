@@ -9,7 +9,14 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
   useEffect(() => {
     client
       .fetch(
-        `*[_type == "benchmark"]{title, beforeImage, afterImage, reviewImage}`
+        `*[_type == "benchmark"] 
+          | order(coalesce(sortOrder, 9999) asc, _createdAt asc) {
+            title,
+            subtitle,
+            beforeImage,
+            afterImage,
+            reviewImage
+          }`
       )
       .then(setBenchmarks)
       .catch(console.error);
@@ -36,7 +43,13 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
       <div className="py-5 px-4 max-w-7xl mx-auto text-white">
         {benchmarks.map((b, i) => (
           <div key={i} className="mb-12">
-            <h2 className="text-3xl font-bold text-center mb-4">{b.title}</h2>
+            <h2 className="text-3xl font-bold text-center mb-1">{b.title}</h2>
+            {b.subtitle && (
+              <p className="text-center text-slate-300 mb-4 text-sm">
+                {b.subtitle}
+              </p>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Before */}
               <div className="border-2 border-red-600 rounded-lg p-2">

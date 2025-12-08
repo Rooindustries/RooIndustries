@@ -25,7 +25,12 @@ export default function Payment() {
   const [referral, setReferral] = useState(null);
   const [validating, setValidating] = useState(false);
 
-  const [banner, setBanner] = useState(null); // { type: "success" | "error" | "info", text: string }
+  // 🔵 Coupon states
+  const [couponInput, setCouponInput] = useState("");
+  const [coupon, setCoupon] = useState(null);
+  const [validatingCoupon, setValidatingCoupon] = useState(false);
+
+  const [banner, setBanner] = useState(null);
 
   const showBanner = (type, text) => {
     setBanner({ type, text });
@@ -34,11 +39,51 @@ export default function Payment() {
     }, 4000);
   };
 
-  const discountPercent = referral?.currentDiscountPercent || 0;
+  // Referral discount
+  const referralPercent = referral?.currentDiscountPercent || 0;
   const commissionPercent = referral?.currentCommissionPercent || 0;
 
-  const discountAmount = +(baseAmount * (discountPercent / 100)).toFixed(2);
-  const finalAmount = Math.max(0, +(baseAmount - discountAmount).toFixed(2));
+  // Coupon discount
+  const couponPercent = coupon?.discountPercent || 0;
+  const canStackCouponWithReferral =
+    coupon?.canCombineWithReferral === true || false;
+
+  // Compute discount breakdown
+  let referralDiscountAmount = 0;
+  let couponDiscountAmount = 0;
+
+  if (baseAmount > 0) {
+    // Referral always based on baseAmount
+    if (referralPercent > 0) {
+      referralDiscountAmount = +(baseAmount * (referralPercent / 100)).toFixed(
+        2
+      );
+    }
+
+    if (couponPercent > 0 && coupon) {
+      if (canStackCouponWithReferral && referralPercent > 0) {
+        // 💡 Option A: coupon also on full baseAmount (simpler)
+        couponDiscountAmount = +(baseAmount * (couponPercent / 100)).toFixed(2);
+      } else {
+        // No stacking or no referral
+        couponDiscountAmount = +(baseAmount * (couponPercent / 100)).toFixed(2);
+      }
+    }
+  }
+
+  const totalDiscountAmount = +(
+    (referralDiscountAmount || 0) + (couponDiscountAmount || 0)
+  ).toFixed(2);
+
+  const finalAmount = Math.max(
+    0,
+    +(baseAmount - totalDiscountAmount).toFixed(2)
+  );
+
+  const discountPercentCombined =
+    baseAmount > 0
+      ? +((totalDiscountAmount / baseAmount) * 100 || 0).toFixed(2)
+      : 0;
 
   // Razorpay state
   const [rzpReady, setRzpReady] = useState(false);
@@ -86,10 +131,13 @@ export default function Payment() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ----------------- REFERRAL VALIDATION -----------------
   async function validateReferral(code) {
     if (!code) {
       setReferral(null);
-      localStorage.removeItem("referral");
+      try {
+        localStorage.removeItem("referral");
+      } catch {}
       return;
     }
     try {
@@ -104,25 +152,93 @@ export default function Payment() {
         setReferral(data.referral);
 
         if (data.referral.code) {
-          localStorage.setItem("referral", data.referral.code);
+          try {
+            localStorage.setItem("referral", data.referral.code);
+          } catch {}
         } else {
-          localStorage.removeItem("referral");
+          try {
+            localStorage.removeItem("referral");
+          } catch {}
+        }
+
+        // If we already have a coupon that can't stack, clear it
+        if (
+          coupon &&
+          coupon.canCombineWithReferral === false &&
+          data.referral
+        ) {
+          setCoupon(null);
+          setCouponInput("");
+          showBanner(
+            "info",
+            "Current coupon can't be combined with referrals and was removed."
+          );
         }
       } else {
         setReferral(null);
-        localStorage.removeItem("referral");
+        try {
+          localStorage.removeItem("referral");
+        } catch {}
         showBanner("error", "Invalid or inactive referral code.");
       }
     } catch (e) {
       console.error(e);
       setReferral(null);
-      localStorage.removeItem("referral");
+      try {
+        localStorage.removeItem("referral");
+      } catch {}
       showBanner(
         "error",
         "We couldn’t validate that referral code. Please try again."
       );
     } finally {
       setValidating(false);
+    }
+  }
+
+  // ----------------- COUPON VALIDATION -----------------
+  async function validateCoupon(code) {
+    if (!code) {
+      setCoupon(null);
+      return;
+    }
+    try {
+      setValidatingCoupon(true);
+      const r = await fetch(
+        `/api/ref/validateCoupon?code=${encodeURIComponent(code)}`
+      );
+      const data = await r.json();
+      console.log("validateCoupon result:", data);
+
+      if (data.ok && data.coupon) {
+        // If coupon can't be combined and there's already a referral, block it
+        if (data.coupon.canCombineWithReferral === false && referral) {
+          setCoupon(null);
+          showBanner(
+            "error",
+            "This coupon can't be used together with a referral discount. Remove the referral or use a different coupon."
+          );
+          return;
+        }
+
+        setCoupon(data.coupon);
+        showBanner(
+          "success",
+          `Coupon applied: ${data.coupon.discountPercent}% off`
+        );
+      } else {
+        setCoupon(null);
+        showBanner("error", data.error || "Invalid coupon code.");
+      }
+    } catch (e) {
+      console.error(e);
+      setCoupon(null);
+      showBanner(
+        "error",
+        "We couldn’t validate that coupon code. Please try again."
+      );
+    } finally {
+      setValidatingCoupon(false);
     }
   }
 
@@ -137,10 +253,17 @@ export default function Payment() {
     }
 
     try {
+      if (finalAmount <= 0) {
+        showBanner(
+          "error",
+          "Final amount is zero or negative. Please contact support."
+        );
+        return;
+      }
+
       setPayingRzp(true);
       showBanner("info", "Opening Razorpay checkout…");
 
-      // 1) Ask backend to create Razorpay order
       const orderRes = await fetch("/api/razorpay/createOrder", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -152,6 +275,7 @@ export default function Payment() {
             date,
             time,
             referralCode: referral?.code || referralInput || "",
+            couponCode: coupon?.code || couponInput || "",
           },
         }),
       });
@@ -168,7 +292,6 @@ export default function Payment() {
         return;
       }
 
-      // 2) Open Razorpay popup
       const options = {
         key: orderData.key,
         amount: orderData.amount,
@@ -190,7 +313,6 @@ export default function Payment() {
 
         handler: async function (response) {
           try {
-            // 3) Verify signature on backend
             const verifyRes = await fetch("/api/razorpay/verify", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -212,11 +334,21 @@ export default function Payment() {
               ...bookingData,
               referralCode: referral?.code || referralInput || "",
               referralId: referral?._id || null,
-              discountPercent,
-              discountAmount,
+
+              // coupon details
+              couponCode: coupon?.code || couponInput || "",
+              couponDiscountPercent: couponPercent,
+              couponDiscountAmount: couponDiscountAmount,
+
+              // combined discount data
+              discountPercent: discountPercentCombined,
+              discountAmount: totalDiscountAmount,
+
               grossAmount: baseAmount,
               netAmount: finalAmount,
+
               commissionPercent,
+
               razorpayOrderId: response.razorpay_order_id,
               razorpayPaymentId: response.razorpay_payment_id,
               status: "captured",
@@ -238,7 +370,6 @@ export default function Payment() {
               return;
             }
 
-            // all good -> go to success page
             navigate("/payment-success");
           } catch (err) {
             console.error("Razorpay post-payment error:", err);
@@ -317,7 +448,7 @@ export default function Payment() {
           <div className="mt-6">
             <p className="font-semibold text-lg text-white">{packageTitle}</p>
             <div className="mt-2 space-y-1">
-              {discountPercent > 0 && (
+              {(referralPercent > 0 || couponPercent > 0) && (
                 <p className="text-xl text-slate-300 line-through">
                   ${baseAmount.toFixed(2)}
                 </p>
@@ -325,12 +456,31 @@ export default function Payment() {
               <p className="text-3xl font-extrabold text-sky-400">
                 ${finalAmount.toFixed(2)} USD
               </p>
-              {discountPercent > 0 && (
+
+              {/* Detailed discount breakdown */}
+              {referralPercent > 0 && (
                 <p className="text-sm text-green-300">
-                  You saved {discountPercent}% (−${discountAmount.toFixed(2)})
-                  via {referral?.name}
+                  Referral: {referralPercent}% (−$
+                  {referralDiscountAmount.toFixed(2)}
+                  {referral?.name ? ` via ${referral.name}` : ""})
                 </p>
               )}
+              {couponPercent > 0 && coupon && (
+                <p className="text-sm text-emerald-300">
+                  Coupon "{coupon.code}": {couponPercent}% (−$
+                  {couponDiscountAmount.toFixed(2)})
+                  {canStackCouponWithReferral && referralPercent > 0
+                    ? " (stacked with referral)"
+                    : ""}
+                </p>
+              )}
+              {totalDiscountAmount > 0 && (
+                <p className="text-xs text-slate-300">
+                  Total savings: {discountPercentCombined}% (−$
+                  {totalDiscountAmount.toFixed(2)})
+                </p>
+              )}
+
               <p className="text-sm text-slate-400 mt-1">
                 Date: <span className="text-sky-300">{date}</span> — Time:{" "}
                 <span className="text-sky-300">{time}</span>
@@ -345,18 +495,18 @@ export default function Payment() {
             <label className="block text-sm font-semibold mb-1">
               Referral Code (optional)
             </label>
-            <div className="flex gap-2 items-center">
+            <div className="flex flex-wrap gap-2 items-center">
               <input
                 value={referralInput}
                 onChange={(e) => setReferralInput(e.target.value.trim())}
                 placeholder="e.g. vouch"
-                className="w-60 bg-[#0c162a] border border-sky-800/40 rounded-md px-3 py-2 outline-none"
+                className="w-60 bg-[#0c162a] border border-sky-800/40 rounded-md px-3 py-2 outline-none text-sm"
               />
 
               <button
                 onClick={() => validateReferral(referralInput)}
                 disabled={validating}
-                className="glow-button px-3 py-2 rounded-md font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60"
+                className="glow-button px-3 py-2 rounded-md font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 text-sm"
               >
                 {validating ? "Checking..." : "Apply"}
                 <span className="glow-line glow-line-top" />
@@ -368,6 +518,50 @@ export default function Payment() {
             {referralInput && !referral && !validating && (
               <p className="text-sm text-red-300 mt-2">
                 Invalid or inactive referral code.
+              </p>
+            )}
+          </div>
+
+          {/* Coupon input - right under referral */}
+          <div className="mt-5">
+            <label className="block text-sm font-semibold mb-1">
+              Coupon Code (optional)
+            </label>
+            <div className="flex flex-wrap gap-2 items-center">
+              <input
+                value={couponInput}
+                onChange={(e) => setCouponInput(e.target.value.trim())}
+                placeholder="e.g. BF10"
+                className="w-60 bg-[#0c162a] border border-sky-800/40 rounded-md px-3 py-2 outline-none text-sm"
+              />
+
+              <button
+                onClick={() => validateCoupon(couponInput)}
+                disabled={validatingCoupon}
+                className="glow-button px-3 py-2 rounded-md font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 text-sm"
+              >
+                {validatingCoupon ? "Checking..." : "Apply"}
+                <span className="glow-line glow-line-top" />
+                <span className="glow-line glow-line-right" />
+                <span className="glow-line glow-line-bottom" />
+                <span className="glow-line glow-line-left" />
+              </button>
+
+              {coupon && (
+                <button
+                  onClick={() => {
+                    setCoupon(null);
+                    setCouponInput("");
+                  }}
+                  className="text-xs text-slate-300 underline underline-offset-2"
+                >
+                  Remove coupon
+                </button>
+              )}
+            </div>
+            {coupon && coupon.canCombineWithReferral === false && referral && (
+              <p className="text-xs text-amber-300 mt-1">
+                This coupon cannot be clubbed with a referral discount.
               </p>
             )}
           </div>
@@ -451,11 +645,17 @@ export default function Payment() {
                         ...bookingData,
                         referralCode: referral?.code || referralInput || "",
                         referralId: referral?._id || null,
-                        discountPercent,
-                        discountAmount,
+
+                        couponCode: coupon?.code || couponInput || "",
+                        couponDiscountPercent: couponPercent,
+                        couponDiscountAmount: couponDiscountAmount,
+
+                        discountPercent: discountPercentCombined,
+                        discountAmount: totalDiscountAmount,
                         grossAmount: baseAmount,
                         netAmount: finalAmount,
                         commissionPercent,
+
                         paypalOrderId: details?.id || "",
                         payerEmail: details?.payer?.email_address || "",
                         status: "captured",
