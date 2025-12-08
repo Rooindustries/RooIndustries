@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import { client } from "../sanityClient";
 
@@ -8,6 +8,10 @@ const titleClass =
 
 export default function StreamerYoutuberReviews() {
   const [entries, setEntries] = useState([]);
+  const [maxCardHeight, setMaxCardHeight] = useState(0);
+  const [viewportWidth, setViewportWidth] = useState(
+    typeof window !== "undefined" ? window.innerWidth : 0
+  );
 
   const sectionClass =
     "py-16 px-4 sm:px-6 text-center text-white relative overflow-hidden";
@@ -57,6 +61,20 @@ export default function StreamerYoutuberReviews() {
     };
   }, []);
 
+  useEffect(() => {
+    const handleResize = () => {
+      setViewportWidth(window.innerWidth);
+    };
+
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  const reportHeight = useCallback((height) => {
+    setMaxCardHeight((prev) => (height > prev ? height : prev));
+  }, []);
+
   const normalizeReviews = (incoming) => {
     if (!incoming?.length) return [];
     return incoming;
@@ -70,6 +88,7 @@ export default function StreamerYoutuberReviews() {
 
   const leftReviews = normalizeReviews(left?.reviews);
   const rightReviews = normalizeReviews(right?.reviews);
+  const lockHeight = viewportWidth >= 640;
 
   return (
     <section className={sectionClass}>
@@ -81,9 +100,12 @@ export default function StreamerYoutuberReviews() {
           defaultTitle={defaultTitle}
           defaultSubtitle={defaultSubtitle}
           reviews={leftReviews}
-          intervalMs={4000}
+          intervalMs={8000}
           transitionMs={1400}
           glowEnabled={left?.glowEnabled}
+          onMeasureHeight={reportHeight}
+          fixedHeight={lockHeight && maxCardHeight ? maxCardHeight : null}
+          lockHeight={lockHeight}
         />
 
         <Carousel
@@ -93,9 +115,12 @@ export default function StreamerYoutuberReviews() {
           defaultTitle={defaultTitle}
           defaultSubtitle={defaultSubtitle}
           reviews={rightReviews}
-          intervalMs={4000}
+          intervalMs={8000}
           transitionMs={1400}
           glowEnabled={right?.glowEnabled}
+          onMeasureHeight={reportHeight}
+          fixedHeight={lockHeight && maxCardHeight ? maxCardHeight : null}
+          lockHeight={lockHeight}
         />
       </div>
     </section>
@@ -112,25 +137,103 @@ function Carousel({
   intervalMs,
   transitionMs,
   glowEnabled,
+  onMeasureHeight,
+  fixedHeight,
+  lockHeight,
 }) {
-  const [index, setIndex] = useState(0);
+  const slideCount = Array.isArray(reviews) ? reviews.length : 0;
+  const hasMultipleSlides = slideCount > 1;
+  const extendedReviews =
+    hasMultipleSlides && reviews
+      ? [reviews[slideCount - 1], ...reviews, reviews[0]]
+      : reviews || [];
+  const totalSlides = extendedReviews.length;
+
+  const [index, setIndex] = useState(hasMultipleSlides ? 1 : 0);
+  const [isAnimating, setIsAnimating] = useState(hasMultipleSlides);
+  const isTransitioningRef = useRef(false);
+  const [localHeight, setLocalHeight] = useState(0);
   const containerRef = useRef(null);
+  const cardRefs = useRef([]);
 
-  const handleNext = () => {
-    if (!reviews?.length) return;
-    setIndex((prev) => (prev + 1) % reviews.length);
-  };
+  const heightToUse = lockHeight ? fixedHeight || localHeight : 0;
 
-  const handlePrev = () => {
-    if (!reviews?.length) return;
-    setIndex((prev) => (prev - 1 + reviews.length) % reviews.length);
-  };
+  const measureHeights = useCallback(() => {
+    const heights =
+      cardRefs.current
+        ?.map((card) => card?.offsetHeight || 0)
+        ?.filter(Boolean) || [];
+
+    if (!heights.length) return;
+
+    const tallest = Math.max(...heights);
+    setLocalHeight((prev) => (prev === tallest ? prev : tallest));
+    onMeasureHeight?.(tallest);
+  }, [onMeasureHeight]);
+
+  const handleNext = useCallback(() => {
+    if (!hasMultipleSlides || isTransitioningRef.current) return;
+    isTransitioningRef.current = true;
+    setIsAnimating(true);
+    setIndex((prev) => prev + 1);
+  }, [hasMultipleSlides]);
+
+  const handlePrev = useCallback(() => {
+    if (!hasMultipleSlides || isTransitioningRef.current) return;
+    isTransitioningRef.current = true;
+    setIsAnimating(true);
+    setIndex((prev) => prev - 1);
+  }, [hasMultipleSlides]);
 
   useEffect(() => {
-    if (!reviews?.length || reviews.length < 2) return;
-    const interval = setInterval(handleNext, intervalMs);
+    if (!hasMultipleSlides) return;
+    const interval = setInterval(() => {
+      if (!isTransitioningRef.current) {
+        handleNext();
+      }
+    }, intervalMs);
     return () => clearInterval(interval);
-  }, [reviews, intervalMs]);
+  }, [hasMultipleSlides, handleNext, intervalMs]);
+
+  useEffect(() => {
+    setIndex(hasMultipleSlides ? 1 : 0);
+    setIsAnimating(hasMultipleSlides);
+    isTransitioningRef.current = false;
+  }, [hasMultipleSlides, slideCount]);
+
+  useEffect(() => {
+    measureHeights();
+    const onResize = () => measureHeights();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [measureHeights, extendedReviews]);
+
+  useEffect(() => {
+    if (isAnimating) return;
+    const id = requestAnimationFrame(() => setIsAnimating(true));
+    return () => cancelAnimationFrame(id);
+  }, [isAnimating]);
+
+  const handleTransitionEnd = () => {
+    if (!hasMultipleSlides) return;
+
+    if (index === 0) {
+      setIsAnimating(false);
+      setIndex(totalSlides - 2);
+      isTransitioningRef.current = false;
+      return;
+    }
+
+    if (index === totalSlides - 1) {
+      setIsAnimating(false);
+      setIndex(1);
+      isTransitioningRef.current = false;
+      return;
+    }
+
+    setIsAnimating(false);
+    isTransitioningRef.current = false;
+  };
 
   const CornerSparkle = ({ className, delay }) => (
     <div className={`absolute z-30 pointer-events-none ${className}`}>
@@ -155,16 +258,15 @@ function Carousel({
   return (
     <div className="text-center text-white relative">
       <div className="w-full mx-auto px-4">
-        {/* REMOVED 'truncate' CLASS BELOW */}
         <h3
-          className={`${titleClass} mb-2 w-full`}
+          className={`${titleClass} mb-3 w-full`}
           title={title || defaultTitle}
         >
           {title || defaultTitle}
         </h3>
       </div>
 
-      <p className="text-slate-300 mb-5 text-[14px]">
+      <p className="text-slate-300 mb-6 text-[14px]">
         {subtitle || defaultSubtitle}
       </p>
 
@@ -207,32 +309,48 @@ function Carousel({
               className="flex"
               style={{
                 transform: `translateX(-${index * 100}%)`,
-                transition: `transform ${transitionMs}ms ease-in-out`,
+                transition: isAnimating
+                  ? `transform ${transitionMs}ms ease-in-out`
+                  : "none",
               }}
+              onTransitionEnd={handleTransitionEnd}
             >
-              {reviews.map((review, i) => (
+              {extendedReviews.map((review, i) => (
                 <div
-                  key={i}
-                  className="flex-shrink-0 w-full 
-                             min-h-[200px] sm:min-h-[180px] md:min-h-[200px]
-                             flex flex-col items-center 
-                             bg-[#0b1120]/90 rounded-3xl 
-                             px-6 py-8 relative"
+                  key={`review-${i}-${review?.name || "item"}`}
+                  ref={(el) => {
+                    cardRefs.current[i] = el;
+                  }}
+                  className="flex-shrink-0 w-full"
+                  style={
+                    heightToUse
+                      ? {
+                          minHeight: `${heightToUse}px`,
+                        }
+                      : undefined
+                  }
                 >
-                  <h3 className="text-2xl font-semibold text-sky-300 mb-4 absolute top-6">
-                    {review.name}
-                  </h3>
+                  <div
+                    className="grid h-full grid-rows-[auto,1fr] rounded-3xl 
+                               bg-[#0b1120]/90 px-7 py-8 text-center gap-1"
+                  >
+                    <div className="flex flex-col items-center justify-start gap-3">
+                      <h3 className="text-2xl font-semibold text-sky-300 leading-snug">
+                        {review.name}
+                      </h3>
 
-                  {review.profession ? (
-                    <p className="text-slate-400 text-xs absolute top-14">
-                      {review.profession}
-                    </p>
-                  ) : null}
+                      {review.profession ? (
+                        <p className="text-slate-400 text-sm leading-tight">
+                          {review.profession}
+                        </p>
+                      ) : null}
+                    </div>
 
-                  <div className="flex-grow flex items-center justify-center mt-8">
-                    <p className="text-slate-100 text-base leading-relaxed max-w-sm">
-                      {review.text}
-                    </p>
+                    <div className="flex items-center justify-center">
+                      <p className="text-slate-100 text-base leading-relaxed max-w-sm">
+                        {review.text}
+                      </p>
+                    </div>
                   </div>
                 </div>
               ))}
