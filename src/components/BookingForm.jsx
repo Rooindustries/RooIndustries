@@ -211,6 +211,15 @@ export default function BookingForm() {
   const [pageFadeIn, setPageFadeIn] = useState(false);
   const scrollLockRef = useRef(null);
 
+  // slot hold state
+  const [holdId, setHoldId] = useState(null);
+  const [holdExpiresAt, setHoldExpiresAt] = useState(null);
+  const [lockingSlot, setLockingSlot] = useState(false);
+
+  // custom XOC fields
+  const [xocCustomMobo, setXocCustomMobo] = useState("");
+  const [xocCustomRam, setXocCustomRam] = useState("");
+
   const clearErrorIfResolved = (
     nextForm = form,
     nextMobo = xocMoboId,
@@ -237,10 +246,6 @@ export default function BookingForm() {
       setErrorStep2("");
     }
   };
-
-  // custom XOC fields
-  const [xocCustomMobo, setXocCustomMobo] = useState("");
-  const [xocCustomRam, setXocCustomRam] = useState("");
 
   // Package from URL
   const selectedPackage = useMemo(
@@ -332,14 +337,20 @@ export default function BookingForm() {
     return t;
   }, []);
 
-  // ---------- FETCH SETTINGS ----------
+  // ---------- FETCH SETTINGS + ACTIVE HOLDS ----------
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [sRaw, booked] = await Promise.all([
+        const [sRaw, booked, holds] = await Promise.all([
           client.fetch(`*[_type == "bookingSettings"][0]`),
           client.fetch(
-            `*[_type == "booking"]{date, time, startTimeUTC, packageTitle}`
+            `*[_type == "booking"]{date, time, startTimeUTC, packageTitle, hostDate, hostTime}`
+          ),
+          client.fetch(
+            `*[_type == "slotHold" && expiresAt > now()]{
+              hostDate,
+              hostTime
+            }`
           ),
         ]);
 
@@ -357,7 +368,21 @@ export default function BookingForm() {
           s.xocCloseHour = Number(s.xocCloseHour);
         }
 
-        s.bookedSlots = booked || [];
+        const holdsMapped = (holds || []).map((h) => ({
+          date: h.hostDate,
+          time: h.hostTime,
+          isHold: true,
+        }));
+
+        const bookedMapped =
+          booked?.map((b) => ({
+            date: b.hostDate || b.date,
+            time: b.hostTime || b.time,
+            isHold: false,
+          })) || [];
+
+        s.bookedSlots = [...bookedMapped, ...holdsMapped];
+
         setSettings(s);
       } catch (err) {
         console.error("Error fetching booking data:", err);
@@ -525,16 +550,18 @@ export default function BookingForm() {
 
     const hostDateLabel = selectedDate.toDateString();
     const bookedForDayHost =
-      settings.bookedSlots
-        ?.filter((b) => b.date === hostDateLabel)
-        .map((b) => b.time) || [];
+      settings.bookedSlots?.filter((b) => b.date === hostDateLabel) || [];
 
     const slots = [];
     for (let h = open; h <= close; h++) {
       const hostLabel = hostTimeLabel(h);
       const isAllowed = allowed.includes(h);
-      const isBooked = bookedForDayHost.includes(hostLabel);
-      const disabled = !isAllowed || isBooked;
+
+      const record = bookedForDayHost.find((b) => b.time === hostLabel);
+      const isHeld = !!record && record.isHold;
+      const isBooked = !!record && !record.isHold;
+
+      const disabled = !isAllowed || isBooked || isHeld;
 
       const utcStart = getUtcFromHostLocal(hostYear, hostMonth, hostDay, h);
       const localLabel = formatLocalTime(utcStart);
@@ -546,6 +573,7 @@ export default function BookingForm() {
         utcStart,
         disabled,
         isBooked,
+        isHeld,
         isAllowed,
       });
     }
@@ -593,9 +621,7 @@ export default function BookingForm() {
 
     const hostDateLabel = d.toDateString();
     const bookedForDayHost =
-      settings.bookedSlots
-        ?.filter((b) => b.date === hostDateLabel)
-        .map((b) => b.time) || [];
+      settings.bookedSlots?.filter((b) => b.date === hostDateLabel) || [];
 
     let availableCount = 0;
     let totalConsidered = 0;
@@ -603,8 +629,12 @@ export default function BookingForm() {
     for (let h = open; h <= close; h++) {
       const hostLabel = hostTimeLabel(h);
       const isAllowed = allowed.includes(h);
-      const isBooked = bookedForDayHost.includes(hostLabel);
-      const disabled = !isAllowed || isBooked;
+
+      const record = bookedForDayHost.find((b) => b.time === hostLabel);
+      const isHeld = !!record && record.isHold;
+      const isBooked = !!record && !record.isHold;
+
+      const disabled = !isAllowed || isBooked || isHeld;
 
       if (isAllowed) {
         totalConsidered++;
@@ -662,6 +692,73 @@ export default function BookingForm() {
 
     setSelectedDate(date);
     setSelectedSlot(null);
+    // if user changes date after locking, we just let existing hold expire
+  };
+
+  // ---------- LOCK SLOT + GO TO STEP 2 ----------
+  const handleLockAndGoNext = async () => {
+    if (!selectedDate || !selectedSlot) {
+      setErrorStep1("Please select a date and time before continuing.");
+      return;
+    }
+
+    if (lockingSlot) return;
+
+    setErrorStep1("");
+    setLockingSlot(true);
+
+    try {
+      const res = await fetch("/api/holdSlot", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          hostDate: selectedDate.toDateString(),
+          hostTime: selectedSlot.hostLabel,
+          startTimeUTC: selectedSlot.utcStart.toISOString(),
+          packageTitle: selectedPackage.title,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        setErrorStep1(
+          data.message ||
+            "That slot was just taken by someone else. Please choose another time."
+        );
+        return;
+      }
+
+      // Save hold info
+      setHoldId(data.holdId);
+      setHoldExpiresAt(data.expiresAt);
+
+      // Immediately mark this slot as held in local state so it shows as red/locked
+      setSettings((prev) => {
+        if (!prev) return prev;
+        const hostDateLabel = selectedDate.toDateString();
+        const newHold = {
+          date: hostDateLabel,
+          time: selectedSlot.hostLabel,
+          isHold: true,
+        };
+        return {
+          ...prev,
+          bookedSlots: [...(prev.bookedSlots || []), newHold],
+        };
+      });
+
+      setStep(2);
+    } catch (err) {
+      console.error("Error reserving slot:", err);
+      setErrorStep1(
+        "Could not reserve this slot. Please check your internet and try again."
+      );
+    } finally {
+      setLockingSlot(false);
+    }
   };
 
   // ---------- SUBMIT ----------
@@ -721,6 +818,10 @@ export default function BookingForm() {
 
       status: "pending",
 
+      // pass hold info to Payment -> createBooking
+      slotHoldId: holdId || null,
+      slotHoldExpiresAt: holdExpiresAt || null,
+
       ...(finalReferralCode ? { referralCode: finalReferralCode } : {}),
 
       ...(isXoc && selectedMobo && selectedRam
@@ -737,7 +838,6 @@ export default function BookingForm() {
           }
         : {}),
 
-      // extra fields if they used custom entries
       ...(isXoc && isCustomMobo && xocCustomMobo.trim()
         ? {
             xocCustomMotherboard: xocCustomMobo.trim(),
@@ -937,7 +1037,7 @@ export default function BookingForm() {
                           onClick={() => !t.disabled && setSelectedSlot(t)}
                           disabled={t.disabled}
                           className={`py-2 rounded-lg border transition-all duration-200 ${
-                            t.isBooked
+                            t.isBooked || t.isHeld
                               ? "bg-red-900/40 border-red-700/40 text-red-400 cursor-not-allowed"
                               : t.disabled
                               ? "bg-slate-800/40 text-slate-500 border-slate-700/50 cursor-not-allowed"
@@ -978,22 +1078,15 @@ export default function BookingForm() {
                 </button>
 
                 <button
-                  onClick={() => {
-                    if (!selectedDate || !selectedSlot) {
-                      setErrorStep1(
-                        "Please select a date and time before continuing."
-                      );
-                      return;
-                    }
-                    setErrorStep1("");
-                    setStep(2);
-                  }}
-                  aria-disabled={!selectedDate || !selectedSlot}
+                  onClick={handleLockAndGoNext}
+                  aria-disabled={!selectedDate || !selectedSlot || lockingSlot}
                   className={`glow-button w-full sm:w-64 py-3 rounded-lg font-semibold text-lg transition-all duration-300 ${
-                    !selectedDate || !selectedSlot ? "opacity-60" : ""
+                    !selectedDate || !selectedSlot || lockingSlot
+                      ? "opacity-60"
+                      : ""
                   }`}
                 >
-                  Next
+                  {lockingSlot ? "Reserving..." : "Next"}
                   <span className="glow-line glow-line-top" />
                   <span className="glow-line glow-line-right" />
                   <span className="glow-line glow-line-bottom" />
@@ -1211,6 +1304,17 @@ export default function BookingForm() {
                 value={form.notes}
                 className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 h-24 focus:outline-none focus:border-sky-500 transition"
               ></textarea>
+
+              {holdExpiresAt && (
+                <p className="text-[11px] text-sky-400/70">
+                  Your selected time is reserved for you until{" "}
+                  {new Date(holdExpiresAt).toLocaleTimeString(undefined, {
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}{" "}
+                  (your local time).
+                </p>
+              )}
 
               <p className="text-sky-400/60 text-xs">
                 Please read the FAQ before booking — it answers everything you
