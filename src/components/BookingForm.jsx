@@ -6,7 +6,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 const HOST_TZ_NAME = "Asia/Kolkata";
 const IST_OFFSET_MINUTES = 330;
 const FORM_PREFILL_KEY = "booking_form_prefill";
-const HOLD_STORAGE_KEY = "my_slot_hold"; // Key to track hold in browser
+const HOLD_STORAGE_KEY = "my_slot_hold";
 
 // Read query params
 function useQuery() {
@@ -217,7 +217,7 @@ export default function BookingForm() {
   const [showReservedModal, setShowReservedModal] = useState(false);
 
   // --- Slot hold state with persistence logic ---
-  const [myHold, setMyHold] = useState(null); // { holdId, hostDate, hostTime, expiresAt }
+  const [myHold, setMyHold] = useState(null);
   const [lockingSlot, setLockingSlot] = useState(false);
 
   // Load existing hold from localStorage on mount
@@ -371,7 +371,8 @@ export default function BookingForm() {
           client.fetch(
             `*[_type == "slotHold" && expiresAt > now()]{
               hostDate,
-              hostTime
+              hostTime,
+              _id
             }`
           ),
         ]);
@@ -394,6 +395,7 @@ export default function BookingForm() {
           date: h.hostDate,
           time: h.hostTime,
           isHold: true,
+          holdId: h._id, // Ensure we have the ID to check conflicts
         }));
 
         const bookedMapped =
@@ -571,26 +573,34 @@ export default function BookingForm() {
 
     const hostDateLabel = selectedDate.toDateString();
 
-    const bookedForDayHost =
-      settings.bookedSlots
-        ?.filter((b) => {
-          if (
-            myHold &&
-            b.date === myHold.hostDate &&
-            b.time === myHold.hostTime
-          ) {
-            return false;
-          }
-          return b.date === hostDateLabel;
-        })
-        .map((b) => b.time) || [];
+    const daySlots =
+      settings.bookedSlots?.filter((b) => {
+        // If I am holding this slot, do NOT count it as "booked" in the general list
+        if (
+          myHold &&
+          b.date === myHold.hostDate &&
+          b.time === myHold.hostTime &&
+          b.isHold
+        ) {
+          return false;
+        }
+        return b.date === hostDateLabel;
+      }) || [];
+
+    const bookedForDayHost = daySlots
+      .filter((b) => !b.isHold)
+      .map((b) => b.time);
+
+    // Slots held by others (since we filtered ours out above)
+    const heldForDayHost = daySlots.filter((b) => b.isHold).map((b) => b.time);
 
     const slots = [];
     for (let h = open; h <= close; h++) {
       const hostLabel = hostTimeLabel(h);
       const isAllowed = allowed.includes(h);
       const isBooked = bookedForDayHost.includes(hostLabel);
-      const disabled = !isAllowed || isBooked;
+      const isHeldOther = heldForDayHost.includes(hostLabel);
+      const disabled = !isAllowed || isBooked || isHeldOther;
 
       const utcStart = getUtcFromHostLocal(hostYear, hostMonth, hostDay, h);
       const localLabel = formatLocalTime(utcStart);
@@ -602,6 +612,7 @@ export default function BookingForm() {
         utcStart,
         disabled,
         isBooked,
+        isHeldOther,
         isAllowed,
       });
     }
@@ -645,19 +656,25 @@ export default function BookingForm() {
 
     const hostDateLabel = d.toDateString();
 
-    const bookedForDayHost =
-      settings.bookedSlots
-        ?.filter((b) => {
-          // Exclude my own hold from calculation
-          if (
-            myHold &&
-            b.date === myHold.hostDate &&
-            b.time === myHold.hostTime
-          )
-            return false;
-          return b.date === hostDateLabel;
-        })
-        .map((b) => b.time) || [];
+    const daySlots =
+      settings.bookedSlots?.filter((b) => {
+        // Exclude my own hold from calculation
+        if (
+          myHold &&
+          b.date === myHold.hostDate &&
+          b.time === myHold.hostTime &&
+          b.isHold
+        ) {
+          return false;
+        }
+        return b.date === hostDateLabel;
+      }) || [];
+
+    // Separate permanent bookings from holds
+    const bookedForDayHost = daySlots
+      .filter((b) => !b.isHold)
+      .map((b) => b.time);
+    const heldForDayHost = daySlots.filter((b) => b.isHold).map((b) => b.time);
 
     let availableCount = 0;
     let totalConsidered = 0;
@@ -666,7 +683,8 @@ export default function BookingForm() {
       const hostLabel = hostTimeLabel(h);
       const isAllowed = allowed.includes(h);
       const isBooked = bookedForDayHost.includes(hostLabel);
-      const disabled = !isAllowed || isBooked;
+      const isHeldOther = heldForDayHost.includes(hostLabel);
+      const disabled = !isAllowed || isBooked || isHeldOther;
 
       if (isAllowed) {
         totalConsidered++;
@@ -726,6 +744,33 @@ export default function BookingForm() {
     setSelectedSlot(null);
   };
 
+  // ---------- RELEASE HOLD (Optimistic Update) ----------
+  const releaseHold = async () => {
+    if (!myHold) {
+      setShowReservedModal(false);
+      return;
+    }
+
+    const holdIdToDelete = myHold.holdId;
+
+    // 1. INSTANTLY Update UI (Optimistic)
+    setMyHold(null);
+    localStorage.removeItem(HOLD_STORAGE_KEY);
+    setSelectedSlot(null);
+    setShowReservedModal(false);
+
+    // 2. Fire and Forget Network Request (Doesn't block UI)
+    try {
+      await fetch("/api/releaseHold", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ holdId: holdIdToDelete }),
+      });
+    } catch (err) {
+      console.error("Failed to release hold on server:", err);
+    }
+  };
+
   // ---------- LOCK SLOT + GO TO STEP 2 ----------
   const handleLockAndGoNext = async () => {
     if (!selectedDate || !selectedSlot) {
@@ -739,13 +784,12 @@ export default function BookingForm() {
     setLockingSlot(true);
 
     try {
-      // Pass previous hold ID to swap logic on server
       const body = {
         hostDate: selectedDate.toDateString(),
         hostTime: selectedSlot.hostLabel,
         startTimeUTC: selectedSlot.utcStart.toISOString(),
         packageTitle: selectedPackage.title,
-        previousHoldId: myHold?.holdId || null, // Auto-release old hold
+        previousHoldId: myHold?.holdId || null,
       };
 
       const res = await fetch("/api/holdSlot", {
@@ -776,7 +820,6 @@ export default function BookingForm() {
       setMyHold(newHold);
       localStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(newHold));
 
-      // SHOW POPUP AND MOVE TO STEP 2
       setShowReservedModal(true);
     } catch (err) {
       console.error("Error reserving slot:", err);
@@ -1032,7 +1075,7 @@ export default function BookingForm() {
                       );
                     })}
                   </div>
-                  <div className="mt-3 flex justify-center gap-3 text-[10px] text-sky-300">
+                  <div className="mt-3 flex flex-wrap justify-center gap-3 text-[10px] text-sky-300">
                     <div className="flex items-center gap-1 whitespace-nowrap">
                       <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)]" />
                       <span>Fully Available</span>
@@ -1044,6 +1087,10 @@ export default function BookingForm() {
                     <div className="flex items-center gap-1 whitespace-nowrap">
                       <span className="h-2 w-2 rounded-full bg-red-500 shadow-[0_0_6px_rgba(248,113,113,0.9)]" />
                       <span>Fully Booked</span>
+                    </div>
+                    <div className="flex items-center gap-1 whitespace-nowrap">
+                      <span className="h-2 w-2 rounded-full bg-purple-400 shadow-[0_0_6px_rgba(192,132,252,0.9)]" />
+                      <span>Temporarily Reserved</span>
                     </div>
                   </div>
                 </div>
@@ -1067,18 +1114,29 @@ export default function BookingForm() {
                           myHold.hostDate === selectedDate.toDateString() &&
                           myHold.hostTime === t.hostLabel;
 
+                        const subLabelText = `(${t.hostLabel} IST)`;
+                        const subLabelClass = isMyHold
+                          ? "text-sky-400 font-semibold" // BLUE when reserved
+                          : "text-sky-400/70";
+
                         return (
                           <button
                             key={t.hostLabel}
-                            onClick={() => !t.disabled && setSelectedSlot(t)}
+                            onClick={() =>
+                              !t.disabled && !t.isBooked && !t.isHeldOther
+                                ? setSelectedSlot(t)
+                                : null
+                            }
                             disabled={t.disabled}
                             className={`py-2 rounded-lg border transition-all duration-200 ${
                               t.isBooked
                                 ? "bg-red-900/40 border-red-700/40 text-red-400 cursor-not-allowed"
+                                : t.isHeldOther
+                                ? "bg-purple-900/40 border-purple-700/50 text-purple-300 cursor-not-allowed"
+                                : isMyHold
+                                ? "bg-purple-500/90 text-slate-950 border-purple-200 shadow-[0_0_22px_rgba(168,85,247,0.9)] font-semibold scale-[1.04]"
                                 : t.disabled
                                 ? "bg-slate-800/40 text-slate-500 border-slate-700/50 cursor-not-allowed"
-                                : isMyHold
-                                ? "bg-sky-500/90 text-slate-950 border-sky-300 shadow-[0_0_22px_rgba(56,189,248,0.9)] font-semibold scale-[1.04]"
                                 : selectedSlot?.hostLabel === t.hostLabel
                                 ? "bg-sky-600 text-white border-sky-400 shadow-[0_0_15px_rgba(56,189,248,0.6)]"
                                 : "border-sky-700/40 hover:border-sky-500/60 hover:bg-sky-700/20"
@@ -1086,13 +1144,9 @@ export default function BookingForm() {
                           >
                             {t.localLabel}
                             <span
-                              className={`block text-[10px] mt-1 ${
-                                isMyHold
-                                  ? "text-slate-900 font-semibold"
-                                  : "text-sky-400/70"
-                              }`}
+                              className={`block text-[10px] mt-1 ${subLabelClass}`}
                             >
-                              ({t.hostLabel} IST)
+                              {subLabelText}
                             </span>
                           </button>
                         );
@@ -1147,13 +1201,16 @@ export default function BookingForm() {
 
           {step === 2 && (
             <div className="max-w-2xl mx-auto bg-[#0b1120]/80 border border-sky-700/30 rounded-2xl p-8 shadow-[0_0_25px_rgba(14,165,233,0.15)] space-y-6">
-              {/* ... (Existing Step 2 content stays same) ... */}
               {isXoc && (
                 <div className="space-y-4 border border-sky-700/50 rounded-xl p-4 bg-slate-900/40">
                   <h4 className="text-sky-300 font-semibold text-sm sm:text-base">
                     XOC Hardware Eligibility
                   </h4>
-                  {/* ... XOC Dropdowns ... */}
+                  <p className="text-xs text-sky-400/80">
+                    Choose your motherboard and RAM kit from the supported list
+                    below.
+                  </p>
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <XocDropdown
                       label="Motherboard"
@@ -1169,7 +1226,12 @@ export default function BookingForm() {
                           xocCustomRam
                         );
                       }}
-                      placeholder="Select Your Motherboard"
+                      placeholder={
+                        xocMotherboards.length === 0
+                          ? "No supported boards loaded"
+                          : "Select Your Motherboard"
+                      }
+                      emptyMessage="No supported boards found"
                       getId={(m) => m.id}
                       getLabel={(m) => m.name}
                       customOptionId="__CUSTOM_MOBO__"
@@ -1190,7 +1252,12 @@ export default function BookingForm() {
                           xocCustomRam
                         );
                       }}
-                      placeholder="Select your RAM kit"
+                      placeholder={
+                        xocRams.length === 0
+                          ? "No eligible RAM kits loaded"
+                          : "Select your RAM kit"
+                      }
+                      emptyMessage="No eligible RAM kits found"
                       getId={(r) => r.id}
                       getLabel={(r) =>
                         `${r.name} — ${r.speed} MT/s, CL${r.cas_latency}, ${r.capacityGb}GB`
@@ -1198,44 +1265,101 @@ export default function BookingForm() {
                       customOptionId="__CUSTOM_RAM__"
                       customOptionLabel="+ Add your own RAM kit"
                     />
-                    {/* ... Custom Inputs ... */}
+
                     {xocMoboId === "__CUSTOM_MOBO__" && (
-                      <input
-                        type="text"
-                        value={xocCustomMobo}
-                        onChange={(e) => {
-                          setXocCustomMobo(e.target.value);
-                          clearErrorIfResolved(
-                            form,
-                            xocMoboId,
-                            xocRamId,
-                            e.target.value,
-                            xocCustomRam
-                          );
-                        }}
-                        placeholder="Type Motherboard Model"
-                        className="sm:col-span-2 w-full bg-[#020617] border border-sky-700/60 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400"
-                      />
+                      <div className="sm:col-span-2">
+                        <input
+                          type="text"
+                          value={xocCustomMobo}
+                          onChange={(e) => {
+                            const next = e.target.value;
+                            setXocCustomMobo(next);
+                            clearErrorIfResolved(
+                              form,
+                              xocMoboId,
+                              xocRamId,
+                              next,
+                              xocCustomRam
+                            );
+                          }}
+                          placeholder="Type your Motherboard Model (e.g. ASUS ROG STRIX X670E-E)"
+                          className="w-full bg-[#020617] border border-sky-700/60 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400"
+                        />
+                      </div>
                     )}
+
                     {xocRamId === "__CUSTOM_RAM__" && (
-                      <input
-                        type="text"
-                        value={xocCustomRam}
-                        onChange={(e) => {
-                          setXocCustomRam(e.target.value);
-                          clearErrorIfResolved(
-                            form,
-                            xocMoboId,
-                            xocRamId,
-                            xocCustomMobo,
-                            e.target.value
-                          );
-                        }}
-                        placeholder="Type RAM Kit Details"
-                        className="sm:col-span-2 w-full bg-[#020617] border border-sky-700/60 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400"
-                      />
+                      <div className="sm:col-span-2">
+                        <input
+                          type="text"
+                          value={xocCustomRam}
+                          onChange={(e) => {
+                            const next = e.target.value;
+                            setXocCustomRam(next);
+                            clearErrorIfResolved(
+                              form,
+                              xocMoboId,
+                              xocRamId,
+                              xocCustomMobo,
+                              next
+                            );
+                          }}
+                          placeholder="Type your RAM kit (e.g. 32GB 6000MT/s CL30, brand/model)"
+                          className="w-full bg-[#020617] border border-sky-700/60 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400"
+                        />
+                      </div>
+                    )}
+
+                    {(xocMoboId === "__CUSTOM_MOBO__" ||
+                      xocRamId === "__CUSTOM_RAM__") && (
+                      <div className="sm:col-span-2">
+                        <div className="mt-1 rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-2">
+                          <p className="text-[11px] text-sky-100 leading-snug">
+                            Custom motherboards and RAM kits may not fully meet
+                            our XOC stability and compatibility criteria. For
+                            the best results and safety, please reach out on
+                            Discord so we can double-check your parts before the
+                            session.
+                          </p>
+                        </div>
+                      </div>
                     )}
                   </div>
+
+                  <p className="text-[11px] text-sky-400/70 mt-2">
+                    Only DDR5 AM5 boards and RAM kits that meet the XOC
+                    requirements (6000 MT/s+ with CL limits) are shown in the
+                    supported list.
+                  </p>
+
+                  {(xocMoboId === "__CUSTOM_MOBO__" ||
+                    xocRamId === "__CUSTOM_RAM__") && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setModalMode("switch");
+                          setModalPackage(vertexPackage);
+                          setVertexFadeOut(false);
+                          setVertexFadeIn(false);
+                          setShowVertexModal(true);
+                          setTimeout(() => setVertexFadeIn(true), 20);
+                        }}
+                        className="glow-button mt-3 inline-flex items-center justify-center px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold text-white transition"
+                      >
+                        Switch to Performance Vertex Overhaul
+                        <span className="glow-line glow-line-top" />
+                        <span className="glow-line glow-line-right" />
+                        <span className="glow-line glow-line-bottom" />
+                        <span className="glow-line glow-line-left" />
+                      </button>
+                      <p className="mt-2 text-[11px] font-bold bg-gradient-to-r from-sky-300 via-cyan-300 to-indigo-300 bg-clip-text text-transparent">
+                        If your PC is found to be XOC eligible after booking
+                        Performance Vertex Overhaul, you may pay the difference
+                        in price to upgrade.
+                      </p>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -1280,11 +1404,18 @@ export default function BookingForm() {
                 className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 h-24 focus:outline-none focus:border-sky-500 transition"
               ></textarea>
 
+              <p className="text-sky-400/60 text-xs">
+                Please read the FAQ before booking — it answers everything you
+                need to know.
+              </p>
+
               {/* Show Hold info */}
               {myHold && (
-                <div className="bg-amber-500/10 border border-amber-500/30 p-3 rounded-lg flex items-center gap-3 animate-pulse">
+                <div className="bg-purple-500/10 border border-purple-500/40 p-3 rounded-lg flex items-center gap-3 animate-pulse">
                   <span className="text-xl">🔒</span>
-                  <p className="text-xs text-amber-200">
+                  <p className="text-xs text-white font-medium">
+                    {" "}
+                    {/* CHANGED TO WHITE TEXT */}
                     Slot <strong>{myHold.hostTime}</strong> is reserved for you
                     for 15 minutes.
                   </p>
@@ -1336,10 +1467,16 @@ export default function BookingForm() {
         </>
       )}
 
-      {/* --- RESERVED MODAL (back to normal glow style) --- */}
+      {/* --- RESERVED MODAL --- */}
       {showReservedModal && (
-        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in animate-in fade-in zoom-in duration-300">
-          <div className="bg-[#0b1120] border border-sky-500 rounded-2xl p-6 max-w-sm w-full text-center shadow-[0_0_40px_rgba(14,165,233,0.3)]">
+        <div
+          className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in animate-in fade-in zoom-in duration-300"
+          onClick={releaseHold}
+        >
+          <div
+            className="bg-[#0b1120] border border-sky-500 rounded-2xl p-6 max-w-sm w-full text-center shadow-[0_0_40px_rgba(14,165,233,0.3)] transition-shadow duration-300 hover:shadow-[0_0_55px_rgba(56,189,248,0.6)]"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="w-16 h-16 bg-sky-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
               <span className="text-3xl">🔒</span>
             </div>
@@ -1347,29 +1484,40 @@ export default function BookingForm() {
               Slot Reserved!
             </h3>
             <p className="text-sm text-sky-200/80 mb-6">
-              You have reserved <strong>{myHold?.hostTime}</strong>.
+              You have reserved{" "}
+              <strong className="text-white">{myHold?.hostTime}</strong>.
               <br />
               It is locked to you for 15 minutes.
             </p>
 
-            <button
-              onClick={() => {
-                setShowReservedModal(false);
-                setStep(2);
-              }}
-              className="glow-button w-full py-3 rounded-lg font-semibold inline-flex items-center justify-center gap-2"
-            >
-              Continue
-              <span className="glow-line glow-line-top" />
-              <span className="glow-line glow-line-right" />
-              <span className="glow-line glow-line-bottom" />
-              <span className="glow-line glow-line-left" />
-            </button>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <button
+                type="button"
+                onClick={releaseHold}
+                className="flex-1 bg-slate-700/40 hover:bg-slate-700/60 py-3 rounded-lg font-semibold transition"
+              >
+                Nevermind
+              </button>
+
+              <button
+                onClick={() => {
+                  setShowReservedModal(false);
+                  setStep(2);
+                }}
+                className="glow-button w-full sm:flex-1 py-3 rounded-lg font-semibold transition inline-flex items-center justify-center gap-2"
+              >
+                Continue
+                <span className="glow-line glow-line-top" />
+                <span className="glow-line glow-line-right" />
+                <span className="glow-line glow-line-bottom" />
+                <span className="glow-line glow-line-left" />
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* ... Vertex Modal (Keep existing logic) ... */}
+      {/* ... Vertex Modal (with switch behavior & prefill) ... */}
       {showVertexModal && (
         <div
           className={`fixed inset-0 z-[45] bg-black/60 backdrop-blur-lg flex items-center justify-center px-4 transition-opacity duration-200 ${
@@ -1390,10 +1538,9 @@ export default function BookingForm() {
           }}
         >
           <div
-            className="relative w-full max-w-md bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 border border-sky-400/60 rounded-2xl shadow-[0_0_35px_rgba(56,189,248,0.4)] p-6 text-center"
+            className="relative w-full max-w-md bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 border border-sky-400/60 rounded-2xl shadow-[0_0_35px_rgba(56,189,248,0.4)] p-6 text-center transition-all duration-500 ease-in-out hover:shadow-[0_0_42px_rgba(56,189,248,0.5)]"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* ... Modal content ... */}
             <button
               aria-label="Close"
               className="absolute right-3 top-3 text-sky-200 hover:text-white transition text-2xl"
@@ -1409,21 +1556,36 @@ export default function BookingForm() {
             >
               ×
             </button>
+
             <div className="inline-flex items-center px-4 py-1.5 rounded-full text-xs font-semibold text-white bg-[#1fa7ff] shadow-[0_0_18px_rgba(31,167,255,0.6)] mb-4">
               {displayPackage?.tag ||
                 "For All Budget, Mid-Ranged and High End PCs"}
             </div>
             <h3 className="text-2xl font-bold text-sky-100">
-              {displayPackage?.title}
+              {displayPackage?.title || "Performance Vertex Overhaul"}
             </h3>
             <p className="text-4xl font-bold text-sky-300 mt-2">
-              {displayPackage?.price}
+              {displayPackage?.price || "$84.99"}
             </p>
 
             <ul className="mt-4 space-y-2 text-sm text-sky-100 text-left">
               {(displayPackage?.features && displayPackage.features.length > 0
                 ? displayPackage.features
-                : []
+                : [
+                    "Guaranteed boost in performance (latency, 1% lows, or average FPS)",
+                    "30 day warranty",
+                    "2-4 hour completion time",
+                    "Same day availability",
+                    "Overclocking of CPU, GPU, and RAM (Timings)",
+                    "Diagnosing issues and full system inspection",
+                    "Hidden BIOS tuning",
+                    "Smooth frametimes",
+                    "Benchmark guaranteed results",
+                    "Fan curves, sound tuning, and input latency–based adjustments",
+                    "Proper core allocation and game process prioritization",
+                    "Network driver tuning",
+                    "90 day warranty plus future support at discretion",
+                  ]
               ).map((text) => (
                 <li key={text} className="flex items-start gap-2">
                   <span className="text-sky-400 mt-0.5">✓</span>
@@ -1436,24 +1598,43 @@ export default function BookingForm() {
               <button
                 type="button"
                 onClick={() => {
-                  // ... existing logic ...
-                  setShowVertexModal(false);
-                  setStep(1);
-                  setSelectedDate(null);
-                  setSelectedSlot(null);
-                  // ...
-                  navigate(
-                    `/booking?title=${encodeURIComponent(
-                      displayPackage?.title || "Performance Vertex Overhaul"
-                    )}&price=${encodeURIComponent(
-                      displayPackage?.price || "$84.99"
-                    )}&tag=${encodeURIComponent(
-                      displayPackage?.tag || ""
-                    )}&xoc=0&prefillFromXoc=1`
-                  );
-                  setVertexFadeOut(false);
+                  document.body.classList.remove("is-modal-blur");
+                  setVertexFadeOut(true);
+                  setVertexFadeIn(false);
+                  setTimeout(() => {
+                    setShowVertexModal(false);
+                    setErrorStep2("");
+                    setStep(1);
+                    setSelectedDate(null);
+                    setSelectedSlot(null);
+                    try {
+                      localStorage.setItem(
+                        FORM_PREFILL_KEY,
+                        JSON.stringify({
+                          discord: form.discord,
+                          email: form.email,
+                          specs: form.specs,
+                          mainGame: form.mainGame,
+                          notes: form.notes,
+                        })
+                      );
+                    } catch (err) {
+                      console.error("Failed to store form draft:", err);
+                    }
+                    navigate(
+                      `/booking?title=${encodeURIComponent(
+                        displayPackage?.title || "Performance Vertex Overhaul"
+                      )}&price=${encodeURIComponent(
+                        displayPackage?.price || "$84.99"
+                      )}&tag=${encodeURIComponent(
+                        displayPackage?.tag || ""
+                      )}&xoc=0&prefillFromXoc=1`
+                    );
+                    setVertexFadeOut(false);
+                  }, 200);
                 }}
                 className="glow-button w-full mt-6 py-3 rounded-lg font-semibold text-white shadow-[0_0_20px_rgba(56,189,248,0.4)] inline-flex items-center justify-center gap-2 opacity-90 hover:opacity-100"
+                style={{ transition: "opacity 0.9s ease-in-out" }}
               >
                 {displayPackage?.buttonText || "Book Now"}
                 <span className="glow-line glow-line-top" />
