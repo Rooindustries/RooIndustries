@@ -1,3 +1,4 @@
+// api/createBooking.js
 import { Resend } from "resend";
 import { createClient } from "@sanity/client";
 
@@ -90,9 +91,12 @@ export default async function handler(req, res) {
       startTimeUTC,
       displayDate,
       displayTime,
+
+      // NEW: slot hold
+      slotHoldId = "",
+      slotHoldExpiresAt = "",
     } = req.body || {};
 
-    // 🔵 Make everything mutable so we can override / fill it server-side
     let effectiveReferralId = referralId || null;
     let effectiveReferralCode = referralCode || "";
     let effectiveDiscountPercent = discountPercent || 0;
@@ -101,19 +105,91 @@ export default async function handler(req, res) {
     let effectiveNetAmount = netAmount || 0;
     let effectiveCommissionPercent = commissionPercent || 0;
 
-    // Normalize booking date/time to the host view so availability can be marked as booked
+    // normalize booking date/time
     const bookingDate = hostDate || date || displayDate || "";
     const bookingTime = hostTime || time || displayTime || "";
 
-    // ---------- Derived date/time variants ----------
-    // What we treat as "local" (user) view:
+    if (!bookingDate || !bookingTime) {
+      return res.status(400).json({
+        error: "Missing booking date/time (hostDate/hostTime/display fields).",
+      });
+    }
+
+    // ===== SLOT COLLISION & HOLDS =====
+
+    // 1) already booked?
+    const existingBooking = await writeClient.fetch(
+      `*[_type == "booking" && hostDate == $date && hostTime == $time][0]`,
+      { date: bookingDate, time: bookingTime }
+    );
+
+    if (existingBooking) {
+      return res.status(409).json({
+        error: "This slot is already booked. Please choose another time.",
+      });
+    }
+
+    let holdDoc = null;
+
+    if (slotHoldId) {
+      // 2a) hold must exist & be active
+      holdDoc = await writeClient.fetch(
+        `*[_type == "slotHold" && _id == $id][0]`,
+        { id: slotHoldId }
+      );
+
+      if (!holdDoc) {
+        return res
+          .status(409)
+          .json({ error: "Your slot reservation has expired. Please rebook." });
+      }
+
+      if (holdDoc.expiresAt && new Date(holdDoc.expiresAt) < new Date()) {
+        try {
+          await writeClient.delete(slotHoldId);
+        } catch (e) {
+          console.error("Error deleting expired slotHold:", e);
+        }
+        return res
+          .status(409)
+          .json({ error: "Your slot reservation has expired. Please rebook." });
+      }
+
+      if (
+        holdDoc.hostDate !== bookingDate ||
+        holdDoc.hostTime !== bookingTime
+      ) {
+        return res.status(400).json({
+          error: "Slot hold does not match the selected time. Please rebook.",
+        });
+      }
+    } else {
+      // 2b) if no holdId, still respect active holds
+      const activeHold = await writeClient.fetch(
+        `*[_type == "slotHold" 
+            && hostDate == $date 
+            && hostTime == $time 
+            && expiresAt > now()
+          ][0]`,
+        { date: bookingDate, time: bookingTime }
+      );
+
+      if (activeHold) {
+        return res.status(409).json({
+          error:
+            "This time is temporarily reserved by another user. Please refresh and choose another slot.",
+        });
+      }
+    }
+
+    // ===== TIME VARIANTS =====
     const localDate = displayDate || date || hostDate || "—";
     const localTime = displayTime || localTimeLabel || time || "—";
 
-    // What we treat as IST (host) view:
     const istDate = hostDate || date || displayDate || "—";
     const istTime = hostTime || time || displayTime || "—";
 
+    // ===== MONEY / REFERRAL =====
     if (!effectiveGrossAmount) {
       const numericPrice =
         parseFloat(String(packagePrice || "").replace(/[^0-9.]/g, "")) || 0;
@@ -158,8 +234,6 @@ export default async function handler(req, res) {
             effectiveCommissionPercent = refCommission;
           }
 
-          // ⚠️ IMPORTANT:
-          // Only override discountPercent if the client didn't send one (no coupons, basic flow).
           if (!effectiveDiscountPercent) {
             effectiveDiscountPercent = refDiscount;
           }
@@ -189,14 +263,12 @@ export default async function handler(req, res) {
       ((effectiveCommissionPercent || 0) / 100)
     ).toFixed(2);
 
-    // CREATE BOOKING DOCUMENT
+    // ===== CREATE BOOKING DOC =====
     const doc = await writeClient.create({
       _type: "booking",
-      // original for backwards compatibility
       date: bookingDate,
       time: bookingTime,
 
-      // richer time data
       hostDate,
       hostTime,
       hostTimeZone,
@@ -225,10 +297,8 @@ export default async function handler(req, res) {
       paypalOrderId,
       payerEmail,
 
-      // upgrade info
       ...(originalOrderId ? { originalOrderId } : {}),
 
-      // coupon info
       ...(couponCode
         ? {
             couponCode,
@@ -242,7 +312,16 @@ export default async function handler(req, res) {
         : {}),
     });
 
-    // REFERRAL LOGIC (only increment on real captured payments)
+    // delete hold after success
+    if (slotHoldId) {
+      try {
+        await writeClient.delete(slotHoldId);
+      } catch (e) {
+        console.error("Error deleting slotHold after booking:", e);
+      }
+    }
+
+    // ===== REFERRAL SUCCESS COUNTER =====
     if (effectiveReferralId && status === "captured") {
       const updated = await writeClient
         .patch(effectiveReferralId)
@@ -260,8 +339,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // ------------------------------------------------------------------
-
+    // ===== EMAILS =====
     const siteName = process.env.SITE_NAME || "Roo Industries";
     const logoUrl =
       process.env.LOGO_URL || "https://rooindustries.com/embed_logo.png";
@@ -288,7 +366,6 @@ export default async function handler(req, res) {
       { label: "Notes", value: message || "—" },
     ];
 
-    // CLIENT EMAIL FIELDS
     const clientMoneyAndReferral = [
       ...(effectiveReferralCode
         ? [{ label: "Referral Code", value: effectiveReferralCode }]
@@ -364,7 +441,6 @@ export default async function handler(req, res) {
       ...clientMoneyAndReferral,
     ];
 
-    // OWNER EMAIL FIELDS
     const ownerMoneyAndReferral = [
       ...(effectiveReferralCode
         ? [{ label: "Referral Code", value: effectiveReferralCode }]
@@ -454,7 +530,6 @@ export default async function handler(req, res) {
       ...ownerMoneyAndReferral,
     ];
 
-    // SEND EMAILS
     if (from && email && process.env.RESEND_API_KEY) {
       try {
         await resend.emails.send({
