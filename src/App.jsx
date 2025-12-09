@@ -32,7 +32,7 @@ const RefChangePassword = lazy(() => import("./pages/RefChangePassword"));
 const RefForgot = lazy(() => import("./pages/RefForgot"));
 const RefReset = lazy(() => import("./pages/RefReset"));
 const RefRegister = lazy(() => import("./components/RefRegister"));
-
+const Tools = lazy(() => import("./pages/Tools"));
 function RedirectToDiscord() {
   React.useEffect(() => {
     window.location.href = "https://discord.gg/M7nTkn9dxE";
@@ -73,6 +73,7 @@ function AnimatedRoutes({ setIsModalOpen }) {
           <Route path="/payment" element={<Payment />} />
           <Route path="/payment-success" element={<PaymentSuccess />} />
           <Route path="/thank-you" element={<Thankyou />} />
+          <Route path="/tools" element={<Tools />} />
 
           <Route path="/upgrade-xoc" element={<UpgradeXoc />} />
 
