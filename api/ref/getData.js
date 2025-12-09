@@ -36,8 +36,6 @@ export default async function handler(req, res) {
       { id }
     );
 
-    console.log("GETDATA REFERRAL:", referral);
-
     if (!referral) {
       return res.status(404).json({ ok: false, error: "Referral not found" });
     }

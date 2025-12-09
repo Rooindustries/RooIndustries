@@ -30,7 +30,9 @@ export default async function handler(req, res) {
         isActive,
         canCombineWithReferral,
         validFrom,
-        validTo
+        validTo,
+        maxUses,
+        timesUsed
       }`,
       { code }
     );
@@ -63,6 +65,17 @@ export default async function handler(req, res) {
       });
     }
 
+    // 🔥 NEW: enforce maxUses limit
+    const used = coupon.timesUsed ?? 0;
+    const max = coupon.maxUses;
+
+    if (typeof max === "number" && max > 0 && used >= max) {
+      return res.status(400).json({
+        ok: false,
+        error: "This coupon has reached its maximum number of uses.",
+      });
+    }
+
     return res.status(200).json({
       ok: true,
       coupon: {
@@ -71,6 +84,9 @@ export default async function handler(req, res) {
         code: coupon.code,
         discountPercent: coupon.discountPercent,
         canCombineWithReferral: coupon.canCombineWithReferral ?? false,
+        // optional: send usage info if you ever want to show it in UI
+        maxUses: max ?? null,
+        timesUsed: used,
       },
     });
   } catch (err) {

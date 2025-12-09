@@ -74,9 +74,20 @@ export default function Payment() {
     }
   }
 
-  const totalDiscountAmount = +(
+  // ⛔ OLD: could exceed baseAmount and go negative in emails
+  // const totalDiscountAmount = +(
+  //   (referralDiscountAmount || 0) + (couponDiscountAmount || 0)
+  // ).toFixed(2);
+
+  // ✅ NEW: cap combined discount to 100% of baseAmount
+  const uncappedTotalDiscount = +(
     (referralDiscountAmount || 0) + (couponDiscountAmount || 0)
   ).toFixed(2);
+
+  const totalDiscountAmount =
+    !isUpgrade && baseAmount > 0
+      ? Math.min(baseAmount, uncappedTotalDiscount)
+      : 0;
 
   const finalAmount = isUpgrade
     ? baseAmount // 🔒 upgrades use exact upgrade price, no extra discounts
@@ -298,7 +309,7 @@ export default function Payment() {
         return;
       }
 
-      navigate("/payment-success");
+      navigate("/thank-you");
     } catch (err) {
       console.error("Free booking error:", err);
       showBanner(
