@@ -337,6 +337,34 @@ export default async function handler(req, res) {
           .commit();
       }
     }
+    if (couponCode && status === "captured") {
+      try {
+        const couponDoc = await writeClient.fetch(
+          `*[_type == "coupon" && lower(code) == $code][0]{
+            _id,
+            timesUsed,
+            maxUses
+          }`,
+          { code: couponCode.toLowerCase() }
+        );
+
+        if (couponDoc) {
+          const currentUsed = couponDoc.timesUsed ?? 0;
+          const max = couponDoc.maxUses;
+
+          const patch = writeClient.patch(couponDoc._id).inc({ timesUsed: 1 });
+
+          // If this use hits the limit, auto-deactivate coupon
+          if (typeof max === "number" && max > 0 && currentUsed + 1 >= max) {
+            patch.set({ isActive: false });
+          }
+
+          await patch.commit();
+        }
+      } catch (err) {
+        console.error("❌ Error incrementing coupon timesUsed:", err);
+      }
+    }
 
     // ===== EMAILS =====
     const siteName = process.env.SITE_NAME || "Roo Industries";

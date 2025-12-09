@@ -50,6 +50,22 @@ export default {
       type: 'datetime',
     },
     {
+      name: 'maxUses',
+      title: 'Maximum Uses (optional)',
+      type: 'number',
+      description: 'Total number of times this coupon can be used. Leave empty for unlimited.',
+      validation: (Rule) => Rule.min(1).warning('Leave empty for unlimited uses.'),
+    },
+    {
+      name: 'timesUsed',
+      title: 'Times Used',
+      type: 'number',
+      description: 'How many times this coupon has been used (auto-updated).',
+      readOnly: true,
+      initialValue: 0,
+    },
+
+    {
       name: 'notes',
       title: 'Notes',
       type: 'text',
