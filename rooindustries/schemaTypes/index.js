@@ -16,6 +16,7 @@ import bookingSettings from './bookingSettings'
 import referral from './referral'
 import coupon from './coupon'
 import slotHold from './slotHold'
+import tool from './tool'
 
 export const schemaTypes = [
   benchmark,
@@ -36,4 +37,5 @@ export const schemaTypes = [
   referral,
   coupon,
   slotHold,
+  tool,
 ]
