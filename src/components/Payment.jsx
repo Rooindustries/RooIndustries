@@ -87,9 +87,15 @@ export default function Payment() {
       ? +((totalDiscountAmount / baseAmount) * 100 || 0).toFixed(2)
       : 0;
 
+  // 🔥 Is this a fully-free booking (only for normal bookings)?
+  const isFree = !isUpgrade && finalAmount === 0;
+
   // Razorpay state
   const [rzpReady, setRzpReady] = useState(false);
   const [payingRzp, setPayingRzp] = useState(false);
+
+  // Free booking state
+  const [creatingFree, setCreatingFree] = useState(false);
 
   // Auto-load referral from URL/localStorage ONLY if not upgrade
   useEffect(() => {
@@ -247,12 +253,78 @@ export default function Payment() {
     }
   }
 
+  // ----------------- FREE BOOKING FLOW (100% DISCOUNT) -----------------
+  async function handleFreeBooking() {
+    if (!isFree) return;
+
+    try {
+      setCreatingFree(true);
+      showBanner("info", "Confirming your free booking…");
+
+      const payload = {
+        ...bookingData,
+
+        referralCode: referral?.code || referralInput || "",
+        referralId: referral?._id || null,
+
+        couponCode: coupon?.code || couponInput || "",
+        couponDiscountPercent: couponPercent,
+        couponDiscountAmount,
+
+        discountPercent: discountPercentCombined,
+        discountAmount: totalDiscountAmount,
+
+        grossAmount: baseAmount,
+        netAmount: 0,
+
+        commissionPercent,
+
+        status: "captured",
+        paymentProvider: "free",
+      };
+
+      const res = await fetch("/api/ref/createBooking", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        console.error("Free booking create error:", await res.text());
+        showBanner(
+          "error",
+          "Could not save your free booking. Please contact support."
+        );
+        return;
+      }
+
+      navigate("/payment-success");
+    } catch (err) {
+      console.error("Free booking error:", err);
+      showBanner(
+        "error",
+        "Something went wrong saving your free booking. Please contact support."
+      );
+    } finally {
+      setCreatingFree(false);
+    }
+  }
+
   // Razorpay payment flow
   async function handleRazorpayPay() {
     if (!rzpReady || !window.Razorpay) {
       showBanner(
         "error",
         "Payment system is still loading. Please wait a few seconds and try again."
+      );
+      return;
+    }
+
+    if (isFree) {
+      // Safety guard – shouldn't be reachable because we hide this button for free bookings
+      showBanner(
+        "error",
+        "This booking is fully discounted. Use the 'Confirm Free Booking' button instead."
       );
       return;
     }
@@ -499,6 +571,13 @@ export default function Payment() {
                 <span className="text-sky-300">{time}</span>
               </p>
 
+              {isFree && (
+                <p className="text-xs text-emerald-300 mt-2">
+                  This booking has a 100% discount applied. No payment is
+                  required — just confirm your free booking below.
+                </p>
+              )}
+
               {isUpgrade && (
                 <p className="text-xs text-slate-400 mt-2">
                   Upgrades do not accept new coupons or referral discounts. The
@@ -596,154 +675,197 @@ export default function Payment() {
         </div>
       </div>
 
-      {/* Payment Method */}
+      {/* Payment Method / Free Booking */}
       <div className="mt-8 rounded-2xl border border-sky-700/40 bg-[#080e1a]/95 shadow-[0_0_45px_rgba(14,165,233,0.25)] backdrop-blur-lg">
         <div className="p-6 sm:p-7">
-          <h3 className="text-[20px] font-bold text-white">Payment Method</h3>
+          <h3 className="text-[20px] font-bold text-white">
+            {isFree ? "Confirm Free Booking" : "Payment Method"}
+          </h3>
           <p className="text-slate-400 text-sm mt-1">
-            Secure payment via Razorpay or PayPal
+            {isFree
+              ? "This booking is fully discounted. Confirm below to finalize it."
+              : "Secure payment via Razorpay or PayPal"}
           </p>
 
-          {/* Razorpay option */}
-          <div className="mt-6 flex items-center justify-between gap-4 border border-sky-800/30 bg-[#0c162a]/80 rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(14,165,233,0.15)]">
-            <div>
-              <p className="text-slate-300 text-sm font-medium">
-                Pay with Razorpay
+          {/* 🔥 FREE BOOKING MODE (100% discount) */}
+          {isFree ? (
+            <div className="mt-6 flex flex-col gap-4 border border-emerald-500/40 bg-emerald-500/10 rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(16,185,129,0.35)]">
+              <p className="text-sm text-emerald-100">
+                No payment is required. Click the button below to confirm your
+                free booking.
               </p>
-              <p className="text-slate-400 text-xs">Cards / local methods</p>
-            </div>
-            <button
-              onClick={handleRazorpayPay}
-              disabled={!rzpReady || payingRzp}
-              className="glow-button px-4 py-2 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60"
-            >
-              {payingRzp ? "Processing..." : "Pay with Razorpay"}
-              <span className="glow-line glow-line-top" />
-              <span className="glow-line glow-line-right" />
-              <span className="glow-line glow-line-bottom" />
-              <span className="glow-line glow-line-left" />
-            </button>
-          </div>
-
-          <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-4 border border-sky-800/30 bg-[#0c162a]/80 rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(14,165,233,0.15)]">
-            <div className="flex items-center gap-4">
-              <img
-                src="https://www.paypalobjects.com/webstatic/mktg/Logo/pp-logo-100px.png"
-                alt="PayPal"
-                className="w-20"
-              />
-              <p className="text-slate-300 text-sm font-medium hidden sm:block">
-                Secure global payment
-              </p>
-            </div>
-
-            <div className="w-full sm:w-48 relative z-0">
-              <PayPalScriptProvider
-                options={{
-                  "client-id": process.env.REACT_APP_PAYPAL_CLIENT_ID || "test",
-                  currency: "USD",
-                  intent: "capture",
-                }}
+              <button
+                onClick={handleFreeBooking}
+                disabled={creatingFree}
+                className="glow-button px-4 py-3 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60"
               >
-                <PayPalButtons
-                  fundingSource="paypal"
-                  style={{
-                    layout: "horizontal",
-                    color: "blue",
-                    shape: "rect",
-                    label: "pay",
-                    height: 40,
-                    tagline: false,
-                  }}
-                  createOrder={(data, actions) =>
-                    actions.order.create({
-                      purchase_units: [
-                        {
-                          description: `${packageTitle} booking`,
-                          amount: { value: finalAmount.toFixed(2) },
-                        },
-                      ],
-                    })
-                  }
-                  onApprove={async (data, actions) => {
-                    const details = await actions.order.capture();
+                {creatingFree ? "Confirming…" : "Confirm Free Booking"}
+                <span className="glow-line glow-line-top" />
+                <span className="glow-line glow-line-right" />
+                <span className="glow-line glow-line-bottom" />
+                <span className="glow-line glow-line-left" />
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* Razorpay option */}
+              <div className="mt-6 flex items-center justify-between gap-4 border border-sky-800/30 bg-[#0c162a]/80 rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(14,165,233,0.15)]">
+                <div>
+                  <p className="text-slate-300 text-sm font-medium">
+                    Pay with Razorpay
+                  </p>
+                  <p className="text-slate-400 text-xs">
+                    Cards / local methods
+                  </p>
+                </div>
+                <button
+                  onClick={handleRazorpayPay}
+                  disabled={!rzpReady || payingRzp}
+                  className="glow-button px-4 py-2 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  {payingRzp ? "Processing..." : "Pay with Razorpay"}
+                  <span className="glow-line glow-line-top" />
+                  <span className="glow-line glow-line-right" />
+                  <span className="glow-line glow-line-bottom" />
+                  <span className="glow-line glow-line-left" />
+                </button>
+              </div>
 
-                    try {
-                      const payload = {
-                        ...bookingData,
-                        referralCode: isUpgrade
-                          ? ""
-                          : referral?.code || referralInput || "",
-                        referralId: isUpgrade ? null : referral?._id || null,
+              {/* PayPal option */}
+              <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-4 border border-sky-800/30 bg-[#0c162a]/80 rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(14,165,233,0.15)]">
+                <div className="flex items-center gap-4">
+                  <img
+                    src="https://www.paypalobjects.com/webstatic/mktg/Logo/pp-logo-100px.png"
+                    alt="PayPal"
+                    className="w-20"
+                  />
+                  <p className="text-slate-300 text-sm font-medium hidden sm:block">
+                    Secure global payment
+                  </p>
+                </div>
 
-                        couponCode: isUpgrade
-                          ? ""
-                          : coupon?.code || couponInput || "",
-                        couponDiscountPercent: isUpgrade ? 0 : couponPercent,
-                        couponDiscountAmount: isUpgrade
-                          ? 0
-                          : couponDiscountAmount,
+                <div className="w-full sm:w-48 relative z-0">
+                  <PayPalScriptProvider
+                    options={{
+                      "client-id":
+                        process.env.REACT_APP_PAYPAL_CLIENT_ID || "test",
+                      currency: "USD",
+                      intent: "capture",
+                    }}
+                  >
+                    <PayPalButtons
+                      fundingSource="paypal"
+                      style={{
+                        layout: "horizontal",
+                        color: "blue",
+                        shape: "rect",
+                        label: "pay",
+                        height: 40,
+                        tagline: false,
+                      }}
+                      createOrder={(data, actions) =>
+                        actions.order.create({
+                          purchase_units: [
+                            {
+                              description: `${packageTitle} booking`,
+                              amount: { value: finalAmount.toFixed(2) },
+                            },
+                          ],
+                        })
+                      }
+                      onApprove={async (data, actions) => {
+                        const details = await actions.order.capture();
 
-                        discountPercent: isUpgrade
-                          ? 0
-                          : discountPercentCombined,
-                        discountAmount: isUpgrade ? 0 : totalDiscountAmount,
-                        grossAmount: baseAmount,
-                        netAmount: finalAmount,
-                        commissionPercent: isUpgrade ? 0 : commissionPercent,
+                        try {
+                          const payload = {
+                            ...bookingData,
+                            referralCode: isUpgrade
+                              ? ""
+                              : referral?.code || referralInput || "",
+                            referralId: isUpgrade
+                              ? null
+                              : referral?._id || null,
 
-                        paypalOrderId: details?.id || "",
-                        payerEmail: details?.payer?.email_address || "",
-                        status: "captured",
-                        paymentProvider: "paypal",
-                      };
-                      const res = await fetch("/api/ref/createBooking", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify(payload),
-                      });
+                            couponCode: isUpgrade
+                              ? ""
+                              : coupon?.code || couponInput || "",
+                            couponDiscountPercent: isUpgrade
+                              ? 0
+                              : couponPercent,
+                            couponDiscountAmount: isUpgrade
+                              ? 0
+                              : couponDiscountAmount,
 
-                      if (!res.ok) {
-                        console.error(
-                          "Booking create error:",
-                          await res.text()
-                        );
+                            discountPercent: isUpgrade
+                              ? 0
+                              : discountPercentCombined,
+                            discountAmount: isUpgrade ? 0 : totalDiscountAmount,
+                            grossAmount: baseAmount,
+                            netAmount: finalAmount,
+                            commissionPercent: isUpgrade
+                              ? 0
+                              : commissionPercent,
+
+                            paypalOrderId: details?.id || "",
+                            payerEmail: details?.payer?.email_address || "",
+                            status: "captured",
+                            paymentProvider: "paypal",
+                          };
+                          const res = await fetch("/api/ref/createBooking", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify(payload),
+                          });
+
+                          if (!res.ok) {
+                            console.error(
+                              "Booking create error:",
+                              await res.text()
+                            );
+                            showBanner(
+                              "error",
+                              "Payment succeeded but booking could not be saved. Please contact support."
+                            );
+                            return;
+                          }
+
+                          navigate("/thank-you");
+                        } catch (err) {
+                          console.error("Booking creation error:", err);
+                          showBanner(
+                            "error",
+                            "Payment succeeded but something went wrong saving your booking. Please contact support."
+                          );
+                        }
+                      }}
+                      onError={(err) => {
+                        console.error(err);
                         showBanner(
                           "error",
-                          "Payment succeeded but booking could not be saved. Please contact support."
+                          "PayPal could not process your payment. Please try again."
                         );
-                        return;
-                      }
-
-                      navigate("/payment-success");
-                    } catch (err) {
-                      console.error("Booking creation error:", err);
-                      showBanner(
-                        "error",
-                        "Payment succeeded but something went wrong saving your booking. Please contact support."
-                      );
-                    }
-                  }}
-                  onError={(err) => {
-                    console.error(err);
-                    showBanner(
-                      "error",
-                      "PayPal could not process your payment. Please try again."
-                    );
-                  }}
-                />
-              </PayPalScriptProvider>
-            </div>
-          </div>
+                      }}
+                    />
+                  </PayPalScriptProvider>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
-      <div className="mt-8 text-center">
+      {/* Modern Back Button */}
+      <div className="mt-10 flex justify-center">
         <Link
           to={isUpgrade ? "/packages" : "/booking"}
-          className="text-sky-400 hover:text-sky-300 transition-colors duration-300 text-sm"
+          className="glow-button inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-sky-50 hover:text-white transition-all duration-300"
         >
-          ← {isUpgrade ? "Back to Packages" : "Back to Booking"}
+          <span className="text-lg">←</span>
+          <span>{isUpgrade ? "Back to Packages" : "Back to Booking"}</span>
+          <span className="glow-line glow-line-top" />
+          <span className="glow-line glow-line-right" />
+          <span className="glow-line glow-line-bottom" />
+          <span className="glow-line glow-line-left" />
         </Link>
       </div>
     </section>

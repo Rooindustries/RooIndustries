@@ -1,4 +1,3 @@
-// RefRegister.jsx
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -7,6 +6,7 @@ export default function RefRegister() {
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [paypalEmail, setPaypalEmail] = useState("");
   const [slug, setSlug] = useState("");
   const [slugAvailable, setSlugAvailable] = useState(null);
   const [password, setPassword] = useState("");
@@ -50,6 +50,7 @@ export default function RefRegister() {
 
     const trimmedName = name.trim();
     const trimmedEmail = email.trim().toLowerCase();
+    const trimmedPaypalEmail = paypalEmail.trim().toLowerCase();
     const trimmedSlug = slug.trim().toLowerCase();
     const trimmedPassword = password.trim();
     const trimmedConfirm = confirm.trim();
@@ -58,6 +59,7 @@ export default function RefRegister() {
     if (
       !trimmedName ||
       !trimmedEmail ||
+      !trimmedPaypalEmail ||
       !trimmedSlug ||
       !trimmedPassword ||
       !trimmedConfirm
@@ -67,8 +69,14 @@ export default function RefRegister() {
     }
 
     // basic email format check
-    if (!/\S+@\S+\.\S+/.test(trimmedEmail)) {
-      showToast("error", "Please enter a valid email address.");
+    const emailRegex = /\S+@\S+\.\S+/;
+    if (!emailRegex.test(trimmedEmail)) {
+      showToast("error", "Please enter a valid login email address.");
+      return;
+    }
+
+    if (!emailRegex.test(trimmedPaypalEmail)) {
+      showToast("error", "Please enter a valid PayPal email address.");
       return;
     }
 
@@ -110,6 +118,7 @@ export default function RefRegister() {
         body: JSON.stringify({
           name: trimmedName,
           email: trimmedEmail,
+          paypalEmail: trimmedPaypalEmail,
           slug: trimmedSlug,
           password: trimmedPassword,
         }),
@@ -166,14 +175,33 @@ export default function RefRegister() {
 
         {/* Email */}
         <div>
-          <label className="text-sky-300 text-sm font-semibold">Email</label>
+          <label className="text-sky-300 text-sm font-semibold">
+            Login Email
+          </label>
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="Your email"
+            placeholder="Email you sign in with"
             className="w-full p-4 mt-1 bg-[#0c162a] border border-sky-800/40 rounded-xl outline-none focus:border-sky-500 transition text-base"
           />
+        </div>
+
+        {/* PayPal Email */}
+        <div>
+          <label className="text-sky-300 text-sm font-semibold">
+            PayPal Email (for payouts)
+          </label>
+          <input
+            type="email"
+            value={paypalEmail}
+            onChange={(e) => setPaypalEmail(e.target.value)}
+            placeholder="Email used for your PayPal account"
+            className="w-full p-4 mt-1 bg-[#0c162a] border border-sky-800/40 rounded-xl outline-none focus:border-sky-500 transition text-base"
+          />
+          <p className="text-slate-400 text-xs mt-1">
+            We’ll send your commissions to this PayPal address.
+          </p>
         </div>
 
         {/* Referral Code */}

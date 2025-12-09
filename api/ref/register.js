@@ -15,16 +15,32 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
 
   try {
-    const { name, email, slug, password } = req.body;
+    const { name, email, paypalEmail, slug, password } = req.body;
 
     // Basic presence validation
-    if (!name || !email || !slug || !password)
+    if (!name || !email || !paypalEmail || !slug || !password) {
       return res.status(400).json({ ok: false, error: "All fields required" });
+    }
 
     const trimmedEmail = String(email).trim().toLowerCase();
+    const trimmedPaypalEmail = String(paypalEmail).trim().toLowerCase();
     const trimmedSlug = String(slug).trim().toLowerCase();
 
-    // Check email uniqueness
+    const emailRegex = /\S+@\S+\.\S+/;
+
+    if (!emailRegex.test(trimmedEmail)) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "Invalid login email address" });
+    }
+
+    if (!emailRegex.test(trimmedPaypalEmail)) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "Invalid PayPal email address" });
+    }
+
+    // Check email uniqueness (login email)
     const existingByEmail = await client.fetch(
       `*[_type == "referral" && creatorEmail == $email][0]`,
       { email: trimmedEmail }
@@ -50,16 +66,14 @@ export default async function handler(req, res) {
     // Create referral document
     const referral = await client.create({
       _type: "referral",
-      name: name.trim(),
+      name: String(name).trim(),
       slug: { _type: "slug", current: trimmedSlug },
       creatorEmail: trimmedEmail,
       creatorPassword: hash,
-      currentCommissionPercent: 10, // first-time fixed 10%
-      currentDiscountPercent: 0, // first-time 0% discount
-      maxCommissionPercent: 15,
+      paypalEmail: trimmedPaypalEmail,
+      currentCommissionPercent: 10,
       successfulReferrals: 0,
       isFirstTime: true,
-      // optional fields: paypalEmail, notes etc can be added later
     });
 
     return res.status(201).json({ ok: true, referralId: referral._id });
