@@ -119,13 +119,25 @@ function App() {
         {/* Roo Industries Logo */}
         <a
           href="/"
-          className={`roo-logo z-50 flex justify-center sm:justify-start items-center 
-      transition-transform duration-300 hover:scale-105
-      absolute sm:fixed md:absolute 
-      top-6 left-0 sm:left-8 md:left-10 w-full sm:w-auto
-      max-[480px]:relative max-[480px]:top-6 max-[480px]:mb-4 
-      transition-opacity duration-500 opacity-100
-      outline-none focus:outline-none border-none`}
+          className={`roo-logo z-50 flex items-center 
+          transition-transform duration-300 hover:scale-105
+          transition-opacity duration-500 opacity-100
+          outline-none focus:outline-none border-none
+          
+          /* 1. DEFAULT (Mobile & Tablet < 1000px) 
+             - Relative positioning (flows with page)
+             - Full width with center alignment 
+             - Adds margin bottom to push content down slightly */
+          relative top-6 w-full justify-center mb-4
+          
+          /* 2. DESKTOP (> 1280px)
+             - Switches to Absolute/Fixed positioning
+             - Auto width
+             - Aligns to the start (left) */
+          min-[1280px]:absolute min-[1280px]:fixed min-[1280px]:md:absolute
+          min-[1280px]:top-6 min-[1280px]:left-10 
+          min-[1280px]:w-auto min-[1280px]:justify-start 
+          min-[1280px]:mb-0`}
         >
           <img
             src="/logo.webp"
