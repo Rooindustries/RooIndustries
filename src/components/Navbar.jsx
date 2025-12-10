@@ -124,6 +124,16 @@ export default function Navbar() {
             Book
           </Link>
           <Link
+            to="/tools"
+            className={`px-2 sm:px-4 py-1.5 rounded-full transition max-[850px]:hidden ${
+              isActive("/tools")
+                ? "bg-cyan-400 text-black"
+                : "hover:text-cyan-400"
+            }`}
+          >
+            Tools
+          </Link>
+          <Link
             to="/contact"
             className={`px-2 sm:px-4 py-1.5 rounded-full transition ${
               isActive("/contact")
