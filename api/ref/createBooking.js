@@ -95,9 +95,6 @@ export default async function handler(req, res) {
       paymentProvider = "",
     } = req.body || {};
 
-    // ================================================================
-    // 🔥 1. MACHINE-GUN SECURITY FIX: Prevent fake paid bookings
-    // ================================================================
     if (status === "captured" && paymentProvider !== "free") {
       const hasPaypalProof = !!paypalOrderId;
       const hasRazorpayProof = !!razorpayPaymentId;
