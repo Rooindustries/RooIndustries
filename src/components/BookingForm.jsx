@@ -546,6 +546,8 @@ export default function BookingForm() {
   const times = useMemo(() => {
     if (!settings || !selectedDate) return [];
 
+    const now = new Date();
+
     const hostYear = selectedDate.getFullYear();
     const hostMonth = selectedDate.getMonth();
     const hostDay = selectedDate.getDate();
@@ -600,10 +602,13 @@ export default function BookingForm() {
       const isAllowed = allowed.includes(h);
       const isBooked = bookedForDayHost.includes(hostLabel);
       const isHeldOther = heldForDayHost.includes(hostLabel);
-      const disabled = !isAllowed || isBooked || isHeldOther;
 
       const utcStart = getUtcFromHostLocal(hostYear, hostMonth, hostDay, h);
       const localLabel = formatLocalTime(utcStart);
+
+      const isPast = utcStart <= now;
+
+      const disabled = !isAllowed || isBooked || isHeldOther || isPast;
 
       slots.push({
         hostHour: h,
@@ -614,6 +619,7 @@ export default function BookingForm() {
         isBooked,
         isHeldOther,
         isAllowed,
+        isPast,
       });
     }
 
@@ -676,6 +682,11 @@ export default function BookingForm() {
       .map((b) => b.time);
     const heldForDayHost = daySlots.filter((b) => b.isHold).map((b) => b.time);
 
+    const hostYear = d.getFullYear();
+    const hostMonth = d.getMonth();
+    const hostDay = d.getDate();
+    const now = new Date();
+
     let availableCount = 0;
     let totalConsidered = 0;
 
@@ -684,7 +695,11 @@ export default function BookingForm() {
       const isAllowed = allowed.includes(h);
       const isBooked = bookedForDayHost.includes(hostLabel);
       const isHeldOther = heldForDayHost.includes(hostLabel);
-      const disabled = !isAllowed || isBooked || isHeldOther;
+
+      const utcStart = getUtcFromHostLocal(hostYear, hostMonth, hostDay, h);
+      const isPast = utcStart <= now;
+
+      const disabled = !isAllowed || isBooked || isHeldOther || isPast;
 
       if (isAllowed) {
         totalConsidered++;
