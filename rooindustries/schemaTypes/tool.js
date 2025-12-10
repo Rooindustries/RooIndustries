@@ -101,7 +101,7 @@ export default {
       title: 'Download Note',
       type: 'string',
       description:
-        'e.g."Download from official CPUID mirror" or "Installer hosted directly by Roo Industries."',
+        'e.g. "Download from official CPUID mirror" or "Installer hosted directly by Roo Industries."',
     },
   ],
 }
