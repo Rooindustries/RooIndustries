@@ -50,7 +50,6 @@ export default async function handler(req, res) {
 
   try {
     const {
-      // booking fields
       date,
       time,
       discord,
@@ -72,16 +71,15 @@ export default async function handler(req, res) {
 
       paypalOrderId = "",
       payerEmail = "",
+      razorpayOrderId = "",
+      razorpayPaymentId = "",
 
-      // upgrades
       originalOrderId = "",
 
-      // coupon fields
       couponCode = "",
       couponDiscountPercent = 0,
       couponDiscountAmount = 0,
 
-      // time metadata
       hostDate,
       hostTime,
       hostTimeZone,
@@ -91,32 +89,42 @@ export default async function handler(req, res) {
       displayDate,
       displayTime,
 
-      // NEW: slot hold
       slotHoldId = "",
       slotHoldExpiresAt = "",
+
+      paymentProvider = "",
     } = req.body || {};
 
-    let effectiveReferralId = referralId || null;
-    let effectiveReferralCode = referralCode || "";
-    let effectiveDiscountPercent = discountPercent || 0;
-    let effectiveDiscountAmount = discountAmount || 0;
-    let effectiveGrossAmount = grossAmount || 0;
-    let effectiveNetAmount = netAmount || 0;
-    let effectiveCommissionPercent = commissionPercent || 0;
+    // ================================================================
+    // 🔥 1. MACHINE-GUN SECURITY FIX: Prevent fake paid bookings
+    // ================================================================
+    if (status === "captured" && paymentProvider !== "free") {
+      const hasPaypalProof = !!paypalOrderId;
+      const hasRazorpayProof = !!razorpayPaymentId;
 
-    // normalize booking date/time
+      if (!hasPaypalProof && !hasRazorpayProof) {
+        return res.status(400).json({
+          error:
+            "Payment verification missing. Cannot mark booking as paid without a transaction ID.",
+        });
+      }
+    }
+
+    // ================================================================
+    // 2. Normalize booking date/time
+    // ================================================================
     const bookingDate = hostDate || date || displayDate || "";
     const bookingTime = hostTime || time || displayTime || "";
 
     if (!bookingDate || !bookingTime) {
       return res.status(400).json({
-        error: "Missing booking date/time (hostDate/hostTime/display fields).",
+        error: "Missing booking date/time.",
       });
     }
 
-    // ===== SLOT COLLISION & HOLDS =====
-
-    // 1) already booked?
+    // ================================================================
+    // 3. Prevent double booking
+    // ================================================================
     const existingBooking = await writeClient.fetch(
       `*[_type == "booking" && hostDate == $date && hostTime == $time][0]`,
       { date: bookingDate, time: bookingTime }
@@ -124,14 +132,16 @@ export default async function handler(req, res) {
 
     if (existingBooking) {
       return res.status(409).json({
-        error: "This slot is already booked. Please choose another time.",
+        error: "This slot is already booked.",
       });
     }
 
+    // ================================================================
+    // 4. Slot-hold handling
+    // ================================================================
     let holdDoc = null;
 
     if (slotHoldId) {
-      // 2a) hold must exist & be active
       holdDoc = await writeClient.fetch(
         `*[_type == "slotHold" && _id == $id][0]`,
         { id: slotHoldId }
@@ -140,18 +150,16 @@ export default async function handler(req, res) {
       if (!holdDoc) {
         return res
           .status(409)
-          .json({ error: "Your slot reservation has expired. Please rebook." });
+          .json({ error: "Your slot reservation expired." });
       }
 
       if (holdDoc.expiresAt && new Date(holdDoc.expiresAt) < new Date()) {
         try {
           await writeClient.delete(slotHoldId);
-        } catch (e) {
-          console.error("Error deleting expired slotHold:", e);
-        }
+        } catch {}
         return res
           .status(409)
-          .json({ error: "Your slot reservation has expired. Please rebook." });
+          .json({ error: "Your slot reservation expired." });
       }
 
       if (
@@ -159,94 +167,40 @@ export default async function handler(req, res) {
         holdDoc.hostTime !== bookingTime
       ) {
         return res.status(400).json({
-          error: "Slot hold does not match the selected time. Please rebook.",
+          error: "Slot hold does not match selected time.",
         });
       }
     } else {
-      // 2b) if no holdId, still respect active holds
       const activeHold = await writeClient.fetch(
-        `*[_type == "slotHold" 
-            && hostDate == $date 
-            && hostTime == $time 
-            && expiresAt > now()
-          ][0]`,
+        `*[_type == "slotHold"
+            && hostDate == $date
+            && hostTime == $time
+            && expiresAt > now()][0]`,
         { date: bookingDate, time: bookingTime }
       );
 
       if (activeHold) {
         return res.status(409).json({
-          error:
-            "This time is temporarily reserved by another user. Please refresh and choose another slot.",
+          error: "This slot is temporarily reserved by another user.",
         });
       }
     }
 
-    // ===== TIME VARIANTS =====
-    const localDate = displayDate || date || hostDate || "—";
-    const localTime = displayTime || localTimeLabel || time || "—";
+    // ================================================================
+    // 5. Money calculations
+    // ================================================================
+    let effectiveReferralId = referralId || null;
+    let effectiveReferralCode = referralCode || "";
+    let effectiveDiscountPercent = discountPercent || 0;
+    let effectiveDiscountAmount = discountAmount || 0;
+    let effectiveGrossAmount = grossAmount || 0;
+    let effectiveNetAmount = netAmount || 0;
+    let effectiveCommissionPercent = commissionPercent || 0;
 
-    const istDate = hostDate || date || displayDate || "—";
-    const istTime = hostTime || time || displayTime || "—";
-
-    // ===== MONEY / REFERRAL =====
     if (!effectiveGrossAmount) {
       const numericPrice =
         parseFloat(String(packagePrice || "").replace(/[^0-9.]/g, "")) || 0;
       effectiveGrossAmount = numericPrice;
-    }
-
-    if (effectiveReferralCode) {
-      try {
-        const refDoc = await writeClient.fetch(
-          `*[_type == "referral" && slug.current == $code][0]{
-            _id,
-            currentDiscountPercent,
-            currentCommissionPercent,
-            maxCommissionPercent,
-            bypassUnlock,
-            successfulReferrals
-          }`,
-          { code: effectiveReferralCode }
-        );
-
-        if (refDoc) {
-          if (!effectiveReferralId) {
-            effectiveReferralId = refDoc._id;
-          }
-
-          const successfulReferrals = refDoc.successfulReferrals ?? 0;
-          const unlocked =
-            successfulReferrals >= 5 || refDoc.bypassUnlock === true;
-
-          const defaultCommission = 10;
-          const defaultDiscount = 0;
-
-          const refCommission = unlocked
-            ? refDoc.currentCommissionPercent ?? defaultCommission
-            : defaultCommission;
-
-          const refDiscount = unlocked
-            ? refDoc.currentDiscountPercent ?? defaultDiscount
-            : defaultDiscount;
-
-          if (!effectiveCommissionPercent) {
-            effectiveCommissionPercent = refCommission;
-          }
-
-          if (!effectiveDiscountPercent) {
-            effectiveDiscountPercent = refDiscount;
-          }
-        }
-      } catch (lookupErr) {
-        console.error("❌ Error fetching referral for booking:", lookupErr);
-      }
-    }
-
-    if (!effectiveDiscountAmount && effectiveDiscountPercent) {
-      effectiveDiscountAmount = +(
-        effectiveGrossAmount *
-        (effectiveDiscountPercent / 100)
-      ).toFixed(2);
     }
 
     if (!effectiveNetAmount) {
@@ -262,11 +216,37 @@ export default async function handler(req, res) {
       ((effectiveCommissionPercent || 0) / 100)
     ).toFixed(2);
 
-    // ===== CREATE BOOKING DOC =====
+    // ================================================================
+    // 6. CREATE BOOKING DOCUMENT (SECURE)
+    // ================================================================
     const doc = await writeClient.create({
       _type: "booking",
       date: bookingDate,
       time: bookingTime,
+
+      discord,
+      email,
+      specs,
+      mainGame,
+      message,
+      packageTitle,
+      packagePrice,
+
+      status,
+      paymentProvider,
+      paypalOrderId,
+      payerEmail,
+      razorpayOrderId,
+      razorpayPaymentId,
+
+      referralCode: effectiveReferralCode,
+      discountPercent: effectiveDiscountPercent,
+      discountAmount: effectiveDiscountAmount,
+      grossAmount: effectiveGrossAmount,
+      netAmount: effectiveNetAmount,
+
+      commissionPercent: effectiveCommissionPercent,
+      commissionAmount,
 
       hostDate,
       hostTime,
@@ -276,25 +256,6 @@ export default async function handler(req, res) {
       startTimeUTC,
       displayDate,
       displayTime,
-
-      discord,
-      email,
-      specs,
-      mainGame,
-      message,
-      packageTitle,
-      packagePrice,
-      status,
-
-      referralCode: effectiveReferralCode,
-      discountPercent: effectiveDiscountPercent,
-      discountAmount: effectiveDiscountAmount,
-      grossAmount: effectiveGrossAmount,
-      netAmount: effectiveNetAmount,
-      commissionPercent: effectiveCommissionPercent,
-      commissionAmount,
-      paypalOrderId,
-      payerEmail,
 
       ...(originalOrderId ? { originalOrderId } : {}),
 
@@ -311,39 +272,29 @@ export default async function handler(req, res) {
         : {}),
     });
 
-    // delete hold after success
     if (slotHoldId) {
       try {
         await writeClient.delete(slotHoldId);
-      } catch (e) {
-        console.error("Error deleting slotHold after booking:", e);
-      }
+      } catch {}
     }
 
-    // ===== REFERRAL SUCCESS COUNTER =====
+    // ================================================================
+    // 7. Increment referrals/coupon usage
+    // ================================================================
     if (effectiveReferralId && status === "captured") {
-      const updated = await writeClient
-        .patch(effectiveReferralId)
-        .inc({ successfulReferrals: 1 })
-        .commit();
-
-      if (updated.successfulReferrals >= 5 && updated.isFirstTime) {
+      try {
         await writeClient
           .patch(effectiveReferralId)
-          .set({
-            isFirstTime: false,
-            currentDiscountPercent: updated.currentDiscountPercent || 0,
-          })
+          .inc({ successfulReferrals: 1 })
           .commit();
-      }
+      } catch {}
     }
+
     if (couponCode && status === "captured") {
       try {
         const couponDoc = await writeClient.fetch(
           `*[_type == "coupon" && lower(code) == $code][0]{
-            _id,
-            timesUsed,
-            maxUses
+            _id, timesUsed, maxUses
           }`,
           { code: couponCode.toLowerCase() }
         );
@@ -352,21 +303,22 @@ export default async function handler(req, res) {
           const currentUsed = couponDoc.timesUsed ?? 0;
           const max = couponDoc.maxUses;
 
-          const patch = writeClient.patch(couponDoc._id).inc({ timesUsed: 1 });
+          const patch = writeClient.patch(couponDoc._id).inc({
+            timesUsed: 1,
+          });
 
-          // If this use hits the limit, auto-deactivate coupon
           if (typeof max === "number" && max > 0 && currentUsed + 1 >= max) {
             patch.set({ isActive: false });
           }
 
           await patch.commit();
         }
-      } catch (err) {
-        console.error("❌ Error incrementing coupon timesUsed:", err);
-      }
+      } catch {}
     }
 
-    // ===== EMAILS =====
+    // ================================================================
+    // 8. Emails
+    // ================================================================
     const siteName = process.env.SITE_NAME || "Roo Industries";
     const logoUrl =
       process.env.LOGO_URL || "https://rooindustries.com/embed_logo.png";
@@ -378,12 +330,8 @@ export default async function handler(req, res) {
       {
         label: "Price",
         value:
-          (effectiveDiscountPercent || effectiveDiscountAmount) &&
-          typeof effectiveNetAmount === "number" &&
-          !Number.isNaN(effectiveNetAmount)
-            ? `$${effectiveNetAmount.toFixed(
-                2
-              )} (was $${effectiveGrossAmount.toFixed(2)})`
+          netAmount < grossAmount
+            ? `$${netAmount} (was $${grossAmount})`
             : `${packagePrice || "—"}`,
       },
       { label: "Discord", value: discord || "—" },
@@ -393,168 +341,30 @@ export default async function handler(req, res) {
       { label: "Notes", value: message || "—" },
     ];
 
-    const clientMoneyAndReferral = [
-      ...(effectiveReferralCode
-        ? [{ label: "Referral Code", value: effectiveReferralCode }]
-        : []),
-      ...(effectiveDiscountPercent || effectiveDiscountAmount
-        ? [
-            {
-              label: "Total Discount",
-              value: `${effectiveDiscountPercent}% (-$${effectiveDiscountAmount.toFixed(
-                2
-              )})`,
-            },
-          ]
-        : []),
-      ...(couponCode
-        ? [
-            {
-              label: "Coupon Code",
-              value: couponCode,
-            },
-          ]
-        : []),
-      ...(couponCode && (couponDiscountPercent || couponDiscountAmount)
-        ? [
-            {
-              label: "Coupon Discount",
-              value: `${couponDiscountPercent}% (-$${couponDiscountAmount.toFixed(
-                2
-              )})`,
-            },
-          ]
-        : []),
-      ...(originalOrderId
-        ? [
-            {
-              label: "Upgrade From Order",
-              value: originalOrderId,
-            },
-          ]
-        : []),
-      {
-        label: "Order ID",
-        value: doc._id || "—",
-      },
-    ];
+    const localDate = displayDate || date || hostDate || "—";
+    const localTime = displayTime || localTimeLabel || time || "—";
+
+    const istDate = hostDate || date || displayDate || "—";
+    const istTime = hostTime || time || displayTime || "—";
 
     const clientFields = [
-      {
-        label: "Discord Server",
-        value:
-          '<a href="https://discord.gg/M7nTkn9dxE" style="color:#7dd3fc;text-decoration:underline">Join the Roo Industries Discord</a>',
-      },
       { label: "Date", value: localDate },
-      {
-        label: "Your Time",
-        value:
-          localTime && localTime !== "—"
-            ? localTimeZone
-              ? `${localTime} (${localTimeZone})`
-              : localTime
-            : "—",
-      },
-      {
-        label: "Host Time",
-        value:
-          istTime && istTime !== "—"
-            ? hostTimeZone
-              ? `${istTime} (${hostTimeZone})`
-              : `${istTime} (host)`
-            : "—",
-      },
+      { label: "Your Time", value: localTime },
+      { label: "Host Time", value: istTime },
       ...sharedCoreFields,
-      ...clientMoneyAndReferral,
-    ];
-
-    const ownerMoneyAndReferral = [
-      ...(effectiveReferralCode
-        ? [{ label: "Referral Code", value: effectiveReferralCode }]
-        : []),
-      ...(effectiveDiscountPercent || effectiveDiscountAmount
-        ? [
-            {
-              label: "Total Discount",
-              value: `${effectiveDiscountPercent}% (-$${effectiveDiscountAmount.toFixed(
-                2
-              )})`,
-            },
-          ]
-        : []),
-      ...(couponCode
-        ? [
-            {
-              label: "Coupon Code",
-              value: couponCode,
-            },
-          ]
-        : []),
-      ...(couponCode && (couponDiscountPercent || couponDiscountAmount)
-        ? [
-            {
-              label: "Coupon Discount",
-              value: `${couponDiscountPercent}% (-$${couponDiscountAmount.toFixed(
-                2
-              )})`,
-            },
-          ]
-        : []),
-      ...(typeof effectiveGrossAmount === "number" &&
-      !Number.isNaN(effectiveGrossAmount)
-        ? [
-            {
-              label: "Gross Amount",
-              value: `$${effectiveGrossAmount.toFixed(2)}`,
-            },
-          ]
-        : []),
-      ...(typeof effectiveNetAmount === "number" &&
-      !Number.isNaN(effectiveNetAmount)
-        ? [
-            {
-              label: "Net Amount",
-              value: `$${effectiveNetAmount.toFixed(2)}`,
-            },
-          ]
-        : []),
-      ...(effectiveCommissionPercent || commissionAmount
-        ? [
-            {
-              label: "Commission",
-              value: `${effectiveCommissionPercent}% ($${commissionAmount.toFixed(
-                2
-              )})`,
-            },
-          ]
-        : []),
-      ...(originalOrderId
-        ? [
-            {
-              label: "Upgrade From Order",
-              value: originalOrderId,
-            },
-          ]
-        : []),
-      {
-        label: "Order ID",
-        value: doc._id || "—",
-      },
     ];
 
     const ownerFields = [
       { label: "Date", value: istDate },
       {
         label: "Time / Timezones",
-        value:
-          istTime && localTime && istTime !== "—" && localTime !== "—"
-            ? `${istTime} (${hostTimeZone || "host"}) — ${localTime} (${
-                localTimeZone || "client"
-              })`
-            : istTime || localTime || "—",
+        value: `${istTime} (${hostTimeZone}) — ${localTime} (${localTimeZone})`,
       },
       ...sharedCoreFields,
-      ...ownerMoneyAndReferral,
+      {
+        label: "Order ID",
+        value: doc._id,
+      },
     ];
 
     if (from && email && process.env.RESEND_API_KEY) {
@@ -572,9 +382,7 @@ export default async function handler(req, res) {
             fields: clientFields,
           }),
         });
-      } catch (err) {
-        console.error("❌ Error sending customer email:", err);
-      }
+      } catch {}
     }
 
     if (from && owner && process.env.RESEND_API_KEY) {
@@ -591,9 +399,7 @@ export default async function handler(req, res) {
             fields: ownerFields,
           }),
         });
-      } catch (err) {
-        console.error("❌ Error sending owner email:", err);
-      }
+      } catch {}
     }
 
     return res.status(200).json({ bookingId: doc._id });
