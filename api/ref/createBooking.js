@@ -95,27 +95,91 @@ export default async function handler(req, res) {
       paymentProvider = "",
     } = req.body || {};
 
-    const isCaptured = status === "captured";
-    const isFreeProvider = paymentProvider === "free";
-
-    if (!isCaptured) {
-      return res.status(400).json({
-        error: "Cannot create booking without completed payment.",
-      });
+    // ================================================================
+    // 1. Basic paymentProvider validation
+    // ================================================================
+    if (!paymentProvider) {
+      return res
+        .status(400)
+        .json({ error: "Missing payment provider on booking request." });
     }
 
-    // 🔒 NEW: For free bookings, netAmount must be exactly 0 (front-end already does this)
-    if (isFreeProvider) {
-      const numericNet = Number(netAmount ?? 0);
-      if (numericNet !== 0) {
+    if (
+      paymentProvider !== "free" &&
+      paymentProvider !== "paypal" &&
+      paymentProvider !== "razorpay"
+    ) {
+      return res.status(400).json({ error: "Unsupported payment provider." });
+    }
+
+    // ================================================================
+    // 2. Special handling for FREE bookings
+    //    -> must be backed by a valid, active 100% coupon
+    // ================================================================
+    if (paymentProvider === "free") {
+      if (status !== "captured") {
         return res.status(400).json({
-          error: "Invalid free booking payload.",
+          error: "Free bookings must have status 'captured'.",
+        });
+      }
+
+      if (!couponCode) {
+        return res.status(400).json({
+          error: "Free bookings require a valid coupon code.",
+        });
+      }
+
+      const freeCoupon = await writeClient.fetch(
+        `*[_type == "coupon" && lower(code) == $code][0]{
+          _id,
+          isActive,
+          timesUsed,
+          maxUses,
+          discountPercent
+        }`,
+        { code: String(couponCode).toLowerCase() }
+      );
+
+      if (!freeCoupon) {
+        return res.status(400).json({
+          error: "Coupon not found or inactive for free booking.",
+        });
+      }
+
+      const currentUsed = freeCoupon.timesUsed ?? 0;
+      const maxUses = freeCoupon.maxUses;
+
+      if (
+        freeCoupon.isActive === false ||
+        (typeof maxUses === "number" && maxUses > 0 && currentUsed >= maxUses)
+      ) {
+        return res.status(400).json({
+          error: "This coupon can no longer be used for free bookings.",
+        });
+      }
+
+      if (
+        typeof freeCoupon.discountPercent === "number" &&
+        freeCoupon.discountPercent < 100
+      ) {
+        return res.status(400).json({
+          error: "This coupon does not provide a full (100%) discount.",
         });
       }
     }
 
-    // Existing guard, now using isCaptured/isFreeProvider
-    if (isCaptured && !isFreeProvider) {
+    // ================================================================
+    // 3. Paid bookings: require proof for captured status
+    // ================================================================
+    if (paymentProvider === "paypal" || paymentProvider === "razorpay") {
+      if (status !== "captured") {
+        return res.status(400).json({
+          error: "Only captured payments can create bookings.",
+        });
+      }
+    }
+
+    if (status === "captured" && paymentProvider !== "free") {
       const hasPaypalProof = !!paypalOrderId;
       const hasRazorpayProof = !!razorpayPaymentId;
 
@@ -128,7 +192,7 @@ export default async function handler(req, res) {
     }
 
     // ================================================================
-    // 2. Normalize booking date/time
+    // 4. Normalize booking date/time
     // ================================================================
     const bookingDate = hostDate || date || displayDate || "";
     const bookingTime = hostTime || time || displayTime || "";
@@ -140,7 +204,7 @@ export default async function handler(req, res) {
     }
 
     // ================================================================
-    // 3. Prevent double booking
+    // 5. Prevent double booking
     // ================================================================
     const existingBooking = await writeClient.fetch(
       `*[_type == "booking" && hostDate == $date && hostTime == $time][0]`,
@@ -154,7 +218,7 @@ export default async function handler(req, res) {
     }
 
     // ================================================================
-    // 4. Slot-hold handling
+    // 6. Slot-hold handling
     // ================================================================
     let holdDoc = null;
 
@@ -204,7 +268,7 @@ export default async function handler(req, res) {
     }
 
     // ================================================================
-    // 5. Money calculations
+    // 7. Money calculations
     // ================================================================
     let effectiveReferralId = referralId || null;
     let effectiveReferralCode = referralCode || "";
@@ -214,20 +278,25 @@ export default async function handler(req, res) {
     let effectiveNetAmount = netAmount || 0;
     let effectiveCommissionPercent = commissionPercent || 0;
 
+    // Derive gross if not passed
     if (!effectiveGrossAmount) {
       const numericPrice =
         parseFloat(String(packagePrice || "").replace(/[^0-9.]/g, "")) || 0;
       effectiveGrossAmount = numericPrice;
     }
 
-    if (!effectiveNetAmount && !isFreeProvider) {
-      effectiveNetAmount = +(
-        effectiveGrossAmount - (effectiveDiscountAmount || 0)
-      ).toFixed(2);
-    }
-
-    if (isFreeProvider) {
+    // For FREE bookings, enforce 100% discount server-side
+    if (paymentProvider === "free") {
+      effectiveDiscountPercent = 100;
+      effectiveDiscountAmount = effectiveGrossAmount;
       effectiveNetAmount = 0;
+    } else {
+      // For paid bookings, if net not provided, derive it once
+      if (!effectiveNetAmount) {
+        effectiveNetAmount = +(
+          effectiveGrossAmount - (effectiveDiscountAmount || 0)
+        ).toFixed(2);
+      }
     }
 
     const commissionBase = effectiveNetAmount || effectiveGrossAmount || 0;
@@ -238,7 +307,7 @@ export default async function handler(req, res) {
     ).toFixed(2);
 
     // ================================================================
-    // 6. CREATE BOOKING DOCUMENT (SECURE)
+    // 8. CREATE BOOKING DOCUMENT
     // ================================================================
     const doc = await writeClient.create({
       _type: "booking",
@@ -300,7 +369,7 @@ export default async function handler(req, res) {
     }
 
     // ================================================================
-    // 7. Increment referrals/coupon usage
+    // 9. Increment referrals/coupon usage
     // ================================================================
     if (effectiveReferralId && status === "captured") {
       try {
@@ -338,7 +407,7 @@ export default async function handler(req, res) {
     }
 
     // ================================================================
-    // 8. Emails
+    // 10. Emails
     // ================================================================
     const siteName = process.env.SITE_NAME || "Roo Industries";
     const logoUrl =
@@ -352,7 +421,9 @@ export default async function handler(req, res) {
         label: "Price",
         value:
           effectiveNetAmount < effectiveGrossAmount
-            ? `$${effectiveNetAmount} (was $${effectiveGrossAmount})`
+            ? `$${effectiveNetAmount.toFixed(
+                2
+              )} (was $${effectiveGrossAmount.toFixed(2)})`
             : `${packagePrice || "—"}`,
       },
       { label: "Discord", value: discord || "—" },

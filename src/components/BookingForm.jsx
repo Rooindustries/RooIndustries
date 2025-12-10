@@ -546,7 +546,7 @@ export default function BookingForm() {
   const times = useMemo(() => {
     if (!settings || !selectedDate) return [];
 
-    const now = new Date();
+    const now = new Date(); // current moment in UTC basis for comparison
 
     const hostYear = selectedDate.getFullYear();
     const hostMonth = selectedDate.getMonth();
