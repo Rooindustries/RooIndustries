@@ -11,7 +11,6 @@ const writeClient = createClient({
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// Discord invite (your link)
 const DISCORD_INVITE_URL = "https://discord.gg/M7nTkn9dxE";
 
 const emailHtml = ({
@@ -506,7 +505,6 @@ export default async function handler(req, res) {
             intro:
               "Thanks for booking! I’ll reach out on Discord/Email to confirm your time.",
             fields: clientFields,
-            // 👇 this shows the Discord button at the top
             discordInviteUrl: DISCORD_INVITE_URL,
           }),
         });
