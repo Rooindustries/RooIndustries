@@ -11,7 +11,17 @@ const writeClient = createClient({
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-const emailHtml = ({ logoUrl, siteName, heading, intro, fields }) => `
+// Discord invite (your link)
+const DISCORD_INVITE_URL = "https://discord.gg/M7nTkn9dxE";
+
+const emailHtml = ({
+  logoUrl,
+  siteName,
+  heading,
+  intro,
+  fields,
+  discordInviteUrl,
+}) => `
   <div style="font-family:Inter,Arial,sans-serif;background:#0b1120;padding:24px;color:#e5f2ff">
     <table width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;margin:0 auto;background:#0f172a;border:1px solid rgba(56,189,248,.2);border-radius:16px;overflow:hidden">
       <tr>
@@ -23,7 +33,31 @@ const emailHtml = ({ logoUrl, siteName, heading, intro, fields }) => `
       <tr>
         <td style="padding:24px">
           <h1 style="margin:0 0 8px;font-size:20px;color:#a5e8ff">${heading}</h1>
-          <p style="margin:0 0 16px;opacity:.85">${intro}</p>
+
+          ${
+            discordInviteUrl
+              ? `
+          <p style="margin:0 0 10px;">
+            <a
+              href="${discordInviteUrl}"
+              style="
+                display:inline-block;
+                padding:8px 14px;
+                border-radius:999px;
+                background:#38bdf8;
+                color:#0b1120;
+                font-size:13px;
+                text-decoration:none;
+                font-weight:600;
+              "
+            >
+              Join the Roo Industries Discord
+            </a>
+          </p>`
+              : ""
+          }
+
+          <p style="margin:10px 0 16px;opacity:.85">${intro}</p>
           <table cellpadding="0" cellspacing="0" style="width:100%;background:#0b1120;border:1px solid rgba(56,189,248,.15);border-radius:12px">
             <tbody>
               ${fields
@@ -472,6 +506,8 @@ export default async function handler(req, res) {
             intro:
               "Thanks for booking! I’ll reach out on Discord/Email to confirm your time.",
             fields: clientFields,
+            // 👇 this shows the Discord button at the top
+            discordInviteUrl: DISCORD_INVITE_URL,
           }),
         });
       } catch {}
