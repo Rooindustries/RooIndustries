@@ -50,7 +50,7 @@ const emailHtml = ({
                 font-weight:600;
               "
             >
-              Join the Roo Industries Discord
+              Join the Roo Industries Discord (Required)
             </a>
           </p>`
               : ""
@@ -93,7 +93,6 @@ export default async function handler(req, res) {
       packageTitle,
       packagePrice,
       status = "pending",
-
       referralId,
       referralCode,
       discountPercent = 0,
@@ -101,18 +100,14 @@ export default async function handler(req, res) {
       grossAmount = 0,
       netAmount = 0,
       commissionPercent = 0,
-
       paypalOrderId = "",
       payerEmail = "",
       razorpayOrderId = "",
       razorpayPaymentId = "",
-
       originalOrderId = "",
-
       couponCode = "",
       couponDiscountPercent = 0,
       couponDiscountAmount = 0,
-
       hostDate,
       hostTime,
       hostTimeZone,
@@ -121,16 +116,11 @@ export default async function handler(req, res) {
       startTimeUTC,
       displayDate,
       displayTime,
-
       slotHoldId = "",
       slotHoldExpiresAt = "",
-
       paymentProvider = "",
     } = req.body || {};
 
-    // ================================================================
-    // 1. Basic paymentProvider validation
-    // ================================================================
     if (!paymentProvider) {
       return res
         .status(400)
@@ -145,10 +135,6 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Unsupported payment provider." });
     }
 
-    // ================================================================
-    // 2. Special handling for FREE bookings
-    //    -> must be backed by a valid, active 100% coupon
-    // ================================================================
     if (paymentProvider === "free") {
       if (status !== "captured") {
         return res.status(400).json({
@@ -201,9 +187,6 @@ export default async function handler(req, res) {
       }
     }
 
-    // ================================================================
-    // 3. Paid bookings: require proof for captured status
-    // ================================================================
     if (paymentProvider === "paypal" || paymentProvider === "razorpay") {
       if (status !== "captured") {
         return res.status(400).json({
@@ -224,9 +207,6 @@ export default async function handler(req, res) {
       }
     }
 
-    // ================================================================
-    // 4. Normalize booking date/time
-    // ================================================================
     const bookingDate = hostDate || date || displayDate || "";
     const bookingTime = hostTime || time || displayTime || "";
 
@@ -236,9 +216,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // ================================================================
-    // 5. Prevent double booking
-    // ================================================================
     const existingBooking = await writeClient.fetch(
       `*[_type == "booking" && hostDate == $date && hostTime == $time][0]`,
       { date: bookingDate, time: bookingTime }
@@ -250,9 +227,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // ================================================================
-    // 6. Slot-hold handling
-    // ================================================================
     let holdDoc = null;
 
     if (slotHoldId) {
@@ -300,9 +274,6 @@ export default async function handler(req, res) {
       }
     }
 
-    // ================================================================
-    // 7. Money calculations
-    // ================================================================
     let effectiveReferralId = referralId || null;
     let effectiveReferralCode = referralCode || "";
     let effectiveDiscountPercent = discountPercent || 0;
@@ -311,20 +282,17 @@ export default async function handler(req, res) {
     let effectiveNetAmount = netAmount || 0;
     let effectiveCommissionPercent = commissionPercent || 0;
 
-    // Derive gross if not passed
     if (!effectiveGrossAmount) {
       const numericPrice =
         parseFloat(String(packagePrice || "").replace(/[^0-9.]/g, "")) || 0;
       effectiveGrossAmount = numericPrice;
     }
 
-    // For FREE bookings, enforce 100% discount server-side
     if (paymentProvider === "free") {
       effectiveDiscountPercent = 100;
       effectiveDiscountAmount = effectiveGrossAmount;
       effectiveNetAmount = 0;
     } else {
-      // For paid bookings, if net not provided, derive it once
       if (!effectiveNetAmount) {
         effectiveNetAmount = +(
           effectiveGrossAmount - (effectiveDiscountAmount || 0)
@@ -339,14 +307,10 @@ export default async function handler(req, res) {
       ((effectiveCommissionPercent || 0) / 100)
     ).toFixed(2);
 
-    // ================================================================
-    // 8. CREATE BOOKING DOCUMENT
-    // ================================================================
     const doc = await writeClient.create({
       _type: "booking",
       date: bookingDate,
       time: bookingTime,
-
       discord,
       email,
       specs,
@@ -354,23 +318,19 @@ export default async function handler(req, res) {
       message,
       packageTitle,
       packagePrice,
-
       status,
       paymentProvider,
       paypalOrderId,
       payerEmail,
       razorpayOrderId,
       razorpayPaymentId,
-
       referralCode: effectiveReferralCode,
       discountPercent: effectiveDiscountPercent,
       discountAmount: effectiveDiscountAmount,
       grossAmount: effectiveGrossAmount,
       netAmount: effectiveNetAmount,
-
       commissionPercent: effectiveCommissionPercent,
       commissionAmount,
-
       hostDate,
       hostTime,
       hostTimeZone,
@@ -379,9 +339,7 @@ export default async function handler(req, res) {
       startTimeUTC,
       displayDate,
       displayTime,
-
       ...(originalOrderId ? { originalOrderId } : {}),
-
       ...(couponCode
         ? {
             couponCode,
@@ -389,7 +347,6 @@ export default async function handler(req, res) {
             couponDiscountAmount,
           }
         : {}),
-
       ...(effectiveReferralId
         ? { referral: { _type: "reference", _ref: effectiveReferralId } }
         : {}),
@@ -401,9 +358,6 @@ export default async function handler(req, res) {
       } catch {}
     }
 
-    // ================================================================
-    // 9. Increment referrals/coupon usage
-    // ================================================================
     if (effectiveReferralId && status === "captured") {
       try {
         await writeClient
@@ -439,9 +393,6 @@ export default async function handler(req, res) {
       } catch {}
     }
 
-    // ================================================================
-    // 10. Emails
-    // ================================================================
     const siteName = process.env.SITE_NAME || "Roo Industries";
     const logoUrl =
       process.env.LOGO_URL || "https://rooindustries.com/embed_logo.png";
@@ -492,18 +443,23 @@ export default async function handler(req, res) {
       },
     ];
 
+    const bookingRef = (doc._id || "").slice(-6).toUpperCase() || "BOOKING";
+
+    const clientSubject = `Your ${siteName} booking (Ref: ${bookingRef})`;
+    const ownerSubject = `New booking ${bookingRef} — ${packageTitle} (${istDate} ${istTime})`;
+
     if (from && email && process.env.RESEND_API_KEY) {
       try {
         await resend.emails.send({
           from,
           to: email,
-          subject: `Your ${siteName} booking request`,
+          subject: clientSubject,
           html: emailHtml({
             logoUrl,
             siteName,
             heading: "Booking Received ✨",
             intro:
-              "Thanks for booking! I’ll reach out on Discord/Email to confirm your time.",
+              "To continue with your booking, please join the Roo Industries Discord using the button above. I'll contact you there (or by email if needed) to confirm your time and details.",
             fields: clientFields,
             discordInviteUrl: DISCORD_INVITE_URL,
           }),
@@ -516,7 +472,7 @@ export default async function handler(req, res) {
         await resend.emails.send({
           from,
           to: owner,
-          subject: `New booking — ${packageTitle} (${istDate} ${istTime})`,
+          subject: ownerSubject,
           html: emailHtml({
             logoUrl,
             siteName,
