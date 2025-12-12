@@ -18,7 +18,13 @@ export default function RefRegister() {
     setToast({ type, message });
     setTimeout(() => setToast(null), 2800);
   }
-
+  useEffect(() => {
+    const savedEmail = localStorage.getItem("referral_prefill_email");
+    if (savedEmail) {
+      setEmail(savedEmail);
+      localStorage.removeItem("referral_prefill_email");
+    }
+  }, []);
   // Debounced slug availability check
   useEffect(() => {
     if (!slug) {
