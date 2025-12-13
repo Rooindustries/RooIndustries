@@ -50,9 +50,156 @@ export default {
       type: 'string',
     },
     {
+      name: 'contactDiscord',
+      title: 'Discord (optional)',
+      type: 'string',
+    },
+    {
+      name: 'contactTelegram',
+      title: 'Telegram / Signal (optional)',
+      type: 'string',
+    },
+    {
+      name: 'contactPhone',
+      title: 'Phone (optional)',
+      type: 'string',
+    },
+    {
+      name: 'xocPayments',
+      title: 'XOC Payment Log',
+      type: 'array',
+      of: [
+        {
+          type: 'object',
+          name: 'paymentLogXoc',
+          title: 'XOC Payment',
+          fields: [
+            {
+              name: 'amount',
+              title: 'Amount Paid (USD)',
+              type: 'number',
+              validation: (Rule) => Rule.required().min(0),
+            },
+            {
+              name: 'paidOn',
+              title: 'Paid On',
+              type: 'datetime',
+              validation: (Rule) => Rule.required(),
+            },
+            {
+              name: 'note',
+              title: 'Note / Reference',
+              type: 'string',
+              description: 'Invoice ID or transaction reference (optional).',
+            },
+          ],
+          preview: {
+            select: {amount: 'amount', paidOn: 'paidOn', note: 'note'},
+            prepare({amount, paidOn, note}) {
+              const date = paidOn ? new Date(paidOn).toLocaleDateString() : '';
+              const title = amount ? `$${amount} paid` : 'Payment';
+              const subtitle = [date, note].filter(Boolean).join(' • ');
+              return {title, subtitle};
+            },
+          },
+        },
+      ],
+    },
+    {
+      name: 'vertexPayments',
+      title: 'Vertex Payment Log',
+      type: 'array',
+      of: [
+        {
+          type: 'object',
+          name: 'paymentLogVertex',
+          title: 'Vertex Payment',
+          fields: [
+            {
+              name: 'amount',
+              title: 'Amount Paid (USD)',
+              type: 'number',
+              validation: (Rule) => Rule.required().min(0),
+            },
+            {
+              name: 'paidOn',
+              title: 'Paid On',
+              type: 'datetime',
+              validation: (Rule) => Rule.required(),
+            },
+            {
+              name: 'note',
+              title: 'Note / Reference',
+              type: 'string',
+              description: 'Invoice ID or transaction reference (optional).',
+            },
+          ],
+          preview: {
+            select: {amount: 'amount', paidOn: 'paidOn', note: 'note'},
+            prepare({amount, paidOn, note}) {
+              const date = paidOn ? new Date(paidOn).toLocaleDateString() : '';
+              const title = amount ? `$${amount} paid` : 'Payment';
+              const subtitle = [date, note].filter(Boolean).join(' • ');
+              return {title, subtitle};
+            },
+          },
+        },
+      ],
+    },
+    {
+      name: 'earnedXoc',
+      title: 'Earned (XOC)',
+      type: 'number',
+      readOnly: true,
+      description: 'Calculated from bookings. Not editable.',
+    },
+    {
+      name: 'earnedVertex',
+      title: 'Earned (Vertex)',
+      type: 'number',
+      readOnly: true,
+      description: 'Calculated from bookings. Not editable.',
+    },
+    {
+      name: 'earnedTotal',
+      title: 'Earned (Total)',
+      type: 'number',
+      readOnly: true,
+      description: 'Calculated from bookings. Not editable.',
+    },
+    {
+      name: 'paidXoc',
+      title: 'Paid (XOC)',
+      type: 'number',
+      readOnly: true,
+      description: 'Sum of XOC payment log. Not editable.',
+    },
+    {
+      name: 'paidVertex',
+      title: 'Paid (Vertex)',
+      type: 'number',
+      readOnly: true,
+      description: 'Sum of Vertex payment log. Not editable.',
+    },
+    {
+      name: 'paidTotal',
+      title: 'Paid (Total)',
+      type: 'number',
+      readOnly: true,
+      description: 'Sum of all payments. Not editable.',
+    },
+    {
+      name: 'owedTotal',
+      title: 'Owed (Total)',
+      type: 'number',
+      readOnly: true,
+      description: 'Total remaining balance. Not editable.',
+    },
+    {
       name: 'notes',
-      title: 'Notes',
+      title: 'Internal Notes (admin only)',
       type: 'text',
+      description: 'Private notes for admins. Not shown to creators.',
     },
     {
       name: 'creatorEmail',
