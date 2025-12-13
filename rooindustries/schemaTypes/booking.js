@@ -25,16 +25,8 @@ export default {
     {name: 'packageTitle', title: 'Package Title', type: 'string'},
     {name: 'packagePrice', title: 'Package Price', type: 'string'},
 
-    {
-      name: 'displayDate',
-      title: 'Client Display Date',
-      type: 'string',
-    },
-    {
-      name: 'displayTime',
-      title: 'Client Display Time',
-      type: 'string',
-    },
+    {name: 'displayDate', title: 'Client Display Date', type: 'string'},
+    {name: 'displayTime', title: 'Client Display Time', type: 'string'},
     {
       name: 'hostDate',
       title: 'Host Date',
@@ -47,28 +39,11 @@ export default {
       type: 'string',
       description: 'Time label used to block slots, e.g. 2:00 PM.',
     },
-    {
-      name: 'hostTimeZone',
-      title: 'Host Time Zone',
-      type: 'string',
-    },
-    {
-      name: 'localTimeZone',
-      title: 'Client Time Zone',
-      type: 'string',
-    },
-    {
-      name: 'localTimeLabel',
-      title: 'Client Local Time Label',
-      type: 'string',
-    },
-    {
-      name: 'startTimeUTC',
-      title: 'Start Time (UTC)',
-      type: 'datetime',
-    },
+    {name: 'hostTimeZone', title: 'Host Time Zone', type: 'string'},
+    {name: 'localTimeZone', title: 'Client Time Zone', type: 'string'},
+    {name: 'localTimeLabel', title: 'Client Local Time Label', type: 'string'},
+    {name: 'startTimeUTC', title: 'Start Time (UTC)', type: 'datetime'},
 
-    // ---------- Referral + payout ----------
     {name: 'referralCode', title: 'Referral Code', type: 'string'},
     {
       name: 'referral',
@@ -83,8 +58,15 @@ export default {
     {name: 'commissionPercent', title: 'Commission %', type: 'number'},
     {name: 'commissionAmount', title: 'Commission Amount (USD)', type: 'number'},
 
-    // ---------- Payment metadata ----------
+    {name: 'paymentProvider', title: 'Payment Provider', type: 'string'},
+    {name: 'couponCode', title: 'Coupon Code', type: 'string'},
+    {name: 'couponDiscountPercent', title: 'Coupon Discount %', type: 'number'},
+    {name: 'couponDiscountAmount', title: 'Coupon Discount Amount (USD)', type: 'number'},
+
     {name: 'paypalOrderId', title: 'PayPal Order ID', type: 'string'},
     {name: 'payerEmail', title: 'Payer Email', type: 'string'},
+
+    {name: 'razorpayOrderId', title: 'Razorpay Order ID', type: 'string'},
+    {name: 'razorpayPaymentId', title: 'Razorpay Payment ID', type: 'string'},
   ],
 }
