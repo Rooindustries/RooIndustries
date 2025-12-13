@@ -163,7 +163,7 @@ export default function RefRegister() {
       <form
         onSubmit={handleRegister}
         className="mt-12 w-full max-w-md 
-                  bg-[#0a1324]/70 backdrop-blur-xl 
+                  bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 backdrop-blur-xl 
                   border border-sky-700/40 
                   shadow-[0_0_35px_rgba(56,189,248,0.35)]
                   rounded-2xl p-8 space-y-7"
@@ -265,13 +265,15 @@ export default function RefRegister() {
         <button
           type="submit"
           disabled={loading}
-          className={`w-full py-4 rounded-xl font-bold text-lg transition-all ${
-            loading
-              ? "bg-gray-700 opacity-40 cursor-not-allowed"
-              : "bg-sky-600 hover:bg-sky-500 shadow-[0_0_25px_rgba(56,189,248,0.5)]"
+          className={`glow-button w-full py-4 rounded-xl font-bold text-lg transition-all ${
+            loading ? "opacity-50 cursor-not-allowed" : ""
           }`}
         >
           {loading ? "Registering..." : "Register"}
+          <span className="glow-line glow-line-top" />
+          <span className="glow-line glow-line-right" />
+          <span className="glow-line glow-line-bottom" />
+          <span className="glow-line glow-line-left" />
         </button>
       </form>
 
