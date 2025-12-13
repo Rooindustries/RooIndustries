@@ -8,12 +8,11 @@ export default function ReferralBox() {
   function handleStart() {
     if (!email || !email.includes("@")) return;
 
-    // Save the email so the register page can grab it
     localStorage.setItem("referral_prefill_email", email);
-
-    // Redirect to register page
     nav("/referrals/register");
   }
+
+  const isValid = !!email && email.includes("@");
 
   return (
     <div className="mt-12 bg-[#0a1324]/80 border border-indigo-500/30 rounded-2xl p-6 shadow-[0_0_30px_rgba(99,102,241,0.2)] backdrop-blur-md max-w-4xl mx-auto md:flex md:items-center md:justify-between md:gap-8">
@@ -39,10 +38,28 @@ export default function ReferralBox() {
 
         <button
           onClick={handleStart}
-          disabled={!email || !email.includes("@")}
-          className="glow-button inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-5 py-3 text-sm font-semibold text-white ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300 w-full sm:w-auto"
+          disabled={!isValid}
+          className="
+            glow-button
+            inline-flex items-center justify-center gap-2
+            rounded-xl
+            px-4 sm:px-5 py-3
+            text-sm font-semibold text-white
+            ring-1 ring-sky-700/50
+            transition-all duration-300
+            active:translate-y-px
+            w-full sm:w-auto
+
+            bg-gradient-to-r from-sky-600 to-indigo-600
+            hover:from-sky-500 hover:to-indigo-500
+            shadow-[0_10px_30px_rgba(56,189,248,0.35)]
+
+            disabled:opacity-50 disabled:cursor-not-allowed
+            disabled:hover:from-sky-600 disabled:hover:to-indigo-600
+          "
         >
-          Get Started
+          <span className="relative z-10 drop-shadow">Get Started</span>
+
           <span className="glow-line glow-line-top" />
           <span className="glow-line glow-line-right" />
           <span className="glow-line glow-line-bottom" />
