@@ -7,6 +7,7 @@ const HOST_TZ_NAME = "Asia/Kolkata";
 const IST_OFFSET_MINUTES = 330;
 const FORM_PREFILL_KEY = "booking_form_prefill";
 const HOLD_STORAGE_KEY = "my_slot_hold";
+const RESERVED_FADE_MS = 220;
 
 // Read query params
 function useQuery() {
@@ -42,6 +43,36 @@ const formatLocalTime = (utcDate) => {
   } catch {
     return utcDate.toISOString();
   }
+};
+
+const parseHostLabelToHour = (label) => {
+  if (!label) return null;
+  const match = label.match(/(\d+):\d{2}\s*(AM|PM)/i);
+  if (!match) return null;
+  let hour = Number(match[1]) % 12;
+  const meridiem = match[2].toUpperCase();
+  if (meridiem === "PM") hour += 12;
+  return hour;
+};
+
+const getUtcDateFromHold = (hold) => {
+  if (!hold) return null;
+
+  if (hold.startTimeUTC) {
+    const fromStart = new Date(hold.startTimeUTC);
+    if (!isNaN(fromStart.getTime())) return fromStart;
+  }
+
+  const hostDate = hold.hostDate ? new Date(hold.hostDate) : null;
+  const hostHour = parseHostLabelToHour(hold.hostTime);
+  if (!hostDate || isNaN(hostDate.getTime()) || hostHour === null) return null;
+
+  return getUtcFromHostLocal(
+    hostDate.getFullYear(),
+    hostDate.getMonth(),
+    hostDate.getDate(),
+    hostHour
+  );
 };
 
 function XocDropdown({
@@ -215,6 +246,8 @@ export default function BookingForm() {
 
   // --- POPUP STATE ---
   const [showReservedModal, setShowReservedModal] = useState(false);
+  const [reservedFadeOut, setReservedFadeOut] = useState(false);
+  const [reservedFadeIn, setReservedFadeIn] = useState(false);
 
   // --- Slot hold state with persistence logic ---
   const [myHold, setMyHold] = useState(null);
@@ -228,7 +261,18 @@ export default function BookingForm() {
         const parsed = JSON.parse(stored);
         // check if expired
         if (new Date(parsed.expiresAt) > new Date()) {
-          setMyHold(parsed);
+          const normalizedHold = { ...parsed };
+          if (!normalizedHold.startTimeUTC) {
+            const utcDate = getUtcDateFromHold(normalizedHold);
+            if (utcDate) {
+              normalizedHold.startTimeUTC = utcDate.toISOString();
+              localStorage.setItem(
+                HOLD_STORAGE_KEY,
+                JSON.stringify(normalizedHold)
+              );
+            }
+          }
+          setMyHold(normalizedHold);
         } else {
           localStorage.removeItem(HOLD_STORAGE_KEY);
         }
@@ -424,7 +468,8 @@ export default function BookingForm() {
 
   // Prefill form if coming from XOC switch
   useEffect(() => {
-    if (q.get("prefillFromXoc") === "1") {
+    const params = new URLSearchParams(location.search);
+    if (params.get("prefillFromXoc") === "1") {
       try {
         const stored = localStorage.getItem(FORM_PREFILL_KEY);
         if (stored) {
@@ -464,6 +509,18 @@ export default function BookingForm() {
       };
     }
   }, [showVertexModal, showReservedModal]);
+
+  // animate reserved modal fade-in
+  useEffect(() => {
+    if (showReservedModal) {
+      setReservedFadeOut(false);
+      setReservedFadeIn(false);
+      const frame = requestAnimationFrame(() => setReservedFadeIn(true));
+      return () => cancelAnimationFrame(frame);
+    }
+    setReservedFadeIn(false);
+    setReservedFadeOut(false);
+  }, [showReservedModal]);
 
   // ---------- FETCH PERFORMANCE VERTEX PACKAGE (for modal) ----------
   useEffect(() => {
@@ -759,6 +816,31 @@ export default function BookingForm() {
     setSelectedSlot(null);
   };
 
+  const holdLocalTimeLabel = useMemo(() => {
+    if (!myHold) return "";
+    const utcDate = getUtcDateFromHold(myHold);
+    if (!utcDate) return myHold.hostTime || "";
+    return formatLocalTime(utcDate);
+  }, [myHold]);
+
+  const closeReservedModalWithRelease = () => {
+    setReservedFadeIn(false);
+    setReservedFadeOut(true);
+    setTimeout(() => {
+      releaseHold();
+    }, RESERVED_FADE_MS);
+  };
+
+  const closeReservedModalWithoutRelease = () => {
+    setReservedFadeIn(false);
+    setReservedFadeOut(true);
+    setTimeout(() => {
+      setShowReservedModal(false);
+      setReservedFadeOut(false);
+      setStep(2);
+    }, RESERVED_FADE_MS);
+  };
+
   // ---------- RELEASE HOLD (Optimistic Update) ----------
   const releaseHold = async () => {
     if (!myHold) {
@@ -830,6 +912,7 @@ export default function BookingForm() {
         expiresAt: data.expiresAt,
         hostDate: selectedDate.toDateString(),
         hostTime: selectedSlot.hostLabel,
+        startTimeUTC: selectedSlot.utcStart.toISOString(),
       };
 
       setMyHold(newHold);
@@ -1131,14 +1214,16 @@ export default function BookingForm() {
 
                         const subLabelText = `(${t.hostLabel} IST)`;
                         const subLabelClass = isMyHold
-                          ? "text-sky-400 font-semibold" // BLUE when reserved
+                          ? "text-[#38BDF8B3]"
                           : "text-sky-400/70";
 
                         return (
                           <button
                             key={t.hostLabel}
                             onClick={() =>
-                              !t.disabled && !t.isBooked && !t.isHeldOther
+                              !t.disabled &&
+                              !t.isBooked &&
+                              !t.isHeldOther
                                 ? setSelectedSlot(t)
                                 : null
                             }
@@ -1149,7 +1234,7 @@ export default function BookingForm() {
                                 : t.isHeldOther
                                 ? "bg-purple-900/40 border-purple-700/50 text-purple-300 cursor-not-allowed"
                                 : isMyHold
-                                ? "bg-purple-500/90 text-slate-950 border-purple-200 shadow-[0_0_22px_rgba(168,85,247,0.9)] font-semibold scale-[1.04]"
+                                ? "bg-purple-900/50 border-purple-500/60 text-purple-200 cursor-not-allowed shadow-[0_0_14px_rgba(168,85,247,0.7)]"
                                 : t.disabled
                                 ? "bg-slate-800/40 text-slate-500 border-slate-700/50 cursor-not-allowed"
                                 : selectedSlot?.hostLabel === t.hostLabel
@@ -1431,8 +1516,9 @@ export default function BookingForm() {
                   <p className="text-xs text-white font-medium">
                     {" "}
                     {/* CHANGED TO WHITE TEXT */}
-                    Slot <strong>{myHold.hostTime}</strong> is reserved for you
-                    for 15 minutes.
+                    Slot{" "}
+                    <strong>{holdLocalTimeLabel || myHold.hostTime}</strong> is
+                    reserved for you for 15 minutes.
                   </p>
                 </div>
               )}
@@ -1485,11 +1571,19 @@ export default function BookingForm() {
       {/* --- RESERVED MODAL --- */}
       {showReservedModal && (
         <div
-          className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in animate-in fade-in zoom-in duration-300"
-          onClick={releaseHold}
+          className={`fixed inset-0 z-[60] bg-black/60 backdrop-blur-lg flex items-center justify-center px-4 transition-opacity duration-200 ease-out ${
+            reservedFadeOut ? "opacity-0" : reservedFadeIn ? "opacity-100" : "opacity-0"
+          }`}
+          onClick={closeReservedModalWithRelease}
         >
           <div
-            className="bg-[#0b1120] border border-sky-500 rounded-2xl p-6 max-w-sm w-full text-center shadow-[0_0_40px_rgba(14,165,233,0.3)] transition-shadow duration-300 hover:shadow-[0_0_55px_rgba(56,189,248,0.6)]"
+            className={`relative w-full max-w-md bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 border border-sky-400/60 rounded-2xl shadow-[0_0_35px_rgba(56,189,248,0.4)] p-6 text-center transition-all duration-200 ease-out hover:shadow-[0_0_42px_rgba(56,189,248,0.5)] ${
+              reservedFadeOut
+                ? "opacity-0 scale-95"
+                : reservedFadeIn
+                ? "opacity-100 scale-100"
+                : "opacity-0 scale-95"
+            }`}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="w-16 h-16 bg-sky-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -1498,27 +1592,31 @@ export default function BookingForm() {
             <h3 className="text-xl font-bold text-white mb-2">
               Slot Reserved!
             </h3>
-            <p className="text-sm text-sky-200/80 mb-6">
+            <p className="text-sm text-sky-200/80 mb-2">
               You have reserved{" "}
-              <strong className="text-white">{myHold?.hostTime}</strong>.
+              <strong className="text-white">
+                {holdLocalTimeLabel || myHold?.hostTime || "--"}
+              </strong>
               <br />
-              It is locked to you for 15 minutes.
+              It is locked for 15 minutes.
             </p>
+            {holdLocalTimeLabel && myHold?.hostTime && (
+              <p className="text-[11px] text-slate-400 mb-6">
+                Host time: {myHold.hostTime} ({HOST_TZ_NAME})
+              </p>
+            )}
 
             <div className="flex flex-col sm:flex-row gap-3">
               <button
                 type="button"
-                onClick={releaseHold}
+                onClick={closeReservedModalWithRelease}
                 className="flex-1 bg-slate-700/40 hover:bg-slate-700/60 py-3 rounded-lg font-semibold transition"
               >
                 Nevermind
               </button>
 
               <button
-                onClick={() => {
-                  setShowReservedModal(false);
-                  setStep(2);
-                }}
+                onClick={closeReservedModalWithoutRelease}
                 className="glow-button w-full sm:flex-1 py-3 rounded-lg font-semibold transition inline-flex items-center justify-center gap-2"
               >
                 Continue
