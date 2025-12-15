@@ -25,33 +25,34 @@ export default function About() {
   return (
     <section
       id="about"
-      className="mx-auto max-w-5xl py-16 px-4 sm:px-6 text-center"
+      className="mx-auto max-w-6xl py-16 px-4 sm:px-6 text-center"
     >
       <h2 className="text-5xl sm:text-6xl font-extrabold tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
         {aboutData.title}
       </h2>
 
-      <div className="mx-auto mt-8 max-w-3xl rounded-lg bg-[#1b2430] p-8 ring-1 ring-[#2b3a4a] text-left text-[15px] leading-7 text-slate-200/90">
+      <div className="mx-auto mt-8 max-w-4xl rounded-2xl bg-[#1b2430] p-8 sm:p-10 ring-1 ring-[#2b3a4a] text-left text-base sm:text-lg leading-8 sm:leading-9 text-slate-200/95">
         {aboutData.description}
       </div>
 
-      {/* Leaderboard section */}
       <div className="mt-12 flex flex-col items-center">
-        <div className="flex items-center gap-2 mb-3">
-          <Zap className="text-cyan-500 w-5 h-5 animate-pulse drop-shadow-[0_0_6px_#00ffff]" />
-          <h3 className="text-cyan-400 font-semibold text-lg sm:text-xl tracking-wide drop-shadow-[0_0_8px_#00ffff]">
+        <div className="flex items-center gap-2 mb-4">
+          <Zap className="text-cyan-500 w-6 h-6 animate-pulse drop-shadow-[0_0_6px_#00ffff]" />
+          <h3 className="text-cyan-400 font-semibold text-xl sm:text-2xl tracking-wide drop-shadow-[0_0_8px_#00ffff]">
             {aboutData.recordTitle}
           </h3>
-          <Zap className="text-cyan-500 w-5 h-5 animate-pulse drop-shadow-[0_0_6px_#00ffff]" />
+          <Zap className="text-cyan-500 w-6 h-6 animate-pulse drop-shadow-[0_0_6px_#00ffff]" />
         </div>
 
-        <a href={aboutData.recordLink} target="_blank" rel="noreferrer">
-          <img
-            src={urlFor(aboutData.recordImage).url()}
-            alt="System Benchmark Result"
-            className="rounded-lg shadow-lg border border-[#2b3a4a] hover:border-cyan-500 transition-all duration-300"
-          />
-        </a>
+        {aboutData.recordImage && aboutData.recordLink && (
+          <a href={aboutData.recordLink} target="_blank" rel="noreferrer">
+            <img
+              src={urlFor(aboutData.recordImage).url()}
+              alt="System Benchmark Result"
+              className="rounded-xl shadow-lg border border-[#2b3a4a] hover:border-cyan-500 transition-all duration-300"
+            />
+          </a>
+        )}
       </div>
 
       <div className="h-3" />
