@@ -31,7 +31,7 @@ const RefDashboard = lazy(() => import("./pages/RefDashboard"));
 const RefChangePassword = lazy(() => import("./pages/RefChangePassword"));
 const RefForgot = lazy(() => import("./pages/RefForgot"));
 const RefReset = lazy(() => import("./pages/RefReset"));
-const RefRegister = lazy(() => import("./components/RefRegister"));
+const RefRegister = lazy(() => import("./pages/RefRegister"));
 const Tools = lazy(() => import("./pages/Tools"));
 
 function RedirectToDiscord() {
