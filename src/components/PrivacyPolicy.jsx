@@ -73,17 +73,11 @@ export default function PrivacyPolicy() {
                 marks: {
                   link: ({ value, children }) => {
                     const href = (value?.href || "").toLowerCase();
-                    // Check if the link is our target email (including typos or missing mailto)
                     const isTargetEmail =
                       href.includes("rooindustries.com") ||
                       href.startsWith("mailto");
 
-                    const finalHref = isTargetEmail
-                      ? "/contact" // Redirect email clicks to contact page
-                      : value?.href;
-
-                    // Apply specific styles if it's the target email, otherwise use standard link style
-                    // Note: Changed the original text-black to text-slate-200 for visibility on dark background
+                    const finalHref = isTargetEmail ? "/contact" : value?.href;
                     const linkClasses = isTargetEmail
                       ? "text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition-colors"
                       : "underline hover:text-cyan-400 transition-colors text-slate-200";
