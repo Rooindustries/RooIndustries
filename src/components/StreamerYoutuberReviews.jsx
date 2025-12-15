@@ -278,7 +278,7 @@ function Carousel({
         </h3>
       </div>
 
-      <p className="text-slate-300 mb-6 text-sm sm:text-[14px]">
+      <p className="text-slate-300/90 mb-6 text-base sm:text-lg">
         {subtitle || defaultSubtitle}
       </p>
 
@@ -347,7 +347,7 @@ function Carousel({
                       </h3>
 
                       {review.profession ? (
-                        <p className="text-slate-400 text-sm leading-tight">
+                        <p className="text-slate-400 text-base sm:text-lg leading-tight">
                           {review.profession}
                         </p>
                       ) : null}
