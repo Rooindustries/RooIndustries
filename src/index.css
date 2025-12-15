@@ -216,3 +216,37 @@ body.is-modal-open {
   animation-play-state: running !important;
   filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.8));
 }
+
+/* =========================================
+   VIDEO OVERLAY FIX (Opera GX & Others)
+   ========================================= */
+
+/* Forces the video element to ignore all mouse events.
+   This prevents the browser from detecting a "hover" on the video,
+   so it won't show the "Pop out" or "Fast Forward" buttons.
+   Clicking the logo still works because the parent <a> tag captures the click.
+*/
+.roo-logo-video {
+  pointer-events: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -webkit-touch-callout: none !important;
+}
+
+/* Hides native webkit controls aggressively */
+.roo-logo-video::-webkit-media-controls,
+.roo-logo-video::-webkit-media-controls-enclosure,
+.roo-logo-video::-webkit-media-controls-panel,
+.roo-logo-video::-webkit-media-controls-overlay-play-button,
+.roo-logo-video::-webkit-media-controls-start-playback-button,
+.roo-logo-video::-webkit-media-controls-current-time-display,
+.roo-logo-video::-webkit-media-controls-time-remaining-display,
+.roo-logo-video::-webkit-media-controls-timeline,
+.roo-logo-video::-webkit-media-controls-volume-slider,
+.roo-logo-video::-webkit-media-controls-mute-button,
+.roo-logo-video::-webkit-media-controls-fullscreen-button {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  -webkit-appearance: none !important;
+}
