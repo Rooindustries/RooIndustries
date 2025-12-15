@@ -27,7 +27,7 @@ export default function About() {
       id="about"
       className="mx-auto max-w-6xl py-16 px-4 sm:px-6 text-center"
     >
-      <h2 className="text-5xl sm:text-6xl font-extrabold tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+      <h2 className="text-[48px] sm:text-[48px] md:text-[48px] font-extrabold tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
         {aboutData.title}
       </h2>
 
