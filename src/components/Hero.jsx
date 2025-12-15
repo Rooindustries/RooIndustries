@@ -108,7 +108,6 @@ export default function Hero() {
           </Link>
         </div>
 
-        {/* UPDATED BULLET SECTION: Tighter spacing to keep them on one line */}
         <div className="mt-8 w-full">
           {bullets.length > 0 && (
             <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 sm:gap-x-6">
