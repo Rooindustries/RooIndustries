@@ -9,6 +9,7 @@ import { FaDiscord } from "react-icons/fa";
 import { AnimatePresence, motion } from "framer-motion";
 import Navbar from "./components/Navbar";
 import { Analytics } from "@vercel/analytics/react";
+import CanvasVideo from "./components/CanvasVideo"; 
 
 // Lazy-loaded pages
 const Home = lazy(() => import("./pages/Home"));
@@ -95,6 +96,7 @@ function AnimatedRoutes({ setIsModalOpen }) {
 
 function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [useStaticLogo, setUseStaticLogo] = useState(false);
 
   return (
     <Router>
@@ -116,28 +118,61 @@ function App() {
                       animate-pulse"
           ></div>
 
-          {/* Roo Industries Logo */}
+          {/* Roo Industries Logo Wrapper */}
           <a
             href="/"
-            className={`roo-logo z-50 flex items-center 
+            className={`roo-logo group z-50 flex items-center justify-center
           transition-transform duration-300 hover:scale-105
           transition-opacity duration-500 opacity-100
           outline-none focus:outline-none border-none
           
-          relative top-6 w-full justify-center mb-4
+          relative top-6 w-full mb-4
           min-[1280px]:absolute min-[1280px]:fixed min-[1280px]:md:absolute
           min-[1280px]:top-6 min-[1280px]:left-10 
           min-[1280px]:w-auto min-[1280px]:justify-start 
           min-[1280px]:mb-0`}
           >
-            <img
-              src="/logo.webp"
-              alt="Roo Industries Logo"
-              className="w-40 sm:w-48 md:w-56 drop-shadow-[0_0_25px_rgba(14,165,233,0.4)] 
-                hover:drop-shadow-[0_0_35px_rgba(14,165,233,0.6)] transition-all duration-500"
-              loading="eager"
-              fetchPriority="high"
+            
+            {/* --- DOUBLE LAYER GLOW ENGINE (REFINED) --- */}
+            
+            {/* Layer 1: The Ambient Body (Deep Blue)
+                - Idle: 80% (High visibility)
+                - Hover: 90% + small scale (Subtle boost, not explosion)
+            */}
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 
+                            w-40 h-14 bg-blue-500 rounded-full blur-[50px]
+                            opacity-80 group-hover:opacity-90 group-hover:scale-110 
+                            transition-all duration-500 ease-out z-[-1]" 
             />
+
+            {/* Layer 2: The Hot Core (Bright Cyan)
+                - Idle: 60% (Visible core)
+                - Hover: 80% + small scale (Gets hotter, but not blinding)
+            */}
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 
+                            w-32 h-10 bg-cyan-400 rounded-full blur-[35px]
+                            opacity-60 group-hover:opacity-80 group-hover:scale-110 
+                            transition-all duration-500 ease-out z-[-1]" 
+            />
+
+            {useStaticLogo ? (
+              <img
+                src="/logo.webp"
+                alt="Roo Industries Logo"
+                className="w-48 sm:w-56 md:w-60 relative z-10"
+                loading="eager"
+                fetchPriority="high"
+              />
+            ) : (
+              <CanvasVideo
+                src="/logo-animated.webm"
+                poster="/logo.webp"
+                onError={() => setUseStaticLogo(true)}
+                className="w-48 sm:w-56 md:w-60 roo-logo-video relative z-10
+                drop-shadow-[0_0_10px_rgba(14,165,233,0.3)]
+                transition-all duration-500" 
+              />
+            )}
           </a>
 
           {/* Navbar and pages */}
@@ -164,21 +199,21 @@ function App() {
           >
             <span
               className="text-[13px] sm:text-sm font-semibold text-sky-200/80 
-                drop-shadow-[0_0_6px_rgba(14,165,233,0.4)] 
-                group-hover:text-sky-300 transition-colors duration-300"
+              drop-shadow-[0_0_6px_rgba(14,165,233,0.4)] 
+              group-hover:text-sky-300 transition-colors duration-300"
             >
               Join the Discord!
             </span>
 
             <div
               className="relative bg-gradient-to-br from-[#295bbf] via-[#1f48a0] to-[#162f74]
-                text-white p-4 sm:p-5 rounded-full
-                shadow-[0_0_25px_rgba(56,189,248,0.4),0_0_45px_rgba(56,189,248,0.2)]
-                transition-all duration-300 hover:scale-125 
-                hover:shadow-[0_0_45px_rgba(56,189,248,0.8),0_0_90px_rgba(56,189,248,0.4)]
-                before:absolute before:inset-0 before:rounded-full
-                before:bg-[radial-gradient(circle_at_center,rgba(56,189,248,0.25),transparent_70%)]
-                before:blur-xl before:-z-10"
+              text-white p-4 sm:p-5 rounded-full
+              shadow-[0_0_25px_rgba(56,189,248,0.4),0_0_45px_rgba(56,189,248,0.2)]
+              transition-all duration-300 hover:scale-125 
+              hover:shadow-[0_0_45px_rgba(56,189,248,0.8),0_0_90px_rgba(56,189,248,0.4)]
+              before:absolute before:inset-0 before:rounded-full
+              before:bg-[radial-gradient(circle_at_center,rgba(56,189,248,0.25),transparent_70%)]
+              before:blur-xl before:-z-10"
             >
               <FaDiscord
                 className="w-8 h-8 sm:w-11 sm:h-11 text-white drop-shadow-[0_0_15px_rgba(56,189,248,0.7)]
