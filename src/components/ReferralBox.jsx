@@ -19,7 +19,7 @@ export default function ReferralBox() {
       {/* Left Side: Text Content */}
       <div className="text-left mb-5 md:mb-0 md:flex-1">
         <h3 className="text-2xl font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-sky-300 to-indigo-300 drop-shadow-sm">
-          Join the Program
+          Join the Referral Program
         </h3>
         <p className="text-sm text-slate-400 leading-relaxed">
           Are you a creator? Enter your email to get started with registration.
