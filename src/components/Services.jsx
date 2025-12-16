@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { client } from "../sanityClient";
+import imageUrlBuilder from "@sanity/image-url";
 import {
   Clock,
   Shield,
@@ -9,6 +10,7 @@ import {
   Cpu,
   ChevronLeft,
   ChevronRight,
+  HelpCircle,
 } from "lucide-react";
 import {
   AnimatePresence,
@@ -16,6 +18,11 @@ import {
   animate,
   useMotionValue,
 } from "framer-motion";
+
+const builder = imageUrlBuilder(client);
+function urlFor(source) {
+  return builder.image(source);
+}
 
 function AnimatedNumber({ value, duration = 0.65 }) {
   const mv = useMotionValue(0);
@@ -48,13 +55,13 @@ export default function Services() {
         `*[_type == "services"][0]{
           heading,
           subheading,
-          cards[]{title, description, iconType},
+          cards[]{title, description, iconType, customIcon},
           benchEnabled,
           benchBeforeLabel,
           benchAfterLabel,
           benchPagePrefix,
           benchPages[]{
-            games[]{gameTitle, beforeFps, afterFps}
+            games[]{gameTitle, beforeFps, afterFps, gpu, cpu, ram}
           }
         }`
       )
@@ -62,26 +69,17 @@ export default function Services() {
       .catch(console.error);
   }, []);
 
-  const icons = useMemo(
+  const iconClass =
+    "w-6 h-6 text-cyan-300 drop-shadow-[0_0_10px_rgba(56,189,248,0.35)]";
+
+  const iconMap = useMemo(
     () => ({
-      zap: (
-        <Zap className="w-6 h-6 text-cyan-300 drop-shadow-[0_0_10px_rgba(56,189,248,0.35)]" />
-      ),
-      clock: (
-        <Clock className="w-6 h-6 text-cyan-300 drop-shadow-[0_0_10px_rgba(56,189,248,0.35)]" />
-      ),
-      shield: (
-        <Shield className="w-6 h-6 text-cyan-300 drop-shadow-[0_0_10px_rgba(56,189,248,0.35)]" />
-      ),
-      wrench: (
-        <Wrench className="w-6 h-6 text-cyan-300 drop-shadow-[0_0_10px_rgba(56,189,248,0.35)]" />
-      ),
-      video: (
-        <Video className="w-6 h-6 text-cyan-300 drop-shadow-[0_0_10px_rgba(56,189,248,0.35)]" />
-      ),
-      cpu: (
-        <Cpu className="w-6 h-6 text-cyan-300 drop-shadow-[0_0_10px_rgba(56,189,248,0.35)]" />
-      ),
+      zap: Zap,
+      clock: Clock,
+      shield: Shield,
+      wrench: Wrench,
+      video: Video,
+      cpu: Cpu,
     }),
     []
   );
@@ -105,16 +103,25 @@ export default function Services() {
     return data.benchPages[safePage]?.games || [];
   }, [data, safePage]);
 
-  const games3 = useMemo(() => {
-    const arr = Array.isArray(pageGames) ? pageGames.slice(0, 3) : [];
-    while (arr.length < 3) arr.push(null);
-    return arr;
-  }, [pageGames]);
-
   const benchShouldRender = useMemo(() => {
     const enabled = data?.benchEnabled !== false;
     return enabled && totalPages > 0;
   }, [data, totalPages]);
+
+  // 1. GRID COLUMNS logic
+  const gridClass = useMemo(() => {
+    const count = pageGames.length;
+    if (count === 1) return "grid grid-cols-1 gap-5";
+    if (count === 2) return "grid grid-cols-1 md:grid-cols-2 gap-5";
+    return "grid grid-cols-1 md:grid-cols-3 gap-5";
+  }, [pageGames.length]);
+
+  const containerClass = useMemo(() => {
+    const count = pageGames.length;
+    if (count === 1) return "max-w-xl";
+    if (count === 2) return "max-w-5xl";
+    return "w-full";
+  }, [pageGames.length]);
 
   const canPrev = safePage > 0;
   const canNext = safePage < totalPages - 1;
@@ -145,11 +152,11 @@ export default function Services() {
     "after:bg-[radial-gradient(60%_60%_at_50%_20%,rgba(56,189,248,.25),transparent_70%)] " +
     "after:opacity-70";
 
-  const swap = {
-    initial: { opacity: 0 },
-    animate: { opacity: 1 },
-    exit: { opacity: 0 },
-    transition: { duration: 0.42, ease: "easeInOut" },
+  const contentSwap = {
+    initial: { opacity: 0, scale: 0.98 },
+    animate: { opacity: 1, scale: 1 },
+    exit: { opacity: 0, scale: 0.98 },
+    transition: { duration: 0.25, ease: "easeOut" },
   };
 
   if (!data) return null;
@@ -175,53 +182,72 @@ export default function Services() {
 
       <div className="h-10" />
 
+      {/* SERVICE CARDS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-5">
-        {data.cards?.map((card, i) => (
-          <div
-            key={i}
-            className={
-              "group relative overflow-hidden rounded-2xl p-6 min-h-[190px] " +
-              "bg-gradient-to-b from-[#111827]/70 to-[#0b1220]/85 " +
-              "ring-1 ring-white/10 shadow-[0_18px_55px_rgba(0,0,0,.55)] " +
-              "transition duration-300 hover:-translate-y-[2px] hover:ring-cyan-400/35"
-            }
-          >
-            <div className="pointer-events-none absolute inset-0 opacity-70">
-              <div className="absolute -top-24 -left-24 h-56 w-56 rounded-full bg-cyan-400/10 blur-3xl" />
-              <div className="absolute -bottom-24 -right-24 h-56 w-56 rounded-full bg-sky-400/10 blur-3xl" />
+        {data.cards?.map((card, i) => {
+          const IconComponent = iconMap[card.iconType] || HelpCircle;
+
+          return (
+            <div
+              key={i}
+              className={
+                "group relative overflow-hidden rounded-2xl p-6 min-h-[190px] " +
+                "bg-gradient-to-b from-[#111827]/70 to-[#0b1220]/85 " +
+                "ring-1 ring-white/10 shadow-[0_18px_55px_rgba(0,0,0,.55)] " +
+                "transition duration-300 hover:-translate-y-[2px] hover:ring-cyan-400/35"
+              }
+            >
+              <div className="pointer-events-none absolute inset-0 opacity-70">
+                <div className="absolute -top-24 -left-24 h-56 w-56 rounded-full bg-cyan-400/10 blur-3xl" />
+                <div className="absolute -bottom-24 -right-24 h-56 w-56 rounded-full bg-sky-400/10 blur-3xl" />
+              </div>
+
+              <div className="relative">
+                <div className={iconWrap}>
+                  {card.customIcon ? (
+                    <img
+                      src={urlFor(card.customIcon).width(64).url()}
+                      alt={card.title}
+                      className="w-7 h-7 object-contain drop-shadow-[0_0_8px_rgba(56,189,248,0.25)]"
+                    />
+                  ) : (
+                    <IconComponent className={iconClass} />
+                  )}
+                </div>
+
+                <h4 className="mt-5 text-[18px] font-extrabold tracking-tight text-white">
+                  {card.title}
+                </h4>
+
+                <p className="mt-2 text-[13px] leading-5 text-slate-300/90">
+                  {card.description}
+                </p>
+              </div>
             </div>
-
-            <div className="relative">
-              <div className={iconWrap}>{icons[card.iconType] || null}</div>
-
-              <h4 className="mt-5 text-[18px] font-extrabold tracking-tight text-white">
-                {card.title}
-              </h4>
-
-              <p className="mt-2 text-[13px] leading-5 text-slate-300/90">
-                {card.description}
-              </p>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {benchShouldRender && (
         <>
           <div className="h-10" />
 
-          <div className="relative rounded-[28px] ring-1 ring-white/10 bg-gradient-to-b from-[#0d1526]/70 to-[#070c15]/85 shadow-[0_32px_110px_rgba(0,0,0,.7)] overflow-hidden">
+          {/* CONTAINER BOX */}
+          <motion.div
+            layout
+            className={`relative rounded-[28px] ring-1 ring-white/10 bg-gradient-to-b from-[#0d1526]/70 to-[#070c15]/85 shadow-[0_32px_110px_rgba(0,0,0,.7)] overflow-hidden mx-auto ${containerClass}`}
+          >
             <div className="pointer-events-none absolute inset-0">
               <div className="absolute inset-0 opacity-[0.35] bg-[radial-gradient(80%_60%_at_50%_0%,rgba(56,189,248,.18),transparent_65%)]" />
               <div className="absolute inset-0 opacity-[0.28] bg-[linear-gradient(to_bottom,transparent,rgba(0,0,0,.22))]" />
               <div className="absolute -top-56 left-1/2 -translate-x-1/2 h-[32rem] w-[52rem] rounded-full bg-white/5 blur-3xl" />
-              <div className="absolute -bottom-48 -left-52 h-[30rem] w-[30rem] rounded-full bg-cyan-400/10 blur-3xl" />
-              <div className="absolute -bottom-48 -right-52 h-[30rem] w-[30rem] rounded-full bg-sky-400/10 blur-3xl" />
+              <div className="absolute -bottom-48 left-0 h-[30rem] w-[30rem] rounded-full bg-cyan-400/10 blur-3xl" />
+              <div className="absolute -bottom-48 right-0 h-[30rem] w-[30rem] rounded-full bg-sky-400/10 blur-3xl" />
             </div>
 
             <div className="relative p-5 sm:p-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                {games3.map((g, idx) => {
+              <div className={gridClass}>
+                {pageGames.map((g, idx) => {
                   const pct = g ? calcPct(g?.beforeFps, g?.afterFps) : null;
                   const { bf, af } = g
                     ? calcFill(g?.beforeFps, g?.afterFps)
@@ -238,7 +264,8 @@ export default function Services() {
                       : null;
 
                   return (
-                    <div
+                    <motion.div
+                      layout
                       key={idx}
                       className={
                         "relative overflow-hidden rounded-2xl " +
@@ -256,10 +283,10 @@ export default function Services() {
                         <AnimatePresence mode="wait">
                           <motion.div
                             key={`${safePage}-${idx}`}
-                            initial={swap.initial}
-                            animate={swap.animate}
-                            exit={swap.exit}
-                            transition={swap.transition}
+                            initial={contentSwap.initial}
+                            animate={contentSwap.animate}
+                            exit={contentSwap.exit}
+                            transition={contentSwap.transition}
                           >
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
@@ -352,15 +379,44 @@ export default function Services() {
                                 </div>
                               </div>
                             </div>
+
+                            <div className="mt-4 rounded-xl bg-black/40 ring-1 ring-white/5 p-3">
+                              <div className="grid grid-cols-3 gap-2 divide-x divide-white/10 text-center">
+                                <div className="flex flex-col px-1">
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                                    GPU
+                                  </span>
+                                  <span className="text-[11px] font-medium text-slate-300 leading-tight break-words">
+                                    {g?.gpu || "—"}
+                                  </span>
+                                </div>
+                                <div className="flex flex-col px-1">
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                                    CPU
+                                  </span>
+                                  <span className="text-[11px] font-medium text-slate-300 leading-tight break-words">
+                                    {g?.cpu || "—"}
+                                  </span>
+                                </div>
+                                <div className="flex flex-col px-1">
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                                    RAM
+                                  </span>
+                                  <span className="text-[11px] font-medium text-slate-300 leading-tight break-words">
+                                    {g?.ram || "—"}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
                           </motion.div>
                         </AnimatePresence>
                       </div>
-                    </div>
+                    </motion.div>
                   );
                 })}
               </div>
             </div>
-          </div>
+          </motion.div>
 
           <div className="mt-4 flex items-center justify-center">
             <div className="inline-flex items-center gap-3 rounded-full bg-white/5 ring-1 ring-white/10 px-3 py-2 shadow-[0_14px_45px_rgba(0,0,0,.55)]">
