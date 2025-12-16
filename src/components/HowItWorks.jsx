@@ -36,7 +36,8 @@ export default function HowItWorks() {
     return (
       <div
         className="relative overflow-hidden rounded-2xl border border-sky-700/40 bg-[#081225]/70
-                   shadow-[0_0_26px_rgba(14,165,233,0.30)] w-11/12 sm:w-4/5 aspect-[16/10]"
+                   shadow-[0_0_26px_rgba(14,165,233,0.30)]
+                   w-[calc(100%+0.75rem)] sm:w-[calc(100%+1.25rem)] -mx-1.5 sm:-mx-2.5 aspect-[16/10]"
       >
         <video
           className="absolute inset-0 w-full h-full object-cover"
