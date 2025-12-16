@@ -16,25 +16,38 @@ export default {
           fields: [
             {name: 'title', title: 'Title', type: 'string'},
             {name: 'description', title: 'Description', type: 'text'},
+            // 1. Existing Dropdown
             {
               name: 'iconType',
-              title: 'Icon Type',
+              title: 'Icon (Preset)',
               type: 'string',
+              description: 'Select a built-in icon OR upload a custom one below.',
               options: {
                 list: [
-                  {title: 'Zap', value: 'zap'},
-                  {title: 'Clock', value: 'clock'},
-                  {title: 'Shield', value: 'shield'},
-                  {title: 'Wrench', value: 'wrench'},
-                  {title: 'Video', value: 'video'},
-                  {title: 'CPU', value: 'cpu'},
+                  {title: 'Zap (Lightning)', value: 'zap'},
+                  {title: 'Clock (Time)', value: 'clock'},
+                  {title: 'Shield (Security)', value: 'shield'},
+                  {title: 'Wrench (Tools)', value: 'wrench'},
+                  {title: 'Video (Camera)', value: 'video'},
+                  {title: 'CPU (Processor)', value: 'cpu'},
                 ],
+              },
+            },
+            // 2. New Image Upload Field
+            {
+              name: 'customIcon',
+              title: 'Custom Icon (Upload)',
+              type: 'image',
+              description: 'Upload an SVG or PNG. This overrides the preset icon selection.',
+              options: {
+                hotspot: true, // Allows cropping if needed
               },
             },
           ],
         },
       ],
     },
+    // ... existing benchmark fields ...
     {
       name: 'benchMetricLabel',
       title: 'Metric Label',
@@ -45,7 +58,6 @@ export default {
     {name: 'benchAfterLabel', title: 'Optimized Label', type: 'string', initialValue: 'Optimized'},
     {name: 'benchBadgeSuffix', title: 'Badge Suffix', type: 'string', initialValue: 'FPS'},
     {name: 'benchPagePrefix', title: 'Page Prefix', type: 'string', initialValue: 'Page'},
-
     {
       name: 'benchPages',
       title: 'Bench Pages',
@@ -67,6 +79,9 @@ export default {
                     {name: 'gameTitle', title: 'Game Title', type: 'string'},
                     {name: 'beforeFps', title: 'Before FPS', type: 'number'},
                     {name: 'afterFps', title: 'Optimized FPS', type: 'number'},
+                    {name: 'gpu', title: 'GPU', type: 'string'},
+                    {name: 'cpu', title: 'CPU', type: 'string'},
+                    {name: 'ram', title: 'RAM', type: 'string'},
                   ],
                 },
               ],
