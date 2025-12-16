@@ -36,8 +36,7 @@ export default function HowItWorks() {
     return (
       <div
         className="relative overflow-hidden rounded-2xl border border-sky-700/40 bg-[#081225]/70
-                   shadow-[0_0_26px_rgba(14,165,233,0.30)]
-                   w-44 h-32 sm:w-48 sm:h-36 md:w-56 md:h-40 lg:w-60 lg:h-44"
+                   shadow-[0_0_26px_rgba(14,165,233,0.30)] w-11/12 sm:w-4/5 aspect-[16/10]"
       >
         <video
           className="absolute inset-0 w-full h-full object-cover"
@@ -83,13 +82,17 @@ export default function HowItWorks() {
                          shadow-[0_0_25px_rgba(14,165,233,0.15)] hover:shadow-[0_0_35px_rgba(14,165,233,0.25)]
                          transition-all duration-300"
             >
-              {/* TOP-ALIGNED: text left + video right */}
-              <div className="flex flex-col sm:flex-row items-start justify-between gap-6">
-                <div className="min-w-0 flex-1">
+              {/* Video stacked on top of the text content */}
+              <div className="flex flex-col items-center gap-6 text-center">
+                <div className="w-full flex justify-center">
+                  <VideoBadge name={videoByStepIndex[i]} />
+                </div>
+
+                <div className="w-full">
                   {s.badge && (
                     <span
-                      className="inline-flex items-center gap-2 text-xs font-semibold tracking-wide
-                                 text-sky-200/90 bg-sky-900/30 border border-sky-700/40 px-3 py-1 rounded-full
+                      className="inline-flex items-center gap-2 text-sm sm:text-base font-semibold tracking-wide
+                                 text-sky-100 bg-sky-900/40 border border-sky-700/50 px-3.5 py-1.5 rounded-full
                                  shadow-[0_0_12px_rgba(14,165,233,0.3)]"
                     >
                       {s.badge}
@@ -124,10 +127,20 @@ export default function HowItWorks() {
                   )}
                 </div>
 
-                {/* no self-center -> keeps all videos same top level */}
-                <div className="shrink-0">
-                  <VideoBadge name={videoByStepIndex[i]} />
-                </div>
+                {i === 0 && (
+                  <div className="w-full flex justify-center">
+                    <a
+                      href="https://discord.gg/M7nTkn9dxE"
+                      className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-sky-400 to-cyan-500
+                                 text-slate-900 font-semibold px-4 py-2 text-sm shadow-[0_8px_24px_rgba(56,189,248,0.35)]
+                                 hover:shadow-[0_12px_30px_rgba(56,189,248,0.45)] transition-transform duration-200 hover:-translate-y-0.5"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Join our Discord
+                    </a>
+                  </div>
+                )}
               </div>
             </div>
           ))}
