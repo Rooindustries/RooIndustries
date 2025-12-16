@@ -35,9 +35,9 @@ export default function HowItWorks() {
 
     return (
       <div
-        className="relative w-20 h-20 sm:w-24 sm:h-24 md:w-28 md:h-28 rounded-2xl overflow-hidden
-                   border border-sky-700/40 bg-[#081225]/70
-                   shadow-[0_0_22px_rgba(14,165,233,0.28)]"
+        className="relative overflow-hidden rounded-2xl border border-sky-700/40 bg-[#081225]/70
+                   shadow-[0_0_26px_rgba(14,165,233,0.30)]
+                   w-44 h-32 sm:w-48 sm:h-36 md:w-56 md:h-40 lg:w-60 lg:h-44"
       >
         <video
           className="absolute inset-0 w-full h-full object-cover"
@@ -51,7 +51,7 @@ export default function HowItWorks() {
           <source src={mp4} type="video/mp4" />
         </video>
 
-        <div className="absolute inset-0 bg-gradient-to-br from-sky-500/10 via-transparent to-cyan-500/10" />
+        <div className="absolute inset-0 bg-gradient-to-br from-sky-500/12 via-transparent to-cyan-500/12" />
         <div className="absolute inset-0 ring-1 ring-inset ring-white/10" />
       </div>
     );
@@ -83,8 +83,8 @@ export default function HowItWorks() {
                          shadow-[0_0_25px_rgba(14,165,233,0.15)] hover:shadow-[0_0_35px_rgba(14,165,233,0.25)]
                          transition-all duration-300"
             >
-              {/* LEFT: badge+text  |  RIGHT: video */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+              {/* TOP-ALIGNED: text left + video right */}
+              <div className="flex flex-col sm:flex-row items-start justify-between gap-6">
                 <div className="min-w-0 flex-1">
                   {s.badge && (
                     <span
@@ -124,7 +124,8 @@ export default function HowItWorks() {
                   )}
                 </div>
 
-                <div className="shrink-0 self-start sm:self-center">
+                {/* no self-center -> keeps all videos same top level */}
+                <div className="shrink-0">
                   <VideoBadge name={videoByStepIndex[i]} />
                 </div>
               </div>
