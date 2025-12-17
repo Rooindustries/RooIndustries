@@ -10,6 +10,14 @@ const FORM_PREFILL_KEY = "booking_form_prefill";
 const HOLD_STORAGE_KEY = "my_slot_hold";
 const BOOKING_DRAFT_KEY = "booking_draft";
 const SESSION_STATE_KEY = "booking_modal_state";
+const REFERRAL_STORAGE_KEY = "referral_session";
+const readReferralFromSession = () => {
+  try {
+    return sessionStorage.getItem(REFERRAL_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+};
 const getDraftKey = (pkg) => (pkg?.title ? pkg.title : "_default");
 const isDraftEmpty = (formObj, moboId, ramId, customMobo, customRam) =>
   !formObj.discord.trim() &&
@@ -320,6 +328,20 @@ export default function BookingForm({ isMobile }) {
     document.body.classList.remove("is-modal-blur");
     setShowVertexModal(false);
   };
+
+  // Persist referral from URL into session storage; clear if no ref is present
+  useEffect(() => {
+    try {
+      const ref = q.get("ref") || "";
+      if (ref) {
+        sessionStorage.setItem(REFERRAL_STORAGE_KEY, ref);
+      } else {
+        sessionStorage.removeItem(REFERRAL_STORAGE_KEY);
+      }
+    } catch (err) {
+      console.error("Failed to persist referral session:", err);
+    }
+  }, [q]);
 
   useEffect(() => {
     const prevTitle = prevPackageRef.current;
@@ -1343,7 +1365,19 @@ export default function BookingForm({ isMobile }) {
 
   // ---------- SUBMIT ----------
   const handleSubmit = async () => {
-    if (!selectedDate || !selectedSlot) return;
+    if (!selectedDate || !selectedSlot) {
+      setStep(1);
+      setErrorStep1("Please select a time slot before continuing.");
+      return;
+    }
+
+    const holdExpired =
+      myHold?.expiresAt && new Date(myHold.expiresAt) <= new Date();
+    if (!myHold?.holdId || holdExpired) {
+      setStep(1);
+      setErrorStep1("Please reserve a slot before continuing.");
+      return;
+    }
 
     const displayDate = selectedDate.toLocaleDateString(undefined, {
       weekday: "long",
@@ -1355,14 +1389,8 @@ export default function BookingForm({ isMobile }) {
     const displayTime = selectedSlot.localLabel;
 
     const referralFromQuery = q.get("ref") || "";
-    let referralFromStorage = "";
-    try {
-      referralFromStorage = localStorage.getItem("referral") || "";
-    } catch (e) {
-      console.error("Failed to read referral from localStorage:", e);
-    }
-
-    const finalReferralCode = referralFromQuery || referralFromStorage;
+    const referralFromSession = readReferralFromSession();
+    const finalReferralCode = referralFromQuery || referralFromSession;
 
     const isCustomMobo = isXoc && xocMoboId === "__CUSTOM_MOBO__";
     const isCustomRam = isXoc && xocRamId === "__CUSTOM_RAM__";

@@ -152,7 +152,9 @@ export default function ReservationBanner() {
     const tick = () => {
       const diff = expiresAtMs - Date.now();
       if (diff <= 0) {
-        releaseHold(true);
+        const shouldRedirectHome =
+          path.startsWith("/payment") || path.startsWith("/booking");
+        releaseHold(true, shouldRedirectHome);
         return false;
       }
       setCountdown(diff);
@@ -164,7 +166,7 @@ export default function ReservationBanner() {
       if (!ok) clearInterval(id);
     }, 1000);
     return () => clearInterval(id);
-  }, [hold]);
+  }, [hold, path]);
 
   const holdLocalTimeLabel = useMemo(() => {
     if (!hold) return "";
