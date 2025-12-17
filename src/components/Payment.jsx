@@ -18,20 +18,16 @@ export default function Payment({ hideFooter = false }) {
 
   const isUpgrade = !!bookingData.originalOrderId;
   const navState = location.state || (window.history?.state?.usr ?? {});
-  
-  // LOGIC CHANGE: We want to show a back button even in modal mode.
-  // The original logic hid the footer if backgroundLocation was present.
-  // We will keep 'hideFooterEffective' for the main site footer, but handle the "Back" button separately.
+
   const isModalMode = !!navState.backgroundLocation || navState.modal === true;
   const hideFooterEffective = hideFooter || isModalMode;
 
-  const backToBookingState = { 
-    backgroundLocation: navState.backgroundLocation || location, 
+  const backToBookingState = {
+    backgroundLocation: navState.backgroundLocation || location,
     modal: true,
-    // Preserve any other booking state if needed
-    ...navState 
+    ...navState,
   };
-  
+
   const packageTitle = bookingData.packageTitle || "—";
   const packagePrice = bookingData.packagePrice || "$0";
   const date = bookingData.displayDate || "--";
@@ -112,8 +108,7 @@ export default function Payment({ hideFooter = false }) {
   // Razorpay state
   const [rzpReady, setRzpReady] = useState(false);
   const [payingRzp, setPayingRzp] = useState(false);
-  const paypalClientId =
-    process.env.REACT_APP_PAYPAL_CLIENT_ID || "";
+  const paypalClientId = process.env.REACT_APP_PAYPAL_CLIENT_ID || "";
   const hasPaypalClientId = !!paypalClientId;
 
   // Free booking state
@@ -921,7 +916,10 @@ export default function Payment({ hideFooter = false }) {
          This ensures a navigation method exists inside the popup.
       */}
       {(isModalMode || !hideFooter) && (
-        <motion.div variants={itemVariants} className="mt-10 flex justify-center pb-8">
+        <motion.div
+          variants={itemVariants}
+          className="mt-10 flex justify-center pb-8"
+        >
           <Link
             to="/booking"
             state={backToBookingState}
