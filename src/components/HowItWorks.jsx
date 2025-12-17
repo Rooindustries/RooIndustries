@@ -114,7 +114,7 @@ export default function HowItWorks() {
                           {" "}
                           (
                           <Link
-                            to="/faq#trust"
+                            to="/#trust"
                             className="bg-gradient-to-r from-sky-400 to-cyan-400 bg-clip-text text-transparent font-semibold
                                        hover:from-cyan-300 hover:to-sky-300 transition-all duration-300
                                        hover:drop-shadow-[0_0_6px_rgba(56,189,248,0.8)]"
