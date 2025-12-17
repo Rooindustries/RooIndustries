@@ -6,6 +6,7 @@ import Footer from "../components/Footer";
 import HowItWorks from "../components/HowItWorks";
 import ReferralBox from "../components/ReferralBox";
 import Packages from "../components/Packages";
+import Faq from "../components/Faq";
 
 export default function Home() {
   return (
@@ -16,6 +17,7 @@ export default function Home() {
       <Packages />
       <HowItWorks />
       <About />
+      <Faq />
       <ReferralBox />
       <Footer />
     </>
