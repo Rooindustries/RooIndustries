@@ -81,7 +81,7 @@ export default function Hero() {
 
         <div className="mt-7 flex items-center justify-center gap-3 sm:gap-4 flex-wrap min-h-[56px]">
           <Link
-            to="/packages"
+            to="/#packages"
             className="glow-button inline-flex items-center justify-center gap-2 rounded-md 
                         px-3 sm:px-5 py-2 sm:py-3 text-[11px] sm:text-sm font-semibold text-white 
                         ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"

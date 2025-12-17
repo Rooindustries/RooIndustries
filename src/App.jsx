@@ -4,12 +4,15 @@ import {
   Routes,
   Route,
   useLocation,
+  useNavigate,
 } from "react-router-dom";
 import { FaDiscord } from "react-icons/fa";
 import { AnimatePresence, motion } from "framer-motion";
 import Navbar from "./components/Navbar";
 import { Analytics } from "@vercel/analytics/react";
 import CanvasVideo from "./components/CanvasVideo"; 
+import ReservationBanner from "./components/ReservationBanner";
+import BookingModal from "./components/BookingModal";
 
 // Lazy-loaded pages
 const Home = lazy(() => import("./pages/Home"));
@@ -42,13 +45,15 @@ function RedirectToDiscord() {
   return null;
 }
 
-function AnimatedRoutes({ setIsModalOpen }) {
-  const location = useLocation();
+function AnimatedRoutes({ setIsModalOpen, routesLocation, routeKey }) {
+  const baseLocation = useLocation();
+  const location = routesLocation || baseLocation;
+  const motionKey = routeKey || `${location.pathname}${location.search || ""}`;
 
   return (
     <AnimatePresence mode="wait">
       <motion.div
-        key={location.pathname}
+        key={motionKey}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
@@ -94,14 +99,41 @@ function AnimatedRoutes({ setIsModalOpen }) {
   );
 }
 
-function App() {
+function AppContent() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [useStaticLogo, setUseStaticLogo] = useState(false);
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const backgroundLocation =
+    location.state && location.state.backgroundLocation
+      ? location.state.backgroundLocation
+      : null;
+  const isBookingRoute = (location.pathname || "").startsWith("/booking");
+  const isPaymentRoute = (location.pathname || "").startsWith("/payment");
+  const isFlowRoute = isBookingRoute || isPaymentRoute;
+  const fallbackLocation =
+    isFlowRoute && !backgroundLocation
+      ? { ...location, pathname: "/", search: "", hash: "" }
+      : null;
+  const routesLocation = backgroundLocation || fallbackLocation || location;
+  const routesKey = `${routesLocation.pathname}${routesLocation.search || ""}`;
+
+  const closeBookingModal = () => {
+    const target =
+      backgroundLocation || { pathname: "/", search: "", hash: "", state: null };
+    const targetPath = `${target.pathname || "/"}${target.search || ""}${
+      target.hash || ""
+    }`;
+    navigate(targetPath, {
+      replace: isFlowRoute,
+      state: target.state,
+    });
+  };
 
   return (
-    <Router>
-      <>
-        <Analytics />
+    <>
+      <Analytics />
 
         <div
           className="relative min-h-screen text-white overflow-hidden 
@@ -178,15 +210,20 @@ function App() {
           {/* Navbar and pages */}
           <main className="relative z-10 pt-10 sm:pt-24">
             <Navbar />
+            <ReservationBanner />
 
             <Suspense
               fallback={
                 <div className="pt-32 text-center text-slate-300 text-sm">
-                  Loading…
+                  Loading...
                 </div>
               }
             >
-              <AnimatedRoutes setIsModalOpen={setIsModalOpen} />
+              <AnimatedRoutes
+                setIsModalOpen={setIsModalOpen}
+                routesLocation={routesLocation}
+                routeKey={routesKey}
+              />
             </Suspense>
           </main>
 
@@ -195,7 +232,7 @@ function App() {
             href="https://discord.gg/M7nTkn9dxE"
             target="_blank"
             rel="noopener noreferrer"
-            className="fixed bottom-6 sm:bottom-12 right-6 sm:right-12 z-50 flex flex-col items-center gap-1 group animate-[float_3s_ease-in-out_infinite]"
+            className="fixed bottom-3.5 sm:bottom-12 right-2 sm:right-12 z-50 flex flex-col items-center gap-1 group animate-[float_3s_ease-in-out_infinite]"
           >
             <span
               className="text-[13px] sm:text-sm font-semibold text-sky-200/80 
@@ -223,7 +260,25 @@ function App() {
             </div>
           </a>
         </div>
-      </>
+        <BookingModal open={isFlowRoute} onClose={closeBookingModal}>
+          <Suspense
+            fallback={
+              <div className="pt-32 text-center text-slate-300 text-sm">
+                  Loading...
+              </div>
+            }
+          >
+            {isPaymentRoute ? <Payment hideFooter /> : <Book hideFooter compact />}
+          </Suspense>
+        </BookingModal>
+    </>
+  );
+}
+
+function App() {
+  return (
+    <Router>
+      <AppContent />
     </Router>
   );
 }
