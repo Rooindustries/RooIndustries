@@ -2261,7 +2261,7 @@ export default function BookingForm({ isMobile }) {
                         <span className="flex-1">
                           {shouldLinkUpgrade(text) ? (
                             <Link
-                              to={`/faq#${UPGRADE_FAQ_HASH}`}
+                              to={`/#${UPGRADE_FAQ_HASH}`}
                               className="underline underline-offset-2 transition"
                               style={{ color: "#22D3EE" }}
                               onClick={() => {
