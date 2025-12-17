@@ -5,16 +5,17 @@ import StreamerYoutuberReviews from "../components/StreamerYoutuberReviews";
 import Footer from "../components/Footer";
 import HowItWorks from "../components/HowItWorks";
 import ReferralBox from "../components/ReferralBox";
+import Packages from "../components/Packages";
 
 export default function Home() {
   return (
     <>
       <Hero />
       <StreamerYoutuberReviews />
-      <About />
-      {/* Packages */}
-      <HowItWorks />
       <Services />
+      <Packages />
+      <HowItWorks />
+      <About />
       <ReferralBox />
       <Footer />
     </>

@@ -1,8 +1,9 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { useLocation, Link, useNavigate } from "react-router-dom";
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
+import { motion } from "framer-motion";
 
-export default function Payment() {
+export default function Payment({ hideFooter = false }) {
   const location = useLocation();
   const q = new URLSearchParams(location.search);
   const navigate = useNavigate();
@@ -15,8 +16,22 @@ export default function Payment() {
     }
   }, [q]);
 
-  const isUpgrade = !!bookingData.originalOrderId; // 🔵 upgrade mode flag
+  const isUpgrade = !!bookingData.originalOrderId;
+  const navState = location.state || (window.history?.state?.usr ?? {});
+  
+  // LOGIC CHANGE: We want to show a back button even in modal mode.
+  // The original logic hid the footer if backgroundLocation was present.
+  // We will keep 'hideFooterEffective' for the main site footer, but handle the "Back" button separately.
+  const isModalMode = !!navState.backgroundLocation || navState.modal === true;
+  const hideFooterEffective = hideFooter || isModalMode;
 
+  const backToBookingState = { 
+    backgroundLocation: navState.backgroundLocation || location, 
+    modal: true,
+    // Preserve any other booking state if needed
+    ...navState 
+  };
+  
   const packageTitle = bookingData.packageTitle || "—";
   const packagePrice = bookingData.packagePrice || "$0";
   const date = bookingData.displayDate || "--";
@@ -24,12 +39,12 @@ export default function Payment() {
   const baseAmount =
     parseFloat(String(packagePrice).replace(/[^0-9.]/g, "")) || 0;
 
-  // Referral state (used only when NOT upgrade)
+  // Referral state
   const [referralInput, setReferralInput] = useState("");
   const [referral, setReferral] = useState(null);
   const [validating, setValidating] = useState(false);
 
-  // Coupon state (used only when NOT upgrade)
+  // Coupon state
   const [couponInput, setCouponInput] = useState("");
   const [coupon, setCoupon] = useState(null);
   const [validatingCoupon, setValidatingCoupon] = useState(false);
@@ -74,12 +89,6 @@ export default function Payment() {
     }
   }
 
-  // ⛔ OLD: could exceed baseAmount and go negative in emails
-  // const totalDiscountAmount = +(
-  //   (referralDiscountAmount || 0) + (couponDiscountAmount || 0)
-  // ).toFixed(2);
-
-  // ✅ NEW: cap combined discount to 100% of baseAmount
   const uncappedTotalDiscount = +(
     (referralDiscountAmount || 0) + (couponDiscountAmount || 0)
   ).toFixed(2);
@@ -90,7 +99,7 @@ export default function Payment() {
       : 0;
 
   const finalAmount = isUpgrade
-    ? baseAmount // 🔒 upgrades use exact upgrade price, no extra discounts
+    ? baseAmount
     : Math.max(0, +(baseAmount - totalDiscountAmount).toFixed(2));
 
   const discountPercentCombined =
@@ -98,7 +107,6 @@ export default function Payment() {
       ? +((totalDiscountAmount / baseAmount) * 100 || 0).toFixed(2)
       : 0;
 
-  // 🔥 Is this a fully-free booking (only for normal bookings)?
   const isFree = !isUpgrade && finalAmount === 0;
 
   // Razorpay state
@@ -108,9 +116,9 @@ export default function Payment() {
   // Free booking state
   const [creatingFree, setCreatingFree] = useState(false);
 
-  // Auto-load referral from URL/localStorage ONLY if not upgrade
+  // Auto-load referral
   useEffect(() => {
-    if (isUpgrade) return; // 🔒 no referrals on upgrade
+    if (isUpgrade) return;
 
     const params = new URLSearchParams(location.search);
     const fromUrl = params.get("ref");
@@ -155,7 +163,7 @@ export default function Payment() {
 
   // ----------------- REFERRAL VALIDATION -----------------
   async function validateReferral(code) {
-    if (isUpgrade) return; // safety
+    if (isUpgrade) return;
     if (!code) {
       setReferral(null);
       try {
@@ -220,7 +228,7 @@ export default function Payment() {
 
   // ----------------- COUPON VALIDATION -----------------
   async function validateCoupon(code) {
-    if (isUpgrade) return; // safety
+    if (isUpgrade) return;
     if (!code) {
       setCoupon(null);
       return;
@@ -264,7 +272,7 @@ export default function Payment() {
     }
   }
 
-  // ----------------- FREE BOOKING FLOW (100% DISCOUNT) -----------------
+  // ----------------- FREE BOOKING FLOW -----------------
   async function handleFreeBooking() {
     if (!isFree) return;
 
@@ -332,7 +340,6 @@ export default function Payment() {
     }
 
     if (isFree) {
-      // Safety guard – shouldn't be reachable because we hide this button for free bookings
       showBanner(
         "error",
         "This booking is fully discounted. Use the 'Confirm Free Booking' button instead."
@@ -362,7 +369,6 @@ export default function Payment() {
             packageTitle,
             date,
             time,
-            // For upgrades, these will be blank because UI is disabled
             referralCode: isUpgrade
               ? ""
               : referral?.code || referralInput || "",
@@ -424,7 +430,6 @@ export default function Payment() {
             const payload = {
               ...bookingData,
 
-              // For normal bookings we send discounts; for upgrades we send none
               referralCode: isUpgrade
                 ? ""
                 : referral?.code || referralInput || "",
@@ -494,46 +499,80 @@ export default function Payment() {
     }
   }
 
+  // --- ANIMATION CONFIG ---
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.1, // Each child appears 0.1s after the prev one
+        delayChildren: 0.1,
+      },
+    },
+  };
+
+  const itemVariants = {
+    hidden: { opacity: 0, y: 20 },
+    visible: {
+      opacity: 1,
+      y: 0,
+      transition: { type: "spring", stiffness: 260, damping: 30 },
+    },
+  };
+
   return (
-    <section className="relative z-10 pt-32 pb-24 px-6 max-w-3xl mx-auto text-white">
-      <h2 className="text-4xl sm:text-5xl font-extrabold text-center text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
-        {isUpgrade ? "Complete Upgrade Payment" : "Complete Payment"}
-      </h2>
-      <p className="mt-3 text-slate-300/80 text-center text-sm sm:text-base">
-        {isUpgrade
-          ? "Review your upgrade details and proceed to payment"
-          : "Review your booking details and proceed to payment"}
-      </p>
+    // Converted to motion.section to handle page fade-in
+    <motion.section
+      className="relative z-10 py-4 md:py-32 px-6 max-w-3xl mx-auto text-white"
+      variants={containerVariants}
+      initial="hidden"
+      animate="visible"
+    >
+      <motion.div variants={itemVariants}>
+        <h2 className="text-4xl sm:text-5xl font-extrabold text-center text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+          {isUpgrade ? "Complete Upgrade Payment" : "Complete Payment"}
+        </h2>
+        <p className="mt-3 text-slate-300/80 text-center text-sm sm:text-base">
+          {isUpgrade
+            ? "Review your upgrade details and proceed to payment"
+            : "Review your booking details and proceed to payment"}
+        </p>
+      </motion.div>
 
-      {banner && banner.text && (
-        <div
-          className={`mt-6 rounded-xl border px-4 py-3 text-sm flex items-center gap-3 shadow-[0_0_25px_rgba(15,23,42,0.8)] ${
-            banner.type === "error"
-              ? "border-red-500/60 bg-red-500/10 text-red-200"
-              : banner.type === "success"
-              ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-200"
-              : "border-sky-500/60 bg-sky-500/10 text-sky-100"
-          }`}
-        >
-          <span className="text-lg">
-            {banner.type === "error"
-              ? "⚠️"
-              : banner.type === "success"
-              ? "✅"
-              : "💬"}
-          </span>
-          <p className="flex-1">{banner.text}</p>
-          <button
-            onClick={() => setBanner(null)}
-            className="text-xs uppercase tracking-wide opacity-70 hover:opacity-100"
+      <motion.div variants={itemVariants}>
+        {banner && banner.text && (
+          <div
+            className={`mt-6 rounded-xl border px-4 py-3 text-sm flex items-center gap-3 shadow-[0_0_25px_rgba(15,23,42,0.8)] ${
+              banner.type === "error"
+                ? "border-red-500/60 bg-red-500/10 text-red-200"
+                : banner.type === "success"
+                ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-200"
+                : "border-sky-500/60 bg-sky-500/10 text-sky-100"
+            }`}
           >
-            Close
-          </button>
-        </div>
-      )}
+            <span className="text-lg">
+              {banner.type === "error"
+                ? "⚠️"
+                : banner.type === "success"
+                ? "✅"
+                : "💬"}
+            </span>
+            <p className="flex-1">{banner.text}</p>
+            <button
+              onClick={() => setBanner(null)}
+              className="text-xs uppercase tracking-wide opacity-70 hover:opacity-100"
+            >
+              Close
+            </button>
+          </div>
+        )}
+      </motion.div>
 
-      {/* Booking Summary */}
-      <div className="mt-8 rounded-2xl border border-sky-700/40 bg-[#0a1324]/90 shadow-[0_0_35px_rgba(14,165,233,0.15)] backdrop-blur-md">
+      {/* Booking Summary Card */}
+      <motion.div
+        variants={itemVariants}
+        className="mt-8 rounded-2xl border border-sky-700/40 bg-[#0a1324]/90 shadow-[0_0_35px_rgba(14,165,233,0.15)] backdrop-blur-md"
+      >
         <div className="p-6 sm:p-7">
           <h3 className="text-[20px] font-bold text-white">
             {isUpgrade ? "Upgrade Summary" : "Booking Summary"}
@@ -601,7 +640,7 @@ export default function Payment() {
 
           <div className="mt-6 h-px w-full bg-sky-800/40" />
 
-          {/* Referral & Coupon inputs - ONLY for normal bookings */}
+          {/* Referral & Coupon inputs */}
           {!isUpgrade && (
             <>
               {/* Referral input */}
@@ -684,10 +723,13 @@ export default function Payment() {
             </>
           )}
         </div>
-      </div>
+      </motion.div>
 
       {/* Payment Method / Free Booking */}
-      <div className="mt-8 rounded-2xl border border-sky-700/40 bg-[#080e1a]/95 shadow-[0_0_45px_rgba(14,165,233,0.25)] backdrop-blur-lg">
+      <motion.div
+        variants={itemVariants}
+        className="mt-8 rounded-2xl border border-sky-700/40 bg-[#080e1a]/95 shadow-[0_0_45px_rgba(14,165,233,0.25)] backdrop-blur-lg"
+      >
         <div className="p-6 sm:p-7">
           <h3 className="text-[20px] font-bold text-white">
             {isFree ? "Confirm Free Booking" : "Payment Method"}
@@ -863,22 +905,28 @@ export default function Payment() {
             </>
           )}
         </div>
-      </div>
+      </motion.div>
 
-      {/* Modern Back Button */}
-      <div className="mt-10 flex justify-center">
-        <Link
-          to={isUpgrade ? "/packages" : "/booking"}
-          className="glow-button inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-sky-50 hover:text-white transition-all duration-300"
-        >
-          <span className="text-lg">←</span>
-          <span>{isUpgrade ? "Back to Packages" : "Back to Booking"}</span>
-          <span className="glow-line glow-line-top" />
-          <span className="glow-line glow-line-right" />
-          <span className="glow-line glow-line-bottom" />
-          <span className="glow-line glow-line-left" />
-        </Link>
-      </div>
-    </section>
+      {/* Modern Back Button 
+         ALWAYS render this if we are in modal mode OR if hideFooter is false. 
+         This ensures a navigation method exists inside the popup.
+      */}
+      {(isModalMode || !hideFooter) && (
+        <motion.div variants={itemVariants} className="mt-10 flex justify-center pb-8">
+          <Link
+            to="/booking"
+            state={backToBookingState}
+            className="glow-button inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-sky-50 hover:text-white transition-all duration-300"
+          >
+            <span className="text-lg">←</span>
+            <span>Back to Booking</span>
+            <span className="glow-line glow-line-top" />
+            <span className="glow-line glow-line-right" />
+            <span className="glow-line glow-line-bottom" />
+            <span className="glow-line glow-line-left" />
+          </Link>
+        </motion.div>
+      )}
+    </motion.section>
   );
 }
