@@ -1,13 +1,26 @@
-// src/components/BookingForm.jsx
 import React, { useEffect, useMemo, useState, useRef } from "react";
+import { createPortal } from "react-dom";
 import { client } from "../sanityClient";
 import { useLocation, useNavigate } from "react-router-dom";
+import { motion, AnimatePresence } from "framer-motion";
 
 const HOST_TZ_NAME = "Asia/Kolkata";
 const IST_OFFSET_MINUTES = 330;
 const FORM_PREFILL_KEY = "booking_form_prefill";
 const HOLD_STORAGE_KEY = "my_slot_hold";
-const RESERVED_FADE_MS = 220;
+const BOOKING_DRAFT_KEY = "booking_draft";
+const SESSION_STATE_KEY = "booking_modal_state";
+const getDraftKey = (pkg) => (pkg?.title ? pkg.title : "_default");
+const isDraftEmpty = (formObj, moboId, ramId, customMobo, customRam) =>
+  !formObj.discord.trim() &&
+  !formObj.email.trim() &&
+  !formObj.specs.trim() &&
+  !formObj.mainGame.trim() &&
+  !formObj.notes.trim() &&
+  !moboId &&
+  !ramId &&
+  !customMobo.trim() &&
+  !customRam.trim();
 
 // Read query params
 function useQuery() {
@@ -42,6 +55,36 @@ const formatLocalTime = (utcDate) => {
     });
   } catch {
     return utcDate.toISOString();
+  }
+};
+
+const formatCountdown = (ms) => {
+  if (!ms || ms <= 0) return "0:00";
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+};
+
+const fetchWithRetry = async (query, params = {}, attempts = 3, delayMs = 250) => {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await client.fetch(query, params);
+    } catch (err) {
+      lastErr = err;
+      if (i === attempts - 1) break;
+      await new Promise((res) => setTimeout(res, delayMs));
+    }
+  }
+  throw lastErr;
+};
+
+const broadcastHold = (payload) => {
+  try {
+    window.dispatchEvent(new CustomEvent("hold-state", { detail: payload }));
+  } catch (e) {
+    console.error("Failed to broadcast hold state", e);
   }
 };
 
@@ -203,7 +246,8 @@ function XocDropdown({
   );
 }
 
-export default function BookingForm() {
+// Accepts isMobile prop from BookingModal to force layout styles
+export default function BookingForm({ isMobile }) {
   const location = useLocation();
   const q = useQuery();
   const navigate = useNavigate();
@@ -235,23 +279,153 @@ export default function BookingForm() {
   const [xocMoboId, setXocMoboId] = useState("");
   const [xocRamId, setXocRamId] = useState("");
   const [showVertexModal, setShowVertexModal] = useState(false);
-  const [vertexFadeOut, setVertexFadeOut] = useState(false);
-  const [vertexFadeIn, setVertexFadeIn] = useState(false);
   const [vertexPackage, setVertexPackage] = useState(null);
   const [planPackage, setPlanPackage] = useState(null);
   const [modalPackage, setModalPackage] = useState(null);
   const [modalMode, setModalMode] = useState("switch");
   const [pageFadeIn, setPageFadeIn] = useState(false);
   const scrollLockRef = useRef(null);
+  const [persistedPackage, setPersistedPackage] = useState(null);
+  const [preventHoldAutoload, setPreventHoldAutoload] = useState(false);
+  const [drafts, setDrafts] = useState({});
 
-  // --- POPUP STATE ---
-  const [showReservedModal, setShowReservedModal] = useState(false);
-  const [reservedFadeOut, setReservedFadeOut] = useState(false);
-  const [reservedFadeIn, setReservedFadeIn] = useState(false);
+  // Package from URL
+  const selectedPackage = useMemo(() => {
+    const queryPkg = {
+      title: q.get("title") || "",
+      price: q.get("price") || "",
+      tag: q.get("tag") || "",
+    };
+    if (queryPkg.title) return queryPkg;
+    if (persistedPackage) return persistedPackage;
+    return queryPkg;
+  }, [q, persistedPackage]);
 
-  // --- Slot hold state with persistence logic ---
+  const prevPackageRef = useRef(selectedPackage.title);
+  const prevPackageDataRef = useRef(selectedPackage);
+  const [draftLoading, setDraftLoading] = useState(true);
   const [myHold, setMyHold] = useState(null);
   const [lockingSlot, setLockingSlot] = useState(false);
+  const [holdCountdownMs, setHoldCountdownMs] = useState(null);
+  const clearedNoHoldRef = useRef(false);
+  const sessionRestoredRef = useRef(false);
+
+  useEffect(() => {
+    const prevTitle = prevPackageRef.current;
+    const nextTitle = selectedPackage.title;
+    if (prevTitle && prevTitle !== nextTitle) {
+      const prevPkgData = prevPackageDataRef.current;
+      if (
+        prevPkgData &&
+        !isDraftEmpty(form, xocMoboId, xocRamId, xocCustomMobo, xocCustomRam)
+      ) {
+        persistDraft({
+          form: { ...form },
+          selectedPackage: { ...prevPkgData },
+          xocMoboId,
+          xocRamId,
+          xocCustomMobo,
+          xocCustomRam,
+        });
+      }
+      setPreventHoldAutoload(true);
+      setErrorStep1("");
+      setErrorStep2("");
+      setSelectedSlot(null);
+      setStep(1);
+    }
+    prevPackageRef.current = nextTitle;
+    prevPackageDataRef.current = selectedPackage;
+  }, [selectedPackage.title]);
+
+  // Restore modal session state if present
+  useEffect(() => {
+    if (sessionRestoredRef.current) return;
+    try {
+      const raw = localStorage.getItem(SESSION_STATE_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw);
+        if (saved.packageTitle === selectedPackage.title) {
+          if (saved.step) setStep(saved.step);
+          if (saved.month) {
+            const m = new Date(saved.month);
+            if (!isNaN(m)) setMonth(m);
+          }
+          if (saved.selectedDate) {
+            const d = new Date(saved.selectedDate);
+            if (!isNaN(d)) setSelectedDate(d);
+          }
+          if (saved.selectedSlot?.hostLabel) {
+            setSelectedSlot({
+              hostLabel: saved.selectedSlot.hostLabel,
+              utcStart: saved.selectedSlot.utcStart
+                ? new Date(saved.selectedSlot.utcStart)
+                : null,
+              localLabel: saved.selectedSlot.localLabel || "",
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Failed to restore session state:", err);
+    } finally {
+      sessionRestoredRef.current = true;
+    }
+  }, [selectedPackage.title]);
+
+  // Persist modal session state
+  useEffect(() => {
+    try {
+      const payload = {
+        packageTitle: selectedPackage.title,
+        step,
+        month: month?.toISOString?.() || null,
+        selectedDate: selectedDate?.toISOString?.() || null,
+        selectedSlot: selectedSlot
+          ? {
+              hostLabel: selectedSlot.hostLabel,
+              utcStart: selectedSlot.utcStart?.toISOString?.() || null,
+              localLabel: selectedSlot.localLabel,
+            }
+          : null,
+      };
+      localStorage.setItem(SESSION_STATE_KEY, JSON.stringify(payload));
+    } catch (err) {
+      console.error("Failed to persist session state:", err);
+    }
+  }, [step, month, selectedDate, selectedSlot, selectedPackage.title]);
+
+  // If no active reservation, reset and clear persisted data so we land on times
+  useEffect(() => {
+    if (draftLoading) return;
+    if (myHold) {
+      clearedNoHoldRef.current = false;
+      return;
+    }
+    if (clearedNoHoldRef.current) return;
+
+    const key = getDraftKey(selectedPackage);
+    clearDraftForPackage(key);
+    setForm({
+      discord: "",
+      email: "",
+      specs: "",
+      mainGame: "",
+      notes: "",
+    });
+    setXocMoboId("");
+    setXocRamId("");
+    setXocCustomMobo("");
+    setXocCustomRam("");
+    setSelectedSlot(null);
+    setStep(1);
+    clearedNoHoldRef.current = true;
+    try {
+      localStorage.removeItem(SESSION_STATE_KEY);
+    } catch (err) {
+      console.error("Failed to clear session state:", err);
+    }
+  }, [draftLoading, myHold, selectedPackage]);
 
   // Load existing hold from localStorage on mount
   useEffect(() => {
@@ -273,6 +447,7 @@ export default function BookingForm() {
             }
           }
           setMyHold(normalizedHold);
+          broadcastHold(normalizedHold);
         } else {
           localStorage.removeItem(HOLD_STORAGE_KEY);
         }
@@ -281,6 +456,79 @@ export default function BookingForm() {
       console.error(e);
     }
   }, []);
+
+  // Align UI with any active hold (including persisted)
+  useEffect(() => {
+    if (!myHold) return;
+
+    if (preventHoldAutoload) {
+      setSelectedSlot(null);
+      setStep(1);
+      return;
+    }
+
+    const samePackage =
+      !myHold.packageTitle ||
+      !selectedPackage.title ||
+      myHold.packageTitle === selectedPackage.title;
+
+    const hostDate = myHold.hostDate ? new Date(myHold.hostDate) : null;
+    const utcDate = getUtcDateFromHold(myHold);
+
+    if (hostDate && !isNaN(hostDate.getTime())) {
+      setSelectedDate(hostDate);
+    }
+
+    if (samePackage && utcDate) {
+      setSelectedSlot((prev) =>
+        prev?.hostLabel === myHold.hostTime
+          ? prev
+          : {
+              hostLabel: myHold.hostTime,
+              utcStart: utcDate,
+              localLabel: formatLocalTime(utcDate),
+            }
+      );
+      setStep(2);
+    } else {
+      setSelectedSlot(null);
+      setStep(1);
+    }
+  }, [myHold, selectedPackage.title, preventHoldAutoload]);
+
+  // Countdown + expiry handling for holds
+  useEffect(() => {
+    if (!myHold?.expiresAt) {
+      setHoldCountdownMs(null);
+      return;
+    }
+
+    const expiresAtMs = new Date(myHold.expiresAt).getTime();
+    if (!Number.isFinite(expiresAtMs)) {
+      setHoldCountdownMs(null);
+      return;
+    }
+
+    const tick = () => {
+      const diff = expiresAtMs - Date.now();
+      if (diff <= 0) {
+        releaseHold();
+        return false;
+      }
+      setHoldCountdownMs(diff);
+      return true;
+    };
+
+    tick();
+    const id = setInterval(() => {
+      const ok = tick();
+      if (!ok) {
+        clearInterval(id);
+      }
+    }, 1000);
+
+    return () => clearInterval(id);
+  }, [myHold]);
 
   const clearErrorIfResolved = (
     nextForm = form,
@@ -313,20 +561,11 @@ export default function BookingForm() {
   const [xocCustomMobo, setXocCustomMobo] = useState("");
   const [xocCustomRam, setXocCustomRam] = useState("");
 
-  // Package from URL
-  const selectedPackage = useMemo(
-    () => ({
-      title: q.get("title") || "",
-      price: q.get("price") || "",
-      tag: q.get("tag") || "",
-    }),
-    [q]
-  );
-
   // is this XOC?
   const isXoc =
     q.get("xoc") === "1" ||
-    selectedPackage.title === "XOC / Extreme Overclocking";
+    selectedPackage.title === "XOC / Extreme Overclocking" ||
+    (selectedPackage.title || "").toLowerCase().includes("xoc");
 
   const displayPackage = modalPackage || vertexPackage;
   const isStep2Complete = useMemo(() => {
@@ -408,11 +647,11 @@ export default function BookingForm() {
     const fetchData = async () => {
       try {
         const [sRaw, booked, holds] = await Promise.all([
-          client.fetch(`*[_type == "bookingSettings"][0]`),
-          client.fetch(
+          fetchWithRetry(`*[_type == "bookingSettings"][0]`),
+          fetchWithRetry(
             `*[_type == "booking"]{date, time, startTimeUTC, packageTitle, hostDate, hostTime}`
           ),
-          client.fetch(
+          fetchWithRetry(
             `*[_type == "slotHold" && expiresAt > now()]{
               hostDate,
               hostTime,
@@ -483,9 +722,75 @@ export default function BookingForm() {
     }
   }, [location.search]);
 
+  // Load persisted booking draft (keeps form + package when returning)
+  // Load drafts (per-package)
+  useEffect(() => {
+    try {
+      const storedDraft = localStorage.getItem(BOOKING_DRAFT_KEY);
+      if (storedDraft) {
+        const parsed = JSON.parse(storedDraft);
+        setDrafts(parsed.packages || {});
+        const key = getDraftKey(selectedPackage);
+        const draftForPkg =
+          (parsed.packages && parsed.packages[key]) ||
+          (parsed.lastTitle && parsed.packages && parsed.packages[parsed.lastTitle]) ||
+          null;
+        if (draftForPkg) {
+          if (draftForPkg.form) setForm((prev) => ({ ...prev, ...draftForPkg.form }));
+          if (draftForPkg.selectedPackage) {
+            setPersistedPackage(draftForPkg.selectedPackage);
+          }
+          if (draftForPkg.xocMoboId) setXocMoboId(draftForPkg.xocMoboId);
+          if (draftForPkg.xocRamId) setXocRamId(draftForPkg.xocRamId);
+          if (draftForPkg.xocCustomMobo) setXocCustomMobo(draftForPkg.xocCustomMobo);
+          if (draftForPkg.xocCustomRam) setXocCustomRam(draftForPkg.xocCustomRam);
+          setPreventHoldAutoload(false);
+          setStep(2);
+        }
+      }
+      setDraftLoading(false);
+    } catch (err) {
+      console.error("Failed to load booking draft:", err);
+      setDraftLoading(false);
+    }
+  }, [selectedPackage.title]);
+
+  const persistDraft = (payload) => {
+    try {
+      const current = localStorage.getItem(BOOKING_DRAFT_KEY);
+      let parsed = { packages: {}, lastTitle: null };
+      if (current) {
+        parsed = { lastTitle: null, packages: {}, ...JSON.parse(current) };
+      }
+      const key = getDraftKey(payload.selectedPackage);
+      parsed.packages[key] = payload;
+      parsed.lastTitle = key;
+      setDrafts(parsed.packages);
+      localStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify(parsed));
+    } catch (e) {
+      console.error("Failed to persist booking draft:", e);
+    }
+  };
+
+  const clearDraftForPackage = (pkgKey) => {
+    try {
+      const current = localStorage.getItem(BOOKING_DRAFT_KEY);
+      if (!current) return;
+      const parsed = { lastTitle: null, packages: {}, ...JSON.parse(current) };
+      if (parsed.packages && parsed.packages[pkgKey]) {
+        delete parsed.packages[pkgKey];
+        if (parsed.lastTitle === pkgKey) parsed.lastTitle = null;
+        setDrafts(parsed.packages);
+        localStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify(parsed));
+      }
+    } catch (e) {
+      console.error("Failed to clear draft:", e);
+    }
+  };
+
   // Lock body scroll when modal is open
   useEffect(() => {
-    if (showVertexModal || showReservedModal) {
+    if (showVertexModal) {
       const body = document.body;
       const html = document.documentElement;
       const scrollY = window.scrollY;
@@ -508,19 +813,20 @@ export default function BookingForm() {
         window.scrollTo(0, stored.scrollY || 0);
       };
     }
-  }, [showVertexModal, showReservedModal]);
+  }, [showVertexModal]);
 
-  // animate reserved modal fade-in
+  // Hide booking modal close button while viewing current plan modal
   useEffect(() => {
-    if (showReservedModal) {
-      setReservedFadeOut(false);
-      setReservedFadeIn(false);
-      const frame = requestAnimationFrame(() => setReservedFadeIn(true));
-      return () => cancelAnimationFrame(frame);
+    const body = document.body;
+    if (!body) return;
+
+    if (showVertexModal && modalMode === "view") {
+      body.classList.add("view-plan-open");
+      return () => body.classList.remove("view-plan-open");
     }
-    setReservedFadeIn(false);
-    setReservedFadeOut(false);
-  }, [showReservedModal]);
+
+    body.classList.remove("view-plan-open");
+  }, [showVertexModal, modalMode]);
 
   // ---------- FETCH PERFORMANCE VERTEX PACKAGE (for modal) ----------
   useEffect(() => {
@@ -637,9 +943,9 @@ export default function BookingForm() {
         // If I am holding this slot, do NOT count it as "booked" in the general list
         if (
           myHold &&
-          b.date === myHold.hostDate &&
-          b.time === myHold.hostTime &&
-          b.isHold
+          b.isHold &&
+          (b.holdId === myHold.holdId ||
+            (b.date === myHold.hostDate && b.time === myHold.hostTime))
         ) {
           return false;
         }
@@ -651,14 +957,26 @@ export default function BookingForm() {
       .map((b) => b.time);
 
     // Slots held by others (since we filtered ours out above)
-    const heldForDayHost = daySlots.filter((b) => b.isHold).map((b) => b.time);
+    const heldForDayHost = daySlots
+      .filter((b) => b.isHold && b.holdId !== myHold?.holdId)
+      .map((b) => b.time);
 
     const slots = [];
     for (let h = open; h <= close; h++) {
       const hostLabel = hostTimeLabel(h);
       const isAllowed = allowed.includes(h);
-      const isBooked = bookedForDayHost.includes(hostLabel);
-      const isHeldOther = heldForDayHost.includes(hostLabel);
+      let isBooked = bookedForDayHost.includes(hostLabel);
+      let isHeldOther = heldForDayHost.includes(hostLabel);
+
+      const isMyCurrentHold =
+        myHold &&
+        myHold.hostDate === hostDateLabel &&
+        myHold.hostTime === hostLabel;
+
+      if (isMyCurrentHold) {
+        isBooked = false;
+        isHeldOther = false;
+      }
 
       const utcStart = getUtcFromHostLocal(hostYear, hostMonth, hostDay, h);
       const localLabel = formatLocalTime(utcStart);
@@ -724,9 +1042,9 @@ export default function BookingForm() {
         // Exclude my own hold from calculation
         if (
           myHold &&
-          b.date === myHold.hostDate &&
-          b.time === myHold.hostTime &&
-          b.isHold
+          b.isHold &&
+          (b.holdId === myHold.holdId ||
+            (b.date === myHold.hostDate && b.time === myHold.hostTime))
         ) {
           return false;
         }
@@ -737,7 +1055,9 @@ export default function BookingForm() {
     const bookedForDayHost = daySlots
       .filter((b) => !b.isHold)
       .map((b) => b.time);
-    const heldForDayHost = daySlots.filter((b) => b.isHold).map((b) => b.time);
+    const heldForDayHost = daySlots
+      .filter((b) => b.isHold && b.holdId !== myHold?.holdId)
+      .map((b) => b.time);
 
     const hostYear = d.getFullYear();
     const hostMonth = d.getMonth();
@@ -797,7 +1117,49 @@ export default function BookingForm() {
       xocCustomMobo,
       xocCustomRam
     );
+    const empty = isDraftEmpty(nextForm, xocMoboId, xocRamId, xocCustomMobo, xocCustomRam);
+    if (empty) {
+      clearDraftForPackage(getDraftKey(selectedPackage));
+    } else {
+      persistDraft({
+        form: nextForm,
+        selectedPackage: { ...selectedPackage },
+        xocMoboId,
+        xocRamId,
+        xocCustomMobo,
+        xocCustomRam,
+      });
+    }
   };
+
+  useEffect(() => {
+    if (draftLoading) return;
+    const allEmpty =
+      !form.discord.trim() &&
+      !form.email.trim() &&
+      !form.specs.trim() &&
+      !form.mainGame.trim() &&
+      !form.notes.trim() &&
+      !xocMoboId &&
+      !xocRamId &&
+      !xocCustomMobo.trim() &&
+      !xocCustomRam.trim();
+    if (allEmpty) {
+      clearDraftForPackage(getDraftKey(selectedPackage));
+    }
+  }, [
+    form.discord,
+    form.email,
+    form.specs,
+    form.mainGame,
+    form.notes,
+    xocMoboId,
+    xocRamId,
+    xocCustomMobo,
+    xocCustomRam,
+    selectedPackage,
+    draftLoading,
+  ]);
 
   const handleDayClick = (day) => {
     const date = new Date(month.getFullYear(), month.getMonth(), day);
@@ -814,6 +1176,15 @@ export default function BookingForm() {
 
     setSelectedDate(date);
     setSelectedSlot(null);
+    setPreventHoldAutoload(false);
+    persistDraft({
+      form,
+      selectedPackage: { ...selectedPackage },
+      xocMoboId,
+      xocRamId,
+      xocCustomMobo,
+      xocCustomRam,
+    });
   };
 
   const holdLocalTimeLabel = useMemo(() => {
@@ -823,40 +1194,42 @@ export default function BookingForm() {
     return formatLocalTime(utcDate);
   }, [myHold]);
 
-  const closeReservedModalWithRelease = () => {
-    setReservedFadeIn(false);
-    setReservedFadeOut(true);
-    setTimeout(() => {
-      releaseHold();
-    }, RESERVED_FADE_MS);
+  const clearHoldState = (resetStep = true, clearStorage = true) => {
+    setMyHold(null);
+    if (clearStorage) {
+      localStorage.removeItem(HOLD_STORAGE_KEY);
+    }
+    setSelectedSlot(null);
+    setHoldCountdownMs(null);
+    if (resetStep) setStep(1);
+    broadcastHold(null);
   };
 
-  const closeReservedModalWithoutRelease = () => {
-    setReservedFadeIn(false);
-    setReservedFadeOut(true);
-    setTimeout(() => {
-      setShowReservedModal(false);
-      setReservedFadeOut(false);
-      setStep(2);
-    }, RESERVED_FADE_MS);
+  const updateHoldPackage = (pkg) => {
+    if (!myHold) return;
+    const updated = {
+      ...myHold,
+      packageTitle: pkg?.title || myHold.packageTitle,
+      packagePrice: pkg?.price || myHold.packagePrice,
+      packageTag: pkg?.tag || myHold.packageTag,
+    };
+    setMyHold(updated);
+    try {
+      localStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(updated));
+    } catch (e) {
+      console.error("Failed to persist updated hold:", e);
+    }
+    broadcastHold(updated);
   };
 
   // ---------- RELEASE HOLD (Optimistic Update) ----------
-  const releaseHold = async () => {
-    if (!myHold) {
-      setShowReservedModal(false);
-      return;
-    }
+  const releaseHold = async (resetStep = true) => {
+    if (!myHold) return;
 
     const holdIdToDelete = myHold.holdId;
 
-    // 1. INSTANTLY Update UI (Optimistic)
-    setMyHold(null);
-    localStorage.removeItem(HOLD_STORAGE_KEY);
-    setSelectedSlot(null);
-    setShowReservedModal(false);
+    clearHoldState(resetStep);
 
-    // 2. Fire and Forget Network Request (Doesn't block UI)
     try {
       await fetch("/api/releaseHold", {
         method: "POST",
@@ -880,13 +1253,32 @@ export default function BookingForm() {
     setErrorStep1("");
     setLockingSlot(true);
 
+    let previousHoldId = null;
+    const isSameAsExisting =
+      myHold &&
+      myHold.hostDate === selectedDate.toDateString() &&
+      myHold.hostTime === selectedSlot.hostLabel;
+
+    if (myHold && isSameAsExisting) {
+      updateHoldPackage(selectedPackage);
+      setStep(2);
+      setLockingSlot(false);
+      setPreventHoldAutoload(false);
+      return;
+    }
+
+    if (myHold && !isSameAsExisting) {
+      previousHoldId = myHold.holdId || null;
+      await releaseHold(false);
+    }
+
     try {
       const body = {
         hostDate: selectedDate.toDateString(),
         hostTime: selectedSlot.hostLabel,
         startTimeUTC: selectedSlot.utcStart.toISOString(),
         packageTitle: selectedPackage.title,
-        previousHoldId: myHold?.holdId || null,
+        previousHoldId,
       };
 
       const res = await fetch("/api/holdSlot", {
@@ -913,12 +1305,21 @@ export default function BookingForm() {
         hostDate: selectedDate.toDateString(),
         hostTime: selectedSlot.hostLabel,
         startTimeUTC: selectedSlot.utcStart.toISOString(),
+        packageTitle: selectedPackage.title,
+        packagePrice: selectedPackage.price,
+        packageTag: selectedPackage.tag,
       };
 
       setMyHold(newHold);
       localStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(newHold));
+      broadcastHold(newHold);
 
-      setShowReservedModal(true);
+      const expiresIn =
+        newHold.expiresAt && new Date(newHold.expiresAt).getTime() - Date.now();
+      if (Number.isFinite(expiresIn)) {
+        setHoldCountdownMs(Math.max(0, expiresIn));
+      }
+      setStep(2);
     } catch (err) {
       console.error("Error reserving slot:", err);
       setErrorStep1(
@@ -1018,9 +1419,25 @@ export default function BookingForm() {
         : {}),
     };
 
-    // Clean up local storage hold before navigating, as it will be handled by backend now
-    localStorage.removeItem(HOLD_STORAGE_KEY);
-    navigate(`/payment?data=${encodeURIComponent(JSON.stringify(payload))}`);
+    try {
+      persistDraft({
+        form: { ...form },
+        selectedPackage: { ...selectedPackage },
+        xocMoboId,
+        xocRamId,
+        xocCustomMobo,
+        xocCustomRam,
+      });
+    } catch (e) {
+      console.error("Failed to persist booking draft:", e);
+    }
+
+    // Keep hold persisted for banner
+    const backgroundLocation =
+      location.state?.backgroundLocation || location.state || null;
+    navigate(`/payment?data=${encodeURIComponent(JSON.stringify(payload))}`, {
+      state: backgroundLocation ? { backgroundLocation } : undefined,
+    });
   };
 
   // ---------- CALENDAR DATA ----------
@@ -1031,734 +1448,877 @@ export default function BookingForm() {
     (_, i) => i + 1
   );
 
+  // --- ANIMATION VARIANTS FOR SLEEK MODAL ---
+  const overlayVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: { duration: 0.3, ease: "easeOut" },
+    },
+    exit: {
+      opacity: 0,
+      transition: { duration: 0.2, ease: "easeIn" },
+    },
+  };
+
+  const modalContainerVariants = {
+    hidden: { opacity: 0, scale: 0.95, y: 15 },
+    visible: {
+      opacity: 1,
+      scale: 1,
+      y: 0,
+      transition: {
+        type: "spring",
+        damping: 25,
+        stiffness: 300,
+        mass: 0.8,
+        staggerChildren: 0.08, // This creates the sleek cascade effect
+        delayChildren: 0.1,
+      },
+    },
+    exit: {
+      opacity: 0,
+      scale: 0.95,
+      y: 15,
+      transition: { duration: 0.2 },
+    },
+  };
+
+  const itemVariants = {
+    hidden: { opacity: 0, y: 15 },
+    visible: {
+      opacity: 1,
+      y: 0,
+      transition: { type: "spring", stiffness: 200, damping: 20 },
+    },
+  };
+
   return (
-    <div
-      className={`text-white transition-opacity duration-300 ${
-        pageFadeIn ? "opacity-100" : "opacity-0"
-      }`}
-    >
-      {!settings ? (
-        <div className="text-center text-sky-300 mt-20">Loading...</div>
-      ) : (
-        <>
-          {selectedPackage.title && (
-            <div className="mb-8 max-w-lg mx-auto bg-[#0b1120]/70 border border-sky-700/40 rounded-xl p-6 text-center shadow-[0_0_15px_rgba(14,165,233,0.25)]">
-              {selectedPackage.tag && (
-                <div className="mb-2">
-                  <span className="bg-sky-500/80 text-xs font-semibold px-3 py-1 rounded-full shadow-[0_0_8px_rgba(56,189,248,0.4)]">
-                    {selectedPackage.tag}
-                  </span>
-                </div>
-              )}
-              <h3 className="text-2xl font-bold text-sky-300">
-                {selectedPackage.title}
-              </h3>
-              <p className="text-3xl font-semibold text-sky-400 mt-2">
-                {selectedPackage.price}
-              </p>
-            </div>
-          )}
-
-          {step === 1 && (
-            <div className="max-w-3xl mx-auto backdrop-blur-sm bg-[#0b1120]/80 border border-sky-700/30 rounded-2xl p-8 text-center shadow-[0_0_25px_rgba(14,165,233,0.15)]">
-              <h3 className="text-sky-300 text-lg font-semibold mb-2">
-                Select a Date and Time for Your Session
-              </h3>
-              <p className="text-xs text-sky-400/70 mb-5">
-                Times are shown in{" "}
-                <span className="font-semibold">your local time</span> (
-                {userTimeZone}), based on host availability in{" "}
-                <span className="font-semibold">India (IST)</span>.
-              </p>
-
-              <div className="flex flex-col sm:flex-row gap-8 justify-center">
-                <div>
-                  <div className="flex justify-between items-center mb-4">
-                    <button
-                      onClick={() =>
-                        setMonth(
-                          new Date(month.getFullYear(), month.getMonth() - 1, 1)
-                        )
-                      }
-                      className="text-sky-400 hover:text-sky-300 transition"
-                    >
-                      ‹
-                    </button>
-                    <h4 className="text-xl font-semibold text-sky-200">
-                      {month.toLocaleString("default", {
-                        month: "long",
-                      })}{" "}
-                      {month.getFullYear()}
-                    </h4>
-                    <button
-                      onClick={() =>
-                        setMonth(
-                          new Date(month.getFullYear(), month.getMonth() + 1, 1)
-                        )
-                      }
-                      className="text-sky-400 hover:text-sky-300 transition"
-                    >
-                      ›
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-7 gap-2 text-sm text-sky-300 mb-2">
-                    {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
-                      (d) => (
-                        <div key={d} className="font-semibold text-sky-400/70">
-                          {d}
-                        </div>
-                      )
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-7 gap-2 text-sm">
-                    {Array(startOfMonth.getDay())
-                      .fill(null)
-                      .map((_, i) => (
-                        <div key={`empty-${i}`} />
-                      ))}
-
-                    {daysInMonth.map((day) => {
-                      const date = new Date(
-                        month.getFullYear(),
-                        month.getMonth(),
-                        day
-                      );
-                      date.setHours(0, 0, 0, 0);
-
-                      const maxDate = new Date();
-                      maxDate.setDate(
-                        maxDate.getDate() + (settings.maxDaysAheadBooking || 7)
-                      );
-                      maxDate.setHours(0, 0, 0, 0);
-
-                      const disabled = date < startOfToday || date > maxDate;
-                      const isSelected =
-                        selectedDate && isSameDay(date, selectedDate);
-
-                      const slotInfo = getDaySlotInfo(date);
-                      let dotClass = "";
-                      if (slotInfo?.color === "red") {
-                        dotClass =
-                          "bg-red-500 shadow-[0_0_6px_rgba(248,113,113,0.9)]";
-                      } else if (slotInfo?.color === "yellow") {
-                        dotClass =
-                          "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.9)]";
-                      } else if (slotInfo?.color === "green") {
-                        dotClass =
-                          "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)]";
-                      }
-
-                      return (
-                        <button
-                          key={day}
-                          disabled={disabled}
-                          onClick={() => handleDayClick(day)}
-                          className={`p-2 rounded-lg transition-all duration-200 flex flex-col items-center justify-center ${
-                            isSelected
-                              ? "bg-sky-600 text-white shadow-[0_0_12px_rgba(56,189,248,0.6)]"
-                              : disabled
-                              ? "text-slate-500 cursor-not-allowed"
-                              : "hover:bg-sky-700/40 text-sky-200"
-                          }`}
-                        >
-                          <span>{day}</span>
-                          {slotInfo?.color && (
-                            <span
-                              className={`mt-0.5 h-1.5 w-1.5 rounded-full ${dotClass}`}
-                            />
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className="mt-3 flex flex-wrap justify-center gap-3 text-[10px] text-sky-300">
-                    <div className="flex items-center gap-1 whitespace-nowrap">
-                      <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)]" />
-                      <span>Fully Available</span>
-                    </div>
-                    <div className="flex items-center gap-1 whitespace-nowrap">
-                      <span className="h-2 w-2 rounded-full bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.9)]" />
-                      <span>Limited Slots</span>
-                    </div>
-                    <div className="flex items-center gap-1 whitespace-nowrap">
-                      <span className="h-2 w-2 rounded-full bg-red-500 shadow-[0_0_6px_rgba(248,113,113,0.9)]" />
-                      <span>Fully Booked</span>
-                    </div>
-                    <div className="flex items-center gap-1 whitespace-nowrap">
-                      <span className="h-2 w-2 rounded-full bg-purple-400 shadow-[0_0_6px_rgba(192,132,252,0.9)]" />
-                      <span>Temporarily Reserved</span>
-                    </div>
-                  </div>
-                </div>
-
-                {selectedDate && (
-                  <div className="flex-1">
-                    <p className="text-sky-200 mb-3 font-semibold">
-                      Availability for{" "}
-                      {selectedDate.toLocaleDateString(undefined, {
-                        weekday: "long",
-                        month: "long",
-                        day: "numeric",
-                      })}
-                    </p>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                      {times.map((t) => {
-                        const isMyHold =
-                          myHold &&
-                          selectedDate &&
-                          myHold.hostDate === selectedDate.toDateString() &&
-                          myHold.hostTime === t.hostLabel;
-
-                        const subLabelText = `(${t.hostLabel} IST)`;
-                        const subLabelClass = isMyHold
-                          ? "text-[#38BDF8B3]"
-                          : "text-sky-400/70";
-
-                        return (
-                          <button
-                            key={t.hostLabel}
-                            onClick={() =>
-                              !t.disabled &&
-                              !t.isBooked &&
-                              !t.isHeldOther
-                                ? setSelectedSlot(t)
-                                : null
-                            }
-                            disabled={t.disabled}
-                            className={`py-2 rounded-lg border transition-all duration-200 ${
-                              t.isBooked
-                                ? "bg-red-900/40 border-red-700/40 text-red-400 cursor-not-allowed"
-                                : t.isHeldOther
-                                ? "bg-purple-900/40 border-purple-700/50 text-purple-300 cursor-not-allowed"
-                                : isMyHold
-                                ? "bg-purple-900/50 border-purple-500/60 text-purple-200 cursor-not-allowed shadow-[0_0_14px_rgba(168,85,247,0.7)]"
-                                : t.disabled
-                                ? "bg-slate-800/40 text-slate-500 border-slate-700/50 cursor-not-allowed"
-                                : selectedSlot?.hostLabel === t.hostLabel
-                                ? "bg-sky-600 text-white border-sky-400 shadow-[0_0_15px_rgba(56,189,248,0.6)]"
-                                : "border-sky-700/40 hover:border-sky-500/60 hover:bg-sky-700/20"
-                            }`}
-                          >
-                            {t.localLabel}
-                            <span
-                              className={`block text-[10px] mt-1 ${subLabelClass}`}
-                            >
-                              {subLabelText}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
+    <>
+      <div
+        className={`text-white transition-opacity duration-300 ${
+          pageFadeIn ? "opacity-100" : "opacity-0"
+        }`}
+      >
+        {!settings ? (
+          <div className="text-center text-sky-300 mt-20">Loading...</div>
+        ) : (
+          <>
+            {selectedPackage.title && (
+              <div className="mb-8 max-w-lg mx-auto bg-[#0b1120]/70 border border-sky-700/40 rounded-xl p-6 text-center shadow-[0_0_15px_rgba(14,165,233,0.25)]">
+                {selectedPackage.tag && (
+                  <div className="mb-2">
+                    <span className="bg-sky-500/80 text-xs font-semibold px-3 py-1 rounded-full shadow-[0_0_8px_rgba(56,189,248,0.4)]">
+                      {selectedPackage.tag}
+                    </span>
                   </div>
                 )}
+                <h3 className="text-2xl font-bold text-sky-300">
+                  {selectedPackage.title}
+                </h3>
+                <p className="text-3xl font-semibold text-sky-400 mt-2">
+                  {selectedPackage.price}
+                </p>
               </div>
+            )}
 
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mt-10">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setModalMode("view");
-                    setModalPackage(planPackage || selectedPackage);
-                    setVertexFadeOut(false);
-                    setVertexFadeIn(false);
-                    setShowVertexModal(true);
-                    setTimeout(() => setVertexFadeIn(true), 20);
-                  }}
-                  className="glow-button w-full sm:w-64 py-3 rounded-lg font-semibold text-lg transition-all duration-300 inline-flex items-center justify-center gap-2"
+            <AnimatePresence mode="wait">
+              {step === 1 && (
+                <motion.div
+                  key="step1"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3, ease: "easeInOut" }}
+                  // NOTE: removed backdrop-blur-sm to fix text fuzziness
+                  className="max-w-3xl mx-auto bg-[#0b1120]/90 border border-sky-700/30 rounded-2xl p-8 text-center shadow-[0_0_25px_rgba(14,165,233,0.15)]"
                 >
-                  View My Plan
-                  <span className="glow-line glow-line-top" />
-                  <span className="glow-line glow-line-right" />
-                  <span className="glow-line glow-line-bottom" />
-                  <span className="glow-line glow-line-left" />
-                </button>
-
-                <button
-                  onClick={handleLockAndGoNext}
-                  aria-disabled={!selectedDate || !selectedSlot || lockingSlot}
-                  className={`glow-button w-full sm:w-64 py-3 rounded-lg font-semibold text-lg transition-all duration-300 ${
-                    !selectedDate || !selectedSlot || lockingSlot
-                      ? "opacity-60"
-                      : ""
-                  }`}
-                >
-                  {lockingSlot ? "Reserving..." : "Next"}
-                  <span className="glow-line glow-line-top" />
-                  <span className="glow-line glow-line-right" />
-                  <span className="glow-line glow-line-bottom" />
-                  <span className="glow-line glow-line-left" />
-                </button>
-              </div>
-
-              {errorStep1 && (
-                <p className="text-red-400 mt-3 text-sm">{errorStep1}</p>
-              )}
-            </div>
-          )}
-
-          {step === 2 && (
-            <div className="max-w-2xl mx-auto bg-[#0b1120]/80 border border-sky-700/30 rounded-2xl p-8 shadow-[0_0_25px_rgba(14,165,233,0.15)] space-y-6">
-              {isXoc && (
-                <div className="space-y-4 border border-sky-700/50 rounded-xl p-4 bg-slate-900/40">
-                  <h4 className="text-sky-300 font-semibold text-sm sm:text-base">
-                    XOC Hardware Eligibility
-                  </h4>
-                  <p className="text-xs text-sky-400/80">
-                    Choose your motherboard and RAM kit from the supported list
-                    below.
+                  <h3 className="text-sky-300 text-lg font-semibold mb-2">
+                    Select a Date and Time for Your Session
+                  </h3>
+                  <p className="text-xs text-sky-400/70 mb-5">
+                    Times are shown in{" "}
+                    <span className="font-semibold">your local time</span> (
+                    {userTimeZone}), based on host availability in{" "}
+                    <span className="font-semibold">India (IST)</span>.
                   </p>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <XocDropdown
-                      label="Motherboard"
-                      items={xocMotherboards}
-                      value={xocMoboId}
-                      onChange={(val) => {
-                        setXocMoboId(val);
-                        clearErrorIfResolved(
-                          form,
-                          val,
-                          xocRamId,
-                          xocCustomMobo,
-                          xocCustomRam
-                        );
-                      }}
-                      placeholder={
-                        xocMotherboards.length === 0
-                          ? "No supported boards loaded"
-                          : "Select Your Motherboard"
-                      }
-                      emptyMessage="No supported boards found"
-                      getId={(m) => m.id}
-                      getLabel={(m) => m.name}
-                      customOptionId="__CUSTOM_MOBO__"
-                      customOptionLabel="+ Add Your Own Motherboard"
-                    />
-
-                    <XocDropdown
-                      label="RAM Kit"
-                      items={xocRams}
-                      value={xocRamId}
-                      onChange={(val) => {
-                        setXocRamId(val);
-                        clearErrorIfResolved(
-                          form,
-                          xocMoboId,
-                          val,
-                          xocCustomMobo,
-                          xocCustomRam
-                        );
-                      }}
-                      placeholder={
-                        xocRams.length === 0
-                          ? "No eligible RAM kits loaded"
-                          : "Select your RAM kit"
-                      }
-                      emptyMessage="No eligible RAM kits found"
-                      getId={(r) => r.id}
-                      getLabel={(r) =>
-                        `${r.name} — ${r.speed} MT/s, CL${r.cas_latency}, ${r.capacityGb}GB`
-                      }
-                      customOptionId="__CUSTOM_RAM__"
-                      customOptionLabel="+ Add your own RAM kit"
-                    />
-
-                    {xocMoboId === "__CUSTOM_MOBO__" && (
-                      <div className="sm:col-span-2">
-                        <input
-                          type="text"
-                          value={xocCustomMobo}
-                          onChange={(e) => {
-                            const next = e.target.value;
-                            setXocCustomMobo(next);
-                            clearErrorIfResolved(
-                              form,
-                              xocMoboId,
-                              xocRamId,
-                              next,
-                              xocCustomRam
-                            );
-                          }}
-                          placeholder="Type your Motherboard Model (e.g. ASUS ROG STRIX X670E-E)"
-                          className="w-full bg-[#020617] border border-sky-700/60 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400"
-                        />
+                  <div
+                    className={`flex flex-col gap-8 justify-center ${
+                      isMobile ? "" : "sm:flex-row"
+                    }`}
+                  >
+                    <div>
+                      <div className="flex justify-between items-center mb-4">
+                        <button
+                          onClick={() =>
+                            setMonth(
+                              new Date(
+                                month.getFullYear(),
+                                month.getMonth() - 1,
+                                1
+                              )
+                            )
+                          }
+                          className="text-sky-400 hover:text-sky-300 transition"
+                        >
+                          ‹
+                        </button>
+                        <h4 className="text-xl font-semibold text-sky-200">
+                          {month.toLocaleString("default", {
+                            month: "long",
+                          })}{" "}
+                          {month.getFullYear()}
+                        </h4>
+                        <button
+                          onClick={() =>
+                            setMonth(
+                              new Date(
+                                month.getFullYear(),
+                                month.getMonth() + 1,
+                                1
+                              )
+                            )
+                          }
+                          className="text-sky-400 hover:text-sky-300 transition"
+                        >
+                          ›
+                        </button>
                       </div>
-                    )}
 
-                    {xocRamId === "__CUSTOM_RAM__" && (
-                      <div className="sm:col-span-2">
-                        <input
-                          type="text"
-                          value={xocCustomRam}
-                          onChange={(e) => {
-                            const next = e.target.value;
-                            setXocCustomRam(next);
-                            clearErrorIfResolved(
-                              form,
-                              xocMoboId,
-                              xocRamId,
-                              xocCustomMobo,
-                              next
-                            );
-                          }}
-                          placeholder="Type your RAM kit (e.g. 32GB 6000MT/s CL30, brand/model)"
-                          className="w-full bg-[#020617] border border-sky-700/60 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400"
-                        />
+                      <div className="grid grid-cols-7 gap-2 text-sm text-sky-300 mb-2">
+                        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
+                          (d) => (
+                            <div key={d} className="font-semibold text-sky-400/70">
+                              {d}
+                            </div>
+                          )
+                        )}
                       </div>
-                    )}
 
-                    {(xocMoboId === "__CUSTOM_MOBO__" ||
-                      xocRamId === "__CUSTOM_RAM__") && (
-                      <div className="sm:col-span-2">
-                        <div className="mt-1 rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-2">
-                          <p className="text-[11px] text-sky-100 leading-snug">
-                            Custom motherboards and RAM kits may not fully meet
-                            our XOC stability and compatibility criteria. For
-                            the best results and safety, please reach out on
-                            Discord so we can double-check your parts before the
-                            session.
-                          </p>
+                      <div className="grid grid-cols-7 gap-2 text-sm">
+                        {Array(startOfMonth.getDay())
+                          .fill(null)
+                          .map((_, i) => (
+                            <div key={`empty-${i}`} />
+                          ))}
+
+                        {daysInMonth.map((day) => {
+                          const date = new Date(
+                            month.getFullYear(),
+                            month.getMonth(),
+                            day
+                          );
+                          date.setHours(0, 0, 0, 0);
+
+                          const maxDate = new Date();
+                          maxDate.setDate(
+                            maxDate.getDate() + (settings.maxDaysAheadBooking || 7)
+                          );
+                          maxDate.setHours(0, 0, 0, 0);
+
+                          const disabled = date < startOfToday || date > maxDate;
+                          const isSelected =
+                            selectedDate && isSameDay(date, selectedDate);
+
+                          const slotInfo = getDaySlotInfo(date);
+                          let dotClass = "";
+                          if (slotInfo?.color === "red") {
+                            dotClass =
+                              "bg-red-500 shadow-[0_0_6px_rgba(248,113,113,0.9)]";
+                          } else if (slotInfo?.color === "yellow") {
+                            dotClass =
+                              "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.9)]";
+                          } else if (slotInfo?.color === "green") {
+                            dotClass =
+                              "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)]";
+                          }
+
+                          return (
+                            <button
+                              key={day}
+                              disabled={disabled}
+                              onClick={() => handleDayClick(day)}
+                              className={`p-2 rounded-lg transition-all duration-200 flex flex-col items-center justify-center ${
+                                isSelected
+                                  ? "bg-sky-600 text-white shadow-[0_0_12px_rgba(56,189,248,0.6)]"
+                                  : disabled
+                                  ? "text-slate-500 cursor-not-allowed"
+                                  : "hover:bg-sky-700/40 text-sky-200"
+                              }`}
+                            >
+                              <span>{day}</span>
+                              {slotInfo?.color && (
+                                <span
+                                  className={`mt-0.5 h-1.5 w-1.5 rounded-full ${dotClass}`}
+                                />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="mt-3 flex flex-wrap justify-center gap-3 text-[10px] text-sky-300">
+                        <div className="flex items-center gap-1 whitespace-nowrap">
+                          <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)]" />
+                          <span>Fully Available</span>
+                        </div>
+                        <div className="flex items-center gap-1 whitespace-nowrap">
+                          <span className="h-2 w-2 rounded-full bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.9)]" />
+                          <span>Limited Slots</span>
+                        </div>
+                        <div className="flex items-center gap-1 whitespace-nowrap">
+                          <span className="h-2 w-2 rounded-full bg-red-500 shadow-[0_0_6px_rgba(248,113,113,0.9)]" />
+                          <span>Fully Booked</span>
+                        </div>
+                        <div className="flex items-center gap-1 whitespace-nowrap">
+                          <span className="h-2 w-2 rounded-full bg-purple-400 shadow-[0_0_6px_rgba(192,132,252,0.9)]" />
+                          <span>Temporarily Reserved</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {selectedDate && (
+                      <div className="flex-1">
+                        <p className="text-sky-200 mb-3 font-semibold">
+                          Availability for{" "}
+                          {selectedDate.toLocaleDateString(undefined, {
+                            weekday: "long",
+                            month: "long",
+                            day: "numeric",
+                          })}
+                        </p>
+
+                        <div
+                          className={`grid gap-3 ${
+                            isMobile
+                              ? "grid-cols-2"
+                              : "grid-cols-2 sm:grid-cols-3"
+                          }`}
+                        >
+                          {times.map((t) => {
+                            const isMyHold =
+                              myHold &&
+                              selectedDate &&
+                              myHold.hostDate === selectedDate.toDateString() &&
+                              myHold.hostTime === t.hostLabel;
+
+                            const subLabelText = `(${t.hostLabel} IST)`;
+                            const subLabelClass = isMyHold
+                              ? "text-[#38BDF8B3]"
+                              : "text-sky-400/70";
+
+                            return (
+                              <button
+                                key={t.hostLabel}
+                                onClick={() => {
+                                  if (isMyHold) {
+                                    setSelectedSlot(t);
+                                    setPreventHoldAutoload(false);
+                                    return;
+                                  }
+                                  if (
+                                    !t.disabled &&
+                                    !t.isBooked &&
+                                    !t.isHeldOther
+                                  ) {
+                                    setSelectedSlot(t);
+                                    setPreventHoldAutoload(false);
+                                  }
+                                }}
+                                disabled={t.disabled && !isMyHold}
+                                className={`py-2 rounded-lg border transition-all duration-200 ${
+                                  t.isBooked
+                                    ? "bg-red-900/40 border-red-700/40 text-red-400 cursor-not-allowed"
+                                    : t.isHeldOther
+                                    ? "bg-purple-900/40 border-purple-700/50 text-purple-300 cursor-not-allowed"
+                                    : isMyHold
+                                    ? "bg-purple-900/50 border-purple-500/60 text-purple-100 shadow-[0_0_14px_rgba(168,85,247,0.7)] hover:border-purple-400 hover:bg-purple-800/50"
+                                    : t.disabled
+                                    ? "bg-slate-800/40 text-slate-500 border-slate-700/50 cursor-not-allowed"
+                                    : selectedSlot?.hostLabel === t.hostLabel
+                                    ? "bg-sky-600 text-white border-sky-400 shadow-[0_0_15px_rgba(56,189,248,0.6)]"
+                                    : "border-sky-700/40 hover:border-sky-500/60 hover:bg-sky-700/20"
+                                }`}
+                              >
+                                {t.localLabel}
+                                <span
+                                  className={`block text-[10px] mt-1 ${subLabelClass}`}
+                                >
+                                  {subLabelText}
+                                </span>
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
                   </div>
 
-                  <p className="text-[11px] text-sky-400/70 mt-2">
-                    Only DDR5 AM5 boards and RAM kits that meet the XOC
-                    requirements (6000 MT/s+ with CL limits) are shown in the
-                    supported list.
+                  <div
+                    className={`flex flex-col items-center justify-center gap-4 mt-10 ${
+                      isMobile ? "" : "sm:flex-row"
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setModalMode("view");
+                        setModalPackage(planPackage || selectedPackage);
+                        setShowVertexModal(true);
+                      }}
+                      className={`glow-button w-full sm:w-64 py-3 rounded-lg font-semibold text-lg transition-all duration-300 inline-flex items-center justify-center gap-2 ${
+                        isMobile ? "" : ""
+                      }`}
+                    >
+                      View My Plan
+                      <span className="glow-line glow-line-top" />
+                      <span className="glow-line glow-line-right" />
+                      <span className="glow-line glow-line-bottom" />
+                      <span className="glow-line glow-line-left" />
+                    </button>
+
+                    <button
+                      onClick={handleLockAndGoNext}
+                      aria-disabled={
+                        !selectedDate || !selectedSlot || lockingSlot
+                      }
+                      className={`glow-button w-full sm:w-64 py-3 rounded-lg font-semibold text-lg transition-all duration-300 ${
+                        !selectedDate || !selectedSlot || lockingSlot
+                          ? "opacity-60"
+                          : ""
+                      } ${isMobile ? "" : ""}`}
+                    >
+                      {lockingSlot ? "Reserving..." : "Next"}
+                      <span className="glow-line glow-line-top" />
+                      <span className="glow-line glow-line-right" />
+                      <span className="glow-line glow-line-bottom" />
+                      <span className="glow-line glow-line-left" />
+                    </button>
+                  </div>
+
+                  {errorStep1 && (
+                    <p className="text-red-400 mt-3 text-sm">{errorStep1}</p>
+                  )}
+                </motion.div>
+              )}
+
+              {step === 2 && (
+                <motion.div
+                  key="step2"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3, ease: "easeInOut" }}
+                  // NOTE: removed backdrop-blur-sm
+                  className="max-w-2xl mx-auto bg-[#0b1120]/90 border border-sky-700/30 rounded-2xl p-8 shadow-[0_0_25px_rgba(14,165,233,0.15)] space-y-6"
+                >
+                  {isXoc && (
+                    <div className="space-y-4 border border-sky-700/50 rounded-xl p-4 bg-slate-900/40">
+                      <h4 className="text-sky-300 font-semibold text-sm sm:text-base">
+                        XOC Hardware Eligibility
+                      </h4>
+                      <p className="text-xs text-sky-400/80">
+                        Choose your motherboard and RAM kit from the supported
+                        list below.
+                      </p>
+
+                      <div
+                        className={`grid gap-4 ${
+                          isMobile ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2"
+                        }`}
+                      >
+                        <XocDropdown
+                          label="Motherboard"
+                          items={xocMotherboards}
+                          value={xocMoboId}
+                          onChange={(val) => {
+                            setXocMoboId(val);
+                            clearErrorIfResolved(
+                              form,
+                              val,
+                              xocRamId,
+                              xocCustomMobo,
+                              xocCustomRam
+                            );
+                            const nextEmpty = isDraftEmpty(
+                              form,
+                              val,
+                              xocRamId,
+                              xocCustomMobo,
+                              xocCustomRam
+                            );
+                            if (nextEmpty) {
+                              clearDraftForPackage(getDraftKey(selectedPackage));
+                            } else {
+                              persistDraft({
+                                form,
+                                selectedPackage: { ...selectedPackage },
+                                xocMoboId: val,
+                                xocRamId,
+                                xocCustomMobo,
+                                xocCustomRam,
+                              });
+                            }
+                          }}
+                          placeholder={
+                            xocMotherboards.length === 0
+                              ? "No supported boards loaded"
+                              : "Select Your Motherboard"
+                          }
+                          emptyMessage="No supported boards found"
+                          getId={(m) => m.id}
+                          getLabel={(m) => m.name}
+                          customOptionId="__CUSTOM_MOBO__"
+                          customOptionLabel="+ Add Your Own Motherboard"
+                        />
+
+                        <XocDropdown
+                          label="RAM Kit"
+                          items={xocRams}
+                          value={xocRamId}
+                          onChange={(val) => {
+                            setXocRamId(val);
+                            clearErrorIfResolved(
+                              form,
+                              xocMoboId,
+                              val,
+                              xocCustomMobo,
+                              xocCustomRam
+                            );
+                            const nextEmpty = isDraftEmpty(
+                              form,
+                              xocMoboId,
+                              val,
+                              xocCustomMobo,
+                              xocCustomRam
+                            );
+                            if (nextEmpty) {
+                              clearDraftForPackage(getDraftKey(selectedPackage));
+                            } else {
+                              persistDraft({
+                                form,
+                                selectedPackage: { ...selectedPackage },
+                                xocMoboId,
+                                xocRamId: val,
+                                xocCustomMobo,
+                                xocCustomRam,
+                              });
+                            }
+                          }}
+                          placeholder={
+                            xocRams.length === 0
+                              ? "No eligible RAM kits loaded"
+                              : "Select your RAM kit"
+                          }
+                          emptyMessage="No eligible RAM kits found"
+                          getId={(r) => r.id}
+                          getLabel={(r) =>
+                            `${r.name} — ${r.speed} MT/s, CL${r.cas_latency}, ${r.capacityGb}GB`
+                          }
+                          customOptionId="__CUSTOM_RAM__"
+                          customOptionLabel="+ Add your own RAM kit"
+                        />
+
+                        {xocMoboId === "__CUSTOM_MOBO__" && (
+                          <div className={isMobile ? "" : "sm:col-span-2"}>
+                            <input
+                              type="text"
+                              value={xocCustomMobo}
+                              onChange={(e) => {
+                                const next = e.target.value;
+                                setXocCustomMobo(next);
+                                clearErrorIfResolved(
+                                  form,
+                                  xocMoboId,
+                                  xocRamId,
+                                  next,
+                                  xocCustomRam
+                                );
+                                const nextEmpty = isDraftEmpty(
+                                  form,
+                                  xocMoboId,
+                                  xocRamId,
+                                  next,
+                                  xocCustomRam
+                                );
+                                if (nextEmpty) {
+                                  clearDraftForPackage(
+                                    getDraftKey(selectedPackage)
+                                  );
+                                } else {
+                                  persistDraft({
+                                    form,
+                                    selectedPackage: { ...selectedPackage },
+                                    xocMoboId,
+                                    xocRamId,
+                                    xocCustomMobo: next,
+                                    xocCustomRam,
+                                  });
+                                }
+                              }}
+                              placeholder="Type your Motherboard Model (e.g. ASUS ROG STRIX X670E-E)"
+                              className="w-full bg-[#020617] border border-sky-700/60 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400"
+                            />
+                          </div>
+                        )}
+
+                        {xocRamId === "__CUSTOM_RAM__" && (
+                          <div className={isMobile ? "" : "sm:col-span-2"}>
+                            <input
+                              type="text"
+                              value={xocCustomRam}
+                              onChange={(e) => {
+                                const next = e.target.value;
+                                setXocCustomRam(next);
+                                clearErrorIfResolved(
+                                  form,
+                                  xocMoboId,
+                                  xocRamId,
+                                  xocCustomMobo,
+                                  next
+                                );
+                                const nextEmpty = isDraftEmpty(
+                                  form,
+                                  xocMoboId,
+                                  xocRamId,
+                                  xocCustomMobo,
+                                  next
+                                );
+                                if (nextEmpty) {
+                                  clearDraftForPackage(
+                                    getDraftKey(selectedPackage)
+                                  );
+                                } else {
+                                  persistDraft({
+                                    form,
+                                    selectedPackage: { ...selectedPackage },
+                                    xocMoboId,
+                                    xocRamId,
+                                    xocCustomMobo,
+                                    xocCustomRam: next,
+                                  });
+                                }
+                              }}
+                              placeholder="Type your RAM kit (e.g. 32GB 6000MT/s CL30, brand/model)"
+                              className="w-full bg-[#020617] border border-sky-700/60 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400"
+                            />
+                          </div>
+                        )}
+
+                        {(xocMoboId === "__CUSTOM_MOBO__" ||
+                          xocRamId === "__CUSTOM_RAM__") && (
+                          <div className={isMobile ? "" : "sm:col-span-2"}>
+                            <div className="mt-1 rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-2">
+                              <p className="text-[11px] text-sky-100 leading-snug">
+                                Custom motherboards and RAM kits may not fully
+                                meet our XOC stability and compatibility criteria.
+                                For the best results and safety, please reach out
+                                on Discord so we can double-check your parts
+                                before the session.
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <p className="text-[11px] text-sky-400/70 mt-2">
+                        Only DDR5 AM5 boards and RAM kits that meet the XOC
+                        requirements (6000 MT/s+ with CL limits) are shown in the
+                        supported list.
+                      </p>
+
+                      {(xocMoboId === "__CUSTOM_MOBO__" ||
+                        xocRamId === "__CUSTOM_RAM__") && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setModalMode("switch");
+                              setModalPackage(vertexPackage);
+                              setShowVertexModal(true);
+                            }}
+                            className="glow-button mt-3 inline-flex items-center justify-center px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold text-white transition"
+                          >
+                            Switch to Performance Vertex Overhaul
+                            <span className="glow-line glow-line-top" />
+                            <span className="glow-line glow-line-right" />
+                            <span className="glow-line glow-line-bottom" />
+                            <span className="glow-line glow-line-left" />
+                          </button>
+                          <p className="mt-2 text-[11px] font-bold bg-gradient-to-r from-sky-300 via-cyan-300 to-indigo-300 bg-clip-text text-transparent">
+                            If your PC is found to be XOC eligible after booking
+                            Performance Vertex Overhaul, you may pay the
+                            difference in price to upgrade.
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  <input
+                    name="discord"
+                    placeholder="Discord (e.g. Servi#1234 or @Servi)"
+                    onChange={handleChange}
+                    value={form.discord}
+                    className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 focus:outline-none focus:border-sky-500 transition"
+                  />
+                  <input
+                    name="email"
+                    type="email"
+                    placeholder="Email"
+                    onChange={handleChange}
+                    value={form.email}
+                    className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 focus:outline-none focus:border-sky-500 transition"
+                  />
+                  <input
+                    name="specs"
+                    placeholder={
+                      isXoc ? "PC Specs (e.g. GPU, CPU, Cooling)" : "PC Specs"
+                    }
+                    onChange={handleChange}
+                    value={form.specs}
+                    className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 focus:outline-none focus:border-sky-500 transition"
+                  />
+                  <input
+                    name="mainGame"
+                    placeholder="Main use case (Game/Apps)"
+                    onChange={handleChange}
+                    value={form.mainGame}
+                    className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 focus:outline-none focus:border-sky-500 transition"
+                  />
+
+                  <textarea
+                    name="notes"
+                    placeholder="Any extra requirements?"
+                    onChange={handleChange}
+                    value={form.notes}
+                    className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 h-24 focus:outline-none focus:border-sky-500 transition"
+                  ></textarea>
+
+                  <p className="text-sky-400/60 text-xs">
+                    Please read the FAQ before booking — it answers everything you
+                    need to know.
                   </p>
 
-                  {(xocMoboId === "__CUSTOM_MOBO__" ||
-                    xocRamId === "__CUSTOM_RAM__") && (
-                    <>
+                  {myHold &&
+                    holdCountdownMs !== null &&
+                    holdCountdownMs > 0 && (
+                      <div className="bg-purple-500/10 border border-purple-500/40 p-3 rounded-lg flex items-center gap-3">
+                        <p className="text-xs text-white font-medium">
+                          Slot{" "}
+                          <strong>{holdLocalTimeLabel || myHold.hostTime}</strong>{" "}
+                          is reserved.{" "}
+                          <span className="text-sky-200">
+                            Expires in {formatCountdown(holdCountdownMs)}.
+                          </span>
+                        </p>
+                      </div>
+                    )}
+
+                  <div className="flex justify-between gap-4">
+                    <button
+                      onClick={() => {
+                        releaseHold(true);
+                        setStep(1);
+                      }}
+                      className="w-1/2 bg-slate-700/40 hover:bg-slate-700/60 py-3 rounded-lg font-semibold transition"
+                    >
+                      Back
+                    </button>
+
+                    <button
+                      onClick={async () => {
+                        if (loading) return;
+
+                        const validationError = getStep2Error();
+                        if (validationError) {
+                          setErrorStep2(validationError);
+                          return;
+                        }
+
+                        setErrorStep2("");
+                        setLoading(true);
+                        await handleSubmit();
+                        setLoading(false);
+                      }}
+                      className={`glow-button w-1/2 py-3 rounded-lg font-semibold transition inline-flex items-center justify-center gap-2 ${
+                        loading || !isStep2Complete
+                          ? "opacity-60 cursor-not-allowed"
+                          : ""
+                      }`}
+                    >
+                      {loading ? "Submitting..." : "Submit & Pay"}
+                      <span className="glow-line glow-line-top" />
+                      <span className="glow-line glow-line-right" />
+                      <span className="glow-line glow-line-bottom" />
+                      <span className="glow-line glow-line-left" />
+                    </button>
+
+                    {errorStep2 && (
+                      <p className="text-red-400 text-sm mt-3">{errorStep2}</p>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </>
+        )}
+      </div>
+      {typeof document !== "undefined" &&
+        createPortal(
+          <AnimatePresence>
+            {showVertexModal && (
+              <motion.div
+                className={`fixed inset-0 z-[100] ${
+                  modalMode === "view" ? "bg-transparent" : "bg-black/60"
+                } backdrop-blur-lg flex items-center justify-center px-4`}
+                variants={overlayVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                onClick={() => {
+                  document.body.classList.remove("is-modal-blur");
+                  setShowVertexModal(false);
+                }}
+              >
+                <motion.div
+                  variants={modalContainerVariants}
+                  // We don't set initial/animate here because they inherit from the parent,
+                  // but since we defined specific variants for the children, it works automatically.
+                  className="relative w-full max-w-md bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 border border-sky-400/60 rounded-2xl shadow-[0_0_35px_rgba(56,189,248,0.4)] p-6 text-center transition-all duration-500 ease-in-out hover:shadow-[0_0_42px_rgba(56,189,248,0.5)]"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <motion.button
+                    aria-label="Close"
+                    variants={itemVariants}
+                    className="absolute right-3 top-3 text-sky-200 hover:text-white transition text-2xl z-10"
+                    onClick={() => {
+                      document.body.classList.remove("is-modal-blur");
+                      setShowVertexModal(false);
+                    }}
+                  >
+                    ×
+                  </motion.button>
+
+                  <motion.div variants={itemVariants}>
+                    <div className="inline-flex items-center px-4 py-1.5 rounded-full text-xs font-semibold text-white bg-[#1fa7ff] shadow-[0_0_18px_rgba(31,167,255,0.6)] mb-4">
+                      {displayPackage?.tag ||
+                        "For All Budget, Mid-Ranged and High End PCs"}
+                    </div>
+                  </motion.div>
+
+                  <motion.h3
+                    variants={itemVariants}
+                    className="text-2xl font-bold text-sky-100"
+                  >
+                    {displayPackage?.title || "Performance Vertex Overhaul"}
+                  </motion.h3>
+
+                  <motion.p
+                    variants={itemVariants}
+                    className="text-4xl font-bold text-sky-300 mt-2"
+                  >
+                    {displayPackage?.price || "$84.99"}
+                  </motion.p>
+
+                  <motion.ul className="mt-4 space-y-2 text-sm text-sky-100 text-left">
+                    {(displayPackage?.features &&
+                    displayPackage.features.length > 0
+                      ? displayPackage.features
+                      : [
+                          "Guaranteed boost in performance (latency, 1% lows, or average FPS)",
+                          "30 day warranty",
+                          "2-4 hour completion time",
+                          "Same day availability",
+                          "Overclocking of CPU, GPU, and RAM (Timings)",
+                          "Diagnosing issues and full system inspection",
+                          "Hidden BIOS tuning",
+                          "Smooth frametimes",
+                          "Benchmark guaranteed results",
+                          "Fan curves, sound tuning, and input latency-driven adjustments",
+                          "Proper core allocation and game process prioritization",
+                          "Network driver tuning",
+                          "90 day warranty plus future support at discretion",
+                        ]
+                    ).map((text, i) => (
+                      <motion.li
+                        key={text + i}
+                        variants={itemVariants}
+                        className="flex items-start gap-2"
+                      >
+                        <span className="text-sky-400 mt-0.5">-</span>
+                        <span>{text}</span>
+                      </motion.li>
+                    ))}
+                  </motion.ul>
+
+                  {modalMode !== "view" && (
+                    <motion.div variants={itemVariants}>
                       <button
                         type="button"
                         onClick={() => {
-                          setModalMode("switch");
-                          setModalPackage(vertexPackage);
-                          setVertexFadeOut(false);
-                          setVertexFadeIn(false);
-                          setShowVertexModal(true);
-                          setTimeout(() => setVertexFadeIn(true), 20);
+                          document.body.classList.remove("is-modal-blur");
+                          setShowVertexModal(false);
+                          setErrorStep2("");
+                          setPreventHoldAutoload(true);
+                          setStep(1);
+                          setSelectedDate(null);
+                          setSelectedSlot(null);
+                          try {
+                            const nextPackage = {
+                              title:
+                                displayPackage?.title ||
+                                "Performance Vertex Overhaul",
+                              price: displayPackage?.price || "$84.99",
+                              tag: displayPackage?.tag || "",
+                            };
+                            persistDraft({
+                              form: { ...form },
+                              selectedPackage: nextPackage,
+                              xocMoboId,
+                              xocRamId,
+                              xocCustomMobo,
+                              xocCustomRam,
+                            });
+                          } catch (err) {
+                            console.error("Failed to store form draft:", err);
+                          }
+                          navigate(
+                            `/booking?title=${encodeURIComponent(
+                              displayPackage?.title ||
+                                "Performance Vertex Overhaul"
+                            )}&price=${encodeURIComponent(
+                              displayPackage?.price || "$84.99"
+                            )}&tag=${encodeURIComponent(
+                              displayPackage?.tag || ""
+                            )}&xoc=0`,
+                            location.state?.backgroundLocation
+                              ? {
+                                  state: {
+                                    backgroundLocation:
+                                      location.state.backgroundLocation,
+                                  },
+                                }
+                              : undefined
+                          );
                         }}
-                        className="glow-button mt-3 inline-flex items-center justify-center px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold text-white transition"
+                        className="glow-button w-full mt-6 py-3 rounded-lg font-semibold text-white shadow-[0_0_20px_rgba(56,189,248,0.4)] inline-flex items-center justify-center gap-2 opacity-90 hover:opacity-100"
+                        style={{ transition: "opacity 0.9s ease-in-out" }}
                       >
-                        Switch to Performance Vertex Overhaul
+                        {displayPackage?.buttonText || "Book Now"}
                         <span className="glow-line glow-line-top" />
                         <span className="glow-line glow-line-right" />
                         <span className="glow-line glow-line-bottom" />
                         <span className="glow-line glow-line-left" />
                       </button>
-                      <p className="mt-2 text-[11px] font-bold bg-gradient-to-r from-sky-300 via-cyan-300 to-indigo-300 bg-clip-text text-transparent">
-                        If your PC is found to be XOC eligible after booking
-                        Performance Vertex Overhaul, you may pay the difference
-                        in price to upgrade.
-                      </p>
-                    </>
+                    </motion.div>
                   )}
-                </div>
-              )}
-
-              {/* ---------- NORMAL FORM FIELDS ---------- */}
-              <input
-                name="discord"
-                placeholder="Discord (e.g. Servi#1234 or @Servi)"
-                onChange={handleChange}
-                value={form.discord}
-                className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 focus:outline-none focus:border-sky-500 transition"
-              />
-              <input
-                name="email"
-                type="email"
-                placeholder="Email"
-                onChange={handleChange}
-                value={form.email}
-                className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 focus:outline-none focus:border-sky-500 transition"
-              />
-              <input
-                name="specs"
-                placeholder={
-                  isXoc ? "PC Specs (e.g. GPU, CPU, Cooling)" : "PC Specs"
-                }
-                onChange={handleChange}
-                value={form.specs}
-                className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 focus:outline-none focus:border-sky-500 transition"
-              />
-              <input
-                name="mainGame"
-                placeholder="Main use case (Game/Apps)"
-                onChange={handleChange}
-                value={form.mainGame}
-                className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 focus:outline-none focus:border-sky-500 transition"
-              />
-
-              <textarea
-                name="notes"
-                placeholder="Any extra requirements?"
-                onChange={handleChange}
-                value={form.notes}
-                className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 h-24 focus:outline-none focus:border-sky-500 transition"
-              ></textarea>
-
-              <p className="text-sky-400/60 text-xs">
-                Please read the FAQ before booking — it answers everything you
-                need to know.
-              </p>
-
-              {/* Show Hold info */}
-              {myHold && (
-                <div className="bg-purple-500/10 border border-purple-500/40 p-3 rounded-lg flex items-center gap-3 animate-pulse">
-                  <span className="text-xl">🔒</span>
-                  <p className="text-xs text-white font-medium">
-                    {" "}
-                    {/* CHANGED TO WHITE TEXT */}
-                    Slot{" "}
-                    <strong>{holdLocalTimeLabel || myHold.hostTime}</strong> is
-                    reserved for you for 15 minutes.
-                  </p>
-                </div>
-              )}
-
-              <div className="flex justify-between gap-4">
-                <button
-                  onClick={() => setStep(1)}
-                  className="w-1/2 bg-slate-700/40 hover:bg-slate-700/60 py-3 rounded-lg font-semibold transition"
-                >
-                  Back
-                </button>
-
-                <button
-                  onClick={async () => {
-                    if (loading) return;
-
-                    const validationError = getStep2Error();
-                    if (validationError) {
-                      setErrorStep2(validationError);
-                      return;
-                    }
-
-                    setErrorStep2("");
-                    setLoading(true);
-                    await handleSubmit();
-                    setLoading(false);
-                  }}
-                  className={`glow-button w-1/2 py-3 rounded-lg font-semibold transition inline-flex items-center justify-center gap-2 ${
-                    loading || !isStep2Complete
-                      ? "opacity-60 cursor-not-allowed"
-                      : ""
-                  }`}
-                >
-                  {loading ? "Submitting..." : "Submit & Pay"}
-                  <span className="glow-line glow-line-top" />
-                  <span className="glow-line glow-line-right" />
-                  <span className="glow-line glow-line-bottom" />
-                  <span className="glow-line glow-line-left" />
-                </button>
-              </div>
-
-              {errorStep2 && (
-                <p className="text-red-400 text-sm mt-3">{errorStep2}</p>
-              )}
-            </div>
-          )}
-        </>
-      )}
-
-      {/* --- RESERVED MODAL --- */}
-      {showReservedModal && (
-        <div
-          className={`fixed inset-0 z-[60] bg-black/60 backdrop-blur-lg flex items-center justify-center px-4 transition-opacity duration-200 ease-out ${
-            reservedFadeOut ? "opacity-0" : reservedFadeIn ? "opacity-100" : "opacity-0"
-          }`}
-          onClick={closeReservedModalWithRelease}
-        >
-          <div
-            className={`relative w-full max-w-md bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 border border-sky-400/60 rounded-2xl shadow-[0_0_35px_rgba(56,189,248,0.4)] p-6 text-center transition-all duration-200 ease-out hover:shadow-[0_0_42px_rgba(56,189,248,0.5)] ${
-              reservedFadeOut
-                ? "opacity-0 scale-95"
-                : reservedFadeIn
-                ? "opacity-100 scale-100"
-                : "opacity-0 scale-95"
-            }`}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="w-16 h-16 bg-sky-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-              <span className="text-3xl">🔒</span>
-            </div>
-            <h3 className="text-xl font-bold text-white mb-2">
-              Slot Reserved!
-            </h3>
-            <p className="text-sm text-sky-200/80 mb-2">
-              You have reserved{" "}
-              <strong className="text-white">
-                {holdLocalTimeLabel || myHold?.hostTime || "--"}
-              </strong>
-              <br />
-              It is locked for 15 minutes.
-            </p>
-            {holdLocalTimeLabel && myHold?.hostTime && (
-              <p className="text-[11px] text-slate-400 mb-6">
-                Host time: {myHold.hostTime} ({HOST_TZ_NAME})
-              </p>
+                </motion.div>
+              </motion.div>
             )}
-
-            <div className="flex flex-col sm:flex-row gap-3">
-              <button
-                type="button"
-                onClick={closeReservedModalWithRelease}
-                className="flex-1 bg-slate-700/40 hover:bg-slate-700/60 py-3 rounded-lg font-semibold transition"
-              >
-                Nevermind
-              </button>
-
-              <button
-                onClick={closeReservedModalWithoutRelease}
-                className="glow-button w-full sm:flex-1 py-3 rounded-lg font-semibold transition inline-flex items-center justify-center gap-2"
-              >
-                Continue
-                <span className="glow-line glow-line-top" />
-                <span className="glow-line glow-line-right" />
-                <span className="glow-line glow-line-bottom" />
-                <span className="glow-line glow-line-left" />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ... Vertex Modal (with switch behavior & prefill) ... */}
-      {showVertexModal && (
-        <div
-          className={`fixed inset-0 z-[45] bg-black/60 backdrop-blur-lg flex items-center justify-center px-4 transition-opacity duration-200 ${
-            vertexFadeOut
-              ? "opacity-0 pointer-events-none"
-              : vertexFadeIn
-              ? "opacity-100"
-              : "opacity-0"
-          }`}
-          onClick={() => {
-            document.body.classList.remove("is-modal-blur");
-            setVertexFadeOut(true);
-            setVertexFadeIn(false);
-            setTimeout(() => {
-              setShowVertexModal(false);
-              setVertexFadeOut(false);
-            }, 200);
-          }}
-        >
-          <div
-            className="relative w-full max-w-md bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 border border-sky-400/60 rounded-2xl shadow-[0_0_35px_rgba(56,189,248,0.4)] p-6 text-center transition-all duration-500 ease-in-out hover:shadow-[0_0_42px_rgba(56,189,248,0.5)]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              aria-label="Close"
-              className="absolute right-3 top-3 text-sky-200 hover:text-white transition text-2xl"
-              onClick={() => {
-                document.body.classList.remove("is-modal-blur");
-                setVertexFadeOut(true);
-                setVertexFadeIn(false);
-                setTimeout(() => {
-                  setShowVertexModal(false);
-                  setVertexFadeOut(false);
-                }, 200);
-              }}
-            >
-              ×
-            </button>
-
-            <div className="inline-flex items-center px-4 py-1.5 rounded-full text-xs font-semibold text-white bg-[#1fa7ff] shadow-[0_0_18px_rgba(31,167,255,0.6)] mb-4">
-              {displayPackage?.tag ||
-                "For All Budget, Mid-Ranged and High End PCs"}
-            </div>
-            <h3 className="text-2xl font-bold text-sky-100">
-              {displayPackage?.title || "Performance Vertex Overhaul"}
-            </h3>
-            <p className="text-4xl font-bold text-sky-300 mt-2">
-              {displayPackage?.price || "$84.99"}
-            </p>
-
-            <ul className="mt-4 space-y-2 text-sm text-sky-100 text-left">
-              {(displayPackage?.features && displayPackage.features.length > 0
-                ? displayPackage.features
-                : [
-                    "Guaranteed boost in performance (latency, 1% lows, or average FPS)",
-                    "30 day warranty",
-                    "2-4 hour completion time",
-                    "Same day availability",
-                    "Overclocking of CPU, GPU, and RAM (Timings)",
-                    "Diagnosing issues and full system inspection",
-                    "Hidden BIOS tuning",
-                    "Smooth frametimes",
-                    "Benchmark guaranteed results",
-                    "Fan curves, sound tuning, and input latency–based adjustments",
-                    "Proper core allocation and game process prioritization",
-                    "Network driver tuning",
-                    "90 day warranty plus future support at discretion",
-                  ]
-              ).map((text) => (
-                <li key={text} className="flex items-start gap-2">
-                  <span className="text-sky-400 mt-0.5">✓</span>
-                  <span>{text}</span>
-                </li>
-              ))}
-            </ul>
-
-            {modalMode !== "view" && (
-              <button
-                type="button"
-                onClick={() => {
-                  document.body.classList.remove("is-modal-blur");
-                  setVertexFadeOut(true);
-                  setVertexFadeIn(false);
-                  setTimeout(() => {
-                    setShowVertexModal(false);
-                    setErrorStep2("");
-                    setStep(1);
-                    setSelectedDate(null);
-                    setSelectedSlot(null);
-                    try {
-                      localStorage.setItem(
-                        FORM_PREFILL_KEY,
-                        JSON.stringify({
-                          discord: form.discord,
-                          email: form.email,
-                          specs: form.specs,
-                          mainGame: form.mainGame,
-                          notes: form.notes,
-                        })
-                      );
-                    } catch (err) {
-                      console.error("Failed to store form draft:", err);
-                    }
-                    navigate(
-                      `/booking?title=${encodeURIComponent(
-                        displayPackage?.title || "Performance Vertex Overhaul"
-                      )}&price=${encodeURIComponent(
-                        displayPackage?.price || "$84.99"
-                      )}&tag=${encodeURIComponent(
-                        displayPackage?.tag || ""
-                      )}&xoc=0&prefillFromXoc=1`
-                    );
-                    setVertexFadeOut(false);
-                  }, 200);
-                }}
-                className="glow-button w-full mt-6 py-3 rounded-lg font-semibold text-white shadow-[0_0_20px_rgba(56,189,248,0.4)] inline-flex items-center justify-center gap-2 opacity-90 hover:opacity-100"
-                style={{ transition: "opacity 0.9s ease-in-out" }}
-              >
-                {displayPackage?.buttonText || "Book Now"}
-                <span className="glow-line glow-line-top" />
-                <span className="glow-line glow-line-right" />
-                <span className="glow-line glow-line-bottom" />
-                <span className="glow-line glow-line-left" />
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
+          </AnimatePresence>,
+          document.body
+        )}
+    </>
   );
 }

@@ -48,7 +48,7 @@ export default function Footer() {
       {/* Buttons */}
       <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
         <Link
-          to="/packages"
+          to="/#packages"
           className="glow-button inline-flex items-center justify-center gap-2 rounded-md 
                        px-4 sm:px-5 py-3 text-sm font-semibold text-white 
                        ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300 w-full sm:w-auto"
