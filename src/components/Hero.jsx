@@ -25,6 +25,7 @@ export default function Hero() {
   const tagline = heroData?.tagline;
   const headingLine1 = heroData?.headingLine1;
   const headingLine2 = heroData?.headingLine2;
+  const hasSecond = Boolean(headingLine2);
   const description = heroData?.description;
   const subtext = heroData?.subtext;
   const bullets = heroData?.bullets || [];
@@ -32,6 +33,7 @@ export default function Hero() {
   return (
     <header id="top" className="py-16 flex justify-center">
       <section className="mx-auto max-w-3xl px-6 text-center">
+        {/* Tagline Area */}
         <div className="h-[30px] sm:h-[36px] flex justify-center items-center">
           {tagline && (
             <div
@@ -46,23 +48,39 @@ export default function Hero() {
           )}
         </div>
 
-        <div className="mt-8 min-h-[120px] sm:min-h-[160px] flex flex-col justify-start">
-          {headingLine1 && (
-            <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold leading-tight tracking-tight">
-              {headingLine1}
-            </h1>
-          )}
-          {headingLine2 && (
-            <div
-              className="mt-1 text-3xl sm:text-5xl lg:text-6xl font-extrabold leading-tight 
-                          bg-gradient-to-r from-sky-400 to-blue-500 text-transparent 
-                          bg-clip-text drop-shadow-[0_0_10px_rgba(56,189,248,0.7)]"
+        {/* Heading Area */}
+        <div
+          className={`mt-8 flex flex-col justify-start w-full ${
+            hasSecond
+              ? "min-h-[100px] sm:min-h-[140px]"
+              : "min-h-[80px] sm:min-h-[100px]"
+          }`}
+        >
+          {(headingLine1 || headingLine2) && (
+            <h1
+              className="text-3xl sm:text-5xl lg:text-6xl font-extrabold leading-tight tracking-tight 
+                         flex flex-col items-center justify-center"
             >
-              {headingLine2}
-            </div>
+              {headingLine1 && (
+                <span className="whitespace-normal sm:whitespace-nowrap">
+                  {headingLine1}
+                </span>
+              )}
+              {headingLine2 && (
+                <span
+                  className="bg-gradient-to-r from-sky-400 to-blue-500 text-transparent 
+                             bg-clip-text drop-shadow-[0_0_10px_rgba(56,189,248,0.7)] 
+                             whitespace-normal sm:whitespace-nowrap
+                             mt-1 sm:mt-2" // CHANGED: Added margin-top to separate it from line 1
+                >
+                  {headingLine2}
+                </span>
+              )}
+            </h1>
           )}
         </div>
 
+        {/* Description Area */}
         <div className="min-h-[48px] sm:min-h-[60px]">
           {description && (
             <p className="mt-4 text-sm sm:text-base md:text-lg text-slate-200/90 leading-relaxed">
@@ -71,6 +89,7 @@ export default function Hero() {
           )}
         </div>
 
+        {/* Subtext Area */}
         <div className="min-h-[32px] sm:min-h-[36px]">
           {subtext && (
             <p className="mt-6 text-[14px] sm:text-lg font-semibold text-cyan-300">
@@ -79,6 +98,7 @@ export default function Hero() {
           )}
         </div>
 
+        {/* Buttons Area */}
         <div className="mt-7 flex items-center justify-center gap-3 sm:gap-4 flex-wrap min-h-[56px]">
           <Link
             to="/#packages"
@@ -108,6 +128,7 @@ export default function Hero() {
           </Link>
         </div>
 
+        {/* Bullets Area */}
         <div className="mt-8 w-full">
           {bullets.length > 0 && (
             <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 sm:gap-x-6">
