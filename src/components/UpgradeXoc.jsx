@@ -15,7 +15,7 @@ export default function UpgradeXoc() {
 
     const trimmed = orderId.trim();
     if (!trimmed) {
-      setError("Please enter the Order ID from your confirmation email.");
+      setError("Please enter the Order ID from your confirmation email. ");
       return;
     }
 
