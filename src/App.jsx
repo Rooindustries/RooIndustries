@@ -117,14 +117,18 @@ function AppContent() {
   const [useStaticLogo, setUseStaticLogo] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const pathName = location.pathname || "";
 
   const backgroundLocation =
     location.state && location.state.backgroundLocation
       ? location.state.backgroundLocation
       : null;
-  const isBookingRoute = (location.pathname || "").startsWith("/booking");
-  const isPaymentRoute = (location.pathname || "").startsWith("/payment");
-  const isFlowRoute = isBookingRoute || isPaymentRoute;
+  const isBookingRoute = pathName.startsWith("/booking");
+  const isPaymentRoute = pathName === "/payment";
+  const isPaymentSuccessRoute = pathName.startsWith("/payment-success");
+  const isThankYouRoute = pathName.startsWith("/thank-you");
+  const isFlowRoute =
+    isBookingRoute || isPaymentRoute || isPaymentSuccessRoute || isThankYouRoute;
   const fallbackLocation =
     isFlowRoute && !backgroundLocation
       ? { ...location, pathname: "/", search: "", hash: "" }
@@ -281,7 +285,15 @@ function AppContent() {
               </div>
             }
           >
-            {isPaymentRoute ? <Payment hideFooter /> : <Book hideFooter compact />}
+            {isPaymentSuccessRoute ? (
+              <PaymentSuccess hideFooter />
+            ) : isThankYouRoute ? (
+              <Thankyou hideFooter />
+            ) : isPaymentRoute ? (
+              <Payment hideFooter />
+            ) : (
+              <Book hideFooter compact />
+            )}
           </Suspense>
         </BookingModal>
     </>
