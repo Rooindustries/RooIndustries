@@ -4,13 +4,8 @@ dotenv.config({ path: ".env.local" });
 const Razorpay = require("razorpay");
 
 function createClient() {
-  const keyId = process.env.RAZORPAY_KEY_ID;
-  const keySecret = process.env.RAZORPAY_KEY_SECRET;
-
-  console.log("Razorpay keys present?", {
-    keyId: !!keyId,
-    keySecret: !!keySecret,
-  });
+  const keyId = process.env.RAZORPAY_KEY_ID || "";
+  const keySecret = process.env.RAZORPAY_KEY_SECRET || "";
 
   if (!keyId || !keySecret) {
     return null;
@@ -57,7 +52,6 @@ module.exports = async function handler(req, res) {
       currency,
       receipt: `booking_${Date.now()}`,
       notes: notes || {},
-      checkout_config_id: "config_Rm7exJgvjrWbQ8",
     };
 
     const order = await razorpay.orders.create(options);

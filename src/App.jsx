@@ -1,4 +1,4 @@
-import React, { useState, Suspense, lazy } from "react";
+import React, { useState, Suspense, lazy, useEffect } from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -45,6 +45,19 @@ function RedirectToDiscord() {
   return null;
 }
 
+function RedirectPackagesToHome() {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const targetSearch = location.search || "";
+    const targetHash = location.hash || "";
+    navigate(`/${targetSearch}${targetHash}`, { replace: true });
+  }, [location.search, location.hash, navigate]);
+
+  return null;
+}
+
 function AnimatedRoutes({ setIsModalOpen, routesLocation, routeKey }) {
   const baseLocation = useLocation();
   const location = routesLocation || baseLocation;
@@ -62,7 +75,7 @@ function AnimatedRoutes({ setIsModalOpen, routesLocation, routeKey }) {
       >
         <Routes location={location}>
           <Route path="/" element={<Home />} />
-          <Route path="/packages" element={<Packages />} />
+          <Route path="/packages" element={<RedirectPackagesToHome />} />
           <Route
             path="/benchmarks"
             element={<Benchmarks setIsModalOpen={setIsModalOpen} />}

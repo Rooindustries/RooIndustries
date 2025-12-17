@@ -7,6 +7,34 @@ const HOLD_STORAGE_KEY = "my_slot_hold";
 const BOOKING_DRAFT_KEY = "booking_draft";
 const HOST_TZ_NAME = "Asia/Kolkata";
 const IST_OFFSET_MINUTES = 330;
+const MOBILE_MAX_WIDTH = 780;
+
+const useIsMobileWidth = (maxWidth = MOBILE_MAX_WIDTH) => {
+  const getIsMobile = () =>
+    typeof window !== "undefined" ? window.innerWidth <= maxWidth : false;
+  const [isMobileWidth, setIsMobileWidth] = useState(getIsMobile);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mediaQuery = window.matchMedia(`(max-width: ${maxWidth}px)`);
+    const handleChange = (event) => setIsMobileWidth(event.matches);
+    handleChange(mediaQuery);
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", handleChange);
+      return () => mediaQuery.removeEventListener("change", handleChange);
+    }
+
+    if (typeof mediaQuery.addListener === "function") {
+      mediaQuery.addListener(handleChange);
+      return () => mediaQuery.removeListener(handleChange);
+    }
+
+    return undefined;
+  }, [maxWidth]);
+
+  return isMobileWidth;
+};
 
 const parseHostLabelToHour = (label) => {
   if (!label) return null;
@@ -75,6 +103,9 @@ export default function ReservationBanner() {
   const [hold, setHold] = useState(null);
   const [countdown, setCountdown] = useState(null);
   const path = location.pathname || "";
+  const isMobileWidth = useIsMobileWidth();
+  const isDesktopWidth = !isMobileWidth;
+  const isPaymentScreen = path.startsWith("/payment");
 
   useEffect(() => {
     try {
@@ -225,38 +256,63 @@ export default function ReservationBanner() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const isPaymentScreen = path.startsWith("/payment");
-  
-  // Outer container alignment: Centered on payment, Left-aligned otherwise (mobile only)
-  const alignmentClass = isPaymentScreen 
-      ? 'flex justify-center' 
-      : 'flex justify-start sm:justify-center';
+  const alignmentClass = isPaymentScreen
+    ? "justify-center"
+    : isMobileWidth
+    ? "justify-start"
+    : "justify-center";
 
-  // Inner banner styling classes
-  const bannerWidthClass = isPaymentScreen 
-      ? 'w-full max-w-full' // Mobile: Full width
-      : 'w-auto max-w-[90vw] sm:max-w-[30rem] md:max-w-[36rem] lg:max-w-[42rem] xl:max-w-[50rem]'; // Original behavior
+  const containerSpacingClass = isMobileWidth
+    ? "bottom-3 sm:bottom-11 px-2.5 sm:px-5"
+    : "bottom-12 lg:bottom-[57px] px-6";
 
-  // Shorter height/padding class (using py-1.5 for a very short look)
-  const paddingClass = isPaymentScreen 
-      ? 'py-1.5' 
-      : 'py-2 sm:py-3 md:py-3.5';
+  const bannerWidthClass = (() => {
+    if (isPaymentScreen) {
+      return isMobileWidth
+        ? "w-full max-w-full"
+        : "w-full max-w-[36rem] lg:max-w-[50rem]";
+    }
+    return isMobileWidth
+      ? "w-auto max-w-[90vw] sm:max-w-[30rem]"
+      : "w-full max-w-[42rem] lg:max-w-[50rem]";
+  })();
 
-  // Inner flex direction change for payment screen (row layout)
+  const paddingClass = isPaymentScreen
+    ? isMobileWidth
+      ? "py-1.5 px-3 sm:px-4"
+      : "py-3.5 px-5 lg:px-6"
+    : isMobileWidth
+    ? "py-2 px-3 sm:px-4"
+    : "py-3.5 px-5 lg:px-6";
+
   const innerFlexDirectionClass = isPaymentScreen
-      ? 'flex-row' // Use row layout on payment screen for inline text/button
-      : 'flex-col lg:flex-row'; // Original layout
+    ? isMobileWidth
+      ? "flex-row justify-center"
+      : "flex-row items-center justify-center"
+    : isMobileWidth
+    ? "flex-col justify-center"
+    : "flex-row justify-center lg:justify-between";
 
-  // Text alignment class
   const textAlignmentClass = isPaymentScreen
-      ? 'text-center flex-none' // Force text block to not take full width (flex-none) and center text
-      : 'text-left flex-1'; // Original default is left and flex-1
+    ? isMobileWidth
+      ? "text-center flex-none"
+      : "text-center flex-none"
+    : "text-left flex-1";
+
+  const titleSizeClass = isMobileWidth ? "text-xs sm:text-sm" : "text-base";
+  const subtitleSizeClass = isMobileWidth ? "text-[11px] sm:text-[12px]" : "text-sm";
+  const buttonTextSizeClass = isMobileWidth ? "text-[11px] sm:text-xs" : "text-sm";
+  const gapClass = isDesktopWidth ? "gap-3" : "gap-2 sm:gap-2.5";
+  const buttonGapClass = isDesktopWidth ? "gap-2.5" : "gap-1.5 sm:gap-2";
+  const buttonJustifyClass =
+    isPaymentScreen && isDesktopWidth ? "justify-center" : isDesktopWidth ? "justify-end" : "justify-center";
+  const buttonWrapClass = isPaymentScreen && isDesktopWidth ? "flex-nowrap" : "flex-wrap";
 
   return createPortal(
     <AnimatePresence>
       {shouldRender && (
         <motion.div 
-          className={`pointer-events-none fixed inset-x-0 bottom-3 sm:bottom-11 md:bottom-12 lg:bottom-[57px] z-[9999] px-2.5 sm:px-5 md:px-6 ${alignmentClass}`}
+          className={`pointer-events-none fixed inset-x-0 z-[9999] flex ${alignmentClass} ${containerSpacingClass}`}
           
           // Animation definitions
           initial={{ opacity: 0, y: 30 }} 
@@ -272,43 +328,43 @@ export default function ReservationBanner() {
               border border-white/10 
               bg-slate-900/70 
               shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] 
-              px-2.5 sm:px-4 md:px-5 lg:px-6 
               ${paddingClass} 
-              inline-flex ${innerFlexDirectionClass} lg:items-center gap-2 sm:gap-2.5 md:gap-3 justify-center
+              inline-flex ${innerFlexDirectionClass} lg:items-center ${gapClass}
             `}
             style={{ 
               backdropFilter: "blur(40px)", 
               WebkitBackdropFilter: "blur(40px)" 
             }}
           >
-            {/* Text Block - Adjusted to flex-none/text-center on payment screen */}
+            {/* Text Block */}
             <div className={`min-w-0 z-10 ${textAlignmentClass}`}>
-              <p className="text-xs sm:text-sm md:text-base font-semibold text-white truncate drop-shadow-md">
+              <p className={`font-semibold text-white truncate drop-shadow-md ${titleSizeClass}`}>
                 Slot {holdLocalTimeLabel || hold.hostTime || "--"}
                 {hold?.packageTitle ? ` — ${hold.packageTitle}` : ""}
               </p>
-              <p className="text-[11px] sm:text-[12px] text-sky-200/90 truncate drop-shadow-sm">
+              <p className={`text-sky-200/90 truncate drop-shadow-sm ${subtitleSizeClass}`}>
                 Expires in {formatCountdown(countdown)} • Host {hold.hostTime} ({HOST_TZ_NAME})
               </p>
             </div>
             
-            {/* Buttons Block - Moved Release button to the start of the button block */}
-            <div className="flex items-center gap-1.5 sm:gap-2.5 md:gap-3 lg:ml-auto flex-wrap justify-center lg:justify-end z-10">
-              {/* Release Button is now the only one visible on the payment screen (via logic) */}
+            {/* Buttons Block */}
+            <div className={`flex items-center ${buttonWrapClass} z-10 lg:flex-none ${buttonGapClass} ${buttonJustifyClass}`}>
+              
+              {/* Release Button */}
               <button
                 type="button"
                 onClick={() => releaseHold(false, true)}
-                className="rounded-lg border border-red-400/30 bg-red-500/20 px-2.5 py-1.5 sm:px-3 sm:py-2 text-[11px] sm:text-xs md:text-sm font-semibold text-red-50 hover:bg-red-500/30 transition shadow-sm"
+                className={`rounded-lg border border-red-400/30 bg-red-500/20 px-2.5 py-1.5 sm:px-3 sm:py-2 ${buttonTextSizeClass} font-semibold text-red-50 hover:bg-red-500/30 transition shadow-sm`}
               >
                 Release
               </button>
               
-              {/* Continue button is hidden on payment screen, so the Release button sits next to the text */}
-              {!path.startsWith("/payment") && (
+              {/* Continue button (Hidden on payment screen) */}
+              {!isPaymentScreen && (
                 <button
                   type="button"
                   onClick={continueBooking}
-                  className="rounded-lg border border-sky-400/30 bg-sky-500/20 px-2.5 py-1.5 sm:px-3 sm:py-2 text-[11px] sm:text-xs md:text-sm font-semibold text-sky-50 hover:bg-sky-500/30 transition whitespace-nowrap shadow-sm"
+                  className={`rounded-lg border border-sky-400/30 bg-sky-500/20 px-2.5 py-1.5 sm:px-3 sm:py-2 ${buttonTextSizeClass} font-semibold text-sky-50 hover:bg-sky-500/30 transition whitespace-nowrap shadow-sm`}
                 >
                   Continue booking
                 </button>
