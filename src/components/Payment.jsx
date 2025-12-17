@@ -112,6 +112,9 @@ export default function Payment({ hideFooter = false }) {
   // Razorpay state
   const [rzpReady, setRzpReady] = useState(false);
   const [payingRzp, setPayingRzp] = useState(false);
+  const paypalClientId =
+    process.env.REACT_APP_PAYPAL_CLIENT_ID || "";
+  const hasPaypalClientId = !!paypalClientId;
 
   // Free booking state
   const [creatingFree, setCreatingFree] = useState(false);
@@ -133,6 +136,12 @@ export default function Payment({ hideFooter = false }) {
     }
 
     if (stored) {
+      try {
+        // Persist referral code across the entire session when entered via referral links.
+        localStorage.setItem("referral", stored);
+      } catch (e) {
+        console.error("Failed to persist referral to localStorage:", e);
+      }
       setReferralInput(stored);
       validateReferral(stored);
     }
@@ -166,9 +175,7 @@ export default function Payment({ hideFooter = false }) {
     if (isUpgrade) return;
     if (!code) {
       setReferral(null);
-      try {
-        localStorage.removeItem("referral");
-      } catch {}
+
       return;
     }
     try {
@@ -206,17 +213,12 @@ export default function Payment({ hideFooter = false }) {
         }
       } else {
         setReferral(null);
-        try {
-          localStorage.removeItem("referral");
-        } catch {}
         showBanner("error", "Invalid or inactive referral code.");
       }
     } catch (e) {
       console.error(e);
       setReferral(null);
-      try {
-        localStorage.removeItem("referral");
-      } catch {}
+
       showBanner(
         "error",
         "We couldn’t validate that referral code. Please try again."
@@ -798,108 +800,115 @@ export default function Payment({ hideFooter = false }) {
                 </div>
 
                 <div className="w-full sm:w-48 relative z-0">
-                  <PayPalScriptProvider
-                    options={{
-                      "client-id":
-                        process.env.REACT_APP_PAYPAL_CLIENT_ID || "test",
-                      currency: "USD",
-                      intent: "capture",
-                    }}
-                  >
-                    <PayPalButtons
-                      fundingSource="paypal"
-                      style={{
-                        layout: "horizontal",
-                        color: "blue",
-                        shape: "rect",
-                        label: "pay",
-                        height: 40,
-                        tagline: false,
+                  {hasPaypalClientId ? (
+                    <PayPalScriptProvider
+                      options={{
+                        "client-id": paypalClientId,
+                        currency: "USD",
+                        intent: "capture",
                       }}
-                      createOrder={(data, actions) =>
-                        actions.order.create({
-                          purchase_units: [
-                            {
-                              description: `${packageTitle} booking`,
-                              amount: { value: finalAmount.toFixed(2) },
-                            },
-                          ],
-                        })
-                      }
-                      onApprove={async (data, actions) => {
-                        const details = await actions.order.capture();
+                    >
+                      <PayPalButtons
+                        fundingSource="paypal"
+                        style={{
+                          layout: "horizontal",
+                          color: "blue",
+                          shape: "rect",
+                          label: "pay",
+                          height: 40,
+                          tagline: false,
+                        }}
+                        createOrder={(data, actions) =>
+                          actions.order.create({
+                            purchase_units: [
+                              {
+                                description: `${packageTitle} booking`,
+                                amount: { value: finalAmount.toFixed(2) },
+                              },
+                            ],
+                          })
+                        }
+                        onApprove={async (data, actions) => {
+                          const details = await actions.order.capture();
 
-                        try {
-                          const payload = {
-                            ...bookingData,
-                            referralCode: isUpgrade
-                              ? ""
-                              : referral?.code || referralInput || "",
-                            referralId: isUpgrade
-                              ? null
-                              : referral?._id || null,
+                          try {
+                            const payload = {
+                              ...bookingData,
+                              referralCode: isUpgrade
+                                ? ""
+                                : referral?.code || referralInput || "",
+                              referralId: isUpgrade
+                                ? null
+                                : referral?._id || null,
 
-                            couponCode: isUpgrade
-                              ? ""
-                              : coupon?.code || couponInput || "",
-                            couponDiscountPercent: isUpgrade
-                              ? 0
-                              : couponPercent,
-                            couponDiscountAmount: isUpgrade
-                              ? 0
-                              : couponDiscountAmount,
+                              couponCode: isUpgrade
+                                ? ""
+                                : coupon?.code || couponInput || "",
+                              couponDiscountPercent: isUpgrade
+                                ? 0
+                                : couponPercent,
+                              couponDiscountAmount: isUpgrade
+                                ? 0
+                                : couponDiscountAmount,
 
-                            discountPercent: isUpgrade
-                              ? 0
-                              : discountPercentCombined,
-                            discountAmount: isUpgrade ? 0 : totalDiscountAmount,
-                            grossAmount: baseAmount,
-                            netAmount: finalAmount,
-                            commissionPercent: isUpgrade
-                              ? 0
-                              : commissionPercent,
+                              discountPercent: isUpgrade
+                                ? 0
+                                : discountPercentCombined,
+                              discountAmount: isUpgrade
+                                ? 0
+                                : totalDiscountAmount,
+                              grossAmount: baseAmount,
+                              netAmount: finalAmount,
+                              commissionPercent: isUpgrade
+                                ? 0
+                                : commissionPercent,
 
-                            paypalOrderId: details?.id || "",
-                            payerEmail: details?.payer?.email_address || "",
-                            status: "captured",
-                            paymentProvider: "paypal",
-                          };
-                          const res = await fetch("/api/ref/createBooking", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify(payload),
-                          });
+                              paypalOrderId: details?.id || "",
+                              payerEmail: details?.payer?.email_address || "",
+                              status: "captured",
+                              paymentProvider: "paypal",
+                            };
+                            const res = await fetch("/api/ref/createBooking", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify(payload),
+                            });
 
-                          if (!res.ok) {
-                            console.error(
-                              "Booking create error:",
-                              await res.text()
-                            );
+                            if (!res.ok) {
+                              console.error(
+                                "Booking create error:",
+                                await res.text()
+                              );
+                              showBanner(
+                                "error",
+                                "Payment succeeded but booking could not be saved. Please contact support."
+                              );
+                              return;
+                            }
+
+                            navigate("/thank-you");
+                          } catch (err) {
+                            console.error("Booking creation error:", err);
                             showBanner(
                               "error",
-                              "Payment succeeded but booking could not be saved. Please contact support."
+                              "Payment succeeded but something went wrong saving your booking. Please contact support."
                             );
-                            return;
                           }
-
-                          navigate("/thank-you");
-                        } catch (err) {
-                          console.error("Booking creation error:", err);
+                        }}
+                        onError={(err) => {
+                          console.error(err);
                           showBanner(
                             "error",
-                            "Payment succeeded but something went wrong saving your booking. Please contact support."
+                            "PayPal could not process your payment. Please try again."
                           );
-                        }
-                      }}
-                      onError={(err) => {
-                        console.error(err);
-                        showBanner(
-                          "error",
-                          "PayPal could not process your payment. Please try again."
-                        );
-                      }}
-                    />
-                  </PayPalScriptProvider>
+                        }}
+                      />
+                    </PayPalScriptProvider>
+                  ) : (
+                    <p className="text-xs text-amber-300 text-center">
+                      PayPal is unavailable: client ID not configured.
+                    </p>
+                  )}
                 </div>
               </div>
             </>
