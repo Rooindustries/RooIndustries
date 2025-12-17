@@ -29,6 +29,45 @@ export default function Navbar() {
     return () => window.removeEventListener("scroll", handleScroll);
   }, [lastScrollY]);
 
+  useEffect(() => {
+    if (location.hash === "#packages") {
+      let retry;
+      let attempts = 0;
+
+      const scrollToPackages = () => {
+        const el = document.getElementById("packages");
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          const elementTop = rect.top + window.scrollY; // Absolute position of the top of the element
+
+          // --- FIX APPLIED HERE ---
+          // Target Y is the absolute top position of the element.
+          // This ensures the element's top aligns with the viewport's top.
+          const targetY = elementTop; 
+          
+          // Ensure we don't scroll past the very top of the document (0)
+          const finalScrollPosition = Math.max(0, targetY);
+
+          window.scrollTo({
+            top: finalScrollPosition,
+            behavior: "smooth",
+          });
+          return;
+        }
+        if (attempts < 5) {
+          attempts += 1;
+          retry = setTimeout(scrollToPackages, 80);
+        }
+      };
+
+      scrollToPackages();
+
+      return () => {
+        if (retry) clearTimeout(retry);
+      };
+    }
+  }, [location]);
+
   return (
     <nav
       className={`
@@ -104,24 +143,11 @@ export default function Navbar() {
             Reviews
           </Link>
 
-          {/* BOOK — ALWAYS HIGHLIGHTED, ALL ROUTES INCLUDING HOME */}
           <Link
-            to="/packages"
-            className="
-              px-3 sm:px-5 py-1.5
-              rounded-full font-semibold
-              bg-cyan-400
-              text-slate-950
-              border border-cyan-300
-              shadow-[0_0_22px_rgba(34,211,238,0.9)]
-              outline outline-2 outline-cyan-200/90 outline-offset-2
-              hover:bg-cyan-300
-              hover:shadow-[0_0_30px_rgba(34,211,238,1)]
-              hover:-translate-y-[1px]
-              transition
-            "
+            to="/#packages"
+            className="px-2 sm:px-4 py-1.5 rounded-full transition hover:text-cyan-400"
           >
-            Book
+            Plans
           </Link>
           <Link
             to="/tools"

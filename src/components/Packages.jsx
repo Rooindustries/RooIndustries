@@ -1,9 +1,13 @@
 import React, { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { client } from "../sanityClient";
 
 export default function Packages() {
   const [packages, setPackages] = useState([]);
+  const location = useLocation();
+  const bookingState = {
+    backgroundLocation: location.state?.backgroundLocation || location,
+  };
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -28,7 +32,10 @@ export default function Packages() {
   }, []);
 
   return (
-    <section className="relative z-10 pt-32 pb-24 text-center text-white">
+    <section
+      id="packages"
+      className="relative z-10 pt-32 pb-24 text-center text-white"
+    >
       <h2 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
         Choose Your Package
       </h2>
@@ -88,6 +95,7 @@ export default function Packages() {
                 )}&tag=${encodeURIComponent(p.tag || "")}&xoc=${
                   isXoc ? "1" : "0"
                 }`}
+                state={bookingState}
                 className="glow-button mt-8 w-full text-white py-3 rounded-md font-semibold shadow-[0_0_20px_rgba(56,189,248,0.4)] transition-all duration-300 text-center inline-flex items-center justify-center gap-2"
               >
                 {p.buttonText}
