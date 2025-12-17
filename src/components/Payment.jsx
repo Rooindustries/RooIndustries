@@ -8,6 +8,26 @@ export default function Payment({ hideFooter = false }) {
   const q = new URLSearchParams(location.search);
   const navigate = useNavigate();
 
+  const REFERRAL_STORAGE_KEY = "referral_session";
+
+  const readStoredReferral = () => {
+    try {
+      return sessionStorage.getItem(REFERRAL_STORAGE_KEY) || "";
+    } catch {
+      return "";
+    }
+  };
+
+  const writeStoredReferral = (code) => {
+    try {
+      if (code) {
+        sessionStorage.setItem(REFERRAL_STORAGE_KEY, code);
+      } else {
+        sessionStorage.removeItem(REFERRAL_STORAGE_KEY);
+      }
+    } catch {}
+  };
+
   const bookingData = useMemo(() => {
     try {
       return JSON.parse(q.get("data") || "{}");
@@ -22,13 +42,49 @@ export default function Payment({ hideFooter = false }) {
   const isModalMode = !!navState.backgroundLocation || navState.modal === true;
   const hideFooterEffective = hideFooter || isModalMode;
 
+  const getModalFlowState = () => {
+    if (!isModalMode) return undefined;
+    return {
+      backgroundLocation:
+        navState.backgroundLocation || { pathname: "/", search: "", hash: "" },
+      modal: true,
+    };
+  };
+
   const backToBookingState = {
     backgroundLocation: navState.backgroundLocation || location,
     modal: true,
     ...navState,
   };
 
-  const packageTitle = bookingData.packageTitle || "—";
+  const hasTimeslot =
+    !!bookingData?.hostDate &&
+    !!bookingData?.hostTime &&
+    !!bookingData?.startTimeUTC &&
+    !!bookingData?.displayDate &&
+    !!bookingData?.displayTime;
+  const holdExpiresAt = bookingData?.slotHoldExpiresAt;
+  const holdExpired =
+    holdExpiresAt && new Date(holdExpiresAt).getTime() <= Date.now();
+  const hasSlotHold = !!bookingData?.slotHoldId && !holdExpired;
+  const canSubmitBooking = hasTimeslot && hasSlotHold;
+
+  const ensureSlotBeforeAction = () => {
+    if (canSubmitBooking) return true;
+    showBanner(
+      "error",
+      holdExpired
+        ? "Your reserved slot expired. Please select a new time before completing your booking."
+        : "Please select a time slot before completing your booking."
+    );
+    navigate("/booking", {
+      state: backToBookingState,
+      replace: true,
+    });
+    return false;
+  };
+
+  const packageTitle = bookingData.packageTitle || "";
   const packagePrice = bookingData.packagePrice || "$0";
   const date = bookingData.displayDate || "--";
   const time = bookingData.displayTime || "--";
@@ -94,16 +150,35 @@ export default function Payment({ hideFooter = false }) {
       ? Math.min(baseAmount, uncappedTotalDiscount)
       : 0;
 
-  const finalAmount = isUpgrade
+  const rawFinalAmount = isUpgrade
     ? baseAmount
     : Math.max(0, +(baseAmount - totalDiscountAmount).toFixed(2));
 
-  const discountPercentCombined =
-    !isUpgrade && baseAmount > 0
-      ? +((totalDiscountAmount / baseAmount) * 100 || 0).toFixed(2)
-      : 0;
+  const hasFreeCoupon = !isUpgrade && coupon?.discountPercent === 100;
+  const isFree = hasFreeCoupon && rawFinalAmount === 0;
+  const preventedFreeReduction =
+    !isUpgrade && !isFree && rawFinalAmount === 0 && baseAmount > 0;
+  const minPayable = 0.01;
 
-  const isFree = !isUpgrade && finalAmount === 0;
+  const finalAmount = isUpgrade
+    ? baseAmount
+    : isFree
+    ? 0
+    : Math.max(minPayable, rawFinalAmount);
+
+  const effectiveDiscountAmount = isUpgrade
+    ? 0
+    : preventedFreeReduction
+    ? +(baseAmount - finalAmount).toFixed(2)
+    : totalDiscountAmount;
+
+  const discountPercentCombined = isUpgrade
+    ? 0
+    : preventedFreeReduction
+    ? +((effectiveDiscountAmount / baseAmount) * 100 || 0).toFixed(2)
+    : !isUpgrade && baseAmount > 0
+    ? +((totalDiscountAmount / baseAmount) * 100 || 0).toFixed(2)
+    : 0;
 
   // Razorpay state
   const [rzpReady, setRzpReady] = useState(false);
@@ -121,24 +196,19 @@ export default function Payment({ hideFooter = false }) {
     const params = new URLSearchParams(location.search);
     const fromUrl = params.get("ref");
 
-    let stored = fromUrl;
-    if (!stored) {
-      try {
-        stored = localStorage.getItem("referral");
-      } catch (e) {
-        console.error("Failed to read referral from localStorage:", e);
-      }
+    if (fromUrl) {
+      writeStoredReferral(fromUrl);
+      setReferralInput(fromUrl);
+      validateReferral(fromUrl);
+      return;
     }
 
+    const stored = readStoredReferral();
     if (stored) {
-      try {
-        // Persist referral code across the entire session when entered via referral links.
-        localStorage.setItem("referral", stored);
-      } catch (e) {
-        console.error("Failed to persist referral to localStorage:", e);
-      }
       setReferralInput(stored);
       validateReferral(stored);
+    } else {
+      writeStoredReferral("");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.search, isUpgrade]);
@@ -184,15 +254,7 @@ export default function Payment({ hideFooter = false }) {
       if (data.ok && data.referral) {
         setReferral(data.referral);
 
-        if (data.referral.code) {
-          try {
-            localStorage.setItem("referral", data.referral.code);
-          } catch {}
-        } else {
-          try {
-            localStorage.removeItem("referral");
-          } catch {}
-        }
+        writeStoredReferral(data.referral.code || "");
 
         if (
           coupon &&
@@ -208,15 +270,16 @@ export default function Payment({ hideFooter = false }) {
         }
       } else {
         setReferral(null);
+        writeStoredReferral("");
         showBanner("error", "Invalid or inactive referral code.");
       }
     } catch (e) {
       console.error(e);
       setReferral(null);
-
+      writeStoredReferral("");
       showBanner(
         "error",
-        "We couldn’t validate that referral code. Please try again."
+        "We couldn't validate that referral code. Please try again."
       );
     } finally {
       setValidating(false);
@@ -262,7 +325,7 @@ export default function Payment({ hideFooter = false }) {
       setCoupon(null);
       showBanner(
         "error",
-        "We couldn’t validate that coupon code. Please try again."
+        "We couldn't validate that coupon code. Please try again."
       );
     } finally {
       setValidatingCoupon(false);
@@ -272,10 +335,11 @@ export default function Payment({ hideFooter = false }) {
   // ----------------- FREE BOOKING FLOW -----------------
   async function handleFreeBooking() {
     if (!isFree) return;
+    if (!ensureSlotBeforeAction()) return;
 
     try {
       setCreatingFree(true);
-      showBanner("info", "Confirming your free booking…");
+      showBanner("info", "Confirming your free booking...");
 
       const payload = {
         ...bookingData,
@@ -288,7 +352,7 @@ export default function Payment({ hideFooter = false }) {
         couponDiscountAmount,
 
         discountPercent: discountPercentCombined,
-        discountAmount: totalDiscountAmount,
+        discountAmount: effectiveDiscountAmount,
 
         grossAmount: baseAmount,
         netAmount: 0,
@@ -314,7 +378,10 @@ export default function Payment({ hideFooter = false }) {
         return;
       }
 
-      navigate("/thank-you");
+      navigate("/thank-you", {
+        state: getModalFlowState(),
+        replace: true,
+      });
     } catch (err) {
       console.error("Free booking error:", err);
       showBanner(
@@ -325,7 +392,6 @@ export default function Payment({ hideFooter = false }) {
       setCreatingFree(false);
     }
   }
-
   // Razorpay payment flow
   async function handleRazorpayPay() {
     if (!rzpReady || !window.Razorpay) {
@@ -335,6 +401,8 @@ export default function Payment({ hideFooter = false }) {
       );
       return;
     }
+
+    if (!ensureSlotBeforeAction()) return;
 
     if (isFree) {
       showBanner(
@@ -354,7 +422,7 @@ export default function Payment({ hideFooter = false }) {
       }
 
       setPayingRzp(true);
-      showBanner("info", "Opening Razorpay checkout…");
+      showBanner("info", "Opening Razorpay checkout...");
 
       const orderRes = await fetch("/api/razorpay/createOrder", {
         method: "POST",
@@ -381,7 +449,7 @@ export default function Payment({ hideFooter = false }) {
         showBanner(
           "error",
           orderData.message ||
-            "Couldn’t start the payment. Please try again or use PayPal."
+            "Couldn't start the payment. Please try again or use PayPal."
         );
         return;
       }
@@ -437,7 +505,7 @@ export default function Payment({ hideFooter = false }) {
               couponDiscountAmount: isUpgrade ? 0 : couponDiscountAmount,
 
               discountPercent: isUpgrade ? 0 : discountPercentCombined,
-              discountAmount: isUpgrade ? 0 : totalDiscountAmount,
+              discountAmount: isUpgrade ? 0 : effectiveDiscountAmount,
 
               grossAmount: baseAmount,
               netAmount: finalAmount,
@@ -465,7 +533,10 @@ export default function Payment({ hideFooter = false }) {
               return;
             }
 
-            navigate("/payment-success");
+            navigate("/payment-success", {
+              state: getModalFlowState(),
+              replace: true,
+            });
           } catch (err) {
             console.error("Razorpay post-payment error:", err);
             showBanner(
@@ -549,10 +620,10 @@ export default function Payment({ hideFooter = false }) {
           >
             <span className="text-lg">
               {banner.type === "error"
-                ? "⚠️"
+                ? "!"
                 : banner.type === "success"
-                ? "✅"
-                : "💬"}
+                ? "OK"
+                : "i"}
             </span>
             <p className="flex-1">{banner.text}</p>
             <button
@@ -592,39 +663,41 @@ export default function Payment({ hideFooter = false }) {
 
               {!isUpgrade && referralPercent > 0 && (
                 <p className="text-sm text-green-300">
-                  Referral: {referralPercent}% (−$
+                  Referral: {referralPercent}% ($
                   {referralDiscountAmount.toFixed(2)}
                   {referral?.name ? ` via ${referral.name}` : ""})
                 </p>
               )}
               {!isUpgrade && couponPercent > 0 && coupon && (
                 <p className="text-sm text-emerald-300">
-                  Coupon "{coupon.code}": {couponPercent}% (−$
+                  Coupon "{coupon.code}": {couponPercent}% ($
                   {couponDiscountAmount.toFixed(2)})
                   {canStackCouponWithReferral && referralPercent > 0
                     ? " (stacked with referral)"
                     : ""}
                 </p>
               )}
-              {!isUpgrade && totalDiscountAmount > 0 && (
+              {!isUpgrade && effectiveDiscountAmount > 0 && (
                 <p className="text-xs text-slate-300">
-                  Total savings: {discountPercentCombined}% (−$
-                  {totalDiscountAmount.toFixed(2)})
+                  Total savings: {discountPercentCombined}% (${effectiveDiscountAmount.toFixed(2)})
                 </p>
               )}
 
               <p className="text-sm text-slate-400 mt-1">
-                Date: <span className="text-sky-300">{date}</span> — Time:{" "}
-                <span className="text-sky-300">{time}</span>
+                Date: <span className="text-sky-300">{date}</span> - Time: <span className="text-sky-300">{time}</span>
               </p>
 
               {isFree && (
                 <p className="text-xs text-emerald-300 mt-2">
-                  This booking has a 100% discount applied. No payment is
-                  required — just confirm your free booking below.
+                  This booking has a 100% discount applied. No payment is required - just confirm your free booking below.
                 </p>
               )}
-
+              {!isFree && preventedFreeReduction && (
+                <p className="text-xs text-amber-200 mt-2">
+                  A minimum charge applies unless you use an approved
+                  free-booking code.
+                </p>
+              )}
               {isUpgrade && (
                 <p className="text-xs text-slate-400 mt-2">
                   Upgrades do not accept new coupons or referral discounts. The
@@ -737,7 +810,7 @@ export default function Payment({ hideFooter = false }) {
               : "Secure payment via Razorpay or PayPal"}
           </p>
 
-          {/* 🔥 FREE BOOKING MODE (100% discount) */}
+          {/* FREE BOOKING MODE (100% discount) */}
           {isFree ? (
             <div className="mt-6 flex flex-col gap-4 border border-emerald-500/40 bg-emerald-500/10 rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(16,185,129,0.35)]">
               <p className="text-sm text-emerald-100">
@@ -749,7 +822,7 @@ export default function Payment({ hideFooter = false }) {
                 disabled={creatingFree}
                 className="glow-button px-4 py-3 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60"
               >
-                {creatingFree ? "Confirming…" : "Confirm Free Booking"}
+                {creatingFree ? "Confirming..." : "Confirm Free Booking"}
                 <span className="glow-line glow-line-top" />
                 <span className="glow-line glow-line-right" />
                 <span className="glow-line glow-line-bottom" />
@@ -813,6 +886,12 @@ export default function Payment({ hideFooter = false }) {
                           height: 40,
                           tagline: false,
                         }}
+                        onClick={(data, actions) => {
+                          if (!ensureSlotBeforeAction()) {
+                            return actions?.reject ? actions.reject() : false;
+                          }
+                          return actions?.resolve ? actions.resolve() : true;
+                        }}
                         createOrder={(data, actions) =>
                           actions.order.create({
                             purchase_units: [
@@ -824,6 +903,7 @@ export default function Payment({ hideFooter = false }) {
                           })
                         }
                         onApprove={async (data, actions) => {
+                          if (!ensureSlotBeforeAction()) return;
                           const details = await actions.order.capture();
 
                           try {
@@ -851,7 +931,7 @@ export default function Payment({ hideFooter = false }) {
                                 : discountPercentCombined,
                               discountAmount: isUpgrade
                                 ? 0
-                                : totalDiscountAmount,
+                                : effectiveDiscountAmount,
                               grossAmount: baseAmount,
                               netAmount: finalAmount,
                               commissionPercent: isUpgrade
@@ -881,7 +961,10 @@ export default function Payment({ hideFooter = false }) {
                               return;
                             }
 
-                            navigate("/thank-you");
+                            navigate("/payment-success", {
+                              state: getModalFlowState(),
+                              replace: true,
+                            });
                           } catch (err) {
                             console.error("Booking creation error:", err);
                             showBanner(
@@ -925,7 +1008,7 @@ export default function Payment({ hideFooter = false }) {
             state={backToBookingState}
             className="glow-button inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-sky-50 hover:text-white transition-all duration-300"
           >
-            <span className="text-lg">←</span>
+            <span className="text-lg">&lt;-</span>
             <span>Back to Booking</span>
             <span className="glow-line glow-line-top" />
             <span className="glow-line glow-line-right" />
@@ -937,3 +1020,5 @@ export default function Payment({ hideFooter = false }) {
     </motion.section>
   );
 }
+
+

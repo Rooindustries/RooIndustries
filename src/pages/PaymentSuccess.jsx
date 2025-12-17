@@ -1,10 +1,11 @@
 import PaymentSuccess from "../components/PaymentSuccess";
 import Footer from "../components/Footer";
 
-export default function Page() {
+export default function Page({ hideFooter = false }) {
   return (
     <>
-      <PaymentSuccess /> <Footer />
+      <PaymentSuccess />
+      {!hideFooter && <Footer />}
     </>
   );
 }
