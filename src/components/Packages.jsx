@@ -8,12 +8,23 @@ export default function Packages() {
   const bookingState = {
     backgroundLocation: location.state?.backgroundLocation || location,
   };
+  const UPGRADE_FAQ_HASH = "upgrade-path";
+  const shouldLinkUpgrade = (text = "") =>
+    /upgrade path|upgrade a single component|every 6 months|upgrade pc each 6 months|reXOC/i.test(
+      text
+    );
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const ref = params.get("ref");
+
+    // Still persist referral codes when rendering on other routes (e.g., homepage) without redirecting.
     if (ref) {
-      localStorage.setItem("referral", ref);
+      try {
+        localStorage.setItem("referral", ref);
+      } catch (e) {
+        console.error("Failed to store referral from link:", e);
+      }
     }
 
     client
@@ -78,12 +89,27 @@ export default function Packages() {
                   {p.price}
                 </p>
                 <ul className="mt-6 space-y-2 text-left text-sm text-slate-300 leading-relaxed">
-                  {p.features?.map((f, idx) => (
-                    <li key={idx} className="flex items-start gap-2">
-                      <span className="text-sky-400 mt-1">✔</span>
-                      <span className="flex-1">{f}</span>
-                    </li>
-                  ))}
+                  {p.features?.map((f, idx) => {
+                    const linkToUpgradeFaq = shouldLinkUpgrade(f);
+                    return (
+                      <li key={idx} className="flex items-start gap-2">
+                        <span className="text-sky-400 mt-1">✔</span>
+                        <span className="flex-1">
+                          {linkToUpgradeFaq ? (
+                            <Link
+                              to={`/faq#${UPGRADE_FAQ_HASH}`}
+                              className="underline underline-offset-2 transition"
+                              style={{ color: "#22D3EE" }}
+                            >
+                              {f}
+                            </Link>
+                          ) : (
+                            f
+                          )}
+                        </span>
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
 
