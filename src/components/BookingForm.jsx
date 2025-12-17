@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { client } from "../sanityClient";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 
 const HOST_TZ_NAME = "Asia/Kolkata";
@@ -38,6 +38,12 @@ const hostTimeLabel = (h) => {
   const disp = ((h + 11) % 12) + 1;
   return `${disp}:00 ${ampm}`;
 };
+
+const UPGRADE_FAQ_HASH = "upgrade-path";
+const shouldLinkUpgrade = (text = "") =>
+  /upgrade path|upgrade a single component|every 6 months|upgrade pc each 6 months|reXOC/i.test(
+    text
+  );
 
 const getUtcFromHostLocal = (year, monthIndex, day, hostHour) => {
   const utcMs =
@@ -309,6 +315,11 @@ export default function BookingForm({ isMobile }) {
   const [holdCountdownMs, setHoldCountdownMs] = useState(null);
   const clearedNoHoldRef = useRef(false);
   const sessionRestoredRef = useRef(false);
+
+  const closeVertexModal = () => {
+    document.body.classList.remove("is-modal-blur");
+    setShowVertexModal(false);
+  };
 
   useEffect(() => {
     const prevTitle = prevPackageRef.current;
@@ -2247,7 +2258,22 @@ export default function BookingForm({ isMobile }) {
                         className="flex items-start gap-2"
                       >
                         <span className="text-sky-400 mt-0.5">-</span>
-                        <span>{text}</span>
+                        <span className="flex-1">
+                          {shouldLinkUpgrade(text) ? (
+                            <Link
+                              to={`/faq#${UPGRADE_FAQ_HASH}`}
+                              className="underline underline-offset-2 transition"
+                              style={{ color: "#22D3EE" }}
+                              onClick={() => {
+                                closeVertexModal();
+                              }}
+                            >
+                              {text}
+                            </Link>
+                          ) : (
+                            text
+                          )}
+                        </span>
                       </motion.li>
                     ))}
                   </motion.ul>

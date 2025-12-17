@@ -58,7 +58,14 @@ export default function RefDashboard() {
 
         console.log("DASHBOARD DATA:", data);
 
-        if (!data.ok) return nav("/referrals/login");
+        if (!data.ok) {
+          try {
+            localStorage.removeItem("creatorId");
+          } catch (err) {
+            console.error("Failed to clear creatorId after invalid data:", err);
+          }
+          return nav("/referrals/login");
+        }
 
         const ref = data.referral || {};
 
@@ -86,6 +93,11 @@ export default function RefDashboard() {
         }
       } catch (e) {
         console.error(e);
+        try {
+          localStorage.removeItem("creatorId");
+        } catch (err) {
+          console.error("Failed to clear creatorId after error:", err);
+        }
         nav("/referrals/login");
       } finally {
         setLoading(false);
@@ -224,7 +236,7 @@ export default function RefDashboard() {
 
   // referral code + link
   const referralCode = creator.slug?.current || "";
-  const referralLink = `${window.location.origin}/packages?ref=${referralCode}`;
+  const referralLink = `${window.location.origin}/?ref=${referralCode}`;
 
   const payoutData = payout || {};
   const earnings = payoutData.earnings || {};
