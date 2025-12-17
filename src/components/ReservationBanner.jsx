@@ -262,9 +262,16 @@ export default function ReservationBanner() {
     ? "justify-start"
     : "justify-center";
 
-  const containerSpacingClass = isMobileWidth
-    ? "bottom-3 sm:bottom-11 px-2.5 sm:px-5"
-    : "bottom-12 lg:bottom-[57px] px-6";
+  const containerSpacingClass = (() => {
+    if (isPaymentScreen) {
+      return isMobileWidth
+        ? "bottom-1.5 sm:bottom-5 px-2.5 sm:px-4"
+        : "bottom-4 lg:bottom-6 px-6";
+    }
+    return isMobileWidth
+      ? "bottom-3 sm:bottom-11 px-2.5 sm:px-5"
+      : "bottom-12 lg:bottom-[57px] px-6";
+  })();
 
   const bannerWidthClass = (() => {
     if (isPaymentScreen) {

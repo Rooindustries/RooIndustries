@@ -10,6 +10,9 @@ export default function BookingModal({ open, onClose, children }) {
   const [renderWidth, setRenderWidth] = useState(1150);
   const [wrapperSize, setWrapperSize] = useState({ width: 0, height: 0 });
 
+  const MOBILE_PADDING_Y = 80;
+  const DESKTOP_PADDING_Y = 36;
+
   // 1. STRICT 780px BREAKPOINT
   useLayoutEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 780px)");
@@ -29,7 +32,8 @@ export default function BookingModal({ open, onClose, children }) {
       const height = window.innerHeight;
       const currentIsMobile = isMobile || width < 780;
 
-      const PADDING_Y = 96; 
+      const paddingY = currentIsMobile ? MOBILE_PADDING_Y : DESKTOP_PADDING_Y; 
+      const DESKTOP_SCALE_BOOST = 1.03;
 
       let scale = 1;
       let baseWidth = 0;
@@ -47,13 +51,15 @@ export default function BookingModal({ open, onClose, children }) {
         let heightScale = 1.5; 
         if (contentRef.current) {
           const contentH = contentRef.current.offsetHeight;
-          const availableH = height - PADDING_Y; 
+          const availableH = height - paddingY; 
           heightScale = availableH / contentH;
         }
 
         scale = Math.min(widthScale, heightScale);
-        scale = Math.min(Math.max(scale, 0.5), 1.2);
+        scale *= DESKTOP_SCALE_BOOST;
       }
+
+      scale = Math.min(Math.max(scale, 0.5), 1.2);
       
       setDynamicScale(scale);
       setRenderWidth(baseWidth);
@@ -126,6 +132,8 @@ export default function BookingModal({ open, onClose, children }) {
     onClose?.();
   };
 
+  const paddingBlockValue = (isMobile ? MOBILE_PADDING_Y : DESKTOP_PADDING_Y) / 2;
+
   return (
     <AnimatePresence>
       {open && (
@@ -160,7 +168,10 @@ export default function BookingModal({ open, onClose, children }) {
           />
 
           {/* SCROLL CONTAINER */}
-          <div className="min-h-full w-full flex flex-col py-12 cursor-pointer">
+          <div 
+            className="min-h-full w-full flex flex-col cursor-pointer"
+            style={{ paddingTop: paddingBlockValue, paddingBottom: paddingBlockValue }}
+          >
             
             {/* ANIMATED SIZE WRAPPER */}
             <motion.div 
