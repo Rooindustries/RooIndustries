@@ -9,16 +9,45 @@ export default function Packages() {
     backgroundLocation: location.state?.backgroundLocation || location,
   };
   const UPGRADE_FAQ_HASH = "upgrade-path";
-  const shouldLinkUpgrade = (text = "") =>
-    /upgrade path|upgrade a single component|every 6 months|upgrade pc each 6 months|reXOC/i.test(
-      text
-    );
+
+  const renderFeatureText = (text) => {
+    if (!text) return null;
+
+    const linkRegex = /(Future Upgrade Path)/i;
+
+    const boldRegex = /(Lifetime)/i;
+
+    return text.split(boldRegex).map((part, i) => {
+      // If this part is "Lifetime", make it bold
+      if (boldRegex.test(part)) {
+        return (
+          <span key={i} className="font-bold text-white">
+            {part}
+          </span>
+        );
+      }
+      return part.split(linkRegex).map((subPart, j) => {
+        if (linkRegex.test(subPart)) {
+          return (
+            <Link
+              key={`${i}-${j}`}
+              to={`/#${UPGRADE_FAQ_HASH}`}
+              className="underline underline-offset-2 transition"
+              style={{ color: "#22D3EE" }}
+            >
+              {subPart}
+            </Link>
+          );
+        }
+        return subPart;
+      });
+    });
+  };
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const ref = params.get("ref");
 
-    // Still persist referral codes when rendering on other routes (e.g., homepage) without redirecting.
     if (ref) {
       try {
         localStorage.setItem("referral", ref);
@@ -90,22 +119,12 @@ export default function Packages() {
                 </p>
                 <ul className="mt-6 space-y-2 text-left text-sm text-slate-300 leading-relaxed">
                   {p.features?.map((f, idx) => {
-                    const linkToUpgradeFaq = shouldLinkUpgrade(f);
                     return (
                       <li key={idx} className="flex items-start gap-2">
                         <span className="text-sky-400 mt-1">✔</span>
                         <span className="flex-1">
-                          {linkToUpgradeFaq ? (
-                            <Link
-                              to={`/#${UPGRADE_FAQ_HASH}`}
-                              className="underline underline-offset-2 transition"
-                              style={{ color: "#22D3EE" }}
-                            >
-                              {f}
-                            </Link>
-                          ) : (
-                            f
-                          )}
+                          {/* Use the strict helper function here */}
+                          {renderFeatureText(f)}
                         </span>
                       </li>
                     );
