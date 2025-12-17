@@ -97,7 +97,7 @@ export default function Packages() {
                         <span className="flex-1">
                           {linkToUpgradeFaq ? (
                             <Link
-                              to={`/faq#${UPGRADE_FAQ_HASH}`}
+                              to={`/#${UPGRADE_FAQ_HASH}`}
                               className="underline underline-offset-2 transition"
                               style={{ color: "#22D3EE" }}
                             >

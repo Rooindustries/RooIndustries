@@ -5,6 +5,10 @@ import BackButton from "./BackButton";
 export default function Navbar() {
   const location = useLocation();
   const isActive = (path) => location.pathname === path;
+  const faqHashes = ["#faq", "#upgrade-path", "#trust"];
+  const isFaqActive =
+    location.pathname === "/faq" ||
+    (location.pathname === "/" && faqHashes.includes(location.hash || ""));
 
   const [isVisible, setIsVisible] = useState(true);
   const [lastScrollY, setLastScrollY] = useState(0);
@@ -30,42 +34,31 @@ export default function Navbar() {
   }, [lastScrollY]);
 
   useEffect(() => {
-    if (location.hash === "#packages") {
-      let retry;
-      let attempts = 0;
+    const { hash } = location;
+    if (!hash) return;
 
-      const scrollToPackages = () => {
-        const el = document.getElementById("packages");
-        if (el) {
-          const rect = el.getBoundingClientRect();
-          const elementTop = rect.top + window.scrollY; // Absolute position of the top of the element
+    let retry;
+    let attempts = 0;
+    const scrollToHashTarget = () => {
+      const targetId = hash.replace("#", "");
+      const el = document.getElementById(targetId);
+      if (el) {
+        const elementTop = el.getBoundingClientRect().top + window.scrollY;
+        const targetY = Math.max(0, elementTop - 80);
+        window.scrollTo({ top: targetY, behavior: "smooth" });
+        return;
+      }
+      if (attempts < 8) {
+        attempts += 1;
+        retry = setTimeout(scrollToHashTarget, 100);
+      }
+    };
 
-          // --- FIX APPLIED HERE ---
-          // Target Y is the absolute top position of the element.
-          // This ensures the element's top aligns with the viewport's top.
-          const targetY = elementTop; 
-          
-          // Ensure we don't scroll past the very top of the document (0)
-          const finalScrollPosition = Math.max(0, targetY);
+    scrollToHashTarget();
 
-          window.scrollTo({
-            top: finalScrollPosition,
-            behavior: "smooth",
-          });
-          return;
-        }
-        if (attempts < 5) {
-          attempts += 1;
-          retry = setTimeout(scrollToPackages, 80);
-        }
-      };
-
-      scrollToPackages();
-
-      return () => {
-        if (retry) clearTimeout(retry);
-      };
-    }
+    return () => {
+      if (retry) clearTimeout(retry);
+    };
   }, [location]);
 
   return (
@@ -112,11 +105,9 @@ export default function Navbar() {
           `}
         >
           <Link
-            to="/faq"
+            to="/#faq"
             className={`hidden sm:inline px-2 sm:px-4 py-1.5 rounded-full transition ${
-              isActive("/faq")
-                ? "bg-cyan-400 text-black"
-                : "hover:text-cyan-400"
+              isFaqActive ? "bg-cyan-400 text-black" : "hover:text-cyan-400"
             }`}
           >
             FAQ
