@@ -17,6 +17,7 @@ import referral from './referral'
 import coupon from './coupon'
 import slotHold from './slotHold'
 import tool from './tool'
+import referralBox from './referralBox'
 
 export const schemaTypes = [
   benchmark,
@@ -38,4 +39,5 @@ export const schemaTypes = [
   coupon,
   slotHold,
   tool,
+  referralBox,
 ]
