@@ -23,10 +23,8 @@ export default function Hero() {
   }, []);
 
   const tagline = heroData?.tagline;
-
   const headingLine1 = heroData?.headingData1 || heroData?.headingLine1;
   const headingLine2 = heroData?.headingLine2;
-
   const description = heroData?.description;
   const subtext = heroData?.subtext;
   const bullets = heroData?.bullets || [];
@@ -36,10 +34,9 @@ export default function Hero() {
       .replace(/\\u00a0/g, " ")
       .replace(/\u00a0/g, " ");
 
-  const renderWithBold110 = (text) => {
+  const renderWithGlow110 = (text) => {
     const cleaned = normalizeText(text);
     const target = "110% FPS";
-
     if (!cleaned || !cleaned.includes(target)) return cleaned;
 
     const parts = cleaned.split(target);
@@ -47,7 +44,9 @@ export default function Hero() {
     return (
       <>
         {parts[0]}
-        <span className="font-extrabold">{target}</span>
+        <span className="text-cyan-200 drop-shadow-[0_0_10px_rgba(34,211,238,0.95)]">
+          {target}
+        </span>
         {parts.slice(1).join(target)}
       </>
     );
@@ -66,17 +65,16 @@ export default function Hero() {
       return (
         <>
           <span className="text-white">
-            {renderWithBold110(`${firstPart} - `)}
+            {renderWithGlow110(`${firstPart} - `)}
           </span>
-
           <span className="bg-gradient-to-r from-sky-400 to-blue-500 text-transparent bg-clip-text drop-shadow-[0_0_10px_rgba(56,189,248,0.7)]">
-            {renderWithBold110(secondPart)}
+            {renderWithGlow110(secondPart)}
           </span>
         </>
       );
     }
 
-    return <span className="text-white">{renderWithBold110(cleaned)}</span>;
+    return <span className="text-white">{renderWithGlow110(cleaned)}</span>;
   };
 
   const headingLine2Node = useMemo(() => {
@@ -84,7 +82,7 @@ export default function Hero() {
 
     return (
       <span className="block bg-gradient-to-r from-sky-400 to-blue-500 text-transparent bg-clip-text drop-shadow-[0_0_10px_rgba(56,189,248,0.7)]">
-        {renderWithBold110(headingLine2)}
+        {renderWithGlow110(headingLine2)}
       </span>
     );
   }, [headingLine2]);
@@ -92,59 +90,45 @@ export default function Hero() {
   return (
     <header id="top" className="py-16 flex justify-center">
       <section className="mx-auto max-w-4xl px-6 text-center">
-        {/* Tagline Area */}
         <div className="h-[30px] sm:h-[36px] flex justify-center items-center">
           {tagline && (
-            <div
-              className="inline-flex items-center rounded-full border border-slate-700/80 
-                         bg-slate-900/70 px-4 sm:px-5 py-1.5 sm:py-2
-                         shadow-[0_0_10px_rgba(0,255,255,0.6),0_0_20px_rgba(0,255,255,0.4)]"
-            >
+            <div className="inline-flex items-center rounded-full border border-slate-700/80 bg-slate-900/70 px-4 sm:px-5 py-1.5 sm:py-2 shadow-[0_0_10px_rgba(0,255,255,0.6),0_0_20px_rgba(0,255,255,0.4)]">
               <span className="text-[11px] sm:text-sm font-medium text-slate-200">
-                {renderWithBold110(tagline)}
+                {renderWithGlow110(tagline)}
               </span>
             </div>
           )}
         </div>
 
-        {/* Heading Area */}
         <div className="mt-8 w-full">
           <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold leading-tight tracking-tight text-center">
-            {/* LINE 1 */}
             {headingLine1 && (
               <span className="block">{renderHeadingLine1(headingLine1)}</span>
             )}
-
-            {/* LINE 2 */}
             {headingLine2Node}
           </h1>
         </div>
 
-        {/* Description Area */}
         <div className="min-h-[48px] sm:min-h-[60px]">
           {description && (
             <p className="mt-4 text-sm sm:text-base md:text-lg text-slate-200/90 leading-relaxed max-w-2xl mx-auto">
-              {renderWithBold110(description)}
+              {renderWithGlow110(description)}
             </p>
           )}
         </div>
 
-        {/* Subtext Area */}
         <div className="min-h-[32px] sm:min-h-[36px]">
           {subtext && (
             <p className="mt-6 text-[14px] sm:text-lg font-semibold text-cyan-300">
-              {renderWithBold110(subtext)}
+              {renderWithGlow110(subtext)}
             </p>
           )}
         </div>
 
-        {/* Buttons Area */}
         <div className="mt-7 flex items-center justify-center gap-3 sm:gap-4 flex-wrap min-h-[56px]">
           <Link
             to="/#packages"
-            className="glow-button inline-flex items-center justify-center gap-2 rounded-md 
-                       px-3 sm:px-5 py-2 sm:py-3 text-[11px] sm:text-sm font-semibold text-white 
-                       ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
+            className="glow-button inline-flex items-center justify-center gap-2 rounded-md px-3 sm:px-5 py-2 sm:py-3 text-[11px] sm:text-sm font-semibold text-white ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
           >
             <Zap className="w-4 h-4 sm:w-5 sm:h-5 text-white drop-shadow-[0_0_6px_rgba(56,189,248,0.8)]" />
             Supercharge Your Performance Now
@@ -156,9 +140,7 @@ export default function Hero() {
 
           <Link
             to="/benchmarks"
-            className="glow-button inline-flex items-center justify-center gap-2 rounded-md 
-                       px-3 sm:px-5 py-2 sm:py-3 text-[11px] sm:text-sm font-semibold text-white 
-                       ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
+            className="glow-button inline-flex items-center justify-center gap-2 rounded-md px-3 sm:px-5 py-2 sm:py-3 text-[11px] sm:text-sm font-semibold text-white ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
           >
             View Results
             <span className="glow-line glow-line-top" />
@@ -168,7 +150,6 @@ export default function Hero() {
           </Link>
         </div>
 
-        {/* Bullets Area */}
         <div className="mt-8 w-full">
           {bullets.length > 0 && (
             <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 sm:gap-x-6">
@@ -176,7 +157,7 @@ export default function Hero() {
                 <div key={i} className="flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-green-400 shrink-0" />
                   <span className="text-s sm:text-s font-medium text-slate-200 whitespace-nowrap">
-                    {renderWithBold110(text)}
+                    {renderWithGlow110(text)}
                   </span>
                 </div>
               ))}
