@@ -16,6 +16,14 @@ export default {
       description: 'Displayed as text, e.g. $79.99 or $199.99',
     },
     {
+      name: 'order',
+      title: 'Display Order',
+      type: 'number',
+      description: 'Controls package ordering (1 renders leftmost)',
+      initialValue: 1,
+      validation: (Rule) => Rule.integer().min(1),
+    },
+    {
       name: 'tag',
       title: 'Highlight Tag',
       type: 'string',
@@ -33,12 +41,6 @@ export default {
       title: 'Button Text',
       type: 'string',
       initialValue: 'Book Now',
-    },
-    {
-      name: 'buttonLink',
-      title: 'Button Link',
-      type: 'string',
-      description: 'Internal or external link (e.g. /discord or https://...)',
     },
     {
       name: 'isHighlighted',

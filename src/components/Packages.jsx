@@ -58,13 +58,14 @@ export default function Packages() {
 
     client
       .fetch(
-        `*[_type == "package"] | order(_createdAt asc) {
+        `*[_type == "package"] | order(coalesce(order, 999) asc, _createdAt asc) {
           title,
           price,
           tag,
           features,
           buttonText,
-          isHighlighted
+          isHighlighted,
+          order
         }`
       )
       .then(setPackages)
