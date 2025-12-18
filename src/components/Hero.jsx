@@ -130,8 +130,7 @@ export default function Hero() {
             to="/#packages"
             className="glow-button inline-flex items-center justify-center gap-2 rounded-md px-3 sm:px-5 py-2 sm:py-3 text-[11px] sm:text-sm font-semibold text-white ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
           >
-            <Zap className="w-4 h-4 sm:w-5 sm:h-5 text-white drop-shadow-[0_0_6px_rgba(56,189,248,0.8)]" />
-            Supercharge Your Performance Now
+            Book Optimization
             <span className="glow-line glow-line-top" />
             <span className="glow-line glow-line-right" />
             <span className="glow-line glow-line-bottom" />
@@ -142,7 +141,7 @@ export default function Hero() {
             to="/benchmarks"
             className="glow-button inline-flex items-center justify-center gap-2 rounded-md px-3 sm:px-5 py-2 sm:py-3 text-[11px] sm:text-sm font-semibold text-white ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
           >
-            View Results
+            See FPS Boosts
             <span className="glow-line glow-line-top" />
             <span className="glow-line glow-line-right" />
             <span className="glow-line glow-line-bottom" />
