@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Zap } from "lucide-react";
 import { client } from "../sanityClient";
@@ -23,43 +23,71 @@ export default function Hero() {
   }, []);
 
   const tagline = heroData?.tagline;
-  // Fallback if you renamed the field in Sanity, otherwise use headingLine1
+
   const headingLine1 = heroData?.headingData1 || heroData?.headingLine1;
   const headingLine2 = heroData?.headingLine2;
+
   const description = heroData?.description;
   const subtext = heroData?.subtext;
   const bullets = heroData?.bullets || [];
 
-  // FIXED: Logic to split text at "-" and keep it inline
-  const renderHeading = (text) => {
+  const normalizeText = (s = "") =>
+    String(s)
+      .replace(/\\u00a0/g, " ")
+      .replace(/\u00a0/g, " ");
+
+  const renderWithBold110 = (text) => {
+    const cleaned = normalizeText(text);
+    const target = "110% FPS";
+
+    if (!cleaned || !cleaned.includes(target)) return cleaned;
+
+    const parts = cleaned.split(target);
+
+    return (
+      <>
+        {parts[0]}
+        <span className="font-extrabold">{target}</span>
+        {parts.slice(1).join(target)}
+      </>
+    );
+  };
+
+  const renderHeadingLine1 = (text) => {
     if (!text) return null;
 
-    if (text.includes("-")) {
-      const parts = text.split("-");
-      // "PC Optimization "
+    const cleaned = normalizeText(text);
+
+    if (cleaned.includes("-")) {
+      const parts = cleaned.split("-");
       const firstPart = parts[0].trim();
-      // "Reimagined"
       const secondPart = parts.slice(1).join("-").trim();
 
       return (
         <>
-          {/* Part 1: White Text (including the dash) */}
-          <span className="text-white">{firstPart} - </span>
+          <span className="text-white">
+            {renderWithBold110(`${firstPart} - `)}
+          </span>
 
-          {/* Part 2: Blue Highlighted Text */}
-          <span
-            className="bg-gradient-to-r from-sky-400 to-blue-500 text-transparent 
-                       bg-clip-text drop-shadow-[0_0_10px_rgba(56,189,248,0.7)]"
-          >
-            {secondPart}
+          <span className="bg-gradient-to-r from-sky-400 to-blue-500 text-transparent bg-clip-text drop-shadow-[0_0_10px_rgba(56,189,248,0.7)]">
+            {renderWithBold110(secondPart)}
           </span>
         </>
       );
     }
 
-    // Standard text if no dash is found
-    return <span className="text-white">{text}</span>;
+    return <span className="text-white">{renderWithBold110(cleaned)}</span>;
   };
+
+  const headingLine2Node = useMemo(() => {
+    if (!headingLine2) return null;
+
+    return (
+      <span className="block bg-gradient-to-r from-sky-400 to-blue-500 text-transparent bg-clip-text drop-shadow-[0_0_10px_rgba(56,189,248,0.7)]">
+        {renderWithBold110(headingLine2)}
+      </span>
+    );
+  }, [headingLine2]);
 
   return (
     <header id="top" className="py-16 flex justify-center">
@@ -69,33 +97,26 @@ export default function Hero() {
           {tagline && (
             <div
               className="inline-flex items-center rounded-full border border-slate-700/80 
-                          bg-slate-900/70 px-4 sm:px-5 py-1.5 sm:py-2
-                          shadow-[0_0_10px_rgba(0,255,255,0.6),0_0_20px_rgba(0,255,255,0.4)]"
+                         bg-slate-900/70 px-4 sm:px-5 py-1.5 sm:py-2
+                         shadow-[0_0_10px_rgba(0,255,255,0.6),0_0_20px_rgba(0,255,255,0.4)]"
             >
               <span className="text-[11px] sm:text-sm font-medium text-slate-200">
-                {tagline}
+                {renderWithBold110(tagline)}
               </span>
             </div>
           )}
         </div>
 
         {/* Heading Area */}
-        {/* Removed 'flex' classes here to allow text to flow naturally inline */}
-        <div className="mt-8 w-full min-h-[80px] sm:min-h-[100px]">
+        <div className="mt-8 w-full">
           <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold leading-tight tracking-tight text-center">
-            {/* Render Heading Line 1 (with split logic) */}
-            {headingLine1 && renderHeading(headingLine1)}
-
-            {/* Render Heading Line 2 (if it exists separately) */}
-            {headingLine2 && (
-              <span
-                className="bg-gradient-to-r from-sky-400 to-blue-500 text-transparent 
-                           bg-clip-text drop-shadow-[0_0_10px_rgba(56,189,248,0.7)] 
-                           ml-2 sm:ml-3"
-              >
-                {headingLine2}
-              </span>
+            {/* LINE 1 */}
+            {headingLine1 && (
+              <span className="block">{renderHeadingLine1(headingLine1)}</span>
             )}
+
+            {/* LINE 2 */}
+            {headingLine2Node}
           </h1>
         </div>
 
@@ -103,7 +124,7 @@ export default function Hero() {
         <div className="min-h-[48px] sm:min-h-[60px]">
           {description && (
             <p className="mt-4 text-sm sm:text-base md:text-lg text-slate-200/90 leading-relaxed max-w-2xl mx-auto">
-              {description}
+              {renderWithBold110(description)}
             </p>
           )}
         </div>
@@ -112,7 +133,7 @@ export default function Hero() {
         <div className="min-h-[32px] sm:min-h-[36px]">
           {subtext && (
             <p className="mt-6 text-[14px] sm:text-lg font-semibold text-cyan-300">
-              {subtext}
+              {renderWithBold110(subtext)}
             </p>
           )}
         </div>
@@ -122,8 +143,8 @@ export default function Hero() {
           <Link
             to="/#packages"
             className="glow-button inline-flex items-center justify-center gap-2 rounded-md 
-                        px-3 sm:px-5 py-2 sm:py-3 text-[11px] sm:text-sm font-semibold text-white 
-                        ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
+                       px-3 sm:px-5 py-2 sm:py-3 text-[11px] sm:text-sm font-semibold text-white 
+                       ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
           >
             <Zap className="w-4 h-4 sm:w-5 sm:h-5 text-white drop-shadow-[0_0_6px_rgba(56,189,248,0.8)]" />
             Supercharge Your Performance Now
@@ -136,8 +157,8 @@ export default function Hero() {
           <Link
             to="/benchmarks"
             className="glow-button inline-flex items-center justify-center gap-2 rounded-md 
-                        px-3 sm:px-5 py-2 sm:py-3 text-[11px] sm:text-sm font-semibold text-white 
-                        ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
+                       px-3 sm:px-5 py-2 sm:py-3 text-[11px] sm:text-sm font-semibold text-white 
+                       ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
           >
             View Results
             <span className="glow-line glow-line-top" />
@@ -155,7 +176,7 @@ export default function Hero() {
                 <div key={i} className="flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-green-400 shrink-0" />
                   <span className="text-s sm:text-s font-medium text-slate-200 whitespace-nowrap">
-                    {text}
+                    {renderWithBold110(text)}
                   </span>
                 </div>
               ))}
