@@ -37,6 +37,7 @@ const getQuestionId = (question = "", answer = "") => {
 export default function FaqSection() {
   const location = useLocation();
   const [sections, setSections] = useState([]);
+  const [faqCopy, setFaqCopy] = useState(null);
   const [activeCategory, setActiveCategory] = useState(null);
   const [openQuestions, setOpenQuestions] = useState({});
   const categoryRefs = useRef([]);
@@ -96,6 +97,21 @@ export default function FaqSection() {
   useEffect(() => {
     client
       .fetch(
+        `*[_type == "faqSettings"][0]{
+          eyebrow,
+          title,
+          subtitle
+        }`,
+        {},
+        { cache: "no-store" }
+      )
+      .then(setFaqCopy)
+      .catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    client
+      .fetch(
         `*[_type == "faqSection"] | order(_createdAt asc) {
           sectionTitle,
           questions[]{question, answer}
@@ -105,9 +121,6 @@ export default function FaqSection() {
       )
       .then((res) => {
         setSections(res || []);
-        if ((res || []).length) {
-          setActiveCategory((prev) => (prev === null ? 0 : prev));
-        }
       })
       .catch(console.error);
   }, []);
@@ -120,7 +133,6 @@ export default function FaqSection() {
 
     if (hash === "faq") {
       scrollWithOffset("faq");
-      if (activeCategory === null) setActiveCategory(0);
       return;
     }
 
@@ -156,6 +168,11 @@ export default function FaqSection() {
   }, [location.hash, sections]);
 
   const isLoading = !sections.length;
+  const eyebrowText = faqCopy?.eyebrow || "Answers without the fluff";
+  const headingText = faqCopy?.title || "Frequently Asked Questions";
+  const subtitleText =
+    faqCopy?.subtitle ||
+    "Click a category to reveal the questions, then tap a question to expand its answer.";
 
   return (
     <section
@@ -165,14 +182,13 @@ export default function FaqSection() {
       <div className="relative max-w-6xl mx-auto">
         <div className="text-center">
           <span className="inline-flex items-center gap-2 px-4 py-1 rounded-full bg-sky-900/40 border border-sky-500/30 text-xs sm:text-sm font-semibold uppercase tracking-wide text-cyan-100 shadow-[0_0_18px_rgba(56,189,248,0.5)]">
-            Answers without the fluff
+            {eyebrowText}
           </span>
           <h2 className="mt-4 text-4xl sm:text-5xl font-extrabold tracking-tight text-sky-100 drop-shadow-[0_0_20px_rgba(56,189,248,0.35)]">
-            Frequently Asked Questions
+            {headingText}
           </h2>
           <p className="mt-3 text-slate-200/80 text-sm sm:text-base">
-            Click a category to reveal the questions, then tap a question to
-            expand its answer.
+            {subtitleText}
           </p>
         </div>
 
