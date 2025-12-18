@@ -132,13 +132,15 @@ export default function HowItWorks() {
                   <div className="w-full flex justify-center">
                     <a
                       href="https://discord.gg/M7nTkn9dxE"
-                      className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-sky-400 to-cyan-500
-                                 text-slate-900 font-semibold px-4 py-2 text-sm shadow-[0_8px_24px_rgba(56,189,248,0.35)]
-                                 hover:shadow-[0_12px_30px_rgba(56,189,248,0.45)] transition-transform duration-200 hover:-translate-y-0.5"
+                      className="glow-button inline-flex items-center gap-2 rounded-full px-4 sm:px-5 py-2 text-sm font-semibold text-white ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
                       target="_blank"
                       rel="noreferrer"
                     >
                       Join our Discord
+                      <span className="glow-line glow-line-top" />
+                      <span className="glow-line glow-line-right" />
+                      <span className="glow-line glow-line-bottom" />
+                      <span className="glow-line glow-line-left" />
                     </a>
                   </div>
                 )}

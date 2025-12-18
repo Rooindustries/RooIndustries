@@ -48,10 +48,6 @@ const hostTimeLabel = (h) => {
 };
 
 const UPGRADE_FAQ_HASH = "upgrade-path";
-const shouldLinkUpgrade = (text = "") =>
-  /upgrade path|upgrade a single component|every 6 months|upgrade pc each 6 months|reXOC/i.test(
-    text
-  );
 
 const getUtcFromHostLocal = (year, monthIndex, day, hostHour) => {
   const utcMs =
@@ -327,6 +323,31 @@ export default function BookingForm({ isMobile }) {
   const closeVertexModal = () => {
     document.body.classList.remove("is-modal-blur");
     setShowVertexModal(false);
+  };
+
+  const renderFeatureWithUpgradeLink = (text = "") => {
+    if (!/future upgrade path/i.test(text)) return text;
+
+    return text.split(/(Future Upgrade Path)/i).map((part, idx) => {
+      const isMatch = /future upgrade path/i.test(part);
+      if (isMatch) {
+        return (
+          <Link
+            key={`upgrade-link-${idx}`}
+            to={`/#${UPGRADE_FAQ_HASH}`}
+            className="underline underline-offset-2 transition"
+            style={{ color: "#22D3EE" }}
+            onClick={() => {
+              closeVertexModal();
+            }}
+          >
+            {part}
+          </Link>
+        );
+      }
+
+      return <React.Fragment key={`upgrade-text-${idx}`}>{part}</React.Fragment>;
+    });
   };
 
   // Persist referral from URL into session storage; clear if no ref is present
@@ -2287,20 +2308,7 @@ export default function BookingForm({ isMobile }) {
                       >
                         <span className="text-sky-400 mt-0.5">-</span>
                         <span className="flex-1">
-                          {shouldLinkUpgrade(text) ? (
-                            <Link
-                              to={`/#${UPGRADE_FAQ_HASH}`}
-                              className="underline underline-offset-2 transition"
-                              style={{ color: "#22D3EE" }}
-                              onClick={() => {
-                                closeVertexModal();
-                              }}
-                            >
-                              {text}
-                            </Link>
-                          ) : (
-                            text
-                          )}
+                          {renderFeatureWithUpgradeLink(text)}
                         </span>
                       </motion.li>
                     ))}
