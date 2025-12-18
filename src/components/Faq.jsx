@@ -331,7 +331,7 @@ export default function FaqSection() {
                               <button
                                 type="button"
                                 onClick={() => handleNextCategory(i)}
-                                className="group inline-flex items-center gap-2 rounded-full border border-cyan-400/70 bg-gradient-to-r from-sky-600/60 to-cyan-500/60 px-4 py-2 text-sm font-semibold text-slate-950 shadow-[0_6px_18px_rgba(56,189,248,0.26)] transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_10px_24px_rgba(56,189,248,0.36)]"
+                                className="glow-button group inline-flex items-center gap-2 rounded-full px-4 sm:px-5 py-2 text-sm font-semibold text-white ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
                               >
                                 Next: {nextCategory?.sectionTitle}
                                 <motion.span
@@ -344,6 +344,10 @@ export default function FaqSection() {
                                 >
                                   <ArrowRight className="h-4 w-4" />
                                 </motion.span>
+                                <span className="glow-line glow-line-top" />
+                                <span className="glow-line glow-line-right" />
+                                <span className="glow-line glow-line-bottom" />
+                                <span className="glow-line glow-line-left" />
                               </button>
                             </div>
                           )}
