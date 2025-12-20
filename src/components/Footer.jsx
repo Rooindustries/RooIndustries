@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Zap } from "lucide-react";
 import { client } from "../sanityClient";
 
 export default function Footer() {
@@ -49,12 +48,16 @@ export default function Footer() {
       <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
         <Link
           to="/#packages"
-          className="glow-button inline-flex items-center justify-center gap-2 rounded-md 
-                       px-4 sm:px-5 py-3 text-sm font-semibold text-white 
-                       ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300 w-full sm:w-auto"
+          className="glow-button relative inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-cyan-300 ring-1 ring-cyan-500/60 hover:text-cyan-100 active:translate-y-px transition-all duration-300 w-full sm:w-auto"
+          style={{
+            background: "#0a1d3d",
+            backgroundImage: "none",
+            boxShadow:
+              "0 0 26px rgba(56,189,248,0.30), 0 0 38px rgba(56,189,248,0.18)",
+            animation: "none",
+          }}
         >
-          <Zap className="w-4 h-4 sm:w-5 sm:h-5 text-white drop-shadow-[0_0_6px_rgba(56,189,248,0.8)]" />
-          Supercharge Your Performance
+          Book Optimization
           <span className="glow-line glow-line-top" />
           <span className="glow-line glow-line-right" />
           <span className="glow-line glow-line-bottom" />
@@ -64,7 +67,7 @@ export default function Footer() {
         <Link
           to="/Contact"
           className="glow-button inline-flex items-center justify-center gap-2 rounded-md 
-                     px-6 py-3 text-sm font-semibold text-white 
+                     px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white 
                      ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300 w-full sm:w-auto"
         >
           Contact Us
