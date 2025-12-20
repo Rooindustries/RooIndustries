@@ -89,6 +89,11 @@ body.view-plan-open #booking-modal-close {
   animation: glowPulseCentered 3.2s ease-in-out infinite;
 }
 
+.glow-button.fps-boosts-button {
+  box-shadow: 0 0 8px rgba(3, 233, 244, 0.16),
+    0 0 16px rgba(3, 233, 244, 0.1);
+}
+
 .glow-button:disabled,
 .glow-button[aria-disabled="true"] {
   opacity: 0.6;
