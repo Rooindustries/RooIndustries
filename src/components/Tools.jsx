@@ -167,10 +167,14 @@ export default function Tools() {
                   {/* top row: icon + tag */}
                   <div className="flex items-start justify-between gap-3 mb-5">
                     <div className="w-9 h-9 rounded-xl bg-slate-900/80 border border-sky-700/50 flex items-center justify-center overflow-hidden shrink-0">
+                      {/* SEO: ensure tool icons are crawlable with descriptive alt text. */}
                       {iconUrl ? (
                         <img
                           src={iconUrl}
-                          alt={title}
+                          alt={title ? `${title} tool icon` : "Tool icon"}
+                          width={28}
+                          height={28}
+                          decoding="async"
                           className="w-7 h-7 object-contain"
                         />
                       ) : (
@@ -266,10 +270,18 @@ export default function Tools() {
             </button>
 
             <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-slate-900/80 border border-sky-700/60 flex items-center justify-center shadow-[0_0_25px_rgba(56,189,248,0.35)]">
+              {/* SEO: keep the modal icon descriptive for screen readers. */}
               {pendingDownload.iconUrl ? (
                 <img
                   src={pendingDownload.iconUrl}
-                  alt={pendingDownload.title || "Tool icon"}
+                  alt={
+                    pendingDownload.title
+                      ? `${pendingDownload.title} tool icon`
+                      : "Tool icon"
+                  }
+                  width={48}
+                  height={48}
+                  decoding="async"
                   className="w-12 h-12 object-contain"
                 />
               ) : (

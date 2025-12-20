@@ -37,7 +37,7 @@ export default function Terms() {
         return (
           <a
             key={i}
-            href="/contact"
+            href="mailto:serviroo@rooindustries.com"
             className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition-colors"
           >
             {part}
@@ -73,11 +73,19 @@ export default function Terms() {
                   marks: {
                     link: ({ value, children }) => {
                       const href = (value?.href || "").toLowerCase();
+                      const isContactLink =
+                        href === "/contact" ||
+                        href.startsWith("/contact?") ||
+                        href.startsWith("/contact#") ||
+                        href.startsWith("/contact/");
                       const isEmail =
                         href.includes("rooindustries.com") ||
-                        href.startsWith("mailto");
+                        href.startsWith("mailto") ||
+                        isContactLink;
 
-                      const finalHref = isEmail ? "/contact" : value?.href;
+                      const finalHref = isEmail
+                        ? "mailto:serviroo@rooindustries.com"
+                        : value?.href;
 
                       // Apply Cyan style if it's an email, otherwise keep standard white style
                       const linkClasses = isEmail
