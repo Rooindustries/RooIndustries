@@ -155,10 +155,13 @@ export default function Navbar() {
             href="https://discord.gg/M7nTkn9dxE"
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1 px-2 sm:px-4 py-1.5 rounded-full transition hover:text-cyan-400 leading-none"
+            className="inline-flex items-center gap-1 px-2 sm:px-4 py-1.5 rounded-full transition hover:text-cyan-400"
           >
-            <FaDiscord className="text-[1.1em] self-center" aria-hidden="true" />
-            <span>Discord</span>
+            <FaDiscord
+              className="text-[1.1em] relative top-[-0.25px] flex-shrink-0"
+              aria-hidden="true"
+            />
+            <span className="leading-none">Discord</span>
           </a>
         </div>
       </div>
