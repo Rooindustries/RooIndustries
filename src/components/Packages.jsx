@@ -125,6 +125,12 @@ export default function Packages() {
           const includedSet = new Set(
             (p.includedBullets || []).map((b) => b?._id).filter(Boolean)
           );
+          const orderedBullets = hasGlobalBullets
+            ? [
+                ...globalBullets.filter((b) => includedSet.has(b._id)),
+                ...globalBullets.filter((b) => !includedSet.has(b._id)),
+              ]
+            : [];
 
           return (
             <div
@@ -162,7 +168,7 @@ export default function Packages() {
                 <div className="mt-5">
                   <ul className="w-full space-y-2.5 text-left text-base sm:text-lg text-slate-300 leading-relaxed">
                     {hasGlobalBullets ? (
-                      globalBullets.map((b) => {
+                      orderedBullets.map((b) => {
                         const on = includedSet.has(b._id);
                         return (
                           <li
