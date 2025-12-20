@@ -1,24 +1,37 @@
 import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { client } from "../sanityClient";
+import PackageDetailsModal from "./PackageDetailsModal";
 
 export default function Packages() {
   const [packages, setPackages] = useState([]);
+  const [globalBullets, setGlobalBullets] = useState([]);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsPkg, setDetailsPkg] = useState(null);
+
   const location = useLocation();
   const bookingState = {
     backgroundLocation: location.state?.backgroundLocation || location,
   };
   const UPGRADE_FAQ_HASH = "upgrade-path";
 
+  const openDetails = (pkg) => {
+    setDetailsPkg(pkg);
+    setDetailsOpen(true);
+  };
+
+  const closeDetails = () => {
+    setDetailsOpen(false);
+    setDetailsPkg(null);
+  };
+
   const renderFeatureText = (text) => {
     if (!text) return null;
 
     const linkRegex = /(Future Upgrade Path)/i;
-
     const boldRegex = /(Lifetime)/i;
 
     return text.split(boldRegex).map((part, i) => {
-      // If this part is "Lifetime", make it bold
       if (boldRegex.test(part)) {
         return (
           <span key={i} className="font-bold text-white">
@@ -56,21 +69,34 @@ export default function Packages() {
       }
     }
 
-    client
-      .fetch(
-        `*[_type == "package"] | order(coalesce(order, 999) asc, _createdAt asc) {
-          title,
-          price,
-          tag,
-          features,
-          buttonText,
-          isHighlighted,
-          order
-        }`
-      )
-      .then(setPackages)
+    const packagesQuery = `*[_type == "package"] | order(coalesce(order, 999) asc, _createdAt asc) {
+      _id,
+      title,
+      price,
+      tag,
+      description,
+      includedBullets[]->{ _id },
+      features,
+      buttonText,
+      isHighlighted,
+      order
+    }`;
+
+    const bulletsQuery = `*[_type == "packageBullet"] | order(coalesce(order, 999) asc, _createdAt asc) {
+      _id,
+      label,
+      order
+    }`;
+
+    Promise.all([client.fetch(packagesQuery), client.fetch(bulletsQuery)])
+      .then(([pkgs, bullets]) => {
+        setPackages(Array.isArray(pkgs) ? pkgs : []);
+        setGlobalBullets(Array.isArray(bullets) ? bullets : []);
+      })
       .catch(console.error);
   }, []);
+
+  const hasGlobalBullets = globalBullets.length > 0;
 
   return (
     <section
@@ -96,64 +122,115 @@ export default function Packages() {
         {packages.map((p, i) => {
           const isXoc = p.title === "XOC / Extreme Overclocking";
 
+          const includedSet = new Set(
+            (p.includedBullets || []).map((b) => b?._id).filter(Boolean)
+          );
+
           return (
             <div
-              key={i}
-              className={`relative w-full sm:w-[520px] border rounded-xl p-6 transition-all duration-500 flex flex-col justify-between bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 ${
+              key={p._id || i}
+              className={`relative w-full sm:w-[500px] border rounded-xl px-7 py-7 transition-all duration-500 flex flex-col bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 text-base sm:text-lg ${
                 p.isHighlighted
                   ? "border-sky-400/60 shadow-[0_0_35px_rgba(56,189,248,0.4)] hover:shadow-[0_0_50px_rgba(56,189,248,0.6)]"
                   : "border-sky-600/40 shadow-[0_0_25px_rgba(14,165,233,0.25)] hover:shadow-[0_0_35px_rgba(14,165,233,0.4)]"
-              }`}
+              } min-h-[620px]`}
             >
               {p.tag && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                  <span className="inline-block whitespace-nowrap bg-sky-500 text-xs font-bold px-4 py-1 rounded-full shadow-[0_0_15px_rgba(56,189,248,0.6)]">
+                  <span className="inline-block whitespace-nowrap bg-sky-500 text-sm font-bold px-4 py-1 rounded-full shadow-[0_0_15px_rgba(56,189,248,0.6)]">
                     {p.tag}
                   </span>
                 </div>
               )}
 
+              {/* Top content */}
               <div>
-                <h3 className="text-2xl font-semibold">{p.title}</h3>
-                <p className="mt-6 text-5xl font-bold text-sky-400">
+                <h3 className="text-3xl font-semibold">{p.title}</h3>
+
+                <p className="mt-6 text-6xl font-bold text-sky-400">
                   {p.price}
                 </p>
-                <ul className="mt-6 space-y-2 text-left text-sm text-slate-300 leading-relaxed">
-                  {p.features?.map((f, idx) => {
-                    return (
-                      <li key={idx} className="flex items-start gap-2">
-                        <span className="text-sky-400 mt-1">✔</span>
-                        <span className="flex-1">
-                          {/* Use the strict helper function here */}
-                          {renderFeatureText(f)}
-                        </span>
+
+                {p.description && (
+                  <p className="mt-4 text-left text-base sm:text-lg leading-relaxed text-slate-300/85">
+                    {p.description}
+                  </p>
+                )}
+
+                <div className="mt-5 border-t border-white/10" />
+
+                <div className="mt-5">
+                  <ul className="w-full space-y-2.5 text-left text-base sm:text-lg text-slate-300 leading-relaxed">
+                    {hasGlobalBullets ? (
+                      globalBullets.map((b) => {
+                        const on = includedSet.has(b._id);
+                        return (
+                          <li
+                            key={b._id}
+                            className={`flex items-start gap-2 transition ${
+                              on ? "opacity-100" : "opacity-35"
+                            }`}
+                          >
+                            <span
+                              className={`mt-0.5 inline-flex h-5 w-6 shrink-0 items-center justify-center ${
+                                on ? "text-sky-400" : "text-slate-500"
+                              }`}
+                            >
+                              {on ? "✓" : "○"}
+                            </span>
+                            <span className="flex-1">{b.label}</span>
+                          </li>
+                        );
+                      })
+                    ) : (
+                      <li className="text-sm text-slate-400/70">
+                        (No global bullets yet — create 6 “Package Bullet
+                        (Global)” items in Sanity.)
                       </li>
-                    );
-                  })}
-                </ul>
+                    )}
+                  </ul>
+                </div>
               </div>
 
-              <Link
-                to={`/booking?title=${encodeURIComponent(
-                  p.title
-                )}&price=${encodeURIComponent(
-                  p.price
-                )}&tag=${encodeURIComponent(p.tag || "")}&xoc=${
-                  isXoc ? "1" : "0"
-                }`}
-                state={bookingState}
-                className="glow-button mt-8 w-full text-white py-3 rounded-md font-semibold shadow-[0_0_20px_rgba(56,189,248,0.4)] transition-all duration-300 text-center inline-flex items-center justify-center gap-2"
-              >
-                {p.buttonText}
-                <span className="glow-line glow-line-top" />
-                <span className="glow-line glow-line-right" />
-                <span className="glow-line glow-line-bottom" />
-                <span className="glow-line glow-line-left" />
-              </Link>
+              {/* Bottom buttons pinned to bottom */}
+              <div className="mt-auto pt-7 flex flex-col sm:flex-row gap-3">
+                <button
+                  type="button"
+                  onClick={() => openDetails(p)}
+                  className="w-full sm:w-1/2 rounded-md border border-sky-500/40 bg-slate-900/40 py-3 text-base font-semibold text-sky-100 shadow-[0_0_15px_rgba(56,189,248,0.2)] transition hover:bg-slate-900/70 hover:text-white"
+                >
+                  Full Breakdown
+                </button>
+
+                <Link
+                  to={`/booking?title=${encodeURIComponent(
+                    p.title
+                  )}&price=${encodeURIComponent(
+                    p.price
+                  )}&tag=${encodeURIComponent(p.tag || "")}&xoc=${
+                    isXoc ? "1" : "0"
+                  }`}
+                  state={bookingState}
+                  className="glow-button w-full sm:w-1/2 text-white text-lg py-3 rounded-md font-semibold shadow-[0_0_20px_rgba(56,189,248,0.4)] transition-all duration-300 text-center inline-flex items-center justify-center gap-2"
+                >
+                  {p.buttonText || "Book Now"}
+                  <span className="glow-line glow-line-top" />
+                  <span className="glow-line glow-line-right" />
+                  <span className="glow-line glow-line-bottom" />
+                  <span className="glow-line glow-line-left" />
+                </Link>
+              </div>
             </div>
           );
         })}
       </div>
+
+      <PackageDetailsModal
+        open={detailsOpen}
+        onClose={closeDetails}
+        pkg={detailsPkg}
+        renderFeature={renderFeatureText}
+      />
     </section>
   );
 }
