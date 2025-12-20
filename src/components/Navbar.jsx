@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { FaDiscord } from "react-icons/fa";
 import BackButton from "./BackButton";
 
 export default function Navbar() {
@@ -154,9 +155,10 @@ export default function Navbar() {
             href="https://discord.gg/M7nTkn9dxE"
             target="_blank"
             rel="noreferrer"
-            className="px-2 sm:px-4 py-1.5 rounded-full transition hover:text-cyan-400"
+            className="inline-flex items-center gap-1 px-2 sm:px-4 py-1.5 rounded-full transition hover:text-cyan-400 leading-none"
           >
-            Discord
+            <FaDiscord className="text-[1.1em] self-center" aria-hidden="true" />
+            <span>Discord</span>
           </a>
         </div>
       </div>
