@@ -122,7 +122,6 @@ export default function Packages() {
         {packages.map((p, i) => {
           const isXoc = p.title === "XOC / Extreme Overclocking";
 
-          // ✅ FIX: no hooks inside map
           const includedSet = new Set(
             (p.includedBullets || []).map((b) => b?._id).filter(Boolean)
           );
@@ -152,17 +151,14 @@ export default function Packages() {
                   {p.price}
                 </p>
 
-                {/* ✅ NEW description (from Sanity) */}
                 {p.description && (
                   <p className="mt-4 text-left text-base sm:text-lg leading-relaxed text-slate-300/85">
                     {p.description}
                   </p>
                 )}
 
-                {/* ✅ light divider */}
                 <div className="mt-5 border-t border-white/10" />
 
-                {/* ✅ 6 global bullets with checked/faded */}
                 <div className="mt-5">
                   <ul className="w-full space-y-2.5 text-left text-base sm:text-lg text-slate-300 leading-relaxed">
                     {hasGlobalBullets ? (
