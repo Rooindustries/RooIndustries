@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from "react";
 import { useLocation, Link, useNavigate } from "react-router-dom";
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 import { motion } from "framer-motion";
+import { deriveSlotLabels, HOST_TZ_NAME } from "../utils/timezone";
 
 export default function Payment({ hideFooter = false }) {
   const location = useLocation();
@@ -86,8 +87,47 @@ export default function Payment({ hideFooter = false }) {
 
   const packageTitle = bookingData.packageTitle || "";
   const packagePrice = bookingData.packagePrice || "$0";
-  const date = bookingData.displayDate || "--";
-  const time = bookingData.displayTime || "--";
+  const parsedUtc = bookingData.startTimeUTC
+    ? new Date(bookingData.startTimeUTC)
+    : null;
+
+  const utcStart =
+    parsedUtc && !isNaN(parsedUtc.getTime()) ? parsedUtc : null;
+
+  const userTimeZone =
+    bookingData.localTimeZone ||
+    (() => {
+      try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      } catch {
+        return "UTC";
+      }
+    })();
+
+  const hostTimeZone = bookingData.hostTimeZone || HOST_TZ_NAME;
+
+  const slotLabels = utcStart
+    ? deriveSlotLabels(utcStart, userTimeZone, hostTimeZone)
+    : null;
+
+  const date =
+    slotLabels?.localDateLabel || bookingData.displayDate || "--";
+  const time =
+    slotLabels?.localTimeLabel || bookingData.displayTime || "--";
+  const hostDate =
+    slotLabels?.hostDateLabel ||
+    bookingData.hostDate ||
+    bookingData.date ||
+    bookingData.displayDate ||
+    "--";
+  const hostTime =
+    bookingData.hostTime ||
+    slotLabels?.hostTimeLabel ||
+    bookingData.time ||
+    bookingData.displayTime ||
+    "--";
+  const crossesDateBoundary =
+    slotLabels?.crossesDateBoundary && date !== "--" && hostDate !== "--";
   const baseAmount =
     parseFloat(String(packagePrice).replace(/[^0-9.]/g, "")) || 0;
 
@@ -684,7 +724,16 @@ export default function Payment({ hideFooter = false }) {
               )}
 
               <p className="text-sm text-slate-400 mt-1">
-                Date: <span className="text-sky-300">{date}</span> - Time: <span className="text-sky-300">{time}</span>
+                Your time: <span className="text-sky-300">{date}</span> at{" "}
+                <span className="text-sky-300">{time}</span>
+              </p>
+              <p className="text-xs text-slate-400">
+                Host ({hostTimeZone}):{" "}
+                <span className="text-sky-200">{hostDate}</span> at{" "}
+                <span className="text-sky-200">{hostTime}</span>
+                {crossesDateBoundary
+                  ? " • Note: this slot spans different calendar days."
+                  : ""}
               </p>
 
               {isFree && (
