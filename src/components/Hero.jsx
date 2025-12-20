@@ -15,6 +15,7 @@ export default function Hero() {
           headingLine2,
           description,
           subtext,
+          ctaNote,
           bullets
         }`
       )
@@ -127,24 +128,6 @@ export default function Hero() {
 
         <div className="mt-7 flex items-center justify-center gap-3 sm:gap-4 flex-wrap min-h-[56px]">
           <Link
-            to="/#packages"
-            className="glow-button relative inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-cyan-300 ring-1 ring-cyan-500/60 hover:text-cyan-100 active:translate-y-px transition-all duration-300"
-            style={{
-              background: "#0a1d3d",
-              backgroundImage: "none",
-              boxShadow:
-                "0 0 26px rgba(56,189,248,0.30), 0 0 38px rgba(56,189,248,0.18)",
-              animation: "none",
-            }}
-          >
-            Book Optimization
-            <span className="glow-line glow-line-top" />
-            <span className="glow-line glow-line-right" />
-            <span className="glow-line glow-line-bottom" />
-            <span className="glow-line glow-line-left" />
-          </Link>
-
-          <Link
             to="/benchmarks"
             className="glow-button inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
           >
@@ -154,9 +137,26 @@ export default function Hero() {
             <span className="glow-line glow-line-bottom" />
             <span className="glow-line glow-line-left" />
           </Link>
+
+          <Link
+            to="/#packages"
+            className="glow-button book-optimization-button relative inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white ring-2 ring-cyan-300/70 hover:text-white active:translate-y-px transition-all duration-300"
+          >
+            Book Optimization
+            <span className="glow-line glow-line-top" />
+            <span className="glow-line glow-line-right" />
+            <span className="glow-line glow-line-bottom" />
+            <span className="glow-line glow-line-left" />
+          </Link>
         </div>
 
-        <div className="mt-8 w-full">
+        {heroData?.ctaNote && (
+          <p className="mt-5 text-sm sm:text-base text-sky-200/90 font-semibold">
+            {heroData.ctaNote}
+          </p>
+        )}
+
+        <div className="mt-5 w-full">
           {bullets.length > 0 && (
             <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 sm:gap-x-6">
               {bullets.map((text, i) => (
