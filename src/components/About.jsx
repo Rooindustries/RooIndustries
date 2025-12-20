@@ -14,7 +14,10 @@ export default function About() {
           title,
           description,
           recordTitle,
-          recordImage,
+          recordImage{
+            ...,
+            "dimensions": asset->metadata.dimensions
+          },
           recordLink
         }`
       )
@@ -27,6 +30,10 @@ export default function About() {
   const recordImageUrl = aboutData.recordImage
     ? urlFor(aboutData.recordImage).url()
     : "";
+  const recordDimensions = aboutData.recordImage?.dimensions;
+  const recordAlt = aboutData.recordTitle
+    ? `Leaderboard record image: ${aboutData.recordTitle}`
+    : "Leaderboard record image";
   const leaderboardHref =
     aboutData.recordLink && typeof aboutData.recordLink === "string"
       ? aboutData.recordLink
@@ -40,7 +47,7 @@ export default function About() {
       {zoomSrc && (
         <ImageZoomModal
           src={zoomSrc}
-          alt={aboutData.recordTitle || "Leaderboard preview"}
+          alt={recordAlt}
           onClose={() => setZoomSrc("")}
         />
       )}
@@ -64,12 +71,20 @@ export default function About() {
 
         {aboutData.recordImage && (
           <>
-            <img
-              src={recordImageUrl}
-              alt="System Benchmark Result"
-              className="rounded-xl shadow-lg border border-[#2b3a4a] hover:border-cyan-500 transition-all duration-300 cursor-pointer"
-              onClick={() => setZoomSrc(recordImageUrl)}
-            />
+            {/* SEO/CLS: add a semantic figure/caption and intrinsic size without affecting layout. */}
+            <figure className="m-0">
+              <img
+                src={recordImageUrl}
+                alt={recordAlt}
+                width={recordDimensions?.width}
+                height={recordDimensions?.height}
+                loading="lazy"
+                decoding="async"
+                className="rounded-xl shadow-lg border border-[#2b3a4a] hover:border-cyan-500 transition-all duration-300 cursor-pointer"
+                onClick={() => setZoomSrc(recordImageUrl)}
+              />
+              <figcaption className="sr-only">{recordAlt}</figcaption>
+            </figure>
             <a
               href={leaderboardHref}
               target="_blank"

@@ -48,29 +48,9 @@ export default function Footer() {
       <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
         <Link
           to="/#packages"
-          className="glow-button relative inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-cyan-300 ring-1 ring-cyan-500/60 hover:text-cyan-100 active:translate-y-px transition-all duration-300 w-full sm:w-auto"
-          style={{
-            background: "#0a1d3d",
-            backgroundImage: "none",
-            boxShadow:
-              "0 0 26px rgba(56,189,248,0.30), 0 0 38px rgba(56,189,248,0.18)",
-            animation: "none",
-          }}
+          className="glow-button book-optimization-button relative inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white ring-2 ring-cyan-300/70 hover:text-white active:translate-y-px transition-all duration-300 w-full sm:w-auto"
         >
           Book Optimization
-          <span className="glow-line glow-line-top" />
-          <span className="glow-line glow-line-right" />
-          <span className="glow-line glow-line-bottom" />
-          <span className="glow-line glow-line-left" />
-        </Link>
-
-        <Link
-          to="/Contact"
-          className="glow-button inline-flex items-center justify-center gap-2 rounded-md 
-                     px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white 
-                     ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300 w-full sm:w-auto"
-        >
-          Contact Us
           <span className="glow-line glow-line-top" />
           <span className="glow-line glow-line-right" />
           <span className="glow-line glow-line-bottom" />

@@ -150,16 +150,14 @@ export default function Navbar() {
           >
             Tools
           </Link>
-          <Link
-            to="/contact"
-            className={`px-2 sm:px-4 py-1.5 rounded-full transition ${
-              isActive("/contact")
-                ? "bg-cyan-400 text-black"
-                : "hover:text-cyan-400"
-            }`}
+          <a
+            href="https://discord.gg/M7nTkn9dxE"
+            target="_blank"
+            rel="noreferrer"
+            className="px-2 sm:px-4 py-1.5 rounded-full transition hover:text-cyan-400"
           >
-            Contact
-          </Link>
+            Discord
+          </a>
         </div>
       </div>
     </nav>
