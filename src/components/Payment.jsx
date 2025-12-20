@@ -906,9 +906,13 @@ export default function Payment({ hideFooter = false }) {
               {/* PayPal option */}
               <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-4 border border-sky-800/30 bg-[#0c162a]/80 rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(14,165,233,0.15)]">
                 <div className="flex items-center gap-4">
+                  {/* SEO: add descriptive alt text and intrinsic size for the payment logo. */}
                   <img
                     src="https://www.paypalobjects.com/webstatic/mktg/Logo/pp-logo-100px.png"
-                    alt="PayPal"
+                    alt="PayPal payment logo"
+                    width={100}
+                    height={26}
+                    decoding="async"
                     className="w-20"
                   />
                   <p className="text-slate-300 text-sm font-medium hidden sm:block">

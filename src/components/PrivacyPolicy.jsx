@@ -20,12 +20,12 @@ export default function PrivacyPolicy() {
     const parts = cleanText.split(/(serviroo@rooindustries\.com)/gi);
 
     return parts.map((part, i) => {
-      // 3. If this part is the email, apply the contact link and style
+      // 3. If this part is the email, apply the mailto link and style
       if (part.toLowerCase() === "serviroo@rooindustries.com") {
         return (
           <a
             key={i}
-            href="/contact"
+            href="mailto:serviroo@rooindustries.com"
             // Applied the requested cyan styling
             className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition-colors"
           >
@@ -73,11 +73,19 @@ export default function PrivacyPolicy() {
                 marks: {
                   link: ({ value, children }) => {
                     const href = (value?.href || "").toLowerCase();
+                    const isContactLink =
+                      href === "/contact" ||
+                      href.startsWith("/contact?") ||
+                      href.startsWith("/contact#") ||
+                      href.startsWith("/contact/");
                     const isTargetEmail =
                       href.includes("rooindustries.com") ||
-                      href.startsWith("mailto");
+                      href.startsWith("mailto") ||
+                      isContactLink;
 
-                    const finalHref = isTargetEmail ? "/contact" : value?.href;
+                    const finalHref = isTargetEmail
+                      ? "mailto:serviroo@rooindustries.com"
+                      : value?.href;
                     const linkClasses = isTargetEmail
                       ? "text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition-colors"
                       : "underline hover:text-cyan-400 transition-colors text-slate-200";
