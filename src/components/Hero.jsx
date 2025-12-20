@@ -128,7 +128,7 @@ export default function Hero() {
         <div className="mt-7 flex items-center justify-center gap-3 sm:gap-4 flex-wrap min-h-[56px]">
           <Link
             to="/#packages"
-            className="glow-button relative inline-flex items-center justify-center gap-2 rounded-md px-3 sm:px-5 py-2 sm:py-3 text-[11px] sm:text-sm font-semibold text-cyan-300 ring-1 ring-cyan-500/60 hover:text-cyan-100 active:translate-y-px transition-all duration-300"
+            className="glow-button relative inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-cyan-300 ring-1 ring-cyan-500/60 hover:text-cyan-100 active:translate-y-px transition-all duration-300"
             style={{
               background: "#0a1d3d",
               backgroundImage: "none",
@@ -146,7 +146,7 @@ export default function Hero() {
 
           <Link
             to="/benchmarks"
-            className="glow-button inline-flex items-center justify-center gap-2 rounded-md px-3 sm:px-5 py-2 sm:py-3 text-[11px] sm:text-sm font-semibold text-white ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
+            className="glow-button inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
           >
             See FPS Boosts
             <span className="glow-line glow-line-top" />
