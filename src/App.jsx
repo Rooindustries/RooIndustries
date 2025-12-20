@@ -216,6 +216,7 @@ function AppContent() {
               <CanvasVideo
                 src="/logo-animated.webm"
                 poster="/logo.webp"
+                alt="Roo Industries logo"
                 onError={() => setUseStaticLogo(true)}
                 className="w-48 sm:w-56 md:w-60 roo-logo-video relative z-10
                 drop-shadow-[0_0_10px_rgba(14,165,233,0.3)]
@@ -244,38 +245,6 @@ function AppContent() {
             </Suspense>
           </main>
 
-          {/* Discord Icon */}
-          <a
-            href="https://discord.gg/M7nTkn9dxE"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="fixed bottom-3.5 sm:bottom-12 right-2 sm:right-12 z-50 flex flex-col items-center gap-1 group animate-[float_3s_ease-in-out_infinite]"
-          >
-            <span
-              className="text-[13px] sm:text-sm font-semibold text-sky-200/80 
-              drop-shadow-[0_0_6px_rgba(14,165,233,0.4)] 
-              group-hover:text-sky-300 transition-colors duration-300"
-            >
-              Join the Discord!
-            </span>
-
-            <div
-              className="relative bg-gradient-to-br from-[#295bbf] via-[#1f48a0] to-[#162f74]
-              text-white p-4 sm:p-5 rounded-full
-              shadow-[0_0_25px_rgba(56,189,248,0.4),0_0_45px_rgba(56,189,248,0.2)]
-              transition-all duration-300 hover:scale-125 
-              hover:shadow-[0_0_45px_rgba(56,189,248,0.8),0_0_90px_rgba(56,189,248,0.4)]
-              before:absolute before:inset-0 before:rounded-full
-              before:bg-[radial-gradient(circle_at_center,rgba(56,189,248,0.25),transparent_70%)]
-              before:blur-xl before:-z-10"
-            >
-              <FaDiscord
-                className="w-8 h-8 sm:w-11 sm:h-11 text-white drop-shadow-[0_0_15px_rgba(56,189,248,0.7)]
-                  group-hover:drop-shadow-[0_0_25px_rgba(56,189,248,1)] 
-                  transition-all duration-300"
-              />
-            </div>
-          </a>
         </div>
         <BookingModal open={isFlowRoute} onClose={closeBookingModal}>
           <Suspense

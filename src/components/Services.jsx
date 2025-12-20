@@ -204,10 +204,14 @@ export default function Services() {
 
               <div className="relative">
                 <div className={iconWrap}>
+                  {/* SEO: keep custom service icons as img elements with descriptive alt text. */}
                   {card.customIcon ? (
                     <img
                       src={urlFor(card.customIcon).width(64).url()}
-                      alt={card.title}
+                      alt={card.title ? `${card.title} service icon` : "Service icon"}
+                      width={28}
+                      height={28}
+                      decoding="async"
                       className="w-7 h-7 object-contain drop-shadow-[0_0_8px_rgba(56,189,248,0.25)]"
                     />
                   ) : (

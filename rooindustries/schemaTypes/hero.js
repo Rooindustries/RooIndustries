@@ -9,6 +9,12 @@ export default {
     {name: 'description', title: 'Short Description', type: 'text', rows: 3},
     {name: 'subtext', title: 'Small Highlight Text', type: 'string'},
     {
+      name: 'ctaNote',
+      title: 'CTA Note (Line under buttons)',
+      type: 'string',
+      description: 'Optional line shown under hero buttons, above badges.',
+    },
+    {
       name: 'bullets',
       title: 'Bottom Bullet Points',
       type: 'array',
