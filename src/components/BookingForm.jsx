@@ -3,8 +3,12 @@ import { createPortal } from "react-dom";
 import { client } from "../sanityClient";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
+import {
+  deriveSlotLabels,
+  formatHostDateLabel,
+  HOST_TZ_NAME,
+} from "../utils/timezone";
 
-const HOST_TZ_NAME = "Asia/Kolkata";
 const IST_OFFSET_MINUTES = 330;
 const FORM_PREFILL_KEY = "booking_form_prefill";
 const HOLD_STORAGE_KEY = "my_slot_hold";
@@ -1353,10 +1357,14 @@ export default function BookingForm({ isMobile }) {
         return;
       }
 
+      const hostDateLabel =
+        formatHostDateLabel(selectedSlot.utcStart, HOST_TZ_NAME) ||
+        selectedDate.toDateString();
+
       const newHold = {
         holdId: data.holdId,
         expiresAt: data.expiresAt,
-        hostDate: selectedDate.toDateString(),
+        hostDate: hostDateLabel,
         hostTime: selectedSlot.hostLabel,
         startTimeUTC: selectedSlot.utcStart.toISOString(),
         packageTitle: selectedPackage.title,
@@ -1400,14 +1408,23 @@ export default function BookingForm({ isMobile }) {
       return;
     }
 
-    const displayDate = selectedDate.toLocaleDateString(undefined, {
-      weekday: "long",
-      month: "long",
-      day: "numeric",
-      year: "numeric",
-    });
+    const slotLabels = deriveSlotLabels(
+      selectedSlot.utcStart,
+      userTimeZone,
+      HOST_TZ_NAME
+    );
 
-    const displayTime = selectedSlot.localLabel;
+    const displayDate =
+      slotLabels.localDateLabel ||
+      selectedDate.toLocaleDateString(undefined, {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      });
+
+    const displayTime = slotLabels.localTimeLabel || selectedSlot.localLabel;
+    const hostDate = slotLabels.hostDateLabel || selectedDate.toDateString();
 
     const referralFromQuery = q.get("ref") || "";
     const referralFromSession = readReferralFromSession();
@@ -1427,14 +1444,15 @@ export default function BookingForm({ isMobile }) {
       displayDate,
       displayTime,
 
-      hostDate: selectedDate.toDateString(),
+      hostDate,
       hostTime: selectedSlot.hostLabel,
       hostTimeZone: HOST_TZ_NAME,
 
       localTimeZone: userTimeZone,
-      localTimeLabel: selectedSlot.localLabel,
+      localTimeLabel: displayTime,
 
       startTimeUTC: selectedSlot.utcStart.toISOString(),
+      crossesDateBoundary: slotLabels.crossesDateBoundary,
 
       discord: form.discord.trim(),
       email: form.email.trim(),

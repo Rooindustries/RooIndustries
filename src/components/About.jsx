@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { Zap } from "lucide-react";
 import { client, urlFor } from "../sanityClient";
+import ImageZoomModal from "../components/ImageZoomModal";
 
 export default function About() {
   const [aboutData, setAboutData] = useState(null);
+  const [zoomSrc, setZoomSrc] = useState("");
 
   useEffect(() => {
     client
@@ -22,11 +24,27 @@ export default function About() {
 
   if (!aboutData) return null;
 
+  const recordImageUrl = aboutData.recordImage
+    ? urlFor(aboutData.recordImage).url()
+    : "";
+  const leaderboardHref =
+    aboutData.recordLink && typeof aboutData.recordLink === "string"
+      ? aboutData.recordLink
+      : "/benchmarks";
+
   return (
     <section
       id="about"
       className="mx-auto max-w-6xl py-16 px-4 sm:px-6 text-center"
     >
+      {zoomSrc && (
+        <ImageZoomModal
+          src={zoomSrc}
+          alt={aboutData.recordTitle || "Leaderboard preview"}
+          onClose={() => setZoomSrc("")}
+        />
+      )}
+
       <h2 className="text-[48px] sm:text-[48px] md:text-[48px] font-extrabold tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
         {aboutData.title}
       </h2>
@@ -44,14 +62,34 @@ export default function About() {
           <Zap className="text-cyan-500 w-6 h-6 animate-pulse drop-shadow-[0_0_6px_#00ffff]" />
         </div>
 
-        {aboutData.recordImage && aboutData.recordLink && (
-          <a href={aboutData.recordLink} target="_blank" rel="noreferrer">
+        {aboutData.recordImage && (
+          <>
             <img
-              src={urlFor(aboutData.recordImage).url()}
+              src={recordImageUrl}
               alt="System Benchmark Result"
-              className="rounded-xl shadow-lg border border-[#2b3a4a] hover:border-cyan-500 transition-all duration-300"
+              className="rounded-xl shadow-lg border border-[#2b3a4a] hover:border-cyan-500 transition-all duration-300 cursor-pointer"
+              onClick={() => setZoomSrc(recordImageUrl)}
             />
-          </a>
+            <a
+              href={leaderboardHref}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-4 glow-button relative inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white ring-1 ring-sky-700/60 hover:text-white active:translate-y-px transition-all duration-300"
+              style={{
+                background: "#0b63d1",
+                backgroundImage: "none",
+                boxShadow:
+                  "0 0 26px rgba(59,130,246,0.35), 0 0 38px rgba(59,130,246,0.2)",
+                animation: "none",
+              }}
+            >
+              View Leaderboard
+              <span className="glow-line glow-line-top" />
+              <span className="glow-line glow-line-right" />
+              <span className="glow-line glow-line-bottom" />
+              <span className="glow-line glow-line-left" />
+            </a>
+          </>
         )}
       </div>
 
