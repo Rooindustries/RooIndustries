@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 
-const CanvasVideo = ({ src, poster, className, onError }) => {
+const CanvasVideo = ({ src, poster, className, onError, alt }) => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
 
@@ -43,6 +43,16 @@ const CanvasVideo = ({ src, poster, className, onError }) => {
 
   return (
     <div style={{ position: 'relative', display: 'inline-block' }}>
+      {/* SEO: mirror the canvas-rendered video with a crawlable img fallback. */}
+      {poster && alt ? (
+        <img
+          src={poster}
+          alt={alt}
+          className="sr-only"
+          decoding="async"
+          loading="eager"
+        />
+      ) : null}
       {/* THE FIX: We cannot use display: none. 
          Instead, we use opacity: 0 and z-index: -1.
          This forces the browser to keep rendering the frames.
@@ -56,6 +66,7 @@ const CanvasVideo = ({ src, poster, className, onError }) => {
         muted
         playsInline
         onError={onError}
+        aria-hidden="true"
         style={{ 
           position: 'absolute', 
           opacity: 0, 
@@ -71,6 +82,7 @@ const CanvasVideo = ({ src, poster, className, onError }) => {
       <canvas
         ref={canvasRef}
         className={className}
+        aria-hidden="true"
       />
     </div>
   );

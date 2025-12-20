@@ -80,6 +80,15 @@ body.view-plan-open #booking-modal-close {
   box-shadow: 0 0 15px rgba(3, 233, 244, 0.25), 0 0 30px rgba(3, 233, 244, 0.15);
 }
 
+.glow-button.book-optimization-button {
+  background: linear-gradient(135deg, #0b4aa3 0%, #0a2e6d 55%, #071936 100%);
+  background-size: 100% 100%;
+  background-position: center;
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.22),
+    0 0 26px rgba(56, 189, 248, 0.16);
+  animation: glowPulseCentered 3.2s ease-in-out infinite;
+}
+
 .glow-button:disabled,
 .glow-button[aria-disabled="true"] {
   opacity: 0.6;
@@ -141,6 +150,20 @@ body.view-plan-open #booking-modal-close {
   }
   100% {
     background-position: 0% 50%;
+  }
+}
+
+@keyframes glowPulseCentered {
+  0%,
+  100% {
+    box-shadow: 0 0 14px rgba(56, 189, 248, 0.22),
+      0 0 26px rgba(56, 189, 248, 0.16);
+    filter: brightness(0.9);
+  }
+  50% {
+    box-shadow: 0 0 24px rgba(56, 189, 248, 0.5),
+      0 0 44px rgba(56, 189, 248, 0.32);
+    filter: brightness(1.02);
   }
 }
 
