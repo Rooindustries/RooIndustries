@@ -17,7 +17,6 @@ import BookingModal from "./components/BookingModal";
 // Lazy-loaded pages
 const Home = lazy(() => import("./pages/Home"));
 const Benchmarks = lazy(() => import("./pages/Benchmarks"));
-const Contact = lazy(() => import("./pages/Contact"));
 const Terms = lazy(() => import("./pages/Terms"));
 const Privacy = lazy(() => import("./pages/PrivacyPolicy"));
 const Reviews = lazy(() => import("./pages/Reviews"));
@@ -80,7 +79,6 @@ function AnimatedRoutes({ setIsModalOpen, routesLocation, routeKey }) {
             path="/benchmarks"
             element={<Benchmarks setIsModalOpen={setIsModalOpen} />}
           />
-          <Route path="/contact" element={<Contact />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/terms" element={<Terms />} />
           <Route
