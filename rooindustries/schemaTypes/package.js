@@ -41,18 +41,24 @@ export default {
       type: 'string',
       description: "Optional label like 'Most Popular' (leave blank if none)",
     },
-
-    // ✅ NEW: pick which of the 6 global bullets apply to THIS package
+    // Per-package bullet lists
     {
-      name: 'includedBullets',
-      title: 'Included Global Bullet Points',
+      name: 'checkedBullets',
+      title: 'Checked Bullet Points',
       type: 'array',
-      of: [{type: 'reference', to: [{type: 'packageBullet'}]}],
-      description: 'Select which of the global 6 bullet points are INCLUDED in this package.',
-      validation: (Rule) => Rule.unique().max(6),
+      of: [{type: 'string'}],
+      description: 'Bullet points shown as checked for this package.',
+      validation: (Rule) => Rule.unique(),
+    },
+    {
+      name: 'uncheckedBullets',
+      title: 'Unchecked Bullet Points',
+      type: 'array',
+      of: [{type: 'string'}],
+      description: 'Bullet points shown as unchecked for this package.',
+      validation: (Rule) => Rule.unique(),
     },
 
-    // Keep your detailed breakdown list for the modal
     {
       name: 'features',
       title: 'Full Breakdown Features (Modal)',
