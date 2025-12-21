@@ -5,7 +5,6 @@ import PackageDetailsModal from "./PackageDetailsModal";
 
 export default function Packages() {
   const [packages, setPackages] = useState([]);
-  const [globalBullets, setGlobalBullets] = useState([]);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsPkg, setDetailsPkg] = useState(null);
 
@@ -57,6 +56,13 @@ export default function Packages() {
     });
   };
 
+  const normalizeBullets = (items) =>
+    Array.isArray(items)
+      ? items
+          .map((item) => (typeof item === "string" ? item.trim() : ""))
+          .filter(Boolean)
+      : [];
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const ref = params.get("ref");
@@ -75,28 +81,21 @@ export default function Packages() {
       price,
       tag,
       description,
-      includedBullets[]->{ _id },
+      checkedBullets,
+      uncheckedBullets,
       features,
       buttonText,
       isHighlighted,
       order
     }`;
 
-    const bulletsQuery = `*[_type == "packageBullet"] | order(coalesce(order, 999) asc, _createdAt asc) {
-      _id,
-      label,
-      order
-    }`;
-
-    Promise.all([client.fetch(packagesQuery), client.fetch(bulletsQuery)])
-      .then(([pkgs, bullets]) => {
+    client
+      .fetch(packagesQuery)
+      .then((pkgs) => {
         setPackages(Array.isArray(pkgs) ? pkgs : []);
-        setGlobalBullets(Array.isArray(bullets) ? bullets : []);
       })
       .catch(console.error);
   }, []);
-
-  const hasGlobalBullets = globalBullets.length > 0;
 
   return (
     <section
@@ -122,15 +121,13 @@ export default function Packages() {
         {packages.map((p, i) => {
           const isXoc = p.title === "XOC / Extreme Overclocking";
 
-          const includedSet = new Set(
-            (p.includedBullets || []).map((b) => b?._id).filter(Boolean)
-          );
-          const orderedBullets = hasGlobalBullets
-            ? [
-                ...globalBullets.filter((b) => includedSet.has(b._id)),
-                ...globalBullets.filter((b) => !includedSet.has(b._id)),
-              ]
-            : [];
+          const checkedBullets = normalizeBullets(p.checkedBullets);
+          const uncheckedBullets = normalizeBullets(p.uncheckedBullets);
+          const orderedBullets = [
+            ...checkedBullets.map((label) => ({ label, checked: true })),
+            ...uncheckedBullets.map((label) => ({ label, checked: false })),
+          ];
+          const hasBullets = orderedBullets.length > 0;
 
           return (
             <div
@@ -158,7 +155,7 @@ export default function Packages() {
                 </p>
 
                 {p.description && (
-                  <p className="mt-4 text-left text-base sm:text-lg leading-relaxed text-slate-300/85">
+                  <p className="mt-4 text-center text-base sm:text-lg leading-relaxed text-slate-300/85">
                     {p.description}
                   </p>
                 )}
@@ -167,12 +164,12 @@ export default function Packages() {
 
                 <div className="mt-5">
                   <ul className="w-full space-y-2.5 text-left text-base sm:text-lg text-slate-300 leading-relaxed">
-                    {hasGlobalBullets ? (
-                      orderedBullets.map((b) => {
-                        const on = includedSet.has(b._id);
+                    {hasBullets ? (
+                      orderedBullets.map((b, index) => {
+                        const on = b.checked;
                         return (
                           <li
-                            key={b._id}
+                            key={`${on ? "on" : "off"}-${index}`}
                             className={`flex items-start gap-2 transition ${
                               on ? "opacity-100" : "opacity-35"
                             }`}
@@ -182,7 +179,7 @@ export default function Packages() {
                                 on ? "text-sky-400" : "text-slate-500"
                               }`}
                             >
-                              {on ? "✓" : "○"}
+                              {on ? "\u2713" : "\u25CB"}
                             </span>
                             <span className="flex-1">{b.label}</span>
                           </li>
@@ -190,8 +187,7 @@ export default function Packages() {
                       })
                     ) : (
                       <li className="text-sm text-slate-400/70">
-                        (No global bullets yet — create 6 “Package Bullet
-                        (Global)” items in Sanity.)
+                        (No package bullets yet)
                       </li>
                     )}
                   </ul>
