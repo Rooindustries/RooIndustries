@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 html {
-  font-family: "Roboto Flex", system-ui, sans-serif;
+  font-family: "Roboto Flex Variable", system-ui, sans-serif;
   scroll-behavior: smooth;
   -webkit-font-smoothing: antialiased;
 }
