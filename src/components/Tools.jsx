@@ -174,6 +174,7 @@ export default function Tools() {
                           alt={title ? `${title} tool icon` : "Tool icon"}
                           width={28}
                           height={28}
+                          loading="lazy"
                           decoding="async"
                           className="w-7 h-7 object-contain"
                         />
