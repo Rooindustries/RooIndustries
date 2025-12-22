@@ -7,8 +7,40 @@ const CanvasVideo = ({ src, poster, className, onError, alt }) => {
   useEffect(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
+    if (!video || !canvas) return;
     const ctx = canvas.getContext('2d', { alpha: true });
+    if (!ctx) return;
     let animationFrameId;
+    let posterImage = null;
+    let posterReady = false;
+    let posterDrawn = false;
+
+    const drawPoster = () => {
+      if (!posterImage || !posterReady || posterDrawn) return;
+      const width = posterImage.naturalWidth || canvas.width;
+      const height = posterImage.naturalHeight || canvas.height;
+      if (width && height) {
+        if (canvas.width !== width || canvas.height !== height) {
+          canvas.width = width;
+          canvas.height = height;
+        }
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(posterImage, 0, 0, canvas.width, canvas.height);
+        posterDrawn = true;
+      }
+    };
+
+    if (poster) {
+      posterImage = new Image();
+      posterImage.decoding = "async";
+      posterImage.src = poster;
+      posterImage.onload = () => {
+        posterReady = true;
+        if (video.readyState < 2) {
+          drawPoster();
+        }
+      };
+    }
 
     const render = () => {
       // Check if video is ready to play
@@ -22,6 +54,8 @@ const CanvasVideo = ({ src, poster, className, onError, alt }) => {
         // Draw the frame
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      } else {
+        drawPoster();
       }
       
       animationFrameId = requestAnimationFrame(render);
@@ -38,8 +72,11 @@ const CanvasVideo = ({ src, poster, className, onError, alt }) => {
     return () => {
       cancelAnimationFrame(animationFrameId);
       video.removeEventListener('loadeddata', startPlay);
+      if (posterImage) {
+        posterImage.onload = null;
+      }
     };
-  }, []);
+  }, [poster]);
 
   return (
     <div style={{ position: 'relative', display: 'inline-block' }}>
