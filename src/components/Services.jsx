@@ -211,6 +211,7 @@ export default function Services() {
                       alt={card.title ? `${card.title} service icon` : "Service icon"}
                       width={28}
                       height={28}
+                      loading="lazy"
                       decoding="async"
                       className="w-7 h-7 object-contain drop-shadow-[0_0_8px_rgba(56,189,248,0.25)]"
                     />

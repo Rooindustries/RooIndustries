@@ -206,6 +206,8 @@ function AppContent() {
               <img
                 src="/logo.webp"
                 alt="Roo Industries Logo"
+                width={500}
+                height={267}
                 className="w-48 sm:w-56 md:w-60 relative z-10"
                 loading="eager"
                 fetchPriority="high"
