@@ -9,6 +9,18 @@ export default {
     {name: 'description', title: 'Short Description', type: 'text', rows: 3},
     {name: 'subtext', title: 'Small Highlight Text', type: 'string'},
     {
+      name: 'ctaPrimaryText',
+      title: 'Primary CTA Text',
+      type: 'string',
+      description: 'Label for the Book Optimization button.',
+    },
+    {
+      name: 'ctaSecondaryText',
+      title: 'Secondary CTA Text',
+      type: 'string',
+      description: 'Label for the See FPS Boosts button.',
+    },
+    {
       name: 'ctaNote',
       title: 'CTA Note (Line under buttons)',
       type: 'string',

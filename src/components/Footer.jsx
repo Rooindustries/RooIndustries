@@ -4,6 +4,7 @@ import { client } from "../sanityClient";
 
 export default function Footer() {
   const [footerData, setFooterData] = useState(null);
+  const [heroCtaText, setHeroCtaText] = useState(null);
   const location = useLocation();
 
   const searchParams = new URLSearchParams(location.search);
@@ -13,16 +14,26 @@ export default function Footer() {
   useEffect(() => {
     client
       .fetch(
-        `*[_type == "footer"][0]{
-          title,
-          subtitle,
-          description,
-          availability
+        `{
+          "footer": *[_type == "footer"][0]{
+            title,
+            subtitle,
+            description,
+            availability
+          },
+          "hero": *[_type == "hero"][0]{
+            ctaPrimaryText
+          }
         }`
       )
-      .then(setFooterData)
+      .then((data) => {
+        setFooterData(data?.footer || null);
+        setHeroCtaText(data?.hero?.ctaPrimaryText || null);
+      })
       .catch(console.error);
   }, []);
+
+  const bookCtaText = heroCtaText || "Tune My Rig";
 
   return (
     <footer
@@ -45,17 +56,39 @@ export default function Footer() {
       </p>
 
       {/* Buttons */}
-      <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
+      <div className="mt-7 flex items-center justify-center gap-3 sm:gap-4 flex-wrap min-h-[56px]">
         <Link
           to="/#packages"
-          className="glow-button book-optimization-button relative inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white ring-2 ring-cyan-300/70 hover:text-white active:translate-y-px transition-all duration-300 w-full sm:w-auto"
+          className="glow-button book-optimization-button relative inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white ring-2 ring-cyan-300/70 hover:text-white active:translate-y-px transition-all duration-300"
         >
-          Tune My Rig
+          {bookCtaText}
           <span className="glow-line glow-line-top" />
           <span className="glow-line glow-line-right" />
           <span className="glow-line glow-line-bottom" />
           <span className="glow-line glow-line-left" />
         </Link>
+
+        <a
+          href="https://www.trustpilot.com/review/rooindustries.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="glow-button fps-boosts-button inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
+        >
+          <img
+            src="/trustpilot-star.png"
+            alt="Trustpilot"
+            width={20}
+            height={20}
+            loading="lazy"
+            decoding="async"
+            className="h-5 w-5 -translate-y-[2px]"
+          />
+          Review on Trustpilot
+          <span className="glow-line glow-line-top" />
+          <span className="glow-line glow-line-right" />
+          <span className="glow-line glow-line-bottom" />
+          <span className="glow-line glow-line-left" />
+        </a>
       </div>
 
       <p className="mt-8 text-xs text-white-400">
