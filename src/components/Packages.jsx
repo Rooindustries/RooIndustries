@@ -5,6 +5,7 @@ import PackageDetailsModal from "./PackageDetailsModal";
 
 export default function Packages() {
   const [packages, setPackages] = useState([]);
+  const [sectionCopy, setSectionCopy] = useState(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsPkg, setDetailsPkg] = useState(null);
 
@@ -95,27 +96,49 @@ export default function Packages() {
         setPackages(Array.isArray(pkgs) ? pkgs : []);
       })
       .catch(console.error);
+
+    const sectionQuery = `*[_type == "packagesSettings"][0]{
+      heading,
+      badgeText,
+      subheading
+    }`;
+
+    client
+      .fetch(sectionQuery)
+      .then(setSectionCopy)
+      .catch(console.error);
   }, []);
+
+  const headingText = sectionCopy?.heading ?? "Choose Your Package";
+  const badgeText = sectionCopy?.badgeText ?? "Fully Online";
+  const subheadingText =
+    sectionCopy?.subheading ?? "Select the tuning package that best fits your needs";
 
   return (
     <section
       id="packages"
       className="relative z-10 pt-32 pb-24 text-center text-white"
     >
-      <h2 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
-        Choose Your Package
-      </h2>
+      {headingText && (
+        <h2 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+          {headingText}
+        </h2>
+      )}
 
-      <div className="mt-4 flex justify-center">
-        <span className="inline-flex items-center gap-2.5 px-5 py-2 rounded-full text-sm sm:text-[0.95rem] font-semibold bg-slate-900/80 text-cyan-100 border border-cyan-400/40 shadow-[0_0_18px_rgba(56,189,248,0.7)]">
-          <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]" />
-          Fully Online
-        </span>
-      </div>
+      {badgeText && (
+        <div className="mt-4 flex justify-center">
+          <span className="inline-flex items-center gap-2.5 px-5 py-2 rounded-full text-sm sm:text-[0.95rem] font-semibold bg-slate-900/80 text-cyan-100 border border-cyan-400/40 shadow-[0_0_18px_rgba(56,189,248,0.7)]">
+            <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]" />
+            {badgeText}
+          </span>
+        </div>
+      )}
 
-      <p className="mt-3 text-slate-300/80 text-sm sm:text-base">
-        Select the tuning package that best fits your needs
-      </p>
+      {subheadingText && (
+        <p className="mt-3 text-slate-300/80 text-sm sm:text-base">
+          {subheadingText}
+        </p>
+      )}
 
       <div className="mt-12 flex flex-col sm:flex-row justify-center gap-10 px-6 flex-wrap">
         {packages.map((p, i) => {

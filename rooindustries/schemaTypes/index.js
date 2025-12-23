@@ -19,6 +19,7 @@ import slotHold from './slotHold'
 import tool from './tool'
 import referralBox from './referralBox'
 import faqSettings from './faqSettings'
+import packagesSettings from './packagesSettings'
 
 export const schemaTypes = [
   benchmark,
@@ -42,4 +43,5 @@ export const schemaTypes = [
   tool,
   referralBox,
   faqSettings,
+  packagesSettings,
 ]
