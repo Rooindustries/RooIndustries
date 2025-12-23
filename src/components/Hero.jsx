@@ -17,6 +17,8 @@ export default function Hero() {
           headingLine2,
           description,
           subtext,
+          ctaPrimaryText,
+          ctaSecondaryText,
           ctaNote,
           ctaNoteIcon,
           bullets
@@ -32,12 +34,8 @@ export default function Hero() {
   const description = heroData?.description;
   const subtext = heroData?.subtext;
   const bullets = heroData?.bullets || [];
-
-  const ctaGlowGradient =
-    "linear-gradient(90deg, rgba(56, 189, 248, 1) 0%, rgba(2, 132, 199, 1) 38%, rgba(29, 78, 216, 1) 100%)";
-  const ctaDeepGradient =
-    "linear-gradient(135deg, #0b4aa3 0%, #0a2e6d 55%, #071936 100%)";
-
+  const primaryCtaText = heroData?.ctaPrimaryText || "Tune My Rig";
+  const secondaryCtaText = heroData?.ctaSecondaryText || "See the Proof";
   const headingLine2BaseClass =
     "bg-gradient-to-r from-sky-400 to-blue-500 text-transparent bg-clip-text drop-shadow-[0_0_10px_rgba(56,189,248,0.7)]";
 
@@ -204,9 +202,8 @@ export default function Hero() {
           <Link
             to="/#packages"
             className="glow-button book-optimization-button relative inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white ring-2 ring-cyan-300/70 hover:text-white active:translate-y-px transition-all duration-300"
-            style={{ background: ctaGlowGradient }}
           >
-            Tune My Rig
+            {renderWithGlow110(primaryCtaText)}
             <span className="glow-line glow-line-top" />
             <span className="glow-line glow-line-right" />
             <span className="glow-line glow-line-bottom" />
@@ -216,9 +213,8 @@ export default function Hero() {
           <Link
             to="/benchmarks"
             className="glow-button fps-boosts-button inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
-            style={{ background: ctaDeepGradient }}
           >
-            See the Proof
+            {renderWithGlow110(secondaryCtaText)}
             <span className="glow-line glow-line-top" />
             <span className="glow-line glow-line-right" />
             <span className="glow-line glow-line-bottom" />

@@ -77,6 +77,14 @@ export default {
                   name: 'benchGame',
                   fields: [
                     {name: 'gameTitle', title: 'Game Title', type: 'string'},
+                    {
+                      name: 'gameLogo',
+                      title: 'Game Logo',
+                      type: 'image',
+                      options: {
+                        hotspot: true,
+                      },
+                    },
                     {name: 'beforeFps', title: 'Before FPS', type: 'number'},
                     {name: 'afterFps', title: 'Optimized FPS', type: 'number'},
                     {name: 'gpu', title: 'GPU', type: 'string'},
