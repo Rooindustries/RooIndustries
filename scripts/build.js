@@ -1,0 +1,22 @@
+const { execSync } = require("child_process");
+
+// CRA build: use react-snap after build to prerender marketing routes.
+const resolvedVercelEnv =
+  process.env.VERCEL_ENV ||
+  process.env.REACT_APP_VERCEL_ENV ||
+  "production";
+
+const env = {
+  ...process.env,
+  CI: process.env.CI || "false",
+  REACT_APP_VERCEL_ENV: resolvedVercelEnv,
+};
+
+if (!env.REACT_APP_SITE_URL && process.env.SITE_URL) {
+  env.REACT_APP_SITE_URL = process.env.SITE_URL;
+}
+
+execSync("react-scripts build", {
+  stdio: "inherit",
+  env,
+});
