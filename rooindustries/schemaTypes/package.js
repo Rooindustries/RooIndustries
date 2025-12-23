@@ -81,6 +81,13 @@ export default {
       initialValue: 'Book Now',
     },
     {
+      name: 'detailsButtonText',
+      title: 'Details Button Text',
+      type: 'string',
+      description: 'Label for the breakdown button on the packages page.',
+      initialValue: "See What's Included",
+    },
+    {
       name: 'isHighlighted',
       title: 'Highlight Card',
       type: 'boolean',
