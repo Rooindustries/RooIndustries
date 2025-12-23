@@ -37,6 +37,31 @@ const RefReset = lazy(() => import("./pages/RefReset"));
 const RefRegister = lazy(() => import("./pages/RefRegister"));
 const Tools = lazy(() => import("./pages/Tools"));
 
+const isIOSDevice = () => {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  return (
+    /iPad|iPhone|iPod/.test(ua) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
+};
+
+const canPlayWebm = () => {
+  if (typeof document === "undefined") return false;
+  const video = document.createElement("video");
+  if (!video.canPlayType) return false;
+  const canPlay =
+    video.canPlayType('video/webm; codecs="vp9, opus"') ||
+    video.canPlayType('video/webm; codecs="vp8, vorbis"') ||
+    video.canPlayType("video/webm");
+  return canPlay === "probably" || canPlay === "maybe";
+};
+
+const getInitialLogoMode = () => {
+  if (isIOSDevice()) return "apng";
+  return canPlayWebm() ? "webm" : "apng";
+};
+
 function RedirectToDiscord() {
   React.useEffect(() => {
     window.location.href = "https://discord.gg/M7nTkn9dxE";
@@ -112,10 +137,21 @@ function AnimatedRoutes({ setIsModalOpen, routesLocation, routeKey }) {
 
 function AppContent() {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [useStaticLogo, setUseStaticLogo] = useState(false);
+  const [logoMode, setLogoMode] = useState(() => getInitialLogoMode());
+  const [apngLoaded, setApngLoaded] = useState(false);
+
   const location = useLocation();
   const navigate = useNavigate();
   const pathName = location.pathname || "";
+
+  const handleWebmError = () => {
+    setApngLoaded(false);
+    setLogoMode((current) => (current === "webm" ? "apng" : "static"));
+  };
+
+  const handleApngError = () => {
+    setLogoMode("static");
+  };
 
   const backgroundLocation =
     location.state && location.state.backgroundLocation
@@ -133,6 +169,16 @@ function AppContent() {
       : null;
   const routesLocation = backgroundLocation || fallbackLocation || location;
   const routesKey = `${routesLocation.pathname}${routesLocation.search || ""}`;
+
+  const logoSizeClassName = "w-48 sm:w-56 md:w-60";
+  const logoStaticClassName = `${logoSizeClassName} relative z-10`;
+  const logoAnimatedClassName = `${logoSizeClassName} relative z-10 drop-shadow-[0_0_10px_rgba(14,165,233,0.3)] transition-all duration-500`;
+  const logoApngPlaceholderClassName = `${logoStaticClassName} transition-opacity duration-300 ${
+    apngLoaded ? "opacity-0" : "opacity-100"
+  }`;
+  const logoApngClassName = `absolute inset-0 w-full h-full z-10 drop-shadow-[0_0_10px_rgba(14,165,233,0.3)] transition-all duration-500 ${
+    apngLoaded ? "opacity-100" : "opacity-0"
+  }`;
 
   const closeBookingModal = () => {
     const target =
@@ -202,25 +248,49 @@ function AppContent() {
                             transition-all duration-500 ease-out z-[-1]" 
             />
 
-            {useStaticLogo ? (
+            {logoMode === "static" ? (
+              // 1. FALLBACK: Static WebP if anything fails
               <img
                 src="/logo.webp"
                 alt="Roo Industries Logo"
                 width={500}
                 height={267}
-                className="w-48 sm:w-56 md:w-60 relative z-10"
+                className={logoStaticClassName}
                 loading="eager"
                 fetchPriority="high"
               />
+            ) : logoMode === "apng" ? (
+              // 2. iOS/No-WebM MODE: APNG animation with static fallback while loading
+              <div className="relative inline-block">
+                <img
+                  src="/logo.webp"
+                  alt=""
+                  aria-hidden="true"
+                  width={500}
+                  height={267}
+                  className={logoApngPlaceholderClassName}
+                  loading="eager"
+                  fetchPriority="high"
+                />
+                <img
+                  src="/logo-animated.png"
+                  alt="Roo Industries Logo"
+                  className={logoApngClassName}
+                  loading="eager"
+                  fetchPriority="high"
+                  decoding="async"
+                  onLoad={() => setApngLoaded(true)}
+                  onError={handleApngError}
+                />
+              </div>
             ) : (
+              // 3. DESKTOP/ANDROID MODE: Canvas video when WebM is supported
               <CanvasVideo
                 src="/logo-animated.webm"
                 poster="/logo.webp"
-                alt="Roo Industries logo"
-                onError={() => setUseStaticLogo(true)}
-                className="w-48 sm:w-56 md:w-60 roo-logo-video relative z-10
-                drop-shadow-[0_0_10px_rgba(14,165,233,0.3)]
-                transition-all duration-500" 
+                alt="Roo Industries Logo"
+                onError={handleWebmError}
+                className={`${logoAnimatedClassName} roo-logo-video`}
               />
             )}
           </a>
