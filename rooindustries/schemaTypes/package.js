@@ -41,6 +41,13 @@ export default {
       type: 'string',
       description: "Optional label like 'Most Popular' (leave blank if none)",
     },
+    {
+      name: 'tagGoldGlow',
+      title: 'Highlight Tag Gold Glow',
+      type: 'boolean',
+      description: 'Uses the gold glow styling for the highlight tag.',
+      initialValue: false,
+    },
     // Per-package bullet lists
     {
       name: 'checkedBullets',
