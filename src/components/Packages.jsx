@@ -87,6 +87,7 @@ export default function Packages() {
       uncheckedBullets,
       features,
       buttonText,
+      detailsButtonText,
       isHighlighted,
       order
     }`;
@@ -244,7 +245,7 @@ export default function Packages() {
                   onClick={() => openDetails(p)}
                   className="w-full sm:w-1/2 rounded-md border border-sky-500/40 bg-slate-900/40 py-3 text-base font-semibold text-sky-100 shadow-[0_0_15px_rgba(56,189,248,0.2)] transition hover:bg-slate-900/70 hover:text-white"
                 >
-                  Full Breakdown
+                  {p.detailsButtonText || "See What's Included"}
                 </button>
 
                 <Link
