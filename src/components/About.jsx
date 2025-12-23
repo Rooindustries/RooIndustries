@@ -56,7 +56,7 @@ export default function About() {
         {aboutData.title}
       </h2>
 
-      <div className="mx-auto mt-8 max-w-4xl rounded-2xl bg-[#1b2430] p-8 sm:p-10 ring-1 ring-[#2b3a4a] text-left text-base sm:text-lg leading-8 sm:leading-9 text-slate-200/95">
+      <div className="mx-auto mt-8 max-w-4xl rounded-2xl bg-[#1b2430] p-8 sm:p-10 ring-1 ring-[#2b3a4a] text-left text-base sm:text-lg leading-8 sm:leading-9 text-slate-200/95 whitespace-pre-line">
         {aboutData.description}
       </div>
 

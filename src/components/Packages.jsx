@@ -81,6 +81,7 @@ export default function Packages() {
       title,
       price,
       tag,
+      tagGoldGlow,
       description,
       checkedBullets,
       uncheckedBullets,
@@ -163,8 +164,27 @@ export default function Packages() {
             >
               {p.tag && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                  <span className="inline-block whitespace-nowrap bg-sky-500 text-sm font-bold px-4 py-1 rounded-full shadow-[0_0_15px_rgba(56,189,248,0.6)]">
-                    {p.tag}
+                  <span
+                    className={`inline-flex items-center whitespace-nowrap text-sm font-bold px-4 py-1 rounded-full ${
+                      p.tagGoldGlow
+                        ? "border border-amber-300/70 bg-slate-900/90 bg-gradient-to-r from-amber-500/25 via-amber-400/15 to-amber-500/25 shadow-[0_0_16px_rgba(245,158,11,0.9),0_0_30px_rgba(217,119,6,0.65)]"
+                        : "bg-sky-500 shadow-[0_0_15px_rgba(56,189,248,0.6)]"
+                    }`}
+                  >
+                    {p.tagGoldGlow ? (
+                      <span
+                        className="bg-gradient-to-r from-amber-200 via-orange-300 to-amber-100 text-transparent bg-clip-text
+                        [text-shadow:
+                          0_0_10px_rgba(245,158,11,0.90),
+                          0_0_22px_rgba(217,119,6,0.75),
+                          0_0_44px_rgba(180,83,9,0.60)
+                        ]"
+                      >
+                        {p.tag}
+                      </span>
+                    ) : (
+                      p.tag
+                    )}
                   </span>
                 </div>
               )}
