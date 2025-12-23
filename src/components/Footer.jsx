@@ -77,11 +77,9 @@ export default function Footer() {
           <img
             src="/trustpilot-star.png"
             alt="Trustpilot"
-            width={20}
-            height={20}
             loading="lazy"
             decoding="async"
-            className="h-5 w-5 -translate-y-[2px]"
+            className="h-[1.15em] w-auto -translate-y-[0.1em] object-contain"
           />
           Review on Trustpilot
           <span className="glow-line glow-line-top" />
