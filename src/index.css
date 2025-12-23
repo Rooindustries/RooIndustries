@@ -18,6 +18,22 @@ body::-webkit-scrollbar {
   display: none;
 }
 
+body {
+  background: linear-gradient(
+    to top,
+    #00b7c0 0%,
+    #006185 30%,
+    #001f5a 65%,
+    #000040 100%
+  );
+  background-attachment: fixed;
+}
+
+.trustpilot-widget,
+.trustpilot-widget iframe {
+  background: transparent !important;
+}
+
 body.is-modal-open {
   overflow: hidden !important;
 }
@@ -81,15 +97,26 @@ body.view-plan-open #booking-modal-close {
 }
 
 .glow-button.book-optimization-button {
-  background: linear-gradient(135deg, #0b4aa3 0%, #0a2e6d 55%, #071936 100%);
-  background-size: 100% 100%;
-  background-position: center;
-  box-shadow: 0 0 14px rgba(56, 189, 248, 0.22),
-    0 0 26px rgba(56, 189, 248, 0.16);
-  animation: glowPulseCentered 3.2s ease-in-out infinite;
+  background: linear-gradient(
+    120deg,
+    rgba(102, 185, 250, 1) 0%,
+    rgba(38, 145, 220, 1) 45%,
+    rgba(18, 95, 195, 1) 100%
+  );
+  background-size: 200% 200%;
+  background-position: 0% 50%;
+  box-shadow: 0 0 14px rgba(45, 212, 191, 0.28),
+    0 0 26px rgba(45, 212, 191, 0.2);
+  animation: lightBlueSweep 12s ease-in-out infinite;
 }
 
 .glow-button.fps-boosts-button {
+  background: rgba(15, 23, 42, 0.25);
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  background-clip: padding-box;
+  animation: none;
   box-shadow: 0 0 8px rgba(3, 233, 244, 0.16),
     0 0 16px rgba(3, 233, 244, 0.1);
 }
@@ -169,6 +196,18 @@ body.view-plan-open #booking-modal-close {
     box-shadow: 0 0 24px rgba(56, 189, 248, 0.5),
       0 0 44px rgba(56, 189, 248, 0.32);
     filter: brightness(1.02);
+  }
+}
+
+@keyframes lightBlueSweep {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
   }
 }
 
