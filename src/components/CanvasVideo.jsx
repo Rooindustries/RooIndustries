@@ -90,10 +90,8 @@ const CanvasVideo = ({ src, poster, className, onError, alt }) => {
           loading="eager"
         />
       ) : null}
-      {/* THE FIX: We cannot use display: none. 
-         Instead, we use opacity: 0 and z-index: -1.
-         This forces the browser to keep rendering the frames.
-      */}
+      
+      {/* HIDDEN VIDEO SOURCE */}
       <video
         ref={videoRef}
         src={src}
