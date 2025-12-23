@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Zap } from "lucide-react";
 import { client } from "../sanityClient";
 
 export default function Hero() {
@@ -19,6 +18,7 @@ export default function Hero() {
           description,
           subtext,
           ctaNote,
+          ctaNoteIcon,
           bullets
         }`
       )
@@ -32,10 +32,12 @@ export default function Hero() {
   const description = heroData?.description;
   const subtext = heroData?.subtext;
   const bullets = heroData?.bullets || [];
+
   const ctaGlowGradient =
     "linear-gradient(90deg, rgba(56, 189, 248, 1) 0%, rgba(2, 132, 199, 1) 38%, rgba(29, 78, 216, 1) 100%)";
   const ctaDeepGradient =
     "linear-gradient(135deg, #0b4aa3 0%, #0a2e6d 55%, #071936 100%)";
+
   const headingLine2BaseClass =
     "bg-gradient-to-r from-sky-400 to-blue-500 text-transparent bg-clip-text drop-shadow-[0_0_10px_rgba(56,189,248,0.7)]";
 
@@ -144,6 +146,9 @@ export default function Hero() {
     );
   }, [headingLine2, headingLine2BaseClass, line2NoWrap]);
 
+  const ctaNote = heroData?.ctaNote;
+  const ctaNoteIcon = heroData?.ctaNoteIcon;
+
   return (
     <header id="top" className="py-16 flex justify-center">
       <section className="mx-auto max-w-4xl px-6 text-center">
@@ -166,6 +171,7 @@ export default function Hero() {
               <span className="block">{renderHeadingLine1(headingLine1)}</span>
             )}
             {headingLine2Node}
+
             {headingLine2 && (
               <span
                 ref={line2MeasureRef}
@@ -200,7 +206,7 @@ export default function Hero() {
             className="glow-button book-optimization-button relative inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white ring-2 ring-cyan-300/70 hover:text-white active:translate-y-px transition-all duration-300"
             style={{ background: ctaGlowGradient }}
           >
-            Book Optimization
+            Tune My Rig
             <span className="glow-line glow-line-top" />
             <span className="glow-line glow-line-right" />
             <span className="glow-line glow-line-bottom" />
@@ -212,7 +218,7 @@ export default function Hero() {
             className="glow-button fps-boosts-button inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
             style={{ background: ctaDeepGradient }}
           >
-            See FPS Boosts
+            See the Proof
             <span className="glow-line glow-line-top" />
             <span className="glow-line glow-line-right" />
             <span className="glow-line glow-line-bottom" />
@@ -220,9 +226,24 @@ export default function Hero() {
           </Link>
         </div>
 
-        {heroData?.ctaNote && (
-          <p className="mt-5 text-sm sm:text-base text-sky-200/90 font-semibold">
-            {heroData.ctaNote}
+        {ctaNote && (
+          <p className="mt-5 text-sm sm:text-base font-extrabold tracking-wide relative inline-flex items-center gap-2">
+            {ctaNoteIcon && (
+              <span className="text-slate-100" aria-hidden="true">
+                {ctaNoteIcon}
+              </span>
+            )}
+            <span
+              className="bg-gradient-to-r from-amber-200 via-orange-300 to-amber-100 text-transparent bg-clip-text
+        [text-shadow:
+          0_0_10px_rgba(245,158,11,0.90),
+          0_0_22px_rgba(217,119,6,0.85),
+          0_0_44px_rgba(180,83,9,0.70),
+          0_0_80px_rgba(124,45,18,0.55)
+        ]"
+            >
+              {ctaNote}
+            </span>
           </p>
         )}
 
