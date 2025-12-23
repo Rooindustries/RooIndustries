@@ -15,6 +15,12 @@ export default {
       description: 'Optional line shown under hero buttons, above badges.',
     },
     {
+      name: 'ctaNoteIcon',
+      title: 'CTA Note Icon',
+      type: 'string',
+      description: 'Optional icon/emoji shown before the CTA note.',
+    },
+    {
       name: 'bullets',
       title: 'Bottom Bullet Points',
       type: 'array',
