@@ -1,10 +1,13 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Zap } from "lucide-react";
 import { client } from "../sanityClient";
 
 export default function Hero() {
   const [heroData, setHeroData] = useState(null);
+  const [line2NoWrap, setLine2NoWrap] = useState(false);
+  const headingRef = useRef(null);
+  const line2MeasureRef = useRef(null);
 
   useEffect(() => {
     client
@@ -33,6 +36,8 @@ export default function Hero() {
     "linear-gradient(90deg, rgba(56, 189, 248, 1) 0%, rgba(2, 132, 199, 1) 38%, rgba(29, 78, 216, 1) 100%)";
   const ctaDeepGradient =
     "linear-gradient(135deg, #0b4aa3 0%, #0a2e6d 55%, #071936 100%)";
+  const headingLine2BaseClass =
+    "bg-gradient-to-r from-sky-400 to-blue-500 text-transparent bg-clip-text drop-shadow-[0_0_10px_rgba(56,189,248,0.7)]";
 
   const normalizeText = (s = "") =>
     String(s)
@@ -82,15 +87,62 @@ export default function Hero() {
     return <span className="text-white">{renderWithGlow110(cleaned)}</span>;
   };
 
+  useEffect(() => {
+    if (!headingLine2) {
+      setLine2NoWrap(false);
+      return;
+    }
+
+    const container = headingRef.current;
+    const measureEl = line2MeasureRef.current;
+    if (!container || !measureEl) return;
+
+    let frame = 0;
+
+    const update = () => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const containerWidth = container.clientWidth;
+        const textWidth = measureEl.offsetWidth;
+        const totalBuffer = Math.max(24, Math.round(containerWidth * 0.08));
+        const maxLineWidth = containerWidth - totalBuffer;
+        const next =
+          textWidth > 0 && maxLineWidth > 0 && textWidth <= maxLineWidth;
+        setLine2NoWrap((prev) => (prev === next ? prev : next));
+      });
+    };
+
+    update();
+
+    if (typeof ResizeObserver === "undefined") {
+      return () => {
+        if (frame) cancelAnimationFrame(frame);
+      };
+    }
+
+    const ro = new ResizeObserver(update);
+    ro.observe(container);
+    ro.observe(measureEl);
+
+    return () => {
+      ro.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [headingLine2]);
+
   const headingLine2Node = useMemo(() => {
     if (!headingLine2) return null;
 
     return (
-      <span className="block bg-gradient-to-r from-sky-400 to-blue-500 text-transparent bg-clip-text drop-shadow-[0_0_10px_rgba(56,189,248,0.7)]">
+      <span
+        className={`block ${headingLine2BaseClass} ${
+          line2NoWrap ? "whitespace-nowrap" : "whitespace-normal"
+        }`}
+      >
         {renderWithGlow110(headingLine2)}
       </span>
     );
-  }, [headingLine2]);
+  }, [headingLine2, headingLine2BaseClass, line2NoWrap]);
 
   return (
     <header id="top" className="py-16 flex justify-center">
@@ -106,11 +158,23 @@ export default function Hero() {
         </div>
 
         <div className="mt-8 w-full">
-          <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold leading-tight tracking-tight text-center">
+          <h1
+            ref={headingRef}
+            className="relative text-3xl sm:text-5xl lg:text-6xl font-extrabold leading-tight tracking-tight text-center"
+          >
             {headingLine1 && (
               <span className="block">{renderHeadingLine1(headingLine1)}</span>
             )}
             {headingLine2Node}
+            {headingLine2 && (
+              <span
+                ref={line2MeasureRef}
+                aria-hidden="true"
+                className={`absolute left-0 top-0 inline-block ${headingLine2BaseClass} pointer-events-none opacity-0 whitespace-nowrap`}
+              >
+                {renderWithGlow110(headingLine2)}
+              </span>
+            )}
           </h1>
         </div>
 
