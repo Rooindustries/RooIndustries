@@ -61,7 +61,7 @@ export default function Services() {
           benchAfterLabel,
           benchPagePrefix,
           benchPages[]{
-            games[]{gameTitle, beforeFps, afterFps, gpu, cpu, ram}
+            games[]{gameTitle, gameLogo, beforeFps, afterFps, gpu, cpu, ram}
           }
         }`
       )
@@ -295,8 +295,25 @@ export default function Services() {
                           >
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
-                                <div className="truncate text-[16px] sm:text-[17px] font-extrabold tracking-tight text-white">
-                                  {g?.gameTitle || "—"}
+                                <div className="flex items-center gap-2 min-w-0">
+                                  {g?.gameLogo ? (
+                                    <img
+                                      src={urlFor(g.gameLogo)
+                                        .width(64)
+                                        .height(64)
+                                        .fit("max")
+                                        .url()}
+                                      alt={g?.gameTitle ? `${g.gameTitle} logo` : "Game logo"}
+                                      width={24}
+                                      height={24}
+                                      loading="lazy"
+                                      decoding="async"
+                                      className="h-5 w-5 sm:h-6 sm:w-6 shrink-0 rounded-sm object-contain"
+                                    />
+                                  ) : null}
+                                  <div className="truncate text-[16px] sm:text-[17px] font-extrabold tracking-tight text-white">
+                                    {g?.gameTitle || "-"}
+                                  </div>
                                 </div>
                                 <div className="mt-1 h-[2px] w-14 rounded-full bg-gradient-to-r from-cyan-300/70 to-transparent opacity-70" />
                               </div>
