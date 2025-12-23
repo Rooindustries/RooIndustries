@@ -294,6 +294,7 @@ export default function BookingForm({ isMobile }) {
   const [xocRamId, setXocRamId] = useState("");
   const [showVertexModal, setShowVertexModal] = useState(false);
   const [vertexPackage, setVertexPackage] = useState(null);
+  const [vertexEssentialsPackage, setVertexEssentialsPackage] = useState(null);
   const [planPackage, setPlanPackage] = useState(null);
   const [modalPackage, setModalPackage] = useState(null);
   const [modalMode, setModalMode] = useState("switch");
@@ -905,6 +906,26 @@ export default function BookingForm({ isMobile }) {
       }
     };
     fetchVertex();
+  }, []);
+
+  useEffect(() => {
+    const fetchVertexEssentials = async () => {
+      try {
+        const data = await client.fetch(
+          `*[_type == "package" && title match "Vertex Essentials"][0]{
+            title,
+            price,
+            tag,
+            features,
+            buttonText
+          }`
+        );
+        setVertexEssentialsPackage(data);
+      } catch (err) {
+        console.error("Error fetching Vertex Essentials package:", err);
+      }
+    };
+    fetchVertexEssentials();
   }, []);
 
   // ---------- FETCH CURRENT PLAN PACKAGE (for view plan modal) ----------
@@ -2108,25 +2129,42 @@ export default function BookingForm({ isMobile }) {
                       {(xocMoboId === "__CUSTOM_MOBO__" ||
                         xocRamId === "__CUSTOM_RAM__") && (
                         <>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setModalMode("switch");
-                              setModalPackage(vertexPackage);
-                              setShowVertexModal(true);
-                            }}
-                            className="glow-button mt-3 inline-flex items-center justify-center px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold text-white transition"
-                          >
-                            Switch to Performance Vertex Overhaul
-                            <span className="glow-line glow-line-top" />
-                            <span className="glow-line glow-line-right" />
-                            <span className="glow-line glow-line-bottom" />
-                            <span className="glow-line glow-line-left" />
-                          </button>
+                          <div className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setModalMode("switch");
+                                setModalPackage(vertexPackage);
+                                setShowVertexModal(true);
+                              }}
+                              className="glow-button inline-flex items-center justify-center px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold text-white transition"
+                            >
+                              Switch to Performance Vertex Overhaul
+                              <span className="glow-line glow-line-top" />
+                              <span className="glow-line glow-line-right" />
+                              <span className="glow-line glow-line-bottom" />
+                              <span className="glow-line glow-line-left" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setModalMode("switch");
+                                setModalPackage(vertexEssentialsPackage);
+                                setShowVertexModal(true);
+                              }}
+                              className="glow-button inline-flex items-center justify-center px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold text-white transition"
+                            >
+                              Switch to Vertex Essentials
+                              <span className="glow-line glow-line-top" />
+                              <span className="glow-line glow-line-right" />
+                              <span className="glow-line glow-line-bottom" />
+                              <span className="glow-line glow-line-left" />
+                            </button>
+                          </div>
                           <p className="mt-2 text-[11px] font-bold bg-gradient-to-r from-sky-300 via-cyan-300 to-indigo-300 bg-clip-text text-transparent">
                             If your PC is found to be XOC eligible after booking
-                            Performance Vertex Overhaul, you may pay the
-                            difference in price to upgrade.
+                            Performance Vertex Overhaul/Vertex Essentials, you may pay
+                            the difference in price to upgrade.
                           </p>
                         </>
                       )}
