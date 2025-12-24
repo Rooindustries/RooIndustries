@@ -1,12 +1,23 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { client } from "../sanityClient";
 
 export default function Hero() {
   const [heroData, setHeroData] = useState(null);
-  const [line2NoWrap, setLine2NoWrap] = useState(false);
-  const headingRef = useRef(null);
-  const line2MeasureRef = useRef(null);
+  const containerRef = useRef(null);
+  const line1Ref = useRef(null);
+  const line2Ref = useRef(null);
+  const [line1FontSize, setLine1FontSize] = useState(null);
+  const [line2FontSize, setLine2FontSize] = useState(null);
+
+  // Base font sizes in pixels for different breakpoints
+  const getBaseFontSize = useCallback(() => {
+    if (typeof window === "undefined") return 48;
+    const width = window.innerWidth;
+    if (width >= 1024) return 60; // lg:text-6xl = 3.75rem = 60px
+    if (width >= 640) return 48; // sm:text-5xl = 3rem = 48px
+    return 30; // text-3xl = 1.875rem = 30px
+  }, []);
 
   useEffect(() => {
     client
@@ -36,6 +47,9 @@ export default function Hero() {
   const bullets = heroData?.bullets || [];
   const primaryCtaText = heroData?.ctaPrimaryText || "Tune My Rig";
   const secondaryCtaText = heroData?.ctaSecondaryText || "See the Proof";
+  const ctaNote = heroData?.ctaNote;
+  const ctaNoteIcon = heroData?.ctaNoteIcon;
+
   const headingLine2BaseClass =
     "bg-gradient-to-r from-sky-400 to-blue-500 text-transparent bg-clip-text drop-shadow-[0_0_10px_rgba(56,189,248,0.7)]";
 
@@ -87,69 +101,113 @@ export default function Hero() {
     return <span className="text-white">{renderWithGlow110(cleaned)}</span>;
   };
 
-  useEffect(() => {
-    if (!headingLine2) {
-      setLine2NoWrap(false);
-      return;
+  // Calculate optimal font size to fit container
+  const calculateFontSizes = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const containerWidth = container.clientWidth;
+    const padding = 16;
+    const maxWidth = containerWidth - padding;
+    const baseFontSize = getBaseFontSize();
+
+    // Helper function to find optimal font size
+    const findOptimalFontSize = (element, baseSize) => {
+      if (!element) return baseSize;
+
+      // Reset to base size to measure
+      element.style.fontSize = `${baseSize}px`;
+
+      // Force reflow
+      void element.offsetWidth;
+
+      const naturalWidth = element.scrollWidth;
+
+      if (naturalWidth <= maxWidth) {
+        return baseSize;
+      }
+
+      // Calculate the ratio and apply it to font size
+      const ratio = maxWidth / naturalWidth;
+      const newSize = Math.floor(baseSize * ratio);
+
+      // Set minimum font size (don't go below 50% of base)
+      return Math.max(newSize, baseFontSize * 0.5);
+    };
+
+    // Calculate for line 1
+    if (line1Ref.current && headingLine1) {
+      const optimalSize = findOptimalFontSize(line1Ref.current, baseFontSize);
+      setLine1FontSize(optimalSize);
+    } else {
+      setLine1FontSize(null);
     }
 
-    const container = headingRef.current;
-    const measureEl = line2MeasureRef.current;
-    if (!container || !measureEl) return;
+    // Calculate for line 2
+    if (line2Ref.current && headingLine2) {
+      const optimalSize = findOptimalFontSize(line2Ref.current, baseFontSize);
+      setLine2FontSize(optimalSize);
+    } else {
+      setLine2FontSize(null);
+    }
+  }, [getBaseFontSize, headingLine1, headingLine2]);
 
-    let frame = 0;
+  // Recalculate on resize
+  useEffect(() => {
+    calculateFontSizes();
 
-    const update = () => {
-      if (frame) cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        const containerWidth = container.clientWidth;
-        const textWidth = measureEl.offsetWidth;
-        const totalBuffer = Math.max(24, Math.round(containerWidth * 0.08));
-        const maxLineWidth = containerWidth - totalBuffer;
-        const next =
-          textWidth > 0 && maxLineWidth > 0 && textWidth <= maxLineWidth;
-        setLine2NoWrap((prev) => (prev === next ? prev : next));
+    const handleResize = () => {
+      // Reset font sizes first so we can measure fresh
+      setLine1FontSize(null);
+      setLine2FontSize(null);
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(calculateFontSizes);
       });
     };
 
-    update();
+    window.addEventListener("resize", handleResize);
 
-    if (typeof ResizeObserver === "undefined") {
-      return () => {
-        if (frame) cancelAnimationFrame(frame);
-      };
+    let resizeObserver;
+    if (typeof ResizeObserver !== "undefined" && containerRef.current) {
+      resizeObserver = new ResizeObserver(handleResize);
+      resizeObserver.observe(containerRef.current);
     }
 
-    const ro = new ResizeObserver(update);
-    ro.observe(container);
-    ro.observe(measureEl);
-
     return () => {
-      ro.disconnect();
-      if (frame) cancelAnimationFrame(frame);
+      window.removeEventListener("resize", handleResize);
+      if (resizeObserver) resizeObserver.disconnect();
     };
-  }, [headingLine2]);
+  }, [calculateFontSizes]);
 
-  const headingLine2Node = useMemo(() => {
-    if (!headingLine2) return null;
+  // Recalculate when hero data loads
+  useEffect(() => {
+    if (heroData) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(calculateFontSizes);
+      });
+    }
+  }, [heroData, calculateFontSizes]);
 
-    return (
-      <span
-        className={`block ${headingLine2BaseClass} ${
-          line2NoWrap ? "whitespace-nowrap" : "whitespace-normal"
-        }`}
-      >
-        {renderWithGlow110(headingLine2)}
-      </span>
-    );
-  }, [headingLine2, headingLine2BaseClass, line2NoWrap]);
+  // Get font size style or fall back to Tailwind classes
+  const getLine1Style = () => {
+    if (line1FontSize !== null) {
+      return { fontSize: `${line1FontSize}px`, textAlign: "center" };
+    }
+    return {};
+  };
 
-  const ctaNote = heroData?.ctaNote;
-  const ctaNoteIcon = heroData?.ctaNoteIcon;
+  const getLine2Style = () => {
+    if (line2FontSize !== null) {
+      return { fontSize: `${line2FontSize}px`, textAlign: "center" };
+    }
+    return {};
+  };
 
   return (
     <header id="top" className="py-16 flex justify-center">
-      <section className="mx-auto max-w-4xl px-6 text-center">
+      <section className="mx-auto max-w-4xl px-6 text-center w-full">
+        {/* Tagline Badge */}
         <div className="h-[30px] sm:h-[36px] flex justify-center items-center">
           {tagline && (
             <div className="inline-flex items-center rounded-full border border-slate-700/80 bg-slate-900/70 px-4 sm:px-5 py-1.5 sm:py-2 shadow-[0_0_10px_rgba(0,255,255,0.6),0_0_20px_rgba(0,255,255,0.4)]">
@@ -160,21 +218,24 @@ export default function Hero() {
           )}
         </div>
 
-        <div className="mt-8 w-full">
-          <h1
-            ref={headingRef}
-            className="relative text-3xl sm:text-5xl lg:text-6xl font-extrabold leading-tight tracking-tight text-center"
-          >
+        {/* Main Heading - Never Wraps */}
+        <div className="mt-8 w-full" ref={containerRef}>
+          <h1 className="font-extrabold leading-tight tracking-tight text-center">
             {headingLine1 && (
-              <span className="block">{renderHeadingLine1(headingLine1)}</span>
+              <span
+                ref={line1Ref}
+                className="block w-full whitespace-nowrap text-center text-3xl sm:text-5xl lg:text-6xl"
+                style={getLine1Style()}
+              >
+                {renderHeadingLine1(headingLine1)}
+              </span>
             )}
-            {headingLine2Node}
 
             {headingLine2 && (
               <span
-                ref={line2MeasureRef}
-                aria-hidden="true"
-                className={`absolute left-0 top-0 inline-block ${headingLine2BaseClass} pointer-events-none opacity-0 whitespace-nowrap`}
+                ref={line2Ref}
+                className={`block w-full whitespace-nowrap text-center text-3xl sm:text-5xl lg:text-6xl ${headingLine2BaseClass}`}
+                style={getLine2Style()}
               >
                 {renderWithGlow110(headingLine2)}
               </span>
@@ -182,6 +243,7 @@ export default function Hero() {
           </h1>
         </div>
 
+        {/* Description */}
         <div className="min-h-[48px] sm:min-h-[60px]">
           {description && (
             <p className="mt-4 text-sm sm:text-base md:text-lg text-slate-200/90 leading-relaxed max-w-2xl mx-auto">
@@ -190,6 +252,7 @@ export default function Hero() {
           )}
         </div>
 
+        {/* Subtext */}
         <div className="min-h-[32px] sm:min-h-[36px]">
           {subtext && (
             <p className="mt-6 text-[14px] sm:text-lg font-semibold text-cyan-300">
@@ -198,6 +261,7 @@ export default function Hero() {
           )}
         </div>
 
+        {/* CTA Buttons */}
         <div className="mt-7 flex items-center justify-center gap-3 sm:gap-4 flex-wrap min-h-[56px]">
           <Link
             to="/#packages"
@@ -222,6 +286,7 @@ export default function Hero() {
           </Link>
         </div>
 
+        {/* CTA Note */}
         {ctaNote && (
           <p className="mt-5 text-sm sm:text-base font-extrabold tracking-wide relative inline-flex items-center gap-2">
             {ctaNoteIcon && (
@@ -229,14 +294,11 @@ export default function Hero() {
                 {ctaNoteIcon}
               </span>
             )}
-            <span
-              className="gold-flair-text"
-            >
-              {ctaNote}
-            </span>
+            <span className="gold-flair-text">{ctaNote}</span>
           </p>
         )}
 
+        {/* Bullet Points */}
         <div className="mt-5 w-full">
           {bullets.length > 0 && (
             <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 sm:gap-x-6">
