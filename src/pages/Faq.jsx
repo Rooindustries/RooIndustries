@@ -2,12 +2,18 @@ import { useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import Faqs from "../components/Faq";
 import Footer from "../components/Footer";
+import SEO from "../components/SEO";
 
 export default function Faq() {
   const navigate = useNavigate();
   const location = useLocation();
 
   useEffect(() => {
+    const isPrerender =
+      (typeof navigator !== "undefined" &&
+        navigator.userAgent === "ReactSnap") ||
+      (typeof window !== "undefined" && window.__PRERENDER__ === true);
+    if (isPrerender) return;
     if (location.pathname === "/faq") {
       navigate("/#faq", { replace: true });
     }
@@ -15,6 +21,10 @@ export default function Faq() {
 
   return (
     <>
+      <SEO
+        title="FAQ | Roo Industries"
+        description="Answers to common questions about our optimization process, safety, and results."
+      />
       <Faqs />
       <Footer />
     </>

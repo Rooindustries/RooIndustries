@@ -1,4 +1,17 @@
 {
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "rooindustries.com"
+        }
+      ],
+      "destination": "https://www.rooindustries.com/:path*",
+      "permanent": true
+    }
+  ],
   "headers": [
     {
       "source": "/static/:path*",
