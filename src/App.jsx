@@ -10,6 +10,7 @@ import { FaDiscord } from "react-icons/fa";
 import { AnimatePresence, motion } from "framer-motion";
 import Navbar from "./components/Navbar";
 import { Analytics } from "@vercel/analytics/react";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 import CanvasVideo from "./components/CanvasVideo"; 
 import ReservationBanner from "./components/ReservationBanner";
 import BookingModal from "./components/BookingModal";
@@ -22,6 +23,7 @@ const Privacy = lazy(() => import("./pages/PrivacyPolicy"));
 const Reviews = lazy(() => import("./pages/Reviews"));
 const Packages = lazy(() => import("./pages/Packages"));
 const Faq = lazy(() => import("./pages/Faq"));
+const Contact = lazy(() => import("./pages/Contact"));
 const Book = lazy(() => import("./pages/Book"));
 const Payment = lazy(() => import("./pages/Payment"));
 const PaymentSuccess = lazy(() => import("./pages/PaymentSuccess"));
@@ -72,12 +74,21 @@ function RedirectToDiscord() {
 function RedirectPackagesToHome() {
   const location = useLocation();
   const navigate = useNavigate();
+  const isPrerender =
+    (typeof navigator !== "undefined" &&
+      navigator.userAgent === "ReactSnap") ||
+    (typeof window !== "undefined" && window.__PRERENDER__ === true);
 
   useEffect(() => {
+    if (isPrerender) return;
     const targetSearch = location.search || "";
     const targetHash = location.hash || "";
     navigate(`/${targetSearch}${targetHash}`, { replace: true });
-  }, [location.search, location.hash, navigate]);
+  }, [isPrerender, location.search, location.hash, navigate]);
+
+  if (isPrerender) {
+    return <Packages />;
+  }
 
   return null;
 }
@@ -111,6 +122,7 @@ function AnimatedRoutes({ setIsModalOpen, routesLocation, routeKey }) {
             element={<Reviews setIsModalOpen={setIsModalOpen} />}
           />
           <Route path="/booking" element={<Book />} />
+          <Route path="/contact" element={<Contact />} />
           <Route path="/faq" element={<Faq />} />
           <Route path="/discord" element={<RedirectToDiscord />} />
           <Route path="/payment" element={<Payment />} />
@@ -195,6 +207,7 @@ function AppContent() {
   return (
     <>
       <Analytics />
+      <SpeedInsights />
 
         <div
           className="relative min-h-screen text-white overflow-hidden 
