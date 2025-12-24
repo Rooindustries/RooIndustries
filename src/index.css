@@ -39,7 +39,8 @@ body.is-modal-open {
 }
 
 .site-nav {
-  transition: filter 200ms ease, opacity 200ms ease;
+  transition: filter 200ms ease, opacity 500ms ease-in-out,
+    transform 500ms ease-in-out;
 }
 
 .is-modal-blur .site-nav {
