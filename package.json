@@ -14,6 +14,7 @@
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^13.5.0",
     "@vercel/analytics": "^1.6.1",
+    "@vercel/speed-insights": "^1.2.0",
     "bcryptjs": "^3.0.3",
     "crypto": "^1.0.1",
     "dayjs": "^1.11.19",
@@ -25,6 +26,7 @@
     "razorpay": "^2.9.6",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-helmet-async": "^2.0.5",
     "react-icons": "^5.5.0",
     "react-router-dom": "^7.9.4",
     "react-scripts": "5.0.1",
@@ -33,7 +35,9 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "cross-env CI=false react-scripts build",
+    "prebuild": "node scripts/generate-sitemap.js && node scripts/generate-robots.js",
+    "build": "node scripts/build.js",
+    "postbuild": "node scripts/prerender.js",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },
@@ -58,6 +62,8 @@
   "devDependencies": {
     "autoprefixer": "^10.4.21",
     "cross-env": "^7.0.3",
+    "@prerenderer/prerenderer": "^1.2.5",
+    "@prerenderer/renderer-jsdom": "^1.1.9",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.18"
   }
