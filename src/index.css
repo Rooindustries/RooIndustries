@@ -118,8 +118,7 @@ body.view-plan-open #booking-modal-close {
   -webkit-backdrop-filter: blur(12px) saturate(140%);
   background-clip: padding-box;
   animation: none;
-  box-shadow: 0 0 8px rgba(3, 233, 244, 0.16),
-    0 0 16px rgba(3, 233, 244, 0.1);
+  box-shadow: 0 0 8px rgba(3, 233, 244, 0.16), 0 0 16px rgba(3, 233, 244, 0.1);
 }
 
 .glow-button:disabled,
@@ -302,8 +301,7 @@ body.view-plan-open #booking-modal-close {
   color: transparent;
   animation: goldFlairShift 6s ease-in-out infinite;
   text-shadow: 0 0 10px rgba(245, 158, 11, 0.9),
-    0 0 22px rgba(217, 119, 6, 0.75),
-    0 0 44px rgba(180, 83, 9, 0.6),
+    0 0 22px rgba(217, 119, 6, 0.75), 0 0 44px rgba(180, 83, 9, 0.6),
     0 0 80px rgba(124, 45, 18, 0.55);
 }
 
@@ -317,8 +315,7 @@ body.view-plan-open #booking-modal-close {
   );
   background-size: 200% 200%;
   animation: goldFlairShift 6s ease-in-out infinite;
-  box-shadow: 0 0 16px rgba(245, 158, 11, 0.9),
-    0 0 30px rgba(217, 119, 6, 0.65);
+  box-shadow: 0 0 16px rgba(245, 158, 11, 0.9), 0 0 30px rgba(217, 119, 6, 0.65);
 }
 
 @keyframes goldFlairShift {
@@ -333,15 +330,6 @@ body.view-plan-open #booking-modal-close {
   }
 }
 
-/* =========================================
-   VIDEO OVERLAY FIX (Opera GX & Others)
-   ========================================= */
-
-/* Forces the video element to ignore all mouse events.
-   This prevents the browser from detecting a "hover" on the video,
-   so it won't show the "Pop out" or "Fast Forward" buttons.
-   Clicking the logo still works because the parent <a> tag captures the click.
-*/
 .roo-logo-video {
   pointer-events: none !important;
   user-select: none !important;
@@ -365,4 +353,13 @@ body.view-plan-open #booking-modal-close {
   opacity: 0 !important;
   visibility: hidden !important;
   -webkit-appearance: none !important;
+}
+
+.roo-logo {
+  transition: opacity 500ms ease-in-out;
+}
+
+html.nav-past-logo .roo-logo {
+  opacity: 0;
+  pointer-events: none;
 }
