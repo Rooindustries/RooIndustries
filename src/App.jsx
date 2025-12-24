@@ -74,17 +74,19 @@ function RedirectToDiscord() {
 function RedirectPackagesToHome() {
   const location = useLocation();
   const navigate = useNavigate();
-  const isReactSnap =
-    typeof navigator !== "undefined" && navigator.userAgent === "ReactSnap";
+  const isPrerender =
+    (typeof navigator !== "undefined" &&
+      navigator.userAgent === "ReactSnap") ||
+    (typeof window !== "undefined" && window.__PRERENDER__ === true);
 
   useEffect(() => {
-    if (isReactSnap) return;
+    if (isPrerender) return;
     const targetSearch = location.search || "";
     const targetHash = location.hash || "";
     navigate(`/${targetSearch}${targetHash}`, { replace: true });
-  }, [isReactSnap, location.search, location.hash, navigate]);
+  }, [isPrerender, location.search, location.hash, navigate]);
 
-  if (isReactSnap) {
+  if (isPrerender) {
     return <Packages />;
   }
 

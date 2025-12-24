@@ -9,9 +9,11 @@ export default function Faq() {
   const location = useLocation();
 
   useEffect(() => {
-    const isReactSnap =
-      typeof navigator !== "undefined" && navigator.userAgent === "ReactSnap";
-    if (isReactSnap) return;
+    const isPrerender =
+      (typeof navigator !== "undefined" &&
+        navigator.userAgent === "ReactSnap") ||
+      (typeof window !== "undefined" && window.__PRERENDER__ === true);
+    if (isPrerender) return;
     if (location.pathname === "/faq") {
       navigate("/#faq", { replace: true });
     }

@@ -12,15 +12,26 @@ export const client = createClient({
 const builder = imageUrlBuilder(client);
 export const urlFor = (source) => builder.image(source);
 
-const isReactSnap =
-  typeof navigator !== "undefined" && navigator.userAgent === "ReactSnap";
+const isPrerender =
+  (typeof navigator !== "undefined" && navigator.userAgent === "ReactSnap") ||
+  (typeof window !== "undefined" && window.__PRERENDER__ === true);
 
-if (isReactSnap && typeof window !== "undefined") {
+const notifyPrerenderReady = () => {
+  if (typeof window === "undefined") return;
+  if (!window.__PRERENDER__) return;
+  if (window.__PRERENDER_READY__) return;
+  if (window.__PRERENDER_PENDING__?.size) return;
+
+  window.__PRERENDER_READY__ = true;
+  document.dispatchEvent(new Event("prerender-ready"));
+};
+
+if (isPrerender && typeof window !== "undefined") {
   if (!window.__PRERENDER_PENDING__) {
     window.__PRERENDER_PENDING__ = new Set();
   }
 
-  // CRA uses react-snap for prerender; wait for Sanity requests before snapshotting.
+  // Wait for Sanity requests before snapshotting or jsdom prerender.
   if (!window.snapSaveState) {
     window.snapSaveState = () =>
       new Promise((resolve) => {
@@ -40,18 +51,23 @@ if (isReactSnap && typeof window !== "undefined") {
         check();
       });
   }
+
+  setTimeout(notifyPrerenderReady, 0);
 }
 
 const originalFetch = client.fetch.bind(client);
 client.fetch = (...args) => {
   const promise = originalFetch(...args);
   if (
-    isReactSnap &&
+    isPrerender &&
     typeof window !== "undefined" &&
     window.__PRERENDER_PENDING__
   ) {
     window.__PRERENDER_PENDING__.add(promise);
-    const cleanup = () => window.__PRERENDER_PENDING__.delete(promise);
+    const cleanup = () => {
+      window.__PRERENDER_PENDING__.delete(promise);
+      notifyPrerenderReady();
+    };
     promise.then(cleanup).catch(cleanup);
   }
   return promise;
