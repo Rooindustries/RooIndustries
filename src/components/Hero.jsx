@@ -230,13 +230,7 @@ export default function Hero() {
               </span>
             )}
             <span
-              className="bg-gradient-to-r from-amber-200 via-orange-300 to-amber-100 text-transparent bg-clip-text
-        [text-shadow:
-          0_0_10px_rgba(245,158,11,0.90),
-          0_0_22px_rgba(217,119,6,0.85),
-          0_0_44px_rgba(180,83,9,0.70),
-          0_0_80px_rgba(124,45,18,0.55)
-        ]"
+              className="gold-flair-text"
             >
               {ctaNote}
             </span>
