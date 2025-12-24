@@ -1,14 +1,22 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { client } from "../sanityClient";
+import {
+  getPreloadedState,
+  isReactSnap,
+  setSnapState,
+} from "../utils/prerenderState";
 
 export default function Hero() {
-  const [heroData, setHeroData] = useState(null);
+  const [preloaded] = useState(() => getPreloadedState("home.hero"));
+  const hasPreloaded = typeof preloaded !== "undefined";
+  const [heroData, setHeroData] = useState(() => preloaded ?? null);
   const [line2NoWrap, setLine2NoWrap] = useState(false);
   const headingRef = useRef(null);
   const line2MeasureRef = useRef(null);
 
   useEffect(() => {
+    if (hasPreloaded) return; // react-snap preloaded this content.
     client
       .fetch(
         `*[_type == "hero"][0]{
@@ -24,9 +32,14 @@ export default function Hero() {
           bullets
         }`
       )
-      .then(setHeroData)
+      .then((data) => {
+        setHeroData(data);
+        if (isReactSnap()) {
+          setSnapState("home.hero", data);
+        }
+      })
       .catch(console.error);
-  }, []);
+  }, [hasPreloaded]);
 
   const tagline = heroData?.tagline;
   const headingLine1 = heroData?.headingData1 || heroData?.headingLine1;

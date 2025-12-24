@@ -1,23 +1,38 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { client } from "../sanityClient";
+import {
+  getPreloadedState,
+  isReactSnap,
+  setSnapState,
+} from "../utils/prerenderState";
+
+const DEFAULT_CONTENT = {
+  heading: "Join the Referral Program",
+  description:
+    "Are you a creator? Enter your email to get started with registration.",
+  emailPlaceholder: "Enter your email...",
+  startButtonText: "Get Started",
+  loginButtonText: "Login",
+  loginPath: "/login",
+  registerPath: "/referrals/register",
+};
 
 export default function ReferralBox() {
   const nav = useNavigate();
   const [email, setEmail] = useState("");
 
-  const [content, setContent] = useState({
-    heading: "Join the Referral Program",
-    description:
-      "Are you a creator? Enter your email to get started with registration.",
-    emailPlaceholder: "Enter your email...",
-    startButtonText: "Get Started",
-    loginButtonText: "Login",
-    loginPath: "/login",
-    registerPath: "/referrals/register",
-  });
+  const [preloaded] = useState(() =>
+    getPreloadedState("home.referralBox")
+  );
+  const hasPreloaded = typeof preloaded !== "undefined";
+  const [content, setContent] = useState(() => ({
+    ...DEFAULT_CONTENT,
+    ...(preloaded || {}),
+  }));
 
   useEffect(() => {
+    if (hasPreloaded) return; // react-snap preloaded this content.
     let cancelled = false;
 
     async function fetchContent() {
@@ -43,6 +58,9 @@ export default function ReferralBox() {
               )
             ),
           }));
+          if (isReactSnap()) {
+            setSnapState("home.referralBox", data);
+          }
         }
       } catch {
         // keep fallbacks
@@ -53,7 +71,7 @@ export default function ReferralBox() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [hasPreloaded]);
 
   function handleStart() {
     if (!email || !email.includes("@")) return;

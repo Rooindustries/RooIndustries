@@ -1,9 +1,16 @@
 import React, { useEffect, useState } from "react";
 import { PortableText } from "@portabletext/react";
 import { client } from "../sanityClient";
+import {
+  getPreloadedState,
+  isReactSnap,
+  setSnapState,
+} from "../utils/prerenderState";
 
 export default function PrivacyPolicy() {
-  const [data, setData] = useState(null);
+  const [preloaded] = useState(() => getPreloadedState("privacy.data"));
+  const hasPreloaded = typeof preloaded !== "undefined";
+  const [data, setData] = useState(() => preloaded ?? null);
 
   // Helper function to process text strings within paragraphs, converting the specific email to a link
   const renderTextWithLinks = (text) => {
@@ -39,6 +46,7 @@ export default function PrivacyPolicy() {
 
   // Fetch from Sanity
   useEffect(() => {
+    if (hasPreloaded) return; // react-snap preloaded this content.
     client
       .fetch(
         `*[_type == "privacyPolicy"][0]{
@@ -47,9 +55,14 @@ export default function PrivacyPolicy() {
           lastUpdated
         }`
       )
-      .then(setData)
+      .then((next) => {
+        setData(next);
+        if (isReactSnap()) {
+          setSnapState("privacy.data", next);
+        }
+      })
       .catch(console.error);
-  }, []);
+  }, [hasPreloaded]);
 
   if (!data) return null;
 

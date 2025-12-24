@@ -2,6 +2,11 @@ import React, { useEffect, useMemo, useState } from "react";
 import { client } from "../sanityClient";
 import imageUrlBuilder from "@sanity/image-url";
 import {
+  getPreloadedState,
+  isReactSnap,
+  setSnapState,
+} from "../utils/prerenderState";
+import {
   Clock,
   Shield,
   Wrench,
@@ -46,10 +51,13 @@ function AnimatedNumber({ value, duration = 0.65 }) {
 }
 
 export default function Services() {
-  const [data, setData] = useState(null);
+  const [preloaded] = useState(() => getPreloadedState("home.services"));
+  const hasPreloaded = typeof preloaded !== "undefined";
+  const [data, setData] = useState(() => preloaded ?? null);
   const [page, setPage] = useState(0);
 
   useEffect(() => {
+    if (hasPreloaded) return; // react-snap preloaded this content.
     client
       .fetch(
         `*[_type == "services"][0]{
@@ -65,9 +73,14 @@ export default function Services() {
           }
         }`
       )
-      .then(setData)
+      .then((res) => {
+        setData(res);
+        if (isReactSnap()) {
+          setSnapState("home.services", res);
+        }
+      })
       .catch(console.error);
-  }, []);
+  }, [hasPreloaded]);
 
   const iconClass =
     "w-6 h-6 text-cyan-300 drop-shadow-[0_0_10px_rgba(56,189,248,0.35)]";

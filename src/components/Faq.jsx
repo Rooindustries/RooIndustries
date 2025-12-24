@@ -3,6 +3,11 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ArrowRight, ChevronDown } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { client } from "../sanityClient";
+import {
+  getPreloadedState,
+  isReactSnap,
+  setSnapState,
+} from "../utils/prerenderState";
 
 const slugify = (text = "") =>
   text
@@ -36,8 +41,16 @@ const getQuestionId = (question = "", answer = "") => {
 
 export default function FaqSection() {
   const location = useLocation();
-  const [sections, setSections] = useState([]);
-  const [faqCopy, setFaqCopy] = useState(null);
+  const [preloadedSettings] = useState(() =>
+    getPreloadedState("faq.settings")
+  );
+  const [preloadedSections] = useState(() =>
+    getPreloadedState("faq.sections")
+  );
+  const hasPreloadedSettings = typeof preloadedSettings !== "undefined";
+  const hasPreloadedSections = typeof preloadedSections !== "undefined";
+  const [sections, setSections] = useState(() => preloadedSections ?? []);
+  const [faqCopy, setFaqCopy] = useState(() => preloadedSettings ?? null);
   const [activeCategory, setActiveCategory] = useState(null);
   const [openQuestions, setOpenQuestions] = useState({});
   const categoryRefs = useRef([]);
@@ -95,6 +108,7 @@ export default function FaqSection() {
   };
 
   useEffect(() => {
+    if (hasPreloadedSettings) return; // react-snap preloaded this content.
     client
       .fetch(
         `*[_type == "faqSettings"][0]{
@@ -105,11 +119,17 @@ export default function FaqSection() {
         {},
         { cache: "no-store" }
       )
-      .then(setFaqCopy)
+      .then((data) => {
+        setFaqCopy(data);
+        if (isReactSnap()) {
+          setSnapState("faq.settings", data);
+        }
+      })
       .catch(console.error);
-  }, []);
+  }, [hasPreloadedSettings]);
 
   useEffect(() => {
+    if (hasPreloadedSections) return; // react-snap preloaded this content.
     client
       .fetch(
         `*[_type == "faqSection"] | order(_createdAt asc) {
@@ -120,10 +140,14 @@ export default function FaqSection() {
         { cache: "no-store" }
       )
       .then((res) => {
-        setSections(res || []);
+        const nextSections = res || [];
+        setSections(nextSections);
+        if (isReactSnap()) {
+          setSnapState("faq.sections", nextSections);
+        }
       })
       .catch(console.error);
-  }, []);
+  }, [hasPreloadedSections]);
 
   useEffect(() => {
     if (!sections.length) return;

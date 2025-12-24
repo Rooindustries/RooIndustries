@@ -2,12 +2,20 @@ import React, { useEffect, useState } from "react";
 import { Zap } from "lucide-react";
 import { client, urlFor } from "../sanityClient";
 import ImageZoomModal from "../components/ImageZoomModal";
+import {
+  getPreloadedState,
+  isReactSnap,
+  setSnapState,
+} from "../utils/prerenderState";
 
 export default function About() {
-  const [aboutData, setAboutData] = useState(null);
+  const [preloaded] = useState(() => getPreloadedState("home.about"));
+  const hasPreloaded = typeof preloaded !== "undefined";
+  const [aboutData, setAboutData] = useState(() => preloaded ?? null);
   const [zoomSrc, setZoomSrc] = useState("");
 
   useEffect(() => {
+    if (hasPreloaded) return;
     client
       .fetch(
         `*[_type == "about"][0]{
@@ -21,9 +29,14 @@ export default function About() {
           recordLink
         }`
       )
-      .then(setAboutData)
+      .then((data) => {
+        setAboutData(data);
+        if (isReactSnap()) {
+          setSnapState("home.about", data);
+        }
+      })
       .catch(console.error);
-  }, []);
+  }, [hasPreloaded]);
 
   if (!aboutData) return null;
 
@@ -71,7 +84,6 @@ export default function About() {
 
         {aboutData.recordImage && (
           <>
-            {/* SEO/CLS: add a semantic figure/caption and intrinsic size without affecting layout. */}
             <figure className="m-0">
               <img
                 src={recordImageUrl}

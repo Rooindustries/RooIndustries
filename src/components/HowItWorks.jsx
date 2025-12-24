@@ -1,11 +1,19 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { client } from "../sanityClient";
+import {
+  getPreloadedState,
+  isReactSnap,
+  setSnapState,
+} from "../utils/prerenderState";
 
 export default function HowItWorks() {
-  const [data, setData] = useState(null);
+  const [preloaded] = useState(() => getPreloadedState("home.howItWorks"));
+  const hasPreloaded = typeof preloaded !== "undefined";
+  const [data, setData] = useState(() => preloaded ?? null);
 
   useEffect(() => {
+    if (hasPreloaded) return; // react-snap preloaded this content.
     client
       .fetch(
         `*[_type == "howItWorks"][0]{
@@ -14,9 +22,14 @@ export default function HowItWorks() {
           steps[]{badge, title, text, iconType}
         }`
       )
-      .then((res) => setData(res))
+      .then((res) => {
+        setData(res);
+        if (isReactSnap()) {
+          setSnapState("home.howItWorks", res);
+        }
+      })
       .catch((err) => console.error("Sanity fetch error:", err));
-  }, []);
+  }, [hasPreloaded]);
 
   if (!data) return null;
 

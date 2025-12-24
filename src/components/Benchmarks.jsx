@@ -1,9 +1,16 @@
 import React, { useState, useEffect } from "react";
 import { client, urlFor } from "../sanityClient";
 import ImageZoomModal from "../components/ImageZoomModal";
+import {
+  getPreloadedState,
+  isReactSnap,
+  setSnapState,
+} from "../utils/prerenderState";
 
 export default function Benchmarks({ setIsModalOpen = () => {} }) {
-  const [benchmarks, setBenchmarks] = useState([]);
+  const [preloaded] = useState(() => getPreloadedState("benchmarks.list"));
+  const hasPreloaded = typeof preloaded !== "undefined";
+  const [benchmarks, setBenchmarks] = useState(() => preloaded ?? []);
   const [selectedImage, setSelectedImage] = useState(null);
   const [selectedAlt, setSelectedAlt] = useState("");
 
@@ -19,6 +26,7 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
   };
 
   useEffect(() => {
+    if (hasPreloaded) return; // react-snap preloaded this content.
     client
       .fetch(
         `*[_type == "benchmark"] 
@@ -39,9 +47,14 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
             }
           }`
       )
-      .then(setBenchmarks)
+      .then((data) => {
+        setBenchmarks(data);
+        if (isReactSnap()) {
+          setSnapState("benchmarks.list", data);
+        }
+      })
       .catch(console.error);
-  }, []);
+  }, [hasPreloaded]);
 
   return (
     <section className="relative py-28 px-4 max-w-7xl mx-auto text-white">

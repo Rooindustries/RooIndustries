@@ -14,6 +14,7 @@ import { SpeedInsights } from "@vercel/speed-insights/react";
 import CanvasVideo from "./components/CanvasVideo"; 
 import ReservationBanner from "./components/ReservationBanner";
 import BookingModal from "./components/BookingModal";
+import { isReactSnap } from "./utils/prerenderState";
 
 // Lazy-loaded pages
 const Home = lazy(() => import("./pages/Home"));
@@ -74,10 +75,7 @@ function RedirectToDiscord() {
 function RedirectPackagesToHome() {
   const location = useLocation();
   const navigate = useNavigate();
-  const isPrerender =
-    (typeof navigator !== "undefined" &&
-      navigator.userAgent === "ReactSnap") ||
-    (typeof window !== "undefined" && window.__PRERENDER__ === true);
+  const isPrerender = isReactSnap();
 
   useEffect(() => {
     if (isPrerender) return;

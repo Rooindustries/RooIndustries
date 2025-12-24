@@ -1,11 +1,19 @@
 import React, { useEffect, useState } from "react";
 import { PortableText } from "@portabletext/react";
 import { client } from "../sanityClient";
+import {
+  getPreloadedState,
+  isReactSnap,
+  setSnapState,
+} from "../utils/prerenderState";
 
 export default function Terms() {
-  const [data, setData] = useState(null);
+  const [preloaded] = useState(() => getPreloadedState("terms.data"));
+  const hasPreloaded = typeof preloaded !== "undefined";
+  const [data, setData] = useState(() => preloaded ?? null);
 
   useEffect(() => {
+    if (hasPreloaded) return; // react-snap preloaded this content.
     client
       .fetch(
         `*[_type == "terms"][0]{
@@ -14,9 +22,14 @@ export default function Terms() {
           sections[]{heading, content}
         }`
       )
-      .then(setData)
+      .then((next) => {
+        setData(next);
+        if (isReactSnap()) {
+          setSnapState("terms.data", next);
+        }
+      })
       .catch(console.error);
-  }, []);
+  }, [hasPreloaded]);
 
   // Helper: Manually processes text to find the email and apply the link + style
   const renderTextWithLinks = (text) => {

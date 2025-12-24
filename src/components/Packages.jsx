@@ -2,10 +2,23 @@ import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { client } from "../sanityClient";
 import PackageDetailsModal from "./PackageDetailsModal";
+import {
+  getPreloadedState,
+  isReactSnap,
+  setSnapState,
+} from "../utils/prerenderState";
 
 export default function Packages() {
-  const [packages, setPackages] = useState([]);
-  const [sectionCopy, setSectionCopy] = useState(null);
+  const [preloadedPackages] = useState(() =>
+    getPreloadedState("packages.list")
+  );
+  const [preloadedSection] = useState(() =>
+    getPreloadedState("packages.section")
+  );
+  const hasPreloadedPackages = typeof preloadedPackages !== "undefined";
+  const hasPreloadedSection = typeof preloadedSection !== "undefined";
+  const [packages, setPackages] = useState(() => preloadedPackages ?? []);
+  const [sectionCopy, setSectionCopy] = useState(() => preloadedSection ?? null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsPkg, setDetailsPkg] = useState(null);
 
@@ -75,7 +88,10 @@ export default function Packages() {
         console.error("Failed to store referral from link:", e);
       }
     }
+  }, []);
 
+  useEffect(() => {
+    if (hasPreloadedPackages) return; // react-snap preloaded this content.
     const packagesQuery = `*[_type == "package"] | order(coalesce(order, 999) asc, _createdAt asc) {
       _id,
       title,
@@ -95,10 +111,17 @@ export default function Packages() {
     client
       .fetch(packagesQuery)
       .then((pkgs) => {
-        setPackages(Array.isArray(pkgs) ? pkgs : []);
+        const nextPackages = Array.isArray(pkgs) ? pkgs : [];
+        setPackages(nextPackages);
+        if (isReactSnap()) {
+          setSnapState("packages.list", nextPackages);
+        }
       })
       .catch(console.error);
+  }, [hasPreloadedPackages]);
 
+  useEffect(() => {
+    if (hasPreloadedSection) return; // react-snap preloaded this content.
     const sectionQuery = `*[_type == "packagesSettings"][0]{
       heading,
       badgeText,
@@ -107,9 +130,14 @@ export default function Packages() {
 
     client
       .fetch(sectionQuery)
-      .then(setSectionCopy)
+      .then((data) => {
+        setSectionCopy(data);
+        if (isReactSnap()) {
+          setSnapState("packages.section", data);
+        }
+      })
       .catch(console.error);
-  }, []);
+  }, [hasPreloadedSection]);
 
   const headingText = sectionCopy?.heading ?? "Choose Your Package";
   const badgeText = sectionCopy?.badgeText ?? "Fully Online";

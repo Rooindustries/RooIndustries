@@ -1,14 +1,22 @@
 import React, { useState, useEffect } from "react";
 import { useForm, ValidationError } from "@formspree/react";
 import { client } from "../sanityClient";
+import {
+  getPreloadedState,
+  isReactSnap,
+  setSnapState,
+} from "../utils/prerenderState";
 
 export default function Services() {
-  const [contactData, setContactData] = useState(null);
+  const [preloaded] = useState(() => getPreloadedState("contact.data"));
+  const hasPreloaded = typeof preloaded !== "undefined";
+  const [contactData, setContactData] = useState(() => preloaded ?? null);
   const [copied, setCopied] = useState(false);
 
   const [state, handleSubmit] = useForm("mpwybpen");
 
   useEffect(() => {
+    if (hasPreloaded) return; // react-snap preloaded this content.
     client
       .fetch(
         `*[_type == "contact"][0]{
@@ -18,9 +26,14 @@ export default function Services() {
           formId
         }`
       )
-      .then(setContactData)
+      .then((data) => {
+        setContactData(data);
+        if (isReactSnap()) {
+          setSnapState("contact.data", data);
+        }
+      })
       .catch(console.error);
-  }, []);
+  }, [hasPreloaded]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(

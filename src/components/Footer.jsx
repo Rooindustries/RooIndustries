@@ -1,10 +1,21 @@
 import React, { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { client } from "../sanityClient";
+import {
+  getPreloadedState,
+  isReactSnap,
+  setSnapState,
+} from "../utils/prerenderState";
 
 export default function Footer() {
-  const [footerData, setFooterData] = useState(null);
-  const [heroCtaText, setHeroCtaText] = useState(null);
+  const [preloaded] = useState(() => getPreloadedState("footer.bundle"));
+  const hasPreloaded = typeof preloaded !== "undefined";
+  const [footerData, setFooterData] = useState(
+    () => preloaded?.footer ?? null
+  );
+  const [heroCtaText, setHeroCtaText] = useState(
+    () => preloaded?.hero?.ctaPrimaryText ?? null
+  );
   const location = useLocation();
 
   const searchParams = new URLSearchParams(location.search);
@@ -12,6 +23,7 @@ export default function Footer() {
     location.pathname === "/booking" && searchParams.get("xoc") === "1";
 
   useEffect(() => {
+    if (hasPreloaded) return; // react-snap preloaded this content.
     client
       .fetch(
         `{
@@ -27,11 +39,18 @@ export default function Footer() {
         }`
       )
       .then((data) => {
-        setFooterData(data?.footer || null);
-        setHeroCtaText(data?.hero?.ctaPrimaryText || null);
+        const payload = {
+          footer: data?.footer || null,
+          hero: data?.hero || null,
+        };
+        setFooterData(payload.footer);
+        setHeroCtaText(payload.hero?.ctaPrimaryText || null);
+        if (isReactSnap()) {
+          setSnapState("footer.bundle", payload);
+        }
       })
       .catch(console.error);
-  }, []);
+  }, [hasPreloaded]);
 
   const bookCtaText = heroCtaText || "Tune My Rig";
 

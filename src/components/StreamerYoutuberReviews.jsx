@@ -1,13 +1,22 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import { client } from "../sanityClient";
+import {
+  getPreloadedState,
+  isReactSnap,
+  setSnapState,
+} from "../utils/prerenderState";
 
 const titleClass =
   "text-3xl sm:text-[40px] md:text-[48px] leading-tight font-extrabold text-center tracking-tight " +
   "text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]";
 
 export default function StreamerYoutuberReviews() {
-  const [entries, setEntries] = useState([]);
+  const [preloaded] = useState(() =>
+    getPreloadedState("home.proReviews")
+  );
+  const hasPreloaded = typeof preloaded !== "undefined";
+  const [entries, setEntries] = useState(() => preloaded ?? []);
   const [maxCardHeight, setMaxCardHeight] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(
     typeof window !== "undefined" ? window.innerWidth : 0
@@ -28,12 +37,23 @@ export default function StreamerYoutuberReviews() {
     let cancelled = false;
 
     const fetchData = async () => {
+      if (hasPreloaded) return; // react-snap preloaded this content.
       const res = await client.fetch(query);
       if (cancelled) return;
-      setEntries(Array.isArray(res) ? res : []);
+      const nextEntries = Array.isArray(res) ? res : [];
+      setEntries(nextEntries);
+      if (isReactSnap()) {
+        setSnapState("home.proReviews", nextEntries);
+      }
     };
 
     fetchData();
+
+    if (isReactSnap()) {
+      return () => {
+        cancelled = true;
+      };
+    }
 
     const subscription = client
       .listen(query, {}, { visibility: "query" })
@@ -59,7 +79,7 @@ export default function StreamerYoutuberReviews() {
       cancelled = true;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [hasPreloaded]);
 
   useEffect(() => {
     const handleResize = () => {

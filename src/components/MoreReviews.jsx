@@ -1,13 +1,21 @@
 import React, { useState, useEffect } from "react";
 import { client, urlFor } from "../sanityClient";
 import ImageZoomModal from "./ImageZoomModal";
+import {
+  getPreloadedState,
+  isReactSnap,
+  setSnapState,
+} from "../utils/prerenderState";
 
 export default function Reviews() {
   const [selectedImage, setSelectedImage] = useState(null);
   const [selectedAlt, setSelectedAlt] = useState("");
-  const [reviews, setReviews] = useState([]);
+  const [preloaded] = useState(() => getPreloadedState("reviews.list"));
+  const hasPreloaded = typeof preloaded !== "undefined";
+  const [reviews, setReviews] = useState(() => preloaded ?? []);
 
   useEffect(() => {
+    if (hasPreloaded) return; // react-snap preloaded this content.
     client
       .fetch(
         `*[_type == "review"] | order(_createdAt asc){
@@ -18,9 +26,14 @@ export default function Reviews() {
           alt
         }`
       )
-      .then(setReviews)
+      .then((data) => {
+        setReviews(data);
+        if (isReactSnap()) {
+          setSnapState("reviews.list", data);
+        }
+      })
       .catch(console.error);
-  }, []);
+  }, [hasPreloaded]);
 
   // SEO/a11y: keep the alt text aligned with the zoomed review image.
   const handleOpenZoom = (src, altText) => {

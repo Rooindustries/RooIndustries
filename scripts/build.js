@@ -1,6 +1,6 @@
 const { execSync } = require("child_process");
 
-// CRA build: prerender marketing routes after build using a jsdom renderer.
+// CRA build: use react-snap after build to prerender marketing routes.
 const resolvedVercelEnv =
   process.env.VERCEL_ENV ||
   process.env.REACT_APP_VERCEL_ENV ||
