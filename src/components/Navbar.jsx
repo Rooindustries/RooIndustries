@@ -2,6 +2,32 @@ import React, { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { FaDiscord } from "react-icons/fa";
 import BackButton from "./BackButton";
+import CanvasVideo from "./CanvasVideo";
+
+const isIOSDevice = () => {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  return (
+    /iPad|iPhone|iPod/.test(ua) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
+};
+
+const canPlayWebm = () => {
+  if (typeof document === "undefined") return false;
+  const video = document.createElement("video");
+  if (!video.canPlayType) return false;
+  const canPlay =
+    video.canPlayType('video/webm; codecs="vp9, opus"') ||
+    video.canPlayType('video/webm; codecs="vp8, vorbis"') ||
+    video.canPlayType("video/webm");
+  return canPlay === "probably" || canPlay === "maybe";
+};
+
+const getInitialSmallLogoMode = () => {
+  if (isIOSDevice()) return "apng";
+  return canPlayWebm() ? "webm" : "apng";
+};
 
 export default function Navbar() {
   const location = useLocation();
@@ -9,11 +35,14 @@ export default function Navbar() {
   const [open, setOpen] = useState(false);
   const [isVisible, setIsVisible] = useState(true);
   const [isPastLogo, setIsPastLogo] = useState(false);
+  const [smallLogoMode, setSmallLogoMode] = useState(() =>
+    getInitialSmallLogoMode()
+  );
+  const [smallApngLoaded, setSmallApngLoaded] = useState(false);
+  const [isNotchInView, setIsNotchInView] = useState(true);
+  const [useNotchVisibility, setUseNotchVisibility] = useState(false);
   const lastScrollYRef = useRef(0);
-  const logoBoundsRef = useRef(null);
-  const isPastLogoRef = useRef(false);
   const floatingNavRef = useRef(null);
-  const [floatingOnScreen, setFloatingOnScreen] = useState(false);
 
   const isActive = (path) => location.pathname === path;
 
@@ -22,65 +51,60 @@ export default function Navbar() {
     location.pathname === "/faq" ||
     (location.pathname === "/" && faqHashes.includes(location.hash || ""));
 
-  useEffect(() => {
-    const updateLogoThreshold = () => {
-      const logoEl = document.querySelector(".roo-logo");
-      if (!logoEl) {
-        logoBoundsRef.current = null;
-        return;
-      }
-      const rect = logoEl.getBoundingClientRect();
-      logoBoundsRef.current = {
-        top: rect.top + window.scrollY,
-        bottom: rect.top + window.scrollY + rect.height,
-      };
-    };
+  const handleSmallWebmError = () => {
+    setSmallApngLoaded(false);
+    setSmallLogoMode((current) => (current === "webm" ? "apng" : "static"));
+  };
 
+  const handleSmallApngError = () => {
+    setSmallLogoMode("static");
+  };
+
+  useEffect(() => {
     const handleScroll = () => {
       const currentScrollY = window.scrollY;
       const lastScrollY = lastScrollYRef.current;
-      const bounds = logoBoundsRef.current;
-      const top = bounds?.top ?? 0;
-      const bottom = bounds?.bottom ?? 120;
-      const enterOffset = 24;
-      const exitOffset = 12;
-      const enterPoint = bottom + enterOffset;
-      const exitPoint = Math.max(0, top - exitOffset);
-      const nextIsVisible = !(currentScrollY > lastScrollY && currentScrollY > 50);
+      const logoEl = document.querySelector(".roo-logo");
+      const viewportHeight =
+        window.innerHeight || document.documentElement.clientHeight;
+      const logoRect = logoEl ? logoEl.getBoundingClientRect() : null;
+      const isLogoInView = logoRect
+        ? logoRect.bottom > 0 && logoRect.top < viewportHeight
+        : false;
+      const logoStyle = logoEl ? window.getComputedStyle(logoEl) : null;
+      const nextUseNotchVisibility = logoStyle
+        ? logoStyle.position === "fixed" ||
+          logoStyle.position === "absolute" ||
+          logoStyle.position === "sticky"
+        : false;
+      const nextIsPastLogo = !isLogoInView;
+      const nextIsVisible =
+        !nextIsPastLogo || !(currentScrollY > lastScrollY && currentScrollY > 50);
 
       setIsVisible(nextIsVisible);
       setScrolled(currentScrollY > 12);
       lastScrollYRef.current = currentScrollY;
-
-      if (logoBoundsRef.current === null) updateLogoThreshold();
-
-      const nextIsPastLogo = isPastLogoRef.current
-        ? currentScrollY > exitPoint
-        : currentScrollY > enterPoint;
-      isPastLogoRef.current = nextIsPastLogo;
       setIsPastLogo(nextIsPastLogo);
+      setUseNotchVisibility(nextUseNotchVisibility);
 
       const floatingEl = floatingNavRef.current;
-      let nextFloatingOnScreen = false;
+      let nextIsNotchInView = false;
       if (floatingEl) {
         const rect = floatingEl.getBoundingClientRect();
-        const viewportHeight =
-          window.innerHeight || document.documentElement.clientHeight;
         const inView = rect.bottom > 0 && rect.top < viewportHeight;
         const style = window.getComputedStyle(floatingEl);
         const opacity = Number(style.opacity || 0);
         const isRendered =
           style.display !== "none" && style.visibility !== "hidden";
-        nextFloatingOnScreen = inView && isRendered && opacity > 0.05;
+        nextIsNotchInView = inView && isRendered && opacity > 0.05;
       }
-      setFloatingOnScreen(nextFloatingOnScreen);
+      setIsNotchInView(nextIsNotchInView);
+
     };
 
-    updateLogoThreshold();
     handleScroll();
 
     const handleResize = () => {
-      updateLogoThreshold();
       handleScroll();
     };
 
@@ -96,27 +120,6 @@ export default function Navbar() {
   useEffect(() => {
     if (!isPastLogo) setOpen(false);
   }, [isPastLogo]);
-
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      const floatingEl = floatingNavRef.current;
-      if (!floatingEl) {
-        setFloatingOnScreen(false);
-        return;
-      }
-      const rect = floatingEl.getBoundingClientRect();
-      const viewportHeight =
-        window.innerHeight || document.documentElement.clientHeight;
-      const inView = rect.bottom > 0 && rect.top < viewportHeight;
-      const style = window.getComputedStyle(floatingEl);
-      const opacity = Number(style.opacity || 0);
-      const isRendered =
-        style.display !== "none" && style.visibility !== "hidden";
-      setFloatingOnScreen(inView && isRendered && opacity > 0.05);
-    });
-
-    return () => cancelAnimationFrame(frame);
-  }, [isPastLogo, isVisible]);
 
   // close mobile menu on route change
   useEffect(() => {
@@ -155,7 +158,16 @@ export default function Navbar() {
   const linkIdle = "text-white/85 hover:text-cyan-200";
   const linkActive = "bg-cyan-400 text-black";
   const showFloating = !isPastLogo && isVisible;
-  const showFixed = isPastLogo && !floatingOnScreen;
+  const showFixed = useNotchVisibility ? !isNotchInView : isPastLogo;
+  const smallLogoSizeClassName = "h-11 w-11";
+  const smallLogoStaticClassName = `${smallLogoSizeClassName} object-contain drop-shadow-[0_0_18px_rgba(34,211,238,0.25)]`;
+  const smallLogoAnimatedClassName = `${smallLogoSizeClassName} object-contain drop-shadow-[0_0_18px_rgba(34,211,238,0.25)] transition-all duration-500`;
+  const smallLogoApngPlaceholderClassName = `${smallLogoStaticClassName} transition-opacity duration-300 ${
+    smallApngLoaded ? "opacity-0" : "opacity-100"
+  }`;
+  const smallLogoApngClassName = `absolute inset-0 w-full h-full z-10 object-contain drop-shadow-[0_0_18px_rgba(34,211,238,0.25)] transition-all duration-500 ${
+    smallApngLoaded ? "opacity-100" : "opacity-0"
+  }`;
 
   return (
     <>
@@ -264,43 +276,30 @@ export default function Navbar() {
 
       {/* Fixed header (Nav 2 - after main logo) */}
       <header
-        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-          showFixed
-            ? "opacity-100 translate-y-0"
-            : "opacity-0 -translate-y-2 pointer-events-none"
-        }`}
+        className={`fixed top-0 left-0 right-0 z-50 border-b backdrop-blur-md transition-[opacity,transform] duration-500 ease-in-out will-change-transform ${
+          scrolled ? "border-cyan-300/10" : "border-white/5"
+        } ${
+          scrolled
+            ? "bg-gradient-to-b from-[#07162d]/92 to-[#061226]/75 shadow-[0_10px_30px_rgba(0,0,0,0.25)]"
+            : "bg-gradient-to-b from-[#07162d]/65 to-[#061226]/35"
+        } ${showFixed ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2 pointer-events-none"}`}
         aria-hidden={!showFixed}
       >
-        {/* Background layer */}
+        {/* subtle grid overlay */}
         <div
-          className={`
-            relative
-            border-b
-            ${scrolled ? "border-cyan-300/10" : "border-white/5"}
-            backdrop-blur-md
-            transition-all duration-200
-            ${
-              scrolled
-                ? "bg-gradient-to-b from-[#07162d]/92 to-[#061226]/75 shadow-[0_10px_30px_rgba(0,0,0,0.25)]"
-                : "bg-gradient-to-b from-[#07162d]/65 to-[#061226]/35"
-            }
-          `}
-        >
-          {/* subtle grid overlay */}
-          <div
-            className="pointer-events-none absolute inset-0 opacity-[0.14]"
-            style={{
-              backgroundImage:
-                "linear-gradient(to right, rgba(255,255,255,0.08) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.06) 1px, transparent 1px)",
-              backgroundSize: "80px 80px",
-            }}
-          />
+          className="pointer-events-none absolute inset-0 opacity-[0.14] z-0"
+          style={{
+            backgroundImage:
+              "linear-gradient(to right, rgba(255,255,255,0.08) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.06) 1px, transparent 1px)",
+            backgroundSize: "80px 80px",
+          }}
+        />
 
-          {/* cyan glow line */}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-cyan-300/50 to-transparent" />
+        {/* cyan glow line */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-cyan-300/50 to-transparent z-0" />
 
-          <div className="relative mx-auto max-w-7xl px-4 sm:px-6">
-            <div className="h-16 flex items-center justify-between">
+        <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6">
+          <div className="flex items-center justify-between py-2 sm:h-16 sm:py-0">
               {/* Left: Logo / Back */}
               <div className="flex items-center gap-3">
                 {location.pathname !== "/" ? (
@@ -308,16 +307,48 @@ export default function Navbar() {
                 ) : null}
 
                 <Link to="/" className="flex items-center gap-2 select-none">
-                  <div className="h-11 w-11 grid place-items-center">
-                    <img
-                      src="/favicon.svg"
-                      alt="Roo Industries"
-                      className="h-11 w-11 object-contain drop-shadow-[0_0_18px_rgba(34,211,238,0.25)]"
-                      loading="eager"
-                    />
+                  <div className="relative h-11 w-11 grid place-items-center">
+                    {smallLogoMode === "static" ? (
+                      <img
+                        src="/favicon.svg"
+                        alt="Roo Industries"
+                        className={smallLogoStaticClassName}
+                        loading="eager"
+                        fetchPriority="high"
+                      />
+                    ) : smallLogoMode === "apng" ? (
+                      <>
+                        <img
+                          src="/favicon.svg"
+                          alt=""
+                          aria-hidden="true"
+                          className={smallLogoApngPlaceholderClassName}
+                          loading="eager"
+                          fetchPriority="high"
+                        />
+                        <img
+                          src="/logo-animated-small.png"
+                          alt="Roo Industries"
+                          className={smallLogoApngClassName}
+                          loading="eager"
+                          fetchPriority="high"
+                          decoding="async"
+                          onLoad={() => setSmallApngLoaded(true)}
+                          onError={handleSmallApngError}
+                        />
+                      </>
+                    ) : (
+                      <CanvasVideo
+                        src="/logo-animated-small.webm"
+                        poster="/favicon.svg"
+                        alt="Roo Industries"
+                        onError={handleSmallWebmError}
+                        className={`${smallLogoAnimatedClassName} roo-logo-video`}
+                      />
+                    )}
                   </div>
 
-                  <div className="hidden sm:block leading-tight">
+                  <div className="block leading-tight">
                     <div className="text-white font-semibold tracking-wide">
                       Roo Industries
                     </div>
@@ -375,7 +406,8 @@ export default function Navbar() {
                   rel="noreferrer"
                   className="
                     hidden sm:inline-flex items-center gap-2
-                    px-3 py-2 text-sm font-semibold
+                    px-3 py-2 text-sm font-semibold whitespace-nowrap
+                    max-[820px]:px-2 max-[820px]:text-xs max-[820px]:gap-1
                     text-white
                     border border-cyan-300/15
                     bg-cyan-400/10 hover:bg-cyan-400/15
@@ -407,71 +439,75 @@ export default function Navbar() {
                   </div>
                 </button>
               </div>
-            </div>
+          </div>
 
-            {/* Mobile dropdown */}
-            {open && (
-              <div className="md:hidden pb-4">
-                <div className="mt-2 border border-white/10 bg-[#061226]/55 backdrop-blur-md">
-                  <div className="flex flex-col">
-                    <Link
-                      to="/#faq"
-                      className={`px-4 py-3 text-sm ${
-                        isFaqActive ? "bg-cyan-400 text-black" : "text-white/85"
-                      } hover:text-cyan-200 transition`}
-                    >
-                      FAQ
-                    </Link>
-                    <Link
-                      to="/benchmarks"
-                      className={`px-4 py-3 text-sm ${
-                        isActive("/benchmarks")
-                          ? "bg-cyan-400 text-black"
-                          : "text-white/85"
-                      } hover:text-cyan-200 transition`}
-                    >
-                      Benchmarks
-                    </Link>
-                    <Link
-                      to="/reviews"
-                      className={`px-4 py-3 text-sm ${
-                        isActive("/reviews")
-                          ? "bg-cyan-400 text-black"
-                          : "text-white/85"
-                      } hover:text-cyan-200 transition`}
-                    >
-                      Reviews
-                    </Link>
-                    <Link
-                      to="/#packages"
-                      className="px-4 py-3 text-sm text-white/85 hover:text-cyan-200 transition"
-                    >
-                      Plans
-                    </Link>
-                    <Link
-                      to="/tools"
-                      className={`px-4 py-3 text-sm ${
-                        isActive("/tools")
-                          ? "bg-cyan-400 text-black"
-                          : "text-white/85"
-                      } hover:text-cyan-200 transition`}
-                    >
-                      Tools
-                    </Link>
+          {/* Mobile dropdown */}
+          <div
+            className={`md:hidden overflow-hidden transition-all duration-300 ease-out ${
+              open
+                ? "pb-4 max-h-[520px] opacity-100 translate-y-0"
+                : "max-h-0 opacity-0 -translate-y-2 pointer-events-none"
+            }`}
+            aria-hidden={!open}
+          >
+            <div className="mt-2 border border-white/10 bg-[#061226]/55 backdrop-blur-md transition-all duration-300">
+              <div className="flex flex-col">
+                <Link
+                  to="/#faq"
+                  className={`px-4 py-3 text-sm ${
+                    isFaqActive ? "bg-cyan-400 text-black" : "text-white/85"
+                  } hover:text-cyan-200 transition`}
+                >
+                  FAQ
+                </Link>
+                <Link
+                  to="/benchmarks"
+                  className={`px-4 py-3 text-sm ${
+                    isActive("/benchmarks")
+                      ? "bg-cyan-400 text-black"
+                      : "text-white/85"
+                  } hover:text-cyan-200 transition`}
+                >
+                  Benchmarks
+                </Link>
+                <Link
+                  to="/reviews"
+                  className={`px-4 py-3 text-sm ${
+                    isActive("/reviews")
+                      ? "bg-cyan-400 text-black"
+                      : "text-white/85"
+                  } hover:text-cyan-200 transition`}
+                >
+                  Reviews
+                </Link>
+                <Link
+                  to="/#packages"
+                  className="px-4 py-3 text-sm text-white/85 hover:text-cyan-200 transition"
+                >
+                  Plans
+                </Link>
+                <Link
+                  to="/tools"
+                  className={`px-4 py-3 text-sm ${
+                    isActive("/tools")
+                      ? "bg-cyan-400 text-black"
+                      : "text-white/85"
+                  } hover:text-cyan-200 transition`}
+                >
+                  Tools
+                </Link>
 
-                    <a
-                      href="https://discord.gg/M7nTkn9dxE"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="px-4 py-3 text-sm text-white/85 hover:text-cyan-200 transition inline-flex items-center gap-2"
-                    >
-                      <FaDiscord aria-hidden="true" />
-                      Join Discord
-                    </a>
-                  </div>
-                </div>
+                <a
+                  href="https://discord.gg/M7nTkn9dxE"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-4 py-3 text-sm text-white/85 hover:text-cyan-200 transition inline-flex items-center gap-2"
+                >
+                  <FaDiscord aria-hidden="true" />
+                  Join Discord
+                </a>
               </div>
-            )}
+            </div>
           </div>
         </div>
       </header>
