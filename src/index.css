@@ -294,6 +294,45 @@ body.view-plan-open #booking-modal-close {
   filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.8));
 }
 
+.gold-flair-text {
+  background: linear-gradient(90deg, #fde68a 0%, #fdba74 45%, #fef3c7 100%);
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: goldFlairShift 6s ease-in-out infinite;
+  text-shadow: 0 0 10px rgba(245, 158, 11, 0.9),
+    0 0 22px rgba(217, 119, 6, 0.75),
+    0 0 44px rgba(180, 83, 9, 0.6),
+    0 0 80px rgba(124, 45, 18, 0.55);
+}
+
+.gold-flair-pill {
+  background-color: rgba(15, 23, 42, 0.9);
+  background-image: linear-gradient(
+    90deg,
+    rgba(245, 158, 11, 0.35) 0%,
+    rgba(251, 191, 36, 0.22) 45%,
+    rgba(245, 158, 11, 0.35) 100%
+  );
+  background-size: 200% 200%;
+  animation: goldFlairShift 6s ease-in-out infinite;
+  box-shadow: 0 0 16px rgba(245, 158, 11, 0.9),
+    0 0 30px rgba(217, 119, 6, 0.65);
+}
+
+@keyframes goldFlairShift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
 /* =========================================
    VIDEO OVERLAY FIX (Opera GX & Others)
    ========================================= */
