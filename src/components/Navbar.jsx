@@ -33,14 +33,11 @@ export default function Navbar() {
   const location = useLocation();
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
-  const [isVisible, setIsVisible] = useState(true);
-  const [isPastLogo, setIsPastLogo] = useState(false);
+  const [isPastNav, setIsPastNav] = useState(false);
   const [smallLogoMode, setSmallLogoMode] = useState(() =>
     getInitialSmallLogoMode()
   );
   const [smallApngLoaded, setSmallApngLoaded] = useState(false);
-  const [isNotchInView, setIsNotchInView] = useState(true);
-  const [useNotchVisibility, setUseNotchVisibility] = useState(false);
   const lastScrollYRef = useRef(0);
   const floatingNavRef = useRef(null);
 
@@ -63,70 +60,38 @@ export default function Navbar() {
   useEffect(() => {
     const handleScroll = () => {
       const currentScrollY = window.scrollY;
-      const lastScrollY = lastScrollYRef.current;
-      const logoEl = document.querySelector(".roo-logo");
+      const floatingNav = floatingNavRef.current;
       const viewportHeight =
         window.innerHeight || document.documentElement.clientHeight;
-      const logoRect = logoEl ? logoEl.getBoundingClientRect() : null;
-      const isLogoInView = logoRect
-        ? logoRect.bottom > 0 && logoRect.top < viewportHeight
-        : false;
-      const logoStyle = logoEl ? window.getComputedStyle(logoEl) : null;
-      const nextUseNotchVisibility = logoStyle
-        ? logoStyle.position === "fixed" ||
-          logoStyle.position === "absolute" ||
-          logoStyle.position === "sticky"
-        : false;
-      const nextIsPastLogo = !isLogoInView;
-      const nextIsVisible =
-        !nextIsPastLogo || !(currentScrollY > lastScrollY && currentScrollY > 50);
 
-      setIsVisible(nextIsVisible);
+      const navRect = floatingNav ? floatingNav.getBoundingClientRect() : null;
+      const isNavInView = navRect
+        ? navRect.bottom > 0 && navRect.top < viewportHeight
+        : false;
+
       setScrolled(currentScrollY > 12);
       lastScrollYRef.current = currentScrollY;
-      setIsPastLogo(nextIsPastLogo);
-      setUseNotchVisibility(nextUseNotchVisibility);
-
-      const floatingEl = floatingNavRef.current;
-      let nextIsNotchInView = false;
-      if (floatingEl) {
-        const rect = floatingEl.getBoundingClientRect();
-        const inView = rect.bottom > 0 && rect.top < viewportHeight;
-        const style = window.getComputedStyle(floatingEl);
-        const opacity = Number(style.opacity || 0);
-        const isRendered =
-          style.display !== "none" && style.visibility !== "hidden";
-        nextIsNotchInView = inView && isRendered && opacity > 0.05;
-      }
-      setIsNotchInView(nextIsNotchInView);
-
+      setIsPastNav(!isNavInView);
     };
 
     handleScroll();
-
-    const handleResize = () => {
-      handleScroll();
-    };
-
     window.addEventListener("scroll", handleScroll, { passive: true });
-    window.addEventListener("resize", handleResize);
+    window.addEventListener("resize", handleScroll);
 
     return () => {
       window.removeEventListener("scroll", handleScroll);
-      window.removeEventListener("resize", handleResize);
+      window.removeEventListener("resize", handleScroll);
     };
   }, [location.pathname]);
 
   useEffect(() => {
-    if (!isPastLogo) setOpen(false);
-  }, [isPastLogo]);
+    if (!isPastNav) setOpen(false);
+  }, [isPastNav]);
 
-  // close mobile menu on route change
   useEffect(() => {
     setOpen(false);
   }, [location.pathname, location.hash]);
 
-  // Hash smooth scroll
   useEffect(() => {
     const { hash } = location;
     if (!hash) return;
@@ -139,7 +104,7 @@ export default function Navbar() {
       const el = document.getElementById(targetId);
       if (el) {
         const elementTop = el.getBoundingClientRect().top + window.scrollY;
-        const targetY = Math.max(0, elementTop - 84); // offset for fixed navbar
+        const targetY = Math.max(0, elementTop - 84);
         window.scrollTo({ top: targetY, behavior: "smooth" });
         return;
       }
@@ -157,8 +122,21 @@ export default function Navbar() {
     "px-2 sm:px-4 py-1.5 rounded-full text-sm font-medium transition";
   const linkIdle = "text-white/85 hover:text-cyan-200";
   const linkActive = "bg-cyan-400 text-black";
-  const showFloating = !isPastLogo && isVisible;
-  const showFixed = useNotchVisibility ? !isNotchInView : isPastLogo;
+
+  const showFloating = !isPastNav;
+  const showFixed = isPastNav;
+
+  useEffect(() => {
+    if (showFloating) {
+      document.documentElement.classList.remove("nav-past-logo");
+    } else {
+      document.documentElement.classList.add("nav-past-logo");
+    }
+    return () => {
+      document.documentElement.classList.remove("nav-past-logo");
+    };
+  }, [showFloating]);
+
   const smallLogoSizeClassName = "h-11 w-11";
   const smallLogoStaticClassName = `${smallLogoSizeClassName} object-contain drop-shadow-[0_0_18px_rgba(34,211,238,0.25)]`;
   const smallLogoAnimatedClassName = `${smallLogoSizeClassName} object-contain drop-shadow-[0_0_18px_rgba(34,211,238,0.25)] transition-all duration-500`;
@@ -177,11 +155,11 @@ export default function Navbar() {
         className={`
           site-nav
           w-full z-40 px-2 sm:px-8 transition-all duration-500 ease-in-out
-          ${showFloating ? "translate-y-0 opacity-100" : "-translate-y-full opacity-0 pointer-events-none"}
+          absolute top-[2.8rem] max-[639px]:top-[6.5rem] max-[479px]:top-[3rem]
           ${
-            isPastLogo
-              ? "fixed top-5"
-              : "absolute top-[2.8rem] max-[639px]:top-[6.5rem] max-[479px]:top-[3rem]"
+            showFloating
+              ? "translate-y-0 opacity-100"
+              : "-translate-y-full opacity-0 pointer-events-none"
           }
         `}
         aria-hidden={!showFloating}
@@ -274,7 +252,7 @@ export default function Navbar() {
         </div>
       </nav>
 
-      {/* Fixed header (Nav 2 - after main logo) */}
+      {/* Fixed header (Nav 2) */}
       <header
         className={`fixed top-0 left-0 right-0 z-50 border-b backdrop-blur-md transition-[opacity,transform] duration-500 ease-in-out will-change-transform ${
           scrolled ? "border-cyan-300/10" : "border-white/5"
@@ -282,7 +260,11 @@ export default function Navbar() {
           scrolled
             ? "bg-gradient-to-b from-[#07162d]/92 to-[#061226]/75 shadow-[0_10px_30px_rgba(0,0,0,0.25)]"
             : "bg-gradient-to-b from-[#07162d]/65 to-[#061226]/35"
-        } ${showFixed ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2 pointer-events-none"}`}
+        } ${
+          showFixed
+            ? "opacity-100 translate-y-0"
+            : "opacity-0 -translate-y-2 pointer-events-none"
+        }`}
         aria-hidden={!showFixed}
       >
         {/* subtle grid overlay */}
@@ -300,111 +282,109 @@ export default function Navbar() {
 
         <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6">
           <div className="flex items-center justify-between py-2 sm:h-16 sm:py-0">
-              {/* Left: Logo / Back */}
-              <div className="flex items-center gap-3">
-                {location.pathname !== "/" ? (
-                  <BackButton hidden={false} inline={true} />
-                ) : null}
+            {/* Left: Logo / Back */}
+            <div className="flex items-center gap-3">
+              {location.pathname !== "/" ? (
+                <BackButton hidden={false} inline={true} />
+              ) : null}
 
-                <Link to="/" className="flex items-center gap-2 select-none">
-                  <div className="relative h-11 w-11 grid place-items-center">
-                    {smallLogoMode === "static" ? (
+              <Link to="/" className="flex items-center gap-2 select-none">
+                <div className="relative h-11 w-11 grid place-items-center">
+                  {smallLogoMode === "static" ? (
+                    <img
+                      src="/favicon.svg"
+                      alt="Roo Industries"
+                      className={smallLogoStaticClassName}
+                      loading="eager"
+                      fetchPriority="high"
+                    />
+                  ) : smallLogoMode === "apng" ? (
+                    <>
                       <img
                         src="/favicon.svg"
-                        alt="Roo Industries"
-                        className={smallLogoStaticClassName}
+                        alt=""
+                        aria-hidden="true"
+                        className={smallLogoApngPlaceholderClassName}
                         loading="eager"
                         fetchPriority="high"
                       />
-                    ) : smallLogoMode === "apng" ? (
-                      <>
-                        <img
-                          src="/favicon.svg"
-                          alt=""
-                          aria-hidden="true"
-                          className={smallLogoApngPlaceholderClassName}
-                          loading="eager"
-                          fetchPriority="high"
-                        />
-                        <img
-                          src="/logo-animated-small.png"
-                          alt="Roo Industries"
-                          className={smallLogoApngClassName}
-                          loading="eager"
-                          fetchPriority="high"
-                          decoding="async"
-                          onLoad={() => setSmallApngLoaded(true)}
-                          onError={handleSmallApngError}
-                        />
-                      </>
-                    ) : (
-                      <CanvasVideo
-                        src="/logo-animated-small.webm"
-                        poster="/favicon.svg"
+                      <img
+                        src="/logo-animated-small.png"
                         alt="Roo Industries"
-                        onError={handleSmallWebmError}
-                        className={`${smallLogoAnimatedClassName} roo-logo-video`}
+                        className={smallLogoApngClassName}
+                        loading="eager"
+                        fetchPriority="high"
+                        decoding="async"
+                        onLoad={() => setSmallApngLoaded(true)}
+                        onError={handleSmallApngError}
                       />
-                    )}
+                    </>
+                  ) : (
+                    <CanvasVideo
+                      src="/logo-animated-small.webm"
+                      poster="/favicon.svg"
+                      alt="Roo Industries"
+                      onError={handleSmallWebmError}
+                      className={`${smallLogoAnimatedClassName} roo-logo-video`}
+                    />
+                  )}
+                </div>
+
+                <div className="block leading-tight">
+                  <div className="text-white font-semibold tracking-wide">
+                    Roo Industries
                   </div>
-
-                  <div className="block leading-tight">
-                    <div className="text-white font-semibold tracking-wide">
-                      Roo Industries
-                    </div>
-                    <div className="text-[11px] text-white/55">
-                      Precision Performance Engineering
-                    </div>
+                  <div className="text-[11px] text-white/55">
+                    Precision Performance Engineering
                   </div>
-                </Link>
-              </div>
+                </div>
+              </Link>
+            </div>
 
-              {/* Center: Links (desktop) */}
-              <nav className="hidden md:flex items-center gap-1">
-                <Link
-                  to="/#faq"
-                  className={`${linkBase} ${
-                    isFaqActive ? linkActive : linkIdle
-                  }`}
-                >
-                  FAQ
-                </Link>
-                <Link
-                  to="/benchmarks"
-                  className={`${linkBase} ${
-                    isActive("/benchmarks") ? linkActive : linkIdle
-                  }`}
-                >
-                  Benchmarks
-                </Link>
-                <Link
-                  to="/reviews"
-                  className={`${linkBase} ${
-                    isActive("/reviews") ? linkActive : linkIdle
-                  }`}
-                >
-                  Reviews
-                </Link>
-                <Link to="/#packages" className={`${linkBase} ${linkIdle}`}>
-                  Plans
-                </Link>
-                <Link
-                  to="/tools"
-                  className={`${linkBase} ${
-                    isActive("/tools") ? linkActive : linkIdle
-                  }`}
-                >
-                  Tools
-                </Link>
-              </nav>
+            {/* Center: Links (desktop) */}
+            <nav className="hidden md:flex items-center gap-1">
+              <Link
+                to="/#faq"
+                className={`${linkBase} ${isFaqActive ? linkActive : linkIdle}`}
+              >
+                FAQ
+              </Link>
+              <Link
+                to="/benchmarks"
+                className={`${linkBase} ${
+                  isActive("/benchmarks") ? linkActive : linkIdle
+                }`}
+              >
+                Benchmarks
+              </Link>
+              <Link
+                to="/reviews"
+                className={`${linkBase} ${
+                  isActive("/reviews") ? linkActive : linkIdle
+                }`}
+              >
+                Reviews
+              </Link>
+              <Link to="/#packages" className={`${linkBase} ${linkIdle}`}>
+                Plans
+              </Link>
+              <Link
+                to="/tools"
+                className={`${linkBase} ${
+                  isActive("/tools") ? linkActive : linkIdle
+                }`}
+              >
+                Tools
+              </Link>
+            </nav>
 
-              {/* Right: CTA + Mobile */}
-              <div className="flex items-center gap-2">
-                <a
-                  href="https://discord.gg/M7nTkn9dxE"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="
+            {/* Right: CTA + Mobile */}
+            <div className="flex items-center gap-2">
+              <a
+                href="https://discord.gg/M7nTkn9dxE"
+                target="_blank"
+                rel="noreferrer"
+                className="
                     hidden sm:inline-flex items-center gap-2
                     px-3 py-2 text-sm font-semibold whitespace-nowrap
                     max-[820px]:px-2 max-[820px]:text-xs max-[820px]:gap-1
@@ -414,15 +394,15 @@ export default function Navbar() {
                     shadow-[0_0_18px_rgba(34,211,238,0.14)]
                     transition
                   "
-                >
-                  <FaDiscord className="text-[1.05em]" aria-hidden="true" />
-                  Join Discord
-                </a>
+              >
+                <FaDiscord className="text-[1.05em]" aria-hidden="true" />
+                Join Discord
+              </a>
 
-                {/* Mobile menu button */}
-                <button
-                  onClick={() => setOpen((v) => !v)}
-                  className="
+              {/* Mobile menu button */}
+              <button
+                onClick={() => setOpen((v) => !v)}
+                className="
                     md:hidden
                     h-10 w-10 grid place-items-center
                     text-white/90 hover:text-cyan-200
@@ -430,15 +410,15 @@ export default function Navbar() {
                     bg-white/5 hover:bg-cyan-400/10
                     transition
                   "
-                  aria-label="Open menu"
-                >
-                  <div className="space-y-1">
-                    <div className="h-[2px] w-5 bg-current" />
-                    <div className="h-[2px] w-5 bg-current opacity-80" />
-                    <div className="h-[2px] w-5 bg-current opacity-60" />
-                  </div>
-                </button>
-              </div>
+                aria-label="Open menu"
+              >
+                <div className="space-y-1">
+                  <div className="h-[2px] w-5 bg-current" />
+                  <div className="h-[2px] w-5 bg-current opacity-80" />
+                  <div className="h-[2px] w-5 bg-current opacity-60" />
+                </div>
+              </button>
+            </div>
           </div>
 
           {/* Mobile dropdown */}
