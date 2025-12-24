@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect } from "react";
 
 const CanvasVideo = ({ src, poster, className, onError, alt }) => {
   const videoRef = useRef(null);
@@ -8,7 +8,7 @@ const CanvasVideo = ({ src, poster, className, onError, alt }) => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
-    const ctx = canvas.getContext('2d', { alpha: true });
+    const ctx = canvas.getContext("2d", { alpha: true });
     if (!ctx) return;
     let animationFrameId;
     let posterImage = null;
@@ -43,35 +43,34 @@ const CanvasVideo = ({ src, poster, className, onError, alt }) => {
     }
 
     const render = () => {
-      // Check if video is ready to play
       if (video.readyState >= 2) {
-        // Sync canvas size to video size once
-        if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+        if (
+          canvas.width !== video.videoWidth ||
+          canvas.height !== video.videoHeight
+        ) {
           canvas.width = video.videoWidth;
           canvas.height = video.videoHeight;
         }
-        
-        // Draw the frame
+
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       } else {
         drawPoster();
       }
-      
+
       animationFrameId = requestAnimationFrame(render);
     };
 
-    // Ensure video plays even if browser tries to pause background videos
     const startPlay = () => {
       video.play().catch((e) => console.log("Autoplay prevented:", e));
     };
 
-    video.addEventListener('loadeddata', startPlay);
+    video.addEventListener("loadeddata", startPlay);
     render();
 
     return () => {
       cancelAnimationFrame(animationFrameId);
-      video.removeEventListener('loadeddata', startPlay);
+      video.removeEventListener("loadeddata", startPlay);
       if (posterImage) {
         posterImage.onload = null;
       }
@@ -79,8 +78,7 @@ const CanvasVideo = ({ src, poster, className, onError, alt }) => {
   }, [poster]);
 
   return (
-    <div style={{ position: 'relative', display: 'inline-block' }}>
-      {/* SEO: mirror the canvas-rendered video with a crawlable img fallback. */}
+    <div style={{ position: "relative", display: "inline-block" }}>
       {poster && alt ? (
         <img
           src={poster}
@@ -90,7 +88,7 @@ const CanvasVideo = ({ src, poster, className, onError, alt }) => {
           loading="eager"
         />
       ) : null}
-      
+
       {/* HIDDEN VIDEO SOURCE */}
       <video
         ref={videoRef}
@@ -102,23 +100,19 @@ const CanvasVideo = ({ src, poster, className, onError, alt }) => {
         playsInline
         onError={onError}
         aria-hidden="true"
-        style={{ 
-          position: 'absolute', 
-          opacity: 0, 
-          pointerEvents: 'none',
+        style={{
+          position: "absolute",
+          opacity: 0,
+          pointerEvents: "none",
           zIndex: -1,
-          width: '1px', 
-          height: '1px',
-          overflow: 'hidden'
-        }} 
+          width: "1px",
+          height: "1px",
+          overflow: "hidden",
+        }}
       />
-      
+
       {/* The Visible Canvas */}
-      <canvas
-        ref={canvasRef}
-        className={className}
-        aria-hidden="true"
-      />
+      <canvas ref={canvasRef} className={className} aria-hidden="true" />
     </div>
   );
 };
