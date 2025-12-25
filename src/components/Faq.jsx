@@ -34,7 +34,7 @@ const getQuestionId = (question = "", answer = "") => {
   return slugify(question);
 };
 
-export default function FaqSection() {
+export default function FaqSection({ compact = false }) {
   const location = useLocation();
   const [sections, setSections] = useState([]);
   const [faqCopy, setFaqCopy] = useState(null);
@@ -174,10 +174,12 @@ export default function FaqSection() {
     faqCopy?.subtitle ||
     "Click a category to reveal the questions, then tap a question to expand its answer.";
 
+  const sectionPaddingClass = compact ? "pt-20 pb-10" : "pt-20 pb-24";
+
   return (
     <section
       id="faq"
-      className="relative z-10 scroll-mt-32 pt-20 pb-24 px-4 sm:px-6 text-white"
+      className={`relative z-10 scroll-mt-32 ${sectionPaddingClass} px-4 sm:px-6 text-white`}
     >
       <div className="relative max-w-6xl mx-auto">
         <div className="text-center">
