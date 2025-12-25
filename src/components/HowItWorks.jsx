@@ -36,8 +36,8 @@ export default function HowItWorks() {
     return (
       <div
         className="relative overflow-hidden rounded-2xl border border-sky-700/40 bg-[#081225]/70
-                   shadow-[0_0_26px_rgba(14,165,233,0.30)]
-                   w-[calc(100%+0.75rem)] sm:w-[calc(100%+1.25rem)] -mx-1.5 sm:-mx-2.5 aspect-[16/10]"
+                   shadow-[0_0_26px_rgba(14,165,233,0.3)]
+                   w-[calc(100%+0.75rem)] sm:w-[calc(100%+1rem)] -mx-1.5 sm:-mx-2 aspect-[16/10]"
       >
         <video
           className="absolute inset-0 w-full h-full object-cover"
@@ -60,7 +60,7 @@ export default function HowItWorks() {
   return (
     <section
       id="how-it-works"
-      className="relative z-10 py-16 px-4 sm:px-6 text-white max-w-6xl mx-auto"
+      className="relative z-10 py-16 px-4 sm:px-6 text-white max-w-[110rem] mx-auto"
     >
       {data.title && (
         <h2 className="text-4xl sm:text-5xl font-extrabold text-center tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
@@ -75,16 +75,16 @@ export default function HowItWorks() {
       )}
 
       {data.steps?.length > 0 && (
-        <div className="mt-12 grid grid-cols-1 sm:grid-cols-2 gap-8">
+        <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           {data.steps.map((s, i) => (
             <div
               key={i}
-              className="group backdrop-blur-sm bg-[#0b1120]/80 border border-sky-700/30 rounded-2xl p-6
+              className="group backdrop-blur-sm bg-[#0b1120]/80 border border-sky-700/30 rounded-2xl p-4
                          shadow-[0_0_25px_rgba(14,165,233,0.15)] hover:shadow-[0_0_35px_rgba(14,165,233,0.25)]
                          transition-all duration-300"
             >
               {/* Video stacked on top of the text content */}
-              <div className="flex flex-col items-center gap-6 text-center">
+              <div className="flex flex-col items-center gap-5 text-center">
                 <div className="w-full flex justify-center">
                   <VideoBadge name={videoByStepIndex[i]} />
                 </div>
