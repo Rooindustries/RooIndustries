@@ -8,17 +8,19 @@ export default function Book({ hideFooter = false, compact = false }) {
   const titleSize = compact ? "text-3xl sm:text-4xl" : "text-4xl sm:text-5xl";
 
   return (
-    <section
-      className={`relative z-10 ${padY} px-6 text-white text-center`}
-      style={{ margin: 0 }}
-    >
-      <h2
-        className={`${titleSize} font-extrabold text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)] ${titleMargin}`}
+    <>
+      <section
+        className={`relative z-10 ${padY} px-6 text-white text-center`}
+        style={{ margin: 0 }}
       >
-        Schedule Your Session
-      </h2>
-      <BookingForm />
+        <h2
+          className={`${titleSize} font-extrabold text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)] ${titleMargin}`}
+        >
+          Schedule Your Session
+        </h2>
+        <BookingForm />
+      </section>
       {!hideFooter && <Footer />}
-    </section>
+    </>
   );
 }

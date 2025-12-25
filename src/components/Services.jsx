@@ -166,7 +166,7 @@ export default function Services() {
   const pagePrefix = data.benchPagePrefix || "Page";
 
   return (
-    <section className="mx-auto max-w-[92rem] py-16 px-4 sm:px-6">
+    <section id="services" className="mx-auto max-w-[92rem] py-16 px-4 sm:px-6">
       <div className="text-center">
         {data.heading && (
           <h3 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.45)]">
@@ -208,7 +208,11 @@ export default function Services() {
                   {card.customIcon ? (
                     <img
                       src={urlFor(card.customIcon).width(64).url()}
-                      alt={card.title ? `${card.title} service icon` : "Service icon"}
+                      alt={
+                        card.title
+                          ? `${card.title} service icon`
+                          : "Service icon"
+                      }
                       width={28}
                       height={28}
                       loading="lazy"
@@ -303,7 +307,11 @@ export default function Services() {
                                         .height(64)
                                         .fit("max")
                                         .url()}
-                                      alt={g?.gameTitle ? `${g.gameTitle} logo` : "Game logo"}
+                                      alt={
+                                        g?.gameTitle
+                                          ? `${g.gameTitle} logo`
+                                          : "Game logo"
+                                      }
                                       width={24}
                                       height={24}
                                       loading="lazy"
