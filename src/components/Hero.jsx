@@ -46,7 +46,7 @@ export default function Hero() {
   const subtext = heroData?.subtext;
   const bullets = heroData?.bullets || [];
   const primaryCtaText = heroData?.ctaPrimaryText || "Tune My Rig";
-  const secondaryCtaText = heroData?.ctaSecondaryText || "See the Proof";
+  const secondaryCtaText = "See how it works";
   const ctaNote = heroData?.ctaNote;
   const ctaNoteIcon = heroData?.ctaNoteIcon;
 
@@ -275,7 +275,7 @@ export default function Hero() {
           </Link>
 
           <Link
-            to="/benchmarks"
+            to="/#how-it-works"
             className="glow-button fps-boosts-button inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
           >
             {renderWithGlow110(secondaryCtaText)}

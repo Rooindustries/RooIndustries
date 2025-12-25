@@ -69,7 +69,7 @@ export default function ReferralBox() {
   const isValid = !!email && email.includes("@");
 
   return (
-    <div className="mt-12 bg-[#0a1324]/80 border border-indigo-500/30 rounded-2xl p-6 shadow-[0_0_30px_rgba(99,102,241,0.2)] backdrop-blur-md max-w-4xl mx-auto md:flex md:items-center md:justify-between md:gap-8">
+    <div className="mt-12 mb-8 bg-[#0a1324]/80 border border-indigo-500/30 rounded-2xl p-6 shadow-[0_0_30px_rgba(99,102,241,0.2)] backdrop-blur-md max-w-4xl mx-auto md:flex md:items-center md:justify-between md:gap-8">
       {/* Left Side: Text Content */}
       <div className="text-left mb-5 md:mb-0 md:flex-1">
         <h3 className="text-2xl font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-sky-300 to-indigo-300 drop-shadow-sm">
