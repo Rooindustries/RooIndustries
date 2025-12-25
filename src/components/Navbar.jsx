@@ -82,14 +82,11 @@ export default function Navbar() {
     setProofOpen(false);
   }, [location.pathname, location.hash]);
 
+  // Close dropdown when clicking outside (desktop only)
   useEffect(() => {
-    if (!open && proofOpen) {
-      setProofOpen(false);
-    }
-  }, [open, proofOpen]);
+    if (!proofOpen || typeof window === "undefined") return;
+    if (!window.matchMedia("(min-width: 768px)").matches) return;
 
-  // Close dropdown when clicking outside
-  useEffect(() => {
     const handleClickOutside = (event) => {
       if (
         proofDropdownRef.current &&
@@ -99,14 +96,10 @@ export default function Navbar() {
       }
     };
 
-    if (proofOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-      document.addEventListener("touchstart", handleClickOutside);
-    }
+    document.addEventListener("mousedown", handleClickOutside);
 
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("touchstart", handleClickOutside);
     };
   }, [proofOpen]);
 
@@ -351,7 +344,13 @@ export default function Navbar() {
 
             {/* Mobile menu button */}
             <button
-              onClick={() => setOpen((v) => !v)}
+              onClick={() =>
+                setOpen((v) => {
+                  const next = !v;
+                  if (!next) setProofOpen(false);
+                  return next;
+                })
+              }
               className="
                   md:hidden
                   h-12 w-12 grid place-items-center
@@ -433,6 +432,10 @@ export default function Navbar() {
               >
                 <Link
                   to="/benchmarks"
+                  onClick={() => {
+                    setProofOpen(false);
+                    setOpen(false);
+                  }}
                   className={`${mobileSubLinkBase} ${
                     isActive("/benchmarks")
                       ? mobileSubLinkActive
@@ -443,6 +446,10 @@ export default function Navbar() {
                 </Link>
                 <Link
                   to="/reviews"
+                  onClick={() => {
+                    setProofOpen(false);
+                    setOpen(false);
+                  }}
                   className={`${mobileSubLinkBase} ${
                     isActive("/reviews")
                       ? mobileSubLinkActive
