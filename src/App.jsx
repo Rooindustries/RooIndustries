@@ -11,7 +11,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import Navbar from "./components/Navbar";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
-import CanvasVideo from "./components/CanvasVideo"; 
 import ReservationBanner from "./components/ReservationBanner";
 import BookingModal from "./components/BookingModal";
 
@@ -39,31 +38,6 @@ const RefReset = lazy(() => import("./pages/RefReset"));
 const RefRegister = lazy(() => import("./pages/RefRegister"));
 const Tools = lazy(() => import("./pages/Tools"));
 
-const isIOSDevice = () => {
-  if (typeof navigator === "undefined") return false;
-  const ua = navigator.userAgent || "";
-  return (
-    /iPad|iPhone|iPod/.test(ua) ||
-    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
-  );
-};
-
-const canPlayWebm = () => {
-  if (typeof document === "undefined") return false;
-  const video = document.createElement("video");
-  if (!video.canPlayType) return false;
-  const canPlay =
-    video.canPlayType('video/webm; codecs="vp9, opus"') ||
-    video.canPlayType('video/webm; codecs="vp8, vorbis"') ||
-    video.canPlayType("video/webm");
-  return canPlay === "probably" || canPlay === "maybe";
-};
-
-const getInitialLogoMode = () => {
-  if (isIOSDevice()) return "apng";
-  return canPlayWebm() ? "webm" : "apng";
-};
-
 function RedirectToDiscord() {
   React.useEffect(() => {
     window.location.href = "https://discord.gg/M7nTkn9dxE";
@@ -75,8 +49,7 @@ function RedirectPackagesToHome() {
   const location = useLocation();
   const navigate = useNavigate();
   const isPrerender =
-    (typeof navigator !== "undefined" &&
-      navigator.userAgent === "ReactSnap") ||
+    (typeof navigator !== "undefined" && navigator.userAgent === "ReactSnap") ||
     (typeof window !== "undefined" && window.__PRERENDER__ === true);
 
   useEffect(() => {
@@ -106,7 +79,7 @@ function AnimatedRoutes({ setIsModalOpen, routesLocation, routeKey }) {
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.3 }}
-        className="w-full"
+        className="w-full flex flex-col flex-1"
       >
         <Routes location={location}>
           <Route path="/" element={<Home />} />
@@ -149,21 +122,10 @@ function AnimatedRoutes({ setIsModalOpen, routesLocation, routeKey }) {
 
 function AppContent() {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [logoMode, setLogoMode] = useState(() => getInitialLogoMode());
-  const [apngLoaded, setApngLoaded] = useState(false);
 
   const location = useLocation();
   const navigate = useNavigate();
   const pathName = location.pathname || "";
-
-  const handleWebmError = () => {
-    setApngLoaded(false);
-    setLogoMode((current) => (current === "webm" ? "apng" : "static"));
-  };
-
-  const handleApngError = () => {
-    setLogoMode("static");
-  };
 
   const backgroundLocation =
     location.state && location.state.backgroundLocation
@@ -174,7 +136,10 @@ function AppContent() {
   const isPaymentSuccessRoute = pathName.startsWith("/payment-success");
   const isThankYouRoute = pathName.startsWith("/thank-you");
   const isFlowRoute =
-    isBookingRoute || isPaymentRoute || isPaymentSuccessRoute || isThankYouRoute;
+    isBookingRoute ||
+    isPaymentRoute ||
+    isPaymentSuccessRoute ||
+    isThankYouRoute;
   const fallbackLocation =
     isFlowRoute && !backgroundLocation
       ? { ...location, pathname: "/", search: "", hash: "" }
@@ -182,19 +147,13 @@ function AppContent() {
   const routesLocation = backgroundLocation || fallbackLocation || location;
   const routesKey = `${routesLocation.pathname}${routesLocation.search || ""}`;
 
-  const logoSizeClassName = "w-48 sm:w-56 md:w-60";
-  const logoStaticClassName = `${logoSizeClassName} relative z-10`;
-  const logoAnimatedClassName = `${logoSizeClassName} relative z-10 drop-shadow-[0_0_10px_rgba(14,165,233,0.3)] transition-all duration-500`;
-  const logoApngPlaceholderClassName = `${logoStaticClassName} transition-opacity duration-300 ${
-    apngLoaded ? "opacity-0" : "opacity-100"
-  }`;
-  const logoApngClassName = `absolute inset-0 w-full h-full z-10 drop-shadow-[0_0_10px_rgba(14,165,233,0.3)] transition-all duration-500 ${
-    apngLoaded ? "opacity-100" : "opacity-0"
-  }`;
-
   const closeBookingModal = () => {
-    const target =
-      backgroundLocation || { pathname: "/", search: "", hash: "", state: null };
+    const target = backgroundLocation || {
+      pathname: "/",
+      search: "",
+      hash: "",
+      state: null,
+    };
     const targetPath = `${target.pathname || "/"}${target.search || ""}${
       target.hash || ""
     }`;
@@ -209,145 +168,60 @@ function AppContent() {
       <Analytics />
       <SpeedInsights />
 
-        <div
-          className="relative min-h-screen text-white overflow-hidden 
+      <div
+        className="relative min-h-screen flex flex-col text-white overflow-hidden 
         bg-[linear-gradient(to_top,#00b7c0_0%,#006185_30%,#001f5a_65%,#000040_100%)]
         bg-fixed"
-        >
-          {/* Background layers */}
-          <div
-            className="absolute inset-0 bg-[linear-gradient(45deg,rgba(255,255,255,0.05)_1px,transparent_1px)] 
+      >
+        {/* Background layers */}
+        <div
+          className="absolute inset-0 bg-[linear-gradient(45deg,rgba(255,255,255,0.05)_1px,transparent_1px)] 
                       bg-[size:40px_40px] opacity-50 animate-pulse"
-          ></div>
-          <div
-            className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(14,165,233,0.25),rgba(3,7,18,1) 80%)] 
+        ></div>
+        <div
+          className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(14,165,233,0.25),rgba(3,7,18,1) 80%)] 
                       animate-pulse"
-          ></div>
+        ></div>
 
-          {/* Roo Industries Logo Wrapper */}
-          <a
-            href="/"
-            className={`roo-logo group z-50 flex items-center justify-center
-          transition-transform duration-300 hover:scale-105
-          transition-opacity duration-500 opacity-100
-          outline-none focus:outline-none border-none
-          
-          relative top-6 w-full mb-4
-          min-[1280px]:absolute min-[1280px]:fixed min-[1280px]:md:absolute
-          min-[1280px]:top-6 min-[1280px]:left-10 
-          min-[1280px]:w-auto min-[1280px]:justify-start 
-          min-[1280px]:mb-0`}
-          >
-            
-            {/* --- DOUBLE LAYER GLOW ENGINE (REFINED) --- */}
-            
-            {/* Layer 1: The Ambient Body (Deep Blue)
-                - Idle: 80% (High visibility)
-                - Hover: 90% + small scale (Subtle boost, not explosion)
-            */}
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 
-                            w-40 h-14 bg-blue-500 rounded-full blur-[50px]
-                            opacity-80 group-hover:opacity-90 group-hover:scale-110 
-                            transition-all duration-500 ease-out z-[-1]" 
-            />
+        {/* Navbar and pages */}
+        <main className="relative z-10 flex flex-col flex-1 pt-10 sm:pt-24">
+          <Navbar />
+          <ReservationBanner />
 
-            {/* Layer 2: The Hot Core (Bright Cyan)
-                - Idle: 60% (Visible core)
-                - Hover: 80% + small scale (Gets hotter, but not blinding)
-            */}
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 
-                            w-32 h-10 bg-cyan-400 rounded-full blur-[35px]
-                            opacity-60 group-hover:opacity-80 group-hover:scale-110 
-                            transition-all duration-500 ease-out z-[-1]" 
-            />
-
-            {logoMode === "static" ? (
-              // 1. FALLBACK: Static WebP if anything fails
-              <img
-                src="/logo.webp"
-                alt="Roo Industries Logo"
-                width={500}
-                height={267}
-                className={logoStaticClassName}
-                loading="eager"
-                fetchPriority="high"
-              />
-            ) : logoMode === "apng" ? (
-              // 2. iOS/No-WebM MODE: APNG animation with static fallback while loading
-              <div className="relative inline-block">
-                <img
-                  src="/logo.webp"
-                  alt=""
-                  aria-hidden="true"
-                  width={500}
-                  height={267}
-                  className={logoApngPlaceholderClassName}
-                  loading="eager"
-                  fetchPriority="high"
-                />
-                <img
-                  src="/logo-animated.png"
-                  alt="Roo Industries Logo"
-                  className={logoApngClassName}
-                  loading="eager"
-                  fetchPriority="high"
-                  decoding="async"
-                  onLoad={() => setApngLoaded(true)}
-                  onError={handleApngError}
-                />
-              </div>
-            ) : (
-              // 3. DESKTOP/ANDROID MODE: Canvas video when WebM is supported
-              <CanvasVideo
-                src="/logo-animated.webm"
-                poster="/logo.webp"
-                alt="Roo Industries Logo"
-                onError={handleWebmError}
-                className={`${logoAnimatedClassName} roo-logo-video`}
-              />
-            )}
-          </a>
-
-          {/* Navbar and pages */}
-          <main className="relative z-10 pt-10 sm:pt-24">
-            <Navbar />
-            <ReservationBanner />
-
-            <Suspense
-              fallback={
-                <div className="pt-32 text-center text-slate-300 text-sm">
-                  Loading...
-                </div>
-              }
-            >
-              <AnimatedRoutes
-                setIsModalOpen={setIsModalOpen}
-                routesLocation={routesLocation}
-                routeKey={routesKey}
-              />
-            </Suspense>
-          </main>
-
-        </div>
-        <BookingModal open={isFlowRoute} onClose={closeBookingModal}>
           <Suspense
             fallback={
               <div className="pt-32 text-center text-slate-300 text-sm">
-                  Loading...
+                Loading...
               </div>
             }
           >
-            {isPaymentSuccessRoute ? (
-              <PaymentSuccess hideFooter />
-            ) : isThankYouRoute ? (
-              <Thankyou hideFooter />
-            ) : isPaymentRoute ? (
-              <Payment hideFooter />
-            ) : (
-              <Book hideFooter compact />
-            )}
+            <AnimatedRoutes
+              setIsModalOpen={setIsModalOpen}
+              routesLocation={routesLocation}
+              routeKey={routesKey}
+            />
           </Suspense>
-        </BookingModal>
+        </main>
+      </div>
+      <BookingModal open={isFlowRoute} onClose={closeBookingModal}>
+        <Suspense
+          fallback={
+            <div className="pt-32 text-center text-slate-300 text-sm">
+              Loading...
+            </div>
+          }
+        >
+          {isPaymentSuccessRoute ? (
+            <PaymentSuccess hideFooter />
+          ) : isThankYouRoute ? (
+            <Thankyou hideFooter />
+          ) : isPaymentRoute ? (
+            <Payment hideFooter />
+          ) : (
+            <Book hideFooter compact />
+          )}
+        </Suspense>
+      </BookingModal>
     </>
   );
 }
