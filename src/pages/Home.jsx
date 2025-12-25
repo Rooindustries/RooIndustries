@@ -29,9 +29,7 @@ export default function Home() {
       <Services />
       <Packages />
       <HowItWorks />
-      <About />
-      <Faq compact />
-      <div className="mt-2 flex items-center justify-center">
+      <div className="mt-4 flex items-center justify-center">
         <Link
           to="/#packages"
           className="glow-button book-optimization-button relative inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white ring-2 ring-cyan-300/70 hover:text-white active:translate-y-px transition-all duration-300"
@@ -43,6 +41,8 @@ export default function Home() {
           <span className="glow-line glow-line-left" />
         </Link>
       </div>
+      <About />
+      <Faq compact />
       <ReferralBox />
       <Footer />
     </>

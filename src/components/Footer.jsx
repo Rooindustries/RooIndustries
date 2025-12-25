@@ -50,6 +50,21 @@ export default function Footer() {
               >
                 Tools
               </Link>
+              <a
+                href="https://www.trustpilot.com/review/rooindustries.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-xs font-semibold tracking-wide uppercase text-white/70 hover:text-cyan-400 transition-colors"
+              >
+                <img
+                  src="/trustpilot-star.png"
+                  alt="Trustpilot"
+                  loading="lazy"
+                  decoding="async"
+                  className="h-[1.15em] w-auto -translate-y-[0.1em] object-contain"
+                />
+                Review on Trustpilot
+              </a>
             </nav>
 
             <a
