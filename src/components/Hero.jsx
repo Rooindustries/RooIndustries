@@ -46,7 +46,7 @@ export default function Hero() {
   const subtext = heroData?.subtext;
   const bullets = heroData?.bullets || [];
   const primaryCtaText = heroData?.ctaPrimaryText || "Tune My Rig";
-  const secondaryCtaText = "See how it works";
+  const secondaryCtaText = heroData?.ctaSecondaryText || "See how it works";
   const ctaNote = heroData?.ctaNote;
   const ctaNoteIcon = heroData?.ctaNoteIcon;
 
