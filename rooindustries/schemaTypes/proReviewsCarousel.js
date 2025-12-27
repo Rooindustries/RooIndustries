@@ -4,40 +4,14 @@ export default {
   type: 'document',
   fields: [
     {
-      name: 'slot',
-      title: 'Placement Slot',
-      type: 'string',
-      description:
-        'Select which column this carousel feeds (left or right). Create one doc per slot.',
-      options: {
-        list: [
-          {title: 'Left', value: 'left'},
-          {title: 'Right', value: 'right'},
-        ],
-        layout: 'radio',
-      },
-      initialValue: 'left',
-      validation: (Rule) => Rule.required(),
-    },
-    {
       name: 'title',
       title: 'Section Title',
       type: 'string',
-      description:
-        "Heading at the top of the pro reviews section (e.g. 'What professional streamers and gamers say about us')",
     },
     {
       name: 'subtitle',
       title: 'Subtitle',
       type: 'string',
-      description: "Short description below the title (e.g. 'Feedback from pros...')",
-    },
-    {
-      name: 'glowEnabled',
-      title: 'Enable Glow Animation',
-      type: 'boolean',
-      description: 'Toggle animated outline around this carousel.',
-      initialValue: true,
     },
     {
       name: 'reviews',
@@ -48,22 +22,65 @@ export default {
           type: 'object',
           fields: [
             {
+              name: 'pfp',
+              title: 'Profile Picture',
+              type: 'image',
+              options: {
+                hotspot: true,
+              },
+            },
+            {
+              name: 'isVip',
+              title: 'VIP Glow Effect',
+              type: 'boolean',
+              description: 'Enable for important creators. Adds a golden border and glow.',
+              initialValue: false,
+            },
+            {
               name: 'name',
               title: 'Reviewer Name',
               type: 'string',
+              validation: (Rule) => Rule.required(),
             },
             {
               name: 'profession',
               title: 'Profession',
               type: 'string',
-              description: 'e.g. Streamer, YouTuber, Coach, Analyst',
+            },
+            {
+              name: 'optimizationResult',
+              title: 'Optimization Result',
+              type: 'string',
+              description: 'e.g. "200 -> 1000" or "FPS Boosted"',
             },
             {
               name: 'text',
               title: 'Review Text',
               type: 'text',
+              validation: (Rule) => Rule.required().max(128),
+            },
+            {
+              name: 'rating',
+              title: 'Star Rating',
+              type: 'number',
+              options: {
+                list: [
+                  {title: '1 Star', value: 1},
+                  {title: '2 Stars', value: 2},
+                  {title: '3 Stars', value: 3},
+                  {title: '4 Stars', value: 4},
+                  {title: '5 Stars', value: 5},
+                ],
+              },
             },
           ],
+          preview: {
+            select: {
+              title: 'name',
+              subtitle: 'profession',
+              media: 'pfp',
+            },
+          },
         },
       ],
     },
