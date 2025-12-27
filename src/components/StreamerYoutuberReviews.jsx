@@ -20,6 +20,7 @@ export default function StreamerYoutuberReviews() {
       reviews[]{
         name,
         profession,
+        game,
         optimizationResult,
         text,
         rating,
@@ -131,10 +132,21 @@ function CompactStarRating({ rating = 5 }) {
 
 function ReviewCard({ review }) {
   const isVip = review.isVip;
+  const highlightStyle = {
+    background: isVip
+      ? "none"
+      : "linear-gradient(90deg, #7dd3fc 0%, #38bdf8 30%, #22d3ee 70%, #67e8f9 100%)",
+    WebkitBackgroundClip: isVip ? "border-box" : "text",
+    backgroundClip: isVip ? "border-box" : "text",
+    WebkitTextFillColor: isVip ? "#facc15" : "transparent",
+    color: isVip ? "#facc15" : "transparent",
+    textShadow: isVip ? "0 0 10px rgba(250, 204, 21, 0.5)" : "none",
+    filter: isVip ? "none" : "drop-shadow(0 0 8px rgba(56,189,248,0.5))",
+  };
 
   return (
     <div
-      className="flex-shrink-0 w-[420px] sm:w-[520px] h-[220px] sm:h-[240px] rounded-2xl select-none pointer-events-none flex flex-col transition-all duration-300"
+      className="flex-shrink-0 w-[420px] sm:w-[520px] h-[260px] sm:h-[290px] rounded-2xl select-none pointer-events-none flex flex-col transition-all duration-300"
       style={{
         background: "rgba(12,22,40,0.95)",
         boxShadow: "none",
@@ -190,26 +202,23 @@ function ReviewCard({ review }) {
           {review.optimizationResult && (
             <h4
               className="text-xl sm:text-2xl font-bold leading-snug flex-shrink-0 mb-1"
-              style={{
-                background: isVip
-                  ? "none"
-                  : "linear-gradient(90deg, #7dd3fc 0%, #38bdf8 30%, #22d3ee 70%, #67e8f9 100%)",
-                WebkitBackgroundClip: isVip ? "border-box" : "text",
-                backgroundClip: isVip ? "border-box" : "text",
-                WebkitTextFillColor: isVip ? "#facc15" : "transparent",
-                color: isVip ? "#facc15" : "transparent",
-                textShadow: isVip ? "0 0 10px rgba(250, 204, 21, 0.5)" : "none",
-                filter: isVip
-                  ? "none"
-                  : "drop-shadow(0 0 8px rgba(56,189,248,0.5))",
-              }}
+              style={highlightStyle}
             >
               {review.optimizationResult}
             </h4>
           )}
 
+          {review.game && (
+            <p
+              className="text-sm sm:text-base font-semibold leading-snug flex-shrink-0 mb-1"
+              style={highlightStyle}
+            >
+              {review.game}
+            </p>
+          )}
+
           {/* Review Text - Quotes removed here */}
-          <p className="text-slate-300 text-sm sm:text-base leading-relaxed italic break-words overflow-hidden line-clamp-4 mb-1">
+          <p className="text-slate-300 text-sm sm:text-base leading-relaxed italic break-words overflow-hidden line-clamp-3 mb-1">
             {review.text}
           </p>
 

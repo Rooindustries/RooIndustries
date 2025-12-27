@@ -48,6 +48,12 @@ export default {
               type: 'string',
             },
             {
+              name: 'game',
+              title: 'Game',
+              type: 'string',
+              description: 'Shown above the FPS result.',
+            },
+            {
               name: 'optimizationResult',
               title: 'Optimization Result',
               type: 'string',
@@ -57,7 +63,9 @@ export default {
               name: 'text',
               title: 'Review Text',
               type: 'text',
-              validation: (Rule) => Rule.required().max(128),
+              description:
+                'Make sure to check if it fits well in the cards, some can fit differently even when same size.',
+              validation: (Rule) => Rule.required().max(290),
             },
             {
               name: 'rating',
