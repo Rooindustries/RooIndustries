@@ -102,7 +102,8 @@ export default function Packages() {
     const sectionQuery = `*[_type == "packagesSettings"][0]{
       heading,
       badgeText,
-      subheading
+      subheading,
+      dividerText
     }`;
 
     client
@@ -115,6 +116,7 @@ export default function Packages() {
   const badgeText = sectionCopy?.badgeText ?? "Fully Online";
   const subheadingText =
     sectionCopy?.subheading ?? "Select the tuning package that best fits your needs";
+  const dividerText = sectionCopy?.dividerText;
 
   return (
     <section
@@ -142,128 +144,137 @@ export default function Packages() {
         </p>
       )}
 
-      <div className="mt-12 flex flex-col sm:flex-row justify-center gap-10 px-6 flex-wrap">
-        {packages.map((p, i) => {
-          const isXoc = p.title === "XOC / Extreme Overclocking";
+      <div className="mt-12 px-6">
+        <div className="mx-auto w-fit max-w-full">
+          <div className="flex flex-col sm:flex-row justify-center gap-10 flex-wrap">
+            {packages.map((p, i) => {
+              const isXoc = p.title === "XOC / Extreme Overclocking";
 
-          const checkedBullets = normalizeBullets(p.checkedBullets);
-          const uncheckedBullets = normalizeBullets(p.uncheckedBullets);
-          const orderedBullets = [
-            ...checkedBullets.map((label) => ({ label, checked: true })),
-            ...uncheckedBullets.map((label) => ({ label, checked: false })),
-          ];
-          const hasBullets = orderedBullets.length > 0;
+              const checkedBullets = normalizeBullets(p.checkedBullets);
+              const uncheckedBullets = normalizeBullets(p.uncheckedBullets);
+              const orderedBullets = [
+                ...checkedBullets.map((label) => ({ label, checked: true })),
+                ...uncheckedBullets.map((label) => ({ label, checked: false })),
+              ];
+              const hasBullets = orderedBullets.length > 0;
 
-          return (
-            <div
-              key={p._id || i}
-              className={`relative w-full sm:w-[500px] border rounded-xl px-7 py-7 transition-all duration-500 flex flex-col bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 text-base sm:text-lg ${
-                p.isHighlighted
-                  ? "border-sky-400/60 shadow-[0_0_35px_rgba(56,189,248,0.4)] hover:shadow-[0_0_50px_rgba(56,189,248,0.6)]"
-                  : "border-sky-600/40 shadow-[0_0_25px_rgba(14,165,233,0.25)] hover:shadow-[0_0_35px_rgba(14,165,233,0.4)]"
-              } min-h-[620px]`}
-            >
-              {p.tag && (
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                  <span
-                    className={`inline-flex items-center whitespace-nowrap text-sm font-bold px-4 py-1 rounded-full ${
-                      p.tagGoldGlow
-                        ? "border border-amber-300/70 gold-flair-pill"
-                        : "bg-sky-500 shadow-[0_0_15px_rgba(56,189,248,0.6)]"
-                    }`}
-                  >
-                    {p.tagGoldGlow ? (
+              return (
+                <div
+                  key={p._id || i}
+                  className={`relative w-full sm:w-[500px] border rounded-xl px-7 py-7 transition-all duration-500 flex flex-col bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 text-base sm:text-lg ${
+                    p.isHighlighted
+                      ? "border-sky-400/60 shadow-[0_0_35px_rgba(56,189,248,0.4)] hover:shadow-[0_0_50px_rgba(56,189,248,0.6)]"
+                      : "border-sky-600/40 shadow-[0_0_25px_rgba(14,165,233,0.25)] hover:shadow-[0_0_35px_rgba(14,165,233,0.4)]"
+                  } min-h-[620px]`}
+                >
+                  {p.tag && (
+                    <div className="absolute -top-3 left-1/2 -translate-x-1/2">
                       <span
-                        className="gold-flair-text"
+                        className={`inline-flex items-center whitespace-nowrap text-sm font-bold px-4 py-1 rounded-full ${
+                          p.tagGoldGlow
+                            ? "border border-amber-300/70 gold-flair-pill"
+                            : "bg-sky-500 shadow-[0_0_15px_rgba(56,189,248,0.6)]"
+                        }`}
                       >
-                        {p.tag}
+                        {p.tagGoldGlow ? (
+                          <span className="gold-flair-text">{p.tag}</span>
+                        ) : (
+                          p.tag
+                        )}
                       </span>
-                    ) : (
-                      p.tag
+                    </div>
+                  )}
+
+                  {/* Top content */}
+                  <div>
+                    <h3 className="text-3xl font-semibold">{p.title}</h3>
+
+                    <p className="mt-6 text-6xl font-bold text-sky-400">
+                      {p.price}
+                    </p>
+
+                    {p.description && (
+                      <p className="mt-4 text-center text-base sm:text-lg leading-relaxed text-slate-300/85">
+                        {p.description}
+                      </p>
                     )}
-                  </span>
-                </div>
-              )}
 
-              {/* Top content */}
-              <div>
-                <h3 className="text-3xl font-semibold">{p.title}</h3>
+                    <div className="mt-5 border-t border-white/10" />
 
-                <p className="mt-6 text-6xl font-bold text-sky-400">
-                  {p.price}
-                </p>
-
-                {p.description && (
-                  <p className="mt-4 text-center text-base sm:text-lg leading-relaxed text-slate-300/85">
-                    {p.description}
-                  </p>
-                )}
-
-                <div className="mt-5 border-t border-white/10" />
-
-                <div className="mt-5">
-                  <ul className="w-full space-y-2.5 text-left text-base sm:text-lg text-slate-300 leading-relaxed">
-                    {hasBullets ? (
-                      orderedBullets.map((b, index) => {
-                        const on = b.checked;
-                        return (
-                          <li
-                            key={`${on ? "on" : "off"}-${index}`}
-                            className={`flex items-start gap-2 transition ${
-                              on ? "opacity-100" : "opacity-35"
-                            }`}
-                          >
-                            <span
-                              className={`mt-0.5 inline-flex h-5 w-6 shrink-0 items-center justify-center ${
-                                on ? "text-sky-400" : "text-slate-500"
-                              }`}
-                            >
-                              {on ? "\u2713" : "\u25CB"}
-                            </span>
-                            <span className="flex-1">{b.label}</span>
+                    <div className="mt-5">
+                      <ul className="w-full space-y-2.5 text-left text-base sm:text-lg text-slate-300 leading-relaxed">
+                        {hasBullets ? (
+                          orderedBullets.map((b, index) => {
+                            const on = b.checked;
+                            return (
+                              <li
+                                key={`${on ? "on" : "off"}-${index}`}
+                                className={`flex items-start gap-2 transition ${
+                                  on ? "opacity-100" : "opacity-35"
+                                }`}
+                              >
+                                <span
+                                  className={`mt-0.5 inline-flex h-5 w-6 shrink-0 items-center justify-center ${
+                                    on ? "text-sky-400" : "text-slate-500"
+                                  }`}
+                                >
+                                  {on ? "\u2713" : "\u25CB"}
+                                </span>
+                                <span className="flex-1">{b.label}</span>
+                              </li>
+                            );
+                          })
+                        ) : (
+                          <li className="text-sm text-slate-400/70">
+                            (No package bullets yet)
                           </li>
-                        );
-                      })
-                    ) : (
-                      <li className="text-sm text-slate-400/70">
-                        (No package bullets yet)
-                      </li>
-                    )}
-                  </ul>
+                        )}
+                      </ul>
+                    </div>
+                  </div>
+
+                  {/* Bottom buttons pinned to bottom */}
+                  <div className="mt-auto pt-7 flex flex-col sm:flex-row gap-3">
+                    <button
+                      type="button"
+                      onClick={() => openDetails(p)}
+                      className="w-full sm:w-1/2 rounded-md border border-sky-500/40 bg-slate-900/40 py-3 text-base font-semibold text-sky-100 shadow-[0_0_15px_rgba(56,189,248,0.2)] transition hover:bg-slate-900/70 hover:text-white"
+                    >
+                      {p.detailsButtonText || "See What's Included"}
+                    </button>
+
+                    <Link
+                      to={`/booking?title=${encodeURIComponent(
+                        p.title
+                      )}&price=${encodeURIComponent(
+                        p.price
+                      )}&tag=${encodeURIComponent(p.tag || "")}&xoc=${
+                        isXoc ? "1" : "0"
+                      }`}
+                      state={bookingState}
+                      className="glow-button w-full sm:w-1/2 text-white text-lg py-3 rounded-md font-semibold shadow-[0_0_20px_rgba(56,189,248,0.4)] transition-all duration-300 text-center inline-flex items-center justify-center gap-2"
+                    >
+                      {p.buttonText || "Book Now"}
+                      <span className="glow-line glow-line-top" />
+                      <span className="glow-line glow-line-right" />
+                      <span className="glow-line glow-line-bottom" />
+                      <span className="glow-line glow-line-left" />
+                    </Link>
+                  </div>
                 </div>
-              </div>
+              );
+            })}
+          </div>
 
-              {/* Bottom buttons pinned to bottom */}
-              <div className="mt-auto pt-7 flex flex-col sm:flex-row gap-3">
-                <button
-                  type="button"
-                  onClick={() => openDetails(p)}
-                  className="w-full sm:w-1/2 rounded-md border border-sky-500/40 bg-slate-900/40 py-3 text-base font-semibold text-sky-100 shadow-[0_0_15px_rgba(56,189,248,0.2)] transition hover:bg-slate-900/70 hover:text-white"
-                >
-                  {p.detailsButtonText || "See What's Included"}
-                </button>
-
-                <Link
-                  to={`/booking?title=${encodeURIComponent(
-                    p.title
-                  )}&price=${encodeURIComponent(
-                    p.price
-                  )}&tag=${encodeURIComponent(p.tag || "")}&xoc=${
-                    isXoc ? "1" : "0"
-                  }`}
-                  state={bookingState}
-                  className="glow-button w-full sm:w-1/2 text-white text-lg py-3 rounded-md font-semibold shadow-[0_0_20px_rgba(56,189,248,0.4)] transition-all duration-300 text-center inline-flex items-center justify-center gap-2"
-                >
-                  {p.buttonText || "Book Now"}
-                  <span className="glow-line glow-line-top" />
-                  <span className="glow-line glow-line-right" />
-                  <span className="glow-line glow-line-bottom" />
-                  <span className="glow-line glow-line-left" />
-                </Link>
-              </div>
+          {dividerText && (
+            <div className="mt-8 flex w-full flex-col items-stretch text-center text-slate-300/85 gap-[0.5em]">
+              <p className="w-full text-[1.1875rem] sm:text-[1.1875rem] font-bold leading-relaxed whitespace-pre-line break-words text-slate-100">
+                {dividerText}
+              </p>
+              <div className="glow-button packages-divider-line h-[6px] w-full rounded-full opacity-90 shadow-[0_0_30px_rgba(56,189,248,0.8)]" />
             </div>
-          );
-        })}
+          )}
+        </div>
       </div>
 
       <PackageDetailsModal
