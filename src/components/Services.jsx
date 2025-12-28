@@ -145,7 +145,7 @@ export default function Services() {
   };
 
   const iconWrap =
-    "w-14 h-14 rounded-2xl grid place-items-center relative " +
+    "w-14 h-14 rounded-2xl grid place-items-center relative mx-auto " +
     "bg-gradient-to-b from-sky-400/15 via-cyan-400/10 to-transparent " +
     "ring-1 ring-white/10 shadow-[0_10px_30px_rgba(0,0,0,.45)] " +
     "after:content-[''] after:absolute after:inset-0 after:rounded-2xl " +
@@ -191,7 +191,7 @@ export default function Services() {
             <div
               key={i}
               className={
-                "group relative overflow-hidden rounded-2xl p-6 min-h-[190px] " +
+                "group relative overflow-hidden rounded-2xl p-6 min-h-[190px] text-center " +
                 "bg-gradient-to-b from-[#111827]/70 to-[#0b1220]/85 " +
                 "ring-1 ring-white/10 shadow-[0_18px_55px_rgba(0,0,0,.55)] " +
                 "transition duration-300 hover:-translate-y-[2px] hover:ring-cyan-400/35"
