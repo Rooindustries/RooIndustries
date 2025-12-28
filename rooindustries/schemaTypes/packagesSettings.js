@@ -22,5 +22,12 @@ export default {
       rows: 2,
       description: 'Short line under the badge.',
     },
+    {
+      name: 'dividerText',
+      title: 'Divider Text',
+      type: 'text',
+      rows: 3,
+      description: 'Text shown above the glow divider under the packages list.',
+    },
   ],
 }

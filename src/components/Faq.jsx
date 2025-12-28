@@ -1,8 +1,10 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef, useLayoutEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowRight, ChevronDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { client } from "../sanityClient";
+
+// --- HELPERS ---
 
 const slugify = (text = "") =>
   text
@@ -13,6 +15,7 @@ const slugify = (text = "") =>
 
 const UPGRADE_HASH = "upgrade-path";
 const TRUST_HASH = "trust";
+const QUESTIONS_PER_PAGE = 10;
 const UPGRADE_PATTERNS = [
   /upgrade path/i,
   /upgrade a single component/i,
@@ -34,74 +37,84 @@ const getQuestionId = (question = "", answer = "") => {
   return slugify(question);
 };
 
+// --- CUSTOM HOOK FOR AUTO-HEIGHT ANIMATION ---
+// This allows us to animate height without installing extra libraries like react-use-measure
+function useElementSize() {
+  const ref = useRef(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+
+  useLayoutEffect(() => {
+    if (!ref.current) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setSize({
+          width: entry.contentRect.width,
+          height: entry.contentRect.height,
+        });
+      }
+    });
+
+    observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, []);
+
+  return [ref, size];
+}
+
+// --- ANIMATION VARIANTS ---
+const variants = {
+  enter: (direction) => ({
+    x: direction > 0 ? 30 : -30,
+    opacity: 0,
+    filter: "blur(4px)",
+  }),
+  center: {
+    zIndex: 1,
+    x: 0,
+    opacity: 1,
+    filter: "blur(0px)",
+  },
+  exit: (direction) => ({
+    zIndex: 0,
+    x: direction < 0 ? 30 : -30,
+    opacity: 0,
+    filter: "blur(4px)",
+  }),
+};
+
 export default function FaqSection({ compact = false }) {
   const location = useLocation();
-  const [sections, setSections] = useState([]);
   const [faqCopy, setFaqCopy] = useState(null);
-  const [activeCategory, setActiveCategory] = useState(null);
   const [openQuestions, setOpenQuestions] = useState({});
-  const categoryRefs = useRef([]);
+  const [questions, setQuestions] = useState(null);
+  
+  // Pagination State
+  const [[page, direction], setPage] = useState([0, 0]);
 
-  const getCategoryId = (title = "", index = 0) =>
-    slugify(title) || `category-${index + 1}`;
+  // Height Measurement for smooth container resizing
+  const [containerRef, { height }] = useElementSize();
 
   const scrollWithOffset = (id, behavior = "smooth") => {
     const el = typeof id === "string" ? document.getElementById(id) : id;
     if (!el) return false;
-
     const yOffset = -96;
     const y = el.getBoundingClientRect().top + window.scrollY + yOffset;
     window.scrollTo({ top: y, behavior });
     return true;
   };
 
-  const scrollToCategory = (index, behavior = "smooth") => {
-    const el = categoryRefs.current[index];
-    if (el) scrollWithOffset(el, behavior);
-  };
-
-  const focusCategory = (index, behavior = "smooth") => {
-    setActiveCategory(index);
-    setTimeout(() => scrollToCategory(index, behavior), 120);
-  };
-
-  const toggleCategory = (index) => {
-    setActiveCategory((prev) => {
-      const next = prev === index ? null : index;
-      if (next !== null) {
-        setTimeout(() => scrollToCategory(next), 100);
-      }
-      return next;
-    });
-  };
-
-  const toggleQuestion = (categoryIndex, questionIndex) => {
-    setOpenQuestions((prev) => {
-      const categoryState = prev[categoryIndex] || {};
-      return {
-        ...prev,
-        [categoryIndex]: {
-          ...categoryState,
-          [questionIndex]: !categoryState[questionIndex],
-        },
-      };
-    });
-  };
-
-  const handleNextCategory = (currentIndex) => {
-    const nextIndex = currentIndex + 1;
-    if (nextIndex >= sections.length) return;
-    focusCategory(nextIndex);
+  const toggleQuestion = (questionId) => {
+    setOpenQuestions((prev) => ({
+      ...prev,
+      [questionId]: !prev[questionId],
+    }));
   };
 
   useEffect(() => {
     client
       .fetch(
-        `*[_type == "faqSettings"][0]{
-          eyebrow,
-          title,
-          subtitle
-        }`,
+        `*[_type == "faqSettings"][0]{ eyebrow, title, subtitle }`,
         {},
         { cache: "no-store" }
       )
@@ -112,22 +125,48 @@ export default function FaqSection({ compact = false }) {
   useEffect(() => {
     client
       .fetch(
-        `*[_type == "faqSection"] | order(_createdAt asc) {
-          sectionTitle,
-          questions[]{question, answer}
-        }`,
+        `coalesce(
+          *[_type == "faqSection" && _id == "faq"][0].questions,
+          *[_type == "faqSection"] | order(_createdAt asc) .questions[]
+        )`,
         {},
         { cache: "no-store" }
       )
-      .then((res) => {
-        setSections(res || []);
-      })
+      .then((res) => setQuestions(Array.isArray(res) ? res : []))
       .catch(console.error);
   }, []);
 
-  useEffect(() => {
-    if (!sections.length) return;
+  const flatQuestions = useMemo(
+    () =>
+      (questions || []).map((q, idx) => ({
+        ...q,
+        id: getQuestionId(q.question, q.answer),
+        key: String(idx),
+        index: idx,
+      })),
+    [questions]
+  );
 
+  const totalPages = Math.ceil(flatQuestions.length / QUESTIONS_PER_PAGE);
+  const safePage = Math.min(Math.max(0, page), Math.max(0, totalPages - 1));
+
+  const pagedQuestions = useMemo(() => {
+    const start = safePage * QUESTIONS_PER_PAGE;
+    return flatQuestions.slice(start, start + QUESTIONS_PER_PAGE);
+  }, [flatQuestions, safePage]);
+
+  const paginate = (newDirection) => {
+    const newPage = safePage + newDirection;
+    if (newPage >= 0 && newPage < totalPages) {
+      setPage([newPage, newDirection]);
+      setTimeout(() => scrollWithOffset("faq"), 250);
+    }
+  };
+
+  const isLoading = questions === null;
+
+  useEffect(() => {
+    if (!flatQuestions.length) return;
     const hash = (location.hash || "").replace("#", "");
     if (!hash) return;
 
@@ -136,44 +175,21 @@ export default function FaqSection({ compact = false }) {
       return;
     }
 
-    const questionMatch = sections.reduce((match, sec, sIdx) => {
-      if (match) return match;
-      const qIdx = sec.questions?.findIndex(
-        (q) => getQuestionId(q.question, q.answer) === hash
-      );
-      if (qIdx >= 0) return { categoryIndex: sIdx, questionIndex: qIdx };
-      return null;
-    }, null);
-
-    if (questionMatch) {
-      const { categoryIndex, questionIndex } = questionMatch;
-      setActiveCategory(categoryIndex);
-      setOpenQuestions((prev) => ({
-        ...prev,
-        [categoryIndex]: {
-          ...(prev[categoryIndex] || {}),
-          [questionIndex]: true,
-        },
-      }));
-      setTimeout(() => scrollWithOffset(hash), 140);
-      return;
+    const questionIndex = flatQuestions.findIndex((q) => q.id === hash);
+    if (questionIndex >= 0) {
+      const targetPage = Math.floor(questionIndex / QUESTIONS_PER_PAGE);
+      if (targetPage !== safePage) {
+        const dir = targetPage > safePage ? 1 : -1;
+        setPage([targetPage, dir]);
+      }
+      setOpenQuestions((prev) => ({ ...prev, [hash]: true }));
+      setTimeout(() => scrollWithOffset(hash), 250);
     }
+  }, [location.hash, flatQuestions]); 
 
-    const categoryIndex = sections.findIndex(
-      (sec, idx) => getCategoryId(sec.sectionTitle, idx) === hash
-    );
-    if (categoryIndex >= 0) {
-      focusCategory(categoryIndex);
-    }
-  }, [location.hash, sections]);
-
-  const isLoading = !sections.length;
   const eyebrowText = faqCopy?.eyebrow || "Answers without the fluff";
   const headingText = faqCopy?.title || "Frequently Asked Questions";
-  const subtitleText =
-    faqCopy?.subtitle ||
-    "Click a category to reveal the questions, then tap a question to expand its answer.";
-
+  const subtitleText = faqCopy?.subtitle || "Click a question to expand its answer.";
   const sectionPaddingClass = compact ? "pt-20 pb-10" : "pt-20 pb-24";
 
   return (
@@ -194,173 +210,129 @@ export default function FaqSection({ compact = false }) {
           </p>
         </div>
 
-        <div className="mt-12 space-y-5">
+        <div className="mt-12">
           {isLoading && (
-            <div className="rounded-2xl border border-sky-800/30 bg-slate-900/60 p-6">
-              <div className="h-4 w-24 rounded-full bg-sky-800/60 animate-pulse" />
+            <div className="rounded-2xl border border-sky-800/30 bg-slate-900/60 p-6 animate-pulse">
+              <div className="h-4 w-24 rounded-full bg-sky-800/60" />
               <div className="mt-3 space-y-2">
-                <div className="h-3 w-full rounded bg-sky-900/60 animate-pulse" />
-                <div className="h-3 w-5/6 rounded bg-sky-900/60 animate-pulse" />
-                <div className="h-3 w-4/6 rounded bg-sky-900/60 animate-pulse" />
+                <div className="h-3 w-full rounded bg-sky-900/60" />
+                <div className="h-3 w-5/6 rounded bg-sky-900/60" />
               </div>
             </div>
           )}
 
-          {sections.map((sec, i) => {
-            const isOpen = activeCategory === i;
-            const nextCategory = sections[i + 1];
-            const categoryId = getCategoryId(sec.sectionTitle, i);
+          {/* HEIGHT ANIMATION WRAPPER
+            This motion.div reads the height from the hook and animates to it.
+          */}
+          <motion.div
+            animate={{ height: height || "auto" }}
+            transition={{ type: "spring", stiffness: 180, damping: 20 }}
+            className="relative overflow-hidden"
+          >
+            {/* MEASUREMENT DIV
+              The ref attaches here. ResizeObserver watches this div.
+            */}
+            <div ref={containerRef}>
+              <AnimatePresence initial={false} mode="wait" custom={direction}>
+                <motion.div
+                  key={safePage}
+                  custom={direction}
+                  variants={variants}
+                  initial="enter"
+                  animate="center"
+                  exit="exit"
+                  transition={{
+                    x: { type: "spring", stiffness: 300, damping: 30 },
+                    opacity: { duration: 0.2 },
+                  }}
+                  className="space-y-4 py-2" // py-2 prevents margin collapse issues
+                >
+                  {pagedQuestions.map((q, idx) => {
+                    const isAnswerOpen = openQuestions[q.id] || false;
+                    const questionNumber = safePage * QUESTIONS_PER_PAGE + idx + 1;
 
-            return (
-              <div
-                key={categoryId}
-                id={categoryId}
-                ref={(el) => (categoryRefs.current[i] = el)}
-                className={`relative rounded-2xl border transition-all duration-200 ${
-                  isOpen
-                    ? "border-cyan-400/60 shadow-[0_0_20px_rgba(56,189,248,0.25)] bg-slate-900/75"
-                    : "border-sky-800/50 shadow-[0_0_14px_rgba(14,165,233,0.18)] hover:border-cyan-300/60 bg-slate-950/50"
-                }`}
-              >
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => toggleCategory(i)}
-                    aria-expanded={isOpen}
-                    className="w-full flex items-center justify-between gap-4 px-5 sm:px-7 py-5 text-left"
-                  >
-                    <div className="flex items-center gap-4 sm:gap-5">
-                      <div className="h-12 w-12 sm:h-14 sm:w-14 rounded-xl bg-gradient-to-br from-sky-500/80 to-cyan-400/80 border border-cyan-300/60 shadow-[0_0_20px_rgba(56,189,248,0.55)] flex items-center justify-center text-xl font-extrabold text-slate-950">
-                        {String(i + 1).padStart(2, "0")}
-                      </div>
-                      <div>
-                        <p className="text-[12px] uppercase tracking-[0.2em] text-cyan-200/80">
-                          Category
-                        </p>
-                        <h3 className="text-xl sm:text-2xl font-bold text-white">
-                          {sec.sectionTitle}
-                        </h3>
-                        <p className="text-xs text-slate-300/70 mt-1">
-                          {sec.questions?.length || 0} question
-                          {sec.questions?.length === 1 ? "" : "s"}
-                        </p>
-                      </div>
-                    </div>
-
-                    <motion.span
-                      animate={{ rotate: isOpen ? 180 : 0 }}
-                      transition={{ duration: 0.22 }}
-                      className="flex h-10 w-10 items-center justify-center rounded-full border border-sky-800/60 bg-slate-900/70 text-cyan-200 shadow-[0_0_12px_rgba(56,189,248,0.22)]"
-                    >
-                      <ChevronDown className="h-5 w-5" />
-                    </motion.span>
-                  </button>
-
-                  <AnimatePresence initial={false}>
-                    {isOpen && (
+                    return (
                       <motion.div
-                        key="category-body"
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: "auto", opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.18, ease: "easeInOut" }}
-                        className="px-5 sm:px-7 pb-6 overflow-hidden"
+                        layout="position"
+                        key={q.key}
+                        id={q.id}
+                        className="rounded-xl border border-sky-800/60 bg-slate-950/60 px-4 sm:px-5 py-3 transition-all duration-200 hover:border-cyan-300/60"
                       >
-                        <div className="mt-1 space-y-4">
-                          {sec.questions?.map((q, idx) => {
-                            const questionId = getQuestionId(
-                              q.question,
-                              q.answer
-                            );
-                            const isAnswerOpen =
-                              openQuestions?.[i]?.[idx] || false;
+                        <button
+                          type="button"
+                          onClick={() => toggleQuestion(q.id)}
+                          className="w-full flex items-start justify-between gap-3 text-left"
+                          aria-expanded={isAnswerOpen}
+                        >
+                          <div className="flex-1 text-[15px] sm:text-[16px] font-semibold text-sky-50">
+                            <span className="mr-2 text-sky-200/80 font-semibold">
+                              {questionNumber})
+                            </span>
+                            {q.question}
+                          </div>
+                          <motion.span
+                            animate={{ rotate: isAnswerOpen ? 180 : 0 }}
+                            transition={{ duration: 0.2 }}
+                            className="ml-2 text-cyan-200"
+                          >
+                            <ChevronDown className="h-4 w-4" />
+                          </motion.span>
+                        </button>
 
-                            return (
-                              <div
-                                key={`${questionId}-${idx}`}
-                                id={questionId}
-                                className="rounded-xl border border-sky-800/60 bg-slate-950/60 px-4 sm:px-5 py-3 transition-all duration-200 hover:border-cyan-300/60"
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() => toggleQuestion(i, idx)}
-                                  className="w-full flex items-center justify-between gap-3 text-left"
-                                  aria-expanded={isAnswerOpen}
-                                >
-                                  <div className="flex-1 text-[15px] sm:text-[16px] font-semibold text-sky-50">
-                                    {q.question}
-                                  </div>
-                                  <motion.span
-                                    animate={{ rotate: isAnswerOpen ? 180 : 0 }}
-                                    transition={{ duration: 0.12 }}
-                                    className="ml-2 text-cyan-200"
-                                  >
-                                    <ChevronDown className="h-4 w-4" />
-                                  </motion.span>
-                                </button>
-
-                                <AnimatePresence initial={false}>
-                                  {isAnswerOpen && (
-                                    <motion.div
-                                      key="answer"
-                                      initial={{ height: 0, opacity: 0 }}
-                                      animate={{ height: "auto", opacity: 1 }}
-                                      exit={{ height: 0, opacity: 0 }}
-                                      transition={{
-                                        duration: 0.18,
-                                        ease: "easeInOut",
-                                      }}
-                                      className="overflow-hidden"
-                                    >
-                                      <div className="mt-3 text-slate-200/90 leading-relaxed">
-                                        {q.answer}
-                                      </div>
-                                    </motion.div>
-                                  )}
-                                </AnimatePresence>
+                        <AnimatePresence>
+                          {isAnswerOpen && (
+                            <motion.div
+                              key="answer"
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: "auto", opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.3, ease: "easeOut" }}
+                              className="overflow-hidden"
+                            >
+                              <div className="pt-2 text-slate-200/90 leading-relaxed font-normal">
+                                {q.answer}
                               </div>
-                            );
-                          })}
-
-                          {!sec.questions?.length && (
-                            <div className="text-slate-300/70 text-sm">
-                              No questions added to this category yet.
-                            </div>
+                            </motion.div>
                           )}
-
-                          {nextCategory && (
-                            <div className="pt-2 flex justify-end">
-                              <button
-                                type="button"
-                                onClick={() => handleNextCategory(i)}
-                                className="glow-button group inline-flex items-center gap-2 rounded-full px-4 sm:px-5 py-2 text-sm font-semibold text-white ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
-                              >
-                                Next: {nextCategory?.sectionTitle}
-                                <motion.span
-                                  animate={{ x: [0, 4, 0] }}
-                                  transition={{
-                                    repeat: Infinity,
-                                    duration: 1.2,
-                                  }}
-                                  className="text-base"
-                                >
-                                  <ArrowRight className="h-4 w-4" />
-                                </motion.span>
-                                <span className="glow-line glow-line-top" />
-                                <span className="glow-line glow-line-right" />
-                                <span className="glow-line glow-line-bottom" />
-                                <span className="glow-line glow-line-left" />
-                              </button>
-                            </div>
-                          )}
-                        </div>
+                        </AnimatePresence>
                       </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              </div>
-            );
-          })}
+                    );
+                  })}
+
+                  {!isLoading && flatQuestions.length === 0 && (
+                    <div className="text-slate-300/70 text-sm">
+                      No questions added yet.
+                    </div>
+                  )}
+                </motion.div>
+              </AnimatePresence>
+            </div>
+          </motion.div>
+
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div className="pt-6 flex items-center justify-center gap-2 sm:gap-3 text-sm text-slate-300">
+              <button
+                type="button"
+                onClick={() => paginate(-1)}
+                disabled={safePage <= 0}
+                className="w-24 sm:w-28 shrink-0 rounded-full border border-sky-700/60 bg-slate-900/70 px-3 sm:px-4 py-2 font-semibold text-slate-100 text-center transition hover:border-cyan-300/60 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
+              >
+                Previous
+              </button>
+              <span className="min-w-[96px] sm:min-w-[110px] text-center text-slate-300/80 font-medium">
+                Page {safePage + 1} of {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => paginate(1)}
+                disabled={safePage >= totalPages - 1}
+                className="w-24 sm:w-28 shrink-0 rounded-full border border-sky-700/60 bg-slate-900/70 px-3 sm:px-4 py-2 font-semibold text-slate-100 text-center transition hover:border-cyan-300/60 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
+              >
+                Next
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </section>
