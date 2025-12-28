@@ -1,14 +1,8 @@
 export default {
   name: 'faqSection',
-  title: 'FAQ Sections',
+  title: 'FAQ',
   type: 'document',
   fields: [
-    {
-      name: 'sectionTitle',
-      title: 'Section Title',
-      type: 'string',
-      description: 'Category name',
-    },
     {
       name: 'questions',
       title: 'Questions',
