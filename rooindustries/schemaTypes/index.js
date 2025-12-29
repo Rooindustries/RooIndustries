@@ -20,6 +20,7 @@ import tool from './tool'
 import referralBox from './referralBox'
 import faqSettings from './faqSettings'
 import packagesSettings from './packagesSettings'
+import supportedGames from './supportedGames'
 
 export const schemaTypes = [
   benchmark,
@@ -44,4 +45,5 @@ export const schemaTypes = [
   referralBox,
   faqSettings,
   packagesSettings,
+  supportedGames,
 ]
