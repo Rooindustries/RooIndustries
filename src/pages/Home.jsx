@@ -6,6 +6,7 @@ import Footer from "../components/Footer";
 import HowItWorks from "../components/HowItWorks";
 import ReferralBox from "../components/ReferralBox";
 import Packages from "../components/Packages";
+import SupportedGames from "../components/SupportedGames";
 import Faq from "../components/Faq";
 import SEO from "../components/SEO";
 import { Link } from "react-router-dom";
@@ -42,6 +43,7 @@ export default function Home() {
         </Link>
       </div>
       <About />
+      <SupportedGames />
       <Faq compact />
       <ReferralBox />
       <Footer />
