@@ -32,7 +32,7 @@ function GameCard({ game, index }) {
                 loading="lazy"
                 decoding="async"
                 className="absolute inset-0 h-full w-full object-cover transition-all duration-500 ease-out group-hover:scale-105"
-                sizes="(min-width: 1280px) 14vw, (min-width: 1024px) 18vw, (min-width: 640px) 26vw, 40vw"
+                sizes="(min-width: 1280px) 14vw, (min-width: 1024px) 18vw, (min-width: 640px) 26vw, 30vw"
               />
               {/* Subtle overlay on hover */}
               <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
@@ -85,7 +85,7 @@ export default function SupportedGames() {
 
   const featuredGames = useMemo(() => {
     if (!Array.isArray(data?.featuredGames)) return [];
-    return data.featuredGames.slice(0, 5);
+    return data.featuredGames.slice(0, 6);
   }, [data]);
 
   const moreGames = useMemo(() => {
@@ -130,7 +130,7 @@ export default function SupportedGames() {
         id="supported-games"
         className="relative z-10 py-16 sm:py-20 px-4 sm:px-6 text-center text-white"
       >
-        <div className="max-w-5xl mx-auto">
+        <div className="max-w-6xl mx-auto">
           {/* Header - matching Packages style */}
           <div className="text-center mb-10 sm:mb-12">
             {data.title && (
@@ -148,8 +148,8 @@ export default function SupportedGames() {
           {/* Games grid */}
           {featuredGames.length > 0 && (
             <div className="rounded-2xl bg-gradient-to-b from-slate-900/50 to-slate-950/50 ring-1 ring-white/10 backdrop-blur-sm p-4 sm:p-5 shadow-[0_0_30px_rgba(0,0,0,0.3)]">
-              {/* Featured games grid - 5 columns on large screens */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+              {/* Featured games grid - 3 on mobile, 6 on large screens */}
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2 sm:gap-3 md:gap-4">
                 {featuredGames.map((game, index) => (
                   <GameCard
                     key={game?._key || index}
@@ -180,7 +180,7 @@ export default function SupportedGames() {
                     <div className="flex-1 h-px bg-gradient-to-r from-transparent via-sky-500/30 to-transparent" />
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2 sm:gap-3 md:gap-4">
                     {moreGames.map((game, index) => (
                       <GameCard
                         key={game?._key || index}
