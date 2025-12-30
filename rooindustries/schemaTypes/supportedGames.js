@@ -24,9 +24,9 @@ export default {
     },
     {
       name: 'featuredGames',
-      title: 'Featured Games (max 5)',
+      title: 'Featured Games (max 6)',
       type: 'array',
-      validation: (Rule) => Rule.max(5),
+      validation: (Rule) => Rule.max(6),
       of: [
         {
           type: 'object',
