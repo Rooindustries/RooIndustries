@@ -3,6 +3,8 @@ import { Link, useLocation } from "react-router-dom";
 import { client } from "../sanityClient";
 import PackageDetailsModal from "./PackageDetailsModal";
 
+const REFERRAL_STORAGE_KEY = "referral_session";
+
 export default function Packages() {
   const [packages, setPackages] = useState([]);
   const [sectionCopy, setSectionCopy] = useState(null);
@@ -70,6 +72,7 @@ export default function Packages() {
 
     if (ref) {
       try {
+        sessionStorage.setItem(REFERRAL_STORAGE_KEY, ref);
         localStorage.setItem("referral", ref);
       } catch (e) {
         console.error("Failed to store referral from link:", e);
