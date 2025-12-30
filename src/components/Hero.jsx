@@ -5,18 +5,18 @@ import { client } from "../sanityClient";
 export default function Hero() {
   const [heroData, setHeroData] = useState(null);
   const containerRef = useRef(null);
-  const line1Ref = useRef(null);
-  const line2Ref = useRef(null);
+  const measure1Ref = useRef(null);
+  const measure2Ref = useRef(null);
   const [line1FontSize, setLine1FontSize] = useState(null);
   const [line2FontSize, setLine2FontSize] = useState(null);
+  const [initialLoadDone, setInitialLoadDone] = useState(false);
 
-  // Base font sizes in pixels for different breakpoints
   const getBaseFontSize = useCallback(() => {
     if (typeof window === "undefined") return 48;
     const width = window.innerWidth;
-    if (width >= 1024) return 60; // lg:text-6xl = 3.75rem = 60px
-    if (width >= 640) return 48; // sm:text-5xl = 3rem = 48px
-    return 30; // text-3xl = 1.875rem = 30px
+    if (width >= 1024) return 60;
+    if (width >= 640) return 48;
+    return 30;
   }, []);
 
   useEffect(() => {
@@ -101,112 +101,171 @@ export default function Hero() {
     return <span className="text-white">{renderWithGlow110(cleaned)}</span>;
   };
 
-  // Calculate optimal font size to fit container
   const calculateFontSizes = useCallback(() => {
     const container = containerRef.current;
-    if (!container) return;
+    const measure1 = measure1Ref.current;
+    const measure2 = measure2Ref.current;
+
+    if (
+      !container ||
+      !measure1 ||
+      !measure2 ||
+      !headingLine1 ||
+      !headingLine2
+    ) {
+      return;
+    }
 
     const containerWidth = container.clientWidth;
     const padding = 16;
     const maxWidth = containerWidth - padding;
     const baseFontSize = getBaseFontSize();
 
-    // Helper function to find optimal font size
-    const findOptimalFontSize = (element, baseSize) => {
-      if (!element) return baseSize;
+    measure1.style.fontSize = `${baseFontSize}px`;
+    measure2.style.fontSize = `${baseFontSize}px`;
 
-      // Reset to base size to measure
-      element.style.fontSize = `${baseSize}px`;
+    const width1AtBase = measure1.getBoundingClientRect().width;
+    const width2AtBase = measure2.getBoundingClientRect().width;
 
-      // Force reflow
-      void element.offsetWidth;
+    const longerWidth = Math.max(width1AtBase, width2AtBase);
+    const targetWidth = Math.min(longerWidth, maxWidth);
 
-      const naturalWidth = element.scrollWidth;
+    let size1 = baseFontSize * (targetWidth / width1AtBase);
+    let size2 = baseFontSize * (targetWidth / width2AtBase);
 
-      if (naturalWidth <= maxWidth) {
-        return baseSize;
-      }
+    measure1.style.fontSize = `${size1}px`;
+    measure2.style.fontSize = `${size2}px`;
 
-      // Calculate the ratio and apply it to font size
-      const ratio = maxWidth / naturalWidth;
-      const newSize = Math.floor(baseSize * ratio);
+    const width1After = measure1.getBoundingClientRect().width;
+    const width2After = measure2.getBoundingClientRect().width;
 
-      // Set minimum font size (don't go below 50% of base)
-      return Math.max(newSize, baseFontSize * 0.5);
-    };
+    if (Math.abs(width1After - width2After) > 0.5) {
+      const actualMax = Math.max(width1After, width2After);
+      const finalTarget = Math.min(actualMax, maxWidth);
 
-    // Calculate for line 1
-    if (line1Ref.current && headingLine1) {
-      const optimalSize = findOptimalFontSize(line1Ref.current, baseFontSize);
-      setLine1FontSize(optimalSize);
-    } else {
-      setLine1FontSize(null);
+      size1 = size1 * (finalTarget / width1After);
+      size2 = size2 * (finalTarget / width2After);
+
+      measure1.style.fontSize = `${size1}px`;
+      measure2.style.fontSize = `${size2}px`;
+
+      const width1Final = measure1.getBoundingClientRect().width;
+      const width2Final = measure2.getBoundingClientRect().width;
+
+      const finalMax2 = Math.max(width1Final, width2Final);
+      size1 = size1 * (finalMax2 / width1Final);
+      size2 = size2 * (finalMax2 / width2Final);
     }
 
-    // Calculate for line 2
-    if (line2Ref.current && headingLine2) {
-      const optimalSize = findOptimalFontSize(line2Ref.current, baseFontSize);
-      setLine2FontSize(optimalSize);
-    } else {
-      setLine2FontSize(null);
-    }
-  }, [getBaseFontSize, headingLine1, headingLine2]);
+    const minSize = baseFontSize * 0.5;
+    const maxSize = baseFontSize * 1.5;
 
-  // Recalculate on resize
+    setLine1FontSize(Math.max(minSize, Math.min(maxSize, size1)));
+    setLine2FontSize(Math.max(minSize, Math.min(maxSize, size2)));
+
+    if (!initialLoadDone) {
+      setInitialLoadDone(true);
+    }
+  }, [getBaseFontSize, headingLine1, headingLine2, initialLoadDone]);
+
   useEffect(() => {
-    calculateFontSizes();
+    let resizeTimeout;
 
     const handleResize = () => {
-      // Reset font sizes first so we can measure fresh
-      setLine1FontSize(null);
-      setLine2FontSize(null);
-
-      requestAnimationFrame(() => {
-        requestAnimationFrame(calculateFontSizes);
-      });
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        calculateFontSizes();
+      }, 100);
     };
 
     window.addEventListener("resize", handleResize);
 
     let resizeObserver;
     if (typeof ResizeObserver !== "undefined" && containerRef.current) {
-      resizeObserver = new ResizeObserver(handleResize);
+      resizeObserver = new ResizeObserver(() => {
+        clearTimeout(resizeTimeout);
+        resizeTimeout = setTimeout(() => {
+          calculateFontSizes();
+        }, 100);
+      });
       resizeObserver.observe(containerRef.current);
     }
 
     return () => {
       window.removeEventListener("resize", handleResize);
+      clearTimeout(resizeTimeout);
       if (resizeObserver) resizeObserver.disconnect();
     };
   }, [calculateFontSizes]);
 
-  // Recalculate when hero data loads
   useEffect(() => {
-    if (heroData) {
+    if (heroData && headingLine1 && headingLine2) {
       requestAnimationFrame(() => {
-        requestAnimationFrame(calculateFontSizes);
+        calculateFontSizes();
       });
     }
-  }, [heroData, calculateFontSizes]);
+  }, [heroData, headingLine1, headingLine2, calculateFontSizes]);
 
-  // Get font size style or fall back to Tailwind classes
   const getLine1Style = () => {
     if (line1FontSize !== null) {
-      return { fontSize: `${line1FontSize}px`, textAlign: "center" };
+      return {
+        fontSize: `${line1FontSize}px`,
+        lineHeight: 1.1,
+        opacity: 1,
+      };
     }
-    return {};
+    return {
+      fontSize: `${getBaseFontSize()}px`,
+      lineHeight: 1.1,
+      opacity: 0,
+    };
   };
 
   const getLine2Style = () => {
     if (line2FontSize !== null) {
-      return { fontSize: `${line2FontSize}px`, textAlign: "center" };
+      return {
+        fontSize: `${line2FontSize}px`,
+        lineHeight: 1.1,
+        opacity: 1,
+      };
     }
-    return {};
+    return {
+      fontSize: `${getBaseFontSize()}px`,
+      lineHeight: 1.1,
+      opacity: 0,
+    };
   };
 
   return (
     <header id="top" className="py-16 flex justify-center">
       <section className="mx-auto max-w-4xl px-6 text-center w-full">
+        <div
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            visibility: "hidden",
+            height: 0,
+            overflow: "hidden",
+            whiteSpace: "nowrap",
+            pointerEvents: "none",
+          }}
+        >
+          <span
+            ref={measure1Ref}
+            className="font-extrabold tracking-tight"
+            style={{ lineHeight: 1.1 }}
+          >
+            {normalizeText(headingLine1)}
+          </span>
+          <span
+            ref={measure2Ref}
+            className="font-extrabold tracking-tight"
+            style={{ lineHeight: 1.1 }}
+          >
+            {normalizeText(headingLine2)}
+          </span>
+        </div>
+
         {/* Tagline Badge */}
         <div className="h-[30px] sm:h-[36px] flex justify-center items-center">
           {tagline && (
@@ -218,13 +277,12 @@ export default function Hero() {
           )}
         </div>
 
-        {/* Main Heading - Never Wraps */}
+        {/* Main Heading - Both Lines Same Width */}
         <div className="mt-8 w-full" ref={containerRef}>
-          <h1 className="font-extrabold leading-tight tracking-tight text-center">
+          <h1 className="font-extrabold tracking-tight text-center">
             {headingLine1 && (
               <span
-                ref={line1Ref}
-                className="block w-full whitespace-nowrap text-center text-3xl sm:text-5xl lg:text-6xl"
+                className="block w-full whitespace-nowrap text-center transition-opacity duration-150"
                 style={getLine1Style()}
               >
                 {renderHeadingLine1(headingLine1)}
@@ -233,8 +291,7 @@ export default function Hero() {
 
             {headingLine2 && (
               <span
-                ref={line2Ref}
-                className={`block w-full whitespace-nowrap text-center text-3xl sm:text-5xl lg:text-6xl ${headingLine2BaseClass}`}
+                className={`block w-full whitespace-nowrap text-center transition-opacity duration-150 ${headingLine2BaseClass}`}
                 style={getLine2Style()}
               >
                 {renderWithGlow110(headingLine2)}

@@ -236,7 +236,9 @@ export default function RefDashboard() {
 
   // referral code + link
   const referralCode = creator.slug?.current || "";
-  const referralLink = `${window.location.origin}/?ref=${referralCode}`;
+  const referralLink = `${window.location.origin}/?ref=${encodeURIComponent(
+    referralCode
+  )}#packages`;
 
   const payoutData = payout || {};
   const earnings = payoutData.earnings || {};
