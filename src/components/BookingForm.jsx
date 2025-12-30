@@ -355,13 +355,13 @@ export default function BookingForm({ isMobile }) {
     });
   };
 
-  // Persist referral from URL into session storage; clear if no ref is present
+  // Persist referral from URL into session storage; clear only if explicitly blank
   useEffect(() => {
     try {
       const ref = q.get("ref") || "";
       if (ref) {
         sessionStorage.setItem(REFERRAL_STORAGE_KEY, ref);
-      } else {
+      } else if (q.has("ref")) {
         sessionStorage.removeItem(REFERRAL_STORAGE_KEY);
       }
     } catch (err) {
