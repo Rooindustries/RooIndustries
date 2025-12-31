@@ -27,6 +27,7 @@ export default function Home() {
       />
       <Hero />
       <StreamerYoutuberReviews />
+      <About />
       <Services />
       <Packages />
       <HowItWorks />
@@ -42,7 +43,6 @@ export default function Home() {
           <span className="glow-line glow-line-left" />
         </Link>
       </div>
-      <About />
       <SupportedGames />
       <Faq compact />
       <ReferralBox />
