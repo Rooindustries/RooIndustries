@@ -10,7 +10,7 @@ export default function StreamerYoutuberReviews() {
   const [data, setData] = useState(null);
 
   const sectionClass =
-    "py-12 sm:py-16 text-center text-white relative overflow-hidden";
+    "pt-12 sm:pt-16 pb-4 sm:pb-6 text-center text-white relative overflow-hidden";
 
   useEffect(() => {
     const query = `*[_type == "proReviewsCarousel"][0]{
