@@ -56,7 +56,7 @@ export default function About() {
   return (
     <section
       id="about"
-      className="mx-auto max-w-6xl py-16 px-4 sm:px-6 text-center"
+      className="mx-auto max-w-6xl pt-4 sm:pt-6 pb-16 px-4 sm:px-6 text-center"
     >
       <div className="mt-6">
         <div className="mx-auto max-w-6xl rounded-2xl border border-sky-700/40 bg-gradient-to-br from-[#0b1d33] via-[#0a1324] to-[#06101f] shadow-[0_0_32px_rgba(14,165,233,0.2)] overflow-hidden">
@@ -105,7 +105,9 @@ export default function About() {
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5 text-left">
                   {recordDetails.map((detail, index) => (
                     <div
-                      key={detail?._key || `${detail?.label || "detail"}-${index}`}
+                      key={
+                        detail?._key || `${detail?.label || "detail"}-${index}`
+                      }
                       className="flex h-full flex-col rounded-2xl border border-sky-700/30 bg-slate-900/40 px-3 py-2"
                     >
                       <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400 whitespace-nowrap">
