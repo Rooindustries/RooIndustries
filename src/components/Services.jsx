@@ -57,11 +57,13 @@ export default function Services() {
           subheading,
           cards[]{title, description, iconType, customIcon},
           benchEnabled,
+          benchMetricLabel,
           benchBeforeLabel,
           benchAfterLabel,
+          benchBadgeSuffix,
           benchPagePrefix,
           benchPages[]{
-            games[]{gameTitle, gameLogo, beforeFps, afterFps, gpu, cpu, ram}
+            games[]{gameTitle, gameLogo, beforeFps, afterFps, gpu, cpu, ram, metricLabel}
           }
         }`
       )
@@ -163,6 +165,7 @@ export default function Services() {
 
   const beforeLabel = data.benchBeforeLabel || "Before";
   const afterLabel = data.benchAfterLabel || "Optimized";
+  const badgeSuffix = data.benchBadgeSuffix || "FPS";
   const pagePrefix = data.benchPagePrefix || "Page";
 
   return (
@@ -272,6 +275,9 @@ export default function Services() {
                       ? Number(g.afterFps)
                       : null;
 
+                  const metricText =
+                    g?.metricLabel || data?.benchMetricLabel || "Avg FPS";
+
                   return (
                     <motion.div
                       layout
@@ -324,6 +330,19 @@ export default function Services() {
                                   </div>
                                 </div>
                                 <div className="mt-1 h-[2px] w-14 rounded-full bg-gradient-to-r from-cyan-300/70 to-transparent opacity-70" />
+                                {metricText ? (
+                                  <div className="mt-3">
+                                    <span
+                                      className={
+                                        "inline-flex items-center rounded-full px-2.5 py-1 text-[13px] font-semibold " +
+                                        "bg-white/5 text-slate-100/90 ring-1 ring-white/10 " +
+                                        "shadow-[0_8px_22px_rgba(0,0,0,.3)]"
+                                      }
+                                    >
+                                      {metricText}
+                                    </span>
+                                  </div>
+                                ) : null}
                               </div>
 
                               <span
@@ -333,7 +352,7 @@ export default function Services() {
                                   "shadow-[0_10px_30px_rgba(0,0,0,.35)]"
                                 }
                               >
-                                {pct === null ? "—" : `+${pct}% FPS`}
+                                {pct === null ? "—" : `+${pct}% ${badgeSuffix}`}
                               </span>
                             </div>
 
