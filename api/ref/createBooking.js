@@ -207,6 +207,8 @@ export default async function handler(req, res) {
       }
     }
 
+    const isPaidBooking = status === "captured" && paymentProvider !== "free";
+
     const bookingDate = hostDate || date || displayDate || "";
     const bookingTime = hostTime || time || displayTime || "";
 
@@ -227,7 +229,19 @@ export default async function handler(req, res) {
       });
     }
 
+    const now = new Date();
+    const fetchActiveHold = () =>
+      writeClient.fetch(
+        `*[_type == "slotHold"
+            && hostDate == $date
+            && hostTime == $time
+            && expiresAt > now()][0]`,
+        { date: bookingDate, time: bookingTime }
+      );
+
     let holdDoc = null;
+    let holdMissing = false;
+    let holdExpired = false;
 
     if (slotHoldId) {
       holdDoc = await writeClient.fetch(
@@ -236,21 +250,13 @@ export default async function handler(req, res) {
       );
 
       if (!holdDoc) {
-        return res
-          .status(409)
-          .json({ error: "Your slot reservation expired." });
-      }
-
-      if (holdDoc.expiresAt && new Date(holdDoc.expiresAt) < new Date()) {
+        holdMissing = true;
+      } else if (holdDoc.expiresAt && new Date(holdDoc.expiresAt) < now) {
+        holdExpired = true;
         try {
           await writeClient.delete(slotHoldId);
         } catch {}
-        return res
-          .status(409)
-          .json({ error: "Your slot reservation expired." });
-      }
-
-      if (
+      } else if (
         holdDoc.hostDate !== bookingDate ||
         holdDoc.hostTime !== bookingTime
       ) {
@@ -258,19 +264,41 @@ export default async function handler(req, res) {
           error: "Slot hold does not match selected time.",
         });
       }
-    } else {
-      const activeHold = await writeClient.fetch(
-        `*[_type == "slotHold"
-            && hostDate == $date
-            && hostTime == $time
-            && expiresAt > now()][0]`,
-        { date: bookingDate, time: bookingTime }
-      );
+
+      if ((holdMissing || holdExpired) && !isPaidBooking) {
+        return res
+          .status(409)
+          .json({ error: "Your slot reservation expired." });
+      }
+
+      if ((holdMissing || holdExpired) && isPaidBooking) {
+        console.warn("Proceeding without an active hold for a paid booking.", {
+          slotHoldId,
+          bookingDate,
+          bookingTime,
+          paymentProvider,
+        });
+      }
+    }
+
+    if (!slotHoldId || holdMissing || holdExpired) {
+      const activeHold = await fetchActiveHold();
 
       if (activeHold) {
-        return res.status(409).json({
-          error: "This slot is temporarily reserved by another user.",
-        });
+        if (!isPaidBooking || !slotHoldId) {
+          return res.status(409).json({
+            error: "This slot is temporarily reserved by another user.",
+          });
+        }
+
+        if (activeHold._id !== slotHoldId) {
+          console.warn("Paid booking is overriding another active hold.", {
+            slotHoldId,
+            activeHoldId: activeHold._id,
+            bookingDate,
+            bookingTime,
+          });
+        }
       }
     }
 
@@ -352,11 +380,18 @@ export default async function handler(req, res) {
         : {}),
     });
 
-    if (slotHoldId) {
-      try {
-        await writeClient.delete(slotHoldId);
-      } catch {}
-    }
+    try {
+      const holdIds = await writeClient.fetch(
+        `*[_type == "slotHold" && hostDate == $date && hostTime == $time]._id`,
+        { date: bookingDate, time: bookingTime }
+      );
+
+      if (Array.isArray(holdIds) && holdIds.length > 0) {
+        await Promise.all(
+          holdIds.map((id) => writeClient.delete(id).catch(() => {}))
+        );
+      }
+    } catch {}
 
     if (effectiveReferralId && status === "captured") {
       try {
@@ -393,29 +428,73 @@ export default async function handler(req, res) {
       } catch {}
     }
 
+    let owner = process.env.OWNER_EMAIL;
+    try {
+      const settings = await writeClient.fetch(
+        `*[_type == "bookingSettings"][0]{ ownerEmail }`
+      );
+      const ownerFromSettings = String(settings?.ownerEmail || "").trim();
+      if (ownerFromSettings) {
+        owner = ownerFromSettings;
+      }
+    } catch (ownerErr) {
+      console.error(
+        "Failed to load booking owner email:",
+        ownerErr?.message || ownerErr
+      );
+    }
+
     const siteName = process.env.SITE_NAME || "Roo Industries";
     const logoUrl =
       process.env.LOGO_URL || "https://rooindustries.com/embed_logo.png";
     const from = process.env.FROM_EMAIL;
-    const owner = process.env.OWNER_EMAIL;
+
+    const formatMoney = (value) =>
+      Number.isFinite(value) ? value.toFixed(2) : "0.00";
+    const discountPercentValue =
+      typeof effectiveDiscountPercent === "number" ? effectiveDiscountPercent : 0;
+    const discountAmountValue =
+      typeof effectiveDiscountAmount === "number" ? effectiveDiscountAmount : 0;
+    const couponPercentValue =
+      typeof couponDiscountPercent === "number" ? couponDiscountPercent : 0;
+    const couponAmountValue =
+      typeof couponDiscountAmount === "number" ? couponDiscountAmount : 0;
 
     const sharedCoreFields = [
-      { label: "Package", value: `${packageTitle || "—"}` },
+      { label: "Package", value: `${packageTitle || "-"}` },
       {
         label: "Price",
         value:
           effectiveNetAmount < effectiveGrossAmount
-            ? `$${effectiveNetAmount.toFixed(
-                2
-              )} (was $${effectiveGrossAmount.toFixed(2)})`
-            : `${packagePrice || "—"}`,
+            ? `$${formatMoney(effectiveNetAmount)} (was $${formatMoney(effectiveGrossAmount)})`
+            : `${packagePrice || "-"}`,
       },
-      { label: "Discord", value: discord || "—" },
-      { label: "Email", value: email || "—" },
-      { label: "Main Game", value: mainGame || "—" },
-      { label: "PC Specs", value: specs || "—" },
-      { label: "Notes", value: message || "—" },
+      { label: "Discord", value: discord || "-" },
+      { label: "Email", value: email || "-" },
+      { label: "Main Game", value: mainGame || "-" },
+      { label: "PC Specs", value: specs || "-" },
+      { label: "Notes", value: message || "-" },
     ];
+
+    const ownerDiscountFields = [];
+
+    if (discountPercentValue > 0 || discountAmountValue > 0) {
+      ownerDiscountFields.push({
+        label: "Discount",
+        value: `${discountPercentValue}% ($${formatMoney(discountAmountValue)})`,
+      });
+    }
+
+    if (couponCode) {
+      const couponSuffix =
+        couponPercentValue > 0 || couponAmountValue > 0
+          ? ` (${couponPercentValue}% - $${formatMoney(couponAmountValue)})`
+          : "";
+      ownerDiscountFields.push({
+        label: "Coupon Code",
+        value: `${couponCode}${couponSuffix}`,
+      });
+    }
 
     const localDate = displayDate || date || hostDate || "—";
     const localTime = displayTime || localTimeLabel || time || "—";
@@ -434,8 +513,9 @@ export default async function handler(req, res) {
       { label: "Date", value: istDate },
       {
         label: "Time / Timezones",
-        value: `${istTime} (${hostTimeZone}) — ${localTime} (${localTimeZone})`,
+        value: `${istTime} (${hostTimeZone}) - ${localTime} (${localTimeZone})`,
       },
+      ...ownerDiscountFields,
       ...sharedCoreFields,
       {
         label: "Order ID",
@@ -450,7 +530,7 @@ export default async function handler(req, res) {
 
     if (from && email && process.env.RESEND_API_KEY) {
       try {
-        await resend.emails.send({
+        const { error } = await resend.emails.send({
           from,
           to: email,
           subject: clientSubject,
@@ -464,12 +544,18 @@ export default async function handler(req, res) {
             discordInviteUrl: DISCORD_INVITE_URL,
           }),
         });
-      } catch {}
+
+        if (error) {
+          console.error("Resend client email error:", error);
+        }
+      } catch (emailErr) {
+        console.error("Resend client email exception:", emailErr);
+      }
     }
 
     if (from && owner && process.env.RESEND_API_KEY) {
       try {
-        await resend.emails.send({
+        const { error } = await resend.emails.send({
           from,
           to: owner,
           subject: ownerSubject,
@@ -481,12 +567,19 @@ export default async function handler(req, res) {
             fields: ownerFields,
           }),
         });
-      } catch {}
+        if (error) {
+          console.error("Resend owner email error:", error);
+        }
+      } catch (emailErr) {
+        console.error("Resend owner email exception:", emailErr);
+      }
     }
 
     return res.status(200).json({ bookingId: doc._id });
   } catch (err) {
-    console.error("❌ Booking API error:", err);
-    return res.status(500).json({ error: err.message || "Server error" });
+    const message = err?.message || "Server error";
+    const code = err?.code;
+    console.error("Booking API error:", { message, code });
+    return res.status(500).json({ error: message });
   }
 }
