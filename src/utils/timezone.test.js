@@ -56,4 +56,13 @@ describe("timezone helpers", () => {
     expect(labels.hostDateLabel).toMatch(/Dec 19/);
     expect(labels.crossesDateBoundary).toBe(true);
   });
+
+  test("host date label keeps leading zero on single-digit days", () => {
+    // 12:00 IST on Jan 05 should retain the leading zero in host label.
+    const utcStart = new Date(Date.UTC(2099, 0, 5, 6, 30));
+
+    const labels = deriveSlotLabels(utcStart, "UTC", HOST_TZ_NAME);
+
+    expect(labels.hostDateLabel).toMatch(/Jan 05/);
+  });
 });
