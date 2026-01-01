@@ -40,7 +40,7 @@ export const formatHostDateLabel = (utcDate, hostTimeZone = HOST_TZ_NAME) => {
         return acc;
       }, {});
 
-    const day = parts.day ? String(Number(parts.day)) : "";
+    const day = parts.day || "";
     const weekday = parts.weekday || "";
     const month = parts.month || "";
     const year = parts.year || "";
