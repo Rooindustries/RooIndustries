@@ -33,30 +33,35 @@ export default {
                 ],
               },
             },
-            // 2. New Image Upload Field
             {
               name: 'customIcon',
               title: 'Custom Icon (Upload)',
               type: 'image',
               description: 'Upload an SVG or PNG. This overrides the preset icon selection.',
               options: {
-                hotspot: true, // Allows cropping if needed
+                hotspot: true,
               },
             },
           ],
         },
       ],
     },
-    // ... existing benchmark fields ...
     {
       name: 'benchMetricLabel',
-      title: 'Metric Label',
+      title: 'Default Metric Badge',
       type: 'string',
-      initialValue: 'Frames Per Second',
+      description: 'Fallback badge if a game does not set its own (e.g., Avg FPS or 1% Lows).',
+      initialValue: 'Avg FPS',
     },
     {name: 'benchBeforeLabel', title: 'Before Label', type: 'string', initialValue: 'Before'},
     {name: 'benchAfterLabel', title: 'Optimized Label', type: 'string', initialValue: 'Optimized'},
-    {name: 'benchBadgeSuffix', title: 'Badge Suffix', type: 'string', initialValue: 'FPS'},
+    {
+      name: 'benchBadgeSuffix',
+      title: 'Badge Suffix',
+      type: 'string',
+      description: 'Suffix for the percent badge (e.g., FPS).',
+      initialValue: 'FPS',
+    },
     {name: 'benchPagePrefix', title: 'Page Prefix', type: 'string', initialValue: 'Page'},
     {
       name: 'benchPages',
@@ -87,6 +92,13 @@ export default {
                     },
                     {name: 'beforeFps', title: 'Before FPS', type: 'number'},
                     {name: 'afterFps', title: 'Optimized FPS', type: 'number'},
+                    {
+                      name: 'metricLabel',
+                      title: 'Avg/low Badge',
+                      type: 'string',
+                      description: 'Shown under the game name',
+                      initialValue: 'Avg FPS',
+                    },
                     {name: 'gpu', title: 'GPU', type: 'string'},
                     {name: 'cpu', title: 'CPU', type: 'string'},
                     {name: 'ram', title: 'RAM', type: 'string'},
