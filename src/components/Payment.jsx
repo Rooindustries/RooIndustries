@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useLocation, Link, useNavigate } from "react-router-dom";
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 import { motion } from "framer-motion";
@@ -69,6 +69,7 @@ export default function Payment({ hideFooter = false }) {
     holdExpiresAt && new Date(holdExpiresAt).getTime() <= Date.now();
   const hasSlotHold = !!bookingData?.slotHoldId && !holdExpired;
   const canSubmitBooking = hasTimeslot && hasSlotHold;
+  const holdExpiryHandledRef = useRef(false);
 
   const ensureSlotBeforeAction = () => {
     if (canSubmitBooking) return true;
@@ -149,6 +150,37 @@ export default function Payment({ hideFooter = false }) {
       setBanner((prev) => (prev?.text === text ? null : prev));
     }, 4000);
   };
+
+  useEffect(() => {
+    if (!holdExpiresAt) return;
+    const expiresAtMs = new Date(holdExpiresAt).getTime();
+    if (!Number.isFinite(expiresAtMs)) return;
+
+    const triggerExpiry = () => {
+      if (holdExpiryHandledRef.current) return;
+      holdExpiryHandledRef.current = true;
+      showBanner(
+        "error",
+        "Your reserved slot expired. Please select a new time before completing your booking."
+      );
+      navigate("/booking", {
+        state: {
+          backgroundLocation: navState.backgroundLocation || location,
+          modal: true,
+          ...navState,
+        },
+        replace: true,
+      });
+    };
+
+    if (expiresAtMs <= Date.now()) {
+      triggerExpiry();
+      return;
+    }
+
+    const timeoutId = setTimeout(triggerExpiry, expiresAtMs - Date.now());
+    return () => clearTimeout(timeoutId);
+  }, [holdExpiresAt, navigate, navState, location]);
 
   // Referral discount
   const referralPercent = isUpgrade ? 0 : referral?.currentDiscountPercent || 0;
@@ -410,11 +442,32 @@ export default function Payment({ hideFooter = false }) {
       });
 
       if (!res.ok) {
-        console.error("Free booking create error:", await res.text());
+        const raw = await res.text();
+        let errorMessage =
+          "Could not save your free booking. Please contact support.";
+        try {
+          const data = JSON.parse(raw);
+          if (data?.error || data?.message) {
+            errorMessage = data.error || data.message;
+          }
+        } catch {
+          if (raw) errorMessage = raw;
+        }
+        if (res.status === 409) {
+          errorMessage =
+            "Your reserved slot expired. Please select a new time before completing your booking.";
+        }
+        console.error("Free booking create error:", raw);
         showBanner(
           "error",
-          "Could not save your free booking. Please contact support."
+          errorMessage
         );
+        if (res.status === 409) {
+          navigate("/booking", {
+            state: backToBookingState,
+            replace: true,
+          });
+        }
         return;
       }
 
