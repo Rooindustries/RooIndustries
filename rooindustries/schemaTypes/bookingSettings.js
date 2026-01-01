@@ -16,6 +16,14 @@ export default {
       initialValue: 7,
     },
     {
+      name: 'ownerEmail',
+      title: 'Booking Owner Email',
+      type: 'string',
+      description:
+        'Notification destination for new bookings. Overrides OWNER_EMAIL if set.',
+      validation: (Rule) => Rule.email().warning('Enter a valid email address.'),
+    },
+    {
       name: 'openHour',
       title: 'Opening Hour (24h) — Vertex / Default',
       type: 'number',
