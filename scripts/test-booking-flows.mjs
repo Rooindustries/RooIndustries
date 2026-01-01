@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 import crypto from "crypto";
 import { createClient } from "@sanity/client";
 import { createRequire } from "module";
+import { formatHostDateLabel } from "../src/utils/timezone.js";
 
 dotenv.config({ path: ".env.local" });
 
@@ -75,6 +76,16 @@ const makeSlot = (dayOffset, hour24) => {
   const hostTime = formatHostTime(hour24);
   const startTimeUTC = new Date(
     Date.UTC(2099, 0, 10 + dayOffset, hour24, 0, 0)
+  ).toISOString();
+  return { hostDate, hostTime, startTimeUTC };
+};
+
+const makeCustomSlot = (year, monthIndex, dayOfMonth, hour24) => {
+  const date = new Date(year, monthIndex, dayOfMonth);
+  const hostDate = date.toDateString();
+  const hostTime = formatHostTime(hour24);
+  const startTimeUTC = new Date(
+    Date.UTC(year, monthIndex, dayOfMonth, hour24, 0, 0)
   ).toISOString();
   return { hostDate, hostTime, startTimeUTC };
 };
@@ -484,6 +495,32 @@ const testBookingFlow = async () => {
     ...paidPayload(makeSlot(11, 21), { paymentProvider: "stripe" }),
   });
   record("unsupported_payment_provider", unsupportedRes.status === 400);
+
+  const singleDigitSlot = makeCustomSlot(2099, 0, 5, 9);
+  const singleDigitHold = await createHold(
+    singleDigitSlot,
+    new Date(Date.now() + 10 * 60 * 1000).toISOString()
+  );
+  const hostDateLabel = formatHostDateLabel(
+    new Date(singleDigitSlot.startTimeUTC),
+    "Asia/Kolkata"
+  );
+  const singleDigitRes = await callHandler(createBookingHandler, {
+    ...paidPayload(singleDigitSlot, {
+      slotHoldId: singleDigitHold._id,
+      hostDate: hostDateLabel,
+    }),
+  });
+  if (singleDigitRes.status === 200 && singleDigitRes.body?.bookingId) {
+    created.bookings.push(singleDigitRes.body.bookingId);
+    record("single_digit_day_hold_match", true, singleDigitRes.body.bookingId);
+  } else {
+    record(
+      "single_digit_day_hold_match",
+      false,
+      JSON.stringify(singleDigitRes.body)
+    );
+  }
 };
 
 try {
