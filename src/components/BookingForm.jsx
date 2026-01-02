@@ -112,6 +112,66 @@ const parseHostLabelToHour = (label) => {
   return hour;
 };
 
+const parseDateKey = (value) => {
+  if (!value) return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toDateString();
+  }
+  if (typeof value !== "string") return null;
+  const datePart = value.split("T")[0];
+  const [year, month, day] = datePart.split("-").map((num) => Number(num));
+  if (!year || !month || !day) return null;
+  const date = new Date(year, month - 1, day);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toDateString();
+};
+
+const parseHourValue = (value) => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const match = raw.match(/^(\d{1,2})(?::\d{2})?$/);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  if (!Number.isFinite(hour) || hour < 0 || hour > 23) return null;
+  return hour;
+};
+
+const normalizeDateSlots = (slots) => {
+  const map = {};
+  (slots || []).forEach((slot) => {
+    const dateKey = parseDateKey(slot?.date);
+    if (!dateKey) return;
+    const timesRaw = Array.isArray(slot?.times) ? slot.times : [];
+    const hours = timesRaw
+      .map((time) => parseHourValue(time))
+      .filter((time) => Number.isFinite(time));
+    const unique = Array.from(new Set(hours)).sort((a, b) => a - b);
+    if (!unique.length) return;
+    map[dateKey] = unique;
+  });
+  return map;
+};
+
+const normalizePackageKey = (value) =>
+  String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+
+const normalizePackageDateSlots = (entries) => {
+  const map = {};
+  (entries || []).forEach((entry) => {
+    const titleKey = normalizePackageKey(entry?.package?.title);
+    if (!titleKey) return;
+    const slots = normalizeDateSlots(entry?.dateSlots);
+    if (!Object.keys(slots).length) return;
+    map[titleKey] = slots;
+  });
+  return map;
+};
+
 const getUtcDateFromHold = (hold) => {
   if (!hold) return null;
 
@@ -620,11 +680,16 @@ export default function BookingForm({ isMobile }) {
   const [xocCustomMobo, setXocCustomMobo] = useState("");
   const [xocCustomRam, setXocCustomRam] = useState("");
 
+  const normalizedPackageTitle = normalizePackageKey(selectedPackage.title);
+
   // is this XOC?
   const isXoc =
     q.get("xoc") === "1" ||
     selectedPackage.title === "XOC / Extreme Overclocking" ||
-    (selectedPackage.title || "").toLowerCase().includes("xoc");
+    normalizedPackageTitle.includes("xoc");
+
+  const isVertexEssentials =
+    normalizedPackageTitle.includes("vertex essential");
 
   const displayPackage = modalPackage || vertexPackage;
   const isStep2Complete = useMemo(() => {
@@ -701,12 +766,60 @@ export default function BookingForm({ isMobile }) {
     return t;
   }, []);
 
+  const dateSlotMap = useMemo(() => {
+    if (!settings) return null;
+    const baseMap = settings.dateSlotMap;
+    const xocMap = settings.xocDateSlotMap;
+    const essentialsMap = settings.vertexEssentialsDateSlotMap;
+    const packageMaps = settings.packageDateSlotMaps;
+    const packageTitleKey = normalizePackageKey(selectedPackage.title);
+    const packageMap =
+      packageTitleKey && packageMaps ? packageMaps[packageTitleKey] : null;
+    const hasBase = baseMap && Object.keys(baseMap).length > 0;
+    const hasXoc = xocMap && Object.keys(xocMap).length > 0;
+    const hasEssentials =
+      essentialsMap && Object.keys(essentialsMap).length > 0;
+    const hasPackageMap = packageMap && Object.keys(packageMap).length > 0;
+
+    if (hasPackageMap) return packageMap;
+    if (isXoc && hasXoc) return xocMap;
+    if (isVertexEssentials && hasEssentials) return essentialsMap;
+    if (!isXoc && hasBase) return baseMap;
+
+    if (hasBase) return baseMap;
+    if (hasEssentials) return essentialsMap;
+    if (hasXoc) return xocMap;
+    return null;
+  }, [settings, isXoc, isVertexEssentials, selectedPackage.title]);
+
+  const isDateAllowed = (dateObj) => {
+    if (!settings) return false;
+    const d = new Date(dateObj);
+    d.setHours(0, 0, 0, 0);
+
+    if (d < startOfToday) return false;
+
+    if (!dateSlotMap) return false;
+
+    const dateKey = d.toDateString();
+    const hours = dateSlotMap[dateKey];
+    return Array.isArray(hours) && hours.length > 0;
+  };
+
   // ---------- FETCH SETTINGS + ACTIVE HOLDS ----------
   useEffect(() => {
     const fetchData = async () => {
       try {
         const [sRaw, booked, holds] = await Promise.all([
-          fetchWithRetry(`*[_type == "bookingSettings"][0]`),
+          fetchWithRetry(
+            `*[_type == "bookingSettings"][0]{
+              ...,
+              packageDateSlots[]{
+                package->{_id,title},
+                dateSlots
+              }
+            }`
+          ),
           fetchWithRetry(
             `*[_type == "booking"]{date, time, startTimeUTC, packageTitle, hostDate, hostTime}`
           ),
@@ -723,15 +836,12 @@ export default function BookingForm({ isMobile }) {
 
         const s = { ...sRaw };
 
-        s.openHour = Number(s.openHour ?? 9);
-        s.closeHour = Number(s.closeHour ?? 21);
-
-        if (s.xocOpenHour !== undefined && s.xocOpenHour !== null) {
-          s.xocOpenHour = Number(s.xocOpenHour);
-        }
-        if (s.xocCloseHour !== undefined && s.xocCloseHour !== null) {
-          s.xocCloseHour = Number(s.xocCloseHour);
-        }
+        s.dateSlotMap = normalizeDateSlots(s.dateSlots);
+        s.xocDateSlotMap = normalizeDateSlots(s.xocDateSlots);
+        s.vertexEssentialsDateSlotMap = normalizeDateSlots(
+          s.vertexEssentialsDateSlots
+        );
+        s.packageDateSlotMaps = normalizePackageDateSlots(s.packageDateSlots);
 
         const holdsMapped = (holds || []).map((h) => ({
           date: h.hostDate,
@@ -994,28 +1104,11 @@ export default function BookingForm({ isMobile }) {
     const hostMonth = selectedDate.getMonth();
     const hostDay = selectedDate.getDate();
 
-    const dayName = selectedDate
-      .toLocaleDateString("en-US", { weekday: "long" })
-      .toLowerCase();
-
-    // choose correct weekly slots
-    const weeklyObj = isXoc
-      ? settings.xocAvailableTimes || {}
-      : settings.availableTimes || {};
-
-    const allowedRaw = weeklyObj[dayName] || [];
-    const allowed = allowedRaw.map((x) => Number(x));
-
-    // choose open/close hours
-    const open = isXoc
-      ? settings.xocOpenHour ?? settings.openHour ?? 0
-      : settings.openHour ?? 0;
-
-    const close = isXoc
-      ? settings.xocCloseHour ?? settings.closeHour ?? 23
-      : settings.closeHour ?? 23;
+    if (!dateSlotMap) return [];
 
     const hostDateLabel = selectedDate.toDateString();
+    const dateSlotHours = dateSlotMap[hostDateLabel] || [];
+    const dateSlotSet = new Set(dateSlotHours);
 
     const daySlots =
       settings.bookedSlots?.filter((b) => {
@@ -1041,9 +1134,8 @@ export default function BookingForm({ isMobile }) {
       .map((b) => b.time);
 
     const slots = [];
-    for (let h = open; h <= close; h++) {
+    const buildSlot = (h, isAllowed) => {
       const hostLabel = hostTimeLabel(h);
-      const isAllowed = allowed.includes(h);
       let isBooked = bookedForDayHost.includes(hostLabel);
       let isHeldOther = heldForDayHost.includes(hostLabel);
 
@@ -1075,10 +1167,15 @@ export default function BookingForm({ isMobile }) {
         isAllowed,
         isPast,
       });
+    };
+
+    for (let h = 0; h <= 23; h++) {
+      const isAllowed = dateSlotSet.has(h);
+      buildSlot(h, isAllowed);
     }
 
     return slots;
-  }, [settings, selectedDate, isXoc, myHold]);
+  }, [settings, selectedDate, isXoc, myHold, dateSlotMap]);
 
   const getDaySlotInfo = (dateObj) => {
     if (!settings) return null;
@@ -1086,33 +1183,8 @@ export default function BookingForm({ isMobile }) {
     const d = new Date(dateObj);
     d.setHours(0, 0, 0, 0);
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const maxDate = new Date();
-    maxDate.setDate(maxDate.getDate() + (settings.maxDaysAheadBooking || 7));
-    maxDate.setHours(0, 0, 0, 0);
-
-    if (d < today || d > maxDate) return null;
-
-    const dayName = d
-      .toLocaleDateString("en-US", { weekday: "long" })
-      .toLowerCase();
-
-    const weeklyObj = isXoc
-      ? settings.xocAvailableTimes || {}
-      : settings.availableTimes || {};
-
-    const allowedRaw = weeklyObj[dayName] || [];
-    const allowed = allowedRaw.map((x) => Number(x));
-
-    const open = isXoc
-      ? settings.xocOpenHour ?? settings.openHour ?? 0
-      : settings.openHour ?? 0;
-
-    const close = isXoc
-      ? settings.xocCloseHour ?? settings.closeHour ?? 23
-      : settings.closeHour ?? 23;
+    if (d < startOfToday) return null;
+    if (!dateSlotMap) return null;
 
     const hostDateLabel = d.toDateString();
 
@@ -1146,22 +1218,22 @@ export default function BookingForm({ isMobile }) {
     let availableCount = 0;
     let totalConsidered = 0;
 
-    for (let h = open; h <= close; h++) {
+    const allowedHours = dateSlotMap[hostDateLabel] || [];
+    if (!allowedHours.length) return null;
+
+    allowedHours.forEach((h) => {
       const hostLabel = hostTimeLabel(h);
-      const isAllowed = allowed.includes(h);
       const isBooked = bookedForDayHost.includes(hostLabel);
       const isHeldOther = heldForDayHost.includes(hostLabel);
 
       const utcStart = getUtcFromHostLocal(hostYear, hostMonth, hostDay, h);
       const isPast = utcStart <= now;
 
-      const disabled = !isAllowed || isBooked || isHeldOther || isPast;
+      const disabled = isBooked || isHeldOther || isPast;
 
-      if (isAllowed) {
-        totalConsidered++;
-        if (!disabled) availableCount++;
-      }
-    }
+      totalConsidered++;
+      if (!disabled) availableCount++;
+    });
 
     if (totalConsidered === 0) {
       return { color: "red" };
@@ -1177,12 +1249,18 @@ export default function BookingForm({ isMobile }) {
   // ---------- INITIAL DATE ----------
   useEffect(() => {
     if (settings && !selectedDate) {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      setSelectedDate(today);
-      setMonth(today);
+      if (!dateSlotMap) return;
+
+      const nextDate = Object.keys(dateSlotMap)
+        .map((key) => new Date(key))
+        .filter((d) => !Number.isNaN(d.getTime()) && d >= startOfToday)
+        .sort((a, b) => a - b)[0];
+      const initialDate = nextDate ? new Date(nextDate) : new Date(startOfToday);
+      initialDate.setHours(0, 0, 0, 0);
+      setSelectedDate(initialDate);
+      setMonth(new Date(initialDate.getFullYear(), initialDate.getMonth(), 1));
     }
-  }, [settings, selectedDate]);
+  }, [settings, selectedDate, dateSlotMap, startOfToday]);
 
   // ---------- HELPERS ----------
   const handleChange = (e) => {
@@ -1244,14 +1322,7 @@ export default function BookingForm({ isMobile }) {
     const date = new Date(month.getFullYear(), month.getMonth(), day);
     date.setHours(0, 0, 0, 0);
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const maxDate = new Date();
-    maxDate.setDate(maxDate.getDate() + (settings.maxDaysAheadBooking || 7));
-    maxDate.setHours(0, 0, 0, 0);
-
-    if (date < today || date > maxDate) return;
+    if (!isDateAllowed(date)) return;
 
     setSelectedDate(date);
     setSelectedSlot(null);
@@ -1710,13 +1781,7 @@ export default function BookingForm({ isMobile }) {
                           );
                           date.setHours(0, 0, 0, 0);
 
-                          const maxDate = new Date();
-                          maxDate.setDate(
-                            maxDate.getDate() + (settings.maxDaysAheadBooking || 7)
-                          );
-                          maxDate.setHours(0, 0, 0, 0);
-
-                          const disabled = date < startOfToday || date > maxDate;
+                          const disabled = !isDateAllowed(date);
                           const isSelected =
                             selectedDate && isSameDay(date, selectedDate);
 

@@ -20,6 +20,7 @@ const emailHtml = ({
   intro,
   fields,
   discordInviteUrl,
+  discordLabel,
 }) => `
   <div style="font-family:Inter,Arial,sans-serif;background:#0b1120;padding:24px;color:#e5f2ff">
     <table width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;margin:0 auto;background:#0f172a;border:1px solid rgba(56,189,248,.2);border-radius:16px;overflow:hidden">
@@ -50,7 +51,7 @@ const emailHtml = ({
                 font-weight:600;
               "
             >
-              Join the Roo Industries Discord (Required)
+              ${discordLabel || "Join the Roo Industries Discord (Required)"}
             </a>
           </p>`
               : ""
@@ -381,6 +382,15 @@ export default async function handler(req, res) {
     });
 
     try {
+      await writeClient
+        .patch(doc._id)
+        .setIfMissing({ orderId: doc._id })
+        .commit();
+    } catch (err) {
+      console.error("Failed to set booking orderId:", err);
+    }
+
+    try {
       const holdIds = await writeClient.fetch(
         `*[_type == "slotHold" && hostDate == $date && hostTime == $time]._id`,
         { date: bookingDate, time: bookingTime }
@@ -474,6 +484,7 @@ export default async function handler(req, res) {
       { label: "Main Game", value: mainGame || "-" },
       { label: "PC Specs", value: specs || "-" },
       { label: "Notes", value: message || "-" },
+      { label: "Order ID", value: doc._id },
     ];
 
     const ownerDiscountFields = [];
@@ -517,15 +528,11 @@ export default async function handler(req, res) {
       },
       ...ownerDiscountFields,
       ...sharedCoreFields,
-      {
-        label: "Order ID",
-        value: doc._id,
-      },
     ];
 
     const bookingRef = (doc._id || "").slice(-6).toUpperCase() || "BOOKING";
 
-    const clientSubject = `Your ${siteName} booking (Ref: ${bookingRef})`;
+    const clientSubject = `Your ${siteName} booking`;
     const ownerSubject = `New booking ${bookingRef} — ${packageTitle} (${istDate} ${istTime})`;
 
     if (from && email && process.env.RESEND_API_KEY) {

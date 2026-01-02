@@ -11,6 +11,13 @@ export default {
     {name: 'specs', title: 'PC Specs', type: 'text'},
     {name: 'mainGame', title: 'Main Game', type: 'string'},
     {name: 'message', title: 'Notes', type: 'text'},
+    {
+      name: 'orderId',
+      title: 'Order ID',
+      type: 'string',
+      readOnly: true,
+      description: 'Matches the booking document ID.',
+    },
 
     {
       name: 'status',

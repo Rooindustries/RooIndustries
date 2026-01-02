@@ -24,140 +24,113 @@ export default {
       validation: (Rule) => Rule.email().warning('Enter a valid email address.'),
     },
     {
-      name: 'openHour',
-      title: 'Opening Hour (24h) — Vertex / Default',
-      type: 'number',
-      initialValue: 0,
+      name: 'packageDateSlots',
+      title: 'Package Date Slots',
+      type: 'array',
+      description:
+        'Optional per-package date overrides. If set, these slots take priority for that package.',
+      of: [
+        {
+          type: 'object',
+          fields: [
+            {
+              name: 'package',
+              title: 'Package',
+              type: 'reference',
+              to: [{type: 'package'}],
+            },
+            {
+              name: 'dateSlots',
+              title: 'Date Slots',
+              type: 'array',
+              of: [
+                {
+                  type: 'object',
+                  fields: [
+                    {name: 'date', title: 'Date', type: 'date'},
+                    {
+                      name: 'times',
+                      title: 'Available Hours (24h)',
+                      type: 'array',
+                      of: [{type: 'string'}],
+                      options: {layout: 'grid', list: hourOptions},
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+          preview: {
+            select: {title: 'package.title'},
+            prepare: ({title}) => ({
+              title: title || 'Package',
+            }),
+          },
+        },
+      ],
     },
     {
-      name: 'closeHour',
-      title: 'Closing Hour (24h) — Vertex / Default',
-      type: 'number',
-      initialValue: 23,
+      name: 'dateSlots',
+      title: 'Date-Based Time Slots (Vertex / Default)',
+      type: 'array',
+      description: 'Add specific dates with available hours.',
+      of: [
+        {
+          type: 'object',
+          fields: [
+            {name: 'date', title: 'Date', type: 'date'},
+            {
+              name: 'times',
+              title: 'Available Hours (24h)',
+              type: 'array',
+              of: [{type: 'string'}],
+              options: {layout: 'grid', list: hourOptions},
+            },
+          ],
+        },
+      ],
     },
     {
-      name: 'availableTimes',
-      title: 'Weekly Time Slots — Vertex / Default',
-      type: 'object',
-      fields: [
+      name: 'vertexEssentialsDateSlots',
+      title: 'Date-Based Time Slots (Vertex Essentials)',
+      type: 'array',
+      description: 'Add specific dates with available hours.',
+      of: [
         {
-          name: 'sunday',
-          title: 'Sunday',
-          type: 'array',
-          of: [{type: 'string'}],
-          options: {layout: 'grid', list: hourOptions},
-        },
-        {
-          name: 'monday',
-          title: 'Monday',
-          type: 'array',
-          of: [{type: 'string'}],
-          options: {layout: 'grid', list: hourOptions},
-        },
-        {
-          name: 'tuesday',
-          title: 'Tuesday',
-          type: 'array',
-          of: [{type: 'string'}],
-          options: {layout: 'grid', list: hourOptions},
-        },
-        {
-          name: 'wednesday',
-          title: 'Wednesday',
-          type: 'array',
-          of: [{type: 'string'}],
-          options: {layout: 'grid', list: hourOptions},
-        },
-        {
-          name: 'thursday',
-          title: 'Thursday',
-          type: 'array',
-          of: [{type: 'string'}],
-          options: {layout: 'grid', list: hourOptions},
-        },
-        {
-          name: 'friday',
-          title: 'Friday',
-          type: 'array',
-          of: [{type: 'string'}],
-          options: {layout: 'grid', list: hourOptions},
-        },
-        {
-          name: 'saturday',
-          title: 'Saturday',
-          type: 'array',
-          of: [{type: 'string'}],
-          options: {layout: 'grid', list: hourOptions},
+          type: 'object',
+          fields: [
+            {name: 'date', title: 'Date', type: 'date'},
+            {
+              name: 'times',
+              title: 'Available Hours (24h)',
+              type: 'array',
+              of: [{type: 'string'}],
+              options: {layout: 'grid', list: hourOptions},
+            },
+          ],
         },
       ],
     },
 
     // ===== XOC SCHEDULE (separate fields) =====
     {
-      name: 'xocOpenHour',
-      title: 'XOC Opening Hour (24h)',
-      type: 'number',
-      description: 'Optional. If empty, defaults to normal Opening Hour.',
-    },
-    {
-      name: 'xocCloseHour',
-      title: 'XOC Closing Hour (24h)',
-      type: 'number',
-      description: 'Optional. If empty, defaults to normal Closing Hour.',
-    },
-    {
-      name: 'xocAvailableTimes',
-      title: 'Weekly Time Slots — XOC / Extreme Overclocking',
-      type: 'object',
-      fields: [
+      name: 'xocDateSlots',
+      title: 'Date-Based Time Slots (XOC / Extreme Overclocking)',
+      type: 'array',
+      description: 'Add specific dates with available hours.',
+      of: [
         {
-          name: 'sunday',
-          title: 'Sunday',
-          type: 'array',
-          of: [{type: 'string'}],
-          options: {layout: 'grid', list: hourOptions},
-        },
-        {
-          name: 'monday',
-          title: 'Monday',
-          type: 'array',
-          of: [{type: 'string'}],
-          options: {layout: 'grid', list: hourOptions},
-        },
-        {
-          name: 'tuesday',
-          title: 'Tuesday',
-          type: 'array',
-          of: [{type: 'string'}],
-          options: {layout: 'grid', list: hourOptions},
-        },
-        {
-          name: 'wednesday',
-          title: 'Wednesday',
-          type: 'array',
-          of: [{type: 'string'}],
-          options: {layout: 'grid', list: hourOptions},
-        },
-        {
-          name: 'thursday',
-          title: 'Thursday',
-          type: 'array',
-          of: [{type: 'string'}],
-          options: {layout: 'grid', list: hourOptions},
-        },
-        {
-          name: 'friday',
-          title: 'Friday',
-          type: 'array',
-          of: [{type: 'string'}],
-          options: {layout: 'grid', list: hourOptions},
-        },
-        {
-          name: 'saturday',
-          title: 'Saturday',
-          type: 'array',
-          of: [{type: 'string'}],
-          options: {layout: 'grid', list: hourOptions},
+          type: 'object',
+          fields: [
+            {name: 'date', title: 'Date', type: 'date'},
+            {
+              name: 'times',
+              title: 'Available Hours (24h)',
+              type: 'array',
+              of: [{type: 'string'}],
+              options: {layout: 'grid', list: hourOptions},
+            },
+          ],
         },
       ],
     },
