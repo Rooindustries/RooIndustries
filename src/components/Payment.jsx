@@ -10,6 +10,33 @@ export default function Payment({ hideFooter = false }) {
   const navigate = useNavigate();
 
   const REFERRAL_STORAGE_KEY = "referral_session";
+  const FLOW_BACKGROUND_KEY = "flow_background_location";
+
+  const readStoredBackground = () => {
+    try {
+      const raw = sessionStorage.getItem(FLOW_BACKGROUND_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.pathname) {
+        return parsed;
+      }
+    } catch {}
+    return null;
+  };
+
+  const writeStoredBackground = (loc) => {
+    try {
+      if (!loc || !loc.pathname) return;
+      sessionStorage.setItem(
+        FLOW_BACKGROUND_KEY,
+        JSON.stringify({
+          pathname: loc.pathname,
+          search: loc.search || "",
+          hash: loc.hash || "",
+        })
+      );
+    } catch {}
+  };
 
   const readStoredReferral = () => {
     try {
@@ -39,21 +66,30 @@ export default function Payment({ hideFooter = false }) {
 
   const isUpgrade = !!bookingData.originalOrderId;
   const navState = location.state || (window.history?.state?.usr ?? {});
+  const storedBackground = readStoredBackground();
+  const modalBackground =
+    navState.backgroundLocation || storedBackground || null;
 
-  const isModalMode = !!navState.backgroundLocation || navState.modal === true;
+  useEffect(() => {
+    if (navState.backgroundLocation) {
+      writeStoredBackground(navState.backgroundLocation);
+    }
+  }, [navState.backgroundLocation]);
+
+  const isModalMode = !!modalBackground || navState.modal === true;
   const hideFooterEffective = hideFooter || isModalMode;
 
   const getModalFlowState = () => {
     if (!isModalMode) return undefined;
     return {
       backgroundLocation:
-        navState.backgroundLocation || { pathname: "/", search: "", hash: "" },
+        modalBackground || { pathname: "/", search: "", hash: "" },
       modal: true,
     };
   };
 
   const backToBookingState = {
-    backgroundLocation: navState.backgroundLocation || location,
+    backgroundLocation: modalBackground || location,
     modal: true,
     ...navState,
   };
