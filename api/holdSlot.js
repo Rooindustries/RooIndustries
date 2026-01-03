@@ -76,11 +76,9 @@ export default async function handler(req, res) {
         // Ensure we don't delete the brand new hold we just created if IDs somehow matched
         if (previousHoldId !== created._id) {
           await client.delete(previousHoldId);
-          console.log(`Deleted previous hold: ${previousHoldId}`);
         }
-      } catch (cleanupErr) {
-        console.warn("Failed to delete previous hold:", cleanupErr);
-        // Don't fail the request, just log it
+      } catch {
+        // Don't fail the request.
       }
     }
 

@@ -1,5 +1,8 @@
 import { Resend } from "resend";
 import { createClient } from "@sanity/client";
+import dotenv from "dotenv";
+
+dotenv.config({ path: ".env.local" });
 
 const writeClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -121,6 +124,7 @@ export default async function handler(req, res) {
       slotHoldExpiresAt = "",
       paymentProvider = "",
     } = req.body || {};
+    const isUpgrade = !!originalOrderId;
 
     if (!paymentProvider) {
       return res
@@ -219,86 +223,70 @@ export default async function handler(req, res) {
       });
     }
 
-    const existingBooking = await writeClient.fetch(
-      `*[_type == "booking" && hostDate == $date && hostTime == $time][0]`,
-      { date: bookingDate, time: bookingTime }
-    );
-
-    if (existingBooking) {
-      return res.status(409).json({
-        error: "This slot is already booked.",
-      });
-    }
-
-    const now = new Date();
-    const fetchActiveHold = () =>
-      writeClient.fetch(
-        `*[_type == "slotHold"
-            && hostDate == $date
-            && hostTime == $time
-            && expiresAt > now()][0]`,
+    if (!isUpgrade) {
+      const existingBooking = await writeClient.fetch(
+        `*[_type == "booking" && hostDate == $date && hostTime == $time][0]`,
         { date: bookingDate, time: bookingTime }
       );
 
-    let holdDoc = null;
-    let holdMissing = false;
-    let holdExpired = false;
-
-    if (slotHoldId) {
-      holdDoc = await writeClient.fetch(
-        `*[_type == "slotHold" && _id == $id][0]`,
-        { id: slotHoldId }
-      );
-
-      if (!holdDoc) {
-        holdMissing = true;
-      } else if (holdDoc.expiresAt && new Date(holdDoc.expiresAt) < now) {
-        holdExpired = true;
-        try {
-          await writeClient.delete(slotHoldId);
-        } catch {}
-      } else if (
-        holdDoc.hostDate !== bookingDate ||
-        holdDoc.hostTime !== bookingTime
-      ) {
-        return res.status(400).json({
-          error: "Slot hold does not match selected time.",
+      if (existingBooking) {
+        return res.status(409).json({
+          error: "This slot is already booked.",
         });
       }
 
-      if ((holdMissing || holdExpired) && !isPaidBooking) {
-        return res
-          .status(409)
-          .json({ error: "Your slot reservation expired." });
-      }
+      const now = new Date();
+      const fetchActiveHold = () =>
+        writeClient.fetch(
+          `*[_type == "slotHold"
+              && hostDate == $date
+              && hostTime == $time
+              && expiresAt > now()][0]`,
+          { date: bookingDate, time: bookingTime }
+        );
 
-      if ((holdMissing || holdExpired) && isPaidBooking) {
-        console.warn("Proceeding without an active hold for a paid booking.", {
-          slotHoldId,
-          bookingDate,
-          bookingTime,
-          paymentProvider,
-        });
-      }
-    }
+      let holdDoc = null;
+      let holdMissing = false;
+      let holdExpired = false;
 
-    if (!slotHoldId || holdMissing || holdExpired) {
-      const activeHold = await fetchActiveHold();
+      if (slotHoldId) {
+        holdDoc = await writeClient.fetch(
+          `*[_type == "slotHold" && _id == $id][0]`,
+          { id: slotHoldId }
+        );
 
-      if (activeHold) {
-        if (!isPaidBooking || !slotHoldId) {
-          return res.status(409).json({
-            error: "This slot is temporarily reserved by another user.",
+        if (!holdDoc) {
+          holdMissing = true;
+        } else if (holdDoc.expiresAt && new Date(holdDoc.expiresAt) < now) {
+          holdExpired = true;
+          try {
+            await writeClient.delete(slotHoldId);
+          } catch {}
+        } else if (
+          holdDoc.hostDate !== bookingDate ||
+          holdDoc.hostTime !== bookingTime
+        ) {
+          return res.status(400).json({
+            error: "Slot hold does not match selected time.",
           });
         }
 
-        if (activeHold._id !== slotHoldId) {
-          console.warn("Paid booking is overriding another active hold.", {
-            slotHoldId,
-            activeHoldId: activeHold._id,
-            bookingDate,
-            bookingTime,
-          });
+        if ((holdMissing || holdExpired) && !isPaidBooking) {
+          return res
+            .status(409)
+            .json({ error: "Your slot reservation expired." });
+        }
+      }
+
+      if (!slotHoldId || holdMissing || holdExpired) {
+        const activeHold = await fetchActiveHold();
+
+        if (activeHold) {
+          if (!isPaidBooking || !slotHoldId) {
+            return res.status(409).json({
+              error: "This slot is temporarily reserved by another user.",
+            });
+          }
         }
       }
     }
@@ -390,18 +378,20 @@ export default async function handler(req, res) {
       console.error("Failed to set booking orderId:", err);
     }
 
-    try {
-      const holdIds = await writeClient.fetch(
-        `*[_type == "slotHold" && hostDate == $date && hostTime == $time]._id`,
-        { date: bookingDate, time: bookingTime }
-      );
-
-      if (Array.isArray(holdIds) && holdIds.length > 0) {
-        await Promise.all(
-          holdIds.map((id) => writeClient.delete(id).catch(() => {}))
+    if (!isUpgrade) {
+      try {
+        const holdIds = await writeClient.fetch(
+          `*[_type == "slotHold" && hostDate == $date && hostTime == $time]._id`,
+          { date: bookingDate, time: bookingTime }
         );
-      }
-    } catch {}
+
+        if (Array.isArray(holdIds) && holdIds.length > 0) {
+          await Promise.all(
+            holdIds.map((id) => writeClient.delete(id).catch(() => {}))
+          );
+        }
+      } catch {}
+    }
 
     if (effectiveReferralId && status === "captured") {
       try {
