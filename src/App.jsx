@@ -28,6 +28,7 @@ const Payment = lazy(() => import("./pages/Payment"));
 const PaymentSuccess = lazy(() => import("./pages/PaymentSuccess"));
 const Thankyou = lazy(() => import("./pages/Thankyou"));
 const UpgradeXoc = lazy(() => import("./pages/UpgradeXoc"));
+const Upgrade = lazy(() => import("./pages/Upgrade"));
 
 // Referral system (also lazy)
 const RefLogin = lazy(() => import("./pages/RefLogin"));
@@ -102,6 +103,7 @@ function AnimatedRoutes({ setIsModalOpen, routesLocation, routeKey }) {
           <Route path="/payment-success" element={<PaymentSuccess />} />
           <Route path="/thank-you" element={<Thankyou />} />
           <Route path="/tools" element={<Tools />} />
+          <Route path="/upgrade/:slug" element={<Upgrade />} />
           <Route path="/upgrade-xoc" element={<UpgradeXoc />} />
 
           {/* Referral system routes */}

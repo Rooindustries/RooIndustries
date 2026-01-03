@@ -78,6 +78,33 @@ export default async function handler(req, res) {
 
     const earnings = computeEarningsFromBookings(bookings || []);
 
+    const packages = await readClient.fetch(
+      `*[_type == "package"] | order(coalesce(order, 999) asc, title asc){
+        title,
+        order
+      }`
+    );
+
+    const earningsByPackage = earnings.byPackage || {};
+    const packageBreakdown = (Array.isArray(packages) ? packages : []).map(
+      (pkg) => ({
+        title: pkg?.title || 'Package',
+        amount: earningsByPackage[pkg?.title] || 0,
+      })
+    );
+
+    if (earningsByPackage) {
+      Object.keys(earningsByPackage).forEach((title) => {
+        const exists = packageBreakdown.some((item) => item.title === title);
+        if (!exists) {
+          packageBreakdown.push({
+            title,
+            amount: earningsByPackage[title],
+          });
+        }
+      });
+    }
+
     const xocPayments = referral.xocPayments || [];
     const vertexPayments = referral.vertexPayments || [];
 
@@ -123,6 +150,7 @@ export default async function handler(req, res) {
         contactPhone: referral.contactPhone || '',
       },
       earnings,
+      packageBreakdown,
       payments,
       remaining,
       logs: {

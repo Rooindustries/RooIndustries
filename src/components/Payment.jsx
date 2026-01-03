@@ -68,11 +68,18 @@ export default function Payment({ hideFooter = false }) {
   const holdExpired =
     holdExpiresAt && new Date(holdExpiresAt).getTime() <= Date.now();
   const hasSlotHold = !!bookingData?.slotHoldId && !holdExpired;
-  const canSubmitBooking = hasTimeslot && hasSlotHold;
+  const canSubmitBooking = isUpgrade ? hasTimeslot : hasTimeslot && hasSlotHold;
   const holdExpiryHandledRef = useRef(false);
 
   const ensureSlotBeforeAction = () => {
     if (canSubmitBooking) return true;
+    if (isUpgrade) {
+      showBanner(
+        "error",
+        "Missing time details for this upgrade. Please contact support."
+      );
+      return false;
+    }
     showBanner(
       "error",
       holdExpired
@@ -183,13 +190,11 @@ export default function Payment({ hideFooter = false }) {
   }, [holdExpiresAt, navigate, navState, location]);
 
   // Referral discount
-  const referralPercent = isUpgrade ? 0 : referral?.currentDiscountPercent || 0;
-  const commissionPercent = isUpgrade
-    ? 0
-    : referral?.currentCommissionPercent || 0;
+  const referralPercent = referral?.currentDiscountPercent || 0;
+  const commissionPercent = referral?.currentCommissionPercent || 0;
 
   // Coupon discount
-  const couponPercent = isUpgrade ? 0 : coupon?.discountPercent || 0;
+  const couponPercent = coupon?.discountPercent || 0;
   const canStackCouponWithReferral =
     coupon?.canCombineWithReferral === true || false;
 
@@ -197,7 +202,7 @@ export default function Payment({ hideFooter = false }) {
   let referralDiscountAmount = 0;
   let couponDiscountAmount = 0;
 
-  if (!isUpgrade && baseAmount > 0) {
+  if (baseAmount > 0) {
     if (referralPercent > 0) {
       referralDiscountAmount = +(baseAmount * (referralPercent / 100)).toFixed(
         2
@@ -218,37 +223,28 @@ export default function Payment({ hideFooter = false }) {
   ).toFixed(2);
 
   const totalDiscountAmount =
-    !isUpgrade && baseAmount > 0
-      ? Math.min(baseAmount, uncappedTotalDiscount)
-      : 0;
+    baseAmount > 0 ? Math.min(baseAmount, uncappedTotalDiscount) : 0;
 
-  const rawFinalAmount = isUpgrade
-    ? baseAmount
-    : Math.max(0, +(baseAmount - totalDiscountAmount).toFixed(2));
+  const rawFinalAmount = Math.max(
+    0,
+    +(baseAmount - totalDiscountAmount).toFixed(2)
+  );
 
-  const hasFreeCoupon = !isUpgrade && coupon?.discountPercent === 100;
+  const hasFreeCoupon = coupon?.discountPercent === 100;
   const isFree = hasFreeCoupon && rawFinalAmount === 0;
   const preventedFreeReduction =
-    !isUpgrade && !isFree && rawFinalAmount === 0 && baseAmount > 0;
+    !isFree && rawFinalAmount === 0 && baseAmount > 0;
   const minPayable = 0.01;
 
-  const finalAmount = isUpgrade
-    ? baseAmount
-    : isFree
-    ? 0
-    : Math.max(minPayable, rawFinalAmount);
+  const finalAmount = isFree ? 0 : Math.max(minPayable, rawFinalAmount);
 
-  const effectiveDiscountAmount = isUpgrade
-    ? 0
-    : preventedFreeReduction
+  const effectiveDiscountAmount = preventedFreeReduction
     ? +(baseAmount - finalAmount).toFixed(2)
     : totalDiscountAmount;
 
-  const discountPercentCombined = isUpgrade
-    ? 0
-    : preventedFreeReduction
+  const discountPercentCombined = preventedFreeReduction
     ? +((effectiveDiscountAmount / baseAmount) * 100 || 0).toFixed(2)
-    : !isUpgrade && baseAmount > 0
+    : baseAmount > 0
     ? +((totalDiscountAmount / baseAmount) * 100 || 0).toFixed(2)
     : 0;
 
@@ -263,8 +259,6 @@ export default function Payment({ hideFooter = false }) {
 
   // Auto-load referral
   useEffect(() => {
-    if (isUpgrade) return;
-
     const params = new URLSearchParams(location.search);
     const fromUrl = params.get("ref");
 
@@ -283,7 +277,7 @@ export default function Payment({ hideFooter = false }) {
       writeStoredReferral("");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.search, isUpgrade]);
+  }, [location.search]);
 
   // Load Razorpay checkout script
   useEffect(() => {
@@ -309,7 +303,6 @@ export default function Payment({ hideFooter = false }) {
 
   // ----------------- REFERRAL VALIDATION -----------------
   async function validateReferral(code) {
-    if (isUpgrade) return;
     if (!code) {
       setReferral(null);
 
@@ -321,8 +314,6 @@ export default function Payment({ hideFooter = false }) {
         `/api/ref/validateReferral?code=${encodeURIComponent(code)}`
       );
       const data = await r.json();
-      console.log("validateReferral result:", data);
-
       if (data.ok && data.referral) {
         setReferral(data.referral);
 
@@ -360,7 +351,6 @@ export default function Payment({ hideFooter = false }) {
 
   // ----------------- COUPON VALIDATION -----------------
   async function validateCoupon(code) {
-    if (isUpgrade) return;
     if (!code) {
       setCoupon(null);
       return;
@@ -371,8 +361,6 @@ export default function Payment({ hideFooter = false }) {
         `/api/ref/validateCoupon?code=${encodeURIComponent(code)}`
       );
       const data = await r.json();
-      console.log("validateCoupon result:", data);
-
       if (data.ok && data.coupon) {
         if (data.coupon.canCombineWithReferral === false && referral) {
           setCoupon(null);
@@ -527,10 +515,8 @@ export default function Payment({ hideFooter = false }) {
             packageTitle,
             date,
             time,
-            referralCode: isUpgrade
-              ? ""
-              : referral?.code || referralInput || "",
-            couponCode: isUpgrade ? "" : coupon?.code || couponInput || "",
+            referralCode: referral?.code || referralInput || "",
+            couponCode: coupon?.code || couponInput || "",
           },
         }),
       });
@@ -588,22 +574,20 @@ export default function Payment({ hideFooter = false }) {
             const payload = {
               ...bookingData,
 
-              referralCode: isUpgrade
-                ? ""
-                : referral?.code || referralInput || "",
-              referralId: isUpgrade ? null : referral?._id || null,
+              referralCode: referral?.code || referralInput || "",
+              referralId: referral?._id || null,
 
-              couponCode: isUpgrade ? "" : coupon?.code || couponInput || "",
-              couponDiscountPercent: isUpgrade ? 0 : couponPercent,
-              couponDiscountAmount: isUpgrade ? 0 : couponDiscountAmount,
+              couponCode: coupon?.code || couponInput || "",
+              couponDiscountPercent: couponPercent,
+              couponDiscountAmount: couponDiscountAmount,
 
-              discountPercent: isUpgrade ? 0 : discountPercentCombined,
-              discountAmount: isUpgrade ? 0 : effectiveDiscountAmount,
+              discountPercent: discountPercentCombined,
+              discountAmount: effectiveDiscountAmount,
 
               grossAmount: baseAmount,
               netAmount: finalAmount,
 
-              commissionPercent: isUpgrade ? 0 : commissionPercent,
+              commissionPercent: commissionPercent,
 
               razorpayOrderId: response.razorpay_order_id,
               razorpayPaymentId: response.razorpay_payment_id,
@@ -641,7 +625,6 @@ export default function Payment({ hideFooter = false }) {
 
         modal: {
           ondismiss: function () {
-            console.log("Razorpay popup closed by user");
             showBanner("info", "Payment cancelled before completion.");
           },
         },
@@ -745,7 +728,7 @@ export default function Payment({ hideFooter = false }) {
           <div className="mt-6">
             <p className="font-semibold text-lg text-white">{packageTitle}</p>
             <div className="mt-2 space-y-1">
-              {!isUpgrade && (referralPercent > 0 || couponPercent > 0) && (
+              {(referralPercent > 0 || couponPercent > 0) && (
                 <p className="text-xl text-slate-300 line-through">
                   ${baseAmount.toFixed(2)}
                 </p>
@@ -754,14 +737,14 @@ export default function Payment({ hideFooter = false }) {
                 ${finalAmount.toFixed(2)} USD
               </p>
 
-              {!isUpgrade && referralPercent > 0 && (
+              {referralPercent > 0 && (
                 <p className="text-sm text-green-300">
                   Referral: {referralPercent}% ($
                   {referralDiscountAmount.toFixed(2)}
                   {referral?.name ? ` via ${referral.name}` : ""})
                 </p>
               )}
-              {!isUpgrade && couponPercent > 0 && coupon && (
+              {couponPercent > 0 && coupon && (
                 <p className="text-sm text-emerald-300">
                   Coupon "{coupon.code}": {couponPercent}% ($
                   {couponDiscountAmount.toFixed(2)})
@@ -770,7 +753,7 @@ export default function Payment({ hideFooter = false }) {
                     : ""}
                 </p>
               )}
-              {!isUpgrade && effectiveDiscountAmount > 0 && (
+              {effectiveDiscountAmount > 0 && (
                 <p className="text-xs text-slate-300">
                   Total savings: {discountPercentCombined}% (${effectiveDiscountAmount.toFixed(2)})
                 </p>
@@ -802,9 +785,7 @@ export default function Payment({ hideFooter = false }) {
               )}
               {isUpgrade && (
                 <p className="text-xs text-slate-400 mt-2">
-                  Upgrades do not accept new coupons or referral discounts. The
-                  price above is already calculated as the difference between
-                  full XOC and what you previously paid.
+                  Upgrade price reflects the difference between the target package and your original payment.
                 </p>
               )}
             </div>
@@ -813,87 +794,85 @@ export default function Payment({ hideFooter = false }) {
           <div className="mt-6 h-px w-full bg-sky-800/40" />
 
           {/* Referral & Coupon inputs */}
-          {!isUpgrade && (
-            <>
-              {/* Referral input */}
-              <div className="mt-6">
-                <label className="block text-sm font-semibold mb-1">
-                  Referral Code (optional)
-                </label>
-                <div className="flex flex-wrap gap-2 items-center">
-                  <input
-                    value={referralInput}
-                    onChange={(e) => setReferralInput(e.target.value.trim())}
-                    placeholder="e.g. vouch"
-                    className="w-60 bg-[#0c162a] border border-sky-800/40 rounded-md px-3 py-2 outline-none text-sm"
-                  />
+          <>
+            {/* Referral input */}
+            <div className="mt-6">
+              <label className="block text-sm font-semibold mb-1">
+                Referral Code (optional)
+              </label>
+              <div className="flex flex-wrap gap-2 items-center">
+                <input
+                  value={referralInput}
+                  onChange={(e) => setReferralInput(e.target.value.trim())}
+                  placeholder="e.g. vouch"
+                  className="w-60 bg-[#0c162a] border border-sky-800/40 rounded-md px-3 py-2 outline-none text-sm"
+                />
 
+                <button
+                  onClick={() => validateReferral(referralInput)}
+                  disabled={validating}
+                  className="glow-button px-3 py-2 rounded-md font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 text-sm"
+                >
+                  {validating ? "Checking..." : "Apply"}
+                  <span className="glow-line glow-line-top" />
+                  <span className="glow-line glow-line-right" />
+                  <span className="glow-line glow-line-bottom" />
+                  <span className="glow-line glow-line-left" />
+                </button>
+              </div>
+              {referralInput && !referral && !validating && (
+                <p className="text-sm text-red-300 mt-2">
+                  Invalid or inactive referral code.
+                </p>
+              )}
+            </div>
+
+            {/* Coupon input */}
+            <div className="mt-5">
+              <label className="block text-sm font-semibold mb-1">
+                Coupon Code (optional)
+              </label>
+              <div className="flex flex-wrap gap-2 items-center">
+                <input
+                  value={couponInput}
+                  onChange={(e) => setCouponInput(e.target.value.trim())}
+                  placeholder="e.g. BF10"
+                  className="w-60 bg-[#0c162a] border border-sky-800/40 rounded-md px-3 py-2 outline-none text-sm"
+                />
+
+                <button
+                  onClick={() => validateCoupon(couponInput)}
+                  disabled={validatingCoupon}
+                  className="glow-button px-3 py-2 rounded-md font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 text-sm"
+                >
+                  {validatingCoupon ? "Checking..." : "Apply"}
+                  <span className="glow-line glow-line-top" />
+                  <span className="glow-line glow-line-right" />
+                  <span className="glow-line glow-line-bottom" />
+                  <span className="glow-line glow-line-left" />
+                </button>
+
+                {coupon && (
                   <button
-                    onClick={() => validateReferral(referralInput)}
-                    disabled={validating}
-                    className="glow-button px-3 py-2 rounded-md font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 text-sm"
+                    onClick={() => {
+                      setCoupon(null);
+                      setCouponInput("");
+                    }}
+                    className="text-xs text-slate-300 underline underline-offset-2"
                   >
-                    {validating ? "Checking..." : "Apply"}
-                    <span className="glow-line glow-line-top" />
-                    <span className="glow-line glow-line-right" />
-                    <span className="glow-line glow-line-bottom" />
-                    <span className="glow-line glow-line-left" />
+                    Remove coupon
                   </button>
-                </div>
-                {referralInput && !referral && !validating && (
-                  <p className="text-sm text-red-300 mt-2">
-                    Invalid or inactive referral code.
-                  </p>
                 )}
               </div>
-
-              {/* Coupon input */}
-              <div className="mt-5">
-                <label className="block text-sm font-semibold mb-1">
-                  Coupon Code (optional)
-                </label>
-                <div className="flex flex-wrap gap-2 items-center">
-                  <input
-                    value={couponInput}
-                    onChange={(e) => setCouponInput(e.target.value.trim())}
-                    placeholder="e.g. BF10"
-                    className="w-60 bg-[#0c162a] border border-sky-800/40 rounded-md px-3 py-2 outline-none text-sm"
-                  />
-
-                  <button
-                    onClick={() => validateCoupon(couponInput)}
-                    disabled={validatingCoupon}
-                    className="glow-button px-3 py-2 rounded-md font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 text-sm"
-                  >
-                    {validatingCoupon ? "Checking..." : "Apply"}
-                    <span className="glow-line glow-line-top" />
-                    <span className="glow-line glow-line-right" />
-                    <span className="glow-line glow-line-bottom" />
-                    <span className="glow-line glow-line-left" />
-                  </button>
-
-                  {coupon && (
-                    <button
-                      onClick={() => {
-                        setCoupon(null);
-                        setCouponInput("");
-                      }}
-                      className="text-xs text-slate-300 underline underline-offset-2"
-                    >
-                      Remove coupon
-                    </button>
-                  )}
-                </div>
-                {coupon &&
-                  coupon.canCombineWithReferral === false &&
-                  referral && (
-                    <p className="text-xs text-amber-300 mt-1">
-                      This coupon cannot be clubbed with a referral discount.
-                    </p>
-                  )}
-              </div>
-            </>
-          )}
+              {coupon &&
+                coupon.canCombineWithReferral === false &&
+                referral && (
+                  <p className="text-xs text-amber-300 mt-1">
+                    This coupon cannot be clubbed with a referral discount.
+                  </p>
+                )}
+            </div>
+          </>
         </div>
       </motion.div>
 
@@ -1015,34 +994,18 @@ export default function Payment({ hideFooter = false }) {
                           try {
                             const payload = {
                               ...bookingData,
-                              referralCode: isUpgrade
-                                ? ""
-                                : referral?.code || referralInput || "",
-                              referralId: isUpgrade
-                                ? null
-                                : referral?._id || null,
+                              referralCode: referral?.code || referralInput || "",
+                              referralId: referral?._id || null,
 
-                              couponCode: isUpgrade
-                                ? ""
-                                : coupon?.code || couponInput || "",
-                              couponDiscountPercent: isUpgrade
-                                ? 0
-                                : couponPercent,
-                              couponDiscountAmount: isUpgrade
-                                ? 0
-                                : couponDiscountAmount,
+                              couponCode: coupon?.code || couponInput || "",
+                              couponDiscountPercent: couponPercent,
+                              couponDiscountAmount: couponDiscountAmount,
 
-                              discountPercent: isUpgrade
-                                ? 0
-                                : discountPercentCombined,
-                              discountAmount: isUpgrade
-                                ? 0
-                                : effectiveDiscountAmount,
+                              discountPercent: discountPercentCombined,
+                              discountAmount: effectiveDiscountAmount,
                               grossAmount: baseAmount,
                               netAmount: finalAmount,
-                              commissionPercent: isUpgrade
-                                ? 0
-                                : commissionPercent,
+                              commissionPercent: commissionPercent,
 
                               paypalOrderId: details?.id || "",
                               payerEmail: details?.payer?.email_address || "",

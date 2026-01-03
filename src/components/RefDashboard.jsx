@@ -56,8 +56,6 @@ export default function RefDashboard() {
         const res = await fetch(`/api/ref/getData?id=${creatorId}`);
         const data = await res.json();
 
-        console.log("DASHBOARD DATA:", data);
-
         if (!data.ok) {
           try {
             localStorage.removeItem("creatorId");
@@ -244,6 +242,19 @@ export default function RefDashboard() {
   const earnings = payoutData.earnings || {};
   const payments = payoutData.payments || {};
   const logs = payoutData.logs || {};
+  const packageBreakdownRaw = Array.isArray(payoutData.packageBreakdown)
+    ? payoutData.packageBreakdown
+    : [];
+  const fallbackBreakdown = earnings.byPackage
+    ? Object.keys(earnings.byPackage)
+        .sort((a, b) => a.localeCompare(b))
+        .map((title) => ({
+          title,
+          amount: earnings.byPackage[title],
+        }))
+    : [];
+  const packageBreakdown =
+    packageBreakdownRaw.length > 0 ? packageBreakdownRaw : fallbackBreakdown;
 
   async function copyReferralLink() {
     try {
@@ -424,9 +435,19 @@ export default function RefDashboard() {
 
             {payout && (
               <>
-            <div className="grid sm:grid-cols-2 gap-3 auto-rows-fr">
-              <StatCard label="Total owed - XOC" value={earnings.xoc} />
-              <StatCard label="Total owed - Vertex" value={earnings.vertex} />
+            {packageBreakdown.length > 0 && (
+              <div className="grid sm:grid-cols-3 gap-3 auto-rows-fr">
+                {packageBreakdown.map((item) => (
+                  <StatCard
+                    key={`pkg-${item.title}`}
+                    label={`Total owed - ${item.title}`}
+                    value={item.amount}
+                  />
+                ))}
+              </div>
+            )}
+
+            <div className="mt-3 grid sm:grid-cols-2 gap-3 auto-rows-fr">
               <StatCard
                 label="Total paid"
                 value={payments.total}
