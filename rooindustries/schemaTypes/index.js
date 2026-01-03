@@ -21,6 +21,7 @@ import referralBox from './referralBox'
 import faqSettings from './faqSettings'
 import packagesSettings from './packagesSettings'
 import supportedGames from './supportedGames'
+import upgradeLink from './upgradeLink'
 
 export const schemaTypes = [
   benchmark,
@@ -46,4 +47,5 @@ export const schemaTypes = [
   faqSettings,
   packagesSettings,
   supportedGames,
+  upgradeLink,
 ]

@@ -18,6 +18,13 @@ export default {
       readOnly: true,
       description: 'Matches the booking document ID.',
     },
+    {
+      name: 'originalOrderId',
+      title: 'Original Order ID (Upgrade)',
+      type: 'string',
+      readOnly: true,
+      description: 'Links an upgrade payment back to the original booking.',
+    },
 
     {
       name: 'status',

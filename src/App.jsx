@@ -28,6 +28,7 @@ const Payment = lazy(() => import("./pages/Payment"));
 const PaymentSuccess = lazy(() => import("./pages/PaymentSuccess"));
 const Thankyou = lazy(() => import("./pages/Thankyou"));
 const UpgradeXoc = lazy(() => import("./pages/UpgradeXoc"));
+const Upgrade = lazy(() => import("./pages/Upgrade"));
 
 // Referral system (also lazy)
 const RefLogin = lazy(() => import("./pages/RefLogin"));
@@ -102,6 +103,7 @@ function AnimatedRoutes({ setIsModalOpen, routesLocation, routeKey }) {
           <Route path="/payment-success" element={<PaymentSuccess />} />
           <Route path="/thank-you" element={<Thankyou />} />
           <Route path="/tools" element={<Tools />} />
+          <Route path="/upgrade/:slug" element={<Upgrade />} />
           <Route path="/upgrade-xoc" element={<UpgradeXoc />} />
 
           {/* Referral system routes */}
@@ -126,11 +128,34 @@ function AppContent() {
   const location = useLocation();
   const navigate = useNavigate();
   const pathName = location.pathname || "";
+  const FLOW_BACKGROUND_KEY = "flow_background_location";
 
-  const backgroundLocation =
-    location.state && location.state.backgroundLocation
-      ? location.state.backgroundLocation
-      : null;
+  const readStoredBackground = () => {
+    try {
+      const raw = sessionStorage.getItem(FLOW_BACKGROUND_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.pathname) {
+        return parsed;
+      }
+    } catch {}
+    return null;
+  };
+
+  const writeStoredBackground = (loc) => {
+    try {
+      if (!loc || !loc.pathname) return;
+      sessionStorage.setItem(
+        FLOW_BACKGROUND_KEY,
+        JSON.stringify({
+          pathname: loc.pathname,
+          search: loc.search || "",
+          hash: loc.hash || "",
+        })
+      );
+    } catch {}
+  };
+
   const isBookingRoute = pathName.startsWith("/booking");
   const isPaymentRoute = pathName === "/payment";
   const isPaymentSuccessRoute = pathName.startsWith("/payment-success");
@@ -140,6 +165,29 @@ function AppContent() {
     isPaymentRoute ||
     isPaymentSuccessRoute ||
     isThankYouRoute;
+
+  useEffect(() => {
+    const stateBackground = location.state?.backgroundLocation;
+    if (stateBackground?.pathname) {
+      writeStoredBackground(stateBackground);
+      return;
+    }
+    if (!isFlowRoute) {
+      writeStoredBackground({
+        pathname: location.pathname,
+        search: location.search || "",
+        hash: location.hash || "",
+      });
+    }
+  }, [location.pathname, location.search, location.hash, location.state, isFlowRoute]);
+
+  const storedBackground = readStoredBackground();
+  const backgroundLocation =
+    location.state && location.state.backgroundLocation
+      ? location.state.backgroundLocation
+      : isFlowRoute
+      ? storedBackground
+      : null;
   const fallbackLocation =
     isFlowRoute && !backgroundLocation
       ? { ...location, pathname: "/", search: "", hash: "" }
