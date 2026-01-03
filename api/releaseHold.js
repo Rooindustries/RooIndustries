@@ -22,7 +22,6 @@ export default async function handler(req, res) {
   try {
     // Attempt to delete the document
     await client.delete(holdId);
-    console.log(`Successfully released hold: ${holdId}`);
     return res.status(200).json({ ok: true, message: "Hold released" });
   } catch (err) {
     console.error("Error releasing hold:", err);

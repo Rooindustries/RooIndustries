@@ -32,7 +32,6 @@ export default async function handler(req, res) {
 
     return res.json({ ok: true, hash });
   } catch (err) {
-    console.log("HASHPASSWORD ERROR:", err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
 }

@@ -3,6 +3,12 @@ export function normalizeNumber(value) {
   return Number.isFinite(n) ? n : 0;
 }
 
+export function normalizePackageTitle(title = '') {
+  const raw = String(title || '').trim();
+  if (!raw) return 'Unknown';
+  return raw.replace(/\s*\(upgrade\)\s*$/i, '').trim();
+}
+
 export function classifyPackage(packageTitle = '') {
   const normalized = String(packageTitle || '').toLowerCase();
 
@@ -24,9 +30,11 @@ export function classifyPackage(packageTitle = '') {
 
 export function computeEarningsFromBookings(bookings = []) {
   const totals = {xoc: 0, vertex: 0, total: 0};
+  const byPackage = {};
 
   bookings.forEach((booking) => {
-    const pkg = classifyPackage(booking?.packageTitle);
+    const packageTitle = normalizePackageTitle(booking?.packageTitle);
+    const pkg = classifyPackage(packageTitle);
     const commissionAmount = normalizeNumber(booking?.commissionAmount);
     const commissionPercent = normalizeNumber(booking?.commissionPercent);
     const base =
@@ -37,6 +45,11 @@ export function computeEarningsFromBookings(bookings = []) {
       commissionAmount ||
       +(base * ((commissionPercent || 0) / 100 || 0)).toFixed(2);
 
+    if (packageTitle) {
+      byPackage[packageTitle] =
+        normalizeNumber(byPackage[packageTitle]) + normalizeNumber(earned);
+    }
+
     totals[pkg] += earned;
     totals.total += earned;
   });
@@ -45,6 +58,10 @@ export function computeEarningsFromBookings(bookings = []) {
     xoc: +totals.xoc.toFixed(2),
     vertex: +totals.vertex.toFixed(2),
     total: +totals.total.toFixed(2),
+    byPackage: Object.keys(byPackage).reduce((acc, key) => {
+      acc[key] = +byPackage[key].toFixed(2);
+      return acc;
+    }, {}),
   };
 }
 

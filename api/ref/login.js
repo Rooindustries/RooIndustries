@@ -22,7 +22,6 @@ export default async function handler(req, res) {
     );
 
     if (!referral) {
-      console.log("❌ Referral not found");
       return res.status(404).json({ ok: false });
     }
 
@@ -46,17 +45,13 @@ export default async function handler(req, res) {
             .patch(referral._id)
             .set({ creatorPassword: hash })
             .commit();
-          console.log("🔐 Auto-hashed password on first login");
         } catch (e) {
           console.error("Failed to auto-hash password:", e);
         }
       }
     }
 
-    console.log("🔐 Password match:", valid);
-
     if (!valid) {
-      console.log("❌ Wrong password");
       return res.status(401).json({ ok: false });
     }
 

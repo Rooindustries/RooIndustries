@@ -62,7 +62,7 @@ const CanvasVideo = ({ src, poster, className, onError, alt }) => {
     };
 
     const startPlay = () => {
-      video.play().catch((e) => console.log("Autoplay prevented:", e));
+      video.play().catch(() => {});
     };
 
     video.addEventListener("loadeddata", startPlay);
