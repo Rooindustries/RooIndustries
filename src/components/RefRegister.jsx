@@ -131,8 +131,6 @@ export default function RefRegister() {
       });
 
       const data = await res.json();
-      console.log("REGISTER RESPONSE:", data);
-
       if (!data.ok) {
         showToast("error", data.error || "Registration failed.");
         setLoading(false);

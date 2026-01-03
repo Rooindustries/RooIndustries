@@ -16,8 +16,6 @@ export default async function handler(req, res) {
   try {
     const { id, commissionPercent, discountPercent } = req.body;
 
-    console.log("💾 Update request:", req.body);
-
     if (!id) {
       return res.status(400).json({ ok: false, error: "Missing creator ID" });
     }

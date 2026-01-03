@@ -50,8 +50,6 @@ export default function RefLogin() {
       });
 
       const data = await res.json();
-      console.log("LOGIN RESPONSE:", data);
-
       if (!data.ok) {
         showToast("error", "Wrong referral code or password.");
         setLoading(false);
