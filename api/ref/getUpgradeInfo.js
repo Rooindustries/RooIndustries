@@ -14,13 +14,19 @@ const client = createClient({
 const parseMoney = (value) =>
   parseFloat(String(value || "").replace(/[^0-9.]/g, "")) || 0;
 
+const normalizeTitle = (value) =>
+  String(value || "")
+    .replace(/\s*\(upgrade\)\s*$/i, "")
+    .trim()
+    .toLowerCase();
+
 const normalizeSlug = (value) => {
   if (!value) return "";
   if (Array.isArray(value)) return String(value[0] || "").toLowerCase();
   return String(value || "").toLowerCase();
 };
 
-const getOriginalPaid = (booking) => {
+const getPaidAmount = (booking) => {
   if (
     typeof booking?.netAmount === "number" &&
     !Number.isNaN(booking.netAmount)
@@ -130,7 +136,41 @@ export default async function handler(req, res) {
     }
 
     const targetPriceNum = parseMoney(targetPackage.price);
-    const originalPaid = getOriginalPaid(booking);
+    const rootOrderId = booking.originalOrderId || booking._id;
+    const paidBookings = await client.fetch(
+      `*[_type == "booking"
+        && status in ["captured", "completed"]
+        && (_id == $rootId || originalOrderId == $rootId)
+      ]{
+        _id,
+        packageTitle,
+        netAmount,
+        grossAmount,
+        packagePrice
+      }`,
+      { rootId: rootOrderId }
+    );
+
+    const normalizedTarget = normalizeTitle(targetPackage.title);
+    const alreadyTarget = Array.isArray(paidBookings)
+      ? paidBookings.some(
+          (entry) => normalizeTitle(entry?.packageTitle) === normalizedTarget
+        )
+      : normalizeTitle(booking.packageTitle) === normalizedTarget;
+
+    if (alreadyTarget) {
+      return res.status(400).json({
+        ok: false,
+        error: "This order already matches the target package.",
+      });
+    }
+
+    const originalPaid = Array.isArray(paidBookings)
+      ? paidBookings.reduce(
+          (sum, entry) => sum + getPaidAmount(entry),
+          0
+        )
+      : getPaidAmount(booking);
     const upgradePrice = Math.max(
       0,
       +(targetPriceNum - originalPaid).toFixed(2)
