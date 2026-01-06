@@ -53,14 +53,14 @@ export default async function handler(req, res) {
       .commit();
 
     // 6. Send Email via Resend
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+    const baseUrl =
+      process.env.NEXT_PUBLIC_BASE_URL || "https://www.rooindustries.com";
     const resetLink = `${baseUrl}/referrals/reset?token=${resetToken}`;
 
-    // --- FIX IS HERE: USE YOUR ENV VARIABLE ---
     const fromAddress = process.env.FROM_EMAIL || "onboarding@resend.dev";
 
     const { data, error } = await resend.emails.send({
-      from: fromAddress, // Now uses "Roo Industries <no-reply@updates.rooindustries.com>"
+      from: fromAddress,
       to: [email],
       subject: "Reset your Password",
       html: `
