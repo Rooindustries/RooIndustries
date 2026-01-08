@@ -13,6 +13,7 @@ import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 import ReservationBanner from "./components/ReservationBanner";
 import BookingModal from "./components/BookingModal";
+import TawkTo from "./components/TawkTo";
 
 // Lazy-loaded pages
 const Home = lazy(() => import("./pages/Home"));
@@ -275,8 +276,13 @@ function AppContent() {
 }
 
 function App() {
+  // Example: add routes here to disable chat without refactoring.
+  const tawkDisabledRoutes = [];
+  // const tawkDisabledRoutes = ["/booking"]; // Disables chat on /booking and nested routes.
+
   return (
     <Router>
+      <TawkTo disabledRoutes={tawkDisabledRoutes} />
       <AppContent />
     </Router>
   );
