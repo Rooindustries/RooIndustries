@@ -1,0 +1,2629 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>
+      BIOS Mastery Guide | Unlock Your PC's Hidden Performance | Roo Industries
+    </title>
+
+    <link
+      href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&family=DM+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>
+      :root {
+        --bg-primary: #08080c;
+        --bg-secondary: #0f0f16;
+        --bg-tertiary: #16161f;
+        --bg-card: #111118;
+
+        --accent-gold: #ffc832;
+        --accent-gold-bright: #ffe066;
+        --accent-gold-dim: rgba(255, 200, 50, 0.12);
+
+        --accent-amber: #ff9500;
+        --accent-amber-dim: rgba(255, 149, 0, 0.15);
+
+        --accent-cyan: #00e5ff;
+        --accent-cyan-bright: #4df0ff;
+        --accent-cyan-dim: rgba(0, 229, 255, 0.12);
+
+        --accent-red: #ff4d6a;
+        --accent-red-dim: rgba(255, 77, 106, 0.12);
+
+        --accent-green: #00ff9d;
+        --accent-green-dim: rgba(0, 255, 157, 0.12);
+
+        --accent-purple: #b366ff;
+        --accent-purple-dim: rgba(179, 102, 255, 0.12);
+
+        --accent-blue: #4d9fff;
+        --accent-blue-dim: rgba(77, 159, 255, 0.12);
+
+        --text-primary: #ffffff;
+        --text-secondary: #b0b0c0;
+        --text-muted: #707080;
+
+        --border-subtle: rgba(255, 255, 255, 0.06);
+        --border-gold: rgba(255, 200, 50, 0.3);
+        --border-cyan: rgba(0, 229, 255, 0.3);
+
+        --gradient-gold: linear-gradient(
+          135deg,
+          #ffc832 0%,
+          #ffe066 50%,
+          #ffc832 100%
+        );
+        --gradient-cyan: linear-gradient(
+          135deg,
+          #00e5ff 0%,
+          #4df0ff 50%,
+          #00e5ff 100%
+        );
+        --gradient-premium: linear-gradient(135deg, #ffc832 0%, #00e5ff 100%);
+        --gradient-dark: linear-gradient(180deg, #08080c 0%, #0f0f16 100%);
+
+        --glow-gold: 0 0 20px rgba(255, 200, 50, 0.3);
+        --glow-cyan: 0 0 20px rgba(0, 229, 255, 0.3);
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      @page {
+        size: letter;
+        margin: 0;
+      }
+
+      body {
+        font-family: "DM Sans", sans-serif;
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        line-height: 1.7;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .page {
+        width: 8.5in;
+        min-height: 11in;
+        margin: 0 auto;
+        padding: 0.6in 0.75in;
+        background: var(--bg-primary);
+        position: relative;
+        page-break-after: always;
+        overflow: hidden;
+      }
+
+      .page::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(
+            ellipse at 15% 15%,
+            rgba(255, 200, 50, 0.04) 0%,
+            transparent 45%
+          ),
+          radial-gradient(
+            ellipse at 85% 85%,
+            rgba(0, 229, 255, 0.03) 0%,
+            transparent 45%
+          ),
+          radial-gradient(
+            ellipse at 50% 50%,
+            rgba(179, 102, 255, 0.02) 0%,
+            transparent 60%
+          );
+        pointer-events: none;
+      }
+
+      .page-header {
+        position: absolute;
+        top: 0.4in;
+        right: 0.75in;
+        font-family: "Space Mono", monospace;
+        font-size: 9px;
+        color: var(--text-muted);
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        opacity: 0.7;
+      }
+
+      .page-number {
+        position: absolute;
+        bottom: 0.4in;
+        right: 0.75in;
+        font-family: "Space Mono", monospace;
+        font-size: 10px;
+        color: var(--accent-gold);
+        letter-spacing: 2px;
+        text-shadow: 0 0 8px rgba(255, 200, 50, 0.3);
+      }
+
+      .page-footer {
+        position: absolute;
+        bottom: 0.4in;
+        left: 0.75in;
+        font-family: "Space Mono", monospace;
+        font-size: 9px;
+        color: var(--text-muted);
+        letter-spacing: 1px;
+        text-transform: uppercase;
+      }
+
+      /* COVER PAGE */
+      .cover-page {
+        background: var(--bg-primary);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        padding: 0;
+        position: relative;
+        text-align: center;
+      }
+
+      .cover-page::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(
+            ellipse at 30% 30%,
+            rgba(255, 200, 50, 0.15) 0%,
+            transparent 40%
+          ),
+          radial-gradient(
+            ellipse at 70% 70%,
+            rgba(0, 229, 255, 0.1) 0%,
+            transparent 40%
+          ),
+          radial-gradient(
+            ellipse at 50% 50%,
+            rgba(179, 102, 255, 0.05) 0%,
+            transparent 50%
+          );
+        pointer-events: none;
+      }
+
+      .cover-badge {
+        font-family: "Space Mono", monospace;
+        font-size: 11px;
+        color: var(--accent-gold);
+        letter-spacing: 3px;
+        text-transform: uppercase;
+        margin-bottom: 20px;
+        padding: 8px 20px;
+        border: 1px solid var(--border-gold);
+        border-radius: 4px;
+        background: var(--accent-gold-dim);
+      }
+
+      .cover-title {
+        font-family: "Syne", sans-serif;
+        font-size: 52px;
+        font-weight: 800;
+        color: var(--text-primary);
+        line-height: 1.1;
+        margin-bottom: 15px;
+        text-shadow: 0 0 40px rgba(255, 200, 50, 0.3);
+      }
+
+      .cover-title span {
+        background: var(--gradient-premium);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+
+      .cover-subtitle {
+        font-family: "DM Sans", sans-serif;
+        font-size: 20px;
+        color: var(--text-secondary);
+        margin-bottom: 40px;
+        max-width: 500px;
+      }
+
+      .cover-stats {
+        display: flex;
+        gap: 40px;
+        margin-top: 30px;
+      }
+      .cover-stat {
+        text-align: center;
+      }
+
+      .cover-stat-value {
+        font-family: "Syne", sans-serif;
+        font-size: 36px;
+        font-weight: 700;
+        color: var(--accent-cyan);
+        text-shadow: var(--glow-cyan);
+      }
+
+      .cover-stat-label {
+        font-family: "Space Mono", monospace;
+        font-size: 10px;
+        color: var(--text-muted);
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        margin-top: 5px;
+      }
+
+      .cover-brands {
+        display: flex;
+        gap: 30px;
+        margin-top: 50px;
+        padding: 20px 40px;
+        background: var(--bg-card);
+        border-radius: 8px;
+        border: 1px solid var(--border-subtle);
+      }
+
+      .brand-logo {
+        font-family: "Syne", sans-serif;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        padding: 8px 16px;
+        border: 1px solid var(--border-subtle);
+        border-radius: 4px;
+        transition: all 0.3s ease;
+      }
+
+      .brand-logo:hover {
+        color: var(--accent-gold);
+        border-color: var(--border-gold);
+      }
+
+      /* SECTION HEADERS */
+      .section-header {
+        margin-bottom: 25px;
+        padding-bottom: 15px;
+        border-bottom: 1px solid var(--border-subtle);
+      }
+
+      .section-number {
+        font-family: "Space Mono", monospace;
+        font-size: 11px;
+        color: var(--accent-gold);
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        display: block;
+        margin-bottom: 8px;
+      }
+
+      .section-title {
+        font-family: "Syne", sans-serif;
+        font-size: 28px;
+        font-weight: 700;
+        color: var(--text-primary);
+        line-height: 1.2;
+      }
+
+      /* CONTENT STYLES */
+      h3 {
+        font-family: "Syne", sans-serif;
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--accent-gold);
+        margin: 25px 0 12px 0;
+      }
+
+      h4 {
+        font-family: "DM Sans", sans-serif;
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--accent-cyan);
+        margin: 18px 0 10px 0;
+      }
+
+      p {
+        font-size: 13px;
+        color: var(--text-secondary);
+        margin-bottom: 12px;
+        line-height: 1.7;
+      }
+
+      .lead-text {
+        font-size: 15px;
+        color: var(--text-primary);
+        line-height: 1.8;
+        margin-bottom: 20px;
+      }
+
+      /* INSIGHT BOX */
+      .insight-box {
+        background: linear-gradient(
+          135deg,
+          var(--bg-card) 0%,
+          var(--bg-tertiary) 100%
+        );
+        border: 1px solid var(--border-gold);
+        border-left: 3px solid var(--accent-gold);
+        border-radius: 6px;
+        padding: 16px 18px;
+        margin: 18px 0;
+      }
+
+      .insight-box-title {
+        font-family: "Space Mono", monospace;
+        font-size: 11px;
+        color: var(--accent-gold);
+        letter-spacing: 1px;
+        margin-bottom: 10px;
+        font-weight: 700;
+      }
+
+      .insight-box p {
+        margin-bottom: 0;
+        font-size: 12px;
+      }
+
+      /* WARNING BOX */
+      .warning-box {
+        background: linear-gradient(
+          135deg,
+          rgba(255, 77, 106, 0.08) 0%,
+          rgba(255, 77, 106, 0.03) 100%
+        );
+        border: 1px solid rgba(255, 77, 106, 0.3);
+        border-left: 3px solid var(--accent-red);
+        border-radius: 6px;
+        padding: 16px 18px;
+        margin: 18px 0;
+      }
+
+      .warning-box h4 {
+        font-family: "Space Mono", monospace;
+        font-size: 11px;
+        color: var(--accent-red);
+        letter-spacing: 1px;
+        margin: 0 0 10px 0;
+        font-weight: 700;
+      }
+
+      .warning-box p {
+        margin-bottom: 0;
+        font-size: 12px;
+      }
+
+      /* SUCCESS BOX */
+      .success-box {
+        background: linear-gradient(
+          135deg,
+          rgba(0, 255, 157, 0.08) 0%,
+          rgba(0, 255, 157, 0.03) 100%
+        );
+        border: 1px solid rgba(0, 255, 157, 0.3);
+        border-left: 3px solid var(--accent-green);
+        border-radius: 6px;
+        padding: 16px 18px;
+        margin: 18px 0;
+      }
+
+      .success-box h4 {
+        font-family: "Space Mono", monospace;
+        font-size: 11px;
+        color: var(--accent-green);
+        letter-spacing: 1px;
+        margin: 0 0 10px 0;
+        font-weight: 700;
+      }
+
+      .success-box p {
+        margin-bottom: 0;
+        font-size: 12px;
+      }
+
+      /* DATA TABLE */
+      .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 18px 0;
+        font-size: 12px;
+      }
+
+      .data-table th {
+        background: var(--bg-tertiary);
+        color: var(--accent-gold);
+        font-family: "Space Mono", monospace;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        padding: 12px 14px;
+        text-align: left;
+        border-bottom: 2px solid var(--border-gold);
+      }
+
+      .data-table td {
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--border-subtle);
+        color: var(--text-secondary);
+        vertical-align: top;
+      }
+
+      .data-table tr:hover td {
+        background: var(--bg-card);
+      }
+
+      /* BRAND CARD */
+      .brand-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-subtle);
+        border-radius: 8px;
+        padding: 20px;
+        margin: 18px 0;
+      }
+
+      .brand-card-header {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        margin-bottom: 15px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--border-subtle);
+      }
+
+      .brand-icon {
+        overflow: hidden;
+        width: 48px;
+        height: 48px;
+        background: var(--accent-gold-dim);
+        border: 1px solid var(--border-gold);
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: "Syne", sans-serif;
+        font-weight: 800;
+        font-size: 14px;
+        color: var(--accent-gold);
+      }
+
+      .brand-name {
+        font-family: "Syne", sans-serif;
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--text-primary);
+      }
+
+      .brand-subtitle {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: 2px;
+      }
+
+      /* STEP LIST */
+      .step-list {
+        counter-reset: step-counter;
+        list-style: none;
+        padding: 0;
+        margin: 15px 0;
+      }
+
+      .step-list li {
+        counter-increment: step-counter;
+        position: relative;
+        padding-left: 45px;
+        margin-bottom: 15px;
+        font-size: 13px;
+        color: var(--text-secondary);
+      }
+
+      .step-list li::before {
+        content: counter(step-counter);
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 28px;
+        height: 28px;
+        background: var(--accent-gold-dim);
+        border: 1px solid var(--border-gold);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: "Space Mono", monospace;
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--accent-gold);
+      }
+
+      /* KEY COMBO */
+      .key {
+        display: inline-block;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-subtle);
+        border-radius: 4px;
+        padding: 3px 8px;
+        font-family: "Space Mono", monospace;
+        font-size: 11px;
+        color: var(--accent-cyan);
+        margin: 0 2px;
+      }
+
+      /* BENCHMARK CARD */
+      .benchmark-card {
+        background: linear-gradient(
+          135deg,
+          var(--bg-card) 0%,
+          var(--bg-tertiary) 100%
+        );
+        border: 1px solid var(--border-cyan);
+        border-radius: 8px;
+        padding: 18px;
+        margin: 15px 0;
+      }
+
+      .benchmark-name {
+        font-family: "Syne", sans-serif;
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--accent-cyan);
+        margin-bottom: 8px;
+      }
+
+      .benchmark-desc {
+        font-size: 12px;
+        color: var(--text-secondary);
+        margin-bottom: 10px;
+      }
+
+      .benchmark-link {
+        font-family: "Space Mono", monospace;
+        font-size: 10px;
+        color: var(--text-muted);
+        text-decoration: none;
+      }
+
+      .benchmark-link:hover {
+        color: var(--accent-cyan);
+      }
+
+      /* PERFORMANCE METER */
+      .performance-meter {
+        background: var(--bg-tertiary);
+        border-radius: 8px;
+        padding: 20px;
+        margin: 20px 0;
+        text-align: center;
+      }
+
+      .meter-title {
+        font-family: "Space Mono", monospace;
+        font-size: 10px;
+        color: var(--text-muted);
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        margin-bottom: 15px;
+      }
+
+      .meter-value {
+        font-family: "Syne", sans-serif;
+        font-size: 48px;
+        font-weight: 800;
+        color: var(--accent-red);
+        text-shadow: 0 0 30px rgba(255, 77, 106, 0.4);
+      }
+
+      .meter-value.unlocked {
+        color: var(--accent-green);
+        text-shadow: 0 0 30px rgba(0, 255, 157, 0.4);
+      }
+
+      .meter-label {
+        font-size: 14px;
+        color: var(--text-secondary);
+        margin-top: 8px;
+      }
+
+      /* TOC */
+      .toc {
+        background: var(--bg-card);
+        border: 1px solid var(--border-subtle);
+        border-radius: 8px;
+        padding: 25px 30px;
+        margin: 25px 0;
+      }
+
+      .toc-title {
+        font-family: "Syne", sans-serif;
+        font-size: 20px;
+        font-weight: 700;
+        color: var(--accent-gold);
+        margin-bottom: 20px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--border-gold);
+      }
+
+      .toc-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+
+      .toc-list li {
+        padding: 10px 0;
+        border-bottom: 1px solid var(--border-subtle);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .toc-list li:last-child {
+        border-bottom: none;
+      }
+
+      .toc-section {
+        font-size: 14px;
+        color: var(--text-primary);
+      }
+
+      .toc-page {
+        font-family: "Space Mono", monospace;
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+
+      /* COMPARISON GRID */
+      .comparison-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 15px;
+        margin: 20px 0;
+      }
+
+      .comparison-item {
+        background: var(--bg-card);
+        border: 1px solid var(--border-subtle);
+        border-radius: 6px;
+        padding: 15px;
+      }
+
+      .comparison-label {
+        font-family: "Space Mono", monospace;
+        font-size: 10px;
+        color: var(--text-muted);
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+
+      .comparison-before {
+        font-size: 24px;
+        font-weight: 700;
+        color: var(--accent-red);
+      }
+
+      .comparison-after {
+        font-size: 24px;
+        font-weight: 700;
+        color: var(--accent-green);
+      }
+
+      /* CALLOUT */
+      .callout {
+        background: linear-gradient(
+          135deg,
+          var(--accent-gold-dim) 0%,
+          transparent 100%
+        );
+        border: 1px solid var(--border-gold);
+        border-radius: 8px;
+        padding: 20px;
+        margin: 20px 0;
+        text-align: center;
+      }
+
+      .callout-icon {
+        font-size: 32px;
+        margin-bottom: 10px;
+      }
+
+      .callout-text {
+        font-size: 14px;
+        color: var(--text-primary);
+        margin: 0;
+      }
+
+      /* BIOS PATH */
+      .bios-path {
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-subtle);
+        border-radius: 4px;
+        padding: 10px 14px;
+        font-family: "Space Mono", monospace;
+        font-size: 11px;
+        color: var(--accent-cyan);
+        margin: 10px 0;
+        display: inline-block;
+      }
+
+      .bios-path .arrow {
+        color: var(--text-muted);
+        margin: 0 8px;
+      }
+
+      /* QUICK REFERENCE */
+      .quick-ref {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        margin: 20px 0;
+      }
+
+      .quick-ref-item {
+        background: var(--bg-card);
+        border: 1px solid var(--border-subtle);
+        border-radius: 6px;
+        padding: 15px;
+        text-align: center;
+      }
+
+      .quick-ref-brand {
+        font-family: "Syne", sans-serif;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--accent-gold);
+        margin-bottom: 8px;
+      }
+
+      .quick-ref-key {
+        font-family: "Space Mono", monospace;
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--text-primary);
+      }
+
+      .mini-cards {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 14px;
+        margin: 16px 0;
+      }
+
+      .mini-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-subtle);
+        border-radius: 8px;
+        padding: 16px;
+      }
+
+      .mini-card-title {
+        font-family: "Syne", sans-serif;
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--text-primary);
+        margin-bottom: 8px;
+      }
+
+      .mini-card p {
+        font-size: 12px;
+        margin-bottom: 0;
+      }
+
+      @media print {
+        .page {
+          page-break-after: always;
+          page-break-inside: avoid;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ============================================================ -->
+    <!-- COVER PAGE -->
+    <!-- ============================================================ -->
+    <div class="page cover-page">
+      <div class="page-header">Roo Industries</div>
+
+      <div class="cover-badge">Free Education Resource</div>
+
+      <h1 class="cover-title">BIOS <span>Mastery</span> Guide</h1>
+
+      <p class="cover-subtitle">
+        Unlock the hidden performance your PC is leaving on the table. A
+        beginner-friendly guide to essential BIOS settings.
+      </p>
+
+      <div class="cover-stats">
+        <div class="cover-stat">
+          <div class="cover-stat-value">15-40%</div>
+          <div class="cover-stat-label">Typical Performance Gain</div>
+        </div>
+        <div class="cover-stat">
+          <div class="cover-stat-value">10 min</div>
+          <div class="cover-stat-label">Time to Configure</div>
+        </div>
+        <div class="cover-stat">
+          <div class="cover-stat-value">$0</div>
+          <div class="cover-stat-label">Cost to Implement</div>
+        </div>
+      </div>
+
+      <div class="cover-brands">
+        <span class="brand-logo">ASUS</span>
+        <span class="brand-logo">MSI</span>
+        <span class="brand-logo">GIGABYTE</span>
+        <span class="brand-logo">ASRock</span>
+      </div>
+
+      <div class="page-footer">Version 1.0 | January 2026</div>
+      <div class="page-number">Roo Industries</div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- TABLE OF CONTENTS -->
+    <!-- ============================================================ -->
+    <div class="page">
+      <div class="page-header">Roo Industries</div>
+
+      <div class="section-header">
+        <span class="section-number">Navigation</span>
+        <h2 class="section-title">Table of Contents</h2>
+      </div>
+
+      <div class="toc">
+        <div class="toc-title">What You'll Learn</div>
+        <ul class="toc-list">
+          <li>
+            <span class="toc-section">Part 1: Is Your PC Underperforming?</span
+            ><span class="toc-page">Page 3</span>
+          </li>
+          <li>
+            <span class="toc-section"
+              >Part 2: How to Test Your Current Performance</span
+            ><span class="toc-page">Page 4</span>
+          </li>
+          <li>
+            <span class="toc-section"
+              >Part 3: What is BIOS & Why It Matters</span
+            ><span class="toc-page">Page 5</span>
+          </li>
+          <li>
+            <span class="toc-section"
+              >Part 4: How to Enter BIOS (All Brands)</span
+            ><span class="toc-page">Page 6</span>
+          </li>
+          <li>
+            <span class="toc-section"
+              >Part 5: XMP & EXPO — Unlock Your RAM Speed</span
+            ><span class="toc-page">Pages 7-10</span>
+          </li>
+          <li>
+            <span
+              class="toc-section"
+              style="padding-left: 20px; color: var(--text-secondary)"
+              >— When XMP/EXPO Doesn't Work</span
+            ><span class="toc-page">Page 11</span>
+          </li>
+          <li>
+            <span
+              class="toc-section"
+              style="padding-left: 20px; color: var(--text-secondary)"
+              >— RAM Slots & Brand-Specific Issues</span
+            ><span class="toc-page">Pages 12-13</span>
+          </li>
+          <li>
+            <span class="toc-section"
+              >Part 6: PBO — AMD CPU Performance Boost</span
+            ><span class="toc-page">Pages 14-15</span>
+          </li>
+          <li>
+            <span class="toc-section">Part 7: Other Essential Settings</span
+            ><span class="toc-page">Page 16</span>
+          </li>
+          <li>
+            <span class="toc-section">Part 8: Safety & Recovery</span
+            ><span class="toc-page">Page 17</span>
+          </li>
+          <li>
+            <span class="toc-section">Quick Reference Cards</span
+            ><span class="toc-page">Page 18</span>
+          </li>
+        </ul>
+      </div>
+
+      <div class="insight-box">
+        <div class="insight-box-title">Who This Guide Is For</div>
+        <p>
+          This guide is written for <strong>absolute beginners</strong> who have
+          never touched BIOS settings. No technical experience required. We
+          explain everything in plain English with step-by-step instructions for
+          every major motherboard brand.
+        </p>
+      </div>
+
+      <div class="callout">
+        <div
+          class="callout-icon"
+          style="
+            font-family: 'Syne', sans-serif;
+            font-size: 24px;
+            color: var(--accent-gold);
+          "
+        >
+          15-40%
+        </div>
+        <p class="callout-text">
+          That's how much performance most gamers are leaving on the table
+          because they never configured their BIOS. This guide fixes that in 10
+          minutes.
+        </p>
+      </div>
+
+      <div class="page-footer">BIOS Mastery Guide</div>
+      <div class="page-number">02</div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- PART 1 -->
+    <!-- ============================================================ -->
+    <div class="page">
+      <div class="page-header">Roo Industries</div>
+
+      <div class="section-header">
+        <span class="section-number">Part 1</span>
+        <h2 class="section-title">Is Your PC Underperforming?</h2>
+      </div>
+
+      <p class="lead-text">
+        Here's a shocking truth:
+        <strong
+          >Your RAM is probably running at half its rated speed right
+          now.</strong
+        >
+        And your CPU? It might be holding back too. This isn't your fault—it's
+        how computers ship from the factory.
+      </p>
+
+      <h3>The Hidden Performance Problem</h3>
+      <p>
+        When you buy DDR4-3600 or DDR5-6000 RAM, that speed on the box?
+        <strong>Your PC doesn't use it by default.</strong> Instead, it runs at
+        the "safe" base speed:
+      </p>
+
+      <div class="comparison-grid">
+        <div class="comparison-item">
+          <div class="comparison-label">DDR4 Default Speed</div>
+          <div class="comparison-before">2133 MHz</div>
+        </div>
+        <div class="comparison-item">
+          <div class="comparison-label">DDR4 Rated Speed</div>
+          <div class="comparison-after">3600 MHz</div>
+        </div>
+        <div class="comparison-item">
+          <div class="comparison-label">DDR5 Default Speed</div>
+          <div class="comparison-before">4800 MHz</div>
+        </div>
+        <div class="comparison-item">
+          <div class="comparison-label">DDR5 Rated Speed</div>
+          <div class="comparison-after">6000+ MHz</div>
+        </div>
+      </div>
+
+      <div class="warning-box">
+        <h4>The Factory Settings Problem</h4>
+        <p>
+          Manufacturers set everything to the lowest common denominator for
+          compatibility. Great for avoiding returns. Terrible for your gaming
+          performance.
+          <strong>You paid for speed you're not getting.</strong>
+        </p>
+      </div>
+
+      <h3>Real-World Performance You're Missing</h3>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Game</th>
+            <th>Default BIOS</th>
+            <th>Optimized BIOS</th>
+            <th>Gain</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>CS2 (Competitive)</td>
+            <td>245 FPS avg</td>
+            <td>310 FPS avg</td>
+            <td style="color: var(--accent-green)">+27%</td>
+          </tr>
+          <tr>
+            <td>Valorant (Competitive)</td>
+            <td>280 FPS avg</td>
+            <td>340 FPS avg</td>
+            <td style="color: var(--accent-green)">+21%</td>
+          </tr>
+          <tr>
+            <td>Fortnite (Performance)</td>
+            <td>195 FPS avg</td>
+            <td>245 FPS avg</td>
+            <td style="color: var(--accent-green)">+26%</td>
+          </tr>
+          <tr>
+            <td>Cyberpunk 2077</td>
+            <td>68 FPS avg</td>
+            <td>78 FPS avg</td>
+            <td style="color: var(--accent-green)">+15%</td>
+          </tr>
+          <tr>
+            <td>Warzone</td>
+            <td>142 FPS avg</td>
+            <td>175 FPS avg</td>
+            <td style="color: var(--accent-green)">+23%</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>
+        <em
+          >Results based on Ryzen 7 7800X3D + RTX 4070 Super with DDR5-6000 RAM.
+          Your results will vary based on hardware.</em
+        >
+      </p>
+
+      <div class="success-box">
+        <h4>The Good News</h4>
+        <p>
+          Fixing this takes about 10 minutes. This requires enabling a few
+          settings that are already built into your system. This guide shows you
+          exactly how.
+        </p>
+      </div>
+
+      <div class="page-footer">BIOS Mastery Guide</div>
+      <div class="page-number">03</div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- PART 2 -->
+    <!-- ============================================================ -->
+    <div class="page">
+      <div class="page-header">Roo Industries</div>
+
+      <div class="section-header">
+        <span class="section-number">Part 2</span>
+        <h2 class="section-title">How to Test Your Current Performance</h2>
+      </div>
+
+      <p class="lead-text">
+        Before we optimize anything, let's see where you stand right now. This
+        gives you a "before" score to compare against your "after" results.
+      </p>
+
+      <h3>Step 1: Check Your RAM Speed Right Now</h3>
+      <ol class="step-list">
+        <li>
+          Press <span class="key">Ctrl</span> + <span class="key">Shift</span> +
+          <span class="key">Esc</span> to open Task Manager
+        </li>
+        <li>Click the <strong>"Performance"</strong> tab at the top</li>
+        <li>Click <strong>"Memory"</strong> on the left sidebar</li>
+        <li>Look at the <strong>"Speed"</strong> value in the top right</li>
+      </ol>
+
+      <div class="insight-box">
+        <div class="insight-box-title">What Your Speed Means</div>
+        <p>
+          <strong>If you see 2133 MHz (DDR4) or 4800 MHz (DDR5):</strong> Your
+          RAM is running at base speed. XMP/EXPO is NOT enabled. You're leaving
+          significant performance on the table.<br /><br />
+          <strong
+            >If you see your rated speed (3200/3600/6000 MHz etc.):</strong
+          >
+          XMP/EXPO is already enabled. Skip to Part 6 for CPU optimization.
+        </p>
+      </div>
+
+      <h3>Step 2: Run Free Benchmark Tests</h3>
+      <p>Use these free tools to get your baseline performance scores:</p>
+
+      <div class="benchmark-card">
+        <div class="benchmark-name">3DMark (Free Demo)</div>
+        <div class="benchmark-desc">
+          Industry standard gaming benchmark. Run "Time Spy" for a GPU/CPU score
+          you can compare globally. Download free on Steam.
+        </div>
+        <span class="benchmark-link"
+          >store.steampowered.com/app/223850/3DMark/</span
+        >
+      </div>
+
+      <div class="benchmark-card">
+        <div class="benchmark-name">BenchMate</div>
+        <div class="benchmark-desc">
+          Standardized benchmarking suite used by overclockers and hardware
+          reviewers. Includes Cinebench, validates results, prevents cheating.
+        </div>
+        <span class="benchmark-link">benchmate.org</span>
+      </div>
+
+      <div
+        class="benchmark-card"
+        style="
+          border-color: var(--border-gold);
+          background: linear-gradient(
+            135deg,
+            var(--accent-gold-dim) 0%,
+            var(--bg-card) 100%
+          );
+        "
+      >
+        <div class="benchmark-name" style="color: var(--accent-gold)">
+          Roo Industries Tools
+        </div>
+        <div class="benchmark-desc">
+          Curated toolkit for optimization work. CPU-Z, HWiNFO, ZenTimings,
+          TestMem5, MSI Afterburner, DDU, and more.
+        </div>
+        <span class="benchmark-link" style="color: var(--accent-gold)"
+          >rooindustries.com/tools</span
+        >
+      </div>
+
+      <div class="warning-box">
+        <h4>Write Down Your Scores</h4>
+        <p>
+          Run these benchmarks BEFORE making any BIOS changes. Write down or
+          screenshot your results. After enabling XMP/EXPO and PBO, run them
+          again to see your improvement.
+        </p>
+      </div>
+
+      <div class="page-footer">BIOS Mastery Guide</div>
+      <div class="page-number">04</div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- PART 3 -->
+    <!-- ============================================================ -->
+    <div class="page">
+      <div class="page-header">Roo Industries</div>
+
+      <div class="section-header">
+        <span class="section-number">Part 3</span>
+        <h2 class="section-title">What is BIOS & Why It Matters</h2>
+      </div>
+
+      <p class="lead-text">
+        BIOS is your computer's control center that runs BEFORE Windows even
+        starts. It controls how your hardware behaves at the deepest level.
+      </p>
+
+      <h3>BIOS in Plain English</h3>
+      <p>Think of BIOS like this:</p>
+
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Analogy</th>
+            <th>What It Means</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Car engine settings</td>
+            <td>BIOS controls how "fast" your hardware is allowed to run</td>
+          </tr>
+          <tr>
+            <td>Home circuit breaker</td>
+            <td>BIOS controls power delivery to your components</td>
+          </tr>
+          <tr>
+            <td>Phone's hidden settings menu</td>
+            <td>BIOS has settings you can't access from Windows</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>What BIOS Controls</h3>
+      <div class="comparison-grid">
+        <div
+          class="comparison-item"
+          style="
+            background: var(--accent-gold-dim);
+            border-color: var(--border-gold);
+          "
+        >
+          <div class="comparison-label" style="color: var(--accent-gold)">
+            RAM Speed
+          </div>
+          <p style="font-size: 12px; margin: 0">
+            How fast your memory runs. Default is slow. XMP/EXPO unlocks full
+            speed.
+          </p>
+        </div>
+        <div
+          class="comparison-item"
+          style="
+            background: var(--accent-cyan-dim);
+            border-color: var(--border-cyan);
+          "
+        >
+          <div class="comparison-label" style="color: var(--accent-cyan)">
+            CPU Power
+          </div>
+          <p style="font-size: 12px; margin: 0">
+            How much power your CPU gets. PBO unlocks higher clocks on AMD.
+          </p>
+        </div>
+        <div
+          class="comparison-item"
+          style="
+            background: var(--accent-purple-dim);
+            border-color: rgba(179, 102, 255, 0.3);
+          "
+        >
+          <div class="comparison-label" style="color: var(--accent-purple)">
+            Boot Order
+          </div>
+          <p style="font-size: 12px; margin: 0">
+            Which drive Windows loads from. Important for SSDs.
+          </p>
+        </div>
+        <div
+          class="comparison-item"
+          style="
+            background: var(--accent-green-dim);
+            border-color: rgba(0, 255, 157, 0.3);
+          "
+        >
+          <div class="comparison-label" style="color: var(--accent-green)">
+            Fan Curves
+          </div>
+          <p style="font-size: 12px; margin: 0">
+            How fast your cooling fans spin at different temperatures.
+          </p>
+        </div>
+      </div>
+
+      <h3>UEFI vs BIOS: What's the Difference?</h3>
+      <p>
+        UEFI is just the modern, graphical BIOS. For this guide, they mean the
+        same thing. All modern boards use UEFI.
+      </p>
+
+      <div class="insight-box">
+        <div class="insight-box-title">
+          Why Manufacturers Ship With "Safe" Settings
+        </div>
+        <p>
+          Motherboard makers want zero returns. So they set everything
+          conservatively—your RAM runs at base speed instead of rated. Your CPU
+          stays within safe limits even if it could boost higher.
+          <strong
+            >These settings guarantee compatibility but sacrifice
+            performance.</strong
+          >
+        </p>
+      </div>
+
+      <div class="success-box">
+        <h4>Is This Safe?</h4>
+        <p>
+          Yes. XMP/EXPO are <strong>factory-tested profiles</strong>. PBO is
+          AMD's <strong>official</strong> performance feature. The worst that
+          can happen is a reboot and an auto-revert to safe settings.
+        </p>
+      </div>
+
+      <div class="page-footer">BIOS Mastery Guide</div>
+      <div class="page-number">05</div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- PART 4 -->
+    <!-- ============================================================ -->
+    <div class="page">
+      <div class="page-header">Roo Industries</div>
+
+      <div class="section-header">
+        <span class="section-number">Part 4</span>
+        <h2 class="section-title">How to Enter BIOS (All Brands)</h2>
+      </div>
+
+      <p class="lead-text">
+        To change any BIOS settings, you need to enter BIOS during startup.
+        Here's exactly how to do it for every major motherboard brand.
+      </p>
+
+      <h3>Quick Reference: BIOS Entry Keys</h3>
+      <div class="quick-ref">
+        <div class="quick-ref-item">
+          <div class="quick-ref-brand">ASUS</div>
+          <div class="quick-ref-key">DEL or F2</div>
+        </div>
+        <div class="quick-ref-item">
+          <div class="quick-ref-brand">MSI</div>
+          <div class="quick-ref-key">DEL</div>
+        </div>
+        <div class="quick-ref-item">
+          <div class="quick-ref-brand">Gigabyte</div>
+          <div class="quick-ref-key">DEL</div>
+        </div>
+        <div class="quick-ref-item">
+          <div class="quick-ref-brand">ASRock</div>
+          <div class="quick-ref-key">DEL or F2</div>
+        </div>
+      </div>
+
+      <h3>Step-by-Step Instructions</h3>
+      <ol class="step-list">
+        <li>
+          <strong>Restart your computer</strong> — Click Start → Power → Restart
+        </li>
+        <li>
+          <strong>Spam the BIOS key immediately</strong> — As soon as the screen
+          goes black, start pressing <span class="key">DEL</span> repeatedly
+        </li>
+        <li>
+          <strong>Keep pressing until BIOS appears</strong> — You'll see a
+          graphical interface with your motherboard's logo
+        </li>
+        <li>
+          <strong>If Windows loads instead</strong> — You missed the window.
+          Restart and try again
+        </li>
+      </ol>
+
+      <div class="warning-box">
+        <h4>Using a Wireless Keyboard?</h4>
+        <p>
+          Some wireless keyboards don't work during boot. If you can't enter
+          BIOS, try a wired USB keyboard temporarily.
+        </p>
+      </div>
+
+      <h3>Alternative Method: Enter BIOS from Windows</h3>
+      <p>
+        If the key method doesn't work (Fast Boot enabled), use this method:
+      </p>
+      <ol class="step-list">
+        <li>
+          Open <strong>Settings</strong> → <strong>System</strong> →
+          <strong>Recovery</strong>
+        </li>
+        <li>Under "Advanced startup," click <strong>"Restart now"</strong></li>
+        <li>
+          After restart, click <strong>Troubleshoot</strong> →
+          <strong>Advanced options</strong>
+        </li>
+        <li>
+          Click <strong>"UEFI Firmware Settings"</strong> →
+          <strong>Restart</strong>
+        </li>
+        <li>Your PC will restart directly into BIOS</li>
+      </ol>
+
+      <h3>Understanding EZ Mode vs Advanced Mode</h3>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Mode</th>
+            <th>What It Shows</th>
+            <th>When to Use</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="color: var(--accent-cyan)">EZ Mode</td>
+            <td>
+              Simplified view with basic settings, XMP toggle often visible
+            </td>
+            <td>Quick XMP enable, fan curves, system info</td>
+          </tr>
+          <tr>
+            <td style="color: var(--accent-gold)">Advanced Mode</td>
+            <td>Full settings tree with all options</td>
+            <td>PBO settings, detailed RAM timings, power limits</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="insight-box">
+        <div class="insight-box-title">How to Switch Between Modes</div>
+        <p>
+          <strong>ASUS/MSI/Gigabyte:</strong> Press <span class="key">F7</span
+          ><br />
+          <strong>ASRock:</strong> Press <span class="key">F6</span>
+        </p>
+      </div>
+
+      <div class="page-footer">BIOS Mastery Guide</div>
+      <div class="page-number">06</div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- PART 5: XMP & EXPO (INTRO) -->
+    <!-- ============================================================ -->
+    <div class="page">
+      <div class="page-header">Roo Industries</div>
+
+      <div class="section-header">
+        <span class="section-number">Part 5</span>
+        <h2 class="section-title">XMP & EXPO — Unlock Your RAM Speed</h2>
+      </div>
+
+      <p class="lead-text">
+        This is the single most impactful BIOS change for gaming performance.
+        One click can give you 15-30% more FPS in CPU-limited games.
+      </p>
+
+      <h3>What is XMP / EXPO / DOCP?</h3>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Platform</th>
+            <th>What It Does</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="color: var(--accent-cyan)">
+              <strong>XMP</strong><br /><span
+                style="font-size: 10px; color: var(--text-muted)"
+                >Extreme Memory Profile</span
+              >
+            </td>
+            <td>Intel</td>
+            <td>
+              Factory-tested profile stored on your RAM. Enables rated speed
+              with one click.
+            </td>
+          </tr>
+          <tr>
+            <td style="color: var(--accent-purple)">
+              <strong>EXPO</strong><br /><span
+                style="font-size: 10px; color: var(--text-muted)"
+                >Extended Profiles for Overclocking</span
+              >
+            </td>
+            <td>AMD (AM5)</td>
+            <td>
+              AMD's version of XMP for DDR5 memory. Optimized for Ryzen
+              7000/9000.
+            </td>
+          </tr>
+          <tr>
+            <td style="color: var(--accent-gold)">
+              <strong>DOCP / A-XMP</strong>
+            </td>
+            <td>AMD (AM4)</td>
+            <td>
+              AMD-compatible versions of XMP for older platforms. Same result.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="insight-box">
+        <div class="insight-box-title">Which One Do You Need?</div>
+        <p>
+          <strong>Intel CPU?</strong> Look for XMP<br />
+          <strong>AMD Ryzen 7000/9000 (AM5)?</strong> Look for EXPO first, then
+          XMP if not available<br />
+          <strong>AMD Ryzen 3000/5000 (AM4)?</strong> Look for DOCP, A-XMP, or
+          just XMP
+        </p>
+      </div>
+
+      <div class="success-box">
+        <h4>XMP/EXPO is NOT Risky Overclocking</h4>
+        <p>
+          These profiles are <strong>factory-tested</strong>. You're just
+          enabling the speed you paid for. If it doesn't work, your PC usually
+          auto-recovers after a few failed boots.
+        </p>
+      </div>
+
+      <div class="performance-meter">
+        <div class="meter-title">Typical RAM Performance Before/After XMP</div>
+        <div style="display: flex; justify-content: center; gap: 60px">
+          <div>
+            <div class="meter-value">2133</div>
+            <div class="meter-label">MHz (Default)</div>
+          </div>
+          <div
+            style="
+              font-size: 32px;
+              color: var(--text-muted);
+              align-self: center;
+            "
+          >
+            →
+          </div>
+          <div>
+            <div class="meter-value unlocked">3600</div>
+            <div class="meter-label">MHz (XMP Enabled)</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="page-footer">BIOS Mastery Guide</div>
+      <div class="page-number">07</div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- PART 5: ASUS -->
+    <!-- ============================================================ -->
+    <div class="page">
+      <div class="page-header">Roo Industries</div>
+
+      <div class="section-header">
+        <span class="section-number">Part 5 Continued</span>
+        <h2 class="section-title">Enable XMP/EXPO: ASUS Motherboards</h2>
+      </div>
+
+      <div class="brand-card">
+        <div class="brand-card-header">
+          <div
+            class="brand-icon"
+            style="background: #fff; border-color: #000; color: #000"
+          >
+            ASUS
+          </div>
+          <div>
+            <div class="brand-name">ASUS Motherboards</div>
+            <div class="brand-subtitle">
+              ROG, TUF Gaming, Prime, ProArt Series
+            </div>
+          </div>
+        </div>
+
+        <h4>Method 1: EZ Mode (Fastest)</h4>
+        <ol class="step-list">
+          <li>
+            Enter BIOS by pressing <span class="key">DEL</span> during startup
+          </li>
+          <li>You'll land in <strong>EZ Mode</strong> by default</li>
+          <li>
+            Find <strong>"X.M.P."</strong> or <strong>"EXPO"</strong> on the
+            main screen
+          </li>
+          <li>
+            Select <strong>"Enabled"</strong> or <strong>"Profile 1"</strong>
+          </li>
+          <li>Press <span class="key">F10</span> to save and exit</li>
+        </ol>
+
+        <h4>Method 2: Advanced Mode</h4>
+        <p class="bios-path">
+          AI Tweaker <span class="arrow">→</span> Ai Overclock Tuner
+          <span class="arrow">→</span> XMP I / XMP II / EXPO I
+        </p>
+        <ol class="step-list">
+          <li>Press <span class="key">F7</span> to enter Advanced Mode</li>
+          <li>Go to <strong>"AI Tweaker"</strong> (or "Extreme Tweaker")</li>
+          <li>
+            Change <strong>"Ai Overclock Tuner"</strong> from Auto to
+            <strong>XMP I</strong>, <strong>XMP II</strong>, or
+            <strong>EXPO</strong>
+          </li>
+          <li>Press <span class="key">F10</span> → Save and Exit</li>
+        </ol>
+      </div>
+
+      <div class="insight-box">
+        <div class="insight-box-title">XMP I vs XMP II — Which to Choose?</div>
+        <p>
+          <strong>XMP I:</strong> ASUS optimized settings. Try first.<br />
+          <strong>XMP II:</strong> Uses the stick’s raw profile. Use if XMP I
+          causes issues.
+        </p>
+      </div>
+
+      <div class="page-footer">BIOS Mastery Guide</div>
+      <div class="page-number">08</div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- PART 5: MSI & GIGABYTE -->
+    <!-- ============================================================ -->
+    <div class="page">
+      <div class="page-header">Roo Industries</div>
+
+      <div class="section-header">
+        <span class="section-number">Part 5 Continued</span>
+        <h2 class="section-title">Enable XMP/EXPO: MSI & Gigabyte</h2>
+      </div>
+
+      <div class="brand-card">
+        <div class="brand-card-header">
+          <div
+            class="brand-icon"
+            style="background: #1a1a1a; border-color: #ff0000; color: #ff0000"
+          >
+            MSI
+          </div>
+          <div>
+            <div class="brand-name">MSI Motherboards</div>
+            <div class="brand-subtitle">
+              MEG, MPG, MAG, PRO Series — Click BIOS
+            </div>
+          </div>
+        </div>
+
+        <h4>EZ Mode (Recommended)</h4>
+        <ol class="step-list">
+          <li>
+            Enter BIOS by pressing <span class="key">DEL</span> during startup
+          </li>
+          <li>
+            Find the <strong>"XMP"</strong> or <strong>"A-XMP"</strong> toggle
+            on the main screen
+          </li>
+          <li>Select <strong>"Profile 1"</strong> (or Profile 2 if needed)</li>
+          <li>Press <span class="key">F10</span> to save and exit</li>
+        </ol>
+
+        <h4>Advanced Mode</h4>
+        <p class="bios-path">
+          OC <span class="arrow">→</span> Extreme Memory Profile (XMP)
+          <span class="arrow">→</span> Enabled / Profile 1
+        </p>
+        <p>
+          Press <span class="key">F7</span> to enter Advanced Mode, then open
+          <strong>OC</strong>. XMP is near the top.
+        </p>
+      </div>
+
+      <div class="brand-card" style="margin-top: 25px">
+        <div class="brand-card-header">
+          <div
+            class="brand-icon"
+            style="background: #1a1a1a; border-color: #f7941d; color: #f7941d"
+          >
+            GB
+          </div>
+          <div>
+            <div class="brand-name">Gigabyte Motherboards</div>
+            <div class="brand-subtitle">AORUS, Gaming, UD Series</div>
+          </div>
+        </div>
+
+        <h4>Main BIOS Screen</h4>
+        <ol class="step-list">
+          <li>
+            Enter BIOS by pressing <span class="key">DEL</span> during startup
+          </li>
+          <li>Open <strong>"Advanced Memory Settings"</strong></li>
+          <li>Find <strong>"Extreme Memory Profile (X.M.P.)"</strong></li>
+          <li>Select <strong>"Profile 1"</strong></li>
+          <li>Press <span class="key">F10</span> to save and exit</li>
+        </ol>
+
+        <h4>Alternative Location</h4>
+        <p class="bios-path">
+          Tweaker <span class="arrow">→</span> XMP / EXPO
+          <span class="arrow">→</span> Profile 1
+        </p>
+      </div>
+
+      <div class="insight-box">
+        <div class="insight-box-title">MSI Memory Try It! Feature</div>
+        <p>
+          MSI offers <strong>"Memory Try It!"</strong> profiles in OC. Only try
+          this if XMP is unstable. Start with Profile 1 first.
+        </p>
+      </div>
+
+      <div class="page-footer">BIOS Mastery Guide</div>
+      <div class="page-number">09</div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- PART 5: ASRock -->
+    <!-- ============================================================ -->
+    <div class="page">
+      <div class="page-header">Roo Industries</div>
+
+      <div class="section-header">
+        <span class="section-number">Part 5 Continued</span>
+        <h2 class="section-title">Enable XMP/EXPO: ASRock Motherboards</h2>
+      </div>
+
+      <div class="brand-card">
+        <div class="brand-card-header">
+          <div
+            class="brand-icon"
+            style="background: #1a1a1a; border-color: #00a651; color: #00a651"
+          >
+            AR
+          </div>
+          <div>
+            <div class="brand-name">ASRock Motherboards</div>
+            <div class="brand-subtitle">
+              Taichi, Steel Legend, Phantom Gaming, Pro Series
+            </div>
+          </div>
+        </div>
+
+        <h4>Easy Mode</h4>
+        <ol class="step-list">
+          <li>
+            Enter BIOS by pressing <span class="key">DEL</span> or
+            <span class="key">F2</span> during startup
+          </li>
+          <li>Press <span class="key">F6</span> to switch modes if needed</li>
+          <li>
+            Find <strong>"XMP"</strong> / <strong>"EXPO"</strong> on the main
+            screen
+          </li>
+          <li>Enable and select your profile</li>
+          <li>Press <span class="key">F10</span> to save and exit</li>
+        </ol>
+
+        <h4>Advanced Mode (OC Tweaker)</h4>
+        <p class="bios-path">
+          OC Tweaker <span class="arrow">→</span> DRAM Configuration
+          <span class="arrow">→</span> Load XMP Setting
+        </p>
+        <ol class="step-list">
+          <li>Go to <strong>"OC Tweaker"</strong></li>
+          <li>Open <strong>"DRAM Configuration"</strong></li>
+          <li>
+            Select <strong>"Load XMP Setting"</strong> /
+            <strong>"XMP Profile"</strong>
+          </li>
+          <li>Pick <strong>Profile 1</strong> / <strong>EXPO</strong></li>
+          <li>Press <span class="key">F10</span> to save and exit</li>
+        </ol>
+      </div>
+
+      <h3>Verifying XMP/EXPO is Active</h3>
+      <ol class="step-list">
+        <li>
+          Open Task Manager (<span class="key">Ctrl</span> +
+          <span class="key">Shift</span> + <span class="key">Esc</span>)
+        </li>
+        <li>Go to <strong>Performance</strong> → <strong>Memory</strong></li>
+        <li>
+          Check <strong>"Speed"</strong> — it should match your rated speed
+        </li>
+        <li>
+          Optional: CPU-Z → Memory tab (frequency shown is half the DDR number)
+        </li>
+      </ol>
+
+      <div class="success-box">
+        <h4>Quick Fix: XMP Won't Boot</h4>
+        <p>
+          <strong>1.</strong> Try Profile 2 (if available)<br />
+          <strong>2.</strong> Update BIOS<br />
+          <strong>3.</strong> Try a lower speed (e.g., 5600 instead of 6000)<br />
+          <strong>4.</strong> Ensure RAM is in A2 + B2 (slots 2 and 4)
+        </p>
+      </div>
+
+      <div class="page-footer">BIOS Mastery Guide</div>
+      <div class="page-number">10</div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- PART 5: TROUBLESHOOTING -->
+    <!-- ============================================================ -->
+    <div class="page">
+      <div class="page-header">Roo Industries</div>
+
+      <div class="section-header">
+        <span class="section-number">Part 5 Continued</span>
+        <h2 class="section-title">When XMP/EXPO Doesn't Work</h2>
+      </div>
+
+      <p class="lead-text">
+        XMP/EXPO failing is common. Don’t panic—there are two main causes, and
+        both have fixes.
+      </p>
+
+      <h3>Why XMP/EXPO Fails</h3>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Cause</th>
+            <th>What's Happening</th>
+            <th>Signs</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="color: var(--accent-cyan)">
+              <strong>Memory Controller Limit</strong>
+            </td>
+            <td>Your CPU's memory controller can't handle the frequency.</td>
+            <td>No POST, boot loops, or crashes under load</td>
+          </tr>
+          <tr>
+            <td style="color: var(--accent-gold)">
+              <strong>Voltage Issue</strong>
+            </td>
+            <td>
+              RAM voltage isn’t being applied correctly (common on picky
+              combos).
+            </td>
+            <td>Random crashes, memtest errors, instability</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Diagnostic Steps</h3>
+      <div class="insight-box">
+        <div class="insight-box-title">PC Won't POST After Enabling XMP</div>
+        <p>
+          Wait 30–60 seconds (memory training can take time). If nothing
+          happens, hold power for 10 seconds. Many boards auto-recover after a
+          few failed boots. If not, clear CMOS (Part 8).
+        </p>
+      </div>
+
+      <div class="insight-box">
+        <div class="insight-box-title">XMP Boots But System Is Unstable</div>
+        <p>
+          In BIOS, set DRAM Voltage manually:
+          <strong>DDR4: 1.35V</strong> | <strong>DDR5: 1.35–1.40V</strong>. For
+          DDR5 also match <strong>VDDQ</strong> to <strong>VDD</strong>.
+        </p>
+      </div>
+
+      <div class="insight-box">
+        <div class="insight-box-title">
+          XMP Works at Lower Speed But Not Rated Speed
+        </div>
+        <p>
+          Your CPU/board combo may not handle the rated frequency. Drop 200–400
+          MHz, or use Profile 2. This is common and not a defect.
+        </p>
+      </div>
+
+      <h3>Voltage Quick Reference</h3>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Platform</th>
+            <th>Voltage for Frequency Issues</th>
+            <th>Voltage for Timing Issues</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Intel</strong></td>
+            <td>SA (System Agent) — try 1.25–1.35V</td>
+            <td>DRAM Voltage — match XMP spec</td>
+          </tr>
+          <tr>
+            <td><strong>AMD</strong></td>
+            <td>SoC Voltage — try 1.10–1.20V</td>
+            <td>DRAM VDD/VDDQ — match EXPO spec</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="warning-box">
+        <h4>Dual-Rank RAM Warning</h4>
+        <p>
+          Dual-rank kits often need more voltage and may not hit the same XMP
+          speed. Dropping 200–400 MHz is a normal, practical solution.
+        </p>
+      </div>
+
+      <div class="page-footer">BIOS Mastery Guide</div>
+      <div class="page-number">11</div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- RAM SLOT CONFIGURATION -->
+    <!-- ============================================================ -->
+    <div class="page">
+      <div class="page-header">Roo Industries</div>
+
+      <div class="section-header">
+        <span class="section-number">Part 5 Continued</span>
+        <h2 class="section-title">RAM Slot Configuration</h2>
+      </div>
+
+      <p class="lead-text">
+        Wrong slots = worse performance or XMP failure. This trips up more
+        people than you'd expect.
+      </p>
+
+      <h3>Correct Slot Placement</h3>
+      <p>
+        For a 2-stick kit on a 4-slot motherboard, use
+        <strong>slots 2 and 4</strong> (A2 + B2):
+      </p>
+
+      <div
+        style="
+          background: var(--bg-card);
+          border: 1px solid var(--border-gold);
+          border-radius: 8px;
+          padding: 25px;
+          margin: 20px 0;
+          text-align: center;
+        "
+      >
+        <p
+          style="
+            font-family: 'Space Mono', monospace;
+            font-size: 11px;
+            margin-bottom: 15px;
+            color: var(--text-muted);
+          "
+        >
+          [CPU SOCKET THIS SIDE]
+        </p>
+        <div
+          style="
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            margin-bottom: 15px;
+          "
+        >
+          <div
+            style="
+              width: 65px;
+              height: 80px;
+              background: var(--bg-tertiary);
+              border: 2px dashed var(--text-muted);
+              border-radius: 4px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              flex-direction: column;
+            "
+          >
+            <span
+              style="
+                font-family: 'Space Mono', monospace;
+                font-size: 10px;
+                color: var(--text-muted);
+              "
+              >Slot 1</span
+            >
+            <span style="font-size: 9px; color: var(--accent-red)">EMPTY</span>
+          </div>
+          <div
+            style="
+              width: 65px;
+              height: 80px;
+              background: var(--accent-gold-dim);
+              border: 2px solid var(--accent-gold);
+              border-radius: 4px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              flex-direction: column;
+            "
+          >
+            <span
+              style="
+                font-family: 'Space Mono', monospace;
+                font-size: 10px;
+                color: var(--accent-gold);
+              "
+              >Slot 2</span
+            >
+            <span style="font-size: 9px; color: var(--accent-gold)">RAM</span>
+          </div>
+          <div
+            style="
+              width: 65px;
+              height: 80px;
+              background: var(--bg-tertiary);
+              border: 2px dashed var(--text-muted);
+              border-radius: 4px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              flex-direction: column;
+            "
+          >
+            <span
+              style="
+                font-family: 'Space Mono', monospace;
+                font-size: 10px;
+                color: var(--text-muted);
+              "
+              >Slot 3</span
+            >
+            <span style="font-size: 9px; color: var(--accent-red)">EMPTY</span>
+          </div>
+          <div
+            style="
+              width: 65px;
+              height: 80px;
+              background: var(--accent-gold-dim);
+              border: 2px solid var(--accent-gold);
+              border-radius: 4px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              flex-direction: column;
+            "
+          >
+            <span
+              style="
+                font-family: 'Space Mono', monospace;
+                font-size: 10px;
+                color: var(--accent-gold);
+              "
+              >Slot 4</span
+            >
+            <span style="font-size: 9px; color: var(--accent-gold)">RAM</span>
+          </div>
+        </div>
+        <p style="font-size: 11px; color: var(--text-secondary); margin: 0">
+          Slots 2 and 4 enable dual-channel and have better signal integrity on
+          most boards.
+        </p>
+      </div>
+
+      <div class="warning-box">
+        <h4>Why Not Slots 1 and 3?</h4>
+        <p>
+          Slots 2 and 4 typically have better signal integrity. Wrong slots can
+          prevent XMP from working even if everything else is correct.
+        </p>
+      </div>
+
+      <h3>4-Stick Configurations</h3>
+      <p>
+        If you have 4 sticks, fill all slots. But know 4 sticks is harder on the
+        memory controller; you may need to lower speed.
+      </p>
+
+      <div class="page-footer">BIOS Mastery Guide</div>
+      <div class="page-number">12</div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- BRAND-SPECIFIC ISSUES -->
+    <!-- ============================================================ -->
+    <div class="page">
+      <div class="page-header">Roo Industries</div>
+
+      <div class="section-header">
+        <span class="section-number">Part 5 Continued</span>
+        <h2 class="section-title">Brand-Specific Issues</h2>
+      </div>
+
+      <p class="lead-text">
+        Each motherboard brand has quirks. Knowing them saves hours.
+      </p>
+
+      <div class="mini-cards">
+        <div class="mini-card">
+          <div class="mini-card-title" style="color: var(--accent-gold)">
+            ASUS
+          </div>
+          <p>
+            Generally best memory training. Try <strong>XMP I</strong> first. If
+            unstable, use XMP II or update BIOS.
+          </p>
+        </div>
+        <div class="mini-card">
+          <div class="mini-card-title" style="color: var(--accent-red)">
+            MSI
+          </div>
+          <p>
+            Some boards undervolt DRAM on Auto—set DRAM voltage manually to spec
+            if unstable.
+          </p>
+        </div>
+        <div class="mini-card">
+          <div class="mini-card-title" style="color: var(--accent-amber)">
+            Gigabyte
+          </div>
+          <p>
+            Look under <strong>Tweaker</strong> for XMP. If boot loops, wait
+            longer for memory training on first boot.
+          </p>
+        </div>
+        <div class="mini-card">
+          <div class="mini-card-title" style="color: var(--accent-green)">
+            ASRock
+          </div>
+          <p>
+            Sometimes hides XMP deeper under <strong>OC Tweaker</strong>. Ensure
+            you load the profile, not just set frequency.
+          </p>
+        </div>
+      </div>
+
+      <div class="insight-box">
+        <div class="insight-box-title">Pro Tip</div>
+        <p>
+          If you updated BIOS and XMP still fails, the fastest "real-world" fix
+          is often:
+          <strong>drop frequency 200–400 MHz</strong>, keep voltage at spec, and
+          enjoy stable performance.
+        </p>
+      </div>
+
+      <div class="page-footer">BIOS Mastery Guide</div>
+      <div class="page-number">13</div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- PART 6: PBO (AMD) - PAGE 14 -->
+    <!-- ============================================================ -->
+    <div class="page">
+      <div class="page-header">Roo Industries</div>
+
+      <div class="section-header">
+        <span class="section-number">Part 6</span>
+        <h2 class="section-title">PBO — AMD CPU Performance Boost</h2>
+      </div>
+
+      <p class="lead-text">
+        If you have an AMD Ryzen CPU, PBO (Precision Boost Overdrive) can
+        increase boost clocks automatically, improving FPS and 1% lows in
+        CPU-limited games.
+      </p>
+
+      <h3>What PBO Actually Does</h3>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Setting</th>
+            <th>What It Changes</th>
+            <th>Result</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="color: var(--accent-cyan)">
+              <strong>PBO: Enabled</strong>
+            </td>
+            <td>Raises power/current limits within safe rules</td>
+            <td>Higher sustained boost clocks</td>
+          </tr>
+          <tr>
+            <td style="color: var(--accent-gold)">
+              <strong>Curve Optimizer</strong>
+            </td>
+            <td>Undervolts per-core intelligently</td>
+            <td>More boost + lower temps (best tweak)</td>
+          </tr>
+          <tr>
+            <td style="color: var(--accent-red)">
+              <strong>Too aggressive CO</strong>
+            </td>
+            <td>Undervolt too much</td>
+            <td>Crashes / WHEA errors</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="warning-box">
+        <h4>Intel Users</h4>
+        <p>
+          PBO is AMD-only. If you have Intel, skip to Part 7. Your main win was
+          XMP.
+        </p>
+      </div>
+
+      <h3>Quick PBO Setup (Safe Defaults)</h3>
+      <ol class="step-list">
+        <li>
+          Enter BIOS → Advanced Mode (<span class="key">F7</span> on most
+          boards)
+        </li>
+        <li>Find <strong>PBO / Precision Boost Overdrive</strong></li>
+        <li>
+          Set PBO to <strong>Enabled</strong> (or <strong>Advanced</strong>)
+        </li>
+        <li>Leave limits on <strong>Auto</strong> for now</li>
+        <li>Save & Exit (<span class="key">F10</span>)</li>
+      </ol>
+
+      <div class="success-box">
+        <h4>Expected Result</h4>
+        <p>
+          Most Ryzen CPUs will boost a bit higher under load, especially with
+          good cooling. Real gains show up in CPU-heavy games as better 1% lows
+          and less stutter.
+        </p>
+      </div>
+
+      <div class="page-footer">BIOS Mastery Guide</div>
+      <div class="page-number">14</div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- PART 6: PBO PATHS - PAGE 15 -->
+    <!-- ============================================================ -->
+    <div class="page">
+      <div class="page-header">Roo Industries</div>
+
+      <div class="section-header">
+        <span class="section-number">Part 6 Continued</span>
+        <h2 class="section-title">Where to Find PBO (By Brand)</h2>
+      </div>
+
+      <p class="lead-text">
+        BIOS menus differ. Use these common paths to find PBO fast.
+      </p>
+
+      <div class="brand-card">
+        <div class="brand-card-header">
+          <div
+            class="brand-icon"
+            style="background: #fff; border-color: #000; color: #000"
+          >
+            ASUS
+          </div>
+          <div>
+            <div class="brand-name">ASUS</div>
+            <div class="brand-subtitle">ROG / TUF / Prime (AMD boards)</div>
+          </div>
+        </div>
+        <p class="bios-path">
+          Advanced <span class="arrow">→</span> AMD Overclocking
+          <span class="arrow">→</span> Precision Boost Overdrive
+        </p>
+        <p class="bios-path">
+          AI Tweaker <span class="arrow">→</span> Precision Boost Overdrive
+        </p>
+        <p>Set PBO to <strong>Enabled</strong> or <strong>Advanced</strong>.</p>
+      </div>
+
+      <div class="brand-card">
+        <div class="brand-card-header">
+          <div
+            class="brand-icon"
+            style="background: #1a1a1a; border-color: #ff0000; color: #ff0000"
+          >
+            MSI
+          </div>
+          <div>
+            <div class="brand-name">MSI</div>
+            <div class="brand-subtitle">OC Menu (AMD boards)</div>
+          </div>
+        </div>
+        <p class="bios-path">
+          OC <span class="arrow">→</span> Advanced CPU Configuration
+          <span class="arrow">→</span> Precision Boost Overdrive
+        </p>
+        <p class="bios-path">
+          Settings <span class="arrow">→</span> Advanced
+          <span class="arrow">→</span> AMD Overclocking
+          <span class="arrow">→</span> PBO
+        </p>
+      </div>
+
+      <div class="brand-card">
+        <div class="brand-card-header">
+          <div
+            class="brand-icon"
+            style="background: #1a1a1a; border-color: #f7941d; color: #f7941d"
+          >
+            GB
+          </div>
+          <div>
+            <div class="brand-name">Gigabyte</div>
+            <div class="brand-subtitle">Tweaker / Settings (AMD boards)</div>
+          </div>
+        </div>
+        <p class="bios-path">
+          Tweaker <span class="arrow">→</span> Advanced CPU Settings
+          <span class="arrow">→</span> Precision Boost Overdrive
+        </p>
+        <p class="bios-path">
+          Settings <span class="arrow">→</span> AMD Overclocking
+          <span class="arrow">→</span> PBO
+        </p>
+      </div>
+
+      <div class="brand-card">
+        <div class="brand-card-header">
+          <div
+            class="brand-icon"
+            style="background: #1a1a1a; border-color: #00a651; color: #00a651"
+          >
+            AR
+          </div>
+          <div>
+            <div class="brand-name">ASRock</div>
+            <div class="brand-subtitle">OC Tweaker / Advanced (AMD boards)</div>
+          </div>
+        </div>
+        <p class="bios-path">
+          Advanced <span class="arrow">→</span> AMD CBS
+          <span class="arrow">→</span> NBIO Common Options
+          <span class="arrow">→</span> Precision Boost Overdrive
+        </p>
+        <p class="bios-path">
+          OC Tweaker <span class="arrow">→</span> CPU Configuration
+          <span class="arrow">→</span> PBO
+        </p>
+      </div>
+
+      <div class="warning-box">
+        <h4>If You See "AMD Overclocking" Warning</h4>
+        <p>
+          Accept the prompt. It’s normal—just a disclaimer screen. You’re still
+          using AMD-supported features.
+        </p>
+      </div>
+
+      <div class="page-footer">BIOS Mastery Guide</div>
+      <div class="page-number">15</div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- PART 7: OTHER ESSENTIAL SETTINGS - PAGE 16 -->
+    <!-- ============================================================ -->
+    <div class="page">
+      <div class="page-header">Roo Industries</div>
+
+      <div class="section-header">
+        <span class="section-number">Part 7</span>
+        <h2 class="section-title">Other Essential BIOS Settings</h2>
+      </div>
+
+      <p class="lead-text">
+        These aren’t always performance boosters, but they improve stability,
+        compatibility, and quality-of-life.
+      </p>
+
+      <div class="mini-cards">
+        <div class="mini-card">
+          <div class="mini-card-title" style="color: var(--accent-cyan)">
+            Resize BAR (ReBAR)
+          </div>
+          <p>
+            Enables CPU to access more GPU memory at once. Good for many modern
+            games. Usually: <strong>Enabled</strong>.
+          </p>
+        </div>
+        <div class="mini-card">
+          <div class="mini-card-title" style="color: var(--accent-gold)">
+            Above 4G Decoding
+          </div>
+          <p>Often required for ReBAR. Enable it if you enable ReBAR.</p>
+        </div>
+        <div class="mini-card">
+          <div class="mini-card-title" style="color: var(--accent-green)">
+            Fan Curves
+          </div>
+          <p>
+            Set a sane curve: quiet at idle, ramps up under load. Helps temps =
+            better boost clocks.
+          </p>
+        </div>
+        <div class="mini-card">
+          <div class="mini-card-title" style="color: var(--accent-purple)">
+            Boot Order
+          </div>
+          <p>
+            Make sure your OS drive is first. Fixes random “no boot device”
+            issues after BIOS resets.
+          </p>
+        </div>
+      </div>
+
+      <h3>Typical Paths</h3>
+      <p class="bios-path">
+        Advanced <span class="arrow">→</span> PCIe / PCI Subsystem
+        <span class="arrow">→</span> Re-Size BAR Support
+      </p>
+      <p class="bios-path">
+        Advanced <span class="arrow">→</span> PCIe / PCI Subsystem
+        <span class="arrow">→</span> Above 4G Decoding
+      </p>
+
+      <div class="insight-box">
+        <div class="insight-box-title">If You Don’t See ReBAR</div>
+        <p>
+          Update BIOS and GPU drivers. Some older GPUs/boards don’t support it.
+          If unsupported, don’t worry—XMP/PBO were the big wins.
+        </p>
+      </div>
+
+      <div class="page-footer">BIOS Mastery Guide</div>
+      <div class="page-number">16</div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- PART 8: SAFETY & RECOVERY - PAGE 17 -->
+    <!-- ============================================================ -->
+    <div class="page">
+      <div class="page-header">Roo Industries</div>
+
+      <div class="section-header">
+        <span class="section-number">Part 8</span>
+        <h2 class="section-title">Safety & Recovery</h2>
+      </div>
+
+      <p class="lead-text">
+        If something goes wrong (boot loop after XMP/PBO), your PC is not
+        “dead.” Use these recovery steps.
+      </p>
+
+      <h3>1) Auto-Recovery (Most Common)</h3>
+      <ol class="step-list">
+        <li>
+          After enabling XMP, first boot can take 30–60 seconds (memory
+          training)
+        </li>
+        <li>
+          If it fails, many boards will try 2–3 times, then revert to safe
+          defaults
+        </li>
+        <li>
+          If you see BIOS again with a message like “settings were reset,” just
+          re-enable XMP with a lower profile
+        </li>
+      </ol>
+
+      <h3>2) Clear CMOS (Hard Reset)</h3>
+      <div class="warning-box">
+        <h4>Before You Do This</h4>
+        <p>
+          Clearing CMOS resets BIOS settings (XMP/PBO/boot order). It does NOT
+          delete Windows or your files.
+        </p>
+      </div>
+
+      <ol class="step-list">
+        <li>Power off the PC and switch PSU off (or unplug)</li>
+        <li>Press the power button once (drains leftover power)</li>
+        <li>
+          Use one of these methods:
+          <div
+            style="
+              margin-top: 8px;
+              font-size: 12px;
+              color: var(--text-secondary);
+            "
+          >
+            • Press the motherboard <strong>Clear CMOS</strong> button (if you
+            have one)<br />
+            • Short the <strong>CLR_CMOS</strong> pins with a screwdriver for
+            5–10 seconds (check your manual)<br />
+            • Remove the coin-cell battery for 2–3 minutes, then reinstall
+          </div>
+        </li>
+        <li>
+          Boot up → enter BIOS → set correct boot drive → re-enable XMP (try
+          Profile 2 or lower speed)
+        </li>
+      </ol>
+
+      <div class="success-box">
+        <h4>Fastest “Back to Stable” Plan</h4>
+        <p>
+          If XMP fails: clear CMOS → enable XMP → set DRAM voltage to spec →
+          lower speed by 200 MHz. You’ll get most of the gains with maximum
+          stability.
+        </p>
+      </div>
+
+      <div class="page-footer">BIOS Mastery Guide</div>
+      <div class="page-number">17</div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- QUICK REFERENCE CARDS - PAGE 18 -->
+    <!-- ============================================================ -->
+    <div class="page">
+      <div class="page-header">Roo Industries</div>
+
+      <div class="section-header">
+        <span class="section-number">Quick Reference</span>
+        <h2 class="section-title">One-Page Cheat Sheet</h2>
+      </div>
+
+      <div class="brand-card">
+        <div class="brand-card-header">
+          <div class="brand-icon">XMP</div>
+          <div>
+            <div class="brand-name">RAM Performance (All Platforms)</div>
+            <div class="brand-subtitle">Biggest FPS win for most gamers</div>
+          </div>
+        </div>
+
+        <table class="data-table" style="margin-top: 10px">
+          <thead>
+            <tr>
+              <th>Goal</th>
+              <th>What to Set</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Enable rated RAM speed</strong></td>
+              <td>XMP / EXPO / DOCP = <strong>Profile 1</strong></td>
+              <td>If unstable: Profile 2 or lower speed 200–400 MHz</td>
+            </tr>
+            <tr>
+              <td><strong>Slots for 2 sticks</strong></td>
+              <td><strong>A2 + B2</strong> (slots 2 and 4)</td>
+              <td>Wrong slots can break XMP</td>
+            </tr>
+            <tr>
+              <td><strong>Manual DRAM voltage</strong></td>
+              <td>
+                DDR4: <strong>1.35V</strong> | DDR5: <strong>1.35–1.40V</strong>
+              </td>
+              <td>Set if XMP “boots but crashes”</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="brand-card">
+        <div class="brand-card-header">
+          <div
+            class="brand-icon"
+            style="
+              border-color: var(--border-cyan);
+              background: var(--accent-cyan-dim);
+              color: var(--accent-cyan);
+            "
+          >
+            PBO
+          </div>
+          <div>
+            <div class="brand-name">AMD CPU Boost (Ryzen)</div>
+            <div class="brand-subtitle">
+              Extra 1% lows + smoother CPU-limited games
+            </div>
+          </div>
+        </div>
+
+        <table class="data-table" style="margin-top: 10px">
+          <thead>
+            <tr>
+              <th>Goal</th>
+              <th>What to Set</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Quick boost</strong></td>
+              <td>PBO = <strong>Enabled</strong></td>
+              <td>Safe starter setting</td>
+            </tr>
+            <tr>
+              <td><strong>Stability check</strong></td>
+              <td>Run Cinebench + a game</td>
+              <td>If WHEA/crashes: reduce CO, or keep PBO simple</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout">
+        <div
+          class="callout-icon"
+          style="
+            font-family: 'Syne', sans-serif;
+            font-size: 22px;
+            color: var(--accent-gold);
+          "
+        >
+          Done in 10 minutes
+        </div>
+        <p class="callout-text">
+          Enable XMP/EXPO + (AMD) PBO, verify in Windows, benchmark
+          before/after, and enjoy the free performance.
+        </p>
+      </div>
+
+      <div class="page-footer">BIOS Mastery Guide</div>
+      <div class="page-number">18</div>
+    </div>
+  </body>
+</html>
