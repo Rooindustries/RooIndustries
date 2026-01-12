@@ -6,7 +6,6 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
-import { FaDiscord } from "react-icons/fa";
 import { AnimatePresence, motion } from "framer-motion";
 import Navbar from "./components/Navbar";
 import { Analytics } from "@vercel/analytics/react";
@@ -233,7 +232,10 @@ function AppContent() {
         ></div>
 
         {/* Navbar and pages */}
-        <main className="relative z-10 flex flex-col flex-1 pt-10 sm:pt-24">
+        <main
+          className="relative z-10 flex flex-col flex-1 transition-[padding-top] duration-500 ease-in-out"
+          style={{ paddingTop: "var(--header-offset, 0px)" }}
+        >
           <Navbar />
           <ReservationBanner />
 
