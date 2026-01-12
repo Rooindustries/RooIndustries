@@ -55,12 +55,6 @@ export default function DiscordGuideBanner({ hidden = false }) {
         <span className="sm:hidden">
           {banner.mobileText || banner.text || DEFAULT_BANNER.mobileText}
         </span>
-        <span
-          className="text-cyan-200 transition-transform group-hover:translate-x-0.5"
-          aria-hidden="true"
-        >
-          -&gt;
-        </span>
       </a>
     </div>
   );
