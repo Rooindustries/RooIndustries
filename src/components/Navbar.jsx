@@ -1,8 +1,9 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { FaDiscord } from "react-icons/fa";
 import BackButton from "./BackButton";
 import CanvasVideo from "./CanvasVideo";
+import DiscordGuideBanner from "./DiscordGuideBanner";
 
 const isIOSDevice = () => {
   if (typeof navigator === "undefined") return false;
@@ -32,6 +33,7 @@ const getInitialSmallLogoMode = () => {
 export default function Navbar() {
   const location = useLocation();
   const [scrolled, setScrolled] = useState(false);
+  const [bannerHidden, setBannerHidden] = useState(false);
   const [open, setOpen] = useState(false);
   const [proofOpen, setProofOpen] = useState(false);
   const [smallLogoMode, setSmallLogoMode] = useState(() =>
@@ -39,6 +41,7 @@ export default function Navbar() {
   );
   const [smallApngLoaded, setSmallApngLoaded] = useState(false);
   const proofDropdownRef = useRef(null);
+  const headerRef = useRef(null);
 
   const isActive = (path) => location.pathname === path;
 
@@ -64,9 +67,20 @@ export default function Navbar() {
     setSmallLogoMode("static");
   };
 
+  const updateHeaderOffset = useCallback(() => {
+    if (typeof document === "undefined" || !headerRef.current) return;
+    const height = headerRef.current.offsetHeight;
+    document.documentElement.style.setProperty(
+      "--header-offset",
+      `${height}px`
+    );
+  }, []);
+
   useEffect(() => {
     const handleScroll = () => {
-      setScrolled(window.scrollY > 12);
+      const scrollY = window.scrollY || 0;
+      setScrolled(scrollY > 12);
+      setBannerHidden(scrollY > 8);
     };
 
     handleScroll();
@@ -76,6 +90,26 @@ export default function Navbar() {
       window.removeEventListener("scroll", handleScroll);
     };
   }, []);
+
+  useEffect(() => {
+    updateHeaderOffset();
+    if (typeof ResizeObserver === "undefined" || !headerRef.current) {
+      const handleResize = () => updateHeaderOffset();
+      window.addEventListener("resize", handleResize);
+      return () => window.removeEventListener("resize", handleResize);
+    }
+
+    const observer = new ResizeObserver(() => updateHeaderOffset());
+    observer.observe(headerRef.current);
+
+    return () => observer.disconnect();
+  }, [updateHeaderOffset]);
+
+  useEffect(() => {
+    updateHeaderOffset();
+    const id = setTimeout(updateHeaderOffset, 320);
+    return () => clearTimeout(id);
+  }, [bannerHidden, updateHeaderOffset]);
 
   useEffect(() => {
     setOpen(false);
@@ -156,6 +190,7 @@ export default function Navbar() {
 
   return (
     <header
+      ref={headerRef}
       className={`fixed top-0 left-0 right-0 z-50 border-b backdrop-blur-md transition-all duration-300 ${
         scrolled ? "border-cyan-300/10" : "border-white/5"
       } ${
@@ -176,6 +211,10 @@ export default function Navbar() {
 
       {/* cyan glow line */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-cyan-300/50 to-transparent z-0" />
+
+      <div className="relative z-10">
+        <DiscordGuideBanner hidden={bannerHidden} />
+      </div>
 
       <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6">
         <div className="flex items-center h-20 sm:h-24">
