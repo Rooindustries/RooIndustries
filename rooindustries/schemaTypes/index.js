@@ -22,6 +22,7 @@ import faqSettings from './faqSettings'
 import packagesSettings from './packagesSettings'
 import supportedGames from './supportedGames'
 import upgradeLink from './upgradeLink'
+import discordBanner from './discordBanner'
 
 export const schemaTypes = [
   benchmark,
@@ -48,4 +49,5 @@ export const schemaTypes = [
   packagesSettings,
   supportedGames,
   upgradeLink,
+  discordBanner,
 ]
