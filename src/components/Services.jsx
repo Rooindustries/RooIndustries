@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { client } from "../sanityClient";
-import imageUrlBuilder from "@sanity/image-url";
+import { createImageUrlBuilder } from "@sanity/image-url";
 import {
   Clock,
   Shield,
@@ -19,7 +19,7 @@ import {
   useMotionValue,
 } from "framer-motion";
 
-const builder = imageUrlBuilder(client);
+const builder = createImageUrlBuilder(client);
 function urlFor(source) {
   return builder.image(source);
 }
