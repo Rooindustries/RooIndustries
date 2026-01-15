@@ -1,5 +1,5 @@
 import { createClient } from "@sanity/client";
-import imageUrlBuilder from "@sanity/image-url";
+import { createImageUrlBuilder } from "@sanity/image-url";
 
 export const client = createClient({
   projectId: "9g42k3ur",
@@ -9,7 +9,7 @@ export const client = createClient({
   token: process.env.REACT_APP_SANITY_WRITE_TOKEN,
 });
 
-const builder = imageUrlBuilder(client);
+const builder = createImageUrlBuilder(client);
 export const urlFor = (source) => builder.image(source);
 
 const isPrerender =
