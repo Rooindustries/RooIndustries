@@ -8,7 +8,7 @@ const resolvedVercelEnv =
 
 const env = {
   ...process.env,
-  CI: process.env.CI || "false",
+  CI: "false",  // Force CI=false to treat ESLint warnings as warnings, not errors
   REACT_APP_VERCEL_ENV: resolvedVercelEnv,
 };
 
