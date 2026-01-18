@@ -11,6 +11,7 @@ const routes = [
   "/contact",
   "/terms",
   "/privacy",
+  "/meet-the-team",
 ];
 
 const staticDir = path.join(__dirname, "..", "build");
