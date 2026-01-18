@@ -57,6 +57,7 @@ export default function Navbar() {
     location.pathname === "/faq" ||
     (location.pathname === "/" && faqHashes.includes(location.hash || ""));
   const isProofActive = isActive("/benchmarks") || isActive("/reviews");
+  const isTeamActive = isActive("/meet-the-team");
 
   const handleSmallWebmError = () => {
     setSmallApngLoaded(false);
@@ -359,6 +360,12 @@ export default function Navbar() {
               >
                 FAQ
               </Link>
+              <Link
+                to="/meet-the-team"
+                className={`${linkBase} ${isTeamActive ? linkActive : linkIdle}`}
+              >
+                Meet the Team
+              </Link>
             </nav>
 
             <a
@@ -505,6 +512,14 @@ export default function Navbar() {
                 }`}
               >
                 FAQ
+              </Link>
+              <Link
+                to="/meet-the-team"
+                className={`${mobileLinkBase} ${
+                  isTeamActive ? mobileLinkActive : mobileLinkIdle
+                }`}
+              >
+                Meet the Team
               </Link>
 
               <a

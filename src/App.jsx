@@ -38,6 +38,7 @@ const RefForgot = lazy(() => import("./pages/RefForgot"));
 const RefReset = lazy(() => import("./pages/RefReset"));
 const RefRegister = lazy(() => import("./pages/RefRegister"));
 const Tools = lazy(() => import("./pages/Tools"));
+const MeetTheTeam = lazy(() => import("./pages/MeetTheTeam"));
 
 function RedirectToDiscord() {
   React.useEffect(() => {
@@ -103,6 +104,7 @@ function AnimatedRoutes({ setIsModalOpen, routesLocation, routeKey }) {
           <Route path="/payment-success" element={<PaymentSuccess />} />
           <Route path="/thank-you" element={<Thankyou />} />
           <Route path="/tools" element={<Tools />} />
+          <Route path="/meet-the-team" element={<MeetTheTeam />} />
           <Route path="/upgrade/:slug" element={<Upgrade />} />
           <Route path="/upgrade-xoc" element={<UpgradeXoc />} />
 

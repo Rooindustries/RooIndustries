@@ -14,11 +14,9 @@ export default function Footer() {
   };
 
   return (
-    <footer className="relative mt-auto pt-8">
-      <div className="relative border-t border-cyan-300/10 bg-gradient-to-b from-[#07162d]/95 to-[#061226]/95">
-        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/35 to-transparent" />
-
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 py-4">
+    <footer className="relative mt-auto">
+      <div className="relative bg-gradient-to-b from-[#07162d]/95 to-[#061226]/95">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 pt-8 pb-4">
         <div className="flex flex-col md:flex-row items-center gap-3 pb-3 border-b border-cyan-300/10">
           <Link to="/" className="flex items-center gap-3 select-none">
             <img
@@ -49,6 +47,12 @@ export default function Footer() {
                 className="hover:text-cyan-400 transition-colors"
               >
                 Tools
+              </Link>
+              <Link
+                to="/meet-the-team"
+                className="hover:text-cyan-400 transition-colors"
+              >
+                Meet the team
               </Link>
               <a
                 href="https://www.trustpilot.com/review/rooindustries.com"
