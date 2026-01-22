@@ -459,6 +459,12 @@ export default async function handler(req, res) {
       typeof couponDiscountPercent === "number" ? couponDiscountPercent : 0;
     const couponAmountValue =
       typeof couponDiscountAmount === "number" ? couponDiscountAmount : 0;
+    const couponSuffix =
+      couponPercentValue > 0 || couponAmountValue > 0
+        ? ` (${couponPercentValue}% - $${formatMoney(couponAmountValue)})`
+        : "";
+    const couponDisplay = couponCode ? `${couponCode}${couponSuffix}` : "-";
+    const referralDisplay = effectiveReferralCode || "-";
 
     const sharedCoreFields = [
       { label: "Package", value: `${packageTitle || "-"}` },
@@ -474,6 +480,8 @@ export default async function handler(req, res) {
       { label: "Main Game", value: mainGame || "-" },
       { label: "PC Specs", value: specs || "-" },
       { label: "Notes", value: message || "-" },
+      { label: "Referral Code", value: referralDisplay },
+      { label: "Coupon Code", value: couponDisplay },
       { label: "Order ID", value: doc._id },
     ];
 
@@ -483,17 +491,6 @@ export default async function handler(req, res) {
       ownerDiscountFields.push({
         label: "Discount",
         value: `${discountPercentValue}% ($${formatMoney(discountAmountValue)})`,
-      });
-    }
-
-    if (couponCode) {
-      const couponSuffix =
-        couponPercentValue > 0 || couponAmountValue > 0
-          ? ` (${couponPercentValue}% - $${formatMoney(couponAmountValue)})`
-          : "";
-      ownerDiscountFields.push({
-        label: "Coupon Code",
-        value: `${couponCode}${couponSuffix}`,
       });
     }
 
