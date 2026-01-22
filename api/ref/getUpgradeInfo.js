@@ -182,9 +182,24 @@ export default async function handler(req, res) {
       price: targetPriceNum,
     };
 
+    const bookingPayload = {
+      _id: booking._id,
+      packageTitle: booking.packageTitle,
+      packagePrice: booking.packagePrice,
+      discord: booking.discord,
+      email: booking.email,
+      specs: booking.specs,
+      mainGame: booking.mainGame,
+      message: booking.message,
+      displayDate: booking.displayDate,
+      displayTime: booking.displayTime,
+      localTimeZone: booking.localTimeZone,
+      startTimeUTC: booking.startTimeUTC,
+    };
+
     return res.status(200).json({
       ok: true,
-      booking,
+      booking: bookingPayload,
       upgradeLink: upgradeLink
         ? {
             title: upgradeLink.title,

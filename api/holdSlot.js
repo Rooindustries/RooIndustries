@@ -9,19 +9,79 @@ const client = createClient({
   useCdn: false,
 });
 
+const OWNER_TZ_NAME = "Asia/Kolkata";
+
+const formatOwnerDateLabel = (utcDate, timeZone = OWNER_TZ_NAME) => {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      weekday: "short",
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    })
+      .formatToParts(utcDate)
+      .reduce((acc, cur) => {
+        acc[cur.type] = cur.value;
+        return acc;
+      }, {});
+
+    const day = parts.day || "";
+    const weekday = parts.weekday || "";
+    const month = parts.month || "";
+    const year = parts.year || "";
+
+    return `${weekday} ${month} ${day} ${year}`.trim();
+  } catch (err) {
+    console.error("Failed to format owner date label", err);
+    return "";
+  }
+};
+
+const formatOwnerTimeLabel = (utcDate, timeZone = OWNER_TZ_NAME) => {
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(utcDate);
+  } catch (err) {
+    console.error("Failed to format owner time label", err);
+    return "";
+  }
+};
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ ok: false, message: "Method not allowed" });
   }
 
   try {
-    const { hostDate, hostTime, startTimeUTC, packageTitle, previousHoldId } =
+    const { startTimeUTC, packageTitle, previousHoldId } =
       req.body || {};
 
-    if (!hostDate || !hostTime || !startTimeUTC) {
+    if (!startTimeUTC) {
       return res.status(400).json({
         ok: false,
-        message: "Missing hostDate, hostTime, or startTimeUTC.",
+        message: "Missing startTimeUTC.",
+      });
+    }
+
+    const utcDate = new Date(startTimeUTC);
+    if (!Number.isFinite(utcDate.getTime())) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid startTimeUTC.",
+      });
+    }
+
+    const hostDate = formatOwnerDateLabel(utcDate);
+    const hostTime = formatOwnerTimeLabel(utcDate);
+
+    if (!hostDate || !hostTime) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid owner date/time.",
       });
     }
 
