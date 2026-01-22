@@ -9,9 +9,8 @@ dotenv.config({ path: ".env.local" });
 const require = createRequire(import.meta.url);
 const createOrderHandler = require("../api/razorpay/createOrder.js");
 const verifyHandler = require("../api/razorpay/verify.js");
-const { default: createBookingHandler } = await import(
-  "../api/ref/createBooking.js"
-);
+const { default: createBookingHandler } =
+  await import("../api/ref/createBooking.js");
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -22,9 +21,11 @@ const client = createClient({
 });
 
 const runId = `booking-test-${Date.now()}`;
-const userEmail = process.env.TEST_USER_EMAIL || "vihaann2.0@gmail.com";
+const userEmail = process.env.TEST_USER_EMAIL || "nerky@rooindustries.com";
 const packageTitle = "Test Package";
 const packagePrice = "$100.00";
+const testCouponCode = process.env.TEST_COUPON_CODE || "";
+const testReferralCode = process.env.TEST_REFERRAL_CODE || "";
 
 const created = {
   bookings: [],
@@ -75,7 +76,7 @@ const makeSlot = (dayOffset, hour24) => {
   const hostDate = addDays(dayOffset).toDateString();
   const hostTime = formatHostTime(hour24);
   const startTimeUTC = new Date(
-    Date.UTC(2099, 0, 10 + dayOffset, hour24, 0, 0)
+    Date.UTC(2099, 0, 10 + dayOffset, hour24, 0, 0),
   ).toISOString();
   return { hostDate, hostTime, startTimeUTC };
 };
@@ -85,7 +86,7 @@ const makeCustomSlot = (year, monthIndex, dayOfMonth, hour24) => {
   const hostDate = date.toDateString();
   const hostTime = formatHostTime(hour24);
   const startTimeUTC = new Date(
-    Date.UTC(year, monthIndex, dayOfMonth, hour24, 0, 0)
+    Date.UTC(year, monthIndex, dayOfMonth, hour24, 0, 0),
   ).toISOString();
   return { hostDate, hostTime, startTimeUTC };
 };
@@ -149,6 +150,8 @@ const paidPayload = (slot, overrides = {}) => ({
   discountPercent: 0,
   discountAmount: 0,
   commissionPercent: 0,
+  ...(testCouponCode ? { couponCode: testCouponCode } : {}),
+  ...(testReferralCode ? { referralCode: testReferralCode } : {}),
   ...overrides,
 });
 
@@ -167,19 +170,13 @@ const freePayload = (slot, overrides = {}) => ({
 });
 
 const cleanup = async () => {
-  const deleteIds = [
-    ...created.bookings,
-    ...created.holds,
-    ...created.coupons,
-  ];
-  await Promise.all(
-    deleteIds.map((id) => client.delete(id).catch(() => {}))
-  );
+  const deleteIds = [...created.bookings, ...created.holds, ...created.coupons];
+  await Promise.all(deleteIds.map((id) => client.delete(id).catch(() => {})));
 };
 
 const checkBookingSettingsOwner = async () => {
   const settings = await client.fetch(
-    `*[_type == "bookingSettings"][0]{ ownerEmail }`
+    `*[_type == "bookingSettings"][0]{ ownerEmail }`,
   );
   if (settings?.ownerEmail) {
     record("owner_email_configured", true, settings.ownerEmail);
@@ -203,14 +200,14 @@ const testRazorpay = async () => {
         method: "POST",
         body: { amount: 1, currency: "USD", notes: { runId } },
       },
-      createRes.res
+      createRes.res,
     );
     const createOk =
       createRes.capture.status === 200 && createRes.capture.body?.ok;
     record(
       "razorpay_create_order",
       createOk,
-      createRes.capture.body?.orderId || JSON.stringify(createRes.capture.body)
+      createRes.capture.body?.orderId || JSON.stringify(createRes.capture.body),
     );
 
     const orderId = "order_test_" + Date.now();
@@ -230,14 +227,14 @@ const testRazorpay = async () => {
           razorpay_signature: signature,
         },
       },
-      verifyRes.res
+      verifyRes.res,
     );
     const verifyOk =
       verifyRes.capture.status === 200 && verifyRes.capture.body?.ok;
     record(
       "razorpay_verify_signature",
       verifyOk,
-      JSON.stringify(verifyRes.capture.body)
+      JSON.stringify(verifyRes.capture.body),
     );
   } catch (err) {
     record("razorpay_exception", false, err?.message || String(err));
@@ -254,7 +251,7 @@ const testPayPal = async () => {
     }
 
     const authHeader = Buffer.from(`${clientId}:${clientSecret}`).toString(
-      "base64"
+      "base64",
     );
     const bases = [
       "https://api-m.sandbox.paypal.com",
@@ -342,7 +339,7 @@ const testBookingFlow = async () => {
   const paidSlot = makeSlot(0, 10);
   const paidHold = await createHold(
     paidSlot,
-    new Date(Date.now() + 10 * 60 * 1000).toISOString()
+    new Date(Date.now() + 10 * 60 * 1000).toISOString(),
   );
 
   const paidRes = await callHandler(createBookingHandler, {
@@ -357,18 +354,18 @@ const testBookingFlow = async () => {
 
   const paidHoldCleanup = await client.fetch(
     `*[_type == "slotHold" && hostDate == $date && hostTime == $time][0]`,
-    { date: paidSlot.hostDate, time: paidSlot.hostTime }
+    { date: paidSlot.hostDate, time: paidSlot.hostTime },
   );
   record(
     "paid_hold_cleanup",
     !paidHoldCleanup,
-    paidHoldCleanup ? "hold still exists" : ""
+    paidHoldCleanup ? "hold still exists" : "",
   );
 
   const freeSlot = makeSlot(1, 11);
   const freeHold = await createHold(
     freeSlot,
-    new Date(Date.now() + 10 * 60 * 1000).toISOString()
+    new Date(Date.now() + 10 * 60 * 1000).toISOString(),
   );
 
   const freeRes = await callHandler(createBookingHandler, {
@@ -386,12 +383,12 @@ const testBookingFlow = async () => {
 
   const freeCouponCheck = await client.fetch(
     `*[_type == "coupon" && _id == $id][0]{ timesUsed, isActive }`,
-    { id: freeCoupon._id }
+    { id: freeCoupon._id },
   );
   record(
     "free_coupon_usage",
     freeCouponCheck?.timesUsed === 1,
-    JSON.stringify(freeCouponCheck)
+    JSON.stringify(freeCouponCheck),
   );
 
   const missingProvider = await callHandler(createBookingHandler, {
@@ -424,7 +421,7 @@ const testBookingFlow = async () => {
   const mismatchSlot = makeSlot(6, 16);
   const mismatchHold = await createHold(
     { ...mismatchSlot, hostTime: formatHostTime(17) },
-    new Date(Date.now() + 10 * 60 * 1000).toISOString()
+    new Date(Date.now() + 10 * 60 * 1000).toISOString(),
   );
   const mismatchRes = await callHandler(createBookingHandler, {
     ...paidPayload(mismatchSlot, { slotHoldId: mismatchHold._id }),
@@ -434,7 +431,7 @@ const testBookingFlow = async () => {
   const activeHoldSlot = makeSlot(7, 17);
   await createHold(
     activeHoldSlot,
-    new Date(Date.now() + 10 * 60 * 1000).toISOString()
+    new Date(Date.now() + 10 * 60 * 1000).toISOString(),
   );
   const activeHoldRes = await callHandler(createBookingHandler, {
     ...freePayload(activeHoldSlot, { couponCode: holdCoupon.code }),
@@ -444,7 +441,7 @@ const testBookingFlow = async () => {
   const expiredSlot = makeSlot(8, 18);
   const expiredHold = await createHold(
     expiredSlot,
-    new Date(Date.now() - 60 * 1000).toISOString()
+    new Date(Date.now() - 60 * 1000).toISOString(),
   );
   const freeExpiredRes = await callHandler(createBookingHandler, {
     ...freePayload(expiredSlot, {
@@ -457,7 +454,7 @@ const testBookingFlow = async () => {
   const paidExpiredSlot = makeSlot(9, 19);
   const paidExpiredHold = await createHold(
     paidExpiredSlot,
-    new Date(Date.now() - 60 * 1000).toISOString()
+    new Date(Date.now() - 60 * 1000).toISOString(),
   );
   const originalResendKey = process.env.RESEND_API_KEY;
   process.env.RESEND_API_KEY = "";
@@ -499,11 +496,11 @@ const testBookingFlow = async () => {
   const singleDigitSlot = makeCustomSlot(2099, 0, 5, 9);
   const singleDigitHold = await createHold(
     singleDigitSlot,
-    new Date(Date.now() + 10 * 60 * 1000).toISOString()
+    new Date(Date.now() + 10 * 60 * 1000).toISOString(),
   );
   const hostDateLabel = formatHostDateLabel(
     new Date(singleDigitSlot.startTimeUTC),
-    "Asia/Kolkata"
+    "Asia/Kolkata",
   );
   const singleDigitRes = await callHandler(createBookingHandler, {
     ...paidPayload(singleDigitSlot, {
@@ -518,7 +515,7 @@ const testBookingFlow = async () => {
     record(
       "single_digit_day_hold_match",
       false,
-      JSON.stringify(singleDigitRes.body)
+      JSON.stringify(singleDigitRes.body),
     );
   }
 };
@@ -536,6 +533,6 @@ try {
   console.log(
     `\nCompleted ${results.length} checks. Passed ${passed}, Failed ${
       results.length - passed
-    }.`
+    }.`,
   );
 }
