@@ -2,6 +2,32 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { client } from "../sanityClient";
 
+const formatLocalDate = (utcDate, timeZone) => {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      ...(timeZone ? { timeZone } : {}),
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    }).format(utcDate);
+  } catch {
+    return "";
+  }
+};
+
+const formatLocalTime = (utcDate, timeZone) => {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      ...(timeZone ? { timeZone } : {}),
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(utcDate);
+  } catch {
+    return "";
+  }
+};
+
 const UPGRADE_LINK_QUERY = `*[_type == "upgradeLink" && lower(slug.current) == $slug][0]{
   title,
   intro,
@@ -139,10 +165,18 @@ export default function UpgradeLink() {
       return;
     }
 
-    const bookingData = {
-      date: booking.date || booking.displayDate || booking.hostDate || "",
-      time: booking.time || booking.displayTime || booking.hostTime || "",
+    const utcStart = booking.startTimeUTC
+      ? new Date(booking.startTimeUTC)
+      : null;
+    const clientTimeZone = booking.localTimeZone || "";
+    const displayDate =
+      booking.displayDate ||
+      (utcStart ? formatLocalDate(utcStart, clientTimeZone) : "");
+    const displayTime =
+      booking.displayTime ||
+      (utcStart ? formatLocalTime(utcStart, clientTimeZone) : "");
 
+    const bookingData = {
       discord: booking.discord || "",
       email: booking.email || "",
       specs: booking.specs || "",
@@ -153,21 +187,10 @@ export default function UpgradeLink() {
       packagePrice: `$${upgradePrice.toFixed(2)}`,
       status: "pending",
 
-      hostDate: booking.hostDate || booking.date || booking.displayDate || "",
-      hostTime: booking.hostTime || booking.time || booking.displayTime || "",
-      hostTimeZone: booking.hostTimeZone || "Asia/Kolkata",
-      localTimeZone: booking.localTimeZone || "",
-      localTimeLabel:
-        booking.localTimeLabel || booking.displayTime || booking.time || "",
+      displayDate,
+      displayTime,
+      localTimeZone: clientTimeZone,
       startTimeUTC: booking.startTimeUTC || "",
-      displayDate:
-        booking.displayDate || booking.date || booking.hostDate || "",
-      displayTime:
-        booking.displayTime ||
-        booking.localTimeLabel ||
-        booking.time ||
-        booking.hostTime ||
-        "",
 
       originalOrderId: booking._id,
     };

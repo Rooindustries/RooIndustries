@@ -1,6 +1,32 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+const formatLocalDate = (utcDate, timeZone) => {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      ...(timeZone ? { timeZone } : {}),
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    }).format(utcDate);
+  } catch {
+    return "";
+  }
+};
+
+const formatLocalTime = (utcDate, timeZone) => {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      ...(timeZone ? { timeZone } : {}),
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(utcDate);
+  } catch {
+    return "";
+  }
+};
+
 export default function UpgradeXoc() {
   const [orderId, setOrderId] = useState("");
   const [loading, setLoading] = useState(false);
@@ -56,13 +82,20 @@ export default function UpgradeXoc() {
       return;
     }
 
+    const utcStart = booking.startTimeUTC
+      ? new Date(booking.startTimeUTC)
+      : null;
+    const clientTimeZone = booking.localTimeZone || "";
+    const displayDate =
+      booking.displayDate ||
+      (utcStart ? formatLocalDate(utcStart, clientTimeZone) : "");
+    const displayTime =
+      booking.displayTime ||
+      (utcStart ? formatLocalTime(utcStart, clientTimeZone) : "");
+
     // Build bookingData exactly like your normal Booking → Payment flow,
     // but as an upgrade with the new price.
     const bookingData = {
-      // original time fields
-      date: booking.date || booking.displayDate || booking.hostDate || "",
-      time: booking.time || booking.displayTime || booking.hostTime || "",
-
       discord: booking.discord || "",
       email: booking.email || "",
       specs: booking.specs || "",
@@ -74,22 +107,10 @@ export default function UpgradeXoc() {
       packagePrice: `$${upgradePrice.toFixed(2)}`,
       status: "pending",
 
-      // time metadata for your API (keep as close as possible to original)
-      hostDate: booking.hostDate || booking.date || booking.displayDate || "",
-      hostTime: booking.hostTime || booking.time || booking.displayTime || "",
-      hostTimeZone: booking.hostTimeZone || "Asia/Kolkata",
-      localTimeZone: booking.localTimeZone || "",
-      localTimeLabel:
-        booking.localTimeLabel || booking.displayTime || booking.time || "",
+      displayDate,
+      displayTime,
+      localTimeZone: clientTimeZone,
       startTimeUTC: booking.startTimeUTC || "",
-      displayDate:
-        booking.displayDate || booking.date || booking.hostDate || "",
-      displayTime:
-        booking.displayTime ||
-        booking.localTimeLabel ||
-        booking.time ||
-        booking.hostTime ||
-        "",
 
       // NEW: link this upgrade back to original booking in emails / DB
       originalOrderId: booking._id,

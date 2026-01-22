@@ -3,11 +3,7 @@ import { createPortal } from "react-dom";
 import { client } from "../sanityClient";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  deriveSlotLabels,
-  formatHostDateLabel,
-  HOST_TZ_NAME,
-} from "../utils/timezone";
+
 
 const IST_OFFSET_MINUTES = 330;
 const FORM_PREFILL_KEY = "booking_form_prefill";
@@ -45,12 +41,6 @@ const isSameDay = (a, b) =>
   a.getMonth() === b.getMonth() &&
   a.getDate() === b.getDate();
 
-const hostTimeLabel = (h) => {
-  const ampm = h >= 12 ? "PM" : "AM";
-  const disp = ((h + 11) % 12) + 1;
-  return `${disp}:00 ${ampm}`;
-};
-
 const UPGRADE_FAQ_HASH = "upgrade-path";
 
 const getUtcFromHostLocal = (year, monthIndex, day, hostHour) => {
@@ -61,14 +51,56 @@ const getUtcFromHostLocal = (year, monthIndex, day, hostHour) => {
 };
 
 // Format a UTC Date into the user's local time string
-const formatLocalTime = (utcDate) => {
+const formatLocalTime = (utcDate, timeZone) => {
   try {
-    return utcDate.toLocaleTimeString(undefined, {
+    return new Intl.DateTimeFormat(undefined, {
+      ...(timeZone ? { timeZone } : {}),
       hour: "numeric",
       minute: "2-digit",
-    });
+    }).format(utcDate);
   } catch {
     return utcDate.toISOString();
+  }
+};
+
+const formatLocalDate = (utcDate, timeZone) => {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      ...(timeZone ? { timeZone } : {}),
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    }).format(utcDate);
+  } catch {
+    return utcDate.toISOString();
+  }
+};
+
+const getLocalDateKey = (utcDate, timeZone) => {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      ...(timeZone ? { timeZone } : {}),
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    })
+      .formatToParts(utcDate)
+      .reduce((acc, cur) => {
+        acc[cur.type] = cur.value;
+        return acc;
+      }, {});
+
+    const year = Number(parts.year);
+    const month = Number(parts.month);
+    const day = Number(parts.day);
+    if (!year || !month || !day) return "";
+    return new Date(year, month - 1, day).toDateString();
+  } catch {
+    const fallback = new Date(utcDate);
+    if (Number.isNaN(fallback.getTime())) return "";
+    fallback.setHours(0, 0, 0, 0);
+    return fallback.toDateString();
   }
 };
 
@@ -100,16 +132,6 @@ const broadcastHold = (payload) => {
   } catch (e) {
     console.error("Failed to broadcast hold state", e);
   }
-};
-
-const parseHostLabelToHour = (label) => {
-  if (!label) return null;
-  const match = label.match(/(\d+):\d{2}\s*(AM|PM)/i);
-  if (!match) return null;
-  let hour = Number(match[1]) % 12;
-  const meridiem = match[2].toUpperCase();
-  if (meridiem === "PM") hour += 12;
-  return hour;
 };
 
 const parseDateKey = (value) => {
@@ -173,23 +195,9 @@ const normalizePackageDateSlots = (entries) => {
 };
 
 const getUtcDateFromHold = (hold) => {
-  if (!hold) return null;
-
-  if (hold.startTimeUTC) {
-    const fromStart = new Date(hold.startTimeUTC);
-    if (!isNaN(fromStart.getTime())) return fromStart;
-  }
-
-  const hostDate = hold.hostDate ? new Date(hold.hostDate) : null;
-  const hostHour = parseHostLabelToHour(hold.hostTime);
-  if (!hostDate || isNaN(hostDate.getTime()) || hostHour === null) return null;
-
-  return getUtcFromHostLocal(
-    hostDate.getFullYear(),
-    hostDate.getMonth(),
-    hostDate.getDate(),
-    hostHour
-  );
+  if (!hold?.startTimeUTC) return null;
+  const fromStart = new Date(hold.startTimeUTC);
+  return Number.isNaN(fromStart.getTime()) ? null : fromStart;
 };
 
 function XocDropdown({
@@ -337,7 +345,13 @@ export default function BookingForm({ isMobile }) {
   const [errorStep1, setErrorStep1] = useState("");
   const [errorStep2, setErrorStep2] = useState("");
 
-  const [userTimeZone, setUserTimeZone] = useState("UTC");
+  const [userTimeZone] = useState(() => {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    } catch {
+      return "UTC";
+    }
+  });
 
   const [form, setForm] = useState({
     discord: "",
@@ -470,18 +484,25 @@ export default function BookingForm({ isMobile }) {
             const m = new Date(saved.month);
             if (!isNaN(m)) setMonth(m);
           }
-          if (saved.selectedDate) {
+          let restoredDate = false;
+          if (saved.selectedSlot?.utcStart) {
+            const utcStart = new Date(saved.selectedSlot.utcStart);
+            if (!isNaN(utcStart.getTime())) {
+              const slotId = saved.selectedSlot.slotId || utcStart.toISOString();
+              setSelectedSlot({
+                slotId,
+                utcStart,
+                localLabel: saved.selectedSlot.localLabel || "",
+              });
+              const localDate = new Date(utcStart);
+              localDate.setHours(0, 0, 0, 0);
+              setSelectedDate(localDate);
+              restoredDate = true;
+            }
+          }
+          if (!restoredDate && saved.selectedDate) {
             const d = new Date(saved.selectedDate);
             if (!isNaN(d)) setSelectedDate(d);
-          }
-          if (saved.selectedSlot?.hostLabel) {
-            setSelectedSlot({
-              hostLabel: saved.selectedSlot.hostLabel,
-              utcStart: saved.selectedSlot.utcStart
-                ? new Date(saved.selectedSlot.utcStart)
-                : null,
-              localLabel: saved.selectedSlot.localLabel || "",
-            });
           }
         }
       }
@@ -502,7 +523,7 @@ export default function BookingForm({ isMobile }) {
         selectedDate: selectedDate?.toISOString?.() || null,
         selectedSlot: selectedSlot
           ? {
-              hostLabel: selectedSlot.hostLabel,
+              slotId: selectedSlot.slotId,
               utcStart: selectedSlot.utcStart?.toISOString?.() || null,
               localLabel: selectedSlot.localLabel,
             }
@@ -554,17 +575,21 @@ export default function BookingForm({ isMobile }) {
         const parsed = JSON.parse(stored);
         // check if expired
         if (new Date(parsed.expiresAt) > new Date()) {
-          const normalizedHold = { ...parsed };
-          if (!normalizedHold.startTimeUTC) {
-            const utcDate = getUtcDateFromHold(normalizedHold);
-            if (utcDate) {
-              normalizedHold.startTimeUTC = utcDate.toISOString();
-              localStorage.setItem(
-                HOLD_STORAGE_KEY,
-                JSON.stringify(normalizedHold)
-              );
-            }
+          const normalizedHold = {
+            holdId: parsed.holdId,
+            expiresAt: parsed.expiresAt,
+            startTimeUTC: parsed.startTimeUTC,
+            packageTitle: parsed.packageTitle,
+            packagePrice: parsed.packagePrice,
+            packageTag: parsed.packageTag,
+          };
+          const utcDate = getUtcDateFromHold(normalizedHold);
+          if (!utcDate) {
+            localStorage.removeItem(HOLD_STORAGE_KEY);
+            return;
           }
+          normalizedHold.startTimeUTC = utcDate.toISOString();
+          localStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
           setMyHold(normalizedHold);
           broadcastHold(normalizedHold);
         } else {
@@ -591,21 +616,23 @@ export default function BookingForm({ isMobile }) {
       !selectedPackage.title ||
       myHold.packageTitle === selectedPackage.title;
 
-    const hostDate = myHold.hostDate ? new Date(myHold.hostDate) : null;
     const utcDate = getUtcDateFromHold(myHold);
 
-    if (hostDate && !isNaN(hostDate.getTime())) {
-      setSelectedDate(hostDate);
+    if (utcDate && !isNaN(utcDate.getTime())) {
+      const localDate = new Date(utcDate);
+      localDate.setHours(0, 0, 0, 0);
+      setSelectedDate(localDate);
     }
 
     if (samePackage && utcDate) {
+      const slotId = utcDate.toISOString();
       setSelectedSlot((prev) =>
-        prev?.hostLabel === myHold.hostTime
+        prev?.slotId === slotId
           ? prev
           : {
-              hostLabel: myHold.hostTime,
+              slotId,
               utcStart: utcDate,
-              localLabel: formatLocalTime(utcDate),
+              localLabel: formatLocalTime(utcDate, userTimeZone),
             }
       );
       setStep(2);
@@ -613,7 +640,7 @@ export default function BookingForm({ isMobile }) {
       setSelectedSlot(null);
       setStep(1);
     }
-  }, [myHold, selectedPackage.title, preventHoldAutoload]);
+  }, [myHold, selectedPackage.title, preventHoldAutoload, userTimeZone]);
 
   // Countdown + expiry handling for holds
   useEffect(() => {
@@ -750,16 +777,6 @@ export default function BookingForm({ isMobile }) {
     return "";
   };
 
-  // ---------- DETECT USER TIME ZONE ----------
-  useEffect(() => {
-    try {
-      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-      setUserTimeZone(tz);
-    } catch {
-      setUserTimeZone("UTC");
-    }
-  }, []);
-
   const startOfToday = useMemo(() => {
     const t = new Date();
     t.setHours(0, 0, 0, 0);
@@ -792,6 +809,42 @@ export default function BookingForm({ isMobile }) {
     return null;
   }, [settings, isXoc, isVertexEssentials, selectedPackage.title]);
 
+  const localSlotMap = useMemo(() => {
+    if (!dateSlotMap) return null;
+    const map = {};
+    Object.entries(dateSlotMap).forEach(([hostDateKey, hours]) => {
+      const hostDate = new Date(hostDateKey);
+      if (Number.isNaN(hostDate.getTime())) return;
+
+      (hours || []).forEach((h) => {
+        if (!Number.isFinite(h)) return;
+        const utcStart = getUtcFromHostLocal(
+          hostDate.getFullYear(),
+          hostDate.getMonth(),
+          hostDate.getDate(),
+          h
+        );
+        if (Number.isNaN(utcStart.getTime())) return;
+
+        const localDateKey = getLocalDateKey(utcStart, userTimeZone);
+        if (!localDateKey) return;
+
+        const slotId = utcStart.toISOString();
+        const localLabel = formatLocalTime(utcStart, userTimeZone);
+
+        const list = map[localDateKey] || [];
+        list.push({ slotId, utcStart, localLabel });
+        map[localDateKey] = list;
+      });
+    });
+
+    Object.values(map).forEach((list) =>
+      list.sort((a, b) => a.utcStart - b.utcStart)
+    );
+
+    return map;
+  }, [dateSlotMap, userTimeZone]);
+
   const isDateAllowed = (dateObj) => {
     if (!settings) return false;
     const d = new Date(dateObj);
@@ -799,11 +852,11 @@ export default function BookingForm({ isMobile }) {
 
     if (d < startOfToday) return false;
 
-    if (!dateSlotMap) return false;
+    if (!localSlotMap) return false;
 
     const dateKey = d.toDateString();
-    const hours = dateSlotMap[dateKey];
-    return Array.isArray(hours) && hours.length > 0;
+    const slots = localSlotMap[dateKey];
+    return Array.isArray(slots) && slots.length > 0;
   };
 
   // ---------- FETCH SETTINGS + ACTIVE HOLDS ----------
@@ -821,12 +874,11 @@ export default function BookingForm({ isMobile }) {
             }`
           ),
           fetchWithRetry(
-            `*[_type == "booking"]{date, time, startTimeUTC, packageTitle, hostDate, hostTime}`
+            `*[_type == "booking"]{startTimeUTC, packageTitle}`
           ),
           fetchWithRetry(
             `*[_type == "slotHold" && expiresAt > now()]{
-              hostDate,
-              hostTime,
+              startTimeUTC,
               _id
             }`
           ),
@@ -843,18 +895,22 @@ export default function BookingForm({ isMobile }) {
         );
         s.packageDateSlotMaps = normalizePackageDateSlots(s.packageDateSlots);
 
-        const holdsMapped = (holds || []).map((h) => ({
-          date: h.hostDate,
-          time: h.hostTime,
-          isHold: true,
-          holdId: h._id, // Ensure we have the ID to check conflicts
-        }));
+        const holdsMapped =
+          (holds || [])
+            .map((h) => ({
+              startTimeUTC: h.startTimeUTC,
+              isHold: true,
+              holdId: h._id,
+            }))
+            .filter((h) => h.startTimeUTC) || [];
 
         const bookedMapped =
-          booked?.map((b) => ({
-            date: b.hostDate || b.date,
-            time: b.hostTime || b.time,
-          })) || [];
+          booked
+            ?.map((b) => ({
+              startTimeUTC: b.startTimeUTC,
+              isHold: false,
+            }))
+            .filter((b) => b.startTimeUTC) || [];
 
         s.bookedSlots = [...bookedMapped, ...holdsMapped];
 
@@ -1096,139 +1152,76 @@ export default function BookingForm({ isMobile }) {
   }, [isXoc]);
 
   const times = useMemo(() => {
-    if (!settings || !selectedDate) return [];
+    if (!settings || !selectedDate || !localSlotMap) return [];
 
-    const now = new Date(); // current moment in UTC basis for comparison
+    const now = new Date();
+    const dateKey = selectedDate.toDateString();
+    const daySlots = localSlotMap[dateKey] || [];
 
-    const hostYear = selectedDate.getFullYear();
-    const hostMonth = selectedDate.getMonth();
-    const hostDay = selectedDate.getDate();
+    const bookedSet = new Set();
+    const heldMap = new Map();
 
-    if (!dateSlotMap) return [];
-
-    const hostDateLabel = selectedDate.toDateString();
-    const dateSlotHours = dateSlotMap[hostDateLabel] || [];
-    const dateSlotSet = new Set(dateSlotHours);
-
-    const daySlots =
-      settings.bookedSlots?.filter((b) => {
-        // If I am holding this slot, do NOT count it as "booked" in the general list
-        if (
-          myHold &&
-          b.isHold &&
-          (b.holdId === myHold.holdId ||
-            (b.date === myHold.hostDate && b.time === myHold.hostTime))
-        ) {
-          return false;
-        }
-        return b.date === hostDateLabel;
-      }) || [];
-
-    const bookedForDayHost = daySlots
-      .filter((b) => !b.isHold)
-      .map((b) => b.time);
-
-    // Slots held by others (since we filtered ours out above)
-    const heldForDayHost = daySlots
-      .filter((b) => b.isHold && b.holdId !== myHold?.holdId)
-      .map((b) => b.time);
-
-    const slots = [];
-    const buildSlot = (h, isAllowed) => {
-      const hostLabel = hostTimeLabel(h);
-      let isBooked = bookedForDayHost.includes(hostLabel);
-      let isHeldOther = heldForDayHost.includes(hostLabel);
-
-      const isMyCurrentHold =
-        myHold &&
-        myHold.hostDate === hostDateLabel &&
-        myHold.hostTime === hostLabel;
-
-      if (isMyCurrentHold) {
-        isBooked = false;
-        isHeldOther = false;
+    (settings.bookedSlots || []).forEach((slot) => {
+      if (!slot.startTimeUTC) return;
+      if (slot.isHold) {
+        heldMap.set(slot.startTimeUTC, slot.holdId || "");
+      } else {
+        bookedSet.add(slot.startTimeUTC);
       }
+    });
 
-      const utcStart = getUtcFromHostLocal(hostYear, hostMonth, hostDay, h);
-      const localLabel = formatLocalTime(utcStart);
+    return daySlots.map((slot) => {
+      const isBooked = bookedSet.has(slot.slotId);
+      const holdId = heldMap.get(slot.slotId);
+      const isHeldOther = !!holdId && holdId !== myHold?.holdId;
+      const isPast = slot.utcStart <= now;
+      const disabled = isBooked || isHeldOther || isPast;
 
-      const isPast = utcStart <= now;
-
-      const disabled = !isAllowed || isBooked || isHeldOther || isPast;
-
-      slots.push({
-        hostHour: h,
-        hostLabel,
-        localLabel,
-        utcStart,
+      return {
+        ...slot,
         disabled,
         isBooked,
         isHeldOther,
-        isAllowed,
+        isAllowed: true,
         isPast,
-      });
-    };
-
-    for (let h = 0; h <= 23; h++) {
-      const isAllowed = dateSlotSet.has(h);
-      buildSlot(h, isAllowed);
-    }
-
-    return slots;
-  }, [settings, selectedDate, isXoc, myHold, dateSlotMap]);
+      };
+    });
+  }, [settings, selectedDate, localSlotMap, myHold]);
 
   const getDaySlotInfo = (dateObj) => {
-    if (!settings) return null;
+    if (!settings || !localSlotMap) return null;
 
     const d = new Date(dateObj);
     d.setHours(0, 0, 0, 0);
 
     if (d < startOfToday) return null;
-    if (!dateSlotMap) return null;
 
-    const hostDateLabel = d.toDateString();
+    const dateKey = d.toDateString();
+    const daySlots = localSlotMap[dateKey] || [];
+    if (!daySlots.length) return null;
 
-    const daySlots =
-      settings.bookedSlots?.filter((b) => {
-        // Exclude my own hold from calculation
-        if (
-          myHold &&
-          b.isHold &&
-          (b.holdId === myHold.holdId ||
-            (b.date === myHold.hostDate && b.time === myHold.hostTime))
-        ) {
-          return false;
-        }
-        return b.date === hostDateLabel;
-      }) || [];
+    const bookedSet = new Set();
+    const heldMap = new Map();
 
-    // Separate permanent bookings from holds
-    const bookedForDayHost = daySlots
-      .filter((b) => !b.isHold)
-      .map((b) => b.time);
-    const heldForDayHost = daySlots
-      .filter((b) => b.isHold && b.holdId !== myHold?.holdId)
-      .map((b) => b.time);
+    (settings.bookedSlots || []).forEach((slot) => {
+      if (!slot.startTimeUTC) return;
+      if (slot.isHold) {
+        heldMap.set(slot.startTimeUTC, slot.holdId || "");
+      } else {
+        bookedSet.add(slot.startTimeUTC);
+      }
+    });
 
-    const hostYear = d.getFullYear();
-    const hostMonth = d.getMonth();
-    const hostDay = d.getDate();
     const now = new Date();
 
     let availableCount = 0;
     let totalConsidered = 0;
 
-    const allowedHours = dateSlotMap[hostDateLabel] || [];
-    if (!allowedHours.length) return null;
-
-    allowedHours.forEach((h) => {
-      const hostLabel = hostTimeLabel(h);
-      const isBooked = bookedForDayHost.includes(hostLabel);
-      const isHeldOther = heldForDayHost.includes(hostLabel);
-
-      const utcStart = getUtcFromHostLocal(hostYear, hostMonth, hostDay, h);
-      const isPast = utcStart <= now;
-
+    daySlots.forEach((slot) => {
+      const isBooked = bookedSet.has(slot.slotId);
+      const holdId = heldMap.get(slot.slotId);
+      const isHeldOther = !!holdId && holdId !== myHold?.holdId;
+      const isPast = slot.utcStart <= now;
       const disabled = isBooked || isHeldOther || isPast;
 
       totalConsidered++;
@@ -1249,9 +1242,9 @@ export default function BookingForm({ isMobile }) {
   // ---------- INITIAL DATE ----------
   useEffect(() => {
     if (settings && !selectedDate) {
-      if (!dateSlotMap) return;
+      if (!localSlotMap) return;
 
-      const nextDate = Object.keys(dateSlotMap)
+      const nextDate = Object.keys(localSlotMap)
         .map((key) => new Date(key))
         .filter((d) => !Number.isNaN(d.getTime()) && d >= startOfToday)
         .sort((a, b) => a - b)[0];
@@ -1260,7 +1253,7 @@ export default function BookingForm({ isMobile }) {
       setSelectedDate(initialDate);
       setMonth(new Date(initialDate.getFullYear(), initialDate.getMonth(), 1));
     }
-  }, [settings, selectedDate, dateSlotMap, startOfToday]);
+  }, [settings, selectedDate, localSlotMap, startOfToday]);
 
   // ---------- HELPERS ----------
   const handleChange = (e) => {
@@ -1340,9 +1333,9 @@ export default function BookingForm({ isMobile }) {
   const holdLocalTimeLabel = useMemo(() => {
     if (!myHold) return "";
     const utcDate = getUtcDateFromHold(myHold);
-    if (!utcDate) return myHold.hostTime || "";
-    return formatLocalTime(utcDate);
-  }, [myHold]);
+    if (!utcDate) return "";
+    return formatLocalTime(utcDate, userTimeZone);
+  }, [myHold, userTimeZone]);
 
   const clearHoldState = (resetStep = true, clearStorage = true) => {
     setMyHold(null);
@@ -1404,10 +1397,9 @@ export default function BookingForm({ isMobile }) {
     setLockingSlot(true);
 
     let previousHoldId = null;
+    const selectedSlotId = selectedSlot.utcStart.toISOString();
     const isSameAsExisting =
-      myHold &&
-      myHold.hostDate === selectedDate.toDateString() &&
-      myHold.hostTime === selectedSlot.hostLabel;
+      myHold && myHold.startTimeUTC === selectedSlotId;
 
     if (myHold && isSameAsExisting) {
       updateHoldPackage(selectedPackage);
@@ -1424,9 +1416,7 @@ export default function BookingForm({ isMobile }) {
 
     try {
       const body = {
-        hostDate: selectedDate.toDateString(),
-        hostTime: selectedSlot.hostLabel,
-        startTimeUTC: selectedSlot.utcStart.toISOString(),
+        startTimeUTC: selectedSlotId,
         packageTitle: selectedPackage.title,
         previousHoldId,
       };
@@ -1449,16 +1439,10 @@ export default function BookingForm({ isMobile }) {
         return;
       }
 
-      const hostDateLabel =
-        formatHostDateLabel(selectedSlot.utcStart, HOST_TZ_NAME) ||
-        selectedDate.toDateString();
-
       const newHold = {
         holdId: data.holdId,
         expiresAt: data.expiresAt,
-        hostDate: hostDateLabel,
-        hostTime: selectedSlot.hostLabel,
-        startTimeUTC: selectedSlot.utcStart.toISOString(),
+        startTimeUTC: selectedSlotId,
         packageTitle: selectedPackage.title,
         packagePrice: selectedPackage.price,
         packageTag: selectedPackage.tag,
@@ -1500,14 +1484,8 @@ export default function BookingForm({ isMobile }) {
       return;
     }
 
-    const slotLabels = deriveSlotLabels(
-      selectedSlot.utcStart,
-      userTimeZone,
-      HOST_TZ_NAME
-    );
-
     const displayDate =
-      slotLabels.localDateLabel ||
+      formatLocalDate(selectedSlot.utcStart, userTimeZone) ||
       selectedDate.toLocaleDateString(undefined, {
         weekday: "long",
         month: "long",
@@ -1515,8 +1493,9 @@ export default function BookingForm({ isMobile }) {
         year: "numeric",
       });
 
-    const displayTime = slotLabels.localTimeLabel || selectedSlot.localLabel;
-    const hostDate = slotLabels.hostDateLabel || selectedDate.toDateString();
+    const displayTime =
+      formatLocalTime(selectedSlot.utcStart, userTimeZone) ||
+      selectedSlot.localLabel;
 
     const referralFromQuery = q.get("ref") || "";
     const referralFromSession = readReferralFromSession();
@@ -1536,15 +1515,10 @@ export default function BookingForm({ isMobile }) {
       displayDate,
       displayTime,
 
-      hostDate,
-      hostTime: selectedSlot.hostLabel,
-      hostTimeZone: HOST_TZ_NAME,
-
       localTimeZone: userTimeZone,
       localTimeLabel: displayTime,
 
       startTimeUTC: selectedSlot.utcStart.toISOString(),
-      crossesDateBoundary: slotLabels.crossesDateBoundary,
 
       discord: form.discord.trim(),
       email: form.email.trim(),
@@ -1709,8 +1683,7 @@ export default function BookingForm({ isMobile }) {
                   <p className="text-xs text-sky-400/70 mb-5">
                     Times are shown in{" "}
                     <span className="font-semibold">your local time</span> (
-                    {userTimeZone}), based on host availability in{" "}
-                    <span className="font-semibold">India (IST)</span>.
+                    {userTimeZone}).
                   </p>
 
                   <div
@@ -1861,19 +1834,11 @@ export default function BookingForm({ isMobile }) {
                         >
                           {times.map((t) => {
                             const isMyHold =
-                              myHold &&
-                              selectedDate &&
-                              myHold.hostDate === selectedDate.toDateString() &&
-                              myHold.hostTime === t.hostLabel;
-
-                            const subLabelText = `(${t.hostLabel} IST)`;
-                            const subLabelClass = isMyHold
-                              ? "text-[#38BDF8B3]"
-                              : "text-sky-400/70";
+                              myHold && myHold.startTimeUTC === t.slotId;
 
                             return (
                               <button
-                                key={t.hostLabel}
+                                key={t.slotId}
                                 onClick={() => {
                                   if (isMyHold) {
                                     setSelectedSlot(t);
@@ -1899,17 +1864,12 @@ export default function BookingForm({ isMobile }) {
                                     ? "bg-purple-900/50 border-purple-500/60 text-purple-100 shadow-[0_0_14px_rgba(168,85,247,0.7)] hover:border-purple-400 hover:bg-purple-800/50"
                                     : t.disabled
                                     ? "bg-slate-800/40 text-slate-500 border-slate-700/50 cursor-not-allowed"
-                                    : selectedSlot?.hostLabel === t.hostLabel
+                                    : selectedSlot?.slotId === t.slotId
                                     ? "bg-sky-600 text-white border-sky-400 shadow-[0_0_15px_rgba(56,189,248,0.6)]"
                                     : "border-sky-700/40 hover:border-sky-500/60 hover:bg-sky-700/20"
                                 }`}
                               >
                                 {t.localLabel}
-                                <span
-                                  className={`block text-[10px] mt-1 ${subLabelClass}`}
-                                >
-                                  {subLabelText}
-                                </span>
                               </button>
                             );
                           })}
@@ -2287,7 +2247,7 @@ export default function BookingForm({ isMobile }) {
                       <div className="bg-purple-500/10 border border-purple-500/40 p-3 rounded-lg flex items-center gap-3">
                         <p className="text-xs text-white font-medium">
                           Slot{" "}
-                          <strong>{holdLocalTimeLabel || myHold.hostTime}</strong>{" "}
+                          <strong>{holdLocalTimeLabel || "--"}</strong>{" "}
                           is reserved.{" "}
                           <span className="text-sky-200">
                             Expires in {formatCountdown(holdCountdownMs)}.
