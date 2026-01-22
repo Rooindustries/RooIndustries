@@ -5,8 +5,6 @@ import { motion, AnimatePresence } from "framer-motion";
 
 const HOLD_STORAGE_KEY = "my_slot_hold";
 const BOOKING_DRAFT_KEY = "booking_draft";
-const HOST_TZ_NAME = "Asia/Kolkata";
-const IST_OFFSET_MINUTES = 330;
 const MOBILE_MAX_WIDTH = 780;
 
 const useIsMobileWidth = (maxWidth = MOBILE_MAX_WIDTH) => {
@@ -36,38 +34,10 @@ const useIsMobileWidth = (maxWidth = MOBILE_MAX_WIDTH) => {
   return isMobileWidth;
 };
 
-const parseHostLabelToHour = (label) => {
-  if (!label) return null;
-  const match = label.match(/(\d+):\d{2}\s*(AM|PM)/i);
-  if (!match) return null;
-  let hour = Number(match[1]) % 12;
-  const meridiem = match[2].toUpperCase();
-  if (meridiem === "PM") hour += 12;
-  return hour;
-};
-
-const getUtcFromHostLocal = (year, monthIndex, day, hostHour) => {
-  const utcMs =
-    Date.UTC(year, monthIndex, day, hostHour, 0) -
-    IST_OFFSET_MINUTES * 60 * 1000;
-  return new Date(utcMs);
-};
-
 const getUtcDateFromHold = (hold) => {
-  if (!hold) return null;
-  if (hold.startTimeUTC) {
-    const fromStart = new Date(hold.startTimeUTC);
-    if (!isNaN(fromStart.getTime())) return fromStart;
-  }
-  const hostDate = hold.hostDate ? new Date(hold.hostDate) : null;
-  const hostHour = parseHostLabelToHour(hold.hostTime);
-  if (!hostDate || isNaN(hostDate.getTime()) || hostHour === null) return null;
-  return getUtcFromHostLocal(
-    hostDate.getFullYear(),
-    hostDate.getMonth(),
-    hostDate.getDate(),
-    hostHour
-  );
+  if (!hold?.startTimeUTC) return null;
+  const fromStart = new Date(hold.startTimeUTC);
+  return Number.isNaN(fromStart.getTime()) ? null : fromStart;
 };
 
 const formatLocalTime = (utcDate) => {
@@ -113,8 +83,23 @@ export default function ReservationBanner() {
       if (stored) {
         const parsed = JSON.parse(stored);
         if (new Date(parsed.expiresAt) > new Date()) {
-          setHold(parsed);
-          broadcastHold(parsed);
+          const normalizedHold = {
+            holdId: parsed.holdId,
+            expiresAt: parsed.expiresAt,
+            startTimeUTC: parsed.startTimeUTC,
+            packageTitle: parsed.packageTitle,
+            packagePrice: parsed.packagePrice,
+            packageTag: parsed.packageTag,
+          };
+          const utcDate = getUtcDateFromHold(normalizedHold);
+          if (!utcDate) {
+            localStorage.removeItem(HOLD_STORAGE_KEY);
+            return;
+          }
+          normalizedHold.startTimeUTC = utcDate.toISOString();
+          localStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
+          setHold(normalizedHold);
+          broadcastHold(normalizedHold);
         } else {
           localStorage.removeItem(HOLD_STORAGE_KEY);
         }
@@ -128,12 +113,27 @@ export default function ReservationBanner() {
     const handler = (evt) => {
       const detail = evt.detail || null;
       if (detail) {
-        localStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(detail));
+        const normalizedHold = {
+          holdId: detail.holdId,
+          expiresAt: detail.expiresAt,
+          startTimeUTC: detail.startTimeUTC,
+          packageTitle: detail.packageTitle,
+          packagePrice: detail.packagePrice,
+          packageTag: detail.packageTag,
+        };
+        const utcDate = getUtcDateFromHold(normalizedHold);
+        if (!utcDate) {
+          localStorage.removeItem(HOLD_STORAGE_KEY);
+          setHold(null);
+          return;
+        }
+        normalizedHold.startTimeUTC = utcDate.toISOString();
+        localStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
+        setHold(normalizedHold);
+        return;
       }
-      if (!detail) {
-        localStorage.removeItem(HOLD_STORAGE_KEY);
-      }
-      setHold(detail);
+      localStorage.removeItem(HOLD_STORAGE_KEY);
+      setHold(null);
     };
     window.addEventListener("hold-state", handler);
     return () => window.removeEventListener("hold-state", handler);
@@ -171,7 +171,7 @@ export default function ReservationBanner() {
   const holdLocalTimeLabel = useMemo(() => {
     if (!hold) return "";
     const utcDate = getUtcDateFromHold(hold);
-    if (!utcDate) return hold.hostTime || "";
+    if (!utcDate) return "";
     return formatLocalTime(utcDate);
   }, [hold]);
 
@@ -348,11 +348,11 @@ export default function ReservationBanner() {
             {/* Text Block */}
             <div className={`min-w-0 z-10 ${textAlignmentClass}`}>
               <p className={`font-semibold text-white truncate drop-shadow-md ${titleSizeClass}`}>
-                Slot {holdLocalTimeLabel || hold.hostTime || "--"}
+                Slot {holdLocalTimeLabel || "--"}
                 {hold?.packageTitle ? ` — ${hold.packageTitle}` : ""}
               </p>
               <p className={`text-sky-200/90 truncate drop-shadow-sm ${subtitleSizeClass}`}>
-                Expires in {formatCountdown(countdown)} • Host {hold.hostTime} ({HOST_TZ_NAME})
+                Expires in {formatCountdown(countdown)}
               </p>
             </div>
             
