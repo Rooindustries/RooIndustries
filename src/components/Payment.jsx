@@ -2,7 +2,31 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useLocation, Link, useNavigate } from "react-router-dom";
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 import { motion } from "framer-motion";
-import { deriveSlotLabels, HOST_TZ_NAME } from "../utils/timezone";
+const formatLocalDate = (utcDate, timeZone) => {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      ...(timeZone ? { timeZone } : {}),
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    }).format(utcDate);
+  } catch {
+    return "--";
+  }
+};
+
+const formatLocalTime = (utcDate, timeZone) => {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      ...(timeZone ? { timeZone } : {}),
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(utcDate);
+  } catch {
+    return "--";
+  }
+};
 
 export default function Payment({ hideFooter = false }) {
   const location = useLocation();
@@ -95,8 +119,6 @@ export default function Payment({ hideFooter = false }) {
   };
 
   const hasTimeslot =
-    !!bookingData?.hostDate &&
-    !!bookingData?.hostTime &&
     !!bookingData?.startTimeUTC &&
     !!bookingData?.displayDate &&
     !!bookingData?.displayTime;
@@ -148,30 +170,12 @@ export default function Payment({ hideFooter = false }) {
       }
     })();
 
-  const hostTimeZone = bookingData.hostTimeZone || HOST_TZ_NAME;
-
-  const slotLabels = utcStart
-    ? deriveSlotLabels(utcStart, userTimeZone, hostTimeZone)
-    : null;
-
   const date =
-    slotLabels?.localDateLabel || bookingData.displayDate || "--";
-  const time =
-    slotLabels?.localTimeLabel || bookingData.displayTime || "--";
-  const hostDate =
-    slotLabels?.hostDateLabel ||
-    bookingData.hostDate ||
-    bookingData.date ||
     bookingData.displayDate ||
-    "--";
-  const hostTime =
-    bookingData.hostTime ||
-    slotLabels?.hostTimeLabel ||
-    bookingData.time ||
+    (utcStart ? formatLocalDate(utcStart, userTimeZone) : "--");
+  const time =
     bookingData.displayTime ||
-    "--";
-  const crossesDateBoundary =
-    slotLabels?.crossesDateBoundary && date !== "--" && hostDate !== "--";
+    (utcStart ? formatLocalTime(utcStart, userTimeZone) : "--");
   const baseAmount =
     parseFloat(String(packagePrice).replace(/[^0-9.]/g, "")) || 0;
 
@@ -551,6 +555,7 @@ export default function Payment({ hideFooter = false }) {
             packageTitle,
             date,
             time,
+            startTimeUTC: bookingData.startTimeUTC || "",
             referralCode: referral?.code || referralInput || "",
             couponCode: coupon?.code || couponInput || "",
           },
@@ -799,14 +804,12 @@ export default function Payment({ hideFooter = false }) {
                 Your time: <span className="text-sky-300">{date}</span> at{" "}
                 <span className="text-sky-300">{time}</span>
               </p>
-              <p className="text-xs text-slate-400">
-                Host ({hostTimeZone}):{" "}
-                <span className="text-sky-200">{hostDate}</span> at{" "}
-                <span className="text-sky-200">{hostTime}</span>
-                {crossesDateBoundary
-                  ? " • Note: this slot spans different calendar days."
-                  : ""}
-              </p>
+              {userTimeZone && (
+                <p className="text-xs text-slate-400">
+                  Time zone:{" "}
+                  <span className="text-slate-300">{userTimeZone}</span>
+                </p>
+              )}
 
               {isFree && (
                 <p className="text-xs text-emerald-300 mt-2">
@@ -1019,6 +1022,7 @@ export default function Payment({ hideFooter = false }) {
                               {
                                 description: `${packageTitle} booking`,
                                 amount: { value: finalAmount.toFixed(2) },
+                                custom_id: bookingData.startTimeUTC || "",
                               },
                             ],
                           })
