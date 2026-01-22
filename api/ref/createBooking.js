@@ -15,6 +15,72 @@ const writeClient = createClient({
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 const DISCORD_INVITE_URL = "https://discord.gg/M7nTkn9dxE";
+const OWNER_TZ_NAME = "Asia/Kolkata";
+
+const parseUtcDate = (value) => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+};
+
+const formatInTimeZone = (utcDate, timeZone, options = {}) => {
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      ...options,
+      ...(timeZone ? { timeZone } : {}),
+    }).format(utcDate);
+  } catch (err) {
+    console.error("Failed to format date in zone", err);
+    return "";
+  }
+};
+
+const formatOwnerDateLabel = (utcDate, timeZone = OWNER_TZ_NAME) => {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      weekday: "short",
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    })
+      .formatToParts(utcDate)
+      .reduce((acc, cur) => {
+        acc[cur.type] = cur.value;
+        return acc;
+      }, {});
+
+    const day = parts.day || "";
+    const weekday = parts.weekday || "";
+    const month = parts.month || "";
+    const year = parts.year || "";
+
+    return `${weekday} ${month} ${day} ${year}`.trim();
+  } catch (err) {
+    console.error("Failed to format owner date label", err);
+    return "";
+  }
+};
+
+const formatOwnerTimeLabel = (utcDate, timeZone = OWNER_TZ_NAME) =>
+  formatInTimeZone(utcDate, timeZone, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+const formatClientDateLabel = (utcDate, timeZone) =>
+  formatInTimeZone(utcDate, timeZone, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+
+const formatClientTimeLabel = (utcDate, timeZone) =>
+  formatInTimeZone(utcDate, timeZone, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
 
 const emailHtml = ({
   logoUrl,
@@ -87,8 +153,6 @@ export default async function handler(req, res) {
 
   try {
     const {
-      date,
-      time,
       discord,
       email,
       specs,
@@ -112,11 +176,7 @@ export default async function handler(req, res) {
       couponCode = "",
       couponDiscountPercent = 0,
       couponDiscountAmount = 0,
-      hostDate,
-      hostTime,
-      hostTimeZone,
       localTimeZone,
-      localTimeLabel,
       startTimeUTC,
       displayDate,
       displayTime,
@@ -214,12 +274,37 @@ export default async function handler(req, res) {
 
     const isPaidBooking = status === "captured" && paymentProvider !== "free";
 
-    const bookingDate = hostDate || date || displayDate || "";
-    const bookingTime = hostTime || time || displayTime || "";
+    const utcDate = parseUtcDate(startTimeUTC);
+    if (!utcDate) {
+      return res.status(400).json({
+        error: "Missing or invalid startTimeUTC.",
+      });
+    }
 
-    if (!bookingDate || !bookingTime) {
+    const normalizedStartTimeUTC = utcDate.toISOString();
+    const ownerDate = formatOwnerDateLabel(utcDate);
+    const ownerTime = formatOwnerTimeLabel(utcDate);
+
+    if (!ownerDate || !ownerTime) {
       return res.status(400).json({
         error: "Missing booking date/time.",
+      });
+    }
+
+    const clientTimeZone = String(localTimeZone || "").trim();
+    const clientDate =
+      displayDate ||
+      (clientTimeZone ? formatClientDateLabel(utcDate, clientTimeZone) : "");
+    const clientTime =
+      displayTime ||
+      (clientTimeZone ? formatClientTimeLabel(utcDate, clientTimeZone) : "");
+
+    const bookingDate = ownerDate;
+    const bookingTime = ownerTime;
+
+    if (!clientDate || !clientTime) {
+      return res.status(400).json({
+        error: "Missing client booking date/time.",
       });
     }
 
@@ -245,49 +330,50 @@ export default async function handler(req, res) {
           { date: bookingDate, time: bookingTime }
         );
 
-      let holdDoc = null;
-      let holdMissing = false;
-      let holdExpired = false;
-
-      if (slotHoldId) {
-        holdDoc = await writeClient.fetch(
-          `*[_type == "slotHold" && _id == $id][0]`,
-          { id: slotHoldId }
-        );
-
-        if (!holdDoc) {
-          holdMissing = true;
-        } else if (holdDoc.expiresAt && new Date(holdDoc.expiresAt) < now) {
-          holdExpired = true;
-          try {
-            await writeClient.delete(slotHoldId);
-          } catch {}
-        } else if (
-          holdDoc.hostDate !== bookingDate ||
-          holdDoc.hostTime !== bookingTime
-        ) {
-          return res.status(400).json({
-            error: "Slot hold does not match selected time.",
-          });
-        }
-
-        if ((holdMissing || holdExpired) && !isPaidBooking) {
-          return res
-            .status(409)
-            .json({ error: "Your slot reservation expired." });
-        }
+      if (!slotHoldId) {
+        return res
+          .status(409)
+          .json({ error: "Your slot reservation expired." });
       }
 
-      if (!slotHoldId || holdMissing || holdExpired) {
-        const activeHold = await fetchActiveHold();
+      const holdDoc = await writeClient.fetch(
+        `*[_type == "slotHold" && _id == $id][0]`,
+        { id: slotHoldId }
+      );
 
-        if (activeHold) {
-          if (!isPaidBooking || !slotHoldId) {
-            return res.status(409).json({
-              error: "This slot is temporarily reserved by another user.",
-            });
-          }
-        }
+      if (!holdDoc) {
+        return res
+          .status(409)
+          .json({ error: "Your slot reservation expired." });
+      }
+
+      if (holdDoc.expiresAt && new Date(holdDoc.expiresAt) < now) {
+        try {
+          await writeClient.delete(slotHoldId);
+        } catch {}
+        return res
+          .status(409)
+          .json({ error: "Your slot reservation expired." });
+      }
+
+      const holdUtc = parseUtcDate(holdDoc.startTimeUTC);
+      const holdUtcIso = holdUtc ? holdUtc.toISOString() : "";
+      if (
+        (holdUtcIso && holdUtcIso !== normalizedStartTimeUTC) ||
+        (!holdUtcIso &&
+          (holdDoc.hostDate !== bookingDate ||
+            holdDoc.hostTime !== bookingTime))
+      ) {
+        return res.status(400).json({
+          error: "Slot hold does not match selected time.",
+        });
+      }
+
+      const activeHold = await fetchActiveHold();
+      if (activeHold && activeHold._id !== slotHoldId) {
+        return res.status(409).json({
+          error: "This slot is temporarily reserved by another user.",
+        });
       }
     }
 
@@ -348,14 +434,14 @@ export default async function handler(req, res) {
       netAmount: effectiveNetAmount,
       commissionPercent: effectiveCommissionPercent,
       commissionAmount,
-      hostDate,
-      hostTime,
-      hostTimeZone,
-      localTimeZone,
-      localTimeLabel,
-      startTimeUTC,
-      displayDate,
-      displayTime,
+      hostDate: bookingDate,
+      hostTime: bookingTime,
+      hostTimeZone: OWNER_TZ_NAME,
+      localTimeZone: clientTimeZone,
+      localTimeLabel: clientTime,
+      startTimeUTC: normalizedStartTimeUTC,
+      displayDate: clientDate,
+      displayTime: clientTime,
       ...(originalOrderId ? { originalOrderId } : {}),
       ...(couponCode
         ? {
@@ -494,25 +580,20 @@ export default async function handler(req, res) {
       });
     }
 
-    const localDate = displayDate || date || hostDate || "—";
-    const localTime = displayTime || localTimeLabel || time || "—";
-
-    const istDate = hostDate || date || displayDate || "—";
-    const istTime = hostTime || time || displayTime || "—";
-
     const clientFields = [
-      { label: "Date", value: localDate },
-      { label: "Your Time", value: localTime },
-      { label: "Host Time", value: istTime },
+      { label: "Date", value: clientDate || "-" },
+      { label: "Time", value: clientTime || "-" },
+      ...(clientTimeZone ? [{ label: "Time Zone", value: clientTimeZone }] : []),
       ...sharedCoreFields,
     ];
 
     const ownerFields = [
-      { label: "Date", value: istDate },
-      {
-        label: "Time / Timezones",
-        value: `${istTime} (${hostTimeZone}) - ${localTime} (${localTimeZone})`,
-      },
+      { label: "Client Date", value: clientDate || "-" },
+      { label: "Client Time", value: clientTime || "-" },
+      ...(clientTimeZone ? [{ label: "Client Time Zone", value: clientTimeZone }] : []),
+      { label: "Date", value: ownerDate || "-" },
+      { label: "Time", value: ownerTime || "-" },
+      { label: "Time Zone", value: OWNER_TZ_NAME },
       ...ownerDiscountFields,
       ...sharedCoreFields,
     ];
@@ -520,7 +601,7 @@ export default async function handler(req, res) {
     const bookingRef = (doc._id || "").slice(-6).toUpperCase() || "BOOKING";
 
     const clientSubject = `Your ${siteName} booking`;
-    const ownerSubject = `New booking ${bookingRef} — ${packageTitle} (${istDate} ${istTime})`;
+    const ownerSubject = `New booking ${bookingRef} - ${packageTitle} (${ownerDate} ${ownerTime})`;
 
     if (from && email && process.env.RESEND_API_KEY) {
       try {
