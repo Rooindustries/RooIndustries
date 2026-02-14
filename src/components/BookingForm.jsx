@@ -1170,7 +1170,8 @@ export default function BookingForm({ isMobile }) {
       }
     });
 
-    return daySlots.map((slot) => {
+    // Build available slots with status
+    const availableSlots = daySlots.map((slot) => {
       const isBooked = bookedSet.has(slot.slotId);
       const holdId = heldMap.get(slot.slotId);
       const isHeldOther = !!holdId && holdId !== myHold?.holdId;
@@ -1184,9 +1185,54 @@ export default function BookingForm({ isMobile }) {
         isHeldOther,
         isAllowed: true,
         isPast,
+        isUnavailable: false,
       };
     });
-  }, [settings, selectedDate, localSlotMap, myHold]);
+
+    // Build set of available slotIds for lookup
+    const availableSlotIds = new Set(daySlots.map((s) => s.slotId));
+
+    // Generate unavailable hours from all IST hours (0-23) for each host date
+    const unavailableSlots = [];
+    if (dateSlotMap) {
+      Object.entries(dateSlotMap).forEach(([hostDateKey, availableHours]) => {
+        const hostDate = new Date(hostDateKey);
+        if (Number.isNaN(hostDate.getTime())) return;
+        const availSet = new Set(availableHours || []);
+
+        for (let h = 0; h < 24; h++) {
+          if (availSet.has(h)) continue;
+          const utcStart = getUtcFromHostLocal(
+            hostDate.getFullYear(),
+            hostDate.getMonth(),
+            hostDate.getDate(),
+            h
+          );
+          if (Number.isNaN(utcStart.getTime())) continue;
+          const localDateKey = getLocalDateKey(utcStart, userTimeZone);
+          if (localDateKey !== dateKey) continue;
+          const slotId = `unavail-${hostDateKey}-${h}`;
+          if (availableSlotIds.has(slotId)) continue;
+          const localLabel = formatLocalTime(utcStart, userTimeZone);
+          unavailableSlots.push({
+            slotId,
+            utcStart,
+            localLabel,
+            disabled: true,
+            isBooked: false,
+            isHeldOther: false,
+            isAllowed: false,
+            isPast: false,
+            isUnavailable: true,
+          });
+        }
+      });
+    }
+
+    const allSlots = [...availableSlots, ...unavailableSlots];
+    allSlots.sort((a, b) => a.utcStart - b.utcStart);
+    return allSlots;
+  }, [settings, selectedDate, localSlotMap, dateSlotMap, myHold, userTimeZone]);
 
   const getDaySlotInfo = (dateObj) => {
     if (!settings || !localSlotMap) return null;
@@ -1856,7 +1902,9 @@ export default function BookingForm({ isMobile }) {
                                 }}
                                 disabled={t.disabled && !isMyHold}
                                 className={`py-2 rounded-lg border transition-all duration-200 ${
-                                  t.isBooked
+                                  t.isUnavailable
+                                    ? "bg-slate-900/30 border-slate-700/30 text-slate-600 cursor-not-allowed"
+                                    : t.isBooked
                                     ? "bg-red-900/40 border-red-700/40 text-red-400 cursor-not-allowed"
                                     : t.isHeldOther
                                     ? "bg-purple-900/40 border-purple-700/50 text-purple-300 cursor-not-allowed"
