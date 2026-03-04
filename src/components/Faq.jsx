@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useState, useRef, useLayoutEffect } from "re
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronDown } from "lucide-react";
 import { useLocation } from "react-router-dom";
+import { Helmet } from "react-helmet-async";
 import { client } from "../sanityClient";
+import { buildFAQPageJsonLd } from "../seoConfig";
 
 // --- HELPERS ---
 
@@ -192,7 +194,18 @@ export default function FaqSection({ compact = false }) {
   const subtitleText = faqCopy?.subtitle || "Click a question to expand its answer.";
   const sectionPaddingClass = compact ? "pt-20 pb-10" : "pt-20 pb-24";
 
+  const faqJsonLd = useMemo(
+    () => (flatQuestions.length > 0 ? buildFAQPageJsonLd(flatQuestions) : null),
+    [flatQuestions]
+  );
+
   return (
+    <>
+      {faqJsonLd && (
+        <Helmet>
+          <script type="application/ld+json">{JSON.stringify(faqJsonLd)}</script>
+        </Helmet>
+      )}
     <section
       id="faq"
       className={`relative z-10 scroll-mt-32 ${sectionPaddingClass} px-4 sm:px-6 text-white`}
@@ -336,5 +349,6 @@ export default function FaqSection({ compact = false }) {
         </div>
       </div>
     </section>
+    </>
   );
 }

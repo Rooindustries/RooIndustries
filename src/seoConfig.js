@@ -43,6 +43,36 @@ export const SERVICE_LIST = [
   },
 ];
 
+export const buildFAQPageJsonLd = (items = []) => ({
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: items.map((item) => ({
+    "@type": "Question",
+    name: item.question,
+    acceptedAnswer: {
+      "@type": "Answer",
+      text: item.answer,
+    },
+  })),
+});
+
+export const buildAggregateRatingJsonLd = ({
+  ratingValue = "5",
+  reviewCount = "100",
+  bestRating = "5",
+} = {}) => ({
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  name: SITE_NAME,
+  url: SITE_URL,
+  aggregateRating: {
+    "@type": "AggregateRating",
+    ratingValue,
+    reviewCount,
+    bestRating,
+  },
+});
+
 export const buildOfferCatalogJsonLd = (name = "Optimization Services") => ({
   "@context": "https://schema.org",
   "@type": "OfferCatalog",

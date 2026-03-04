@@ -15,6 +15,7 @@ const routes = [
   "/terms",
   "/privacy",
   "/meet-the-team",
+  "/tools",
 ];
 
 const now = new Date().toISOString();
