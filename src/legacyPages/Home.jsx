@@ -73,21 +73,36 @@ export default function Home() {
           <About />
         </Suspense>
       </DeferredSection>
-      <DeferredSection fallbackClassName="min-h-[520px]" rootMargin="420px 0px">
-        <Suspense fallback={<SectionFallback className="min-h-[520px]" />}>
-          <Services />
-        </Suspense>
-      </DeferredSection>
-      <DeferredSection fallbackClassName="min-h-[620px]" rootMargin="520px 0px">
-        <Suspense fallback={<SectionFallback className="min-h-[620px]" />}>
-          <Packages />
-        </Suspense>
-      </DeferredSection>
-      <DeferredSection fallbackClassName="min-h-[340px]" rootMargin="360px 0px">
-        <Suspense fallback={<SectionFallback className="min-h-[340px]" />}>
-          <HowItWorks />
-        </Suspense>
-      </DeferredSection>
+      <section id="services">
+        <DeferredSection
+          fallbackClassName="min-h-[520px]"
+          rootMargin="420px 0px"
+        >
+          <Suspense fallback={<SectionFallback className="min-h-[520px]" />}>
+            <Services />
+          </Suspense>
+        </DeferredSection>
+      </section>
+      <section id="packages">
+        <DeferredSection
+          fallbackClassName="min-h-[620px]"
+          rootMargin="520px 0px"
+        >
+          <Suspense fallback={<SectionFallback className="min-h-[620px]" />}>
+            <Packages />
+          </Suspense>
+        </DeferredSection>
+      </section>
+      <section id="how-it-works">
+        <DeferredSection
+          fallbackClassName="min-h-[340px]"
+          rootMargin="360px 0px"
+        >
+          <Suspense fallback={<SectionFallback className="min-h-[340px]" />}>
+            <HowItWorks />
+          </Suspense>
+        </DeferredSection>
+      </section>
       <div className="mt-4 flex items-center justify-center">
         <Link
           to="/#packages"
