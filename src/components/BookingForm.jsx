@@ -2322,7 +2322,7 @@ export default function BookingForm({ isMobile }) {
                   </p>
 
                   {hasActiveHold && (
-                    <div className="bg-purple-500/10 border border-purple-500/40 p-3 rounded-lg flex items-center gap-3">
+                    <div className="bg-purple-500/10 border border-purple-500/40 p-3 rounded-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                       <p className="text-xs text-white font-medium">
                         Slot <strong>{holdLocalTimeLabel || "--"}</strong> is
                         reserved.{" "}
@@ -2330,6 +2330,16 @@ export default function BookingForm({ isMobile }) {
                           Expires in {formatCountdown(holdCountdownMs)}.
                         </span>
                       </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          releaseHold(true);
+                          setStep(1);
+                        }}
+                        className="inline-flex items-center justify-center rounded-lg border border-purple-300/40 bg-purple-900/40 px-3 py-1.5 text-xs font-semibold text-purple-100 hover:bg-purple-800/60 transition"
+                      >
+                        Release Slot
+                      </button>
                     </div>
                   )}
 
