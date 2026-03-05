@@ -1,4 +1,5 @@
 import { createClient } from "@sanity/client";
+import { requireReferralSession } from "./auth";
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -14,10 +15,22 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { id, commissionPercent, discountPercent } = req.body;
+    const session = requireReferralSession(req, res);
+    if (!session) return;
+    const id = session.referralId;
+    const { commissionPercent, discountPercent } = req.body || {};
+    const nextCommission = Number(commissionPercent);
+    const nextDiscount = Number(discountPercent);
 
-    if (!id) {
-      return res.status(400).json({ ok: false, error: "Missing creator ID" });
+    if (
+      !Number.isFinite(nextCommission) ||
+      !Number.isFinite(nextDiscount) ||
+      nextCommission < 0 ||
+      nextDiscount < 0
+    ) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "Invalid commission/discount values" });
     }
 
     // Fetch current data for this creator
@@ -40,7 +53,7 @@ export default async function handler(req, res) {
     const bypassUnlock = creator.bypassUnlock === true;
 
     // Same validation as before
-    if (commissionPercent + discountPercent > max) {
+    if (nextCommission + nextDiscount > max) {
       return res.status(400).json({
         ok: false,
         error: `Total % cannot exceed ${max}`,
@@ -51,8 +64,8 @@ export default async function handler(req, res) {
 
     // Build patch
     let patch = client.patch(id).set({
-      currentCommissionPercent: commissionPercent,
-      currentDiscountPercent: discountPercent,
+      currentCommissionPercent: nextCommission,
+      currentDiscountPercent: nextDiscount,
     });
 
     if (unlocked && creator.isFirstTime) {

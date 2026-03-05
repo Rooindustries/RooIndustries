@@ -577,6 +577,7 @@ export default function BookingForm({ isMobile }) {
         if (new Date(parsed.expiresAt) > new Date()) {
           const normalizedHold = {
             holdId: parsed.holdId,
+            holdToken: parsed.holdToken,
             expiresAt: parsed.expiresAt,
             startTimeUTC: parsed.startTimeUTC,
             packageTitle: parsed.packageTitle,
@@ -1416,6 +1417,7 @@ export default function BookingForm({ isMobile }) {
     if (!myHold) return;
 
     const holdIdToDelete = myHold.holdId;
+    const holdTokenToDelete = myHold.holdToken;
 
     clearHoldState(resetStep);
 
@@ -1423,7 +1425,10 @@ export default function BookingForm({ isMobile }) {
       await fetch("/api/releaseHold", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ holdId: holdIdToDelete }),
+        body: JSON.stringify({
+          holdId: holdIdToDelete,
+          holdToken: holdTokenToDelete,
+        }),
       });
     } catch (err) {
       console.error("Failed to release hold on server:", err);
@@ -1443,6 +1448,7 @@ export default function BookingForm({ isMobile }) {
     setLockingSlot(true);
 
     let previousHoldId = null;
+    let previousHoldToken = null;
     const selectedSlotId = selectedSlot.utcStart.toISOString();
     const isSameAsExisting =
       myHold && myHold.startTimeUTC === selectedSlotId;
@@ -1457,6 +1463,7 @@ export default function BookingForm({ isMobile }) {
 
     if (myHold && !isSameAsExisting) {
       previousHoldId = myHold.holdId || null;
+      previousHoldToken = myHold.holdToken || null;
       await releaseHold(false);
     }
 
@@ -1465,6 +1472,7 @@ export default function BookingForm({ isMobile }) {
         startTimeUTC: selectedSlotId,
         packageTitle: selectedPackage.title,
         previousHoldId,
+        previousHoldToken,
       };
 
       const res = await fetch("/api/holdSlot", {
@@ -1487,6 +1495,7 @@ export default function BookingForm({ isMobile }) {
 
       const newHold = {
         holdId: data.holdId,
+        holdToken: data.holdToken,
         expiresAt: data.expiresAt,
         startTimeUTC: selectedSlotId,
         packageTitle: selectedPackage.title,
@@ -1579,6 +1588,7 @@ export default function BookingForm({ isMobile }) {
 
       // NEW: pass hold info to Payment -> createBooking
       slotHoldId: myHold?.holdId || null,
+      slotHoldToken: myHold?.holdToken || null,
       slotHoldExpiresAt: myHold?.expiresAt || null,
 
       ...(finalReferralCode ? { referralCode: finalReferralCode } : {}),

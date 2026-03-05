@@ -1,5 +1,6 @@
 import {createClient} from '@sanity/client';
 import crypto from 'crypto';
+import {requireSecret} from './auth';
 import {
   buildBalance,
   computeEarningsFromBookings,
@@ -25,11 +26,12 @@ const writeClient = createClient({
 const WEBHOOK_SECRET = process.env.SANITY_WEBHOOK_SECRET;
 
 function isValidSignature(body, signature) {
-  if (!WEBHOOK_SECRET) return true; // no secret configured = skip validation
+  if (!WEBHOOK_SECRET) return false;
   const hmac = crypto.createHmac('sha256', WEBHOOK_SECRET);
   hmac.update(typeof body === 'string' ? body : JSON.stringify(body));
   const digest = hmac.digest('hex');
-  return signature === digest;
+  if (!signature || signature.length !== digest.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(digest));
 }
 
 export default async function handler(req, res) {
@@ -37,9 +39,18 @@ export default async function handler(req, res) {
     return res.status(405).json({ok: false, error: 'Method not allowed'});
   }
 
-  // Validate webhook signature if secret is configured
+  if (
+    !requireSecret(
+      res,
+      'SANITY_WEBHOOK_SECRET',
+      'Webhook secret is required on this endpoint.'
+    )
+  ) {
+    return;
+  }
+
   const signature = req.headers['sanity-webhook-signature'] || '';
-  if (WEBHOOK_SECRET && !isValidSignature(req.body, signature)) {
+  if (!isValidSignature(req.body, signature)) {
     return res.status(401).json({ok: false, error: 'Invalid signature'});
   }
 
