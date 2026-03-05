@@ -55,8 +55,13 @@ const requiredChecks = [
 
 const optionalChecks = [
   {
-    keys: ["PAYPAL_CLIENT_ID", "REACT_APP_PAYPAL_CLIENT_ID"],
-    label: "PAYPAL_CLIENT_ID (or REACT_APP_PAYPAL_CLIENT_ID fallback)",
+    keys: [
+      "PAYPAL_CLIENT_ID",
+      "REACT_APP_PAYPAL_CLIENT_ID",
+      "NEXT_PUBLIC_PAYPAL_CLIENT_ID",
+    ],
+    label:
+      "PAYPAL_CLIENT_ID (or REACT_APP_PAYPAL_CLIENT_ID/NEXT_PUBLIC_PAYPAL_CLIENT_ID fallback)",
   },
   {
     keys: ["PAYPAL_CLIENT_SECRET"],

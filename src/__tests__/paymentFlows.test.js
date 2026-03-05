@@ -112,6 +112,18 @@ describe("payment flows", () => {
 
     const fetchCalls = [];
     global.fetch = jest.fn(async (url, options = {}) => {
+      if (url === "/api/payment/providers") {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            providers: {
+              razorpay: { enabled: true, mode: "live" },
+              paypal: { enabled: false, mode: "live" },
+            },
+          }),
+        };
+      }
       if (url === "/api/razorpay/createOrder") {
         const body = JSON.parse(options.body || "{}");
         fetchCalls.push({ url, body });
@@ -222,6 +234,18 @@ describe("payment flows", () => {
 
     const fetchCalls = [];
     global.fetch = jest.fn(async (url, options = {}) => {
+      if (url === "/api/payment/providers") {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            providers: {
+              razorpay: { enabled: true, mode: "live" },
+              paypal: { enabled: true, mode: "live" },
+            },
+          }),
+        };
+      }
       if (url === "/api/ref/createBooking") {
         const body = JSON.parse(options.body || "{}");
         fetchCalls.push({ url, body });
