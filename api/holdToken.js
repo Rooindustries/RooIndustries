@@ -3,6 +3,8 @@ import crypto from "crypto";
 const HOLD_TOKEN_SECRET =
   process.env.HOLD_TOKEN_SECRET ||
   process.env.REF_SESSION_SECRET ||
+  process.env.SESSION_SECRET ||
+  process.env.JWT_SECRET ||
   (process.env.NODE_ENV === "production" ? "" : "dev_hold_token_secret");
 
 const base64UrlEncode = (value) =>
@@ -16,7 +18,9 @@ const sign = (input) =>
 
 const assertSecret = () => {
   if (!HOLD_TOKEN_SECRET) {
-    throw new Error("HOLD_TOKEN_SECRET (or REF_SESSION_SECRET) is required");
+    throw new Error(
+      "HOLD_TOKEN_SECRET (or REF_SESSION_SECRET/SESSION_SECRET/JWT_SECRET) is required"
+    );
   }
 };
 
