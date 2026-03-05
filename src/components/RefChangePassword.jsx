@@ -1,16 +1,36 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 export default function RefChangePassword() {
   const nav = useNavigate();
-  const creatorId = localStorage.getItem("creatorId");
+  const [sessionChecked, setSessionChecked] = useState(false);
 
   const [pass1, setPass1] = useState("");
   const [pass2, setPass2] = useState("");
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
 
-  if (!creatorId) nav("/referrals/login");
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        const res = await fetch("/api/ref/getData");
+        const data = await res.json();
+        if (!data.ok) {
+          nav("/referrals/login");
+          return;
+        }
+      } catch (err) {
+        console.error("Failed to validate referral session:", err);
+        nav("/referrals/login");
+        return;
+      } finally {
+        setSessionChecked(true);
+      }
+    };
+    checkSession();
+  }, [nav]);
+
+  if (!sessionChecked) return null;
 
   function showToast(type, msg) {
     setToast({ type, msg });
@@ -27,12 +47,18 @@ export default function RefChangePassword() {
       const res = await fetch("/api/ref/hashPassword", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ creatorId, password: pass1 }),
+        body: JSON.stringify({ password: pass1 }),
       });
 
       const data = await res.json();
 
-      if (!data.ok) return showToast("error", "Failed to update password");
+      if (!data.ok) {
+        if (res.status === 401) {
+          nav("/referrals/login");
+          return;
+        }
+        return showToast("error", data.error || "Failed to update password");
+      }
 
       showToast("success", "Password updated!");
       setPass1("");

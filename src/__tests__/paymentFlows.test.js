@@ -106,6 +106,7 @@ describe("payment flows", () => {
       displayTime,
       localTimeZone: timeZone,
       slotHoldId: "hold_razorpay",
+      slotHoldToken: "hold_token_razorpay",
       slotHoldExpiresAt: "2099-01-05T06:00:00.000Z",
     };
 
@@ -215,6 +216,7 @@ describe("payment flows", () => {
       displayTime,
       localTimeZone: timeZone,
       slotHoldId: "hold_paypal",
+      slotHoldToken: "hold_token_paypal",
       slotHoldExpiresAt: "2099-01-05T06:00:00.000Z",
     };
 

@@ -108,6 +108,7 @@ describe("booking calendar UI", () => {
           json: async () => ({
             ok: true,
             holdId: "hold_ui_1",
+            holdToken: "hold_token_ui_1",
             expiresAt: "2099-01-05T06:00:00.000Z",
           }),
         };
