@@ -1,6 +1,8 @@
 import { Resend } from "resend";
 import { createClient } from "@sanity/client";
+import crypto from "crypto";
 import dotenv from "dotenv";
+import { verifyHoldToken } from "../holdToken";
 
 dotenv.config({ path: ".env.local" });
 
@@ -81,6 +83,103 @@ const formatClientTimeLabel = (utcDate, timeZone) =>
     hour: "numeric",
     minute: "2-digit",
   });
+
+const toMoney = (value) => {
+  const parsed = Number(
+    typeof value === "string" ? value.replace(/[^0-9.]/g, "") : value
+  );
+  if (!Number.isFinite(parsed)) return 0;
+  return +parsed.toFixed(2);
+};
+
+const clampPercent = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.min(100, Math.max(0, parsed));
+};
+
+const isProdLike = process.env.NODE_ENV === "production";
+
+const verifyRazorpaySignature = ({
+  orderId,
+  paymentId,
+  signature,
+  secret,
+}) => {
+  const payload = `${orderId}|${paymentId}`;
+  const expected = crypto
+    .createHmac("sha256", secret)
+    .update(payload)
+    .digest("hex");
+  return (
+    signature?.length === expected.length &&
+    crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
+  );
+};
+
+const getPayPalBaseUrl = () =>
+  process.env.PAYPAL_ENV === "live"
+    ? "https://api-m.paypal.com"
+    : "https://api-m.sandbox.paypal.com";
+
+const getPayPalToken = async () => {
+  const clientId = process.env.PAYPAL_CLIENT_ID || "";
+  const clientSecret = process.env.PAYPAL_CLIENT_SECRET || "";
+  if (!clientId || !clientSecret) return null;
+
+  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+  const response = await fetch(`${getPayPalBaseUrl()}/v1/oauth2/token`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${basic}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: "grant_type=client_credentials",
+  });
+  if (!response.ok) return null;
+  const data = await response.json();
+  return data?.access_token || null;
+};
+
+const verifyPayPalOrder = async ({ orderId, expectedAmount }) => {
+  const token = await getPayPalToken();
+  if (!token) return { ok: false, reason: "paypal_credentials_missing" };
+
+  const response = await fetch(
+    `${getPayPalBaseUrl()}/v2/checkout/orders/${encodeURIComponent(orderId)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    return { ok: false, reason: `paypal_lookup_failed_${response.status}` };
+  }
+
+  const details = await response.json();
+  const status = String(details?.status || "").toUpperCase();
+  if (status !== "COMPLETED") {
+    return { ok: false, reason: `paypal_status_${status || "unknown"}` };
+  }
+
+  const paidAmount =
+    toMoney(
+      details?.purchase_units?.[0]?.payments?.captures?.[0]?.amount?.value ||
+        details?.purchase_units?.[0]?.amount?.value ||
+        0
+    ) || 0;
+
+  if (Math.abs(paidAmount - expectedAmount) > 0.01) {
+    return { ok: false, reason: "paypal_amount_mismatch" };
+  }
+
+  return {
+    ok: true,
+    payerEmail: details?.payer?.email_address || "",
+  };
+};
 
 const emailHtml = ({
   logoUrl,
@@ -163,25 +262,19 @@ export default async function handler(req, res) {
       status = "pending",
       referralId,
       referralCode,
-      discountPercent = 0,
-      discountAmount = 0,
-      grossAmount = 0,
-      netAmount = 0,
-      commissionPercent = 0,
       paypalOrderId = "",
       payerEmail = "",
       razorpayOrderId = "",
       razorpayPaymentId = "",
+      razorpaySignature = "",
       originalOrderId = "",
       couponCode = "",
-      couponDiscountPercent = 0,
-      couponDiscountAmount = 0,
       localTimeZone,
       startTimeUTC,
       displayDate,
       displayTime,
       slotHoldId = "",
-      slotHoldExpiresAt = "",
+      slotHoldToken = "",
       paymentProvider = "",
     } = req.body || {};
     const isUpgrade = !!originalOrderId;
@@ -272,7 +365,31 @@ export default async function handler(req, res) {
       }
     }
 
-    const isPaidBooking = status === "captured" && paymentProvider !== "free";
+    if (paymentProvider === "paypal" && paypalOrderId) {
+      const existingByPaypal = await writeClient.fetch(
+        `*[_type == "booking" && paypalOrderId == $paypalOrderId][0]{_id}`,
+        { paypalOrderId }
+      );
+      if (existingByPaypal?._id) {
+        return res.status(200).json({
+          bookingId: existingByPaypal._id,
+          idempotent: true,
+        });
+      }
+    }
+
+    if (paymentProvider === "razorpay" && razorpayPaymentId) {
+      const existingByRazorpay = await writeClient.fetch(
+        `*[_type == "booking" && razorpayPaymentId == $razorpayPaymentId][0]{_id}`,
+        { razorpayPaymentId }
+      );
+      if (existingByRazorpay?._id) {
+        return res.status(200).json({
+          bookingId: existingByRazorpay._id,
+          idempotent: true,
+        });
+      }
+    }
 
     const utcDate = parseUtcDate(startTimeUTC);
     if (!utcDate) {
@@ -330,7 +447,7 @@ export default async function handler(req, res) {
           { date: bookingDate, time: bookingTime }
         );
 
-      if (!slotHoldId) {
+      if (!slotHoldId || !slotHoldToken) {
         return res
           .status(409)
           .json({ error: "Your slot reservation expired." });
@@ -369,6 +486,18 @@ export default async function handler(req, res) {
         });
       }
 
+      const validHoldToken = verifyHoldToken({
+        token: slotHoldToken,
+        holdId: slotHoldId,
+        startTimeUTC: holdUtcIso || normalizedStartTimeUTC,
+      });
+
+      if (!validHoldToken) {
+        return res.status(403).json({
+          error: "This slot reservation is not valid for your session.",
+        });
+      }
+
       const activeHold = await fetchActiveHold();
       if (activeHold && activeHold._id !== slotHoldId) {
         return res.status(409).json({
@@ -377,38 +506,242 @@ export default async function handler(req, res) {
       }
     }
 
-    let effectiveReferralId = referralId || null;
-    let effectiveReferralCode = referralCode || "";
-    let effectiveDiscountPercent = discountPercent || 0;
-    let effectiveDiscountAmount = discountAmount || 0;
-    let effectiveGrossAmount = grossAmount || 0;
-    let effectiveNetAmount = netAmount || 0;
-    let effectiveCommissionPercent = commissionPercent || 0;
+    const normalizedCouponCode = String(couponCode || "")
+      .trim()
+      .toLowerCase();
+    const normalizedReferralCode = String(referralCode || "")
+      .trim()
+      .toLowerCase();
 
-    if (!effectiveGrossAmount) {
-      const numericPrice =
-        parseFloat(String(packagePrice || "").replace(/[^0-9.]/g, "")) || 0;
-      effectiveGrossAmount = numericPrice;
+    let effectiveGrossAmount = 0;
+    if (!isUpgrade) {
+      const packageDoc = await writeClient.fetch(
+        `*[_type == "package" && title == $title][0]{price}`,
+        { title: packageTitle }
+      );
+      effectiveGrossAmount = toMoney(packageDoc?.price || packagePrice);
+    } else {
+      const normalizedUpgradeTitle = String(packageTitle || "")
+        .replace(/\s*\(upgrade\)\s*$/i, "")
+        .trim();
+
+      const originalBooking = await writeClient.fetch(
+        `*[_type == "booking" && _id == $id][0]{
+          _id,
+          status,
+          netAmount,
+          grossAmount,
+          packagePrice
+        }`,
+        { id: originalOrderId }
+      );
+
+      if (!originalBooking?._id) {
+        return res.status(400).json({
+          error: "Original booking could not be verified for this upgrade.",
+        });
+      }
+
+      const targetPackage = await writeClient.fetch(
+        `*[_type == "package" && title == $title][0]{price}`,
+        { title: normalizedUpgradeTitle }
+      );
+
+      const targetPrice = toMoney(targetPackage?.price || packagePrice);
+      const alreadyPaid = toMoney(
+        originalBooking.netAmount ||
+          originalBooking.grossAmount ||
+          originalBooking.packagePrice
+      );
+
+      effectiveGrossAmount = Math.max(0, toMoney(targetPrice - alreadyPaid));
     }
 
-    if (paymentProvider === "free") {
-      effectiveDiscountPercent = 100;
-      effectiveDiscountAmount = effectiveGrossAmount;
-      effectiveNetAmount = 0;
-    } else {
-      if (!effectiveNetAmount) {
-        effectiveNetAmount = +(
-          effectiveGrossAmount - (effectiveDiscountAmount || 0)
-        ).toFixed(2);
+    if (!effectiveGrossAmount || effectiveGrossAmount <= 0) {
+      return res.status(400).json({
+        error: "Unable to resolve package pricing on server.",
+      });
+    }
+
+    let referralDoc = null;
+    if (referralId) {
+      referralDoc = await writeClient.fetch(
+        `*[_type == "referral" && _id == $id][0]{
+          _id,
+          slug,
+          currentCommissionPercent,
+          currentDiscountPercent
+        }`,
+        { id: referralId }
+      );
+    }
+
+    if (!referralDoc && normalizedReferralCode) {
+      referralDoc = await writeClient.fetch(
+        `*[_type == "referral" && slug.current == $code][0]{
+          _id,
+          slug,
+          currentCommissionPercent,
+          currentDiscountPercent
+        }`,
+        { code: normalizedReferralCode }
+      );
+    }
+
+    const effectiveReferralId = referralDoc?._id || null;
+    const effectiveReferralCode =
+      referralDoc?.slug?.current || normalizedReferralCode || "";
+    const referralDiscountPercent = clampPercent(
+      referralDoc?.currentDiscountPercent || 0
+    );
+    const effectiveCommissionPercent = clampPercent(
+      referralDoc?.currentCommissionPercent || 0
+    );
+
+    let couponDoc = null;
+    if (normalizedCouponCode) {
+      couponDoc = await writeClient.fetch(
+        `*[_type == "coupon" && lower(code) == $code][0]{
+          _id,
+          code,
+          isActive,
+          timesUsed,
+          maxUses,
+          validFrom,
+          validTo,
+          canCombineWithReferral,
+          discountPercent
+        }`,
+        { code: normalizedCouponCode }
+      );
+
+      if (!couponDoc) {
+        return res.status(400).json({ error: "Coupon is invalid." });
+      }
+
+      const now = new Date();
+      const used = couponDoc.timesUsed ?? 0;
+      const max = couponDoc.maxUses;
+
+      if (
+        couponDoc.isActive === false ||
+        (couponDoc.validFrom && new Date(couponDoc.validFrom) > now) ||
+        (couponDoc.validTo && new Date(couponDoc.validTo) < now) ||
+        (typeof max === "number" && max > 0 && used >= max)
+      ) {
+        return res.status(400).json({
+          error: "This coupon is inactive or expired.",
+        });
       }
     }
 
-    const commissionBase = effectiveNetAmount || effectiveGrossAmount || 0;
+    const couponDiscountPercent = clampPercent(couponDoc?.discountPercent || 0);
+    const canCombineWithReferral = couponDoc?.canCombineWithReferral === true;
 
-    const commissionAmount = +(
-      commissionBase *
-      ((effectiveCommissionPercent || 0) / 100)
-    ).toFixed(2);
+    const referralDiscountAmount = toMoney(
+      effectiveGrossAmount * (referralDiscountPercent / 100)
+    );
+    const couponDiscountAmount = toMoney(
+      effectiveGrossAmount * (couponDiscountPercent / 100)
+    );
+
+    let effectiveDiscountAmount = 0;
+    if (couponDoc && referralDoc) {
+      effectiveDiscountAmount = canCombineWithReferral
+        ? toMoney(referralDiscountAmount + couponDiscountAmount)
+        : Math.max(referralDiscountAmount, couponDiscountAmount);
+    } else if (couponDoc) {
+      effectiveDiscountAmount = couponDiscountAmount;
+    } else {
+      effectiveDiscountAmount = referralDiscountAmount;
+    }
+
+    effectiveDiscountAmount = Math.min(effectiveGrossAmount, effectiveDiscountAmount);
+
+    if (paymentProvider === "free") {
+      effectiveDiscountAmount = effectiveGrossAmount;
+    }
+
+    const effectiveNetAmount =
+      paymentProvider === "free"
+        ? 0
+        : toMoney(effectiveGrossAmount - effectiveDiscountAmount);
+
+    if (paymentProvider !== "free" && effectiveNetAmount <= 0) {
+      return res.status(400).json({
+        error: "Payable amount resolved to zero. Use the free booking flow.",
+      });
+    }
+
+    const effectiveDiscountPercent =
+      effectiveGrossAmount > 0
+        ? toMoney((effectiveDiscountAmount / effectiveGrossAmount) * 100)
+        : 0;
+
+    const commissionBase = effectiveNetAmount || effectiveGrossAmount || 0;
+    const commissionAmount = toMoney(
+      commissionBase * (effectiveCommissionPercent / 100)
+    );
+
+    let verifiedPayerEmail = payerEmail;
+
+    if (paymentProvider === "razorpay") {
+      if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+        return res.status(400).json({
+          error: "Missing Razorpay verification fields.",
+        });
+      }
+
+      const razorpaySecret = process.env.RAZORPAY_KEY_SECRET || "";
+      if (!razorpaySecret && isProdLike) {
+        return res.status(500).json({
+          error: "Server misconfigured: missing Razorpay secret.",
+        });
+      }
+
+      if (razorpaySecret) {
+        const validSignature = verifyRazorpaySignature({
+          orderId: razorpayOrderId,
+          paymentId: razorpayPaymentId,
+          signature: razorpaySignature,
+          secret: razorpaySecret,
+        });
+        if (!validSignature) {
+          return res.status(400).json({ error: "Invalid Razorpay signature." });
+        }
+      }
+    }
+
+    if (paymentProvider === "paypal") {
+      if (!paypalOrderId) {
+        return res.status(400).json({
+          error: "Missing PayPal order id for captured payment.",
+        });
+      }
+
+      const hasPayPalCreds =
+        !!process.env.PAYPAL_CLIENT_ID && !!process.env.PAYPAL_CLIENT_SECRET;
+      if (!hasPayPalCreds && isProdLike) {
+        return res.status(500).json({
+          error: "Server misconfigured: missing PayPal API credentials.",
+        });
+      }
+
+      if (hasPayPalCreds) {
+        const paypalVerification = await verifyPayPalOrder({
+          orderId: paypalOrderId,
+          expectedAmount: effectiveNetAmount,
+        });
+        if (!paypalVerification.ok) {
+          return res.status(400).json({
+            error: `PayPal verification failed (${paypalVerification.reason}).`,
+          });
+        }
+        if (paypalVerification.payerEmail) {
+          verifiedPayerEmail = paypalVerification.payerEmail;
+        }
+      }
+    }
 
     const doc = await writeClient.create({
       _type: "booking",
@@ -424,7 +757,7 @@ export default async function handler(req, res) {
       status,
       paymentProvider,
       paypalOrderId,
-      payerEmail,
+      payerEmail: verifiedPayerEmail,
       razorpayOrderId,
       razorpayPaymentId,
       referralCode: effectiveReferralCode,

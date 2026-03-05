@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 
 export default function RefDashboard() {
   const nav = useNavigate();
-  const creatorId = localStorage.getItem("creatorId");
 
   const [creator, setCreator] = useState(null);
   const [commission, setCommission] = useState(0);
@@ -26,13 +25,11 @@ export default function RefDashboard() {
   `;
 
   useEffect(() => {
-    if (!creatorId) return nav("/referrals/login");
-
-    const loadPayouts = async (refId) => {
+    const loadPayouts = async () => {
       try {
         setPayoutLoading(true);
         setPayoutError(null);
-        const res = await fetch(`/api/ref/payouts?id=${refId}`);
+        const res = await fetch("/api/ref/payouts");
         const data = await res.json();
 
         if (!data.ok) {
@@ -53,7 +50,7 @@ export default function RefDashboard() {
 
     async function load() {
       try {
-        const res = await fetch(`/api/ref/getData?id=${creatorId}`);
+        const res = await fetch("/api/ref/getData");
         const data = await res.json();
 
         if (!data.ok) {
@@ -77,7 +74,7 @@ export default function RefDashboard() {
 
         setCreator(normalized);
         setMax(normalized.maxCommissionPercent ?? 15);
-        loadPayouts(creatorId);
+        loadPayouts();
 
         const bypass = normalized.bypassUnlock === true;
         const isUnlocked = successfulReferrals >= 5 || bypass;
@@ -103,7 +100,7 @@ export default function RefDashboard() {
     }
 
     load();
-  }, [creatorId, nav]);
+  }, [nav]);
 
   function showToast(type, message) {
     setToast({ type, message });
@@ -209,7 +206,6 @@ export default function RefDashboard() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: creatorId,
           commissionPercent: commission,
           discountPercent: discount,
         }),
@@ -234,7 +230,11 @@ export default function RefDashboard() {
 
   // referral code + link
   const referralCode = creator.slug?.current || "";
-  const referralLink = `${window.location.origin}/?ref=${encodeURIComponent(
+  const referralOrigin =
+    typeof window !== "undefined"
+      ? window.location.origin
+      : "https://www.rooindustries.com";
+  const referralLink = `${referralOrigin}/?ref=${encodeURIComponent(
     referralCode
   )}#packages`;
 
@@ -498,9 +498,15 @@ export default function RefDashboard() {
 
       {/* LOGOUT */}
       <button
-        onClick={() => {
-          localStorage.removeItem("creatorId");
-          nav("/referrals/login");
+        onClick={async () => {
+          try {
+            await fetch("/api/ref/logout", { method: "POST" });
+          } catch (err) {
+            console.error("Failed to clear referral session cookie:", err);
+          } finally {
+            localStorage.removeItem("creatorId");
+            nav("/referrals/login");
+          }
         }}
         className="mt-3 w-full py-3 bg-[#0a1220] border border-red-700/30 rounded-xl text-red-300 text-center font-semibold hover:bg-red-900/30 hover:border-red-500/40 transition-all shadow-[0_0_10px_rgba(239,68,68,0.25)] hover:shadow-[0_0_20px_rgba(239,68,68,0.45)]"
       >

@@ -1,4 +1,5 @@
 import { createClient } from "@sanity/client";
+import { requireReferralSession } from "./auth";
 
 const readClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -14,11 +15,9 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { id } = req.query;
-
-    if (!id) {
-      return res.status(400).json({ ok: false, error: "Missing creator id" });
-    }
+    const session = requireReferralSession(req, res);
+    if (!session) return;
+    const id = session.referralId;
 
     const referral = await readClient.fetch(
       `*[_type == "referral" && _id == $id][0]{

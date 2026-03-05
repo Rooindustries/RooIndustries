@@ -258,6 +258,7 @@ const createPaidBooking = async ({
   timeZone,
   paymentProvider = "paypal",
   holdId,
+  holdToken,
   holdExpiresAt,
 }) => {
   const utcDate = new Date(startTimeUTC);
@@ -279,6 +280,7 @@ const createPaidBooking = async ({
     displayDate,
     displayTime,
     slotHoldId: holdId || null,
+    slotHoldToken: holdToken || null,
     slotHoldExpiresAt: holdExpiresAt || null,
   };
 
@@ -290,6 +292,7 @@ const createPaidBooking = async ({
   if (paymentProvider === "razorpay") {
     payload.razorpayOrderId = "razorpay_order_1";
     payload.razorpayPaymentId = "razorpay_payment_1";
+    payload.razorpaySignature = "test_signature";
   }
 
   const req = createReq(payload);
@@ -304,6 +307,9 @@ beforeAll(() => {
   process.env.FROM_EMAIL = "booking@roo.test";
   process.env.OWNER_EMAIL = OWNER_EMAIL;
   process.env.SITE_NAME = "Roo Industries";
+  process.env.RAZORPAY_KEY_SECRET = "";
+  process.env.PAYPAL_CLIENT_ID = "";
+  process.env.PAYPAL_CLIENT_SECRET = "";
   const load = (path) => {
     const mod = require(path);
     return mod && mod.default ? mod.default : mod;
@@ -367,6 +373,7 @@ describe("booking reservation API", () => {
       timeZone: "America/Los_Angeles",
       paymentProvider: "razorpay",
       holdId: first.body.holdId,
+      holdToken: first.body.holdToken,
       holdExpiresAt: first.body.expiresAt,
     });
 
@@ -386,6 +393,7 @@ describe("booking reservation API", () => {
       timeZone: "America/Los_Angeles",
       paymentProvider: "paypal",
       holdId: hold.body.holdId,
+      holdToken: hold.body.holdToken,
       holdExpiresAt: hold.body.expiresAt,
     });
 
@@ -441,7 +449,9 @@ describe("booking reservation API", () => {
         displayDate: formatClientDate(utcDate, "America/Los_Angeles"),
         displayTime: formatClientTime(utcDate, "America/Los_Angeles"),
         slotHoldId: hold.body.holdId,
+        slotHoldToken: hold.body.holdToken,
         slotHoldExpiresAt: hold.body.expiresAt,
+        razorpaySignature: "test_signature",
       }),
       res
     );
@@ -452,7 +462,7 @@ describe("booking reservation API", () => {
 
     const releaseRes = createRes();
     await releaseHold(
-      createReq({ holdId: hold.body.holdId }),
+      createReq({ holdId: hold.body.holdId, holdToken: hold.body.holdToken }),
       releaseRes
     );
 
@@ -472,6 +482,7 @@ describe("booking reservation API", () => {
       timeZone: "America/Los_Angeles",
       paymentProvider: "paypal",
       holdId: hold.body.holdId,
+      holdToken: hold.body.holdToken,
       holdExpiresAt: hold.body.expiresAt,
     });
 
@@ -484,10 +495,12 @@ describe("booking reservation API", () => {
       timeZone: "America/Los_Angeles",
       paymentProvider: "paypal",
       holdId: hold.body.holdId,
+      holdToken: hold.body.holdToken,
       holdExpiresAt: hold.body.expiresAt,
     });
 
-    expect(duplicate.res.statusCode).toBe(409);
+    expect(duplicate.res.statusCode).toBe(200);
+    expect(duplicate.res.body.idempotent).toBe(true);
     expect(store.bookings).toHaveLength(1);
     expect(mockSendEmail).toHaveBeenCalledTimes(2);
   });
@@ -535,6 +548,7 @@ describe("email time zone separation and midnight handling", () => {
       timeZone,
       paymentProvider: "razorpay",
       holdId: hold.body.holdId,
+      holdToken: hold.body.holdToken,
       holdExpiresAt: hold.body.expiresAt,
     });
 
