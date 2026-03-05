@@ -228,17 +228,18 @@ export default function Navbar() {
   const linkBase =
     "px-3 sm:px-5 py-2 rounded-full text-base font-medium transition border border-white/10 hover:border-cyan-300/30";
   const linkIdle = "text-white/85 hover:text-cyan-200";
-  const linkActive = "bg-cyan-400 text-black border-cyan-400";
+  const linkActive =
+    "bg-cyan-300/24 text-cyan-100 border-cyan-200/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]";
   const dropdownItemBase =
     "block w-full text-left px-4 py-3 text-sm transition first:rounded-t-xl last:rounded-b-xl";
   const dropdownItemIdle = "text-white/85 hover:text-cyan-200 hover:bg-white/5";
-  const dropdownItemActive = "bg-cyan-400 text-black";
+  const dropdownItemActive = "bg-cyan-300/24 text-cyan-100";
   const mobileLinkBase = "px-5 py-4 text-base transition";
   const mobileLinkIdle = "text-white/85 hover:text-cyan-200";
-  const mobileLinkActive = "bg-cyan-400 text-black";
+  const mobileLinkActive = "bg-cyan-300/24 text-cyan-100";
   const mobileSubLinkBase = "px-9 py-3 text-sm transition";
   const mobileSubLinkIdle = "text-white/85 hover:text-cyan-200";
-  const mobileSubLinkActive = "bg-cyan-400 text-black";
+  const mobileSubLinkActive = "bg-cyan-300/24 text-cyan-100";
 
   const smallLogoSizeClassName = "h-14 w-14";
   const smallLogoStaticClassName = `${smallLogoSizeClassName} object-contain drop-shadow-[0_0_18px_rgba(34,211,238,0.25)]`;
@@ -248,20 +249,22 @@ export default function Navbar() {
     <header
       ref={headerRef}
       className={`fixed top-0 left-0 right-0 z-50 border-b transition-all duration-300 ${
-        scrolled ? "border-cyan-300/10" : "border-white/5"
+        scrolled ? "border-cyan-300/14" : "border-white/8"
       } ${
         scrolled
-          ? "bg-gradient-to-b from-[#07162d]/82 to-[#061226]/62 shadow-[0_10px_30px_rgba(0,0,0,0.25)]"
-          : "bg-gradient-to-b from-[#07162d]/68 to-[#061226]/52"
+          ? "bg-gradient-to-b from-[#04172d]/80 to-[#031325]/64 shadow-[0_10px_30px_rgba(0,0,0,0.28)]"
+          : "bg-gradient-to-b from-[#04172d]/72 to-[#031325]/56"
       }`}
       style={{
-        WebkitBackdropFilter: "saturate(170%) blur(14px)",
-        backdropFilter: "saturate(170%) blur(14px)",
+        WebkitBackdropFilter: "saturate(135%) blur(14px)",
+        backdropFilter: "saturate(135%) blur(14px)",
       }}
     >
       <div
         className={`pointer-events-none absolute inset-0 z-0 ${
-          scrolled ? "bg-[#061226]/58" : "bg-[#07162d]/44"
+          scrolled
+            ? "bg-[linear-gradient(to_bottom,rgba(34,211,238,0.07),rgba(4,23,45,0.72))]"
+            : "bg-[linear-gradient(to_bottom,rgba(34,211,238,0.09),rgba(4,23,45,0.56))]"
         }`}
       />
 
@@ -276,7 +279,7 @@ export default function Navbar() {
       />
 
       {/* cyan glow line */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-cyan-300/50 to-transparent z-0" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-cyan-300/35 to-transparent z-0" />
 
       <div className="relative z-10">
         <DiscordGuideBanner hidden={bannerHidden} />
