@@ -9,6 +9,10 @@
 
 # production
 /build
+/.next
+/.lighthouseci
+/test-results
+/playwright-report
 
 # misc
 .env*

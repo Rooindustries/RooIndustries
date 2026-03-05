@@ -4,6 +4,12 @@ import { client } from "../sanityClient";
 // Category label is now just the text from Sanity, or "Tool" if empty
 const categoryLabel = (cat) => cat || "Tool";
 
+const optimizeIconUrl = (url) => {
+  if (!url) return "";
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}auto=format&fit=max&w=64&h=64`;
+};
+
 export default function Tools() {
   const [tools, setTools] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -32,7 +38,11 @@ export default function Tools() {
           }`
         );
         if (!cancelled) {
-          setTools(data || []);
+          const normalizedTools = (data || []).map((tool) => ({
+            ...tool,
+            iconUrl: optimizeIconUrl(tool?.iconUrl),
+          }));
+          setTools(normalizedTools);
           setLoading(false);
         }
       } catch (err) {
@@ -102,8 +112,23 @@ export default function Tools() {
     closeDownloadModal();
   };
 
+  const placeholderCards = 9;
+  const toolItems = loading
+    ? Array.from({ length: placeholderCards }, (_, index) => ({
+        _id: `placeholder-${index}`,
+        __placeholder: true,
+      }))
+    : tools;
+
   return (
-    <section className="relative z-10 pt-28 pb-24 px-6 max-w-6xl mx-auto text-white">
+    <section
+      className="relative z-10 pt-28 pb-24 px-6 max-w-6xl mx-auto text-white"
+      style={{
+        width: "100%",
+        maxWidth: "1152px",
+        ...(loading ? { minHeight: "1840px" } : {}),
+      }}
+    >
       {/* Heading */}
       <header className="text-center mb-10">
         <p className="text-xs tracking-[0.3em] uppercase text-sky-400/80 mb-2">
@@ -119,15 +144,29 @@ export default function Tools() {
         </p>
       </header>
 
-      {loading ? (
-        <div className="mt-16 text-center text-sky-300">Loading tools…</div>
-      ) : tools.length === 0 ? (
+      {!loading && tools.length === 0 ? (
         <div className="mt-16 text-center text-slate-300">
           No tools configured yet. Add some in Sanity Studio.
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
-          {tools.map((tool) => {
+          {toolItems.map((tool) => {
+            if (tool.__placeholder) {
+              return (
+                <article
+                  key={tool._id}
+                  className="group relative rounded-2xl border border-sky-800/40 bg-[#020617]/80 overflow-hidden p-6"
+                  aria-hidden="true"
+                >
+                  <div className="h-5 w-24 rounded bg-slate-700/60 animate-pulse" />
+                  <div className="mt-4 h-6 w-3/4 rounded bg-slate-700/60 animate-pulse" />
+                  <div className="mt-3 h-4 w-full rounded bg-slate-700/50 animate-pulse" />
+                  <div className="mt-2 h-4 w-5/6 rounded bg-slate-700/50 animate-pulse" />
+                  <div className="mt-8 h-10 w-full rounded-xl bg-slate-700/60 animate-pulse" />
+                </article>
+              );
+            }
+
             const {
               _id,
               title,
