@@ -248,9 +248,7 @@ export default function Navbar() {
   return (
     <header
       ref={headerRef}
-      className={`fixed top-0 left-0 right-0 z-50 border-b transition-all duration-300 ${
-        scrolled ? "border-cyan-300/14" : "border-white/8"
-      } ${
+      className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
         scrolled
           ? "bg-gradient-to-b from-[#04172d]/80 to-[#031325]/64 shadow-[0_10px_30px_rgba(0,0,0,0.28)]"
           : "bg-gradient-to-b from-[#04172d]/72 to-[#031325]/56"
@@ -270,16 +268,13 @@ export default function Navbar() {
 
       {/* subtle grid overlay */}
       <div
-        className="pointer-events-none absolute inset-0 opacity-[0.14] z-0"
+        className="pointer-events-none absolute inset-0 opacity-[0.08] z-0"
         style={{
           backgroundImage:
             "linear-gradient(to right, rgba(255,255,255,0.08) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.06) 1px, transparent 1px)",
           backgroundSize: "80px 80px",
         }}
       />
-
-      {/* cyan glow line */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-cyan-300/35 to-transparent z-0" />
 
       <div className="relative z-10">
         <DiscordGuideBanner hidden={bannerHidden} />
