@@ -1,6 +1,11 @@
-const isProdBuild =
-  process.env.VERCEL_ENV === "production" ||
-  (process.env.NODE_ENV === "production" && process.env.CI === "true");
+const vercelEnv = (process.env.VERCEL_ENV || "").trim().toLowerCase();
+const hasExplicitVercelEnv = vercelEnv.length > 0;
+
+// Vercel previews typically run with NODE_ENV=production.
+// Only hard-block when VERCEL_ENV explicitly says production.
+const isProdBuild = hasExplicitVercelEnv
+  ? vercelEnv === "production"
+  : process.env.NODE_ENV === "production" && process.env.CI === "true";
 
 const hasAny = (keys = []) => keys.some((key) => !!process.env[key]);
 
