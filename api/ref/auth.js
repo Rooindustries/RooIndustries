@@ -5,8 +5,13 @@ export const REF_SESSION_COOKIE = "ref_session";
 const REF_SESSION_SECRET =
   process.env.REF_SESSION_SECRET ||
   process.env.SESSION_SECRET ||
+  process.env.JWT_SECRET ||
   (process.env.NODE_ENV === "production" ? "" : "dev_ref_session_secret");
-const ADMIN_KEY = process.env.REF_ADMIN_KEY || process.env.REFERRAL_ADMIN_KEY;
+const ADMIN_KEY =
+  process.env.REF_ADMIN_KEY ||
+  process.env.REFERRAL_ADMIN_KEY ||
+  process.env.CRON_SECRET ||
+  "";
 
 const SESSION_AGE_SECONDS = {
   short: 60 * 60 * 12,
@@ -150,7 +155,7 @@ export const requireAdminKey = (req, res) => {
   if (!ADMIN_KEY) {
     res.status(500).json({
       ok: false,
-      error: "Server misconfigured: referral admin key is missing.",
+      error: "Access is temporarily unavailable.",
     });
     return false;
   }
@@ -161,7 +166,7 @@ export const requireAdminKey = (req, res) => {
   const provided = headerKey || bodyKey || queryKey;
 
   if (!provided || provided !== ADMIN_KEY) {
-    res.status(403).json({ ok: false, error: "Invalid admin key" });
+    res.status(403).json({ ok: false, error: "Unauthorized request." });
     return false;
   }
 
@@ -169,11 +174,18 @@ export const requireAdminKey = (req, res) => {
 };
 
 export const requireSecret = (res, secretName, errorMessage) => {
-  if (process.env[secretName]) return true;
+  const keys = Array.isArray(secretName) ? secretName : [secretName];
+  const hasSecret = keys.some((key) => !!process.env[key]);
+  if (hasSecret) return true;
+
+  const label = Array.isArray(secretName)
+    ? secretName.filter(Boolean).join(" or ")
+    : secretName;
+
   res.status(500).json({
     ok: false,
     error:
-      errorMessage || `Server misconfigured: missing required secret ${secretName}.`,
+      errorMessage || `Server misconfigured: missing required secret ${label}.`,
   });
   return false;
 };
