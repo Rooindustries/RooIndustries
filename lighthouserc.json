@@ -1,0 +1,28 @@
+{
+  "ci": {
+    "collect": {
+      "startServerCommand": "npm run start -- --port 3000",
+      "startServerReadyPattern": "Ready",
+      "numberOfRuns": 2,
+      "settings": {
+        "preset": "desktop",
+        "formFactor": "desktop",
+        "throttlingMethod": "provided"
+      },
+      "url": [
+        "http://127.0.0.1:3000/",
+        "http://127.0.0.1:3000/reviews",
+        "http://127.0.0.1:3000/tools"
+      ]
+    },
+    "assert": {
+      "assertions": {
+        "largest-contentful-paint": ["error", { "maxNumericValue": 2500 }],
+        "cumulative-layout-shift": ["error", { "maxNumericValue": 0.1 }],
+        "max-potential-fid": ["error", { "maxNumericValue": 200 }],
+        "interactive": ["error", { "maxNumericValue": 4000 }],
+        "total-byte-weight": ["error", { "maxNumericValue": 800000 }]
+      }
+    }
+  }
+}

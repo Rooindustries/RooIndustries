@@ -2,10 +2,14 @@ const fs = require("fs");
 const path = require("path");
 
 const siteUrl = (process.env.SITE_URL ||
+  process.env.NEXT_PUBLIC_SITE_URL ||
   process.env.REACT_APP_SITE_URL ||
   "https://www.rooindustries.com").replace(/\/$/, "");
 
-const vercelEnv = process.env.VERCEL_ENV || process.env.REACT_APP_VERCEL_ENV;
+const vercelEnv =
+  process.env.VERCEL_ENV ||
+  process.env.NEXT_PUBLIC_VERCEL_ENV ||
+  process.env.REACT_APP_VERCEL_ENV;
 const nodeEnv = process.env.NODE_ENV;
 const isNonProdEnv =
   vercelEnv && vercelEnv !== "production"

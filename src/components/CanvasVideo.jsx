@@ -1,6 +1,7 @@
 import React, { useRef, useEffect } from "react";
 
 const CanvasVideo = ({ src, poster, className, onError, alt }) => {
+  const wrapperRef = useRef(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
 
@@ -11,6 +12,7 @@ const CanvasVideo = ({ src, poster, className, onError, alt }) => {
     const ctx = canvas.getContext("2d", { alpha: true });
     if (!ctx) return;
     let animationFrameId;
+    let isVisible = true;
     let posterImage = null;
     let posterReady = false;
     let posterDrawn = false;
@@ -42,7 +44,19 @@ const CanvasVideo = ({ src, poster, className, onError, alt }) => {
       };
     }
 
+    const stopLoop = () => {
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+    };
+
     const render = () => {
+      if (document.hidden || !isVisible) {
+        stopLoop();
+        return;
+      }
+
       if (video.readyState >= 2) {
         if (
           canvas.width !== video.videoWidth ||
@@ -61,24 +75,57 @@ const CanvasVideo = ({ src, poster, className, onError, alt }) => {
       animationFrameId = requestAnimationFrame(render);
     };
 
-    const startPlay = () => {
-      video.play().catch(() => {});
+    const startLoop = () => {
+      if (animationFrameId || document.hidden || !isVisible) return;
+      animationFrameId = requestAnimationFrame(render);
     };
 
+    const startPlay = () => {
+      video.play().catch(() => {});
+      startLoop();
+    };
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        stopLoop();
+        return;
+      }
+      startLoop();
+    };
+
+    let observer = null;
+    if (typeof IntersectionObserver === "function" && wrapperRef.current) {
+      observer = new IntersectionObserver(
+        (entries) => {
+          isVisible = entries[0]?.isIntersecting ?? true;
+          if (isVisible) {
+            startLoop();
+          } else {
+            stopLoop();
+          }
+        },
+        { rootMargin: "180px 0px" }
+      );
+      observer.observe(wrapperRef.current);
+    }
+
     video.addEventListener("loadeddata", startPlay);
-    render();
+    document.addEventListener("visibilitychange", handleVisibility);
+    startLoop();
 
     return () => {
-      cancelAnimationFrame(animationFrameId);
+      stopLoop();
       video.removeEventListener("loadeddata", startPlay);
+      document.removeEventListener("visibilitychange", handleVisibility);
       if (posterImage) {
         posterImage.onload = null;
       }
+      if (observer) observer.disconnect();
     };
   }, [poster]);
 
   return (
-    <div style={{ position: "relative", display: "inline-block" }}>
+    <div ref={wrapperRef} style={{ position: "relative", display: "inline-block" }}>
       {poster && alt ? (
         <img
           src={poster}
