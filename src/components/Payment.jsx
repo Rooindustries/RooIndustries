@@ -546,7 +546,7 @@ export default function Payment({ hideFooter = false }) {
       }
 
       setPayingRzp(true);
-      showBanner("info", "Opening Razorpay checkout...");
+      showBanner("info", "Opening secure checkout...");
 
       const orderRes = await fetch("/api/razorpay/createOrder", {
         method: "POST",
@@ -571,8 +571,7 @@ export default function Payment({ hideFooter = false }) {
         console.error("Razorpay order error:", orderData);
         showBanner(
           "error",
-          orderData.message ||
-            "Couldn't start the payment. Please try again or use PayPal."
+          orderData.message || "Couldn't start the payment. Please try again."
         );
         return;
       }
@@ -610,7 +609,7 @@ export default function Payment({ hideFooter = false }) {
               console.error("Razorpay verify failed:", verifyData);
               showBanner(
                 "error",
-                "Payment verification failed. Please contact support or try another method."
+                "Payment verification failed. Please contact support."
               );
               return;
             }
@@ -681,7 +680,7 @@ export default function Payment({ hideFooter = false }) {
       console.error("Razorpay error:", err);
       showBanner(
         "error",
-        "Payment could not be processed. Please try again or use PayPal."
+        "Payment could not be processed. Please try again."
       );
     } finally {
       setPayingRzp(false);
@@ -931,7 +930,7 @@ export default function Payment({ hideFooter = false }) {
           <p className="text-slate-400 text-sm mt-1">
             {isFree
               ? "This booking is fully discounted. Confirm below to finalize it."
-              : "Secure payment via Razorpay or PayPal"}
+              : "Secure online payment checkout"}
           </p>
 
           {/* FREE BOOKING MODE (100% discount) */}
@@ -959,10 +958,10 @@ export default function Payment({ hideFooter = false }) {
               <div className="mt-6 flex items-center justify-between gap-4 border border-sky-800/30 bg-[#0c162a]/80 rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(14,165,233,0.15)]">
                 <div>
                   <p className="text-slate-300 text-sm font-medium">
-                    Pay with Razorpay
+                    Primary checkout
                   </p>
                   <p className="text-slate-400 text-xs">
-                    Cards / local methods
+                    Cards and local methods
                   </p>
                 </div>
                 <button
@@ -970,7 +969,7 @@ export default function Payment({ hideFooter = false }) {
                   disabled={!rzpReady || payingRzp}
                   className="glow-button px-4 py-2 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60"
                 >
-                  {payingRzp ? "Processing..." : "Pay with Razorpay"}
+                  {payingRzp ? "Processing..." : "Pay Securely"}
                   <span className="glow-line glow-line-top" />
                   <span className="glow-line glow-line-right" />
                   <span className="glow-line glow-line-bottom" />
@@ -984,7 +983,7 @@ export default function Payment({ hideFooter = false }) {
                   {/* SEO: add descriptive alt text and intrinsic size for the payment logo. */}
                   <img
                     src="https://www.paypalobjects.com/webstatic/mktg/Logo/pp-logo-100px.png"
-                    alt="PayPal payment logo"
+                    alt="Secure payment provider logo"
                     width={100}
                     height={26}
                     decoding="async"
@@ -1090,14 +1089,14 @@ export default function Payment({ hideFooter = false }) {
                           console.error(err);
                           showBanner(
                             "error",
-                            "PayPal could not process your payment. Please try again."
+                            "This payment method could not process your payment. Please try again."
                           );
                         }}
                       />
                     </PayPalScriptProvider>
                   ) : (
                     <p className="text-xs text-amber-300 text-center">
-                      PayPal is unavailable: client ID not configured.
+                      This payment method is currently unavailable.
                     </p>
                   )}
                 </div>
