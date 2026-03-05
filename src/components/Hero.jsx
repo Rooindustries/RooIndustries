@@ -1,25 +1,38 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { client } from "../sanityClient";
 
+const fallbackHeroData = {
+  tagline: "Roo Industries - Precision Performance Engineering",
+  headingLine1: "Your PC Isn't Maxed Out.",
+  headingLine2: "We Unlock Full Performance.",
+  description:
+    "Factory settings are generic - not dialed for your exact hardware and goals. That's why \"good PCs\" still suffer from frametime spikes, weak 1% lows, input lag, and a floaty mouse. We tune your BIOS, Windows, and game configs for consistent smoothness, faster responses and 1:1 input registration.",
+  subtext: "Measurable gains. Competitive standard. No guesswork.",
+  ctaPrimaryText: "Tune My Rig",
+  ctaSecondaryText: "See How It Works",
+  ctaNote: "Top 20 3DMark Hall of Fame - 150+ rigs optimized - Plans from $49.95",
+  ctaNoteIcon: "🏆",
+  bullets: [
+    "Benchmark Verified Results",
+    "150+ PCs Optimized",
+    "Up to Lifetime Warranty",
+    "Same-Day Service Available",
+  ],
+};
+const enableLiveHeroContent = process.env.NEXT_PUBLIC_ENABLE_HERO_CMS === "1";
+
 export default function Hero() {
-  const [heroData, setHeroData] = useState(null);
+  const [heroData, setHeroData] = useState(fallbackHeroData);
   const containerRef = useRef(null);
   const measure1Ref = useRef(null);
   const measure2Ref = useRef(null);
   const [line1FontSize, setLine1FontSize] = useState(null);
   const [line2FontSize, setLine2FontSize] = useState(null);
-  const [initialLoadDone, setInitialLoadDone] = useState(false);
-
-  const getBaseFontSize = useCallback(() => {
-    if (typeof window === "undefined") return 48;
-    const width = window.innerWidth;
-    if (width >= 1024) return 60;
-    if (width >= 640) return 48;
-    return 30;
-  }, []);
 
   useEffect(() => {
+    if (!enableLiveHeroContent) return;
+
     client
       .fetch(
         `*[_type == "hero"][0]{
@@ -35,20 +48,33 @@ export default function Hero() {
           bullets
         }`
       )
-      .then(setHeroData)
-      .catch(console.error);
+      .then((data) => {
+        if (!data || typeof data !== "object") return;
+        setHeroData((prev) => ({
+          ...prev,
+          ...data,
+        }));
+      })
+      .catch(() => {});
   }, []);
 
-  const tagline = heroData?.tagline;
-  const headingLine1 = heroData?.headingData1 || heroData?.headingLine1;
-  const headingLine2 = heroData?.headingLine2;
-  const description = heroData?.description;
-  const subtext = heroData?.subtext;
-  const bullets = heroData?.bullets || [];
-  const primaryCtaText = heroData?.ctaPrimaryText || "Tune My Rig";
-  const secondaryCtaText = heroData?.ctaSecondaryText || "See how it works";
-  const ctaNote = heroData?.ctaNote;
-  const ctaNoteIcon = heroData?.ctaNoteIcon;
+  const tagline = heroData?.tagline || fallbackHeroData.tagline;
+  const headingLine1 =
+    heroData?.headingData1 ||
+    heroData?.headingLine1 ||
+    fallbackHeroData.headingLine1;
+  const headingLine2 = heroData?.headingLine2 || fallbackHeroData.headingLine2;
+  const description = heroData?.description || fallbackHeroData.description;
+  const subtext = heroData?.subtext || fallbackHeroData.subtext;
+  const bullets = Array.isArray(heroData?.bullets)
+    ? heroData.bullets.filter(Boolean)
+    : fallbackHeroData.bullets;
+  const primaryCtaText =
+    heroData?.ctaPrimaryText || fallbackHeroData.ctaPrimaryText;
+  const secondaryCtaText =
+    heroData?.ctaSecondaryText || fallbackHeroData.ctaSecondaryText;
+  const ctaNote = heroData?.ctaNote || fallbackHeroData.ctaNote;
+  const ctaNoteIcon = heroData?.ctaNoteIcon || fallbackHeroData.ctaNoteIcon;
 
   const headingLine2BaseClass =
     "bg-gradient-to-r from-sky-400 to-blue-500 text-transparent bg-clip-text drop-shadow-[0_0_10px_rgba(56,189,248,0.7)]";
@@ -101,139 +127,83 @@ export default function Hero() {
     return <span className="text-white">{renderWithGlow110(cleaned)}</span>;
   };
 
-  const calculateFontSizes = useCallback(() => {
+  const getBaseFontSize = useCallback(() => {
+    if (typeof window === "undefined") return 60;
+    const width = window.innerWidth;
+    if (width >= 1280) return 60;
+    if (width >= 768) return 48;
+    return 30;
+  }, []);
+
+  const calculateHeadingSizes = useCallback(() => {
     const container = containerRef.current;
     const measure1 = measure1Ref.current;
     const measure2 = measure2Ref.current;
 
-    if (
-      !container ||
-      !measure1 ||
-      !measure2 ||
-      !headingLine1 ||
-      !headingLine2
-    ) {
+    if (!container || !measure1 || !measure2 || !headingLine1 || !headingLine2) {
       return;
     }
 
-    const containerWidth = container.clientWidth;
-    const padding = 16;
-    const maxWidth = containerWidth - padding;
+    const maxWidth = Math.max(220, container.clientWidth - 16);
     const baseFontSize = getBaseFontSize();
 
     measure1.style.fontSize = `${baseFontSize}px`;
     measure2.style.fontSize = `${baseFontSize}px`;
 
-    const width1AtBase = measure1.getBoundingClientRect().width;
-    const width2AtBase = measure2.getBoundingClientRect().width;
+    const width1 = measure1.getBoundingClientRect().width;
+    const width2 = measure2.getBoundingClientRect().width;
 
-    const longerWidth = Math.max(width1AtBase, width2AtBase);
-    const targetWidth = Math.min(longerWidth, maxWidth);
+    if (!width1 || !width2) return;
 
-    let size1 = baseFontSize * (targetWidth / width1AtBase);
-    let size2 = baseFontSize * (targetWidth / width2AtBase);
+    const targetWidth = Math.min(Math.max(width1, width2), maxWidth);
+    const nextLine1 = baseFontSize * (targetWidth / width1);
+    const nextLine2 = baseFontSize * (targetWidth / width2);
+    const minSize = baseFontSize * 0.52;
+    const maxSize = baseFontSize * 1.42;
 
-    measure1.style.fontSize = `${size1}px`;
-    measure2.style.fontSize = `${size2}px`;
-
-    const width1After = measure1.getBoundingClientRect().width;
-    const width2After = measure2.getBoundingClientRect().width;
-
-    if (Math.abs(width1After - width2After) > 0.5) {
-      const actualMax = Math.max(width1After, width2After);
-      const finalTarget = Math.min(actualMax, maxWidth);
-
-      size1 = size1 * (finalTarget / width1After);
-      size2 = size2 * (finalTarget / width2After);
-
-      measure1.style.fontSize = `${size1}px`;
-      measure2.style.fontSize = `${size2}px`;
-
-      const width1Final = measure1.getBoundingClientRect().width;
-      const width2Final = measure2.getBoundingClientRect().width;
-
-      const finalMax2 = Math.max(width1Final, width2Final);
-      size1 = size1 * (finalMax2 / width1Final);
-      size2 = size2 * (finalMax2 / width2Final);
-    }
-
-    const minSize = baseFontSize * 0.5;
-    const maxSize = baseFontSize * 1.5;
-
-    setLine1FontSize(Math.max(minSize, Math.min(maxSize, size1)));
-    setLine2FontSize(Math.max(minSize, Math.min(maxSize, size2)));
-
-    if (!initialLoadDone) {
-      setInitialLoadDone(true);
-    }
-  }, [getBaseFontSize, headingLine1, headingLine2, initialLoadDone]);
+    setLine1FontSize(Math.max(minSize, Math.min(maxSize, nextLine1)));
+    setLine2FontSize(Math.max(minSize, Math.min(maxSize, nextLine2)));
+  }, [getBaseFontSize, headingLine1, headingLine2]);
 
   useEffect(() => {
-    let resizeTimeout;
+    let resizeTimer;
+    let rafId = 0;
+    let resizeObserver;
 
-    const handleResize = () => {
-      clearTimeout(resizeTimeout);
-      resizeTimeout = setTimeout(() => {
-        calculateFontSizes();
-      }, 100);
+    const run = () => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(calculateHeadingSizes);
     };
 
-    window.addEventListener("resize", handleResize);
+    const onResize = () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(run, 100);
+    };
 
-    let resizeObserver;
+    window.addEventListener("resize", onResize);
+    run();
+
     if (typeof ResizeObserver !== "undefined" && containerRef.current) {
-      resizeObserver = new ResizeObserver(() => {
-        clearTimeout(resizeTimeout);
-        resizeTimeout = setTimeout(() => {
-          calculateFontSizes();
-        }, 100);
-      });
+      resizeObserver = new ResizeObserver(onResize);
       resizeObserver.observe(containerRef.current);
     }
 
     return () => {
-      window.removeEventListener("resize", handleResize);
-      clearTimeout(resizeTimeout);
+      window.removeEventListener("resize", onResize);
+      clearTimeout(resizeTimer);
+      cancelAnimationFrame(rafId);
       if (resizeObserver) resizeObserver.disconnect();
     };
-  }, [calculateFontSizes]);
+  }, [calculateHeadingSizes]);
 
-  useEffect(() => {
-    if (heroData && headingLine1 && headingLine2) {
-      requestAnimationFrame(() => {
-        calculateFontSizes();
-      });
-    }
-  }, [heroData, headingLine1, headingLine2, calculateFontSizes]);
-
-  const getLine1Style = () => {
-    if (line1FontSize !== null) {
-      return {
-        fontSize: `${line1FontSize}px`,
-        lineHeight: 1.1,
-        opacity: 1,
-      };
-    }
-    return {
-      fontSize: `${getBaseFontSize()}px`,
-      lineHeight: 1.1,
-      opacity: 0,
-    };
+  const lineBaseSize = 60;
+  const line1Style = {
+    fontSize: `${line1FontSize ?? lineBaseSize}px`,
+    lineHeight: 1.08,
   };
-
-  const getLine2Style = () => {
-    if (line2FontSize !== null) {
-      return {
-        fontSize: `${line2FontSize}px`,
-        lineHeight: 1.1,
-        opacity: 1,
-      };
-    }
-    return {
-      fontSize: `${getBaseFontSize()}px`,
-      lineHeight: 1.1,
-      opacity: 0,
-    };
+  const line2Style = {
+    fontSize: `${line2FontSize ?? lineBaseSize}px`,
+    lineHeight: 1.08,
   };
 
   return (
@@ -253,14 +223,14 @@ export default function Hero() {
           <span
             ref={measure1Ref}
             className="font-extrabold tracking-tight"
-            style={{ lineHeight: 1.1 }}
+            style={{ lineHeight: 1.08 }}
           >
             {normalizeText(headingLine1)}
           </span>
           <span
             ref={measure2Ref}
             className="font-extrabold tracking-tight"
-            style={{ lineHeight: 1.1 }}
+            style={{ lineHeight: 1.08 }}
           >
             {normalizeText(headingLine2)}
           </span>
@@ -282,8 +252,8 @@ export default function Hero() {
           <h1 className="font-extrabold tracking-tight text-center">
             {headingLine1 && (
               <span
-                className="block w-full whitespace-nowrap text-center transition-opacity duration-150"
-                style={getLine1Style()}
+                className="block w-full whitespace-nowrap text-center text-white transition-[font-size] duration-150"
+                style={line1Style}
               >
                 {renderHeadingLine1(headingLine1)}
               </span>
@@ -291,8 +261,8 @@ export default function Hero() {
 
             {headingLine2 && (
               <span
-                className={`block w-full whitespace-nowrap text-center transition-opacity duration-150 ${headingLine2BaseClass}`}
-                style={getLine2Style()}
+                className={`block w-full whitespace-nowrap text-center transition-[font-size] duration-150 ${headingLine2BaseClass}`}
+                style={line2Style}
               >
                 {renderWithGlow110(headingLine2)}
               </span>

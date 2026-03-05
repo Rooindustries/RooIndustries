@@ -8,11 +8,35 @@ const titleClass =
 
 export default function StreamerYoutuberReviews() {
   const [data, setData] = useState(null);
+  const [shouldLoad, setShouldLoad] = useState(false);
+  const sectionRef = useRef(null);
 
   const sectionClass =
     "pt-12 sm:pt-16 pb-4 sm:pb-6 text-center text-white relative overflow-hidden";
 
   useEffect(() => {
+    if (typeof IntersectionObserver === "undefined" || !sectionRef.current) {
+      setShouldLoad(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setShouldLoad(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "250px 0px" }
+    );
+
+    observer.observe(sectionRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!shouldLoad) return;
+
     const query = `*[_type == "proReviewsCarousel"][0]{
       _id,
       title,
@@ -42,27 +66,19 @@ export default function StreamerYoutuberReviews() {
 
     fetchData();
 
-    const subscription = client
-      .listen(query, {}, { visibility: "query" })
-      .subscribe((update) => {
-        if (cancelled) return;
-        if (update.result) {
-          setData(update.result);
-        }
-      });
-
     return () => {
       cancelled = true;
-      subscription.unsubscribe();
     };
-  }, []);
+  }, [shouldLoad]);
 
   const defaultTitle = "What professionals say about us";
   const defaultSubtitle = "Feedback from pros who rely on us.";
   const reviews = data?.reviews || [];
 
+  const isLoading = shouldLoad && !data;
+
   return (
-    <section className={sectionClass}>
+    <section ref={sectionRef} className={sectionClass}>
       <div className="px-4 sm:px-6 mb-8">
         <h3 className={`${titleClass} mb-3`}>{data?.title || defaultTitle}</h3>
         <p className="text-slate-300/90 text-base sm:text-lg">
@@ -70,7 +86,14 @@ export default function StreamerYoutuberReviews() {
         </p>
       </div>
 
-      <InfiniteDraggableCarousel reviews={reviews} />
+      {isLoading ? (
+        <div className="px-4 flex gap-5 overflow-hidden justify-center">
+          <div className="w-[420px] sm:w-[520px] h-[260px] sm:h-[290px] rounded-2xl bg-slate-900/60 border border-slate-700/50 animate-pulse" />
+          <div className="hidden sm:block w-[520px] h-[290px] rounded-2xl bg-slate-900/60 border border-slate-700/50 animate-pulse" />
+        </div>
+      ) : (
+        <InfiniteDraggableCarousel reviews={reviews} />
+      )}
     </section>
   );
 }
@@ -167,13 +190,21 @@ function ReviewCard({ review }) {
         <div className="flex items-center gap-3 pr-24 mb-3 flex-shrink-0 relative z-10">
           {review.pfp ? (
             <img
-              src={urlFor(review.pfp).width(120).height(120).fit("crop").url()}
+              src={urlFor(review.pfp)
+                .width(120)
+                .height(120)
+                .fit("crop")
+                .format("webp")
+                .quality(70)
+                .url()}
               alt={review.name}
               className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full object-cover flex-shrink-0 ${
                 isVip
                   ? "border-2 border-yellow-300"
                   : "border-2 border-sky-500/30"
               }`}
+              loading="lazy"
+              decoding="async"
               draggable={false}
             />
           ) : (
@@ -245,6 +276,8 @@ function InfiniteDraggableCarousel({ reviews }) {
   const xPos = useRef(0);
   const animationFrameId = useRef(null);
   const startTime = useRef(null);
+  const sectionVisibleRef = useRef(true);
+  const pageVisibleRef = useRef(true);
   const dragStart = useRef(0);
   const lastDragPos = useRef(0);
   const velocity = useRef(0);
@@ -254,7 +287,25 @@ function InfiniteDraggableCarousel({ reviews }) {
   const displayReviews =
     reviews.length > 0 ? [...reviews, ...reviews, ...reviews, ...reviews] : [];
 
+  const stopAnimation = () => {
+    if (animationFrameId.current) {
+      cancelAnimationFrame(animationFrameId.current);
+      animationFrameId.current = null;
+    }
+  };
+
+  const startAnimation = () => {
+    if (animationFrameId.current) return;
+    if (!pageVisibleRef.current || !sectionVisibleRef.current) return;
+    animationFrameId.current = requestAnimationFrame(animate);
+  };
+
   const animate = (timestamp) => {
+    if (!pageVisibleRef.current || !sectionVisibleRef.current) {
+      stopAnimation();
+      return;
+    }
+
     if (!startTime.current) startTime.current = timestamp;
     if (!isDragging) {
       if (Math.abs(velocity.current) > 0.1) {
@@ -279,9 +330,46 @@ function InfiniteDraggableCarousel({ reviews }) {
 
   useEffect(() => {
     if (reviews.length === 0) return;
-    animationFrameId.current = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(animationFrameId.current);
+    startAnimation();
+    return () => stopAnimation();
   }, [reviews.length, isDragging]);
+
+  useEffect(() => {
+    if (!containerRef.current || typeof IntersectionObserver === "undefined") {
+      sectionVisibleRef.current = true;
+      startAnimation();
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        sectionVisibleRef.current = entries[0]?.isIntersecting ?? true;
+        if (sectionVisibleRef.current) {
+          startAnimation();
+        } else {
+          stopAnimation();
+        }
+      },
+      { rootMargin: "220px 0px" }
+    );
+
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, [reviews.length]);
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      pageVisibleRef.current = !document.hidden;
+      if (pageVisibleRef.current) {
+        startAnimation();
+      } else {
+        stopAnimation();
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [reviews.length]);
 
   const handleDragStart = (clientX) => {
     setIsDragging(true);
