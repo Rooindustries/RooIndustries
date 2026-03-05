@@ -23,7 +23,7 @@ const writeClient = createClient({
   useCdn: false,
 });
 
-const WEBHOOK_SECRET = process.env.SANITY_WEBHOOK_SECRET;
+const WEBHOOK_SECRET = process.env.SANITY_WEBHOOK_SECRET || process.env.CRON_SECRET;
 
 function isValidSignature(body, signature) {
   if (!WEBHOOK_SECRET) return false;
@@ -42,7 +42,7 @@ export default async function handler(req, res) {
   if (
     !requireSecret(
       res,
-      'SANITY_WEBHOOK_SECRET',
+      ['SANITY_WEBHOOK_SECRET', 'CRON_SECRET'],
       'Webhook secret is required on this endpoint.'
     )
   ) {

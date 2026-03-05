@@ -169,7 +169,7 @@ describe("payment flows", () => {
     });
 
     const razorpayButton = await screen.findByRole("button", {
-      name: /pay with razorpay/i,
+      name: /pay securely/i,
     });
 
     await waitFor(() => expect(razorpayButton).not.toBeDisabled());
