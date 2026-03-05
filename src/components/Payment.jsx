@@ -310,11 +310,10 @@ export default function Payment({ hideFooter = false }) {
   const hasPaypalClientId = !!paypalClientId;
   const canUseRazorpay = !!providerConfig?.razorpay?.enabled;
   const canUsePaypal = hasPaypalClientId && !!providerConfig?.paypal?.enabled;
-  const paypalPublicEnabled =
-    String(
-      process.env.NEXT_PUBLIC_SHOW_PAYPAL || process.env.REACT_APP_SHOW_PAYPAL || ""
-    ).toLowerCase() === "true";
-  const shouldRenderPaypalBlock = paypalPublicEnabled || showInternalPayments;
+  // PayPal should be visible to all clients when provider is enabled.
+  // `showInternalPayments` still allows internal preview/testing behavior.
+  const shouldRenderPaypalBlock =
+    !!providerConfig?.paypal?.enabled || showInternalPayments;
   const canDisplayPaypalMethod = shouldRenderPaypalBlock && canUsePaypal;
 
   // Free booking state
