@@ -49,9 +49,13 @@ module.exports = async function handler(req, res) {
     process.env.REACT_APP_PAYPAL_CLIENT_SECRET ||
     "";
   const paypalMode = resolvePayPalMode(isProdLike);
+  const hasPayPalClientId = !!paypalClientId;
+  const hasPayPalClientSecret = !!paypalClientSecret;
+  const hasRequiredPayPalCredentials = isProdLike
+    ? hasPayPalClientId && hasPayPalClientSecret
+    : hasPayPalClientId;
   const paypalEnabled =
-    !!paypalClientId &&
-    !!paypalClientSecret &&
+    hasRequiredPayPalCredentials &&
     !(isProdLike && paypalMode !== "live");
 
   return res.status(200).json({

@@ -205,15 +205,15 @@ export default function Navbar() {
         scrolled ? "border-cyan-300/10" : "border-white/5"
       } ${
         scrolled
-          ? "bg-gradient-to-b from-[#07162d]/95 to-[#061226]/88 shadow-[0_10px_30px_rgba(0,0,0,0.25)]"
-          : "bg-gradient-to-b from-[#07162d]/90 to-[#061226]/82"
+          ? "bg-gradient-to-b from-[#07162d]/98 to-[#061226]/94 shadow-[0_10px_30px_rgba(0,0,0,0.25)]"
+          : "bg-gradient-to-b from-[#07162d]/95 to-[#061226]/90"
       }`}
       style={{
         backgroundColor: scrolled
-          ? "rgba(6, 18, 38, 0.92)"
-          : "rgba(7, 22, 45, 0.86)",
-        WebkitBackdropFilter: "saturate(165%) blur(14px)",
-        backdropFilter: "saturate(165%) blur(14px)",
+          ? "rgba(6, 18, 38, 0.96)"
+          : "rgba(7, 22, 45, 0.93)",
+        WebkitBackdropFilter: "saturate(170%) blur(14px)",
+        backdropFilter: "saturate(170%) blur(14px)",
       }}
     >
       {/* subtle grid overlay */}
