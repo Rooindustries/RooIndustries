@@ -205,17 +205,20 @@ export default function Navbar() {
         scrolled ? "border-cyan-300/10" : "border-white/5"
       } ${
         scrolled
-          ? "bg-gradient-to-b from-[#07162d]/98 to-[#061226]/94 shadow-[0_10px_30px_rgba(0,0,0,0.25)]"
-          : "bg-gradient-to-b from-[#07162d]/95 to-[#061226]/90"
+          ? "bg-gradient-to-b from-[#07162d]/82 to-[#061226]/62 shadow-[0_10px_30px_rgba(0,0,0,0.25)]"
+          : "bg-gradient-to-b from-[#07162d]/68 to-[#061226]/52"
       }`}
       style={{
-        backgroundColor: scrolled
-          ? "rgba(6, 18, 38, 0.96)"
-          : "rgba(7, 22, 45, 0.93)",
         WebkitBackdropFilter: "saturate(170%) blur(14px)",
         backdropFilter: "saturate(170%) blur(14px)",
       }}
     >
+      <div
+        className={`pointer-events-none absolute inset-0 z-0 ${
+          scrolled ? "bg-[#061226]/58" : "bg-[#07162d]/44"
+        }`}
+      />
+
       {/* subtle grid overlay */}
       <div
         className="pointer-events-none absolute inset-0 opacity-[0.14] z-0"
