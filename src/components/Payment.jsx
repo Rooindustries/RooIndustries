@@ -298,6 +298,7 @@ export default function Payment({ hideFooter = false }) {
     razorpay: { enabled: true, mode: "unknown" },
     paypal: { enabled: false, mode: "unknown" },
   });
+  const [showInternalPayments, setShowInternalPayments] = useState(false);
   const paypalClientId =
     process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID ||
     process.env.REACT_APP_PAYPAL_CLIENT_ID ||
@@ -305,6 +306,12 @@ export default function Payment({ hideFooter = false }) {
   const hasPaypalClientId = !!paypalClientId;
   const canUseRazorpay = !!providerConfig?.razorpay?.enabled;
   const canUsePaypal = hasPaypalClientId && !!providerConfig?.paypal?.enabled;
+  const paypalPublicEnabled =
+    String(
+      process.env.NEXT_PUBLIC_SHOW_PAYPAL || process.env.REACT_APP_SHOW_PAYPAL || ""
+    ).toLowerCase() === "true";
+  const shouldRenderPaypalBlock = paypalPublicEnabled || showInternalPayments;
+  const canDisplayPaypalMethod = shouldRenderPaypalBlock && canUsePaypal;
 
   // Free booking state
   const [creatingFree, setCreatingFree] = useState(false);
@@ -379,6 +386,33 @@ export default function Payment({ hideFooter = false }) {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const INTERNAL_PAYMENTS_KEY = "roo_internal_payments";
+    const params = new URLSearchParams(location.search);
+    const internalToggle = params.get("internalPayments");
+
+    try {
+      if (internalToggle === "1") {
+        sessionStorage.setItem(INTERNAL_PAYMENTS_KEY, "1");
+      } else if (internalToggle === "0") {
+        sessionStorage.removeItem(INTERNAL_PAYMENTS_KEY);
+      }
+
+      const host = String(window.location.hostname || "").toLowerCase();
+      const isLocalHost = host === "localhost" || host === "127.0.0.1";
+      const isVercelPreviewHost = host.endsWith(".vercel.app");
+      const hasInternalSession =
+        sessionStorage.getItem(INTERNAL_PAYMENTS_KEY) === "1";
+
+      setShowInternalPayments(
+        isLocalHost || isVercelPreviewHost || hasInternalSession
+      );
+    } catch {
+      setShowInternalPayments(false);
+    }
+  }, [location.search]);
 
   // ----------------- REFERRAL VALIDATION -----------------
   async function validateReferral(code) {
@@ -557,7 +591,7 @@ export default function Payment({ hideFooter = false }) {
     if (!canUseRazorpay) {
       showBanner(
         "error",
-        "Primary checkout is currently unavailable. Please try again shortly."
+        "RazorPay secure checkout is currently unavailable. Please try again shortly."
       );
       return;
     }
@@ -999,21 +1033,31 @@ export default function Payment({ hideFooter = false }) {
           ) : (
             <>
               {/* Razorpay option */}
-              <div className="mt-6 flex items-center justify-between gap-4 border border-sky-800/30 bg-[#0c162a]/80 rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(14,165,233,0.15)]">
-                <div>
-                  <p className="text-slate-300 text-sm font-medium">
-                    Primary checkout
-                  </p>
-                  <p className="text-slate-400 text-xs">
-                    Cards and local methods
-                  </p>
+              <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 border border-sky-800/30 bg-[#0c162a]/80 rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(14,165,233,0.15)]">
+                <div className="flex items-center gap-4">
+                  <img
+                    src="https://razorpay.com/assets/razorpay-logo.svg"
+                    alt="Razorpay payment logo"
+                    width={120}
+                    height={24}
+                    decoding="async"
+                    className="h-5 w-auto"
+                  />
+                  <div>
+                    <p className="text-slate-300 text-sm font-medium">
+                      RazorPay Secure Checkout
+                    </p>
+                    <p className="text-slate-400 text-xs">
+                      Cards, UPI, wallets, and local methods
+                    </p>
+                  </div>
                 </div>
                 <button
                   onClick={handleRazorpayPay}
                   disabled={!rzpReady || payingRzp || !canUseRazorpay}
                   className="glow-button px-4 py-2 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60"
                 >
-                  {payingRzp ? "Processing..." : "Pay Securely"}
+                  {payingRzp ? "Processing..." : "Pay with RazorPay"}
                   <span className="glow-line glow-line-top" />
                   <span className="glow-line glow-line-right" />
                   <span className="glow-line glow-line-bottom" />
@@ -1022,134 +1066,135 @@ export default function Payment({ hideFooter = false }) {
               </div>
               {!canUseRazorpay && (
                 <p className="mt-2 text-xs text-amber-300">
-                  Primary checkout is currently unavailable.
+                  RazorPay secure checkout is currently unavailable.
                 </p>
               )}
 
               {/* PayPal option */}
-              <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-4 border border-sky-800/30 bg-[#0c162a]/80 rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(14,165,233,0.15)]">
-                <div className="flex items-center gap-4">
-                  {/* SEO: add descriptive alt text and intrinsic size for the payment logo. */}
-                  <img
-                    src="https://www.paypalobjects.com/webstatic/mktg/Logo/pp-logo-100px.png"
-                    alt="Secure payment provider logo"
-                    width={100}
-                    height={26}
-                    decoding="async"
-                    className="w-20"
-                  />
-                  <p className="text-slate-300 text-sm font-medium hidden sm:block">
-                    Secure global payment
-                  </p>
-                </div>
+              {shouldRenderPaypalBlock && (
+                <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-4 border border-sky-800/30 bg-[#0c162a]/80 rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(14,165,233,0.15)]">
+                  <div className="flex items-center gap-4">
+                    <img
+                      src="https://www.paypalobjects.com/webstatic/mktg/Logo/pp-logo-100px.png"
+                      alt="PayPal payment logo"
+                      width={100}
+                      height={26}
+                      decoding="async"
+                      className="w-20"
+                    />
+                    <p className="text-slate-300 text-sm font-medium hidden sm:block">
+                      Secure global payment
+                    </p>
+                  </div>
 
-                <div className="w-full sm:w-48 relative z-0">
-                  {canUsePaypal ? (
-                    <PayPalScriptProvider
-                      options={{
-                        "client-id": paypalClientId,
-                        currency: "USD",
-                        intent: "capture",
-                      }}
-                    >
-                      <PayPalButtons
-                        fundingSource="paypal"
-                        style={{
-                          layout: "horizontal",
-                          color: "blue",
-                          shape: "rect",
-                          label: "pay",
-                          height: 40,
-                          tagline: false,
+                  <div className="w-full sm:w-48 relative z-0">
+                    {canDisplayPaypalMethod ? (
+                      <PayPalScriptProvider
+                        options={{
+                          "client-id": paypalClientId,
+                          currency: "USD",
+                          intent: "capture",
                         }}
-                        onClick={(data, actions) => {
-                          if (!ensureSlotBeforeAction()) {
-                            return actions?.reject ? actions.reject() : false;
+                      >
+                        <PayPalButtons
+                          fundingSource="paypal"
+                          style={{
+                            layout: "horizontal",
+                            color: "blue",
+                            shape: "rect",
+                            label: "pay",
+                            height: 40,
+                            tagline: false,
+                          }}
+                          onClick={(data, actions) => {
+                            if (!ensureSlotBeforeAction()) {
+                              return actions?.reject ? actions.reject() : false;
+                            }
+                            return actions?.resolve ? actions.resolve() : true;
+                          }}
+                          createOrder={(data, actions) =>
+                            actions.order.create({
+                              purchase_units: [
+                                {
+                                  description: `${packageTitle} booking`,
+                                  amount: { value: finalAmount.toFixed(2) },
+                                  custom_id: bookingData.startTimeUTC || "",
+                                },
+                              ],
+                            })
                           }
-                          return actions?.resolve ? actions.resolve() : true;
-                        }}
-                        createOrder={(data, actions) =>
-                          actions.order.create({
-                            purchase_units: [
-                              {
-                                description: `${packageTitle} booking`,
-                                amount: { value: finalAmount.toFixed(2) },
-                                custom_id: bookingData.startTimeUTC || "",
-                              },
-                            ],
-                          })
-                        }
-                        onApprove={async (data, actions) => {
-                          if (!ensureSlotBeforeAction()) return;
-                          const details = await actions.order.capture();
+                          onApprove={async (data, actions) => {
+                            if (!ensureSlotBeforeAction()) return;
+                            const details = await actions.order.capture();
 
-                          try {
-                            const payload = {
-                              ...bookingData,
-                              referralCode: referral?.code || referralInput || "",
-                              referralId: referral?._id || null,
+                            try {
+                              const payload = {
+                                ...bookingData,
+                                referralCode: referral?.code || referralInput || "",
+                                referralId: referral?._id || null,
 
-                              couponCode: coupon?.code || couponInput || "",
-                              couponDiscountPercent: couponPercent,
-                              couponDiscountAmount: couponDiscountAmount,
+                                couponCode: coupon?.code || couponInput || "",
+                                couponDiscountPercent: couponPercent,
+                                couponDiscountAmount: couponDiscountAmount,
 
-                              discountPercent: discountPercentCombined,
-                              discountAmount: effectiveDiscountAmount,
-                              grossAmount: baseAmount,
-                              netAmount: finalAmount,
-                              commissionPercent: commissionPercent,
+                                discountPercent: discountPercentCombined,
+                                discountAmount: effectiveDiscountAmount,
+                                grossAmount: baseAmount,
+                                netAmount: finalAmount,
+                                commissionPercent: commissionPercent,
 
-                              paypalOrderId: details?.id || "",
-                              payerEmail: details?.payer?.email_address || "",
-                              status: "captured",
-                              paymentProvider: "paypal",
-                            };
-                            const res = await fetch("/api/ref/createBooking", {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify(payload),
-                            });
+                                paypalOrderId: details?.id || "",
+                                payerEmail: details?.payer?.email_address || "",
+                                status: "captured",
+                                paymentProvider: "paypal",
+                              };
+                              const res = await fetch("/api/ref/createBooking", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify(payload),
+                              });
 
-                            if (!res.ok) {
-                              console.error(
-                                "Booking create error:",
-                                await res.text()
-                              );
+                              if (!res.ok) {
+                                console.error(
+                                  "Booking create error:",
+                                  await res.text()
+                                );
+                                showBanner(
+                                  "error",
+                                  "Payment succeeded but booking could not be saved. Please contact support."
+                                );
+                                return;
+                              }
+
+                              navigate("/payment-success", {
+                                state: getModalFlowState(),
+                                replace: true,
+                              });
+                            } catch (err) {
+                              console.error("Booking creation error:", err);
                               showBanner(
                                 "error",
-                                "Payment succeeded but booking could not be saved. Please contact support."
+                                "Payment succeeded but something went wrong saving your booking. Please contact support."
                               );
-                              return;
                             }
-
-                            navigate("/payment-success", {
-                              state: getModalFlowState(),
-                              replace: true,
-                            });
-                          } catch (err) {
-                            console.error("Booking creation error:", err);
+                          }}
+                          onError={(err) => {
+                            console.error(err);
                             showBanner(
                               "error",
-                              "Payment succeeded but something went wrong saving your booking. Please contact support."
+                              "This payment method could not process your payment. Please try again."
                             );
-                          }
-                        }}
-                        onError={(err) => {
-                          console.error(err);
-                          showBanner(
-                            "error",
-                            "This payment method could not process your payment. Please try again."
-                          );
-                        }}
-                      />
-                    </PayPalScriptProvider>
-                  ) : (
-                    <p className="text-xs text-amber-300 text-center">
-                      This payment method is currently unavailable.
-                    </p>
-                  )}
+                          }}
+                        />
+                      </PayPalScriptProvider>
+                    ) : (
+                      <p className="text-xs text-amber-300 text-center">
+                        This payment method is currently unavailable.
+                      </p>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
             </>
           )}
         </div>

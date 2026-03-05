@@ -14,8 +14,12 @@
 
 html {
   font-family: "Roboto Flex Variable", system-ui, sans-serif;
+  font-optical-sizing: auto;
+  font-variation-settings: "opsz" 14, "slnt" 0;
   scroll-behavior: smooth;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 html,
@@ -37,6 +41,8 @@ body {
     #000040 100%
   );
   background-attachment: fixed;
+  -webkit-font-smoothing: inherit;
+  -moz-osx-font-smoothing: inherit;
 }
 
 .trustpilot-widget,
