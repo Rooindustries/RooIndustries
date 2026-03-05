@@ -403,11 +403,15 @@ export default function Payment({ hideFooter = false }) {
       const host = String(window.location.hostname || "").toLowerCase();
       const isLocalHost = host === "localhost" || host === "127.0.0.1";
       const isVercelPreviewHost = host.endsWith(".vercel.app");
+      const isPublicProductionHost =
+        host === "rooindustries.com" || host === "www.rooindustries.com";
       const hasInternalSession =
         sessionStorage.getItem(INTERNAL_PAYMENTS_KEY) === "1";
 
       setShowInternalPayments(
-        isLocalHost || isVercelPreviewHost || hasInternalSession
+        isLocalHost ||
+          isVercelPreviewHost ||
+          (!isPublicProductionHost && hasInternalSession)
       );
     } catch {
       setShowInternalPayments(false);
