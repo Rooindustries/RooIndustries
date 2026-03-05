@@ -9,6 +9,11 @@ const isProdBuild = hasExplicitVercelEnv
 
 const hasAny = (keys = []) => keys.some((key) => !!process.env[key]);
 
+const sessionSecretKeys = ["REF_SESSION_SECRET", "SESSION_SECRET", "JWT_SECRET"];
+const holdTokenSecretKeys = ["HOLD_TOKEN_SECRET", ...sessionSecretKeys];
+const adminKeyKeys = ["REF_ADMIN_KEY", "REFERRAL_ADMIN_KEY", "CRON_SECRET"];
+const webhookSecretKeys = ["SANITY_WEBHOOK_SECRET", "CRON_SECRET"];
+
 const requiredChecks = [
   {
     keys: ["SANITY_PROJECT_ID"],
@@ -23,32 +28,35 @@ const requiredChecks = [
     label: "SANITY_WRITE_TOKEN",
   },
   {
-    keys: ["REF_SESSION_SECRET"],
-    label: "REF_SESSION_SECRET",
+    keys: sessionSecretKeys,
+    label: "REF_SESSION_SECRET (or SESSION_SECRET/JWT_SECRET fallback)",
   },
   {
-    keys: ["HOLD_TOKEN_SECRET", "REF_SESSION_SECRET"],
-    label: "HOLD_TOKEN_SECRET (or REF_SESSION_SECRET fallback)",
+    keys: holdTokenSecretKeys,
+    label: "HOLD_TOKEN_SECRET (or REF_SESSION_SECRET/SESSION_SECRET/JWT_SECRET fallback)",
   },
   {
-    keys: ["REF_ADMIN_KEY", "REFERRAL_ADMIN_KEY"],
-    label: "REF_ADMIN_KEY or REFERRAL_ADMIN_KEY",
+    keys: adminKeyKeys,
+    label: "REF_ADMIN_KEY / REFERRAL_ADMIN_KEY (or CRON_SECRET fallback)",
   },
   {
     keys: ["CRON_SECRET"],
     label: "CRON_SECRET",
   },
   {
-    keys: ["SANITY_WEBHOOK_SECRET"],
-    label: "SANITY_WEBHOOK_SECRET",
+    keys: webhookSecretKeys,
+    label: "SANITY_WEBHOOK_SECRET (or CRON_SECRET fallback)",
   },
   {
     keys: ["RAZORPAY_KEY_SECRET"],
     label: "RAZORPAY_KEY_SECRET",
   },
+];
+
+const optionalChecks = [
   {
-    keys: ["PAYPAL_CLIENT_ID"],
-    label: "PAYPAL_CLIENT_ID",
+    keys: ["PAYPAL_CLIENT_ID", "REACT_APP_PAYPAL_CLIENT_ID"],
+    label: "PAYPAL_CLIENT_ID (or REACT_APP_PAYPAL_CLIENT_ID fallback)",
   },
   {
     keys: ["PAYPAL_CLIENT_SECRET"],
@@ -62,21 +70,30 @@ const missing = requiredChecks
 
 if (missing.length === 0) {
   console.log("[env] Runtime secret validation passed.");
-  process.exit(0);
-}
-
-if (!isProdBuild) {
+} else if (!isProdBuild) {
   console.warn(
     `[env] Non-production build: missing optional runtime secrets:\n- ${missing.join(
       "\n- "
     )}`
   );
-  process.exit(0);
+} else {
+  console.error(
+    `[env] Production build blocked: missing required runtime secrets:\n- ${missing.join(
+      "\n- "
+    )}`
+  );
+  process.exit(1);
 }
 
-console.error(
-  `[env] Production build blocked: missing required runtime secrets:\n- ${missing.join(
-    "\n- "
-  )}`
-);
-process.exit(1);
+const missingOptional = optionalChecks
+  .filter((check) => !hasAny(check.keys))
+  .map((check) => check.label);
+
+if (missingOptional.length > 0) {
+  console.warn(
+    `[env] Optional runtime payment secrets not set:\n- ${missingOptional.join(
+      "\n- "
+    )}\nSome payment-provider verification paths may be unavailable.`
+  );
+}
+process.exit(0);

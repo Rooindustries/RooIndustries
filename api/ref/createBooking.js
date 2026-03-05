@@ -688,14 +688,14 @@ export default async function handler(req, res) {
     if (paymentProvider === "razorpay") {
       if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
         return res.status(400).json({
-          error: "Missing Razorpay verification fields.",
+          error: "Missing payment verification fields.",
         });
       }
 
       const razorpaySecret = process.env.RAZORPAY_KEY_SECRET || "";
       if (!razorpaySecret && isProdLike) {
         return res.status(500).json({
-          error: "Server misconfigured: missing Razorpay secret.",
+          error: "Payment verification is temporarily unavailable.",
         });
       }
 
@@ -707,7 +707,7 @@ export default async function handler(req, res) {
           secret: razorpaySecret,
         });
         if (!validSignature) {
-          return res.status(400).json({ error: "Invalid Razorpay signature." });
+          return res.status(400).json({ error: "Payment verification failed." });
         }
       }
     }
@@ -715,7 +715,7 @@ export default async function handler(req, res) {
     if (paymentProvider === "paypal") {
       if (!paypalOrderId) {
         return res.status(400).json({
-          error: "Missing PayPal order id for captured payment.",
+          error: "Missing payment verification fields.",
         });
       }
 
@@ -723,7 +723,7 @@ export default async function handler(req, res) {
         !!process.env.PAYPAL_CLIENT_ID && !!process.env.PAYPAL_CLIENT_SECRET;
       if (!hasPayPalCreds && isProdLike) {
         return res.status(500).json({
-          error: "Server misconfigured: missing PayPal API credentials.",
+          error: "Payment verification is temporarily unavailable.",
         });
       }
 
@@ -733,8 +733,11 @@ export default async function handler(req, res) {
           expectedAmount: effectiveNetAmount,
         });
         if (!paypalVerification.ok) {
+          console.warn(
+            `PayPal verification rejected: ${paypalVerification.reason || "unknown"}`
+          );
           return res.status(400).json({
-            error: `PayPal verification failed (${paypalVerification.reason}).`,
+            error: "Payment verification failed.",
           });
         }
         if (paypalVerification.payerEmail) {
