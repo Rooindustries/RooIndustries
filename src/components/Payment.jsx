@@ -296,13 +296,15 @@ export default function Payment({ hideFooter = false }) {
   const [payingRzp, setPayingRzp] = useState(false);
   const [providerConfig, setProviderConfig] = useState({
     razorpay: { enabled: true, mode: "unknown" },
-    paypal: { enabled: false, mode: "unknown" },
+    paypal: { enabled: false, mode: "unknown", clientId: "" },
   });
   const [showInternalPayments, setShowInternalPayments] = useState(false);
-  const paypalClientId =
+  const paypalClientIdFromEnv =
     process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID ||
     process.env.REACT_APP_PAYPAL_CLIENT_ID ||
     "";
+  const paypalClientId =
+    providerConfig?.paypal?.clientId || paypalClientIdFromEnv;
   const hasPaypalClientId = !!paypalClientId;
   const canUseRazorpay = !!providerConfig?.razorpay?.enabled;
   const canUsePaypal = hasPaypalClientId && !!providerConfig?.paypal?.enabled;
@@ -375,6 +377,7 @@ export default function Payment({ hideFooter = false }) {
           paypal: {
             enabled: !!data.providers?.paypal?.enabled,
             mode: data.providers?.paypal?.mode || "unknown",
+            clientId: data.providers?.paypal?.clientId || "",
           },
         });
       })
@@ -387,7 +390,11 @@ export default function Payment({ hideFooter = false }) {
         if (isLocalHost && hasPaypalClientId) {
           setProviderConfig((prev) => ({
             ...prev,
-            paypal: { enabled: true, mode: "sandbox" },
+            paypal: {
+              enabled: true,
+              mode: "sandbox",
+              clientId: prev?.paypal?.clientId || paypalClientIdFromEnv,
+            },
           }));
         }
       });
@@ -413,15 +420,11 @@ export default function Payment({ hideFooter = false }) {
       const host = String(window.location.hostname || "").toLowerCase();
       const isLocalHost = host === "localhost" || host === "127.0.0.1";
       const isVercelPreviewHost = host.endsWith(".vercel.app");
-      const isPublicProductionHost =
-        host === "rooindustries.com" || host === "www.rooindustries.com";
       const hasInternalSession =
         sessionStorage.getItem(INTERNAL_PAYMENTS_KEY) === "1";
 
       setShowInternalPayments(
-        isLocalHost ||
-          isVercelPreviewHost ||
-          (!isPublicProductionHost && hasInternalSession)
+        isLocalHost || isVercelPreviewHost || hasInternalSession
       );
     } catch {
       setShowInternalPayments(false);
