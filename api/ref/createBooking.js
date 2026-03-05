@@ -98,7 +98,13 @@ const clampPercent = (value) => {
   return Math.min(100, Math.max(0, parsed));
 };
 
-const isProdLike = process.env.NODE_ENV === "production";
+const resolveIsProdLike = () => {
+  const vercelEnv = String(process.env.VERCEL_ENV || "").toLowerCase();
+  if (vercelEnv) return vercelEnv === "production";
+  return process.env.NODE_ENV === "production";
+};
+
+const isProdLike = resolveIsProdLike();
 
 const verifyRazorpaySignature = ({
   orderId,
@@ -117,14 +123,39 @@ const verifyRazorpaySignature = ({
   );
 };
 
+const getPayPalMode = () => {
+  const explicit = String(
+    process.env.PAYPAL_ENV || process.env.NEXT_PUBLIC_PAYPAL_ENV || ""
+  )
+    .trim()
+    .toLowerCase();
+
+  if (explicit === "live" || explicit === "production") return "live";
+  if (explicit === "sandbox" || explicit === "test") return "sandbox";
+  return isProdLike ? "live" : "sandbox";
+};
+
 const getPayPalBaseUrl = () =>
-  process.env.PAYPAL_ENV === "live"
+  getPayPalMode() === "live"
     ? "https://api-m.paypal.com"
     : "https://api-m.sandbox.paypal.com";
 
+const getPayPalCredentials = () => {
+  const clientId =
+    process.env.PAYPAL_CLIENT_ID ||
+    process.env.REACT_APP_PAYPAL_CLIENT_ID ||
+    process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID ||
+    "";
+  const clientSecret =
+    process.env.PAYPAL_CLIENT_SECRET ||
+    process.env.REACT_APP_PAYPAL_CLIENT_SECRET ||
+    "";
+
+  return { clientId, clientSecret };
+};
+
 const getPayPalToken = async () => {
-  const clientId = process.env.PAYPAL_CLIENT_ID || "";
-  const clientSecret = process.env.PAYPAL_CLIENT_SECRET || "";
+  const { clientId, clientSecret } = getPayPalCredentials();
   if (!clientId || !clientSecret) return null;
 
   const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
@@ -719,8 +750,9 @@ export default async function handler(req, res) {
         });
       }
 
-      const hasPayPalCreds =
-        !!process.env.PAYPAL_CLIENT_ID && !!process.env.PAYPAL_CLIENT_SECRET;
+      const { clientId: paypalClientId, clientSecret: paypalClientSecret } =
+        getPayPalCredentials();
+      const hasPayPalCreds = !!paypalClientId && !!paypalClientSecret;
       if (!hasPayPalCreds && isProdLike) {
         return res.status(500).json({
           error: "Payment verification is temporarily unavailable.",
