@@ -379,7 +379,17 @@ export default function Payment({ hideFooter = false }) {
         });
       })
       .catch(() => {
-        // Keep safe defaults when provider config cannot be fetched.
+        // Local `next dev` does not mount `/api/*` from root serverless files.
+        // Keep PayPal testable on localhost when a client ID is configured.
+        if (typeof window === "undefined") return;
+        const host = String(window.location.hostname || "").toLowerCase();
+        const isLocalHost = host === "localhost" || host === "127.0.0.1";
+        if (isLocalHost && hasPaypalClientId) {
+          setProviderConfig((prev) => ({
+            ...prev,
+            paypal: { enabled: true, mode: "sandbox" },
+          }));
+        }
       });
 
     return () => {
