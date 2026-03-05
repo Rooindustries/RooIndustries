@@ -201,13 +201,20 @@ export default function Navbar() {
   return (
     <header
       ref={headerRef}
-      className={`fixed top-0 left-0 right-0 z-50 border-b backdrop-blur-md transition-all duration-300 ${
+      className={`fixed top-0 left-0 right-0 z-50 border-b transition-all duration-300 ${
         scrolled ? "border-cyan-300/10" : "border-white/5"
       } ${
         scrolled
-          ? "bg-gradient-to-b from-[#07162d]/92 to-[#061226]/75 shadow-[0_10px_30px_rgba(0,0,0,0.25)]"
-          : "bg-gradient-to-b from-[#07162d]/80 to-[#061226]/60"
+          ? "bg-gradient-to-b from-[#07162d]/76 to-[#061226]/56 shadow-[0_10px_30px_rgba(0,0,0,0.25)]"
+          : "bg-gradient-to-b from-[#07162d]/62 to-[#061226]/45"
       }`}
+      style={{
+        backgroundColor: scrolled
+          ? "rgba(6, 18, 38, 0.70)"
+          : "rgba(7, 22, 45, 0.56)",
+        WebkitBackdropFilter: "saturate(150%) blur(12px)",
+        backdropFilter: "saturate(150%) blur(12px)",
+      }}
     >
       {/* subtle grid overlay */}
       <div
