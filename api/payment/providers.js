@@ -68,6 +68,7 @@ module.exports = async function handler(req, res) {
       paypal: {
         enabled: paypalEnabled,
         mode: paypalMode,
+        clientId: hasPayPalClientId ? paypalClientId : "",
       },
     },
   });
