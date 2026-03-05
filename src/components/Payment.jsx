@@ -299,12 +299,14 @@ export default function Payment({ hideFooter = false }) {
     paypal: { enabled: false, mode: "unknown", clientId: "" },
   });
   const [showInternalPayments, setShowInternalPayments] = useState(false);
-  const paypalClientIdFromEnv =
+  const paypalClientIdFromEnv = (
     process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID ||
     process.env.REACT_APP_PAYPAL_CLIENT_ID ||
-    "";
-  const paypalClientId =
-    providerConfig?.paypal?.clientId || paypalClientIdFromEnv;
+    ""
+  ).trim();
+  const paypalClientId = (
+    providerConfig?.paypal?.clientId || paypalClientIdFromEnv
+  ).trim();
   const hasPaypalClientId = !!paypalClientId;
   const canUseRazorpay = !!providerConfig?.razorpay?.enabled;
   const canUsePaypal = hasPaypalClientId && !!providerConfig?.paypal?.enabled;
@@ -377,7 +379,7 @@ export default function Payment({ hideFooter = false }) {
           paypal: {
             enabled: !!data.providers?.paypal?.enabled,
             mode: data.providers?.paypal?.mode || "unknown",
-            clientId: data.providers?.paypal?.clientId || "",
+            clientId: String(data.providers?.paypal?.clientId || "").trim(),
           },
         });
       })
