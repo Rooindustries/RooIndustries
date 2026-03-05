@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 
 const TAWK_SCRIPT_ID = "tawkto-embed-script";
@@ -39,6 +39,7 @@ const isRouteDisabled = (pathname, disabledRoutes) => {
 function TawkTo({ disabledRoutes = [] }) {
   const location = useLocation();
   const isDisabledRef = useRef(false);
+  const [intentReady, setIntentReady] = useState(false);
   const pathname = location.pathname || "/";
   const isDisabled = isRouteDisabled(pathname, disabledRoutes);
 
@@ -66,9 +67,33 @@ function TawkTo({ disabledRoutes = [] }) {
   }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (intentReady) return;
+
+    let timeoutId = null;
+    const markIntent = () => setIntentReady(true);
+
+    const passiveOpts = { passive: true };
+    window.addEventListener("pointerdown", markIntent, passiveOpts);
+    window.addEventListener("keydown", markIntent, passiveOpts);
+    window.addEventListener("touchstart", markIntent, passiveOpts);
+    window.addEventListener("scroll", markIntent, passiveOpts);
+    timeoutId = window.setTimeout(markIntent, 12000);
+
+    return () => {
+      window.removeEventListener("pointerdown", markIntent, passiveOpts);
+      window.removeEventListener("keydown", markIntent, passiveOpts);
+      window.removeEventListener("touchstart", markIntent, passiveOpts);
+      window.removeEventListener("scroll", markIntent, passiveOpts);
+      if (timeoutId) window.clearTimeout(timeoutId);
+    };
+  }, [intentReady]);
+
+  useEffect(() => {
     if (typeof window === "undefined" || typeof document === "undefined")
       return;
     if (isDisabled) return;
+    if (!intentReady) return;
     if (document.getElementById(TAWK_SCRIPT_ID)) return;
 
     window.Tawk_API = window.Tawk_API || {};
@@ -87,7 +112,7 @@ function TawkTo({ disabledRoutes = [] }) {
     } else {
       document.body.appendChild(script);
     }
-  }, [isDisabled]);
+  }, [isDisabled, intentReady]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;

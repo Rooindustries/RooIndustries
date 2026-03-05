@@ -1,5 +1,6 @@
 export const SITE_NAME = "Roo Industries";
-export const SITE_URL = (process.env.REACT_APP_SITE_URL ||
+export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL ||
+  process.env.REACT_APP_SITE_URL ||
   "https://www.rooindustries.com").replace(/\/$/, "");
 export const DEFAULT_TITLE = `${SITE_NAME} | Professional PC Optimization`;
 export const DEFAULT_DESCRIPTION =
@@ -42,6 +43,19 @@ export const SERVICE_LIST = [
     description: "CPU, GPU, and RAM tuning with stability checks.",
   },
 ];
+
+export const buildFAQPageJsonLd = (items = []) => ({
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: items.map((item) => ({
+    "@type": "Question",
+    name: item.question,
+    acceptedAnswer: {
+      "@type": "Answer",
+      text: item.answer,
+    },
+  })),
+});
 
 export const buildOfferCatalogJsonLd = (name = "Optimization Services") => ({
   "@context": "https://schema.org",

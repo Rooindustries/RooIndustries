@@ -20,26 +20,31 @@
     "dayjs": "^1.11.19",
     "dotenv": "^17.2.3",
     "framer-motion": "^12.23.25",
-    "jsonwebtoken": "^9.0.2",
+    "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.545.0",
+    "next": "^15.3.1",
     "nodemon": "^3.1.10",
     "razorpay": "^2.9.6",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-helmet-async": "^2.0.5",
     "react-icons": "^5.5.0",
-    "react-router-dom": "^7.9.4",
-    "react-scripts": "5.0.1",
+    "react-router": "^7.13.1",
+    "react-router-dom": "^7.13.1",
     "resend": "^6.5.2",
     "web-vitals": "^2.1.4"
   },
   "scripts": {
-    "dev": "react-scripts start",
-    "start": "react-scripts start",
-    "prebuild": "node scripts/generate-sitemap.js && node scripts/generate-robots.js",
-    "build": "node scripts/build.js",
-    "postbuild": "node scripts/prerender.js",
+    "dev": "next dev --turbopack",
+    "start": "next start",
+    "prebuild": "node scripts/validate-runtime-env.js && node scripts/generate-sitemap.js && node scripts/generate-robots.js",
+    "build": "next build",
     "test": "react-scripts test",
+    "check:seo": "node scripts/check-seo.js",
+    "check:budgets": "node scripts/check-budgets.js",
+    "test:seo:nonjs": "playwright test tests/nonjs-seo.spec.js",
+    "test:smoke:routes": "playwright test tests/routes-smoke.spec.js",
+    "lighthouse:ci": "lhci autorun --config=./lighthouserc.json",
     "eject": "react-scripts eject"
   },
   "eslintConfig": {
@@ -61,11 +66,14 @@
     ]
   },
   "devDependencies": {
+    "@lhci/cli": "^0.14.0",
+    "@playwright/test": "^1.55.0",
     "@prerenderer/prerenderer": "^1.2.5",
     "@prerenderer/renderer-jsdom": "^1.1.9",
     "autoprefixer": "^10.4.21",
     "cross-env": "^7.0.3",
     "postcss": "^8.5.6",
+    "react-scripts": "5.0.1",
     "tailwindcss": "^3.4.18"
   }
 }
