@@ -46,6 +46,72 @@ export default function Navbar() {
     setSmallLogoMode("static");
   };
 
+  const getHeaderOffsetPx = useCallback(() => {
+    if (typeof window === "undefined" || typeof document === "undefined") {
+      return 110;
+    }
+    const raw = getComputedStyle(document.documentElement).getPropertyValue(
+      "--header-offset"
+    );
+    const parsed = parseFloat(raw);
+    return Number.isFinite(parsed) ? parsed + 12 : 110;
+  }, []);
+
+  const scrollToHashTarget = useCallback(
+    (hash, behavior = "smooth") => {
+      if (!hash || typeof window === "undefined") return () => {};
+      const targetId = decodeURIComponent(hash.replace("#", ""));
+      if (!targetId) return () => {};
+
+      const deadline = Date.now() + 6000;
+      let rafId = null;
+      let settleTimeout = null;
+
+      const alignToTarget = (el, scrollBehavior) => {
+        const elementTop = el.getBoundingClientRect().top + window.scrollY;
+        const targetY = Math.max(0, elementTop - getHeaderOffsetPx());
+        window.scrollTo({ top: targetY, behavior: scrollBehavior });
+      };
+
+      const tick = () => {
+        const el = document.getElementById(targetId);
+        if (el) {
+          alignToTarget(el, behavior);
+          // Re-align after layout settles (fonts/images/banner transitions).
+          settleTimeout = setTimeout(() => {
+            const settled = document.getElementById(targetId);
+            if (settled) alignToTarget(settled, "auto");
+          }, 450);
+          return;
+        }
+
+        if (Date.now() < deadline) {
+          rafId = requestAnimationFrame(tick);
+        }
+      };
+
+      tick();
+
+      return () => {
+        if (rafId) cancelAnimationFrame(rafId);
+        if (settleTimeout) clearTimeout(settleTimeout);
+      };
+    },
+    [getHeaderOffsetPx]
+  );
+
+  const handleSectionLinkClick = useCallback(
+    (hash) => {
+      setOpen(false);
+      setProofOpen(false);
+      if (location.pathname === "/") {
+        // Force scroll even when clicking the same hash repeatedly.
+        setTimeout(() => scrollToHashTarget(hash), 0);
+      }
+    },
+    [location.pathname, scrollToHashTarget]
+  );
+
   const updateHeaderOffset = useCallback(() => {
     if (typeof document === "undefined" || !headerRef.current) return;
     const height = headerRef.current.offsetHeight;
@@ -156,28 +222,8 @@ export default function Navbar() {
   useEffect(() => {
     const { hash } = location;
     if (!hash) return;
-
-    let retry;
-    let attempts = 0;
-
-    const scrollToHashTarget = () => {
-      const targetId = hash.replace("#", "");
-      const el = document.getElementById(targetId);
-      if (el) {
-        const elementTop = el.getBoundingClientRect().top + window.scrollY;
-        const targetY = Math.max(0, elementTop - 100);
-        window.scrollTo({ top: targetY, behavior: "smooth" });
-        return;
-      }
-      if (attempts < 8) {
-        attempts += 1;
-        retry = setTimeout(scrollToHashTarget, 100);
-      }
-    };
-
-    scrollToHashTarget();
-    return () => retry && clearTimeout(retry);
-  }, [location]);
+    return scrollToHashTarget(hash, "smooth");
+  }, [location, scrollToHashTarget]);
 
   const linkBase =
     "px-3 sm:px-5 py-2 rounded-full text-base font-medium transition border border-white/10 hover:border-cyan-300/30";
@@ -298,6 +344,7 @@ export default function Navbar() {
             <nav className="hidden md:flex items-center gap-2">
               <Link
                 to="/#services"
+                onClick={() => handleSectionLinkClick("#services")}
                 className={`${linkBase} ${
                   isBenefitsActive ? linkActive : linkIdle
                 }`}
@@ -306,6 +353,7 @@ export default function Navbar() {
               </Link>
               <Link
                 to="/#packages"
+                onClick={() => handleSectionLinkClick("#packages")}
                 className={`${linkBase} ${
                   isPlansActive ? linkActive : linkIdle
                 }`}
@@ -371,6 +419,7 @@ export default function Navbar() {
               </div>
               <Link
                 to="/#faq"
+                onClick={() => handleSectionLinkClick("#faq")}
                 className={`${linkBase} ${isFaqActive ? linkActive : linkIdle}`}
               >
                 FAQ
@@ -444,6 +493,7 @@ export default function Navbar() {
             <div className="flex flex-col">
               <Link
                 to="/#services"
+                onClick={() => handleSectionLinkClick("#services")}
                 className={`${mobileLinkBase} ${
                   isBenefitsActive ? mobileLinkActive : mobileLinkIdle
                 }`}
@@ -452,6 +502,7 @@ export default function Navbar() {
               </Link>
               <Link
                 to="/#packages"
+                onClick={() => handleSectionLinkClick("#packages")}
                 className={`${mobileLinkBase} ${
                   isPlansActive ? mobileLinkActive : mobileLinkIdle
                 }`}
@@ -522,6 +573,7 @@ export default function Navbar() {
               </div>
               <Link
                 to="/#faq"
+                onClick={() => handleSectionLinkClick("#faq")}
                 className={`${mobileLinkBase} ${
                   isFaqActive ? mobileLinkActive : mobileLinkIdle
                 }`}
