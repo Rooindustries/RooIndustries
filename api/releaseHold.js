@@ -1,4 +1,5 @@
 import { createClient } from "@sanity/client";
+import { verifyHoldToken } from "./holdToken";
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -13,14 +14,31 @@ export default async function handler(req, res) {
     return res.status(405).json({ message: "Method not allowed" });
   }
 
-  const { holdId } = req.body || {};
+  const { holdId, holdToken } = req.body || {};
 
-  if (!holdId) {
-    return res.status(400).json({ message: "Missing holdId" });
+  if (!holdId || !holdToken) {
+    return res.status(400).json({ ok: false, message: "Missing hold credentials" });
   }
 
   try {
-    // Attempt to delete the document
+    const hold = await client.fetch(`*[_type == "slotHold" && _id == $id][0]`, {
+      id: holdId,
+    });
+
+    if (!hold) {
+      return res.status(404).json({ ok: false, message: "Hold not found" });
+    }
+
+    const validToken = verifyHoldToken({
+      token: holdToken,
+      holdId,
+      startTimeUTC: hold.startTimeUTC,
+    });
+
+    if (!validToken) {
+      return res.status(403).json({ ok: false, message: "Invalid hold token" });
+    }
+
     await client.delete(holdId);
     return res.status(200).json({ ok: true, message: "Hold released" });
   } catch (err) {

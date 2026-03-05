@@ -1,6 +1,7 @@
 // ./api/ref/register.js
 import { createClient } from "@sanity/client";
 import bcrypt from "bcryptjs";
+import { setReferralSessionCookie } from "./auth";
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -75,6 +76,12 @@ export default async function handler(req, res) {
       successfulReferrals: 0,
       isFirstTime: true,
     });
+
+    setReferralSessionCookie(
+      res,
+      { referralId: referral._id, code: trimmedSlug },
+      true
+    );
 
     return res.status(201).json({ ok: true, referralId: referral._id });
   } catch (err) {

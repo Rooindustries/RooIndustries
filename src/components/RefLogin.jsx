@@ -17,13 +17,18 @@ export default function RefLogin() {
 
   // Load saved referral code
   useEffect(() => {
-    const creatorId = localStorage.getItem("creatorId");
-    const remembered = localStorage.getItem("refRememberMe") === "true";
-
-    if (creatorId && remembered) {
-      nav("/referrals/dashboard");
-      return;
-    }
+    const checkSession = async () => {
+      try {
+        const sessionRes = await fetch("/api/ref/getData");
+        if (sessionRes.ok) {
+          nav("/referrals/dashboard");
+          return;
+        }
+      } catch (err) {
+        console.error("Failed to check referral session:", err);
+      }
+    };
+    checkSession();
 
     const savedCode = localStorage.getItem("refLoginCode");
     if (savedCode) {
@@ -46,7 +51,7 @@ export default function RefLogin() {
       const res = await fetch("/api/ref/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, password }),
+        body: JSON.stringify({ code, password, rememberMe }),
       });
 
       const data = await res.json();
@@ -56,7 +61,9 @@ export default function RefLogin() {
         return;
       }
 
-      localStorage.setItem("creatorId", data.creatorId);
+      if (data?.creatorId) {
+        localStorage.setItem("creatorId", data.creatorId);
+      }
 
       // Handle remember me
       if (rememberMe) {

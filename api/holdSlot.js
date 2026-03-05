@@ -1,5 +1,6 @@
 // api/holdSlot.js
 import { createClient } from "@sanity/client";
+import { issueHoldToken, verifyHoldToken } from "./holdToken";
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -57,7 +58,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { startTimeUTC, packageTitle, previousHoldId } =
+    const { startTimeUTC, packageTitle, previousHoldId, previousHoldToken } =
       req.body || {};
 
     if (!startTimeUTC) {
@@ -130,11 +131,33 @@ export default async function handler(req, res) {
       expiresAt,
     });
 
+    let holdToken = "";
+    try {
+      holdToken = issueHoldToken({
+        holdId: created._id,
+        startTimeUTC,
+        expiresAt,
+      });
+    } catch (tokenError) {
+      console.error("Failed to issue hold token:", tokenError);
+      await client.delete(created._id).catch(() => {});
+      return res.status(500).json({
+        ok: false,
+        message: "Server misconfigured for hold security.",
+      });
+    }
+
     // 4) Clean up previous hold (Unreserve the old one)
     if (previousHoldId) {
       try {
-        // Ensure we don't delete the brand new hold we just created if IDs somehow matched
-        if (previousHoldId !== created._id) {
+        const validPreviousToken = verifyHoldToken({
+          token: previousHoldToken,
+          holdId: previousHoldId,
+        });
+        if (
+          validPreviousToken &&
+          previousHoldId !== created._id
+        ) {
           await client.delete(previousHoldId);
         }
       } catch {
@@ -145,6 +168,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       holdId: created._id,
+      holdToken,
       expiresAt,
     });
   } catch (err) {

@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import { createClient } from "@sanity/client";
+import { requireReferralSession } from "./auth";
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -13,12 +14,21 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ ok: false });
 
   try {
-    const { creatorId, password } = req.body;
+    const session = requireReferralSession(req, res);
+    if (!session) return;
+    const creatorId = session.referralId;
+    const { password } = req.body || {};
 
-    if (!creatorId || !password) {
+    if (!password) {
       return res
         .status(400)
-        .json({ ok: false, error: "Missing creatorId or password" });
+        .json({ ok: false, error: "Missing password" });
+    }
+
+    if (String(password).length < 8) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "Password must be at least 8 characters" });
     }
 
     const hash = await bcrypt.hash(password, 10);
@@ -30,7 +40,7 @@ export default async function handler(req, res) {
       })
       .commit();
 
-    return res.json({ ok: true, hash });
+    return res.json({ ok: true });
   } catch (err) {
     return res.status(500).json({ ok: false, error: "Server error" });
   }
