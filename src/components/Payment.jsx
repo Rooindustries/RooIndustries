@@ -1233,7 +1233,9 @@ export default function Payment({ hideFooter = false }) {
             state={backToBookingState}
             className="glow-button inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-sky-50 hover:text-white transition-all duration-300"
           >
-            <span className="text-lg">&lt;-</span>
+            <span aria-hidden="true" className="text-lg leading-none">
+              ←
+            </span>
             <span>Back to Booking</span>
             <span className="glow-line glow-line-top" />
             <span className="glow-line glow-line-right" />
