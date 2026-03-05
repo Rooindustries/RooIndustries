@@ -294,8 +294,17 @@ export default function Payment({ hideFooter = false }) {
   // Razorpay state
   const [rzpReady, setRzpReady] = useState(false);
   const [payingRzp, setPayingRzp] = useState(false);
-  const paypalClientId = process.env.REACT_APP_PAYPAL_CLIENT_ID || "";
+  const [providerConfig, setProviderConfig] = useState({
+    razorpay: { enabled: true, mode: "unknown" },
+    paypal: { enabled: false, mode: "unknown" },
+  });
+  const paypalClientId =
+    process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID ||
+    process.env.REACT_APP_PAYPAL_CLIENT_ID ||
+    "";
   const hasPaypalClientId = !!paypalClientId;
+  const canUseRazorpay = !!providerConfig?.razorpay?.enabled;
+  const canUsePaypal = hasPaypalClientId && !!providerConfig?.paypal?.enabled;
 
   // Free booking state
   const [creatingFree, setCreatingFree] = useState(false);
@@ -342,6 +351,33 @@ export default function Payment({ hideFooter = false }) {
       document.body.removeChild(script);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    fetch("/api/payment/providers")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("bad_status"))))
+      .then((data) => {
+        if (!active || !data?.ok || !data?.providers) return;
+        setProviderConfig({
+          razorpay: {
+            enabled: !!data.providers?.razorpay?.enabled,
+            mode: data.providers?.razorpay?.mode || "unknown",
+          },
+          paypal: {
+            enabled: !!data.providers?.paypal?.enabled,
+            mode: data.providers?.paypal?.mode || "unknown",
+          },
+        });
+      })
+      .catch(() => {
+        // Keep safe defaults when provider config cannot be fetched.
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   // ----------------- REFERRAL VALIDATION -----------------
@@ -518,6 +554,14 @@ export default function Payment({ hideFooter = false }) {
   }
   // Razorpay payment flow
   async function handleRazorpayPay() {
+    if (!canUseRazorpay) {
+      showBanner(
+        "error",
+        "Primary checkout is currently unavailable. Please try again shortly."
+      );
+      return;
+    }
+
     if (!rzpReady || !window.Razorpay) {
       showBanner(
         "error",
@@ -966,7 +1010,7 @@ export default function Payment({ hideFooter = false }) {
                 </div>
                 <button
                   onClick={handleRazorpayPay}
-                  disabled={!rzpReady || payingRzp}
+                  disabled={!rzpReady || payingRzp || !canUseRazorpay}
                   className="glow-button px-4 py-2 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60"
                 >
                   {payingRzp ? "Processing..." : "Pay Securely"}
@@ -976,6 +1020,11 @@ export default function Payment({ hideFooter = false }) {
                   <span className="glow-line glow-line-left" />
                 </button>
               </div>
+              {!canUseRazorpay && (
+                <p className="mt-2 text-xs text-amber-300">
+                  Primary checkout is currently unavailable.
+                </p>
+              )}
 
               {/* PayPal option */}
               <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-4 border border-sky-800/30 bg-[#0c162a]/80 rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(14,165,233,0.15)]">
@@ -995,7 +1044,7 @@ export default function Payment({ hideFooter = false }) {
                 </div>
 
                 <div className="w-full sm:w-48 relative z-0">
-                  {hasPaypalClientId ? (
+                  {canUsePaypal ? (
                     <PayPalScriptProvider
                       options={{
                         "client-id": paypalClientId,
