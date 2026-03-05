@@ -89,7 +89,9 @@ export default function Payment({ hideFooter = false }) {
   }, [q]);
 
   const isUpgrade = !!bookingData.originalOrderId;
-  const navState = location.state || (window.history?.state?.usr ?? {});
+  const historyUsrState =
+    typeof window !== "undefined" ? window.history?.state?.usr : null;
+  const navState = location.state || historyUsrState || {};
   const storedBackground = readStoredBackground();
   const modalBackground =
     navState.backgroundLocation || storedBackground || null;
@@ -125,7 +127,8 @@ export default function Payment({ hideFooter = false }) {
   const holdExpiresAt = bookingData?.slotHoldExpiresAt;
   const holdExpired =
     holdExpiresAt && new Date(holdExpiresAt).getTime() <= Date.now();
-  const hasSlotHold = !!bookingData?.slotHoldId && !holdExpired;
+  const hasSlotHold =
+    !!bookingData?.slotHoldId && !!bookingData?.slotHoldToken && !holdExpired;
   const canSubmitBooking = isUpgrade ? hasTimeslot : hasTimeslot && hasSlotHold;
   const holdExpiryHandledRef = useRef(false);
 
@@ -632,6 +635,7 @@ export default function Payment({ hideFooter = false }) {
 
               razorpayOrderId: response.razorpay_order_id,
               razorpayPaymentId: response.razorpay_payment_id,
+              razorpaySignature: response.razorpay_signature,
               status: "captured",
               paymentProvider: "razorpay",
             };
@@ -1129,5 +1133,3 @@ export default function Payment({ hideFooter = false }) {
     </motion.section>
   );
 }
-
-

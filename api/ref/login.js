@@ -1,5 +1,6 @@
 import { createClient } from "@sanity/client";
 import bcrypt from "bcryptjs";
+import { setReferralSessionCookie } from "./auth";
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -14,7 +15,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
 
   try {
-    const { code, password } = req.body;
+    const { code, password, rememberMe = false } = req.body || {};
 
     const referral = await client.fetch(
       `*[_type == "referral" && slug.current == $code][0]`,
@@ -54,6 +55,12 @@ export default async function handler(req, res) {
     if (!valid) {
       return res.status(401).json({ ok: false });
     }
+
+    setReferralSessionCookie(
+      res,
+      { referralId: referral._id, code: referral.slug?.current || code },
+      Boolean(rememberMe)
+    );
 
     return res.json({
       ok: true,
