@@ -2,17 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { FaDiscord } from "react-icons/fa";
 import BackButton from "./BackButton";
-import CanvasVideo from "./CanvasVideo";
 import DiscordGuideBanner from "./DiscordGuideBanner";
-
-const isIOSDevice = () => {
-  if (typeof navigator === "undefined") return false;
-  const ua = navigator.userAgent || "";
-  return (
-    /iPad|iPhone|iPod/.test(ua) ||
-    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
-  );
-};
 
 const canPlayWebm = () => {
   if (typeof document === "undefined") return false;
@@ -25,21 +15,14 @@ const canPlayWebm = () => {
   return canPlay === "probably" || canPlay === "maybe";
 };
 
-const getInitialSmallLogoMode = () => {
-  if (isIOSDevice()) return "apng";
-  return canPlayWebm() ? "webm" : "apng";
-};
-
 export default function Navbar() {
   const location = useLocation();
   const [scrolled, setScrolled] = useState(false);
   const [bannerHidden, setBannerHidden] = useState(false);
   const [open, setOpen] = useState(false);
   const [proofOpen, setProofOpen] = useState(false);
-  const [smallLogoMode, setSmallLogoMode] = useState(() =>
-    getInitialSmallLogoMode()
-  );
-  const [smallApngLoaded, setSmallApngLoaded] = useState(false);
+  // Keep initial server/client markup identical, then upgrade to animated mode on mount.
+  const [smallLogoMode, setSmallLogoMode] = useState("static");
   const proofDropdownRef = useRef(null);
   const headerRef = useRef(null);
 
@@ -60,11 +43,6 @@ export default function Navbar() {
   const isTeamActive = isActive("/meet-the-team");
 
   const handleSmallWebmError = () => {
-    setSmallApngLoaded(false);
-    setSmallLogoMode((current) => (current === "webm" ? "apng" : "static"));
-  };
-
-  const handleSmallApngError = () => {
     setSmallLogoMode("static");
   };
 
@@ -75,6 +53,43 @@ export default function Navbar() {
       "--header-offset",
       `${height}px`
     );
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const prefersReducedMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)"
+    ).matches;
+    const saveDataEnabled = Boolean(navigator?.connection?.saveData);
+    const supportsWebm = canPlayWebm();
+
+    if (prefersReducedMotion || saveDataEnabled || !supportsWebm) {
+      setSmallLogoMode("static");
+      return;
+    }
+
+    const enableAnimatedLogo = () => setSmallLogoMode("webm");
+    const interactionEvents = [
+      "pointerdown",
+      "touchstart",
+      "keydown",
+      "mousemove",
+      "scroll",
+    ];
+
+    interactionEvents.forEach((eventName) => {
+      window.addEventListener(eventName, enableAnimatedLogo, {
+        once: true,
+        passive: true,
+      });
+    });
+
+    return () => {
+      interactionEvents.forEach((eventName) => {
+        window.removeEventListener(eventName, enableAnimatedLogo);
+      });
+    };
   }, []);
 
   useEffect(() => {
@@ -182,12 +197,6 @@ export default function Navbar() {
   const smallLogoSizeClassName = "h-14 w-14";
   const smallLogoStaticClassName = `${smallLogoSizeClassName} object-contain drop-shadow-[0_0_18px_rgba(34,211,238,0.25)]`;
   const smallLogoAnimatedClassName = `${smallLogoSizeClassName} object-contain drop-shadow-[0_0_18px_rgba(34,211,238,0.25)] transition-all duration-500`;
-  const smallLogoApngPlaceholderClassName = `${smallLogoStaticClassName} transition-opacity duration-300 ${
-    smallApngLoaded ? "opacity-0" : "opacity-100"
-  }`;
-  const smallLogoApngClassName = `absolute inset-0 w-full h-full z-10 object-contain drop-shadow-[0_0_18px_rgba(34,211,238,0.25)] transition-all duration-500 ${
-    smallApngLoaded ? "opacity-100" : "opacity-0"
-  }`;
 
   return (
     <header
@@ -227,42 +236,38 @@ export default function Navbar() {
 
             <Link to="/" className="flex items-center gap-3 select-none">
               <div className="relative h-14 w-14 grid place-items-center">
-                {smallLogoMode === "static" ? (
+                {smallLogoMode === "webm" ? (
+                  <>
+                    <img
+                      src="/favicon-96x96.png"
+                      alt="Roo Industries"
+                      className="sr-only"
+                      loading="eager"
+                      decoding="async"
+                    />
+                    <video
+                      className={smallLogoAnimatedClassName}
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                      preload="metadata"
+                      poster="/favicon-96x96.png"
+                      onError={handleSmallWebmError}
+                      aria-hidden="true"
+                    >
+                      <source src="/logo-animated-small.webm" type="video/webm" />
+                    </video>
+                  </>
+                ) : (
                   <img
-                    src="/favicon.svg"
+                    src="/favicon-96x96.png"
                     alt="Roo Industries"
                     className={smallLogoStaticClassName}
                     loading="eager"
                     fetchPriority="high"
-                  />
-                ) : smallLogoMode === "apng" ? (
-                  <>
-                    <img
-                      src="/favicon.svg"
-                      alt=""
-                      aria-hidden="true"
-                      className={smallLogoApngPlaceholderClassName}
-                      loading="eager"
-                      fetchPriority="high"
-                    />
-                    <img
-                      src="/logo-animated-small.png"
-                      alt="Roo Industries"
-                      className={smallLogoApngClassName}
-                      loading="eager"
-                      fetchPriority="high"
-                      decoding="async"
-                      onLoad={() => setSmallApngLoaded(true)}
-                      onError={handleSmallApngError}
-                    />
-                  </>
-                ) : (
-                  <CanvasVideo
-                    src="/logo-animated-small.webm"
-                    poster="/favicon.svg"
-                    alt="Roo Industries"
-                    onError={handleSmallWebmError}
-                    className={`${smallLogoAnimatedClassName} roo-logo-video`}
+                    width={56}
+                    height={56}
                   />
                 )}
               </div>

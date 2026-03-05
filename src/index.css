@@ -2,6 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --header-offset: 146px;
+}
+
+@media (max-width: 640px) {
+  :root {
+    --header-offset: 128px;
+  }
+}
+
 html {
   font-family: "Roboto Flex Variable", system-ui, sans-serif;
   scroll-behavior: smooth;
@@ -399,4 +409,39 @@ body.view-plan-open #booking-modal-close {
 html.nav-past-logo .roo-logo {
   opacity: 0;
   pointer-events: none;
+}
+
+/* Lightweight rendering path for browsers likely running software compositing. */
+html.low-performance-mode {
+  scroll-behavior: auto;
+}
+
+html.low-performance-mode body {
+  background-attachment: scroll;
+}
+
+html.low-performance-mode .animate-pulse,
+html.low-performance-mode .glow-button,
+html.low-performance-mode .glow-beam,
+html.low-performance-mode .sparkle-icon,
+html.low-performance-mode .gold-flair-text,
+html.low-performance-mode .gold-flair-pill {
+  animation: none !important;
+}
+
+html.low-performance-mode .glow-button,
+html.low-performance-mode .gold-flair-pill,
+html.low-performance-mode .gold-flair-text {
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+html.low-performance-mode [class*="backdrop-blur"] {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html.low-performance-mode .is-modal-blur .site-nav {
+  filter: none !important;
+  opacity: 1 !important;
 }

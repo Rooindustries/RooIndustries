@@ -193,6 +193,7 @@ export default function FaqSection({ compact = false }) {
   const sectionPaddingClass = compact ? "pt-20 pb-10" : "pt-20 pb-24";
 
   return (
+    <>
     <section
       id="faq"
       className={`relative z-10 scroll-mt-32 ${sectionPaddingClass} px-4 sm:px-6 text-white`}
@@ -336,5 +337,6 @@ export default function FaqSection({ compact = false }) {
         </div>
       </div>
     </section>
+    </>
   );
 }

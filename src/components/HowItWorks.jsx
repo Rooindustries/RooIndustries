@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { client } from "../sanityClient";
 
@@ -28,6 +28,31 @@ export default function HowItWorks() {
   };
 
   const VideoBadge = ({ name }) => {
+    const cardRef = useRef(null);
+    const [isVisible, setIsVisible] = useState(false);
+
+    useEffect(() => {
+      if (!name) return;
+      if (!cardRef.current || typeof IntersectionObserver === "undefined") {
+        setIsVisible(true);
+        return;
+      }
+
+      const observer = new IntersectionObserver(
+        (entries) => {
+          const entry = entries[0];
+          if (entry?.isIntersecting) {
+            setIsVisible(true);
+            observer.disconnect();
+          }
+        },
+        { rootMargin: "200px 0px" }
+      );
+
+      observer.observe(cardRef.current);
+      return () => observer.disconnect();
+    }, [name]);
+
     if (!name) return null;
 
     const webm = `/videos/${name}.webm`;
@@ -35,21 +60,24 @@ export default function HowItWorks() {
 
     return (
       <div
+        ref={cardRef}
         className="relative overflow-hidden rounded-2xl border border-sky-700/40 bg-[#081225]/70
                    shadow-[0_0_26px_rgba(14,165,233,0.3)]
                    w-[calc(100%+0.75rem)] sm:w-[calc(100%+1rem)] -mx-1.5 sm:-mx-2 aspect-[16/10]"
       >
-        <video
-          className="absolute inset-0 w-full h-full object-cover"
-          autoPlay
-          loop
-          muted
-          playsInline
-          preload="metadata"
-        >
-          <source src={webm} type="video/webm" />
-          <source src={mp4} type="video/mp4" />
-        </video>
+        {isVisible ? (
+          <video
+            className="absolute inset-0 w-full h-full object-cover"
+            autoPlay
+            loop
+            muted
+            playsInline
+            preload="none"
+          >
+            <source src={webm} type="video/webm" />
+            <source src={mp4} type="video/mp4" />
+          </video>
+        ) : null}
 
         <div className="absolute inset-0 bg-gradient-to-br from-sky-500/12 via-transparent to-cyan-500/12" />
         <div className="absolute inset-0 ring-1 ring-inset ring-white/10" />
