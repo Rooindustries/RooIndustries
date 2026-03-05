@@ -1,4 +1,5 @@
 import {createClient} from '@sanity/client';
+import {requireSecret} from './auth';
 import {
   buildBalance,
   computeEarningsFromBookings,
@@ -22,7 +23,20 @@ const writeClient = createClient({
 });
 
 export default async function handler(req, res) {
-  // Vercel Cron sends GET requests with authorization header
+  if (req.method !== 'GET') {
+    return res.status(405).json({ok: false, error: 'Method not allowed'});
+  }
+
+  if (
+    !requireSecret(
+      res,
+      'CRON_SECRET',
+      'CRON_SECRET is required on this endpoint.'
+    )
+  ) {
+    return;
+  }
+
   const authHeader = req.headers.authorization;
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return res.status(401).json({ok: false, error: 'Unauthorized'});

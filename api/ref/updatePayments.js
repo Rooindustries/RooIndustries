@@ -1,5 +1,6 @@
 import {createClient} from '@sanity/client';
 import {randomUUID} from 'crypto';
+import {requireAdminKey} from './auth';
 import {
   buildBalance,
   computeEarningsFromBookings,
@@ -22,8 +23,6 @@ const writeClient = createClient({
   useCdn: false,
 });
 
-const ADMIN_KEY = process.env.REF_ADMIN_KEY || process.env.REFERRAL_ADMIN_KEY;
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ok: false, error: 'Method not allowed'});
@@ -38,15 +37,9 @@ export default async function handler(req, res) {
       note = '',
       entryId = '',
       internalNotes,
-      adminKey,
     } = req.body || {};
 
-    // Admin key is now optional to simplify usage. If one is set, enforce it; if none is set, allow.
-    if (ADMIN_KEY && adminKey !== ADMIN_KEY) {
-      return res
-        .status(403)
-        .json({ok: false, error: 'Invalid admin key'});
-    }
+    if (!requireAdminKey(req, res)) return;
 
     if (!referralId) {
       return res
