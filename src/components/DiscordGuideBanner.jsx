@@ -31,10 +31,10 @@ export default function DiscordGuideBanner({ hidden = false }) {
 
   return (
     <div
-      className={`w-full overflow-hidden bg-gradient-to-r from-cyan-500/20 via-sky-500/25 to-cyan-500/20 transition-all duration-500 ease-in-out ${
+      className={`w-full overflow-hidden bg-gradient-to-r from-[#0a214f]/82 via-[#0b2a62]/78 to-[#0a214f]/82 backdrop-blur-sm transition-all duration-500 ease-in-out ${
         hidden
           ? "max-h-0 opacity-0 -translate-y-2 border-transparent"
-          : "max-h-24 opacity-100 translate-y-0 border-b border-cyan-300/25"
+          : "max-h-24 opacity-100 translate-y-0 border-b border-cyan-300/16"
       }`}
       aria-hidden={hidden ? "true" : undefined}
     >
@@ -42,7 +42,7 @@ export default function DiscordGuideBanner({ hidden = false }) {
         href={banner.link || DEFAULT_BANNER.link}
         target="_blank"
         rel="noreferrer"
-        className={`group flex w-full items-center justify-center gap-2 px-4 py-2.5 sm:py-3 text-sm sm:text-base font-semibold text-cyan-50 transition hover:bg-cyan-400/15 ${
+        className={`group flex w-full items-center justify-center gap-2 px-4 py-2.5 sm:py-3 text-sm sm:text-base font-semibold text-sky-100/92 transition hover:bg-sky-400/10 ${
           hidden ? "pointer-events-none" : "pointer-events-auto"
         }`}
         aria-label={banner.text || DEFAULT_BANNER.text}
