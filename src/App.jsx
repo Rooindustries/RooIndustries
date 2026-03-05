@@ -1,70 +1,92 @@
-import React, { useState, Suspense, lazy, useEffect } from "react";
+import React, { useState, useEffect, Suspense, lazy } from "react";
 import {
   BrowserRouter as Router,
   Routes,
   Route,
   useLocation,
   useNavigate,
+  Navigate,
 } from "react-router-dom";
-import { AnimatePresence, motion } from "framer-motion";
 import Navbar from "./components/Navbar";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 import ReservationBanner from "./components/ReservationBanner";
-import BookingModal from "./components/BookingModal";
 import TawkTo from "./components/TawkTo";
+import PerformanceModeNotice from "./components/PerformanceModeNotice";
+import Hero from "./components/Hero";
 
-// Lazy-loaded pages
-const Home = lazy(() => import("./pages/Home"));
-const Benchmarks = lazy(() => import("./pages/Benchmarks"));
-const Terms = lazy(() => import("./pages/Terms"));
-const Privacy = lazy(() => import("./pages/PrivacyPolicy"));
-const Reviews = lazy(() => import("./pages/Reviews"));
-const Packages = lazy(() => import("./pages/Packages"));
-const Faq = lazy(() => import("./pages/Faq"));
-const Contact = lazy(() => import("./pages/Contact"));
-const Book = lazy(() => import("./pages/Book"));
-const Payment = lazy(() => import("./pages/Payment"));
-const PaymentSuccess = lazy(() => import("./pages/PaymentSuccess"));
-const Thankyou = lazy(() => import("./pages/Thankyou"));
-const UpgradeXoc = lazy(() => import("./pages/UpgradeXoc"));
-const Upgrade = lazy(() => import("./pages/Upgrade"));
+const Home = lazy(() => import("./legacyPages/Home"));
+import Reviews from "./legacyPages/Reviews";
+import Tools from "./legacyPages/Tools";
+const Benchmarks = lazy(() => import("./legacyPages/Benchmarks"));
+const Terms = lazy(() => import("./legacyPages/Terms"));
+const Privacy = lazy(() => import("./legacyPages/PrivacyPolicy"));
+const Packages = lazy(() => import("./legacyPages/Packages"));
+const Faq = lazy(() => import("./legacyPages/Faq"));
+const Contact = lazy(() => import("./legacyPages/Contact"));
+const Book = lazy(() => import("./legacyPages/Book"));
+const Payment = lazy(() => import("./legacyPages/Payment"));
+const PaymentSuccess = lazy(() => import("./legacyPages/PaymentSuccess"));
+const Thankyou = lazy(() => import("./legacyPages/Thankyou"));
+const UpgradeXoc = lazy(() => import("./legacyPages/UpgradeXoc"));
+const Upgrade = lazy(() => import("./legacyPages/Upgrade"));
+const BookingModal = lazy(() => import("./components/BookingModal"));
 
-// Referral system (also lazy)
-const RefLogin = lazy(() => import("./pages/RefLogin"));
-const RefDashboard = lazy(() => import("./pages/RefDashboard"));
-const RefChangePassword = lazy(() => import("./pages/RefChangePassword"));
-const RefForgot = lazy(() => import("./pages/RefForgot"));
-const RefReset = lazy(() => import("./pages/RefReset"));
-const RefRegister = lazy(() => import("./pages/RefRegister"));
-const Tools = lazy(() => import("./pages/Tools"));
-const MeetTheTeam = lazy(() => import("./pages/MeetTheTeam"));
+const RefLogin = lazy(() => import("./legacyPages/RefLogin"));
+const RefDashboard = lazy(() => import("./legacyPages/RefDashboard"));
+const RefChangePassword = lazy(() => import("./legacyPages/RefChangePassword"));
+const RefForgot = lazy(() => import("./legacyPages/RefForgot"));
+const RefReset = lazy(() => import("./legacyPages/RefReset"));
+const RefRegister = lazy(() => import("./legacyPages/RefRegister"));
+const MeetTheTeam = lazy(() => import("./legacyPages/MeetTheTeam"));
+const NotFound = lazy(() => import("./legacyPages/NotFound"));
+
+const DeferredTelemetry = () => {
+  const [enabled, setEnabled] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    if ("requestIdleCallback" in window) {
+      const idleId = window.requestIdleCallback(() => setEnabled(true), {
+        timeout: 2500,
+      });
+      return () => window.cancelIdleCallback?.(idleId);
+    }
+
+    const timeoutId = window.setTimeout(() => setEnabled(true), 1500);
+    return () => window.clearTimeout(timeoutId);
+  }, []);
+
+  if (!enabled) return null;
+
+  return (
+    <>
+      <Analytics />
+      <SpeedInsights />
+    </>
+  );
+};
+
+const RouteFallback = () => (
+  <div className="pt-16 text-center text-slate-300 text-sm">Loading...</div>
+);
+
+const HomeRouteFallback = () => (
+  <>
+    <Hero />
+    <div className="min-h-[900px]" aria-hidden="true" />
+  </>
+);
+
+const withRouteSuspense = (node, fallback = <RouteFallback />) => (
+  <Suspense fallback={fallback}>{node}</Suspense>
+);
 
 function RedirectToDiscord() {
   React.useEffect(() => {
     window.location.href = "https://discord.gg/M7nTkn9dxE";
   }, []);
-  return null;
-}
-
-function RedirectPackagesToHome() {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const isPrerender =
-    (typeof navigator !== "undefined" && navigator.userAgent === "ReactSnap") ||
-    (typeof window !== "undefined" && window.__PRERENDER__ === true);
-
-  useEffect(() => {
-    if (isPrerender) return;
-    const targetSearch = location.search || "";
-    const targetHash = location.hash || "";
-    navigate(`/${targetSearch}${targetHash}`, { replace: true });
-  }, [isPrerender, location.search, location.hash, navigate]);
-
-  if (isPrerender) {
-    return <Packages />;
-  }
-
   return null;
 }
 
@@ -74,57 +96,85 @@ function AnimatedRoutes({ setIsModalOpen, routesLocation, routeKey }) {
   const motionKey = routeKey || `${location.pathname}${location.search || ""}`;
 
   return (
-    <AnimatePresence mode="wait">
-      <motion.div
-        key={motionKey}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.3 }}
-        className="w-full flex flex-col flex-1"
-      >
+    <div key={motionKey} className="w-full flex flex-col flex-1">
         <Routes location={location}>
-          <Route path="/" element={<Home />} />
-          <Route path="/packages" element={<RedirectPackagesToHome />} />
+          <Route
+            path="/"
+            element={withRouteSuspense(<Home />, <HomeRouteFallback />)}
+          />
+          <Route path="/packages" element={withRouteSuspense(<Packages />)} />
           <Route
             path="/benchmarks"
-            element={<Benchmarks setIsModalOpen={setIsModalOpen} />}
+            element={withRouteSuspense(
+              <Benchmarks setIsModalOpen={setIsModalOpen} />
+            )}
           />
-          <Route path="/privacy" element={<Privacy />} />
-          <Route path="/terms" element={<Terms />} />
+          <Route path="/privacy" element={withRouteSuspense(<Privacy />)} />
+          <Route path="/terms" element={withRouteSuspense(<Terms />)} />
           <Route
             path="/reviews"
             element={<Reviews setIsModalOpen={setIsModalOpen} />}
           />
-          <Route path="/booking" element={<Book />} />
-          <Route path="/contact" element={<Contact />} />
-          <Route path="/faq" element={<Faq />} />
+          <Route path="/booking" element={withRouteSuspense(<Book />)} />
+          <Route path="/contact" element={withRouteSuspense(<Contact />)} />
+          <Route path="/faq" element={withRouteSuspense(<Faq />)} />
           <Route path="/discord" element={<RedirectToDiscord />} />
-          <Route path="/payment" element={<Payment />} />
-          <Route path="/payment-success" element={<PaymentSuccess />} />
-          <Route path="/thank-you" element={<Thankyou />} />
+          <Route path="/payment" element={withRouteSuspense(<Payment />)} />
+          <Route
+            path="/payment-success"
+            element={withRouteSuspense(<PaymentSuccess />)}
+          />
+          <Route path="/thank-you" element={withRouteSuspense(<Thankyou />)} />
           <Route path="/tools" element={<Tools />} />
-          <Route path="/meet-the-team" element={<MeetTheTeam />} />
-          <Route path="/upgrade/:slug" element={<Upgrade />} />
-          <Route path="/upgrade-xoc" element={<UpgradeXoc />} />
+          <Route
+            path="/meet-the-team"
+            element={withRouteSuspense(<MeetTheTeam />)}
+          />
+          <Route
+            path="/upgrade/:slug"
+            element={withRouteSuspense(<Upgrade />)}
+          />
+          <Route
+            path="/upgrade-xoc"
+            element={withRouteSuspense(<UpgradeXoc />)}
+          />
 
           {/* Referral system routes */}
-          <Route path="/referrals/login" element={<RefLogin />} />
-          <Route path="/referrals/dashboard" element={<RefDashboard />} />
+          <Route
+            path="/referrals/login"
+            element={withRouteSuspense(<RefLogin />)}
+          />
+          <Route
+            path="/referrals/dashboard"
+            element={withRouteSuspense(<RefDashboard />)}
+          />
           <Route
             path="/referrals/change-password"
-            element={<RefChangePassword />}
+            element={withRouteSuspense(<RefChangePassword />)}
           />
-          <Route path="/referrals/forgot" element={<RefForgot />} />
-          <Route path="/referrals/reset" element={<RefReset />} />
-          <Route path="/referrals/Register" element={<RefRegister />} />
+          <Route
+            path="/referrals/forgot"
+            element={withRouteSuspense(<RefForgot />)}
+          />
+          <Route
+            path="/referrals/reset"
+            element={withRouteSuspense(<RefReset />)}
+          />
+          <Route
+            path="/referrals/register"
+            element={withRouteSuspense(<RefRegister />)}
+          />
+          <Route
+            path="/referrals/Register"
+            element={<Navigate to="/referrals/register" replace />}
+          />
+          <Route path="*" element={withRouteSuspense(<NotFound />)} />
         </Routes>
-      </motion.div>
-    </AnimatePresence>
+    </div>
   );
 }
 
-function AppContent() {
+export function AppContent() {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const location = useLocation();
@@ -215,66 +265,56 @@ function AppContent() {
 
   return (
     <>
-      <Analytics />
-      <SpeedInsights />
+      <DeferredTelemetry />
 
       <div
         className="relative min-h-screen flex flex-col text-white overflow-hidden 
         bg-[linear-gradient(to_top,#00b7c0_0%,#006185_30%,#001f5a_65%,#000040_100%)]
-        bg-fixed"
+        bg-scroll md:bg-fixed"
       >
         {/* Background layers */}
         <div
           className="absolute inset-0 bg-[linear-gradient(45deg,rgba(255,255,255,0.05)_1px,transparent_1px)] 
-                      bg-[size:40px_40px] opacity-50 animate-pulse"
+                      bg-[size:40px_40px] opacity-50"
         ></div>
         <div
           className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(14,165,233,0.25),rgba(3,7,18,1) 80%)] 
-                      animate-pulse"
+                      "
         ></div>
 
         {/* Navbar and pages */}
         <main
-          className="relative z-10 flex flex-col flex-1 transition-[padding-top] duration-500 ease-in-out"
-          style={{ paddingTop: "var(--header-offset, 0px)" }}
+          className="relative z-10 flex flex-col flex-1"
+          style={{ paddingTop: "var(--header-offset)" }}
         >
           <Navbar />
           <ReservationBanner />
 
-          <Suspense
-            fallback={
-              <div className="pt-32 text-center text-slate-300 text-sm">
-                Loading...
-              </div>
-            }
-          >
-            <AnimatedRoutes
-              setIsModalOpen={setIsModalOpen}
-              routesLocation={routesLocation}
-              routeKey={routesKey}
-            />
-          </Suspense>
+          <AnimatedRoutes
+            setIsModalOpen={setIsModalOpen}
+            routesLocation={routesLocation}
+            routeKey={routesKey}
+          />
         </main>
       </div>
-      <BookingModal open={isFlowRoute} onClose={closeBookingModal}>
-        <Suspense
-          fallback={
-            <div className="pt-32 text-center text-slate-300 text-sm">
-              Loading...
-            </div>
-          }
-        >
-          {isPaymentSuccessRoute ? (
-            <PaymentSuccess hideFooter />
-          ) : isThankYouRoute ? (
-            <Thankyou hideFooter />
-          ) : isPaymentRoute ? (
-            <Payment hideFooter />
-          ) : (
-            <Book hideFooter compact />
-          )}
+      {isFlowRoute && (
+        <Suspense fallback={null}>
+          <BookingModal open onClose={closeBookingModal}>
+            <Suspense fallback={<RouteFallback />}>
+              {isPaymentSuccessRoute ? (
+                <PaymentSuccess hideFooter />
+              ) : isThankYouRoute ? (
+                <Thankyou hideFooter />
+              ) : isPaymentRoute ? (
+                <Payment hideFooter />
+              ) : (
+                <Book hideFooter compact />
+              )}
+            </Suspense>
+          </BookingModal>
         </Suspense>
-      </BookingModal>
+      )}
+      <PerformanceModeNotice />
     </>
   );
 }

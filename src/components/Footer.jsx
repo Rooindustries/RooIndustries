@@ -20,11 +20,13 @@ export default function Footer() {
         <div className="flex flex-col md:flex-row items-center gap-3 pb-3 border-b border-cyan-300/10">
           <Link to="/" className="flex items-center gap-3 select-none">
             <img
-              src="/favicon.svg"
+              src="/favicon-96x96.png"
               alt="Roo Industries"
               className="h-14 w-14 sm:h-16 sm:w-16 object-contain drop-shadow-[0_0_14px_rgba(34,211,238,0.30)]"
               loading="lazy"
               decoding="async"
+              width={64}
+              height={64}
             />
           </Link>
 
@@ -65,6 +67,8 @@ export default function Footer() {
                   alt="Trustpilot"
                   loading="lazy"
                   decoding="async"
+                  width={96}
+                  height={96}
                   className="h-[1.15em] w-auto -translate-y-[0.1em] object-contain"
                 />
                 Review on Trustpilot
@@ -92,6 +96,8 @@ export default function Footer() {
                 className="h-7 w-auto object-contain"
                 loading="lazy"
                 decoding="async"
+                width={240}
+                height={152}
               />
             </span>
             <span className="grid place-items-center h-10 w-14 rounded-xl border border-white/10 bg-[#0b1830]/60">
@@ -101,6 +107,8 @@ export default function Footer() {
                 className="h-7 w-auto object-contain"
                 loading="lazy"
                 decoding="async"
+                width={220}
+                height={128}
               />
             </span>
             <span className="grid place-items-center h-10 w-14 rounded-xl border border-white/10 bg-[#0b1830]/60">

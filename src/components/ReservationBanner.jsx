@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useLocation } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
 
 const HOLD_STORAGE_KEY = "my_slot_hold";
 const BOOKING_DRAFT_KEY = "booking_draft";
@@ -85,6 +84,7 @@ export default function ReservationBanner() {
         if (new Date(parsed.expiresAt) > new Date()) {
           const normalizedHold = {
             holdId: parsed.holdId,
+            holdToken: parsed.holdToken,
             expiresAt: parsed.expiresAt,
             startTimeUTC: parsed.startTimeUTC,
             packageTitle: parsed.packageTitle,
@@ -115,6 +115,7 @@ export default function ReservationBanner() {
       if (detail) {
         const normalizedHold = {
           holdId: detail.holdId,
+          holdToken: detail.holdToken,
           expiresAt: detail.expiresAt,
           startTimeUTC: detail.startTimeUTC,
           packageTitle: detail.packageTitle,
@@ -178,6 +179,7 @@ export default function ReservationBanner() {
   const releaseHold = async (clearOnly = false, redirect = false) => {
     if (!hold) return;
     const holdIdToDelete = hold.holdId;
+    const holdTokenToDelete = hold.holdToken;
     setHold(null);
     localStorage.removeItem(HOLD_STORAGE_KEY);
     localStorage.removeItem(BOOKING_DRAFT_KEY);
@@ -196,7 +198,10 @@ export default function ReservationBanner() {
       fetch("/api/releaseHold", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ holdId: holdIdToDelete }),
+        body: JSON.stringify({
+          holdId: holdIdToDelete,
+          holdToken: holdTokenToDelete,
+        }),
       }).catch((err) =>
         console.error("Failed to release hold on server:", err)
       );
@@ -317,20 +322,20 @@ export default function ReservationBanner() {
     isPaymentScreen && isDesktopWidth ? "justify-center" : isDesktopWidth ? "justify-end" : "justify-center";
   const buttonWrapClass = isPaymentScreen && isDesktopWidth ? "flex-nowrap" : "flex-wrap";
 
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  if (!shouldRender) {
+    return null;
+  }
+
   return createPortal(
-    <AnimatePresence>
-      {shouldRender && (
-        <motion.div 
-          className={`pointer-events-none fixed inset-x-0 z-[9999] flex ${alignmentClass} ${containerSpacingClass}`}
-          
-          // Animation definitions
-          initial={{ opacity: 0, y: 30 }} 
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: 30 }}
-          transition={{ type: "spring", stiffness: 150, damping: 25, duration: 0.4 }} 
-        >
-          <div
-            className={`
+    <div
+      className={`pointer-events-none fixed inset-x-0 z-[9999] flex ${alignmentClass} ${containerSpacingClass}`}
+    >
+      <div
+        className={`
               pointer-events-auto relative overflow-hidden 
               ${bannerWidthClass}
               rounded-2xl 
@@ -344,45 +349,43 @@ export default function ReservationBanner() {
               backdropFilter: "blur(40px)", 
               WebkitBackdropFilter: "blur(40px)" 
             }}
+      >
+        {/* Text Block */}
+        <div className={`min-w-0 z-10 ${textAlignmentClass}`}>
+          <p className={`font-semibold text-white truncate drop-shadow-md ${titleSizeClass}`}>
+            Slot {holdLocalTimeLabel || "--"}
+            {hold?.packageTitle ? ` — ${hold.packageTitle}` : ""}
+          </p>
+          <p className={`text-sky-200/90 truncate drop-shadow-sm ${subtitleSizeClass}`}>
+            Expires in {formatCountdown(countdown)}
+          </p>
+        </div>
+
+        {/* Buttons Block */}
+        <div className={`flex items-center ${buttonWrapClass} z-10 lg:flex-none ${buttonGapClass} ${buttonJustifyClass}`}>
+
+          {/* Release Button */}
+          <button
+            type="button"
+            onClick={() => releaseHold(false, true)}
+            className={`rounded-lg border border-red-400/30 bg-red-500/20 px-2.5 py-1.5 sm:px-3 sm:py-2 ${buttonTextSizeClass} font-semibold text-red-50 hover:bg-red-500/30 transition shadow-sm`}
           >
-            {/* Text Block */}
-            <div className={`min-w-0 z-10 ${textAlignmentClass}`}>
-              <p className={`font-semibold text-white truncate drop-shadow-md ${titleSizeClass}`}>
-                Slot {holdLocalTimeLabel || "--"}
-                {hold?.packageTitle ? ` — ${hold.packageTitle}` : ""}
-              </p>
-              <p className={`text-sky-200/90 truncate drop-shadow-sm ${subtitleSizeClass}`}>
-                Expires in {formatCountdown(countdown)}
-              </p>
-            </div>
-            
-            {/* Buttons Block */}
-            <div className={`flex items-center ${buttonWrapClass} z-10 lg:flex-none ${buttonGapClass} ${buttonJustifyClass}`}>
-              
-              {/* Release Button */}
+            Release
+          </button>
+
+          {/* Continue button (Hidden on payment screen) */}
+          {!isPaymentScreen && (
               <button
                 type="button"
-                onClick={() => releaseHold(false, true)}
-                className={`rounded-lg border border-red-400/30 bg-red-500/20 px-2.5 py-1.5 sm:px-3 sm:py-2 ${buttonTextSizeClass} font-semibold text-red-50 hover:bg-red-500/30 transition shadow-sm`}
+                onClick={continueBooking}
+                className={`rounded-lg border border-sky-400/30 bg-sky-500/20 px-2.5 py-1.5 sm:px-3 sm:py-2 ${buttonTextSizeClass} font-semibold text-sky-50 hover:bg-sky-500/30 transition whitespace-nowrap shadow-sm`}
               >
-                Release
+                Continue booking
               </button>
-              
-              {/* Continue button (Hidden on payment screen) */}
-              {!isPaymentScreen && (
-                <button
-                  type="button"
-                  onClick={continueBooking}
-                  className={`rounded-lg border border-sky-400/30 bg-sky-500/20 px-2.5 py-1.5 sm:px-3 sm:py-2 ${buttonTextSizeClass} font-semibold text-sky-50 hover:bg-sky-500/30 transition whitespace-nowrap shadow-sm`}
-                >
-                  Continue booking
-                </button>
-              )}
-            </div>
-          </div>
-        </motion.div>
-      )}
-    </AnimatePresence>,
+          )}
+        </div>
+      </div>
+    </div>,
     document.body
   );
 }
