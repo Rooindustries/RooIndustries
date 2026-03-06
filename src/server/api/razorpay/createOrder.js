@@ -1,3 +1,5 @@
+import { resolveBookingPricing } from "../ref/pricing.js";
+
 function getCredentials() {
   const keyId = process.env.RAZORPAY_KEY_ID || "";
   const keySecret = process.env.RAZORPAY_KEY_SECRET || "";
@@ -14,12 +16,13 @@ function toSubunits(amount, currency = "USD") {
 }
 
 function resolveServerCurrency() {
-  return String(process.env.RAZORPAY_CURRENCY || "USD")
-    .trim()
-    .toUpperCase() || "USD";
+  return (
+    String(process.env.RAZORPAY_CURRENCY || "USD").trim().toUpperCase() ||
+    "USD"
+  );
 }
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", ["POST"]);
     return res.status(405).json({ ok: false, message: "Method not allowed" });
@@ -45,8 +48,7 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    const pricingModule = await import("./../ref/pricing.js");
-    const pricing = await pricingModule.resolveBookingPricing({
+    const pricing = await resolveBookingPricing({
       packageTitle: notes.packageTitle,
       originalOrderId: notes.originalOrderId || "",
       referralCode: notes.referralCode || "",
@@ -83,7 +85,10 @@ module.exports = async function handler(req, res) {
     const order = await upstream.json();
 
     if (!upstream.ok || !order?.id) {
-      const details = order?.error?.description || order?.error?.reason || order?.error?.code;
+      const details =
+        order?.error?.description ||
+        order?.error?.reason ||
+        order?.error?.code;
       throw new Error(details || `Razorpay order create failed (${upstream.status})`);
     }
 
@@ -98,8 +103,7 @@ module.exports = async function handler(req, res) {
     console.error("Razorpay createOrder error:", err);
     return res.status(500).json({
       ok: false,
-      message:
-        err?.message || "Failed to create Razorpay order",
+      message: err?.message || "Failed to create Razorpay order",
     });
   }
-};
+}
