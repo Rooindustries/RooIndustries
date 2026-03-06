@@ -8,16 +8,12 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(request) {
+async function handle(request, methodOverride) {
   const handler = await loadLegacyApiHandler(
     path.join(process.cwd(), "api", "releaseHold.js")
   );
-  return runLegacyApiHandler({ request, handler, methodOverride: "GET" });
+  return runLegacyApiHandler({ request, handler, methodOverride });
 }
 
-export async function POST(request) {
-  const handler = await loadLegacyApiHandler(
-    path.join(process.cwd(), "api", "releaseHold.js")
-  );
-  return runLegacyApiHandler({ request, handler, methodOverride: "POST" });
-}
+export const GET = (request) => handle(request, "GET");
+export const POST = (request) => handle(request, "POST");
