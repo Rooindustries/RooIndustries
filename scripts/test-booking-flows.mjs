@@ -7,10 +7,10 @@ import { formatHostDateLabel } from "../src/utils/timezone.js";
 dotenv.config({ path: ".env.local" });
 
 const require = createRequire(import.meta.url);
-const createOrderHandler = require("../api/razorpay/createOrder.js");
-const verifyHandler = require("../api/razorpay/verify.js");
+const createOrderHandler = require("../src/server/api/razorpay/createOrder.js");
+const verifyHandler = require("../src/server/api/razorpay/verify.js");
 const { default: createBookingHandler } =
-  await import("../api/ref/createBooking.js");
+  await import("../src/server/api/ref/createBooking.js");
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
