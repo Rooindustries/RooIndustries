@@ -364,7 +364,7 @@ beforeAll(() => {
     return mod && mod.default ? mod.default : mod;
   };
   holdSlot = load("../../src/server/booking/holdSlot");
-  createBooking = load("../../api/ref/createBooking");
+  createBooking = load("../../src/server/api/ref/createBooking");
   releaseHold = load("../../src/server/booking/releaseHold");
 });
 

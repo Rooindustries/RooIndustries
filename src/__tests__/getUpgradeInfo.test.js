@@ -31,7 +31,7 @@ const createRes = () => ({
 });
 
 beforeAll(() => {
-  const mod = require("../../api/ref/getUpgradeInfo");
+  const mod = require("../../src/server/api/ref/getUpgradeInfo");
   getUpgradeInfo = mod && mod.default ? mod.default : mod;
 });
 
