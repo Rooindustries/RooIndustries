@@ -1,18 +1,15 @@
-import path from "node:path";
-
-import {
-  loadLegacyApiHandler,
-  runLegacyApiHandler,
-} from "../../../src/lib/nextApiAdapter";
+import holdSlotHandler from "../../../src/server/booking/holdSlot";
+import { runLegacyApiHandler } from "../../../src/lib/nextApiAdapter";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 async function handle(request, methodOverride) {
-  const handler = await loadLegacyApiHandler(
-    path.join(process.cwd(), "src", "server", "booking", "holdSlot.js")
-  );
-  return runLegacyApiHandler({ request, handler, methodOverride });
+  return runLegacyApiHandler({
+    request,
+    handler: holdSlotHandler,
+    methodOverride,
+  });
 }
 
 export const GET = (request) => handle(request, "GET");
