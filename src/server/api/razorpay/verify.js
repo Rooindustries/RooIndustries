@@ -1,6 +1,3 @@
-const dotenv = require("dotenv");
-dotenv.config({ path: ".env.local" });
-
 const crypto = require("crypto");
 
 module.exports = async function handler(req, res) {

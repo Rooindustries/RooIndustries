@@ -1,6 +1,3 @@
-const dotenv = require("dotenv");
-dotenv.config({ path: ".env.local" });
-
 const Razorpay = require("razorpay");
 
 function createClient() {

@@ -1,12 +1,9 @@
 import { Resend } from "resend";
 import { createClient } from "@sanity/client";
 import crypto from "crypto";
-import dotenv from "dotenv";
 import { verifyHoldToken } from "../../booking/holdToken.js";
 import { resolveBookingPricing } from "./pricing.js";
 import { buildSlotBookingId } from "../../booking/slotIdentity.js";
-
-dotenv.config({ path: ".env.local" });
 
 const writeClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
