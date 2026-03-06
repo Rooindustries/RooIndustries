@@ -1,25 +1,22 @@
-import path from "node:path";
-
-import {
-  loadLegacyApiHandler,
-  runLegacyApiHandler,
-} from "../../../../src/lib/nextApiAdapter";
+import createOrder from "../../../../src/server/api/razorpay/createOrder";
+import verify from "../../../../src/server/api/razorpay/verify";
+import { runLegacyApiHandler } from "../../../../src/lib/nextApiAdapter";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ALLOWED_ACTIONS = new Set(["createOrder", "verify"]);
+const ACTION_HANDLERS = {
+  createOrder,
+  verify,
+};
 
 async function handle(request, context, methodOverride) {
   const { action } = await context.params;
+  const handler = ACTION_HANDLERS[action];
 
-  if (!ALLOWED_ACTIONS.has(action)) {
+  if (!handler) {
     return Response.json({ ok: false, error: "Not found" }, { status: 404 });
   }
-
-  const handler = await loadLegacyApiHandler(
-    path.join(process.cwd(), "src", "server", "api", "razorpay", `${action}.js`)
-  );
 
   return runLegacyApiHandler({ request, handler, methodOverride });
 }
