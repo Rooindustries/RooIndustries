@@ -166,7 +166,7 @@ export default function HowItWorks({ initialData = null }) {
           {data.steps.map((s, i) => (
             <div
               key={i}
-              className="group backdrop-blur-sm bg-[#0b1120]/80 border border-sky-700/30 rounded-2xl p-4
+              className="group scroll-blur-lite backdrop-blur-sm bg-[#0b1120]/80 border border-sky-700/30 rounded-2xl p-4
                          shadow-[0_0_25px_rgba(14,165,233,0.15)] hover:shadow-[0_0_35px_rgba(14,165,233,0.25)]
                          transition-all duration-300"
             >
