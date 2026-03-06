@@ -145,7 +145,7 @@ export default function SupportedGames({ initialData = null }) {
 
           {/* Games grid */}
           {featuredGames.length > 0 && (
-            <div className="rounded-2xl bg-gradient-to-b from-slate-900/50 to-slate-950/50 ring-1 ring-white/10 backdrop-blur-sm p-4 sm:p-5 shadow-[0_0_30px_rgba(0,0,0,0.3)]">
+            <div className="scroll-blur-lite rounded-2xl bg-gradient-to-b from-slate-900/50 to-slate-950/50 ring-1 ring-white/10 backdrop-blur-sm p-4 sm:p-5 shadow-[0_0_30px_rgba(0,0,0,0.3)]">
               {/* Featured games grid - 3 on mobile, 6 on large screens */}
               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2 sm:gap-3 md:gap-4">
                 {featuredGames.map((game, index) => (
