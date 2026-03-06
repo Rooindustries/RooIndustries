@@ -2,9 +2,9 @@ import { Resend } from "resend";
 import { createClient } from "@sanity/client";
 import crypto from "crypto";
 import dotenv from "dotenv";
-import { verifyHoldToken } from "../holdToken.js";
+import { verifyHoldToken } from "../../src/server/booking/holdToken.js";
 import { resolveBookingPricing } from "./pricing.js";
-import { buildSlotBookingId } from "../slotIdentity.js";
+import { buildSlotBookingId } from "../../src/server/booking/slotIdentity.js";
 
 dotenv.config({ path: ".env.local" });
 

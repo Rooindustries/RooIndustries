@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 async function handle(request, methodOverride) {
   const handler = await loadLegacyApiHandler(
-    path.join(process.cwd(), "api", "releaseHold.js")
+    path.join(process.cwd(), "src", "server", "booking", "releaseHold.js")
   );
   return runLegacyApiHandler({ request, handler, methodOverride });
 }

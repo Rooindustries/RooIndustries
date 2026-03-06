@@ -363,9 +363,9 @@ beforeAll(() => {
     const mod = require(path);
     return mod && mod.default ? mod.default : mod;
   };
-  holdSlot = load("../../api/holdSlot");
+  holdSlot = load("../../src/server/booking/holdSlot");
   createBooking = load("../../api/ref/createBooking");
-  releaseHold = load("../../api/releaseHold");
+  releaseHold = load("../../src/server/booking/releaseHold");
 });
 
 beforeEach(() => {
