@@ -557,6 +557,12 @@ html.is-scrolling .glass-scroll-lite {
     0 10px 24px rgba(2, 6, 23, 0.24) !important;
 }
 
+html.is-scrolling .scroll-blur-lite,
+html.low-performance-mode .scroll-blur-lite {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
 html.perf-no-navbar-blur .site-navbar-glass,
 html.perf-no-navbar-blur .glass-premium {
   -webkit-backdrop-filter: none !important;
