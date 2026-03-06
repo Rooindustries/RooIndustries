@@ -1,22 +1,22 @@
 import "../src/roboto-latin.css";
 import "../src/index.css";
+import seo from "@/src/lib/seo";
 
-const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || "https://www.rooindustries.com").replace(/\/$/, "");
-
-export const metadata = {
-  metadataBase: new URL(siteUrl),
-  title: {
-    default: "Roo Industries | Professional PC Optimization",
-    template: "%s",
-  },
-  description:
-    "World-class PC optimization, BIOS tuning, and game performance boosts delivered fully online.",
-};
+// Keep root metadata static at layout level so core tags appear immediately.
+export const metadata = seo.getMetadataForPath("/");
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <head />
+      <head>
+        <link
+          rel="preload"
+          href="/fonts/roboto-flex-latin-opsz-normal.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin="anonymous"
+        />
+      </head>
       <body>{children}</body>
     </html>
   );

@@ -2,7 +2,6 @@
 
 import React from "react";
 import { MemoryRouter } from "react-router-dom";
-import { HelmetProvider } from "react-helmet-async";
 import { AppContent } from "../App";
 
 const buildQueryString = (searchParams) => {
@@ -28,15 +27,18 @@ const buildQueryString = (searchParams) => {
   return query ? `?${query}` : "";
 };
 
-export default function LegacyRoutePage({ pathname = "/", searchParams }) {
+export default function LegacyRoutePage({
+  pathname = "/",
+  searchParams,
+  initialHomeData = null,
+}) {
   const query = buildQueryString(searchParams);
+  // Keep initial server/client entry deterministic; hash intent is handled post-mount.
   const initialEntry = `${pathname}${query}`;
 
   return (
-    <HelmetProvider>
-      <MemoryRouter initialEntries={[initialEntry]}>
-        <AppContent />
-      </MemoryRouter>
-    </HelmetProvider>
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <AppContent initialHomeData={initialHomeData} routeShell="memory" />
+    </MemoryRouter>
   );
 }

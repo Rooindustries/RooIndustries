@@ -1,5 +1,5 @@
 import { createClient } from "@sanity/client";
-import { verifyHoldToken } from "./holdToken";
+import { verifyHoldToken } from "./holdToken.js";
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -33,6 +33,7 @@ export default async function handler(req, res) {
       token: holdToken,
       holdId,
       startTimeUTC: hold.startTimeUTC,
+      holdNonce: hold.holdNonce || "",
     });
 
     if (!validToken) {

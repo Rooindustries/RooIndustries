@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { client } from "../sanityClient";
 import { createImageUrlBuilder } from "@sanity/image-url";
+import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS, readHomeSectionData } from "../lib/homeSectionData";
 import {
   Clock,
   Shield,
@@ -45,31 +46,24 @@ function AnimatedNumber({ value, duration = 0.65 }) {
   return <span>{display}</span>;
 }
 
-export default function Services() {
-  const [data, setData] = useState(null);
+export default function Services({ initialData = null }) {
+  const [data, setData] = useState(
+    () => initialData ?? readHomeSectionData(HOME_SECTION_DATA_KEYS.services)
+  );
+
+  useEffect(() => {
+    if (initialData !== null) {
+      setData(initialData);
+    }
+  }, [initialData]);
   const [page, setPage] = useState(0);
 
   useEffect(() => {
-    client
-      .fetch(
-        `*[_type == "services"][0]{
-          heading,
-          subheading,
-          cards[]{title, description, iconType, customIcon},
-          benchEnabled,
-          benchMetricLabel,
-          benchBeforeLabel,
-          benchAfterLabel,
-          benchBadgeSuffix,
-          benchPagePrefix,
-          benchPages[]{
-            games[]{gameTitle, gameLogo, beforeFps, afterFps, gpu, cpu, ram, metricLabel}
-          }
-        }`
-      )
+    if (data !== null) return;
+    fetchHomeSectionData(HOME_SECTION_DATA_KEYS.services)
       .then(setData)
       .catch(console.error);
-  }, []);
+  }, [data]);
 
   const iconClass =
     "w-6 h-6 text-cyan-300 drop-shadow-[0_0_10px_rgba(56,189,248,0.35)]";
@@ -161,7 +155,13 @@ export default function Services() {
     transition: { duration: 0.25, ease: "easeOut" },
   };
 
-  if (!data) return null;
+  if (!data) {
+    return (
+      <section className="mx-auto max-w-[92rem] py-16 px-4 sm:px-6" aria-hidden="true">
+        <div className="min-h-[980px] rounded-3xl border border-sky-700/20 bg-gradient-to-b from-[#0d1526]/70 to-[#08101d]/80" />
+      </section>
+    );
+  }
 
   const beforeLabel = data.benchBeforeLabel || "Before";
   const afterLabel = data.benchAfterLabel || "Optimized";

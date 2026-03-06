@@ -1,4 +1,4 @@
-import { clearReferralSessionCookie } from "./auth";
+import { clearReferralSessionCookie } from "./auth.js";
 
 export default function handler(req, res) {
   if (req.method !== "POST") {

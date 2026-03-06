@@ -17,6 +17,26 @@ const resetStore = () => {
     slotHolds: [],
     coupons: [],
     referrals: [],
+    packages: [
+      {
+        _id: "pkg_vertex",
+        _type: "package",
+        title: "Performance Vertex Overhaul",
+        price: "$84.99",
+      },
+      {
+        _id: "pkg_xoc",
+        _type: "package",
+        title: "XOC / Extreme Overclocking",
+        price: "$149.95",
+      },
+      {
+        _id: "pkg_test",
+        _type: "package",
+        title: "Test Package",
+        price: "$49.95",
+      },
+    ],
     bookingSettings: { ownerEmail: OWNER_EMAIL },
   };
   idCounter = 1;
@@ -90,6 +110,7 @@ const findById = (id) => {
     store.slotHolds,
     store.coupons,
     store.referrals,
+    store.packages,
   ];
   for (const collection of collections) {
     const found = collection.find((doc) => doc._id === id);
@@ -98,11 +119,32 @@ const findById = (id) => {
   return null;
 };
 
+const createConflictError = () => {
+  const err = new Error("Document already exists");
+  err.statusCode = 409;
+  err.status = 409;
+  return err;
+};
+
 const mockSanityClient = {
   fetch: async (query, params = {}) => {
     const q = String(query || "");
     if (q.includes('_type == "bookingSettings"')) {
       return store.bookingSettings;
+    }
+    if (
+      q.includes('_type == "package"') &&
+      q.includes("title == $title")
+    ) {
+      return (
+        store.packages.find((pkg) => pkg.title === params.title) || null
+      );
+    }
+    if (
+      q.includes('_type == "booking"') &&
+      q.includes("_id == $id")
+    ) {
+      return store.bookings.find((b) => b._id === params.id) || null;
     }
     if (
       q.includes('_type == "booking"') &&
@@ -169,6 +211,9 @@ const mockSanityClient = {
     if (!next._id) {
       next._id = `doc_${idCounter++}`;
     }
+    if (findById(next._id)) {
+      throw createConflictError();
+    }
     if (next._type === "slotHold") {
       store.slotHolds.push(next);
     }
@@ -181,6 +226,9 @@ const mockSanityClient = {
     if (next._type === "referral") {
       store.referrals.push(next);
     }
+    if (next._type === "package") {
+      store.packages.push(next);
+    }
     return next;
   },
   delete: async (id) => {
@@ -192,6 +240,7 @@ const mockSanityClient = {
     removeFrom(store.bookings);
     removeFrom(store.coupons);
     removeFrom(store.referrals);
+    removeFrom(store.packages);
     return { _id: id };
   },
   patch: (id) => {
@@ -366,7 +415,8 @@ describe("booking reservation API", () => {
 
     const second = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
     expect(second.res.statusCode).toBe(200);
-    expect(second.body.holdId).not.toBe(first.body.holdId);
+    expect(second.body.holdId).toBe(first.body.holdId);
+    expect(second.body.holdToken).not.toBe(first.body.holdToken);
 
     const { res: bookingRes } = await createPaidBooking({
       startTimeUTC,
@@ -470,6 +520,32 @@ describe("booking reservation API", () => {
     expect(store.slotHolds).toHaveLength(0);
   });
 
+  test("stale hold token cannot release a newly re-acquired slot", async () => {
+    const baseTime = new Date("2025-01-01T00:00:00.000Z").getTime();
+    const nowSpy = jest.spyOn(Date, "now").mockReturnValue(baseTime);
+
+    const startTimeUTC = "2025-01-15T07:59:00.000Z";
+    const first = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
+    expect(first.res.statusCode).toBe(200);
+
+    nowSpy.mockReturnValue(baseTime + 16 * 60 * 1000);
+    const second = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
+    expect(second.res.statusCode).toBe(200);
+    expect(second.body.holdId).toBe(first.body.holdId);
+    expect(second.body.holdToken).not.toBe(first.body.holdToken);
+
+    const staleReleaseRes = createRes();
+    await releaseHold(
+      createReq({ holdId: first.body.holdId, holdToken: first.body.holdToken }),
+      staleReleaseRes
+    );
+
+    expect(staleReleaseRes.statusCode).toBe(403);
+    expect(store.slotHolds).toHaveLength(1);
+
+    nowSpy.mockRestore();
+  });
+
   test("race conditions prevent double bookings and duplicate emails", async () => {
     expect(CLIENT_EMAIL).toBe("vihaann2.0@gmail.com");
     expect(OWNER_EMAIL).toBe("serviroo@rooindustries.com");
@@ -518,6 +594,63 @@ describe("booking reservation API", () => {
     expect(res.statusCode).toBe(409);
     expect(store.bookings).toHaveLength(0);
     expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
+  test("upgrade booking backfills original booking details without leaking them from the client", async () => {
+    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    const originalUtcDate = new Date(startTimeUTC);
+    store.bookings.push({
+      _id: "booking_original",
+      _type: "booking",
+      status: "completed",
+      discord: "servi",
+      email: CLIENT_EMAIL,
+      specs: "9800X3D / RTX 5080",
+      mainGame: "Overwatch 2",
+      message: "Original booking notes",
+      packageTitle: "Performance Vertex Overhaul",
+      packagePrice: "$84.99",
+      grossAmount: 84.99,
+      netAmount: 84.99,
+      localTimeZone: "America/Los_Angeles",
+      startTimeUTC,
+      displayDate: formatClientDate(originalUtcDate, "America/Los_Angeles"),
+      displayTime: formatClientTime(originalUtcDate, "America/Los_Angeles"),
+      hostDate: formatOwnerDate(originalUtcDate),
+      hostTime: formatOwnerTime(originalUtcDate),
+    });
+
+    const res = createRes();
+    await createBooking(
+      createReq({
+        email: CLIENT_EMAIL,
+        packageTitle: "XOC / Extreme Overclocking (Upgrade)",
+        packagePrice: "$64.96",
+        status: "captured",
+        paymentProvider: "paypal",
+        paypalOrderId: "paypal_upgrade_1",
+        originalOrderId: "booking_original",
+      }),
+      res
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(store.bookings).toHaveLength(2);
+
+    const upgrade = store.bookings.find((b) => b._id !== "booking_original");
+    expect(upgrade.email).toBe(CLIENT_EMAIL);
+    expect(upgrade.discord).toBe("servi");
+    expect(upgrade.specs).toBe("9800X3D / RTX 5080");
+    expect(upgrade.mainGame).toBe("Overwatch 2");
+    expect(upgrade.message).toBe("Original booking notes");
+    expect(upgrade.startTimeUTC).toBe(startTimeUTC);
+    expect(upgrade.displayDate).toBe(
+      formatClientDate(originalUtcDate, "America/Los_Angeles")
+    );
+    expect(upgrade.displayTime).toBe(
+      formatClientTime(originalUtcDate, "America/Los_Angeles")
+    );
+    expect(upgrade.originalOrderId).toBe("booking_original");
   });
 });
 

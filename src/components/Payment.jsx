@@ -648,7 +648,6 @@ export default function Payment({ hideFooter = false }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          amount: finalAmount,
           currency: "USD",
           notes: {
             packageTitle,
@@ -657,6 +656,7 @@ export default function Payment({ hideFooter = false }) {
             startTimeUTC: bookingData.startTimeUTC || "",
             referralCode: referral?.code || referralInput || "",
             couponCode: coupon?.code || couponInput || "",
+            originalOrderId: bookingData.originalOrderId || "",
           },
         }),
       });
@@ -855,7 +855,7 @@ export default function Payment({ hideFooter = false }) {
       {/* Booking Summary Card */}
       <motion.div
         variants={itemVariants}
-        className="mt-8 rounded-2xl border border-sky-700/40 bg-[#0a1324]/90 shadow-[0_0_35px_rgba(14,165,233,0.15)] backdrop-blur-md"
+        className="low-perf-surface glass-premium glass-card-surface glass-scroll-lite mt-8 rounded-2xl border border-sky-700/40"
       >
         <div className="p-6 sm:p-7">
           <h3 className="text-[20px] font-bold text-white">
@@ -1017,7 +1017,7 @@ export default function Payment({ hideFooter = false }) {
       {/* Payment Method / Free Booking */}
       <motion.div
         variants={itemVariants}
-        className="mt-8 rounded-2xl border border-sky-700/40 bg-[#080e1a]/95 shadow-[0_0_45px_rgba(14,165,233,0.25)] backdrop-blur-lg"
+        className="low-perf-surface glass-premium glass-card-surface glass-scroll-lite mt-8 rounded-2xl border border-sky-700/40"
       >
         <div className="p-6 sm:p-7">
           <h3 className="text-[20px] font-bold text-white">
@@ -1051,7 +1051,7 @@ export default function Payment({ hideFooter = false }) {
           ) : (
             <>
               {/* Razorpay option */}
-              <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 border border-sky-800/30 bg-[#0c162a]/80 rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(14,165,233,0.15)]">
+              <div className="low-perf-surface glass-premium glass-card-surface mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-xl border border-sky-800/30 px-5 py-4">
                 <div className="flex items-center gap-4">
                   <img
                     src="https://razorpay.com/assets/razorpay-logo.svg"
@@ -1090,7 +1090,7 @@ export default function Payment({ hideFooter = false }) {
 
               {/* PayPal option */}
               {shouldRenderPaypalBlock && (
-                <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-4 border border-sky-800/30 bg-[#0c162a]/80 rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(14,165,233,0.15)]">
+                <div className="low-perf-surface glass-premium glass-card-surface mt-4 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-xl border border-sky-800/30 px-5 py-4">
                   <div className="flex items-center gap-4">
                     <img
                       src="https://www.paypalobjects.com/webstatic/mktg/Logo/pp-logo-100px.png"

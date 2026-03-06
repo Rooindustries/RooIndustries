@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
-import { client, urlFor } from "../sanityClient";
+import { urlFor } from "../sanityClient";
+import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS, readHomeSectionData } from "../lib/homeSectionData";
 
 function GameCard({ game, index }) {
   const title = game?.title || "Game";
@@ -49,39 +50,24 @@ function GameCard({ game, index }) {
   );
 }
 
-export default function SupportedGames() {
-  const [data, setData] = useState(null);
+export default function SupportedGames({ initialData = null }) {
+  const [data, setData] = useState(
+    () => initialData ?? readHomeSectionData(HOME_SECTION_DATA_KEYS.supportedGames)
+  );
+
+  useEffect(() => {
+    if (initialData !== null) {
+      setData(initialData);
+    }
+  }, [initialData]);
   const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
-    client
-      .fetch(
-        `*[_type == "supportedGames"][0]{
-          title,
-          subtitle,
-          showAllLabel,
-          showLessLabel,
-          featuredGames[]{
-            _key,
-            title,
-            coverImage{
-              ...,
-              "dimensions": asset->metadata.dimensions
-            }
-          },
-          moreGames[]{
-            _key,
-            title,
-            coverImage{
-              ...,
-              "dimensions": asset->metadata.dimensions
-            }
-          }
-        }`
-      )
+    if (data !== null) return;
+    fetchHomeSectionData(HOME_SECTION_DATA_KEYS.supportedGames)
       .then(setData)
       .catch(console.error);
-  }, []);
+  }, [data]);
 
   const featuredGames = useMemo(() => {
     if (!Array.isArray(data?.featuredGames)) return [];
@@ -98,7 +84,19 @@ export default function SupportedGames() {
     ? data?.showLessLabel || "Show Less"
     : data?.showAllLabel || "View All Games";
 
-  if (!data || (featuredGames.length === 0 && !hasMore)) return null;
+  if (!data) {
+    return (
+      <section
+        id="supported-games"
+        className="relative z-10 py-16 sm:py-20 px-4 sm:px-6 text-center text-white"
+        aria-hidden="true"
+      >
+        <div className="max-w-6xl mx-auto min-h-[720px] rounded-3xl border border-sky-700/20 bg-gradient-to-b from-[#0d1526]/70 to-[#08101d]/80" />
+      </section>
+    );
+  }
+
+  if (featuredGames.length === 0 && !hasMore) return null;
 
   return (
     <>

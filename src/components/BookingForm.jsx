@@ -364,6 +364,7 @@ export default function BookingForm({ isMobile }) {
   // XOC hardware data loaded from /api/xocParts
   const [xocMotherboards, setXocMotherboards] = useState([]);
   const [xocRams, setXocRams] = useState([]);
+  const [xocPartsError, setXocPartsError] = useState("");
   const [xocMoboId, setXocMoboId] = useState("");
   const [xocRamId, setXocRamId] = useState("");
   const [showVertexModal, setShowVertexModal] = useState(false);
@@ -1121,17 +1122,24 @@ export default function BookingForm({ isMobile }) {
   // ---------- LOAD XOC PARTS FROM LOCAL OPENDB (API) ----------
   useEffect(() => {
     if (!isXoc) return;
+    setXocPartsError("");
 
     const loadXocParts = async () => {
       try {
         const res = await fetch("/api/xocParts");
         if (!res.ok) {
-          console.error("Failed to load XOC parts:", res.status);
+          setXocPartsError(
+            "Supported hardware list is temporarily unavailable. You can still continue by selecting custom parts."
+          );
+          console.warn("Failed to load XOC parts:", res.status);
           return;
         }
         const data = await res.json();
         if (!data.ok) {
-          console.error("XOC parts error:", data.error);
+          setXocPartsError(
+            "Supported hardware list is temporarily unavailable. You can still continue by selecting custom parts."
+          );
+          console.warn("XOC parts error:", data.error);
           return;
         }
 
@@ -1144,8 +1152,12 @@ export default function BookingForm({ isMobile }) {
 
         setXocMotherboards(sortedMobos);
         setXocRams(sortedRams);
+        setXocPartsError("");
       } catch (err) {
-        console.error("Error fetching /api/xocParts:", err);
+        setXocPartsError(
+          "Supported hardware list is temporarily unavailable. You can still continue by selecting custom parts."
+        );
+        console.warn("Error fetching /api/xocParts:", err);
       }
     };
 
@@ -2016,6 +2028,28 @@ export default function BookingForm({ isMobile }) {
                   // NOTE: removed backdrop-blur-sm
                   className="max-w-2xl mx-auto bg-[#0b1120]/90 border border-sky-700/30 rounded-2xl p-8 shadow-[0_0_25px_rgba(14,165,233,0.15)] space-y-6"
                 >
+                  {hasActiveHold && (
+                    <div className="bg-purple-500/10 border border-purple-500/40 p-3 rounded-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                      <p className="text-xs text-white font-medium">
+                        Slot <strong>{holdLocalTimeLabel || "--"}</strong> is
+                        reserved.{" "}
+                        <span className="text-sky-200">
+                          Expires in {formatCountdown(holdCountdownMs)}.
+                        </span>
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          releaseHold(true);
+                          setStep(1);
+                        }}
+                        className="inline-flex items-center justify-center rounded-lg border border-purple-300/40 bg-purple-900/40 px-3 py-1.5 text-xs font-semibold text-purple-100 hover:bg-purple-800/60 transition"
+                      >
+                        Release Slot
+                      </button>
+                    </div>
+                  )}
+
                   {isXoc && (
                     <div className="space-y-4 border border-sky-700/50 rounded-xl p-4 bg-slate-900/40">
                       <h4 className="text-sky-300 font-semibold text-sm sm:text-base">
@@ -2025,6 +2059,11 @@ export default function BookingForm({ isMobile }) {
                         Choose your motherboard and RAM kit from the supported
                         list below.
                       </p>
+                      {xocPartsError ? (
+                        <p className="rounded-lg border border-amber-300/30 bg-amber-300/10 px-3 py-2 text-xs text-amber-100">
+                          {xocPartsError}
+                        </p>
+                      ) : null}
 
                       <div
                         className={`grid gap-4 ${
@@ -2320,28 +2359,6 @@ export default function BookingForm({ isMobile }) {
                     Please read the FAQ before booking — it answers everything you
                     need to know.
                   </p>
-
-                  {hasActiveHold && (
-                    <div className="bg-purple-500/10 border border-purple-500/40 p-3 rounded-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                      <p className="text-xs text-white font-medium">
-                        Slot <strong>{holdLocalTimeLabel || "--"}</strong> is
-                        reserved.{" "}
-                        <span className="text-sky-200">
-                          Expires in {formatCountdown(holdCountdownMs)}.
-                        </span>
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          releaseHold(true);
-                          setStep(1);
-                        }}
-                        className="inline-flex items-center justify-center rounded-lg border border-purple-300/40 bg-purple-900/40 px-3 py-1.5 text-xs font-semibold text-purple-100 hover:bg-purple-800/60 transition"
-                      >
-                        Release Slot
-                      </button>
-                    </div>
-                  )}
 
                   <div className="flex justify-between gap-4">
                     <button

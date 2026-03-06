@@ -1,6 +1,6 @@
 import {createClient} from '@sanity/client';
 import {randomUUID} from 'crypto';
-import {requireAdminKey} from './auth';
+import {requireAdminKey} from './auth.js';
 import {
   buildBalance,
   computeEarningsFromBookings,

@@ -24,20 +24,21 @@ const assertSecret = () => {
   }
 };
 
-export const issueHoldToken = ({ holdId, startTimeUTC, expiresAt }) => {
+export const issueHoldToken = ({ holdId, startTimeUTC, expiresAt, holdNonce = "" }) => {
   assertSecret();
   const payload = {
-    v: 1,
+    v: holdNonce ? 2 : 1,
     hid: holdId,
     st: startTimeUTC,
     exp: Math.floor(new Date(expiresAt).getTime() / 1000),
+    ...(holdNonce ? { n: holdNonce } : {}),
   };
   const encoded = base64UrlEncode(JSON.stringify(payload));
   const signature = sign(encoded);
   return `${encoded}.${signature}`;
 };
 
-export const verifyHoldToken = ({ token, holdId, startTimeUTC }) => {
+export const verifyHoldToken = ({ token, holdId, startTimeUTC, holdNonce = "" }) => {
   try {
     assertSecret();
     if (!token || typeof token !== "string" || !token.includes(".")) return null;
@@ -56,6 +57,7 @@ export const verifyHoldToken = ({ token, holdId, startTimeUTC }) => {
     if (!payload?.hid || !payload?.exp) return null;
     if (holdId && payload.hid !== holdId) return null;
     if (startTimeUTC && payload.st && payload.st !== startTimeUTC) return null;
+    if (holdNonce && payload.n !== holdNonce) return null;
     if (payload.exp <= Math.floor(Date.now() / 1000)) return null;
     return payload;
   } catch {

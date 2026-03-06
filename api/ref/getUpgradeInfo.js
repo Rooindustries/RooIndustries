@@ -26,6 +26,8 @@ const normalizeSlug = (value) => {
   return String(value || "").toLowerCase();
 };
 
+const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
+
 const getPaidAmount = (booking) => {
   if (
     typeof booking?.netAmount === "number" &&
@@ -49,17 +51,33 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
   }
 
-  const { id, slug } = req.query;
+  const { id, slug, email } = req.query;
   if (!id) {
     return res
       .status(400)
       .json({ ok: false, error: "Missing Order ID (bookingId)." });
+  }
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) {
+    return res
+      .status(400)
+      .json({ ok: false, error: "Missing booking email." });
   }
 
   try {
     const booking = await client.getDocument(id);
 
     if (!booking || booking._type !== "booking") {
+      return res
+        .status(404)
+        .json({ ok: false, error: "No booking found with that Order ID." });
+    }
+
+    const allowedEmails = [booking.email, booking.payerEmail]
+      .map(normalizeEmail)
+      .filter(Boolean);
+
+    if (allowedEmails.length > 0 && !allowedEmails.includes(normalizedEmail)) {
       return res
         .status(404)
         .json({ ok: false, error: "No booking found with that Order ID." });
@@ -186,11 +204,6 @@ export default async function handler(req, res) {
       _id: booking._id,
       packageTitle: booking.packageTitle,
       packagePrice: booking.packagePrice,
-      discord: booking.discord,
-      email: booking.email,
-      specs: booking.specs,
-      mainGame: booking.mainGame,
-      message: booking.message,
       displayDate: booking.displayDate,
       displayTime: booking.displayTime,
       localTimeZone: booking.localTimeZone,

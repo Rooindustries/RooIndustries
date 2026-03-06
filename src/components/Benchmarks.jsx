@@ -18,6 +18,11 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
     setSelectedAlt("");
   };
 
+  const buildImageSrc = (image, width) =>
+    image
+      ? urlFor(image).width(width).format("webp").quality(60).url()
+      : "";
+
   useEffect(() => {
     client
       .fetch(
@@ -94,12 +99,13 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
                   {/* SEO/CLS: keep benchmark images in semantic figures with intrinsic sizing. */}
                   <figure className="m-0">
                     <img
-                      src={urlFor(b.beforeImage).url()}
+                      src={buildImageSrc(b.beforeImage, 1280)}
                       alt={beforeAlt}
                       width={beforeDims?.width}
                       height={beforeDims?.height}
                       loading="lazy"
                       decoding="async"
+                      sizes="(max-width: 768px) 94vw, 46vw"
                       className="rounded w-full cursor-pointer shadow-lg border border-red-600 hover:border-red-500 hover:shadow-red-500/40 transition duration-300"
                       onClick={() =>
                         handleOpenZoom(urlFor(b.beforeImage).url(), beforeAlt)
@@ -117,12 +123,13 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
                   {/* SEO/CLS: keep benchmark images in semantic figures with intrinsic sizing. */}
                   <figure className="m-0">
                     <img
-                      src={urlFor(b.afterImage).url()}
+                      src={buildImageSrc(b.afterImage, 1280)}
                       alt={afterAlt}
                       width={afterDims?.width}
                       height={afterDims?.height}
                       loading="lazy"
                       decoding="async"
+                      sizes="(max-width: 768px) 94vw, 46vw"
                       className="rounded w-full cursor-pointer shadow-lg border border-cyan-600 hover:border-cyan-500 hover:shadow-cyan-500/40 transition duration-300"
                       onClick={() =>
                         handleOpenZoom(urlFor(b.afterImage).url(), afterAlt)
@@ -139,12 +146,13 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
                   {/* SEO/CLS: include review images in a semantic figure with intrinsic sizing. */}
                   <figure className="m-0">
                     <img
-                      src={urlFor(b.reviewImage).url()}
+                      src={buildImageSrc(b.reviewImage, 960)}
                       alt={reviewAlt}
                       width={reviewDims?.width}
                       height={reviewDims?.height}
                       loading="lazy"
                       decoding="async"
+                      sizes="(max-width: 768px) 94vw, 62vw"
                       className="rounded-lg shadow-lg mx-auto cursor-pointer border border-gray-500 hover:border-green-500 hover:shadow-green-500/40 transition duration-300"
                       onClick={() =>
                         handleOpenZoom(urlFor(b.reviewImage).url(), reviewAlt)

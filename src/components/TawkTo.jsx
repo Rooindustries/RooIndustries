@@ -77,14 +77,12 @@ function TawkTo({ disabledRoutes = [] }) {
     window.addEventListener("pointerdown", markIntent, passiveOpts);
     window.addEventListener("keydown", markIntent, passiveOpts);
     window.addEventListener("touchstart", markIntent, passiveOpts);
-    window.addEventListener("scroll", markIntent, passiveOpts);
     timeoutId = window.setTimeout(markIntent, 12000);
 
     return () => {
       window.removeEventListener("pointerdown", markIntent, passiveOpts);
       window.removeEventListener("keydown", markIntent, passiveOpts);
       window.removeEventListener("touchstart", markIntent, passiveOpts);
-      window.removeEventListener("scroll", markIntent, passiveOpts);
       if (timeoutId) window.clearTimeout(timeoutId);
     };
   }, [intentReady]);

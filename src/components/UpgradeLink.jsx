@@ -39,6 +39,7 @@ export default function UpgradeLink() {
   const navigate = useNavigate();
 
   const [orderId, setOrderId] = useState("");
+  const [orderEmail, setOrderEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [upgradeInfo, setUpgradeInfo] = useState(null);
   const [error, setError] = useState(null);
@@ -114,6 +115,11 @@ export default function UpgradeLink() {
       setError("Please enter the Order ID from your confirmation email.");
       return;
     }
+    const trimmedEmail = orderEmail.trim();
+    if (!trimmedEmail) {
+      setError("Please enter the email used on the original booking.");
+      return;
+    }
 
     if (!normalizedSlug) {
       setError("Upgrade link is missing. Please contact support.");
@@ -125,6 +131,8 @@ export default function UpgradeLink() {
       const res = await fetch(
         `/api/ref/getUpgradeInfo?id=${encodeURIComponent(
           trimmed
+        )}&email=${encodeURIComponent(
+          trimmedEmail
         )}&slug=${encodeURIComponent(normalizedSlug)}`
       );
       const data = await res.json();
@@ -178,7 +186,7 @@ export default function UpgradeLink() {
 
     const bookingData = {
       discord: booking.discord || "",
-      email: booking.email || "",
+      email: orderEmail.trim(),
       specs: booking.specs || "",
       mainGame: booking.mainGame || "",
       message: booking.message || "",
@@ -235,6 +243,19 @@ export default function UpgradeLink() {
             You can find this in your Roo Industries booking email (labelled
             "Order ID").
           </p>
+          <div className="mb-3">
+            <label className="block text-sm font-semibold mb-2">
+              Booking email
+            </label>
+            <input
+              value={orderEmail}
+              onChange={(e) => setOrderEmail(e.target.value)}
+              placeholder="Email used on the original booking"
+              className="w-full bg-[#0c162a] border border-sky-800/40 rounded-md px-3 py-2 outline-none text-sm"
+              type="email"
+              autoComplete="email"
+            />
+          </div>
           <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
             <input
               value={orderId}

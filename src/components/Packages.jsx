@@ -1,13 +1,36 @@
 import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { client } from "../sanityClient";
 import PackageDetailsModal from "./PackageDetailsModal";
+import {
+  fetchHomeSectionData,
+  HOME_SECTION_DATA_KEYS,
+  readHomeSectionData,
+} from "../lib/homeSectionData";
 
 const REFERRAL_STORAGE_KEY = "referral_session";
 
-export default function Packages() {
-  const [packages, setPackages] = useState([]);
-  const [sectionCopy, setSectionCopy] = useState(null);
+export default function Packages({
+  initialPackages = null,
+  initialSectionCopy = null,
+}) {
+  const [packages, setPackages] = useState(() =>
+    initialPackages !== null
+      ? Array.isArray(initialPackages)
+        ? initialPackages
+        : []
+      : []
+  );
+  const [sectionCopy, setSectionCopy] = useState(() => initialSectionCopy);
+
+  useEffect(() => {
+    if (initialPackages !== null) {
+      setPackages(Array.isArray(initialPackages) ? initialPackages : []);
+    }
+
+    if (initialSectionCopy !== null) {
+      setSectionCopy(initialSectionCopy);
+    }
+  }, [initialPackages, initialSectionCopy]);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsPkg, setDetailsPkg] = useState(null);
 
@@ -79,47 +102,49 @@ export default function Packages() {
       }
     }
 
-    const packagesQuery = `*[_type == "package"] | order(coalesce(order, 999) asc, _createdAt asc) {
-      _id,
-      title,
-      price,
-      tag,
-      tagGoldGlow,
-      description,
-      checkedBullets,
-      uncheckedBullets,
-      features,
-      buttonText,
-      detailsButtonText,
-      isHighlighted,
-      order
-    }`;
+    if (packages.length === 0) {
+      const cachedPackages = readHomeSectionData(HOME_SECTION_DATA_KEYS.packagesList);
+      if (Array.isArray(cachedPackages)) {
+        setPackages(cachedPackages);
+      } else {
+        fetchHomeSectionData(HOME_SECTION_DATA_KEYS.packagesList)
+          .then((pkgs) => {
+            setPackages(Array.isArray(pkgs) ? pkgs : []);
+          })
+          .catch(console.error);
+      }
+    }
 
-    client
-      .fetch(packagesQuery)
-      .then((pkgs) => {
-        setPackages(Array.isArray(pkgs) ? pkgs : []);
-      })
-      .catch(console.error);
-
-    const sectionQuery = `*[_type == "packagesSettings"][0]{
-      heading,
-      badgeText,
-      subheading,
-      dividerText
-    }`;
-
-    client
-      .fetch(sectionQuery)
-      .then(setSectionCopy)
-      .catch(console.error);
-  }, []);
+    if (sectionCopy === null) {
+      const cachedSectionCopy = readHomeSectionData(
+        HOME_SECTION_DATA_KEYS.packagesSettings
+      );
+      if (cachedSectionCopy !== null) {
+        setSectionCopy(cachedSectionCopy);
+      } else {
+        fetchHomeSectionData(HOME_SECTION_DATA_KEYS.packagesSettings)
+          .then(setSectionCopy)
+          .catch(console.error);
+      }
+    }
+  }, [packages.length, sectionCopy]);
 
   const headingText = sectionCopy?.heading ?? "Choose Your Package";
   const badgeText = sectionCopy?.badgeText ?? "Fully Online";
   const subheadingText =
     sectionCopy?.subheading ?? "Select the tuning package that best fits your needs";
   const dividerText = sectionCopy?.dividerText;
+  const isLoading = !sectionCopy && packages.length === 0;
+
+  if (isLoading) {
+    return (
+      <section className="relative z-10 pt-32 pb-24 text-center text-white" aria-hidden="true">
+        <div className="mt-12 px-6">
+          <div className="mx-auto max-w-6xl min-h-[1320px] rounded-3xl border border-sky-700/20 bg-gradient-to-b from-[#0d1526]/70 to-[#08101d]/80" />
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="relative z-10 pt-32 pb-24 text-center text-white">

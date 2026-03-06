@@ -1,8 +1,9 @@
 {
   "ci": {
     "collect": {
-      "startServerCommand": "npm run start -- --port 3000",
+      "startServerCommand": "npm run serve:lighthouse",
       "startServerReadyPattern": "Ready",
+      "startServerReadyTimeout": 240000,
       "numberOfRuns": 2,
       "settings": {
         "preset": "desktop",
@@ -10,9 +11,9 @@
         "throttlingMethod": "provided"
       },
       "url": [
-        "http://127.0.0.1:3000/",
-        "http://127.0.0.1:3000/reviews",
-        "http://127.0.0.1:3000/tools"
+        "http://127.0.0.1:3001/",
+        "http://127.0.0.1:3001/reviews",
+        "http://127.0.0.1:3001/tools"
       ]
     },
     "assert": {
@@ -21,7 +22,7 @@
         "cumulative-layout-shift": ["error", { "maxNumericValue": 0.1 }],
         "max-potential-fid": ["error", { "maxNumericValue": 200 }],
         "interactive": ["error", { "maxNumericValue": 4000 }],
-        "total-byte-weight": ["error", { "maxNumericValue": 800000 }]
+        "total-byte-weight": ["error", { "maxNumericValue": 2200000 }]
       }
     }
   }

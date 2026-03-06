@@ -1,6 +1,7 @@
 import { createClient } from "@sanity/client";
 import bcrypt from "bcryptjs";
-import { setReferralSessionCookie } from "./auth";
+import { setReferralSessionCookie } from "./auth.js";
+import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -16,10 +17,22 @@ export default async function handler(req, res) {
 
   try {
     const { code, password, rememberMe = false } = req.body || {};
+    const normalizedCode = String(code || "").trim().toLowerCase();
+    const clientAddress = getClientAddress(req);
+
+    if (
+      !requireRateLimit(res, {
+        key: `ref-login:${clientAddress}:${normalizedCode || "unknown"}`,
+        max: 10,
+        windowMs: 15 * 60 * 1000,
+      })
+    ) {
+      return;
+    }
 
     const referral = await client.fetch(
       `*[_type == "referral" && slug.current == $code][0]`,
-      { code }
+      { code: normalizedCode }
     );
 
     if (!referral) {

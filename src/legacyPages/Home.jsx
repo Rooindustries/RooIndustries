@@ -1,18 +1,20 @@
-import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Hero from "../components/Hero";
-import { Link } from "react-router-dom";
-
-const About = lazy(() => import("../components/About"));
-const Services = lazy(() => import("../components/Services"));
-const StreamerYoutuberReviews = lazy(() =>
-  import("../components/StreamerYoutuberReviews")
-);
-const Footer = lazy(() => import("../components/Footer"));
-const HowItWorks = lazy(() => import("../components/HowItWorks"));
-const ReferralBox = lazy(() => import("../components/ReferralBox"));
-const Packages = lazy(() => import("../components/Packages"));
-const SupportedGames = lazy(() => import("../components/SupportedGames"));
-const Faq = lazy(() => import("../components/Faq"));
+import { Link, useLocation } from "react-router-dom";
+import {
+  isHomeSectionHash,
+  normalizeSectionHash,
+  readPendingSectionTarget,
+} from "../lib/sectionNavigation";
+import About from "../components/About";
+import Services from "../components/Services";
+import StreamerYoutuberReviews from "../components/StreamerYoutuberReviews";
+import Footer from "../components/Footer";
+import HowItWorks from "../components/HowItWorks";
+import ReferralBox from "../components/ReferralBox";
+import Packages from "../components/Packages";
+import SupportedGames from "../components/SupportedGames";
+import Faq from "../components/Faq";
 
 function DeferredSection({
   children,
@@ -55,52 +57,68 @@ function DeferredSection({
   );
 }
 
-const SectionFallback = ({ className }) => (
-  <div aria-hidden="true" className={className} />
-);
+export default function Home({ initialData = null }) {
+  const location = useLocation();
+  const [forceEagerSections, setForceEagerSections] = useState(() =>
+    isHomeSectionHash(normalizeSectionHash(location.hash || "")) ||
+    isHomeSectionHash(readPendingSectionTarget())
+  );
 
-export default function Home() {
+  useEffect(() => {
+    const hasSectionIntent = isHomeSectionHash(
+      normalizeSectionHash(location.hash || "")
+    );
+    const hasPendingSectionIntent = isHomeSectionHash(readPendingSectionTarget());
+    if (hasSectionIntent || hasPendingSectionIntent) {
+      setForceEagerSections(true);
+    }
+  }, [location.hash]);
+
   return (
     <>
       <Hero />
-      <DeferredSection fallbackClassName="min-h-[380px]" rootMargin="260px 0px">
-        <Suspense fallback={<SectionFallback className="min-h-[380px]" />}>
-          <StreamerYoutuberReviews />
-        </Suspense>
+      <DeferredSection
+        fallbackClassName="min-h-[380px]"
+        rootMargin="160px 0px"
+        eager={forceEagerSections}
+      >
+        <StreamerYoutuberReviews initialData={initialData?.reviews || null} />
       </DeferredSection>
-      <DeferredSection fallbackClassName="min-h-[260px]" rootMargin="280px 0px">
-        <Suspense fallback={<SectionFallback className="min-h-[260px]" />}>
-          <About />
-        </Suspense>
+      <DeferredSection
+        fallbackClassName="min-h-[260px]"
+        rootMargin="160px 0px"
+        eager={forceEagerSections}
+      >
+        <About initialData={initialData?.about || null} />
       </DeferredSection>
-      <section id="services">
+      <section id="services" style={{ scrollMarginTop: "var(--section-nav-offset)" }}>
         <DeferredSection
           fallbackClassName="min-h-[520px]"
-          rootMargin="420px 0px"
+          rootMargin="240px 0px"
+          eager={forceEagerSections}
         >
-          <Suspense fallback={<SectionFallback className="min-h-[520px]" />}>
-            <Services />
-          </Suspense>
+          <Services initialData={initialData?.services || null} />
         </DeferredSection>
       </section>
-      <section id="packages">
+      <section id="packages" style={{ scrollMarginTop: "var(--section-nav-offset)" }}>
         <DeferredSection
           fallbackClassName="min-h-[620px]"
-          rootMargin="520px 0px"
+          rootMargin="300px 0px"
+          eager={forceEagerSections}
         >
-          <Suspense fallback={<SectionFallback className="min-h-[620px]" />}>
-            <Packages />
-          </Suspense>
+          <Packages
+            initialPackages={initialData?.packagesList || null}
+            initialSectionCopy={initialData?.packagesSettings || null}
+          />
         </DeferredSection>
       </section>
       <section id="how-it-works">
         <DeferredSection
           fallbackClassName="min-h-[340px]"
-          rootMargin="360px 0px"
+          rootMargin="220px 0px"
+          eager={forceEagerSections}
         >
-          <Suspense fallback={<SectionFallback className="min-h-[340px]" />}>
-            <HowItWorks />
-          </Suspense>
+          <HowItWorks initialData={initialData?.howItWorks || null} />
         </DeferredSection>
       </section>
       <div className="mt-4 flex items-center justify-center">
@@ -115,24 +133,34 @@ export default function Home() {
           <span className="glow-line glow-line-left" />
         </Link>
       </div>
-      <DeferredSection fallbackClassName="min-h-[360px]" rootMargin="360px 0px">
-        <Suspense fallback={<SectionFallback className="min-h-[360px]" />}>
-          <SupportedGames />
-        </Suspense>
+      <DeferredSection
+        fallbackClassName="min-h-[360px]"
+        rootMargin="220px 0px"
+        eager={forceEagerSections}
+      >
+        <SupportedGames initialData={initialData?.supportedGames || null} />
       </DeferredSection>
-      <DeferredSection fallbackClassName="min-h-[380px]" rootMargin="360px 0px">
-        <Suspense fallback={<SectionFallback className="min-h-[380px]" />}>
-          <Faq compact />
-        </Suspense>
+      <section id="faq" style={{ scrollMarginTop: "var(--section-nav-offset)" }}>
+        <DeferredSection
+          fallbackClassName="min-h-[380px]"
+          rootMargin="220px 0px"
+          eager={forceEagerSections}
+        >
+          <Faq
+            compact
+            initialFaqCopy={initialData?.faqSettings || null}
+            initialQuestions={initialData?.faqQuestions || null}
+          />
+        </DeferredSection>
+      </section>
+      <DeferredSection
+        fallbackClassName="min-h-[160px]"
+        rootMargin="220px 0px"
+        eager={forceEagerSections}
+      >
+        <ReferralBox />
       </DeferredSection>
-      <DeferredSection fallbackClassName="min-h-[160px]" rootMargin="320px 0px">
-        <Suspense fallback={<SectionFallback className="min-h-[160px]" />}>
-          <ReferralBox />
-        </Suspense>
-      </DeferredSection>
-      <Suspense fallback={<SectionFallback className="min-h-[220px]" />}>
-        <Footer />
-      </Suspense>
+      <Footer />
     </>
   );
 }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Plus, Minus, X } from "lucide-react";
+import { useLowPerformanceMode } from "../lib/performanceMode";
 
 export default function ImageZoomModal({
   src,
@@ -7,6 +8,7 @@ export default function ImageZoomModal({
   onClose,
   setIsModalOpen = () => {},
 }) {
+  const lowPerformanceMode = useLowPerformanceMode();
   const [zoom, setZoom] = useState(1);
   const [targetOffset, setTargetOffset] = useState({ x: 0, y: 0 });
   const [currentOffset, setCurrentOffset] = useState({ x: 0, y: 0 });
@@ -16,6 +18,11 @@ export default function ImageZoomModal({
   const [fadeIn, setFadeIn] = useState(false);
 
   useEffect(() => {
+    if (lowPerformanceMode) {
+      setCurrentOffset(targetOffset);
+      return undefined;
+    }
+
     const animate = () => {
       setCurrentOffset((prev) => ({
         x: prev.x + (targetOffset.x - prev.x) * 0.2,
@@ -25,7 +32,7 @@ export default function ImageZoomModal({
     };
     animationRef.current = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animationRef.current);
-  }, [targetOffset]);
+  }, [lowPerformanceMode, targetOffset]);
 
   // Hide logo + disable scroll when open
   useEffect(() => {
@@ -112,7 +119,7 @@ export default function ImageZoomModal({
 
   return (
     <div
-      className={`fixed inset-0 bg-black/60 backdrop-blur-lg flex items-center justify-center z-[9999] transition-opacity duration-200 ${
+      className={`glass-overlay low-perf-overlay fixed inset-0 flex items-center justify-center z-[9999] transition-opacity duration-200 ${
         fadeIn ? "opacity-100" : "opacity-0"
       }`}
       onClick={handleClose}
@@ -138,7 +145,11 @@ export default function ImageZoomModal({
           src={src}
           alt={alt || "Zoomed image"}
           onMouseDown={handleMouseDown}
-          className="rounded-lg shadow-lg select-none object-contain max-h-[85vh] w-auto transition-transform duration-75 ease-linear"
+          className={`rounded-lg shadow-lg select-none object-contain max-h-[85vh] w-auto ${
+            lowPerformanceMode
+              ? ""
+              : "transition-transform duration-75 ease-linear"
+          }`}
           style={{
             transform: `translate(${currentOffset.x / 1.2}px, ${
               currentOffset.y / 1.2

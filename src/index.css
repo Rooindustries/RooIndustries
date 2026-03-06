@@ -4,22 +4,20 @@
 
 :root {
   --header-offset: 146px;
+  --section-nav-offset: 96px;
 }
 
 @media (max-width: 640px) {
   :root {
     --header-offset: 128px;
+    --section-nav-offset: 80px;
   }
 }
 
 html {
   font-family: "Roboto Flex Variable", system-ui, sans-serif;
-  font-optical-sizing: auto;
-  font-variation-settings: "opsz" 14, "slnt" 0;
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
 }
 
 html,
@@ -41,8 +39,6 @@ body {
     #000040 100%
   );
   background-attachment: fixed;
-  -webkit-font-smoothing: inherit;
-  -moz-osx-font-smoothing: inherit;
 }
 
 .trustpilot-widget,
@@ -52,6 +48,18 @@ body {
 
 body.is-modal-open {
   overflow: hidden !important;
+}
+
+html.route-transition-out main {
+  opacity: 0.86;
+  transform: scale(0.997);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+html.route-transition-lock,
+body.route-transition-lock {
+  overflow: hidden !important;
+  overscroll-behavior: none;
 }
 
 .site-nav {
@@ -417,6 +425,48 @@ html.nav-past-logo .roo-logo {
   pointer-events: none;
 }
 
+.glass-premium,
+.glass-lite {
+  isolation: isolate;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background-image:
+    linear-gradient(180deg, rgba(7, 22, 45, 0.88), rgba(6, 18, 38, 0.72)),
+    radial-gradient(circle at top center, rgba(34, 211, 238, 0.08), transparent 58%);
+  box-shadow:
+    inset 0 1px 0 rgba(186, 230, 253, 0.08),
+    0 12px 30px rgba(2, 6, 23, 0.28);
+}
+
+.glass-premium {
+  -webkit-backdrop-filter: saturate(135%) blur(14px);
+  backdrop-filter: saturate(135%) blur(14px);
+}
+
+.glass-lite {
+  background-image:
+    linear-gradient(180deg, rgba(7, 22, 45, 0.96), rgba(6, 18, 38, 0.92)),
+    radial-gradient(circle at top center, rgba(34, 211, 238, 0.07), transparent 58%);
+}
+
+.glass-overlay {
+  background:
+    linear-gradient(180deg, rgba(2, 6, 23, 0.48), rgba(2, 6, 23, 0.62));
+  -webkit-backdrop-filter: saturate(120%) blur(16px);
+  backdrop-filter: saturate(120%) blur(16px);
+}
+
+.glass-card-surface {
+  box-shadow:
+    inset 0 1px 0 rgba(186, 230, 253, 0.08),
+    0 14px 34px rgba(2, 6, 23, 0.3);
+}
+
+.glass-menu-surface {
+  background-image:
+    linear-gradient(180deg, rgba(6, 18, 38, 0.95), rgba(6, 18, 38, 0.88)),
+    radial-gradient(circle at top center, rgba(34, 211, 238, 0.06), transparent 55%);
+}
+
 /* Lightweight rendering path for browsers likely running software compositing. */
 html.low-performance-mode {
   scroll-behavior: auto;
@@ -426,15 +476,6 @@ html.low-performance-mode body {
   background-attachment: scroll;
 }
 
-html.low-performance-mode .animate-pulse,
-html.low-performance-mode .glow-button,
-html.low-performance-mode .glow-beam,
-html.low-performance-mode .sparkle-icon,
-html.low-performance-mode .gold-flair-text,
-html.low-performance-mode .gold-flair-pill {
-  animation: none !important;
-}
-
 html.low-performance-mode .glow-button,
 html.low-performance-mode .gold-flair-pill,
 html.low-performance-mode .gold-flair-text {
@@ -442,12 +483,107 @@ html.low-performance-mode .gold-flair-text {
   text-shadow: none !important;
 }
 
+html.low-performance-mode .glow-beam {
+  opacity: 0.8;
+}
+
+html.low-performance-mode .sparkle-icon {
+  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.45));
+}
+
 html.low-performance-mode [class*="backdrop-blur"] {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
 
+html.low-performance-mode .glass-premium,
+html.low-performance-mode .site-navbar-glass,
+html.low-performance-mode .reservation-banner-surface,
+html.low-performance-mode .low-perf-surface {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  background-image:
+    linear-gradient(180deg, rgba(7, 22, 45, 0.97), rgba(6, 18, 38, 0.93)),
+    radial-gradient(circle at top center, rgba(34, 211, 238, 0.06), transparent 55%) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(186, 230, 253, 0.05),
+    0 10px 24px rgba(2, 6, 23, 0.34) !important;
+}
+
 html.low-performance-mode .is-modal-blur .site-nav {
   filter: none !important;
   opacity: 1 !important;
+}
+
+html.low-performance-mode .low-perf-overlay,
+html.low-performance-mode .glass-overlay {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  background: linear-gradient(
+    180deg,
+    rgba(2, 6, 23, 0.8),
+    rgba(2, 6, 23, 0.9)
+  ) !important;
+}
+
+html.low-performance-mode .low-perf-glow {
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+.site-navbar-glass {
+  isolation: isolate;
+}
+
+.site-nav {
+  position: fixed !important;
+}
+
+.reservation-banner-surface {
+  contain: paint;
+  isolation: isolate;
+  transform: translateZ(0);
+}
+
+/* Keep the same look at rest, but reduce expensive compositing while actively scrolling. */
+html.is-scrolling .glass-scroll-lite {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  background-image:
+    linear-gradient(180deg, rgba(7, 22, 45, 0.95), rgba(6, 18, 38, 0.84)),
+    radial-gradient(circle at top center, rgba(34, 211, 238, 0.05), transparent 55%) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(186, 230, 253, 0.05),
+    0 10px 24px rgba(2, 6, 23, 0.24) !important;
+}
+
+html.perf-no-navbar-blur .site-navbar-glass,
+html.perf-no-navbar-blur .glass-premium {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html.perf-no-banner-blur .reservation-banner-surface,
+html.perf-no-banner-blur .glass-premium {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html.perf-no-glow .glow-button,
+html.perf-no-glow .sparkle-icon,
+html.perf-no-glow .glow-beam,
+html.perf-no-glow .gold-flair-text,
+html.perf-no-glow .gold-flair-pill {
+  animation: none !important;
+}
+
+html.perf-no-glow .glow-button,
+html.perf-no-glow .gold-flair-pill,
+html.perf-no-glow .gold-flair-text {
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+html.perf-no-glow .app-bg-grid-layer {
+  opacity: 0.14 !important;
 }

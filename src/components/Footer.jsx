@@ -118,6 +118,8 @@ export default function Footer() {
                 className="h-7 w-auto object-contain"
                 loading="lazy"
                 decoding="async"
+                width={50}
+                height={30}
               />
             </span>
             <span className="grid place-items-center h-10 w-14 rounded-xl border border-white/10 bg-[#0b1830]/60">
@@ -127,6 +129,8 @@ export default function Footer() {
                 className="h-7 w-auto object-contain"
                 loading="lazy"
                 decoding="async"
+                width={50}
+                height={30}
               />
             </span>
           </div>

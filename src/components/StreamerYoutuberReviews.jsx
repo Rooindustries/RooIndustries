@@ -1,15 +1,49 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Star } from "lucide-react";
-import { client, urlFor } from "../sanityClient";
+import { urlFor } from "../sanityClient";
+import {
+  PERF_TOGGLE_KEYS,
+  getPerfToggleEnabled,
+  subscribePerfDebugChanges,
+} from "../lib/perfDebug";
+import { useScrollRuntime } from "../lib/scrollRuntime";
+import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS, readHomeSectionData } from "../lib/homeSectionData";
 
 const titleClass =
   "text-3xl sm:text-[40px] md:text-[48px] leading-tight font-extrabold text-center tracking-tight " +
   "text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]";
 
-export default function StreamerYoutuberReviews() {
-  const [data, setData] = useState(null);
-  const [shouldLoad, setShouldLoad] = useState(false);
+const getReviewAvatarUrl = (pfp) => {
+  const optimized = urlFor(pfp)
+    .width(112)
+    .height(112)
+    .fit("crop")
+    .format("webp")
+    .quality(55)
+    .url();
+
+  // For GIF-backed sources, force a still frame to avoid heavy animated payloads.
+  return `${optimized}${optimized.includes("?") ? "&" : "?"}frame=1`;
+};
+
+export default function StreamerYoutuberReviews({ initialData = null }) {
+  const [data, setData] = useState(
+    () => initialData ?? readHomeSectionData(HOME_SECTION_DATA_KEYS.reviews)
+  );
+  const [shouldLoad, setShouldLoad] = useState(() => Boolean(initialData));
   const sectionRef = useRef(null);
+
+  useEffect(() => {
+    if (initialData !== null) {
+      setData(initialData);
+      setShouldLoad(true);
+      return;
+    }
+
+    if (readHomeSectionData(HOME_SECTION_DATA_KEYS.reviews) !== null) {
+      setShouldLoad(true);
+    }
+  }, [initialData]);
 
   const sectionClass =
     "pt-12 sm:pt-16 pb-4 sm:pb-6 text-center text-white relative overflow-hidden";
@@ -27,7 +61,7 @@ export default function StreamerYoutuberReviews() {
           observer.disconnect();
         }
       },
-      { rootMargin: "250px 0px" }
+      { rootMargin: "180px 0px" }
     );
 
     observer.observe(sectionRef.current);
@@ -35,28 +69,13 @@ export default function StreamerYoutuberReviews() {
   }, []);
 
   useEffect(() => {
-    if (!shouldLoad) return;
+    if (!shouldLoad || data) return;
 
-    const query = `*[_type == "proReviewsCarousel"][0]{
-      _id,
-      title,
-      subtitle,
-      reviews[]{
-        name,
-        profession,
-        game,
-        optimizationResult,
-        text,
-        rating,
-        pfp,
-        isVip 
-      }
-    }`;
     let cancelled = false;
 
     const fetchData = async () => {
       try {
-        const res = await client.fetch(query);
+        const res = await fetchHomeSectionData(HOME_SECTION_DATA_KEYS.reviews);
         if (cancelled) return;
         setData(res);
       } catch (error) {
@@ -69,7 +88,7 @@ export default function StreamerYoutuberReviews() {
     return () => {
       cancelled = true;
     };
-  }, [shouldLoad]);
+  }, [data, shouldLoad]);
 
   const defaultTitle = "What professionals say about us";
   const defaultSubtitle = "Feedback from pros who rely on us.";
@@ -80,7 +99,7 @@ export default function StreamerYoutuberReviews() {
   return (
     <section ref={sectionRef} className={sectionClass}>
       <div className="px-4 sm:px-6 mb-8">
-        <h3 className={`${titleClass} mb-3`}>{data?.title || defaultTitle}</h3>
+        <h2 className={`${titleClass} mb-3`}>{data?.title || defaultTitle}</h2>
         <p className="text-slate-300/90 text-base sm:text-lg">
           {data?.subtitle || defaultSubtitle}
         </p>
@@ -190,13 +209,7 @@ function ReviewCard({ review }) {
         <div className="flex items-center gap-3 pr-24 mb-3 flex-shrink-0 relative z-10">
           {review.pfp ? (
             <img
-              src={urlFor(review.pfp)
-                .width(120)
-                .height(120)
-                .fit("crop")
-                .format("webp")
-                .quality(70)
-                .url()}
+              src={getReviewAvatarUrl(review.pfp)}
               alt={review.name}
               className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full object-cover flex-shrink-0 ${
                 isVip
@@ -231,12 +244,12 @@ function ReviewCard({ review }) {
         {/* Content Body */}
         <div className="flex flex-col text-left w-full flex-1 min-h-0 relative z-10">
           {review.optimizationResult && (
-            <h4
+            <h3
               className="text-xl sm:text-2xl font-bold leading-snug flex-shrink-0 mb-1"
               style={highlightStyle}
             >
               {review.optimizationResult}
-            </h4>
+            </h3>
           )}
 
           {review.game && (
@@ -276,13 +289,21 @@ function InfiniteDraggableCarousel({ reviews }) {
   const xPos = useRef(0);
   const animationFrameId = useRef(null);
   const startTime = useRef(null);
+  const lastFrameTime = useRef(0);
   const sectionVisibleRef = useRef(true);
   const pageVisibleRef = useRef(true);
   const dragStart = useRef(0);
   const lastDragPos = useRef(0);
   const velocity = useRef(0);
   const positionHistory = useRef([]);
+  const scrollPausedRef = useRef(false);
+  const perfPausedRef = useRef(false);
+  const scrollIdleTimerRef = useRef(null);
+  const { isScrolling } = useScrollRuntime();
   const SPEED = 0.5;
+  const LOW_PERF_SPEED = 1.05;
+  const NORMAL_FRAME_DELTA_MS = 22;
+  const LOW_PERF_FRAME_DELTA_MS = 28;
 
   const displayReviews =
     reviews.length > 0 ? [...reviews, ...reviews, ...reviews, ...reviews] : [];
@@ -294,9 +315,17 @@ function InfiniteDraggableCarousel({ reviews }) {
     }
   };
 
+  const isLowPerformanceMode = () =>
+    typeof document !== "undefined" &&
+    document.documentElement.classList.contains("low-performance-mode");
+
+  const isAutoplayPaused = () =>
+    perfPausedRef.current || scrollPausedRef.current;
+
   const startAnimation = () => {
     if (animationFrameId.current) return;
     if (!pageVisibleRef.current || !sectionVisibleRef.current) return;
+    if (!isDragging && isAutoplayPaused()) return;
     animationFrameId.current = requestAnimationFrame(animate);
   };
 
@@ -306,13 +335,30 @@ function InfiniteDraggableCarousel({ reviews }) {
       return;
     }
 
+    if (!isDragging && isAutoplayPaused()) {
+      stopAnimation();
+      return;
+    }
+
+    const lowPerfMode = isLowPerformanceMode();
+    const minFrameDelta = lowPerfMode
+      ? LOW_PERF_FRAME_DELTA_MS
+      : NORMAL_FRAME_DELTA_MS;
+
+    // Cap updates on weaker devices but keep autoplay alive instead of hard-pausing it.
+    if (lastFrameTime.current && timestamp - lastFrameTime.current < minFrameDelta) {
+      animationFrameId.current = requestAnimationFrame(animate);
+      return;
+    }
+    lastFrameTime.current = timestamp;
+
     if (!startTime.current) startTime.current = timestamp;
     if (!isDragging) {
       if (Math.abs(velocity.current) > 0.1) {
         velocity.current *= 0.95;
         xPos.current -= velocity.current;
       } else {
-        xPos.current -= SPEED;
+        xPos.current -= lowPerfMode ? LOW_PERF_SPEED : SPEED;
       }
     }
     if (trackRef.current) {
@@ -333,6 +379,29 @@ function InfiniteDraggableCarousel({ reviews }) {
     startAnimation();
     return () => stopAnimation();
   }, [reviews.length, isDragging]);
+
+  useEffect(() => {
+    const syncPerfPause = () => {
+      perfPausedRef.current = getPerfToggleEnabled(
+        PERF_TOGGLE_KEYS.PAUSE_REVIEWS_AUTOPLAY
+      );
+      if (perfPausedRef.current && !isDragging) {
+        stopAnimation();
+      } else {
+        startAnimation();
+      }
+    };
+
+    syncPerfPause();
+    const unsubscribePerf = subscribePerfDebugChanges(syncPerfPause);
+    const onPerfModeChange = () => syncPerfPause();
+    window.addEventListener("roo-performance-mode-change", onPerfModeChange);
+
+    return () => {
+      unsubscribePerf();
+      window.removeEventListener("roo-performance-mode-change", onPerfModeChange);
+    };
+  }, [isDragging]);
 
   useEffect(() => {
     if (!containerRef.current || typeof IntersectionObserver === "undefined") {
@@ -370,6 +439,35 @@ function InfiniteDraggableCarousel({ reviews }) {
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => document.removeEventListener("visibilitychange", onVisibilityChange);
   }, [reviews.length]);
+
+  useEffect(() => {
+    scrollPausedRef.current = isScrolling;
+
+    if (scrollIdleTimerRef.current) {
+      clearTimeout(scrollIdleTimerRef.current);
+      scrollIdleTimerRef.current = null;
+    }
+
+    if (isScrolling) {
+      if (!isDragging) {
+        stopAnimation();
+      }
+      return undefined;
+    }
+
+    scrollIdleTimerRef.current = setTimeout(() => {
+      scrollPausedRef.current = false;
+      startAnimation();
+      scrollIdleTimerRef.current = null;
+    }, 150);
+
+    return () => {
+      if (scrollIdleTimerRef.current) {
+        clearTimeout(scrollIdleTimerRef.current);
+        scrollIdleTimerRef.current = null;
+      }
+    };
+  }, [isDragging, isScrolling, reviews.length]);
 
   const handleDragStart = (clientX) => {
     setIsDragging(true);
