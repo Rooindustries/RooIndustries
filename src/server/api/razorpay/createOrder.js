@@ -1,17 +1,10 @@
-const Razorpay = require("razorpay");
-
-function createClient() {
+function getCredentials() {
   const keyId = process.env.RAZORPAY_KEY_ID || "";
   const keySecret = process.env.RAZORPAY_KEY_SECRET || "";
-
   if (!keyId || !keySecret) {
     return null;
   }
-
-  return new Razorpay({
-    key_id: keyId,
-    key_secret: keySecret,
-  });
+  return { keyId, keySecret };
 }
 
 function toSubunits(amount, currency = "USD") {
@@ -32,9 +25,9 @@ module.exports = async function handler(req, res) {
     return res.status(405).json({ ok: false, message: "Method not allowed" });
   }
 
-  const razorpay = createClient();
+  const credentials = getCredentials();
 
-  if (!razorpay) {
+  if (!credentials) {
     return res.status(500).json({
       ok: false,
       message: "Razorpay keys are missing on the server",
@@ -74,14 +67,32 @@ module.exports = async function handler(req, res) {
       },
     };
 
-    const order = await razorpay.orders.create(options);
+    const basic = Buffer.from(
+      `${credentials.keyId}:${credentials.keySecret}`
+    ).toString("base64");
+
+    const upstream = await fetch("https://api.razorpay.com/v1/orders", {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${basic}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(options),
+    });
+
+    const order = await upstream.json();
+
+    if (!upstream.ok || !order?.id) {
+      const details = order?.error?.description || order?.error?.reason || order?.error?.code;
+      throw new Error(details || `Razorpay order create failed (${upstream.status})`);
+    }
 
     return res.status(200).json({
       ok: true,
       orderId: order.id,
       amount: order.amount,
       currency: order.currency,
-      key: process.env.RAZORPAY_KEY_ID,
+      key: credentials.keyId,
     });
   } catch (err) {
     console.error("Razorpay createOrder error:", err);
