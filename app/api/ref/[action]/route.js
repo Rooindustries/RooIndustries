@@ -37,7 +37,7 @@ async function handle(request, context, methodOverride) {
   }
 
   const handler = await loadLegacyApiHandler(
-    path.join(process.cwd(), "api", "ref", `${action}.js`)
+    path.join(process.cwd(), "src", "server", "api", "ref", `${action}.js`)
   );
 
   return runLegacyApiHandler({ request, handler, methodOverride });

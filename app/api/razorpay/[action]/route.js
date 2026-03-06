@@ -18,7 +18,7 @@ async function handle(request, context, methodOverride) {
   }
 
   const handler = await loadLegacyApiHandler(
-    path.join(process.cwd(), "api", "razorpay", `${action}.js`)
+    path.join(process.cwd(), "src", "server", "api", "razorpay", `${action}.js`)
   );
 
   return runLegacyApiHandler({ request, handler, methodOverride });
