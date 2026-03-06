@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState, useRef, useLayoutEffect } from "re
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronDown } from "lucide-react";
 import { useLocation } from "react-router-dom";
-import { client } from "../sanityClient";
+import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS, readHomeSectionData } from "../lib/homeSectionData";
 
 // --- HELPERS ---
 
@@ -36,6 +36,9 @@ const getQuestionId = (question = "", answer = "") => {
   if (isUpgradeQuestion(question, answer)) return UPGRADE_HASH;
   return slugify(question);
 };
+
+const isFaqIntentHash = (hash = "") =>
+  hash === "faq" || hash === UPGRADE_HASH || hash === TRUST_HASH;
 
 // --- CUSTOM HOOK FOR AUTO-HEIGHT ANIMATION ---
 // This allows us to animate height without installing extra libraries like react-use-measure
@@ -83,11 +86,39 @@ const variants = {
   }),
 };
 
-export default function FaqSection({ compact = false }) {
+export default function FaqSection({
+  compact = false,
+  initialFaqCopy = null,
+  initialQuestions = null,
+}) {
   const location = useLocation();
-  const [faqCopy, setFaqCopy] = useState(null);
+  const [faqCopy, setFaqCopy] = useState(
+    () =>
+      initialFaqCopy ?? readHomeSectionData(HOME_SECTION_DATA_KEYS.faqSettings)
+  );
   const [openQuestions, setOpenQuestions] = useState({});
-  const [questions, setQuestions] = useState(null);
+  const [questions, setQuestions] = useState(() =>
+    initialQuestions !== null
+      ? Array.isArray(initialQuestions)
+        ? initialQuestions
+        : []
+      : (() => {
+          const cachedQuestions = readHomeSectionData(
+            HOME_SECTION_DATA_KEYS.faqQuestions
+          );
+          return Array.isArray(cachedQuestions) ? cachedQuestions : [];
+        })()
+  );
+
+  useEffect(() => {
+    if (initialFaqCopy !== null) {
+      setFaqCopy(initialFaqCopy);
+    }
+
+    if (initialQuestions !== null) {
+      setQuestions(Array.isArray(initialQuestions) ? initialQuestions : []);
+    }
+  }, [initialFaqCopy, initialQuestions]);
   
   // Pagination State
   const [[page, direction], setPage] = useState([0, 0]);
@@ -112,29 +143,18 @@ export default function FaqSection({ compact = false }) {
   };
 
   useEffect(() => {
-    client
-      .fetch(
-        `*[_type == "faqSettings"][0]{ eyebrow, title, subtitle }`,
-        {},
-        { cache: "no-store" }
-      )
+    if (faqCopy !== null) return;
+    fetchHomeSectionData(HOME_SECTION_DATA_KEYS.faqSettings)
       .then(setFaqCopy)
       .catch(console.error);
-  }, []);
+  }, [faqCopy]);
 
   useEffect(() => {
-    client
-      .fetch(
-        `coalesce(
-          *[_type == "faqSection" && _id == "faq"][0].questions,
-          *[_type == "faqSection"] | order(_createdAt asc) .questions[]
-        )`,
-        {},
-        { cache: "no-store" }
-      )
+    if (questions !== null) return;
+    fetchHomeSectionData(HOME_SECTION_DATA_KEYS.faqQuestions)
       .then((res) => setQuestions(Array.isArray(res) ? res : []))
       .catch(console.error);
-  }, []);
+  }, [questions]);
 
   const flatQuestions = useMemo(
     () =>
@@ -169,9 +189,11 @@ export default function FaqSection({ compact = false }) {
     if (!flatQuestions.length) return;
     const hash = (location.hash || "").replace("#", "");
     if (!hash) return;
+    if (!isFaqIntentHash(hash) && !flatQuestions.some((q) => q.id === hash)) {
+      return;
+    }
 
     if (hash === "faq") {
-      scrollWithOffset("faq");
       return;
     }
 
@@ -185,17 +207,18 @@ export default function FaqSection({ compact = false }) {
       setOpenQuestions((prev) => ({ ...prev, [hash]: true }));
       setTimeout(() => scrollWithOffset(hash), 250);
     }
-  }, [location.hash, flatQuestions]); 
+  }, [location.hash, flatQuestions, safePage]); 
 
   const eyebrowText = faqCopy?.eyebrow || "Answers without the fluff";
   const headingText = faqCopy?.title || "Frequently Asked Questions";
   const subtitleText = faqCopy?.subtitle || "Click a question to expand its answer.";
   const sectionPaddingClass = compact ? "pt-20 pb-10" : "pt-20 pb-24";
+  const sectionId = compact ? undefined : "faq";
 
   return (
     <>
     <section
-      id="faq"
+      id={sectionId}
       className={`relative z-10 scroll-mt-32 ${sectionPaddingClass} px-4 sm:px-6 text-white`}
     >
       <div className="relative max-w-6xl mx-auto">

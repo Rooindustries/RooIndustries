@@ -23,9 +23,9 @@ const routeMeta = {
     noindex: false,
   },
   "/faq": {
-    title: "FAQ | Roo Industries",
+    title: "PC Optimization FAQ | Roo Industries",
     description:
-      "Answers to common questions about our optimization process, safety, and results.",
+      "Read Roo Industries answers on PC optimization, BIOS tuning, booking, upgrades, warranties, and what to expect from a professional tuning session.",
     noindex: false,
   },
   "/contact": {

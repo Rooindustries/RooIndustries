@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { INDEXABLE_ROUTES } = require("../src/lib/routes");
+const { INDEXABLE_ROUTES, getUpgradeRoutes } = require("../src/lib/routes");
 
 const siteUrl = (process.env.SITE_URL ||
   process.env.NEXT_PUBLIC_SITE_URL ||
@@ -22,9 +22,10 @@ const buildEntry = (route, now) => {
 };
 
 async function run() {
-  const routes = Array.from(new Set(INDEXABLE_ROUTES)).sort((a, b) =>
-    a.localeCompare(b)
-  );
+  const dynamicUpgradeRoutes = await getUpgradeRoutes();
+  const routes = Array.from(
+    new Set([...INDEXABLE_ROUTES, ...dynamicUpgradeRoutes])
+  ).sort((a, b) => a.localeCompare(b));
 
   const now = new Date().toISOString();
   const urlEntries = routes.map((route) => buildEntry(route, now)).join("\n");

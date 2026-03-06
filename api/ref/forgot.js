@@ -1,6 +1,7 @@
 import { createClient } from "@sanity/client";
 import { Resend } from "resend";
 import crypto from "crypto";
+import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 
 // 1. Initialize Resend
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -25,10 +26,23 @@ export default async function handler(req, res) {
       return res.status(400).json({ ok: false, error: "Missing email" });
     }
 
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    const clientAddress = getClientAddress(req);
+
+    if (
+      !requireRateLimit(res, {
+        key: `ref-forgot:${clientAddress}:${normalizedEmail || "unknown"}`,
+        max: 5,
+        windowMs: 30 * 60 * 1000,
+      })
+    ) {
+      return;
+    }
+
     // 3. Find the user by Email
     const referral = await client.fetch(
       `*[_type == "referral" && creatorEmail == $email][0]{ _id, name }`,
-      { email }
+      { email: normalizedEmail }
     );
 
     if (!referral) {
@@ -39,6 +53,10 @@ export default async function handler(req, res) {
 
     // 4. Generate Token & Expiration (1 hour)
     const resetToken = crypto.randomBytes(32).toString("hex");
+    const resetTokenHash = crypto
+      .createHash("sha256")
+      .update(resetToken)
+      .digest("hex");
     const resetTokenExpiresAt = new Date(
       Date.now() + 60 * 60 * 1000
     ).toISOString();
@@ -47,9 +65,10 @@ export default async function handler(req, res) {
     await client
       .patch(referral._id)
       .set({
-        resetToken: resetToken,
+        resetTokenHash,
         resetTokenExpiresAt: resetTokenExpiresAt,
       })
+      .unset(["resetToken"])
       .commit();
 
     // 6. Send Email via Resend
@@ -61,7 +80,7 @@ export default async function handler(req, res) {
 
     const { data, error } = await resend.emails.send({
       from: fromAddress,
-      to: [email],
+      to: [normalizedEmail],
       subject: "Reset your Password",
       html: `
         <p>Hi ${referral.name || "there"},</p>

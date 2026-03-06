@@ -1,6 +1,6 @@
 import {createClient} from '@sanity/client';
 import crypto from 'crypto';
-import {requireSecret} from './auth';
+import {requireSecret} from './auth.js';
 import {
   buildBalance,
   computeEarningsFromBookings,

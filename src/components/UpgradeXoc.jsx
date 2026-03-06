@@ -29,6 +29,7 @@ const formatLocalTime = (utcDate, timeZone) => {
 
 export default function UpgradeXoc() {
   const [orderId, setOrderId] = useState("");
+  const [orderEmail, setOrderEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [upgradeInfo, setUpgradeInfo] = useState(null); // { booking, xoc, upgradePrice, originalPaid }
   const [error, setError] = useState(null);
@@ -44,11 +45,18 @@ export default function UpgradeXoc() {
       setError("Please enter the Order ID from your confirmation email. ");
       return;
     }
+    const trimmedEmail = orderEmail.trim();
+    if (!trimmedEmail) {
+      setError("Please enter the email used on the original booking.");
+      return;
+    }
 
     setLoading(true);
     try {
       const res = await fetch(
-        `/api/ref/getUpgradeInfo?id=${encodeURIComponent(trimmed)}`
+        `/api/ref/getUpgradeInfo?id=${encodeURIComponent(
+          trimmed
+        )}&email=${encodeURIComponent(trimmedEmail)}`
       );
       const data = await res.json();
 
@@ -95,12 +103,12 @@ export default function UpgradeXoc() {
 
     // Build bookingData exactly like your normal Booking → Payment flow,
     // but as an upgrade with the new price.
-    const bookingData = {
-      discord: booking.discord || "",
-      email: booking.email || "",
-      specs: booking.specs || "",
-      mainGame: booking.mainGame || "",
-      message: booking.message || "",
+      const bookingData = {
+        discord: booking.discord || "",
+        email: orderEmail.trim(),
+        specs: booking.specs || "",
+        mainGame: booking.mainGame || "",
+        message: booking.message || "",
 
       // UPGRADE package metadata
       packageTitle: `${xoc.title} (Upgrade)`,
@@ -147,6 +155,19 @@ export default function UpgradeXoc() {
           You can find this in your Roo Industries booking email (labelled
           &quot;Order ID&quot;).
         </p>
+        <div className="mb-3">
+          <label className="block text-sm font-semibold mb-2">
+            Booking email
+          </label>
+          <input
+            value={orderEmail}
+            onChange={(e) => setOrderEmail(e.target.value)}
+            placeholder="Email used on the original booking"
+            className="w-full bg-[#0c162a] border border-sky-800/40 rounded-md px-3 py-2 outline-none text-sm"
+            type="email"
+            autoComplete="email"
+          />
+        </div>
         <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
           <input
             value={orderId}

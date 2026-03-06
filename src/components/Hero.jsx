@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { client } from "../sanityClient";
 
@@ -27,6 +27,13 @@ export default function Hero() {
   const containerRef = useRef(null);
   const measure1Ref = useRef(null);
   const measure2Ref = useRef(null);
+  const sizeCacheRef = useRef({
+    width: 0,
+    line1: null,
+    line2: null,
+    heading1: "",
+    heading2: "",
+  });
   const [line1FontSize, setLine1FontSize] = useState(null);
   const [line2FontSize, setLine2FontSize] = useState(null);
 
@@ -145,6 +152,14 @@ export default function Hero() {
     }
 
     const maxWidth = Math.max(220, container.clientWidth - 16);
+    const cache = sizeCacheRef.current;
+    if (
+      cache.width === maxWidth &&
+      cache.heading1 === headingLine1 &&
+      cache.heading2 === headingLine2
+    ) {
+      return;
+    }
     const baseFontSize = getBaseFontSize();
 
     measure1.style.fontSize = `${baseFontSize}px`;
@@ -160,39 +175,40 @@ export default function Hero() {
     const nextLine2 = baseFontSize * (targetWidth / width2);
     const minSize = baseFontSize * 0.52;
     const maxSize = baseFontSize * 1.42;
+    const nextSize1 = Math.max(minSize, Math.min(maxSize, nextLine1));
+    const nextSize2 = Math.max(minSize, Math.min(maxSize, nextLine2));
 
-    setLine1FontSize(Math.max(minSize, Math.min(maxSize, nextLine1)));
-    setLine2FontSize(Math.max(minSize, Math.min(maxSize, nextLine2)));
+    sizeCacheRef.current = {
+      width: maxWidth,
+      line1: nextSize1,
+      line2: nextSize2,
+      heading1: headingLine1,
+      heading2: headingLine2,
+    };
+
+    setLine1FontSize((prev) =>
+      prev !== null && Math.abs(prev - nextSize1) < 0.5 ? prev : nextSize1
+    );
+    setLine2FontSize((prev) =>
+      prev !== null && Math.abs(prev - nextSize2) < 0.5 ? prev : nextSize2
+    );
   }, [getBaseFontSize, headingLine1, headingLine2]);
 
-  useEffect(() => {
-    let resizeTimer;
+  useLayoutEffect(() => {
     let rafId = 0;
-    let resizeObserver;
 
-    const run = () => {
+    const schedule = () => {
       cancelAnimationFrame(rafId);
       rafId = requestAnimationFrame(calculateHeadingSizes);
     };
 
-    const onResize = () => {
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(run, 100);
-    };
-
-    window.addEventListener("resize", onResize);
-    run();
-
-    if (typeof ResizeObserver !== "undefined" && containerRef.current) {
-      resizeObserver = new ResizeObserver(onResize);
-      resizeObserver.observe(containerRef.current);
-    }
+    calculateHeadingSizes();
+    window.addEventListener("resize", schedule);
+    document.fonts?.ready?.then?.(schedule).catch?.(() => {});
 
     return () => {
-      window.removeEventListener("resize", onResize);
-      clearTimeout(resizeTimer);
+      window.removeEventListener("resize", schedule);
       cancelAnimationFrame(rafId);
-      if (resizeObserver) resizeObserver.disconnect();
     };
   }, [calculateHeadingSizes]);
 

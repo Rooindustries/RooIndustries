@@ -57,7 +57,7 @@ export default function Reviews() {
 
   return (
     <section className="px-4 mt-20 py-12 max-w-7xl mx-auto">
-      <header className="mx-auto max-w-3xl min-h-[62vh] md:min-h-[52vh] flex flex-col items-center justify-center text-center">
+      <header className="mx-auto max-w-3xl py-10 sm:py-12 md:py-16 flex flex-col items-center justify-center text-center">
         <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
           Community Reviews
         </h1>

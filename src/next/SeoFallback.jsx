@@ -11,10 +11,6 @@ const routeCopy = {
     title: "Client Reviews & Results",
     body: "Read verified customer feedback about FPS gains, latency improvements, and system stability.",
   },
-  "/faq": {
-    title: "Frequently Asked Questions",
-    body: "Find answers about process, safety, expectations, and optimization outcomes.",
-  },
   "/contact": {
     title: "Contact Roo Industries",
     body: "Reach out for questions, booking support, and service guidance.",
@@ -53,9 +49,9 @@ export default function SeoFallback({ pathname }) {
     <noscript>
       <section aria-label="No-JS SEO fallback">
         <div className="mx-auto max-w-4xl px-6 pt-28 pb-8 text-white">
-          <h1 className="text-4xl font-extrabold tracking-tight text-sky-100">
+          <h2 className="text-4xl font-extrabold tracking-tight text-sky-100">
             {copy.title}
-          </h1>
+          </h2>
           <p className="mt-4 text-base text-slate-200/90 leading-relaxed">
             {copy.body}
           </p>

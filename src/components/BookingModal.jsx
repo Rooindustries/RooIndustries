@@ -1,10 +1,17 @@
 import React, { useEffect, useRef, useState, useLayoutEffect } from "react";
-import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
+import { useLowPerformanceMode } from "../lib/performanceMode";
 
 export default function BookingModal({ open, onClose, children }) {
   const contentRef = useRef(null);
-  
+  const layoutFrameRef = useRef(0);
+  const lastLayoutRef = useRef({
+    scale: 1,
+    renderWidth: 1150,
+    wrapperWidth: 0,
+    wrapperHeight: 0,
+  });
+  const lowPerformanceMode = useLowPerformanceMode();
   const [dynamicScale, setDynamicScale] = useState(1);
   const [isMobile, setIsMobile] = useState(false);
   const [renderWidth, setRenderWidth] = useState(1150);
@@ -60,26 +67,50 @@ export default function BookingModal({ open, onClose, children }) {
       }
 
       scale = Math.min(Math.max(scale, 0.5), 1.2);
-      
-      setDynamicScale(scale);
-      setRenderWidth(baseWidth);
 
-      if (contentRef.current) {
-        setWrapperSize({
-          width: baseWidth * scale,
-          height: contentRef.current.offsetHeight * scale
-        });
+      const nextLayout = {
+        scale,
+        renderWidth: baseWidth,
+        wrapperWidth: contentRef.current ? baseWidth * scale : 0,
+        wrapperHeight: contentRef.current
+          ? contentRef.current.offsetHeight * scale
+          : 0,
+      };
+      const prevLayout = lastLayoutRef.current;
+      const changed =
+        Math.abs(prevLayout.scale - nextLayout.scale) > 0.005 ||
+        Math.abs(prevLayout.renderWidth - nextLayout.renderWidth) >= 1 ||
+        Math.abs(prevLayout.wrapperWidth - nextLayout.wrapperWidth) >= 1 ||
+        Math.abs(prevLayout.wrapperHeight - nextLayout.wrapperHeight) >= 1;
+
+      if (!changed) {
+        return;
       }
+
+      lastLayoutRef.current = nextLayout;
+      setDynamicScale(nextLayout.scale);
+      setRenderWidth(nextLayout.renderWidth);
+      setWrapperSize({
+        width: nextLayout.wrapperWidth,
+        height: nextLayout.wrapperHeight,
+      });
+    };
+
+    const scheduleLayout = () => {
+      window.cancelAnimationFrame(layoutFrameRef.current);
+      layoutFrameRef.current = window.requestAnimationFrame(calculateLayout);
     };
 
     calculateLayout();
-    window.addEventListener("resize", calculateLayout);
+    window.addEventListener("resize", scheduleLayout);
     
-    const observer = new ResizeObserver(() => calculateLayout());
+    const observer = new ResizeObserver(() => scheduleLayout());
     if (contentRef.current) observer.observe(contentRef.current);
 
     return () => {
-      window.removeEventListener("resize", calculateLayout);
+      window.removeEventListener("resize", scheduleLayout);
+      window.cancelAnimationFrame(layoutFrameRef.current);
+      layoutFrameRef.current = 0;
       observer.disconnect();
     };
   }, [isMobile, children, open]);
@@ -114,15 +145,19 @@ export default function BookingModal({ open, onClose, children }) {
 
   // -- ANIMATION CONFIG --
   const springTransition = {
-    type: "spring",
-    stiffness: 260,
-    damping: 30,
-    mass: 1
+    ...(lowPerformanceMode
+      ? { duration: 0.16, ease: [0.2, 0, 0, 1] }
+      : {
+          type: "spring",
+          stiffness: 260,
+          damping: 30,
+          mass: 1,
+        }),
   };
 
   const fadeTransition = {
-    duration: 0.35,
-    ease: [0.4, 0, 0.2, 1] 
+    duration: lowPerformanceMode ? 0.16 : 0.35,
+    ease: [0.4, 0, 0.2, 1],
   };
 
   const handleGlobalClick = (e) => {
@@ -163,7 +198,7 @@ export default function BookingModal({ open, onClose, children }) {
 
           {/* BACKDROP */}
           <div 
-            className="fixed inset-0 bg-black/40 backdrop-blur-[20px]"
+            className="glass-overlay low-perf-overlay fixed inset-0"
             style={{ pointerEvents: "none" }}
           />
 
@@ -184,7 +219,7 @@ export default function BookingModal({ open, onClose, children }) {
                 width: wrapperSize.width, 
                 height: wrapperSize.height 
               }}
-              layout
+              layout={!lowPerformanceMode}
               transition={springTransition}
             >
               {/* CONTENT SCALER */}
@@ -193,10 +228,22 @@ export default function BookingModal({ open, onClose, children }) {
                 aria-modal="true"
                 className="shadow-none outline-none overflow-visible absolute top-0 left-0 origin-top-left cursor-default"
                 
-                initial={{ scale: dynamicScale * 0.95 }}
-                animate={{ scale: dynamicScale }}
-                exit={{ scale: dynamicScale * 0.95 }}
-                transition={springTransition}
+                initial={
+                  lowPerformanceMode
+                    ? { scale: dynamicScale, opacity: 0 }
+                    : { scale: dynamicScale * 0.95 }
+                }
+                animate={
+                  lowPerformanceMode
+                    ? { scale: dynamicScale, opacity: 1 }
+                    : { scale: dynamicScale }
+                }
+                exit={
+                  lowPerformanceMode
+                    ? { scale: dynamicScale, opacity: 0 }
+                    : { scale: dynamicScale * 0.95 }
+                }
+                transition={lowPerformanceMode ? fadeTransition : springTransition}
               >
                 {/* CONTENT CONTAINER */}
                 <div 

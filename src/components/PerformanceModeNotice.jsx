@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 
 const MODE_KEY = "roo-lite-mode";
 const DISMISS_KEY = "roo-gpu-warning-dismissed";
+const MANUAL_KEY = "roo-lite-mode-manual";
 
 const SOFTWARE_RENDERER_PATTERNS = [
   /swiftshader/i,
@@ -53,6 +54,9 @@ const detectLikelySoftwareRendering = () => {
 const setLiteModeClass = (enabled) => {
   if (typeof document === "undefined") return;
   document.documentElement.classList.toggle("low-performance-mode", enabled);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("roo-performance-mode-change"));
+  }
 };
 
 export default function PerformanceModeNotice() {
@@ -66,31 +70,35 @@ export default function PerformanceModeNotice() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const storedMode = localStorage.getItem(MODE_KEY);
-    if (storedMode === "on") {
-      setLiteModeEnabled(true);
-      setLiteModeClass(true);
-    } else if (storedMode === "off") {
-      setLiteModeEnabled(false);
-      setLiteModeClass(false);
-    }
-
     const runDetection = () => {
       const result = detectLikelySoftwareRendering();
       setDetection(result);
 
-      if (result.likelySoftware) {
-        const dismissed = localStorage.getItem(DISMISS_KEY) === "1";
-        if (!dismissed) {
-          setShowNotice(true);
-        }
+      const storedMode = localStorage.getItem(MODE_KEY);
+      const manualMode = localStorage.getItem(MANUAL_KEY) === "1";
+      let shouldEnableLiteMode = false;
 
-        if (storedMode !== "off" && storedMode !== "on") {
-          setLiteModeEnabled(true);
-          setLiteModeClass(true);
-          localStorage.setItem(MODE_KEY, "on");
+      if (result.likelySoftware) {
+        if (manualMode) {
+          shouldEnableLiteMode = storedMode === "on";
+        } else {
+          shouldEnableLiteMode = storedMode !== "off";
+        }
+      } else {
+        shouldEnableLiteMode = storedMode === "on";
+
+        // One-time migration: clear stale auto-enabled mode on hardware renderers.
+        if (shouldEnableLiteMode && !manualMode) {
+          localStorage.removeItem(MODE_KEY);
+          shouldEnableLiteMode = false;
         }
       }
+
+      setLiteModeEnabled(shouldEnableLiteMode);
+      setLiteModeClass(shouldEnableLiteMode);
+
+      const dismissed = localStorage.getItem(DISMISS_KEY) === "1";
+      setShowNotice(result.likelySoftware && !dismissed);
     };
 
     if ("requestIdleCallback" in window) {
@@ -102,14 +110,17 @@ export default function PerformanceModeNotice() {
 
   const noticeMessage = useMemo(() => {
     if (!detection.likelySoftware) return null;
-    return "Hardware acceleration appears disabled. Lite Mode is available for smoother scrolling.";
-  }, [detection]);
+    return liteModeEnabled
+      ? "Hardware acceleration appears disabled. Lite Mode has been enabled for smoother scrolling."
+      : "Hardware acceleration appears disabled. Lite Mode is available for smoother scrolling.";
+  }, [detection, liteModeEnabled]);
 
   const toggleLiteMode = () => {
     const next = !liteModeEnabled;
     setLiteModeEnabled(next);
     setLiteModeClass(next);
     localStorage.setItem(MODE_KEY, next ? "on" : "off");
+    localStorage.setItem(MANUAL_KEY, "1");
   };
 
   const dismissNotice = () => {

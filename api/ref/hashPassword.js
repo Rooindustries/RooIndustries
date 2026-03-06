@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import { createClient } from "@sanity/client";
-import { requireReferralSession } from "./auth";
+import { requireReferralSession } from "./auth.js";
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,

@@ -1,5 +1,5 @@
 import { createClient } from "@sanity/client";
-import { requireAdminKey } from "./auth";
+import { requireAdminKey } from "./auth.js";
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,

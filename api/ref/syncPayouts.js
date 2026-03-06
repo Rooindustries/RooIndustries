@@ -1,5 +1,5 @@
 import {createClient} from '@sanity/client';
-import {requireAdminKey} from './auth';
+import {requireAdminKey} from './auth.js';
 import {
   buildBalance,
   computeEarningsFromBookings,
