@@ -12,12 +12,12 @@ export async function GET(request) {
   const handler = await loadLegacyApiHandler(
     path.join(process.cwd(), "api", "releaseHold.js")
   );
-  return runLegacyApiHandler({ request, handler });
+  return runLegacyApiHandler({ request, handler, methodOverride: "GET" });
 }
 
 export async function POST(request) {
   const handler = await loadLegacyApiHandler(
     path.join(process.cwd(), "api", "releaseHold.js")
   );
-  return runLegacyApiHandler({ request, handler });
+  return runLegacyApiHandler({ request, handler, methodOverride: "POST" });
 }

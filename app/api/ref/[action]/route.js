@@ -29,7 +29,7 @@ const ALLOWED_ACTIONS = new Set([
   "webhookSync",
 ]);
 
-async function handle(request, context) {
+async function handle(request, context, methodOverride) {
   const { action } = await context.params;
 
   if (!ALLOWED_ACTIONS.has(action)) {
@@ -40,8 +40,8 @@ async function handle(request, context) {
     path.join(process.cwd(), "api", "ref", `${action}.js`)
   );
 
-  return runLegacyApiHandler({ request, handler });
+  return runLegacyApiHandler({ request, handler, methodOverride });
 }
 
-export const GET = handle;
-export const POST = handle;
+export const GET = (request, context) => handle(request, context, "GET");
+export const POST = (request, context) => handle(request, context, "POST");
