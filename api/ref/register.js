@@ -1,7 +1,8 @@
 // ./api/ref/register.js
 import { createClient } from "@sanity/client";
 import bcrypt from "bcryptjs";
-import { setReferralSessionCookie } from "./auth";
+import { setReferralSessionCookie } from "./auth.js";
+import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -17,6 +18,17 @@ export default async function handler(req, res) {
 
   try {
     const { name, email, paypalEmail, slug, password } = req.body;
+
+    const clientAddress = getClientAddress(req);
+    if (
+      !requireRateLimit(res, {
+        key: `ref-register:${clientAddress}`,
+        max: 10,
+        windowMs: 30 * 60 * 1000,
+      })
+    ) {
+      return;
+    }
 
     // Basic presence validation
     if (!name || !email || !paypalEmail || !slug || !password) {

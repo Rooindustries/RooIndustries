@@ -1,24 +1,57 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { client } from "../sanityClient";
+import {
+  PERF_TOGGLE_KEYS,
+  getPerfToggleEnabled,
+  subscribePerfDebugChanges,
+} from "../lib/perfDebug";
+import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS, readHomeSectionData } from "../lib/homeSectionData";
 
-export default function HowItWorks() {
-  const [data, setData] = useState(null);
+export default function HowItWorks({ initialData = null }) {
+  const [data, setData] = useState(
+    () => initialData ?? readHomeSectionData(HOME_SECTION_DATA_KEYS.howItWorks)
+  );
 
   useEffect(() => {
-    client
-      .fetch(
-        `*[_type == "howItWorks"][0]{
-          title,
-          subtitle,
-          steps[]{badge, title, text, iconType}
-        }`
-      )
+    if (initialData !== null) {
+      setData(initialData);
+    }
+  }, [initialData]);
+  const [pauseVideos, setPauseVideos] = useState(false);
+
+  useEffect(() => {
+    if (data !== null) return;
+    fetchHomeSectionData(HOME_SECTION_DATA_KEYS.howItWorks)
       .then((res) => setData(res))
       .catch((err) => console.error("Sanity fetch error:", err));
+  }, [data]);
+
+  useEffect(() => {
+    const syncPauseState = () => {
+      setPauseVideos(
+        getPerfToggleEnabled(PERF_TOGGLE_KEYS.PAUSE_HOWITWORKS_VIDEOS)
+      );
+    };
+
+    syncPauseState();
+    const unsubscribePerf = subscribePerfDebugChanges(syncPauseState);
+    window.addEventListener("roo-performance-mode-change", syncPauseState);
+    return () => {
+      unsubscribePerf();
+      window.removeEventListener("roo-performance-mode-change", syncPauseState);
+    };
   }, []);
 
-  if (!data) return null;
+  if (!data) {
+    return (
+      <section
+        className="relative z-10 py-16 px-4 sm:px-6 text-white max-w-[110rem] mx-auto"
+        aria-hidden="true"
+      >
+        <div className="min-h-[760px] rounded-3xl border border-sky-700/20 bg-gradient-to-b from-[#0d1526]/70 to-[#08101d]/80" />
+      </section>
+    );
+  }
 
   const videoByStepIndex = {
     0: "discordvideo",
@@ -27,23 +60,30 @@ export default function HowItWorks() {
     3: "tuning",
   };
 
-  const VideoBadge = ({ name }) => {
+  const VideoBadge = ({ name, pauseVideos }) => {
     const cardRef = useRef(null);
-    const [isVisible, setIsVisible] = useState(false);
+    const videoRef = useRef(null);
+    const [isIntersecting, setIsIntersecting] = useState(false);
+    const [hasLoaded, setHasLoaded] = useState(false);
+    const [pageVisible, setPageVisible] = useState(
+      typeof document !== "undefined" ? !document.hidden : true
+    );
 
     useEffect(() => {
       if (!name) return;
       if (!cardRef.current || typeof IntersectionObserver === "undefined") {
-        setIsVisible(true);
+        setIsIntersecting(true);
+        setHasLoaded(true);
         return;
       }
 
       const observer = new IntersectionObserver(
         (entries) => {
           const entry = entries[0];
-          if (entry?.isIntersecting) {
-            setIsVisible(true);
-            observer.disconnect();
+          const inView = Boolean(entry?.isIntersecting);
+          setIsIntersecting(inView);
+          if (inView) {
+            setHasLoaded(true);
           }
         },
         { rootMargin: "200px 0px" }
@@ -52,6 +92,27 @@ export default function HowItWorks() {
       observer.observe(cardRef.current);
       return () => observer.disconnect();
     }, [name]);
+
+    useEffect(() => {
+      const onVisibilityChange = () => {
+        setPageVisible(!document.hidden);
+      };
+      document.addEventListener("visibilitychange", onVisibilityChange);
+      return () =>
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+    }, []);
+
+    useEffect(() => {
+      const node = videoRef.current;
+      if (!node || !hasLoaded) return;
+
+      const shouldPlay = isIntersecting && pageVisible && !pauseVideos;
+      if (shouldPlay) {
+        node.play().catch(() => {});
+        return;
+      }
+      node.pause();
+    }, [hasLoaded, isIntersecting, pageVisible, pauseVideos]);
 
     if (!name) return null;
 
@@ -65,8 +126,9 @@ export default function HowItWorks() {
                    shadow-[0_0_26px_rgba(14,165,233,0.3)]
                    w-[calc(100%+0.75rem)] sm:w-[calc(100%+1rem)] -mx-1.5 sm:-mx-2 aspect-[16/10]"
       >
-        {isVisible ? (
+        {hasLoaded ? (
           <video
+            ref={videoRef}
             className="absolute inset-0 w-full h-full object-cover"
             autoPlay
             loop
@@ -111,7 +173,10 @@ export default function HowItWorks() {
               {/* Video stacked on top of the text content */}
               <div className="flex flex-col items-center gap-5 text-center">
                 <div className="w-full flex justify-center">
-                  <VideoBadge name={videoByStepIndex[i]} />
+                  <VideoBadge
+                    name={videoByStepIndex[i]}
+                    pauseVideos={pauseVideos}
+                  />
                 </div>
 
                 <div className="w-full">

@@ -1,11 +1,21 @@
+require("dotenv").config({ path: ".env.local" });
+
 const vercelEnv = (process.env.VERCEL_ENV || "").trim().toLowerCase();
 const hasExplicitVercelEnv = vercelEnv.length > 0;
+const isCi = String(process.env.CI || "").toLowerCase() === "true";
+const isVercelBuild = Boolean(process.env.VERCEL) || hasExplicitVercelEnv;
+const nextPhase = String(process.env.NEXT_PHASE || "").trim().toLowerCase();
+const isNextProductionBuild = nextPhase === "phase-production-build";
+const forceStrict =
+  String(process.env.VALIDATE_RUNTIME_ENV_STRICT || "").toLowerCase() === "1" ||
+  String(process.env.REQUIRE_RUNTIME_SECRETS || "").toLowerCase() === "1";
 
-// Vercel previews typically run with NODE_ENV=production.
-// Only hard-block when VERCEL_ENV explicitly says production.
 const isProdBuild = hasExplicitVercelEnv
   ? vercelEnv === "production"
-  : process.env.NODE_ENV === "production" && process.env.CI === "true";
+  : String(process.env.NODE_ENV || "").toLowerCase() === "production";
+
+const shouldFailClosed =
+  missing => missing.length > 0 && isProdBuild && (isCi || isVercelBuild || isNextProductionBuild || forceStrict);
 
 const hasAny = (keys = []) => keys.some((key) => !!process.env[key]);
 
@@ -75,19 +85,19 @@ const missing = requiredChecks
 
 if (missing.length === 0) {
   console.log("[env] Runtime secret validation passed.");
-} else if (!isProdBuild) {
-  console.warn(
-    `[env] Non-production build: missing optional runtime secrets:\n- ${missing.join(
-      "\n- "
-    )}`
-  );
-} else {
+} else if (shouldFailClosed(missing)) {
   console.error(
     `[env] Production build blocked: missing required runtime secrets:\n- ${missing.join(
       "\n- "
     )}`
   );
   process.exit(1);
+} else {
+  console.warn(
+    `[env] Local/non-release build: missing runtime secrets:\n- ${missing.join(
+      "\n- "
+    )}`
+  );
 }
 
 const missingOptional = optionalChecks

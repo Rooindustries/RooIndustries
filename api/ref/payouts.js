@@ -1,5 +1,5 @@
 import {createClient} from '@sanity/client';
-import {requireReferralSession} from './auth';
+import {requireReferralSession} from './auth.js';
 import {
   buildBalance,
   computeEarningsFromBookings,

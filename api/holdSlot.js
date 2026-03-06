@@ -1,6 +1,8 @@
 // api/holdSlot.js
 import { createClient } from "@sanity/client";
-import { issueHoldToken, verifyHoldToken } from "./holdToken";
+import crypto from "crypto";
+import { issueHoldToken, verifyHoldToken } from "./holdToken.js";
+import { buildSlotHoldId } from "./slotIdentity.js";
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -75,6 +77,14 @@ export default async function handler(req, res) {
         message: "Invalid startTimeUTC.",
       });
     }
+    const normalizedStartTimeUTC = utcDate.toISOString();
+    const holdId = buildSlotHoldId(normalizedStartTimeUTC);
+    if (!holdId) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid startTimeUTC.",
+      });
+    }
 
     const hostDate = formatOwnerDateLabel(utcDate);
     const hostTime = formatOwnerTimeLabel(utcDate);
@@ -98,45 +108,131 @@ export default async function handler(req, res) {
         .json({ ok: false, message: "This slot is already booked." });
     }
 
-    // 2) Is it held by someone else?
-    const existingHold = await client.fetch(
-      `*[_type == "slotHold" 
-          && hostDate == $date 
-          && hostTime == $time 
-          && expiresAt > now()
-        ][0]`,
-      { date: hostDate, time: hostTime }
-    );
+    const now = Date.now();
+    const fetchExistingHold = () =>
+      client.fetch(`*[_type == "slotHold" && _id == $id][0]`, { id: holdId });
 
-    // If it's held, and the holder isn't the one trying to switch (i.e., it's not the previous hold)
-    if (existingHold && existingHold._id !== previousHoldId) {
-      return res
-        .status(409)
-        .json({
-          ok: false,
-          message: "This slot is currently reserved by someone else.",
+    let existingHold = await fetchExistingHold();
+    if (
+      existingHold?.expiresAt &&
+      new Date(existingHold.expiresAt) <= new Date(now)
+    ) {
+      await client.delete(holdId).catch(() => {});
+      existingHold = null;
+    }
+
+    // If the same holder is refreshing the same slot, renew it in place.
+    if (existingHold && previousHoldId === holdId && previousHoldToken) {
+      const validPreviousToken = verifyHoldToken({
+        token: previousHoldToken,
+        holdId,
+        startTimeUTC: existingHold.startTimeUTC || normalizedStartTimeUTC,
+        holdNonce: existingHold.holdNonce || "",
+      });
+
+      if (validPreviousToken) {
+        const expiresAt = new Date(now + 15 * 60 * 1000).toISOString();
+        const holdNonce = crypto.randomUUID();
+        await client
+          .patch(holdId)
+          .set({
+            packageTitle: packageTitle || "",
+            expiresAt,
+            startTimeUTC: normalizedStartTimeUTC,
+            holdNonce,
+          })
+          .commit();
+
+        const holdToken = issueHoldToken({
+          holdId,
+          startTimeUTC: normalizedStartTimeUTC,
+          expiresAt,
+          holdNonce,
         });
+
+        return res.status(200).json({
+          ok: true,
+          holdId,
+          holdToken,
+          expiresAt,
+        });
+      }
+    }
+
+    if (existingHold) {
+      return res.status(409).json({
+        ok: false,
+        message: "This slot is currently reserved by someone else.",
+      });
     }
 
     // 3) Create new 15-minute hold
-    const now = Date.now();
     const expiresAt = new Date(now + 15 * 60 * 1000).toISOString();
+    const holdNonce = crypto.randomUUID();
 
-    const created = await client.create({
-      _type: "slotHold",
-      hostDate,
-      hostTime,
-      startTimeUTC,
-      packageTitle: packageTitle || "",
-      expiresAt,
-    });
+    const createHold = () =>
+      client.create({
+        _id: holdId,
+        _type: "slotHold",
+        hostDate,
+        hostTime,
+        startTimeUTC: normalizedStartTimeUTC,
+        packageTitle: packageTitle || "",
+        expiresAt,
+        holdNonce,
+      });
+
+    let created;
+    try {
+      created = await createHold();
+    } catch (createError) {
+      const statusCode =
+        Number(createError?.statusCode || createError?.status || 0) || 0;
+      if (statusCode === 409) {
+        const activeHold = await fetchExistingHold();
+        const activeHoldExpired =
+          !!activeHold?.expiresAt && new Date(activeHold.expiresAt) <= new Date();
+
+        if (activeHoldExpired) {
+          await client.delete(holdId).catch(() => {});
+          try {
+            created = await createHold();
+          } catch (retryError) {
+            const retryStatusCode =
+              Number(retryError?.statusCode || retryError?.status || 0) || 0;
+            if (retryStatusCode !== 409) throw retryError;
+          }
+        }
+
+        if (created) {
+          // reclaimed expired hold successfully
+        } else if (
+          activeHold?.expiresAt &&
+          new Date(activeHold.expiresAt) > new Date()
+        ) {
+          return res.status(409).json({
+            ok: false,
+            message: "This slot is currently reserved by someone else.",
+          });
+        } else {
+          return res.status(409).json({
+            ok: false,
+            message: "This slot is currently being refreshed. Please try again.",
+          });
+        }
+      }
+      if (!created) {
+        throw createError;
+      }
+    }
 
     let holdToken = "";
     try {
       holdToken = issueHoldToken({
         holdId: created._id,
-        startTimeUTC,
+        startTimeUTC: normalizedStartTimeUTC,
         expiresAt,
+        holdNonce,
       });
     } catch (tokenError) {
       console.error("Failed to issue hold token:", tokenError);
@@ -148,11 +244,17 @@ export default async function handler(req, res) {
     }
 
     // 4) Clean up previous hold (Unreserve the old one)
-    if (previousHoldId) {
+    if (previousHoldId && previousHoldId !== created._id) {
       try {
+        const previousHold = await client.fetch(
+          `*[_type == "slotHold" && _id == $id][0]`,
+          { id: previousHoldId }
+        );
         const validPreviousToken = verifyHoldToken({
           token: previousHoldToken,
           holdId: previousHoldId,
+          startTimeUTC: previousHold?.startTimeUTC,
+          holdNonce: previousHold?.holdNonce || "",
         });
         if (
           validPreviousToken &&

@@ -23,6 +23,12 @@ function toSubunits(amount, currency = "USD") {
   return Math.round(amount * factor);
 }
 
+function resolveServerCurrency() {
+  return String(process.env.RAZORPAY_CURRENCY || "USD")
+    .trim()
+    .toUpperCase() || "USD";
+}
+
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", ["POST"]);
@@ -39,19 +45,36 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const { amount, currency = "USD", notes } = req.body || {};
+    const { notes = {} } = req.body || {};
+    const currency = resolveServerCurrency();
 
-    if (!amount || !currency) {
-      return res
-        .status(400)
-        .json({ ok: false, message: "Missing amount or currency" });
+    if (!notes?.packageTitle) {
+      return res.status(400).json({
+        ok: false,
+        message: "Missing package details required to create the order",
+      });
     }
 
+    const pricingModule = await import("./../ref/pricing.js");
+    const pricing = await pricingModule.resolveBookingPricing({
+      packageTitle: notes.packageTitle,
+      originalOrderId: notes.originalOrderId || "",
+      referralCode: notes.referralCode || "",
+      couponCode: notes.couponCode || "",
+      paymentProvider: "razorpay",
+    });
+
     const options = {
-      amount: toSubunits(amount, currency),
+      amount: toSubunits(pricing.effectiveNetAmount, currency),
       currency,
       receipt: `booking_${Date.now()}`,
-      notes: notes || {},
+      notes: {
+        packageTitle: notes.packageTitle || "",
+        originalOrderId: notes.originalOrderId || "",
+        referralCode: notes.referralCode || "",
+        couponCode: notes.couponCode || "",
+        expectedAmount: String(pricing.effectiveNetAmount),
+      },
     };
 
     const order = await razorpay.orders.create(options);
@@ -67,7 +90,8 @@ module.exports = async function handler(req, res) {
     console.error("Razorpay createOrder error:", err);
     return res.status(500).json({
       ok: false,
-      message: "Failed to create Razorpay order",
+      message:
+        err?.message || "Failed to create Razorpay order",
     });
   }
 };

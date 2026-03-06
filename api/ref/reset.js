@@ -1,5 +1,7 @@
 import { createClient } from "@sanity/client";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
+import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 
 // Initialize Sanity with WRITE permissions
 const client = createClient({
@@ -24,11 +26,26 @@ export default async function handler(req, res) {
         .json({ ok: false, error: "Missing token or password" });
     }
 
+    const clientAddress = getClientAddress(req);
+    if (
+      !requireRateLimit(res, {
+        key: `ref-reset:${clientAddress}`,
+        max: 10,
+        windowMs: 30 * 60 * 1000,
+      })
+    ) {
+      return;
+    }
+
     const now = new Date().toISOString();
+    const tokenHash = crypto
+      .createHash("sha256")
+      .update(String(token))
+      .digest("hex");
 
     const referral = await client.fetch(
-      `*[_type == "referral" && resetToken == $token && resetTokenExpiresAt > $now][0]{ _id }`,
-      { token, now }
+      `*[_type == "referral" && resetTokenHash == $tokenHash && resetTokenExpiresAt > $now][0]{ _id }`,
+      { tokenHash, now }
     );
 
     if (!referral) {
@@ -44,7 +61,7 @@ export default async function handler(req, res) {
     await client
       .patch(referral._id)
       .set({ creatorPassword: hash })
-      .unset(["resetToken", "resetTokenExpiresAt"])
+      .unset(["resetToken", "resetTokenHash", "resetTokenExpiresAt"])
       .commit();
 
     return res.status(200).json({ ok: true });

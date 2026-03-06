@@ -27,6 +27,13 @@ const base64UrlDecode = (value) =>
 const sign = (input, secret) =>
   crypto.createHmac("sha256", secret).update(input).digest("base64url");
 
+const timingSafeEqualString = (left, right) => {
+  const leftBuffer = Buffer.from(String(left || ""));
+  const rightBuffer = Buffer.from(String(right || ""));
+  if (leftBuffer.length !== rightBuffer.length) return false;
+  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+};
+
 const parseCookies = (header = "") =>
   String(header || "")
     .split(";")
@@ -165,7 +172,7 @@ export const requireAdminKey = (req, res) => {
   const queryKey = req?.query?.adminKey;
   const provided = headerKey || bodyKey || queryKey;
 
-  if (!provided || provided !== ADMIN_KEY) {
+  if (!provided || !timingSafeEqualString(provided, ADMIN_KEY)) {
     res.status(403).json({ ok: false, error: "Unauthorized request." });
     return false;
   }

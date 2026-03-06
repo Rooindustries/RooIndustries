@@ -2,7 +2,9 @@ import { Resend } from "resend";
 import { createClient } from "@sanity/client";
 import crypto from "crypto";
 import dotenv from "dotenv";
-import { verifyHoldToken } from "../holdToken";
+import { verifyHoldToken } from "../holdToken.js";
+import { resolveBookingPricing } from "./pricing.js";
+import { buildSlotBookingId } from "../slotIdentity.js";
 
 dotenv.config({ path: ".env.local" });
 
@@ -98,6 +100,8 @@ const clampPercent = (value) => {
   return Math.min(100, Math.max(0, parsed));
 };
 
+const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
+
 const resolveIsProdLike = () => {
   const vercelEnv = String(process.env.VERCEL_ENV || "").toLowerCase();
   if (vercelEnv) return vercelEnv === "production";
@@ -105,6 +109,18 @@ const resolveIsProdLike = () => {
 };
 
 const isProdLike = resolveIsProdLike();
+const isTestEnv = process.env.NODE_ENV === "test";
+const DEFAULT_RAZORPAY_CURRENCY = String(
+  process.env.RAZORPAY_CURRENCY || "USD"
+)
+  .trim()
+  .toUpperCase() || "USD";
+
+const toSubunits = (amount, currency = "USD") => {
+  const factors = { USD: 100, INR: 100, JPY: 1 };
+  const factor = factors[currency] ?? 100;
+  return Math.round(amount * factor);
+};
 
 const verifyRazorpaySignature = ({
   orderId,
@@ -121,6 +137,57 @@ const verifyRazorpaySignature = ({
     signature?.length === expected.length &&
     crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
   );
+};
+
+const verifyRazorpayPayment = async ({
+  orderId,
+  paymentId,
+  expectedAmount,
+  expectedCurrency = "USD",
+}) => {
+  const keyId = process.env.RAZORPAY_KEY_ID || "";
+  const keySecret = process.env.RAZORPAY_KEY_SECRET || "";
+
+  if (!keyId || !keySecret) {
+    return { ok: false, reason: "razorpay_credentials_missing" };
+  }
+
+  const basic = Buffer.from(`${keyId}:${keySecret}`).toString("base64");
+  const response = await fetch(
+    `https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}`,
+    {
+      headers: {
+        Authorization: `Basic ${basic}`,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    return { ok: false, reason: `razorpay_lookup_failed_${response.status}` };
+  }
+
+  const payment = await response.json();
+  const status = String(payment?.status || "").toLowerCase();
+  const paidAmount = Number(payment?.amount || 0);
+  const expectedSubunits = toSubunits(expectedAmount, expectedCurrency);
+
+  if (payment?.order_id !== orderId) {
+    return { ok: false, reason: "razorpay_order_mismatch" };
+  }
+
+  if (payment?.currency !== expectedCurrency) {
+    return { ok: false, reason: "razorpay_currency_mismatch" };
+  }
+
+  if (status !== "authorized" && status !== "captured") {
+    return { ok: false, reason: `razorpay_status_${status || "unknown"}` };
+  }
+
+  if (paidAmount !== expectedSubunits) {
+    return { ok: false, reason: "razorpay_amount_mismatch" };
+  }
+
+  return { ok: true };
 };
 
 const getPayPalMode = () => {
@@ -310,6 +377,85 @@ export default async function handler(req, res) {
     } = req.body || {};
     const isUpgrade = !!originalOrderId;
 
+    let originalBooking = null;
+    if (isUpgrade) {
+      originalBooking = await writeClient.fetch(
+        `*[_type == "booking" && _id == $id][0]{
+          _id,
+          status,
+          discord,
+          email,
+          payerEmail,
+          specs,
+          mainGame,
+          message,
+          localTimeZone,
+          startTimeUTC,
+          displayDate,
+          displayTime
+        }`,
+        { id: originalOrderId }
+      );
+
+      if (!originalBooking?._id) {
+        return res.status(400).json({
+          error: "Original booking could not be verified for this upgrade.",
+        });
+      }
+
+      const originalStatus = String(originalBooking.status || "").toLowerCase();
+      const originalPaid =
+        originalStatus === "captured" || originalStatus === "completed";
+      if (!originalPaid) {
+        return res.status(400).json({
+          error: "Only paid bookings can be upgraded.",
+        });
+      }
+
+      const allowedUpgradeEmails = [
+        originalBooking.email,
+        originalBooking.payerEmail,
+      ]
+        .map(normalizeEmail)
+        .filter(Boolean);
+      const normalizedUpgradeEmail = normalizeEmail(email);
+
+      if (
+        normalizedUpgradeEmail &&
+        allowedUpgradeEmails.length > 0 &&
+        !allowedUpgradeEmails.includes(normalizedUpgradeEmail)
+      ) {
+        return res.status(403).json({
+          error: "Upgrade details do not match the original booking.",
+        });
+      }
+    }
+
+    const resolvedDiscord = String(
+      discord || originalBooking?.discord || ""
+    ).trim();
+    const resolvedEmail = String(
+      email || originalBooking?.email || originalBooking?.payerEmail || ""
+    ).trim();
+    const resolvedSpecs = String(
+      specs || originalBooking?.specs || ""
+    ).trim();
+    const resolvedMainGame = String(
+      mainGame || originalBooking?.mainGame || ""
+    ).trim();
+    const resolvedMessage = String(
+      message || originalBooking?.message || ""
+    ).trim();
+    const resolvedLocalTimeZone = String(
+      localTimeZone || originalBooking?.localTimeZone || ""
+    ).trim();
+    const resolvedStartTimeUTC =
+      startTimeUTC || originalBooking?.startTimeUTC || "";
+    const resolvedDisplayDate =
+      displayDate || originalBooking?.displayDate || "";
+    const resolvedDisplayTime =
+      displayTime || originalBooking?.displayTime || "";
+
     if (!paymentProvider) {
       return res
         .status(400)
@@ -422,7 +568,7 @@ export default async function handler(req, res) {
       }
     }
 
-    const utcDate = parseUtcDate(startTimeUTC);
+    const utcDate = parseUtcDate(resolvedStartTimeUTC);
     if (!utcDate) {
       return res.status(400).json({
         error: "Missing or invalid startTimeUTC.",
@@ -430,6 +576,9 @@ export default async function handler(req, res) {
     }
 
     const normalizedStartTimeUTC = utcDate.toISOString();
+    const bookingDocId = !isUpgrade
+      ? buildSlotBookingId(normalizedStartTimeUTC)
+      : "";
     const ownerDate = formatOwnerDateLabel(utcDate);
     const ownerTime = formatOwnerTimeLabel(utcDate);
 
@@ -439,12 +588,12 @@ export default async function handler(req, res) {
       });
     }
 
-    const clientTimeZone = String(localTimeZone || "").trim();
+    const clientTimeZone = resolvedLocalTimeZone;
     const clientDate =
-      displayDate ||
+      resolvedDisplayDate ||
       (clientTimeZone ? formatClientDateLabel(utcDate, clientTimeZone) : "");
     const clientTime =
-      displayTime ||
+      resolvedDisplayTime ||
       (clientTimeZone ? formatClientTimeLabel(utcDate, clientTimeZone) : "");
 
     const bookingDate = ownerDate;
@@ -521,6 +670,7 @@ export default async function handler(req, res) {
         token: slotHoldToken,
         holdId: slotHoldId,
         startTimeUTC: holdUtcIso || normalizedStartTimeUTC,
+        holdNonce: holdDoc.holdNonce || "",
       });
 
       if (!validHoldToken) {
@@ -537,182 +687,27 @@ export default async function handler(req, res) {
       }
     }
 
-    const normalizedCouponCode = String(couponCode || "")
-      .trim()
-      .toLowerCase();
-    const normalizedReferralCode = String(referralCode || "")
-      .trim()
-      .toLowerCase();
-
-    let effectiveGrossAmount = 0;
-    if (!isUpgrade) {
-      const packageDoc = await writeClient.fetch(
-        `*[_type == "package" && title == $title][0]{price}`,
-        { title: packageTitle }
-      );
-      effectiveGrossAmount = toMoney(packageDoc?.price || packagePrice);
-    } else {
-      const normalizedUpgradeTitle = String(packageTitle || "")
-        .replace(/\s*\(upgrade\)\s*$/i, "")
-        .trim();
-
-      const originalBooking = await writeClient.fetch(
-        `*[_type == "booking" && _id == $id][0]{
-          _id,
-          status,
-          netAmount,
-          grossAmount,
-          packagePrice
-        }`,
-        { id: originalOrderId }
-      );
-
-      if (!originalBooking?._id) {
-        return res.status(400).json({
-          error: "Original booking could not be verified for this upgrade.",
-        });
-      }
-
-      const targetPackage = await writeClient.fetch(
-        `*[_type == "package" && title == $title][0]{price}`,
-        { title: normalizedUpgradeTitle }
-      );
-
-      const targetPrice = toMoney(targetPackage?.price || packagePrice);
-      const alreadyPaid = toMoney(
-        originalBooking.netAmount ||
-          originalBooking.grossAmount ||
-          originalBooking.packagePrice
-      );
-
-      effectiveGrossAmount = Math.max(0, toMoney(targetPrice - alreadyPaid));
-    }
-
-    if (!effectiveGrossAmount || effectiveGrossAmount <= 0) {
-      return res.status(400).json({
-        error: "Unable to resolve package pricing on server.",
-      });
-    }
-
-    let referralDoc = null;
-    if (referralId) {
-      referralDoc = await writeClient.fetch(
-        `*[_type == "referral" && _id == $id][0]{
-          _id,
-          slug,
-          currentCommissionPercent,
-          currentDiscountPercent
-        }`,
-        { id: referralId }
-      );
-    }
-
-    if (!referralDoc && normalizedReferralCode) {
-      referralDoc = await writeClient.fetch(
-        `*[_type == "referral" && slug.current == $code][0]{
-          _id,
-          slug,
-          currentCommissionPercent,
-          currentDiscountPercent
-        }`,
-        { code: normalizedReferralCode }
-      );
-    }
-
-    const effectiveReferralId = referralDoc?._id || null;
-    const effectiveReferralCode =
-      referralDoc?.slug?.current || normalizedReferralCode || "";
-    const referralDiscountPercent = clampPercent(
-      referralDoc?.currentDiscountPercent || 0
-    );
-    const effectiveCommissionPercent = clampPercent(
-      referralDoc?.currentCommissionPercent || 0
-    );
-
-    let couponDoc = null;
-    if (normalizedCouponCode) {
-      couponDoc = await writeClient.fetch(
-        `*[_type == "coupon" && lower(code) == $code][0]{
-          _id,
-          code,
-          isActive,
-          timesUsed,
-          maxUses,
-          validFrom,
-          validTo,
-          canCombineWithReferral,
-          discountPercent
-        }`,
-        { code: normalizedCouponCode }
-      );
-
-      if (!couponDoc) {
-        return res.status(400).json({ error: "Coupon is invalid." });
-      }
-
-      const now = new Date();
-      const used = couponDoc.timesUsed ?? 0;
-      const max = couponDoc.maxUses;
-
-      if (
-        couponDoc.isActive === false ||
-        (couponDoc.validFrom && new Date(couponDoc.validFrom) > now) ||
-        (couponDoc.validTo && new Date(couponDoc.validTo) < now) ||
-        (typeof max === "number" && max > 0 && used >= max)
-      ) {
-        return res.status(400).json({
-          error: "This coupon is inactive or expired.",
-        });
-      }
-    }
-
-    const couponDiscountPercent = clampPercent(couponDoc?.discountPercent || 0);
-    const canCombineWithReferral = couponDoc?.canCombineWithReferral === true;
-
-    const referralDiscountAmount = toMoney(
-      effectiveGrossAmount * (referralDiscountPercent / 100)
-    );
-    const couponDiscountAmount = toMoney(
-      effectiveGrossAmount * (couponDiscountPercent / 100)
-    );
-
-    let effectiveDiscountAmount = 0;
-    if (couponDoc && referralDoc) {
-      effectiveDiscountAmount = canCombineWithReferral
-        ? toMoney(referralDiscountAmount + couponDiscountAmount)
-        : Math.max(referralDiscountAmount, couponDiscountAmount);
-    } else if (couponDoc) {
-      effectiveDiscountAmount = couponDiscountAmount;
-    } else {
-      effectiveDiscountAmount = referralDiscountAmount;
-    }
-
-    effectiveDiscountAmount = Math.min(effectiveGrossAmount, effectiveDiscountAmount);
-
-    if (paymentProvider === "free") {
-      effectiveDiscountAmount = effectiveGrossAmount;
-    }
-
-    const effectiveNetAmount =
-      paymentProvider === "free"
-        ? 0
-        : toMoney(effectiveGrossAmount - effectiveDiscountAmount);
-
-    if (paymentProvider !== "free" && effectiveNetAmount <= 0) {
-      return res.status(400).json({
-        error: "Payable amount resolved to zero. Use the free booking flow.",
-      });
-    }
-
-    const effectiveDiscountPercent =
-      effectiveGrossAmount > 0
-        ? toMoney((effectiveDiscountAmount / effectiveGrossAmount) * 100)
-        : 0;
-
-    const commissionBase = effectiveNetAmount || effectiveGrossAmount || 0;
-    const commissionAmount = toMoney(
-      commissionBase * (effectiveCommissionPercent / 100)
-    );
+    const {
+      couponDiscountAmount,
+      couponDiscountPercent,
+      couponDoc,
+      effectiveCommissionPercent,
+      effectiveDiscountAmount,
+      effectiveDiscountPercent,
+      effectiveGrossAmount,
+      effectiveNetAmount,
+      effectiveReferralCode,
+      effectiveReferralId,
+      commissionAmount,
+    } = await resolveBookingPricing({
+      packageTitle,
+      originalOrderId,
+      referralId,
+      referralCode,
+      couponCode,
+      paymentProvider,
+    });
+    const resolvedPackagePrice = `$${effectiveGrossAmount.toFixed(2)}`;
 
     let verifiedPayerEmail = payerEmail;
 
@@ -723,14 +718,16 @@ export default async function handler(req, res) {
         });
       }
 
+      const razorpayKeyId = process.env.RAZORPAY_KEY_ID || "";
       const razorpaySecret = process.env.RAZORPAY_KEY_SECRET || "";
-      if (!razorpaySecret && isProdLike) {
+      const hasRazorpayCreds = !!razorpayKeyId && !!razorpaySecret;
+      if (!hasRazorpayCreds && !isTestEnv) {
         return res.status(500).json({
           error: "Payment verification is temporarily unavailable.",
         });
       }
 
-      if (razorpaySecret) {
+      if (hasRazorpayCreds) {
         const validSignature = verifyRazorpaySignature({
           orderId: razorpayOrderId,
           paymentId: razorpayPaymentId,
@@ -739,6 +736,22 @@ export default async function handler(req, res) {
         });
         if (!validSignature) {
           return res.status(400).json({ error: "Payment verification failed." });
+        }
+
+        const paymentVerification = await verifyRazorpayPayment({
+          orderId: razorpayOrderId,
+          paymentId: razorpayPaymentId,
+          expectedAmount: effectiveNetAmount,
+          expectedCurrency: DEFAULT_RAZORPAY_CURRENCY,
+        });
+
+        if (!paymentVerification.ok) {
+          console.warn(
+            `Razorpay verification rejected: ${paymentVerification.reason || "unknown"}`
+          );
+          return res.status(400).json({
+            error: "Payment verification failed.",
+          });
         }
       }
     }
@@ -753,7 +766,7 @@ export default async function handler(req, res) {
       const { clientId: paypalClientId, clientSecret: paypalClientSecret } =
         getPayPalCredentials();
       const hasPayPalCreds = !!paypalClientId && !!paypalClientSecret;
-      if (!hasPayPalCreds && isProdLike) {
+      if (!hasPayPalCreds && !isTestEnv) {
         return res.status(500).json({
           error: "Payment verification is temporarily unavailable.",
         });
@@ -778,50 +791,91 @@ export default async function handler(req, res) {
       }
     }
 
-    const doc = await writeClient.create({
-      _type: "booking",
-      date: bookingDate,
-      time: bookingTime,
-      discord,
-      email,
-      specs,
-      mainGame,
-      message,
-      packageTitle,
-      packagePrice,
-      status,
-      paymentProvider,
-      paypalOrderId,
-      payerEmail: verifiedPayerEmail,
-      razorpayOrderId,
-      razorpayPaymentId,
-      referralCode: effectiveReferralCode,
-      discountPercent: effectiveDiscountPercent,
-      discountAmount: effectiveDiscountAmount,
-      grossAmount: effectiveGrossAmount,
-      netAmount: effectiveNetAmount,
-      commissionPercent: effectiveCommissionPercent,
-      commissionAmount,
-      hostDate: bookingDate,
-      hostTime: bookingTime,
-      hostTimeZone: OWNER_TZ_NAME,
-      localTimeZone: clientTimeZone,
-      localTimeLabel: clientTime,
-      startTimeUTC: normalizedStartTimeUTC,
-      displayDate: clientDate,
-      displayTime: clientTime,
-      ...(originalOrderId ? { originalOrderId } : {}),
-      ...(couponCode
-        ? {
-            couponCode,
-            couponDiscountPercent,
-            couponDiscountAmount,
+    let doc;
+    try {
+      doc = await writeClient.create({
+        ...(bookingDocId ? { _id: bookingDocId } : {}),
+        _type: "booking",
+        date: bookingDate,
+        time: bookingTime,
+        discord: resolvedDiscord,
+        email: resolvedEmail,
+        specs: resolvedSpecs,
+        mainGame: resolvedMainGame,
+        message: resolvedMessage,
+        packageTitle,
+        packagePrice: resolvedPackagePrice,
+        status,
+        paymentProvider,
+        paypalOrderId,
+        payerEmail: verifiedPayerEmail,
+        razorpayOrderId,
+        razorpayPaymentId,
+        referralCode: effectiveReferralCode,
+        discountPercent: effectiveDiscountPercent,
+        discountAmount: effectiveDiscountAmount,
+        grossAmount: effectiveGrossAmount,
+        netAmount: effectiveNetAmount,
+        commissionPercent: effectiveCommissionPercent,
+        commissionAmount,
+        hostDate: bookingDate,
+        hostTime: bookingTime,
+        hostTimeZone: OWNER_TZ_NAME,
+        localTimeZone: clientTimeZone,
+        localTimeLabel: clientTime,
+        startTimeUTC: normalizedStartTimeUTC,
+        displayDate: clientDate,
+        displayTime: clientTime,
+        ...(originalOrderId ? { originalOrderId } : {}),
+        ...(couponCode
+          ? {
+              couponCode,
+              couponDiscountPercent,
+              couponDiscountAmount,
+            }
+          : {}),
+        ...(effectiveReferralId
+          ? { referral: { _type: "reference", _ref: effectiveReferralId } }
+          : {}),
+      });
+    } catch (createError) {
+      const statusCode =
+        Number(createError?.statusCode || createError?.status || 0) || 0;
+      if (bookingDocId && statusCode === 409) {
+        const existingBooking = await writeClient.fetch(
+          `*[_type == "booking" && hostDate == $date && hostTime == $time][0]{
+            _id,
+            paymentProvider,
+            paypalOrderId,
+            razorpayPaymentId
+          }`,
+          { date: bookingDate, time: bookingTime }
+        );
+
+        if (existingBooking?._id) {
+          const samePaypalProof =
+            paymentProvider === "paypal" &&
+            !!paypalOrderId &&
+            existingBooking.paypalOrderId === paypalOrderId;
+          const sameRazorpayProof =
+            paymentProvider === "razorpay" &&
+            !!razorpayPaymentId &&
+            existingBooking.razorpayPaymentId === razorpayPaymentId;
+
+          if (samePaypalProof || sameRazorpayProof) {
+            return res.status(200).json({
+              bookingId: existingBooking._id,
+              idempotent: true,
+            });
           }
-        : {}),
-      ...(effectiveReferralId
-        ? { referral: { _type: "reference", _ref: effectiveReferralId } }
-        : {}),
-    });
+        }
+
+        return res.status(409).json({
+          error: "This slot is already booked.",
+        });
+      }
+      throw createError;
+    }
 
     try {
       await writeClient
@@ -832,18 +886,9 @@ export default async function handler(req, res) {
       console.error("Failed to set booking orderId:", err);
     }
 
-    if (!isUpgrade) {
+    if (!isUpgrade && slotHoldId) {
       try {
-        const holdIds = await writeClient.fetch(
-          `*[_type == "slotHold" && hostDate == $date && hostTime == $time]._id`,
-          { date: bookingDate, time: bookingTime }
-        );
-
-        if (Array.isArray(holdIds) && holdIds.length > 0) {
-          await Promise.all(
-            holdIds.map((id) => writeClient.delete(id).catch(() => {}))
-          );
-        }
+        await writeClient.delete(slotHoldId);
       } catch {}
     }
 
@@ -927,7 +972,7 @@ export default async function handler(req, res) {
         value:
           effectiveNetAmount < effectiveGrossAmount
             ? `$${formatMoney(effectiveNetAmount)} (was $${formatMoney(effectiveGrossAmount)})`
-            : `${packagePrice || "-"}`,
+            : resolvedPackagePrice,
       },
       { label: "Discord", value: discord || "-" },
       { label: "Email", value: email || "-" },
@@ -1022,7 +1067,8 @@ export default async function handler(req, res) {
   } catch (err) {
     const message = err?.message || "Server error";
     const code = err?.code;
+    const status = Number(err?.status) || 500;
     console.error("Booking API error:", { message, code });
-    return res.status(500).json({ error: message });
+    return res.status(status).json({ error: message });
   }
 }

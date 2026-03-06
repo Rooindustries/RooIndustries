@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
+import { useLowPerformanceMode } from "../lib/performanceMode";
 
 const overlayVariants = {
   hidden: { opacity: 0 },
@@ -53,6 +54,7 @@ export default function PackageDetailsModal({
   renderFeature,
 }) {
   const scrollLockRef = useRef(null);
+  const lowPerformanceMode = useLowPerformanceMode();
 
   useEffect(() => {
     if (!open) return;
@@ -139,7 +141,7 @@ export default function PackageDetailsModal({
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-lg flex items-center justify-center px-4"
+          className="glass-overlay low-perf-overlay fixed inset-0 z-[100] flex items-center justify-center px-4"
           variants={overlayVariants}
           initial="hidden"
           animate="visible"
@@ -147,8 +149,24 @@ export default function PackageDetailsModal({
           onClick={handleClose}
         >
           <motion.div
-            variants={modalContainerVariants}
-            className="relative w-full max-w-md bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 border border-sky-400/60 rounded-2xl shadow-[0_0_35px_rgba(56,189,248,0.4)] p-6 text-center transition-all duration-500 ease-in-out hover:shadow-[0_0_42px_rgba(56,189,248,0.5)]"
+            variants={
+              lowPerformanceMode
+                ? {
+                    hidden: { opacity: 0, y: 6 },
+                    visible: {
+                      opacity: 1,
+                      y: 0,
+                      transition: { duration: 0.16, ease: "easeOut" },
+                    },
+                    exit: {
+                      opacity: 0,
+                      y: 6,
+                      transition: { duration: 0.12, ease: "easeIn" },
+                    },
+                  }
+                : modalContainerVariants
+            }
+            className="low-perf-surface glass-premium glass-card-surface relative w-full max-w-md rounded-2xl border border-sky-400/60 p-6 text-center transition-all duration-500 ease-in-out hover:shadow-[0_0_42px_rgba(56,189,248,0.5)]"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"

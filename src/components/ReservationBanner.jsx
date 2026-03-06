@@ -335,20 +335,15 @@ export default function ReservationBanner() {
       className={`pointer-events-none fixed inset-x-0 z-[9999] flex ${alignmentClass} ${containerSpacingClass}`}
     >
       <div
-        className={`
+            className={`
               pointer-events-auto relative overflow-hidden 
               ${bannerWidthClass}
               rounded-2xl 
-              border border-white/10 
-              bg-slate-900/70 
-              shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] 
+              glass-premium glass-scroll-lite
               ${paddingClass} 
               inline-flex ${innerFlexDirectionClass} lg:items-center ${gapClass}
+              reservation-banner-surface
             `}
-            style={{ 
-              backdropFilter: "blur(40px)", 
-              WebkitBackdropFilter: "blur(40px)" 
-            }}
       >
         {/* Text Block */}
         <div className={`min-w-0 z-10 ${textAlignmentClass}`}>
