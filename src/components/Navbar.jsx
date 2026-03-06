@@ -1,8 +1,23 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { FaDiscord } from "react-icons/fa";
 import BackButton from "./BackButton";
 import DiscordGuideBanner from "./DiscordGuideBanner";
+import {
+  SECTION_HASHES,
+  buildHomeSectionHref,
+  clearPendingSectionTarget,
+  clearRouteTransitionIntent,
+  consumePendingSectionTarget,
+  isHomeSectionHash,
+  normalizeSectionHash,
+  readPendingSectionTarget,
+  writeRouteTransitionIntent,
+  writePendingSectionTarget,
+} from "../lib/sectionNavigation";
+import { alignToHashTarget, getCssHeaderOffsetPx } from "../lib/scrollCoordinator";
+import { useScrollRuntime } from "../lib/scrollRuntime";
+import { HOME_SECTION_PREFETCH_BY_HASH, prefetchHomeSectionData, readHomeSectionData } from "../lib/homeSectionData";
 
 const canPlayWebm = () => {
   if (typeof document === "undefined") return false;
@@ -15,30 +30,38 @@ const canPlayWebm = () => {
   return canPlay === "probably" || canPlay === "maybe";
 };
 
-export default function Navbar() {
+export default function Navbar({ routeShell = "browser" }) {
   const location = useLocation();
-  const [scrolled, setScrolled] = useState(false);
-  const [bannerHidden, setBannerHidden] = useState(false);
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [proofOpen, setProofOpen] = useState(false);
+  const [activeHomeHash, setActiveHomeHash] = useState("");
   // Keep initial server/client markup identical, then upgrade to animated mode on mount.
   const [smallLogoMode, setSmallLogoMode] = useState("static");
   const proofDropdownRef = useRef(null);
   const headerRef = useRef(null);
+  const navRowRef = useRef(null);
+  const activeScrollCleanupRef = useRef(null);
+  const pendingSectionNavigationTimeoutRef = useRef(null);
+  const sectionTransitionInFlightRef = useRef(false);
+  const { scrollY } = useScrollRuntime();
+
+  const scrolled = scrollY > 12;
+  const bannerHidden = scrollY > 8;
 
   const isActive = (path) => location.pathname === path;
 
-  const benefitsHashes = ["#services"];
-  const plansHashes = ["#packages"];
-  const faqHashes = ["#faq", "#upgrade-path", "#trust"];
+  const benefitsHashes = [SECTION_HASHES.benefits];
+  const plansHashes = [SECTION_HASHES.plans];
+  const faqHashes = [SECTION_HASHES.faq, "#upgrade-path", "#trust"];
   const isBenefitsActive =
-    location.pathname === "/" && benefitsHashes.includes(location.hash || "");
+    location.pathname === "/" && benefitsHashes.includes(activeHomeHash);
   const isPlansActive =
     location.pathname === "/packages" ||
-    (location.pathname === "/" && plansHashes.includes(location.hash || ""));
+    (location.pathname === "/" && plansHashes.includes(activeHomeHash));
   const isFaqActive =
     location.pathname === "/faq" ||
-    (location.pathname === "/" && faqHashes.includes(location.hash || ""));
+    (location.pathname === "/" && faqHashes.includes(activeHomeHash));
   const isProofActive = isActive("/benchmarks") || isActive("/reviews");
   const isTeamActive = isActive("/meet-the-team");
 
@@ -46,12 +69,149 @@ export default function Navbar() {
     setSmallLogoMode("static");
   };
 
+  const getHeaderOffsetPx = useCallback(() => getCssHeaderOffsetPx(110), []);
+
+  const runHashAlignment = useCallback(
+    (hash, behavior = "auto", options = {}) => {
+      if (activeScrollCleanupRef.current) {
+        activeScrollCleanupRef.current();
+      }
+      activeScrollCleanupRef.current = alignToHashTarget({
+        hash,
+        behavior,
+        getOffsetPx: getHeaderOffsetPx,
+        stableFramesRequired: 8,
+        preAlignStableFramesRequired:
+          options.preAlignStableFramesRequired || 8,
+        maxWaitMs: 4200,
+        minRuntimeMs: options.minRuntimeMs || 0,
+        observeMutations: options.observeMutations !== false,
+      });
+    },
+    [getHeaderOffsetPx]
+  );
+
+  const cancelSectionTransition = useCallback(() => {
+    if (pendingSectionNavigationTimeoutRef.current) {
+      clearTimeout(pendingSectionNavigationTimeoutRef.current);
+      pendingSectionNavigationTimeoutRef.current = null;
+    }
+    sectionTransitionInFlightRef.current = false;
+    clearPendingSectionTarget();
+    clearRouteTransitionIntent();
+    if (typeof document !== "undefined") {
+      document.documentElement.classList.remove("route-transition-out");
+    }
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("roo:cancel-route-transition"));
+    }
+    if (activeScrollCleanupRef.current) {
+      activeScrollCleanupRef.current();
+      activeScrollCleanupRef.current = null;
+    }
+  }, []);
+
+  const handleSectionLinkClick = useCallback(
+    async (event, hash) => {
+      setOpen(false);
+      setProofOpen(false);
+      if (typeof window === "undefined") return;
+
+      const normalizedHash = normalizeSectionHash(hash);
+      if (!normalizedHash) return;
+      const onHomePath = location.pathname === "/";
+      const browserPath = window.location.pathname || "/";
+
+      if (!onHomePath) {
+        if (event?.preventDefault) {
+          event.preventDefault();
+        }
+
+        writePendingSectionTarget(normalizedHash);
+        writeRouteTransitionIntent({
+          kind: "section",
+          hash: normalizedHash,
+          from: location.pathname,
+        });
+        document.documentElement.classList.add("route-transition-out");
+
+        const requiredKeys = HOME_SECTION_PREFETCH_BY_HASH[normalizedHash] || [];
+        const missingKeys = requiredKeys.filter((key) => readHomeSectionData(key) === null);
+
+        if (missingKeys.length > 0) {
+          prefetchHomeSectionData(missingKeys).catch(() => {});
+        }
+
+        if (sectionTransitionInFlightRef.current) {
+          return;
+        }
+
+        sectionTransitionInFlightRef.current = true;
+        if (pendingSectionNavigationTimeoutRef.current) {
+          clearTimeout(pendingSectionNavigationTimeoutRef.current);
+        }
+        pendingSectionNavigationTimeoutRef.current = window.setTimeout(() => {
+          pendingSectionNavigationTimeoutRef.current = null;
+          const nextHref = buildHomeSectionHref(normalizedHash);
+          if (routeShell === "memory") {
+            if (window.history?.pushState) {
+              window.history.pushState(window.history.state, "", nextHref);
+            } else {
+              window.location.hash = normalizedHash.slice(1);
+            }
+            navigate("/");
+            return;
+          }
+          if (browserPath !== location.pathname) {
+            window.location.assign(nextHref);
+            return;
+          }
+          navigate(nextHref);
+        }, 20);
+        return;
+      }
+
+      if (event?.preventDefault) {
+        event.preventDefault();
+      }
+
+      // Keep browser URL hash in sync even with MemoryRouter.
+      const nextUrl = `${window.location.pathname}${window.location.search}${normalizedHash}`;
+      if (window.location.hash !== normalizedHash) {
+        if (window.history?.replaceState) {
+          window.history.replaceState(window.history.state, "", nextUrl);
+        } else {
+          window.location.hash = normalizedHash.slice(1);
+        }
+      }
+
+      // Force scroll even when clicking the same hash repeatedly.
+      runHashAlignment(normalizedHash, "auto", {
+        minRuntimeMs: 900,
+      });
+    },
+    [location.pathname, navigate, routeShell, runHashAlignment]
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const syncHash = () => {
+      const nextHash = normalizeSectionHash(
+        window.location.hash || location.hash || ""
+      );
+      setActiveHomeHash(nextHash);
+    };
+    syncHash();
+    window.addEventListener("hashchange", syncHash);
+    return () => window.removeEventListener("hashchange", syncHash);
+  }, [location.hash, location.pathname]);
+
   const updateHeaderOffset = useCallback(() => {
-    if (typeof document === "undefined" || !headerRef.current) return;
-    const height = headerRef.current.offsetHeight;
+    if (typeof document === "undefined") return;
+    const navHeight = navRowRef.current?.offsetHeight || 96;
     document.documentElement.style.setProperty(
-      "--header-offset",
-      `${height}px`
+      "--section-nav-offset",
+      `${navHeight}px`
     );
   }, []);
 
@@ -93,21 +253,6 @@ export default function Navbar() {
   }, []);
 
   useEffect(() => {
-    const handleScroll = () => {
-      const scrollY = window.scrollY || 0;
-      setScrolled(scrollY > 12);
-      setBannerHidden(scrollY > 8);
-    };
-
-    handleScroll();
-    window.addEventListener("scroll", handleScroll, { passive: true });
-
-    return () => {
-      window.removeEventListener("scroll", handleScroll);
-    };
-  }, []);
-
-  useEffect(() => {
     updateHeaderOffset();
     if (typeof ResizeObserver === "undefined" || !headerRef.current) {
       const handleResize = () => updateHeaderOffset();
@@ -122,15 +267,19 @@ export default function Navbar() {
   }, [updateHeaderOffset]);
 
   useEffect(() => {
-    updateHeaderOffset();
-    const id = setTimeout(updateHeaderOffset, 320);
-    return () => clearTimeout(id);
-  }, [bannerHidden, updateHeaderOffset]);
-
-  useEffect(() => {
     setOpen(false);
     setProofOpen(false);
   }, [location.pathname, location.hash]);
+
+  useEffect(() => {
+    if (location.pathname === "/") {
+      sectionTransitionInFlightRef.current = false;
+      if (pendingSectionNavigationTimeoutRef.current) {
+        clearTimeout(pendingSectionNavigationTimeoutRef.current);
+        pendingSectionNavigationTimeoutRef.current = null;
+      }
+    }
+  }, [location.pathname]);
 
   // Close dropdown when clicking outside (desktop only)
   useEffect(() => {
@@ -154,43 +303,62 @@ export default function Navbar() {
   }, [proofOpen]);
 
   useEffect(() => {
-    const { hash } = location;
-    if (!hash) return;
+    if (location.pathname !== "/") return;
 
-    let retry;
-    let attempts = 0;
+    const urlHash = normalizeSectionHash(activeHomeHash);
+    const pendingHash = readPendingSectionTarget();
+    const targetHash = isHomeSectionHash(urlHash)
+      ? urlHash
+      : isHomeSectionHash(pendingHash)
+      ? consumePendingSectionTarget()
+      : "";
 
-    const scrollToHashTarget = () => {
-      const targetId = hash.replace("#", "");
-      const el = document.getElementById(targetId);
-      if (el) {
-        const elementTop = el.getBoundingClientRect().top + window.scrollY;
-        const targetY = Math.max(0, elementTop - 100);
-        window.scrollTo({ top: targetY, behavior: "smooth" });
-        return;
+    if (!isHomeSectionHash(targetHash)) return;
+
+    const fromPending = Boolean(pendingHash && pendingHash === targetHash);
+    if (fromPending && pendingHash === targetHash) {
+      consumePendingSectionTarget();
+    }
+
+    if (typeof window !== "undefined") {
+      const nextUrl = `${window.location.pathname}${window.location.search}${targetHash}`;
+      if (window.location.hash !== targetHash && window.history?.replaceState) {
+        window.history.replaceState(window.history.state, "", nextUrl);
       }
-      if (attempts < 8) {
-        attempts += 1;
-        retry = setTimeout(scrollToHashTarget, 100);
+    }
+
+    if (targetHash !== activeHomeHash) {
+      setActiveHomeHash(targetHash);
+    }
+
+    runHashAlignment(targetHash, "auto", {
+      minRuntimeMs: fromPending ? 60 : 420,
+      preAlignStableFramesRequired: fromPending ? 1 : 5,
+    });
+
+    return () => {
+      if (activeScrollCleanupRef.current) {
+        activeScrollCleanupRef.current();
+        activeScrollCleanupRef.current = null;
       }
     };
+  }, [activeHomeHash, location.pathname, runHashAlignment]);
 
-    scrollToHashTarget();
-    return () => retry && clearTimeout(retry);
-  }, [location]);
+  useEffect(() => {
+    return () => {
+      cancelSectionTransition();
+    };
+  }, [cancelSectionTransition]);
 
-  const linkBase =
-    "px-3 sm:px-5 py-2 rounded-full text-base font-medium transition border border-white/10 hover:border-cyan-300/30";
+  const focusRing =
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#061226]";
+  const linkBase = `px-3 sm:px-5 py-2 rounded-full text-base font-medium transition border border-white/10 hover:border-cyan-300/30 ${focusRing}`;
   const linkIdle = "text-white/85 hover:text-cyan-200";
   const linkActive = "bg-cyan-400 text-black border-cyan-400";
-  const dropdownItemBase =
-    "block w-full text-left px-4 py-3 text-sm transition first:rounded-t-xl last:rounded-b-xl";
-  const dropdownItemIdle = "text-white/85 hover:text-cyan-200 hover:bg-white/5";
-  const dropdownItemActive = "bg-cyan-400 text-black";
-  const mobileLinkBase = "px-5 py-4 text-base transition";
+  const mobileLinkBase = `px-5 py-4 text-base transition ${focusRing}`;
   const mobileLinkIdle = "text-white/85 hover:text-cyan-200";
   const mobileLinkActive = "bg-cyan-400 text-black";
-  const mobileSubLinkBase = "px-9 py-3 text-sm transition";
+  const mobileSubLinkBase = `px-9 py-3 text-sm transition ${focusRing}`;
   const mobileSubLinkIdle = "text-white/85 hover:text-cyan-200";
   const mobileSubLinkActive = "bg-cyan-400 text-black";
 
@@ -201,12 +369,12 @@ export default function Navbar() {
   return (
     <header
       ref={headerRef}
-      className={`fixed top-0 left-0 right-0 z-50 border-b backdrop-blur-md transition-all duration-300 ${
+      className={`site-nav site-navbar-glass glass-premium glass-scroll-lite fixed top-0 left-0 right-0 z-50 overflow-visible border-b transition-all duration-300 ${
         scrolled ? "border-cyan-300/10" : "border-white/5"
       } ${
         scrolled
-          ? "bg-gradient-to-b from-[#07162d]/92 to-[#061226]/75 shadow-[0_10px_30px_rgba(0,0,0,0.25)]"
-          : "bg-gradient-to-b from-[#07162d]/80 to-[#061226]/60"
+          ? "shadow-[0_10px_30px_rgba(0,0,0,0.25)]"
+          : ""
       }`}
     >
       {/* subtle grid overlay */}
@@ -226,15 +394,15 @@ export default function Navbar() {
         <DiscordGuideBanner hidden={bannerHidden} />
       </div>
 
-      <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6">
-        <div className="flex items-center h-20 sm:h-24">
+      <div className="relative z-10 mx-auto max-w-7xl overflow-visible px-4 sm:px-6">
+        <div ref={navRowRef} className="flex h-20 items-center overflow-visible sm:h-24">
           {/* Left: Logo / Back */}
           <div className="flex items-center gap-4">
             {location.pathname !== "/" ? (
               <BackButton hidden={false} inline={true} />
             ) : null}
 
-            <Link to="/" className="flex items-center gap-3 select-none">
+            <Link to="/" onClick={cancelSectionTransition} className="flex items-center gap-3 select-none">
               <div className="relative h-14 w-14 grid place-items-center">
                 {smallLogoMode === "webm" ? (
                   <>
@@ -286,22 +454,32 @@ export default function Navbar() {
           {/* Right: Links + CTA + Mobile */}
           <div className="ml-auto flex items-center gap-3">
             <nav className="hidden md:flex items-center gap-2">
-              <Link
-                to="/#services"
+              <a
+                href={buildHomeSectionHref(SECTION_HASHES.benefits)}
+                data-nav-surface="desktop"
+                data-nav-target="benefits"
+                onClick={(event) =>
+                  handleSectionLinkClick(event, SECTION_HASHES.benefits)
+                }
                 className={`${linkBase} ${
                   isBenefitsActive ? linkActive : linkIdle
                 }`}
               >
                 Benefits
-              </Link>
-              <Link
-                to="/#packages"
+              </a>
+              <a
+                href={buildHomeSectionHref(SECTION_HASHES.plans)}
+                data-nav-surface="desktop"
+                data-nav-target="plans"
+                onClick={(event) =>
+                  handleSectionLinkClick(event, SECTION_HASHES.plans)
+                }
                 className={`${linkBase} ${
                   isPlansActive ? linkActive : linkIdle
                 }`}
               >
                 Plans
-              </Link>
+              </a>
               <div className="relative" ref={proofDropdownRef}>
                 <button
                   type="button"
@@ -328,45 +506,53 @@ export default function Navbar() {
                     />
                   </svg>
                 </button>
-                <div
-                  className={`absolute right-0 mt-2 w-44 rounded-2xl border border-white/10 bg-[#061226]/95 backdrop-blur-md shadow-[0_12px_30px_rgba(0,0,0,0.35)] overflow-hidden transition-all duration-200 ${
-                    proofOpen
-                      ? "opacity-100 visible translate-y-0"
-                      : "opacity-0 invisible translate-y-1 pointer-events-none"
-                  }`}
-                >
-                  <Link
-                    to="/benchmarks"
-                    onClick={() => setProofOpen(false)}
-                    className={`block px-4 py-3 text-sm transition ${
-                      isActive("/benchmarks")
-                        ? "bg-cyan-400 text-black"
-                        : "text-white/85 hover:text-cyan-200 hover:bg-white/5"
-                    }`}
-                  >
-                    Benchmarks
-                  </Link>
-                  <Link
-                    to="/reviews"
-                    onClick={() => setProofOpen(false)}
-                    className={`block px-4 py-3 text-sm transition ${
-                      isActive("/reviews")
-                        ? "bg-cyan-400 text-black"
-                        : "text-white/85 hover:text-cyan-200 hover:bg-white/5"
-                    }`}
-                  >
-                    Reviews
-                  </Link>
-                </div>
+                {proofOpen ? (
+                  <div className="glass-premium glass-menu-surface absolute right-0 top-full z-[80] mt-2 w-44 overflow-hidden rounded-2xl transition-all duration-200">
+                    <Link
+                      to="/benchmarks"
+                      onClick={() => {
+                        cancelSectionTransition();
+                        setProofOpen(false);
+                      }}
+                      className={`block px-4 py-3 text-sm transition ${
+                        isActive("/benchmarks")
+                          ? "bg-cyan-400 text-black"
+                          : "text-white/85 hover:text-cyan-200 hover:bg-white/5"
+                      }`}
+                    >
+                      Benchmarks
+                    </Link>
+                    <Link
+                      to="/reviews"
+                      onClick={() => {
+                        cancelSectionTransition();
+                        setProofOpen(false);
+                      }}
+                      className={`block px-4 py-3 text-sm transition ${
+                        isActive("/reviews")
+                          ? "bg-cyan-400 text-black"
+                          : "text-white/85 hover:text-cyan-200 hover:bg-white/5"
+                      }`}
+                    >
+                      Reviews
+                    </Link>
+                  </div>
+                ) : null}
               </div>
-              <Link
-                to="/#faq"
+              <a
+                href={buildHomeSectionHref(SECTION_HASHES.faq)}
+                data-nav-surface="desktop"
+                data-nav-target="faq"
+                onClick={(event) =>
+                  handleSectionLinkClick(event, SECTION_HASHES.faq)
+                }
                 className={`${linkBase} ${isFaqActive ? linkActive : linkIdle}`}
               >
                 FAQ
-              </Link>
+              </a>
               <Link
                 to="/meet-the-team"
+                onClick={cancelSectionTransition}
                 className={`${linkBase} ${isTeamActive ? linkActive : linkIdle}`}
               >
                 Meet the Team
@@ -430,24 +616,34 @@ export default function Navbar() {
           }`}
           aria-hidden={!open}
         >
-          <div className="mt-2 border border-white/10 bg-[#061226]/55 backdrop-blur-md transition-all duration-300">
+          <div className="glass-premium glass-menu-surface mt-2 transition-all duration-300">
             <div className="flex flex-col">
-              <Link
-                to="/#services"
+              <a
+                href={buildHomeSectionHref(SECTION_HASHES.benefits)}
+                data-nav-surface="mobile"
+                data-nav-target="benefits"
+                onClick={(event) =>
+                  handleSectionLinkClick(event, SECTION_HASHES.benefits)
+                }
                 className={`${mobileLinkBase} ${
                   isBenefitsActive ? mobileLinkActive : mobileLinkIdle
                 }`}
               >
                 Benefits
-              </Link>
-              <Link
-                to="/#packages"
+              </a>
+              <a
+                href={buildHomeSectionHref(SECTION_HASHES.plans)}
+                data-nav-surface="mobile"
+                data-nav-target="plans"
+                onClick={(event) =>
+                  handleSectionLinkClick(event, SECTION_HASHES.plans)
+                }
                 className={`${mobileLinkBase} ${
                   isPlansActive ? mobileLinkActive : mobileLinkIdle
                 }`}
               >
                 Plans
-              </Link>
+              </a>
               <button
                 type="button"
                 onClick={() => setProofOpen((v) => !v)}
@@ -484,6 +680,7 @@ export default function Navbar() {
                 <Link
                   to="/benchmarks"
                   onClick={() => {
+                    cancelSectionTransition();
                     setProofOpen(false);
                     setOpen(false);
                   }}
@@ -498,6 +695,7 @@ export default function Navbar() {
                 <Link
                   to="/reviews"
                   onClick={() => {
+                    cancelSectionTransition();
                     setProofOpen(false);
                     setOpen(false);
                   }}
@@ -510,16 +708,22 @@ export default function Navbar() {
                   Reviews
                 </Link>
               </div>
-              <Link
-                to="/#faq"
+              <a
+                href={buildHomeSectionHref(SECTION_HASHES.faq)}
+                data-nav-surface="mobile"
+                data-nav-target="faq"
+                onClick={(event) =>
+                  handleSectionLinkClick(event, SECTION_HASHES.faq)
+                }
                 className={`${mobileLinkBase} ${
                   isFaqActive ? mobileLinkActive : mobileLinkIdle
                 }`}
               >
                 FAQ
-              </Link>
+              </a>
               <Link
                 to="/meet-the-team"
+                onClick={cancelSectionTransition}
                 className={`${mobileLinkBase} ${
                   isTeamActive ? mobileLinkActive : mobileLinkIdle
                 }`}

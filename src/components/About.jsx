@@ -1,27 +1,35 @@
 import React, { useEffect, useState } from "react";
-import { client } from "../sanityClient";
+import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS, readHomeSectionData } from "../lib/homeSectionData";
 
-export default function About() {
-  const [aboutData, setAboutData] = useState(null);
+export default function About({ initialData = null }) {
+  const [aboutData, setAboutData] = useState(
+    () => initialData ?? readHomeSectionData(HOME_SECTION_DATA_KEYS.about)
+  );
 
   useEffect(() => {
-    client
-      .fetch(
-        `*[_type == "about"][0]{
-          recordTitle,
-          recordBadgeText,
-          recordSubtitle,
-          recordButtonText,
-          recordNote,
-          recordDetails,
-          recordLink
-        }`
-      )
+    if (initialData !== null) {
+      setAboutData(initialData);
+    }
+  }, [initialData]);
+
+  useEffect(() => {
+    if (aboutData !== null) return;
+    fetchHomeSectionData(HOME_SECTION_DATA_KEYS.about)
       .then(setAboutData)
       .catch(console.error);
-  }, []);
+  }, [aboutData]);
 
-  if (!aboutData) return null;
+  if (!aboutData) {
+    return (
+      <section
+        id="about"
+        className="mx-auto max-w-6xl pt-4 sm:pt-6 pb-16 px-4 sm:px-6 text-center"
+        aria-hidden="true"
+      >
+        <div className="mt-6 min-h-[360px] rounded-2xl border border-sky-700/25 bg-gradient-to-br from-[#0b1d33]/70 via-[#0a1324]/70 to-[#06101f]/70" />
+      </section>
+    );
+  }
 
   const recordBadgeText = aboutData.recordBadgeText || "Proof";
   const recordTitle = aboutData.recordTitle || "3DMark Hall of Fame";

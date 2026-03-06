@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Suspense, lazy } from "react";
+import React, { useState, useEffect, Suspense, lazy, useRef } from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -13,18 +13,24 @@ import { SpeedInsights } from "@vercel/speed-insights/react";
 import ReservationBanner from "./components/ReservationBanner";
 import TawkTo from "./components/TawkTo";
 import PerformanceModeNotice from "./components/PerformanceModeNotice";
-import Hero from "./components/Hero";
+import PerfDebugOverlay from "./components/PerfDebugOverlay";
+import Home from "./legacyPages/Home";
+import {
+  consumeRouteTransitionIntent,
+  isHomeSectionHash,
+  normalizeSectionHash,
+} from "./lib/sectionNavigation";
+import { prefetchHomeSectionData } from "./lib/homeSectionData";
 
-const Home = lazy(() => import("./legacyPages/Home"));
 import Reviews from "./legacyPages/Reviews";
 import Tools from "./legacyPages/Tools";
 const Benchmarks = lazy(() => import("./legacyPages/Benchmarks"));
 const Terms = lazy(() => import("./legacyPages/Terms"));
 const Privacy = lazy(() => import("./legacyPages/PrivacyPolicy"));
 const Packages = lazy(() => import("./legacyPages/Packages"));
-const Faq = lazy(() => import("./legacyPages/Faq"));
 const Contact = lazy(() => import("./legacyPages/Contact"));
 const Book = lazy(() => import("./legacyPages/Book"));
+const FaqPage = lazy(() => import("./legacyPages/Faq"));
 const Payment = lazy(() => import("./legacyPages/Payment"));
 const PaymentSuccess = lazy(() => import("./legacyPages/PaymentSuccess"));
 const Thankyou = lazy(() => import("./legacyPages/Thankyou"));
@@ -46,15 +52,18 @@ const DeferredTelemetry = () => {
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
+    const host = String(window.location.hostname || "").toLowerCase();
+    const isLocalHost = host === "localhost" || host === "127.0.0.1";
+    if (isLocalHost) return undefined;
 
     if ("requestIdleCallback" in window) {
       const idleId = window.requestIdleCallback(() => setEnabled(true), {
-        timeout: 2500,
+        timeout: 6000,
       });
       return () => window.cancelIdleCallback?.(idleId);
     }
 
-    const timeoutId = window.setTimeout(() => setEnabled(true), 1500);
+    const timeoutId = window.setTimeout(() => setEnabled(true), 5000);
     return () => window.clearTimeout(timeoutId);
   }, []);
 
@@ -68,15 +77,82 @@ const DeferredTelemetry = () => {
   );
 };
 
+const DeferredTawk = ({ disabledRoutes }) => {
+  const [enabled, setEnabled] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    let timeoutId;
+    let activated = false;
+
+    const enable = () => {
+      if (activated) return;
+      activated = true;
+      setEnabled(true);
+      events.forEach((eventName) =>
+        window.removeEventListener(eventName, enable, true)
+      );
+    };
+
+    const events = ["pointerdown", "keydown", "touchstart", "scroll"];
+    events.forEach((eventName) =>
+      window.addEventListener(eventName, enable, {
+        once: true,
+        passive: true,
+        capture: true,
+      })
+    );
+
+    timeoutId = window.setTimeout(enable, 12000);
+
+    return () => {
+      events.forEach((eventName) =>
+        window.removeEventListener(eventName, enable, true)
+      );
+      if (typeof timeoutId === "number") {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, []);
+
+  if (!enabled) return null;
+  return <TawkTo disabledRoutes={disabledRoutes} />;
+};
+
+const sanitizeBrowserSearch = (pathname, search) => {
+  const params = new URLSearchParams(search || "");
+  if (!params.toString()) return "";
+
+  // Keep useful debugging/attribution params, drop junk shell state that can
+  // leak into the homepage URL from browser/automation handoff flows.
+  const allowedKeys = new Set([
+    "perfdebug",
+    "gclid",
+    "fbclid",
+    "msclkid",
+    "ttclid",
+    "ref",
+  ]);
+
+  const nextParams = new URLSearchParams();
+  params.forEach((value, key) => {
+    const normalizedKey = String(key || "").toLowerCase();
+    const keep =
+      allowedKeys.has(normalizedKey) ||
+      normalizedKey.startsWith("utm_") ||
+      (pathname.startsWith("/booking") && normalizedKey === "xoc");
+
+    if (keep) {
+      nextParams.append(key, value);
+    }
+  });
+
+  const nextQuery = nextParams.toString();
+  return nextQuery ? `?${nextQuery}` : "";
+};
+
 const RouteFallback = () => (
   <div className="pt-16 text-center text-slate-300 text-sm">Loading...</div>
-);
-
-const HomeRouteFallback = () => (
-  <>
-    <Hero />
-    <div className="min-h-[900px]" aria-hidden="true" />
-  </>
 );
 
 const withRouteSuspense = (node, fallback = <RouteFallback />) => (
@@ -90,7 +166,12 @@ function RedirectToDiscord() {
   return null;
 }
 
-function AnimatedRoutes({ setIsModalOpen, routesLocation, routeKey }) {
+function AnimatedRoutes({
+  setIsModalOpen,
+  routesLocation,
+  routeKey,
+  initialHomeData,
+}) {
   const baseLocation = useLocation();
   const location = routesLocation || baseLocation;
   const motionKey = routeKey || `${location.pathname}${location.search || ""}`;
@@ -98,10 +179,7 @@ function AnimatedRoutes({ setIsModalOpen, routesLocation, routeKey }) {
   return (
     <div key={motionKey} className="w-full flex flex-col flex-1">
         <Routes location={location}>
-          <Route
-            path="/"
-            element={withRouteSuspense(<Home />, <HomeRouteFallback />)}
-          />
+          <Route path="/" element={<Home initialData={initialHomeData} />} />
           <Route path="/packages" element={withRouteSuspense(<Packages />)} />
           <Route
             path="/benchmarks"
@@ -117,7 +195,12 @@ function AnimatedRoutes({ setIsModalOpen, routesLocation, routeKey }) {
           />
           <Route path="/booking" element={withRouteSuspense(<Book />)} />
           <Route path="/contact" element={withRouteSuspense(<Contact />)} />
-          <Route path="/faq" element={withRouteSuspense(<Faq />)} />
+          <Route
+            path="/faq"
+            element={withRouteSuspense(
+              <FaqPage initialData={initialHomeData} />
+            )}
+          />
           <Route path="/discord" element={<RedirectToDiscord />} />
           <Route path="/payment" element={withRouteSuspense(<Payment />)} />
           <Route
@@ -174,11 +257,13 @@ function AnimatedRoutes({ setIsModalOpen, routesLocation, routeKey }) {
   );
 }
 
-export function AppContent() {
-  const [isModalOpen, setIsModalOpen] = useState(false);
+export function AppContent({ initialHomeData = null, routeShell = "browser" }) {
+  const [, setIsModalOpen] = useState(false);
+  const [showRouteTransition, setShowRouteTransition] = useState(false);
 
   const location = useLocation();
   const navigate = useNavigate();
+  const lastRouteKeyRef = useRef("");
   const pathName = location.pathname || "";
   const FLOW_BACKGROUND_KEY = "flow_background_location";
 
@@ -217,6 +302,160 @@ export function AppContent() {
     isPaymentRoute ||
     isPaymentSuccessRoute ||
     isThankYouRoute;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const intent = consumeRouteTransitionIntent();
+    if (!intent) {
+      document.documentElement.classList.remove("route-transition-out");
+      return;
+    }
+    const ageMs = Date.now() - Number(intent.ts || 0);
+    if (ageMs > 5000) {
+      document.documentElement.classList.remove("route-transition-out");
+      return;
+    }
+
+    setShowRouteTransition(true);
+    const clearOutClassId = window.setTimeout(() => {
+      document.documentElement.classList.remove("route-transition-out");
+    }, 120);
+
+    const finishTransition = () => {
+      setShowRouteTransition(false);
+    };
+
+    const handleSettled = (event) => {
+      const settledHash = normalizeSectionHash(event?.detail?.hash || "");
+      const intentHash = normalizeSectionHash(intent.hash || "");
+      if (!intentHash || settledHash === intentHash) {
+        finishTransition();
+      }
+    };
+
+    window.addEventListener("roo:section-align-settled", handleSettled);
+
+    const hideOverlayId = window.setTimeout(() => {
+      finishTransition();
+    }, 1600);
+
+    return () => {
+      window.clearTimeout(clearOutClassId);
+      window.clearTimeout(hideOverlayId);
+      window.removeEventListener("roo:section-align-settled", handleSettled);
+    };
+  }, [location.pathname, location.hash]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const handleCancelTransition = () => {
+      setShowRouteTransition(false);
+      document.documentElement.classList.remove("route-transition-out");
+    };
+    window.addEventListener("roo:cancel-route-transition", handleCancelTransition);
+    return () => {
+      window.removeEventListener("roo:cancel-route-transition", handleCancelTransition);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    if (!showRouteTransition) {
+      document.documentElement.classList.remove("route-transition-lock");
+      document.body.classList.remove("route-transition-lock");
+      window.dispatchEvent(
+        new CustomEvent("roo:route-transition-visibility", {
+          detail: { active: false },
+        })
+      );
+      return;
+    }
+
+    document.documentElement.classList.add("route-transition-lock");
+    document.body.classList.add("route-transition-lock");
+    window.dispatchEvent(
+      new CustomEvent("roo:route-transition-visibility", {
+        detail: { active: true },
+      })
+    );
+
+    return () => {
+      document.documentElement.classList.remove("route-transition-lock");
+      document.body.classList.remove("route-transition-lock");
+      window.dispatchEvent(
+        new CustomEvent("roo:route-transition-visibility", {
+          detail: { active: false },
+        })
+      );
+    };
+  }, [showRouteTransition]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    let cancelled = false;
+    const runPrefetch = () => {
+      if (cancelled) return;
+      prefetchHomeSectionData().catch(() => {});
+    };
+
+    if ("requestIdleCallback" in window) {
+      const id = window.requestIdleCallback(runPrefetch, { timeout: 1200 });
+      return () => {
+        cancelled = true;
+        window.cancelIdleCallback?.(id);
+      };
+    }
+
+    const timeoutId = window.setTimeout(runPrefetch, 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const currentHash = normalizeSectionHash(window.location.hash || "");
+    const keepHash =
+      location.pathname === "/" && isHomeSectionHash(currentHash)
+        ? currentHash
+        : "";
+    const sanitizedSearch = sanitizeBrowserSearch(
+      location.pathname || "/",
+      location.search || ""
+    );
+    const nextUrl = `${location.pathname || "/"}${sanitizedSearch}${keepHash}`;
+    const currentUrl = `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`;
+
+    if (currentUrl !== nextUrl && window.history?.replaceState) {
+      window.history.replaceState(window.history.state, "", nextUrl);
+    }
+  }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const routeKey = `${location.pathname || "/"}${location.search || ""}`;
+    const previousRouteKey = lastRouteKeyRef.current;
+    lastRouteKeyRef.current = routeKey;
+
+    if (!previousRouteKey || previousRouteKey === routeKey) {
+      return;
+    }
+
+    const currentHash = normalizeSectionHash(window.location.hash || location.hash || "");
+    const hasHomeSectionIntent =
+      location.pathname === "/" && isHomeSectionHash(currentHash);
+    const isModalBackgroundNavigation = Boolean(location.state?.backgroundLocation);
+
+    if (isFlowRoute || isModalBackgroundNavigation || hasHomeSectionIntent) {
+      return;
+    }
+
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [isFlowRoute, location.hash, location.pathname, location.search, location.state]);
 
   useEffect(() => {
     const stateBackground = location.state?.backgroundLocation;
@@ -272,13 +511,23 @@ export function AppContent() {
         bg-[linear-gradient(to_top,#00b7c0_0%,#006185_30%,#001f5a_65%,#000040_100%)]
         bg-scroll md:bg-fixed"
       >
+        <div
+          className={`fixed inset-0 z-[90] pointer-events-none transition-opacity duration-300 ${
+            showRouteTransition ? "opacity-100" : "opacity-0"
+          }`}
+          aria-hidden="true"
+          style={{
+            background:
+              "linear-gradient(180deg, rgba(1,8,34,0.32), rgba(1,8,34,0.18) 35%, rgba(1,8,34,0.28) 100%)",
+          }}
+        />
         {/* Background layers */}
         <div
-          className="absolute inset-0 bg-[linear-gradient(45deg,rgba(255,255,255,0.05)_1px,transparent_1px)] 
+          className="app-bg-grid-layer absolute inset-0 bg-[linear-gradient(45deg,rgba(255,255,255,0.05)_1px,transparent_1px)] 
                       bg-[size:40px_40px] opacity-50"
         ></div>
         <div
-          className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(14,165,233,0.25),rgba(3,7,18,1) 80%)] 
+          className="app-bg-radial-layer absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(14,165,233,0.25),rgba(3,7,18,1) 80%)] 
                       "
         ></div>
 
@@ -287,13 +536,14 @@ export function AppContent() {
           className="relative z-10 flex flex-col flex-1"
           style={{ paddingTop: "var(--header-offset)" }}
         >
-          <Navbar />
+          <Navbar routeShell={routeShell} />
           <ReservationBanner />
 
           <AnimatedRoutes
             setIsModalOpen={setIsModalOpen}
             routesLocation={routesLocation}
             routeKey={routesKey}
+            initialHomeData={initialHomeData}
           />
         </main>
       </div>
@@ -315,6 +565,7 @@ export function AppContent() {
         </Suspense>
       )}
       <PerformanceModeNotice />
+      <PerfDebugOverlay />
     </>
   );
 }
@@ -326,8 +577,8 @@ function App() {
 
   return (
     <Router>
-      <TawkTo disabledRoutes={tawkDisabledRoutes} />
-      <AppContent />
+      <DeferredTawk disabledRoutes={tawkDisabledRoutes} />
+      <AppContent routeShell="browser" />
     </Router>
   );
 }

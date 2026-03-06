@@ -13,7 +13,7 @@ describe("hold token secret fallback", () => {
     delete process.env.SESSION_SECRET;
     process.env.JWT_SECRET = "jwt_fallback_secret_for_test";
 
-    const { issueHoldToken, verifyHoldToken } = require("../../api/holdToken");
+    const { issueHoldToken, verifyHoldToken } = require("../../src/server/booking/holdToken");
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
 
     const token = issueHoldToken({

@@ -1,34 +1,14 @@
-import React, { useState, useEffect, useRef } from "react";
+import React from "react";
 import { useNavigate } from "react-router-dom";
 import { FaArrowLeft } from "react-icons/fa";
+import { useScrollRuntime } from "../lib/scrollRuntime";
 
 export default function BackButton({ hidden, inline = false }) {
   const navigate = useNavigate();
-
-  const [isVisible, setIsVisible] = useState(true);
-  const lastScrollYRef = useRef(0);
-
-  useEffect(() => {
-    if (hidden || inline) {
-      setIsVisible(true);
-      return;
-    }
-
-    const handleScroll = () => {
-      const currentScrollY = window.scrollY;
-      if (currentScrollY > lastScrollYRef.current && currentScrollY > 50) {
-        setIsVisible(false);
-      } else {
-        setIsVisible(true);
-      }
-      lastScrollYRef.current = currentScrollY;
-    };
-
-    window.addEventListener("scroll", handleScroll);
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, [hidden, inline]);
+  const { scrollY, direction } = useScrollRuntime();
 
   if (hidden) return null;
+  const isVisible = inline || !(direction === "down" && scrollY > 50);
 
   return (
     <button
