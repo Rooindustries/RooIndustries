@@ -318,10 +318,11 @@ export const runLegacyApiHandler = async ({
   request,
   handler,
   query = {},
+  methodOverride = "",
 }) => {
   const url = new URL(request.url);
   const req = {
-    method: String(request.method || "GET").toUpperCase(),
+    method: String(methodOverride || request.method || "GET").toUpperCase(),
     url: request.url,
     query: {
       ...buildQueryObject(url.searchParams),
