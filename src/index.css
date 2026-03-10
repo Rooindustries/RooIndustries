@@ -660,20 +660,9 @@ html.low-performance-mode * {
   transition: none !important;
 }
 
-.site-navbar-glass {
-  isolation: isolate;
-  will-change: transform;
-}
-
-.site-nav {
-  position: fixed !important;
-}
-
-.reservation-banner-surface {
-  contain: paint;
-  isolation: isolate;
-  transform: translateZ(0);
-}
+/* Navbar/banner layer promotion moved to low-perf mode only —
+   global will-change + isolation creates a compositing layer that
+   clips the hero pill's upward box-shadow glow. */
 
 /* Keep the same look at rest, but reduce expensive compositing while actively scrolling.
    Excluded from low-perf mode where backdrop-filter is already permanently killed. */
