@@ -655,11 +655,18 @@ html.low-performance-mode main > *:not(:first-child) {
 /* ── Raster cost reduction for smooth scroll ─────────────────────────────
    Freeze animations/transitions to stop continuous repaints. Expensive
    blur filters are already eliminated by the display:none rule above.
-   Text drop-shadows (small radius, cheap) are intentionally preserved
-   for visual polish — they add <1ms raster per frame. */
+   Drop-shadows are preserved at rest for visual polish. */
 html.low-performance-mode * {
   animation: none !important;
   transition: none !important;
+}
+
+/* Kill ALL filters during active scroll — filters are the #1 CPU raster
+   cost in software compositing (drop-shadow, blur, etc). Beautiful at
+   rest, zero cost during scroll. 160ms debounce restores them. */
+html.low-performance-mode.is-scrolling * {
+  filter: none !important;
+  -webkit-filter: none !important;
 }
 
 /* Navbar/banner layer promotion moved to low-perf mode only —
