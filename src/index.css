@@ -604,11 +604,11 @@ html.low-performance-mode .blur-3xl {
   will-change: auto !important;
 }
 
-/* Reduce 40-64px gaussian blur to 12px on decorative blobs. */
+/* Blur blobs: hide entirely in low-perf (global filter:none catches the filter,
+   but also hide the element since a 40rem transparent blob still costs raster). */
 html.low-performance-mode .blur-2xl,
 html.low-performance-mode .blur-3xl {
-  filter: blur(12px) !important;
-  -webkit-filter: blur(12px) !important;
+  display: none !important;
 }
 
 /* Strip glass card multi-layer box-shadows. */
@@ -679,10 +679,48 @@ html.low-performance-mode * {
   -webkit-backdrop-filter: none !important;
 }
 
-/* Restore visibility for FAQ items that use inline blur(4px) to hide content.
-   Without the blur filter, closed FAQ answers need display:none fallback — but
-   the component already handles this via max-height:0 + overflow:hidden. No
-   additional CSS needed; filter:none just makes the text sharp instead of blurred. */
+/* ── RASTER COST REDUCTION ────────────────────────────────────────────────
+   11s of software rasterization per scroll. The remaining cost is gradients,
+   border-radius, semi-transparent overlays, and box-shadows. Flatten these
+   for low-perf mode to cut raster time. */
+
+/* Kill ALL box-shadows — they require gaussian rasterization in software. */
+html.low-performance-mode * {
+  box-shadow: none !important;
+}
+
+/* Flatten border-radius on large containers — rounded corners on big elements
+   are expensive because the browser must clip-rasterize the entire rect. Keep
+   small radii on buttons/badges (visual identity) but kill large radii. */
+html.low-performance-mode section,
+html.low-performance-mode .glass-premium,
+html.low-performance-mode .glass-lite,
+html.low-performance-mode .glass-card-surface,
+html.low-performance-mode .glass-dark {
+  border-radius: 0 !important;
+}
+
+/* Simplify semi-transparent overlays — replace rgba gradients with solid colors.
+   Compositing transparent layers in software is expensive. */
+html.low-performance-mode .glass-premium::before,
+html.low-performance-mode .glass-premium::after,
+html.low-performance-mode .glass-lite::before,
+html.low-performance-mode .glass-lite::after,
+html.low-performance-mode .glass-dark::before,
+html.low-performance-mode .glass-dark::after {
+  display: none !important;
+}
+
+/* Contain each major section to prevent cross-section paint invalidation. */
+html.low-performance-mode section {
+  contain: layout style paint;
+}
+
+/* Extend content-visibility to ALL below-fold sections, not just 4. */
+html.low-performance-mode main > *:not(:first-child) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 600px;
+}
 
 .site-navbar-glass {
   isolation: isolate;
