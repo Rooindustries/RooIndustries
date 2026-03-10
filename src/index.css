@@ -567,11 +567,11 @@ html.low-performance-mode body::before {
   content: none !important;
 }
 
-/* Override the app wrapper gradient — the actual gradient lives on
-   #app-shell (App.jsx), NOT on body or body::before. */
+/* Force fixed attachment on the app wrapper so the 4-stop gradient rasters
+   once (cached layer) instead of re-rasterizing every scroll frame.
+   Original design already uses md:bg-fixed; this ensures it on all sizes. */
 html.low-performance-mode #app-shell {
-  background: linear-gradient(180deg, #000030 0%, #001050 100%) !important;
-  background-attachment: scroll !important;
+  background-attachment: fixed !important;
 }
 
 /* Freeze animations on specific glow/sparkle elements. */
