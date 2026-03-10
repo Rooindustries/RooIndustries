@@ -507,7 +507,8 @@ export function AppContent({ initialHomeData = null, routeShell = "browser" }) {
       <DeferredTelemetry />
 
       <div
-        className="relative min-h-screen flex flex-col text-white overflow-hidden 
+        id="app-shell"
+        className="relative min-h-screen flex flex-col text-white overflow-hidden
         bg-[linear-gradient(to_top,#00b7c0_0%,#006185_30%,#001f5a_65%,#000040_100%)]
         bg-scroll md:bg-fixed"
       >

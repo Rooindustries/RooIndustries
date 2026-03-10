@@ -567,7 +567,9 @@ html.low-performance-mode body::before {
   content: none !important;
 }
 
-html.low-performance-mode body {
+/* Override the app wrapper gradient — the actual gradient lives on
+   #app-shell (App.jsx), NOT on body or body::before. */
+html.low-performance-mode #app-shell {
   background: linear-gradient(180deg, #000030 0%, #001050 100%) !important;
   background-attachment: scroll !important;
 }
