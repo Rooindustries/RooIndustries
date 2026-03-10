@@ -604,10 +604,14 @@ html.low-performance-mode .blur-3xl {
   will-change: auto !important;
 }
 
-/* Blur blobs: hide entirely in low-perf (global filter:none catches the filter,
-   but also hide the element since a 40rem transparent blob still costs raster). */
+/* Blur blobs: hide entirely in low-perf. Global filter:none removes the blur
+   but leaves hard-edged colored shapes visible — looks ugly. Hide ALL blur
+   elements: named Tailwind classes AND arbitrary blur-[Npx] values. */
 html.low-performance-mode .blur-2xl,
-html.low-performance-mode .blur-3xl {
+html.low-performance-mode .blur-3xl,
+html.low-performance-mode .blur-xl,
+html.low-performance-mode .blur-lg,
+html.low-performance-mode [class*="blur-["] {
   display: none !important;
 }
 
@@ -639,9 +643,12 @@ html.low-performance-mode .reservation-banner-surface {
   contain: none !important;
 }
 
-/* Flatten all opacity/transform transitions during scroll. */
-html.low-performance-mode.is-scrolling * {
-  transition-duration: 0s !important;
+/* Kill ALL animations and transitions in low-perf mode. With filters/shadows
+   already removed, animations serve no visual purpose and waste CPU cycles
+   on keyframe interpolation + style recalc every frame. */
+html.low-performance-mode * {
+  animation: none !important;
+  transition: none !important;
 }
 
 /* Kill backdrop-filter on fps-boosts-button (missed by glass-premium catch). */
