@@ -557,12 +557,12 @@ html.low-performance-mode .low-perf-glow {
 }
 
 /* ── Software-compositing fast path (GPU OFF) ───────────────────────────
-   Goal: 120 FPS scroll with zero GPU acceleration. Kill every per-frame
-   cost: animations, blur, will-change layers, fixed pseudo-elements.
-   Visual delta is near-zero — animations are slow (6-12s), blobs are
-   semi-transparent, and gradient scroll-vs-fixed is imperceptible. */
+   Goal: smooth scroll without GPU acceleration. Kill per-frame costs
+   (animations, blur layers, will-change, fixed pseudo-elements) while
+   preserving visual identity at rest. Filters are only dropped during
+   active scroll via is-scrolling — painted once at rest, zero cost. */
 
-/* Collapse the fixed pseudo-element; restore gradient directly on body. */
+/* Collapse the pseudo-element; restore gradient directly on body. */
 html.low-performance-mode body::before {
   content: none !important;
 }
@@ -578,7 +578,7 @@ html.low-performance-mode body {
   background-attachment: scroll !important;
 }
 
-/* Kill ALL animations — freeze in place with zero visual pop. */
+/* Freeze animations on specific glow/sparkle elements. */
 html.low-performance-mode .glow-button,
 html.low-performance-mode .sparkle-icon,
 html.low-performance-mode .glow-beam,
@@ -604,15 +604,11 @@ html.low-performance-mode .blur-3xl {
   will-change: auto !important;
 }
 
-/* Blur blobs: hide entirely in low-perf. Global filter:none removes the blur
-   but leaves hard-edged colored shapes visible — looks ugly. Hide ALL blur
-   elements: named Tailwind classes AND arbitrary blur-[Npx] values. */
+/* Reduce 40-64px gaussian blur to 12px on decorative blobs. */
 html.low-performance-mode .blur-2xl,
-html.low-performance-mode .blur-3xl,
-html.low-performance-mode .blur-xl,
-html.low-performance-mode .blur-lg,
-html.low-performance-mode [class*="blur-["] {
-  display: none !important;
+html.low-performance-mode .blur-3xl {
+  filter: blur(12px) !important;
+  -webkit-filter: blur(12px) !important;
 }
 
 /* Strip glass card multi-layer box-shadows. */
@@ -643,14 +639,6 @@ html.low-performance-mode .reservation-banner-surface {
   contain: none !important;
 }
 
-/* Kill ALL animations and transitions in low-perf mode. With filters/shadows
-   already removed, animations serve no visual purpose and waste CPU cycles
-   on keyframe interpolation + style recalc every frame. */
-html.low-performance-mode * {
-  animation: none !important;
-  transition: none !important;
-}
-
 /* Kill backdrop-filter on fps-boosts-button (missed by glass-premium catch). */
 html.low-performance-mode .fps-boosts-button {
   -webkit-backdrop-filter: none !important;
@@ -658,75 +646,29 @@ html.low-performance-mode .fps-boosts-button {
   background: rgba(15, 23, 42, 0.5) !important;
 }
 
-/* Simplify glass backgrounds: remove expensive radial-gradient, keep linear. */
-html.low-performance-mode .glass-premium,
-html.low-performance-mode .site-navbar-glass,
-html.low-performance-mode .reservation-banner-surface,
-html.low-performance-mode .low-perf-surface {
-  background-image: linear-gradient(180deg, rgba(7, 22, 45, 0.97), rgba(6, 18, 38, 0.93)) !important;
-}
-
-html.low-performance-mode .glass-overlay,
-html.low-performance-mode .low-perf-overlay {
-  background-image: none !important;
-  background-color: rgba(2, 6, 23, 0.85) !important;
-}
-
-/* ── NUCLEAR FILTER KILL ─────────────────────────────────────────────────
-   381 filter elements cause 11.3s raster time per scroll in software mode.
-   Every drop-shadow(), blur(), and backdrop-filter() requires per-pixel
-   CPU rasterization. Kill them ALL — this single rule eliminates ~370
-   unhandled filter elements (star SVGs, heading glows, decorative blurs,
-   FAQ inline blur(4px), glass backdrop-blur-sm/md/lg/xl).
-   CSS !important overrides both Tailwind utilities AND React inline styles. */
-html.low-performance-mode * {
-  filter: none !important;
-  -webkit-filter: none !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-}
-
-/* ── RASTER COST REDUCTION ────────────────────────────────────────────────
-   11s of software rasterization per scroll. The remaining cost is gradients,
-   border-radius, semi-transparent overlays, and box-shadows. Flatten these
-   for low-perf mode to cut raster time. */
-
-/* Kill ALL box-shadows — they require gaussian rasterization in software. */
-html.low-performance-mode * {
-  box-shadow: none !important;
-}
-
-/* Flatten border-radius on large containers — rounded corners on big elements
-   are expensive because the browser must clip-rasterize the entire rect. Keep
-   small radii on buttons/badges (visual identity) but kill large radii. */
-html.low-performance-mode section,
-html.low-performance-mode .glass-premium,
-html.low-performance-mode .glass-lite,
-html.low-performance-mode .glass-card-surface,
-html.low-performance-mode .glass-dark {
-  border-radius: 0 !important;
-}
-
-/* Simplify semi-transparent overlays — replace rgba gradients with solid colors.
-   Compositing transparent layers in software is expensive. */
-html.low-performance-mode .glass-premium::before,
-html.low-performance-mode .glass-premium::after,
-html.low-performance-mode .glass-lite::before,
-html.low-performance-mode .glass-lite::after,
-html.low-performance-mode .glass-dark::before,
-html.low-performance-mode .glass-dark::after {
-  display: none !important;
-}
-
 /* Contain each major section to prevent cross-section paint invalidation. */
 html.low-performance-mode section {
   contain: layout style paint;
 }
 
-/* Extend content-visibility to ALL below-fold sections, not just 4. */
+/* Extend content-visibility to ALL below-fold sections. */
 html.low-performance-mode main > *:not(:first-child) {
   content-visibility: auto;
   contain-intrinsic-size: auto 600px;
+}
+
+/* ── Scroll-time filter kill ─────────────────────────────────────────────
+   Instead of permanently removing all filters (ugly at rest), only drop
+   them during active scroll. The is-scrolling class is toggled by JS on
+   scroll start and removed 160ms after scroll stop. Filters are painted
+   once at rest (cached, zero ongoing cost) — only during scroll do they
+   cause per-frame CPU rasterization. */
+html.low-performance-mode.is-scrolling * {
+  filter: none !important;
+  -webkit-filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  transition-duration: 0s !important;
 }
 
 .site-navbar-glass {
