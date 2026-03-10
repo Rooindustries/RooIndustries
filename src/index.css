@@ -556,6 +556,66 @@ html.low-performance-mode .low-perf-glow {
   text-shadow: none !important;
 }
 
+/* ── Software-compositing fast path (GPU OFF) ───────────────────────────
+   Goal: 120 FPS scroll with zero GPU acceleration. Kill every per-frame
+   cost: animations, blur, will-change layers, fixed pseudo-elements.
+   Visual delta is near-zero — animations are slow (6-12s), blobs are
+   semi-transparent, and gradient scroll-vs-fixed is imperceptible. */
+
+/* Collapse the fixed pseudo-element; restore gradient directly on body. */
+html.low-performance-mode body::before {
+  content: none !important;
+}
+
+html.low-performance-mode body {
+  background: linear-gradient(
+    to top,
+    #00b7c0 0%,
+    #006185 30%,
+    #001f5a 65%,
+    #000040 100%
+  ) !important;
+  background-attachment: scroll !important;
+}
+
+/* Kill ALL animations — freeze in place with zero visual pop. */
+html.low-performance-mode .glow-button,
+html.low-performance-mode .sparkle-icon,
+html.low-performance-mode .glow-beam,
+html.low-performance-mode .gold-flair-text,
+html.low-performance-mode .gold-flair-pill {
+  animation: none !important;
+}
+
+/* Strip sparkle filter entirely (drop-shadow = compositing cost). */
+html.low-performance-mode .sparkle-icon {
+  filter: none !important;
+}
+
+/* Dim glow-beam without animation. */
+html.low-performance-mode .glow-beam {
+  opacity: 0.6 !important;
+}
+
+/* Revert will-change — GPU layer promotion hurts in software mode. */
+html.low-performance-mode .site-navbar-glass,
+html.low-performance-mode .blur-2xl,
+html.low-performance-mode .blur-3xl {
+  will-change: auto !important;
+}
+
+/* Reduce 40-64px gaussian blur to 12px on decorative blobs. */
+html.low-performance-mode .blur-2xl,
+html.low-performance-mode .blur-3xl {
+  filter: blur(12px) !important;
+  -webkit-filter: blur(12px) !important;
+}
+
+/* Strip glass card multi-layer box-shadows. */
+html.low-performance-mode .glass-card-surface {
+  box-shadow: inset 0 1px 0 rgba(186, 230, 253, 0.05) !important;
+}
+
 .site-navbar-glass {
   isolation: isolate;
   will-change: transform;
