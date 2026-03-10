@@ -662,6 +662,15 @@ html.low-performance-mode main > *:not(:first-child) {
   contain-intrinsic-size: auto 600px;
 }
 
+/* Kill ALL filters — 381 filter elements (star drop-shadows, heading glows,
+   decorative blurs) cause 4s+ raster time per scroll in software mode.
+   Stars become flat yellow (no glow) but keep shape. Box-shadows, rounded
+   corners, and glass pseudos are preserved — only filter is killed. */
+html.low-performance-mode * {
+  filter: none !important;
+  -webkit-filter: none !important;
+}
+
 /* Flatten transitions during scroll — no visual change, just skips
    interpolation to reduce style recalc cost. */
 html.low-performance-mode.is-scrolling * {
