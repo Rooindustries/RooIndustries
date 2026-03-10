@@ -657,17 +657,17 @@ html.low-performance-mode main > *:not(:first-child) {
   contain-intrinsic-size: auto 600px;
 }
 
-/* ── Scroll-time filter kill ─────────────────────────────────────────────
-   Instead of permanently removing all filters (ugly at rest), only drop
-   them during active scroll. The is-scrolling class is toggled by JS on
-   scroll start and removed 160ms after scroll stop. Filters are painted
-   once at rest (cached, zero ongoing cost) — only during scroll do they
-   cause per-frame CPU rasterization. */
+/* ── Scroll-time optimizations ────────────────────────────────────────────
+   Hide heavy gaussian-blur blobs during active scroll (160ms debounce
+   restores them after stop). Small drop-shadows on stars/pills are cheap
+   and stay visible. Transition-duration:0s prevents CSS transitions from
+   animating mid-scroll (no visual change, just skips the interpolation). */
+html.low-performance-mode.is-scrolling .blur-2xl,
+html.low-performance-mode.is-scrolling .blur-3xl {
+  opacity: 0 !important;
+}
+
 html.low-performance-mode.is-scrolling * {
-  filter: none !important;
-  -webkit-filter: none !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
   transition-duration: 0s !important;
 }
 
