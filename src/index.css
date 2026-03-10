@@ -644,6 +644,27 @@ html.low-performance-mode.is-scrolling * {
   transition-duration: 0s !important;
 }
 
+/* Kill backdrop-filter on fps-boosts-button (missed by glass-premium catch). */
+html.low-performance-mode .fps-boosts-button {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  background: rgba(15, 23, 42, 0.5) !important;
+}
+
+/* Simplify glass backgrounds: remove expensive radial-gradient, keep linear. */
+html.low-performance-mode .glass-premium,
+html.low-performance-mode .site-navbar-glass,
+html.low-performance-mode .reservation-banner-surface,
+html.low-performance-mode .low-perf-surface {
+  background-image: linear-gradient(180deg, rgba(7, 22, 45, 0.97), rgba(6, 18, 38, 0.93)) !important;
+}
+
+html.low-performance-mode .glass-overlay,
+html.low-performance-mode .low-perf-overlay {
+  background-image: none !important;
+  background-color: rgba(2, 6, 23, 0.85) !important;
+}
+
 .site-navbar-glass {
   isolation: isolate;
   will-change: transform;
