@@ -665,6 +665,25 @@ html.low-performance-mode .low-perf-overlay {
   background-color: rgba(2, 6, 23, 0.85) !important;
 }
 
+/* ── NUCLEAR FILTER KILL ─────────────────────────────────────────────────
+   381 filter elements cause 11.3s raster time per scroll in software mode.
+   Every drop-shadow(), blur(), and backdrop-filter() requires per-pixel
+   CPU rasterization. Kill them ALL — this single rule eliminates ~370
+   unhandled filter elements (star SVGs, heading glows, decorative blurs,
+   FAQ inline blur(4px), glass backdrop-blur-sm/md/lg/xl).
+   CSS !important overrides both Tailwind utilities AND React inline styles. */
+html.low-performance-mode * {
+  filter: none !important;
+  -webkit-filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Restore visibility for FAQ items that use inline blur(4px) to hide content.
+   Without the blur filter, closed FAQ answers need display:none fallback — but
+   the component already handles this via max-height:0 + overflow:hidden. No
+   additional CSS needed; filter:none just makes the text sharp instead of blurred. */
+
 .site-navbar-glass {
   isolation: isolate;
   will-change: transform;
