@@ -31,6 +31,14 @@ body::-webkit-scrollbar {
 }
 
 body {
+  background: transparent;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
   background: linear-gradient(
     to top,
     #00b7c0 0%,
@@ -38,7 +46,7 @@ body {
     #001f5a 65%,
     #000040 100%
   );
-  background-attachment: fixed;
+  pointer-events: none;
 }
 
 .trustpilot-widget,
@@ -391,6 +399,23 @@ body.view-plan-open #booking-modal-close {
   }
 }
 
+/* CSS containment: prevent animation repaints from invalidating parent/sibling elements. */
+.glow-button {
+  contain: layout paint style;
+}
+
+.sparkle-icon,
+.glow-beam {
+  contain: paint;
+}
+
+/* Promote decorative blur blobs to GPU compositor layers (rasterized once, not per-frame). */
+.blur-2xl,
+.blur-3xl {
+  contain: paint;
+  will-change: transform;
+}
+
 .roo-logo-video {
   pointer-events: none !important;
   user-select: none !important;
@@ -533,6 +558,7 @@ html.low-performance-mode .low-perf-glow {
 
 .site-navbar-glass {
   isolation: isolate;
+  will-change: transform;
 }
 
 .site-nav {
@@ -561,6 +587,15 @@ html.is-scrolling .scroll-blur-lite,
 html.low-performance-mode .scroll-blur-lite {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
+}
+
+/* Pause expensive CSS animations during active scroll to eliminate continuous repaints. */
+html.is-scrolling .glow-button,
+html.is-scrolling .sparkle-icon,
+html.is-scrolling .glow-beam,
+html.is-scrolling .gold-flair-text,
+html.is-scrolling .gold-flair-pill {
+  animation-play-state: paused !important;
 }
 
 html.perf-no-navbar-blur .site-navbar-glass,
