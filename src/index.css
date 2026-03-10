@@ -568,7 +568,13 @@ html.low-performance-mode body::before {
 }
 
 html.low-performance-mode body {
-  background: #001440 !important;
+  background: linear-gradient(
+    to top,
+    #00b7c0 0%,
+    #006185 30%,
+    #001f5a 65%,
+    #000040 100%
+  ) !important;
   background-attachment: scroll !important;
 }
 
@@ -656,15 +662,12 @@ html.low-performance-mode main > *:not(:first-child) {
   contain-intrinsic-size: auto 600px;
 }
 
-/* ── Raster cost elimination for P95 100fps ──────────────────────────────
-   Software rasterization budget: 10ms/frame. Kill every per-pixel cost:
-   filters (gaussian blur/drop-shadow), box-shadows (gaussian raster),
-   animations (keyframe interpolation), transitions (style recalc).
-   Rounded corners and glass pseudos preserved — layout stays intact. */
+/* ── Raster cost reduction for smooth scroll ─────────────────────────────
+   Kill filters (gaussian blur/drop-shadow per-pixel cost), freeze
+   animations/transitions. Box-shadows preserved for card depth. */
 html.low-performance-mode * {
   filter: none !important;
   -webkit-filter: none !important;
-  box-shadow: none !important;
   animation: none !important;
   transition: none !important;
 }
