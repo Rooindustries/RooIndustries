@@ -604,11 +604,16 @@ html.low-performance-mode .blur-3xl {
   will-change: auto !important;
 }
 
-/* Reduce 40-64px gaussian blur to 12px on decorative blobs. */
+/* Hide ALL decorative blur elements — gaussian blur is the #1 CPU raster
+   cost in software compositing. Hiding is better than filter:none because
+   filter:none reveals ugly hard-edged colored shapes underneath. */
+html.low-performance-mode .blur-sm,
+html.low-performance-mode .blur-lg,
+html.low-performance-mode .blur-xl,
 html.low-performance-mode .blur-2xl,
-html.low-performance-mode .blur-3xl {
-  filter: blur(12px) !important;
-  -webkit-filter: blur(12px) !important;
+html.low-performance-mode .blur-3xl,
+html.low-performance-mode [class*="blur-["] {
+  display: none !important;
 }
 
 /* Strip glass card multi-layer box-shadows. */
@@ -657,25 +662,8 @@ html.low-performance-mode main > *:not(:first-child) {
   contain-intrinsic-size: auto 600px;
 }
 
-/* ── Scroll-time optimizations ────────────────────────────────────────────
-   Hide ALL gaussian-blur elements during active scroll (160ms debounce
-   restores them after stop). Targets: decorative blur blobs (2xl/3xl),
-   arbitrary blur-[Npx] (review yellow glow), blur-sm (star glow rings).
-   Star drop-shadows are kept (small, cheap). */
-html.low-performance-mode.is-scrolling .blur-sm,
-html.low-performance-mode.is-scrolling .blur-lg,
-html.low-performance-mode.is-scrolling .blur-xl,
-html.low-performance-mode.is-scrolling .blur-2xl,
-html.low-performance-mode.is-scrolling .blur-3xl,
-html.low-performance-mode.is-scrolling [class*="blur-["] {
-  opacity: 0 !important;
-}
-
-/* Kill FAQ inline blur(4px) animations during scroll. */
-html.low-performance-mode.is-scrolling #faq * {
-  filter: none !important;
-}
-
+/* Flatten transitions during scroll — no visual change, just skips
+   interpolation to reduce style recalc cost. */
 html.low-performance-mode.is-scrolling * {
   transition-duration: 0s !important;
 }
@@ -695,8 +683,9 @@ html.low-performance-mode.is-scrolling * {
   transform: translateZ(0);
 }
 
-/* Keep the same look at rest, but reduce expensive compositing while actively scrolling. */
-html.is-scrolling .glass-scroll-lite {
+/* Keep the same look at rest, but reduce expensive compositing while actively scrolling.
+   Excluded from low-perf mode where backdrop-filter is already permanently killed. */
+html.is-scrolling:not(.low-performance-mode) .glass-scroll-lite {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
   background-image:
