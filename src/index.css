@@ -575,7 +575,7 @@ html.low-performance-mode body {
     #001f5a 65%,
     #000040 100%
   ) !important;
-  background-attachment: scroll !important;
+  background-attachment: fixed !important;
 }
 
 /* Freeze animations on specific glow/sparkle elements. */
@@ -663,11 +663,11 @@ html.low-performance-mode main > *:not(:first-child) {
 }
 
 /* ── Raster cost reduction for smooth scroll ─────────────────────────────
-   Kill filters (gaussian blur/drop-shadow per-pixel cost), freeze
-   animations/transitions. Box-shadows preserved for card depth. */
+   Freeze animations/transitions to stop continuous repaints. Expensive
+   blur filters are already eliminated by the display:none rule above.
+   Text drop-shadows (small radius, cheap) are intentionally preserved
+   for visual polish — they add <1ms raster per frame. */
 html.low-performance-mode * {
-  filter: none !important;
-  -webkit-filter: none !important;
   animation: none !important;
   transition: none !important;
 }
