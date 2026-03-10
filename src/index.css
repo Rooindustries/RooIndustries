@@ -519,12 +519,9 @@ html.low-performance-mode .reservation-banner-surface,
 html.low-performance-mode .low-perf-surface {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
-  background-image:
-    linear-gradient(180deg, rgba(7, 22, 45, 0.97), rgba(6, 18, 38, 0.93)),
-    radial-gradient(circle at top center, rgba(34, 211, 238, 0.06), transparent 55%) !important;
-  box-shadow:
-    inset 0 1px 0 rgba(186, 230, 253, 0.05),
-    0 10px 24px rgba(2, 6, 23, 0.34) !important;
+  background-image: none !important;
+  background-color: rgba(6, 18, 38, 0.95) !important;
+  box-shadow: inset 0 1px 0 rgba(186, 230, 253, 0.05) !important;
 }
 
 html.low-performance-mode .is-modal-blur .site-nav {
@@ -536,11 +533,7 @@ html.low-performance-mode .low-perf-overlay,
 html.low-performance-mode .glass-overlay {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
-  background: linear-gradient(
-    180deg,
-    rgba(2, 6, 23, 0.8),
-    rgba(2, 6, 23, 0.9)
-  ) !important;
+  background: rgba(2, 6, 23, 0.85) !important;
 }
 
 html.low-performance-mode .low-perf-glow {
@@ -604,9 +597,13 @@ html.low-performance-mode [class*="blur-["] {
   display: none !important;
 }
 
-/* Strip glass card multi-layer box-shadows. */
-html.low-performance-mode .glass-card-surface {
-  box-shadow: inset 0 1px 0 rgba(186, 230, 253, 0.05) !important;
+/* Strip multi-layer box-shadows and gradients on all glass/card surfaces. */
+html.low-performance-mode .glass-card-surface,
+html.low-performance-mode .glass-lite,
+html.low-performance-mode .glass-menu-surface {
+  box-shadow: none !important;
+  background-image: none !important;
+  background-color: rgba(6, 18, 38, 0.95) !important;
 }
 
 /* Skip rendering offscreen sections entirely — biggest scroll perf win.
