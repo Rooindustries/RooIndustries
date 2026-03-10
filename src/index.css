@@ -16,7 +16,7 @@
 
 html {
   font-family: "Roboto Flex Variable", system-ui, sans-serif;
-  scroll-behavior: auto;
+  scroll-behavior: smooth;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -31,14 +31,6 @@ body::-webkit-scrollbar {
 }
 
 body {
-  background: transparent;
-}
-
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
   background: linear-gradient(
     to top,
     #00b7c0 0%,
@@ -46,7 +38,7 @@ body::before {
     #001f5a 65%,
     #000040 100%
   );
-  pointer-events: none;
+  background-attachment: fixed;
 }
 
 .trustpilot-widget,
