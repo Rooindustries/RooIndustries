@@ -568,13 +568,7 @@ html.low-performance-mode body::before {
 }
 
 html.low-performance-mode body {
-  background: linear-gradient(
-    to top,
-    #00b7c0 0%,
-    #006185 30%,
-    #001f5a 65%,
-    #000040 100%
-  ) !important;
+  background: #001440 !important;
   background-attachment: scroll !important;
 }
 
@@ -662,19 +656,17 @@ html.low-performance-mode main > *:not(:first-child) {
   contain-intrinsic-size: auto 600px;
 }
 
-/* Kill ALL filters — 381 filter elements (star drop-shadows, heading glows,
-   decorative blurs) cause 4s+ raster time per scroll in software mode.
-   Stars become flat yellow (no glow) but keep shape. Box-shadows, rounded
-   corners, and glass pseudos are preserved — only filter is killed. */
+/* ── Raster cost elimination for P95 100fps ──────────────────────────────
+   Software rasterization budget: 10ms/frame. Kill every per-pixel cost:
+   filters (gaussian blur/drop-shadow), box-shadows (gaussian raster),
+   animations (keyframe interpolation), transitions (style recalc).
+   Rounded corners and glass pseudos preserved — layout stays intact. */
 html.low-performance-mode * {
   filter: none !important;
   -webkit-filter: none !important;
-}
-
-/* Flatten transitions during scroll — no visual change, just skips
-   interpolation to reduce style recalc cost. */
-html.low-performance-mode.is-scrolling * {
-  transition-duration: 0s !important;
+  box-shadow: none !important;
+  animation: none !important;
+  transition: none !important;
 }
 
 .site-navbar-glass {
