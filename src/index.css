@@ -568,14 +568,8 @@ html.low-performance-mode body::before {
 }
 
 html.low-performance-mode body {
-  background: linear-gradient(
-    to top,
-    #00b7c0 0%,
-    #006185 30%,
-    #001f5a 65%,
-    #000040 100%
-  ) !important;
-  background-attachment: fixed !important;
+  background: linear-gradient(180deg, #000030 0%, #001050 100%) !important;
+  background-attachment: scroll !important;
 }
 
 /* Freeze animations on specific glow/sparkle elements. */
