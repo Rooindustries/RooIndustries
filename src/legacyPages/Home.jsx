@@ -6,6 +6,7 @@ import {
   normalizeSectionHash,
   readPendingSectionTarget,
 } from "../lib/sectionNavigation";
+import { useLowPerformanceMode } from "../lib/performanceMode";
 import About from "../components/About";
 import Services from "../components/Services";
 import StreamerYoutuberReviews from "../components/StreamerYoutuberReviews";
@@ -59,10 +60,14 @@ function DeferredSection({
 
 export default function Home({ initialData = null }) {
   const location = useLocation();
+  const isLowPerf = useLowPerformanceMode();
   const [forceEagerSections, setForceEagerSections] = useState(() =>
     isHomeSectionHash(normalizeSectionHash(location.hash || "")) ||
     isHomeSectionHash(readPendingSectionTarget())
   );
+  // In low-perf mode, render all sections eagerly — CSS content-visibility: auto
+  // handles lazy painting. This avoids 250-471ms React render burst stalls.
+  const eagerAll = forceEagerSections || isLowPerf;
 
   useEffect(() => {
     const hasSectionIntent = isHomeSectionHash(
@@ -80,14 +85,14 @@ export default function Home({ initialData = null }) {
       <DeferredSection
         fallbackClassName="min-h-[380px]"
         rootMargin="160px 0px"
-        eager={forceEagerSections}
+        eager={eagerAll}
       >
         <StreamerYoutuberReviews initialData={initialData?.reviews || null} />
       </DeferredSection>
       <DeferredSection
         fallbackClassName="min-h-[260px]"
         rootMargin="160px 0px"
-        eager={forceEagerSections}
+        eager={eagerAll}
       >
         <About initialData={initialData?.about || null} />
       </DeferredSection>
@@ -95,7 +100,7 @@ export default function Home({ initialData = null }) {
         <DeferredSection
           fallbackClassName="min-h-[520px]"
           rootMargin="240px 0px"
-          eager={forceEagerSections}
+          eager={eagerAll}
         >
           <Services initialData={initialData?.services || null} />
         </DeferredSection>
@@ -104,7 +109,7 @@ export default function Home({ initialData = null }) {
         <DeferredSection
           fallbackClassName="min-h-[620px]"
           rootMargin="300px 0px"
-          eager={forceEagerSections}
+          eager={eagerAll}
         >
           <Packages
             initialPackages={initialData?.packagesList || null}
@@ -116,7 +121,7 @@ export default function Home({ initialData = null }) {
         <DeferredSection
           fallbackClassName="min-h-[340px]"
           rootMargin="220px 0px"
-          eager={forceEagerSections}
+          eager={eagerAll}
         >
           <HowItWorks initialData={initialData?.howItWorks || null} />
         </DeferredSection>
@@ -136,7 +141,7 @@ export default function Home({ initialData = null }) {
       <DeferredSection
         fallbackClassName="min-h-[360px]"
         rootMargin="220px 0px"
-        eager={forceEagerSections}
+        eager={eagerAll}
       >
         <SupportedGames initialData={initialData?.supportedGames || null} />
       </DeferredSection>
@@ -144,7 +149,7 @@ export default function Home({ initialData = null }) {
         <DeferredSection
           fallbackClassName="min-h-[380px]"
           rootMargin="220px 0px"
-          eager={forceEagerSections}
+          eager={eagerAll}
         >
           <Faq
             compact
@@ -156,7 +161,7 @@ export default function Home({ initialData = null }) {
       <DeferredSection
         fallbackClassName="min-h-[160px]"
         rootMargin="220px 0px"
-        eager={forceEagerSections}
+        eager={eagerAll}
       >
         <ReferralBox />
       </DeferredSection>
