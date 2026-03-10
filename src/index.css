@@ -639,8 +639,10 @@ html.low-performance-mode .fps-boosts-button {
   background: rgba(15, 23, 42, 0.5) !important;
 }
 
-/* Contain each major section to prevent cross-section paint invalidation. */
-html.low-performance-mode section {
+/* Contain each major section to prevent cross-section paint invalidation.
+   Exclude the hero section (#top section) — paint containment clips the
+   tagline pill's box-shadow glow at the section boundary. */
+html.low-performance-mode section:not(#top > section) {
   contain: layout style paint;
 }
 
