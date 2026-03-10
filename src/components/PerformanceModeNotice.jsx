@@ -166,17 +166,10 @@ export default function PerformanceModeNotice() {
         <div className="mt-3 flex items-center gap-2">
           <button
             type="button"
-            onClick={toggleLiteMode}
+            onClick={dismissNotice}
             className="rounded-lg border border-cyan-300/50 bg-gradient-to-r from-sky-500/80 to-blue-600/80 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-white shadow-[0_0_14px_rgba(56,189,248,0.35)] hover:from-sky-400 hover:to-blue-500 transition"
           >
-            {liteModeEnabled ? "Disable Lite Mode" : "Enable Lite Mode"}
-          </button>
-          <button
-            type="button"
-            onClick={dismissNotice}
-            className="rounded-lg border border-white/20 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/10 hover:border-cyan-300/30 transition"
-          >
-            Dismiss
+            Got it
           </button>
         </div>
       </div>
