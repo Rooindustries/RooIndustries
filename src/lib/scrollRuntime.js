@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 
 const SCROLL_IDLE_MS = 160;
+const LOW_PERF_THROTTLE_MS = 250;
 
 let snapshot = {
   scrollY: 0,
@@ -18,6 +19,7 @@ let cleanup = null;
 let idleTimer = null;
 let rafId = null;
 let pendingScrollY = 0;
+let lastEmitTime = 0;
 const listeners = new Set();
 
 const emit = () => {
@@ -54,8 +56,21 @@ const clearIdleTimer = () => {
   }
 };
 
+const isLowPerf = () =>
+  typeof document !== "undefined" &&
+  document.documentElement.classList.contains("low-performance-mode");
+
 const flushScrollFrame = () => {
   rafId = null;
+
+  // In low-perf mode, throttle React re-renders to every 250ms.
+  // The CSS is-scrolling class still toggles instantly for styling.
+  if (isLowPerf()) {
+    const now = performance.now();
+    if (now - lastEmitTime < LOW_PERF_THROTTLE_MS) return;
+    lastEmitTime = now;
+  }
+
   const nextScrollY = pendingScrollY;
   const nextDirection =
     nextScrollY > snapshot.scrollY
