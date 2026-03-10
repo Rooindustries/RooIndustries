@@ -531,6 +531,36 @@ html.low-performance-mode .low-perf-glow {
   text-shadow: none !important;
 }
 
+/* Kill all continuous CSS animations in lite mode —
+   gradient shifts, glow pulses, shimmer lines all use GPU compositing */
+html.low-performance-mode .glow-button,
+html.low-performance-mode .sparkle-icon,
+html.low-performance-mode .glow-beam,
+html.low-performance-mode [class*="glow-line"],
+html.low-performance-mode .gold-flair-text,
+html.low-performance-mode .gold-flair-pill,
+html.low-performance-mode .game-card {
+  animation: none !important;
+}
+
+/* Decorative filter: blur() — Services.jsx has circles up to 52rem with
+   blur-3xl (64px radius). On CPU: ~128×128 kernel per pixel = devastating. */
+html.low-performance-mode .blur-sm,
+html.low-performance-mode .blur-md,
+html.low-performance-mode .blur-lg,
+html.low-performance-mode .blur-xl,
+html.low-performance-mode .blur-2xl,
+html.low-performance-mode .blur-3xl {
+  filter: none !important;
+  -webkit-filter: none !important;
+}
+
+/* Tailwind drop-shadow filters on headings — per-pixel filter op on CPU */
+html.low-performance-mode [class*="drop-shadow"] {
+  filter: none !important;
+  -webkit-filter: none !important;
+}
+
 .site-navbar-glass {
   isolation: isolate;
 }
@@ -578,8 +608,10 @@ html.perf-no-banner-blur .glass-premium {
 html.perf-no-glow .glow-button,
 html.perf-no-glow .sparkle-icon,
 html.perf-no-glow .glow-beam,
+html.perf-no-glow [class*="glow-line"],
 html.perf-no-glow .gold-flair-text,
-html.perf-no-glow .gold-flair-pill {
+html.perf-no-glow .gold-flair-pill,
+html.perf-no-glow .game-card {
   animation: none !important;
 }
 
