@@ -1,4 +1,8 @@
-import { resolveBookingPricing } from "../ref/pricing.js";
+import {
+  resolveBookingPricing,
+  resolveUpgradeContext,
+} from "../ref/pricing.js";
+import { getClientAddress, requireRateLimit } from "../ref/rateLimit.js";
 
 function getCredentials() {
   const keyId = process.env.RAZORPAY_KEY_ID || "";
@@ -39,6 +43,24 @@ export default async function handler(req, res) {
 
   try {
     const { notes = {} } = req.body || {};
+    const clientAddress = getClientAddress(req);
+    const rateLimitKey = [
+      "razorpay-create-order",
+      clientAddress,
+      String(notes.packageTitle || "").trim().toLowerCase(),
+      String(notes.originalOrderId || "").trim().toLowerCase(),
+      String(notes.referralCode || "").trim().toLowerCase(),
+      String(notes.couponCode || "").trim().toLowerCase(),
+    ].join(":");
+    if (
+      !requireRateLimit(res, {
+        key: rateLimitKey,
+        max: 12,
+        message: "Too many payment order requests. Please try again later.",
+      })
+    ) {
+      return;
+    }
     const currency = resolveServerCurrency();
 
     if (!notes?.packageTitle) {
@@ -48,12 +70,20 @@ export default async function handler(req, res) {
       });
     }
 
+    const upgradeContext = notes.originalOrderId
+      ? await resolveUpgradeContext({
+          originalOrderId: notes.originalOrderId || "",
+          packageTitle: notes.packageTitle,
+        })
+      : null;
+
     const pricing = await resolveBookingPricing({
       packageTitle: notes.packageTitle,
       originalOrderId: notes.originalOrderId || "",
       referralCode: notes.referralCode || "",
       couponCode: notes.couponCode || "",
       paymentProvider: "razorpay",
+      upgradeContext,
     });
 
     const options = {
@@ -101,7 +131,8 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     console.error("Razorpay createOrder error:", err);
-    return res.status(500).json({
+    const status = Number(err?.status) || 500;
+    return res.status(status).json({
       ok: false,
       message: err?.message || "Failed to create Razorpay order",
     });

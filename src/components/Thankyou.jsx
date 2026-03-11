@@ -1,6 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
+import BookingEmailDispatchEffect from "./BookingEmailDispatchEffect";
 
 export default function ThankYou() {
   const containerVariants = {
@@ -21,6 +22,7 @@ export default function ThankYou() {
       animate="visible"
       exit="exit"
     >
+      <BookingEmailDispatchEffect />
       <motion.h1
         className="text-4xl font-bold text-sky-300 drop-shadow-[0_0_20px_rgba(56,189,248,0.5)]"
         variants={containerVariants}

@@ -35,6 +35,7 @@ export default function Payment({ hideFooter = false }) {
 
   const REFERRAL_STORAGE_KEY = "referral_session";
   const FLOW_BACKGROUND_KEY = "flow_background_location";
+  const BOOKING_CONFIRMATION_STORAGE_KEY = "booking_confirmation_state";
 
   const readStoredBackground = () => {
     try {
@@ -78,6 +79,47 @@ export default function Payment({ hideFooter = false }) {
         sessionStorage.removeItem(REFERRAL_STORAGE_KEY);
       }
     } catch {}
+  };
+
+  const writeStoredBookingConfirmation = (confirmation) => {
+    try {
+      if (!confirmation?.bookingId || !confirmation?.emailDispatchToken) {
+        sessionStorage.removeItem(BOOKING_CONFIRMATION_STORAGE_KEY);
+        return;
+      }
+
+      sessionStorage.setItem(
+        BOOKING_CONFIRMATION_STORAGE_KEY,
+        JSON.stringify({
+          bookingId: confirmation.bookingId,
+          emailDispatchToken: confirmation.emailDispatchToken,
+        })
+      );
+    } catch {}
+  };
+
+  const buildConfirmationNavigationState = (responseBody = {}) => {
+    const baseState = getModalFlowState();
+    const bookingId = String(responseBody?.bookingId || "").trim();
+    const emailDispatchToken = String(
+      responseBody?.emailDispatchToken || ""
+    ).trim();
+
+    if (!bookingId || !emailDispatchToken) {
+      writeStoredBookingConfirmation(null);
+      return baseState;
+    }
+
+    const bookingConfirmation = {
+      bookingId,
+      emailDispatchToken,
+    };
+
+    writeStoredBookingConfirmation(bookingConfirmation);
+    return {
+      ...(baseState || {}),
+      bookingConfirmation,
+    };
   };
 
   const bookingData = useMemo(() => {
@@ -552,6 +594,7 @@ export default function Payment({ hideFooter = false }) {
 
         status: "captured",
         paymentProvider: "free",
+        deferEmailsUntilConfirmation: true,
       };
 
       const res = await fetch("/api/ref/createBooking", {
@@ -590,8 +633,10 @@ export default function Payment({ hideFooter = false }) {
         return;
       }
 
+      const data = await res.json();
+
       navigate("/thank-you", {
-        state: getModalFlowState(),
+        state: buildConfirmationNavigationState(data),
         replace: true,
       });
     } catch (err) {
@@ -733,6 +778,7 @@ export default function Payment({ hideFooter = false }) {
               razorpaySignature: response.razorpay_signature,
               status: "captured",
               paymentProvider: "razorpay",
+              deferEmailsUntilConfirmation: true,
             };
 
             const res = await fetch("/api/ref/createBooking", {
@@ -750,8 +796,10 @@ export default function Payment({ hideFooter = false }) {
               return;
             }
 
+            const data = await res.json();
+
             navigate("/payment-success", {
-              state: getModalFlowState(),
+              state: buildConfirmationNavigationState(data),
               replace: true,
             });
           } catch (err) {
@@ -1165,6 +1213,7 @@ export default function Payment({ hideFooter = false }) {
                                 payerEmail: details?.payer?.email_address || "",
                                 status: "captured",
                                 paymentProvider: "paypal",
+                                deferEmailsUntilConfirmation: true,
                               };
                               const res = await fetch("/api/ref/createBooking", {
                                 method: "POST",
@@ -1184,8 +1233,12 @@ export default function Payment({ hideFooter = false }) {
                                 return;
                               }
 
+                              const bookingResult = await res.json();
+
                               navigate("/payment-success", {
-                                state: getModalFlowState(),
+                                state: buildConfirmationNavigationState(
+                                  bookingResult
+                                ),
                                 replace: true,
                               });
                             } catch (err) {

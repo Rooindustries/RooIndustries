@@ -1,3 +1,5 @@
+import { getClientAddress, requireRateLimit } from "../ref/rateLimit.js";
+
 const resolveIsProdLike = () => {
   const vercelEnv = String(process.env.VERCEL_ENV || "").toLowerCase();
   if (vercelEnv) return vercelEnv === "production";
@@ -23,10 +25,21 @@ const resolveRazorpayMode = (keyId = "") => {
   return "unknown";
 };
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   if (req.method !== "GET") {
     res.setHeader("Allow", ["GET"]);
     return res.status(405).json({ ok: false, error: "Method not allowed" });
+  }
+
+  const clientAddress = getClientAddress(req);
+  if (
+    !requireRateLimit(res, {
+      key: `payment-providers:${clientAddress}`,
+      max: 60,
+      message: "Too many payment provider requests. Please try again later.",
+    })
+  ) {
+    return;
   }
 
   const isProdLike = resolveIsProdLike();
@@ -53,9 +66,7 @@ module.exports = async function handler(req, res) {
   const paypalMode = resolvePayPalMode(isProdLike);
   const hasPayPalClientId = !!paypalClientId;
   const hasPayPalClientSecret = !!paypalClientSecret;
-  const hasRequiredPayPalCredentials = isProdLike
-    ? hasPayPalClientId && hasPayPalClientSecret
-    : hasPayPalClientId;
+  const hasRequiredPayPalCredentials = hasPayPalClientId && hasPayPalClientSecret;
   const paypalEnabled =
     hasRequiredPayPalCredentials &&
     !(isProdLike && paypalMode !== "live");
@@ -74,4 +85,4 @@ module.exports = async function handler(req, res) {
       },
     },
   });
-};
+}

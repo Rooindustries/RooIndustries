@@ -439,6 +439,13 @@ const businessSmoke = async () => {
       !providerConfig.razorpayEnabled ||
       (await paymentPage.locator("text=RazorPay Secure Checkout").count()) >= 1,
   });
+  checks.push({
+    check: "paypal_option_present_when_provider_enabled",
+    pass:
+      !providerConfig.paypalEnabled ||
+      (await paymentPage.locator('img[alt="PayPal payment logo"]').count()) >= 1 ||
+      (await paymentPage.locator("text=Secure global payment").count()) >= 1,
+  });
   await paymentPage.close();
 
   const referralPage = await browser.newPage({
