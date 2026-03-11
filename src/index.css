@@ -650,14 +650,21 @@ html.low-performance-mode main > *:not(:first-child) {
 }
 
 /* ── Raster cost reduction ────────────────────────────────────────────────
-   Kill animations, transitions, and ALL CSS filters permanently.
-   filter: drop-shadow() is the #1 CPU raster cost in software compositing
-   (212 visible filter elements). Cheaper text-shadow replaces the glow. */
+   Kill looping animations and expensive filters permanently.
+   filter: drop-shadow() is the #1 CPU raster cost in software compositing.
+   Keep transition: opacity/transform (cheap, needed for fluid navbar/UI). */
 html.low-performance-mode * {
   animation: none !important;
-  transition: none !important;
   filter: none !important;
   -webkit-filter: none !important;
+}
+
+/* Kill only expensive transition properties. Preserve opacity + transform
+   which are cheap even in software compositing and needed for fluid UI. */
+html.low-performance-mode [class*="backdrop"],
+html.low-performance-mode [class*="blur"],
+html.low-performance-mode [class*="shadow"] {
+  transition: none !important;
 }
 
 /* Cheap text-shadow replacement for the drop-shadow glow on headings.
