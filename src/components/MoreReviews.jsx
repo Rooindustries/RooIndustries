@@ -127,7 +127,7 @@ export default function Reviews() {
             onClick={() =>
               setVisibleCount((prev) => Math.min(prev + 9, reviews.length))
             }
-            className="rounded-xl border border-sky-500/50 bg-sky-500/10 px-4 py-2 text-sm font-semibold text-sky-100 hover:bg-sky-500/20 transition-colors"
+            className="rounded-xl border border-white/30 bg-white/15 px-4 py-2 text-sm font-semibold text-white hover:bg-white/25 transition-colors"
           >
             Load more reviews
           </button>
