@@ -124,7 +124,12 @@ const fallbackData = {
 const buildImageUrl = (image, size) => {
   if (!image) return "";
   try {
-    return urlFor(image).width(size).height(size).fit("crop").url();
+    return urlFor(image)
+      .width(size)
+      .height(size)
+      .fit("crop")
+      .auto("format")
+      .url();
   } catch {
     return "";
   }
@@ -211,8 +216,10 @@ const AvatarHex = ({
   sizeClassName,
   accentClassName,
   placeholderClassName,
+  priority = false,
+  imageSize = 200,
 }) => {
-  const imageUrl = buildImageUrl(image, 400);
+  const imageUrl = buildImageUrl(image, imageSize);
   const clipStyle = { clipPath: HEX_CLIP_PATH };
 
   return (
@@ -228,8 +235,11 @@ const AvatarHex = ({
             alt={alt}
             className="h-full w-full object-cover"
             style={clipStyle}
-            loading="lazy"
-            decoding="async"
+            loading={priority ? "eager" : "lazy"}
+            decoding={priority ? "sync" : "async"}
+            fetchPriority={priority ? "high" : undefined}
+            width={imageSize}
+            height={imageSize}
           />
         ) : (
           <div
@@ -423,6 +433,8 @@ export default function MeetTheTeam({ onSeoData }) {
                       sizeClassName="h-[120px] w-[120px]"
                       accentClassName="bg-gradient-to-br from-cyan-300 to-sky-600"
                       placeholderClassName="text-2xl font-bold text-cyan-300"
+                      priority
+                      imageSize={400}
                     />
                   </div>
                   <div className="text-[28px] font-bold">
