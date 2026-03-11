@@ -676,11 +676,28 @@ html.low-performance-mode .site-nav {
   contain: layout style paint !important;
 }
 
-/* Skip painting the route transition overlay when invisible. It's a 1440x900
-   fixed element with a gradient that paints every scroll frame for zero visual
-   benefit at opacity-0. visibility:hidden tells the browser to skip it. */
+
+/* Route transition overlay: a 1440x900 fixed gradient that paints every frame.
+   When invisible (opacity-0), skip painting entirely. Always contain it so its
+   repaint never invalidates the document tree. */
+html.low-performance-mode .pointer-events-none[aria-hidden="true"] {
+  contain: strict !important;
+}
 html.low-performance-mode .pointer-events-none.opacity-0[aria-hidden="true"] {
   visibility: hidden !important;
+}
+
+/* Contain the fixed fps-boost aside to prevent full-document repaint. */
+html.low-performance-mode .fixed[class*="bottom-3"],
+html.low-performance-mode .fixed[class*="bottom-4"] {
+  contain: layout style paint !important;
+}
+
+/* During active scroll, flatten border-radius on large cards to reduce
+   anti-aliased raster cost. 160ms idle debounce restores rounded corners. */
+html.low-performance-mode.is-scrolling [class*="rounded-2xl"],
+html.low-performance-mode.is-scrolling [class*="rounded-xl"] {
+  border-radius: 4px !important;
 }
 
 /* Cheap text-shadow replacement for the drop-shadow glow on headings.
