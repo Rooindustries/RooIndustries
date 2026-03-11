@@ -614,6 +614,7 @@ html.low-performance-mode #packages,
 html.low-performance-mode #how-it-works,
 html.low-performance-mode #faq {
   content-visibility: auto;
+  background-color: #000a1a;
   contain-intrinsic-size: auto 500px;
 }
 
@@ -647,6 +648,7 @@ html.low-performance-mode section:not(#top > section) {
 /* Extend content-visibility to ALL below-fold sections. */
 html.low-performance-mode main > *:not(:first-child) {
   content-visibility: auto;
+  background-color: #000a1a;
   contain-intrinsic-size: auto 600px;
 }
 
