@@ -645,12 +645,6 @@ html.low-performance-mode section:not(#top > section) {
   contain: layout style paint;
 }
 
-/* Extend content-visibility to ALL below-fold sections. */
-html.low-performance-mode main > *:not(:first-child) {
-  content-visibility: auto;
-  background-color: #000a1a;
-  contain-intrinsic-size: auto 600px;
-}
 
 /* ── Raster cost reduction ────────────────────────────────────────────────
    Kill looping animations, expensive filters, and unnecessary transitions.
