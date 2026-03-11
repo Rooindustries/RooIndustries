@@ -607,16 +607,6 @@ html.low-performance-mode .glass-menu-surface {
   background-color: rgba(6, 18, 38, 0.95) !important;
 }
 
-/* Skip rendering offscreen sections entirely — biggest scroll perf win.
-   Browser skips paint + layout for sections outside the viewport. */
-html.low-performance-mode #services,
-html.low-performance-mode #packages,
-html.low-performance-mode #how-it-works,
-html.low-performance-mode #faq {
-  content-visibility: auto;
-  background-color: #000a1a;
-  contain-intrinsic-size: auto 500px;
-}
 
 /* No backdrop-filter = no need for stacking context isolation. */
 html.low-performance-mode .glass-premium,
