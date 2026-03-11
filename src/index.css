@@ -490,7 +490,7 @@ html.low-performance-mode {
 }
 
 html.low-performance-mode body {
-  background: linear-gradient(to top, #004a6b, #000040) fixed !important;
+  background-attachment: scroll;
 }
 
 html.low-performance-mode .glow-button,
