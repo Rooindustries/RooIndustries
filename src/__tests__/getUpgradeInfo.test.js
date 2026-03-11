@@ -37,6 +37,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  globalThis.__rooRateLimitBuckets?.clear?.();
 });
 
 describe("getUpgradeInfo API", () => {
@@ -97,18 +98,58 @@ describe("getUpgradeInfo API", () => {
       startTimeUTC: "2025-01-15T08:00:00.000Z",
     });
 
-    mockFetch
-      .mockResolvedValueOnce({
-        title: "XOC / Extreme Overclocking",
-        price: "$149.95",
-      })
-      .mockResolvedValueOnce([
-        {
+    mockFetch.mockImplementation(async (query, params = {}) => {
+      const q = String(query || "");
+      if (
+        q.includes('_type == "package"') &&
+        q.includes('title == "XOC / Extreme Overclocking"')
+      ) {
+        return {
+          title: "XOC / Extreme Overclocking",
+          price: "$149.95",
+        };
+      }
+      if (q.includes('_type == "booking"') && q.includes("_id == $id")) {
+        return {
           _id: "booking_1",
+          status: "completed",
+          originalOrderId: "",
           packageTitle: "Performance Vertex Overhaul",
+          packagePrice: "$84.99",
+          grossAmount: 84.99,
           netAmount: 84.99,
-        },
-      ]);
+          email: "client@example.com",
+          payerEmail: "payer@example.com",
+          localTimeZone: "America/Los_Angeles",
+          startTimeUTC: "2025-01-15T08:00:00.000Z",
+          displayDate: "Wednesday, January 15, 2025",
+          displayTime: "12:00 AM",
+        };
+      }
+      if (
+        q.includes('_type == "booking"') &&
+        q.includes("originalOrderId == $rootId")
+      ) {
+        return [
+          {
+            _id: "booking_1",
+            packageTitle: "Performance Vertex Overhaul",
+            netAmount: 84.99,
+          },
+        ];
+      }
+      if (
+        q.includes('_type == "package"') &&
+        q.includes("title == $title") &&
+        params.title === "XOC / Extreme Overclocking"
+      ) {
+        return {
+          title: "XOC / Extreme Overclocking",
+          price: "$149.95",
+        };
+      }
+      return null;
+    });
 
     const req = createReq({
       id: "booking_1",

@@ -1,6 +1,7 @@
 let holdSlot;
 let createBooking;
 let releaseHold;
+let sendBookingEmails;
 
 const CLIENT_EMAIL = "vihaann2.0@gmail.com";
 const OWNER_EMAIL = "serviroo@rooindustries.com";
@@ -82,7 +83,11 @@ const formatOwnerTime = (utcDate, timeZone = OWNER_TZ) =>
     minute: "2-digit",
   }).format(utcDate);
 
-const createReq = (body = {}, method = "POST") => ({ method, body });
+const createReq = (body = {}, method = "POST", headers = {}) => ({
+  method,
+  body,
+  headers,
+});
 
 const createRes = () => {
   const res = {
@@ -139,6 +144,19 @@ const mockSanityClient = {
       return (
         store.packages.find((pkg) => pkg.title === params.title) || null
       );
+    }
+    if (
+      q.includes('_type == "booking"') &&
+      q.includes("originalOrderId == $rootId")
+    ) {
+      return store.bookings.filter((booking) => {
+        const status = String(booking.status || "").toLowerCase();
+        const isPaid = status === "captured" || status === "completed";
+        return (
+          isPaid &&
+          (booking._id === params.rootId || booking.originalOrderId === params.rootId)
+        );
+      });
     }
     if (
       q.includes('_type == "booking"') &&
@@ -309,6 +327,7 @@ const createPaidBooking = async ({
   holdId,
   holdToken,
   holdExpiresAt,
+  deferEmailsUntilConfirmation = false,
 }) => {
   const utcDate = new Date(startTimeUTC);
   const displayDate = formatClientDate(utcDate, timeZone);
@@ -331,6 +350,7 @@ const createPaidBooking = async ({
     slotHoldId: holdId || null,
     slotHoldToken: holdToken || null,
     slotHoldExpiresAt: holdExpiresAt || null,
+    deferEmailsUntilConfirmation,
   };
 
   if (paymentProvider === "paypal") {
@@ -356,6 +376,7 @@ beforeAll(() => {
   process.env.FROM_EMAIL = "booking@roo.test";
   process.env.OWNER_EMAIL = OWNER_EMAIL;
   process.env.SITE_NAME = "Roo Industries";
+  process.env.RAZORPAY_KEY_ID = "";
   process.env.RAZORPAY_KEY_SECRET = "";
   process.env.PAYPAL_CLIENT_ID = "";
   process.env.PAYPAL_CLIENT_SECRET = "";
@@ -366,6 +387,7 @@ beforeAll(() => {
   holdSlot = load("../../src/server/booking/holdSlot");
   createBooking = load("../../src/server/api/ref/createBooking");
   releaseHold = load("../../src/server/booking/releaseHold");
+  sendBookingEmails = load("../../src/server/api/ref/sendBookingEmails");
 });
 
 beforeEach(() => {
@@ -373,10 +395,17 @@ beforeEach(() => {
   mockSendEmail.mockReset();
   mockSendEmail.mockResolvedValue({ error: null });
   process.env.OWNER_EMAIL = OWNER_EMAIL;
+  process.env.RAZORPAY_KEY_ID = "";
+  process.env.RAZORPAY_KEY_SECRET = "";
+  process.env.PAYPAL_CLIENT_ID = "";
+  process.env.PAYPAL_CLIENT_SECRET = "";
+  globalThis.__rooRateLimitBuckets?.clear?.();
+  delete global.fetch;
 });
 
 afterEach(() => {
   jest.restoreAllMocks();
+  delete global.fetch;
 });
 
 describe("booking reservation API", () => {
@@ -475,6 +504,145 @@ describe("booking reservation API", () => {
 
     expect(clientCall).toBeTruthy();
     expect(ownerCall).toBeTruthy();
+    expect(clientCall[0].attachments).toBeUndefined();
+  });
+
+  test("createBooking can defer emails until the success page confirms the flow", async () => {
+    const startTimeUTC = "2025-01-15T08:15:00.000Z";
+    const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
+
+    const { res } = await createPaidBooking({
+      startTimeUTC,
+      timeZone: "America/Los_Angeles",
+      paymentProvider: "paypal",
+      holdId: hold.body.holdId,
+      holdToken: hold.body.holdToken,
+      holdExpiresAt: hold.body.expiresAt,
+      deferEmailsUntilConfirmation: true,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockSendEmail).not.toHaveBeenCalled();
+    expect(res.body.bookingId).toBeTruthy();
+    expect(res.body.emailDispatchToken).toBeTruthy();
+    expect(res.body.emailDispatch).toMatchObject({
+      deferred: true,
+      allSent: false,
+    });
+
+    const booking = store.bookings.find((entry) => entry._id === res.body.bookingId);
+    expect(booking.emailDispatchDeferred).toBe(true);
+    expect(booking.emailDispatchStatus).toBe("pending");
+    expect(booking.emailDispatchQueuedAt).toBeTruthy();
+  });
+
+  test("sendBookingEmails dispatches deferred emails once and stays idempotent", async () => {
+    const startTimeUTC = "2025-01-15T08:20:00.000Z";
+    const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
+
+    const { res: bookingRes } = await createPaidBooking({
+      startTimeUTC,
+      timeZone: "America/Los_Angeles",
+      paymentProvider: "paypal",
+      holdId: hold.body.holdId,
+      holdToken: hold.body.holdToken,
+      holdExpiresAt: hold.body.expiresAt,
+      deferEmailsUntilConfirmation: true,
+    });
+
+    expect(bookingRes.statusCode).toBe(200);
+    expect(mockSendEmail).not.toHaveBeenCalled();
+
+    const firstDispatchRes = createRes();
+    await sendBookingEmails(
+      createReq({
+        bookingId: bookingRes.body.bookingId,
+        emailDispatchToken: bookingRes.body.emailDispatchToken,
+      }),
+      firstDispatchRes
+    );
+
+    expect(firstDispatchRes.statusCode).toBe(200);
+    expect(firstDispatchRes.body.ok).toBe(true);
+    expect(mockSendEmail).toHaveBeenCalledTimes(2);
+
+    const bookingAfterFirstDispatch = store.bookings.find(
+      (entry) => entry._id === bookingRes.body.bookingId
+    );
+    expect(bookingAfterFirstDispatch.emailDispatchClientSentAt).toBeTruthy();
+    expect(bookingAfterFirstDispatch.emailDispatchOwnerSentAt).toBeTruthy();
+    expect(bookingAfterFirstDispatch.emailDispatchStatus).toBe("sent");
+
+    const secondDispatchRes = createRes();
+    await sendBookingEmails(
+      createReq({
+        bookingId: bookingRes.body.bookingId,
+        emailDispatchToken: bookingRes.body.emailDispatchToken,
+      }),
+      secondDispatchRes
+    );
+
+    expect(secondDispatchRes.statusCode).toBe(200);
+    expect(secondDispatchRes.body.ok).toBe(true);
+    expect(mockSendEmail).toHaveBeenCalledTimes(2);
+  });
+
+  test("captured paid bookings auto-reconcile after the original hold expires", async () => {
+    const baseTime = new Date("2025-01-01T00:00:00.000Z").getTime();
+    const nowSpy = jest.spyOn(Date, "now").mockReturnValue(baseTime);
+
+    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
+    expect(hold.res.statusCode).toBe(200);
+
+    nowSpy.mockReturnValue(baseTime + 16 * 60 * 1000);
+
+    const { res } = await createPaidBooking({
+      startTimeUTC,
+      timeZone: "America/Los_Angeles",
+      paymentProvider: "paypal",
+      holdId: hold.body.holdId,
+      holdToken: hold.body.holdToken,
+      holdExpiresAt: hold.body.expiresAt,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(store.bookings).toHaveLength(1);
+    expect(store.bookings[0].slotReservationState).toBe(
+      "reconciled_after_expired_hold"
+    );
+    expect(mockSendEmail).toHaveBeenCalledTimes(2);
+
+    nowSpy.mockRestore();
+  });
+
+  test("captured paid bookings auto-reconcile when an expired hold was already deleted", async () => {
+    const baseTime = new Date("2025-01-01T00:00:00.000Z").getTime();
+    const nowSpy = jest.spyOn(Date, "now").mockReturnValue(baseTime);
+
+    const startTimeUTC = "2025-01-15T09:00:00.000Z";
+    const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
+    expect(hold.res.statusCode).toBe(200);
+
+    store.slotHolds = [];
+    nowSpy.mockReturnValue(baseTime + 16 * 60 * 1000);
+
+    const { res } = await createPaidBooking({
+      startTimeUTC,
+      timeZone: "America/Los_Angeles",
+      paymentProvider: "paypal",
+      holdId: hold.body.holdId,
+      holdToken: hold.body.holdToken,
+      holdExpiresAt: hold.body.expiresAt,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(store.bookings).toHaveLength(1);
+    expect(store.bookings[0].slotReservationState).toBe(
+      "reconciled_after_missing_hold"
+    );
+
+    nowSpy.mockRestore();
   });
 
   test("payment failure releases hold via API and sends no emails", async () => {
@@ -651,6 +819,338 @@ describe("booking reservation API", () => {
       formatClientTime(originalUtcDate, "America/Los_Angeles")
     );
     expect(upgrade.originalOrderId).toBe("booking_original");
+  });
+
+  test("upgrade booking rejects requests without the original booking email", async () => {
+    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    const originalUtcDate = new Date(startTimeUTC);
+    store.bookings.push({
+      _id: "booking_original",
+      _type: "booking",
+      status: "completed",
+      email: CLIENT_EMAIL,
+      payerEmail: "payer@example.com",
+      packageTitle: "Performance Vertex Overhaul",
+      packagePrice: "$84.99",
+      grossAmount: 84.99,
+      netAmount: 84.99,
+      localTimeZone: "America/Los_Angeles",
+      startTimeUTC,
+      displayDate: formatClientDate(originalUtcDate, "America/Los_Angeles"),
+      displayTime: formatClientTime(originalUtcDate, "America/Los_Angeles"),
+      hostDate: formatOwnerDate(originalUtcDate),
+      hostTime: formatOwnerTime(originalUtcDate),
+    });
+
+    const res = createRes();
+    await createBooking(
+      createReq({
+        packageTitle: "XOC / Extreme Overclocking",
+        packagePrice: "$64.96",
+        status: "captured",
+        paymentProvider: "paypal",
+        paypalOrderId: "paypal_upgrade_missing_email",
+        originalOrderId: "booking_original",
+      }),
+      res
+    );
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual({
+      error: "Upgrade details do not match the original booking.",
+    });
+    expect(store.bookings).toHaveLength(1);
+  });
+
+  test("upgrade booking rejects mismatched booking email", async () => {
+    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    const originalUtcDate = new Date(startTimeUTC);
+    store.bookings.push({
+      _id: "booking_original",
+      _type: "booking",
+      status: "completed",
+      email: CLIENT_EMAIL,
+      payerEmail: "payer@example.com",
+      packageTitle: "Performance Vertex Overhaul",
+      packagePrice: "$84.99",
+      grossAmount: 84.99,
+      netAmount: 84.99,
+      localTimeZone: "America/Los_Angeles",
+      startTimeUTC,
+      displayDate: formatClientDate(originalUtcDate, "America/Los_Angeles"),
+      displayTime: formatClientTime(originalUtcDate, "America/Los_Angeles"),
+      hostDate: formatOwnerDate(originalUtcDate),
+      hostTime: formatOwnerTime(originalUtcDate),
+    });
+
+    const res = createRes();
+    await createBooking(
+      createReq({
+        email: "wrong@example.com",
+        packageTitle: "XOC / Extreme Overclocking",
+        packagePrice: "$64.96",
+        status: "captured",
+        paymentProvider: "paypal",
+        paypalOrderId: "paypal_upgrade_wrong_email",
+        originalOrderId: "booking_original",
+      }),
+      res
+    );
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual({
+      error: "Upgrade details do not match the original booking.",
+    });
+    expect(store.bookings).toHaveLength(1);
+  });
+
+  test("upgrade pricing uses cumulative paid amount across prior paid upgrades", async () => {
+    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    const originalUtcDate = new Date(startTimeUTC);
+    store.bookings.push({
+      _id: "booking_original",
+      _type: "booking",
+      status: "completed",
+      email: CLIENT_EMAIL,
+      packageTitle: "Performance Vertex Overhaul",
+      packagePrice: "$84.99",
+      grossAmount: 84.99,
+      netAmount: 84.99,
+      localTimeZone: "America/Los_Angeles",
+      startTimeUTC,
+      displayDate: formatClientDate(originalUtcDate, "America/Los_Angeles"),
+      displayTime: formatClientTime(originalUtcDate, "America/Los_Angeles"),
+      hostDate: formatOwnerDate(originalUtcDate),
+      hostTime: formatOwnerTime(originalUtcDate),
+    });
+    store.bookings.push({
+      _id: "booking_upgrade_prior",
+      _type: "booking",
+      status: "captured",
+      email: CLIENT_EMAIL,
+      originalOrderId: "booking_original",
+      packageTitle: "Cooling Tuning Add-On",
+      packagePrice: "$20.00",
+      grossAmount: 20,
+      netAmount: 20,
+    });
+
+    const res = createRes();
+    await createBooking(
+      createReq({
+        email: CLIENT_EMAIL,
+        packageTitle: "XOC / Extreme Overclocking",
+        packagePrice: "$44.96",
+        status: "captured",
+        paymentProvider: "paypal",
+        paypalOrderId: "paypal_upgrade_cumulative",
+        originalOrderId: "booking_original",
+      }),
+      res
+    );
+
+    expect(res.statusCode).toBe(200);
+    const upgrade = store.bookings.find((b) => b._id === res.body.bookingId);
+    expect(upgrade.grossAmount).toBeCloseTo(44.96, 2);
+    expect(upgrade.netAmount).toBeCloseTo(44.96, 2);
+    expect(upgrade.packagePrice).toBe("$44.96");
+  });
+
+  test("upgrade booking rejects orders already at the target package", async () => {
+    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    const originalUtcDate = new Date(startTimeUTC);
+    store.bookings.push({
+      _id: "booking_original",
+      _type: "booking",
+      status: "completed",
+      email: CLIENT_EMAIL,
+      packageTitle: "Performance Vertex Overhaul",
+      packagePrice: "$84.99",
+      grossAmount: 84.99,
+      netAmount: 84.99,
+      localTimeZone: "America/Los_Angeles",
+      startTimeUTC,
+      displayDate: formatClientDate(originalUtcDate, "America/Los_Angeles"),
+      displayTime: formatClientTime(originalUtcDate, "America/Los_Angeles"),
+      hostDate: formatOwnerDate(originalUtcDate),
+      hostTime: formatOwnerTime(originalUtcDate),
+    });
+    store.bookings.push({
+      _id: "booking_upgrade_target",
+      _type: "booking",
+      status: "captured",
+      email: CLIENT_EMAIL,
+      originalOrderId: "booking_original",
+      packageTitle: "XOC / Extreme Overclocking",
+      packagePrice: "$64.96",
+      grossAmount: 64.96,
+      netAmount: 64.96,
+    });
+
+    const res = createRes();
+    await createBooking(
+      createReq({
+        email: CLIENT_EMAIL,
+        packageTitle: "XOC / Extreme Overclocking",
+        packagePrice: "$0.00",
+        status: "captured",
+        paymentProvider: "paypal",
+        paypalOrderId: "paypal_upgrade_already_target",
+        originalOrderId: "booking_original",
+      }),
+      res
+    );
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({
+      error: "This order already matches the target package.",
+    });
+  });
+
+  test("rejects Razorpay payments that are not captured upstream", async () => {
+    process.env.RAZORPAY_KEY_ID = "rzp_test_123";
+    process.env.RAZORPAY_KEY_SECRET = "rzp_secret";
+
+    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    const originalUtcDate = new Date(startTimeUTC);
+    store.bookings.push({
+      _id: "booking_original",
+      _type: "booking",
+      status: "completed",
+      email: CLIENT_EMAIL,
+      packageTitle: "Performance Vertex Overhaul",
+      packagePrice: "$84.99",
+      grossAmount: 84.99,
+      netAmount: 84.99,
+      localTimeZone: "America/Los_Angeles",
+      startTimeUTC,
+      displayDate: formatClientDate(originalUtcDate, "America/Los_Angeles"),
+      displayTime: formatClientTime(originalUtcDate, "America/Los_Angeles"),
+      hostDate: formatOwnerDate(originalUtcDate),
+      hostTime: formatOwnerTime(originalUtcDate),
+    });
+
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        order_id: "razorpay_order_1",
+        currency: "USD",
+        amount: 6496,
+        status: "authorized",
+      }),
+    }));
+
+    const signature = require("crypto")
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update("razorpay_order_1|razorpay_payment_1")
+      .digest("hex");
+
+    const res = createRes();
+    await createBooking(
+      createReq({
+        email: CLIENT_EMAIL,
+        packageTitle: "XOC / Extreme Overclocking",
+        packagePrice: "$64.96",
+        status: "captured",
+        paymentProvider: "razorpay",
+        razorpayOrderId: "razorpay_order_1",
+        razorpayPaymentId: "razorpay_payment_1",
+        razorpaySignature: signature,
+        originalOrderId: "booking_original",
+      }),
+      res
+    );
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: "Payment verification failed." });
+  });
+
+  test("rejects PayPal payments with the wrong captured currency", async () => {
+    process.env.PAYPAL_CLIENT_ID = "paypal_client";
+    process.env.PAYPAL_CLIENT_SECRET = "paypal_secret";
+
+    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    const originalUtcDate = new Date(startTimeUTC);
+    store.bookings.push({
+      _id: "booking_original",
+      _type: "booking",
+      status: "completed",
+      email: CLIENT_EMAIL,
+      payerEmail: CLIENT_EMAIL,
+      packageTitle: "Performance Vertex Overhaul",
+      packagePrice: "$84.99",
+      grossAmount: 84.99,
+      netAmount: 84.99,
+      localTimeZone: "America/Los_Angeles",
+      startTimeUTC,
+      displayDate: formatClientDate(originalUtcDate, "America/Los_Angeles"),
+      displayTime: formatClientTime(originalUtcDate, "America/Los_Angeles"),
+      hostDate: formatOwnerDate(originalUtcDate),
+      hostTime: formatOwnerTime(originalUtcDate),
+    });
+
+    global.fetch = jest.fn(async (url) => {
+      if (String(url).includes("/v1/oauth2/token")) {
+        return {
+          ok: true,
+          json: async () => ({ access_token: "paypal-token" }),
+        };
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          status: "COMPLETED",
+          payer: { email_address: CLIENT_EMAIL },
+          purchase_units: [
+            {
+              payments: {
+                captures: [
+                  {
+                    amount: {
+                      value: "64.96",
+                      currency_code: "EUR",
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      };
+    });
+
+    const res = createRes();
+    await createBooking(
+      createReq({
+        email: CLIENT_EMAIL,
+        packageTitle: "XOC / Extreme Overclocking",
+        packagePrice: "$64.96",
+        status: "captured",
+        paymentProvider: "paypal",
+        paypalOrderId: "paypal_upgrade_currency_mismatch",
+        originalOrderId: "booking_original",
+      }),
+      res
+    );
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: "Payment verification failed." });
+  });
+
+  test("rate limits repeated hold requests", async () => {
+    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    let lastResponse = null;
+
+    for (let index = 0; index < 21; index += 1) {
+      lastResponse = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
+    }
+
+    expect(lastResponse.res.statusCode).toBe(429);
+    expect(lastResponse.body).toEqual({
+      ok: false,
+      error: "Too many slot hold requests. Please try again later.",
+    });
   });
 });
 

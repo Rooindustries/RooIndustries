@@ -38,7 +38,13 @@ export const issueHoldToken = ({ holdId, startTimeUTC, expiresAt, holdNonce = ""
   return `${encoded}.${signature}`;
 };
 
-export const verifyHoldToken = ({ token, holdId, startTimeUTC, holdNonce = "" }) => {
+export const verifyHoldToken = ({
+  token,
+  holdId,
+  startTimeUTC,
+  holdNonce = "",
+  ignoreExpiry = false,
+}) => {
   try {
     assertSecret();
     if (!token || typeof token !== "string" || !token.includes(".")) return null;
@@ -58,7 +64,7 @@ export const verifyHoldToken = ({ token, holdId, startTimeUTC, holdNonce = "" })
     if (holdId && payload.hid !== holdId) return null;
     if (startTimeUTC && payload.st && payload.st !== startTimeUTC) return null;
     if (holdNonce && payload.n !== holdNonce) return null;
-    if (payload.exp <= Math.floor(Date.now() / 1000)) return null;
+    if (!ignoreExpiry && payload.exp <= Math.floor(Date.now() / 1000)) return null;
     return payload;
   } catch {
     return null;

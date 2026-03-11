@@ -1,4 +1,5 @@
 import { createClient } from "@sanity/client";
+import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 
 const readClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -12,6 +13,17 @@ export default async function handler(req, res) {
   try {
     const raw = (req.query.code || "").trim();
     const code = raw.toLowerCase();
+    const clientAddress = getClientAddress(req);
+
+    if (
+      !requireRateLimit(res, {
+        key: `validate-referral:${clientAddress}:${code}`,
+        max: 25,
+        message: "Too many referral validation requests. Please try again later.",
+      })
+    ) {
+      return;
+    }
 
     if (!readClient.config().projectId || !readClient.config().dataset) {
       console.error("Sanity env missing:", {

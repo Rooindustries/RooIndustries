@@ -3,6 +3,7 @@ import { createClient } from "@sanity/client";
 import crypto from "crypto";
 import { issueHoldToken, verifyHoldToken } from "./holdToken.js";
 import { buildSlotHoldId } from "./slotIdentity.js";
+import { getClientAddress, requireRateLimit } from "../api/ref/rateLimit.js";
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -62,6 +63,23 @@ export default async function handler(req, res) {
   try {
     const { startTimeUTC, packageTitle, previousHoldId, previousHoldToken } =
       req.body || {};
+    const clientAddress = getClientAddress(req);
+    const rateLimitKey = [
+      "hold-slot",
+      clientAddress,
+      String(startTimeUTC || "").trim().toLowerCase(),
+      String(previousHoldId || "").trim().toLowerCase(),
+    ].join(":");
+
+    if (
+      !requireRateLimit(res, {
+        key: rateLimitKey,
+        max: 20,
+        message: "Too many slot hold requests. Please try again later.",
+      })
+    ) {
+      return;
+    }
 
     if (!startTimeUTC) {
       return res.status(400).json({

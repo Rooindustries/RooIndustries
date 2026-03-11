@@ -1,5 +1,6 @@
 import { createClient } from "@sanity/client";
 import { verifyHoldToken } from "./holdToken.js";
+import { getClientAddress, requireRateLimit } from "../api/ref/rateLimit.js";
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -15,6 +16,22 @@ export default async function handler(req, res) {
   }
 
   const { holdId, holdToken } = req.body || {};
+  const clientAddress = getClientAddress(req);
+  const rateLimitKey = [
+    "release-hold",
+    clientAddress,
+    String(holdId || "").trim().toLowerCase(),
+  ].join(":");
+
+  if (
+    !requireRateLimit(res, {
+      key: rateLimitKey,
+      max: 25,
+      message: "Too many hold release requests. Please try again later.",
+    })
+  ) {
+    return;
+  }
 
   if (!holdId || !holdToken) {
     return res.status(400).json({ ok: false, message: "Missing hold credentials" });

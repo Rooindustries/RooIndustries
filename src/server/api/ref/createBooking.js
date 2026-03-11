@@ -1,9 +1,21 @@
-import { Resend } from "resend";
 import { createClient } from "@sanity/client";
 import crypto from "crypto";
 import { verifyHoldToken } from "../../booking/holdToken.js";
-import { resolveBookingPricing } from "./pricing.js";
-import { buildSlotBookingId } from "../../booking/slotIdentity.js";
+import { resolveBookingPricing, resolveUpgradeContext } from "./pricing.js";
+import {
+  buildSlotBookingId,
+  buildSlotHoldId,
+} from "../../booking/slotIdentity.js";
+import { getClientAddress, requireRateLimit } from "./rateLimit.js";
+import {
+  buildDeferredEmailDispatch,
+  getBookingForEmailDispatch,
+  sendBookingEmailsForBooking,
+} from "./bookingEmails.js";
+import {
+  canIssueBookingEmailDispatchToken,
+  issueBookingEmailDispatchToken,
+} from "./bookingEmailDispatchToken.js";
 
 const writeClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -13,9 +25,6 @@ const writeClient = createClient({
   useCdn: false,
 });
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-
-const DISCORD_INVITE_URL = "https://discord.gg/M7nTkn9dxE";
 const OWNER_TZ_NAME = "Asia/Kolkata";
 
 const parseUtcDate = (value) => {
@@ -99,6 +108,31 @@ const clampPercent = (value) => {
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 
+const buildBookingSuccessResponse = ({
+  bookingId = "",
+  emailDispatch = null,
+  emailDispatchToken = "",
+  idempotent = false,
+}) => {
+  const body = {
+    bookingId,
+  };
+
+  if (idempotent) {
+    body.idempotent = true;
+  }
+
+  if (emailDispatch) {
+    body.emailDispatch = emailDispatch;
+  }
+
+  if (emailDispatchToken) {
+    body.emailDispatchToken = emailDispatchToken;
+  }
+
+  return body;
+};
+
 const resolveIsProdLike = () => {
   const vercelEnv = String(process.env.VERCEL_ENV || "").toLowerCase();
   if (vercelEnv) return vercelEnv === "production";
@@ -110,6 +144,9 @@ const isTestEnv = process.env.NODE_ENV === "test";
 const DEFAULT_RAZORPAY_CURRENCY = String(
   process.env.RAZORPAY_CURRENCY || "USD"
 )
+  .trim()
+  .toUpperCase() || "USD";
+const DEFAULT_PAYPAL_CURRENCY = String(process.env.PAYPAL_CURRENCY || "USD")
   .trim()
   .toUpperCase() || "USD";
 
@@ -142,49 +179,54 @@ const verifyRazorpayPayment = async ({
   expectedAmount,
   expectedCurrency = "USD",
 }) => {
-  const keyId = process.env.RAZORPAY_KEY_ID || "";
-  const keySecret = process.env.RAZORPAY_KEY_SECRET || "";
+  try {
+    const keyId = process.env.RAZORPAY_KEY_ID || "";
+    const keySecret = process.env.RAZORPAY_KEY_SECRET || "";
 
-  if (!keyId || !keySecret) {
-    return { ok: false, reason: "razorpay_credentials_missing" };
-  }
-
-  const basic = Buffer.from(`${keyId}:${keySecret}`).toString("base64");
-  const response = await fetch(
-    `https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}`,
-    {
-      headers: {
-        Authorization: `Basic ${basic}`,
-      },
+    if (!keyId || !keySecret) {
+      return { ok: false, reason: "razorpay_credentials_missing" };
     }
-  );
 
-  if (!response.ok) {
-    return { ok: false, reason: `razorpay_lookup_failed_${response.status}` };
+    const basic = Buffer.from(`${keyId}:${keySecret}`).toString("base64");
+    const response = await fetch(
+      `https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}`,
+      {
+        headers: {
+          Authorization: `Basic ${basic}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      return { ok: false, reason: `razorpay_lookup_failed_${response.status}` };
+    }
+
+    const payment = await response.json();
+    const status = String(payment?.status || "").toLowerCase();
+    const paidAmount = Number(payment?.amount || 0);
+    const expectedSubunits = toSubunits(expectedAmount, expectedCurrency);
+
+    if (payment?.order_id !== orderId) {
+      return { ok: false, reason: "razorpay_order_mismatch" };
+    }
+
+    if (payment?.currency !== expectedCurrency) {
+      return { ok: false, reason: "razorpay_currency_mismatch" };
+    }
+
+    if (status !== "captured") {
+      return { ok: false, reason: `razorpay_status_${status || "unknown"}` };
+    }
+
+    if (paidAmount !== expectedSubunits) {
+      return { ok: false, reason: "razorpay_amount_mismatch" };
+    }
+
+    return { ok: true };
+  } catch (error) {
+    console.error("Razorpay lookup failed:", error);
+    return { ok: false, reason: "razorpay_lookup_exception" };
   }
-
-  const payment = await response.json();
-  const status = String(payment?.status || "").toLowerCase();
-  const paidAmount = Number(payment?.amount || 0);
-  const expectedSubunits = toSubunits(expectedAmount, expectedCurrency);
-
-  if (payment?.order_id !== orderId) {
-    return { ok: false, reason: "razorpay_order_mismatch" };
-  }
-
-  if (payment?.currency !== expectedCurrency) {
-    return { ok: false, reason: "razorpay_currency_mismatch" };
-  }
-
-  if (status !== "authorized" && status !== "captured") {
-    return { ok: false, reason: `razorpay_status_${status || "unknown"}` };
-  }
-
-  if (paidAmount !== expectedSubunits) {
-    return { ok: false, reason: "razorpay_amount_mismatch" };
-  }
-
-  return { ok: true };
 };
 
 const getPayPalMode = () => {
@@ -220,126 +262,91 @@ const getPayPalCredentials = () => {
 
 const getPayPalToken = async () => {
   const { clientId, clientSecret } = getPayPalCredentials();
-  if (!clientId || !clientSecret) return null;
+  if (!clientId || !clientSecret) {
+    return { ok: false, reason: "paypal_credentials_missing", token: "" };
+  }
 
-  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
-  const response = await fetch(`${getPayPalBaseUrl()}/v1/oauth2/token`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${basic}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials",
-  });
-  if (!response.ok) return null;
-  const data = await response.json();
-  return data?.access_token || null;
-};
-
-const verifyPayPalOrder = async ({ orderId, expectedAmount }) => {
-  const token = await getPayPalToken();
-  if (!token) return { ok: false, reason: "paypal_credentials_missing" };
-
-  const response = await fetch(
-    `${getPayPalBaseUrl()}/v2/checkout/orders/${encodeURIComponent(orderId)}`,
-    {
+  try {
+    const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+    const response = await fetch(`${getPayPalBaseUrl()}/v1/oauth2/token`, {
+      method: "POST",
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: `Basic ${basic}`,
+        "Content-Type": "application/x-www-form-urlencoded",
       },
+      body: "grant_type=client_credentials",
+    });
+    if (!response.ok) {
+      return { ok: false, reason: `paypal_token_failed_${response.status}`, token: "" };
     }
-  );
-
-  if (!response.ok) {
-    return { ok: false, reason: `paypal_lookup_failed_${response.status}` };
+    const data = await response.json();
+    const token = String(data?.access_token || "").trim();
+    if (!token) {
+      return { ok: false, reason: "paypal_token_missing", token: "" };
+    }
+    return { ok: true, reason: "", token };
+  } catch (error) {
+    console.error("PayPal token lookup failed:", error);
+    return { ok: false, reason: "paypal_token_exception", token: "" };
   }
-
-  const details = await response.json();
-  const status = String(details?.status || "").toUpperCase();
-  if (status !== "COMPLETED") {
-    return { ok: false, reason: `paypal_status_${status || "unknown"}` };
-  }
-
-  const paidAmount =
-    toMoney(
-      details?.purchase_units?.[0]?.payments?.captures?.[0]?.amount?.value ||
-        details?.purchase_units?.[0]?.amount?.value ||
-        0
-    ) || 0;
-
-  if (Math.abs(paidAmount - expectedAmount) > 0.01) {
-    return { ok: false, reason: "paypal_amount_mismatch" };
-  }
-
-  return {
-    ok: true,
-    payerEmail: details?.payer?.email_address || "",
-  };
 };
 
-const emailHtml = ({
-  logoUrl,
-  siteName,
-  heading,
-  intro,
-  fields,
-  discordInviteUrl,
-  discordLabel,
-}) => `
-  <div style="font-family:Inter,Arial,sans-serif;background:#0b1120;padding:24px;color:#e5f2ff">
-    <table width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;margin:0 auto;background:#0f172a;border:1px solid rgba(56,189,248,.2);border-radius:16px;overflow:hidden">
-      <tr>
-        <td style="padding:24px;text-align:center;border-bottom:1px solid rgba(56,189,248,.15)">
-          <img src="${logoUrl}" alt="${siteName}" style="height:48px;display:block;margin:0 auto 8px"/>
-          <div style="font-weight:700;font-size:18px;color:#7dd3fc">${siteName}</div>
-        </td>
-      </tr>
-      <tr>
-        <td style="padding:24px">
-          <h1 style="margin:0 0 8px;font-size:20px;color:#a5e8ff">${heading}</h1>
+const verifyPayPalOrder = async ({
+  orderId,
+  expectedAmount,
+  expectedCurrency = "USD",
+}) => {
+  const tokenResult = await getPayPalToken();
+  if (!tokenResult.ok) {
+    return { ok: false, reason: tokenResult.reason || "paypal_credentials_missing" };
+  }
 
-          ${
-            discordInviteUrl
-              ? `
-          <p style="margin:0 0 10px;">
-            <a
-              href="${discordInviteUrl}"
-              style="
-                display:inline-block;
-                padding:8px 14px;
-                border-radius:999px;
-                background:#38bdf8;
-                color:#0b1120;
-                font-size:13px;
-                text-decoration:none;
-                font-weight:600;
-              "
-            >
-              ${discordLabel || "Join the Roo Industries Discord (Required)"}
-            </a>
-          </p>`
-              : ""
-          }
+  try {
+    const response = await fetch(
+      `${getPayPalBaseUrl()}/v2/checkout/orders/${encodeURIComponent(orderId)}`,
+      {
+        headers: {
+          Authorization: `Bearer ${tokenResult.token}`,
+        },
+      }
+    );
 
-          <p style="margin:10px 0 16px;opacity:.85">${intro}</p>
-          <table cellpadding="0" cellspacing="0" style="width:100%;background:#0b1120;border:1px solid rgba(56,189,248,.15);border-radius:12px">
-            <tbody>
-              ${fields
-                .map(
-                  (f) => `
-                <tr>
-                  <td style="padding:10px 14px;color:#93c5fd;width:40%">${f.label}</td>
-                  <td style="padding:10px 14px;color:#e5f2ff">${f.value}</td>
-                </tr>`
-                )
-                .join("")}
-            </tbody>
-          </table>
-          <p style="margin:18px 0 0;font-size:12px;color:#94a3b8">This is an automatic email from ${siteName}.</p>
-        </td>
-      </tr>
-    </table>
-  </div>
-`;
+    if (!response.ok) {
+      return { ok: false, reason: `paypal_lookup_failed_${response.status}` };
+    }
+
+    const details = await response.json();
+    const status = String(details?.status || "").toUpperCase();
+    if (status !== "COMPLETED") {
+      return { ok: false, reason: `paypal_status_${status || "unknown"}` };
+    }
+
+    const captureAmount =
+      details?.purchase_units?.[0]?.payments?.captures?.[0]?.amount ||
+      details?.purchase_units?.[0]?.amount ||
+      null;
+    const paidAmount = toMoney(captureAmount?.value || 0) || 0;
+    const paidCurrency = String(captureAmount?.currency_code || "")
+      .trim()
+      .toUpperCase();
+
+    if (Math.abs(paidAmount - expectedAmount) > 0.01) {
+      return { ok: false, reason: "paypal_amount_mismatch" };
+    }
+
+    if (paidCurrency !== String(expectedCurrency || "USD").trim().toUpperCase()) {
+      return { ok: false, reason: "paypal_currency_mismatch" };
+    }
+
+    return {
+      ok: true,
+      payerEmail: details?.payer?.email_address || "",
+    };
+  } catch (error) {
+    console.error("PayPal order lookup failed:", error);
+    return { ok: false, reason: "paypal_lookup_exception" };
+  }
+};
 
 export default async function handler(req, res) {
   if (req.method !== "POST")
@@ -371,54 +378,51 @@ export default async function handler(req, res) {
       slotHoldId = "",
       slotHoldToken = "",
       paymentProvider = "",
+      deferEmailsUntilConfirmation = false,
     } = req.body || {};
     const isUpgrade = !!originalOrderId;
+    const clientAddress = getClientAddress(req);
+    const rateLimitKeyParts = [
+      "create-booking",
+      clientAddress,
+      String(paymentProvider || "").trim().toLowerCase(),
+      String(originalOrderId || "").trim().toLowerCase(),
+      String(startTimeUTC || "").trim().toLowerCase(),
+      String(paypalOrderId || "").trim().toLowerCase(),
+      String(razorpayPaymentId || "").trim().toLowerCase(),
+    ];
+
+    if (
+      !requireRateLimit(res, {
+        key: rateLimitKeyParts.join(":"),
+        max: 10,
+        message: "Too many booking attempts. Please try again later.",
+      })
+    ) {
+      return;
+    }
 
     let originalBooking = null;
+    let upgradeContext = null;
     if (isUpgrade) {
-      originalBooking = await writeClient.fetch(
-        `*[_type == "booking" && _id == $id][0]{
-          _id,
-          status,
-          discord,
-          email,
-          payerEmail,
-          specs,
-          mainGame,
-          message,
-          localTimeZone,
-          startTimeUTC,
-          displayDate,
-          displayTime
-        }`,
-        { id: originalOrderId }
-      );
-
-      if (!originalBooking?._id) {
-        return res.status(400).json({
-          error: "Original booking could not be verified for this upgrade.",
+      const normalizedUpgradeEmail = normalizeEmail(email);
+      if (!normalizedUpgradeEmail) {
+        return res.status(403).json({
+          error: "Upgrade details do not match the original booking.",
         });
       }
 
-      const originalStatus = String(originalBooking.status || "").toLowerCase();
-      const originalPaid =
-        originalStatus === "captured" || originalStatus === "completed";
-      if (!originalPaid) {
-        return res.status(400).json({
-          error: "Only paid bookings can be upgraded.",
-        });
-      }
-
-      const allowedUpgradeEmails = [
-        originalBooking.email,
-        originalBooking.payerEmail,
-      ]
+      upgradeContext = await resolveUpgradeContext({
+        originalOrderId,
+        packageTitle,
+        client: writeClient,
+      });
+      originalBooking = upgradeContext.booking;
+      const allowedUpgradeEmails = [originalBooking.email, originalBooking.payerEmail]
         .map(normalizeEmail)
         .filter(Boolean);
-      const normalizedUpgradeEmail = normalizeEmail(email);
 
       if (
-        normalizedUpgradeEmail &&
         allowedUpgradeEmails.length > 0 &&
         !allowedUpgradeEmails.includes(normalizedUpgradeEmail)
       ) {
@@ -466,6 +470,82 @@ export default async function handler(req, res) {
     ) {
       return res.status(400).json({ error: "Unsupported payment provider." });
     }
+
+    const deferEmailDispatchRequested = deferEmailsUntilConfirmation === true;
+    const respondWithStoredBooking = async ({ bookingId, idempotent = false }) => {
+      const normalizedBookingId = String(bookingId || "").trim();
+      if (!normalizedBookingId) {
+        return res
+          .status(200)
+          .json(buildBookingSuccessResponse({ bookingId, idempotent }));
+      }
+
+      const booking = await getBookingForEmailDispatch({
+        bookingId: normalizedBookingId,
+        client: writeClient,
+      });
+
+      if (!booking?._id) {
+        return res
+          .status(200)
+          .json(buildBookingSuccessResponse({ bookingId, idempotent }));
+      }
+
+      const allEmailsAlreadySent =
+        !!booking.emailDispatchClientSentAt && !!booking.emailDispatchOwnerSentAt;
+
+      if (
+        deferEmailDispatchRequested &&
+        canIssueBookingEmailDispatchToken() &&
+        !allEmailsAlreadySent
+      ) {
+        const queuedAt = booking.emailDispatchQueuedAt || new Date().toISOString();
+        const patchValues = {
+          emailDispatchDeferred: true,
+          emailDispatchStatus: "pending",
+          emailDispatchQueuedAt: queuedAt,
+          emailDispatchLastError: "",
+        };
+        const patchedBooking =
+          (await writeClient
+            .patch(booking._id)
+            .set(patchValues)
+            .commit()) || {
+            ...booking,
+            ...patchValues,
+          };
+
+        return res.status(200).json(
+          buildBookingSuccessResponse({
+            bookingId: booking._id,
+            idempotent,
+            emailDispatch: buildDeferredEmailDispatch({
+              booking: patchedBooking,
+            }),
+            emailDispatchToken: issueBookingEmailDispatchToken({
+              bookingId: booking._id,
+              email: String(
+                patchedBooking.email || patchedBooking.payerEmail || ""
+              ).trim(),
+            }),
+          })
+        );
+      }
+
+      const sendResult = await sendBookingEmailsForBooking({
+        bookingId: booking._id,
+        booking,
+        client: writeClient,
+      });
+
+      return res.status(sendResult.httpStatus).json(
+        buildBookingSuccessResponse({
+          bookingId: booking._id,
+          idempotent,
+          emailDispatch: sendResult.body?.emailDispatch || null,
+        })
+      );
+    };
 
     if (paymentProvider === "free") {
       if (status !== "captured") {
@@ -545,7 +625,7 @@ export default async function handler(req, res) {
         { paypalOrderId }
       );
       if (existingByPaypal?._id) {
-        return res.status(200).json({
+        return respondWithStoredBooking({
           bookingId: existingByPaypal._id,
           idempotent: true,
         });
@@ -558,7 +638,7 @@ export default async function handler(req, res) {
         { razorpayPaymentId }
       );
       if (existingByRazorpay?._id) {
-        return res.status(200).json({
+        return respondWithStoredBooking({
           bookingId: existingByRazorpay._id,
           idempotent: true,
         });
@@ -575,6 +655,9 @@ export default async function handler(req, res) {
     const normalizedStartTimeUTC = utcDate.toISOString();
     const bookingDocId = !isUpgrade
       ? buildSlotBookingId(normalizedStartTimeUTC)
+      : "";
+    const expectedHoldId = !isUpgrade
+      ? buildSlotHoldId(normalizedStartTimeUTC)
       : "";
     const ownerDate = formatOwnerDateLabel(utcDate);
     const ownerTime = formatOwnerTimeLabel(utcDate);
@@ -602,6 +685,14 @@ export default async function handler(req, res) {
       });
     }
 
+    let holdDoc = null;
+    let fetchActiveHold = null;
+    let holdUtcIso = "";
+    let slotReservationState = isUpgrade ? "upgrade" : "hold_active";
+    const isCapturedPaidPayment =
+      status === "captured" &&
+      (paymentProvider === "paypal" || paymentProvider === "razorpay");
+
     if (!isUpgrade) {
       const existingBooking = await writeClient.fetch(
         `*[_type == "booking" && hostDate == $date && hostTime == $time][0]`,
@@ -614,8 +705,7 @@ export default async function handler(req, res) {
         });
       }
 
-      const now = new Date();
-      const fetchActiveHold = () =>
+      fetchActiveHold = () =>
         writeClient.fetch(
           `*[_type == "slotHold"
               && hostDate == $date
@@ -630,57 +720,30 @@ export default async function handler(req, res) {
           .json({ error: "Your slot reservation expired." });
       }
 
-      const holdDoc = await writeClient.fetch(
+      holdDoc = await writeClient.fetch(
         `*[_type == "slotHold" && _id == $id][0]`,
         { id: slotHoldId }
       );
 
       if (!holdDoc) {
-        return res
-          .status(409)
-          .json({ error: "Your slot reservation expired." });
-      }
-
-      if (holdDoc.expiresAt && new Date(holdDoc.expiresAt) < now) {
-        try {
-          await writeClient.delete(slotHoldId);
-        } catch {}
-        return res
-          .status(409)
-          .json({ error: "Your slot reservation expired." });
-      }
-
-      const holdUtc = parseUtcDate(holdDoc.startTimeUTC);
-      const holdUtcIso = holdUtc ? holdUtc.toISOString() : "";
-      if (
-        (holdUtcIso && holdUtcIso !== normalizedStartTimeUTC) ||
-        (!holdUtcIso &&
-          (holdDoc.hostDate !== bookingDate ||
-            holdDoc.hostTime !== bookingTime))
-      ) {
-        return res.status(400).json({
-          error: "Slot hold does not match selected time.",
-        });
-      }
-
-      const validHoldToken = verifyHoldToken({
-        token: slotHoldToken,
-        holdId: slotHoldId,
-        startTimeUTC: holdUtcIso || normalizedStartTimeUTC,
-        holdNonce: holdDoc.holdNonce || "",
-      });
-
-      if (!validHoldToken) {
-        return res.status(403).json({
-          error: "This slot reservation is not valid for your session.",
-        });
-      }
-
-      const activeHold = await fetchActiveHold();
-      if (activeHold && activeHold._id !== slotHoldId) {
-        return res.status(409).json({
-          error: "This slot is temporarily reserved by another user.",
-        });
+        if (slotHoldId !== expectedHoldId) {
+          return res.status(400).json({
+            error: "Slot hold does not match selected time.",
+          });
+        }
+      } else {
+        const holdUtc = parseUtcDate(holdDoc.startTimeUTC);
+        holdUtcIso = holdUtc ? holdUtc.toISOString() : "";
+        if (
+          (holdUtcIso && holdUtcIso !== normalizedStartTimeUTC) ||
+          (!holdUtcIso &&
+            (holdDoc.hostDate !== bookingDate ||
+              holdDoc.hostTime !== bookingTime))
+        ) {
+          return res.status(400).json({
+            error: "Slot hold does not match selected time.",
+          });
+        }
       }
     }
 
@@ -703,6 +766,8 @@ export default async function handler(req, res) {
       referralCode,
       couponCode,
       paymentProvider,
+      client: writeClient,
+      upgradeContext,
     });
     const resolvedPackagePrice = `$${effectiveGrossAmount.toFixed(2)}`;
 
@@ -743,9 +808,11 @@ export default async function handler(req, res) {
         });
 
         if (!paymentVerification.ok) {
-          console.warn(
-            `Razorpay verification rejected: ${paymentVerification.reason || "unknown"}`
-          );
+          console.warn("Razorpay verification rejected", {
+            orderId: razorpayOrderId,
+            paymentId: razorpayPaymentId,
+            reason: paymentVerification.reason || "unknown",
+          });
           return res.status(400).json({
             error: "Payment verification failed.",
           });
@@ -773,11 +840,13 @@ export default async function handler(req, res) {
         const paypalVerification = await verifyPayPalOrder({
           orderId: paypalOrderId,
           expectedAmount: effectiveNetAmount,
+          expectedCurrency: DEFAULT_PAYPAL_CURRENCY,
         });
         if (!paypalVerification.ok) {
-          console.warn(
-            `PayPal verification rejected: ${paypalVerification.reason || "unknown"}`
-          );
+          console.warn("PayPal verification rejected", {
+            orderId: paypalOrderId,
+            reason: paypalVerification.reason || "unknown",
+          });
           return res.status(400).json({
             error: "Payment verification failed.",
           });
@@ -785,6 +854,55 @@ export default async function handler(req, res) {
         if (paypalVerification.payerEmail) {
           verifiedPayerEmail = paypalVerification.payerEmail;
         }
+      }
+    }
+
+    if (!isUpgrade) {
+      const signedHoldToken = verifyHoldToken({
+        token: slotHoldToken,
+        holdId: slotHoldId,
+        startTimeUTC: holdUtcIso || normalizedStartTimeUTC,
+        holdNonce: holdDoc?.holdNonce || "",
+      });
+      const signedExpiredHoldToken = verifyHoldToken({
+        token: slotHoldToken,
+        holdId: slotHoldId,
+        startTimeUTC: holdUtcIso || normalizedStartTimeUTC,
+        holdNonce: holdDoc?.holdNonce || "",
+        ignoreExpiry: true,
+      });
+      const activeHold = fetchActiveHold ? await fetchActiveHold() : null;
+      const hasActiveReplacementHold =
+        !!holdDoc &&
+        !!activeHold &&
+        !signedHoldToken &&
+        activeHold._id === slotHoldId;
+      const holdExpired =
+        !!holdDoc?.expiresAt && new Date(holdDoc.expiresAt) <= new Date();
+
+      if (signedHoldToken) {
+        slotReservationState = "hold_active";
+      } else if (
+        isCapturedPaidPayment &&
+        signedExpiredHoldToken &&
+        !activeHold &&
+        (!holdDoc || holdExpired)
+      ) {
+        slotReservationState = holdDoc
+          ? "reconciled_after_expired_hold"
+          : "reconciled_after_missing_hold";
+      } else if (hasActiveReplacementHold) {
+        return res.status(409).json({
+          error: "This slot is temporarily reserved by another user.",
+        });
+      } else if (holdExpired || !holdDoc) {
+        return res.status(409).json({
+          error: "Your slot reservation expired.",
+        });
+      } else {
+        return res.status(403).json({
+          error: "This slot reservation is not valid for your session.",
+        });
       }
     }
 
@@ -823,6 +941,9 @@ export default async function handler(req, res) {
         startTimeUTC: normalizedStartTimeUTC,
         displayDate: clientDate,
         displayTime: clientTime,
+        ...(slotReservationState
+          ? { slotReservationState }
+          : {}),
         ...(originalOrderId ? { originalOrderId } : {}),
         ...(couponCode
           ? {
@@ -860,7 +981,7 @@ export default async function handler(req, res) {
             existingBooking.razorpayPaymentId === razorpayPaymentId;
 
           if (samePaypalProof || sameRazorpayProof) {
-            return res.status(200).json({
+            return respondWithStoredBooking({
               bookingId: existingBooking._id,
               idempotent: true,
             });
@@ -924,143 +1045,51 @@ export default async function handler(req, res) {
       } catch {}
     }
 
-    let owner = process.env.OWNER_EMAIL;
-    try {
-      const settings = await writeClient.fetch(
-        `*[_type == "bookingSettings"][0]{ ownerEmail }`
-      );
-      const ownerFromSettings = String(settings?.ownerEmail || "").trim();
-      if (ownerFromSettings) {
-        owner = ownerFromSettings;
-      }
-    } catch (ownerErr) {
-      console.error(
-        "Failed to load booking owner email:",
-        ownerErr?.message || ownerErr
-      );
-    }
+    if (deferEmailDispatchRequested && canIssueBookingEmailDispatchToken()) {
+      const queuedAt = new Date().toISOString();
+      const deferredPatchValues = {
+        emailDispatchDeferred: true,
+        emailDispatchStatus: "pending",
+        emailDispatchQueuedAt: queuedAt,
+        emailDispatchLastError: "",
+      };
+      const deferredBooking =
+        (await writeClient
+          .patch(doc._id)
+          .set(deferredPatchValues)
+          .commit()) || {
+          ...doc,
+          ...deferredPatchValues,
+        };
 
-    const siteName = process.env.SITE_NAME || "Roo Industries";
-    const logoUrl =
-      process.env.LOGO_URL || "https://rooindustries.com/embed_logo.png";
-    const from = process.env.FROM_EMAIL;
-
-    const formatMoney = (value) =>
-      Number.isFinite(value) ? value.toFixed(2) : "0.00";
-    const discountPercentValue =
-      typeof effectiveDiscountPercent === "number" ? effectiveDiscountPercent : 0;
-    const discountAmountValue =
-      typeof effectiveDiscountAmount === "number" ? effectiveDiscountAmount : 0;
-    const couponPercentValue =
-      typeof couponDiscountPercent === "number" ? couponDiscountPercent : 0;
-    const couponAmountValue =
-      typeof couponDiscountAmount === "number" ? couponDiscountAmount : 0;
-    const couponSuffix =
-      couponPercentValue > 0 || couponAmountValue > 0
-        ? ` (${couponPercentValue}% - $${formatMoney(couponAmountValue)})`
-        : "";
-    const couponDisplay = couponCode ? `${couponCode}${couponSuffix}` : "-";
-    const referralDisplay = effectiveReferralCode || "-";
-
-    const sharedCoreFields = [
-      { label: "Package", value: `${packageTitle || "-"}` },
-      {
-        label: "Price",
-        value:
-          effectiveNetAmount < effectiveGrossAmount
-            ? `$${formatMoney(effectiveNetAmount)} (was $${formatMoney(effectiveGrossAmount)})`
-            : resolvedPackagePrice,
-      },
-      { label: "Discord", value: discord || "-" },
-      { label: "Email", value: email || "-" },
-      { label: "Main Game", value: mainGame || "-" },
-      { label: "PC Specs", value: specs || "-" },
-      { label: "Notes", value: message || "-" },
-      { label: "Referral Code", value: referralDisplay },
-      { label: "Coupon Code", value: couponDisplay },
-      { label: "Order ID", value: doc._id },
-    ];
-
-    const ownerDiscountFields = [];
-
-    if (discountPercentValue > 0 || discountAmountValue > 0) {
-      ownerDiscountFields.push({
-        label: "Discount",
-        value: `${discountPercentValue}% ($${formatMoney(discountAmountValue)})`,
-      });
-    }
-
-    const clientFields = [
-      { label: "Date", value: clientDate || "-" },
-      { label: "Time", value: clientTime || "-" },
-      ...(clientTimeZone ? [{ label: "Time Zone", value: clientTimeZone }] : []),
-      ...sharedCoreFields,
-    ];
-
-    const ownerFields = [
-      { label: "Client Date", value: clientDate || "-" },
-      { label: "Client Time", value: clientTime || "-" },
-      ...(clientTimeZone ? [{ label: "Client Time Zone", value: clientTimeZone }] : []),
-      { label: "Date", value: ownerDate || "-" },
-      { label: "Time", value: ownerTime || "-" },
-      { label: "Time Zone", value: OWNER_TZ_NAME },
-      ...ownerDiscountFields,
-      ...sharedCoreFields,
-    ];
-
-    const bookingRef = (doc._id || "").slice(-6).toUpperCase() || "BOOKING";
-
-    const clientSubject = `Your ${siteName} booking`;
-    const ownerSubject = `New booking ${bookingRef} - ${packageTitle} (${ownerDate} ${ownerTime})`;
-
-    if (from && email && process.env.RESEND_API_KEY) {
-      try {
-        const { error } = await resend.emails.send({
-          from,
-          to: email,
-          subject: clientSubject,
-          html: emailHtml({
-            logoUrl,
-            siteName,
-            heading: "Booking Received ✨",
-            intro:
-              "To continue with your booking, please join the Roo Industries Discord using the button above. I'll contact you there (or by email if needed) to confirm your time and details.",
-            fields: clientFields,
-            discordInviteUrl: DISCORD_INVITE_URL,
+      return res.status(200).json(
+        buildBookingSuccessResponse({
+          bookingId: doc._id,
+          emailDispatch: buildDeferredEmailDispatch({
+            booking: deferredBooking,
           }),
-        });
-
-        if (error) {
-          console.error("Resend client email error:", error);
-        }
-      } catch (emailErr) {
-        console.error("Resend client email exception:", emailErr);
-      }
-    }
-
-    if (from && owner && process.env.RESEND_API_KEY) {
-      try {
-        const { error } = await resend.emails.send({
-          from,
-          to: owner,
-          subject: ownerSubject,
-          html: emailHtml({
-            logoUrl,
-            siteName,
-            heading: "New Booking Received",
-            intro: "A new booking was submitted:",
-            fields: ownerFields,
+          emailDispatchToken: issueBookingEmailDispatchToken({
+            bookingId: doc._id,
+            email: String(
+              deferredBooking.email || deferredBooking.payerEmail || ""
+            ).trim(),
           }),
-        });
-        if (error) {
-          console.error("Resend owner email error:", error);
-        }
-      } catch (emailErr) {
-        console.error("Resend owner email exception:", emailErr);
-      }
+        })
+      );
     }
 
-    return res.status(200).json({ bookingId: doc._id });
+    const sendResult = await sendBookingEmailsForBooking({
+      bookingId: doc._id,
+      booking: doc,
+      client: writeClient,
+    });
+
+    return res.status(sendResult.httpStatus).json(
+      buildBookingSuccessResponse({
+        bookingId: doc._id,
+        emailDispatch: sendResult.body?.emailDispatch || null,
+      })
+    );
   } catch (err) {
     const message = err?.message || "Server error";
     const code = err?.code;

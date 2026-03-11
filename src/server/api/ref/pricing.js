@@ -29,9 +29,142 @@ const clampPercent = (value) => {
   return Math.min(100, Math.max(0, parsed));
 };
 
+export const normalizePackageTitle = (value) =>
+  String(value || "")
+    .replace(/\s*\(upgrade\)\s*$/i, "")
+    .trim()
+    .toLowerCase();
+
+export const getPaidAmount = (booking) => {
+  if (
+    typeof booking?.netAmount === "number" &&
+    !Number.isNaN(booking.netAmount)
+  ) {
+    return booking.netAmount;
+  }
+
+  if (
+    typeof booking?.grossAmount === "number" &&
+    !Number.isNaN(booking.grossAmount)
+  ) {
+    return booking.grossAmount;
+  }
+
+  return toMoney(booking?.packagePrice);
+};
+
 const normalizeCouponCode = (value) => String(value || "").trim().toLowerCase();
 const normalizeReferralCode = (value) =>
   String(value || "").trim().toLowerCase();
+
+export async function resolveUpgradeContext({
+  originalOrderId = "",
+  packageTitle = "",
+  client = pricingClient,
+}) {
+  const normalizedUpgradeTitle = String(packageTitle || "")
+    .replace(/\s*\(upgrade\)\s*$/i, "")
+    .trim();
+  const normalizedTargetTitle = normalizePackageTitle(normalizedUpgradeTitle);
+
+  const booking = await client.fetch(
+    `*[_type == "booking" && _id == $id][0]{
+      _id,
+      status,
+      originalOrderId,
+      packageTitle,
+      packagePrice,
+      grossAmount,
+      netAmount,
+      email,
+      payerEmail,
+      discord,
+      specs,
+      mainGame,
+      message,
+      localTimeZone,
+      startTimeUTC,
+      displayDate,
+      displayTime
+    }`,
+    { id: originalOrderId }
+  );
+
+  if (!booking?._id) {
+    throw createApiError(
+      400,
+      "Original booking could not be verified for this upgrade.",
+      "original_booking_missing"
+    );
+  }
+
+  const bookingStatus = String(booking.status || "").toLowerCase();
+  const bookingPaid =
+    bookingStatus === "captured" || bookingStatus === "completed";
+  if (!bookingPaid) {
+    throw createApiError(
+      400,
+      "Only paid bookings can be upgraded.",
+      "original_booking_unpaid"
+    );
+  }
+
+  const rootOrderId = booking.originalOrderId || booking._id;
+  const paidBookings =
+    (await client.fetch(
+      `*[_type == "booking"
+        && status in ["captured", "completed"]
+        && (_id == $rootId || originalOrderId == $rootId)
+      ]{
+        _id,
+        packageTitle,
+        netAmount,
+        grossAmount,
+        packagePrice
+      }`,
+      { rootId: rootOrderId }
+    )) || [];
+
+  const targetPackage = await client.fetch(
+    `*[_type == "package" && title == $title][0]{title, price}`,
+    { title: normalizedUpgradeTitle }
+  );
+
+  if (!targetPackage?.title) {
+    throw createApiError(
+      500,
+      "Target package not found in CMS.",
+      "target_package_missing"
+    );
+  }
+
+  const targetPrice = toMoney(targetPackage.price);
+  const totalPaid = paidBookings.reduce(
+    (sum, entry) => sum + getPaidAmount(entry),
+    0
+  );
+  const alreadyTarget = paidBookings.some(
+    (entry) => normalizePackageTitle(entry?.packageTitle) === normalizedTargetTitle
+  );
+
+  if (alreadyTarget) {
+    throw createApiError(
+      400,
+      "This order already matches the target package.",
+      "already_target"
+    );
+  }
+
+  return {
+    booking,
+    rootOrderId,
+    paidBookings,
+    targetPackage,
+    targetPrice,
+    totalPaid: toMoney(totalPaid),
+    upgradePrice: Math.max(0, toMoney(targetPrice - totalPaid)),
+  };
+}
 
 export async function resolveBookingPricing({
   packageTitle,
@@ -40,7 +173,9 @@ export async function resolveBookingPricing({
   referralCode = "",
   couponCode = "",
   paymentProvider = "",
+  allowZeroPayable = false,
   client = pricingClient,
+  upgradeContext = null,
 }) {
   const isUpgrade = !!originalOrderId;
   const normalizedCouponCode = normalizeCouponCode(couponCode);
@@ -56,42 +191,15 @@ export async function resolveBookingPricing({
 
     effectiveGrossAmount = toMoney(packageDoc?.price);
   } else {
-    const normalizedUpgradeTitle = String(packageTitle || "")
-      .replace(/\s*\(upgrade\)\s*$/i, "")
-      .trim();
+    const resolvedUpgradeContext =
+      upgradeContext ||
+      (await resolveUpgradeContext({
+        originalOrderId,
+        packageTitle,
+        client,
+      }));
 
-    const originalBooking = await client.fetch(
-      `*[_type == "booking" && _id == $id][0]{
-        _id,
-        status,
-        netAmount,
-        grossAmount,
-        packagePrice
-      }`,
-      { id: originalOrderId }
-    );
-
-    if (!originalBooking?._id) {
-      throw createApiError(
-        400,
-        "Original booking could not be verified for this upgrade.",
-        "original_booking_missing"
-      );
-    }
-
-    const targetPackage = await client.fetch(
-      `*[_type == "package" && title == $title][0]{price}`,
-      { title: normalizedUpgradeTitle }
-    );
-
-    const targetPrice = toMoney(targetPackage?.price);
-    const alreadyPaid = toMoney(
-      originalBooking.netAmount ||
-        originalBooking.grossAmount ||
-        originalBooking.packagePrice
-    );
-
-    effectiveGrossAmount = Math.max(0, toMoney(targetPrice - alreadyPaid));
+    effectiveGrossAmount = resolvedUpgradeContext.upgradePrice;
   }
 
   if (!effectiveGrossAmount || effectiveGrossAmount <= 0) {
@@ -211,7 +319,15 @@ export async function resolveBookingPricing({
       ? 0
       : toMoney(effectiveGrossAmount - effectiveDiscountAmount);
 
-  if (paymentProvider !== "free" && effectiveNetAmount <= 0) {
+  if (paymentProvider === "free" && effectiveNetAmount > 0) {
+    throw createApiError(
+      400,
+      "This booking still requires payment.",
+      "free_requires_zero"
+    );
+  }
+
+  if (paymentProvider !== "free" && !allowZeroPayable && effectiveNetAmount <= 0) {
     throw createApiError(
       400,
       "Payable amount resolved to zero. Use the free booking flow.",
@@ -233,6 +349,7 @@ export async function resolveBookingPricing({
   );
 
   return {
+    canCombineWithReferral,
     couponDiscountAmount,
     couponDiscountPercent,
     couponDoc,
@@ -243,7 +360,34 @@ export async function resolveBookingPricing({
     effectiveNetAmount,
     effectiveReferralCode,
     effectiveReferralId,
+    referralDiscountAmount,
+    referralDiscountPercent,
     referralDoc,
     commissionAmount,
+  };
+}
+
+export async function resolvePaymentQuote({
+  packageTitle,
+  originalOrderId = "",
+  referralId = "",
+  referralCode = "",
+  couponCode = "",
+  client,
+}) {
+  const quote = await resolveBookingPricing({
+    packageTitle,
+    originalOrderId,
+    referralId,
+    referralCode,
+    couponCode,
+    paymentProvider: "",
+    allowZeroPayable: true,
+    client,
+  });
+
+  return {
+    ...quote,
+    paymentProvider: quote.effectiveNetAmount <= 0 ? "free" : "paid",
   };
 }

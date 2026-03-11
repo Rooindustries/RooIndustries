@@ -18,11 +18,27 @@ const shouldFailClosed =
   missing => missing.length > 0 && isProdBuild && (isCi || isVercelBuild || isNextProductionBuild || forceStrict);
 
 const hasAny = (keys = []) => keys.some((key) => !!process.env[key]);
+const getFirstValue = (keys = []) => {
+  for (const key of keys) {
+    const value = String(process.env[key] || "").trim();
+    if (value) return value;
+  }
+  return "";
+};
 
 const sessionSecretKeys = ["REF_SESSION_SECRET", "SESSION_SECRET", "JWT_SECRET"];
 const holdTokenSecretKeys = ["HOLD_TOKEN_SECRET", ...sessionSecretKeys];
 const adminKeyKeys = ["REF_ADMIN_KEY", "REFERRAL_ADMIN_KEY", "CRON_SECRET"];
 const webhookSecretKeys = ["SANITY_WEBHOOK_SECRET", "CRON_SECRET"];
+const paypalClientIdKeys = [
+  "PAYPAL_CLIENT_ID",
+  "REACT_APP_PAYPAL_CLIENT_ID",
+  "NEXT_PUBLIC_PAYPAL_CLIENT_ID",
+];
+const paypalClientSecretKeys = [
+  "PAYPAL_CLIENT_SECRET",
+  "REACT_APP_PAYPAL_CLIENT_SECRET",
+];
 
 const requiredChecks = [
   {
@@ -57,31 +73,43 @@ const requiredChecks = [
     keys: webhookSecretKeys,
     label: "SANITY_WEBHOOK_SECRET (or CRON_SECRET fallback)",
   },
-  {
-    keys: ["RAZORPAY_KEY_SECRET"],
-    label: "RAZORPAY_KEY_SECRET",
-  },
-];
-
-const optionalChecks = [
-  {
-    keys: [
-      "PAYPAL_CLIENT_ID",
-      "REACT_APP_PAYPAL_CLIENT_ID",
-      "NEXT_PUBLIC_PAYPAL_CLIENT_ID",
-    ],
-    label:
-      "PAYPAL_CLIENT_ID (or REACT_APP_PAYPAL_CLIENT_ID/NEXT_PUBLIC_PAYPAL_CLIENT_ID fallback)",
-  },
-  {
-    keys: ["PAYPAL_CLIENT_SECRET"],
-    label: "PAYPAL_CLIENT_SECRET",
-  },
 ];
 
 const missing = requiredChecks
   .filter((check) => !hasAny(check.keys))
   .map((check) => check.label);
+
+const razorpayKeyId = getFirstValue(["RAZORPAY_KEY_ID"]);
+const razorpayKeySecret = getFirstValue(["RAZORPAY_KEY_SECRET"]);
+const paypalClientId = getFirstValue(paypalClientIdKeys);
+const paypalClientSecret = getFirstValue(paypalClientSecretKeys);
+
+const providerConsistencyFailures = [];
+const providerConsistencyWarnings = [];
+
+if (!!razorpayKeyId !== !!razorpayKeySecret) {
+  providerConsistencyFailures.push(
+    "Razorpay must be fully configured with both RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET."
+  );
+}
+
+if (!!paypalClientId !== !!paypalClientSecret) {
+  providerConsistencyFailures.push(
+    "PayPal must be fully configured with both PAYPAL_CLIENT_ID (or public fallback) and PAYPAL_CLIENT_SECRET."
+  );
+}
+
+if (!razorpayKeyId && !razorpayKeySecret) {
+  providerConsistencyWarnings.push(
+    "Razorpay keys are not configured. Razorpay payments will stay disabled."
+  );
+}
+
+if (!paypalClientId && !paypalClientSecret) {
+  providerConsistencyWarnings.push(
+    "PayPal credentials are not configured. PayPal payments will stay disabled."
+  );
+}
 
 if (missing.length === 0) {
   console.log("[env] Runtime secret validation passed.");
@@ -100,15 +128,17 @@ if (missing.length === 0) {
   );
 }
 
-const missingOptional = optionalChecks
-  .filter((check) => !hasAny(check.keys))
-  .map((check) => check.label);
+if (providerConsistencyFailures.length > 0) {
+  const rendered = providerConsistencyFailures.join("\n- ");
+  if (shouldFailClosed(providerConsistencyFailures)) {
+    console.error(`[env] Production build blocked:\n- ${rendered}`);
+    process.exit(1);
+  }
 
-if (missingOptional.length > 0) {
-  console.warn(
-    `[env] Optional runtime payment secrets not set:\n- ${missingOptional.join(
-      "\n- "
-    )}\nSome payment-provider verification paths may be unavailable.`
-  );
+  console.warn(`[env] Local/non-release build warning:\n- ${rendered}`);
+}
+
+if (providerConsistencyWarnings.length > 0) {
+  console.warn(`[env] ${providerConsistencyWarnings.join("\n[env] ")}`);
 }
 process.exit(0);

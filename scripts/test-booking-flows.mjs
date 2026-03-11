@@ -1,14 +1,16 @@
 import dotenv from "dotenv";
 import crypto from "crypto";
 import { createClient } from "@sanity/client";
-import { createRequire } from "module";
 import { formatHostDateLabel } from "../src/utils/timezone.js";
 
 dotenv.config({ path: ".env.local" });
 
-const require = createRequire(import.meta.url);
-const createOrderHandler = require("../src/server/api/razorpay/createOrder.js");
-const verifyHandler = require("../src/server/api/razorpay/verify.js");
+const { default: createOrderHandler } =
+  await import("../src/server/api/razorpay/createOrder.js");
+const verifyModule = await import("../src/server/api/razorpay/verify.js");
+const verifyHandler = verifyModule.default || verifyModule;
+const { default: holdSlotHandler } =
+  await import("../src/server/booking/holdSlot.js");
 const { default: createBookingHandler } =
   await import("../src/server/api/ref/createBooking.js");
 
@@ -42,12 +44,16 @@ const record = (name, ok, details) => {
 };
 
 const makeResponse = () => {
-  const capture = { status: 200, body: null };
+  const capture = { status: 200, body: null, headers: {} };
   return {
     capture,
     res: {
       status(code) {
         capture.status = code;
+        return this;
+      },
+      setHeader(name, value) {
+        capture.headers[name] = value;
         return this;
       },
       json(data) {
@@ -58,8 +64,13 @@ const makeResponse = () => {
   };
 };
 
-const callHandler = async (handler, payload) => {
-  const req = { method: "POST", body: payload };
+const callHandler = async (handler, payload, options = {}) => {
+  const req = {
+    method: options.method || "POST",
+    body: payload,
+    headers: options.headers || {},
+    query: options.query || {},
+  };
   const { capture, res } = makeResponse();
   await handler(req, res);
   return capture;
@@ -91,17 +102,23 @@ const makeCustomSlot = (year, monthIndex, dayOfMonth, hour24) => {
   return { hostDate, hostTime, startTimeUTC };
 };
 
-const createHold = async (slot, expiresAt) => {
-  const doc = await client.create({
-    _type: "slotHold",
-    hostDate: slot.hostDate,
-    hostTime: slot.hostTime,
+const reserveHold = async (slot, packageOverride = packageTitle) => {
+  const response = await callHandler(holdSlotHandler, {
     startTimeUTC: slot.startTimeUTC,
-    packageTitle,
-    expiresAt,
+    packageTitle: packageOverride,
   });
-  created.holds.push(doc._id);
-  return doc;
+
+  if (response.status !== 200 || !response.body?.holdId || !response.body?.holdToken) {
+    throw new Error(
+      `hold reservation failed for ${slot.startTimeUTC}: ${JSON.stringify(response.body)}`
+    );
+  }
+
+  if (!created.holds.includes(response.body.holdId)) {
+    created.holds.push(response.body.holdId);
+  }
+
+  return response.body;
 };
 
 const createCoupon = async (code, discountPercent, maxUses = 1) => {
@@ -198,7 +215,8 @@ const testRazorpay = async () => {
     await createOrderHandler(
       {
         method: "POST",
-        body: { amount: 1, currency: "USD", notes: { runId } },
+        body: { amount: 1, currency: "USD", notes: { runId, packageTitle } },
+        headers: {},
       },
       createRes.res,
     );
@@ -337,13 +355,13 @@ const testBookingFlow = async () => {
   const invalidCoupon = await createCoupon(invalidCouponCode, 50);
 
   const paidSlot = makeSlot(0, 10);
-  const paidHold = await createHold(
-    paidSlot,
-    new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-  );
+  const paidHold = await reserveHold(paidSlot);
 
   const paidRes = await callHandler(createBookingHandler, {
-    ...paidPayload(paidSlot, { slotHoldId: paidHold._id }),
+    ...paidPayload(paidSlot, {
+      slotHoldId: paidHold.holdId,
+      slotHoldToken: paidHold.holdToken,
+    }),
   });
   if (paidRes.status === 200 && paidRes.body?.bookingId) {
     created.bookings.push(paidRes.body.bookingId);
@@ -363,14 +381,12 @@ const testBookingFlow = async () => {
   );
 
   const freeSlot = makeSlot(1, 11);
-  const freeHold = await createHold(
-    freeSlot,
-    new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-  );
+  const freeHold = await reserveHold(freeSlot);
 
   const freeRes = await callHandler(createBookingHandler, {
     ...freePayload(freeSlot, {
-      slotHoldId: freeHold._id,
+      slotHoldId: freeHold.holdId,
+      slotHoldToken: freeHold.holdToken,
       couponCode: freeCoupon.code,
     }),
   });
@@ -419,54 +435,61 @@ const testBookingFlow = async () => {
   record("free_coupon_not_100", freeBadCoupon.status === 400);
 
   const mismatchSlot = makeSlot(6, 16);
-  const mismatchHold = await createHold(
-    { ...mismatchSlot, hostTime: formatHostTime(17) },
-    new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-  );
+  const mismatchHold = await reserveHold(makeSlot(6, 17));
   const mismatchRes = await callHandler(createBookingHandler, {
-    ...paidPayload(mismatchSlot, { slotHoldId: mismatchHold._id }),
+    ...paidPayload(mismatchSlot, {
+      slotHoldId: mismatchHold.holdId,
+      slotHoldToken: mismatchHold.holdToken,
+    }),
   });
   record("slot_hold_mismatch", mismatchRes.status === 400);
 
   const activeHoldSlot = makeSlot(7, 17);
-  await createHold(
-    activeHoldSlot,
-    new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-  );
+  await reserveHold(activeHoldSlot);
   const activeHoldRes = await callHandler(createBookingHandler, {
     ...freePayload(activeHoldSlot, { couponCode: holdCoupon.code }),
   });
   record("active_hold_without_id", activeHoldRes.status === 409);
 
   const expiredSlot = makeSlot(8, 18);
-  const expiredHold = await createHold(
-    expiredSlot,
-    new Date(Date.now() - 60 * 1000).toISOString(),
-  );
+  const expiredHold = await reserveHold(expiredSlot);
+  await client
+    .patch(expiredHold.holdId)
+    .set({ expiresAt: new Date(Date.now() - 60 * 1000).toISOString() })
+    .commit();
   const freeExpiredRes = await callHandler(createBookingHandler, {
     ...freePayload(expiredSlot, {
-      slotHoldId: expiredHold._id,
+      slotHoldId: expiredHold.holdId,
+      slotHoldToken: expiredHold.holdToken,
       couponCode: holdCoupon.code,
     }),
   });
   record("free_expired_hold", freeExpiredRes.status === 409);
 
   const paidExpiredSlot = makeSlot(9, 19);
-  const paidExpiredHold = await createHold(
-    paidExpiredSlot,
-    new Date(Date.now() - 60 * 1000).toISOString(),
-  );
+  const paidExpiredHold = await reserveHold(paidExpiredSlot);
+  await client
+    .patch(paidExpiredHold.holdId)
+    .set({ expiresAt: new Date(Date.now() - 60 * 1000).toISOString() })
+    .commit();
   const originalResendKey = process.env.RESEND_API_KEY;
   process.env.RESEND_API_KEY = "";
   const paidExpiredRes = await callHandler(createBookingHandler, {
-    ...paidPayload(paidExpiredSlot, { slotHoldId: paidExpiredHold._id }),
+    ...paidPayload(paidExpiredSlot, {
+      slotHoldId: paidExpiredHold.holdId,
+      slotHoldToken: paidExpiredHold.holdToken,
+    }),
   });
   process.env.RESEND_API_KEY = originalResendKey;
   if (paidExpiredRes.status === 200 && paidExpiredRes.body?.bookingId) {
     created.bookings.push(paidExpiredRes.body.bookingId);
-    record("paid_expired_hold", true, paidExpiredRes.body.bookingId);
+    record("paid_expired_hold_reconciled", true, paidExpiredRes.body.bookingId);
   } else {
-    record("paid_expired_hold", false, JSON.stringify(paidExpiredRes.body));
+    record(
+      "paid_expired_hold_reconciled",
+      false,
+      JSON.stringify(paidExpiredRes.body),
+    );
   }
 
   const duplicateSlot = makeSlot(10, 20);
@@ -494,17 +517,15 @@ const testBookingFlow = async () => {
   record("unsupported_payment_provider", unsupportedRes.status === 400);
 
   const singleDigitSlot = makeCustomSlot(2099, 0, 5, 9);
-  const singleDigitHold = await createHold(
-    singleDigitSlot,
-    new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-  );
+  const singleDigitHold = await reserveHold(singleDigitSlot);
   const hostDateLabel = formatHostDateLabel(
     new Date(singleDigitSlot.startTimeUTC),
     "Asia/Kolkata",
   );
   const singleDigitRes = await callHandler(createBookingHandler, {
     ...paidPayload(singleDigitSlot, {
-      slotHoldId: singleDigitHold._id,
+      slotHoldId: singleDigitHold.holdId,
+      slotHoldToken: singleDigitHold.holdToken,
       hostDate: hostDateLabel,
     }),
   });

@@ -1,4 +1,9 @@
 import { createClient } from "@sanity/client";
+import {
+  getPaidAmount,
+  resolveUpgradeContext,
+} from "./pricing.js";
+import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -11,12 +16,6 @@ const client = createClient({
 const parseMoney = (value) =>
   parseFloat(String(value || "").replace(/[^0-9.]/g, "")) || 0;
 
-const normalizeTitle = (value) =>
-  String(value || "")
-    .replace(/\s*\(upgrade\)\s*$/i, "")
-    .trim()
-    .toLowerCase();
-
 const normalizeSlug = (value) => {
   if (!value) return "";
   if (Array.isArray(value)) return String(value[0] || "").toLowerCase();
@@ -25,27 +24,25 @@ const normalizeSlug = (value) => {
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 
-const getPaidAmount = (booking) => {
-  if (
-    typeof booking?.netAmount === "number" &&
-    !Number.isNaN(booking.netAmount)
-  ) {
-    return booking.netAmount;
-  }
-
-  if (
-    typeof booking?.grossAmount === "number" &&
-    !Number.isNaN(booking.grossAmount)
-  ) {
-    return booking.grossAmount;
-  }
-
-  return parseMoney(booking?.packagePrice);
-};
-
 export default async function handler(req, res) {
   if (req.method !== "GET") {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
+  }
+
+  const clientAddress = getClientAddress(req);
+  const rateLimitKey = `get-upgrade-info:${clientAddress}:${String(
+    req.query?.id || ""
+  ).trim().toLowerCase()}:${String(req.query?.email || "")
+    .trim()
+    .toLowerCase()}`;
+  if (
+    !requireRateLimit(res, {
+      key: rateLimitKey,
+      max: 20,
+      message: "Too many upgrade lookup requests. Please try again later.",
+    })
+  ) {
+    return;
   }
 
   const { id, slug, email } = req.query;
@@ -150,50 +147,21 @@ export default async function handler(req, res) {
       };
     }
 
-    const targetPriceNum = parseMoney(targetPackage.price);
-    const rootOrderId = booking.originalOrderId || booking._id;
-    const paidBookings = await client.fetch(
-      `*[_type == "booking"
-        && status in ["captured", "completed"]
-        && (_id == $rootId || originalOrderId == $rootId)
-      ]{
-        _id,
-        packageTitle,
-        netAmount,
-        grossAmount,
-        packagePrice
-      }`,
-      { rootId: rootOrderId }
+    const upgradeContext = await resolveUpgradeContext({
+      originalOrderId: booking._id,
+      packageTitle: targetPackage.title,
+      client,
+    });
+    const targetPriceNum = parseMoney(upgradeContext.targetPackage.price);
+    const originalPaid = upgradeContext.paidBookings.reduce(
+      (sum, entry) => sum + getPaidAmount(entry),
+      0
     );
-
-    const normalizedTarget = normalizeTitle(targetPackage.title);
-    const alreadyTarget = Array.isArray(paidBookings)
-      ? paidBookings.some(
-          (entry) => normalizeTitle(entry?.packageTitle) === normalizedTarget
-        )
-      : normalizeTitle(booking.packageTitle) === normalizedTarget;
-
-    if (alreadyTarget) {
-      return res.status(400).json({
-        ok: false,
-        error: "This order already matches the target package.",
-      });
-    }
-
-    const originalPaid = Array.isArray(paidBookings)
-      ? paidBookings.reduce(
-          (sum, entry) => sum + getPaidAmount(entry),
-          0
-        )
-      : getPaidAmount(booking);
-    const upgradePrice = Math.max(
-      0,
-      +(targetPriceNum - originalPaid).toFixed(2)
-    );
+    const upgradePrice = Math.max(0, +upgradeContext.upgradePrice.toFixed(2));
 
     const packagePayload = {
-      title: targetPackage.title,
-      priceString: targetPackage.price,
+      title: upgradeContext.targetPackage.title,
+      priceString: upgradeContext.targetPackage.price,
       price: targetPriceNum,
     };
 
@@ -222,10 +190,15 @@ export default async function handler(req, res) {
       upgradePrice,
     });
   } catch (err) {
+    const status = Number(err?.status) || 500;
+    const message =
+      status >= 400 && status < 500
+        ? err?.message || "Unable to resolve upgrade pricing."
+        : "Server error while computing upgrade price.";
     console.error("getUpgradeInfo error:", err);
-    return res.status(500).json({
+    return res.status(status).json({
       ok: false,
-      error: "Server error while computing upgrade price.",
+      error: message,
     });
   }
 }

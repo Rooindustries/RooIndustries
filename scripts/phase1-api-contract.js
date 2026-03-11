@@ -66,6 +66,16 @@ async function run() {
         body?.ok === false,
     },
     {
+      route: "/api/ref/createBooking",
+      method: "POST",
+      body: {},
+      expect: (response, body, hostDrift) =>
+        response.status === 400 &&
+        !hostDrift &&
+        /application\/json/i.test(response.headers.get("content-type") || "") &&
+        typeof body?.error === "string",
+    },
+    {
       route: "/api/ref/getUpgradeInfo?id=nonexistent&email=test%40example.com",
       method: "GET",
       expect: (response, body, hostDrift) =>
@@ -80,6 +90,16 @@ async function run() {
       expect: (response, body, hostDrift) =>
         (response.status === 400 || response.status === 500) &&
         !hostDrift &&
+        typeof body?.ok === "boolean",
+    },
+    {
+      route: "/api/razorpay/verify",
+      method: "POST",
+      body: {},
+      expect: (response, body, hostDrift) =>
+        response.status === 400 &&
+        !hostDrift &&
+        /application\/json/i.test(response.headers.get("content-type") || "") &&
         typeof body?.ok === "boolean",
     },
     {
@@ -160,6 +180,8 @@ async function run() {
       host_drift: hostDrift,
       content_type: response.headers.get("content-type") || "",
       body_ok_flag: typeof body?.ok === "boolean",
+      has_error_text:
+        typeof body?.error === "string" || typeof body?.message === "string",
       motherboards_array: Array.isArray(body?.motherboards),
       rams_array: Array.isArray(body?.rams),
       non_empty_keys: body ? Object.keys(body).length > 0 : false,
@@ -174,6 +196,7 @@ async function run() {
     "host_drift",
     "content_type",
     "body_ok_flag",
+    "has_error_text",
     "motherboards_array",
     "rams_array",
     "non_empty_keys",

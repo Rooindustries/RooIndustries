@@ -163,16 +163,26 @@ const buildHeadersObject = (headers) => {
 const readRequestBody = async (request) => {
   const method = String(request.method || "GET").toUpperCase();
   if (method === "GET" || method === "HEAD") {
-    return {};
+    return {
+      body: {},
+      rawBody: "",
+    };
   }
 
   const contentType = String(request.headers.get("content-type") || "").toLowerCase();
 
   if (contentType.includes("application/json")) {
     try {
-      return await request.json();
+      const rawBody = await request.text();
+      return {
+        body: rawBody ? JSON.parse(rawBody) : {},
+        rawBody,
+      };
     } catch {
-      return {};
+      return {
+        body: {},
+        rawBody: "",
+      };
     }
   }
 
@@ -201,17 +211,29 @@ const readRequestBody = async (request) => {
         body[key] = [body[key], normalized];
       }
 
-      return body;
+      return {
+        body,
+        rawBody: "",
+      };
     } catch {
-      return {};
+      return {
+        body: {},
+        rawBody: "",
+      };
     }
   }
 
   try {
     const text = await request.text();
-    return text ? { rawBody: text } : {};
+    return {
+      body: text ? { rawBody: text } : {},
+      rawBody: text || "",
+    };
   } catch {
-    return {};
+    return {
+      body: {},
+      rawBody: "",
+    };
   }
 };
 
@@ -321,6 +343,7 @@ export const runLegacyApiHandler = async ({
   methodOverride = "",
 }) => {
   const url = new URL(request.url);
+  const { body, rawBody } = await readRequestBody(request);
   const req = {
     method: String(methodOverride || request.method || "GET").toUpperCase(),
     url: request.url,
@@ -328,8 +351,9 @@ export const runLegacyApiHandler = async ({
       ...buildQueryObject(url.searchParams),
       ...query,
     },
-    body: await readRequestBody(request),
+    body,
     headers: buildHeadersObject(request.headers),
+    rawBody,
   };
 
   const { apiRes, hasResponse, getResponse, finalizeDefault } =

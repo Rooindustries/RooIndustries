@@ -1,4 +1,5 @@
 import { createClient } from "@sanity/client";
+import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -14,6 +15,16 @@ export default async function handler(req, res) {
   }
 
   const rawCode = (req.query.code || "").trim();
+  const clientAddress = getClientAddress(req);
+  if (
+    !requireRateLimit(res, {
+      key: `validate-coupon:${clientAddress}:${rawCode.toLowerCase()}`,
+      max: 25,
+      message: "Too many coupon validation requests. Please try again later.",
+    })
+  ) {
+    return;
+  }
   if (!rawCode) {
     return res.status(400).json({ ok: false, error: "Missing coupon code." });
   }
