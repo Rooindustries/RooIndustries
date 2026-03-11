@@ -78,6 +78,7 @@ beforeEach(() => {
   process.env.REACT_APP_PAYPAL_CLIENT_ID = "test-client";
   paypalButtonsProps = null;
   mockNavigate.mockReset();
+  window.sessionStorage.clear();
 });
 
 afterEach(() => {
@@ -146,7 +147,13 @@ describe("payment flows", () => {
       if (url === "/api/ref/createBooking") {
         const body = JSON.parse(options.body || "{}");
         fetchCalls.push({ url, body });
-        return { ok: true, json: async () => ({ bookingId: "b1" }) };
+        return {
+          ok: true,
+          json: async () => ({
+            bookingId: "b1",
+            emailDispatchToken: "dispatch-token-rzp",
+          }),
+        };
       }
       return { ok: true, json: async () => ({ ok: true }) };
     });
@@ -207,6 +214,22 @@ describe("payment flows", () => {
     expect(bookingCall.body.displayDate).toBe(displayDate);
     expect(bookingCall.body.displayTime).toBe(displayTime);
     expect(bookingCall.body.paymentProvider).toBe("razorpay");
+    expect(bookingCall.body.deferEmailsUntilConfirmation).toBe(true);
+    expect(mockNavigate).toHaveBeenCalledWith("/payment-success", {
+      state: {
+        bookingConfirmation: {
+          bookingId: "b1",
+          emailDispatchToken: "dispatch-token-rzp",
+        },
+      },
+      replace: true,
+    });
+    expect(
+      JSON.parse(window.sessionStorage.getItem("booking_confirmation_state"))
+    ).toEqual({
+      bookingId: "b1",
+      emailDispatchToken: "dispatch-token-rzp",
+    });
   });
 
   test("PayPal flow attaches UTC and keeps client email data", async () => {
@@ -249,7 +272,13 @@ describe("payment flows", () => {
       if (url === "/api/ref/createBooking") {
         const body = JSON.parse(options.body || "{}");
         fetchCalls.push({ url, body });
-        return { ok: true, json: async () => ({ bookingId: "b2" }) };
+        return {
+          ok: true,
+          json: async () => ({
+            bookingId: "b2",
+            emailDispatchToken: "dispatch-token-paypal",
+          }),
+        };
       }
       return { ok: true, json: async () => ({ ok: true }) };
     });
@@ -284,5 +313,122 @@ describe("payment flows", () => {
     expect(bookingCall.body.displayTime).toBe(displayTime);
     expect(bookingCall.body.paymentProvider).toBe("paypal");
     expect(bookingCall.body.payerEmail).toBe(CLIENT_EMAIL);
+    expect(bookingCall.body.deferEmailsUntilConfirmation).toBe(true);
+    expect(mockNavigate).toHaveBeenCalledWith("/payment-success", {
+      state: {
+        bookingConfirmation: {
+          bookingId: "b2",
+          emailDispatchToken: "dispatch-token-paypal",
+        },
+      },
+      replace: true,
+    });
+  });
+
+  test("free booking flow defers email dispatch until the thank-you page", async () => {
+    const timeZone = "America/Los_Angeles";
+    const startTimeUTC = "2025-01-15T08:30:00.000Z";
+    const utcDate = new Date(startTimeUTC);
+    const displayDate = formatClientDate(utcDate, timeZone);
+    const displayTime = formatClientTime(utcDate, timeZone);
+
+    const bookingData = {
+      email: CLIENT_EMAIL,
+      packageTitle: "Performance Vertex Overhaul",
+      packagePrice: "$10.00",
+      startTimeUTC,
+      displayDate,
+      displayTime,
+      localTimeZone: timeZone,
+      slotHoldId: "hold_free",
+      slotHoldToken: "hold_token_free",
+      slotHoldExpiresAt: "2099-01-05T06:00:00.000Z",
+    };
+
+    const fetchCalls = [];
+    global.fetch = jest.fn(async (url, options = {}) => {
+      if (url === "/api/payment/providers") {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            providers: {
+              razorpay: { enabled: true, mode: "live" },
+              paypal: { enabled: true, mode: "live" },
+            },
+          }),
+        };
+      }
+      if (String(url).startsWith("/api/ref/validateCoupon")) {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            coupon: {
+              code: "FREE100",
+              discountPercent: 100,
+              canCombineWithReferral: true,
+            },
+          }),
+        };
+      }
+      if (url === "/api/ref/createBooking") {
+        const body = JSON.parse(options.body || "{}");
+        fetchCalls.push({ url, body });
+        return {
+          ok: true,
+          json: async () => ({
+            bookingId: "b3",
+            emailDispatchToken: "dispatch-token-free",
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ ok: true }) };
+    });
+
+    renderPayment(bookingData);
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    await act(async () => {
+      await userEvent.type(
+        screen.getByPlaceholderText(/e\.g\. BF10/i),
+        "FREE100"
+      );
+    });
+
+    const applyButtons = screen.getAllByRole("button", { name: /apply/i });
+    await act(async () => {
+      await userEvent.click(applyButtons[1]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const freeButton = await screen.findByRole("button", {
+      name: /confirm free booking/i,
+    });
+
+    await act(async () => {
+      await userEvent.click(freeButton);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const bookingCall = fetchCalls.find(
+      (call) => call.url === "/api/ref/createBooking"
+    );
+    expect(bookingCall.body.paymentProvider).toBe("free");
+    expect(bookingCall.body.netAmount).toBe(0);
+    expect(bookingCall.body.couponCode).toBe("FREE100");
+    expect(bookingCall.body.deferEmailsUntilConfirmation).toBe(true);
+    expect(mockNavigate).toHaveBeenCalledWith("/thank-you", {
+      state: {
+        bookingConfirmation: {
+          bookingId: "b3",
+          emailDispatchToken: "dispatch-token-free",
+        },
+      },
+      replace: true,
+    });
   });
 });
