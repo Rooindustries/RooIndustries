@@ -693,13 +693,6 @@ html.low-performance-mode .fixed[class*="bottom-4"] {
   contain: layout style paint !important;
 }
 
-/* During active scroll, flatten border-radius on large cards to reduce
-   anti-aliased raster cost. 160ms idle debounce restores rounded corners. */
-html.low-performance-mode.is-scrolling [class*="rounded-2xl"],
-html.low-performance-mode.is-scrolling [class*="rounded-xl"] {
-  border-radius: 4px !important;
-}
-
 /* Cheap text-shadow replacement for the drop-shadow glow on headings.
    text-shadow renders inline during text paint (no bitmap rasterization). */
 html.low-performance-mode [class*="drop-shadow-[0_0"][class*="189,248"] {
