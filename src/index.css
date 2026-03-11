@@ -690,18 +690,9 @@ html.low-performance-mode [class*="drop-shadow-[0_0"][class*="189,248"] {
    global will-change + isolation creates a compositing layer that
    clips the hero pill's upward box-shadow glow. */
 
-/* Keep the same look at rest, but reduce expensive compositing while actively scrolling.
-   Excluded from low-perf mode where backdrop-filter is already permanently killed. */
-html.is-scrolling:not(.low-performance-mode) .glass-scroll-lite {
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-  background-image:
-    linear-gradient(180deg, rgba(7, 22, 45, 0.95), rgba(6, 18, 38, 0.84)),
-    radial-gradient(circle at top center, rgba(34, 211, 238, 0.05), transparent 55%) !important;
-  box-shadow:
-    inset 0 1px 0 rgba(186, 230, 253, 0.05),
-    0 10px 24px rgba(2, 6, 23, 0.24) !important;
-}
+/* glass-scroll-lite scroll kill removed — on GPU-accelerated devices,
+   backdrop-filter is hardware-composited and the frosty→translucent
+   flicker during scroll was more jarring than the compositing cost. */
 
 html.is-scrolling .scroll-blur-lite,
 html.low-performance-mode .scroll-blur-lite {
