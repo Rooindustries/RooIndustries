@@ -660,7 +660,7 @@ html.low-performance-mode .app-bg-radial-layer {
    entire document tree. Safe on fixed-pos elements whose content stays
    within bounds. */
 html.low-performance-mode .site-nav {
-  contain: layout style paint !important;
+  contain: layout style !important;
 }
 
 
@@ -677,7 +677,7 @@ html.low-performance-mode .pointer-events-none.opacity-0[aria-hidden="true"] {
 /* Contain the fixed fps-boost aside to prevent full-document repaint. */
 html.low-performance-mode .fixed[class*="bottom-3"],
 html.low-performance-mode .fixed[class*="bottom-4"] {
-  contain: layout style paint !important;
+  contain: layout style !important;
 }
 
 /* Cheap text-shadow replacement for the drop-shadow glow on headings.
