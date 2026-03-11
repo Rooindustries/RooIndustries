@@ -2,6 +2,19 @@ import { useSyncExternalStore } from "react";
 
 const SCROLL_IDLE_MS = 160;
 
+// Zone thresholds matching consumer usage:
+// Navbar: scrollY > 8, scrollY > 12  |  BackButton: scrollY > 50
+const getZone = (y) => {
+  if (y <= 8) return 0;
+  if (y <= 12) return 1;
+  if (y <= 50) return 2;
+  return 3;
+};
+
+const isLowPerf = () =>
+  typeof document !== "undefined" &&
+  document.documentElement.classList.contains("low-performance-mode");
+
 let snapshot = {
   scrollY: 0,
   direction: "up",
@@ -18,6 +31,7 @@ let cleanup = null;
 let idleTimer = null;
 let rafId = null;
 let pendingScrollY = 0;
+let lastRealScrollY = 0;
 const listeners = new Set();
 
 const emit = () => {
@@ -57,12 +71,30 @@ const clearIdleTimer = () => {
 const flushScrollFrame = () => {
   rafId = null;
   const nextScrollY = pendingScrollY;
+
+  // Compute direction from actual previous position (not stale snapshot)
   const nextDirection =
-    nextScrollY > snapshot.scrollY
+    nextScrollY > lastRealScrollY
       ? "down"
-      : nextScrollY < snapshot.scrollY
+      : nextScrollY < lastRealScrollY
       ? "up"
       : snapshot.direction;
+
+  lastRealScrollY = nextScrollY;
+
+  // In low-perf mode, skip emit if zone + direction unchanged
+  // (consumers only check boolean thresholds, not exact scrollY)
+  if (isLowPerf()) {
+    const prevZone = getZone(snapshot.scrollY);
+    const nextZone = getZone(nextScrollY);
+    if (
+      nextZone === prevZone &&
+      nextDirection === snapshot.direction &&
+      snapshot.isScrolling
+    ) {
+      return; // No consumer state would change — skip React reconciliation
+    }
+  }
 
   setSnapshot({
     scrollY: nextScrollY,
@@ -84,9 +116,11 @@ const handleScroll = () => {
       window.cancelAnimationFrame(rafId);
       rafId = null;
     }
+    const finalScrollY = getScrollY();
+    lastRealScrollY = finalScrollY;
     applyScrollingClass(false);
     setSnapshot({
-      scrollY: getScrollY(),
+      scrollY: finalScrollY,
       direction: snapshot.direction,
       isScrolling: false,
     });
@@ -102,6 +136,7 @@ const attach = () => {
     isScrolling: false,
   };
   pendingScrollY = snapshot.scrollY;
+  lastRealScrollY = snapshot.scrollY;
 
   window.addEventListener("scroll", handleScroll, { passive: true });
 
