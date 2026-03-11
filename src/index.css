@@ -554,9 +554,10 @@ html.low-performance-mode body::before {
 
 /* Force fixed attachment on the app wrapper so the 4-stop gradient rasters
    once (cached layer) instead of re-rasterizing every scroll frame.
-   Original design already uses md:bg-fixed; this ensures it on all sizes. */
+   Body already has the same gradient — kill the duplicate on app-shell. */
 html.low-performance-mode #app-shell {
   background-attachment: fixed !important;
+  background-image: none !important;
 }
 
 /* Freeze animations on specific glow/sparkle elements. */
@@ -650,21 +651,29 @@ html.low-performance-mode main > *:not(:first-child) {
 }
 
 /* ── Raster cost reduction ────────────────────────────────────────────────
-   Kill looping animations and expensive filters permanently.
-   filter: drop-shadow() is the #1 CPU raster cost in software compositing.
-   Keep transition: opacity/transform (cheap, needed for fluid navbar/UI). */
+   Kill looping animations, expensive filters, and unnecessary transitions.
+   Only opacity + transform transitions are preserved — they're cheap even in
+   software compositing and needed for fluid navbar fade/slide. */
 html.low-performance-mode * {
   animation: none !important;
   filter: none !important;
   -webkit-filter: none !important;
+  transition-property: opacity, transform !important;
 }
 
-/* Kill only expensive transition properties. Preserve opacity + transform
-   which are cheap even in software compositing and needed for fluid UI. */
-html.low-performance-mode [class*="backdrop"],
-html.low-performance-mode [class*="blur"],
-html.low-performance-mode [class*="shadow"] {
-  transition: none !important;
+/* ── Decorative layer elimination ───────────────────────────────────────
+   Grid pattern (45deg repeating gradient over 1440x4613 @ 2x DPR) and
+   radial glow layer are pure decoration with huge raster cost. */
+html.low-performance-mode .app-bg-grid-layer,
+html.low-performance-mode .app-bg-radial-layer {
+  display: none !important;
+}
+
+/* Contain the fixed navbar to prevent its repaint from invalidating the
+   entire document tree. Safe on fixed-pos elements whose content stays
+   within bounds. */
+html.low-performance-mode .site-nav {
+  contain: layout style paint !important;
 }
 
 /* Cheap text-shadow replacement for the drop-shadow glow on headings.
