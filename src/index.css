@@ -490,7 +490,7 @@ html.low-performance-mode {
 }
 
 html.low-performance-mode body {
-  background-attachment: scroll;
+  background: linear-gradient(to top, #004a6b, #000040) fixed !important;
 }
 
 html.low-performance-mode .glow-button,
@@ -674,6 +674,13 @@ html.low-performance-mode .app-bg-radial-layer {
    within bounds. */
 html.low-performance-mode .site-nav {
   contain: layout style paint !important;
+}
+
+/* Skip painting the route transition overlay when invisible. It's a 1440x900
+   fixed element with a gradient that paints every scroll frame for zero visual
+   benefit at opacity-0. visibility:hidden tells the browser to skip it. */
+html.low-performance-mode .pointer-events-none.opacity-0[aria-hidden="true"] {
+  visibility: hidden !important;
 }
 
 /* Cheap text-shadow replacement for the drop-shadow glow on headings.
