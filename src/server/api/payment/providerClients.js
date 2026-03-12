@@ -1,25 +1,15 @@
 import crypto from "crypto";
+import providerConfig from "./providerConfig.js";
 
-const resolveIsProdLike = () => {
-  const vercelEnv = String(process.env.VERCEL_ENV || "").trim().toLowerCase();
-  if (vercelEnv) return vercelEnv === "production";
-  return String(process.env.NODE_ENV || "").trim().toLowerCase() === "production";
-};
-
-const resolvePayPalMode = () => {
-  const explicit = String(
-    process.env.PAYPAL_ENV || process.env.NEXT_PUBLIC_PAYPAL_ENV || ""
-  )
-    .trim()
-    .toLowerCase();
-
-  if (explicit === "live" || explicit === "production") return "live";
-  if (explicit === "sandbox" || explicit === "test") return "sandbox";
-  return resolveIsProdLike() ? "live" : "sandbox";
-};
+const {
+  allowProviderModeInRuntime,
+  resolvePayPalMode,
+  resolvePaymentRuntimePolicy,
+  resolveRazorpayMode,
+} = providerConfig;
 
 const getPayPalBaseUrl = () =>
-  resolvePayPalMode() === "live"
+  resolvePayPalMode(resolvePaymentRuntimePolicy()) === "live"
     ? "https://api-m.paypal.com"
     : "https://api-m.sandbox.paypal.com";
 
@@ -27,19 +17,6 @@ export const getPayPalCredentials = () => ({
   clientId: String(process.env.PAYPAL_CLIENT_ID || "").trim(),
   clientSecret: String(process.env.PAYPAL_CLIENT_SECRET || "").trim(),
 });
-
-const resolveRazorpayMode = (keyId = "") => {
-  if (!keyId) return "missing";
-  if (keyId.startsWith("rzp_live_")) return "live";
-  if (keyId.startsWith("rzp_test_")) return "test";
-  return "unknown";
-};
-
-const allowProviderModeInRuntime = (mode, isProdLike) => {
-  if (!mode || mode === "missing" || mode === "unknown") return false;
-  if (isProdLike) return mode === "live";
-  return mode === "live" || mode === "test" || mode === "sandbox";
-};
 
 export const DEFAULT_RAZORPAY_CURRENCY = String(
   process.env.RAZORPAY_CURRENCY || "USD"
@@ -68,19 +45,21 @@ export const toSubunits = (amount, currency = "USD") => {
 };
 
 export const resolveRazorpayCredentials = () => {
+  const runtimePolicy = resolvePaymentRuntimePolicy();
   const keyId = String(process.env.RAZORPAY_KEY_ID || "").trim();
   const keySecret = String(process.env.RAZORPAY_KEY_SECRET || "").trim();
   const mode = resolveRazorpayMode(keyId);
   const enabled =
     !!keyId &&
     !!keySecret &&
-    allowProviderModeInRuntime(mode, resolveIsProdLike());
+    allowProviderModeInRuntime(mode, runtimePolicy);
 
   return {
     enabled,
     keyId,
     keySecret,
     mode,
+    runtime: runtimePolicy.runtime,
   };
 };
 
@@ -162,8 +141,11 @@ export const verifyRazorpayPayment = async ({
   expectedCurrency = DEFAULT_RAZORPAY_CURRENCY,
 }) => {
   const credentials = resolveRazorpayCredentials();
-  if (!credentials.keyId || !credentials.keySecret) {
-    return { ok: false, reason: "razorpay_credentials_missing" };
+  if (!credentials.enabled) {
+    if (!credentials.keyId || !credentials.keySecret) {
+      return { ok: false, reason: "razorpay_credentials_missing" };
+    }
+    return { ok: false, reason: "razorpay_unavailable_in_runtime" };
   }
 
   try {
@@ -231,7 +213,14 @@ export const verifyRazorpayWebhookSignature = ({
 };
 
 export const getPayPalToken = async () => {
+  const runtimePolicy = resolvePaymentRuntimePolicy();
   const { clientId, clientSecret } = getPayPalCredentials();
+  const mode = resolvePayPalMode(runtimePolicy);
+
+  if (!allowProviderModeInRuntime(mode, runtimePolicy)) {
+    return { ok: false, reason: "paypal_unavailable_in_runtime", token: "" };
+  }
+
   if (!clientId || !clientSecret) {
     return { ok: false, reason: "paypal_credentials_missing", token: "" };
   }
