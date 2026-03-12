@@ -189,6 +189,9 @@ export default function Navbar({ routeShell = "browser" }) {
         }
       }
 
+      // replaceState doesn't fire hashchange — update active nav state directly.
+      setActiveHomeHash(normalizedHash);
+
       // Force scroll even when clicking the same hash repeatedly.
       runHashAlignment(normalizedHash, "auto", {
         minRuntimeMs: 900,

@@ -6,7 +6,7 @@ import {
   HOME_SECTION_DATA_KEYS,
   readHomeSectionData,
 } from "../lib/homeSectionData";
-import { writePendingSectionTarget } from "../lib/sectionNavigation";
+import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 
 const REFERRAL_STORAGE_KEY = "referral_session";
 
@@ -14,6 +14,7 @@ export default function Packages({
   initialPackages = null,
   initialSectionCopy = null,
 }) {
+  const handleHomeSectionLink = useHomeSectionLinkHandler();
   const [packages, setPackages] = useState(() =>
     initialPackages !== null
       ? Array.isArray(initialPackages)
@@ -71,7 +72,9 @@ export default function Packages({
             <Link
               key={`${i}-${j}`}
               to={`/#${UPGRADE_FAQ_HASH}`}
-              onClick={() => writePendingSectionTarget(`#${UPGRADE_FAQ_HASH}`)}
+              onClick={(event) =>
+                handleHomeSectionLink(event, `#${UPGRADE_FAQ_HASH}`)
+              }
               className="underline underline-offset-2 transition"
               style={{ color: "#22D3EE" }}
             >
