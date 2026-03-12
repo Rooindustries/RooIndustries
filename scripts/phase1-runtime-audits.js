@@ -410,6 +410,9 @@ const businessSmoke = async () => {
       return {
         status: response.status,
         ok: !!body?.ok,
+        runtime: body?.environment?.runtime || "",
+        previewPaymentsEnabled: body?.environment?.previewPaymentsEnabled === true,
+        livePaymentsEnabled: body?.environment?.livePaymentsEnabled === true,
         razorpayEnabled: !!body?.providers?.razorpay?.enabled,
         paypalEnabled: !!body?.providers?.paypal?.enabled,
       };
@@ -417,6 +420,9 @@ const businessSmoke = async () => {
       return {
         status: 0,
         ok: false,
+        runtime: "",
+        previewPaymentsEnabled: false,
+        livePaymentsEnabled: false,
         razorpayEnabled: false,
         paypalEnabled: false,
       };
@@ -432,6 +438,10 @@ const businessSmoke = async () => {
   checks.push({
     check: "payment_provider_config_loads",
     pass: providerConfig.ok && providerConfig.status === 200,
+  });
+  checks.push({
+    check: "payment_provider_runtime_reported",
+    pass: providerConfig.ok && typeof providerConfig.runtime === "string",
   });
   checks.push({
     check: "razorpay_option_present_when_provider_enabled",
