@@ -38,6 +38,7 @@ export default function Navbar({ routeShell = "browser" }) {
   const [activeHomeHash, setActiveHomeHash] = useState("");
   // Keep initial server/client markup identical, then upgrade to animated mode on mount.
   const [smallLogoMode, setSmallLogoMode] = useState("static");
+  const [logoVideoReady, setLogoVideoReady] = useState(false);
   const proofDropdownRef = useRef(null);
   const headerRef = useRef(null);
   const navRowRef = useRef(null);
@@ -422,12 +423,13 @@ export default function Navbar({ routeShell = "browser" }) {
                 />
                 {smallLogoMode === "webm" && (
                   <video
-                    className={`absolute inset-0 ${smallLogoAnimatedClassName}`}
+                    className={`absolute inset-0 ${smallLogoAnimatedClassName} ${logoVideoReady ? "opacity-100" : "opacity-0"}`}
                     autoPlay
                     loop
                     muted
                     playsInline
                     preload="metadata"
+                    onPlaying={() => setLogoVideoReady(true)}
                     onError={handleSmallWebmError}
                     aria-hidden="true"
                   >
