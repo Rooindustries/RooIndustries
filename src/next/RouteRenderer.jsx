@@ -7,6 +7,7 @@ export default async function RouteRenderer({
   searchParams,
   initialHomeData = null,
 }) {
+  const resolvedSearchParams = await searchParams;
   const resolvedHomeData =
     initialHomeData ??
     (pathname === "/" ? null : await sanityServer.fetchHomePageData());
@@ -16,7 +17,7 @@ export default async function RouteRenderer({
       <SeoFallback pathname={pathname} />
       <LegacyRoutePage
         pathname={pathname}
-        searchParams={searchParams}
+        searchParams={resolvedSearchParams}
         initialHomeData={resolvedHomeData}
       />
     </>
