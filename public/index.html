@@ -87,7 +87,26 @@
 
   <body class="font-sans">
     <noscript>You need to enable JavaScript to run this app.</noscript>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Static hero prerender: paints before React loads, replaced on mount -->
+      <div aria-hidden="true" id="prerender-shell" style="min-height:100vh;background:linear-gradient(to top,#00b7c0 0%,#006185 30%,#001f5a 65%,#000040 100%);background-attachment:fixed">
+        <header style="padding:4rem 0;display:flex;justify-content:center">
+          <div style="max-width:56rem;padding:0 1.5rem;text-align:center;width:100%">
+            <div style="height:36px;display:flex;justify-content:center;align-items:center">
+              <div style="display:inline-flex;align-items:center;border-radius:9999px;border:1px solid rgba(51,65,85,0.8);background:rgba(15,23,42,0.7);padding:0.375rem 1.25rem;box-shadow:0 0 10px rgba(0,255,255,0.6),0 0 20px rgba(0,255,255,0.4)">
+                <span style="font-size:0.875rem;font-weight:500;color:rgba(226,232,240,1)">Roo Industries - Precision Performance Engineering</span>
+              </div>
+            </div>
+            <div style="margin-top:2rem;width:100%">
+              <h1 style="font-weight:800;letter-spacing:-0.025em;text-align:center;font-size:clamp(1.75rem,0.5rem + 5vw,3.75rem);line-height:1.08">
+                <span style="display:block;width:100%;color:white">Your PC Isn't Maxed Out.</span>
+                <span style="display:block;width:100%;background:linear-gradient(to right,#38bdf8,#3b82f6);-webkit-background-clip:text;background-clip:text;color:transparent">We Unlock Full Performance.</span>
+              </h1>
+            </div>
+          </div>
+        </header>
+      </div>
+    </div>
 
     <!-- Google Analytics (deferred to avoid blocking render) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-90X0H1801Q"></script>
