@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { client } from "../sanityClient";
 
@@ -122,6 +122,9 @@ export default function Hero() {
     return <span className="text-white">{renderWithGlow110(cleaned)}</span>;
   };
 
+  const line1Ref = useRef(null);
+  const line2Ref = useRef(null);
+
   const heroLine1Style = {
     fontSize: "var(--hero-line1-size)",
     lineHeight: 1.08,
@@ -130,6 +133,39 @@ export default function Hero() {
     fontSize: "var(--hero-line2-size)",
     lineHeight: 1.08,
   };
+
+  useEffect(() => {
+    const el1 = line1Ref.current;
+    const el2 = line2Ref.current;
+    if (!el1 || !el2 || !headingLine1 || !headingLine2) return;
+
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    let rafId;
+
+    const adjust = () => {
+      const s = getComputedStyle(el2);
+      const base = parseFloat(s.fontSize);
+      ctx.font = `${s.fontWeight} ${base}px ${s.fontFamily}`;
+      const w1 = ctx.measureText(normalizeText(headingLine1)).width;
+      const w2 = ctx.measureText(normalizeText(headingLine2)).width;
+      if (w1 > 0 && w2 > 0) {
+        el1.style.fontSize = `${base * (w2 / w1)}px`;
+      }
+    };
+
+    const onResize = () => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(adjust);
+    };
+
+    (document.fonts?.ready ?? Promise.resolve()).then(adjust);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      cancelAnimationFrame(rafId);
+    };
+  }, [headingLine1, headingLine2]);
 
   return (
     <header id="top" className="py-16 flex justify-center">
@@ -150,6 +186,7 @@ export default function Hero() {
           <h1 className="font-extrabold tracking-tight text-center">
             {headingLine1 && (
               <span
+                ref={line1Ref}
                 className="block w-full text-center text-white"
                 style={heroLine1Style}
               >
@@ -159,6 +196,7 @@ export default function Hero() {
 
             {headingLine2 && (
               <span
+                ref={line2Ref}
                 className={`block w-full text-center ${headingLine2BaseClass}`}
                 style={heroLine2Style}
               >
