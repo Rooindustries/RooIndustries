@@ -10,29 +10,15 @@ const optimizeIconUrl = (url) => {
   return `${url}${separator}auto=format&fit=max&w=64&h=64`;
 };
 
-const normalizeTools = (items) =>
-  (items || []).map((tool) => ({
-    ...tool,
-    iconUrl: optimizeIconUrl(tool?.iconUrl),
-  }));
-
-export default function Tools({ initialData = null }) {
-  const [tools, setTools] = useState(() =>
-    Array.isArray(initialData) ? normalizeTools(initialData) : []
-  );
-  const [loading, setLoading] = useState(() => initialData === null);
+export default function Tools() {
+  const [tools, setTools] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [showDownloadModal, setShowDownloadModal] = useState(false);
   const [pendingDownload, setPendingDownload] = useState(null);
   const [downloadFadeOut, setDownloadFadeOut] = useState(false);
   const [downloadFadeIn, setDownloadFadeIn] = useState(false);
 
   useEffect(() => {
-    if (initialData !== null) {
-      setTools(Array.isArray(initialData) ? normalizeTools(initialData) : []);
-      setLoading(false);
-      return;
-    }
-
     let cancelled = false;
 
     async function fetchTools() {
@@ -52,7 +38,11 @@ export default function Tools({ initialData = null }) {
           }`
         );
         if (!cancelled) {
-          setTools(normalizeTools(data));
+          const normalizedTools = (data || []).map((tool) => ({
+            ...tool,
+            iconUrl: optimizeIconUrl(tool?.iconUrl),
+          }));
+          setTools(normalizedTools);
           setLoading(false);
         }
       } catch (err) {
@@ -65,7 +55,7 @@ export default function Tools({ initialData = null }) {
     return () => {
       cancelled = true;
     };
-  }, [initialData]);
+  }, []);
 
   useEffect(() => {
     const body = document.body;

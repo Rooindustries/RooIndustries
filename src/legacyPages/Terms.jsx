@@ -1,10 +1,10 @@
 import Footer from "../components/Footer";
 import TnC from "../components/Terms";
 
-export default function Terms({ initialData = null }) {
+export default function Terms() {
   return (
     <>
-      <TnC initialData={initialData} />
+      <TnC />
       <Footer />
     </>
   );
