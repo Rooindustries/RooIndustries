@@ -169,9 +169,9 @@ export default function Packages({
         </p>
       )}
 
-      <div className="mt-12 px-6">
+      <div className="mt-12 px-4 sm:px-6">
         <div className="mx-auto w-fit max-w-full">
-          <div className="flex flex-col sm:flex-row justify-center gap-10 flex-wrap">
+          <div className="flex flex-col sm:flex-row justify-center gap-6 sm:gap-10 flex-wrap">
             {packages.map((p, i) => {
               const isXoc = p.title === "XOC / Extreme Overclocking";
 
@@ -186,11 +186,11 @@ export default function Packages({
               return (
                 <div
                   key={p._id || i}
-                  className={`relative w-full sm:w-[500px] border rounded-xl px-7 py-7 transition-all duration-500 flex flex-col bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 text-base sm:text-lg ${
+                  className={`relative w-full sm:w-[500px] border rounded-xl px-5 sm:px-7 py-6 sm:py-7 transition-all duration-500 flex flex-col bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 text-base sm:text-lg ${
                     p.isHighlighted
                       ? "border-sky-400/60 shadow-[0_0_35px_rgba(56,189,248,0.4)] hover:shadow-[0_0_50px_rgba(56,189,248,0.6)]"
                       : "border-sky-600/40 shadow-[0_0_25px_rgba(14,165,233,0.25)] hover:shadow-[0_0_35px_rgba(14,165,233,0.4)]"
-                  } min-h-[620px]`}
+                  } sm:min-h-[620px]`}
                 >
                   {p.tag && (
                     <div className="absolute -top-3 left-1/2 -translate-x-1/2">
