@@ -336,7 +336,7 @@ export default function Navbar({ routeShell = "browser" }) {
 
   const smallLogoSizeClassName = "h-14 w-14 rounded-xl";
   const smallLogoStaticClassName = `${smallLogoSizeClassName} object-contain drop-shadow-[0_0_18px_rgba(34,211,238,0.25)]`;
-  const smallLogoAnimatedClassName = `${smallLogoSizeClassName} object-contain mix-blend-screen drop-shadow-[0_0_18px_rgba(34,211,238,0.25)] transition-opacity duration-500`;
+  const smallLogoAnimatedClassName = `${smallLogoSizeClassName} object-contain drop-shadow-[0_0_18px_rgba(34,211,238,0.25)] transition-opacity duration-500`;
 
   return (
     <header
