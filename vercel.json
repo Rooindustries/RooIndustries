@@ -15,6 +15,15 @@
   ],
   "headers": [
     {
+      "source": "/",
+      "headers": [
+        {
+          "key": "x-vercel-cdn-cache-control",
+          "value": "s-maxage=60, stale-while-revalidate=300"
+        }
+      ]
+    },
+    {
       "source": "/static/:path*",
       "headers": [
         {
