@@ -563,6 +563,70 @@ describe("payment session flow", () => {
     });
   });
 
+  test("start rejects PayPal when the runtime policy disables it", async () => {
+    const hold = createHold();
+    const bookingPayload = baseBookingPayload();
+    bookingPayload.slotHoldToken = issueTokenForHold(hold);
+    mockResolvePaymentProviders.mockReturnValue({
+      serverSessionsEnabled: true,
+      paypal: {
+        enabled: false,
+        mode: "live",
+        clientId: "",
+      },
+      razorpay: {
+        enabled: true,
+        mode: "test",
+      },
+    });
+
+    const result = await startPaymentSession({
+      body: {
+        provider: "paypal",
+        bookingPayload,
+      },
+      client: mockClient,
+    });
+
+    expect(result.httpStatus).toBe(400);
+    expect(result.body).toEqual({
+      ok: false,
+      error: "PayPal is not available in this environment.",
+    });
+  });
+
+  test("start rejects Razorpay when the runtime policy disables it", async () => {
+    const hold = createHold();
+    const bookingPayload = baseBookingPayload();
+    bookingPayload.slotHoldToken = issueTokenForHold(hold);
+    mockResolvePaymentProviders.mockReturnValue({
+      serverSessionsEnabled: true,
+      paypal: {
+        enabled: true,
+        mode: "sandbox",
+        clientId: "paypal-client-id",
+      },
+      razorpay: {
+        enabled: false,
+        mode: "live",
+      },
+    });
+
+    const result = await startPaymentSession({
+      body: {
+        provider: "razorpay",
+        bookingPayload,
+      },
+      client: mockClient,
+    });
+
+    expect(result.httpStatus).toBe(400);
+    expect(result.body).toEqual({
+      ok: false,
+      error: "Razorpay is not available in this environment.",
+    });
+  });
+
   test("start rejects missing holds", async () => {
     const bookingPayload = baseBookingPayload({
       slotHoldId: "missing_hold",

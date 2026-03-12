@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useForm, ValidationError } from "@formspree/react";
 import { client } from "../sanityClient";
 
-export default function Services() {
+export default function Contact() {
   const [contactData, setContactData] = useState(null);
   const [copied, setCopied] = useState(false);
 
