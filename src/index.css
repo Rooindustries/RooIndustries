@@ -650,7 +650,7 @@ html.low-performance-mode section:not(#top > section) {
    Kill looping animations, expensive filters, and unnecessary transitions.
    Only opacity + transform transitions are preserved — they're cheap even in
    software compositing and needed for fluid navbar fade/slide. */
-html.low-performance-mode * {
+html.low-performance-mode *:not(.glow-line) {
   animation: none !important;
   filter: none !important;
   -webkit-filter: none !important;
@@ -719,13 +719,17 @@ html.is-scrolling .gold-flair-pill {
 }
 
 html.perf-no-navbar-blur .site-navbar-glass,
-html.perf-no-navbar-blur .glass-premium {
+html.perf-no-navbar-blur .glass-premium,
+html.perf-reduced-effects-mode .site-navbar-glass,
+html.perf-reduced-effects-mode .glass-premium {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
 
 html.perf-no-banner-blur .reservation-banner-surface,
-html.perf-no-banner-blur .glass-premium {
+html.perf-no-banner-blur .glass-premium,
+html.perf-reduced-effects-mode .reservation-banner-surface,
+html.perf-reduced-effects-mode .glass-premium {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
@@ -734,17 +738,52 @@ html.perf-no-glow .glow-button,
 html.perf-no-glow .sparkle-icon,
 html.perf-no-glow .glow-beam,
 html.perf-no-glow .gold-flair-text,
-html.perf-no-glow .gold-flair-pill {
+html.perf-no-glow .gold-flair-pill,
+html.perf-reduced-effects-mode .glow-button,
+html.perf-reduced-effects-mode .sparkle-icon,
+html.perf-reduced-effects-mode .glow-beam,
+html.perf-reduced-effects-mode .gold-flair-text,
+html.perf-reduced-effects-mode .gold-flair-pill,
+html.perf-reduced-motion-mode .glow-button,
+html.perf-reduced-motion-mode .sparkle-icon,
+html.perf-reduced-motion-mode .glow-beam,
+html.perf-reduced-motion-mode .gold-flair-text,
+html.perf-reduced-motion-mode .gold-flair-pill {
   animation: none !important;
 }
 
 html.perf-no-glow .glow-button,
 html.perf-no-glow .gold-flair-pill,
-html.perf-no-glow .gold-flair-text {
+html.perf-no-glow .gold-flair-text,
+html.perf-reduced-effects-mode .glow-button,
+html.perf-reduced-effects-mode .gold-flair-pill,
+html.perf-reduced-effects-mode .gold-flair-text {
   box-shadow: none !important;
   text-shadow: none !important;
 }
 
-html.perf-no-glow .app-bg-grid-layer {
+html.perf-no-glow .app-bg-grid-layer,
+html.perf-reduced-effects-mode .app-bg-grid-layer {
   opacity: 0.14 !important;
+}
+
+html.perf-reduced-effects-mode .glow-beam {
+  opacity: 0.72 !important;
+}
+
+html.perf-reduced-effects-mode .app-bg-radial-layer {
+  opacity: 0.42 !important;
+}
+
+html.perf-reduced-effects-mode .blur-2xl,
+html.perf-reduced-effects-mode .blur-3xl,
+html.perf-reduced-effects-mode .scroll-blur-lite {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  filter: none !important;
+  -webkit-filter: none !important;
+}
+
+html.perf-reduced-motion-mode {
+  scroll-behavior: auto;
 }
