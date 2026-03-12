@@ -5,6 +5,7 @@ import {
   isHomeSectionHash,
   normalizeSectionHash,
   readPendingSectionTarget,
+  writePendingSectionTarget,
 } from "../lib/sectionNavigation";
 import { useLowPerformanceMode } from "../lib/performanceMode";
 import About from "../components/About";
@@ -25,6 +26,12 @@ function DeferredSection({
 }) {
   const ref = useRef(null);
   const [isVisible, setIsVisible] = useState(eager);
+
+  useEffect(() => {
+    if (eager) {
+      setIsVisible(true);
+    }
+  }, [eager]);
 
   useEffect(() => {
     if (isVisible) return;
@@ -61,8 +68,14 @@ function DeferredSection({
 export default function Home({ initialData = null }) {
   const location = useLocation();
   const isLowPerf = useLowPerformanceMode();
+  const resolveSectionIntentHash = () =>
+    normalizeSectionHash(
+      (typeof window !== "undefined" ? window.location.hash : "") ||
+        location.hash ||
+        ""
+    );
   const [forceEagerSections, setForceEagerSections] = useState(() =>
-    isHomeSectionHash(normalizeSectionHash(location.hash || "")) ||
+    isHomeSectionHash(resolveSectionIntentHash()) ||
     isHomeSectionHash(readPendingSectionTarget())
   );
   // In low-perf mode, render all sections eagerly — CSS content-visibility: auto
@@ -70,13 +83,32 @@ export default function Home({ initialData = null }) {
   const eagerAll = forceEagerSections || isLowPerf;
 
   useEffect(() => {
-    const hasSectionIntent = isHomeSectionHash(
-      normalizeSectionHash(location.hash || "")
+    if (typeof window === "undefined") return undefined;
+
+    const syncForceEagerSections = () => {
+      const hasSectionIntent = isHomeSectionHash(resolveSectionIntentHash());
+      const hasPendingSectionIntent = isHomeSectionHash(
+        readPendingSectionTarget()
+      );
+      if (hasSectionIntent || hasPendingSectionIntent) {
+        setForceEagerSections(true);
+      }
+    };
+
+    syncForceEagerSections();
+    window.addEventListener("hashchange", syncForceEagerSections);
+    window.addEventListener(
+      "roo:pending-section-target",
+      syncForceEagerSections
     );
-    const hasPendingSectionIntent = isHomeSectionHash(readPendingSectionTarget());
-    if (hasSectionIntent || hasPendingSectionIntent) {
-      setForceEagerSections(true);
-    }
+
+    return () => {
+      window.removeEventListener("hashchange", syncForceEagerSections);
+      window.removeEventListener(
+        "roo:pending-section-target",
+        syncForceEagerSections
+      );
+    };
   }, [location.hash]);
 
   return (
@@ -123,7 +155,10 @@ export default function Home({ initialData = null }) {
           </div>
         </DeferredSection>
       </section>
-      <section id="how-it-works">
+      <section
+        id="how-it-works"
+        style={{ scrollMarginTop: "var(--section-nav-offset)" }}
+      >
         <DeferredSection
           fallbackClassName="min-h-[340px]"
           rootMargin="220px 0px"
@@ -137,6 +172,7 @@ export default function Home({ initialData = null }) {
       <div className="mt-4 flex items-center justify-center">
         <Link
           to="/#packages"
+          onClick={() => writePendingSectionTarget("#packages")}
           className="glow-button book-optimization-button relative inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white ring-2 ring-cyan-300/70 hover:text-white active:translate-y-px transition-all duration-300"
         >
           Tune My Rig

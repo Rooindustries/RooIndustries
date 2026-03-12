@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { client } from "../sanityClient";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
+import { writePendingSectionTarget } from "../lib/sectionNavigation";
 
 
 const IST_OFFSET_MINUTES = 330;
@@ -418,6 +419,7 @@ export default function BookingForm({ isMobile }) {
             className="underline underline-offset-2 transition"
             style={{ color: "#22D3EE" }}
             onClick={() => {
+              writePendingSectionTarget(`#${UPGRADE_FAQ_HASH}`);
               closeVertexModal();
             }}
           >

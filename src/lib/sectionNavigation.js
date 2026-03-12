@@ -1,7 +1,10 @@
 export const SECTION_HASHES = Object.freeze({
   benefits: "#services",
   plans: "#packages",
+  howItWorks: "#how-it-works",
   faq: "#faq",
+  upgradePath: "#upgrade-path",
+  trust: "#trust",
 });
 
 export const SECTION_IDS = Object.freeze(
@@ -40,6 +43,11 @@ export const writePendingSectionTarget = (hash = "") => {
   try {
     sessionStorage.setItem(PENDING_SECTION_KEY, normalized);
   } catch {}
+  window.dispatchEvent(
+    new CustomEvent("roo:pending-section-target", {
+      detail: { hash: normalized },
+    })
+  );
 };
 
 export const readPendingSectionTarget = () => {
