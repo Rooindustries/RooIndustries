@@ -2,15 +2,10 @@ import React, { useEffect, useState } from "react";
 import { PortableText } from "@portabletext/react";
 import { client } from "../sanityClient";
 
-export default function Terms({ initialData = null }) {
-  const [data, setData] = useState(initialData);
+export default function Terms() {
+  const [data, setData] = useState(null);
 
   useEffect(() => {
-    if (initialData !== null) {
-      setData(initialData);
-      return;
-    }
-
     client
       .fetch(
         `*[_type == "terms"][0]{
@@ -21,7 +16,7 @@ export default function Terms({ initialData = null }) {
       )
       .then(setData)
       .catch(console.error);
-  }, [initialData]);
+  }, []);
 
   // Helper: Manually processes text to find the email and apply the link + style
   const renderTextWithLinks = (text) => {

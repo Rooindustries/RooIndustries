@@ -1,10 +1,10 @@
 import Userbenchmarks from "../components/Benchmarks";
 import Footer from "../components/Footer";
 
-export default function Benchmarks({ initialData = null }) {
+export default function Benchmarks() {
   return (
     <>
-      {<Userbenchmarks initialData={initialData} />}
+      {<Userbenchmarks />}
       {<Footer />}
     </>
   );

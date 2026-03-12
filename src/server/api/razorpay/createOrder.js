@@ -3,9 +3,6 @@ import {
   resolveUpgradeContext,
 } from "../ref/pricing.js";
 import { getClientAddress, requireRateLimit } from "../ref/rateLimit.js";
-import providerConfig from "../payment/providerConfig.js";
-
-const { resolvePaymentProviders } = providerConfig;
 
 function getCredentials() {
   const keyId = process.env.RAZORPAY_KEY_ID || "";
@@ -33,18 +30,6 @@ export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", ["POST"]);
     return res.status(405).json({ ok: false, message: "Method not allowed" });
-  }
-
-  const providers = resolvePaymentProviders();
-  if (!providers?.razorpay?.enabled) {
-    const previewMessage =
-      providers?.runtime === "preview" && !providers?.previewPaymentsEnabled
-        ? "Razorpay checkout is disabled on preview deployments."
-        : "Razorpay is not available in this environment.";
-    return res.status(403).json({
-      ok: false,
-      message: previewMessage,
-    });
   }
 
   const credentials = getCredentials();

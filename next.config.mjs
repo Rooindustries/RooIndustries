@@ -1,23 +1,5 @@
 /** @type {import('next').NextConfig} */
 const isProduction = process.env.NODE_ENV === "production";
-const isrCacheHeaders = [
-  {
-    key: "Cache-Control",
-    value: "public, s-maxage=60, stale-while-revalidate=300",
-  },
-];
-const isrContentRoutes = [
-  "/",
-  "/benchmarks",
-  "/contact",
-  "/faq",
-  "/meet-the-team",
-  "/packages",
-  "/privacy",
-  "/reviews",
-  "/terms",
-  "/tools",
-];
 const globalSecurityHeaders = [
   {
     key: "X-Content-Type-Options",
@@ -64,10 +46,6 @@ const nextConfig = {
         source: '/:path*',
         headers: globalSecurityHeaders,
       },
-      ...isrContentRoutes.map((source) => ({
-        source,
-        headers: isrCacheHeaders,
-      })),
       {
         source: '/_next/static/:path*',
         headers: [
