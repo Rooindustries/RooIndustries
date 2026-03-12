@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { client } from "../sanityClient";
 
@@ -127,6 +127,44 @@ export default function Hero() {
     lineHeight: 1.08,
   };
 
+  const line1Ref = useRef(null);
+  const line2Ref = useRef(null);
+
+  useEffect(() => {
+    const el1 = line1Ref.current;
+    const el2 = line2Ref.current;
+    if (!el1 || !el2 || !headingLine1 || !headingLine2) return;
+    let rafId;
+
+    const adjust = () => {
+      el1.style.transform = "";
+      el1.style.transformOrigin = "center";
+      const w1 = el1.scrollWidth;
+      const w2 = el2.scrollWidth;
+      if (w1 <= 0 || w2 <= 0) return;
+      const container = el1.parentElement;
+      const avail = container
+        ? container.getBoundingClientRect().width
+        : window.innerWidth - 48;
+      const bothFit = w1 <= avail && w2 <= avail;
+      if (bothFit && Math.abs(w1 - w2) > 2) {
+        el1.style.transform = `scaleX(${w2 / w1})`;
+      }
+    };
+
+    adjust();
+    document.fonts?.ready?.then(() => requestAnimationFrame(adjust));
+    const onResize = () => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(adjust);
+    };
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      cancelAnimationFrame(rafId);
+    };
+  }, [headingLine1, headingLine2]);
+
   return (
     <header id="top" className="py-16 flex justify-center">
       <section className="mx-auto max-w-4xl px-6 text-center w-full">
@@ -146,6 +184,7 @@ export default function Hero() {
           <h1 className="font-extrabold tracking-tight text-center">
             {headingLine1 && (
               <span
+                ref={line1Ref}
                 className="block w-full text-center text-white"
                 style={heroHeadingStyle}
               >
@@ -155,6 +194,7 @@ export default function Hero() {
 
             {headingLine2 && (
               <span
+                ref={line2Ref}
                 className={`block w-full text-center ${headingLine2BaseClass}`}
                 style={heroHeadingStyle}
               >
