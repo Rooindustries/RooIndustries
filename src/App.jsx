@@ -14,6 +14,9 @@ import ReservationBanner from "./components/ReservationBanner";
 import TawkTo from "./components/TawkTo";
 import PerformanceModeNotice from "./components/PerformanceModeNotice";
 import PerfDebugOverlay from "./components/PerfDebugOverlay";
+import { initializePerformanceProfile } from "./lib/performanceProfile";
+
+initializePerformanceProfile();
 import Home from "./legacyPages/Home";
 import {
   consumeRouteTransitionIntent,
