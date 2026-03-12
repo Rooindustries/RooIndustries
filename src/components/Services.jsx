@@ -200,7 +200,7 @@ export default function Services({ initialData = null }) {
                 "transition duration-300 hover:-translate-y-[2px] hover:ring-cyan-400/35"
               }
             >
-              <div className="pointer-events-none absolute inset-0 opacity-70">
+              <div className="pointer-events-none absolute inset-0 opacity-70 hidden sm:block">
                 <div className="absolute -top-24 -left-24 h-56 w-56 rounded-full bg-cyan-400/10 blur-3xl" />
                 <div className="absolute -bottom-24 -right-24 h-56 w-56 rounded-full bg-sky-400/10 blur-3xl" />
               </div>
