@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const { resolvePaymentProviders } = require("../payment/providerConfig.js");
 
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
@@ -7,6 +8,14 @@ module.exports = async function handler(req, res) {
   }
 
   try {
+    const providers = resolvePaymentProviders();
+    if (!providers?.razorpay?.enabled) {
+      return res.status(400).json({
+        ok: false,
+        message: "Razorpay is not available in this environment.",
+      });
+    }
+
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
       req.body || {};
 

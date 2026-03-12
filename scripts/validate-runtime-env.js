@@ -1,5 +1,10 @@
 require("dotenv").config({ path: ".env.local" });
 
+const {
+  resolvePaymentProviders,
+  resolvePaymentRuntimePolicy,
+} = require("../src/server/api/payment/providerConfig.js");
+
 const vercelEnv = (process.env.VERCEL_ENV || "").trim().toLowerCase();
 const hasExplicitVercelEnv = vercelEnv.length > 0;
 const isCi = String(process.env.CI || "").toLowerCase() === "true";
@@ -9,10 +14,14 @@ const isNextProductionBuild = nextPhase === "phase-production-build";
 const forceStrict =
   String(process.env.VALIDATE_RUNTIME_ENV_STRICT || "").toLowerCase() === "1" ||
   String(process.env.REQUIRE_RUNTIME_SECRETS || "").toLowerCase() === "1";
+const paymentRuntimePolicy = resolvePaymentRuntimePolicy();
+const paymentProviders = resolvePaymentProviders();
 
-const isProdBuild = hasExplicitVercelEnv
-  ? vercelEnv === "production"
-  : String(process.env.NODE_ENV || "").toLowerCase() === "production";
+const isProdBuild = paymentRuntimePolicy.runtime === "production";
+const isPreviewBuild = paymentRuntimePolicy.runtime === "preview";
+const isDevelopmentBuild = paymentRuntimePolicy.runtime === "development";
+const previewPaymentsEnabled = paymentRuntimePolicy.previewPaymentsEnabled === true;
+const livePaymentsEnabled = paymentRuntimePolicy.livePaymentsEnabled === true;
 
 const shouldFailClosed =
   missing => missing.length > 0 && isProdBuild && (isCi || isVercelBuild || isNextProductionBuild || forceStrict);
@@ -83,6 +92,11 @@ const razorpayKeyId = getFirstValue(["RAZORPAY_KEY_ID"]);
 const razorpayKeySecret = getFirstValue(["RAZORPAY_KEY_SECRET"]);
 const paypalClientId = getFirstValue(paypalClientIdKeys);
 const paypalClientSecret = getFirstValue(paypalClientSecretKeys);
+const explicitPayPalEnv = String(
+  process.env.PAYPAL_ENV || process.env.NEXT_PUBLIC_PAYPAL_ENV || ""
+)
+  .trim()
+  .toLowerCase();
 
 const providerConsistencyFailures = [];
 const providerConsistencyWarnings = [];
@@ -109,6 +123,56 @@ if (!paypalClientId && !paypalClientSecret) {
   providerConsistencyWarnings.push(
     "PayPal credentials are not configured. PayPal payments will stay disabled."
   );
+}
+
+if (isDevelopmentBuild && livePaymentsEnabled) {
+  providerConsistencyWarnings.push(
+    "Development runtime detected: live payment override is enabled. Use this only for emergency debugging."
+  );
+}
+
+if (isDevelopmentBuild && !livePaymentsEnabled) {
+  if (razorpayKeyId.startsWith("rzp_live_")) {
+    providerConsistencyWarnings.push(
+      "Development runtime detected: live Razorpay keys will stay disabled unless ALLOW_LIVE_PAYMENTS_IN_DEVELOPMENT=1."
+    );
+  }
+
+  if (explicitPayPalEnv === "live" || explicitPayPalEnv === "production") {
+    providerConsistencyWarnings.push(
+      "Development runtime detected: PayPal live mode will stay disabled unless ALLOW_LIVE_PAYMENTS_IN_DEVELOPMENT=1."
+    );
+  }
+}
+
+if (
+  isPreviewBuild &&
+  (razorpayKeyId || razorpayKeySecret || paypalClientId || paypalClientSecret)
+) {
+  if (livePaymentsEnabled) {
+    providerConsistencyWarnings.push(
+      "Preview runtime detected: live payment override is enabled. Use this only for emergency debugging."
+    );
+  } else if (!previewPaymentsEnabled) {
+    providerConsistencyWarnings.push(
+      "Preview build detected: payment providers stay disabled by default. Set ENABLE_PREVIEW_PAYMENTS=1 only when you intentionally want sandbox/test checkout on preview."
+    );
+  }
+
+  if (!livePaymentsEnabled && razorpayKeyId.startsWith("rzp_live_")) {
+    providerConsistencyWarnings.push(
+      "Preview build detected: live Razorpay keys will stay disabled unless ALLOW_LIVE_PAYMENTS_IN_PREVIEW=1."
+    );
+  }
+
+  if (
+    !livePaymentsEnabled &&
+    (explicitPayPalEnv === "live" || explicitPayPalEnv === "production")
+  ) {
+    providerConsistencyWarnings.push(
+      "Preview build detected: PayPal live mode will stay disabled unless ALLOW_LIVE_PAYMENTS_IN_PREVIEW=1."
+    );
+  }
 }
 
 if (missing.length === 0) {
@@ -141,4 +205,8 @@ if (providerConsistencyFailures.length > 0) {
 if (providerConsistencyWarnings.length > 0) {
   console.warn(`[env] ${providerConsistencyWarnings.join("\n[env] ")}`);
 }
+
+console.log(
+  `[env] Payment runtime: runtime=${paymentRuntimePolicy.runtime}, previewPaymentsEnabled=${previewPaymentsEnabled}, livePaymentsEnabled=${livePaymentsEnabled}, razorpayEnabled=${paymentProviders.razorpay.enabled}, paypalEnabled=${paymentProviders.paypal.enabled}`
+);
 process.exit(0);
