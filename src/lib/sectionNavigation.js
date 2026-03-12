@@ -43,6 +43,11 @@ export const writePendingSectionTarget = (hash = "") => {
   try {
     sessionStorage.setItem(PENDING_SECTION_KEY, normalized);
   } catch {}
+  window.dispatchEvent(
+    new CustomEvent("roo:pending-section-target", {
+      detail: { hash: normalized },
+    })
+  );
 };
 
 export const readPendingSectionTarget = () => {

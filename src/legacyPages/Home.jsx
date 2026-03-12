@@ -32,6 +32,12 @@ function DeferredSection({
   const [isVisible, setIsVisible] = useState(eager);
 
   useEffect(() => {
+    if (eager) {
+      setIsVisible(true);
+    }
+  }, [eager]);
+
+  useEffect(() => {
     if (isVisible) return;
     if (typeof IntersectionObserver === "undefined" || !ref.current) {
       setIsVisible(true);
