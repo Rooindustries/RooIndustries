@@ -145,19 +145,41 @@ export default function Hero() {
     document.body.appendChild(probe);
     let rafId;
 
+    const measureWidth = (text, fontSize, style) => {
+      probe.style.font = `${style.fontWeight} ${fontSize}px ${style.fontFamily}`;
+      probe.style.letterSpacing = style.letterSpacing;
+      probe.textContent = text;
+      return probe.getBoundingClientRect().width;
+    };
+
     const adjust = () => {
       const s = getComputedStyle(el2);
       const base = parseFloat(s.fontSize);
-      probe.style.font = `${s.fontWeight} ${base}px ${s.fontFamily}`;
-      probe.style.letterSpacing = s.letterSpacing;
+      const container = el2.parentElement?.parentElement;
+      const avail = container
+        ? container.getBoundingClientRect().width
+        : window.innerWidth - 48;
 
-      probe.textContent = normalizeText(headingLine1);
-      const w1 = probe.getBoundingClientRect().width;
-      probe.textContent = normalizeText(headingLine2);
-      const w2 = probe.getBoundingClientRect().width;
+      const text1 = normalizeText(headingLine1);
+      const text2 = normalizeText(headingLine2);
+      const nw1 = measureWidth(text1, base, s);
+      const nw2 = measureWidth(text2, base, s);
+      if (nw1 <= 0 || nw2 <= 0) return;
 
-      if (w1 > 0 && w2 > 0) {
-        el1.style.fontSize = `${base * (w2 / w1)}px`;
+      const longer = Math.max(nw1, nw2);
+      if (longer <= avail) {
+        // Both fit — scale line1 so both span equal visual width
+        el1.style.fontSize = `${base * (nw2 / nw1)}px`;
+        el2.style.fontSize = `${base}px`;
+      } else {
+        // Longer text overflows — shrink both so longer fits on one line,
+        // then scale shorter to match
+        const fitSize = base * (avail / longer);
+        const fitNw1 = measureWidth(text1, fitSize, s);
+        const fitNw2 = measureWidth(text2, fitSize, s);
+        const scaledLine1Size = fitSize * (fitNw2 / fitNw1);
+        el1.style.fontSize = `${scaledLine1Size}px`;
+        el2.style.fontSize = `${fitSize}px`;
       }
     };
 
