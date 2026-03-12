@@ -2,8 +2,8 @@ import React, { useEffect, useState } from "react";
 import { PortableText } from "@portabletext/react";
 import { client } from "../sanityClient";
 
-export default function PrivacyPolicy({ initialData = null }) {
-  const [data, setData] = useState(initialData);
+export default function PrivacyPolicy() {
+  const [data, setData] = useState(null);
 
   // Helper function to process text strings within paragraphs, converting the specific email to a link
   const renderTextWithLinks = (text) => {
@@ -39,11 +39,6 @@ export default function PrivacyPolicy({ initialData = null }) {
 
   // Fetch from Sanity
   useEffect(() => {
-    if (initialData !== null) {
-      setData(initialData);
-      return;
-    }
-
     client
       .fetch(
         `*[_type == "privacyPolicy"][0]{
@@ -54,7 +49,7 @@ export default function PrivacyPolicy({ initialData = null }) {
       )
       .then(setData)
       .catch(console.error);
-  }, [initialData]);
+  }, []);
 
   if (!data) return null;
 

@@ -13,16 +13,6 @@ const forceStrict =
 const isProdBuild = hasExplicitVercelEnv
   ? vercelEnv === "production"
   : String(process.env.NODE_ENV || "").toLowerCase() === "production";
-const isPreviewBuild = vercelEnv === "preview";
-const previewPaymentsEnabled = ["1", "true", "yes", "on"].includes(
-  String(
-    process.env.ENABLE_PREVIEW_PAYMENTS ||
-      process.env.ALLOW_PREVIEW_PAYMENTS ||
-      ""
-  )
-    .trim()
-    .toLowerCase()
-);
 
 const shouldFailClosed =
   missing => missing.length > 0 && isProdBuild && (isCi || isVercelBuild || isNextProductionBuild || forceStrict);
@@ -93,11 +83,6 @@ const razorpayKeyId = getFirstValue(["RAZORPAY_KEY_ID"]);
 const razorpayKeySecret = getFirstValue(["RAZORPAY_KEY_SECRET"]);
 const paypalClientId = getFirstValue(paypalClientIdKeys);
 const paypalClientSecret = getFirstValue(paypalClientSecretKeys);
-const explicitPayPalEnv = String(
-  process.env.PAYPAL_ENV || process.env.NEXT_PUBLIC_PAYPAL_ENV || ""
-)
-  .trim()
-  .toLowerCase();
 
 const providerConsistencyFailures = [];
 const providerConsistencyWarnings = [];
@@ -124,29 +109,6 @@ if (!paypalClientId && !paypalClientSecret) {
   providerConsistencyWarnings.push(
     "PayPal credentials are not configured. PayPal payments will stay disabled."
   );
-}
-
-if (
-  isPreviewBuild &&
-  (razorpayKeyId || razorpayKeySecret || paypalClientId || paypalClientSecret)
-) {
-  if (!previewPaymentsEnabled) {
-    providerConsistencyWarnings.push(
-      "Preview build detected: payment providers stay disabled by default. Set ENABLE_PREVIEW_PAYMENTS=1 only when you intentionally want sandbox/test checkout on preview."
-    );
-  } else {
-    if (razorpayKeyId.startsWith("rzp_live_")) {
-      providerConsistencyWarnings.push(
-        "Preview build detected: live Razorpay keys will be ignored. Use test keys for preview payments."
-      );
-    }
-
-    if (explicitPayPalEnv === "live" || explicitPayPalEnv === "production") {
-      providerConsistencyWarnings.push(
-        "Preview build detected: PayPal live mode will be ignored. Use sandbox mode for preview payments."
-      );
-    }
-  }
 }
 
 if (missing.length === 0) {

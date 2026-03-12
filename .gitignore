@@ -13,9 +13,6 @@
 /.lighthouseci
 /test-results
 /playwright-report
-/.playwright-cli
-/audit
-/output
 
 # misc
 .env*
@@ -31,6 +28,3 @@ yarn-debug.log*
 yarn-error.log*
 
 .vercel
-cdp-scroll-profile.js
-dropdown-check.js
-gradient-check.js
