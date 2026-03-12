@@ -77,7 +77,7 @@ export default function HowItWorks({ initialData = null }) {
     3: "tuning",
   };
 
-  const VideoBadge = ({ name, pauseVideos }) => {
+  const VideoBadge = ({ name, pauseVideos, loadDelay = 0 }) => {
     const cardRef = useRef(null);
     const videoRef = useRef(null);
     const [isIntersecting, setIsIntersecting] = useState(false);
@@ -94,21 +94,22 @@ export default function HowItWorks({ initialData = null }) {
         return;
       }
 
+      let delayTimer;
       const observer = new IntersectionObserver(
         (entries) => {
           const entry = entries[0];
           const inView = Boolean(entry?.isIntersecting);
           setIsIntersecting(inView);
           if (inView) {
-            setHasLoaded(true);
+            delayTimer = setTimeout(() => setHasLoaded(true), loadDelay);
           }
         },
-        { rootMargin: "200px 0px" }
+        { rootMargin: "600px 0px" }
       );
 
       observer.observe(cardRef.current);
-      return () => observer.disconnect();
-    }, [name]);
+      return () => { observer.disconnect(); clearTimeout(delayTimer); };
+    }, [name, loadDelay]);
 
     useEffect(() => {
       const onVisibilityChange = () => {
@@ -135,6 +136,7 @@ export default function HowItWorks({ initialData = null }) {
 
     const webm = `/videos/${name}.webm`;
     const mp4 = `/videos/${name}.mp4`;
+    const poster = `/posters/${name}.jpg`;
 
     return (
       <div
@@ -151,7 +153,8 @@ export default function HowItWorks({ initialData = null }) {
             loop
             muted
             playsInline
-            preload="none"
+            preload="metadata"
+            poster={poster}
           >
             <source src={webm} type="video/webm" />
             <source src={mp4} type="video/mp4" />
@@ -193,6 +196,7 @@ export default function HowItWorks({ initialData = null }) {
                   <VideoBadge
                     name={videoByStepIndex[i]}
                     pauseVideos={pauseVideos}
+                    loadDelay={i * 150}
                   />
                 </div>
 
