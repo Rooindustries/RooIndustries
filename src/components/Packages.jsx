@@ -203,7 +203,7 @@ export default function Packages({
                         className={`inline-flex items-center whitespace-nowrap text-sm font-bold px-4 py-1 rounded-full ${
                           p.tagGoldGlow
                             ? "border border-amber-300/70 gold-flair-pill"
-                            : "bg-sky-500 shadow-[0_0_15px_rgba(56,189,248,0.6)]"
+                            : "bg-sky-700 shadow-[0_0_15px_rgba(56,189,248,0.6)]"
                         }`}
                       >
                         {p.tagGoldGlow ? (
