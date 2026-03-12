@@ -1,9 +1,12 @@
 import Footer from "../components/Footer";
 import PackagesComp from "../components/Packages";
-export default function Packages() {
+export default function Packages({ initialData = null }) {
   return (
     <>
-      <PackagesComp />
+      <PackagesComp
+        initialPackages={initialData?.packagesList || null}
+        initialSectionCopy={initialData?.packagesSettings || null}
+      />
       <Footer />
     </>
   );
