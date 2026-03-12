@@ -53,7 +53,11 @@ export default function Navbar({ routeShell = "browser" }) {
 
   const benefitsHashes = [SECTION_HASHES.benefits];
   const plansHashes = [SECTION_HASHES.plans];
-  const faqHashes = [SECTION_HASHES.faq, "#upgrade-path", "#trust"];
+  const faqHashes = [
+    SECTION_HASHES.faq,
+    SECTION_HASHES.upgradePath,
+    SECTION_HASHES.trust,
+  ];
   const isBenefitsActive =
     location.pathname === "/" && benefitsHashes.includes(activeHomeHash);
   const isPlansActive =

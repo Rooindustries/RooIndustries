@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { client } from "../sanityClient";
+import { writePendingSectionTarget } from "../lib/sectionNavigation";
 
 const fallbackHeroData = {
   tagline: "Roo Industries - Precision Performance Engineering",
@@ -266,6 +267,7 @@ export default function Hero() {
         <div className="mt-7 flex items-center justify-center gap-3 sm:gap-4 flex-wrap min-h-[56px]">
           <Link
             to="/#packages"
+            onClick={() => writePendingSectionTarget("#packages")}
             className="glow-button book-optimization-button relative inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white ring-2 ring-cyan-300/70 hover:text-white active:translate-y-px transition-all duration-300"
           >
             {renderWithGlow110(primaryCtaText)}
@@ -277,6 +279,7 @@ export default function Hero() {
 
           <Link
             to="/#how-it-works"
+            onClick={() => writePendingSectionTarget("#how-it-works")}
             className="glow-button fps-boosts-button inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
           >
             {renderWithGlow110(secondaryCtaText)}
