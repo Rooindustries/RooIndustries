@@ -264,10 +264,15 @@ const Tag = ({ label, size = "sm" }) => {
   return <span className={`${baseClasses} ${sizeClasses}`}>{label}</span>;
 };
 
-export default function MeetTheTeam({ onSeoData }) {
-  const [rawData, setRawData] = useState(null);
+export default function MeetTheTeam({ initialData = null, onSeoData }) {
+  const [rawData, setRawData] = useState(initialData);
 
   useEffect(() => {
+    if (initialData !== null) {
+      setRawData(initialData);
+      return;
+    }
+
     client
       .fetch(
         `*[_type == "meetTheTeam"][0]{
@@ -313,7 +318,7 @@ export default function MeetTheTeam({ onSeoData }) {
       )
       .then(setRawData)
       .catch(console.error);
-  }, []);
+  }, [initialData]);
 
   const resolved = useMemo(() => {
     const source = rawData || {};

@@ -153,7 +153,7 @@ export default function HowItWorks({ initialData = null }) {
             loop
             muted
             playsInline
-            preload="metadata"
+            preload="none"
             poster={poster}
           >
             <source src={webm} type="video/webm" />

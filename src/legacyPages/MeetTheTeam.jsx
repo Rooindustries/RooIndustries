@@ -1,10 +1,10 @@
 import MeetTheTeam from "../components/MeetTheTeam";
 import Footer from "../components/Footer";
 
-export default function MeetTheTeamPage() {
+export default function MeetTheTeamPage({ initialData = null }) {
   return (
     <>
-      <MeetTheTeam />
+      <MeetTheTeam initialData={initialData} />
       <Footer />
     </>
   );
