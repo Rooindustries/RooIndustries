@@ -645,6 +645,13 @@ html.low-performance-mode section:not(#top > section) {
   contain: layout style;
 }
 
+/* content-visibility: auto can skip child layout when off-screen, which
+   may prevent IntersectionObserver from detecting VideoBadge cards.
+   Override to visible so video loading triggers correctly. */
+html.low-performance-mode #how-it-works .deferred-section-content {
+  content-visibility: visible;
+}
+
 
 /* ── Raster cost reduction ────────────────────────────────────────────────
    Kill looping animations, expensive filters, and unnecessary transitions.
