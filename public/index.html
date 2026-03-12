@@ -1,15 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <!-- Google Analytics -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-90X0H1801Q"></script>
-    <script>
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){dataLayer.push(arguments);}
-      gtag('js', new Date());
-      gtag('config', 'G-90X0H1801Q');
-    </script>
-
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#000000" />
@@ -53,13 +44,14 @@
     <meta name="twitter:image:alt" content="Roo Industries logo" />
 
     <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
-    <link rel="preload" as="image" href="/logo.webp" />
+    <link rel="preload" as="image" href="/logo.webp" fetchpriority="low" />
     <link
       rel="preload"
       as="font"
       href="%PUBLIC_URL%/fonts/roboto-flex-latin-opsz-normal.woff2"
       type="font/woff2"
       crossorigin
+      fetchpriority="high"
     />
     <link rel="preconnect" href="https://9g42k3ur.api.sanity.io" crossorigin />
     <link rel="dns-prefetch" href="//9g42k3ur.api.sanity.io" />
@@ -97,5 +89,13 @@
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
 
+    <!-- Google Analytics (deferred to avoid blocking render) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-90X0H1801Q"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-90X0H1801Q');
+    </script>
   </body>
 </html>
