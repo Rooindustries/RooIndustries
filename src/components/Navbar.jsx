@@ -411,39 +411,28 @@ export default function Navbar({ routeShell = "browser" }) {
 
             <Link to="/" onClick={cancelSectionTransition} className="flex items-center gap-3 select-none">
               <div className="relative h-14 w-14 grid place-items-center">
-                {smallLogoMode === "webm" ? (
-                  <>
-                    <img
-                      src="/favicon-96x96.png"
-                      alt="Roo Industries"
-                      className="sr-only"
-                      loading="eager"
-                      decoding="async"
-                    />
-                    <video
-                      className={smallLogoAnimatedClassName}
-                      autoPlay
-                      loop
-                      muted
-                      playsInline
-                      preload="metadata"
-                      poster="/favicon-96x96.png"
-                      onError={handleSmallWebmError}
-                      aria-hidden="true"
-                    >
-                      <source src="/logo-animated-small.webm" type="video/webm" />
-                    </video>
-                  </>
-                ) : (
-                  <img
-                    src="/favicon-96x96.png"
-                    alt="Roo Industries"
-                    className={smallLogoStaticClassName}
-                    loading="eager"
-                    fetchPriority="high"
-                    width={56}
-                    height={56}
-                  />
+                <img
+                  src="/favicon-96x96.png"
+                  alt="Roo Industries"
+                  className={smallLogoStaticClassName}
+                  loading="eager"
+                  fetchPriority="high"
+                  width={56}
+                  height={56}
+                />
+                {smallLogoMode === "webm" && (
+                  <video
+                    className={`absolute inset-0 ${smallLogoAnimatedClassName}`}
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    preload="metadata"
+                    onError={handleSmallWebmError}
+                    aria-hidden="true"
+                  >
+                    <source src="/logo-animated-small.webm" type="video/webm" />
+                  </video>
                 )}
               </div>
 
