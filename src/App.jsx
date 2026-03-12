@@ -20,6 +20,7 @@ import {
   isHomeSectionHash,
   normalizeSectionHash,
 } from "./lib/sectionNavigation";
+import { sanitizeBrowserSearch } from "./lib/browserSearch";
 import { prefetchHomeSectionData } from "./lib/homeSectionData";
 
 import Reviews from "./legacyPages/Reviews";
@@ -117,38 +118,6 @@ const DeferredTawk = ({ disabledRoutes }) => {
 
   if (!enabled) return null;
   return <TawkTo disabledRoutes={disabledRoutes} />;
-};
-
-const sanitizeBrowserSearch = (pathname, search) => {
-  const params = new URLSearchParams(search || "");
-  if (!params.toString()) return "";
-
-  // Keep useful debugging/attribution params, drop junk shell state that can
-  // leak into the homepage URL from browser/automation handoff flows.
-  const allowedKeys = new Set([
-    "perfdebug",
-    "gclid",
-    "fbclid",
-    "msclkid",
-    "ttclid",
-    "ref",
-  ]);
-
-  const nextParams = new URLSearchParams();
-  params.forEach((value, key) => {
-    const normalizedKey = String(key || "").toLowerCase();
-    const keep =
-      allowedKeys.has(normalizedKey) ||
-      normalizedKey.startsWith("utm_") ||
-      (pathname.startsWith("/booking") && normalizedKey === "xoc");
-
-    if (keep) {
-      nextParams.append(key, value);
-    }
-  });
-
-  const nextQuery = nextParams.toString();
-  return nextQuery ? `?${nextQuery}` : "";
 };
 
 const RouteFallback = () => (

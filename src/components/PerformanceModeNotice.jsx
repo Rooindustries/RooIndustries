@@ -1,134 +1,48 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useState } from "react";
+import {
+  usePerformanceProfile,
+  PERFORMANCE_PROFILES,
+  PERFORMANCE_NOTICE_DISMISS_KEY,
+  DEVICE_CLASSES,
+} from "../lib/performanceProfile";
 
-const MODE_KEY = "roo-lite-mode";
-const DISMISS_KEY = "roo-gpu-warning-dismissed";
-const MANUAL_KEY = "roo-lite-mode-manual";
-
-const SOFTWARE_RENDERER_PATTERNS = [
-  /swiftshader/i,
-  /software/i,
-  /llvmpipe/i,
-  /basic render/i,
-  /mesa offscreen/i,
-];
-
-const detectLikelySoftwareRendering = () => {
-  if (typeof document === "undefined") {
-    return { likelySoftware: false, renderer: "unknown" };
-  }
-
-  const canvas = document.createElement("canvas");
-  const gl =
-    canvas.getContext("webgl2", { failIfMajorPerformanceCaveat: true }) ||
-    canvas.getContext("webgl", { failIfMajorPerformanceCaveat: true }) ||
-    canvas.getContext("experimental-webgl", {
-      failIfMajorPerformanceCaveat: true,
-    });
-
-  if (!gl) {
-    return {
-      likelySoftware: true,
-      renderer: "WebGL unavailable",
-    };
-  }
-
-  let renderer = "";
-  const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
-  if (debugInfo) {
-    renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || "";
-  }
-  if (!renderer) {
-    renderer = gl.getParameter(gl.RENDERER) || "";
-  }
-
-  const likelySoftware = SOFTWARE_RENDERER_PATTERNS.some((pattern) =>
-    pattern.test(renderer)
-  );
-
-  return {
-    likelySoftware,
-    renderer: renderer || "Unknown renderer",
-  };
-};
-
-const setLiteModeClass = (enabled) => {
-  if (typeof document === "undefined") return;
-  document.documentElement.classList.toggle("low-performance-mode", enabled);
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new Event("roo-performance-mode-change"));
+const isNoticeDismissed = () => {
+  try {
+    return localStorage.getItem(PERFORMANCE_NOTICE_DISMISS_KEY) === "1";
+  } catch {
+    return false;
   }
 };
 
 export default function PerformanceModeNotice() {
-  const [liteModeEnabled, setLiteModeEnabled] = useState(false);
-  const [showNotice, setShowNotice] = useState(false);
-  const [detection, setDetection] = useState({
-    likelySoftware: false,
-    renderer: "",
-  });
+  const perf = usePerformanceProfile();
+  const [dismissed, setDismissed] = useState(isNoticeDismissed);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
+  const isLite = perf.profile === PERFORMANCE_PROFILES.LITE;
+  const isReduced = perf.profile === PERFORMANCE_PROFILES.REDUCED;
+  const isDesktopGpu =
+    isLite &&
+    perf.deviceClass === DEVICE_CLASSES.DESKTOP &&
+    perf.reason === "desktop-software-renderer";
 
-    const runDetection = () => {
-      const result = detectLikelySoftwareRendering();
-      setDetection(result);
+  const showNotice = (isLite || isReduced) && !dismissed;
 
-      const storedMode = localStorage.getItem(MODE_KEY);
-      const manualMode = localStorage.getItem(MANUAL_KEY) === "1";
-      let shouldEnableLiteMode = false;
-
-      if (result.likelySoftware) {
-        if (manualMode) {
-          shouldEnableLiteMode = storedMode === "on";
-        } else {
-          shouldEnableLiteMode = storedMode !== "off";
-        }
-      } else {
-        shouldEnableLiteMode = storedMode === "on";
-
-        // One-time migration: clear stale auto-enabled mode on hardware renderers.
-        if (shouldEnableLiteMode && !manualMode) {
-          localStorage.removeItem(MODE_KEY);
-          shouldEnableLiteMode = false;
-        }
-      }
-
-      setLiteModeEnabled(shouldEnableLiteMode);
-      setLiteModeClass(shouldEnableLiteMode);
-
-      const dismissed = localStorage.getItem(DISMISS_KEY) === "1";
-      setShowNotice(result.likelySoftware && !dismissed);
-    };
-
-    if ("requestIdleCallback" in window) {
-      window.requestIdleCallback(runDetection, { timeout: 1000 });
-    } else {
-      setTimeout(runDetection, 250);
+  const dismissNotice = useCallback(() => {
+    setDismissed(true);
+    try {
+      localStorage.setItem(PERFORMANCE_NOTICE_DISMISS_KEY, "1");
+    } catch {
+      /* storage unavailable */
     }
   }, []);
 
-  const noticeMessage = useMemo(() => {
-    if (!detection.likelySoftware) return null;
-    return liteModeEnabled
-      ? "Hardware acceleration appears disabled. Lite Mode has been enabled for smoother scrolling."
-      : "Hardware acceleration appears disabled. Lite Mode is available for smoother scrolling.";
-  }, [detection, liteModeEnabled]);
+  if (!showNotice) return null;
 
-  const toggleLiteMode = () => {
-    const next = !liteModeEnabled;
-    setLiteModeEnabled(next);
-    setLiteModeClass(next);
-    localStorage.setItem(MODE_KEY, next ? "on" : "off");
-    localStorage.setItem(MANUAL_KEY, "1");
-  };
-
-  const dismissNotice = () => {
-    setShowNotice(false);
-    localStorage.setItem(DISMISS_KEY, "1");
-  };
-
-  if (!showNotice || !noticeMessage) return null;
+  const noticeMessage = isDesktopGpu
+    ? "Hardware acceleration appears disabled. Lite Mode has been enabled for smoother scrolling."
+    : isLite
+      ? "Lite Mode has been enabled for smoother scrolling on this device."
+      : "Reduced effects have been enabled for smoother scrolling on this device.";
 
   return (
     <aside
@@ -152,16 +66,20 @@ export default function PerformanceModeNotice() {
           Performance Notice
         </span>
 
-        <p className="mt-2 sm:hidden text-[11px] text-slate-100/95 leading-snug">
-          Hardware acceleration looks off.
-        </p>
+        {isDesktopGpu && (
+          <p className="mt-2 sm:hidden text-[11px] text-slate-100/95 leading-snug">
+            Hardware acceleration looks off.
+          </p>
+        )}
         <p className="mt-2 hidden sm:block text-xs sm:text-sm text-slate-100/95 leading-relaxed">
           {noticeMessage}
         </p>
-        <p className="mt-2 hidden sm:block text-[11px] text-slate-300/75">
-          Chrome: Settings {">"} System {">"} Use graphics acceleration when
-          available.
-        </p>
+        {isDesktopGpu && (
+          <p className="mt-2 hidden sm:block text-[11px] text-slate-300/75">
+            Chrome: Settings {">"} System {">"} Use graphics acceleration when
+            available.
+          </p>
+        )}
 
         <div className="mt-3 flex items-center gap-2">
           <button
