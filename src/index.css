@@ -14,6 +14,13 @@
   }
 }
 
+/* Defer layout/paint cost of below-the-fold sections.
+   Content stays in DOM for SEO — browser skips rendering until near viewport. */
+.deferred-section-content {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 500px;
+}
+
 html {
   background-color: #000040;
   font-family: "Roboto Flex Variable", system-ui, sans-serif;

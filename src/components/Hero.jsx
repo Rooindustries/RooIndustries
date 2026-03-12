@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { client } from "../sanityClient";
 
@@ -24,18 +24,6 @@ const enableLiveHeroContent = process.env.NEXT_PUBLIC_ENABLE_HERO_CMS === "1";
 
 export default function Hero() {
   const [heroData, setHeroData] = useState(fallbackHeroData);
-  const containerRef = useRef(null);
-  const measure1Ref = useRef(null);
-  const measure2Ref = useRef(null);
-  const sizeCacheRef = useRef({
-    width: 0,
-    line1: null,
-    line2: null,
-    heading1: "",
-    heading2: "",
-  });
-  const [line1FontSize, setLine1FontSize] = useState(null);
-  const [line2FontSize, setLine2FontSize] = useState(null);
 
   useEffect(() => {
     if (!enableLiveHeroContent) return;
@@ -134,124 +122,14 @@ export default function Hero() {
     return <span className="text-white">{renderWithGlow110(cleaned)}</span>;
   };
 
-  const getBaseFontSize = useCallback(() => {
-    if (typeof window === "undefined") return 60;
-    const width = window.innerWidth;
-    if (width >= 1280) return 60;
-    if (width >= 768) return 48;
-    return 30;
-  }, []);
-
-  const calculateHeadingSizes = useCallback(() => {
-    const container = containerRef.current;
-    const measure1 = measure1Ref.current;
-    const measure2 = measure2Ref.current;
-
-    if (!container || !measure1 || !measure2 || !headingLine1 || !headingLine2) {
-      return;
-    }
-
-    const maxWidth = Math.max(220, container.clientWidth - 16);
-    const cache = sizeCacheRef.current;
-    if (
-      cache.width === maxWidth &&
-      cache.heading1 === headingLine1 &&
-      cache.heading2 === headingLine2
-    ) {
-      return;
-    }
-    const baseFontSize = getBaseFontSize();
-
-    measure1.style.fontSize = `${baseFontSize}px`;
-    measure2.style.fontSize = `${baseFontSize}px`;
-
-    const width1 = measure1.getBoundingClientRect().width;
-    const width2 = measure2.getBoundingClientRect().width;
-
-    if (!width1 || !width2) return;
-
-    const targetWidth = Math.min(Math.max(width1, width2), maxWidth);
-    const nextLine1 = baseFontSize * (targetWidth / width1);
-    const nextLine2 = baseFontSize * (targetWidth / width2);
-    const minSize = baseFontSize * 0.52;
-    const maxSize = baseFontSize * 1.42;
-    const nextSize1 = Math.max(minSize, Math.min(maxSize, nextLine1));
-    const nextSize2 = Math.max(minSize, Math.min(maxSize, nextLine2));
-
-    sizeCacheRef.current = {
-      width: maxWidth,
-      line1: nextSize1,
-      line2: nextSize2,
-      heading1: headingLine1,
-      heading2: headingLine2,
-    };
-
-    setLine1FontSize((prev) =>
-      prev !== null && Math.abs(prev - nextSize1) < 0.5 ? prev : nextSize1
-    );
-    setLine2FontSize((prev) =>
-      prev !== null && Math.abs(prev - nextSize2) < 0.5 ? prev : nextSize2
-    );
-  }, [getBaseFontSize, headingLine1, headingLine2]);
-
-  useLayoutEffect(() => {
-    let rafId = 0;
-
-    const schedule = () => {
-      cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(calculateHeadingSizes);
-    };
-
-    calculateHeadingSizes();
-    window.addEventListener("resize", schedule);
-    document.fonts?.ready?.then?.(schedule).catch?.(() => {});
-
-    return () => {
-      window.removeEventListener("resize", schedule);
-      cancelAnimationFrame(rafId);
-    };
-  }, [calculateHeadingSizes]);
-
-  const lineBaseSize = 60;
-  const line1Style = {
-    fontSize: `${line1FontSize ?? lineBaseSize}px`,
-    lineHeight: 1.08,
-  };
-  const line2Style = {
-    fontSize: `${line2FontSize ?? lineBaseSize}px`,
+  const heroHeadingStyle = {
+    fontSize: "clamp(1.75rem, 0.5rem + 5vw, 3.75rem)",
     lineHeight: 1.08,
   };
 
   return (
     <header id="top" className="py-16 flex justify-center">
       <section className="mx-auto max-w-4xl px-6 text-center w-full">
-        <div
-          aria-hidden="true"
-          style={{
-            position: "absolute",
-            visibility: "hidden",
-            height: 0,
-            overflow: "hidden",
-            whiteSpace: "nowrap",
-            pointerEvents: "none",
-          }}
-        >
-          <span
-            ref={measure1Ref}
-            className="font-extrabold tracking-tight"
-            style={{ lineHeight: 1.08 }}
-          >
-            {normalizeText(headingLine1)}
-          </span>
-          <span
-            ref={measure2Ref}
-            className="font-extrabold tracking-tight"
-            style={{ lineHeight: 1.08 }}
-          >
-            {normalizeText(headingLine2)}
-          </span>
-        </div>
-
         {/* Tagline Badge */}
         <div className="h-[30px] sm:h-[36px] flex justify-center items-center">
           {tagline && (
@@ -263,13 +141,13 @@ export default function Hero() {
           )}
         </div>
 
-        {/* Main Heading - Both Lines Same Width */}
-        <div className="mt-8 w-full" ref={containerRef}>
+        {/* Main Heading */}
+        <div className="mt-8 w-full">
           <h1 className="font-extrabold tracking-tight text-center">
             {headingLine1 && (
               <span
-                className="block w-full whitespace-nowrap text-center text-white transition-[font-size] duration-150"
-                style={line1Style}
+                className="block w-full text-center text-white"
+                style={heroHeadingStyle}
               >
                 {renderHeadingLine1(headingLine1)}
               </span>
@@ -277,8 +155,8 @@ export default function Hero() {
 
             {headingLine2 && (
               <span
-                className={`block w-full whitespace-nowrap text-center transition-[font-size] duration-150 ${headingLine2BaseClass}`}
-                style={line2Style}
+                className={`block w-full text-center ${headingLine2BaseClass}`}
+                style={heroHeadingStyle}
               >
                 {renderWithGlow110(headingLine2)}
               </span>
