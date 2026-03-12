@@ -1,10 +1,12 @@
 import RouteRenderer from "@/src/next/RouteRenderer";
 import JsonLd from "@/src/next/JsonLd";
 import seo from "@/src/lib/seo";
-import sanityServer from "@/src/lib/sanityServer";
+import { getHomePageData } from "@/src/lib/sanityPageData";
 
-export default async function Page({ searchParams }) {
-  const homePageData = await sanityServer.fetchHomePageData();
+export const revalidate = 60;
+
+export default async function Page() {
+  const homePageData = await getHomePageData();
   const faqQuestions = homePageData?.faqQuestions || [];
   const faqJsonLd = seo.buildFaqJsonLd(faqQuestions);
 
@@ -13,11 +15,7 @@ export default async function Page({ searchParams }) {
       <JsonLd data={seo.buildOrganizationJsonLd()} />
       <JsonLd data={seo.buildOfferCatalogJsonLd()} />
       <JsonLd data={faqJsonLd.mainEntity?.length ? faqJsonLd : null} />
-      <RouteRenderer
-        pathname="/"
-        searchParams={searchParams}
-        initialHomeData={homePageData}
-      />
+      <RouteRenderer pathname="/" initialRouteData={{ home: homePageData }} />
     </>
   );
 }
