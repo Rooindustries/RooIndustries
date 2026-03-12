@@ -143,7 +143,7 @@ export default function HowItWorks({ initialData = null }) {
         ref={cardRef}
         className="relative overflow-hidden rounded-2xl border border-sky-700/40 bg-[#081225]/70
                    shadow-[0_0_26px_rgba(14,165,233,0.3)]
-                   w-[calc(100%+0.75rem)] sm:w-[calc(100%+1rem)] -mx-1.5 sm:-mx-2 aspect-[16/10]"
+                   w-[calc(100%+0.75rem)] sm:w-[calc(100%+1rem)] -mx-1.5 sm:-mx-2 aspect-video sm:aspect-[16/10]"
       >
         {hasLoaded ? (
           <video
