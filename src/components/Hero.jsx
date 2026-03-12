@@ -166,20 +166,15 @@ export default function Hero() {
       const nw2 = measureWidth(text2, base, s);
       if (nw1 <= 0 || nw2 <= 0) return;
 
-      const longer = Math.max(nw1, nw2);
-      if (longer <= avail) {
-        // Both fit — scale line1 so both span equal visual width
+      const bothFit = nw1 <= avail && nw2 <= avail;
+      if (bothFit) {
+        // Desktop/tablet: both fit one line — scale line1 to match line2 width
         el1.style.fontSize = `${base * (nw2 / nw1)}px`;
-        el2.style.fontSize = `${base}px`;
+        el2.style.fontSize = "";
       } else {
-        // Longer text overflows — shrink both so longer fits on one line,
-        // then scale shorter to match
-        const fitSize = base * (avail / longer);
-        const fitNw1 = measureWidth(text1, fitSize, s);
-        const fitNw2 = measureWidth(text2, fitSize, s);
-        const scaledLine1Size = fitSize * (fitNw2 / fitNw1);
-        el1.style.fontSize = `${scaledLine1Size}px`;
-        el2.style.fontSize = `${fitSize}px`;
+        // Mobile: text wraps — use same font size for balanced look
+        el1.style.fontSize = "";
+        el2.style.fontSize = "";
       }
     };
 
