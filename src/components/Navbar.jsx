@@ -219,33 +219,9 @@ export default function Navbar({ routeShell = "browser" }) {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-
-    if (!canAnimateLogo()) {
-      setSmallLogoMode("static");
-      return;
+    if (canAnimateLogo()) {
+      setSmallLogoMode("animated");
     }
-
-    const enableAnimatedLogo = () => setSmallLogoMode("animated");
-    const interactionEvents = [
-      "pointerdown",
-      "touchstart",
-      "keydown",
-      "mousemove",
-      "scroll",
-    ];
-
-    interactionEvents.forEach((eventName) => {
-      window.addEventListener(eventName, enableAnimatedLogo, {
-        once: true,
-        passive: true,
-      });
-    });
-
-    return () => {
-      interactionEvents.forEach((eventName) => {
-        window.removeEventListener(eventName, enableAnimatedLogo);
-      });
-    };
   }, []);
 
   useEffect(() => {
@@ -360,7 +336,7 @@ export default function Navbar({ routeShell = "browser" }) {
 
   const smallLogoSizeClassName = "h-14 w-14 rounded-xl";
   const smallLogoStaticClassName = `${smallLogoSizeClassName} object-contain drop-shadow-[0_0_18px_rgba(34,211,238,0.25)]`;
-  const smallLogoAnimatedClassName = `${smallLogoSizeClassName} object-cover drop-shadow-[0_0_18px_rgba(34,211,238,0.25)] transition-opacity duration-500`;
+  const smallLogoAnimatedClassName = `${smallLogoSizeClassName} object-contain mix-blend-screen drop-shadow-[0_0_18px_rgba(34,211,238,0.25)] transition-opacity duration-500`;
 
   return (
     <header
@@ -399,7 +375,7 @@ export default function Navbar({ routeShell = "browser" }) {
             ) : null}
 
             <Link to="/" onClick={cancelSectionTransition} className="flex items-center gap-3 select-none">
-              <div className="relative h-14 w-14 grid place-items-center">
+              <div className="relative h-14 w-14 grid place-items-center overflow-hidden rounded-xl">
                 <img
                   src="/favicon-96x96.png"
                   alt="Roo Industries"
@@ -415,7 +391,7 @@ export default function Navbar({ routeShell = "browser" }) {
                     alt=""
                     className={`absolute inset-0 ${smallLogoAnimatedClassName}`}
                     aria-hidden="true"
-                    loading="eager"
+                    loading="lazy"
                     decoding="async"
                     onError={handleLogoAnimError}
                   />
