@@ -2,18 +2,13 @@ import React, { useState, useEffect } from "react";
 import { useForm, ValidationError } from "@formspree/react";
 import { client } from "../sanityClient";
 
-export default function Services({ initialData = null }) {
-  const [contactData, setContactData] = useState(initialData);
+export default function Services() {
+  const [contactData, setContactData] = useState(null);
   const [copied, setCopied] = useState(false);
 
   const [state, handleSubmit] = useForm("mpwybpen");
 
   useEffect(() => {
-    if (initialData !== null) {
-      setContactData(initialData);
-      return;
-    }
-
     client
       .fetch(
         `*[_type == "contact"][0]{
@@ -25,7 +20,7 @@ export default function Services({ initialData = null }) {
       )
       .then(setContactData)
       .catch(console.error);
-  }, [initialData]);
+  }, []);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(

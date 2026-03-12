@@ -131,7 +131,7 @@ export default function PerformanceModeNotice() {
   if (!showNotice || !noticeMessage) return null;
 
   return (
-    <div
+    <aside
       className="fixed left-3 sm:left-4 bottom-3 sm:bottom-4 z-[90] w-[min(88vw,320px)] sm:w-[min(92vw,390px)] overflow-hidden rounded-2xl border border-sky-700/50 bg-[#061226]/95 backdrop-blur-md p-3 sm:p-4 text-left shadow-[0_0_30px_rgba(56,189,248,0.26)]"
       role="status"
       aria-live="polite"
@@ -173,6 +173,6 @@ export default function PerformanceModeNotice() {
           </button>
         </div>
       </div>
-    </div>
+    </aside>
   );
 }
