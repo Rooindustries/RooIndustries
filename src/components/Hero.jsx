@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { client } from "../sanityClient";
+import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 
 const fallbackHeroData = {
   tagline: "Roo Industries - Precision Performance Engineering",
@@ -24,6 +25,7 @@ const enableLiveHeroContent = process.env.NEXT_PUBLIC_ENABLE_HERO_CMS === "1";
 
 export default function Hero() {
   const [heroData, setHeroData] = useState(fallbackHeroData);
+  const handleHomeSectionLink = useHomeSectionLinkHandler();
 
   useEffect(() => {
     if (!enableLiveHeroContent) return;
@@ -134,34 +136,70 @@ export default function Hero() {
     const el1 = line1Ref.current;
     const el2 = line2Ref.current;
     if (!el1 || !el2 || !headingLine1 || !headingLine2) return;
+
+    const probe = document.createElement("span");
+    probe.style.cssText =
+      "position:fixed;top:-9999px;left:-9999px;visibility:hidden;white-space:nowrap;pointer-events:none";
+    document.body.appendChild(probe);
     let rafId;
 
+    const measureWidth = (text, fontSize, style) => {
+      probe.style.font = `${style.fontWeight} ${fontSize}px ${style.fontFamily}`;
+      probe.style.letterSpacing = style.letterSpacing;
+      probe.textContent = text;
+      return probe.getBoundingClientRect().width;
+    };
+
     const adjust = () => {
-      el1.style.transform = "";
-      el1.style.transformOrigin = "center";
-      const w1 = el1.scrollWidth;
-      const w2 = el2.scrollWidth;
-      if (w1 <= 0 || w2 <= 0) return;
-      const container = el1.parentElement;
+      // Restore el2 to CSS clamp so we read the true responsive base
+      el2.style.fontSize = "clamp(1.75rem, 0.5rem + 5vw, 3.75rem)";
+
+      const s = getComputedStyle(el2);
+      const base = parseFloat(s.fontSize);
+      const container = el2.parentElement?.parentElement;
       const avail = container
         ? container.getBoundingClientRect().width
         : window.innerWidth - 48;
-      const bothFit = w1 <= avail && w2 <= avail;
-      if (bothFit && Math.abs(w1 - w2) > 2) {
-        el1.style.transform = `scaleX(${w2 / w1})`;
+
+      const text1 = normalizeText(headingLine1);
+      const text2 = normalizeText(headingLine2);
+      const nw1 = measureWidth(text1, base, s);
+      const nw2 = measureWidth(text2, base, s);
+      if (nw1 <= 0 || nw2 <= 0) return;
+
+      const bothFit = nw1 <= avail && nw2 <= avail;
+      const neitherFits = nw1 > avail && nw2 > avail;
+
+      if (bothFit) {
+        // Desktop/tablet: both fit one line — scale line1 to match line2 width
+        el1.style.fontSize = `${base * (nw2 / nw1)}px`;
+      } else if (neitherFits) {
+        // Small phones (≤375px): both wrap — same font size for balanced look
+        el1.style.fontSize = `${base}px`;
+      } else {
+        // Mid-range phones (390-430px): one fits, one wraps — shrink both to single-line
+        const longer = Math.max(nw1, nw2);
+        const shrunk = base * (avail / longer) * 0.97; // 3% margin prevents sub-pixel overflow
+        const sNw1 = measureWidth(text1, shrunk, s);
+        const sNw2 = measureWidth(text2, shrunk, s);
+        // Width-match line1 to line2, but cap so it can't exceed container
+        const target = Math.min(sNw2, avail * 0.99);
+        el1.style.fontSize = `${shrunk * (target / sNw1)}px`;
+        el2.style.fontSize = `${shrunk}px`;
       }
     };
 
-    adjust();
-    document.fonts?.ready?.then(() => requestAnimationFrame(adjust));
     const onResize = () => {
       cancelAnimationFrame(rafId);
       rafId = requestAnimationFrame(adjust);
     };
+
+    (document.fonts?.ready ?? Promise.resolve()).then(adjust);
     window.addEventListener("resize", onResize);
     return () => {
       window.removeEventListener("resize", onResize);
       cancelAnimationFrame(rafId);
+      if (probe.parentNode) probe.parentNode.removeChild(probe);
     };
   }, [headingLine1, headingLine2]);
 
@@ -226,6 +264,7 @@ export default function Hero() {
         <div className="mt-7 flex items-center justify-center gap-3 sm:gap-4 flex-wrap min-h-[56px]">
           <Link
             to="/#packages"
+            onClick={(event) => handleHomeSectionLink(event, "#packages")}
             className="glow-button book-optimization-button relative inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white ring-2 ring-cyan-300/70 hover:text-white active:translate-y-px transition-all duration-300"
           >
             {renderWithGlow110(primaryCtaText)}
@@ -237,6 +276,9 @@ export default function Hero() {
 
           <Link
             to="/#how-it-works"
+            onClick={(event) =>
+              handleHomeSectionLink(event, "#how-it-works")
+            }
             className="glow-button fps-boosts-button inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
           >
             {renderWithGlow110(secondaryCtaText)}
