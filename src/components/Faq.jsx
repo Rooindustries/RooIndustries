@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ChevronDown } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS, readHomeSectionData } from "../lib/homeSectionData";
+import { alignToHashTarget, getCssHeaderOffsetPx } from "../lib/scrollCoordinator";
 
 // --- HELPERS ---
 
@@ -205,7 +206,15 @@ export default function FaqSection({
         setPage([targetPage, dir]);
       }
       setOpenQuestions((prev) => ({ ...prev, [hash]: true }));
-      setTimeout(() => scrollWithOffset(hash), 250);
+      return alignToHashTarget({
+        hash: `#${hash}`,
+        behavior: "auto",
+        getOffsetPx: () => getCssHeaderOffsetPx(96),
+        stableFramesRequired: 4,
+        preAlignStableFramesRequired: 1,
+        minRuntimeMs: 180,
+        maxWaitMs: 5000,
+      });
     }
   }, [location.hash, flatQuestions, safePage]); 
 
