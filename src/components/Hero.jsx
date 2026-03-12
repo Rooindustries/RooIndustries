@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { client } from "../sanityClient";
-import { writePendingSectionTarget } from "../lib/sectionNavigation";
+import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 
 const fallbackHeroData = {
   tagline: "Roo Industries - Precision Performance Engineering",
@@ -25,6 +25,7 @@ const enableLiveHeroContent = process.env.NEXT_PUBLIC_ENABLE_HERO_CMS === "1";
 
 export default function Hero() {
   const [heroData, setHeroData] = useState(fallbackHeroData);
+  const handleHomeSectionLink = useHomeSectionLinkHandler();
 
   useEffect(() => {
     if (!enableLiveHeroContent) return;
@@ -123,17 +124,13 @@ export default function Hero() {
     return <span className="text-white">{renderWithGlow110(cleaned)}</span>;
   };
 
+  const heroHeadingStyle = {
+    fontSize: "clamp(1.75rem, 0.5rem + 5vw, 3.75rem)",
+    lineHeight: 1.08,
+  };
+
   const line1Ref = useRef(null);
   const line2Ref = useRef(null);
-
-  const heroLine1Style = {
-    fontSize: "var(--hero-line1-size)",
-    lineHeight: 1.08,
-  };
-  const heroLine2Style = {
-    fontSize: "var(--hero-line2-size)",
-    lineHeight: 1.08,
-  };
 
   useEffect(() => {
     const el1 = line1Ref.current;
@@ -154,8 +151,7 @@ export default function Hero() {
     };
 
     const adjust = () => {
-      // Restore el2 to CSS variable so we read the true responsive base
-      el2.style.fontSize = "var(--hero-line2-size)";
+      el2.style.fontSize = "clamp(1.75rem, 0.5rem + 5vw, 3.75rem)";
 
       const s = getComputedStyle(el2);
       const base = parseFloat(s.fontSize);
@@ -174,18 +170,14 @@ export default function Hero() {
       const neitherFits = nw1 > avail && nw2 > avail;
 
       if (bothFit) {
-        // Desktop/tablet: both fit one line — scale line1 to match line2 width
         el1.style.fontSize = `${base * (nw2 / nw1)}px`;
       } else if (neitherFits) {
-        // Small phones (≤375px): both wrap — same font size for balanced look
         el1.style.fontSize = `${base}px`;
       } else {
-        // Mid-range phones (390-430px): one fits, one wraps — shrink both to single-line
         const longer = Math.max(nw1, nw2);
-        const shrunk = base * (avail / longer) * 0.97; // 3% margin prevents sub-pixel overflow
+        const shrunk = base * (avail / longer) * 0.97;
         const sNw1 = measureWidth(text1, shrunk, s);
         const sNw2 = measureWidth(text2, shrunk, s);
-        // Width-match line1 to line2, but cap so it can't exceed container
         const target = Math.min(sNw2, avail * 0.99);
         el1.style.fontSize = `${shrunk * (target / sNw1)}px`;
         el2.style.fontSize = `${shrunk}px`;
@@ -209,7 +201,6 @@ export default function Hero() {
   return (
     <header id="top" className="py-16 flex justify-center">
       <section className="mx-auto max-w-4xl px-6 text-center w-full">
-        {/* Tagline Badge */}
         <div className="h-[30px] sm:h-[36px] flex justify-center items-center">
           {tagline && (
             <div className="inline-flex items-center rounded-full border border-slate-700/80 bg-slate-900/70 px-4 sm:px-5 py-1.5 sm:py-2 shadow-[0_0_10px_rgba(0,255,255,0.6),0_0_20px_rgba(0,255,255,0.4)]">
@@ -220,14 +211,13 @@ export default function Hero() {
           )}
         </div>
 
-        {/* Main Heading */}
         <div className="mt-8 w-full">
           <h1 className="font-extrabold tracking-tight text-center">
             {headingLine1 && (
               <span
                 ref={line1Ref}
                 className="block w-full text-center text-white"
-                style={heroLine1Style}
+                style={heroHeadingStyle}
               >
                 {renderHeadingLine1(headingLine1)}
               </span>
@@ -237,7 +227,7 @@ export default function Hero() {
               <span
                 ref={line2Ref}
                 className={`block w-full text-center ${headingLine2BaseClass}`}
-                style={heroLine2Style}
+                style={heroHeadingStyle}
               >
                 {renderWithGlow110(headingLine2)}
               </span>
@@ -245,7 +235,6 @@ export default function Hero() {
           </h1>
         </div>
 
-        {/* Description */}
         <div className="min-h-[48px] sm:min-h-[60px]">
           {description && (
             <p className="mt-4 text-sm sm:text-base md:text-lg text-slate-200/90 leading-relaxed max-w-2xl mx-auto">
@@ -254,7 +243,6 @@ export default function Hero() {
           )}
         </div>
 
-        {/* Subtext */}
         <div className="min-h-[32px] sm:min-h-[36px]">
           {subtext && (
             <p className="mt-6 text-[14px] sm:text-lg font-semibold text-cyan-300">
@@ -263,11 +251,10 @@ export default function Hero() {
           )}
         </div>
 
-        {/* CTA Buttons */}
         <div className="mt-7 flex items-center justify-center gap-3 sm:gap-4 flex-wrap min-h-[56px]">
           <Link
             to="/#packages"
-            onClick={() => writePendingSectionTarget("#packages")}
+            onClick={(event) => handleHomeSectionLink(event, "#packages")}
             className="glow-button book-optimization-button relative inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white ring-2 ring-cyan-300/70 hover:text-white active:translate-y-px transition-all duration-300"
           >
             {renderWithGlow110(primaryCtaText)}
@@ -279,7 +266,9 @@ export default function Hero() {
 
           <Link
             to="/#how-it-works"
-            onClick={() => writePendingSectionTarget("#how-it-works")}
+            onClick={(event) =>
+              handleHomeSectionLink(event, "#how-it-works")
+            }
             className="glow-button fps-boosts-button inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white ring-1 ring-sky-700/50 active:translate-y-px transition-all duration-300"
           >
             {renderWithGlow110(secondaryCtaText)}
@@ -290,7 +279,6 @@ export default function Hero() {
           </Link>
         </div>
 
-        {/* CTA Note */}
         {ctaNote && (
           <p className="mt-5 text-sm sm:text-base font-extrabold tracking-wide relative inline-flex items-center gap-2">
             {ctaNoteIcon && (
@@ -302,7 +290,6 @@ export default function Hero() {
           </p>
         )}
 
-        {/* Bullet Points */}
         <div className="mt-5 w-full">
           {bullets.length > 0 && (
             <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 sm:gap-x-6">

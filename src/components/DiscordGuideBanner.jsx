@@ -45,7 +45,6 @@ export default function DiscordGuideBanner({ hidden = false }) {
         className={`group flex w-full items-center justify-center gap-2 px-4 py-2.5 sm:py-3 text-sm sm:text-base font-semibold text-cyan-50/88 transition hover:bg-cyan-300/8 hover:text-cyan-100 ${
           hidden ? "pointer-events-none" : "pointer-events-auto"
         }`}
-        aria-label={banner.text || DEFAULT_BANNER.text}
         tabIndex={hidden ? -1 : 0}
       >
         <FaDiscord className="text-base sm:text-lg" aria-hidden="true" />
