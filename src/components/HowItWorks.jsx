@@ -7,9 +7,36 @@ import {
 } from "../lib/perfDebug";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS, readHomeSectionData } from "../lib/homeSectionData";
 
+const fallbackData = {
+  title: "How It Works",
+  subtitle: "From first contact to measurable gains — here's the process.",
+  steps: [
+    {
+      badge: "Step 1 — Join",
+      title: "Open a Ticket on Discord",
+      text: "Hop into our Discord server, open a ticket, and tell us about your rig and goals. We'll match you with the right plan.",
+    },
+    {
+      badge: "Step 2 — Connect",
+      title: "Install Our Secure Tools",
+      text: "We send you a lightweight, audited remote-access package. You stay in control the entire time.",
+    },
+    {
+      badge: "Step 3 — Optimize",
+      title: "BIOS & System Tuning",
+      text: "We dial in your BIOS, memory timings, Windows services, power plan, and game configs for your exact hardware.",
+    },
+    {
+      badge: "Step 4 — Verify",
+      title: "Benchmark & Deliver",
+      text: "We run before/after benchmarks so you can see the gains. You get a full report and lifetime support.",
+    },
+  ],
+};
+
 export default function HowItWorks({ initialData = null }) {
   const [data, setData] = useState(
-    () => initialData ?? readHomeSectionData(HOME_SECTION_DATA_KEYS.howItWorks)
+    () => initialData ?? readHomeSectionData(HOME_SECTION_DATA_KEYS.howItWorks) ?? fallbackData
   );
 
   useEffect(() => {
@@ -20,11 +47,12 @@ export default function HowItWorks({ initialData = null }) {
   const [pauseVideos, setPauseVideos] = useState(false);
 
   useEffect(() => {
-    if (data !== null) return;
+    if (initialData !== null) return;
+    if (readHomeSectionData(HOME_SECTION_DATA_KEYS.howItWorks) !== null) return;
     fetchHomeSectionData(HOME_SECTION_DATA_KEYS.howItWorks)
-      .then((res) => setData(res))
+      .then((res) => { if (res) setData(res); })
       .catch((err) => console.error("Sanity fetch error:", err));
-  }, [data]);
+  }, [initialData]);
 
   useEffect(() => {
     const syncPauseState = () => {
@@ -41,17 +69,6 @@ export default function HowItWorks({ initialData = null }) {
       window.removeEventListener("roo-performance-mode-change", syncPauseState);
     };
   }, []);
-
-  if (!data) {
-    return (
-      <section
-        className="relative z-10 py-16 px-4 sm:px-6 text-white max-w-[110rem] mx-auto"
-        aria-hidden="true"
-      >
-        <div className="min-h-[760px] rounded-3xl border border-sky-700/20 bg-gradient-to-b from-[#0d1526]/70 to-[#08101d]/80" />
-      </section>
-    );
-  }
 
   const videoByStepIndex = {
     0: "discordvideo",
