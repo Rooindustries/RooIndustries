@@ -1,7 +1,10 @@
 export const SECTION_HASHES = Object.freeze({
   benefits: "#services",
   plans: "#packages",
+  howItWorks: "#how-it-works",
   faq: "#faq",
+  upgradePath: "#upgrade-path",
+  trust: "#trust",
 });
 
 export const SECTION_IDS = Object.freeze(

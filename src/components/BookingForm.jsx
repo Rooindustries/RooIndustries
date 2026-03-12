@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { client } from "../sanityClient";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
+import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 
 
 const IST_OFFSET_MINUTES = 330;
@@ -330,6 +331,7 @@ function XocDropdown({
 
 // Accepts isMobile prop from BookingModal to force layout styles
 export default function BookingForm({ isMobile }) {
+  const handleHomeSectionLink = useHomeSectionLinkHandler();
   const location = useLocation();
   const q = useQuery();
   const navigate = useNavigate();
@@ -417,7 +419,8 @@ export default function BookingForm({ isMobile }) {
             to={`/#${UPGRADE_FAQ_HASH}`}
             className="underline underline-offset-2 transition"
             style={{ color: "#22D3EE" }}
-            onClick={() => {
+            onClick={(event) => {
+              handleHomeSectionLink(event, `#${UPGRADE_FAQ_HASH}`);
               closeVertexModal();
             }}
           >
