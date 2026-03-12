@@ -20,7 +20,11 @@ import {
   isHomeSectionHash,
   normalizeSectionHash,
 } from "./lib/sectionNavigation";
-import { prefetchHomeSectionData } from "./lib/homeSectionData";
+import {
+  HOME_SECTION_DATA_KEYS,
+  prefetchHomeSectionData,
+  primeHomeSectionData,
+} from "./lib/homeSectionData";
 
 import Reviews from "./legacyPages/Reviews";
 import Tools from "./legacyPages/Tools";
@@ -170,35 +174,66 @@ function AnimatedRoutes({
   setIsModalOpen,
   routesLocation,
   routeKey,
-  initialHomeData,
+  initialRouteData,
 }) {
   const baseLocation = useLocation();
   const location = routesLocation || baseLocation;
   const motionKey = routeKey || `${location.pathname}${location.search || ""}`;
 
   return (
-    <div key={motionKey} className="w-full flex flex-col flex-1">
+      <div key={motionKey} className="w-full flex flex-col flex-1">
         <Routes location={location}>
-          <Route path="/" element={<Home initialData={initialHomeData} />} />
-          <Route path="/packages" element={withRouteSuspense(<Packages />)} />
+          <Route
+            path="/"
+            element={<Home initialData={initialRouteData?.home || null} />}
+          />
+          <Route
+            path="/packages"
+            element={withRouteSuspense(
+              <Packages initialData={initialRouteData?.packages || null} />
+            )}
+          />
           <Route
             path="/benchmarks"
             element={withRouteSuspense(
-              <Benchmarks setIsModalOpen={setIsModalOpen} />
+              <Benchmarks
+                initialData={initialRouteData?.benchmarks || null}
+                setIsModalOpen={setIsModalOpen}
+              />
             )}
           />
-          <Route path="/privacy" element={withRouteSuspense(<Privacy />)} />
-          <Route path="/terms" element={withRouteSuspense(<Terms />)} />
+          <Route
+            path="/privacy"
+            element={withRouteSuspense(
+              <Privacy initialData={initialRouteData?.privacy || null} />
+            )}
+          />
+          <Route
+            path="/terms"
+            element={withRouteSuspense(
+              <Terms initialData={initialRouteData?.terms || null} />
+            )}
+          />
           <Route
             path="/reviews"
-            element={<Reviews setIsModalOpen={setIsModalOpen} />}
+            element={
+              <Reviews
+                initialData={initialRouteData?.reviews || null}
+                setIsModalOpen={setIsModalOpen}
+              />
+            }
           />
           <Route path="/booking" element={withRouteSuspense(<Book />)} />
-          <Route path="/contact" element={withRouteSuspense(<Contact />)} />
+          <Route
+            path="/contact"
+            element={withRouteSuspense(
+              <Contact initialData={initialRouteData?.contact || null} />
+            )}
+          />
           <Route
             path="/faq"
             element={withRouteSuspense(
-              <FaqPage initialData={initialHomeData} />
+              <FaqPage initialData={initialRouteData?.faq || null} />
             )}
           />
           <Route path="/discord" element={<RedirectToDiscord />} />
@@ -208,10 +243,15 @@ function AnimatedRoutes({
             element={withRouteSuspense(<PaymentSuccess />)}
           />
           <Route path="/thank-you" element={withRouteSuspense(<Thankyou />)} />
-          <Route path="/tools" element={<Tools />} />
+          <Route
+            path="/tools"
+            element={<Tools initialData={initialRouteData?.tools || null} />}
+          />
           <Route
             path="/meet-the-team"
-            element={withRouteSuspense(<MeetTheTeam />)}
+            element={withRouteSuspense(
+              <MeetTheTeam initialData={initialRouteData?.meetTheTeam || null} />
+            )}
           />
           <Route
             path="/upgrade/:slug"
@@ -257,7 +297,7 @@ function AnimatedRoutes({
   );
 }
 
-export function AppContent({ initialHomeData = null, routeShell = "browser" }) {
+export function AppContent({ initialRouteData = null, routeShell = "browser" }) {
   const [, setIsModalOpen] = useState(false);
   const [showRouteTransition, setShowRouteTransition] = useState(false);
 
@@ -302,6 +342,42 @@ export function AppContent({ initialHomeData = null, routeShell = "browser" }) {
     isPaymentRoute ||
     isPaymentSuccessRoute ||
     isThankYouRoute;
+
+  useEffect(() => {
+    const homeData = initialRouteData?.home;
+    if (homeData) {
+      primeHomeSectionData({
+        [HOME_SECTION_DATA_KEYS.reviews]: homeData.reviews ?? null,
+        [HOME_SECTION_DATA_KEYS.about]: homeData.about ?? null,
+        [HOME_SECTION_DATA_KEYS.services]: homeData.services ?? null,
+        [HOME_SECTION_DATA_KEYS.packagesList]: homeData.packagesList ?? [],
+        [HOME_SECTION_DATA_KEYS.packagesSettings]:
+          homeData.packagesSettings ?? null,
+        [HOME_SECTION_DATA_KEYS.howItWorks]: homeData.howItWorks ?? null,
+        [HOME_SECTION_DATA_KEYS.supportedGames]:
+          homeData.supportedGames ?? null,
+        [HOME_SECTION_DATA_KEYS.faqSettings]: homeData.faqSettings ?? null,
+        [HOME_SECTION_DATA_KEYS.faqQuestions]: homeData.faqQuestions ?? [],
+      });
+    }
+
+    const faqData = initialRouteData?.faq;
+    if (faqData) {
+      primeHomeSectionData({
+        [HOME_SECTION_DATA_KEYS.faqSettings]: faqData.faqSettings ?? null,
+        [HOME_SECTION_DATA_KEYS.faqQuestions]: faqData.faqQuestions ?? [],
+      });
+    }
+
+    const packagesData = initialRouteData?.packages;
+    if (packagesData) {
+      primeHomeSectionData({
+        [HOME_SECTION_DATA_KEYS.packagesList]: packagesData.packagesList ?? [],
+        [HOME_SECTION_DATA_KEYS.packagesSettings]:
+          packagesData.packagesSettings ?? null,
+      });
+    }
+  }, [initialRouteData]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -393,6 +469,7 @@ export function AppContent({ initialHomeData = null, routeShell = "browser" }) {
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
+    if (location.pathname !== "/") return undefined;
     let cancelled = false;
     const runPrefetch = () => {
       if (cancelled) return;
@@ -412,7 +489,7 @@ export function AppContent({ initialHomeData = null, routeShell = "browser" }) {
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, []);
+  }, [location.pathname]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -544,7 +621,7 @@ export function AppContent({ initialHomeData = null, routeShell = "browser" }) {
             setIsModalOpen={setIsModalOpen}
             routesLocation={routesLocation}
             routeKey={routesKey}
-            initialHomeData={initialHomeData}
+            initialRouteData={initialRouteData}
           />
         </main>
       </div>

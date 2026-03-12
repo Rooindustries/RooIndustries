@@ -1,9 +1,9 @@
 import Contact from "../components/Contact";
 import Footer from "../components/Footer";
-export default function ContactPage() {
+export default function ContactPage({ initialData = null }) {
   return (
     <>
-      {<Contact />}
+      {<Contact initialData={initialData} />}
       <Footer />
     </>
   );
