@@ -139,16 +139,23 @@ export default function Hero() {
     const el2 = line2Ref.current;
     if (!el1 || !el2 || !headingLine1 || !headingLine2) return;
 
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
+    const probe = document.createElement("span");
+    probe.style.cssText =
+      "position:fixed;top:-9999px;left:-9999px;visibility:hidden;white-space:nowrap;pointer-events:none";
+    document.body.appendChild(probe);
     let rafId;
 
     const adjust = () => {
       const s = getComputedStyle(el2);
       const base = parseFloat(s.fontSize);
-      ctx.font = `${s.fontWeight} ${base}px ${s.fontFamily}`;
-      const w1 = ctx.measureText(normalizeText(headingLine1)).width;
-      const w2 = ctx.measureText(normalizeText(headingLine2)).width;
+      probe.style.font = `${s.fontWeight} ${base}px ${s.fontFamily}`;
+      probe.style.letterSpacing = s.letterSpacing;
+
+      probe.textContent = normalizeText(headingLine1);
+      const w1 = probe.getBoundingClientRect().width;
+      probe.textContent = normalizeText(headingLine2);
+      const w2 = probe.getBoundingClientRect().width;
+
       if (w1 > 0 && w2 > 0) {
         el1.style.fontSize = `${base * (w2 / w1)}px`;
       }
@@ -164,6 +171,7 @@ export default function Hero() {
     return () => {
       window.removeEventListener("resize", onResize);
       cancelAnimationFrame(rafId);
+      if (probe.parentNode) probe.parentNode.removeChild(probe);
     };
   }, [headingLine1, headingLine2]);
 
