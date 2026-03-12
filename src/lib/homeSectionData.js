@@ -182,6 +182,14 @@ const writeHomeSectionData = (key, value) => {
   } catch {}
 };
 
+export const primeHomeSectionData = (entries) => {
+  if (!entries || typeof entries !== "object") return;
+  Object.entries(entries).forEach(([key, value]) => {
+    if (!key) return;
+    writeHomeSectionData(key, value);
+  });
+};
+
 export const fetchHomeSectionData = (key) => {
   const config = homeSectionQueries[key];
   if (!config) {

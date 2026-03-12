@@ -1,9 +1,15 @@
 import React, { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import { client, urlFor } from "../sanityClient";
 import ImageZoomModal from "../components/ImageZoomModal";
 
-export default function Benchmarks({ setIsModalOpen = () => {} }) {
-  const [benchmarks, setBenchmarks] = useState([]);
+export default function Benchmarks({
+  initialData = null,
+  setIsModalOpen = () => {},
+}) {
+  const [benchmarks, setBenchmarks] = useState(() =>
+    Array.isArray(initialData) ? initialData : []
+  );
   const [selectedImage, setSelectedImage] = useState(null);
   const [selectedAlt, setSelectedAlt] = useState("");
 
@@ -24,6 +30,11 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
       : "";
 
   useEffect(() => {
+    if (initialData !== null) {
+      setBenchmarks(Array.isArray(initialData) ? initialData : []);
+      return;
+    }
+
     client
       .fetch(
         `*[_type == "benchmark"] 
@@ -44,9 +55,9 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
             }
           }`
       )
-      .then(setBenchmarks)
+      .then((data) => setBenchmarks(Array.isArray(data) ? data : []))
       .catch(console.error);
-  }, []);
+  }, [initialData]);
 
   return (
     <section className="relative py-28 px-4 max-w-7xl mx-auto text-white">
@@ -165,6 +176,19 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
             </div>
           );
         })}
+      </div>
+
+      <div className="mt-10 flex justify-center">
+        <Link
+          to="/#packages"
+          className="glow-button inline-flex items-center justify-center gap-2 rounded-md px-6 py-3 text-base font-semibold text-white ring-2 ring-cyan-300/70 shadow-[0_0_20px_rgba(56,189,248,0.35)] transition-all duration-300 hover:text-white active:translate-y-px"
+        >
+          Optimize My PC
+          <span className="glow-line glow-line-top" />
+          <span className="glow-line glow-line-right" />
+          <span className="glow-line glow-line-bottom" />
+          <span className="glow-line glow-line-left" />
+        </Link>
       </div>
     </section>
   );

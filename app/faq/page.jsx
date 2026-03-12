@@ -1,16 +1,13 @@
 import RouteRenderer from "@/src/next/RouteRenderer";
 import seo from "@/src/lib/seo";
-import { fetchHomePageData } from "@/src/lib/sanityServer";
+import { getFaqPageData } from "@/src/lib/sanityPageData";
 
 export const metadata = seo.getMetadataForPath("/faq");
+export const revalidate = 60;
 
-export default async function Page({ searchParams }) {
-  const initialHomeData = await fetchHomePageData();
+export default async function Page() {
+  const faqPageData = await getFaqPageData();
   return (
-    <RouteRenderer
-      pathname="/faq"
-      searchParams={searchParams}
-      initialHomeData={initialHomeData}
-    />
+    <RouteRenderer pathname="/faq" initialRouteData={{ faq: faqPageData }} />
   );
 }

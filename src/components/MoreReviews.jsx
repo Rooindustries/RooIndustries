@@ -2,13 +2,20 @@ import React, { useState, useEffect } from "react";
 import { client, urlFor } from "../sanityClient";
 import ImageZoomModal from "./ImageZoomModal";
 
-export default function Reviews() {
+export default function Reviews({ initialData = null }) {
   const [selectedImage, setSelectedImage] = useState(null);
   const [selectedAlt, setSelectedAlt] = useState("");
-  const [reviews, setReviews] = useState(null);
+  const [reviews, setReviews] = useState(() =>
+    initialData !== null ? (Array.isArray(initialData) ? initialData : []) : null
+  );
   const [visibleCount, setVisibleCount] = useState(9);
 
   useEffect(() => {
+    if (initialData !== null) {
+      setReviews(Array.isArray(initialData) ? initialData : []);
+      return;
+    }
+
     client
       .fetch(
         `*[_type == "review"] | order(_createdAt asc){
@@ -24,7 +31,7 @@ export default function Reviews() {
         console.error(error);
         setReviews([]);
       });
-  }, []);
+  }, [initialData]);
 
   useEffect(() => {
     if (!Array.isArray(reviews)) return;
