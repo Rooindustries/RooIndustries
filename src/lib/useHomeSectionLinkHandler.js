@@ -16,6 +16,11 @@ export default function useHomeSectionLinkHandler() {
   const activeScrollCleanupRef = useRef(null);
 
   const runHashAlignment = useCallback((hash) => {
+    const isPhone =
+      typeof window !== "undefined" &&
+      window.matchMedia("(max-width: 767px)").matches &&
+      window.matchMedia("(pointer: coarse)").matches;
+
     if (activeScrollCleanupRef.current) {
       activeScrollCleanupRef.current();
     }
@@ -24,10 +29,10 @@ export default function useHomeSectionLinkHandler() {
       hash,
       behavior: "auto",
       getOffsetPx: () => getCssHeaderOffsetPx(110),
-      stableFramesRequired: 8,
-      preAlignStableFramesRequired: 5,
-      minRuntimeMs: 900,
-      maxWaitMs: 4200,
+      stableFramesRequired: isPhone ? 4 : 8,
+      preAlignStableFramesRequired: isPhone ? 0 : 5,
+      minRuntimeMs: isPhone ? 0 : 900,
+      maxWaitMs: isPhone ? 3200 : 4200,
       observeMutations: true,
     });
   }, []);
