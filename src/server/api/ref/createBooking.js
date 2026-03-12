@@ -1,5 +1,4 @@
 import { createClient } from "@sanity/client";
-import crypto from "crypto";
 import { verifyHoldToken } from "../../booking/holdToken.js";
 import { resolveBookingPricing, resolveUpgradeContext } from "./pricing.js";
 import {
@@ -16,6 +15,18 @@ import {
   canIssueBookingEmailDispatchToken,
   issueBookingEmailDispatchToken,
 } from "./bookingEmailDispatchToken.js";
+import providerConfig from "../payment/providerConfig.js";
+import {
+  DEFAULT_PAYPAL_CURRENCY,
+  DEFAULT_RAZORPAY_CURRENCY,
+  getPayPalCredentials,
+  resolveRazorpayCredentials,
+  verifyPayPalOrder,
+  verifyRazorpayPayment,
+  verifyRazorpaySignature,
+} from "../payment/providerClients.js";
+
+const { resolvePaymentProviders } = providerConfig;
 
 const writeClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -92,20 +103,6 @@ const formatClientTimeLabel = (utcDate, timeZone) =>
     minute: "2-digit",
   });
 
-const toMoney = (value) => {
-  const parsed = Number(
-    typeof value === "string" ? value.replace(/[^0-9.]/g, "") : value
-  );
-  if (!Number.isFinite(parsed)) return 0;
-  return +parsed.toFixed(2);
-};
-
-const clampPercent = (value) => {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return 0;
-  return Math.min(100, Math.max(0, parsed));
-};
-
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 
 const buildBookingSuccessResponse = ({
@@ -133,221 +130,7 @@ const buildBookingSuccessResponse = ({
   return body;
 };
 
-const resolveIsProdLike = () => {
-  const vercelEnv = String(process.env.VERCEL_ENV || "").toLowerCase();
-  if (vercelEnv) return vercelEnv === "production";
-  return process.env.NODE_ENV === "production";
-};
-
-const isProdLike = resolveIsProdLike();
 const isTestEnv = process.env.NODE_ENV === "test";
-const DEFAULT_RAZORPAY_CURRENCY = String(
-  process.env.RAZORPAY_CURRENCY || "USD"
-)
-  .trim()
-  .toUpperCase() || "USD";
-const DEFAULT_PAYPAL_CURRENCY = String(process.env.PAYPAL_CURRENCY || "USD")
-  .trim()
-  .toUpperCase() || "USD";
-
-const toSubunits = (amount, currency = "USD") => {
-  const factors = { USD: 100, INR: 100, JPY: 1 };
-  const factor = factors[currency] ?? 100;
-  return Math.round(amount * factor);
-};
-
-const verifyRazorpaySignature = ({
-  orderId,
-  paymentId,
-  signature,
-  secret,
-}) => {
-  const payload = `${orderId}|${paymentId}`;
-  const expected = crypto
-    .createHmac("sha256", secret)
-    .update(payload)
-    .digest("hex");
-  return (
-    signature?.length === expected.length &&
-    crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
-  );
-};
-
-const verifyRazorpayPayment = async ({
-  orderId,
-  paymentId,
-  expectedAmount,
-  expectedCurrency = "USD",
-}) => {
-  try {
-    const keyId = process.env.RAZORPAY_KEY_ID || "";
-    const keySecret = process.env.RAZORPAY_KEY_SECRET || "";
-
-    if (!keyId || !keySecret) {
-      return { ok: false, reason: "razorpay_credentials_missing" };
-    }
-
-    const basic = Buffer.from(`${keyId}:${keySecret}`).toString("base64");
-    const response = await fetch(
-      `https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}`,
-      {
-        headers: {
-          Authorization: `Basic ${basic}`,
-        },
-      }
-    );
-
-    if (!response.ok) {
-      return { ok: false, reason: `razorpay_lookup_failed_${response.status}` };
-    }
-
-    const payment = await response.json();
-    const status = String(payment?.status || "").toLowerCase();
-    const paidAmount = Number(payment?.amount || 0);
-    const expectedSubunits = toSubunits(expectedAmount, expectedCurrency);
-
-    if (payment?.order_id !== orderId) {
-      return { ok: false, reason: "razorpay_order_mismatch" };
-    }
-
-    if (payment?.currency !== expectedCurrency) {
-      return { ok: false, reason: "razorpay_currency_mismatch" };
-    }
-
-    if (status !== "captured") {
-      return { ok: false, reason: `razorpay_status_${status || "unknown"}` };
-    }
-
-    if (paidAmount !== expectedSubunits) {
-      return { ok: false, reason: "razorpay_amount_mismatch" };
-    }
-
-    return { ok: true };
-  } catch (error) {
-    console.error("Razorpay lookup failed:", error);
-    return { ok: false, reason: "razorpay_lookup_exception" };
-  }
-};
-
-const getPayPalMode = () => {
-  const explicit = String(
-    process.env.PAYPAL_ENV || process.env.NEXT_PUBLIC_PAYPAL_ENV || ""
-  )
-    .trim()
-    .toLowerCase();
-
-  if (explicit === "live" || explicit === "production") return "live";
-  if (explicit === "sandbox" || explicit === "test") return "sandbox";
-  return isProdLike ? "live" : "sandbox";
-};
-
-const getPayPalBaseUrl = () =>
-  getPayPalMode() === "live"
-    ? "https://api-m.paypal.com"
-    : "https://api-m.sandbox.paypal.com";
-
-const getPayPalCredentials = () => {
-  const clientId =
-    process.env.PAYPAL_CLIENT_ID ||
-    process.env.REACT_APP_PAYPAL_CLIENT_ID ||
-    process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID ||
-    "";
-  const clientSecret =
-    process.env.PAYPAL_CLIENT_SECRET ||
-    process.env.REACT_APP_PAYPAL_CLIENT_SECRET ||
-    "";
-
-  return { clientId, clientSecret };
-};
-
-const getPayPalToken = async () => {
-  const { clientId, clientSecret } = getPayPalCredentials();
-  if (!clientId || !clientSecret) {
-    return { ok: false, reason: "paypal_credentials_missing", token: "" };
-  }
-
-  try {
-    const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
-    const response = await fetch(`${getPayPalBaseUrl()}/v1/oauth2/token`, {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${basic}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: "grant_type=client_credentials",
-    });
-    if (!response.ok) {
-      return { ok: false, reason: `paypal_token_failed_${response.status}`, token: "" };
-    }
-    const data = await response.json();
-    const token = String(data?.access_token || "").trim();
-    if (!token) {
-      return { ok: false, reason: "paypal_token_missing", token: "" };
-    }
-    return { ok: true, reason: "", token };
-  } catch (error) {
-    console.error("PayPal token lookup failed:", error);
-    return { ok: false, reason: "paypal_token_exception", token: "" };
-  }
-};
-
-const verifyPayPalOrder = async ({
-  orderId,
-  expectedAmount,
-  expectedCurrency = "USD",
-}) => {
-  const tokenResult = await getPayPalToken();
-  if (!tokenResult.ok) {
-    return { ok: false, reason: tokenResult.reason || "paypal_credentials_missing" };
-  }
-
-  try {
-    const response = await fetch(
-      `${getPayPalBaseUrl()}/v2/checkout/orders/${encodeURIComponent(orderId)}`,
-      {
-        headers: {
-          Authorization: `Bearer ${tokenResult.token}`,
-        },
-      }
-    );
-
-    if (!response.ok) {
-      return { ok: false, reason: `paypal_lookup_failed_${response.status}` };
-    }
-
-    const details = await response.json();
-    const status = String(details?.status || "").toUpperCase();
-    if (status !== "COMPLETED") {
-      return { ok: false, reason: `paypal_status_${status || "unknown"}` };
-    }
-
-    const captureAmount =
-      details?.purchase_units?.[0]?.payments?.captures?.[0]?.amount ||
-      details?.purchase_units?.[0]?.amount ||
-      null;
-    const paidAmount = toMoney(captureAmount?.value || 0) || 0;
-    const paidCurrency = String(captureAmount?.currency_code || "")
-      .trim()
-      .toUpperCase();
-
-    if (Math.abs(paidAmount - expectedAmount) > 0.01) {
-      return { ok: false, reason: "paypal_amount_mismatch" };
-    }
-
-    if (paidCurrency !== String(expectedCurrency || "USD").trim().toUpperCase()) {
-      return { ok: false, reason: "paypal_currency_mismatch" };
-    }
-
-    return {
-      ok: true,
-      payerEmail: details?.payer?.email_address || "",
-    };
-  } catch (error) {
-    console.error("PayPal order lookup failed:", error);
-    return { ok: false, reason: "paypal_lookup_exception" };
-  }
-};
-
 export default async function handler(req, res) {
   if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
@@ -469,6 +252,28 @@ export default async function handler(req, res) {
       paymentProvider !== "razorpay"
     ) {
       return res.status(400).json({ error: "Unsupported payment provider." });
+    }
+
+    const availableProviders = isTestEnv ? null : resolvePaymentProviders();
+    if (!isTestEnv && paymentProvider === "paypal") {
+      if (
+        !availableProviders?.paypal?.enabled ||
+        !String(availableProviders?.paypal?.clientId || "").trim()
+      ) {
+        return res.status(400).json({
+          error: "PayPal is not available in this environment.",
+        });
+      }
+    }
+
+    if (
+      !isTestEnv &&
+      paymentProvider === "razorpay" &&
+      !availableProviders?.razorpay?.enabled
+    ) {
+      return res.status(400).json({
+        error: "Razorpay is not available in this environment.",
+      });
     }
 
     const deferEmailDispatchRequested = deferEmailsUntilConfirmation === true;
@@ -780,9 +585,10 @@ export default async function handler(req, res) {
         });
       }
 
-      const razorpayKeyId = process.env.RAZORPAY_KEY_ID || "";
-      const razorpaySecret = process.env.RAZORPAY_KEY_SECRET || "";
-      const hasRazorpayCreds = !!razorpayKeyId && !!razorpaySecret;
+      const razorpayCredentials = resolveRazorpayCredentials();
+      const razorpaySecret = razorpayCredentials.keySecret;
+      const hasRazorpayCreds =
+        !!razorpayCredentials.keyId && !!razorpayCredentials.keySecret;
       if (!hasRazorpayCreds && !isTestEnv) {
         return res.status(500).json({
           error: "Payment verification is temporarily unavailable.",
