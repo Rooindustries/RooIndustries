@@ -252,9 +252,9 @@ export default function Services({ initialData = null }) {
             <div className="pointer-events-none absolute inset-0">
               <div className="absolute inset-0 opacity-[0.35] bg-[radial-gradient(80%_60%_at_50%_0%,rgba(56,189,248,.18),transparent_65%)]" />
               <div className="absolute inset-0 opacity-[0.28] bg-[linear-gradient(to_bottom,transparent,rgba(0,0,0,.22))]" />
-              <div className="absolute -top-56 left-1/2 -translate-x-1/2 h-[32rem] w-[52rem] rounded-full bg-white/5 blur-3xl" />
-              <div className="absolute -bottom-48 left-0 h-[30rem] w-[30rem] rounded-full bg-cyan-400/10 blur-3xl" />
-              <div className="absolute -bottom-48 right-0 h-[30rem] w-[30rem] rounded-full bg-sky-400/10 blur-3xl" />
+              <div className="absolute -top-56 left-1/2 -translate-x-1/2 h-[32rem] w-[52rem] rounded-full bg-white/5 blur-3xl hidden sm:block" />
+              <div className="absolute -bottom-48 left-0 h-[30rem] w-[30rem] rounded-full bg-cyan-400/10 blur-3xl hidden sm:block" />
+              <div className="absolute -bottom-48 right-0 h-[30rem] w-[30rem] rounded-full bg-sky-400/10 blur-3xl hidden sm:block" />
             </div>
 
             <div className="relative p-5 sm:p-6">
@@ -289,8 +289,8 @@ export default function Services({ initialData = null }) {
                       }
                     >
                       <div className="pointer-events-none absolute inset-0">
-                        <div className="absolute -top-16 -right-16 h-44 w-44 rounded-full bg-cyan-400/10 blur-2xl" />
-                        <div className="absolute -bottom-16 -left-16 h-44 w-44 rounded-full bg-sky-400/8 blur-2xl" />
+                        <div className="absolute -top-16 -right-16 h-44 w-44 rounded-full bg-cyan-400/10 blur-2xl hidden sm:block" />
+                        <div className="absolute -bottom-16 -left-16 h-44 w-44 rounded-full bg-sky-400/8 blur-2xl hidden sm:block" />
                         <div className="absolute left-0 top-0 h-full w-[3px] bg-gradient-to-b from-cyan-300/70 via-sky-300/30 to-transparent opacity-60" />
                       </div>
 
