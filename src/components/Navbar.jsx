@@ -19,8 +19,19 @@ import { alignToHashTarget, getCssHeaderOffsetPx } from "../lib/scrollCoordinato
 import { useScrollRuntime } from "../lib/scrollRuntime";
 import { HOME_SECTION_PREFETCH_BY_HASH, prefetchHomeSectionData, readHomeSectionData } from "../lib/homeSectionData";
 
+const isIOSDevice = () => {
+  if (typeof navigator === "undefined") return false;
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
+};
+
 const canPlayWebm = () => {
   if (typeof document === "undefined") return false;
+  // iOS Safari reports "maybe" for webm but composites <video> with an
+  // opaque background, breaking transparent logo overlays.
+  if (isIOSDevice()) return false;
   const video = document.createElement("video");
   if (!video.canPlayType) return false;
   const canPlay =
