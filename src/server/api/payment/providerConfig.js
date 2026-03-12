@@ -1,78 +1,16 @@
-const resolveRuntime = () => {
-  const vercelEnv = String(
-    process.env.VERCEL_ENV || process.env.NEXT_PUBLIC_VERCEL_ENV || ""
-  )
-    .trim()
-    .toLowerCase();
-
-  if (
-    vercelEnv === "production" ||
-    vercelEnv === "preview" ||
-    vercelEnv === "development"
-  ) {
-    return vercelEnv;
-  }
-
-  return process.env.NODE_ENV === "production" ? "production" : "development";
+const resolveIsProdLike = () => {
+  const vercelEnv = String(process.env.VERCEL_ENV || "").toLowerCase();
+  if (vercelEnv) return vercelEnv === "production";
+  return process.env.NODE_ENV === "production";
 };
 
-const resolvePreviewPaymentsEnabled = () =>
-  ["1", "true", "yes", "on"].includes(
-    String(
-      process.env.ENABLE_PREVIEW_PAYMENTS ||
-        process.env.ALLOW_PREVIEW_PAYMENTS ||
-        ""
-    )
-      .trim()
-      .toLowerCase()
-  );
-
-const normalizeRuntimePolicy = (input) => {
-  if (input && typeof input === "object" && !Array.isArray(input)) {
-    return input;
-  }
-
-  const isProdLike = Boolean(input);
-  return {
-    runtime: isProdLike ? "production" : "development",
-    isProdLike,
-    isPreview: false,
-    previewPaymentsEnabled: false,
-  };
-};
-
-const resolvePaymentRuntimePolicy = () => {
-  const runtime = resolveRuntime();
-  const isProdLike = runtime === "production";
-  const isPreview = runtime === "preview";
-
-  return {
-    runtime,
-    isProdLike,
-    isPreview,
-    previewPaymentsEnabled: isPreview && resolvePreviewPaymentsEnabled(),
-  };
-};
-
-const resolveIsProdLike = () => resolvePaymentRuntimePolicy().isProdLike;
-
-const allowProviderModeInRuntime = (
-  mode,
-  runtimePolicy = resolvePaymentRuntimePolicy()
-) => {
-  const policy = normalizeRuntimePolicy(runtimePolicy);
-
+const allowProviderModeInRuntime = (mode, isProdLike) => {
   if (!mode || mode === "missing" || mode === "unknown") return false;
-  if (policy.isProdLike) return mode === "live";
-  if (policy.isPreview) {
-    if (!policy.previewPaymentsEnabled) return false;
-    return mode === "test" || mode === "sandbox";
-  }
+  if (isProdLike) return mode === "live";
   return mode === "live" || mode === "test" || mode === "sandbox";
 };
 
-const resolvePayPalMode = (runtimePolicy = resolvePaymentRuntimePolicy()) => {
-  const policy = normalizeRuntimePolicy(runtimePolicy);
+const resolvePayPalMode = (isProdLike) => {
   const explicit = String(
     process.env.PAYPAL_ENV || process.env.NEXT_PUBLIC_PAYPAL_ENV || ""
   )
@@ -81,7 +19,7 @@ const resolvePayPalMode = (runtimePolicy = resolvePaymentRuntimePolicy()) => {
 
   if (explicit === "live" || explicit === "production") return "live";
   if (explicit === "sandbox" || explicit === "test") return "sandbox";
-  return policy.isProdLike ? "live" : "sandbox";
+  return isProdLike ? "live" : "sandbox";
 };
 
 const resolveRazorpayMode = (keyId = "") => {
@@ -92,7 +30,7 @@ const resolveRazorpayMode = (keyId = "") => {
 };
 
 const resolvePaymentProviders = () => {
-  const runtimePolicy = resolvePaymentRuntimePolicy();
+  const isProdLike = resolveIsProdLike();
 
   const razorpayKeyId = String(process.env.RAZORPAY_KEY_ID || "").trim();
   const razorpayKeySecret = String(process.env.RAZORPAY_KEY_SECRET || "").trim();
@@ -100,21 +38,19 @@ const resolvePaymentProviders = () => {
   const razorpayEnabled =
     !!razorpayKeyId &&
     !!razorpayKeySecret &&
-    allowProviderModeInRuntime(razorpayMode, runtimePolicy);
+    allowProviderModeInRuntime(razorpayMode, isProdLike);
 
   const paypalClientId = String(
     process.env.PAYPAL_CLIENT_ID || process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || ""
   ).trim();
   const paypalClientSecret = String(process.env.PAYPAL_CLIENT_SECRET || "").trim();
-  const paypalMode = resolvePayPalMode(runtimePolicy);
+  const paypalMode = resolvePayPalMode(isProdLike);
   const paypalEnabled =
     !!paypalClientId &&
     !!paypalClientSecret &&
-    allowProviderModeInRuntime(paypalMode, runtimePolicy);
+    allowProviderModeInRuntime(paypalMode, isProdLike);
 
   return {
-    runtime: runtimePolicy.runtime,
-    previewPaymentsEnabled: runtimePolicy.previewPaymentsEnabled,
     serverSessionsEnabled: resolveServerPaymentSessionsEnabled(),
     razorpay: {
       enabled: razorpayEnabled,
@@ -142,7 +78,6 @@ module.exports = {
   resolveIsProdLike,
   resolvePayPalMode,
   resolvePaymentProviders,
-  resolvePaymentRuntimePolicy,
   resolveRazorpayMode,
   resolveServerPaymentSessionsEnabled,
 };

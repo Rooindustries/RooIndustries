@@ -9,7 +9,6 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <head>
-        <link rel="preconnect" href="https://cdn.sanity.io" crossOrigin="" />
         <link
           rel="preload"
           href="/fonts/roboto-flex-latin-opsz-normal.woff2"
