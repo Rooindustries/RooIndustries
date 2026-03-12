@@ -94,7 +94,9 @@ export default function Home({ initialData = null }) {
         rootMargin="160px 0px"
         eager={eagerAll}
       >
-        <About initialData={initialData?.about || null} />
+        <div className="deferred-section-content">
+          <About initialData={initialData?.about || null} />
+        </div>
       </DeferredSection>
       <section id="services" style={{ scrollMarginTop: "var(--section-nav-offset)" }}>
         <DeferredSection
@@ -102,7 +104,9 @@ export default function Home({ initialData = null }) {
           rootMargin="240px 0px"
           eager={eagerAll}
         >
-          <Services initialData={initialData?.services || null} />
+          <div className="deferred-section-content">
+            <Services initialData={initialData?.services || null} />
+          </div>
         </DeferredSection>
       </section>
       <section id="packages" style={{ scrollMarginTop: "var(--section-nav-offset)" }}>
@@ -111,10 +115,12 @@ export default function Home({ initialData = null }) {
           rootMargin="300px 0px"
           eager={eagerAll}
         >
-          <Packages
-            initialPackages={initialData?.packagesList || null}
-            initialSectionCopy={initialData?.packagesSettings || null}
-          />
+          <div className="deferred-section-content">
+            <Packages
+              initialPackages={initialData?.packagesList || null}
+              initialSectionCopy={initialData?.packagesSettings || null}
+            />
+          </div>
         </DeferredSection>
       </section>
       <section id="how-it-works">
@@ -123,7 +129,9 @@ export default function Home({ initialData = null }) {
           rootMargin="220px 0px"
           eager={eagerAll}
         >
-          <HowItWorks initialData={initialData?.howItWorks || null} />
+          <div className="deferred-section-content">
+            <HowItWorks initialData={initialData?.howItWorks || null} />
+          </div>
         </DeferredSection>
       </section>
       <div className="mt-4 flex items-center justify-center">
@@ -143,7 +151,9 @@ export default function Home({ initialData = null }) {
         rootMargin="220px 0px"
         eager={eagerAll}
       >
-        <SupportedGames initialData={initialData?.supportedGames || null} />
+        <div className="deferred-section-content">
+          <SupportedGames initialData={initialData?.supportedGames || null} />
+        </div>
       </DeferredSection>
       <section id="faq" style={{ scrollMarginTop: "var(--section-nav-offset)" }}>
         <DeferredSection
@@ -151,11 +161,13 @@ export default function Home({ initialData = null }) {
           rootMargin="220px 0px"
           eager={eagerAll}
         >
-          <Faq
-            compact
-            initialFaqCopy={initialData?.faqSettings || null}
-            initialQuestions={initialData?.faqQuestions || null}
-          />
+          <div className="deferred-section-content">
+            <Faq
+              compact
+              initialFaqCopy={initialData?.faqSettings || null}
+              initialQuestions={initialData?.faqQuestions || null}
+            />
+          </div>
         </DeferredSection>
       </section>
       <DeferredSection
@@ -163,7 +175,9 @@ export default function Home({ initialData = null }) {
         rootMargin="220px 0px"
         eager={eagerAll}
       >
-        <ReferralBox />
+        <div className="deferred-section-content">
+          <ReferralBox />
+        </div>
       </DeferredSection>
       <Footer />
     </>
