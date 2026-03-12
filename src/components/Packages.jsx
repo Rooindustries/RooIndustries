@@ -6,6 +6,7 @@ import {
   HOME_SECTION_DATA_KEYS,
   readHomeSectionData,
 } from "../lib/homeSectionData";
+import { writePendingSectionTarget } from "../lib/sectionNavigation";
 
 const REFERRAL_STORAGE_KEY = "referral_session";
 
@@ -70,6 +71,7 @@ export default function Packages({
             <Link
               key={`${i}-${j}`}
               to={`/#${UPGRADE_FAQ_HASH}`}
+              onClick={() => writePendingSectionTarget(`#${UPGRADE_FAQ_HASH}`)}
               className="underline underline-offset-2 transition"
               style={{ color: "#22D3EE" }}
             >
