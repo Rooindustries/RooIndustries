@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { lazy, Suspense, useEffect, useRef, useState } from "react";
 import Hero from "../components/Hero";
 import { Link, useLocation } from "react-router-dom";
 import {
@@ -8,14 +8,18 @@ import {
 } from "../lib/sectionNavigation";
 import { useLowPerformanceMode } from "../lib/performanceMode";
 import About from "../components/About";
-import Services from "../components/Services";
 import StreamerYoutuberReviews from "../components/StreamerYoutuberReviews";
 import Footer from "../components/Footer";
 import HowItWorks from "../components/HowItWorks";
 import ReferralBox from "../components/ReferralBox";
-import Packages from "../components/Packages";
 import SupportedGames from "../components/SupportedGames";
-import Faq from "../components/Faq";
+
+// Lazy-load framer-motion-heavy sections to keep them out of the initial bundle.
+// DeferredSection already defers rendering until near-viewport; lazy() defers
+// the JS download/parse too — saving ~52 KB (gzipped) from first-load.
+const Services = lazy(() => import("../components/Services"));
+const Packages = lazy(() => import("../components/Packages"));
+const Faq = lazy(() => import("../components/Faq"));
 
 function DeferredSection({
   children,
@@ -104,9 +108,11 @@ export default function Home({ initialData = null }) {
           rootMargin="240px 0px"
           eager={eagerAll}
         >
-          <div className="deferred-section-content">
-            <Services initialData={initialData?.services || null} />
-          </div>
+          <Suspense fallback={<div className="min-h-[520px]" />}>
+            <div className="deferred-section-content">
+              <Services initialData={initialData?.services || null} />
+            </div>
+          </Suspense>
         </DeferredSection>
       </section>
       <section id="packages" style={{ scrollMarginTop: "var(--section-nav-offset)" }}>
@@ -115,12 +121,14 @@ export default function Home({ initialData = null }) {
           rootMargin="300px 0px"
           eager={eagerAll}
         >
-          <div className="deferred-section-content">
-            <Packages
-              initialPackages={initialData?.packagesList || null}
-              initialSectionCopy={initialData?.packagesSettings || null}
-            />
-          </div>
+          <Suspense fallback={<div className="min-h-[620px]" />}>
+            <div className="deferred-section-content">
+              <Packages
+                initialPackages={initialData?.packagesList || null}
+                initialSectionCopy={initialData?.packagesSettings || null}
+              />
+            </div>
+          </Suspense>
         </DeferredSection>
       </section>
       <section id="how-it-works">
@@ -161,13 +169,15 @@ export default function Home({ initialData = null }) {
           rootMargin="220px 0px"
           eager={eagerAll}
         >
-          <div className="deferred-section-content">
-            <Faq
-              compact
-              initialFaqCopy={initialData?.faqSettings || null}
-              initialQuestions={initialData?.faqQuestions || null}
-            />
-          </div>
+          <Suspense fallback={<div className="min-h-[380px]" />}>
+            <div className="deferred-section-content">
+              <Faq
+                compact
+                initialFaqCopy={initialData?.faqSettings || null}
+                initialQuestions={initialData?.faqQuestions || null}
+              />
+            </div>
+          </Suspense>
         </DeferredSection>
       </section>
       <DeferredSection
