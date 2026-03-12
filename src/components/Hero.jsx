@@ -123,11 +123,11 @@ export default function Hero() {
   };
 
   const heroLine1Style = {
-    fontSize: "clamp(2.04rem, 0.58rem + 5.83vw, 4.37rem)",
+    fontSize: "var(--hero-line1-size)",
     lineHeight: 1.08,
   };
   const heroLine2Style = {
-    fontSize: "clamp(1.75rem, 0.5rem + 5vw, 3.75rem)",
+    fontSize: "var(--hero-line2-size)",
     lineHeight: 1.08,
   };
 
