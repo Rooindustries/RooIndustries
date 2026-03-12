@@ -19,15 +19,10 @@ import { alignToHashTarget, getCssHeaderOffsetPx } from "../lib/scrollCoordinato
 import { useScrollRuntime } from "../lib/scrollRuntime";
 import { HOME_SECTION_PREFETCH_BY_HASH, prefetchHomeSectionData, readHomeSectionData } from "../lib/homeSectionData";
 
-const canPlayWebm = () => {
-  if (typeof document === "undefined") return false;
-  const video = document.createElement("video");
-  if (!video.canPlayType) return false;
-  const canPlay =
-    video.canPlayType('video/webm; codecs="vp9, opus"') ||
-    video.canPlayType('video/webm; codecs="vp8, vorbis"') ||
-    video.canPlayType("video/webm");
-  return canPlay === "probably" || canPlay === "maybe";
+const canAnimateLogo = () => {
+  if (typeof window === "undefined") return false;
+  return !window.matchMedia("(prefers-reduced-motion: reduce)").matches &&
+    !navigator?.connection?.saveData;
 };
 
 export default function Navbar({ routeShell = "browser" }) {
@@ -38,7 +33,6 @@ export default function Navbar({ routeShell = "browser" }) {
   const [activeHomeHash, setActiveHomeHash] = useState("");
   // Keep initial server/client markup identical, then upgrade to animated mode on mount.
   const [smallLogoMode, setSmallLogoMode] = useState("static");
-  const [logoVideoReady, setLogoVideoReady] = useState(false);
   const proofDropdownRef = useRef(null);
   const headerRef = useRef(null);
   const navRowRef = useRef(null);
@@ -70,7 +64,7 @@ export default function Navbar({ routeShell = "browser" }) {
   const isProofActive = isActive("/benchmarks") || isActive("/reviews");
   const isTeamActive = isActive("/meet-the-team");
 
-  const handleSmallWebmError = () => {
+  const handleLogoAnimError = () => {
     setSmallLogoMode("static");
   };
 
@@ -226,18 +220,12 @@ export default function Navbar({ routeShell = "browser" }) {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const prefersReducedMotion = window.matchMedia(
-      "(prefers-reduced-motion: reduce)"
-    ).matches;
-    const saveDataEnabled = Boolean(navigator?.connection?.saveData);
-    const supportsWebm = canPlayWebm();
-
-    if (prefersReducedMotion || saveDataEnabled || !supportsWebm) {
+    if (!canAnimateLogo()) {
       setSmallLogoMode("static");
       return;
     }
 
-    const enableAnimatedLogo = () => setSmallLogoMode("webm");
+    const enableAnimatedLogo = () => setSmallLogoMode("animated");
     const interactionEvents = [
       "pointerdown",
       "touchstart",
@@ -372,7 +360,7 @@ export default function Navbar({ routeShell = "browser" }) {
 
   const smallLogoSizeClassName = "h-14 w-14 rounded-xl";
   const smallLogoStaticClassName = `${smallLogoSizeClassName} object-contain drop-shadow-[0_0_18px_rgba(34,211,238,0.25)]`;
-  const smallLogoAnimatedClassName = `${smallLogoSizeClassName} object-cover drop-shadow-[0_0_18px_rgba(34,211,238,0.25)] transition-all duration-500 mix-blend-screen`;
+  const smallLogoAnimatedClassName = `${smallLogoSizeClassName} object-cover drop-shadow-[0_0_18px_rgba(34,211,238,0.25)] transition-opacity duration-500`;
 
   return (
     <header
@@ -421,20 +409,16 @@ export default function Navbar({ routeShell = "browser" }) {
                   width={56}
                   height={56}
                 />
-                {smallLogoMode === "webm" && (
-                  <video
-                    className={`absolute inset-0 ${smallLogoAnimatedClassName} ${logoVideoReady ? "opacity-100" : "opacity-0"}`}
-                    autoPlay
-                    loop
-                    muted
-                    playsInline
-                    preload="metadata"
-                    onPlaying={() => setLogoVideoReady(true)}
-                    onError={handleSmallWebmError}
+                {smallLogoMode === "animated" && (
+                  <img
+                    src="/logo-animated-small.apng"
+                    alt=""
+                    className={`absolute inset-0 ${smallLogoAnimatedClassName}`}
                     aria-hidden="true"
-                  >
-                    <source src="/logo-animated-small.webm" type="video/webm" />
-                  </video>
+                    loading="eager"
+                    decoding="async"
+                    onError={handleLogoAnimError}
+                  />
                 )}
               </div>
 
