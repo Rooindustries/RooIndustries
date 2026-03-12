@@ -151,7 +151,6 @@ export default function Hero() {
     };
 
     const adjust = () => {
-      // Restore el2 to CSS clamp so we read the true responsive base
       el2.style.fontSize = "clamp(1.75rem, 0.5rem + 5vw, 3.75rem)";
 
       const s = getComputedStyle(el2);
@@ -171,18 +170,14 @@ export default function Hero() {
       const neitherFits = nw1 > avail && nw2 > avail;
 
       if (bothFit) {
-        // Desktop/tablet: both fit one line — scale line1 to match line2 width
         el1.style.fontSize = `${base * (nw2 / nw1)}px`;
       } else if (neitherFits) {
-        // Small phones (≤375px): both wrap — same font size for balanced look
         el1.style.fontSize = `${base}px`;
       } else {
-        // Mid-range phones (390-430px): one fits, one wraps — shrink both to single-line
         const longer = Math.max(nw1, nw2);
-        const shrunk = base * (avail / longer) * 0.97; // 3% margin prevents sub-pixel overflow
+        const shrunk = base * (avail / longer) * 0.97;
         const sNw1 = measureWidth(text1, shrunk, s);
         const sNw2 = measureWidth(text2, shrunk, s);
-        // Width-match line1 to line2, but cap so it can't exceed container
         const target = Math.min(sNw2, avail * 0.99);
         el1.style.fontSize = `${shrunk * (target / sNw1)}px`;
         el2.style.fontSize = `${shrunk}px`;
@@ -206,7 +201,6 @@ export default function Hero() {
   return (
     <header id="top" className="py-16 flex justify-center">
       <section className="mx-auto max-w-4xl px-6 text-center w-full">
-        {/* Tagline Badge */}
         <div className="h-[30px] sm:h-[36px] flex justify-center items-center">
           {tagline && (
             <div className="inline-flex items-center rounded-full border border-slate-700/80 bg-slate-900/70 px-4 sm:px-5 py-1.5 sm:py-2 shadow-[0_0_10px_rgba(0,255,255,0.6),0_0_20px_rgba(0,255,255,0.4)]">
@@ -217,7 +211,6 @@ export default function Hero() {
           )}
         </div>
 
-        {/* Main Heading */}
         <div className="mt-8 w-full">
           <h1 className="font-extrabold tracking-tight text-center">
             {headingLine1 && (
@@ -242,7 +235,6 @@ export default function Hero() {
           </h1>
         </div>
 
-        {/* Description */}
         <div className="min-h-[48px] sm:min-h-[60px]">
           {description && (
             <p className="mt-4 text-sm sm:text-base md:text-lg text-slate-200/90 leading-relaxed max-w-2xl mx-auto">
@@ -251,7 +243,6 @@ export default function Hero() {
           )}
         </div>
 
-        {/* Subtext */}
         <div className="min-h-[32px] sm:min-h-[36px]">
           {subtext && (
             <p className="mt-6 text-[14px] sm:text-lg font-semibold text-cyan-300">
@@ -260,7 +251,6 @@ export default function Hero() {
           )}
         </div>
 
-        {/* CTA Buttons */}
         <div className="mt-7 flex items-center justify-center gap-3 sm:gap-4 flex-wrap min-h-[56px]">
           <Link
             to="/#packages"
@@ -289,7 +279,6 @@ export default function Hero() {
           </Link>
         </div>
 
-        {/* CTA Note */}
         {ctaNote && (
           <p className="mt-5 text-sm sm:text-base font-extrabold tracking-wide relative inline-flex items-center gap-2">
             {ctaNoteIcon && (
@@ -301,7 +290,6 @@ export default function Hero() {
           </p>
         )}
 
-        {/* Bullet Points */}
         <div className="mt-5 w-full">
           {bullets.length > 0 && (
             <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 sm:gap-x-6">
