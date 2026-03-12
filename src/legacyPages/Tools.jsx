@@ -1,10 +1,10 @@
 import Footer from "../components/Footer";
 import Tools from "../components/Tools";
 
-export default function Page({ initialData = null }) {
+export default function Page() {
   return (
     <>
-      <Tools initialData={initialData} />
+      <Tools />
       <Footer />
     </>
   );

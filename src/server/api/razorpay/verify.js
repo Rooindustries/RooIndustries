@@ -1,5 +1,4 @@
 const crypto = require("crypto");
-const { resolvePaymentProviders } = require("../payment/providerConfig.js");
 
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
@@ -8,15 +7,6 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const providers = resolvePaymentProviders();
-    if (!providers?.razorpay?.enabled) {
-      const previewMessage =
-        providers?.runtime === "preview" && !providers?.previewPaymentsEnabled
-          ? "Razorpay verification is disabled on preview deployments."
-          : "Razorpay is not available in this environment.";
-      return res.status(403).json({ ok: false, message: previewMessage });
-    }
-
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
       req.body || {};
 
