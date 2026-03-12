@@ -122,7 +122,11 @@ export default function Hero() {
     return <span className="text-white">{renderWithGlow110(cleaned)}</span>;
   };
 
-  const heroHeadingStyle = {
+  const heroLine1Style = {
+    fontSize: "clamp(1.95rem, 0.55rem + 5.6vw, 4.2rem)",
+    lineHeight: 1.08,
+  };
+  const heroLine2Style = {
     fontSize: "clamp(1.75rem, 0.5rem + 5vw, 3.75rem)",
     lineHeight: 1.08,
   };
@@ -147,7 +151,7 @@ export default function Hero() {
             {headingLine1 && (
               <span
                 className="block w-full text-center text-white"
-                style={heroHeadingStyle}
+                style={heroLine1Style}
               >
                 {renderHeadingLine1(headingLine1)}
               </span>
@@ -156,7 +160,7 @@ export default function Hero() {
             {headingLine2 && (
               <span
                 className={`block w-full text-center ${headingLine2BaseClass}`}
-                style={heroHeadingStyle}
+                style={heroLine2Style}
               >
                 {renderWithGlow110(headingLine2)}
               </span>
