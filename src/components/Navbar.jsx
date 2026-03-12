@@ -426,7 +426,7 @@ export default function Navbar({ routeShell = "browser" }) {
                       loop
                       muted
                       playsInline
-                      preload="none"
+                      preload="metadata"
                       poster="/favicon-96x96.png"
                       onError={handleSmallWebmError}
                       aria-hidden="true"
