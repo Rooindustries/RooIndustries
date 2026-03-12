@@ -153,6 +153,9 @@ export default function Hero() {
     };
 
     const adjust = () => {
+      // Restore el2 to CSS variable so we read the true responsive base
+      el2.style.fontSize = "var(--hero-line2-size)";
+
       const s = getComputedStyle(el2);
       const base = parseFloat(s.fontSize);
       const container = el2.parentElement?.parentElement;
@@ -167,14 +170,24 @@ export default function Hero() {
       if (nw1 <= 0 || nw2 <= 0) return;
 
       const bothFit = nw1 <= avail && nw2 <= avail;
+      const neitherFits = nw1 > avail && nw2 > avail;
+
       if (bothFit) {
         // Desktop/tablet: both fit one line — scale line1 to match line2 width
         el1.style.fontSize = `${base * (nw2 / nw1)}px`;
-        el2.style.fontSize = "";
+      } else if (neitherFits) {
+        // Small phones (≤375px): both wrap — same font size for balanced look
+        el1.style.fontSize = `${base}px`;
       } else {
-        // Mobile: text wraps — use same font size for balanced look
-        el1.style.fontSize = "";
-        el2.style.fontSize = "";
+        // Mid-range phones (390-430px): one fits, one wraps — shrink both to single-line
+        const longer = Math.max(nw1, nw2);
+        const shrunk = base * (avail / longer) * 0.97; // 3% margin prevents sub-pixel overflow
+        const sNw1 = measureWidth(text1, shrunk, s);
+        const sNw2 = measureWidth(text2, shrunk, s);
+        // Width-match line1 to line2, but cap so it can't exceed container
+        const target = Math.min(sNw2, avail * 0.99);
+        el1.style.fontSize = `${shrunk * (target / sNw1)}px`;
+        el2.style.fontSize = `${shrunk}px`;
       }
     };
 
