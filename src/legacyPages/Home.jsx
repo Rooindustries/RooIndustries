@@ -2,6 +2,10 @@ import React, { lazy, Suspense, useEffect, useRef, useState } from "react";
 import Hero from "../components/Hero";
 import { Link, useLocation } from "react-router-dom";
 import {
+  HOME_SECTION_PREFETCH_BY_HASH,
+  prefetchHomeSectionData,
+} from "../lib/homeSectionData";
+import {
   isHomeSectionHash,
   normalizeSectionHash,
   readPendingSectionTarget,
@@ -18,9 +22,12 @@ import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 // Lazy-load framer-motion-heavy sections to keep them out of the initial bundle.
 // DeferredSection already defers rendering until near-viewport; lazy() defers
 // the JS download/parse too — saving ~52 KB (gzipped) from first-load.
-const Services = lazy(() => import("../components/Services"));
-const Packages = lazy(() => import("../components/Packages"));
-const Faq = lazy(() => import("../components/Faq"));
+const loadServices = () => import("../components/Services");
+const loadPackages = () => import("../components/Packages");
+const loadFaq = () => import("../components/Faq");
+const Services = lazy(loadServices);
+const Packages = lazy(loadPackages);
+const Faq = lazy(loadFaq);
 
 function DeferredSection({
   children,
@@ -116,6 +123,41 @@ export default function Home({ initialData = null }) {
     };
   }, [location.hash]);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || isLowPerf) {
+      return undefined;
+    }
+
+    const isPhone =
+      window.matchMedia("(max-width: 767px)").matches &&
+      window.matchMedia("(pointer: coarse)").matches;
+    if (!isPhone) {
+      return undefined;
+    }
+
+    const warmCtaSections = () => {
+      loadServices().catch(() => {});
+      loadPackages().catch(() => {});
+      prefetchHomeSectionData(
+        HOME_SECTION_PREFETCH_BY_HASH["#how-it-works"] || []
+      ).catch(() => {});
+    };
+
+    if (typeof window.requestIdleCallback === "function") {
+      const idleId = window.requestIdleCallback(warmCtaSections, {
+        timeout: 1200,
+      });
+      return () => {
+        if (typeof window.cancelIdleCallback === "function") {
+          window.cancelIdleCallback(idleId);
+        }
+      };
+    }
+
+    const timeoutId = window.setTimeout(warmCtaSections, 250);
+    return () => window.clearTimeout(timeoutId);
+  }, [isLowPerf]);
+
   return (
     <>
       <Hero />
@@ -137,7 +179,7 @@ export default function Home({ initialData = null }) {
       </DeferredSection>
       <section id="services" style={{ scrollMarginTop: "var(--section-nav-offset)" }}>
         <DeferredSection
-          fallbackClassName="min-h-[520px]"
+          fallbackClassName="min-h-[3100px] sm:min-h-[520px]"
           rootMargin="240px 0px"
           eager={eagerAll}
         >
@@ -150,7 +192,7 @@ export default function Home({ initialData = null }) {
       </section>
       <section id="packages" style={{ scrollMarginTop: "var(--section-nav-offset)" }}>
         <DeferredSection
-          fallbackClassName="min-h-[620px]"
+          fallbackClassName="min-h-[2800px] sm:min-h-[620px]"
           rootMargin="300px 0px"
           eager={eagerAll}
         >
