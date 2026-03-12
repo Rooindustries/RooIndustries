@@ -369,9 +369,9 @@ export default function Navbar({ routeShell = "browser" }) {
   const mobileSubLinkIdle = "text-white/85 hover:text-cyan-200";
   const mobileSubLinkActive = "bg-cyan-400 text-black";
 
-  const smallLogoSizeClassName = "h-14 w-14";
+  const smallLogoSizeClassName = "h-14 w-14 rounded-xl";
   const smallLogoStaticClassName = `${smallLogoSizeClassName} object-contain drop-shadow-[0_0_18px_rgba(34,211,238,0.25)]`;
-  const smallLogoAnimatedClassName = `${smallLogoSizeClassName} object-contain drop-shadow-[0_0_18px_rgba(34,211,238,0.25)] transition-all duration-500`;
+  const smallLogoAnimatedClassName = `${smallLogoSizeClassName} object-cover drop-shadow-[0_0_18px_rgba(34,211,238,0.25)] transition-all duration-500`;
 
   return (
     <header
