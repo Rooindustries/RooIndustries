@@ -5,7 +5,7 @@
 :root {
   --header-offset: 146px;
   --section-nav-offset: 96px;
-  --hero-line1-size: clamp(2.04rem, 0.58rem + 5.83vw, 4.37rem);
+  --hero-line1-size: clamp(1.75rem, 0.5rem + 5vw, 3.75rem);
   --hero-line2-size: clamp(1.75rem, 0.5rem + 5vw, 3.75rem);
 }
 
