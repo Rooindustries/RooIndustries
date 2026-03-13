@@ -93,6 +93,13 @@ export default function FaqSection({
   initialQuestions = null,
 }) {
   const location = useLocation();
+  const [activeHash, setActiveHash] = useState(() =>
+    (
+      (typeof window !== "undefined" ? window.location.hash : "") ||
+      location.hash ||
+      ""
+    ).replace(/^#/, "")
+  );
   const [faqCopy, setFaqCopy] = useState(
     () =>
       initialFaqCopy ?? readHomeSectionData(HOME_SECTION_DATA_KEYS.faqSettings)
@@ -120,6 +127,41 @@ export default function FaqSection({
       setQuestions(Array.isArray(initialQuestions) ? initialQuestions : []);
     }
   }, [initialFaqCopy, initialQuestions]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      setActiveHash((location.hash || "").replace(/^#/, ""));
+      return undefined;
+    }
+
+    const syncHashFromWindow = () => {
+      const nextHash = (
+        window.location.hash ||
+        location.hash ||
+        ""
+      ).replace(/^#/, "");
+      setActiveHash((prev) => (prev === nextHash ? prev : nextHash));
+    };
+
+    const syncHashFromIntent = (event) => {
+      const nextHash = String(
+        event?.detail?.hash || window.location.hash || location.hash || ""
+      ).replace(/^#/, "");
+      setActiveHash((prev) => (prev === nextHash ? prev : nextHash));
+    };
+
+    syncHashFromWindow();
+    window.addEventListener("hashchange", syncHashFromWindow);
+    window.addEventListener("roo:pending-section-target", syncHashFromIntent);
+
+    return () => {
+      window.removeEventListener("hashchange", syncHashFromWindow);
+      window.removeEventListener(
+        "roo:pending-section-target",
+        syncHashFromIntent
+      );
+    };
+  }, [location.hash]);
   
   // Pagination State
   const [[page, direction], setPage] = useState([0, 0]);
@@ -188,7 +230,7 @@ export default function FaqSection({
 
   useEffect(() => {
     if (!flatQuestions.length) return;
-    const hash = (location.hash || "").replace("#", "");
+    const hash = activeHash;
     if (!hash) return;
     if (!isFaqIntentHash(hash) && !flatQuestions.some((q) => q.id === hash)) {
       return;
@@ -216,7 +258,7 @@ export default function FaqSection({
         maxWaitMs: 5000,
       });
     }
-  }, [location.hash, flatQuestions, safePage]); 
+  }, [activeHash, flatQuestions, safePage]);
 
   const eyebrowText = faqCopy?.eyebrow || "Answers without the fluff";
   const headingText = faqCopy?.title || "Frequently Asked Questions";
