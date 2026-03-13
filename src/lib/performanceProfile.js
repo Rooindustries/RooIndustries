@@ -100,6 +100,11 @@ const DEFAULT_DECISION = Object.freeze({
   renderer: "",
 });
 
+const SERVER_PERFORMANCE_PROFILE_SNAPSHOT = Object.freeze({
+  ...DEFAULT_DECISION,
+  prefersReducedMotion: false,
+});
+
 const PROBE_EVENTS = ["pointerdown", "keydown", "touchstart", "scroll"];
 const IDLE_EVENTS = [
   "scroll",
@@ -740,10 +745,7 @@ export const usePerformanceProfile = () =>
   useSyncExternalStore(
     subscribePerformanceProfile,
     getPerformanceProfileSnapshot,
-    () => ({
-      ...DEFAULT_DECISION,
-      prefersReducedMotion: false,
-    })
+    () => SERVER_PERFORMANCE_PROFILE_SNAPSHOT
   );
 
 export const isLowPerformanceModeEnabled = () =>
