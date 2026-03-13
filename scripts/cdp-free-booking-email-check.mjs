@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import dotenv from "dotenv";
@@ -8,31 +9,71 @@ dotenv.config({ path: ".env.local" });
 
 const OWNER_TZ = "Asia/Kolkata";
 const OWNER_OFFSET_MINUTES = 330;
-const BASE_URL = String(process.env.BASE_URL || "https://www.rooindustries.com").trim();
+const DEFAULT_BASE_URL = "https://www.rooindustries.com";
+const RAW_BASE_URL = String(
+  process.env.PREVIEW_SHARE_URL || process.env.BASE_URL || DEFAULT_BASE_URL
+).trim();
+const BASE_URL = new URL(RAW_BASE_URL);
+const BASE_ORIGIN = `${BASE_URL.protocol}//${BASE_URL.host}`;
+const BASE_SHARE_TOKEN = String(
+  BASE_URL.searchParams.get("_vercel_share") ||
+    process.env.PREVIEW_SHARE_TOKEN ||
+    ""
+).trim();
 const BOOKING_EMAIL = String(
   process.env.FREE_BOOKING_EMAIL || "serviroo@rooindustries.com"
 ).trim();
-const COUPON_CODE = String(process.env.FREE_BOOKING_COUPON_CODE || "").trim();
 const PACKAGE_TITLE = String(
   process.env.FREE_BOOKING_PACKAGE_TITLE || "Performance Vertex Overhaul"
 ).trim();
-const BOOKING_DISCORD = String(
-  process.env.FREE_BOOKING_DISCORD || "serviroo"
+const RUN_ID = String(
+  process.env.FREE_BOOKING_RUN_ID || `free-booking-${Date.now()}`
 ).trim();
-const CDP_ENDPOINT = "http://localhost:9222";
+const BOOKING_DISCORD = String(
+  process.env.FREE_BOOKING_DISCORD ||
+    `codex-${RUN_ID.replace(/[^a-z0-9]/gi, "").slice(-10) || "smoke"}`
+).trim();
+const REQUESTED_COUPON_CODE = String(
+  process.env.FREE_BOOKING_COUPON_CODE || ""
+).trim();
+const CREATE_TEMP_COUPON = String(
+  process.env.FREE_BOOKING_CREATE_TEMP_COUPON ??
+    (REQUESTED_COUPON_CODE ? "0" : "1")
+)
+  .trim()
+  .toLowerCase() !== "0";
+const KEEP_BOOKING_ARTIFACTS = String(
+  process.env.FREE_BOOKING_KEEP_ARTIFACTS || "0"
+)
+  .trim()
+  .toLowerCase() === "1";
 const BROWSER_MODE = String(process.env.PLAYWRIGHT_BROWSER_MODE || "cdp")
   .trim()
   .toLowerCase();
-
-if (!COUPON_CODE) {
-  throw new Error("FREE_BOOKING_COUPON_CODE is required.");
-}
+const CDP_ENDPOINT = String(process.env.CDP_ENDPOINT || "http://localhost:9222")
+  .trim()
+  .replace(/\/$/, "");
+const IMPORT_CDP_COOKIES = String(
+  process.env.IMPORT_CDP_COOKIES === undefined
+    ? "1"
+    : process.env.IMPORT_CDP_COOKIES
+)
+  .trim()
+  .toLowerCase() !== "0";
+const TERMINAL_EMAIL_DISPATCH_STATUSES = new Set([
+  "sent",
+  "partial",
+  "failed",
+  "delivery_disabled",
+]);
 
 const sanityClient = createClient({
   projectId:
     process.env.SANITY_PROJECT_ID || process.env.NEXT_PUBLIC_SANITY_PROJECT_ID,
   dataset:
-    process.env.SANITY_DATASET || process.env.NEXT_PUBLIC_SANITY_DATASET || "production",
+    process.env.SANITY_DATASET ||
+    process.env.NEXT_PUBLIC_SANITY_DATASET ||
+    "production",
   apiVersion:
     process.env.SANITY_API_VERSION ||
     process.env.NEXT_PUBLIC_SANITY_API_VERSION ||
@@ -44,7 +85,33 @@ const sanityClient = createClient({
   useCdn: false,
 });
 
+if (!sanityClient.config().token) {
+  throw new Error("A Sanity write token is required for the booking smoke test.");
+}
+
+const created = {
+  bookings: [],
+  holds: [],
+  coupons: [],
+};
+
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const trackCreated = (type, id) => {
+  const normalized = String(id || "").trim();
+  if (!normalized) return;
+  if (!created[type].includes(normalized)) {
+    created[type].push(normalized);
+  }
+};
+
+const buildAppUrl = (pathname) => {
+  const url = new URL(pathname, BASE_ORIGIN);
+  if (BASE_SHARE_TOKEN && !url.searchParams.has("_vercel_share")) {
+    url.searchParams.set("_vercel_share", BASE_SHARE_TOKEN);
+  }
+  return url.toString();
+};
 
 const toUtcFromOwnerLocal = (year, monthIndex, day, hour) =>
   new Date(
@@ -76,6 +143,113 @@ const readJsonResponse = async (response) => {
   }
 };
 
+const normalizeSameSite = (value) => {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized === "strict") return "Strict";
+  if (normalized === "none") return "None";
+  if (normalized === "lax") return "Lax";
+  return undefined;
+};
+
+const sendBrowserCdpCommand = async (method, params = {}) => {
+  const versionResponse = await fetch(`${CDP_ENDPOINT}/json/version`);
+  if (!versionResponse.ok) {
+    throw new Error(`CDP endpoint unavailable at ${CDP_ENDPOINT}.`);
+  }
+
+  const version = await versionResponse.json();
+  const wsUrl = String(version?.webSocketDebuggerUrl || "").trim();
+  if (!wsUrl) {
+    throw new Error("CDP browser websocket URL is missing.");
+  }
+
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(wsUrl);
+    const requestId = 1;
+
+    socket.addEventListener("open", () => {
+      socket.send(JSON.stringify({ id: requestId, method, params }));
+    });
+
+    socket.addEventListener("message", (event) => {
+      let payload;
+      try {
+        payload = JSON.parse(String(event.data || ""));
+      } catch (error) {
+        socket.close();
+        reject(error);
+        return;
+      }
+
+      if (payload.id !== requestId) {
+        return;
+      }
+
+      socket.close();
+      if (payload.error) {
+        reject(
+          new Error(
+            payload.error.message || `${method} failed over the CDP websocket.`
+          )
+        );
+        return;
+      }
+
+      resolve(payload.result || {});
+    });
+
+    socket.addEventListener("error", (event) => {
+      socket.close();
+      reject(new Error(event?.message || `${method} websocket error.`));
+    });
+  });
+};
+
+const exportCookiesFromCdp = async () => {
+  if (!IMPORT_CDP_COOKIES || BROWSER_MODE !== "launch") {
+    return [];
+  }
+
+  try {
+    const result = await sendBrowserCdpCommand("Storage.getCookies");
+    return (Array.isArray(result?.cookies) ? result.cookies : [])
+      .map((cookie) => {
+        const normalized = {
+          name: String(cookie?.name || "").trim(),
+          value: String(cookie?.value || ""),
+          domain: String(cookie?.domain || "").trim(),
+          path: String(cookie?.path || "/"),
+          httpOnly: cookie?.httpOnly === true,
+          secure: cookie?.secure === true,
+        };
+
+        if (!normalized.name || !normalized.domain) {
+          return null;
+        }
+
+        const expires = Number(cookie?.expires);
+        if (Number.isFinite(expires) && expires > 0) {
+          normalized.expires = expires;
+        }
+
+        const sameSite = normalizeSameSite(cookie?.sameSite);
+        if (sameSite) {
+          normalized.sameSite = sameSite;
+        }
+
+        return normalized;
+      })
+      .filter(Boolean);
+  } catch (error) {
+    console.warn(
+      `[cdp-free-booking-email-check] Failed to import CDP cookies: ${
+        error?.message || error
+      }`
+    );
+    return [];
+  }
+};
+
 const resolvePackageDoc = async () => {
   const pkg = await sanityClient.fetch(
     `*[_type == "package" && title == $title][0]{ title, price, tag }`,
@@ -87,6 +261,64 @@ const resolvePackageDoc = async () => {
   }
 
   return pkg;
+};
+
+const createTemporaryCoupon = async () => {
+  const suffix = crypto.randomBytes(4).toString("hex").toUpperCase();
+  const code = `FREE${suffix}`;
+  const doc = await sanityClient.create({
+    _type: "coupon",
+    title: `Free Booking Smoke ${RUN_ID}`,
+    code,
+    discountPercent: 100,
+    isActive: true,
+    canCombineWithReferral: false,
+    maxUses: 1,
+    timesUsed: 0,
+  });
+
+  trackCreated("coupons", doc?._id);
+
+  return {
+    code,
+    doc,
+    temporary: true,
+  };
+};
+
+const resolveCoupon = async () => {
+  if (CREATE_TEMP_COUPON) {
+    return createTemporaryCoupon();
+  }
+
+  const code = REQUESTED_COUPON_CODE;
+  if (!code) {
+    throw new Error(
+      "FREE_BOOKING_COUPON_CODE is required when FREE_BOOKING_CREATE_TEMP_COUPON=0."
+    );
+  }
+
+  const coupon = await sanityClient.fetch(
+    `*[_type == "coupon" && lower(code) == $code][0]{
+      _id,
+      code,
+      isActive,
+      discountPercent,
+      maxUses,
+      timesUsed
+    }`,
+    { code: code.toLowerCase() }
+  );
+
+  if (!coupon?._id || coupon.discountPercent !== 100 || coupon.isActive === false) {
+    throw new Error(`Coupon "${code}" is not a usable 100% active coupon.`);
+  }
+
+  return {
+    code: coupon.code,
+    doc: coupon,
+    temporary: false,
+  };
 };
 
 const resolveTargetSlot = async () => {
@@ -113,7 +345,10 @@ const resolveTargetSlot = async () => {
     if (!rawDate) continue;
 
     const dateParts = rawDate.split("-").map((value) => Number(value));
-    if (dateParts.length !== 3 || dateParts.some((value) => !Number.isFinite(value))) {
+    if (
+      dateParts.length !== 3 ||
+      dateParts.some((value) => !Number.isFinite(value))
+    ) {
       continue;
     }
 
@@ -155,10 +390,30 @@ const waitForNewPage = async (context, knownPages) => {
   throw new Error("Failed to observe the new background target.");
 };
 
-const installFetchLogger = async (page) => {
-  await page.addInitScript(() => {
+const installPageInstrumentation = async (page) => {
+  await page.addInitScript((nextRunId) => {
+    window.__codexRunId = nextRunId;
     window.__codexFetchLog = [];
+    window.__codexPageErrors = [];
     const originalFetch = window.fetch.bind(window);
+
+    window.addEventListener("error", (event) => {
+      window.__codexPageErrors.push({
+        type: "error",
+        message: String(event?.message || ""),
+      });
+    });
+
+    window.addEventListener("unhandledrejection", (event) => {
+      const reason = event?.reason;
+      window.__codexPageErrors.push({
+        type: "unhandledrejection",
+        message:
+          typeof reason === "string"
+            ? reason
+            : String(reason?.message || reason || ""),
+      });
+    });
 
     window.fetch = async (...args) => {
       const [input, init] = args;
@@ -191,20 +446,25 @@ const installFetchLogger = async (page) => {
 
       return response;
     };
-  });
+  }, RUN_ID);
 };
 
 const openBackgroundPage = async () => {
   if (BROWSER_MODE === "launch") {
+    const importedCookies = await exportCookiesFromCdp();
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext();
+    if (importedCookies.length > 0) {
+      await context.addCookies(importedCookies);
+    }
     const page = await context.newPage();
-    await installFetchLogger(page);
+    await installPageInstrumentation(page);
 
     return {
       browser,
       context,
       browserSession: null,
+      importedCookieCount: importedCookies.length,
       targetId: "",
       page,
     };
@@ -228,12 +488,13 @@ const openBackgroundPage = async () => {
     background: true,
   });
   const page = await waitForNewPage(context, knownPages);
-  await installFetchLogger(page);
+  await installPageInstrumentation(page);
 
   return {
     browser,
     context,
     browserSession,
+    importedCookieCount: 0,
     targetId,
     page,
   };
@@ -349,12 +610,99 @@ const waitForFetchLog = async (
   };
 };
 
-const runBookingFlow = async ({ page, packageDoc, slot }) => {
-  const bookingUrl = `${BASE_URL}/booking?title=${encodeURIComponent(
-    packageDoc.title
-  )}&price=${encodeURIComponent(packageDoc.price)}&tag=${encodeURIComponent(
-    packageDoc.tag || ""
-  )}`;
+const getPageErrors = async (page) =>
+  page.evaluate(() =>
+    Array.isArray(window.__codexPageErrors) ? window.__codexPageErrors : []
+  );
+
+const fetchProviderReadiness = async (page) =>
+  page.evaluate(async () => {
+    const response = await fetch("/api/payment/providers", {
+      credentials: "include",
+    });
+    let body = null;
+    try {
+      body = await response.json();
+    } catch {}
+    return {
+      status: response.status,
+      body,
+    };
+  });
+
+const getBookingById = async (bookingId) =>
+  sanityClient.fetch(
+    `*[_type == "booking" && _id == $id][0]{
+      _id,
+      _createdAt,
+      orderId,
+      email,
+      payerEmail,
+      packageTitle,
+      packagePrice,
+      couponCode,
+      message,
+      specs,
+      paymentProvider,
+      paymentVerificationState,
+      paymentVerificationWarning,
+      startTimeUTC,
+      displayDate,
+      displayTime,
+      emailDispatchDeferred,
+      emailDispatchStatus,
+      emailDispatchQueuedAt,
+      emailDispatchLastAttemptAt,
+      emailDispatchLastError,
+      emailDispatchClientSentAt,
+      emailDispatchOwnerSentAt
+    }`,
+    { id: bookingId }
+  );
+
+const waitForBookingDispatchState = async (bookingId, timeout = 90000) => {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeout) {
+    const booking = await getBookingById(bookingId);
+    if (
+      booking?._id &&
+      TERMINAL_EMAIL_DISPATCH_STATUSES.has(
+        String(booking.emailDispatchStatus || "").trim().toLowerCase()
+      )
+    ) {
+      return booking;
+    }
+
+    await delay(2000);
+  }
+
+  throw new Error(
+    `Timed out waiting for booking ${bookingId} to reach a terminal email dispatch state.`
+  );
+};
+
+const fetchCouponArtifacts = async (couponCode) =>
+  sanityClient.fetch(
+    `*[_type == "coupon" && lower(code) == $code][0]{
+      _id,
+      code,
+      isActive,
+      timesUsed,
+      maxUses,
+      discountPercent
+    }`,
+    { code: String(couponCode || "").toLowerCase() }
+  );
+
+const runBookingFlow = async ({ page, packageDoc, slot, couponCode }) => {
+  const bookingUrl = buildAppUrl(
+    `/booking?title=${encodeURIComponent(
+      packageDoc.title
+    )}&price=${encodeURIComponent(packageDoc.price)}&tag=${encodeURIComponent(
+      packageDoc.tag || ""
+    )}`
+  );
 
   await page.goto(bookingUrl, {
     waitUntil: "domcontentloaded",
@@ -368,14 +716,12 @@ const runBookingFlow = async ({ page, packageDoc, slot }) => {
   await clickDayButton(page, slot.dayOfMonth);
   await clickTimeButton(page, slot.displayTime);
   await bookingDialog.getByRole("button", { name: "Next" }).click();
-  const holdResponse = await waitForFetchLog(
-    page,
-    {
-      urlIncludes: "/api/holdSlot",
-      method: "POST",
-      status: 200,
-    }
-  );
+  const holdResponse = await waitForFetchLog(page, {
+    urlIncludes: "/api/holdSlot",
+    method: "POST",
+    status: 200,
+  });
+  trackCreated("holds", holdResponse?.body?.holdId);
 
   await bookingDialog
     .getByPlaceholder("Discord (e.g. Servi#1234 or @Servi)")
@@ -383,39 +729,76 @@ const runBookingFlow = async ({ page, packageDoc, slot }) => {
   await bookingDialog.getByPlaceholder("Email").fill(BOOKING_EMAIL);
   await bookingDialog
     .getByPlaceholder("PC Specs")
-    .fill("Codex CDP free-booking email test");
+    .fill(`Codex free-booking smoke ${RUN_ID}`);
   await bookingDialog
     .getByPlaceholder("Main use case (Game/Apps)")
     .fill("Booking email smoke test");
   await bookingDialog
     .getByPlaceholder("Any extra requirements?")
-    .fill(`Free booking email smoke using coupon ${COUPON_CODE}`);
+    .fill(`Automated booking smoke ${RUN_ID}`);
 
   await bookingDialog.getByRole("button", { name: "Submit & Pay" }).click();
   await page.waitForURL(/\/payment/, { timeout: 60000 });
 
+  await page.getByRole("heading", { name: /complete payment/i }).waitFor({
+    timeout: 60000,
+  });
+  await page
+    .getByRole("dialog")
+    .getByText(packageDoc.title, { exact: true })
+    .first()
+    .waitFor({ timeout: 30000 });
+
+  const providerReadiness = await fetchProviderReadiness(page);
+  const paymentPageErrorsBeforeCoupon = await getPageErrors(page);
+
   const couponInput = page.getByPlaceholder("e.g. BF10");
-  await couponInput.fill(COUPON_CODE);
-  await couponInput.locator("xpath=ancestor::div[1]").getByRole("button", {
-    name: "Apply",
-  }).click();
-  await page.getByText(/Coupon applied: 100% off/i).waitFor({ timeout: 30000 });
+  await couponInput.fill(couponCode);
+  await couponInput
+    .locator("xpath=ancestor::div[1]")
+    .getByRole("button", { name: "Apply" })
+    .click();
+  await page.getByText(/Coupon applied: 100% off/i).waitFor({
+    timeout: 30000,
+  });
+  await page.getByRole("button", { name: "Confirm Free Booking" }).waitFor({
+    timeout: 30000,
+  });
 
   await page.getByRole("button", { name: "Confirm Free Booking" }).click();
-  const bookingResponse = await waitForFetchLog(
-    page,
-    {
-      urlIncludes: "/api/ref/createBooking",
-      method: "POST",
-      status: 200,
-    }
-  );
+  const createBookingResponse = await waitForFetchLog(page, {
+    urlIncludes: "/api/ref/createBooking",
+    method: "POST",
+    status: 200,
+  });
+
+  const bookingId = String(createBookingResponse?.body?.bookingId || "").trim();
+  const emailDispatchToken = String(
+    createBookingResponse?.body?.emailDispatchToken || ""
+  ).trim();
+  const emailDispatch = createBookingResponse?.body?.emailDispatch || null;
+
+  if (!bookingId || !emailDispatchToken || !emailDispatch) {
+    throw new Error(
+      "createBooking did not return bookingId, emailDispatch, and emailDispatchToken."
+    );
+  }
+  trackCreated("bookings", bookingId);
+
   await Promise.race([
     page.waitForURL(/\/thank/, { timeout: 60000 }),
     page
       .getByText(/booking has been confirmed|you'll receive a confirmation/i)
       .waitFor({ timeout: 60000 }),
   ]);
+
+  const sendBookingEmailsResponse = await waitForFetchLog(page, {
+    urlIncludes: "/api/ref/sendBookingEmails",
+    method: "POST",
+    status: 200,
+    timeout: 60000,
+  });
+
   const thankYouState = {
     url: page.url(),
     headingVisible:
@@ -426,50 +809,45 @@ const runBookingFlow = async ({ page, packageDoc, slot }) => {
 
   return {
     holdResponse,
-    createBookingResponse: bookingResponse,
+    providerReadiness,
+    paymentPageErrorsBeforeCoupon,
+    createBookingResponse,
+    sendBookingEmailsResponse,
     thankYouState,
   };
 };
 
-const fetchBookingArtifacts = async (slot) => {
-  const booking = await sanityClient.fetch(
-    `*[_type == "booking" && email == $email && startTimeUTC == $startTimeUTC][0] | order(_createdAt desc){
-      _id,
-      _createdAt,
-      email,
-      packageTitle,
-      packagePrice,
-      startTimeUTC,
-      couponCode,
-      paymentProvider,
-      paymentVerificationState,
-      paymentVerificationWarning
-    }`,
-    {
-      email: BOOKING_EMAIL,
-      startTimeUTC: slot.startTimeUTC,
-    }
-  );
-  const coupon = await sanityClient.fetch(
-    `*[_type == "coupon" && lower(code) == $code][0]{
-      _id,
-      code,
-      isActive,
-      timesUsed,
-      maxUses
-    }`,
-    {
-      code: COUPON_CODE.toLowerCase(),
-    }
-  );
+const cleanupArtifacts = async () => {
+  const summary = {
+    deleted: [],
+    failed: [],
+  };
 
-  return { booking, coupon };
+  const deleteIds = [
+    ...created.bookings,
+    ...created.holds,
+    ...created.coupons,
+  ];
+
+  for (const id of deleteIds) {
+    try {
+      await sanityClient.delete(id);
+      summary.deleted.push(id);
+    } catch (error) {
+      summary.failed.push({
+        id,
+        error: error?.message || String(error),
+      });
+    }
+  }
+
+  return summary;
 };
 
-const writeArtifacts = async (report, screenshotPath) => {
+const writeArtifacts = async ({ report, screenshotPath, runId }) => {
   const outDir = path.join(process.cwd(), "audit", "payment-email-smoke");
   await fs.mkdir(outDir, { recursive: true });
-  const reportPath = path.join(outDir, "free-booking-email-check.json");
+  const reportPath = path.join(outDir, `free-booking-email-check-${runId}.json`);
   await fs.writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
   return {
     outDir,
@@ -480,51 +858,114 @@ const writeArtifacts = async (report, screenshotPath) => {
 
 const main = async () => {
   const packageDoc = await resolvePackageDoc();
+  const coupon = await resolveCoupon();
   const slot = await resolveTargetSlot();
   const outDir = path.join(process.cwd(), "audit", "payment-email-smoke");
   await fs.mkdir(outDir, { recursive: true });
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const screenshotPath = path.join(outDir, `free-booking-email-check-${timestamp}.png`);
+  const screenshotPath = path.join(outDir, `free-booking-email-check-${RUN_ID}.png`);
 
-  const { browser, context, browserSession, targetId, page } =
-    await openBackgroundPage();
+  const {
+    browser,
+    context,
+    browserSession,
+    importedCookieCount,
+    targetId,
+    page,
+  } = await openBackgroundPage();
+
+  let cleanupSummary = null;
 
   try {
     const flowResult = await runBookingFlow({
       page,
       packageDoc,
       slot,
+      couponCode: coupon.code,
     });
     await captureScreenshot(context, page, screenshotPath);
-    const sanityArtifacts = await fetchBookingArtifacts(slot);
+
+    const bookingId = String(
+      flowResult.createBookingResponse?.body?.bookingId || ""
+    ).trim();
+    const terminalBooking = await waitForBookingDispatchState(bookingId);
+    const couponArtifacts = await fetchCouponArtifacts(coupon.code);
+    const finalPageErrors = await getPageErrors(page);
+
+    if (!terminalBooking?._id) {
+      throw new Error("Booking was not persisted in Sanity.");
+    }
+
+    if (String(terminalBooking.emailDispatchStatus || "").trim() !== "sent") {
+      throw new Error(
+        `Booking email dispatch ended in "${terminalBooking.emailDispatchStatus}".`
+      );
+    }
+
+    if (
+      !terminalBooking.emailDispatchClientSentAt ||
+      !terminalBooking.emailDispatchOwnerSentAt
+    ) {
+      throw new Error("Booking email dispatch did not send both client and owner emails.");
+    }
+
     const report = {
       generatedAt: new Date().toISOString(),
-      baseUrl: BASE_URL,
+      runId: RUN_ID,
+      baseUrl: BASE_ORIGIN,
+      previewShareTokenPresent: !!BASE_SHARE_TOKEN,
+      browserMode: BROWSER_MODE,
+      importedCookieCount,
       ownerEmail: BOOKING_EMAIL,
       clientEmail: BOOKING_EMAIL,
-      couponCode: COUPON_CODE,
+      couponCode: coupon.code,
+      temporaryCoupon: coupon.temporary,
       package: packageDoc,
       slot,
       holdResponse: flowResult.holdResponse,
+      providerReadiness: flowResult.providerReadiness,
+      paymentPageErrorsBeforeCoupon: flowResult.paymentPageErrorsBeforeCoupon,
       createBookingResponse: flowResult.createBookingResponse,
+      sendBookingEmailsResponse: flowResult.sendBookingEmailsResponse,
       thankYouState: flowResult.thankYouState,
-      ...sanityArtifacts,
+      booking: terminalBooking,
+      coupon: couponArtifacts,
+      finalPageErrors,
+      createdIds: created,
     };
 
-    const outputs = await writeArtifacts(report, screenshotPath);
-    console.log(JSON.stringify(outputs, null, 2));
-    if (!flowResult.createBookingResponse?.body?.emailDispatch) {
-      console.warn(
-        "Booking completed but the createBooking response did not include emailDispatch."
-      );
+    if (!KEEP_BOOKING_ARTIFACTS) {
+      cleanupSummary = await cleanupArtifacts();
+      report.cleanup = cleanupSummary;
     }
+
+    const outputs = await writeArtifacts({
+      report,
+      screenshotPath,
+      runId: RUN_ID,
+    });
+
+    console.log(
+      JSON.stringify(
+        {
+          ...outputs,
+          runId: RUN_ID,
+          bookingId,
+          couponCode: coupon.code,
+          cleanup: cleanupSummary,
+        },
+        null,
+        2
+      )
+    );
   } finally {
     try {
       if (browserSession && targetId) {
         await browserSession.send("Target.closeTarget", { targetId });
       }
     } catch {}
-    await browser.close();
+    if (BROWSER_MODE === "launch") {
+      await browser.close();
+    }
   }
 };
 
