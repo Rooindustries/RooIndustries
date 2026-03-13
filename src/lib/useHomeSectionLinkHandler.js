@@ -28,11 +28,13 @@ export default function useHomeSectionLinkHandler() {
     activeScrollCleanupRef.current = alignToHashTarget({
       hash,
       behavior: "auto",
+      scrollMode: isPhone ? "fast-smooth" : "instant",
+      durationMs: isPhone ? 220 : undefined,
       getOffsetPx: () => getCssHeaderOffsetPx(110),
-      stableFramesRequired: isPhone ? 4 : 8,
-      preAlignStableFramesRequired: isPhone ? 0 : 5,
+      stableFramesRequired: isPhone ? 1 : 8,
+      preAlignStableFramesRequired: isPhone ? 1 : 5,
       minRuntimeMs: isPhone ? 0 : 900,
-      maxWaitMs: isPhone ? 3200 : 4200,
+      maxWaitMs: isPhone ? 1200 : 4200,
       observeMutations: true,
     });
   }, []);

@@ -7,54 +7,68 @@ if (!BASE_URL) {
 
 test.use({
   ...devices["iPhone 13"],
+  javaScriptEnabled: true,
 });
 
-const waitForHashTarget = async (
-  page,
-  hash,
-  selector,
-  maxOffsetPx = 160,
-  timeoutMs = 10000
-) => {
-  const started = Date.now();
+const installAlignmentProbe = async (page, selector) => {
+  await page.evaluate((targetSelector) => {
+    window.__heroCtaScrollProbe = {
+      startedAt: performance.now(),
+      settled: null,
+    };
 
-  while (Date.now() - started <= timeoutMs) {
-    const state = await page.evaluate((targetSelector) => ({
-      hash: window.location.hash,
-      top: Math.round(
-        document.querySelector(targetSelector)?.getBoundingClientRect().top ??
-          9999
-      ),
-      scrollY: Math.round(window.scrollY),
-    }), selector);
-
-    if (state.hash === hash && Math.abs(state.top) <= maxOffsetPx) {
-      return {
-        ...state,
-        elapsedMs: Date.now() - started,
+    const handleSettled = (event) => {
+      window.__heroCtaScrollProbe.settled = {
+        hash: event?.detail?.hash || "",
+        top: Math.round(
+          document.querySelector(targetSelector)?.getBoundingClientRect().top ??
+            9999
+        ),
+        scrollY: Math.round(window.scrollY),
+        settledAt: performance.now(),
       };
-    }
+      window.removeEventListener("roo:section-align-settled", handleSettled);
+    };
 
-    await page.waitForTimeout(100);
-  }
-
-  const state = await page.evaluate((targetSelector) => ({
-    hash: window.location.hash,
-    top: Math.round(
-      document.querySelector(targetSelector)?.getBoundingClientRect().top ?? 9999
-    ),
-    scrollY: Math.round(window.scrollY),
-  }), selector);
-
-  return {
-    ...state,
-    elapsedMs: Date.now() - started,
-  };
+    window.addEventListener("roo:section-align-settled", handleSettled);
+  }, selector);
 };
 
 const clickAndMeasure = async (page, linkName, hash, selector) => {
+  await installAlignmentProbe(page, selector);
   await page.getByRole("link", { name: linkName }).first().click();
-  return waitForHashTarget(page, hash, selector);
+  await page.waitForFunction(
+    (expectedHash) =>
+      window.__heroCtaScrollProbe?.settled?.hash === expectedHash,
+    hash,
+    { timeout: 10000 }
+  );
+
+  return page.evaluate(() => ({
+    ...window.__heroCtaScrollProbe.settled,
+    elapsedMs: Math.round(
+      window.__heroCtaScrollProbe.settled.settledAt -
+        window.__heroCtaScrollProbe.startedAt
+    ),
+  }));
+};
+
+const scrollToTopInstant = async (page) => {
+  await page.evaluate(() => {
+    const root = document.documentElement;
+    const previous = root.style.scrollBehavior;
+    root.style.scrollBehavior = "auto";
+    window.scrollTo({ top: 0, behavior: "auto" });
+    if (previous) {
+      root.style.scrollBehavior = previous;
+      return;
+    }
+    root.style.removeProperty("scroll-behavior");
+  });
+
+  await page.waitForFunction(() => Math.round(window.scrollY) === 0, {
+    timeout: 5000,
+  });
 };
 
 test("hero CTAs settle promptly on phone layouts", async ({ page }) => {
@@ -63,10 +77,16 @@ test("hero CTAs settle promptly on phone layouts", async ({ page }) => {
   let state = await clickAndMeasure(page, "Tune My Rig", "#packages", "#packages");
   expect(state.hash).toBe("#packages");
   expect(Math.abs(state.top)).toBeLessThanOrEqual(160);
-  expect(state.elapsedMs).toBeLessThanOrEqual(1600);
+  expect(state.elapsedMs).toBeLessThanOrEqual(600);
 
-  await page.evaluate(() => window.scrollTo({ top: 0, behavior: "auto" }));
-  await page.waitForTimeout(200);
+  await scrollToTopInstant(page);
+
+  state = await clickAndMeasure(page, "Tune My Rig", "#packages", "#packages");
+  expect(state.hash).toBe("#packages");
+  expect(Math.abs(state.top)).toBeLessThanOrEqual(160);
+  expect(state.elapsedMs).toBeLessThanOrEqual(600);
+
+  await scrollToTopInstant(page);
 
   state = await clickAndMeasure(
     page,
@@ -76,5 +96,5 @@ test("hero CTAs settle promptly on phone layouts", async ({ page }) => {
   );
   expect(state.hash).toBe("#how-it-works");
   expect(Math.abs(state.top)).toBeLessThanOrEqual(160);
-  expect(state.elapsedMs).toBeLessThanOrEqual(1800);
+  expect(state.elapsedMs).toBeLessThanOrEqual(600);
 });
