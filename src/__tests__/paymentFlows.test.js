@@ -64,11 +64,14 @@ const formatClientTime = (utcDate, timeZone) =>
     minute: "2-digit",
   }).format(utcDate);
 
-const renderPayment = (bookingData) => {
+const renderPayment = (bookingData, { paymentFlow = "session" } = {}) => {
   const encoded = encodeURIComponent(JSON.stringify(bookingData));
   __setMockLocation({
     pathname: "/payment",
-    search: `?data=${encoded}`,
+    search:
+      paymentFlow === "legacy"
+        ? `?data=${encoded}&paymentFlow=legacy`
+        : `?data=${encoded}`,
     state: null,
   });
   return render(<Payment />);
@@ -88,7 +91,7 @@ afterEach(() => {
 });
 
 describe("payment flows", () => {
-  test("Razorpay flow attaches UTC and keeps client email data", async () => {
+  test("session Razorpay flow attaches UTC and keeps client email data", async () => {
     expect(CLIENT_EMAIL).toBe("vihaann2.0@gmail.com");
     expect(OWNER_EMAIL).toBe("serviroo@rooindustries.com");
 
@@ -125,32 +128,35 @@ describe("payment flows", () => {
           }),
         };
       }
-      if (url === "/api/razorpay/createOrder") {
+      if (url === "/api/payment/start") {
         const body = JSON.parse(options.body || "{}");
         fetchCalls.push({ url, body });
         return {
           ok: true,
           json: async () => ({
             ok: true,
-            orderId: "order_rzp_1",
-            amount: 1000,
-            currency: "USD",
-            key: "rzp_key",
+            paymentAccessToken: "payment_access_rzp",
+            providerPayload: {
+              orderId: "order_rzp_1",
+              amount: 1000,
+              currency: "USD",
+              key: "rzp_key",
+            },
           }),
         };
       }
-      if (url === "/api/razorpay/verify") {
-        const body = JSON.parse(options.body || "{}");
-        fetchCalls.push({ url, body });
-        return { ok: true, json: async () => ({ ok: true }) };
-      }
-      if (url === "/api/ref/createBooking") {
+      if (url === "/api/payment/finalize") {
         const body = JSON.parse(options.body || "{}");
         fetchCalls.push({ url, body });
         return {
           ok: true,
           json: async () => ({
             bookingId: "b1",
+            status: "email_partial",
+            emailDispatch: {
+              deferred: true,
+              allSent: false,
+            },
             emailDispatchToken: "dispatch-token-rzp",
           }),
         };
@@ -200,21 +206,23 @@ describe("payment flows", () => {
 
     await waitFor(() => expect(razorpayOptions).toBeTruthy());
     const orderCall = fetchCalls.find(
-      (call) => call.url === "/api/razorpay/createOrder"
+      (call) => call.url === "/api/payment/start"
     );
-    expect(orderCall.body.notes.startTimeUTC).toBe(startTimeUTC);
-    expect(orderCall.body.notes.date).toBe(displayDate);
-    expect(orderCall.body.notes.time).toBe(displayTime);
+    expect(orderCall.body.provider).toBe("razorpay");
+    expect(orderCall.body.bookingPayload.startTimeUTC).toBe(startTimeUTC);
+    expect(orderCall.body.bookingPayload.displayDate).toBe(displayDate);
+    expect(orderCall.body.bookingPayload.displayTime).toBe(displayTime);
+    expect(orderCall.body.bookingPayload.email).toBe(CLIENT_EMAIL);
 
-    const bookingCall = fetchCalls.find(
-      (call) => call.url === "/api/ref/createBooking"
+    const finalizeCall = fetchCalls.find(
+      (call) => call.url === "/api/payment/finalize"
     );
-    expect(bookingCall.body.email).toBe(CLIENT_EMAIL);
-    expect(bookingCall.body.startTimeUTC).toBe(startTimeUTC);
-    expect(bookingCall.body.displayDate).toBe(displayDate);
-    expect(bookingCall.body.displayTime).toBe(displayTime);
-    expect(bookingCall.body.paymentProvider).toBe("razorpay");
-    expect(bookingCall.body.deferEmailsUntilConfirmation).toBe(true);
+    expect(finalizeCall.body.paymentAccessToken).toBe("payment_access_rzp");
+    expect(finalizeCall.body.providerData).toEqual({
+      razorpayOrderId: "order_rzp_1",
+      razorpayPaymentId: "pay_rzp_1",
+      razorpaySignature: "sig_rzp_1",
+    });
     expect(mockNavigate).toHaveBeenCalledWith("/payment-success", {
       state: {
         bookingConfirmation: {
@@ -232,7 +240,131 @@ describe("payment flows", () => {
     });
   });
 
-  test("PayPal flow attaches UTC and keeps client email data", async () => {
+  test("legacy Razorpay flow remains available when requested explicitly", async () => {
+    const timeZone = "America/Los_Angeles";
+    const startTimeUTC = "2025-01-15T07:59:00.000Z";
+    const utcDate = new Date(startTimeUTC);
+    const displayDate = formatClientDate(utcDate, timeZone);
+    const displayTime = formatClientTime(utcDate, timeZone);
+
+    const bookingData = {
+      email: CLIENT_EMAIL,
+      packageTitle: "Performance Vertex Overhaul",
+      packagePrice: "$10.00",
+      startTimeUTC,
+      displayDate,
+      displayTime,
+      localTimeZone: timeZone,
+      slotHoldId: "hold_legacy_rzp",
+      slotHoldToken: "hold_token_legacy_rzp",
+      slotHoldExpiresAt: "2099-01-05T06:00:00.000Z",
+    };
+
+    const fetchCalls = [];
+    global.fetch = jest.fn(async (url, options = {}) => {
+      if (url === "/api/payment/providers") {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            providers: {
+              razorpay: { enabled: true, mode: "live" },
+              paypal: { enabled: false, mode: "live" },
+            },
+          }),
+        };
+      }
+      if (url === "/api/razorpay/createOrder") {
+        const body = JSON.parse(options.body || "{}");
+        fetchCalls.push({ url, body });
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            orderId: "order_rzp_legacy",
+            amount: 1000,
+            currency: "USD",
+            key: "rzp_key",
+            paymentRecordId: "paymentRecord.legacy",
+          }),
+        };
+      }
+      if (url === "/api/razorpay/verify") {
+        const body = JSON.parse(options.body || "{}");
+        fetchCalls.push({ url, body });
+        return { ok: true, json: async () => ({ ok: true }) };
+      }
+      if (url === "/api/ref/createBooking") {
+        const body = JSON.parse(options.body || "{}");
+        fetchCalls.push({ url, body });
+        return {
+          ok: true,
+          json: async () => ({
+            bookingId: "b1-legacy",
+            emailDispatchToken: "dispatch-token-rzp-legacy",
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ ok: true }) };
+    });
+
+    let razorpayOptions = null;
+    window.Razorpay = jest.fn().mockImplementation((options) => {
+      razorpayOptions = options;
+      return {
+        open: jest.fn(() => {
+          options.handler({
+            razorpay_order_id: "order_rzp_legacy",
+            razorpay_payment_id: "pay_rzp_legacy",
+            razorpay_signature: "sig_rzp_legacy",
+          });
+        }),
+      };
+    });
+
+    renderPayment(bookingData, { paymentFlow: "legacy" });
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const script = document.querySelector(
+      'script[src="https://checkout.razorpay.com/v1/checkout.js"]'
+    );
+    await act(async () => {
+      script.onload();
+    });
+
+    await act(async () => {
+      await userEvent.click(
+        await screen.findByRole("button", { name: /pay with razorpay/i })
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    await waitFor(() => expect(razorpayOptions).toBeTruthy());
+    const orderCall = fetchCalls.find(
+      (call) => call.url === "/api/razorpay/createOrder"
+    );
+    expect(orderCall.body.notes.startTimeUTC).toBe(startTimeUTC);
+
+    const bookingCall = fetchCalls.find(
+      (call) => call.url === "/api/ref/createBooking"
+    );
+    expect(bookingCall.body.paymentProvider).toBe("razorpay");
+    expect(bookingCall.body.paymentRecordId).toBe("paymentRecord.legacy");
+    expect(mockNavigate).toHaveBeenCalledWith("/payment-success", {
+      state: {
+        bookingConfirmation: {
+          bookingId: "b1-legacy",
+          emailDispatchToken: "dispatch-token-rzp-legacy",
+        },
+      },
+      replace: true,
+    });
+  });
+
+  test("session PayPal flow attaches UTC and keeps client email data", async () => {
     expect(CLIENT_EMAIL).toBe("vihaann2.0@gmail.com");
     expect(OWNER_EMAIL).toBe("serviroo@rooindustries.com");
 
@@ -269,13 +401,34 @@ describe("payment flows", () => {
           }),
         };
       }
-      if (url === "/api/ref/createBooking") {
+      if (url === "/api/payment/start") {
+        const body = JSON.parse(options.body || "{}");
+        fetchCalls.push({ url, body });
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            paymentAccessToken: "payment_access_paypal",
+            providerPayload: {
+              orderId: "paypal_order_1",
+              currency: "USD",
+              clientId: "test-client",
+            },
+          }),
+        };
+      }
+      if (url === "/api/payment/finalize") {
         const body = JSON.parse(options.body || "{}");
         fetchCalls.push({ url, body });
         return {
           ok: true,
           json: async () => ({
             bookingId: "b2",
+            status: "email_partial",
+            emailDispatch: {
+              deferred: true,
+              allSent: false,
+            },
             emailDispatchToken: "dispatch-token-paypal",
           }),
         };
@@ -292,33 +445,127 @@ describe("payment flows", () => {
     expect(paypalButtonsProps).toBeTruthy();
 
     const createSpy = jest.fn().mockResolvedValue("paypal_order_1");
-    await paypalButtonsProps.createOrder({}, { order: { create: createSpy } });
+    const orderId = await paypalButtonsProps.createOrder({}, { order: { create: createSpy } });
 
-    const createArgs = createSpy.mock.calls[0][0];
-    expect(createArgs.purchase_units[0].custom_id).toBe(startTimeUTC);
+    expect(orderId).toBe("paypal_order_1");
+    expect(createSpy).not.toHaveBeenCalled();
+    const startCall = fetchCalls.find((call) => call.url === "/api/payment/start");
+    expect(startCall.body.provider).toBe("paypal");
+    expect(startCall.body.bookingPayload.startTimeUTC).toBe(startTimeUTC);
+    expect(startCall.body.bookingPayload.displayDate).toBe(displayDate);
+    expect(startCall.body.bookingPayload.displayTime).toBe(displayTime);
+    expect(startCall.body.bookingPayload.email).toBe(CLIENT_EMAIL);
 
     const captureSpy = jest.fn().mockResolvedValue({
       id: "paypal_order_1",
       payer: { email_address: CLIENT_EMAIL },
     });
 
-    await paypalButtonsProps.onApprove({}, { order: { capture: captureSpy } });
+    await paypalButtonsProps.onApprove(
+      { orderID: "paypal_order_1" },
+      { order: { capture: captureSpy } }
+    );
+
+    const finalizeCall = fetchCalls.find(
+      (call) => call.url === "/api/payment/finalize"
+    );
+    expect(finalizeCall.body.paymentAccessToken).toBe("payment_access_paypal");
+    expect(finalizeCall.body.providerData).toEqual({
+      paypalOrderId: "paypal_order_1",
+      payerEmail: CLIENT_EMAIL,
+    });
+    expect(mockNavigate).toHaveBeenCalledWith("/payment-success", {
+      state: {
+        bookingConfirmation: {
+          bookingId: "b2",
+          emailDispatchToken: "dispatch-token-paypal",
+        },
+      },
+      replace: true,
+    });
+  });
+
+  test("legacy PayPal flow remains available when requested explicitly", async () => {
+    const timeZone = "America/Los_Angeles";
+    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    const utcDate = new Date(startTimeUTC);
+    const displayDate = formatClientDate(utcDate, timeZone);
+    const displayTime = formatClientTime(utcDate, timeZone);
+
+    const bookingData = {
+      email: CLIENT_EMAIL,
+      packageTitle: "Performance Vertex Overhaul",
+      packagePrice: "$10.00",
+      startTimeUTC,
+      displayDate,
+      displayTime,
+      localTimeZone: timeZone,
+      slotHoldId: "hold_paypal_legacy",
+      slotHoldToken: "hold_token_paypal_legacy",
+      slotHoldExpiresAt: "2099-01-05T06:00:00.000Z",
+    };
+
+    const fetchCalls = [];
+    global.fetch = jest.fn(async (url, options = {}) => {
+      if (url === "/api/payment/providers") {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            providers: {
+              razorpay: { enabled: true, mode: "live" },
+              paypal: { enabled: true, mode: "live" },
+            },
+          }),
+        };
+      }
+      if (url === "/api/ref/createBooking") {
+        const body = JSON.parse(options.body || "{}");
+        fetchCalls.push({ url, body });
+        return {
+          ok: true,
+          json: async () => ({
+            bookingId: "b2-legacy",
+            emailDispatchToken: "dispatch-token-paypal-legacy",
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ ok: true }) };
+    });
+
+    renderPayment(bookingData, { paymentFlow: "legacy" });
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const createSpy = jest.fn().mockResolvedValue("paypal_order_legacy");
+    await paypalButtonsProps.createOrder({}, { order: { create: createSpy } });
+
+    const createArgs = createSpy.mock.calls[0][0];
+    expect(createArgs.purchase_units[0].custom_id).toBe(startTimeUTC);
+
+    const captureSpy = jest.fn().mockResolvedValue({
+      id: "paypal_order_legacy",
+      payer: { email_address: CLIENT_EMAIL },
+    });
+
+    await paypalButtonsProps.onApprove(
+      {},
+      { order: { capture: captureSpy } }
+    );
 
     const bookingCall = fetchCalls.find(
       (call) => call.url === "/api/ref/createBooking"
     );
-    expect(bookingCall.body.email).toBe(CLIENT_EMAIL);
-    expect(bookingCall.body.startTimeUTC).toBe(startTimeUTC);
-    expect(bookingCall.body.displayDate).toBe(displayDate);
-    expect(bookingCall.body.displayTime).toBe(displayTime);
     expect(bookingCall.body.paymentProvider).toBe("paypal");
     expect(bookingCall.body.payerEmail).toBe(CLIENT_EMAIL);
     expect(bookingCall.body.deferEmailsUntilConfirmation).toBe(true);
     expect(mockNavigate).toHaveBeenCalledWith("/payment-success", {
       state: {
         bookingConfirmation: {
-          bookingId: "b2",
-          emailDispatchToken: "dispatch-token-paypal",
+          bookingId: "b2-legacy",
+          emailDispatchToken: "dispatch-token-paypal-legacy",
         },
       },
       replace: true,

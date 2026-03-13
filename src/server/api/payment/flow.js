@@ -275,7 +275,13 @@ const buildPublicStatusBody = (record = {}) => ({
   bookingId: String(record.bookingId || "").trim(),
   recoveryReason: String(record.recoveryReason || "").trim(),
   emailDispatch: normalizeObject(record.emailDispatch),
+  emailDispatchToken: String(record.emailDispatchToken || "").trim(),
 });
+
+const resolvePaymentRecordSuccessStatus = (emailDispatch = {}) =>
+  emailDispatch?.allSent === false
+    ? PAYMENT_STATUS_EMAIL_PARTIAL
+    : PAYMENT_STATUS_BOOKED;
 
 const resolvePaymentAccessTtlSeconds = () =>
   Math.min(
@@ -345,6 +351,216 @@ const buildProviderPayloadFromRecord = (record = {}) => {
   }
 
   return {};
+};
+
+const getLegacyBookingByProviderData = async ({
+  client,
+  provider = "",
+  providerOrderId = "",
+  providerPaymentId = "",
+}) => {
+  const normalizedProvider = String(provider || "").trim().toLowerCase();
+  if (normalizedProvider === "paypal" && providerOrderId) {
+    return client.fetch(
+      `*[_type == "booking" && paypalOrderId == $paypalOrderId][0]`,
+      { paypalOrderId: providerOrderId }
+    );
+  }
+
+  if (normalizedProvider === "razorpay" && providerPaymentId) {
+    return client.fetch(
+      `*[_type == "booking" && razorpayPaymentId == $razorpayPaymentId][0]`,
+      { razorpayPaymentId: providerPaymentId }
+    );
+  }
+
+  if (normalizedProvider === "razorpay" && providerOrderId) {
+    return client.fetch(
+      `*[_type == "booking" && razorpayOrderId == $razorpayOrderId][0]`,
+      { razorpayOrderId: providerOrderId }
+    );
+  }
+
+  return null;
+};
+
+const buildEmailDispatchFromBooking = (booking = {}) => {
+  const clientSent = !!booking.emailDispatchClientSentAt;
+  const ownerSent = !!booking.emailDispatchOwnerSentAt;
+
+  return {
+    deliveryEnabled: true,
+    deferred: !!booking.emailDispatchDeferred,
+    client: {
+      attempted:
+        clientSent ||
+        !!String(booking.emailDispatchStatus || "").trim(),
+      sent: clientSent,
+      skippedReason: clientSent ? "already_sent" : "",
+    },
+    owner: {
+      attempted:
+        ownerSent ||
+        !!String(booking.emailDispatchStatus || "").trim(),
+      sent: ownerSent,
+      skippedReason: ownerSent ? "already_sent" : "",
+    },
+    allSent: clientSent && ownerSent,
+  };
+};
+
+const mirrorLegacyBookingToPaymentRecord = async ({
+  client,
+  provider = "",
+  providerOrderId = "",
+  providerPaymentId = "",
+  payerEmail = "",
+  booking,
+  source = "legacy",
+  eventType = "",
+}) => {
+  if (!booking?._id) return null;
+
+  const normalizedProvider = String(provider || booking.paymentProvider || "")
+    .trim()
+    .toLowerCase();
+  if (normalizedProvider !== "paypal" && normalizedProvider !== "razorpay") {
+    return null;
+  }
+
+  const bookingSeedKey = buildBookingSeedKey({
+    provider: normalizedProvider,
+    packageTitle: booking.packageTitle || "",
+    originalOrderId: booking.originalOrderId || "",
+    startTimeUTC: booking.startTimeUTC || "",
+    email: booking.email || booking.payerEmail || "",
+  });
+  const pricingFingerprint = buildPricingFingerprint({
+    provider: normalizedProvider,
+    packageTitle: booking.packageTitle || "",
+    originalOrderId: booking.originalOrderId || "",
+    startTimeUTC: booking.startTimeUTC || "",
+    email: booking.email || booking.payerEmail || "",
+    grossAmount: Number(booking.grossAmount || booking.packagePrice || 0),
+    netAmount: Number(booking.netAmount || booking.packagePrice || 0),
+    discountAmount: Number(booking.discountAmount || 0),
+    referralCode: booking.referralCode || "",
+    couponCode: booking.couponCode || "",
+    currency:
+      normalizedProvider === "paypal"
+        ? DEFAULT_PAYPAL_CURRENCY
+        : DEFAULT_RAZORPAY_CURRENCY,
+  });
+  const emailDispatch = buildEmailDispatchFromBooking(booking);
+  const status = resolvePaymentRecordSuccessStatus(emailDispatch);
+  const paymentRecordId = buildPaymentRecordId({
+    provider: normalizedProvider,
+    providerOrderId:
+      providerOrderId ||
+      booking.paypalOrderId ||
+      booking.razorpayOrderId ||
+      "",
+    providerPaymentId:
+      providerPaymentId || booking.razorpayPaymentId || "",
+    bookingSeedKey,
+  });
+  const existing = await getPaymentRecordById(client, paymentRecordId);
+  const now = nowIso();
+  const event = buildPaymentRecordEvent({
+    status,
+    source,
+    reason: eventType ? "legacy_booking_mirrored_from_webhook" : "",
+    data: {
+      bookingId: booking._id,
+      providerOrderId:
+        providerOrderId ||
+        booking.paypalOrderId ||
+        booking.razorpayOrderId ||
+        "",
+      providerPaymentId:
+        providerPaymentId || booking.razorpayPaymentId || "",
+      eventType,
+    },
+  });
+
+  const doc = {
+    _id: paymentRecordId,
+    _type: PAYMENT_RECORD_TYPE,
+    provider: normalizedProvider,
+    status,
+    bookingSeedKey,
+    pricingFingerprint,
+    bookingFinalizationKey:
+      normalizedProvider === "paypal"
+        ? `paypal:${providerOrderId || booking.paypalOrderId || ""}`
+        : `razorpay-order:${providerOrderId || booking.razorpayOrderId || ""}`,
+    bookingPayload: {
+      packageTitle: String(booking.packageTitle || "").trim(),
+      originalOrderId: String(booking.originalOrderId || "").trim(),
+      startTimeUTC: String(booking.startTimeUTC || "").trim(),
+      email: String(booking.email || booking.payerEmail || "").trim(),
+      localTimeZone: String(booking.localTimeZone || "").trim(),
+      displayDate: String(booking.displayDate || "").trim(),
+      displayTime: String(booking.displayTime || "").trim(),
+      referralCode: String(booking.referralCode || "").trim(),
+      couponCode: String(booking.couponCode || "").trim(),
+      paymentProvider: normalizedProvider,
+    },
+    pricingSnapshot: {
+      grossAmount: Number(booking.grossAmount || booking.packagePrice || 0),
+      discountAmount: Number(booking.discountAmount || 0),
+      discountPercent: Number(booking.discountPercent || 0),
+      netAmount: Number(booking.netAmount || booking.packagePrice || 0),
+      referralDiscountAmount: 0,
+      referralDiscountPercent: 0,
+      commissionPercent: Number(booking.commissionPercent || 0),
+      couponDiscountPercent: Number(booking.couponDiscountPercent || 0),
+      couponDiscountAmount: Number(booking.couponDiscountAmount || 0),
+      canCombineWithReferral: false,
+      effectiveReferralCode: String(booking.referralCode || "").trim(),
+      effectiveReferralId: "",
+    },
+    holdSnapshot: existing?.holdSnapshot || {},
+    providerOrderId: String(
+      providerOrderId || booking.paypalOrderId || booking.razorpayOrderId || ""
+    ).trim(),
+    providerPaymentId: String(
+      providerPaymentId || booking.razorpayPaymentId || ""
+    ).trim(),
+    payerEmail: String(payerEmail || booking.payerEmail || booking.email || "").trim(),
+    verificationState: String(booking.paymentVerificationState || "").trim(),
+    verificationWarning: String(booking.paymentVerificationWarning || "").trim(),
+    bookingId: String(booking._id || "").trim(),
+    recoveryReason: "",
+    attemptCount: Number(existing?.attemptCount || 0),
+    lastAttemptAt: now,
+    source,
+    providerPublicData:
+      existing?.providerPublicData ||
+      (normalizedProvider === "paypal"
+        ? {
+            orderId: String(
+              providerOrderId || booking.paypalOrderId || ""
+            ).trim(),
+            currency: DEFAULT_PAYPAL_CURRENCY,
+            clientId: String(
+              resolvePaymentProviders()?.paypal?.clientId || ""
+            ).trim(),
+          }
+        : {
+            orderId: String(
+              providerOrderId || booking.razorpayOrderId || ""
+            ).trim(),
+            currency: DEFAULT_RAZORPAY_CURRENCY,
+          }),
+    emailDispatch,
+    emailDispatchToken: "",
+    events: mergePaymentRecordEvents(existing?.events || [], event),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+
+  return upsertPaymentRecord({ client, doc });
 };
 
 const resolveRecordFromAccessToken = async ({
@@ -713,6 +929,8 @@ const buildLegacyBookingPayload = ({
     ...bookingPayload,
     paymentProvider: record.provider,
     status: "captured",
+    deferEmailsUntilConfirmation:
+      String(record.provider || "").trim().toLowerCase() !== "free",
     paypalOrderId:
       String(providerData.paypalOrderId || record.providerOrderId || "").trim(),
     payerEmail:
@@ -997,6 +1215,7 @@ const finalizePaymentRecordInternal = async ({
         bookingId,
         recoveryReason: "",
         emailDispatch: normalizeObject(result.body?.emailDispatch),
+        emailDispatchToken: String(result.body?.emailDispatchToken || "").trim(),
         verificationState: String(bookingDoc?.paymentVerificationState || "").trim(),
         verificationWarning: String(
           bookingDoc?.paymentVerificationWarning || ""
@@ -1630,6 +1849,25 @@ const findOrCreateWebhookRecoveryRecord = async ({
     providerPaymentId,
   });
   if (existing?._id) return existing;
+
+  const existingBooking = await getLegacyBookingByProviderData({
+    client,
+    provider,
+    providerOrderId,
+    providerPaymentId,
+  });
+  if (existingBooking?._id) {
+    return mirrorLegacyBookingToPaymentRecord({
+      client,
+      provider,
+      providerOrderId,
+      providerPaymentId,
+      payerEmail,
+      booking: existingBooking,
+      source: "webhook",
+      eventType,
+    });
+  }
 
   const paymentRecordId = buildPaymentRecordId({
     provider,
