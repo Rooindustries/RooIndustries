@@ -1,5 +1,25 @@
 import { normalizeSectionHash } from "./sectionNavigation";
 
+const SCROLL_TOLERANCE_PX = 1;
+const FAST_SMOOTH_DURATION_MS = 220;
+
+const easeOutCubic = (value) => 1 - Math.pow(1 - value, 3);
+
+const getHeaderOffset = () => {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(
+    "--header-offset"
+  );
+  const parsed = Number.parseFloat(raw);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const setWindowScrollTop = (top) => {
+  window.scrollTo({
+    top: Math.max(0, top),
+    behavior: "auto",
+  });
+};
+
 export const getCssHeaderOffsetPx = (fallback = 110) => {
   if (typeof window === "undefined" || typeof document === "undefined") {
     return fallback;
@@ -14,6 +34,8 @@ export const getCssHeaderOffsetPx = (fallback = 110) => {
 export const alignToHashTarget = ({
   hash,
   behavior = "auto",
+  scrollMode,
+  durationMs = FAST_SMOOTH_DURATION_MS,
   getOffsetPx = () => getCssHeaderOffsetPx(),
   stableFramesRequired = 8,
   preAlignStableFramesRequired = 8,
@@ -30,6 +52,12 @@ export const alignToHashTarget = ({
 
   const targetId = normalizedHash.slice(1);
   if (!targetId) return () => {};
+  const resolvedScrollMode =
+    scrollMode || (behavior === "smooth" ? "fast-smooth" : "instant");
+  const root = document.documentElement;
+  const previousRootScrollBehavior = root.style.scrollBehavior;
+
+  root.style.scrollBehavior = "auto";
 
   const notifySettled = () => {
     if (typeof window === "undefined") return;
@@ -41,13 +69,14 @@ export const alignToHashTarget = ({
   };
 
   let rafId = 0;
+  let animationRafId = 0;
   let cancelled = false;
+  let finished = false;
   const startTs = performance.now();
   const deadline = startTs + maxWaitMs;
   let stableFrames = 0;
   let preAlignStableFrames = 0;
   let firstAlign = true;
-  let mutationObserved = false;
   let observer = null;
   let resizeObserver = null;
   let observedTarget = null;
@@ -56,6 +85,7 @@ export const alignToHashTarget = ({
   let lastDocumentTop = null;
   let lastHeaderOffset = null;
   let userIntentHandler = null;
+  let activeAnimation = null;
 
   const teardownUserIntent = () => {
     if (!userIntentHandler) return;
@@ -66,9 +96,94 @@ export const alignToHashTarget = ({
   };
 
   const markUnstable = () => {
-    mutationObserved = true;
     stableFrames = 0;
     preAlignStableFrames = 0;
+  };
+
+  const cancelAnimation = () => {
+    activeAnimation = null;
+    if (!animationRafId) return;
+    window.cancelAnimationFrame(animationRafId);
+    animationRafId = 0;
+  };
+
+  const restoreRootScrollBehavior = () => {
+    if (previousRootScrollBehavior) {
+      root.style.scrollBehavior = previousRootScrollBehavior;
+      return;
+    }
+    root.style.removeProperty("scroll-behavior");
+  };
+
+  const finish = ({ notify = true } = {}) => {
+    if (finished) return;
+    finished = true;
+    cancelled = true;
+    teardownUserIntent();
+    cancelAnimation();
+    if (rafId) {
+      window.cancelAnimationFrame(rafId);
+    }
+    if (resizeTimeout) {
+      clearTimeout(resizeTimeout);
+    }
+    if (observer) {
+      observer.disconnect();
+    }
+    if (resizeObserver) {
+      if (observedTarget) {
+        resizeObserver.unobserve(observedTarget);
+      }
+      resizeObserver.disconnect();
+    }
+    if (resizeHandler) {
+      window.removeEventListener("resize", resizeHandler);
+    }
+    restoreRootScrollBehavior();
+    if (notify) {
+      notifySettled();
+    }
+  };
+
+  const animateTo = (targetTop) => {
+    const fromTop = window.scrollY;
+    const nextTop = Math.max(0, targetTop);
+
+    if (Math.abs(nextTop - fromTop) <= SCROLL_TOLERANCE_PX) {
+      setWindowScrollTop(nextTop);
+      return;
+    }
+
+    cancelAnimation();
+
+    const startTop = fromTop;
+    const startAt = performance.now();
+    activeAnimation = {
+      targetTop: nextTop,
+      startedAt: startAt,
+    };
+
+    const step = () => {
+      if (cancelled || !activeAnimation) return;
+
+      const elapsed = performance.now() - startAt;
+      const progress = Math.min(1, elapsed / Math.max(1, durationMs));
+      const eased = easeOutCubic(progress);
+      const currentTop = startTop + (nextTop - startTop) * eased;
+
+      setWindowScrollTop(currentTop);
+
+      if (progress >= 1) {
+        setWindowScrollTop(nextTop);
+        activeAnimation = null;
+        animationRafId = 0;
+        return;
+      }
+
+      animationRafId = window.requestAnimationFrame(step);
+    };
+
+    animationRafId = window.requestAnimationFrame(step);
   };
 
   if (observeMutations && typeof MutationObserver !== "undefined") {
@@ -118,9 +233,7 @@ export const alignToHashTarget = ({
       if (!scrollKeys.has(key)) return;
     }
 
-    cancelled = true;
-    teardownUserIntent();
-    notifySettled();
+    finish({ notify: true });
   };
 
   window.addEventListener("wheel", userIntentHandler, { passive: true });
@@ -148,27 +261,20 @@ export const alignToHashTarget = ({
     }
 
     const desiredTop = getOffsetPx();
-    const headerOffset = (() => {
-      const raw = getComputedStyle(document.documentElement).getPropertyValue(
-        "--header-offset"
-      );
-      const parsed = Number.parseFloat(raw);
-      return Number.isFinite(parsed) ? parsed : 0;
-    })();
+    const headerOffset = getHeaderOffset();
     const rectTop = el.getBoundingClientRect().top;
     const documentTop = rectTop + window.scrollY;
     const diff = rectTop - desiredTop;
-    const headerStable =
-      lastHeaderOffset === null || Math.abs(headerOffset - lastHeaderOffset) <= 1;
+    const geometryStable =
+      (lastDocumentTop === null ||
+        Math.abs(documentTop - lastDocumentTop) <= SCROLL_TOLERANCE_PX) &&
+      (lastHeaderOffset === null ||
+        Math.abs(headerOffset - lastHeaderOffset) <= SCROLL_TOLERANCE_PX);
 
-    if (
-      (lastDocumentTop === null || Math.abs(documentTop - lastDocumentTop) <= 1) &&
-      headerStable
-    ) {
+    if (geometryStable) {
       preAlignStableFrames += 1;
     } else {
       preAlignStableFrames = 0;
-      mutationObserved = true;
       stableFrames = 0;
     }
     lastDocumentTop = documentTop;
@@ -182,29 +288,33 @@ export const alignToHashTarget = ({
       return;
     }
 
-    if (Math.abs(diff) > 1) {
-      mutationObserved = false;
-      window.scrollTo({
-        top: Math.max(0, window.scrollY + diff),
-        behavior: firstAlign ? behavior : "auto",
-      });
+    if (Math.abs(diff) > SCROLL_TOLERANCE_PX) {
+      const nextTop = window.scrollY + diff;
+      if (resolvedScrollMode === "fast-smooth" && firstAlign) {
+        if (!activeAnimation) {
+          animateTo(nextTop);
+        }
+      } else if (!activeAnimation) {
+        setWindowScrollTop(nextTop);
+      }
       stableFrames = 0;
-    } else {
+    } else if (!activeAnimation && geometryStable) {
       stableFrames += 1;
+    } else {
+      stableFrames = 0;
     }
 
     firstAlign = false;
 
-    const runtimeMs = now - startTs;
-    const hitStability =
-      stableFrames >= stableFramesRequired && !mutationObserved;
+    const runtimeMs = performance.now() - startTs;
+    const hitStability = stableFrames >= stableFramesRequired;
 
     if (runtimeMs >= minRuntimeMs && hitStability) {
-      notifySettled();
+      finish({ notify: true });
       return;
     }
     if (now >= deadline) {
-      notifySettled();
+      finish({ notify: true });
       return;
     }
 
@@ -213,26 +323,5 @@ export const alignToHashTarget = ({
 
   rafId = window.requestAnimationFrame(tick);
 
-  return () => {
-    cancelled = true;
-    teardownUserIntent();
-    if (rafId) {
-      window.cancelAnimationFrame(rafId);
-    }
-    if (resizeTimeout) {
-      clearTimeout(resizeTimeout);
-    }
-    if (observer) {
-      observer.disconnect();
-    }
-    if (resizeObserver) {
-      if (observedTarget) {
-        resizeObserver.unobserve(observedTarget);
-      }
-      resizeObserver.disconnect();
-    }
-    if (resizeHandler) {
-      window.removeEventListener("resize", resizeHandler);
-    }
-  };
+  return () => finish({ notify: false });
 };
