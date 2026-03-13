@@ -25,6 +25,16 @@ import {
   verifyRazorpayPayment,
   verifyRazorpaySignature,
 } from "../payment/providerClients.js";
+import {
+  buildBookingSeedKey,
+  buildPaymentRecordEvent,
+  buildPaymentRecordId,
+  buildPricingFingerprint,
+  mergePaymentRecordEvents,
+  PAYMENT_RECORD_TYPE,
+  PAYMENT_STATUS_BOOKED,
+  PAYMENT_STATUS_EMAIL_PARTIAL,
+} from "../payment/paymentRecord.js";
 
 const { resolvePaymentProviders } = providerConfig;
 
@@ -130,6 +140,68 @@ const buildBookingSuccessResponse = ({
   return body;
 };
 
+const toMoney = (value) => {
+  const parsed = Number(
+    typeof value === "string" ? value.replace(/[^0-9.]/g, "") : value
+  );
+  if (!Number.isFinite(parsed)) return 0;
+  return +parsed.toFixed(2);
+};
+
+const resolvePaymentRecordStatus = (emailDispatch = {}) =>
+  emailDispatch?.allSent === false
+    ? PAYMENT_STATUS_EMAIL_PARTIAL
+    : PAYMENT_STATUS_BOOKED;
+
+const findPaymentRecordForBooking = async ({
+  client,
+  paymentRecordId = "",
+  paymentProvider = "",
+  paypalOrderId = "",
+  razorpayOrderId = "",
+  razorpayPaymentId = "",
+}) => {
+  if (paymentRecordId) {
+    const byId = await client.fetch(
+      `*[_type == $type && _id == $id][0]`,
+      { type: PAYMENT_RECORD_TYPE, id: paymentRecordId }
+    );
+    if (byId?._id) return byId;
+  }
+
+  if (paymentProvider === "paypal" && paypalOrderId) {
+    return client.fetch(
+      `*[_type == $type && provider == "paypal" && providerOrderId == $providerOrderId][0]`,
+      {
+        type: PAYMENT_RECORD_TYPE,
+        providerOrderId: paypalOrderId,
+      }
+    );
+  }
+
+  if (paymentProvider === "razorpay" && razorpayPaymentId) {
+    return client.fetch(
+      `*[_type == $type && provider == "razorpay" && providerPaymentId == $providerPaymentId][0]`,
+      {
+        type: PAYMENT_RECORD_TYPE,
+        providerPaymentId: razorpayPaymentId,
+      }
+    );
+  }
+
+  if (paymentProvider === "razorpay" && razorpayOrderId) {
+    return client.fetch(
+      `*[_type == $type && provider == "razorpay" && providerOrderId == $providerOrderId][0]`,
+      {
+        type: PAYMENT_RECORD_TYPE,
+        providerOrderId: razorpayOrderId,
+      }
+    );
+  }
+
+  return null;
+};
+
 const isTestEnv = process.env.NODE_ENV === "test";
 export default async function handler(req, res) {
   if (req.method !== "POST")
@@ -160,7 +232,9 @@ export default async function handler(req, res) {
       displayTime,
       slotHoldId = "",
       slotHoldToken = "",
+      slotHoldExpiresAt = "",
       paymentProvider = "",
+      paymentRecordId = "",
       deferEmailsUntilConfirmation = false,
     } = req.body || {};
     const isUpgrade = !!originalOrderId;
@@ -277,6 +351,257 @@ export default async function handler(req, res) {
     }
 
     const deferEmailDispatchRequested = deferEmailsUntilConfirmation === true;
+    const syncPaidPaymentRecordForBooking = async ({
+      bookingId,
+      emailDispatch = null,
+      emailDispatchToken = "",
+      source = "legacy",
+    }) => {
+      const normalizedBookingId = String(bookingId || "").trim();
+      const normalizedProvider = String(paymentProvider || "").trim().toLowerCase();
+      if (
+        !normalizedBookingId ||
+        (normalizedProvider !== "paypal" && normalizedProvider !== "razorpay")
+      ) {
+        return null;
+      }
+
+      const bookingDoc = await writeClient.fetch(
+        `*[_type == "booking" && _id == $id][0]`,
+        { id: normalizedBookingId }
+      );
+      if (!bookingDoc?._id) {
+        return null;
+      }
+
+      const existingRecord = await findPaymentRecordForBooking({
+        client: writeClient,
+        paymentRecordId,
+        paymentProvider: normalizedProvider,
+        paypalOrderId:
+          String(bookingDoc.paypalOrderId || paypalOrderId || "").trim(),
+        razorpayOrderId:
+          String(bookingDoc.razorpayOrderId || razorpayOrderId || "").trim(),
+        razorpayPaymentId: String(
+          bookingDoc.razorpayPaymentId || razorpayPaymentId || ""
+        ).trim(),
+      });
+
+      const bookingSeedKey = buildBookingSeedKey({
+        provider: normalizedProvider,
+        packageTitle: bookingDoc.packageTitle || packageTitle || "",
+        originalOrderId: bookingDoc.originalOrderId || originalOrderId || "",
+        startTimeUTC: bookingDoc.startTimeUTC || resolvedStartTimeUTC || "",
+        email: bookingDoc.email || bookingDoc.payerEmail || resolvedEmail || "",
+      });
+      const providerOrderId = String(
+        bookingDoc.paypalOrderId ||
+          bookingDoc.razorpayOrderId ||
+          paypalOrderId ||
+          razorpayOrderId ||
+          ""
+      ).trim();
+      const providerPaymentId = String(
+        bookingDoc.razorpayPaymentId || razorpayPaymentId || ""
+      ).trim();
+      const resolvedGrossAmount = Number(
+        bookingDoc.grossAmount || toMoney(bookingDoc.packagePrice || packagePrice)
+      );
+      const resolvedNetAmount = Number(
+        bookingDoc.netAmount || toMoney(bookingDoc.packagePrice || packagePrice)
+      );
+      const resolvedDiscountAmount = Number(bookingDoc.discountAmount || 0);
+      const resolvedDiscountPercent = Number(bookingDoc.discountPercent || 0);
+      const resolvedCommissionPercent = Number(bookingDoc.commissionPercent || 0);
+      const resolvedCouponDiscountPercent = Number(
+        bookingDoc.couponDiscountPercent || 0
+      );
+      const resolvedCouponDiscountAmount = Number(
+        bookingDoc.couponDiscountAmount || 0
+      );
+      const resolvedReferralCode = String(
+        bookingDoc.referralCode || referralCode || ""
+      ).trim();
+      const resolvedReferralId = String(
+        bookingDoc.referralId || referralId || ""
+      ).trim();
+      const pricingFingerprint = buildPricingFingerprint({
+        provider: normalizedProvider,
+        packageTitle: bookingDoc.packageTitle || packageTitle || "",
+        originalOrderId: bookingDoc.originalOrderId || originalOrderId || "",
+        startTimeUTC: bookingDoc.startTimeUTC || resolvedStartTimeUTC || "",
+        email: bookingDoc.email || bookingDoc.payerEmail || resolvedEmail || "",
+        grossAmount: resolvedGrossAmount,
+        netAmount: resolvedNetAmount,
+        discountAmount: resolvedDiscountAmount,
+        referralId: resolvedReferralId,
+        referralCode: resolvedReferralCode,
+        couponCode: bookingDoc.couponCode || couponCode || "",
+        currency:
+          normalizedProvider === "paypal"
+            ? DEFAULT_PAYPAL_CURRENCY
+            : DEFAULT_RAZORPAY_CURRENCY,
+      });
+      const resolvedEmailDispatch =
+        emailDispatch ||
+        buildDeferredEmailDispatch({
+          booking: bookingDoc,
+        });
+      const nextStatus = resolvePaymentRecordStatus(resolvedEmailDispatch);
+      const recordId =
+        String(existingRecord?._id || paymentRecordId || "").trim() ||
+        buildPaymentRecordId({
+          provider: normalizedProvider,
+          providerOrderId,
+          providerPaymentId,
+          bookingSeedKey,
+        });
+      const now = new Date().toISOString();
+      const nextEvent = buildPaymentRecordEvent({
+        status: nextStatus,
+        source,
+        data: {
+          bookingId: normalizedBookingId,
+          providerOrderId,
+          providerPaymentId,
+        },
+      });
+      const doc = {
+        _id: recordId,
+        _type: PAYMENT_RECORD_TYPE,
+        provider: normalizedProvider,
+        status: nextStatus,
+        bookingSeedKey,
+        pricingFingerprint,
+        bookingFinalizationKey:
+          normalizedProvider === "paypal"
+            ? `paypal:${providerOrderId}`
+            : `razorpay-order:${providerOrderId}`,
+        bookingPayload: {
+          packageTitle: String(
+            bookingDoc.packageTitle || packageTitle || ""
+          ).trim(),
+          originalOrderId: String(
+            bookingDoc.originalOrderId || originalOrderId || ""
+          ).trim(),
+          startTimeUTC: String(
+            bookingDoc.startTimeUTC || resolvedStartTimeUTC || ""
+          ).trim(),
+          email: String(
+            bookingDoc.email || bookingDoc.payerEmail || resolvedEmail || ""
+          ).trim(),
+          localTimeZone: String(
+            bookingDoc.localTimeZone || resolvedLocalTimeZone || ""
+          ).trim(),
+          displayDate: String(
+            bookingDoc.displayDate || resolvedDisplayDate || ""
+          ).trim(),
+          displayTime: String(
+            bookingDoc.displayTime || resolvedDisplayTime || ""
+          ).trim(),
+          referralCode: resolvedReferralCode,
+          couponCode: String(bookingDoc.couponCode || couponCode || "").trim(),
+          slotHoldId: String(slotHoldId || "").trim(),
+          slotHoldToken: String(slotHoldToken || "").trim(),
+          slotHoldExpiresAt: String(slotHoldExpiresAt || "").trim(),
+          paymentProvider: normalizedProvider,
+        },
+        pricingSnapshot: {
+          grossAmount: resolvedGrossAmount,
+          discountAmount: resolvedDiscountAmount,
+          discountPercent: resolvedDiscountPercent,
+          netAmount: resolvedNetAmount,
+          referralDiscountAmount: 0,
+          referralDiscountPercent: 0,
+          commissionPercent: resolvedCommissionPercent,
+          couponDiscountPercent: resolvedCouponDiscountPercent,
+          couponDiscountAmount: resolvedCouponDiscountAmount,
+          canCombineWithReferral: false,
+          effectiveReferralCode: resolvedReferralCode,
+          effectiveReferralId: resolvedReferralId,
+        },
+        holdSnapshot: existingRecord?.holdSnapshot || {},
+        providerOrderId,
+        providerPaymentId,
+        payerEmail: String(
+          bookingDoc.payerEmail || payerEmail || resolvedEmail || ""
+        ).trim(),
+        verificationState: String(
+          bookingDoc.paymentVerificationState || ""
+        ).trim(),
+        verificationWarning: String(
+          bookingDoc.paymentVerificationWarning || ""
+        ).trim(),
+        bookingId: normalizedBookingId,
+        recoveryReason: "",
+        attemptCount: Number(existingRecord?.attemptCount || 0),
+        lastAttemptAt: now,
+        source,
+        providerPublicData:
+          existingRecord?.providerPublicData ||
+          (normalizedProvider === "paypal"
+            ? {
+                orderId: providerOrderId,
+                currency: DEFAULT_PAYPAL_CURRENCY,
+                clientId: String(
+                  availableProviders?.paypal?.clientId || ""
+                ).trim(),
+              }
+            : {
+                orderId: providerOrderId,
+                currency: DEFAULT_RAZORPAY_CURRENCY,
+                amount: Math.round(resolvedNetAmount * 100),
+                key: String(
+                  resolveRazorpayCredentials()?.keyId || ""
+                ).trim(),
+              }),
+        emailDispatch: resolvedEmailDispatch,
+        emailDispatchToken: String(emailDispatchToken || "").trim(),
+        events: mergePaymentRecordEvents(existingRecord?.events || [], nextEvent),
+        createdAt: existingRecord?.createdAt || now,
+        updatedAt: now,
+      };
+
+      const recordSet = { ...doc };
+      delete recordSet._id;
+      delete recordSet._type;
+
+      if (existingRecord?._id) {
+        await writeClient
+          .patch(existingRecord._id)
+          .set(recordSet)
+          .setIfMissing({
+            _type: PAYMENT_RECORD_TYPE,
+            createdAt: existingRecord.createdAt || now,
+          })
+          .commit();
+        return writeClient.fetch(
+          `*[_type == $type && _id == $id][0]`,
+          { type: PAYMENT_RECORD_TYPE, id: existingRecord._id }
+        );
+      }
+
+      try {
+        await writeClient.create(doc);
+      } catch (error) {
+        const conflict =
+          Number(error?.statusCode || error?.status || 0) === 409;
+        if (!conflict) throw error;
+        await writeClient
+          .patch(recordId)
+          .set(recordSet)
+          .setIfMissing({
+            _type: PAYMENT_RECORD_TYPE,
+            createdAt: now,
+          })
+          .commit();
+      }
+
+      return writeClient.fetch(
+        `*[_type == $type && _id == $id][0]`,
+        { type: PAYMENT_RECORD_TYPE, id: recordId }
+      );
+    };
     const respondWithStoredBooking = async ({ bookingId, idempotent = false }) => {
       const normalizedBookingId = String(bookingId || "").trim();
       if (!normalizedBookingId) {
@@ -319,20 +644,28 @@ export default async function handler(req, res) {
             ...booking,
             ...patchValues,
           };
+        const deferredEmailDispatch = buildDeferredEmailDispatch({
+          booking: patchedBooking,
+        });
+        const deferredEmailDispatchToken = issueBookingEmailDispatchToken({
+          bookingId: booking._id,
+          email: String(
+            patchedBooking.email || patchedBooking.payerEmail || ""
+          ).trim(),
+        });
+        await syncPaidPaymentRecordForBooking({
+          bookingId: booking._id,
+          emailDispatch: deferredEmailDispatch,
+          emailDispatchToken: deferredEmailDispatchToken,
+          source: idempotent ? "legacy-idempotent" : "legacy",
+        });
 
         return res.status(200).json(
           buildBookingSuccessResponse({
             bookingId: booking._id,
             idempotent,
-            emailDispatch: buildDeferredEmailDispatch({
-              booking: patchedBooking,
-            }),
-            emailDispatchToken: issueBookingEmailDispatchToken({
-              bookingId: booking._id,
-              email: String(
-                patchedBooking.email || patchedBooking.payerEmail || ""
-              ).trim(),
-            }),
+            emailDispatch: deferredEmailDispatch,
+            emailDispatchToken: deferredEmailDispatchToken,
           })
         );
       }
@@ -341,6 +674,11 @@ export default async function handler(req, res) {
         bookingId: booking._id,
         booking,
         client: writeClient,
+      });
+      await syncPaidPaymentRecordForBooking({
+        bookingId: booking._id,
+        emailDispatch: sendResult.body?.emailDispatch || null,
+        source: idempotent ? "legacy-idempotent" : "legacy",
       });
 
       return res.status(sendResult.httpStatus).json(
@@ -851,51 +1189,10 @@ export default async function handler(req, res) {
       } catch {}
     }
 
-    if (deferEmailDispatchRequested && canIssueBookingEmailDispatchToken()) {
-      const queuedAt = new Date().toISOString();
-      const deferredPatchValues = {
-        emailDispatchDeferred: true,
-        emailDispatchStatus: "pending",
-        emailDispatchQueuedAt: queuedAt,
-        emailDispatchLastError: "",
-      };
-      const deferredBooking =
-        (await writeClient
-          .patch(doc._id)
-          .set(deferredPatchValues)
-          .commit()) || {
-          ...doc,
-          ...deferredPatchValues,
-        };
-
-      return res.status(200).json(
-        buildBookingSuccessResponse({
-          bookingId: doc._id,
-          emailDispatch: buildDeferredEmailDispatch({
-            booking: deferredBooking,
-          }),
-          emailDispatchToken: issueBookingEmailDispatchToken({
-            bookingId: doc._id,
-            email: String(
-              deferredBooking.email || deferredBooking.payerEmail || ""
-            ).trim(),
-          }),
-        })
-      );
-    }
-
-    const sendResult = await sendBookingEmailsForBooking({
+    return respondWithStoredBooking({
       bookingId: doc._id,
-      booking: doc,
-      client: writeClient,
+      idempotent: false,
     });
-
-    return res.status(sendResult.httpStatus).json(
-      buildBookingSuccessResponse({
-        bookingId: doc._id,
-        emailDispatch: sendResult.body?.emailDispatch || null,
-      })
-    );
   } catch (err) {
     const message = err?.message || "Server error";
     const code = err?.code;
