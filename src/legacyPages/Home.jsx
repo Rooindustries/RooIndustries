@@ -136,26 +136,19 @@ export default function Home({ initialData = null }) {
     }
 
     const warmCtaSections = () => {
+      const warmKeys = Array.from(
+        new Set([
+          ...(HOME_SECTION_PREFETCH_BY_HASH["#packages"] || []),
+          ...(HOME_SECTION_PREFETCH_BY_HASH["#how-it-works"] || []),
+        ])
+      );
       loadServices().catch(() => {});
       loadPackages().catch(() => {});
-      prefetchHomeSectionData(
-        HOME_SECTION_PREFETCH_BY_HASH["#how-it-works"] || []
-      ).catch(() => {});
+      prefetchHomeSectionData(warmKeys).catch(() => {});
     };
 
-    if (typeof window.requestIdleCallback === "function") {
-      const idleId = window.requestIdleCallback(warmCtaSections, {
-        timeout: 1200,
-      });
-      return () => {
-        if (typeof window.cancelIdleCallback === "function") {
-          window.cancelIdleCallback(idleId);
-        }
-      };
-    }
-
-    const timeoutId = window.setTimeout(warmCtaSections, 250);
-    return () => window.clearTimeout(timeoutId);
+    warmCtaSections();
+    return undefined;
   }, [isLowPerf]);
 
   return (
