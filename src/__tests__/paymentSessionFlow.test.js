@@ -116,6 +116,39 @@ const mockClient = {
       return store.bookings.find((entry) => entry._id === params.id) || null;
     }
 
+    if (
+      q.includes('_type == "booking"') &&
+      q.includes("paypalOrderId == $paypalOrderId")
+    ) {
+      return (
+        store.bookings.find(
+          (entry) => entry.paypalOrderId === params.paypalOrderId
+        ) || null
+      );
+    }
+
+    if (
+      q.includes('_type == "booking"') &&
+      q.includes("razorpayPaymentId == $razorpayPaymentId")
+    ) {
+      return (
+        store.bookings.find(
+          (entry) => entry.razorpayPaymentId === params.razorpayPaymentId
+        ) || null
+      );
+    }
+
+    if (
+      q.includes('_type == "booking"') &&
+      q.includes("razorpayOrderId == $razorpayOrderId")
+    ) {
+      return (
+        store.bookings.find(
+          (entry) => entry.razorpayOrderId === params.razorpayOrderId
+        ) || null
+      );
+    }
+
     if (q.includes("_type == $type && _id == $id")) {
       return store.paymentRecords.find((entry) => entry._id === params.id) || null;
     }
@@ -429,13 +462,33 @@ beforeEach(() => {
 
     return res.status(200).json({
       bookingId,
+      emailDispatchToken: req.body.deferEmailsUntilConfirmation
+        ? override.emailDispatchToken || `dispatch_${bookingId}`
+        : "",
       emailDispatch:
-        override.emailDispatch || {
-          deliveryEnabled: true,
-          client: { attempted: true, sent: true, skippedReason: "" },
-          owner: { attempted: true, sent: true, skippedReason: "" },
-          allSent: true,
-        },
+        override.emailDispatch ||
+        (req.body.deferEmailsUntilConfirmation
+          ? {
+              deliveryEnabled: true,
+              deferred: true,
+              client: {
+                attempted: false,
+                sent: false,
+                skippedReason: "deferred_until_confirmation",
+              },
+              owner: {
+                attempted: false,
+                sent: false,
+                skippedReason: "deferred_until_confirmation",
+              },
+              allSent: false,
+            }
+          : {
+              deliveryEnabled: true,
+              client: { attempted: true, sent: true, skippedReason: "" },
+              owner: { attempted: true, sent: true, skippedReason: "" },
+              allSent: true,
+            }),
     });
   });
 });
@@ -731,21 +784,24 @@ describe("payment session flow", () => {
     expect(finalized.httpStatus).toBe(200);
     expect(finalized.body).toMatchObject({
       ok: true,
-      status: paymentRecordConstants.PAYMENT_STATUS_BOOKED,
+      status: paymentRecordConstants.PAYMENT_STATUS_EMAIL_PARTIAL,
       provider: "paypal",
       bookingId: store.bookings[0]._id,
+      emailDispatchToken: `dispatch_${store.bookings[0]._id}`,
       emailDispatch: {
-        allSent: true,
+        deferred: true,
+        allSent: false,
       },
     });
 
     const record = getOnlyPaymentRecord();
     expect(record).toMatchObject({
-      status: paymentRecordConstants.PAYMENT_STATUS_BOOKED,
+      status: paymentRecordConstants.PAYMENT_STATUS_EMAIL_PARTIAL,
       bookingId: store.bookings[0]._id,
       payerEmail: "payer@example.com",
       verificationState: "server_verified",
       verificationWarning: "",
+      emailDispatchToken: `dispatch_${store.bookings[0]._id}`,
     });
   });
 
@@ -775,9 +831,11 @@ describe("payment session flow", () => {
     });
 
     expect(finalized.httpStatus).toBe(200);
-    expect(finalized.body.status).toBe(paymentRecordConstants.PAYMENT_STATUS_BOOKED);
+    expect(finalized.body.status).toBe(
+      paymentRecordConstants.PAYMENT_STATUS_EMAIL_PARTIAL
+    );
     expect(getOnlyPaymentRecord()).toMatchObject({
-      status: paymentRecordConstants.PAYMENT_STATUS_BOOKED,
+      status: paymentRecordConstants.PAYMENT_STATUS_EMAIL_PARTIAL,
       providerPaymentId: "razorpay_payment_1",
     });
   });
@@ -891,7 +949,7 @@ describe("payment session flow", () => {
     expect(secondFinalize.body).toMatchObject({
       ok: true,
       error: "Payment session is already terminal.",
-      status: paymentRecordConstants.PAYMENT_STATUS_BOOKED,
+      status: paymentRecordConstants.PAYMENT_STATUS_EMAIL_PARTIAL,
     });
   });
 
@@ -972,6 +1030,72 @@ describe("payment session flow", () => {
     });
   });
 
+  test("webhooks mirror legacy bookings into terminal payment records when the booking already exists", async () => {
+    store.bookings.push({
+      _id: "booking_legacy_paypal",
+      _type: "booking",
+      paymentProvider: "paypal",
+      paypalOrderId: "paypal_order_existing_booking",
+      email: "payer@example.com",
+      payerEmail: "payer@example.com",
+      packageTitle: "Performance Vertex Overhaul",
+      packagePrice: "$84.99",
+      grossAmount: 84.99,
+      netAmount: 84.99,
+      startTimeUTC: "2099-01-15T08:00:00.000Z",
+      displayDate: "Wednesday, January 15, 2099",
+      displayTime: "12:00 AM",
+      localTimeZone: "America/Los_Angeles",
+      paymentVerificationState: "server_verified",
+      paymentVerificationWarning: "",
+      emailDispatchDeferred: false,
+      emailDispatchStatus: "sent",
+      emailDispatchClientSentAt: "2099-01-15T08:05:00.000Z",
+      emailDispatchOwnerSentAt: "2099-01-15T08:05:00.000Z",
+    });
+
+    const rawBody = JSON.stringify({
+      event_type: "PAYMENT.CAPTURE.COMPLETED",
+      resource: {
+        id: "paypal_capture_existing_booking",
+        supplementary_data: {
+          related_ids: {
+            order_id: "paypal_order_existing_booking",
+          },
+        },
+        payer: {
+          email_address: "payer@example.com",
+        },
+      },
+    });
+
+    const result = await handlePayPalWebhook({
+      req: createReq(JSON.parse(rawBody), {
+        "paypal-transmission-id": "tx-existing",
+      }),
+      client: mockClient,
+    });
+
+    expect(result.httpStatus).toBe(200);
+    expect(result.body).toMatchObject({
+      ok: true,
+      status: paymentRecordConstants.PAYMENT_STATUS_BOOKED,
+      provider: "paypal",
+      bookingId: "booking_legacy_paypal",
+      recoveryReason: "",
+    });
+
+    const record = getOnlyPaymentRecord();
+    expect(record).toMatchObject({
+      status: paymentRecordConstants.PAYMENT_STATUS_BOOKED,
+      providerOrderId: "paypal_order_existing_booking",
+      providerPaymentId: "paypal_capture_existing_booking",
+      bookingId: "booking_legacy_paypal",
+      recoveryReason: "",
+    });
+    expect(store.bookings).toHaveLength(1);
+  });
+
   test("reconcile finalizes stale captured sessions into bookings", async () => {
     const hold = createHold();
     const bookingPayload = baseBookingPayload();
@@ -1008,7 +1132,7 @@ describe("payment session flow", () => {
       },
     });
     expect(getOnlyPaymentRecord().status).toBe(
-      paymentRecordConstants.PAYMENT_STATUS_BOOKED
+      paymentRecordConstants.PAYMENT_STATUS_EMAIL_PARTIAL
     );
   });
 
@@ -1176,7 +1300,9 @@ describe("payment session flow", () => {
 
     expect(first.httpStatus).toBe(200);
     expect(second.httpStatus).toBe(200);
-    expect(second.body.status).toBe(paymentRecordConstants.PAYMENT_STATUS_BOOKED);
+    expect(second.body.status).toBe(
+      paymentRecordConstants.PAYMENT_STATUS_EMAIL_PARTIAL
+    );
     expect(store.bookings).toHaveLength(1);
   });
 });

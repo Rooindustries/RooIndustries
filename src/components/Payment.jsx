@@ -36,6 +36,8 @@ export default function Payment({ hideFooter = false }) {
   const REFERRAL_STORAGE_KEY = "referral_session";
   const FLOW_BACKGROUND_KEY = "flow_background_location";
   const BOOKING_CONFIRMATION_STORAGE_KEY = "booking_confirmation_state";
+  const PAYMENT_SESSION_STORAGE_KEY = "payment_session_state";
+  const INTERNAL_PAYMENTS_KEY = "roo_internal_payments";
 
   const readStoredBackground = () => {
     try {
@@ -98,6 +100,39 @@ export default function Payment({ hideFooter = false }) {
     } catch {}
   };
 
+  const readStoredPaymentSession = () => {
+    try {
+      const raw = sessionStorage.getItem(PAYMENT_SESSION_STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (
+        parsed?.paymentAccessToken &&
+        parsed?.provider &&
+        parsed?.fingerprint &&
+        parsed?.providerPayload
+      ) {
+        return parsed;
+      }
+    } catch {}
+    return null;
+  };
+
+  const writeStoredPaymentSession = (session) => {
+    try {
+      if (!session?.paymentAccessToken || !session?.provider || !session?.fingerprint) {
+        sessionStorage.removeItem(PAYMENT_SESSION_STORAGE_KEY);
+        return;
+      }
+      sessionStorage.setItem(PAYMENT_SESSION_STORAGE_KEY, JSON.stringify(session));
+    } catch {}
+  };
+
+  const clearStoredPaymentSession = () => {
+    try {
+      sessionStorage.removeItem(PAYMENT_SESSION_STORAGE_KEY);
+    } catch {}
+  };
+
   const buildConfirmationNavigationState = (responseBody = {}) => {
     const baseState = getModalFlowState();
     const bookingId = String(responseBody?.bookingId || "").trim();
@@ -129,6 +164,8 @@ export default function Payment({ hideFooter = false }) {
       return {};
     }
   }, [q]);
+  const paymentFlowMode = q.get("paymentFlow") === "legacy" ? "legacy" : "session";
+  const useSessionPayments = paymentFlowMode !== "legacy";
 
   const isUpgrade = !!bookingData.originalOrderId;
   const historyUsrState =
@@ -341,6 +378,9 @@ export default function Payment({ hideFooter = false }) {
     paypal: { enabled: false, mode: "unknown", clientId: "" },
   });
   const [showInternalPayments, setShowInternalPayments] = useState(false);
+  const [paymentSession, setPaymentSession] = useState(null);
+  const [paymentStatusBusy, setPaymentStatusBusy] = useState(false);
+  const sessionStartRef = useRef(null);
   const paypalClientIdFromEnv = (
     process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID ||
     process.env.REACT_APP_PAYPAL_CLIENT_ID ||
@@ -360,6 +400,45 @@ export default function Payment({ hideFooter = false }) {
 
   // Free booking state
   const [creatingFree, setCreatingFree] = useState(false);
+
+  const buildCheckoutPayload = () => ({
+    ...bookingData,
+    packageTitle,
+    packagePrice,
+    email: bookingData.email || "",
+    localTimeZone: userTimeZone,
+    displayDate: date,
+    displayTime: time,
+    referralCode: referral?.code || referralInput || "",
+    referralId: referral?._id || "",
+    couponCode: coupon?.code || couponInput || "",
+  });
+
+  const checkoutFingerprint = useMemo(
+    () =>
+      JSON.stringify({
+        provider: paymentFlowMode,
+        packageTitle,
+        originalOrderId: bookingData.originalOrderId || "",
+        startTimeUTC: bookingData.startTimeUTC || "",
+        email: bookingData.email || "",
+        referralCode: referral?.code || referralInput || "",
+        couponCode: coupon?.code || couponInput || "",
+        finalAmount,
+      }),
+    [
+      paymentFlowMode,
+      packageTitle,
+      bookingData.originalOrderId,
+      bookingData.startTimeUTC,
+      bookingData.email,
+      referral?.code,
+      referralInput,
+      coupon?.code,
+      couponInput,
+      finalAmount,
+    ]
+  );
 
   // Auto-load referral
   useEffect(() => {
@@ -449,7 +528,6 @@ export default function Payment({ hideFooter = false }) {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const INTERNAL_PAYMENTS_KEY = "roo_internal_payments";
     const params = new URLSearchParams(location.search);
     const internalToggle = params.get("internalPayments");
 
@@ -462,17 +540,205 @@ export default function Payment({ hideFooter = false }) {
 
       const host = String(window.location.hostname || "").toLowerCase();
       const isLocalHost = host === "localhost" || host === "127.0.0.1";
-      const isVercelPreviewHost = host.endsWith(".vercel.app");
       const hasInternalSession =
         sessionStorage.getItem(INTERNAL_PAYMENTS_KEY) === "1";
 
-      setShowInternalPayments(
-        isLocalHost || isVercelPreviewHost || hasInternalSession
-      );
+      setShowInternalPayments(isLocalHost || hasInternalSession);
     } catch {
       setShowInternalPayments(false);
     }
   }, [location.search]);
+
+  useEffect(() => {
+    const stored = readStoredPaymentSession();
+    if (stored?.fingerprint === checkoutFingerprint) {
+      setPaymentSession(stored);
+      return;
+    }
+
+    if (stored) {
+      clearStoredPaymentSession();
+    }
+    setPaymentSession(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkoutFingerprint]);
+
+  const persistPaymentSession = (nextSession) => {
+    setPaymentSession(nextSession);
+    writeStoredPaymentSession(nextSession);
+  };
+
+  const getActivePaymentSession = (provider) => {
+    const stored = readStoredPaymentSession();
+    if (
+      stored?.provider === provider &&
+      stored?.fingerprint === checkoutFingerprint &&
+      stored?.paymentAccessToken
+    ) {
+      return stored;
+    }
+
+    if (
+      paymentSession?.provider === provider &&
+      paymentSession?.fingerprint === checkoutFingerprint &&
+      paymentSession?.paymentAccessToken
+    ) {
+      return paymentSession;
+    }
+
+    return null;
+  };
+
+  const clearPaymentSession = () => {
+    sessionStartRef.current = null;
+    setPaymentSession(null);
+    clearStoredPaymentSession();
+  };
+
+  const buildFinalizeNavigation = (responseBody = {}) => {
+    clearPaymentSession();
+    return buildConfirmationNavigationState(responseBody);
+  };
+
+  const fetchJson = async (url, options = {}) => {
+    const response = await fetch(url, options);
+    const data = await response.json().catch(() => ({}));
+    return { response, data };
+  };
+
+  const pollPaymentUntilTerminal = async (paymentAccessToken) => {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 90000) {
+      const { response, data } = await fetchJson(
+        `/api/payment/status?paymentAccessToken=${encodeURIComponent(
+          paymentAccessToken
+        )}`
+      );
+
+      if (!response.ok) {
+        throw new Error(data?.error || "Unable to load payment status.");
+      }
+
+      const nextStatus = String(data?.status || "").trim().toLowerCase();
+      if (
+        nextStatus === "booked" ||
+        nextStatus === "email_partial" ||
+        nextStatus === "failed" ||
+        nextStatus === "abandoned"
+      ) {
+        return data;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+    }
+
+    throw new Error("Timed out waiting for payment confirmation.");
+  };
+
+  const startSessionCheckout = async (provider) => {
+    if (
+      paymentSession?.provider === provider &&
+      paymentSession?.fingerprint === checkoutFingerprint &&
+      paymentSession?.paymentAccessToken &&
+      paymentSession?.providerPayload
+    ) {
+      return paymentSession;
+    }
+
+    if (sessionStartRef.current?.provider === provider) {
+      return sessionStartRef.current.promise;
+    }
+
+    const promise = (async () => {
+      const { response, data } = await fetchJson("/api/payment/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider,
+          bookingPayload: buildCheckoutPayload(),
+        }),
+      });
+
+      if (!response.ok || !data?.ok) {
+        throw new Error(data?.error || "Unable to start payment.");
+      }
+
+      const nextSession = {
+        provider,
+        fingerprint: checkoutFingerprint,
+        paymentAccessToken: String(data.paymentAccessToken || "").trim(),
+        providerPayload: data.providerPayload || {},
+      };
+      persistPaymentSession(nextSession);
+      return nextSession;
+    })();
+
+    sessionStartRef.current = { provider, promise };
+
+    try {
+      return await promise;
+    } finally {
+      sessionStartRef.current = null;
+    }
+  };
+
+  const finalizeSessionCheckout = async ({ paymentAccessToken, providerData }) => {
+    setPaymentStatusBusy(true);
+    try {
+      const { response, data } = await fetchJson("/api/payment/finalize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          paymentAccessToken,
+          providerData,
+        }),
+      });
+
+      if (!response.ok && response.status !== 202) {
+        throw new Error(data?.error || "Unable to finalize payment.");
+      }
+
+      const status = String(data?.status || "").trim().toLowerCase();
+      if (status === "booked" || status === "email_partial") {
+        navigate("/payment-success", {
+          state: buildFinalizeNavigation(data),
+          replace: true,
+        });
+        return data;
+      }
+
+      if (
+        status === "needs_recovery" ||
+        status === "finalizing" ||
+        status === "started"
+      ) {
+        showBanner("info", "Finalizing your payment and booking...");
+        const settled = await pollPaymentUntilTerminal(paymentAccessToken);
+        const settledStatus = String(settled?.status || "").trim().toLowerCase();
+        if (settledStatus === "booked" || settledStatus === "email_partial") {
+          navigate("/payment-success", {
+            state: buildFinalizeNavigation(settled),
+            replace: true,
+          });
+          return settled;
+        }
+
+        clearPaymentSession();
+        throw new Error(
+          settled?.recoveryReason ||
+            settled?.error ||
+            "Payment could not be finalized."
+        );
+      }
+
+      clearPaymentSession();
+      throw new Error(
+        data?.recoveryReason || data?.error || "Payment finalization failed."
+      );
+    } finally {
+      setPaymentStatusBusy(false);
+    }
+  };
 
   // ----------------- REFERRAL VALIDATION -----------------
   async function validateReferral(code) {
@@ -689,26 +955,39 @@ export default function Payment({ hideFooter = false }) {
       setPayingRzp(true);
       showBanner("info", "Opening secure checkout...");
 
-      const orderRes = await fetch("/api/razorpay/createOrder", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          currency: "USD",
-          notes: {
-            packageTitle,
-            date,
-            time,
-            startTimeUTC: bookingData.startTimeUTC || "",
-            referralCode: referral?.code || referralInput || "",
-            couponCode: coupon?.code || couponInput || "",
-            originalOrderId: bookingData.originalOrderId || "",
-          },
-        }),
-      });
+      const orderData = useSessionPayments
+        ? await startSessionCheckout("razorpay").then(
+            (session) => ({
+              ok: true,
+              orderId: session.providerPayload.orderId,
+              amount: session.providerPayload.amount,
+              currency: session.providerPayload.currency,
+              key: session.providerPayload.key,
+              paymentAccessToken: session.paymentAccessToken,
+            })
+          )
+        : await fetch("/api/razorpay/createOrder", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              currency: "USD",
+              notes: {
+                packageTitle,
+                date,
+                time,
+                startTimeUTC: bookingData.startTimeUTC || "",
+                referralCode: referral?.code || referralInput || "",
+                couponCode: coupon?.code || couponInput || "",
+                originalOrderId: bookingData.originalOrderId || "",
+              },
+              bookingPayload: buildCheckoutPayload(),
+            }),
+          }).then(async (res) => ({
+            ...(await res.json().catch(() => ({}))),
+            ok: res.ok,
+          }));
 
-      const orderData = await orderRes.json();
-
-      if (!orderRes.ok || !orderData.ok) {
+      if (!orderData.ok) {
         console.error("Razorpay order error:", orderData);
         showBanner(
           "error",
@@ -738,6 +1017,20 @@ export default function Payment({ hideFooter = false }) {
 
         handler: async function (response) {
           try {
+            if (useSessionPayments) {
+              await finalizeSessionCheckout({
+                paymentAccessToken: String(
+                  orderData.paymentAccessToken || paymentSession?.paymentAccessToken || ""
+                ).trim(),
+                providerData: {
+                  razorpayOrderId: response.razorpay_order_id,
+                  razorpayPaymentId: response.razorpay_payment_id,
+                  razorpaySignature: response.razorpay_signature,
+                },
+              });
+              return;
+            }
+
             const verifyRes = await fetch("/api/razorpay/verify", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -776,6 +1069,7 @@ export default function Payment({ hideFooter = false }) {
               razorpayOrderId: response.razorpay_order_id,
               razorpayPaymentId: response.razorpay_payment_id,
               razorpaySignature: response.razorpay_signature,
+              paymentRecordId: String(orderData.paymentRecordId || "").trim(),
               status: "captured",
               paymentProvider: "razorpay",
               deferEmailsUntilConfirmation: true,
@@ -797,7 +1091,7 @@ export default function Payment({ hideFooter = false }) {
             }
 
             const data = await res.json();
-
+            clearPaymentSession();
             navigate("/payment-success", {
               state: buildConfirmationNavigationState(data),
               replace: true,
@@ -813,6 +1107,7 @@ export default function Payment({ hideFooter = false }) {
 
         modal: {
           ondismiss: function () {
+            clearPaymentSession();
             showBanner("info", "Payment cancelled before completion.");
           },
         },
@@ -1120,10 +1415,14 @@ export default function Payment({ hideFooter = false }) {
                 </div>
                 <button
                   onClick={handleRazorpayPay}
-                  disabled={!rzpReady || payingRzp || !canUseRazorpay}
+                  disabled={
+                    !rzpReady || payingRzp || paymentStatusBusy || !canUseRazorpay
+                  }
                   className="glow-button px-4 py-2 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60"
                 >
-                  {payingRzp ? "Processing..." : "Pay with RazorPay"}
+                  {payingRzp || paymentStatusBusy
+                    ? "Processing..."
+                    : "Pay with RazorPay"}
                   <span className="glow-line glow-line-top" />
                   <span className="glow-line glow-line-right" />
                   <span className="glow-line glow-line-bottom" />
@@ -1164,6 +1463,7 @@ export default function Payment({ hideFooter = false }) {
                       >
                         <PayPalButtons
                           fundingSource="paypal"
+                          disabled={paymentStatusBusy}
                           style={{
                             layout: "horizontal",
                             color: "blue",
@@ -1178,8 +1478,13 @@ export default function Payment({ hideFooter = false }) {
                             }
                             return actions?.resolve ? actions.resolve() : true;
                           }}
-                          createOrder={(data, actions) =>
-                            actions.order.create({
+                          createOrder={async (data, actions) => {
+                            if (useSessionPayments) {
+                              const session = await startSessionCheckout("paypal");
+                              return session?.providerPayload?.orderId || "";
+                            }
+
+                            return actions.order.create({
                               purchase_units: [
                                 {
                                   description: `${packageTitle} booking`,
@@ -1187,13 +1492,30 @@ export default function Payment({ hideFooter = false }) {
                                   custom_id: bookingData.startTimeUTC || "",
                                 },
                               ],
-                            })
-                          }
+                            });
+                          }}
                           onApprove={async (data, actions) => {
                             if (!ensureSlotBeforeAction()) return;
                             const details = await actions.order.capture();
 
                             try {
+                              if (useSessionPayments) {
+                                const activeSession =
+                                  getActivePaymentSession("paypal");
+                                await finalizeSessionCheckout({
+                                  paymentAccessToken: String(
+                                    activeSession?.paymentAccessToken || ""
+                                  ).trim(),
+                                  providerData: {
+                                    paypalOrderId:
+                                      details?.id || data?.orderID || "",
+                                    payerEmail:
+                                      details?.payer?.email_address || "",
+                                  },
+                                });
+                                return;
+                              }
+
                               const payload = {
                                 ...bookingData,
                                 referralCode: referral?.code || referralInput || "",
@@ -1234,6 +1556,7 @@ export default function Payment({ hideFooter = false }) {
                               }
 
                               const bookingResult = await res.json();
+                              clearPaymentSession();
 
                               navigate("/payment-success", {
                                 state: buildConfirmationNavigationState(
@@ -1250,11 +1573,16 @@ export default function Payment({ hideFooter = false }) {
                             }
                           }}
                           onError={(err) => {
+                            clearPaymentSession();
                             console.error(err);
                             showBanner(
                               "error",
                               "This payment method could not process your payment. Please try again."
                             );
+                          }}
+                          onCancel={() => {
+                            clearPaymentSession();
+                            showBanner("info", "Payment cancelled before completion.");
                           }}
                         />
                       </PayPalScriptProvider>
@@ -1265,6 +1593,11 @@ export default function Payment({ hideFooter = false }) {
                     )}
                   </div>
                 </div>
+              )}
+              {paymentStatusBusy && (
+                <p className="mt-3 text-xs text-sky-200">
+                  Finalizing your payment and booking. Please keep this window open.
+                </p>
               )}
             </>
           )}

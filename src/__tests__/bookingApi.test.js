@@ -15,6 +15,7 @@ let idCounter = 1;
 const resetStore = () => {
   store = {
     bookings: [],
+    paymentRecords: [],
     slotHolds: [],
     coupons: [],
     referrals: [],
@@ -112,6 +113,7 @@ const createRes = () => {
 const findById = (id) => {
   const collections = [
     store.bookings,
+    store.paymentRecords,
     store.slotHolds,
     store.coupons,
     store.referrals,
@@ -143,6 +145,48 @@ const mockSanityClient = {
     ) {
       return (
         store.packages.find((pkg) => pkg.title === params.title) || null
+      );
+    }
+    if (q.includes("_type == $type && _id == $id")) {
+      return store.paymentRecords.find((entry) => entry._id === params.id) || null;
+    }
+    if (
+      q.includes('_type == $type') &&
+      q.includes('provider == "paypal"') &&
+      q.includes("providerOrderId == $providerOrderId")
+    ) {
+      return (
+        store.paymentRecords.find(
+          (entry) =>
+            entry.provider === "paypal" &&
+            entry.providerOrderId === params.providerOrderId
+        ) || null
+      );
+    }
+    if (
+      q.includes('_type == $type') &&
+      q.includes('provider == "razorpay"') &&
+      q.includes("providerPaymentId == $providerPaymentId")
+    ) {
+      return (
+        store.paymentRecords.find(
+          (entry) =>
+            entry.provider === "razorpay" &&
+            entry.providerPaymentId === params.providerPaymentId
+        ) || null
+      );
+    }
+    if (
+      q.includes('_type == $type') &&
+      q.includes('provider == "razorpay"') &&
+      q.includes("providerOrderId == $providerOrderId")
+    ) {
+      return (
+        store.paymentRecords.find(
+          (entry) =>
+            entry.provider === "razorpay" &&
+            entry.providerOrderId === params.providerOrderId
+        ) || null
       );
     }
     if (
@@ -235,6 +279,9 @@ const mockSanityClient = {
     if (next._type === "slotHold") {
       store.slotHolds.push(next);
     }
+    if (next._type === "paymentRecord") {
+      store.paymentRecords.push(next);
+    }
     if (next._type === "booking") {
       store.bookings.push(next);
     }
@@ -255,6 +302,7 @@ const mockSanityClient = {
       if (index >= 0) list.splice(index, 1);
     };
     removeFrom(store.slotHolds);
+    removeFrom(store.paymentRecords);
     removeFrom(store.bookings);
     removeFrom(store.coupons);
     removeFrom(store.referrals);
@@ -534,6 +582,38 @@ describe("booking reservation API", () => {
     expect(booking.emailDispatchDeferred).toBe(true);
     expect(booking.emailDispatchStatus).toBe("pending");
     expect(booking.emailDispatchQueuedAt).toBeTruthy();
+  });
+
+  test("direct paid bookings backfill a terminal payment record when no record exists yet", async () => {
+    const startTimeUTC = "2025-01-15T08:18:00.000Z";
+    const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
+
+    const { res } = await createPaidBooking({
+      startTimeUTC,
+      timeZone: "America/Los_Angeles",
+      paymentProvider: "paypal",
+      holdId: hold.body.holdId,
+      holdToken: hold.body.holdToken,
+      holdExpiresAt: hold.body.expiresAt,
+      deferEmailsUntilConfirmation: true,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(store.paymentRecords).toHaveLength(1);
+    expect(store.paymentRecords[0]).toMatchObject({
+      provider: "paypal",
+      status: "email_partial",
+      bookingId: res.body.bookingId,
+      providerOrderId: "paypal_order_1",
+      payerEmail: CLIENT_EMAIL,
+      emailDispatchToken: res.body.emailDispatchToken,
+    });
+    expect(store.paymentRecords[0].bookingPayload).toMatchObject({
+      packageTitle: "Performance Vertex Overhaul",
+      email: CLIENT_EMAIL,
+      paymentProvider: "paypal",
+    });
+    expect(store.paymentRecords[0].pricingSnapshot.netAmount).toBeCloseTo(84.99, 2);
   });
 
   test("sendBookingEmails dispatches deferred emails once and stays idempotent", async () => {
