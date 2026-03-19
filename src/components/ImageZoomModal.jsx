@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { Plus, Minus, X } from "lucide-react";
 import { useLowPerformanceMode } from "../lib/performanceMode";
 
@@ -95,7 +96,6 @@ export default function ImageZoomModal({
     setTargetOffset({ x: dx, y: dy });
   };
 
-  // When mouse released
   const handleMouseUp = (e) => {
     e.preventDefault();
     setDragStart(null);
@@ -106,7 +106,6 @@ export default function ImageZoomModal({
     onClose();
   };
 
-  // Close on Escape
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === "Escape") {
@@ -117,14 +116,13 @@ export default function ImageZoomModal({
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  return (
+  return createPortal(
     <div
       className={`glass-overlay low-perf-overlay fixed inset-0 flex items-center justify-center z-[9999] transition-opacity duration-200 ${
         fadeIn ? "opacity-100" : "opacity-0"
       }`}
       onClick={handleClose}
     >
-      {/* Close Button */}
       <button
         onClick={handleClose}
         className="fixed top-6 right-6 p-2 bg-slate-900/70 border border-sky-700/30 rounded-lg hover:bg-slate-800 transition z-[10001] flex items-center justify-center"
@@ -133,7 +131,6 @@ export default function ImageZoomModal({
         <X className="w-4 h-4 text-cyan-300" />
       </button>
 
-      {/* Image container */}
       <div
         className="relative flex items-center justify-center z-[10000] select-none"
         onClick={(e) => e.stopPropagation()}
@@ -177,6 +174,7 @@ export default function ImageZoomModal({
           <Plus className="w-5 h-5 text-cyan-300" />
         </button>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
