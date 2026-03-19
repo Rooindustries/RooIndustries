@@ -279,6 +279,16 @@ export function AppContent({ initialHomeData = null, routeShell = "browser" }) {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    const outerRaf = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        document.documentElement.classList.add("animations-ready");
+      });
+    });
+    return () => cancelAnimationFrame(outerRaf);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
     const intent = consumeRouteTransitionIntent();
     if (!intent) {
       document.documentElement.classList.remove("route-transition-out");

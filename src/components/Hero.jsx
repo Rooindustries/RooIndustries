@@ -74,7 +74,7 @@ export default function Hero() {
   const ctaNoteIcon = heroData?.ctaNoteIcon || fallbackHeroData.ctaNoteIcon;
 
   const headingLine2BaseClass =
-    "bg-gradient-to-r from-sky-400 to-blue-500 text-transparent bg-clip-text drop-shadow-[0_0_10px_rgba(56,189,248,0.7)]";
+    "bg-gradient-to-r from-sky-400 to-blue-500 text-transparent bg-clip-text";
 
   const normalizeText = (s = "") =>
     String(s)
@@ -91,7 +91,7 @@ export default function Hero() {
     return (
       <>
         {parts[0]}
-        <span className="text-cyan-200 drop-shadow-[0_0_10px_rgba(34,211,238,0.95)]">
+        <span className="text-cyan-200" style={{ textShadow: "0 0 10px rgba(34,211,238,0.95)" }}>
           {target}
         </span>
         {parts.slice(1).join(target)}
@@ -114,7 +114,7 @@ export default function Hero() {
           <span className="text-white">
             {renderWithGlow110(`${firstPart} - `)}
           </span>
-          <span className="bg-gradient-to-r from-sky-400 to-blue-500 text-transparent bg-clip-text drop-shadow-[0_0_10px_rgba(56,189,248,0.7)]">
+          <span className="bg-gradient-to-r from-sky-400 to-blue-500 text-transparent bg-clip-text">
             {renderWithGlow110(secondPart)}
           </span>
         </>
