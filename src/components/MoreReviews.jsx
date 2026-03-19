@@ -11,7 +11,7 @@ export default function Reviews() {
   useEffect(() => {
     client
       .fetch(
-        `*[_type == "review"] | order(_createdAt asc){
+        `*[_type == "review"] | order(_createdAt desc){
           image{
             ...,
             "dimensions": asset->metadata.dimensions
@@ -71,7 +71,7 @@ export default function Reviews() {
         </p>
       </header>
 
-      <div className="mt-8 columns-1 sm:columns-2 lg:columns-3 gap-4 space-y-4">
+      <div className="mt-8 columns-1 lg:columns-2 gap-4 space-y-4">
         {reviewItems.map((rev, i) => {
           if (rev.__placeholder) {
             return (
@@ -88,7 +88,7 @@ export default function Reviews() {
           const reviewAlt = rev.alt || "Client review screenshot";
           const reviewDims = rev.image?.dimensions;
           const reviewSrc = rev.image
-            ? urlFor(rev.image).width(360).format("webp").quality(48).url()
+            ? urlFor(rev.image).format("webp").quality(95).url()
             : "";
           const reviewZoomSrc = rev.image ? urlFor(rev.image).url() : reviewSrc;
 
