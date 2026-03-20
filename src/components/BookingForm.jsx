@@ -1507,6 +1507,7 @@ export default function BookingForm({ isMobile }) {
           data.message ||
             "That slot was just taken by someone else. Please choose another time."
         );
+        setSelectedSlot(null);
         return;
       }
 
