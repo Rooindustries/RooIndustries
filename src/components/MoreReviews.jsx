@@ -88,7 +88,7 @@ export default function Reviews() {
           const reviewAlt = rev.alt || "Client review screenshot";
           const reviewDims = rev.image?.dimensions;
           const reviewSrc = rev.image
-            ? urlFor(rev.image).format("webp").quality(95).url()
+            ? urlFor(rev.image).width(800).format("webp").quality(85).url()
             : "";
           const reviewZoomSrc = rev.image ? urlFor(rev.image).url() : reviewSrc;
 
