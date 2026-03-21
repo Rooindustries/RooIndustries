@@ -56,6 +56,7 @@ const reviewsPath = path.join(process.cwd(), "src", "legacyPages", "Reviews.jsx"
 const seoConfigPath = path.join(process.cwd(), "src", "seoConfig.js");
 const seoLibPath = path.join(process.cwd(), "src", "lib", "seo.js");
 const indexHtmlPath = path.join(process.cwd(), "public", "index.html");
+const biosGuideHtmlPath = path.join(process.cwd(), "public", "BIOSGuide", "index.html");
 
 const reviewsContents = fs.readFileSync(reviewsPath, "utf8");
 if (/AggregateRating/i.test(reviewsContents)) {
@@ -77,6 +78,33 @@ if (!/og:image:width"\s+content="500"/.test(indexHtml)) {
 }
 if (!/og:image:height"\s+content="500"/.test(indexHtml)) {
   errors.push("public/index.html og:image:height must be 500.");
+}
+
+const biosGuideHtml = fs.readFileSync(biosGuideHtmlPath, "utf8");
+if (!/rel="canonical"\s+href="https:\/\/www\.rooindustries\.com\/BIOSGuide"/.test(biosGuideHtml)) {
+  errors.push("BIOSGuide must declare a canonical URL.");
+}
+if (!/meta\s+name="robots"\s+content="index,\s*follow"/i.test(biosGuideHtml)) {
+  errors.push("BIOSGuide must declare index, follow robots metadata.");
+}
+if (!/meta\s+name="description"\s+content="Learn BIOS tuning, performance optimization, and stability fundamentals with Roo Industries' BIOS Mastery Guide for gamers, creators, and PC enthusiasts\."/.test(biosGuideHtml)) {
+  errors.push("BIOSGuide must declare the expected meta description.");
+}
+if (!/"@type":"Article"/.test(biosGuideHtml)) {
+  errors.push("BIOSGuide must include Article JSON-LD.");
+}
+
+const bodyMatch = biosGuideHtml.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+if (!bodyMatch) {
+  errors.push("BIOSGuide body could not be parsed for integrity checks.");
+} else {
+  const bodyHash = require("crypto")
+    .createHash("sha256")
+    .update(bodyMatch[1], "utf8")
+    .digest("hex");
+  if (bodyHash !== "499e0a8325882a83203af8cf05cbc4eac0d844490cefb6f3e46eea0a5ba87338") {
+    errors.push("BIOSGuide body content changed unexpectedly.");
+  }
 }
 
 if (errors.length) {

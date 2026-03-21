@@ -3,6 +3,12 @@ import { NextResponse } from "next/server";
 export function middleware(req) {
   const { pathname } = req.nextUrl;
 
+  if (pathname.toLowerCase() === "/biosguide" && pathname !== "/BIOSGuide") {
+    const url = req.nextUrl.clone();
+    url.pathname = "/BIOSGuide";
+    return NextResponse.redirect(url, 308);
+  }
+
   if (pathname === "/referrals/Register") {
     const url = req.nextUrl.clone();
     url.pathname = "/referrals/register";

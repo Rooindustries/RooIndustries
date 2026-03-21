@@ -1,6 +1,8 @@
 const fs = require("fs");
 const path = require("path");
-const { INDEXABLE_ROUTES, getUpgradeRoutes } = require("../src/lib/routes");
+const { INDEXABLE_ROUTES } = require("../src/lib/routes");
+
+const EXTRA_INDEXABLE_ROUTES = ["/BIOSGuide"];
 
 const siteUrl = (process.env.SITE_URL ||
   process.env.NEXT_PUBLIC_SITE_URL ||
@@ -21,12 +23,10 @@ const buildEntry = (route, now) => {
   ].join("\n");
 };
 
-async function run() {
-  const dynamicUpgradeRoutes = await getUpgradeRoutes();
-  const routes = Array.from(
-    new Set([...INDEXABLE_ROUTES, ...dynamicUpgradeRoutes])
-  ).sort((a, b) => a.localeCompare(b));
-
+function run() {
+  const routes = [...new Set([...INDEXABLE_ROUTES, ...EXTRA_INDEXABLE_ROUTES])].sort(
+    (a, b) => a.localeCompare(b)
+  );
   const now = new Date().toISOString();
   const urlEntries = routes.map((route) => buildEntry(route, now)).join("\n");
 
@@ -44,7 +44,9 @@ async function run() {
   console.log(`[sitemap] Generated ${routes.length} routes.`);
 }
 
-run().catch((error) => {
+try {
+  run();
+} catch (error) {
   console.error("[sitemap] Failed to generate sitemap:", error);
   process.exit(1);
-});
+}

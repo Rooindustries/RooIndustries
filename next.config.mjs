@@ -40,6 +40,14 @@ const nextConfig = {
       },
     ];
   },
+  async rewrites() {
+    return [
+      {
+        source: '/BIOSGuide',
+        destination: '/BIOSGuide/index.html',
+      },
+    ];
+  },
   async headers() {
     return [
       {
