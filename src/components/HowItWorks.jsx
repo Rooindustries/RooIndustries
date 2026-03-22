@@ -106,7 +106,7 @@ export default function HowItWorks({ initialData = null }) {
             delayTimer = setTimeout(() => setHasLoaded(true), loadDelay);
           }
         },
-        { rootMargin: "600px 0px" }
+        { rootMargin: "200px 0px" }
       );
 
       observer.observe(cardRef.current);
