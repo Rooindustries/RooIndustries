@@ -6,7 +6,6 @@ export default function Reviews() {
   const [selectedImage, setSelectedImage] = useState(null);
   const [selectedAlt, setSelectedAlt] = useState("");
   const [reviews, setReviews] = useState(null);
-  const [visibleCount, setVisibleCount] = useState(9);
 
   useEffect(() => {
     client
@@ -26,23 +25,16 @@ export default function Reviews() {
       });
   }, []);
 
-  useEffect(() => {
-    if (!Array.isArray(reviews)) return;
-    const nextCount = Math.min(12, reviews.length);
-    setVisibleCount(nextCount);
-  }, [reviews]);
-
   const isLoading = reviews === null;
   const placeholderCount = 18;
-  const visibleReviews = Array.isArray(reviews)
-    ? reviews.slice(0, visibleCount)
-    : reviews;
   const reviewItems = isLoading
     ? Array.from({ length: placeholderCount }, (_, index) => ({
         __placeholder: true,
         key: `placeholder-${index}`,
       }))
-    : visibleReviews;
+    : Array.isArray(reviews)
+    ? reviews
+    : [];
 
   // SEO/a11y: keep the alt text aligned with the zoomed review image.
   const handleOpenZoom = (src, altText) => {
@@ -120,19 +112,6 @@ export default function Reviews() {
         })}
       </div>
 
-      {!isLoading && Array.isArray(reviews) && visibleCount < reviews.length && (
-        <div className="mt-6 flex justify-center">
-          <button
-            type="button"
-            onClick={() =>
-              setVisibleCount((prev) => Math.min(prev + 9, reviews.length))
-            }
-            className="rounded-xl border border-white/30 bg-white/15 px-4 py-2 text-sm font-semibold text-white hover:bg-white/25 transition-colors"
-          >
-            Load more reviews
-          </button>
-        </div>
-      )}
 
       {selectedImage && (
         <ImageZoomModal
