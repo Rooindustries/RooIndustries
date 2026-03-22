@@ -128,7 +128,8 @@ const buildImageUrl = (image, size) => {
       .width(size)
       .height(size)
       .fit("crop")
-      .auto("format")
+      .format("webp")
+      .quality(75)
       .url();
   } catch {
     return "";
