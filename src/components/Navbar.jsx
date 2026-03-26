@@ -427,7 +427,19 @@ export default function Navbar({ routeShell = "browser" }) {
               >
                 Benefits
               </a>
-
+              <a
+                href={buildHomeSectionHref(SECTION_HASHES.plans)}
+                data-nav-surface="desktop"
+                data-nav-target="plans"
+                onClick={(event) =>
+                  handleSectionLinkClick(event, SECTION_HASHES.plans)
+                }
+                className={`${linkBase} ${
+                  isPlansActive ? linkActive : linkIdle
+                }`}
+              >
+                Plans
+              </a>
               <div className="relative" ref={proofDropdownRef}>
                 <button
                   type="button"
@@ -523,6 +535,7 @@ export default function Navbar({ routeShell = "browser" }) {
                   transition
                 "
             >
+              <FaDiscord className="text-[1.1em]" aria-hidden="true" />
               Discord
             </a>
 
