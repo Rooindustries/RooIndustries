@@ -1,4 +1,4 @@
-import { client } from "../sanityClient";
+import { publicClient } from "../sanityClient";
 
 export const HOME_SECTION_DATA_KEYS = Object.freeze({
   reviews: "reviews",
@@ -69,6 +69,8 @@ export const HOME_SECTION_PREFETCH_BY_HASH = Object.freeze({
 });
 
 const STORAGE_PREFIX = "roo-home-data:";
+const STORAGE_TS_KEY = "roo-home-data:__ts";
+const CACHE_TTL_MS = 5 * 60 * 1000;
 const memoryCache = new Map();
 const inflightCache = new Map();
 
@@ -188,7 +190,22 @@ const homeSectionQueries = {
 
 const getStorageKey = (key) => `${STORAGE_PREFIX}${key}`;
 
+const isSessionCacheExpired = () => {
+  if (typeof window === "undefined") return false;
+  try {
+    const ts = Number(sessionStorage.getItem(STORAGE_TS_KEY) || 0);
+    return Date.now() - ts > CACHE_TTL_MS;
+  } catch {
+    return true;
+  }
+};
+
 export const readHomeSectionData = (key) => {
+  if (isSessionCacheExpired()) {
+    memoryCache.clear();
+    try { sessionStorage.removeItem(STORAGE_TS_KEY); } catch {}
+    return null;
+  }
   if (memoryCache.has(key)) {
     return memoryCache.get(key);
   }
@@ -209,6 +226,9 @@ const writeHomeSectionData = (key, value) => {
   if (typeof window === "undefined") return;
   try {
     sessionStorage.setItem(getStorageKey(key), JSON.stringify(value ?? null));
+    if (!sessionStorage.getItem(STORAGE_TS_KEY)) {
+      sessionStorage.setItem(STORAGE_TS_KEY, String(Date.now()));
+    }
   } catch {}
 };
 
@@ -227,7 +247,7 @@ export const fetchHomeSectionData = (key) => {
     return inflightCache.get(key);
   }
 
-  const request = client
+  const request = publicClient
     .fetch(config.query, {}, config.options || undefined)
     .then((data) => {
       writeHomeSectionData(key, data);

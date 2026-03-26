@@ -1,24 +1,24 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { client } from "../sanityClient";
+import { publicClient } from "../sanityClient";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 
 const fallbackHeroData = {
   tagline: "Roo Industries - Precision Performance Engineering",
-  headingLine1: "Your PC Isn't Maxed Out.",
-  headingLine2: "We Unlock Full Performance.",
+  headingLine1: "More FPS. Less Input Lag.",
+  headingLine2: "Tuned for Your Exact Hardware.",
   description:
-    "Factory settings are generic - not dialed for your exact hardware and goals. That's why \"good PCs\" still suffer from frametime spikes, weak 1% lows, input lag, and a floaty mouse. We tune your BIOS, Windows, and game configs for consistent smoothness, faster responses and 1:1 input registration.",
+    "We optimize your BIOS, memory timings, Windows, and game configs remotely. You keep using your PC — we make it faster.",
   subtext: "Measurable gains. Competitive standard. No guesswork.",
-  ctaPrimaryText: "Tune My Rig",
+  ctaPrimaryText: "Optimize My PC",
   ctaSecondaryText: "See How It Works",
-  ctaNote: "Top 20 3DMark Hall of Fame - 150+ rigs optimized - Plans from $49.95",
+  ctaNote: "Top 20 3DMark Hall of Fame · 150+ rigs optimized · Plans from $49.95",
   ctaNoteIcon: "🏆",
   bullets: [
-    "Benchmark Verified Results",
-    "150+ PCs Optimized",
+    "20–92% FPS Boost",
+    "10–76% Latency Reduction",
     "Up to Lifetime Warranty",
-    "Same-Day Service Available",
+    "Same-Day Sessions Available",
   ],
 };
 const enableLiveHeroContent = process.env.NEXT_PUBLIC_ENABLE_HERO_CMS === "1";
@@ -30,7 +30,7 @@ export default function Hero() {
   useEffect(() => {
     if (!enableLiveHeroContent) return;
 
-    client
+    publicClient
       .fetch(
         `*[_type == "hero"][0]{
           tagline,
