@@ -191,7 +191,7 @@ export default function Packages({
         className="mt-3 inline-flex items-center justify-center gap-2 text-sm text-slate-400 hover:text-slate-200 transition-colors"
       >
         <span className="text-amber-400">{"★".repeat(5)}</span>
-        <span>5.0 avg from 89+ verified reviews</span>
+        <span className="underline underline-offset-2 decoration-slate-500/50">5.0 avg from 89+ verified reviews</span>
       </Link>
 
       <div className="mt-12 px-4 sm:px-6">
@@ -322,9 +322,7 @@ export default function Packages({
                       state={bookingState}
                       className="glow-button w-full sm:w-1/2 text-white text-lg py-3 rounded-md font-semibold shadow-[0_0_20px_rgba(56,189,248,0.4)] transition-all duration-300 text-center inline-flex items-center justify-center gap-2"
                     >
-                      {p.buttonText && p.buttonText !== "Book Now"
-                        ? p.buttonText
-                        : isXoc ? "Book XOC" : "Get Started"}
+                      {p.buttonText || "Book Now"}
                       <span className="glow-line glow-line-top" />
                       <span className="glow-line glow-line-right" />
                       <span className="glow-line glow-line-bottom" />
