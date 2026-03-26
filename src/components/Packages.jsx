@@ -191,7 +191,7 @@ export default function Packages({
         className="mt-3 inline-flex items-center justify-center gap-2 text-sm font-semibold text-slate-200 hover:text-white transition-colors"
       >
         <span className="text-amber-400">{"★".repeat(5)}</span>
-        <span className="underline underline-offset-2 decoration-slate-500/50">5.0 avg from 89+ verified reviews</span>
+        <span className="underline underline-offset-2 decoration-sky-400">5.0 avg from 89+ verified reviews</span>
       </Link>
 
       <div className="mt-12 px-4 sm:px-6">
