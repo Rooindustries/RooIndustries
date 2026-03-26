@@ -33,12 +33,6 @@ export default function Footer() {
           <div className="w-full md:w-auto md:ml-auto flex flex-col md:flex-row items-center md:items-center gap-4">
             <nav className="flex flex-wrap items-center justify-center md:justify-end gap-x-7 gap-y-2 text-xs font-semibold tracking-wide uppercase text-white/70">
               <Link
-                to="/contact"
-                className="hover:text-cyan-400 transition-colors"
-              >
-                Contact
-              </Link>
-              <Link
                 to="/privacy"
                 className="hover:text-cyan-400 transition-colors"
               >
