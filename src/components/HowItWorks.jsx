@@ -79,60 +79,49 @@ export default function HowItWorks({ initialData = null }) {
     3: "tuning",
   };
 
-  const VideoBadge = ({ name, pauseVideos, loadDelay = 0 }) => {
+  const VideoBadge = ({ name, pauseVideos }) => {
     const cardRef = useRef(null);
     const videoRef = useRef(null);
-    const [isIntersecting, setIsIntersecting] = useState(false);
-    const [hasLoaded, setHasLoaded] = useState(false);
-    const [pageVisible, setPageVisible] = useState(
-      typeof document !== "undefined" ? !document.hidden : true
-    );
 
     useEffect(() => {
-      if (!name) return;
-      if (!cardRef.current || typeof IntersectionObserver === "undefined") {
-        setIsIntersecting(true);
-        setHasLoaded(true);
+      const node = videoRef.current;
+      if (!node) return;
+
+      if (pauseVideos) {
+        node.pause();
         return;
       }
 
-      let delayTimer;
+      if (typeof IntersectionObserver === "undefined" || !cardRef.current) {
+        node.play().catch(() => {});
+        return;
+      }
+
+      let visible = false;
       const observer = new IntersectionObserver(
         (entries) => {
-          const entry = entries[0];
-          const inView = Boolean(entry?.isIntersecting);
-          setIsIntersecting(inView);
-          if (inView) {
-            delayTimer = setTimeout(() => setHasLoaded(true), loadDelay);
+          visible = Boolean(entries[0]?.isIntersecting);
+          if (visible && !document.hidden) {
+            node.play().catch(() => {});
+          } else {
+            node.pause();
           }
         },
         { rootMargin: "200px 0px" }
       );
 
-      observer.observe(cardRef.current);
-      return () => { observer.disconnect(); clearTimeout(delayTimer); };
-    }, [name, loadDelay]);
-
-    useEffect(() => {
-      const onVisibilityChange = () => {
-        setPageVisible(!document.hidden);
+      const onVisibility = () => {
+        if (document.hidden) { node.pause(); }
+        else if (visible) { node.play().catch(() => {}); }
       };
-      document.addEventListener("visibilitychange", onVisibilityChange);
-      return () =>
-        document.removeEventListener("visibilitychange", onVisibilityChange);
-    }, []);
 
-    useEffect(() => {
-      const node = videoRef.current;
-      if (!node || !hasLoaded) return;
-
-      const shouldPlay = isIntersecting && pageVisible && !pauseVideos;
-      if (shouldPlay) {
-        node.play().catch(() => {});
-        return;
-      }
-      node.pause();
-    }, [hasLoaded, isIntersecting, pageVisible, pauseVideos]);
+      observer.observe(cardRef.current);
+      document.addEventListener("visibilitychange", onVisibility);
+      return () => {
+        observer.disconnect();
+        document.removeEventListener("visibilitychange", onVisibility);
+      };
+    }, [pauseVideos]);
 
     if (!name) return null;
 
@@ -147,21 +136,19 @@ export default function HowItWorks({ initialData = null }) {
                    shadow-[0_0_26px_rgba(14,165,233,0.3)]
                    w-[calc(100%+0.75rem)] sm:w-[calc(100%+1rem)] -mx-1.5 sm:-mx-2 aspect-video sm:aspect-[16/10]"
       >
-        {hasLoaded ? (
-          <video
-            ref={videoRef}
-            className="absolute inset-0 w-full h-full object-cover"
-            autoPlay
-            loop
-            muted
-            playsInline
-            preload="none"
-            poster={poster}
-          >
-            <source src={webm} type="video/webm" />
-            <source src={mp4} type="video/mp4" />
-          </video>
-        ) : null}
+        <video
+          ref={videoRef}
+          className="absolute inset-0 w-full h-full object-cover"
+          autoPlay
+          loop
+          muted
+          playsInline
+          preload="metadata"
+          poster={poster}
+        >
+          <source src={webm} type="video/webm" />
+          <source src={mp4} type="video/mp4" />
+        </video>
 
         <div className="absolute inset-0 bg-gradient-to-br from-sky-500/12 via-transparent to-cyan-500/12" />
         <div className="absolute inset-0 ring-1 ring-inset ring-white/10" />
@@ -198,7 +185,6 @@ export default function HowItWorks({ initialData = null }) {
                   <VideoBadge
                     name={videoByStepIndex[i]}
                     pauseVideos={pauseVideos}
-                    loadDelay={i * 150}
                   />
                 </div>
 
