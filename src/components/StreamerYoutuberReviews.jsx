@@ -488,9 +488,20 @@ function InfiniteDraggableCarousel({ reviews }) {
     xPos.current += delta;
     lastDragPos.current = clientX;
     const now = performance.now();
+    const history = positionHistory.current;
+
+    // On direction reversal, flush old history so velocity only reflects
+    // the current swipe direction — prevents momentum fighting on mid-drag swap.
+    if (history.length > 0) {
+      const lastDelta = clientX - history[history.length - 1].x;
+      if ((lastDelta > 0 && delta < 0) || (lastDelta < 0 && delta > 0)) {
+        positionHistory.current = [];
+      }
+    }
+
     positionHistory.current.push({ x: clientX, time: now });
     positionHistory.current = positionHistory.current.filter(
-      (p) => now - p.time < 300
+      (p) => now - p.time < 150
     );
   };
 
