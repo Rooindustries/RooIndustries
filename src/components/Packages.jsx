@@ -188,7 +188,7 @@ export default function Packages({
 
       <Link
         to="/reviews"
-        className="mt-3 inline-flex items-center justify-center gap-2 text-sm text-slate-400 hover:text-slate-200 transition-colors"
+        className="mt-3 inline-flex items-center justify-center gap-2 text-sm font-semibold text-slate-200 hover:text-white transition-colors"
       >
         <span className="text-amber-400">{"★".repeat(5)}</span>
         <span className="underline underline-offset-2 decoration-slate-500/50">5.0 avg from 89+ verified reviews</span>
