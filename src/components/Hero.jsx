@@ -8,7 +8,7 @@ const fallbackHeroData = {
   headingLine1: "More FPS. Less Input Lag.",
   headingLine2: "Tuned for Your Exact Hardware.",
   description:
-    "We optimize your BIOS, memory timings, Windows, and game configs remotely. You keep using your PC — we make it faster.",
+    "We optimize your BIOS, memory timings, Windows, and game configs remotely. You keep using your PC while we make it faster.",
   subtext: "Measurable gains. Competitive standard. No guesswork.",
   ctaPrimaryText: "Optimize My PC",
   ctaSecondaryText: "See How It Works",
@@ -21,7 +21,7 @@ const fallbackHeroData = {
     "Same-Day Sessions Available",
   ],
 };
-const enableLiveHeroContent = process.env.NEXT_PUBLIC_ENABLE_HERO_CMS === "1";
+const enableLiveHeroContent = true;
 
 export default function Hero() {
   const [heroData, setHeroData] = useState(fallbackHeroData);
