@@ -199,9 +199,9 @@ export default function Hero() {
   }, [headingLine1, headingLine2]);
 
   return (
-    <header id="top" className="py-16 flex justify-center">
+    <header id="top" className="py-10 sm:py-16 flex justify-center">
       <section className="mx-auto max-w-4xl px-6 text-center w-full">
-        <div className="h-[30px] sm:h-[36px] flex justify-center items-center">
+        <div className="h-[24px] sm:h-[36px] flex justify-center items-center">
           {tagline && (
             <div className="inline-flex items-center rounded-full border border-slate-700/80 bg-slate-900/70 px-4 sm:px-5 py-1.5 sm:py-2 shadow-[0_0_10px_rgba(0,255,255,0.6),0_0_20px_rgba(0,255,255,0.4)]">
               <span className="text-[11px] sm:text-sm font-medium text-slate-200">
@@ -211,7 +211,7 @@ export default function Hero() {
           )}
         </div>
 
-        <div className="mt-8 w-full">
+        <div className="mt-5 sm:mt-8 w-full">
           <h1 className="font-extrabold tracking-tight text-center">
             {headingLine1 && (
               <span
@@ -235,7 +235,7 @@ export default function Hero() {
           </h1>
         </div>
 
-        <div className="min-h-[48px] sm:min-h-[60px]">
+        <div className="min-h-[36px] sm:min-h-[60px]">
           {description && (
             <p className="mt-4 text-sm sm:text-base md:text-lg text-slate-200/90 leading-relaxed max-w-2xl mx-auto">
               {renderWithGlow110(description)}
@@ -243,15 +243,15 @@ export default function Hero() {
           )}
         </div>
 
-        <div className="min-h-[32px] sm:min-h-[36px]">
+        <div className="min-h-[24px] sm:min-h-[36px]">
           {subtext && (
-            <p className="mt-6 text-[14px] sm:text-lg font-semibold text-cyan-300">
+            <p className="mt-4 sm:mt-6 text-[14px] sm:text-lg font-semibold text-cyan-300">
               {renderWithGlow110(subtext)}
             </p>
           )}
         </div>
 
-        <div className="mt-7 flex items-center justify-center gap-3 sm:gap-4 flex-wrap min-h-[56px]">
+        <div className="mt-5 sm:mt-7 flex items-center justify-center gap-3 sm:gap-4 flex-wrap min-h-[56px]">
           <Link
             to="/#packages"
             onClick={(event) => handleHomeSectionLink(event, "#packages")}
@@ -280,7 +280,7 @@ export default function Hero() {
         </div>
 
         {ctaNote && (
-          <p className="mt-5 text-sm sm:text-base font-extrabold tracking-wide relative inline-flex items-center gap-2">
+          <p className="mt-3 sm:mt-5 text-sm sm:text-base font-extrabold tracking-wide relative inline-flex items-center gap-2">
             {ctaNoteIcon && (
               <span className="text-slate-100" aria-hidden="true">
                 {ctaNoteIcon}
@@ -290,9 +290,9 @@ export default function Hero() {
           </p>
         )}
 
-        <div className="mt-5 w-full">
+        <div className="mt-3 sm:mt-5 w-full">
           {bullets.length > 0 && (
-            <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 sm:gap-x-6">
+            <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 sm:gap-y-2 sm:gap-x-6">
               {bullets.map((text, i) => (
                 <div key={i} className="flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-green-400 shrink-0" />
