@@ -140,6 +140,7 @@ function AnimatedRoutes({
   routesLocation,
   routeKey,
   initialHomeData,
+  initialRouteData,
 }) {
   const baseLocation = useLocation();
   const location = routesLocation || baseLocation;
@@ -149,11 +150,19 @@ function AnimatedRoutes({
     <div key={motionKey} className="w-full flex flex-col flex-1">
         <Routes location={location}>
           <Route path="/" element={<Home initialData={initialHomeData} />} />
-          <Route path="/packages" element={withRouteSuspense(<Packages />)} />
+          <Route
+            path="/packages"
+            element={withRouteSuspense(
+              <Packages initialData={initialRouteData?.packages || null} />
+            )}
+          />
           <Route
             path="/benchmarks"
             element={withRouteSuspense(
-              <Benchmarks setIsModalOpen={setIsModalOpen} />
+              <Benchmarks
+                setIsModalOpen={setIsModalOpen}
+                initialData={initialRouteData?.benchmarks || null}
+              />
             )}
           />
           <Route path="/privacy" element={withRouteSuspense(<Privacy />)} />
@@ -177,10 +186,15 @@ function AnimatedRoutes({
             element={withRouteSuspense(<PaymentSuccess />)}
           />
           <Route path="/thank-you" element={withRouteSuspense(<Thankyou />)} />
-          <Route path="/tools" element={<Tools />} />
+          <Route
+            path="/tools"
+            element={<Tools initialData={initialRouteData?.tools || null} />}
+          />
           <Route
             path="/meet-the-team"
-            element={withRouteSuspense(<MeetTheTeam />)}
+            element={withRouteSuspense(
+              <MeetTheTeam initialData={initialRouteData?.meetTheTeam || null} />
+            )}
           />
           <Route
             path="/upgrade/:slug"
@@ -226,7 +240,11 @@ function AnimatedRoutes({
   );
 }
 
-export function AppContent({ initialHomeData = null, routeShell = "browser" }) {
+export function AppContent({
+  initialHomeData = null,
+  initialRouteData = null,
+  routeShell = "browser",
+}) {
   const [, setIsModalOpen] = useState(false);
   const [showRouteTransition, setShowRouteTransition] = useState(false);
 
@@ -276,15 +294,6 @@ export function AppContent({ initialHomeData = null, routeShell = "browser" }) {
     initializePerformanceProfile();
   }, []);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const outerRaf = requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        document.documentElement.classList.add("animations-ready");
-      });
-    });
-    return () => cancelAnimationFrame(outerRaf);
-  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -528,6 +537,7 @@ export function AppContent({ initialHomeData = null, routeShell = "browser" }) {
             routesLocation={routesLocation}
             routeKey={routesKey}
             initialHomeData={initialHomeData}
+            initialRouteData={initialRouteData}
           />
         </main>
       </div>
