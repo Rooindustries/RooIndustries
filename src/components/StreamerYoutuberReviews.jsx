@@ -285,7 +285,7 @@ function ReviewCard({ review }) {
 function InfiniteDraggableCarousel({ reviews }) {
   const containerRef = useRef(null);
   const trackRef = useRef(null);
-  const [isDragging, setIsDragging] = useState(false);
+  const isDraggingRef = useRef(false);
   const xPos = useRef(0);
   const animationFrameId = useRef(null);
   const startTime = useRef(null);
@@ -325,7 +325,7 @@ function InfiniteDraggableCarousel({ reviews }) {
   const startAnimation = () => {
     if (animationFrameId.current) return;
     if (!pageVisibleRef.current || !sectionVisibleRef.current) return;
-    if (!isDragging && isAutoplayPaused()) return;
+    if (!isDraggingRef.current && isAutoplayPaused()) return;
     animationFrameId.current = requestAnimationFrame(animate);
   };
 
@@ -335,25 +335,27 @@ function InfiniteDraggableCarousel({ reviews }) {
       return;
     }
 
-    if (!isDragging && isAutoplayPaused()) {
+    if (!isDraggingRef.current && isAutoplayPaused()) {
       stopAnimation();
       return;
     }
 
     const lowPerfMode = isLowPerformanceMode();
-    const minFrameDelta = lowPerfMode
-      ? LOW_PERF_FRAME_DELTA_MS
-      : NORMAL_FRAME_DELTA_MS;
 
-    // Cap updates on weaker devices but keep autoplay alive instead of hard-pausing it.
-    if (lastFrameTime.current && timestamp - lastFrameTime.current < minFrameDelta) {
-      animationFrameId.current = requestAnimationFrame(animate);
-      return;
+    // Skip frame throttling during drag — commit transforms at full refresh rate.
+    if (!isDraggingRef.current) {
+      const minFrameDelta = lowPerfMode
+        ? LOW_PERF_FRAME_DELTA_MS
+        : NORMAL_FRAME_DELTA_MS;
+      if (lastFrameTime.current && timestamp - lastFrameTime.current < minFrameDelta) {
+        animationFrameId.current = requestAnimationFrame(animate);
+        return;
+      }
     }
     lastFrameTime.current = timestamp;
 
     if (!startTime.current) startTime.current = timestamp;
-    if (!isDragging) {
+    if (!isDraggingRef.current) {
       if (Math.abs(velocity.current) > 0.1) {
         velocity.current *= 0.95;
         xPos.current -= velocity.current;
@@ -378,14 +380,14 @@ function InfiniteDraggableCarousel({ reviews }) {
     if (reviews.length === 0) return;
     startAnimation();
     return () => stopAnimation();
-  }, [reviews.length, isDragging]);
+  }, [reviews.length]);
 
   useEffect(() => {
     const syncPerfPause = () => {
       perfPausedRef.current = getPerfToggleEnabled(
         PERF_TOGGLE_KEYS.PAUSE_REVIEWS_AUTOPLAY
       );
-      if (perfPausedRef.current && !isDragging) {
+      if (perfPausedRef.current && !isDraggingRef.current) {
         stopAnimation();
       } else {
         startAnimation();
@@ -401,7 +403,7 @@ function InfiniteDraggableCarousel({ reviews }) {
       unsubscribePerf();
       window.removeEventListener("roo-performance-mode-change", onPerfModeChange);
     };
-  }, [isDragging]);
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current || typeof IntersectionObserver === "undefined") {
@@ -449,7 +451,7 @@ function InfiniteDraggableCarousel({ reviews }) {
     }
 
     if (isScrolling) {
-      if (!isDragging) {
+      if (!isDraggingRef.current) {
         stopAnimation();
       }
       return undefined;
@@ -467,10 +469,10 @@ function InfiniteDraggableCarousel({ reviews }) {
         scrollIdleTimerRef.current = null;
       }
     };
-  }, [isDragging, isScrolling, reviews.length]);
+  }, [isScrolling, reviews.length]);
 
   const handleDragStart = (clientX) => {
-    setIsDragging(true);
+    isDraggingRef.current = true;
     dragStart.current = clientX;
     lastDragPos.current = clientX;
     velocity.current = 0;
@@ -481,7 +483,7 @@ function InfiniteDraggableCarousel({ reviews }) {
   };
 
   const handleDragMove = (clientX) => {
-    if (!isDragging) return;
+    if (!isDraggingRef.current) return;
     const delta = clientX - lastDragPos.current;
     xPos.current += delta;
     lastDragPos.current = clientX;
@@ -493,7 +495,7 @@ function InfiniteDraggableCarousel({ reviews }) {
   };
 
   const handleDragEnd = () => {
-    setIsDragging(false);
+    isDraggingRef.current = false;
     if (trackRef.current) {
       trackRef.current.style.cursor = "grab";
     }
@@ -517,12 +519,12 @@ function InfiniteDraggableCarousel({ reviews }) {
     handleDragStart(e.clientX);
   };
   const onMouseMove = (e) => {
-    if (isDragging) e.preventDefault();
+    if (isDraggingRef.current) e.preventDefault();
     handleDragMove(e.clientX);
   };
   const onMouseUp = () => handleDragEnd();
   const onMouseLeave = () => {
-    if (isDragging) handleDragEnd();
+    if (isDraggingRef.current) handleDragEnd();
   };
   const onTouchStart = (e) => handleDragStart(e.touches[0].clientX);
   const onTouchMove = (e) => handleDragMove(e.touches[0].clientX);
