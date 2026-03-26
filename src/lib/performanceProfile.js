@@ -520,43 +520,12 @@ export const resolveHardFailDecision = (snapshot) => {
 };
 
 export const resolveInitialPerformanceDecision = (snapshot) => {
-  const hardFailDecision = resolveHardFailDecision(snapshot);
-  if (hardFailDecision) {
-    return hardFailDecision;
-  }
-
-  if (snapshot.deviceClass === DEVICE_CLASSES.DESKTOP) {
-    return {
-      profile: PERFORMANCE_PROFILES.FULL,
-      source: "default",
-      reason: "desktop-hardware-renderer",
-      deviceClass: snapshot.deviceClass,
-      band: "unknown",
-      renderer: snapshot.rendererInfo?.renderer || "",
-    };
-  }
-
-  const bandInfo = getPerformanceBand(snapshot);
-  if (bandInfo.band === "low") {
-    return {
-      profile: PERFORMANCE_PROFILES.REDUCED,
-      source: "auto",
-      reason: "mobile-low-end-heuristic",
-      deviceClass: snapshot.deviceClass,
-      band: bandInfo.band,
-      renderer: snapshot.rendererInfo?.renderer || "",
-    };
-  }
-
   return {
-    profile: PERFORMANCE_PROFILES.FULL,
-    source: "default",
-    reason:
-      bandInfo.band === "high"
-        ? "mobile-high-capability"
-        : "mobile-balanced-default",
+    profile: PERFORMANCE_PROFILES.LITE,
+    source: "auto",
+    reason: "default-lite-mode",
     deviceClass: snapshot.deviceClass,
-    band: bandInfo.band,
+    band: "unknown",
     renderer: snapshot.rendererInfo?.renderer || "",
   };
 };
@@ -812,21 +781,8 @@ export const bootstrapPerformanceProfile = () => {
     return getPerformanceProfileSnapshot();
   }
 
-  const mobileBootstrapSnapshot = collectPerformanceSnapshot({
-    includeRenderer: false,
-  });
-  const snapshot =
-    mobileBootstrapSnapshot.deviceClass === DEVICE_CLASSES.DESKTOP
-      ? collectPerformanceSnapshot({ includeRenderer: true })
-      : mobileBootstrapSnapshot;
-
-  const manualDecision = readLegacyManualDecision({ snapshot });
-  const storedDecision = readStoredAutoDecision({ snapshot });
-  const bootstrapDecision =
-    manualDecision ||
-    storedDecision ||
-    resolveHardFailDecision(snapshot) ||
-    resolveInitialPerformanceDecision(snapshot);
+  const snapshot = collectPerformanceSnapshot({ includeRenderer: false });
+  const bootstrapDecision = resolveInitialPerformanceDecision(snapshot);
 
   applyBootstrapDecision(bootstrapDecision);
   bootstrapComplete = true;
@@ -1126,49 +1082,8 @@ export const initializePerformanceProfile = () => {
   if (!isBrowser()) return getPerformanceProfileSnapshot();
   attachReducedMotionListener();
   bootstrapPerformanceProfile();
-  if (initializationStarted) {
-    return getPerformanceProfileSnapshot();
-  }
-
   initializationStarted = true;
-
-  scheduleIdleEvaluation(() => {
-    const mobileLoadSafeSnapshot = collectPerformanceSnapshot({
-      includeRenderer: false,
-    });
-    const snapshot =
-      mobileLoadSafeSnapshot.deviceClass === DEVICE_CLASSES.DESKTOP
-        ? collectPerformanceSnapshot({
-            includeRenderer: true,
-          })
-        : mobileLoadSafeSnapshot;
-
-    const manualDecision = readLegacyManualDecision({ snapshot });
-    if (manualDecision) {
-      clearStoredAutoDecision();
-      setCurrentDecision(manualDecision);
-      runtimeProbeLocked = true;
-      return;
-    }
-
-    const storedDecision = readStoredAutoDecision({ snapshot });
-    if (storedDecision) {
-      setCurrentDecision(storedDecision);
-      runtimeProbeLocked = true;
-      return;
-    }
-
-    const initialDecision = resolveInitialPerformanceDecision(snapshot);
-    if (initialDecision.profile === PERFORMANCE_PROFILES.LITE) {
-      finalizeAutoDecision(initialDecision, snapshot);
-      runtimeProbeLocked = true;
-      return;
-    }
-
-    setCurrentDecision(initialDecision);
-    maybeStartRuntimeProbe(initialDecision);
-  });
-
+  runtimeProbeLocked = true;
   return getPerformanceProfileSnapshot();
 };
 
