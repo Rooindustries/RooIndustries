@@ -427,19 +427,7 @@ export default function Navbar({ routeShell = "browser" }) {
               >
                 Benefits
               </a>
-              <a
-                href={buildHomeSectionHref(SECTION_HASHES.plans)}
-                data-nav-surface="desktop"
-                data-nav-target="plans"
-                onClick={(event) =>
-                  handleSectionLinkClick(event, SECTION_HASHES.plans)
-                }
-                className={`${linkBase} ${
-                  isPlansActive ? linkActive : linkIdle
-                }`}
-              >
-                Plans
-              </a>
+
               <div className="relative" ref={proofDropdownRef}>
                 <button
                   type="button"
@@ -523,16 +511,19 @@ export default function Navbar({ routeShell = "browser" }) {
               href="https://discord.gg/M7nTkn9dxE"
               target="_blank"
               rel="noreferrer"
-              className="hidden sm:inline-flex items-center gap-2 px-4 py-2.5 text-base font-semibold whitespace-nowrap rounded-full max-[820px]:px-3 max-[820px]:text-sm max-[820px]:gap-1.5 text-white/70 hover:text-white transition"
+              className="
+                  hidden sm:inline-flex items-center gap-2
+                  px-4 py-2.5 text-base font-semibold whitespace-nowrap rounded-full
+                  max-[820px]:px-3 max-[820px]:text-sm max-[820px]:gap-1.5
+                  text-white
+                  border border-cyan-300/30
+                  bg-cyan-400/10 hover:bg-cyan-400/15
+                  hover:border-cyan-300/50
+                  shadow-[0_0_18px_rgba(34,211,238,0.14)]
+                  transition
+                "
             >
-              <FaDiscord className="text-[1.1em]" aria-hidden="true" />
               Discord
-            </a>
-            <a
-              href="/#packages"
-              className="hidden sm:inline-flex items-center gap-2 px-4 py-2.5 text-base font-semibold whitespace-nowrap rounded-full max-[820px]:px-3 max-[820px]:text-sm max-[820px]:gap-1.5 text-white border border-cyan-300/30 bg-cyan-400/10 hover:bg-cyan-400/15 hover:border-cyan-300/50 shadow-[0_0_18px_rgba(34,211,238,0.14)] transition"
-            >
-              Packages
             </a>
 
             {/* Mobile menu button */}
