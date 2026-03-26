@@ -12,7 +12,6 @@ import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 import ReservationBanner from "./components/ReservationBanner";
 import TawkTo from "./components/TawkTo";
-import PerformanceModeNotice from "./components/PerformanceModeNotice";
 import PerfDebugOverlay from "./components/PerfDebugOverlay";
 import { initializePerformanceProfile } from "./lib/performanceProfile";
 import Home from "./legacyPages/Home";
@@ -549,7 +548,6 @@ export function AppContent({ initialHomeData = null, routeShell = "browser" }) {
           </BookingModal>
         </Suspense>
       )}
-      <PerformanceModeNotice />
       <PerfDebugOverlay />
     </>
   );
