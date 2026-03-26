@@ -10,6 +10,18 @@ import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 
 const REFERRAL_STORAGE_KEY = "referral_session";
 
+const MINOR_WORDS = new Set([
+  "a","an","and","as","at","but","by","for","if","in","nor","of","on","or","so","that","the","to","up","via","yet",
+]);
+
+const capitalizeWord = (w) => w.charAt(0).toUpperCase() + w.slice(1);
+
+const toTitleCase = (str) =>
+  str.replace(/\S+/g, (word, idx) => {
+    if (idx > 0 && MINOR_WORDS.has(word.toLowerCase())) return word.toLowerCase();
+    return word.split("-").map(capitalizeWord).join("-");
+  });
+
 export default function Packages({
   initialPackages = null,
   initialSectionCopy = null,
@@ -135,7 +147,7 @@ export default function Packages({
   }, [packages.length, sectionCopy]);
 
   const headingText = sectionCopy?.heading ?? "Choose Your Package";
-  const badgeText = sectionCopy?.badgeText ?? "Fully Online";
+  const badgeText = sectionCopy?.badgeText ?? "Remote Sessions";
   const subheadingText =
     sectionCopy?.subheading ?? "Select the tuning package that best fits your needs";
   const dividerText = sectionCopy?.dividerText;
@@ -174,11 +186,19 @@ export default function Packages({
         </p>
       )}
 
+      <Link
+        to="/reviews"
+        className="mt-3 inline-flex items-center justify-center gap-2 text-sm text-slate-400 hover:text-slate-200 transition-colors"
+      >
+        <span className="text-amber-400">{"★".repeat(5)}</span>
+        <span>5.0 avg from 89+ verified reviews</span>
+      </Link>
+
       <div className="mt-12 px-4 sm:px-6">
         <div className="mx-auto w-fit max-w-full">
           <div className="flex flex-col sm:flex-row justify-center gap-6 sm:gap-10 flex-wrap">
             {packages.map((p, i) => {
-              const isXoc = p.title === "XOC / Extreme Overclocking";
+              const isXoc = /^xoc/i.test(p.title);
 
               const checkedBullets = normalizeBullets(p.checkedBullets);
               const uncheckedBullets = normalizeBullets(p.uncheckedBullets);
@@ -223,11 +243,29 @@ export default function Packages({
                       {p.price}
                     </p>
 
-                    {p.description && (
-                      <p className="mt-4 text-center text-base sm:text-lg leading-relaxed text-slate-300/85">
-                        {p.description}
-                      </p>
-                    )}
+                    {p.description && (() => {
+                      const bestForMatch = p.description.match(/Best for:\s*(.+)/i);
+                      const mainDesc = bestForMatch
+                        ? p.description.slice(0, bestForMatch.index).trim()
+                        : p.description;
+                      const bestFor = bestForMatch ? bestForMatch[1].trim().replace(/\.+$/, "") : null;
+                      return (
+                        <>
+                          <p className="mt-4 text-center text-base sm:text-lg leading-relaxed text-slate-300/85">
+                            {mainDesc}
+                          </p>
+                          {bestFor && (
+                            <div className="mt-3 flex flex-col items-center gap-1.5">
+                              <span className="text-xs font-bold text-white">Suitable for:</span>
+                              <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-600/40 bg-sky-900/30 px-3 py-1 text-xs font-semibold text-sky-200">
+                                <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+                                {toTitleCase(bestFor)}
+                              </span>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
 
                     <div className="mt-5 border-t border-white/10" />
 
@@ -284,7 +322,9 @@ export default function Packages({
                       state={bookingState}
                       className="glow-button w-full sm:w-1/2 text-white text-lg py-3 rounded-md font-semibold shadow-[0_0_20px_rgba(56,189,248,0.4)] transition-all duration-300 text-center inline-flex items-center justify-center gap-2"
                     >
-                      {p.buttonText || "Book Now"}
+                      {p.buttonText && p.buttonText !== "Book Now"
+                        ? p.buttonText
+                        : isXoc ? "Book XOC" : "Get Started"}
                       <span className="glow-line glow-line-top" />
                       <span className="glow-line glow-line-right" />
                       <span className="glow-line glow-line-bottom" />
