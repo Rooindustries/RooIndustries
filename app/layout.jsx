@@ -16,6 +16,12 @@ export default function RootLayout({ children }) {
           type="font/woff2"
           crossOrigin="anonymous"
         />
+        <link
+          rel="preload"
+          href="/favicon-96x96.png"
+          as="image"
+          type="image/png"
+        />
       </head>
       <body>{children}</body>
     </html>
