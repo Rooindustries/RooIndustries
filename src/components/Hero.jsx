@@ -199,7 +199,7 @@ export default function Hero() {
   }, [headingLine1, headingLine2]);
 
   return (
-    <header id="top" className="py-12 flex justify-center">
+    <header id="top" className="py-16 flex justify-center">
       <section className="mx-auto max-w-4xl px-6 text-center w-full">
         <div className="w-full">
           <h1 className="font-extrabold tracking-tight text-center">
