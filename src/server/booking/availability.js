@@ -9,11 +9,22 @@ const BOOKINGS_QUERY = `*[_type == "booking"]{
   packageTitle,
   status
 }`;
-const HOLDS_QUERY = `*[_type == "slotHold" && (expiresAt > now() || phase == "payment_pending")]{
+const HOLDS_QUERY = `*[_type == "slotHold"]{
   startTimeUTC,
   _id,
-  phase
+  phase,
+  expiresAt
 }`;
+
+const HOLD_STATES = Object.freeze({
+  ACTIVE: "active",
+  EXPIRED: "expired",
+});
+
+const isExpiredHold = (hold, now = Date.now()) => {
+  const expiresAtMs = new Date(hold?.expiresAt || "").getTime();
+  return Number.isFinite(expiresAtMs) && expiresAtMs <= now;
+};
 
 export async function getBookingAvailability({ client } = {}) {
   const readClient = client || createRefReadClient();
@@ -22,6 +33,7 @@ export async function getBookingAvailability({ client } = {}) {
     readClient.fetch(BOOKINGS_QUERY),
     readClient.fetch(HOLDS_QUERY),
   ]);
+  const now = Date.now();
 
   return {
     settings: {
@@ -42,6 +54,12 @@ export async function getBookingAvailability({ client } = {}) {
           startTimeUTC: String(hold?.startTimeUTC || "").trim(),
           isHold: true,
           holdId: String(hold?._id || "").trim(),
+          phase: String(hold?.phase || "").trim(),
+          expiresAt: String(hold?.expiresAt || "").trim(),
+          isExpiredHold: isExpiredHold(hold, now),
+          holdState: isExpiredHold(hold, now)
+            ? HOLD_STATES.EXPIRED
+            : HOLD_STATES.ACTIVE,
         }))
         .filter((hold) => hold.startTimeUTC && hold.holdId)),
     ],
