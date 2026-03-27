@@ -169,7 +169,7 @@ export default function Services({ initialData = null }) {
   const pagePrefix = data.benchPagePrefix || "Page";
 
   return (
-    <section className="mx-auto max-w-[92rem] py-16 px-4 sm:px-6">
+    <section className="mx-auto max-w-[92rem] pt-8 pb-16 px-4 sm:px-6">
       <div className="text-center">
         {data.heading && (
           <h3 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.45)]">
