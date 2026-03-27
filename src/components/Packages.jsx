@@ -164,7 +164,7 @@ export default function Packages({
   }
 
   return (
-    <section className="relative z-10 pt-32 pb-24 text-center text-white">
+    <section className="relative z-10 pt-8 pb-24 text-center text-white">
       {headingText && (
         <h2 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
           {headingText}
