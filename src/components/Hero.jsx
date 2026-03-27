@@ -199,19 +199,9 @@ export default function Hero() {
   }, [headingLine1, headingLine2]);
 
   return (
-    <header id="top" className="py-10 sm:py-16 flex justify-center">
+    <header id="top" className="py-6 sm:py-10 flex justify-center">
       <section className="mx-auto max-w-4xl px-6 text-center w-full">
-        <div className="h-[24px] sm:h-[36px] flex justify-center items-center">
-          {tagline && (
-            <div className="inline-flex items-center rounded-full border border-slate-700/80 bg-slate-900/70 px-4 sm:px-5 py-1.5 sm:py-2 shadow-[0_0_10px_rgba(0,255,255,0.6),0_0_20px_rgba(0,255,255,0.4)]">
-              <span className="text-[11px] sm:text-sm font-medium text-slate-200">
-                {renderWithGlow110(tagline)}
-              </span>
-            </div>
-          )}
-        </div>
-
-        <div className="mt-5 sm:mt-8 w-full">
+        <div className="w-full">
           <h1 className="font-extrabold tracking-tight text-center">
             {headingLine1 && (
               <span
