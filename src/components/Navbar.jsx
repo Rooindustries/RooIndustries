@@ -110,6 +110,40 @@ export default function Navbar({ routeShell = "browser" }) {
     }
   }, []);
 
+  const handleHomeClick = useCallback(
+    (event) => {
+      setOpen(false);
+      setProofOpen(false);
+      cancelSectionTransition();
+
+      if (typeof window === "undefined") return;
+
+      if (location.pathname !== "/") {
+        return;
+      }
+
+      event?.preventDefault?.();
+
+      const nextUrl = `${window.location.pathname}${window.location.search}`;
+      if (window.location.hash && window.history?.replaceState) {
+        window.history.replaceState(window.history.state, "", nextUrl);
+      }
+
+      setActiveHomeHash("");
+
+      if (activeScrollCleanupRef.current) {
+        activeScrollCleanupRef.current();
+        activeScrollCleanupRef.current = null;
+      }
+
+      window.scrollTo({
+        top: 0,
+        behavior: "auto",
+      });
+    },
+    [cancelSectionTransition, location.pathname]
+  );
+
   const handleSectionLinkClick = useCallback(
     async (event, hash) => {
       setOpen(false);
@@ -376,7 +410,12 @@ export default function Navbar({ routeShell = "browser" }) {
               <BackButton hidden={false} inline={true} />
             ) : null}
 
-            <Link to="/" onClick={cancelSectionTransition} className="flex items-center gap-3 select-none">
+            <Link
+              to="/"
+              onClick={handleHomeClick}
+              className="flex items-center gap-3 select-none"
+              aria-label="Go to Roo Industries home"
+            >
               <div className="relative h-14 w-14 grid place-items-center overflow-hidden rounded-xl">
                 <img
                   src="/favicon-96x96.png"
