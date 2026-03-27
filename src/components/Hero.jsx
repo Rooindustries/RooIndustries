@@ -4,7 +4,7 @@ import { publicClient } from "../sanityClient";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 
 const fallbackHeroData = {
-  tagline: "Roo Industries - Precision Performance Engineering",
+  tagline: "",
   headingLine1: "More FPS. Less Input Lag.",
   headingLine2: "Tuned for Your Exact Hardware.",
   description:
