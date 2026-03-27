@@ -549,7 +549,7 @@ export default function Navbar({ routeShell = "browser" }) {
               href="https://discord.gg/M7nTkn9dxE"
               target="_blank"
               rel="noreferrer"
-              className="hidden sm:inline-flex items-center gap-2 px-4 py-2.5 text-base font-semibold whitespace-nowrap rounded-full max-[820px]:px-3 max-[820px]:text-sm max-[820px]:gap-1.5 text-white/70 hover:text-white border border-slate-700/50 transition"
+              className="hidden sm:inline-flex items-center gap-2 px-4 py-2.5 text-base font-semibold whitespace-nowrap rounded-full max-[820px]:px-3 max-[820px]:text-sm max-[820px]:gap-1.5 text-white/70 hover:text-white border border-white/10 hover:border-cyan-300/30 transition"
             >
               Discord
             </a>
