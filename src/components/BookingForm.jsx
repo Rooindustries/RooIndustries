@@ -1176,11 +1176,16 @@ export default function BookingForm({ isMobile }) {
 
     const bookedSet = new Set();
     const heldMap = new Map();
+    const expiredHoldSet = new Set();
 
     (settings.bookedSlots || []).forEach((slot) => {
       if (!slot.startTimeUTC) return;
       if (slot.isHold) {
-        heldMap.set(slot.startTimeUTC, slot.holdId || "");
+        if (slot.isExpiredHold) {
+          expiredHoldSet.add(slot.startTimeUTC);
+        } else {
+          heldMap.set(slot.startTimeUTC, slot.holdId || "");
+        }
       } else {
         bookedSet.add(slot.startTimeUTC);
       }
@@ -1191,15 +1196,17 @@ export default function BookingForm({ isMobile }) {
       const isBooked = bookedSet.has(slot.slotId);
       const holdId = heldMap.get(slot.slotId);
       const isHeldOther = !!holdId && holdId !== myHold?.holdId;
+      const isExpired = expiredHoldSet.has(slot.slotId);
       const isPast = slot.utcStart <= now;
-      const disabled = isBooked || isHeldOther || isPast;
+      const disabled = isBooked || isHeldOther || isExpired || isPast;
 
       return {
         ...slot,
         disabled,
         isBooked,
         isHeldOther,
-        isAllowed: true,
+        isExpiredHold: isExpired,
+        isAllowed: !isExpired,
         isPast,
         isUnavailable: false,
       };
@@ -1906,6 +1913,9 @@ export default function BookingForm({ isMobile }) {
                           <span>Temporarily Reserved</span>
                         </div>
                       </div>
+                      <p className="mt-2 text-[10px] font-bold text-sky-100 text-center">
+                        All times shown are in your local timezone ({userTimeZone.replace(/_/g, " ")})
+                      </p>
                     </div>
 
                     {selectedDate && (
@@ -1952,6 +1962,8 @@ export default function BookingForm({ isMobile }) {
                                 className={`py-2 rounded-lg border transition-all duration-200 ${
                                   t.isUnavailable
                                     ? "bg-slate-900/30 border-slate-700/30 text-slate-600 cursor-not-allowed"
+                                    : t.isExpiredHold
+                                    ? "bg-slate-800/30 border-slate-600/30 text-slate-500 cursor-not-allowed line-through opacity-50"
                                     : t.isBooked
                                     ? "bg-red-900/40 border-red-700/40 text-red-400 cursor-not-allowed"
                                     : t.isHeldOther
