@@ -155,7 +155,7 @@ export default function Packages({
 
   if (isLoading) {
     return (
-      <section className="relative z-10 pt-32 pb-24 text-center text-white" aria-hidden="true">
+      <section className="relative z-10 pt-16 pb-24 text-center text-white" aria-hidden="true">
         <div className="mt-12 px-6">
           <div className="mx-auto max-w-6xl min-h-[1320px] rounded-3xl border border-sky-700/20 bg-gradient-to-b from-[#0d1526]/70 to-[#08101d]/80" />
         </div>
