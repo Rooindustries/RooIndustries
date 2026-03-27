@@ -144,6 +144,7 @@ export default function HowItWorks({ initialData = null }) {
           muted
           playsInline
           preload="metadata"
+            fetchPriority="low"
           poster={poster}
         >
           <source src={webm} type="video/webm" />
