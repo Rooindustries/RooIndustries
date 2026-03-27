@@ -517,7 +517,7 @@ export default function Navbar({ routeShell = "browser" }) {
             <a
               href="/#packages"
               onClick={(event) => handleSectionLinkClick(event, SECTION_HASHES.plans)}
-              className="hidden sm:inline-flex items-center gap-2 px-5 py-3 text-base font-semibold whitespace-nowrap rounded-full max-[820px]:px-4 max-[820px]:text-sm max-[820px]:gap-1.5 text-white border border-cyan-300/30 bg-cyan-400/10 hover:bg-cyan-400/15 hover:border-cyan-300/50 shadow-[0_0_18px_rgba(34,211,238,0.14)] transition"
+              className="hidden sm:inline-flex items-center gap-2 px-5 py-3 text-base font-semibold whitespace-nowrap rounded-full max-[820px]:px-4 max-[820px]:text-sm max-[820px]:gap-1.5 text-white bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 transition"
             >
               Packages
             </a>
