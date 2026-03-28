@@ -23,6 +23,49 @@ const fallbackHeroData = {
 };
 const enableLiveHeroContent = true;
 
+
+function CtaNoteBalanced({ icon }) {
+  const containerRef = useRef(null);
+  const singleRef = useRef(null);
+  const [isSplit, setIsSplit] = useState(false);
+
+  useEffect(() => {
+    const check = () => {
+      const el = singleRef.current;
+      if (!el) return;
+      setIsSplit(el.scrollWidth > el.clientWidth);
+    };
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
+  const line1 = "Top 20 3DMark Hall of Fame \u00b7 Plans from $49.95";
+  const line2 = "20\u201392% FPS Boost \u00b7 Up to Lifetime Warranty";
+  const full = line1 + " \u00b7 " + line2;
+
+  return (
+    <div ref={containerRef} className="mt-3 sm:mt-5 text-center">
+      {!isSplit ? (
+        <p ref={singleRef} className="inline-flex items-center gap-2 text-sm sm:text-base font-extrabold tracking-wide whitespace-nowrap">
+          {icon && <span className="text-slate-100" aria-hidden="true">{icon}</span>}
+          <span className="gold-flair-text">{full}</span>
+        </p>
+      ) : (
+        <div className="flex flex-col items-center gap-0.5">
+          <p className="inline-flex items-center gap-2 text-sm sm:text-base font-extrabold tracking-wide">
+            {icon && <span className="text-slate-100" aria-hidden="true">{icon}</span>}
+            <span className="gold-flair-text">{line1}</span>
+          </p>
+          <p className="text-sm sm:text-base font-extrabold tracking-wide">
+            <span className="gold-flair-text">{line2}</span>
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Hero() {
   const [heroData, setHeroData] = useState(fallbackHeroData);
   const handleHomeSectionLink = useHomeSectionLinkHandler();
@@ -270,29 +313,7 @@ export default function Hero() {
         </div>
 
         {ctaNote && (
-          <div className="mt-3 sm:mt-5 text-center">
-            <p className="hidden sm:block text-sm sm:text-base font-extrabold tracking-wide" style={{ textWrap: "balance" }}>
-              {ctaNoteIcon && (
-                <span className="text-slate-100 mr-2" aria-hidden="true">
-                  {ctaNoteIcon}
-                </span>
-              )}
-              <span className="gold-flair-text">{ctaNote}</span>
-            </p>
-            <div className="sm:hidden flex flex-col items-center gap-0.5">
-              <p className="inline-flex items-center gap-2 text-sm font-extrabold tracking-wide">
-                {ctaNoteIcon && (
-                  <span className="text-slate-100" aria-hidden="true">
-                    {ctaNoteIcon}
-                  </span>
-                )}
-                <span className="gold-flair-text">Top 20 3DMark Hall of Fame · Plans from $49.95</span>
-              </p>
-              <p className="text-sm font-extrabold tracking-wide">
-                <span className="gold-flair-text">20–92% FPS Boost · Up to Lifetime Warranty</span>
-              </p>
-            </div>
-          </div>
+          <CtaNoteBalanced icon={ctaNoteIcon} />
         )}
       </section>
     </header>
