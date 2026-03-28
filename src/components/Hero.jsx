@@ -271,9 +271,9 @@ export default function Hero() {
 
         {ctaNote && (
           <div className="mt-3 sm:mt-5 text-center">
-            <p className="hidden sm:inline-flex items-center gap-2 text-sm sm:text-base font-extrabold tracking-wide">
+            <p className="hidden sm:block text-sm sm:text-base font-extrabold tracking-wide" style={{ textWrap: "balance" }}>
               {ctaNoteIcon && (
-                <span className="text-slate-100" aria-hidden="true">
+                <span className="text-slate-100 mr-2" aria-hidden="true">
                   {ctaNoteIcon}
                 </span>
               )}
