@@ -12,7 +12,7 @@ const fallbackHeroData = {
   subtext: "Measurable gains. Competitive standard. No guesswork.",
   ctaPrimaryText: "Optimize My PC",
   ctaSecondaryText: "See How It Works",
-  ctaNote: "Top 20 3DMark Hall of Fame · 150+ rigs optimized · Plans from $49.95",
+  ctaNote: "Top 20 3DMark Hall of Fame · 20–92% FPS Boost · Up to Lifetime Warranty · Plans from $49.95",
   ctaNoteIcon: "🏆",
   bullets: [
     "20–92% FPS Boost",
@@ -270,30 +270,30 @@ export default function Hero() {
         </div>
 
         {ctaNote && (
-          <p className="mt-3 sm:mt-5 text-sm sm:text-base font-extrabold tracking-wide relative inline-flex items-center gap-2">
-            {ctaNoteIcon && (
-              <span className="text-slate-100" aria-hidden="true">
-                {ctaNoteIcon}
-              </span>
-            )}
-            <span className="gold-flair-text">{ctaNote}</span>
-          </p>
-        )}
-
-        <div className="mt-3 sm:mt-5 w-full">
-          {bullets.length > 0 && (
-            <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 sm:gap-y-2 sm:gap-x-6">
-              {bullets.map((text, i) => (
-                <div key={i} className="flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-green-400 shrink-0" />
-                  <span className="text-s sm:text-s font-medium text-slate-200 whitespace-nowrap">
-                    {renderWithGlow110(text)}
+          <div className="mt-3 sm:mt-5 text-center">
+            <p className="hidden sm:inline-flex items-center gap-2 text-sm sm:text-base font-extrabold tracking-wide">
+              {ctaNoteIcon && (
+                <span className="text-slate-100" aria-hidden="true">
+                  {ctaNoteIcon}
+                </span>
+              )}
+              <span className="gold-flair-text">{ctaNote}</span>
+            </p>
+            <div className="sm:hidden flex flex-col items-center gap-0.5">
+              <p className="inline-flex items-center gap-2 text-sm font-extrabold tracking-wide">
+                {ctaNoteIcon && (
+                  <span className="text-slate-100" aria-hidden="true">
+                    {ctaNoteIcon}
                   </span>
-                </div>
-              ))}
+                )}
+                <span className="gold-flair-text">Top 20 3DMark Hall of Fame · Plans from $49.95</span>
+              </p>
+              <p className="text-sm font-extrabold tracking-wide">
+                <span className="gold-flair-text">20–92% FPS Boost · Up to Lifetime Warranty</span>
+              </p>
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </section>
     </header>
   );
