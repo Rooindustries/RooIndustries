@@ -74,7 +74,7 @@ function CtaNoteBalanced({ icon }) {
   return (
     <div className="mt-3 sm:mt-5 text-center">
       {!isSplit ? (
-        <p ref={singleRef} className="flex items-center justify-center gap-2 text-sm sm:text-base font-extrabold tracking-wide whitespace-nowrap overflow-hidden max-w-full">
+        <p ref={singleRef} className="flex items-center justify-center gap-2 text-xs sm:text-sm font-extrabold tracking-wide whitespace-nowrap overflow-hidden max-w-full">
           {icon && <span className="text-slate-100" aria-hidden="true">{icon}</span>}
           <span className="gold-flair-text">{fullText}</span>
         </p>
