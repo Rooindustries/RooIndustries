@@ -26,9 +26,8 @@ const enableLiveHeroContent = true;
 
 function CtaNoteBalanced({ icon }) {
   const singleRef = useRef(null);
-  const line2PRef = useRef(null);
-  const textSpan1Ref = useRef(null);
-  const textSpan2Ref = useRef(null);
+  const line1Ref = useRef(null);
+  const line2Ref = useRef(null);
   const [isSplit, setIsSplit] = useState(false);
 
   const line1Text = "Top 20 3DMark Hall of Fame \u00b7 Plans from $49.95";
@@ -47,26 +46,25 @@ function CtaNoteBalanced({ icon }) {
   }, []);
 
   useEffect(() => {
-    if (!isSplit || !textSpan1Ref.current || !textSpan2Ref.current || !line2PRef.current) return;
+    if (!isSplit) return;
+    const el1 = line1Ref.current;
+    const el2 = line2Ref.current;
+    if (!el1 || !el2) return;
 
     const match = () => {
-      const p2 = line2PRef.current;
+      const p2 = el2.parentElement;
       if (!p2) return;
-      // Reset to base
       p2.style.fontSize = "";
-      // Wait for layout
-      requestAnimationFrame(() => {
-        const w1 = textSpan1Ref.current?.getBoundingClientRect().width || 0;
-        const w2 = textSpan2Ref.current?.getBoundingClientRect().width || 0;
-        if (w1 <= 0 || w2 <= 0) return;
-        const base = parseFloat(getComputedStyle(p2).fontSize);
-        // Scale line2 font so its text width equals line1 text width
-        p2.style.fontSize = (base * w1 / w2) + "px";
-      });
+      const w1 = el1.getBoundingClientRect().width;
+      const w2 = el2.getBoundingClientRect().width;
+      if (w2 > 0 && w1 > 0 && Math.abs(w1 - w2) > 2) {
+        const baseSize = parseFloat(getComputedStyle(p2).fontSize);
+        p2.style.fontSize = (baseSize * (w1 / w2)) + "px";
+      }
     };
 
-    match();
-    const onResize = () => match();
+    const onResize = () => requestAnimationFrame(match);
+    requestAnimationFrame(match);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, [isSplit]);
@@ -82,10 +80,10 @@ function CtaNoteBalanced({ icon }) {
         <div className="flex flex-col items-center gap-0.5">
           <p className="inline-flex items-center gap-2 text-sm sm:text-base font-extrabold tracking-wide whitespace-nowrap">
             {icon && <span className="text-slate-100" aria-hidden="true">{icon}</span>}
-            <span ref={textSpan1Ref} className="gold-flair-text">{line1Text}</span>
+            <span ref={line1Ref} className="gold-flair-text">{line1Text}</span>
           </p>
-          <p ref={line2PRef} className="text-sm sm:text-base font-extrabold tracking-wide whitespace-nowrap">
-            <span ref={textSpan2Ref} className="gold-flair-text">{line2Text}</span>
+          <p className="text-sm sm:text-base font-extrabold tracking-wide whitespace-nowrap">
+            <span ref={line2Ref} className="gold-flair-text">{line2Text}</span>
           </p>
         </div>
       )}
