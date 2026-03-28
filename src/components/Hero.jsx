@@ -25,9 +25,14 @@ const enableLiveHeroContent = true;
 
 
 function CtaNoteBalanced({ icon }) {
-  const containerRef = useRef(null);
   const singleRef = useRef(null);
+  const line1Ref = useRef(null);
+  const line2Ref = useRef(null);
   const [isSplit, setIsSplit] = useState(false);
+
+  const line1Text = "Top 20 3DMark Hall of Fame \u00b7 Plans from $49.95";
+  const line2Text = "20\u201392% FPS Boost \u00b7 Up to Lifetime Warranty";
+  const fullText = line1Text + " \u00b7 " + line2Text;
 
   useEffect(() => {
     const check = () => {
@@ -40,58 +45,42 @@ function CtaNoteBalanced({ icon }) {
     return () => window.removeEventListener("resize", check);
   }, []);
 
-  const splitLine1Ref = useRef(null);
-  const splitLine2Ref = useRef(null);
-  const [splitFontSize, setSplitFontSize] = useState("0.875rem");
-
   useEffect(() => {
     if (!isSplit) return;
-    const el1 = splitLine1Ref.current;
-    const el2 = splitLine2Ref.current;
+    const el1 = line1Ref.current;
+    const el2 = line2Ref.current;
     if (!el1 || !el2) return;
 
-    const matchWidths = () => {
-      const base = 14;
-      el1.style.fontSize = base + "px";
-      el2.style.fontSize = base + "px";
-      const w1 = el1.scrollWidth;
-      const w2 = el2.scrollWidth;
-      const target = Math.max(w1, w2);
-      const container = el1.parentElement;
-      const maxW = container ? container.clientWidth : window.innerWidth - 48;
-      const finalW = Math.min(target, maxW);
-      const f1 = base * (finalW / w1);
-      const f2 = base * (finalW / w2);
-      const finalSize = Math.min(f1, f2, 18);
-      setSplitFontSize(finalSize + "px");
-      el1.style.fontSize = (finalSize * (finalW / w1)) + "px";
-      el2.style.fontSize = finalSize + "px";
+    const match = () => {
+      el2.style.fontSize = "";
+      const w1 = el1.getBoundingClientRect().width;
+      const w2 = el2.getBoundingClientRect().width;
+      if (w2 > 0 && w1 > 0) {
+        const baseSize = parseFloat(getComputedStyle(el2).fontSize);
+        el2.style.fontSize = (baseSize * (w1 / w2)) + "px";
+      }
     };
 
-    matchWidths();
-    window.addEventListener("resize", matchWidths);
-    return () => window.removeEventListener("resize", matchWidths);
+    requestAnimationFrame(match);
+    window.addEventListener("resize", () => requestAnimationFrame(match));
+    return () => window.removeEventListener("resize", match);
   }, [isSplit]);
 
-  const line1 = "Top 20 3DMark Hall of Fame \u00b7 Plans from $49.95";
-  const line2 = "20\u201392% FPS Boost \u00b7 Up to Lifetime Warranty";
-  const full = line1 + " \u00b7 " + line2;
-
   return (
-    <div ref={containerRef} className="mt-3 sm:mt-5 text-center">
+    <div className="mt-3 sm:mt-5 text-center">
       {!isSplit ? (
-        <p ref={singleRef} className="flex items-center gap-2 text-sm sm:text-base font-extrabold tracking-wide whitespace-nowrap overflow-hidden max-w-full">
+        <p ref={singleRef} className="flex items-center justify-center gap-2 text-sm sm:text-base font-extrabold tracking-wide whitespace-nowrap overflow-hidden max-w-full">
           {icon && <span className="text-slate-100" aria-hidden="true">{icon}</span>}
-          <span className="gold-flair-text">{full}</span>
+          <span className="gold-flair-text">{fullText}</span>
         </p>
       ) : (
         <div className="flex flex-col items-center gap-0.5">
-          <p ref={splitLine1Ref} className="inline-flex items-center gap-2 font-extrabold tracking-wide" style={{ fontSize: splitFontSize }}>
+          <p ref={line1Ref} className="inline-flex items-center gap-2 text-sm sm:text-base font-extrabold tracking-wide whitespace-nowrap">
             {icon && <span className="text-slate-100" aria-hidden="true">{icon}</span>}
-            <span className="gold-flair-text">{line1}</span>
+            <span className="gold-flair-text">{line1Text}</span>
           </p>
-          <p ref={splitLine2Ref} className="font-extrabold tracking-wide" style={{ fontSize: splitFontSize }}>
-            <span className="gold-flair-text">{line2}</span>
+          <p ref={line2Ref} className="text-sm sm:text-base font-extrabold tracking-wide whitespace-nowrap">
+            <span className="gold-flair-text">{line2Text}</span>
           </p>
         </div>
       )}
