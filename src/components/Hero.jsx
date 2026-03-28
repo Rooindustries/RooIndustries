@@ -75,12 +75,12 @@ function CtaNoteBalanced({ icon }) {
         </p>
       ) : (
         <div className="flex flex-col items-center gap-0.5">
-          <p ref={line1Ref} className="inline-flex items-center gap-2 text-sm sm:text-base font-extrabold tracking-wide whitespace-nowrap">
+          <p className="inline-flex items-center gap-2 text-sm sm:text-base font-extrabold tracking-wide whitespace-nowrap">
             {icon && <span className="text-slate-100" aria-hidden="true">{icon}</span>}
-            <span className="gold-flair-text">{line1Text}</span>
+            <span ref={line1Ref} className="gold-flair-text">{line1Text}</span>
           </p>
-          <p ref={line2Ref} className="text-sm sm:text-base font-extrabold tracking-wide whitespace-nowrap">
-            <span className="gold-flair-text">{line2Text}</span>
+          <p className="text-sm sm:text-base font-extrabold tracking-wide whitespace-nowrap">
+            <span ref={line2Ref} className="gold-flair-text">{line2Text}</span>
           </p>
         </div>
       )}
