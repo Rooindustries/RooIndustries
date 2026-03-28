@@ -12,7 +12,7 @@ const fallbackHeroData = {
   subtext: "Measurable gains. Competitive standard. No guesswork.",
   ctaPrimaryText: "Optimize My PC",
   ctaSecondaryText: "See How It Works",
-  ctaNote: "Top 20 3DMark Hall of Fame · 20–92% FPS Boost · Up to Lifetime Warranty · Plans from $49.95",
+  ctaNote: "Top 20 3DMark Hall of Fame · Up to Lifetime Warranty · Plans from $49.95 · Plans from $49.95",
   ctaNoteIcon: "🏆",
   bullets: [
     "20–92% FPS Boost",
