@@ -40,6 +40,39 @@ function CtaNoteBalanced({ icon }) {
     return () => window.removeEventListener("resize", check);
   }, []);
 
+  const splitLine1Ref = useRef(null);
+  const splitLine2Ref = useRef(null);
+  const [splitFontSize, setSplitFontSize] = useState("0.875rem");
+
+  useEffect(() => {
+    if (!isSplit) return;
+    const el1 = splitLine1Ref.current;
+    const el2 = splitLine2Ref.current;
+    if (!el1 || !el2) return;
+
+    const matchWidths = () => {
+      const base = 14;
+      el1.style.fontSize = base + "px";
+      el2.style.fontSize = base + "px";
+      const w1 = el1.scrollWidth;
+      const w2 = el2.scrollWidth;
+      const target = Math.max(w1, w2);
+      const container = el1.parentElement;
+      const maxW = container ? container.clientWidth : window.innerWidth - 48;
+      const finalW = Math.min(target, maxW);
+      const f1 = base * (finalW / w1);
+      const f2 = base * (finalW / w2);
+      const finalSize = Math.min(f1, f2, 18);
+      setSplitFontSize(finalSize + "px");
+      el1.style.fontSize = (finalSize * (finalW / w1)) + "px";
+      el2.style.fontSize = finalSize + "px";
+    };
+
+    matchWidths();
+    window.addEventListener("resize", matchWidths);
+    return () => window.removeEventListener("resize", matchWidths);
+  }, [isSplit]);
+
   const line1 = "Top 20 3DMark Hall of Fame \u00b7 Plans from $49.95";
   const line2 = "20\u201392% FPS Boost \u00b7 Up to Lifetime Warranty";
   const full = line1 + " \u00b7 " + line2;
@@ -53,11 +86,11 @@ function CtaNoteBalanced({ icon }) {
         </p>
       ) : (
         <div className="flex flex-col items-center gap-0.5">
-          <p className="inline-flex items-center gap-2 text-sm sm:text-base font-extrabold tracking-wide">
+          <p ref={splitLine1Ref} className="inline-flex items-center gap-2 font-extrabold tracking-wide" style={{ fontSize: splitFontSize }}>
             {icon && <span className="text-slate-100" aria-hidden="true">{icon}</span>}
             <span className="gold-flair-text">{line1}</span>
           </p>
-          <p className="text-sm sm:text-base font-extrabold tracking-wide">
+          <p ref={splitLine2Ref} className="font-extrabold tracking-wide" style={{ fontSize: splitFontSize }}>
             <span className="gold-flair-text">{line2}</span>
           </p>
         </div>
