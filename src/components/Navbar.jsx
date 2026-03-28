@@ -440,10 +440,10 @@ export default function Navbar({ routeShell = "browser" }) {
               </div>
 
               <div className="block leading-tight">
-                <div className="text-white font-semibold tracking-wide text-lg">
+                <div className="text-white font-semibold tracking-wide text-sm sm:text-lg">
                   Roo Industries
                 </div>
-                <div className="text-[10px] sm:text-xs text-white/55">
+                <div className="text-[9px] sm:text-xs text-white/55 whitespace-nowrap">
                   Precision Performance Engineering
                 </div>
               </div>
