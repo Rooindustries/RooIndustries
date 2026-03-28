@@ -22,9 +22,10 @@ import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 // Lazy-load framer-motion-heavy sections to keep them out of the initial bundle.
 // DeferredSection already defers rendering until near-viewport; lazy() defers
 // the JS download/parse too — saving ~52 KB (gzipped) from first-load.
-import Services from "../components/Services";
+const loadServices = () => import("../components/Services");
 const loadPackages = () => import("../components/Packages");
 const loadFaq = () => import("../components/Faq");
+const Services = lazy(loadServices);
 const Packages = lazy(loadPackages);
 const Faq = lazy(loadFaq);
 
@@ -141,6 +142,7 @@ export default function Home({ initialData = null }) {
           ...(HOME_SECTION_PREFETCH_BY_HASH["#how-it-works"] || []),
         ])
       );
+      loadServices().catch(() => {});
       loadPackages().catch(() => {});
       prefetchHomeSectionData(warmKeys).catch(() => {});
     };
@@ -153,7 +155,7 @@ export default function Home({ initialData = null }) {
     <>
       <Hero />
       <DeferredSection
-        fallbackClassName="min-h-[380px]"
+        fallbackClassName="min-h-[510px]"
         rootMargin="160px 0px"
         eager={eagerAll}
       >
@@ -174,9 +176,11 @@ export default function Home({ initialData = null }) {
           rootMargin="240px 0px"
           eager={eagerAll}
         >
-          <div className="deferred-section-content">
-            <Services initialData={initialData?.services || null} />
-          </div>
+          <Suspense fallback={<div className="min-h-[520px]" />}>
+            <div className="deferred-section-content">
+              <Services initialData={initialData?.services || null} />
+            </div>
+          </Suspense>
         </DeferredSection>
       </section>
       <section id="packages" style={{ scrollMarginTop: "var(--section-nav-offset)" }}>
@@ -215,7 +219,7 @@ export default function Home({ initialData = null }) {
           onClick={(event) => handleHomeSectionLink(event, "#packages")}
           className="glow-button book-optimization-button relative inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white ring-2 ring-cyan-300/70 hover:text-white active:translate-y-px transition-all duration-300"
         >
-          Optimize My PC
+          Tune My Rig
           <span className="glow-line glow-line-top" />
           <span className="glow-line glow-line-right" />
           <span className="glow-line glow-line-bottom" />
