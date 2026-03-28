@@ -52,18 +52,21 @@ function CtaNoteBalanced({ icon }) {
     if (!el1 || !el2) return;
 
     const match = () => {
-      el2.style.fontSize = "";
+      const p2 = el2.parentElement;
+      if (!p2) return;
+      p2.style.fontSize = "";
       const w1 = el1.getBoundingClientRect().width;
       const w2 = el2.getBoundingClientRect().width;
-      if (w2 > 0 && w1 > 0) {
-        const baseSize = parseFloat(getComputedStyle(el2).fontSize);
-        el2.style.fontSize = (baseSize * (w1 / w2)) + "px";
+      if (w2 > 0 && w1 > 0 && Math.abs(w1 - w2) > 2) {
+        const baseSize = parseFloat(getComputedStyle(p2).fontSize);
+        p2.style.fontSize = (baseSize * (w1 / w2)) + "px";
       }
     };
 
+    const onResize = () => requestAnimationFrame(match);
     requestAnimationFrame(match);
-    window.addEventListener("resize", () => requestAnimationFrame(match));
-    return () => window.removeEventListener("resize", match);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
   }, [isSplit]);
 
   return (
