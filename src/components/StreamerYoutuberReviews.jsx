@@ -46,7 +46,7 @@ export default function StreamerYoutuberReviews({ initialData = null }) {
   }, [initialData]);
 
   const sectionClass =
-    "pt-12 sm:pt-16 pb-4 sm:pb-6 text-center text-white relative overflow-hidden";
+    "pt-6 sm:pt-8 pb-4 sm:pb-6 text-center text-white relative overflow-hidden";
 
   useEffect(() => {
     if (typeof IntersectionObserver === "undefined" || !sectionRef.current) {
