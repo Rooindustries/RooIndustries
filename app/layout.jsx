@@ -11,7 +11,7 @@ export default function RootLayout({ children }) {
       <head>
         <link
           rel="preload"
-          href="/fonts/roboto-flex-latin-opsz-normal.woff2"
+          href="/fonts/manrope-latin-variable.woff2"
           as="font"
           type="font/woff2"
           crossOrigin="anonymous"
