@@ -23,7 +23,7 @@
         },
         {
           "key": "Link",
-          "value": "</fonts/roboto-flex-latin-opsz-normal.woff2>; rel=preload; as=font; type=font/woff2; crossorigin, </favicon-96x96.png>; rel=preload; as=image"
+          "value": "</fonts/manrope-latin-variable.woff2>; rel=preload; as=font; type=font/woff2; crossorigin, </favicon-96x96.png>; rel=preload; as=image"
         }
       ]
     },
