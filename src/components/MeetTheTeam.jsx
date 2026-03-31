@@ -541,24 +541,26 @@ export default function MeetTheTeam({ onSeoData }) {
                                 placeholderClassName="text-xl font-bold text-cyan-300"
                               />
                             </div>
-                            <div className="text-xl font-semibold">
-                              {card?.name}
-                            </div>
-                            {card?.title && (
-                              <div className="mt-1 text-xs font-medium text-purple-300">
-                                {card.title}
+                            <div className="flex-1 flex flex-col">
+                              <div className="text-xl font-semibold">
+                                {card?.name}
                               </div>
-                            )}
-                            {card?.bio && (
-                              <p className="mt-3 text-sm text-slate-400">
-                                {card.bio}
-                              </p>
-                            )}
+                              {card?.title && (
+                                <div className="mt-1 text-xs font-medium text-purple-300">
+                                  {card.title}
+                                </div>
+                              )}
+                              {card?.bio && (
+                                <p className="mt-3 text-sm text-slate-400">
+                                  {card.bio}
+                                </p>
+                              )}
+                            </div>
                             {card?.ctaLabel && card?.ctaUrl && (
                               <a
                                 href={card.ctaUrl}
                                 {...getLinkProps(card.ctaUrl)}
-                                className="mt-auto pt-3 inline-flex self-center items-center gap-2 rounded-md bg-purple-500 px-5 py-2.5 text-sm font-medium text-white transition-all duration-200 hover:bg-purple-600 hover:scale-[1.02]"
+                                className="mt-4 inline-flex self-center items-center gap-2 rounded-md bg-purple-500 px-5 py-2.5 text-sm font-medium text-white transition-all duration-200 hover:bg-purple-600 hover:scale-[1.02]"
                               >
                                 <SocialIcon type="twitch" />
                                 {card.ctaLabel}
