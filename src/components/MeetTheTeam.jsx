@@ -524,7 +524,7 @@ export default function MeetTheTeam({ onSeoData }) {
                         return (
                           <div
                             key={card?._key || `${card?.name}-${cardIndex}`}
-                            className="relative w-full max-w-[300px] rounded-xl border border-purple-400/30 bg-white/[0.02] px-6 py-7 text-center transition-all duration-300 hover:-translate-y-1 hover:border-purple-400/60 hover:shadow-[0_12px_30px_rgba(145,70,255,0.15)] flex flex-col items-center"
+                            className="relative w-full max-w-[300px] rounded-xl border border-purple-400/30 bg-white/[0.02] px-6 pt-7 pb-5 text-center transition-all duration-300 hover:-translate-y-1 hover:border-purple-400/60 hover:shadow-[0_12px_30px_rgba(145,70,255,0.15)] flex flex-col items-center"
                           >
                             {card?.platformBadge && (
                               <span className="absolute top-4 right-4 rounded bg-purple-500 px-2.5 py-1 text-[10px] font-semibold tracking-[0.2em] text-white">
