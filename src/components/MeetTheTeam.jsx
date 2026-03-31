@@ -558,7 +558,7 @@ export default function MeetTheTeam({ onSeoData }) {
                               <a
                                 href={card.ctaUrl}
                                 {...getLinkProps(card.ctaUrl)}
-                                className="mt-auto pt-5 inline-flex items-center gap-2 rounded-md bg-purple-500 px-5 py-2.5 text-sm font-medium text-white transition-all duration-200 hover:bg-purple-600 hover:scale-[1.02]"
+                                className="mt-auto pt-5 inline-flex self-center items-center gap-2 rounded-md bg-purple-500 px-5 py-2.5 text-sm font-medium text-white transition-all duration-200 hover:bg-purple-600 hover:scale-[1.02]"
                               >
                                 <SocialIcon type="twitch" />
                                 {card.ctaLabel}
