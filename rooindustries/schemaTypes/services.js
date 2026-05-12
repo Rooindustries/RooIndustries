@@ -10,6 +10,14 @@ export default {
       name: 'cards',
       title: 'Top Service Cards',
       type: 'array',
+      initialValue: [
+        {title: 'Zero Lag', description: 'Click. It happens. No delay in between.', iconType: 'clock'},
+        {title: 'Stutter Free', description: 'Consistent frametimes across the board.', iconType: 'zap'},
+        {title: 'FPS Unlocked', description: 'You had more headroom than you thought.', iconType: 'shield'},
+        {title: 'Deep Scan', description: 'Shows you the actual bottleneck, not a guess.', iconType: 'wrench'},
+        {title: 'Go Live', description: 'OBS and your game stop competing for CPU.', iconType: 'video'},
+        {title: 'No Throttle', description: 'Stays fast through long renders and edits.', iconType: 'cpu'},
+      ],
       of: [
         {
           type: 'object',

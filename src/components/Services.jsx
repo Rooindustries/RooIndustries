@@ -25,6 +25,15 @@ function urlFor(source) {
   return builder.image(source);
 }
 
+const CANONICAL_SERVICE_CARDS = [
+  { iconType: "clock",  title: "Zero Lag",         description: "Click. It happens. No delay in between." },
+  { iconType: "zap",    title: "Stutter Free",     description: "Consistent frametimes across the board." },
+  { iconType: "shield", title: "FPS Unlocked",     description: "You had more headroom than you thought." },
+  { iconType: "wrench", title: "Deep Scan",        description: "Shows you the actual bottleneck, not a guess." },
+  { iconType: "video",  title: "Go Live",          description: "OBS and your game stop competing for CPU." },
+  { iconType: "cpu",    title: "No Throttle",      description: "Stays fast through long renders and edits." },
+];
+
 function AnimatedNumber({ value, duration = 0.65 }) {
   const mv = useMotionValue(0);
   const [display, setDisplay] = useState(0);
@@ -64,9 +73,6 @@ export default function Services({ initialData = null }) {
       .then(setData)
       .catch(console.error);
   }, [data]);
-
-  const iconClass =
-    "w-6 h-6 text-cyan-300 drop-shadow-[0_0_10px_rgba(56,189,248,0.35)]";
 
   const iconMap = useMemo(
     () => ({
@@ -140,14 +146,6 @@ export default function Services({ initialData = null }) {
     return { bf, af };
   };
 
-  const iconWrap =
-    "w-14 h-14 rounded-2xl grid place-items-center relative mx-auto " +
-    "bg-gradient-to-b from-sky-400/15 via-cyan-400/10 to-transparent " +
-    "ring-1 ring-white/10 shadow-[0_10px_30px_rgba(0,0,0,.45)] " +
-    "after:content-[''] after:absolute after:inset-0 after:rounded-2xl " +
-    "after:bg-[radial-gradient(60%_60%_at_50%_20%,rgba(56,189,248,.25),transparent_70%)] " +
-    "after:opacity-70";
-
   const contentSwap = {
     initial: { opacity: 0, scale: 0.98 },
     animate: { opacity: 1, scale: 1 },
@@ -168,11 +166,13 @@ export default function Services({ initialData = null }) {
   const badgeSuffix = data.benchBadgeSuffix || "FPS";
   const pagePrefix = data.benchPagePrefix || "Page";
 
+  const cards = data.cards?.length ? data.cards : CANONICAL_SERVICE_CARDS;
+
   return (
     <section className="mx-auto max-w-[92rem] pt-8 pb-16 px-4 sm:px-6">
       <div className="text-center">
         {data.heading && (
-          <h3 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.45)]">
+          <h3 className="text-4xl sm:text-5xl font-bold tracking-tight text-sky-200">
             {data.heading}
           </h3>
         )}
@@ -186,56 +186,43 @@ export default function Services({ initialData = null }) {
       <div className="h-10" />
 
       {/* SERVICE CARDS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-5">
-        {data.cards?.map((card, i) => {
-          const IconComponent = iconMap[card.iconType] || HelpCircle;
-
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+        {cards.map((card, i) => {
+          const canonical = CANONICAL_SERVICE_CARDS[i];
+          const title = canonical?.title ?? card.title;
+          const desc = canonical?.description ?? card.description;
+          const Icon = iconMap[canonical?.iconType ?? card.iconType] || HelpCircle;
           return (
-            <div
-              key={i}
-              className={
-                "group relative overflow-hidden rounded-2xl p-6 min-h-[190px] text-center " +
-                "bg-gradient-to-b from-[#111827]/70 to-[#0b1220]/85 " +
-                "ring-1 ring-white/10 shadow-[0_18px_55px_rgba(0,0,0,.55)] " +
-                "transition duration-300 hover:-translate-y-[2px] hover:ring-cyan-400/35"
-              }
+            <motion.div
+              key={card._key || `svc-${i}`}
+              className="rounded-2xl border border-sky-700/35 bg-gradient-to-b from-[#0a1830] to-[#091427] p-6 min-h-[220px]"
+              initial={{ opacity: 0, y: 14 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.35, delay: i * 0.04, ease: "easeOut" }}
             >
-              <div className="pointer-events-none absolute inset-0 opacity-70 hidden sm:block">
-                <div className="absolute -top-24 -left-24 h-56 w-56 rounded-full bg-cyan-400/10 blur-3xl" />
-                <div className="absolute -bottom-24 -right-24 h-56 w-56 rounded-full bg-sky-400/10 blur-3xl" />
+              <div className="w-12 h-12 rounded-xl grid place-items-center bg-[#0b2642] border border-sky-600/35">
+                {card.customIcon ? (
+                  <img
+                    src={urlFor(card.customIcon).width(64).url()}
+                    alt={title ? `${title} icon` : "Service icon"}
+                    width={22}
+                    height={22}
+                    loading="lazy"
+                    decoding="async"
+                    className="w-[22px] h-[22px] object-contain"
+                  />
+                ) : (
+                  <Icon className="w-[22px] h-[22px] text-sky-300" />
+                )}
               </div>
-
-              <div className="relative">
-                <div className={iconWrap}>
-                  {/* SEO: keep custom service icons as img elements with descriptive alt text. */}
-                  {card.customIcon ? (
-                    <img
-                      src={urlFor(card.customIcon).width(64).url()}
-                      alt={
-                        card.title
-                          ? `${card.title} service icon`
-                          : "Service icon"
-                      }
-                      width={28}
-                      height={28}
-                      loading="lazy"
-                      decoding="async"
-                      className="w-7 h-7 object-contain drop-shadow-[0_0_8px_rgba(56,189,248,0.25)]"
-                    />
-                  ) : (
-                    <IconComponent className={iconClass} />
-                  )}
-                </div>
-
-                <h4 className="mt-5 text-[18px] font-extrabold tracking-tight text-white">
-                  {card.title}
-                </h4>
-
-                <p className="mt-2 text-[13px] leading-5 text-slate-300/90">
-                  {card.description}
-                </p>
-              </div>
-            </div>
+              <h4 className="text-[21px] font-semibold tracking-[-0.01em] text-slate-100 mt-5">
+                {title}
+              </h4>
+              <p className="mt-3 text-[16px] leading-relaxed text-slate-300">
+                {desc}
+              </p>
+            </motion.div>
           );
         })}
       </div>
