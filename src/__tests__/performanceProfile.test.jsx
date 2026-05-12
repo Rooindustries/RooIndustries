@@ -44,7 +44,7 @@ describe("performanceProfile", () => {
     const snapshot = bootstrapPerformanceProfile();
 
     expect(snapshot.profile).toBe(PERFORMANCE_PROFILES.LITE);
-    expect(snapshot.reason).toBe("site-lite-only");
+    expect(snapshot.reason).toBe("default-lite-mode");
     expect(document.documentElement.classList.contains(LOW_PERFORMANCE_CLASS)).toBe(
       true
     );
@@ -58,12 +58,12 @@ describe("performanceProfile", () => {
 
     expect(snapshot).toMatchObject({
       profile: PERFORMANCE_PROFILES.LITE,
-      source: "forced",
-      reason: "site-lite-only",
+      source: "auto",
+      reason: "default-lite-mode",
       deviceClass: DEVICE_CLASSES.DESKTOP,
     });
     expect(isLowPerformanceModeEnabled()).toBe(true);
-    expect(isReducedEffectsModeEnabled()).toBe(false);
+    expect(isReducedEffectsModeEnabled()).toBe(true);
     expect(getPerformanceProfileSnapshot().profile).toBe(
       PERFORMANCE_PROFILES.LITE
     );
@@ -75,16 +75,14 @@ describe("performanceProfile", () => {
 
     initializePerformanceProfile();
 
-    expect(handler).toHaveBeenCalledTimes(1);
-    expect(handler.mock.calls[0][0].detail).toMatchObject({
-      profile: PERFORMANCE_PROFILES.LITE,
-      reason: "site-lite-only",
-    });
+    expect(handler).toHaveBeenCalledTimes(0);
 
     window.removeEventListener(PERFORMANCE_PROFILE_EVENT, handler);
   });
 
   it("keeps useLowPerformanceMode consumers on the lite path", () => {
+    initializePerformanceProfile();
+
     function Probe() {
       const lowPerformanceMode = useLowPerformanceMode();
       return <div>{lowPerformanceMode ? "lite" : "not-lite"}</div>;
@@ -95,6 +93,8 @@ describe("performanceProfile", () => {
   });
 
   it("keeps usePerformanceProfile consumers on the lite snapshot", () => {
+    initializePerformanceProfile();
+
     function Probe() {
       const perf = usePerformanceProfile();
       return <div>{perf.profile}</div>;
@@ -114,12 +114,12 @@ describe("performanceProfile", () => {
     });
 
     expect(getPerformanceProfileSnapshot()).toMatchObject({
-      profile: PERFORMANCE_PROFILES.LITE,
+      profile: PERFORMANCE_PROFILES.FULL,
       reason: "test-override",
     });
-    expect(document.documentElement.classList.contains(LOW_PERFORMANCE_CLASS)).toBe(
-      true
-    );
+    expect(
+      document.documentElement.classList.contains(LOW_PERFORMANCE_CLASS)
+    ).toBe(false);
   });
 
   it("renders no performance notice UI", () => {
