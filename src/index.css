@@ -387,6 +387,21 @@ html.animations-ready .gold-flair-text {
   animation-delay: -2s;
 }
 
+.blue-glint-text {
+  background: linear-gradient(90deg, #7dd3fc 0%, #22d3ee 38%, #dbeafe 52%, #38bdf8 70%, #2563eb 100%);
+  background-size: 220% 220%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 0 12px rgba(56, 189, 248, 0.75),
+    0 0 28px rgba(14, 165, 233, 0.52), 0 0 52px rgba(37, 99, 235, 0.36);
+}
+
+html.animations-ready .blue-glint-text {
+  animation: goldFlairShift 5.5s ease-in-out infinite;
+  animation-delay: -1.5s;
+}
+
 .gold-flair-pill {
   background-color: rgba(15, 23, 42, 0.9);
   background-image: linear-gradient(
@@ -533,7 +548,8 @@ html.low-performance-mode body {
 
 html.low-performance-mode .glow-button,
 html.low-performance-mode .gold-flair-pill,
-html.low-performance-mode .gold-flair-text {
+html.low-performance-mode .gold-flair-text,
+html.low-performance-mode .blue-glint-text {
   box-shadow: none !important;
   text-shadow: none !important;
 }
@@ -603,7 +619,8 @@ html.low-performance-mode .glow-button,
 html.low-performance-mode .sparkle-icon,
 html.low-performance-mode .glow-beam,
 html.low-performance-mode .gold-flair-text,
-html.low-performance-mode .gold-flair-pill {
+html.low-performance-mode .gold-flair-pill,
+html.low-performance-mode .blue-glint-text {
   animation: none !important;
 }
 
@@ -749,7 +766,8 @@ html.is-scrolling .glow-button,
 html.is-scrolling .sparkle-icon,
 html.is-scrolling .glow-beam,
 html.is-scrolling .gold-flair-text,
-html.is-scrolling .gold-flair-pill {
+html.is-scrolling .gold-flair-pill,
+html.is-scrolling .blue-glint-text {
   animation-play-state: paused !important;
 }
 
@@ -774,25 +792,30 @@ html.perf-no-glow .sparkle-icon,
 html.perf-no-glow .glow-beam,
 html.perf-no-glow .gold-flair-text,
 html.perf-no-glow .gold-flair-pill,
+html.perf-no-glow .blue-glint-text,
 html.perf-reduced-effects-mode .glow-button,
 html.perf-reduced-effects-mode .sparkle-icon,
 html.perf-reduced-effects-mode .glow-beam,
 html.perf-reduced-effects-mode .gold-flair-text,
 html.perf-reduced-effects-mode .gold-flair-pill,
+html.perf-reduced-effects-mode .blue-glint-text,
 html.perf-reduced-motion-mode .glow-button,
 html.perf-reduced-motion-mode .sparkle-icon,
 html.perf-reduced-motion-mode .glow-beam,
 html.perf-reduced-motion-mode .gold-flair-text,
-html.perf-reduced-motion-mode .gold-flair-pill {
+html.perf-reduced-motion-mode .gold-flair-pill,
+html.perf-reduced-motion-mode .blue-glint-text {
   animation: none !important;
 }
 
 html.perf-no-glow .glow-button,
 html.perf-no-glow .gold-flair-pill,
 html.perf-no-glow .gold-flair-text,
+html.perf-no-glow .blue-glint-text,
 html.perf-reduced-effects-mode .glow-button,
 html.perf-reduced-effects-mode .gold-flair-pill,
-html.perf-reduced-effects-mode .gold-flair-text {
+html.perf-reduced-effects-mode .gold-flair-text,
+html.perf-reduced-effects-mode .blue-glint-text {
   box-shadow: none !important;
   text-shadow: none !important;
 }

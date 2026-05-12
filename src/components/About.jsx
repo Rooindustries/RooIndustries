@@ -1,5 +1,22 @@
 import React, { useEffect, useState } from "react";
+import { motion } from "framer-motion";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS, readHomeSectionData } from "../lib/homeSectionData";
+
+/*  Record card design tokens — single source of truth.
+    Two accents only: gold (title, via gold-flair-text CSS class) + cyan (everything else). */
+const RC = {
+  "--rc-bg":          "#0a1320",
+  "--rc-bg-mid":      "#0e1526",
+  "--rc-bg-deep":     "#07111f",
+  "--rc-text":        "#f0f4f8",
+  "--rc-text-muted":  "#94a3b8",
+  "--rc-accent":      "#22d3ee",
+  "--rc-accent-soft": "rgba(34, 211, 238, 0.12)",
+  "--rc-border":      "rgba(34, 211, 238, 0.18)",
+  "--rc-border-sub":  "rgba(34, 211, 238, 0.08)",
+  "--rc-cta":         "#0d8fa0",
+  "--rc-cta-end":     "#0a7585",
+};
 
 export default function About({ initialData = null }) {
   const [aboutData, setAboutData] = useState(
@@ -26,7 +43,7 @@ export default function About({ initialData = null }) {
         className="mx-auto max-w-6xl pt-4 sm:pt-6 pb-16 px-4 sm:px-6 text-center"
         aria-hidden="true"
       >
-        <div className="mt-6 min-h-[360px] rounded-2xl border border-sky-700/25 bg-gradient-to-br from-[#0b1d33]/70 via-[#0a1324]/70 to-[#06101f]/70" />
+        <div className="mt-6 min-h-[360px] rounded-2xl" style={{ ...RC, background: "var(--rc-bg)", border: "1px solid var(--rc-border-sub)" }} />
       </section>
     );
   }
@@ -34,17 +51,17 @@ export default function About({ initialData = null }) {
   const recordBadgeText = aboutData.recordBadgeText || "Proof";
   const recordTitle = aboutData.recordTitle || "3DMark Hall of Fame";
   const recordSubtitle =
-    aboutData.recordSubtitle || "Top 20 global CPU profile - official entry";
-  const recordButtonText = aboutData.recordButtonText || "See official entry";
+    aboutData.recordSubtitle || "CPU Profile Global Hall of Fame - Official Entry";
+  const recordButtonText = aboutData.recordButtonText || "See Official Leaderboard";
   const recordNote =
     aboutData.recordNote ||
-    "We don't just promise performance - we show the receipt.";
+    "Former #16 global CPU profile";
   const recordDetailsFallback = [
-    { label: "Rank", value: "#20", sub: "Global CPU profile" },
-    { label: "Score", value: "18829", sub: "Verified" },
-    { label: "Date", value: "Jun 4, 2025", sub: "Submission" },
-    { label: "CPU", value: "AMD Ryzen 9 9950X3D", sub: "Tuned profile" },
-    { label: "GPU", value: "NVIDIA GeForce RTX 5080", sub: "Validated config" },
+    { label: "RANK", value: "#31", sub: "" },
+    { label: "SCORE", value: "18829", sub: "" },
+    { label: "DATE", value: "Jun 4, 2025", sub: "" },
+    { label: "CPU", value: "AMD Ryzen 9 9950X3D", sub: "" },
+    { label: "GPU", value: "NVIDIA GeForce RTX 5080", sub: "" },
   ];
   const recordDetailsRaw = Array.isArray(aboutData.recordDetails)
     ? aboutData.recordDetails
@@ -61,85 +78,123 @@ export default function About({ initialData = null }) {
       ? aboutData.recordLink
       : "/benchmarks";
 
+  const heroStat = recordDetails[0];
+  const specStats = recordDetails.slice(1);
+
   return (
     <section
       id="about"
       className="mx-auto max-w-6xl pt-4 sm:pt-6 pb-16 px-4 sm:px-6 text-center"
     >
       <div className="mt-6">
-        <div className="mx-auto max-w-6xl rounded-2xl border border-sky-700/40 bg-gradient-to-br from-[#0b1d33] via-[#0a1324] to-[#06101f] shadow-[0_0_32px_rgba(14,165,233,0.2)] overflow-hidden">
-          <div className="relative px-4 sm:px-6 py-3.5 sm:py-4.5">
-            <div className="pointer-events-none absolute inset-0 opacity-50 bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.35),transparent_55%)]" />
-            <div className="relative z-10 flex flex-col gap-3">
-              <div className="flex flex-col gap-2.5 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4 text-left">
-                  <span className="inline-flex w-fit items-center gap-2 rounded-full border border-cyan-300/40 bg-cyan-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-cyan-200">
-                    <span className="h-2 w-2 rounded-full bg-cyan-300 shadow-[0_0_10px_rgba(34,211,238,0.8)]" />
-                    {recordBadgeText}
-                  </span>
-                  <div>
-                    <h3 className="text-xl sm:text-2xl font-semibold">
-                      <span className="gold-flair-text">{recordTitle}</span>
-                    </h3>
-                    <p className="text-[11px] sm:text-xs text-slate-400">
-                      {recordSubtitle}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <a
-                    href={leaderboardHref}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="glow-button relative inline-flex items-center justify-center gap-2 rounded-full px-4 sm:px-5 py-2 text-xs sm:text-sm font-semibold text-white ring-1 ring-sky-700/60 hover:text-white active:translate-y-px transition-all duration-300"
-                    style={{
-                      background: "#0b63d1",
-                      backgroundImage: "none",
-                      boxShadow:
-                        "0 0 26px rgba(59,130,246,0.35), 0 0 38px rgba(59,130,246,0.2)",
-                      animation: "none",
-                    }}
-                  >
-                    {recordButtonText}
-                    <span className="glow-line glow-line-top" />
-                    <span className="glow-line glow-line-right" />
-                    <span className="glow-line glow-line-bottom" />
-                    <span className="glow-line glow-line-left" />
-                  </a>
-                </div>
+        {/* Motion 1/3: Entrance — fade-up on scroll, 400ms */}
+        <motion.div
+          className="relative mx-auto max-w-6xl overflow-hidden rounded-2xl"
+          style={{
+            ...RC,
+            background: "linear-gradient(135deg, var(--rc-bg), var(--rc-bg-mid), var(--rc-bg-deep))",
+            border: "1px solid var(--rc-border)",
+          }}
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: "-80px" }}
+          transition={{ duration: 0.4, ease: "easeOut" }}
+        >
+          {/* Top edge line — structural, marks card boundary */}
+          <div
+            className="absolute inset-x-0 top-0 h-px"
+            style={{ background: "linear-gradient(to right, transparent, var(--rc-accent), transparent)", opacity: 0.35 }}
+          />
+
+          <div className="relative px-5 sm:px-8 py-5 sm:py-7">
+            {/* Header: Label + Title + CTA */}
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="space-y-1.5 text-left">
+                {/* Badge as plain uppercase label — no pill, no border, no bg */}
+                <p className="text-[11px] font-bold uppercase tracking-[0.3em]" style={{ color: "var(--rc-accent)" }}>
+                  {recordBadgeText}
+                </p>
+                <h3 className="text-2xl sm:text-3xl lg:text-[2.25rem] font-bold tracking-tight leading-tight">
+                  <span className="gold-flair-text">{recordTitle}</span>
+                </h3>
+                <p className="text-xs sm:text-sm" style={{ color: "var(--rc-text-muted)" }}>
+                  {recordSubtitle}
+                </p>
               </div>
 
-              <div className="rounded-2xl border border-sky-700/40 bg-gradient-to-r from-[#071122] via-[#0a1b32] to-[#071122] p-2.5 sm:p-3 shadow-[0_0_20px_rgba(15,23,42,0.5)]">
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5 text-left">
-                  {recordDetails.map((detail, index) => (
-                    <div
-                      key={
-                        detail?._key || `${detail?.label || "detail"}-${index}`
-                      }
-                      className="flex h-full flex-col rounded-2xl border border-sky-700/30 bg-slate-900/40 px-3 py-2"
+              {/* Motion 3/3: Hover — brightness lift + press-down */}
+              <a
+                href={leaderboardHref}
+                target="_blank"
+                rel="noreferrer"
+                className="glow-button relative inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-xs sm:text-sm font-semibold text-white hover:brightness-110 active:translate-y-px transition-all duration-300 self-start shrink-0"
+                style={{
+                  background: "linear-gradient(135deg, var(--rc-cta), var(--rc-cta-end))",
+                  border: "1px solid var(--rc-border)",
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
+                }}
+              >
+                {recordButtonText}
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25" />
+                </svg>
+                <span className="glow-line glow-line-top" />
+                <span className="glow-line glow-line-right" />
+                <span className="glow-line glow-line-bottom" />
+                <span className="glow-line glow-line-left" />
+              </a>
+            </div>
+
+            {/* Stats: Pure typography hero + spec list */}
+            <div className="mt-6 flex flex-col lg:flex-row gap-4 lg:gap-8 items-start">
+              {/* Hero stat — pure type, no card treatment */}
+              {heroStat && (
+                <div className="flex flex-col items-center justify-center px-6 sm:px-10 py-3 lg:min-w-[160px]">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.3em]" style={{ color: "var(--rc-accent)" }}>
+                    {heroStat.label}
+                  </p>
+                  <p className="mt-1.5 text-5xl sm:text-6xl font-black tracking-tight tabular-nums leading-none" style={{ color: "var(--rc-text)" }}>
+                    {heroStat.value}
+                  </p>
+                </div>
+              )}
+
+              {/* Motion 2/3: Spec rows — staggered slide-in, 300ms each */}
+              {specStats.length > 0 && (
+                <div className="flex-1 flex flex-col justify-center">
+                  {specStats.map((detail, index) => (
+                    <motion.div
+                      key={detail?._key || `${detail?.label || "detail"}-${index}`}
+                      className="flex items-baseline gap-3 sm:gap-4 py-2.5"
+                      style={index > 0 ? { borderTop: "1px solid var(--rc-border-sub)" } : undefined}
+                      initial={{ opacity: 0, x: -12 }}
+                      whileInView={{ opacity: 1, x: 0 }}
+                      viewport={{ once: true }}
+                      transition={{ duration: 0.3, delay: 0.1 + index * 0.06, ease: "easeOut" }}
                     >
-                      <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400 whitespace-nowrap">
+                      <span className="w-11 sm:w-14 shrink-0 text-[11px] font-semibold uppercase tracking-[0.2em]" style={{ color: "var(--rc-text-muted)" }}>
                         {detail?.label || ""}
-                      </p>
-                      <p className="mt-1 text-sm font-semibold text-sky-100 truncate whitespace-nowrap">
+                      </span>
+                      <span className="text-sm sm:text-base font-semibold truncate" style={{ color: "var(--rc-text)" }}>
                         {detail?.value || ""}
-                      </p>
-                      <p className="mt-auto text-[11px] text-slate-400 truncate whitespace-nowrap">
-                        {detail?.sub || ""}
-                      </p>
-                    </div>
+                      </span>
+                    </motion.div>
                   ))}
                 </div>
-              </div>
-
-              {recordNote && (
-                <p className="text-left text-[11px] sm:text-xs text-slate-300/80">
-                  {recordNote}
-                </p>
               )}
             </div>
+
+            {/* Note */}
+            {recordNote && (
+              <p
+                className="mt-5 text-left text-[11px] sm:text-xs pt-4 font-semibold"
+                style={{ borderTop: "1px solid var(--rc-border-sub)" }}
+              >
+                <span className="blue-glint-text">{recordNote}</span>
+              </p>
+            )}
           </div>
-        </div>
+        </motion.div>
       </div>
 
       <div className="h-3" />

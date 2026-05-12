@@ -13,6 +13,7 @@
 /.lighthouseci
 /test-results
 /playwright-report
+/output
 
 # misc
 .env*
