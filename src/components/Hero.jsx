@@ -12,7 +12,7 @@ const fallbackHeroData = {
   subtext: "Measurable gains. Competitive standard. No guesswork.",
   ctaPrimaryText: "Optimize My PC",
   ctaSecondaryText: "See How It Works",
-  ctaNote: "Top 20 3DMark Hall of Fame · Up to Lifetime Warranty · Plans from $49.95 · Plans from $49.95",
+  ctaNote: "Former #16 3DMark HOF · 20–92% FPS Boost · Lifetime Warranty",
   ctaNoteIcon: "🏆",
   bullets: [
     "20–92% FPS Boost",
@@ -23,17 +23,28 @@ const fallbackHeroData = {
 };
 const enableLiveHeroContent = true;
 
+const normalizeText = (s = "") =>
+  String(s)
+    .replace(/\\u00a0/g, " ")
+    .replace(/\u00a0/g, " ");
 
-function CtaNoteBalanced({ icon }) {
+
+function CtaNoteBalanced({ icon, text }) {
   const singleRef = useRef(null);
   const line2PRef = useRef(null);
   const textSpan1Ref = useRef(null);
   const textSpan2Ref = useRef(null);
   const [isSplit, setIsSplit] = useState(false);
 
-  const line1Text = "Top 20 3DMark Hall of Fame \u00b7 Plans from $49.95";
-  const line2Text = "20\u201392% FPS Boost \u00b7 Up to Lifetime Warranty";
-  const fullText = line1Text + " \u00b7 " + line2Text;
+  const fullText = normalizeText(text).trim();
+  const noteParts = fullText.split(/\s+·\s+/).filter(Boolean);
+  const splitIndex = Math.max(1, Math.floor(noteParts.length / 2));
+  const line1Text =
+    noteParts.length > 1
+      ? noteParts.slice(0, splitIndex).join(" · ")
+      : fullText;
+  const line2Text =
+    noteParts.length > 1 ? noteParts.slice(splitIndex).join(" · ") : "";
 
   useEffect(() => {
     const check = () => {
@@ -44,7 +55,7 @@ function CtaNoteBalanced({ icon }) {
     check();
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
-  }, []);
+  }, [fullText]);
 
   useEffect(() => {
     if (!isSplit || !textSpan1Ref.current || !textSpan2Ref.current || !line2PRef.current) return;
@@ -60,8 +71,8 @@ function CtaNoteBalanced({ icon }) {
         const w2 = textSpan2Ref.current?.getBoundingClientRect().width || 0;
         if (w1 <= 0 || w2 <= 0) return;
         const base = parseFloat(getComputedStyle(p2).fontSize);
-        // Scale line2 font so its text width equals line1 text width
-        p2.style.fontSize = (base * w1 / w2) + "px";
+        // Keep the second line visually balanced without enlarging short copy.
+        p2.style.fontSize = `${Math.min(base, (base * w1) / w2)}px`;
       });
     };
 
@@ -69,11 +80,13 @@ function CtaNoteBalanced({ icon }) {
     const onResize = () => match();
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [isSplit]);
+  }, [isSplit, line1Text, line2Text]);
+
+  if (!fullText) return null;
 
   return (
     <div className="mt-3 sm:mt-5 text-center">
-      {!isSplit ? (
+      {!isSplit || !line2Text ? (
         <p ref={singleRef} className="flex items-center justify-center gap-2 text-sm sm:text-base font-extrabold tracking-wide whitespace-nowrap overflow-hidden">
           {icon && <span className="text-slate-100" aria-hidden="true">{icon}</span>}
           <span className="gold-flair-text">{fullText}</span>
@@ -146,11 +159,6 @@ export default function Hero() {
 
   const headingLine2BaseClass =
     "bg-gradient-to-r from-sky-400 to-blue-500 text-transparent bg-clip-text";
-
-  const normalizeText = (s = "") =>
-    String(s)
-      .replace(/\\u00a0/g, " ")
-      .replace(/\u00a0/g, " ");
 
   const renderWithGlow110 = (text) => {
     const cleaned = normalizeText(text);
@@ -341,7 +349,7 @@ export default function Hero() {
         </div>
 
         {ctaNote && (
-          <CtaNoteBalanced icon={ctaNoteIcon} />
+          <CtaNoteBalanced icon={ctaNoteIcon} text={ctaNote} />
         )}
       </section>
     </header>
