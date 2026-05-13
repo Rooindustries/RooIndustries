@@ -34,6 +34,8 @@ export default function SEO({
     if (path === "/") return SITE_URL;
     return `${SITE_URL}${path.startsWith("/") ? "" : "/"}${path}`;
   }, [canonicalPath, location.pathname]);
+  const alternatePath = canonicalPath ?? location.pathname ?? "/";
+  const alternateSuffix = alternatePath === "/" ? "" : alternatePath;
 
   const ogImage = resolveUrl(image);
   const robotsContent = getRobotsContent(noindex);
@@ -49,6 +51,8 @@ export default function SEO({
       <meta name="description" content={description} />
       <meta name="robots" content={robotsContent} />
       <link rel="canonical" href={canonicalUrl} />
+      <link rel="alternate" hrefLang="en-US" href={`https://www.rooindustries.com${alternateSuffix}`} />
+      <link rel="alternate" hrefLang="en-IN" href={`https://www.rooindustries.in${alternateSuffix}`} />
 
       <meta property="og:site_name" content={SITE_NAME} />
       <meta property="og:type" content={type} />

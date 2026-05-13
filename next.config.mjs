@@ -38,6 +38,12 @@ const nextConfig = {
         destination: 'https://www.rooindustries.com/:path*',
         permanent: true,
       },
+      {
+        source: '/:path*',
+        has: [{ type: 'host', value: 'rooindustries.in' }],
+        destination: 'https://www.rooindustries.in/:path*',
+        permanent: true,
+      },
     ];
   },
   async rewrites() {

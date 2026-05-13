@@ -3,6 +3,9 @@ import { createClient } from "@sanity/client";
 import bcrypt from "bcryptjs";
 import { setReferralSessionCookie } from "./auth.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
+import marketConfig from "../../../lib/market.js";
+
+const { resolveMarket } = marketConfig;
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -17,7 +20,20 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
 
   try {
-    const { name, email, paypalEmail, slug, password } = req.body;
+    const {
+      name,
+      email,
+      paypalEmail,
+      upiId,
+      bankAccountNumber,
+      bankIfsc,
+      slug,
+      password,
+    } = req.body;
+    const market = resolveMarket({
+      hostname: req.headers?.host || req.headers?.["x-forwarded-host"] || "",
+    });
+    const isIndiaMarket = market.id === "india";
 
     const clientAddress = getClientAddress(req);
     if (
@@ -31,12 +47,20 @@ export default async function handler(req, res) {
     }
 
     // Basic presence validation
-    if (!name || !email || !paypalEmail || !slug || !password) {
+    if (
+      !name ||
+      !email ||
+      (!isIndiaMarket && !paypalEmail) ||
+      (isIndiaMarket && !upiId) ||
+      !slug ||
+      !password
+    ) {
       return res.status(400).json({ ok: false, error: "All fields required" });
     }
 
     const trimmedEmail = String(email).trim().toLowerCase();
     const trimmedPaypalEmail = String(paypalEmail).trim().toLowerCase();
+    const trimmedUpiId = String(upiId || "").trim().toLowerCase();
     const trimmedSlug = String(slug).trim().toLowerCase();
 
     const emailRegex = /\S+@\S+\.\S+/;
@@ -47,10 +71,14 @@ export default async function handler(req, res) {
         .json({ ok: false, error: "Invalid login email address" });
     }
 
-    if (!emailRegex.test(trimmedPaypalEmail)) {
+    if (!isIndiaMarket && !emailRegex.test(trimmedPaypalEmail)) {
       return res
         .status(400)
         .json({ ok: false, error: "Invalid PayPal email address" });
+    }
+
+    if (isIndiaMarket && !/^[\w.-]+@[\w.-]+$/.test(trimmedUpiId)) {
+      return res.status(400).json({ ok: false, error: "Invalid UPI ID" });
     }
 
     // Check email uniqueness (login email)
@@ -83,7 +111,10 @@ export default async function handler(req, res) {
       slug: { _type: "slug", current: trimmedSlug },
       creatorEmail: trimmedEmail,
       creatorPassword: hash,
-      paypalEmail: trimmedPaypalEmail,
+      paypalEmail: isIndiaMarket ? "" : trimmedPaypalEmail,
+      upiId: isIndiaMarket ? trimmedUpiId : "",
+      bankAccountNumber: isIndiaMarket ? String(bankAccountNumber || "").trim() : "",
+      bankIfsc: isIndiaMarket ? String(bankIfsc || "").trim().toUpperCase() : "",
       currentCommissionPercent: 10,
       successfulReferrals: 0,
       isFirstTime: true,

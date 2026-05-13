@@ -48,6 +48,25 @@ export default {
       name: 'paypalEmail',
       title: 'PayPal Email',
       type: 'string',
+      description: 'Global payout email. Leave empty for India-market creators.',
+    },
+    {
+      name: 'upiId',
+      title: 'UPI ID',
+      type: 'string',
+      description: 'India-market payout UPI ID.',
+    },
+    {
+      name: 'bankAccountNumber',
+      title: 'Bank Account Number',
+      type: 'string',
+      description: 'Optional India payout bank account.',
+    },
+    {
+      name: 'bankIfsc',
+      title: 'Bank IFSC',
+      type: 'string',
+      description: 'Optional India payout IFSC.',
     },
     {
       name: 'contactDiscord',
@@ -76,7 +95,7 @@ export default {
           fields: [
             {
               name: 'amount',
-              title: 'Amount Paid (USD)',
+              title: 'Amount Paid',
               type: 'number',
               validation: (Rule) => Rule.required().min(0),
             },
@@ -97,7 +116,7 @@ export default {
             select: {amount: 'amount', paidOn: 'paidOn', note: 'note'},
             prepare({amount, paidOn, note}) {
               const date = paidOn ? new Date(paidOn).toLocaleDateString() : '';
-              const title = amount ? `$${amount} paid` : 'Payment';
+              const title = amount ? `${amount} paid` : 'Payment';
               const subtitle = [date, note].filter(Boolean).join(' • ');
               return {title, subtitle};
             },
@@ -117,7 +136,7 @@ export default {
           fields: [
             {
               name: 'amount',
-              title: 'Amount Paid (USD)',
+              title: 'Amount Paid',
               type: 'number',
               validation: (Rule) => Rule.required().min(0),
             },
@@ -138,7 +157,7 @@ export default {
             select: {amount: 'amount', paidOn: 'paidOn', note: 'note'},
             prepare({amount, paidOn, note}) {
               const date = paidOn ? new Date(paidOn).toLocaleDateString() : '';
-              const title = amount ? `$${amount} paid` : 'Payment';
+              const title = amount ? `${amount} paid` : 'Payment';
               const subtitle = [date, note].filter(Boolean).join(' • ');
               return {title, subtitle};
             },

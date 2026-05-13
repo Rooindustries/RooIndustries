@@ -1,4 +1,7 @@
-const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || "https://www.rooindustries.com").replace(/\/$/, "");
+const { resolveMarket, resolveMarketSiteUrl } = require("./market.js");
+
+const market = resolveMarket();
+const siteUrl = resolveMarketSiteUrl();
 
 const SITE_NAME = "Roo Industries";
 const DEFAULT_OG_IMAGE = "/embed_logo.png";
@@ -171,6 +174,10 @@ function buildMetadata({
     description,
     alternates: {
       canonical: canonicalUrl,
+      languages: {
+        "en-US": `https://www.rooindustries.com${normalizedPath === "/" ? "" : normalizedPath}`,
+        "en-IN": `https://www.rooindustries.in${normalizedPath === "/" ? "" : normalizedPath}`,
+      },
     },
     robots: forceNoIndex
       ? {
@@ -206,6 +213,8 @@ function buildMetadata({
     other: {
       "twitter:image:alt": imageAlt,
       "canonical-path": normalizedPath,
+      "alternate-global": `https://www.rooindustries.com${normalizedPath === "/" ? "" : normalizedPath}`,
+      "alternate-india": `https://www.rooindustries.in${normalizedPath === "/" ? "" : normalizedPath}`,
     },
   };
 }
@@ -238,7 +247,7 @@ const buildOrganizationJsonLd = () => ({
   url: siteUrl,
   logo: `${siteUrl}${DEFAULT_OG_IMAGE}`,
   sameAs: ["https://discord.gg/M7nTkn9dxE"],
-  areaServed: "Worldwide",
+  areaServed: market.areaServed,
 });
 
 const buildOfferCatalogJsonLd = (name = "Optimization Services") => ({

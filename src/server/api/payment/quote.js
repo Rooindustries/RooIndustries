@@ -1,5 +1,6 @@
 const { resolvePaymentQuote } = require("../ref/pricing.js");
 const { resolvePaymentProviders } = require("./providerConfig.js");
+const { resolveMarket } = require("../../../lib/market.js");
 
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
@@ -15,6 +16,9 @@ module.exports = async function handler(req, res) {
       referralCode = "",
       couponCode = "",
     } = req.body || {};
+    const market = resolveMarket({
+      hostname: req.headers?.host || req.headers?.["x-forwarded-host"] || "",
+    });
 
     if (!String(packageTitle || "").trim()) {
       return res.status(400).json({
@@ -29,8 +33,11 @@ module.exports = async function handler(req, res) {
       referralId,
       referralCode,
       couponCode,
+      currency: market.currency,
     });
-    const providers = resolvePaymentProviders();
+    const providers = resolvePaymentProviders({
+      hostname: req.headers?.host || req.headers?.["x-forwarded-host"] || "",
+    });
     const isFree = resolvedQuote.paymentProvider === "free";
 
     return res.status(200).json({
@@ -47,6 +54,7 @@ module.exports = async function handler(req, res) {
         couponDiscountPercent: resolvedQuote.couponDiscountPercent,
         couponDiscountAmount: resolvedQuote.couponDiscountAmount,
         canCombineWithReferral: resolvedQuote.canCombineWithReferral === true,
+        currency: resolvedQuote.currency || market.currency,
       },
       providers: isFree
         ? {
@@ -58,6 +66,10 @@ module.exports = async function handler(req, res) {
               enabled: false,
               mode: providers.paypal.mode,
               clientId: "",
+            },
+            payu: {
+              enabled: false,
+              mode: providers.payu.mode,
             },
           }
         : providers,

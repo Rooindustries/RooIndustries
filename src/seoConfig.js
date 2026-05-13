@@ -1,13 +1,16 @@
+import marketConfig from "./lib/market";
+
+const { resolveMarket, resolveMarketSiteUrl } = marketConfig;
+const CURRENT_MARKET = resolveMarket();
+
 export const SITE_NAME = "Roo Industries";
-export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL ||
-  process.env.REACT_APP_SITE_URL ||
-  "https://www.rooindustries.com").replace(/\/$/, "");
+export const SITE_URL = resolveMarketSiteUrl();
 export const DEFAULT_TITLE = `${SITE_NAME} | Professional PC Optimization`;
 export const DEFAULT_DESCRIPTION =
   "World-class PC optimization, BIOS tuning, and game performance boosts delivered fully online.";
 export const DEFAULT_OG_IMAGE = `${SITE_URL}/embed_logo.png`;
 export const SAME_AS = ["https://discord.gg/M7nTkn9dxE"];
-export const AREA_SERVED = "Worldwide";
+export const AREA_SERVED = CURRENT_MARKET.areaServed;
 
 export const resolveUrl = (value) => {
   if (!value) return "";

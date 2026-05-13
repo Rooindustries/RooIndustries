@@ -25,6 +25,12 @@ describe("payment provider runtime policy", () => {
     delete process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID;
     delete process.env.RAZORPAY_KEY_ID;
     delete process.env.RAZORPAY_KEY_SECRET;
+    delete process.env.SITE_MARKET;
+    delete process.env.NEXT_PUBLIC_SITE_MARKET;
+    delete process.env.PAYU_KEY;
+    delete process.env.PAYU_SALT;
+    delete process.env.PAYU_ENV;
+    delete process.env.ENABLE_RAZORPAY_INDIA_CHECKOUT;
   });
 
   afterAll(() => {
@@ -232,6 +238,48 @@ describe("payment provider runtime policy", () => {
       enabled: true,
       mode: "live",
       clientId: "paypal-live-client",
+    });
+  });
+
+  test("India market disables PayPal and Razorpay by default", () => {
+    process.env.VERCEL_ENV = "production";
+    process.env.SITE_MARKET = "india";
+    process.env.PAYPAL_ENV = "live";
+    process.env.RAZORPAY_KEY_ID = "rzp_live_prod";
+    process.env.RAZORPAY_KEY_SECRET = "secret";
+    process.env.PAYPAL_CLIENT_ID = "paypal-live-client";
+    process.env.PAYPAL_CLIENT_SECRET = "paypal-live-secret";
+    process.env.PAYU_KEY = "payu-key";
+    process.env.PAYU_SALT = "payu-salt";
+
+    const { resolvePaymentProviders } = loadProviderConfig();
+    const providers = resolvePaymentProviders();
+
+    expect(providers.market).toMatchObject({
+      id: "india",
+      currency: "INR",
+    });
+    expect(providers.paypal.enabled).toBe(false);
+    expect(providers.razorpay.enabled).toBe(false);
+    expect(providers.payu).toEqual({
+      enabled: true,
+      mode: "live",
+    });
+  });
+
+  test("India Razorpay requires an explicit override", () => {
+    process.env.VERCEL_ENV = "production";
+    process.env.SITE_MARKET = "india";
+    process.env.ENABLE_RAZORPAY_INDIA_CHECKOUT = "1";
+    process.env.RAZORPAY_KEY_ID = "rzp_live_prod";
+    process.env.RAZORPAY_KEY_SECRET = "secret";
+
+    const { resolvePaymentProviders } = loadProviderConfig();
+    const providers = resolvePaymentProviders();
+
+    expect(providers.razorpay).toEqual({
+      enabled: true,
+      mode: "live",
     });
   });
 });

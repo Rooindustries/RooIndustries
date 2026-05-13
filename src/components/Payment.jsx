@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useLocation, Link, useNavigate } from "react-router-dom";
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 import { motion } from "framer-motion";
+import marketConfig from "../lib/market";
 const formatLocalDate = (utcDate, timeZone) => {
   try {
     return new Intl.DateTimeFormat(undefined, {
@@ -370,12 +371,19 @@ export default function Payment({ hideFooter = false }) {
     ? +((totalDiscountAmount / baseAmount) * 100 || 0).toFixed(2)
     : 0;
 
-  // Razorpay state
+  const initialMarket = (() => {
+    const market = marketConfig.resolveCurrentMarket();
+    return { id: market.id, currency: market.currency };
+  })();
+
+  // Payment provider state
   const [rzpReady, setRzpReady] = useState(false);
   const [payingRzp, setPayingRzp] = useState(false);
   const [providerConfig, setProviderConfig] = useState({
-    razorpay: { enabled: true, mode: "unknown" },
+    razorpay: { enabled: initialMarket.id !== "india", mode: "unknown" },
     paypal: { enabled: false, mode: "unknown", clientId: "" },
+    payu: { enabled: false, mode: "unknown" },
+    market: initialMarket,
   });
   const [showInternalPayments, setShowInternalPayments] = useState(false);
   const [paymentSession, setPaymentSession] = useState(null);
@@ -392,10 +400,17 @@ export default function Payment({ hideFooter = false }) {
   const hasPaypalClientId = !!paypalClientId;
   const canUseRazorpay = !!providerConfig?.razorpay?.enabled;
   const canUsePaypal = hasPaypalClientId && !!providerConfig?.paypal?.enabled;
+  const isIndiaMarket = providerConfig?.market?.id === "india";
+  const checkoutCurrency = providerConfig?.market?.currency || "USD";
+  const canUsePayu = isIndiaMarket && !!providerConfig?.payu?.enabled;
+  const formatPaymentAmount = (amount) =>
+    checkoutCurrency === "INR"
+      ? `₹${Math.round(Number(amount) || 0).toLocaleString("en-IN")}`
+      : `$${(Number(amount) || 0).toFixed(2)} USD`;
   // PayPal should be visible to all clients when provider is enabled.
   // `showInternalPayments` still allows internal preview/testing behavior.
   const shouldRenderPaypalBlock =
-    !!providerConfig?.paypal?.enabled || showInternalPayments;
+    !isIndiaMarket && (!!providerConfig?.paypal?.enabled || showInternalPayments);
   const canDisplayPaypalMethod = shouldRenderPaypalBlock && canUsePaypal;
 
   // Free booking state
@@ -412,6 +427,8 @@ export default function Payment({ hideFooter = false }) {
     referralCode: referral?.code || referralInput || "",
     referralId: referral?._id || "",
     couponCode: coupon?.code || couponInput || "",
+    market: providerConfig?.market?.id || "global",
+    currency: checkoutCurrency,
   });
 
   const checkoutFingerprint = useMemo(
@@ -425,6 +442,8 @@ export default function Payment({ hideFooter = false }) {
         referralCode: referral?.code || referralInput || "",
         couponCode: coupon?.code || couponInput || "",
         finalAmount,
+        market: providerConfig?.market?.id || "global",
+        currency: checkoutCurrency,
       }),
     [
       paymentFlowMode,
@@ -437,6 +456,8 @@ export default function Payment({ hideFooter = false }) {
       coupon?.code,
       couponInput,
       finalAmount,
+      providerConfig?.market?.id,
+      checkoutCurrency,
     ]
   );
 
@@ -501,6 +522,14 @@ export default function Payment({ hideFooter = false }) {
             mode: data.providers?.paypal?.mode || "unknown",
             clientId: String(data.providers?.paypal?.clientId || "").trim(),
           },
+          payu: {
+            enabled: !!data.providers?.payu?.enabled,
+            mode: data.providers?.payu?.mode || "unknown",
+          },
+          market: {
+            id: data.market?.id || "global",
+            currency: data.market?.currency || "USD",
+          },
         });
       })
       .catch(() => {
@@ -517,6 +546,7 @@ export default function Payment({ hideFooter = false }) {
               mode: "sandbox",
               clientId: prev?.paypal?.clientId || paypalClientIdFromEnv,
             },
+            market: prev?.market || { id: "global", currency: "USD" },
           }));
         }
       });
@@ -1006,9 +1036,25 @@ export default function Payment({ hideFooter = false }) {
 
         method: {
           card: true,
-          netbanking: true,
-          upi: true,
-          wallet: true,
+          netbanking: false,
+          upi: false,
+          wallet: false,
+          emi: false,
+          paylater: false,
+        },
+
+        display: {
+          hide: [
+            { method: "upi" },
+            { method: "netbanking" },
+            { method: "wallet" },
+            { method: "emi" },
+            { method: "paylater" },
+            { method: "cardless_emi" },
+          ],
+          preferences: {
+            show_default_blocks: false,
+          },
         },
 
         theme: {
@@ -1126,6 +1172,63 @@ export default function Payment({ hideFooter = false }) {
     }
   }
 
+  async function handlePayuPay() {
+    if (!canUsePayu) {
+      showBanner(
+        "error",
+        "India checkout is currently unavailable. Please try again shortly."
+      );
+      return;
+    }
+
+    if (!ensureSlotBeforeAction()) return;
+
+    if (isFree) {
+      showBanner(
+        "error",
+        "This booking is fully discounted. Use the 'Confirm Free Booking' button instead."
+      );
+      return;
+    }
+
+    try {
+      setPaymentStatusBusy(true);
+      showBanner("info", "Opening India checkout...");
+      const session = await startSessionCheckout("payu");
+      const payload = session?.providerPayload || {};
+      const action = String(payload.action || "").trim();
+      const fields = payload.fields || {};
+
+      if (!action || !fields || typeof fields !== "object") {
+        throw new Error("India checkout is not configured.");
+      }
+
+      const form = document.createElement("form");
+      form.method = String(payload.method || "POST").toUpperCase();
+      form.action = action;
+      form.style.display = "none";
+
+      Object.entries(fields).forEach(([key, value]) => {
+        const input = document.createElement("input");
+        input.type = "hidden";
+        input.name = key;
+        input.value = String(value ?? "");
+        form.appendChild(input);
+      });
+
+      document.body.appendChild(form);
+      form.submit();
+    } catch (err) {
+      console.error("PayU error:", err);
+      clearPaymentSession();
+      showBanner(
+        "error",
+        err?.message || "India checkout could not be started. Please try again."
+      );
+      setPaymentStatusBusy(false);
+    }
+  }
+
   // --- ANIMATION CONFIG ---
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -1213,24 +1316,24 @@ export default function Payment({ hideFooter = false }) {
             <div className="mt-2 space-y-1">
               {(referralPercent > 0 || couponPercent > 0) && (
                 <p className="text-xl text-slate-300 line-through">
-                  ${baseAmount.toFixed(2)}
+                  {formatPaymentAmount(baseAmount)}
                 </p>
               )}
               <p className="text-3xl font-extrabold text-sky-400">
-                ${finalAmount.toFixed(2)} USD
+                {formatPaymentAmount(finalAmount)}
               </p>
 
               {referralPercent > 0 && (
                 <p className="text-sm text-green-300">
-                  Referral: {referralPercent}% ($
-                  {referralDiscountAmount.toFixed(2)}
+                  Referral: {referralPercent}% (
+                  {formatPaymentAmount(referralDiscountAmount)}
                   {referral?.name ? ` via ${referral.name}` : ""})
                 </p>
               )}
               {couponPercent > 0 && coupon && (
                 <p className="text-sm text-emerald-300">
-                  Coupon "{coupon.code}": {couponPercent}% ($
-                  {couponDiscountAmount.toFixed(2)})
+                  Coupon "{coupon.code}": {couponPercent}% (
+                  {formatPaymentAmount(couponDiscountAmount)})
                   {canStackCouponWithReferral && referralPercent > 0
                     ? " (stacked with referral)"
                     : ""}
@@ -1238,7 +1341,7 @@ export default function Payment({ hideFooter = false }) {
               )}
               {effectiveDiscountAmount > 0 && (
                 <p className="text-xs text-slate-300">
-                  Total savings: {discountPercentCombined}% (${effectiveDiscountAmount.toFixed(2)})
+                  Total savings: {discountPercentCombined}% ({formatPaymentAmount(effectiveDiscountAmount)})
                 </p>
               )}
 
@@ -1393,7 +1496,42 @@ export default function Payment({ hideFooter = false }) {
             </div>
           ) : (
             <>
+              {isIndiaMarket && (
+                <div className="low-perf-surface glass-premium glass-card-surface mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-xl border border-sky-800/30 px-5 py-4">
+                  <div className="flex items-center gap-4">
+                    <div className="grid h-10 w-16 place-items-center rounded-lg border border-emerald-300/30 bg-emerald-400/10 text-xs font-bold uppercase tracking-wide text-emerald-200">
+                      UPI
+                    </div>
+                    <div>
+                      <p className="text-slate-300 text-sm font-medium">
+                        India Secure Checkout
+                      </p>
+                      <p className="text-slate-400 text-xs">
+                        UPI, EMI, and domestic cards
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handlePayuPay}
+                    disabled={paymentStatusBusy || !canUsePayu}
+                    className="glow-button px-4 py-2 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60"
+                  >
+                    {paymentStatusBusy ? "Processing..." : "Pay in INR"}
+                    <span className="glow-line glow-line-top" />
+                    <span className="glow-line glow-line-right" />
+                    <span className="glow-line glow-line-bottom" />
+                    <span className="glow-line glow-line-left" />
+                  </button>
+                </div>
+              )}
+              {isIndiaMarket && !canUsePayu && (
+                <p className="mt-2 text-xs text-amber-300">
+                  India checkout is currently unavailable.
+                </p>
+              )}
+
               {/* Razorpay option */}
+              {!isIndiaMarket && (
               <div className="low-perf-surface glass-premium glass-card-surface mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-xl border border-sky-800/30 px-5 py-4">
                 <div className="flex items-center gap-4">
                   <img
@@ -1409,7 +1547,7 @@ export default function Payment({ hideFooter = false }) {
                       RazorPay Secure Checkout
                     </p>
                     <p className="text-slate-400 text-xs">
-                      Cards, UPI, wallets, and local methods
+                      Secure card checkout
                     </p>
                   </div>
                 </div>
@@ -1429,7 +1567,8 @@ export default function Payment({ hideFooter = false }) {
                   <span className="glow-line glow-line-left" />
                 </button>
               </div>
-              {!canUseRazorpay && (
+              )}
+              {!isIndiaMarket && !canUseRazorpay && (
                 <p className="mt-2 text-xs text-amber-300">
                   RazorPay secure checkout is currently unavailable.
                 </p>

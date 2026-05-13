@@ -1,12 +1,17 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import marketConfig from "../lib/market";
 
 export default function RefRegister() {
   const nav = useNavigate();
+  const isIndiaMarket = marketConfig.resolveCurrentMarket().id === "india";
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [paypalEmail, setPaypalEmail] = useState("");
+  const [upiId, setUpiId] = useState("");
+  const [bankAccountNumber, setBankAccountNumber] = useState("");
+  const [bankIfsc, setBankIfsc] = useState("");
   const [slug, setSlug] = useState("");
   const [slugAvailable, setSlugAvailable] = useState(null);
   const [password, setPassword] = useState("");
@@ -57,6 +62,9 @@ export default function RefRegister() {
     const trimmedName = name.trim();
     const trimmedEmail = email.trim().toLowerCase();
     const trimmedPaypalEmail = paypalEmail.trim().toLowerCase();
+    const trimmedUpiId = upiId.trim().toLowerCase();
+    const trimmedBankAccountNumber = bankAccountNumber.trim();
+    const trimmedBankIfsc = bankIfsc.trim().toUpperCase();
     const trimmedSlug = slug.trim().toLowerCase();
     const trimmedPassword = password.trim();
     const trimmedConfirm = confirm.trim();
@@ -65,7 +73,8 @@ export default function RefRegister() {
     if (
       !trimmedName ||
       !trimmedEmail ||
-      !trimmedPaypalEmail ||
+      (!isIndiaMarket && !trimmedPaypalEmail) ||
+      (isIndiaMarket && !trimmedUpiId) ||
       !trimmedSlug ||
       !trimmedPassword ||
       !trimmedConfirm
@@ -81,8 +90,13 @@ export default function RefRegister() {
       return;
     }
 
-    if (!emailRegex.test(trimmedPaypalEmail)) {
+    if (!isIndiaMarket && !emailRegex.test(trimmedPaypalEmail)) {
       showToast("error", "Please enter a valid PayPal email address.");
+      return;
+    }
+
+    if (isIndiaMarket && !/^[\w.-]+@[\w.-]+$/.test(trimmedUpiId)) {
+      showToast("error", "Please enter a valid UPI ID.");
       return;
     }
 
@@ -124,7 +138,10 @@ export default function RefRegister() {
         body: JSON.stringify({
           name: trimmedName,
           email: trimmedEmail,
-          paypalEmail: trimmedPaypalEmail,
+          paypalEmail: isIndiaMarket ? "" : trimmedPaypalEmail,
+          upiId: isIndiaMarket ? trimmedUpiId : "",
+          bankAccountNumber: isIndiaMarket ? trimmedBankAccountNumber : "",
+          bankIfsc: isIndiaMarket ? trimmedBankIfsc : "",
           slug: trimmedSlug,
           password: trimmedPassword,
         }),
@@ -191,22 +208,64 @@ export default function RefRegister() {
           />
         </div>
 
-        {/* PayPal Email */}
-        <div>
-          <label className="text-sky-300 text-sm font-semibold">
-            PayPal Email (for payouts)
-          </label>
-          <input
-            type="email"
-            value={paypalEmail}
-            onChange={(e) => setPaypalEmail(e.target.value)}
-            placeholder="Email used for your PayPal account"
-            className="w-full p-4 mt-1 bg-[#0c162a] border border-sky-800/40 rounded-xl outline-none focus:border-sky-500 transition text-base"
-          />
-          <p className="text-slate-400 text-xs mt-1">
-            We’ll send your commissions to this PayPal address.
-          </p>
-        </div>
+        {isIndiaMarket ? (
+          <>
+            <div>
+              <label className="text-sky-300 text-sm font-semibold">
+                UPI ID (for payouts)
+              </label>
+              <input
+                value={upiId}
+                onChange={(e) => setUpiId(e.target.value)}
+                placeholder="name@bank"
+                className="w-full p-4 mt-1 bg-[#0c162a] border border-sky-800/40 rounded-xl outline-none focus:border-sky-500 transition text-base"
+              />
+              <p className="text-slate-400 text-xs mt-1">
+                We’ll send commissions to this UPI ID.
+              </p>
+            </div>
+
+            <div>
+              <label className="text-sky-300 text-sm font-semibold">
+                Bank Account Number (optional)
+              </label>
+              <input
+                value={bankAccountNumber}
+                onChange={(e) => setBankAccountNumber(e.target.value)}
+                placeholder="Optional payout backup"
+                className="w-full p-4 mt-1 bg-[#0c162a] border border-sky-800/40 rounded-xl outline-none focus:border-sky-500 transition text-base"
+              />
+            </div>
+
+            <div>
+              <label className="text-sky-300 text-sm font-semibold">
+                IFSC (optional)
+              </label>
+              <input
+                value={bankIfsc}
+                onChange={(e) => setBankIfsc(e.target.value)}
+                placeholder="Optional IFSC"
+                className="w-full p-4 mt-1 bg-[#0c162a] border border-sky-800/40 rounded-xl outline-none focus:border-sky-500 transition text-base"
+              />
+            </div>
+          </>
+        ) : (
+          <div>
+            <label className="text-sky-300 text-sm font-semibold">
+              PayPal Email (for payouts)
+            </label>
+            <input
+              type="email"
+              value={paypalEmail}
+              onChange={(e) => setPaypalEmail(e.target.value)}
+              placeholder="Email used for your PayPal account"
+              className="w-full p-4 mt-1 bg-[#0c162a] border border-sky-800/40 rounded-xl outline-none focus:border-sky-500 transition text-base"
+            />
+            <p className="text-slate-400 text-xs mt-1">
+              We’ll send your commissions to this PayPal address.
+            </p>
+          </div>
+        )}
 
         {/* Referral Code */}
         <div>

@@ -1,4 +1,7 @@
 import { createClient } from "@sanity/client";
+import marketConfig from "../../../lib/market.js";
+
+const { resolveMarketCurrency } = marketConfig;
 
 const pricingClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -60,6 +63,7 @@ const normalizeReferralCode = (value) =>
 export async function resolveUpgradeContext({
   originalOrderId = "",
   packageTitle = "",
+  currency = resolveMarketCurrency(),
   client = pricingClient,
 }) {
   const normalizedUpgradeTitle = String(packageTitle || "")
@@ -76,6 +80,7 @@ export async function resolveUpgradeContext({
       packagePrice,
       grossAmount,
       netAmount,
+      currency,
       email,
       payerEmail,
       discord,
@@ -120,10 +125,29 @@ export async function resolveUpgradeContext({
         packageTitle,
         netAmount,
         grossAmount,
-        packagePrice
+        packagePrice,
+        currency
       }`,
       { rootId: rootOrderId }
     )) || [];
+
+  const requestedCurrency = String(currency || resolveMarketCurrency())
+    .trim()
+    .toUpperCase();
+  const paidCurrencies = [
+    ...new Set(
+      paidBookings
+        .map((entry) => String(entry?.currency || "").trim().toUpperCase())
+        .filter(Boolean)
+    ),
+  ];
+  if (requestedCurrency && paidCurrencies.length && !paidCurrencies.includes(requestedCurrency)) {
+    throw createApiError(
+      400,
+      "This upgrade belongs to a different market.",
+      "upgrade_market_mismatch"
+    );
+  }
 
   const targetPackage = await client.fetch(
     `*[_type == "package" && title == $title][0]{title, price}`,
@@ -176,6 +200,7 @@ export async function resolveBookingPricing({
   allowZeroPayable = false,
   client = pricingClient,
   upgradeContext = null,
+  currency = resolveMarketCurrency(),
 }) {
   const isUpgrade = !!originalOrderId;
   const normalizedCouponCode = normalizeCouponCode(couponCode);
@@ -196,6 +221,7 @@ export async function resolveBookingPricing({
       (await resolveUpgradeContext({
         originalOrderId,
         packageTitle,
+        currency,
         client,
       }));
 
@@ -364,6 +390,7 @@ export async function resolveBookingPricing({
     referralDiscountPercent,
     referralDoc,
     commissionAmount,
+    currency: String(currency || resolveMarketCurrency()).trim().toUpperCase(),
   };
 }
 
@@ -373,6 +400,7 @@ export async function resolvePaymentQuote({
   referralId = "",
   referralCode = "",
   couponCode = "",
+  currency = resolveMarketCurrency(),
   client,
 }) {
   const quote = await resolveBookingPricing({
@@ -383,6 +411,7 @@ export async function resolvePaymentQuote({
     couponCode,
     paymentProvider: "",
     allowZeroPayable: true,
+    currency,
     client,
   });
 

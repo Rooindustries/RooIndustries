@@ -1,6 +1,8 @@
 import { createClient } from "@sanity/client";
+import marketConfig from "../../../lib/market.js";
 
 const DEFAULT_API_VERSION = "2023-10-01";
+const { resolveMarketSanityDataset } = marketConfig;
 
 const readFirstEnv = (keys = []) =>
   keys
@@ -31,10 +33,9 @@ export const resolveSanityEnv = () => ({
     ["SANITY_PRIVATE_PROJECT_ID", "SANITY_PROJECT_ID"],
     "Missing required environment variable: SANITY_PRIVATE_PROJECT_ID"
   ),
-  dataset: requireAnyEnvValue(
-    ["SANITY_PRIVATE_DATASET", "SANITY_DATASET"],
-    "Missing required environment variable: SANITY_PRIVATE_DATASET"
-  ),
+  dataset:
+    readFirstEnv(["SANITY_PRIVATE_DATASET", "SANITY_DATASET"]) ||
+    resolveMarketSanityDataset(),
   apiVersion: readFirstEnv(["SANITY_PRIVATE_API_VERSION", "SANITY_API_VERSION"]) || DEFAULT_API_VERSION,
 });
 

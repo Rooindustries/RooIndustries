@@ -1,5 +1,8 @@
 const TRUTHY_ENV_VALUES = ["1", "true", "yes", "on"];
 const KNOWN_RUNTIMES = new Set(["production", "preview", "development"]);
+const marketConfig = require("../../../lib/market.js");
+
+const { resolveMarket } = marketConfig;
 
 const isTruthyEnv = (value) =>
   TRUTHY_ENV_VALUES.includes(String(value || "").trim().toLowerCase());
@@ -135,13 +138,24 @@ const resolveRazorpayMode = (keyId = "") => {
   return "unknown";
 };
 
-const resolvePaymentProviders = () => {
+const resolvePaymentProviders = (options = {}) => {
   const runtimePolicy = resolvePaymentRuntimePolicy();
+  const market = resolveMarket({
+    hostname: options.hostname || options.host || "",
+    env: options.env || process.env,
+  });
 
   const razorpayKeyId = String(process.env.RAZORPAY_KEY_ID || "").trim();
   const razorpayKeySecret = String(process.env.RAZORPAY_KEY_SECRET || "").trim();
   const razorpayMode = resolveRazorpayMode(razorpayKeyId);
+  const allowIndiaRazorpay =
+    market.id !== "india" ||
+    isTruthyEnv(process.env.ENABLE_RAZORPAY_INDIA_CHECKOUT);
+  const marketAllowsRazorpay =
+    market.razorpayEnabled || (market.id === "india" && allowIndiaRazorpay);
   const razorpayEnabled =
+    marketAllowsRazorpay &&
+    allowIndiaRazorpay &&
     !!razorpayKeyId &&
     !!razorpayKeySecret &&
     allowProviderModeInRuntime(razorpayMode, runtimePolicy);
@@ -157,11 +171,29 @@ const resolvePaymentProviders = () => {
   ).trim();
   const paypalMode = resolvePayPalMode(runtimePolicy);
   const paypalEnabled =
+    market.paypalEnabled &&
     !!paypalClientId &&
     !!paypalClientSecret &&
     allowProviderModeInRuntime(paypalMode, runtimePolicy);
 
+  const payuKey = String(process.env.PAYU_KEY || process.env.PAYU_MERCHANT_KEY || "").trim();
+  const payuSalt = String(process.env.PAYU_SALT || process.env.PAYU_MERCHANT_SALT || "").trim();
+  const payuMode = String(process.env.PAYU_ENV || "").trim().toLowerCase() === "test"
+    ? "test"
+    : "live";
+  const payuEnabled =
+    market.payuEnabled &&
+    !!payuKey &&
+    !!payuSalt &&
+    allowProviderModeInRuntime(payuMode, runtimePolicy);
+
   return {
+    market: {
+      id: market.id,
+      label: market.label,
+      currency: market.currency,
+      siteUrl: market.siteUrl,
+    },
     runtime: runtimePolicy.runtime,
     previewPaymentsEnabled: runtimePolicy.previewPaymentsEnabled,
     livePaymentsEnabled: runtimePolicy.livePaymentsEnabled,
@@ -174,6 +206,10 @@ const resolvePaymentProviders = () => {
       enabled: paypalEnabled,
       mode: paypalMode,
       clientId: paypalEnabled ? paypalClientId : "",
+    },
+    payu: {
+      enabled: payuEnabled,
+      mode: payuKey && payuSalt ? payuMode : "missing",
     },
   };
 };

@@ -15,9 +15,11 @@ const mockIsSlotAllowedForPackage = jest.fn();
 const mockResolvePaymentProviders = jest.fn();
 const mockResolveServerPaymentSessionsEnabled = jest.fn();
 const mockCreatePayPalOrder = jest.fn();
+const mockCreatePayuOrder = jest.fn();
 const mockCreateRazorpayOrder = jest.fn();
 const mockVerifyPayPalOrder = jest.fn();
 const mockVerifyPayPalWebhookSignature = jest.fn();
+const mockVerifyPayuResponse = jest.fn();
 const mockVerifyRazorpayPayment = jest.fn();
 const mockVerifyRazorpaySignature = jest.fn();
 const mockVerifyRazorpayWebhookSignature = jest.fn();
@@ -55,12 +57,15 @@ jest.mock("../server/api/payment/providerConfig", () => ({
 jest.mock("../server/api/payment/providerClients", () => ({
   __esModule: true,
   DEFAULT_PAYPAL_CURRENCY: "USD",
+  DEFAULT_PAYU_CURRENCY: "INR",
   DEFAULT_RAZORPAY_CURRENCY: "USD",
   createPayPalOrder: (...args) => mockCreatePayPalOrder(...args),
+  createPayuOrder: (...args) => mockCreatePayuOrder(...args),
   createRazorpayOrder: (...args) => mockCreateRazorpayOrder(...args),
   verifyPayPalOrder: (...args) => mockVerifyPayPalOrder(...args),
   verifyPayPalWebhookSignature: (...args) =>
     mockVerifyPayPalWebhookSignature(...args),
+  verifyPayuResponse: (...args) => mockVerifyPayuResponse(...args),
   verifyRazorpayPayment: (...args) => mockVerifyRazorpayPayment(...args),
   verifyRazorpaySignature: (...args) => mockVerifyRazorpaySignature(...args),
   verifyRazorpayWebhookSignature: (...args) =>
@@ -305,6 +310,7 @@ const baseQuote = (overrides = {}) => ({
   canCombineWithReferral: false,
   effectiveReferralCode: "",
   effectiveReferralId: "",
+  currency: "USD",
   ...overrides,
 });
 
@@ -411,6 +417,14 @@ beforeEach(() => {
       enabled: true,
       mode: "test",
     },
+    payu: {
+      enabled: false,
+      mode: "missing",
+    },
+    market: {
+      id: "global",
+      currency: "USD",
+    },
   });
   mockResolveServerPaymentSessionsEnabled.mockReturnValue(true);
   mockCreatePayPalOrder.mockResolvedValue({
@@ -423,6 +437,22 @@ beforeEach(() => {
     currency: "USD",
     key: "rzp_test_key",
   });
+  mockCreatePayuOrder.mockResolvedValue({
+    orderId: "payu_txn_1",
+    amount: 8499,
+    currency: "INR",
+    action: "https://test.payu.in/_payment",
+    method: "POST",
+    fields: {
+      key: "payu-key",
+      txnid: "payu_txn_1",
+      amount: "84.99",
+      productinfo: "Performance Vertex Overhaul booking",
+      firstname: "Roo Customer",
+      email: "client@example.com",
+      hash: "hash",
+    },
+  });
   mockVerifyPayPalOrder.mockResolvedValue({
     ok: true,
     payerEmail: "payer@example.com",
@@ -430,6 +460,11 @@ beforeEach(() => {
   });
   mockVerifyPayPalWebhookSignature.mockResolvedValue({ ok: true });
   mockVerifyRazorpayPayment.mockResolvedValue({ ok: true });
+  mockVerifyPayuResponse.mockReturnValue({
+    ok: true,
+    providerPaymentId: "mihpay_1",
+    payerEmail: "client@example.com",
+  });
   mockVerifyRazorpaySignature.mockReturnValue(true);
   mockVerifyRazorpayWebhookSignature.mockReturnValue(true);
 
@@ -451,9 +486,12 @@ beforeEach(() => {
       paymentVerificationWarning:
         override.paymentVerificationWarning || "",
       paymentProvider: req.body.paymentProvider,
+      currency: req.body.currency || "",
       paypalOrderId: req.body.paypalOrderId || "",
       razorpayOrderId: req.body.razorpayOrderId || "",
       razorpayPaymentId: req.body.razorpayPaymentId || "",
+      payuTransactionId: req.body.payuTransactionId || "",
+      payuPaymentId: req.body.payuPaymentId || "",
     });
 
     if (req.body.slotHoldId) {
@@ -593,6 +631,64 @@ describe("payment session flow", () => {
         currency: "USD",
         key: "rzp_test_key",
       },
+    });
+  });
+
+  test("start returns a PayU session for the India market", async () => {
+    const hold = createHold();
+    const bookingPayload = baseBookingPayload();
+    bookingPayload.slotHoldToken = issueTokenForHold(hold);
+    mockResolvePaymentQuote.mockResolvedValue(
+      baseQuote({
+        paymentProvider: "paid",
+        effectiveGrossAmount: 999,
+        effectiveNetAmount: 999,
+        currency: "INR",
+      })
+    );
+    mockResolvePaymentProviders.mockReturnValue({
+      serverSessionsEnabled: true,
+      market: { id: "india", currency: "INR" },
+      paypal: { enabled: false, mode: "live", clientId: "" },
+      razorpay: { enabled: false, mode: "live" },
+      payu: { enabled: true, mode: "live" },
+    });
+
+    const result = await startPaymentSession({
+      body: {
+        provider: "payu",
+        bookingPayload,
+      },
+      headers: { host: "www.rooindustries.in" },
+      client: mockClient,
+    });
+
+    expect(result.httpStatus).toBe(200);
+    expect(result.body).toMatchObject({
+      ok: true,
+      status: paymentRecordConstants.PAYMENT_STATUS_STARTED,
+      provider: "payu",
+      providerPayload: {
+        orderId: "payu_txn_1",
+        currency: "INR",
+        action: "https://test.payu.in/_payment",
+        fields: {
+          txnid: "payu_txn_1",
+        },
+      },
+    });
+    expect(mockCreatePayuOrder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: 999,
+        email: "client@example.com",
+      })
+    );
+    expect(getOnlyPaymentRecord()).toMatchObject({
+      provider: "payu",
+      pricingSnapshot: expect.objectContaining({
+        netAmount: 999,
+        currency: "INR",
+      }),
     });
   });
 
@@ -837,6 +933,66 @@ describe("payment session flow", () => {
     expect(getOnlyPaymentRecord()).toMatchObject({
       status: paymentRecordConstants.PAYMENT_STATUS_EMAIL_PARTIAL,
       providerPaymentId: "razorpay_payment_1",
+    });
+  });
+
+  test("finalize books a PayU session and records INR currency", async () => {
+    const hold = createHold();
+    const bookingPayload = baseBookingPayload();
+    bookingPayload.slotHoldToken = issueTokenForHold(hold);
+    mockResolvePaymentQuote.mockResolvedValue(
+      baseQuote({
+        paymentProvider: "paid",
+        effectiveGrossAmount: 999,
+        effectiveNetAmount: 999,
+        currency: "INR",
+      })
+    );
+    mockResolvePaymentProviders.mockReturnValue({
+      serverSessionsEnabled: true,
+      market: { id: "india", currency: "INR" },
+      paypal: { enabled: false, mode: "live", clientId: "" },
+      razorpay: { enabled: false, mode: "live" },
+      payu: { enabled: true, mode: "live" },
+    });
+
+    const started = await startPaymentSession({
+      body: {
+        provider: "payu",
+        bookingPayload,
+      },
+      headers: { host: "www.rooindustries.in" },
+      client: mockClient,
+    });
+
+    const finalized = await finalizePaymentSession({
+      body: {
+        paymentAccessToken: started.body.paymentAccessToken,
+        providerData: {
+          txnid: "payu_txn_1",
+          mihpayid: "mihpay_1",
+          status: "success",
+          amount: "999.00",
+          productinfo: "Performance Vertex Overhaul booking",
+          firstname: "Roo Customer",
+          email: "client@example.com",
+          hash: "hash",
+        },
+      },
+      client: mockClient,
+    });
+
+    expect(finalized.httpStatus).toBe(200);
+    expect(mockVerifyPayuResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedAmount: 999,
+      })
+    );
+    expect(store.bookings[0]).toMatchObject({
+      paymentProvider: "payu",
+      currency: "INR",
+      payuTransactionId: "payu_txn_1",
+      payuPaymentId: "mihpay_1",
     });
   });
 

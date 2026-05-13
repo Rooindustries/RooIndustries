@@ -20,7 +20,9 @@ export default async function handler(req, res) {
     return;
   }
 
-  const providers = resolvePaymentProviders();
+  const providers = resolvePaymentProviders({
+    hostname: req.headers?.host || req.headers?.["x-forwarded-host"] || "",
+  });
 
   return res.status(200).json({
     ok: true,
@@ -34,7 +36,12 @@ export default async function handler(req, res) {
         mode: providers?.paypal?.mode || "unknown",
         clientId: String(providers?.paypal?.clientId || "").trim(),
       },
+      payu: {
+        enabled: !!providers?.payu?.enabled,
+        mode: providers?.payu?.mode || "unknown",
+      },
     },
+    market: providers?.market || { id: "global", currency: "USD" },
     environment: {
       runtime: providers?.runtime || "development",
       previewPaymentsEnabled: providers?.previewPaymentsEnabled === true,
