@@ -382,7 +382,6 @@ export default function Payment({ hideFooter = false }) {
   const [providerConfig, setProviderConfig] = useState({
     razorpay: { enabled: initialMarket.id !== "india", mode: "unknown" },
     paypal: { enabled: false, mode: "unknown", clientId: "" },
-    payu: { enabled: false, mode: "unknown" },
     market: initialMarket,
   });
   const [showInternalPayments, setShowInternalPayments] = useState(false);
@@ -402,7 +401,6 @@ export default function Payment({ hideFooter = false }) {
   const canUsePaypal = hasPaypalClientId && !!providerConfig?.paypal?.enabled;
   const isIndiaMarket = providerConfig?.market?.id === "india";
   const checkoutCurrency = providerConfig?.market?.currency || "USD";
-  const canUsePayu = isIndiaMarket && !!providerConfig?.payu?.enabled;
   const formatPaymentAmount = (amount) =>
     checkoutCurrency === "INR"
       ? `₹${Math.round(Number(amount) || 0).toLocaleString("en-IN")}`
@@ -521,10 +519,6 @@ export default function Payment({ hideFooter = false }) {
             enabled: !!data.providers?.paypal?.enabled,
             mode: data.providers?.paypal?.mode || "unknown",
             clientId: String(data.providers?.paypal?.clientId || "").trim(),
-          },
-          payu: {
-            enabled: !!data.providers?.payu?.enabled,
-            mode: data.providers?.payu?.mode || "unknown",
           },
           market: {
             id: data.market?.id || "global",
@@ -1172,63 +1166,6 @@ export default function Payment({ hideFooter = false }) {
     }
   }
 
-  async function handlePayuPay() {
-    if (!canUsePayu) {
-      showBanner(
-        "error",
-        "India checkout is currently unavailable. Please try again shortly."
-      );
-      return;
-    }
-
-    if (!ensureSlotBeforeAction()) return;
-
-    if (isFree) {
-      showBanner(
-        "error",
-        "This booking is fully discounted. Use the 'Confirm Free Booking' button instead."
-      );
-      return;
-    }
-
-    try {
-      setPaymentStatusBusy(true);
-      showBanner("info", "Opening India checkout...");
-      const session = await startSessionCheckout("payu");
-      const payload = session?.providerPayload || {};
-      const action = String(payload.action || "").trim();
-      const fields = payload.fields || {};
-
-      if (!action || !fields || typeof fields !== "object") {
-        throw new Error("India checkout is not configured.");
-      }
-
-      const form = document.createElement("form");
-      form.method = String(payload.method || "POST").toUpperCase();
-      form.action = action;
-      form.style.display = "none";
-
-      Object.entries(fields).forEach(([key, value]) => {
-        const input = document.createElement("input");
-        input.type = "hidden";
-        input.name = key;
-        input.value = String(value ?? "");
-        form.appendChild(input);
-      });
-
-      document.body.appendChild(form);
-      form.submit();
-    } catch (err) {
-      console.error("PayU error:", err);
-      clearPaymentSession();
-      showBanner(
-        "error",
-        err?.message || "India checkout could not be started. Please try again."
-      );
-      setPaymentStatusBusy(false);
-    }
-  }
-
   // --- ANIMATION CONFIG ---
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -1500,23 +1437,22 @@ export default function Payment({ hideFooter = false }) {
                 <div className="low-perf-surface glass-premium glass-card-surface mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-xl border border-sky-800/30 px-5 py-4">
                   <div className="flex items-center gap-4">
                     <div className="grid h-10 w-16 place-items-center rounded-lg border border-emerald-300/30 bg-emerald-400/10 text-xs font-bold uppercase tracking-wide text-emerald-200">
-                      UPI
+                      INR
                     </div>
                     <div>
                       <p className="text-slate-300 text-sm font-medium">
                         India Secure Checkout
                       </p>
                       <p className="text-slate-400 text-xs">
-                        UPI, EMI, and domestic cards
+                        IDFC First Bank API pending
                       </p>
                     </div>
                   </div>
                   <button
-                    onClick={handlePayuPay}
-                    disabled={paymentStatusBusy || !canUsePayu}
+                    disabled
                     className="glow-button px-4 py-2 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60"
                   >
-                    {paymentStatusBusy ? "Processing..." : "Pay in INR"}
+                    Pay in INR
                     <span className="glow-line glow-line-top" />
                     <span className="glow-line glow-line-right" />
                     <span className="glow-line glow-line-bottom" />
@@ -1524,9 +1460,9 @@ export default function Payment({ hideFooter = false }) {
                   </button>
                 </div>
               )}
-              {isIndiaMarket && !canUsePayu && (
+              {isIndiaMarket && (
                 <p className="mt-2 text-xs text-amber-300">
-                  India checkout is currently unavailable.
+                  India checkout is currently unavailable until IDFC First Bank API is configured.
                 </p>
               )}
 

@@ -176,17 +176,6 @@ const resolvePaymentProviders = (options = {}) => {
     !!paypalClientSecret &&
     allowProviderModeInRuntime(paypalMode, runtimePolicy);
 
-  const payuKey = String(process.env.PAYU_KEY || process.env.PAYU_MERCHANT_KEY || "").trim();
-  const payuSalt = String(process.env.PAYU_SALT || process.env.PAYU_MERCHANT_SALT || "").trim();
-  const payuMode = String(process.env.PAYU_ENV || "").trim().toLowerCase() === "test"
-    ? "test"
-    : "live";
-  const payuEnabled =
-    market.payuEnabled &&
-    !!payuKey &&
-    !!payuSalt &&
-    allowProviderModeInRuntime(payuMode, runtimePolicy);
-
   return {
     market: {
       id: market.id,
@@ -206,10 +195,6 @@ const resolvePaymentProviders = (options = {}) => {
       enabled: paypalEnabled,
       mode: paypalMode,
       clientId: paypalEnabled ? paypalClientId : "",
-    },
-    payu: {
-      enabled: payuEnabled,
-      mode: payuKey && payuSalt ? payuMode : "missing",
     },
   };
 };

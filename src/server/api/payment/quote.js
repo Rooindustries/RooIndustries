@@ -67,10 +67,6 @@ module.exports = async function handler(req, res) {
               mode: providers.paypal.mode,
               clientId: "",
             },
-            payu: {
-              enabled: false,
-              mode: providers.payu.mode,
-            },
           }
         : providers,
     });

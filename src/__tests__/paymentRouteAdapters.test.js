@@ -28,7 +28,6 @@ const loadPaymentActionRoute = async (handlerOverrides = {}) => {
 
   const handlers = {
     finalize: handlerOverrides.finalize || buildEchoHandler("finalize"),
-    payuReturn: handlerOverrides.payuReturn || buildEchoHandler("payuReturn"),
     providers: handlerOverrides.providers || buildEchoHandler("providers"),
     quote: handlerOverrides.quote || buildEchoHandler("quote"),
     reconcile: handlerOverrides.reconcile || buildEchoHandler("reconcile"),
@@ -39,10 +38,6 @@ const loadPaymentActionRoute = async (handlerOverrides = {}) => {
   jest.doMock("../server/api/payment/finalize.js", () => ({
     __esModule: true,
     default: handlers.finalize,
-  }));
-  jest.doMock("../server/api/payment/payuReturn.js", () => ({
-    __esModule: true,
-    default: handlers.payuReturn,
   }));
   jest.doMock("../server/api/payment/providers.js", () => ({
     __esModule: true,

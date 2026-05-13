@@ -36,7 +36,7 @@ describe("market resolver", () => {
       id: "india",
       currency: "INR",
       paypalEnabled: false,
-      payuEnabled: true,
+      razorpayEnabled: false,
     });
   });
 

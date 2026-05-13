@@ -18,7 +18,6 @@ import {
 import providerConfig from "../payment/providerConfig.js";
 import {
   DEFAULT_PAYPAL_CURRENCY,
-  DEFAULT_PAYU_CURRENCY,
   DEFAULT_RAZORPAY_CURRENCY,
   getPayPalCredentials,
   resolveRazorpayCredentials,
@@ -161,8 +160,6 @@ const findPaymentRecordForBooking = async ({
   paypalOrderId = "",
   razorpayOrderId = "",
   razorpayPaymentId = "",
-  payuTransactionId = "",
-  payuPaymentId = "",
 }) => {
   if (paymentRecordId) {
     const byId = await client.fetch(
@@ -202,26 +199,6 @@ const findPaymentRecordForBooking = async ({
     );
   }
 
-  if (paymentProvider === "payu" && payuTransactionId) {
-    return client.fetch(
-      `*[_type == $type && provider == "payu" && providerOrderId == $providerOrderId][0]`,
-      {
-        type: PAYMENT_RECORD_TYPE,
-        providerOrderId: payuTransactionId,
-      }
-    );
-  }
-
-  if (paymentProvider === "payu" && payuPaymentId) {
-    return client.fetch(
-      `*[_type == $type && provider == "payu" && providerPaymentId == $providerPaymentId][0]`,
-      {
-        type: PAYMENT_RECORD_TYPE,
-        providerPaymentId: payuPaymentId,
-      }
-    );
-  }
-
   return null;
 };
 
@@ -247,8 +224,6 @@ export default async function handler(req, res) {
       razorpayOrderId = "",
       razorpayPaymentId = "",
       razorpaySignature = "",
-      payuTransactionId = "",
-      payuPaymentId = "",
       originalOrderId = "",
       couponCode = "",
       localTimeZone,
@@ -273,7 +248,6 @@ export default async function handler(req, res) {
       String(startTimeUTC || "").trim().toLowerCase(),
       String(paypalOrderId || "").trim().toLowerCase(),
       String(razorpayPaymentId || "").trim().toLowerCase(),
-      String(payuTransactionId || "").trim().toLowerCase(),
     ];
 
     if (
@@ -301,7 +275,7 @@ export default async function handler(req, res) {
         packageTitle,
         currency:
           String(currency || "").trim().toUpperCase() ||
-          (paymentProvider === "payu" ? DEFAULT_PAYU_CURRENCY : DEFAULT_RAZORPAY_CURRENCY),
+          DEFAULT_RAZORPAY_CURRENCY,
         client: writeClient,
       });
       originalBooking = upgradeContext.booking;
@@ -353,20 +327,9 @@ export default async function handler(req, res) {
     if (
       paymentProvider !== "free" &&
       paymentProvider !== "paypal" &&
-      paymentProvider !== "razorpay" &&
-      paymentProvider !== "payu"
+      paymentProvider !== "razorpay"
     ) {
       return res.status(400).json({ error: "Unsupported payment provider." });
-    }
-
-    if (
-      !isTestEnv &&
-      paymentProvider === "payu" &&
-      !req.internalContext?.paymentFinalizeSource
-    ) {
-      return res.status(400).json({
-        error: "PayU bookings must be finalized through the payment session.",
-      });
     }
 
     const availableProviders = isTestEnv ? null : resolvePaymentProviders();
@@ -391,16 +354,6 @@ export default async function handler(req, res) {
       });
     }
 
-    if (
-      !isTestEnv &&
-      paymentProvider === "payu" &&
-      !availableProviders?.payu?.enabled
-    ) {
-      return res.status(400).json({
-        error: "India payments are not available in this environment.",
-      });
-    }
-
     const deferEmailDispatchRequested = deferEmailsUntilConfirmation === true;
     const syncPaidPaymentRecordForBooking = async ({
       bookingId,
@@ -414,8 +367,7 @@ export default async function handler(req, res) {
         !normalizedBookingId ||
         (
           normalizedProvider !== "paypal" &&
-          normalizedProvider !== "razorpay" &&
-          normalizedProvider !== "payu"
+          normalizedProvider !== "razorpay"
         )
       ) {
         return null;
@@ -440,10 +392,6 @@ export default async function handler(req, res) {
         razorpayPaymentId: String(
           bookingDoc.razorpayPaymentId || razorpayPaymentId || ""
         ).trim(),
-        payuTransactionId: String(
-          bookingDoc.payuTransactionId || payuTransactionId || ""
-        ).trim(),
-        payuPaymentId: String(bookingDoc.payuPaymentId || payuPaymentId || "").trim(),
       });
 
       const bookingSeedKey = buildBookingSeedKey({
@@ -456,17 +404,13 @@ export default async function handler(req, res) {
       const providerOrderId = String(
         bookingDoc.paypalOrderId ||
           bookingDoc.razorpayOrderId ||
-          bookingDoc.payuTransactionId ||
           paypalOrderId ||
           razorpayOrderId ||
-          payuTransactionId ||
           ""
       ).trim();
       const providerPaymentId = String(
         bookingDoc.razorpayPaymentId ||
-          bookingDoc.payuPaymentId ||
           razorpayPaymentId ||
-          payuPaymentId ||
           ""
       ).trim();
       const resolvedGrossAmount = Number(
@@ -506,8 +450,6 @@ export default async function handler(req, res) {
           String(currency || bookingDoc.currency || "").trim().toUpperCase() ||
           (normalizedProvider === "paypal"
             ? DEFAULT_PAYPAL_CURRENCY
-            : normalizedProvider === "payu"
-              ? DEFAULT_PAYU_CURRENCY
               : DEFAULT_RAZORPAY_CURRENCY),
       });
       const resolvedEmailDispatch =
@@ -544,8 +486,6 @@ export default async function handler(req, res) {
         bookingFinalizationKey:
           normalizedProvider === "paypal"
             ? `paypal:${providerOrderId}`
-            : normalizedProvider === "payu"
-              ? `payu:${providerOrderId}`
               : `razorpay-order:${providerOrderId}`,
         bookingPayload: {
           packageTitle: String(
@@ -576,8 +516,7 @@ export default async function handler(req, res) {
           slotHoldExpiresAt: String(slotHoldExpiresAt || "").trim(),
           paymentProvider: normalizedProvider,
           currency:
-            String(currency || bookingDoc.currency || "").trim().toUpperCase() ||
-            (normalizedProvider === "payu" ? DEFAULT_PAYU_CURRENCY : ""),
+            String(currency || bookingDoc.currency || "").trim().toUpperCase(),
         },
         pricingSnapshot: {
           grossAmount: resolvedGrossAmount,
@@ -620,12 +559,6 @@ export default async function handler(req, res) {
                   availableProviders?.paypal?.clientId || ""
                 ).trim(),
               }
-            : normalizedProvider === "payu"
-              ? {
-                  orderId: providerOrderId,
-                  currency: DEFAULT_PAYU_CURRENCY,
-                  amount: Math.round(resolvedNetAmount * 100),
-                }
             : {
                 orderId: providerOrderId,
                 currency: DEFAULT_RAZORPAY_CURRENCY,
@@ -992,11 +925,11 @@ export default async function handler(req, res) {
       upgradeContext,
       currency:
         String(currency || "").trim().toUpperCase() ||
-        (paymentProvider === "payu" ? DEFAULT_PAYU_CURRENCY : DEFAULT_RAZORPAY_CURRENCY),
+        DEFAULT_RAZORPAY_CURRENCY,
     });
     const resolvedCurrency =
       String(currency || "").trim().toUpperCase() ||
-      (paymentProvider === "payu" ? DEFAULT_PAYU_CURRENCY : DEFAULT_RAZORPAY_CURRENCY);
+      DEFAULT_RAZORPAY_CURRENCY;
     const resolvedPackagePrice =
       resolvedCurrency === "INR"
         ? `₹${Math.round(effectiveGrossAmount).toLocaleString("en-IN")}`
@@ -1159,8 +1092,6 @@ export default async function handler(req, res) {
         payerEmail: verifiedPayerEmail,
         razorpayOrderId,
         razorpayPaymentId,
-        payuTransactionId,
-        payuPaymentId,
         referralCode: effectiveReferralCode,
         discountPercent: effectiveDiscountPercent,
         discountAmount: effectiveDiscountAmount,
@@ -1200,9 +1131,7 @@ export default async function handler(req, res) {
             _id,
             paymentProvider,
             paypalOrderId,
-            razorpayPaymentId,
-            payuTransactionId,
-            payuPaymentId
+            razorpayPaymentId
           }`,
           { date: bookingDate, time: bookingTime }
         );
@@ -1216,12 +1145,7 @@ export default async function handler(req, res) {
             paymentProvider === "razorpay" &&
             !!razorpayPaymentId &&
             existingBooking.razorpayPaymentId === razorpayPaymentId;
-          const samePayuProof =
-            paymentProvider === "payu" &&
-            !!payuTransactionId &&
-            existingBooking.payuTransactionId === payuTransactionId;
-
-          if (samePaypalProof || sameRazorpayProof || samePayuProof) {
+          if (samePaypalProof || sameRazorpayProof) {
             return respondWithStoredBooking({
               bookingId: existingBooking._id,
               idempotent: true,

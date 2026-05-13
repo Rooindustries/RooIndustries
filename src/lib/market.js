@@ -15,7 +15,6 @@ const MARKET_CONFIGS = Object.freeze({
     areaServed: "Worldwide",
     paypalEnabled: true,
     razorpayEnabled: true,
-    payuEnabled: false,
   }),
   [MARKET_IDS.india]: Object.freeze({
     id: MARKET_IDS.india,
@@ -28,7 +27,6 @@ const MARKET_CONFIGS = Object.freeze({
     areaServed: "India",
     paypalEnabled: false,
     razorpayEnabled: false,
-    payuEnabled: true,
   }),
 });
 

@@ -9,14 +9,11 @@ import marketConfig from "../../../lib/market.js";
 import providerConfig from "./providerConfig.js";
 import {
   createPayPalOrder,
-  createPayuOrder,
   createRazorpayOrder,
   DEFAULT_PAYPAL_CURRENCY,
-  DEFAULT_PAYU_CURRENCY,
   DEFAULT_RAZORPAY_CURRENCY,
   verifyPayPalOrder,
   verifyPayPalWebhookSignature,
-  verifyPayuResponse,
   verifyRazorpayPayment,
   verifyRazorpaySignature,
   verifyRazorpayWebhookSignature,
@@ -275,8 +272,6 @@ const buildRecordPricingFingerprint = ({
       String(bookingPayload?.currency || "").trim().toUpperCase() ||
       (String(provider || "").trim().toLowerCase() === "paypal"
         ? DEFAULT_PAYPAL_CURRENCY
-        : String(provider || "").trim().toLowerCase() === "payu"
-          ? DEFAULT_PAYU_CURRENCY
         : DEFAULT_RAZORPAY_CURRENCY),
   });
 
@@ -360,19 +355,6 @@ const buildProviderPayloadFromRecord = (record = {}) => {
         String(record.providerPublicData?.currency || "").trim().toUpperCase() ||
         DEFAULT_PAYPAL_CURRENCY,
       clientId: String(record.providerPublicData?.clientId || "").trim(),
-    };
-  }
-
-  if (provider === "payu") {
-    return {
-      orderId: String(record.providerOrderId || "").trim(),
-      currency:
-        String(record.providerPublicData?.currency || "").trim().toUpperCase() ||
-        DEFAULT_PAYU_CURRENCY,
-      amount: Number(record.providerPublicData?.amount || 0),
-      action: String(record.providerPublicData?.action || "").trim(),
-      method: String(record.providerPublicData?.method || "POST").trim().toUpperCase(),
-      fields: normalizeObject(record.providerPublicData?.fields),
     };
   }
 
@@ -719,36 +701,6 @@ const verifyProviderCapture = async ({
     };
   }
 
-  if (provider === "payu") {
-    const txnid = String(
-      providerData.txnid || providerData.payuTransactionId || record.providerOrderId || ""
-    ).trim();
-    if (!txnid) {
-      return { ok: false, retryable: false, reason: "payu_transaction_id_missing" };
-    }
-
-    const verification = verifyPayuResponse({
-      payload: {
-        ...providerData,
-        txnid,
-      },
-      expectedAmount: Number(record?.pricingSnapshot?.netAmount || 0),
-    });
-    if (!verification.ok) {
-      return {
-        ok: false,
-        retryable: isTransientVerificationFailure(verification.reason),
-        reason: verification.reason || "payu_verification_failed",
-      };
-    }
-
-    return {
-      ok: true,
-      trustedCapture: true,
-      payerEmail: String(verification.payerEmail || providerData.email || "").trim(),
-    };
-  }
-
   return { ok: false, retryable: false, reason: "payment_provider_unsupported" };
 };
 
@@ -986,11 +938,7 @@ const buildLegacyBookingPayload = ({
     paymentProvider: record.provider,
     status: "captured",
     deferEmailsUntilConfirmation:
-      String(record.provider || "").trim().toLowerCase() !== "free" &&
-      !(
-        String(record.provider || "").trim().toLowerCase() === "payu" &&
-        normalizedSource !== "client"
-      ),
+      String(record.provider || "").trim().toLowerCase() !== "free",
     paypalOrderId:
       String(providerData.paypalOrderId || record.providerOrderId || "").trim(),
     payerEmail:
@@ -1001,10 +949,6 @@ const buildLegacyBookingPayload = ({
       String(providerData.razorpayPaymentId || record.providerPaymentId || "").trim(),
     razorpaySignature:
       String(providerData.razorpaySignature || record.providerSignature || "").trim(),
-    payuTransactionId:
-      String(providerData.txnid || providerData.payuTransactionId || record.providerOrderId || "").trim(),
-    payuPaymentId:
-      String(providerData.mihpayid || providerData.payuPaymentId || record.providerPaymentId || "").trim(),
     slotHoldId:
       String(holdSnapshot.slotHoldId || bookingPayload.slotHoldId || "").trim(),
     slotHoldToken:
@@ -1171,8 +1115,6 @@ const finalizePaymentRecordInternal = async ({
         String(
           providerData.paypalOrderId ||
             providerData.razorpayOrderId ||
-            providerData.txnid ||
-            providerData.payuTransactionId ||
             record.providerOrderId ||
             ""
         ).trim(),
@@ -1180,8 +1122,6 @@ const finalizePaymentRecordInternal = async ({
         String(
           providerData.razorpayPaymentId ||
             providerData.paypalPaymentId ||
-            providerData.mihpayid ||
-            providerData.payuPaymentId ||
             record.providerPaymentId ||
             ""
         ).trim(),
@@ -1424,18 +1364,6 @@ const createOrReusePaymentRecordForStart = async ({
       },
     });
     providerOrderId = providerPayload.orderId;
-  } else if (provider === "payu") {
-    const receipt = `payu_${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`;
-    providerPayload = await createPayuOrder({
-      amount: quote.effectiveNetAmount,
-      description: `${bookingPayload.packageTitle} booking`,
-      bookingSeedKey,
-      email: bookingPayload.email || "",
-      receipt,
-      successUrl: `${siteUrl}/api/payment/payuReturn?provider=payu`,
-      failureUrl: `${siteUrl}/api/payment/payuReturn?provider=payu`,
-    });
-    providerOrderId = providerPayload.orderId;
   } else if (provider === "paypal") {
     providerPayload = await createPayPalOrder({
       amount: quote.effectiveNetAmount,
@@ -1614,8 +1542,7 @@ export const startPaymentSession = async ({
     if (
       provider !== "free" &&
       provider !== "paypal" &&
-      provider !== "razorpay" &&
-      provider !== "payu"
+      provider !== "razorpay"
     ) {
       return {
         httpStatus: 400,
@@ -1637,13 +1564,6 @@ export const startPaymentSession = async ({
       return {
         httpStatus: 400,
         body: { ok: false, error: "Razorpay is not available in this environment." },
-      };
-    }
-
-    if (provider === "payu" && !providers?.payu?.enabled) {
-      return {
-        httpStatus: 400,
-        body: { ok: false, error: "India payments are not available in this environment." },
       };
     }
 
@@ -1786,62 +1706,6 @@ export const finalizePaymentSession = async ({
     record,
     source: "client",
     providerData: flatProviderData,
-  });
-
-  return {
-    httpStatus: finalized.httpStatus,
-    body: finalized.response,
-  };
-};
-
-export const finalizeProviderReturn = async ({
-  query = {},
-  body = {},
-  client = createRefWriteClient(),
-}) => {
-  const requestBody = normalizeObject(body);
-  const providerData = {
-    ...requestBody,
-    ...normalizeObject(query),
-  };
-  const provider = String(providerData.provider || "payu").trim().toLowerCase();
-  const providerOrderId = String(
-    providerData.txnid ||
-      providerData.payuTransactionId ||
-      providerData.paypalOrderId ||
-      providerData.razorpayOrderId ||
-      ""
-  ).trim();
-  const providerPaymentId = String(
-    providerData.mihpayid ||
-      providerData.payuPaymentId ||
-      providerData.razorpayPaymentId ||
-      ""
-  ).trim();
-
-  const record = await loadPaymentRecordForFinalize({
-    client,
-    provider,
-    providerOrderId,
-    providerPaymentId,
-  });
-
-  if (!record?._id) {
-    return {
-      httpStatus: 404,
-      body: {
-        ok: false,
-        error: "Payment session not found.",
-        code: "payment_record_not_found",
-      },
-    };
-  }
-
-  const finalized = await finalizePaymentRecordInternal({
-    client,
-    record,
-    source: "webhook",
-    providerData,
   });
 
   return {

@@ -1,7 +1,6 @@
 import { runLegacyApiHandler } from "../../../../src/lib/nextApiAdapter";
 import finalize from "../../../../src/server/api/payment/finalize.js";
 import providers from "../../../../src/server/api/payment/providers.js";
-import payuReturn from "../../../../src/server/api/payment/payuReturn.js";
 import quote from "../../../../src/server/api/payment/quote.js";
 import reconcile from "../../../../src/server/api/payment/reconcile.js";
 import start from "../../../../src/server/api/payment/start.js";
@@ -12,7 +11,6 @@ export const dynamic = "force-dynamic";
 
 const ACTION_HANDLERS = {
   finalize,
-  payuReturn,
   providers,
   quote,
   reconcile,

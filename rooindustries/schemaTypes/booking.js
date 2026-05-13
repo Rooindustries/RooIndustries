@@ -83,7 +83,5 @@ export default {
 
     {name: 'razorpayOrderId', title: 'Razorpay Order ID', type: 'string'},
     {name: 'razorpayPaymentId', title: 'Razorpay Payment ID', type: 'string'},
-    {name: 'payuTransactionId', title: 'PayU Transaction ID', type: 'string'},
-    {name: 'payuPaymentId', title: 'PayU Payment ID', type: 'string'},
   ],
 }

@@ -27,9 +27,6 @@ describe("payment provider runtime policy", () => {
     delete process.env.RAZORPAY_KEY_SECRET;
     delete process.env.SITE_MARKET;
     delete process.env.NEXT_PUBLIC_SITE_MARKET;
-    delete process.env.PAYU_KEY;
-    delete process.env.PAYU_SALT;
-    delete process.env.PAYU_ENV;
     delete process.env.ENABLE_RAZORPAY_INDIA_CHECKOUT;
   });
 
@@ -249,8 +246,6 @@ describe("payment provider runtime policy", () => {
     process.env.RAZORPAY_KEY_SECRET = "secret";
     process.env.PAYPAL_CLIENT_ID = "paypal-live-client";
     process.env.PAYPAL_CLIENT_SECRET = "paypal-live-secret";
-    process.env.PAYU_KEY = "payu-key";
-    process.env.PAYU_SALT = "payu-salt";
 
     const { resolvePaymentProviders } = loadProviderConfig();
     const providers = resolvePaymentProviders();
@@ -261,10 +256,6 @@ describe("payment provider runtime policy", () => {
     });
     expect(providers.paypal.enabled).toBe(false);
     expect(providers.razorpay.enabled).toBe(false);
-    expect(providers.payu).toEqual({
-      enabled: true,
-      mode: "live",
-    });
   });
 
   test("India Razorpay requires an explicit override", () => {

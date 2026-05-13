@@ -109,10 +109,6 @@ export const buildPaymentRecordId = ({
   if (normalizedProvider === "razorpay" && providerOrderId) {
     return `paymentRecord.razorpay.order.${String(providerOrderId).trim()}`;
   }
-  if (normalizedProvider === "payu" && providerOrderId) {
-    return `paymentRecord.payu.${String(providerOrderId).trim()}`;
-  }
-
   const fallbackSeed = bookingSeedKey || `${normalizedProvider}:${providerOrderId}:${providerPaymentId}`;
   return `paymentRecord.${normalizedProvider}.${stableHash(fallbackSeed)}`;
 };
