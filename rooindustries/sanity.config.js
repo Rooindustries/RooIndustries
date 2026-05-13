@@ -16,12 +16,14 @@ export default defineConfig([
     ...baseConfig,
     name: 'global',
     title: 'Roo Industries Global',
+    basePath: '/global',
     dataset: 'production',
   },
   {
     ...baseConfig,
     name: 'india',
     title: 'Roo Industries India',
+    basePath: '/india',
     dataset: 'production-in',
   },
 ])

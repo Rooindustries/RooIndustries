@@ -6,6 +6,7 @@ const loadRouteRenderer = async () => {
   const LegacyRoutePage = jest.fn(() => null);
   const SeoFallback = jest.fn(() => null);
   const fetchHomePageData = jest.fn().mockResolvedValue({ packagesList: [] });
+  const fetchSiteSettings = jest.fn().mockResolvedValue({ siteMode: "live" });
 
   jest.doMock("../next/LegacyRoutePage.jsx", () => ({
     __esModule: true,
@@ -19,6 +20,7 @@ const loadRouteRenderer = async () => {
     __esModule: true,
     default: {
       fetchHomePageData,
+      fetchSiteSettings,
     },
   }));
 
@@ -28,6 +30,7 @@ const loadRouteRenderer = async () => {
     RouteRenderer,
     LegacyRoutePage,
     fetchHomePageData,
+    fetchSiteSettings,
   };
 };
 
@@ -39,8 +42,12 @@ describe("RouteRenderer", () => {
   });
 
   test("resolves promise search params before rendering the legacy route page", async () => {
-    const { RouteRenderer, LegacyRoutePage, fetchHomePageData } =
-      await loadRouteRenderer();
+    const {
+      RouteRenderer,
+      LegacyRoutePage,
+      fetchHomePageData,
+      fetchSiteSettings,
+    } = await loadRouteRenderer();
     const initialHomeData = { faqQuestions: [] };
 
     const tree = await RouteRenderer({
@@ -54,6 +61,7 @@ describe("RouteRenderer", () => {
 
     render(tree);
 
+    expect(fetchSiteSettings).toHaveBeenCalledTimes(1);
     expect(fetchHomePageData).not.toHaveBeenCalled();
     expect(LegacyRoutePage).toHaveBeenCalledTimes(1);
     expect(LegacyRoutePage.mock.calls[0][0]).toMatchObject({

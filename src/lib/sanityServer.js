@@ -1,5 +1,6 @@
 const { createClient } = require("@sanity/client");
 const { resolveMarketSanityDataset } = require("./market.js");
+const { normalizeSiteSettings } = require("./siteMode.js");
 
 const sanity = createClient({
   projectId: process.env.SANITY_PROJECT_ID || "9g42k3ur",
@@ -8,6 +9,22 @@ const sanity = createClient({
   useCdn: true,
   token: process.env.SANITY_READ_TOKEN || undefined,
 });
+
+const freshSanity = sanity.withConfig({ useCdn: false });
+
+async function fetchSiteSettings() {
+  try {
+    const settings = await freshSanity.fetch(
+      `*[_type == "siteSettings" && _id == "site-settings"][0]{
+        siteMode
+      }`
+    );
+    return normalizeSiteSettings(settings);
+  } catch (error) {
+    console.warn("[sanity] site settings fetch failed:", error.message);
+    return normalizeSiteSettings();
+  }
+}
 
 async function fetchFaqQuestions() {
   try {
@@ -190,4 +207,5 @@ async function fetchHomePageData() {
 module.exports = {
   fetchFaqQuestions,
   fetchHomePageData,
+  fetchSiteSettings,
 };
