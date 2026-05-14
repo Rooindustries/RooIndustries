@@ -130,7 +130,7 @@ const withRouteSuspense = (node, fallback = <RouteFallback />) => (
 
 function RedirectToDiscord() {
   React.useEffect(() => {
-    window.location.href = "https://discord.gg/M7nTkn9dxE";
+    window.location.href = "https://discord.com/invite/qs5HKNyazD";
   }, []);
   return null;
 }

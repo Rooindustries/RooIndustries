@@ -5,7 +5,7 @@ import { client } from "../sanityClient";
 const DEFAULT_BANNER = {
   text: "Free optimization guide in our Discord",
   mobileText: "Free guide in Discord",
-  link: "https://discord.gg/M7nTkn9dxE",
+  link: "https://discord.com/invite/qs5HKNyazD",
 };
 
 export default function DiscordGuideBanner({ hidden = false }) {
