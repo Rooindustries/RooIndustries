@@ -116,7 +116,7 @@ const fallbackData = {
   footer: {
     note: "Want to join our community?",
     buttonText: "Join Our Discord",
-    buttonUrl: "https://discord.gg/M7nTkn9dxE",
+    buttonUrl: "https://discord.com/invite/qs5HKNyazD",
     showDiscordIcon: true,
   },
 };
