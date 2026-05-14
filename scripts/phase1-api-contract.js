@@ -19,14 +19,14 @@ const csvEscape = (value) => {
 async function run() {
   const checks = [
     {
-      route: "/api/xocParts",
+      route: "/api/bookingAvailability",
       method: "GET",
       expect: (response, body, hostDrift) =>
         response.status === 200 &&
         !hostDrift &&
-        typeof body?.ok === "boolean" &&
-        Array.isArray(body?.motherboards) &&
-        Array.isArray(body?.rams),
+        body?.ok === true &&
+        typeof body?.settings === "object" &&
+        Array.isArray(body?.bookedSlots),
     },
     {
       route: "/api/payment/providers",
