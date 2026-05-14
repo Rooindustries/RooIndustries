@@ -101,6 +101,16 @@ describe("booking calendar UI", () => {
 
     let holdRequestBody = null;
     global.fetch = jest.fn(async (url, options = {}) => {
+      if (url === "/api/bookingAvailability") {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            settings,
+            bookedSlots: [],
+          }),
+        };
+      }
       if (url === "/api/holdSlot") {
         holdRequestBody = JSON.parse(options.body || "{}");
         return {
