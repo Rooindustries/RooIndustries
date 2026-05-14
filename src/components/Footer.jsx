@@ -76,7 +76,7 @@ export default function Footer() {
             </nav>
 
             <a
-              href="https://discord.gg/M7nTkn9dxE"
+              href="https://discord.com/invite/qs5HKNyazD"
               target="_blank"
               rel="noopener noreferrer"
               className="h-12 w-12 rounded-full border border-cyan-300/25 bg-cyan-400/10 flex items-center justify-center text-white/90 hover:text-cyan-200 hover:border-cyan-300/55 hover:bg-cyan-400/20 transition-all shadow-[0_0_18px_rgba(34,211,238,0.12)]"

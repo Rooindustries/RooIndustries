@@ -6,7 +6,7 @@ export const DEFAULT_TITLE = `${SITE_NAME} | Professional PC Optimization`;
 export const DEFAULT_DESCRIPTION =
   "World-class PC optimization, BIOS tuning, and game performance boosts delivered fully online.";
 export const DEFAULT_OG_IMAGE = `${SITE_URL}/embed_logo.png`;
-export const SAME_AS = ["https://discord.gg/M7nTkn9dxE"];
+export const SAME_AS = ["https://discord.com/invite/qs5HKNyazD"];
 export const AREA_SERVED = "Worldwide";
 
 export const resolveUrl = (value) => {
