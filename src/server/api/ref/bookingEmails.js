@@ -11,7 +11,7 @@ const writeClient = createClient({
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-export const DISCORD_INVITE_URL = "https://discord.gg/M7nTkn9dxE";
+export const DISCORD_INVITE_URL = "https://discord.com/invite/qs5HKNyazD";
 export const OWNER_TZ_NAME = "Asia/Kolkata";
 const DEFAULT_LOGO_URL = "https://www.rooindustries.com/embed_logo.png";
 

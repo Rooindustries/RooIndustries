@@ -706,7 +706,7 @@ export default function Navbar({ routeShell = "browser" }) {
               </Link>
 
               <a
-                href="https://discord.gg/M7nTkn9dxE"
+                href="https://discord.com/invite/qs5HKNyazD"
                 target="_blank"
                 rel="noreferrer"
                 className={`${mobileLinkBase} ${mobileLinkIdle} inline-flex items-center gap-2`}

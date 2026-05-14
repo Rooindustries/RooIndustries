@@ -246,7 +246,7 @@ const buildOrganizationJsonLd = () => ({
   name: SITE_NAME,
   url: siteUrl,
   logo: `${siteUrl}${DEFAULT_OG_IMAGE}`,
-  sameAs: ["https://discord.gg/M7nTkn9dxE"],
+  sameAs: ["https://discord.com/invite/qs5HKNyazD"],
   areaServed: market.areaServed,
 });
 

@@ -19,7 +19,7 @@ export default {
       name: 'link',
       title: 'Link',
       type: 'url',
-      initialValue: 'https://discord.gg/M7nTkn9dxE',
+      initialValue: 'https://discord.com/invite/qs5HKNyazD',
     },
   ],
 }

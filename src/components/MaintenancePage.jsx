@@ -286,7 +286,7 @@ const MaintenancePage = () => {
               </a>
               <a
                 className="cs-button cs-button-secondary"
-                href="https://discord.gg/M7nTkn9dxE"
+                href="https://discord.com/invite/qs5HKNyazD"
                 target="_blank"
                 rel="noreferrer"
               >
