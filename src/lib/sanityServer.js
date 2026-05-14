@@ -1,4 +1,5 @@
 const { createClient } = require("@sanity/client");
+const { applyPackagesPricing } = require("./packagePricing");
 
 const sanity = createClient({
   projectId: process.env.SANITY_PROJECT_ID || "9g42k3ur",
@@ -177,7 +178,9 @@ async function fetchHomePageData() {
     reviews,
     about,
     services,
-    packagesList: Array.isArray(packagesList) ? packagesList : [],
+    packagesList: applyPackagesPricing(
+      Array.isArray(packagesList) ? packagesList : []
+    ),
     packagesSettings,
     howItWorks,
     supportedGames,

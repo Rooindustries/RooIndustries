@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { useLowPerformanceMode } from "../lib/performanceMode";
+import PriceDisplay from "./PriceDisplay";
 
 const overlayVariants = {
   hidden: { opacity: 0 },
@@ -193,12 +194,12 @@ export default function PackageDetailsModal({
               {pkg?.title}
             </motion.h3>
 
-            <motion.p
+            <motion.div
               variants={itemVariants}
-              className="text-4xl font-bold text-sky-300 mt-2"
+              className="mt-2"
             >
-              {pkg?.price}
-            </motion.p>
+              <PriceDisplay pkg={pkg} size="modal" />
+            </motion.div>
 
             <motion.ul className="mt-4 space-y-2 text-sm text-sky-100 text-left">
               {featureItems.map((item, i) => (

@@ -1,4 +1,7 @@
 import { createClient } from "@sanity/client";
+import packagePricing from "../../../lib/packagePricing.js";
+
+const { applyPackagePricing, getPackagePricePresentation } = packagePricing;
 
 const pricingClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -138,7 +141,8 @@ export async function resolveUpgradeContext({
     );
   }
 
-  const targetPrice = toMoney(targetPackage.price);
+  const pricedTargetPackage = applyPackagePricing(targetPackage);
+  const targetPrice = toMoney(pricedTargetPackage.price);
   const totalPaid = paidBookings.reduce(
     (sum, entry) => sum + getPaidAmount(entry),
     0
@@ -159,7 +163,7 @@ export async function resolveUpgradeContext({
     booking,
     rootOrderId,
     paidBookings,
-    targetPackage,
+    targetPackage: pricedTargetPackage,
     targetPrice,
     totalPaid: toMoney(totalPaid),
     upgradePrice: Math.max(0, toMoney(targetPrice - totalPaid)),
@@ -189,7 +193,8 @@ export async function resolveBookingPricing({
       { title: packageTitle }
     );
 
-    effectiveGrossAmount = toMoney(packageDoc?.price);
+    const pricing = getPackagePricePresentation(packageTitle, packageDoc?.price);
+    effectiveGrossAmount = toMoney(pricing.price);
   } else {
     const resolvedUpgradeContext =
       upgradeContext ||

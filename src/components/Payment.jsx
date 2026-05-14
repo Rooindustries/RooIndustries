@@ -2,6 +2,9 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useLocation, Link, useNavigate } from "react-router-dom";
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 import { motion } from "framer-motion";
+import packagePricing from "../lib/packagePricing";
+
+const { applyPackagePricing } = packagePricing;
 const formatLocalDate = (utcDate, timeZone) => {
   try {
     return new Intl.DateTimeFormat(undefined, {
@@ -159,7 +162,15 @@ export default function Payment({ hideFooter = false }) {
 
   const bookingData = useMemo(() => {
     try {
-      return JSON.parse(q.get("data") || "{}");
+      const parsed = JSON.parse(q.get("data") || "{}");
+      const pricedPackage = applyPackagePricing({
+        title: parsed.packageTitle,
+        price: parsed.packagePrice,
+      });
+      return {
+        ...parsed,
+        packagePrice: pricedPackage?.price || parsed.packagePrice,
+      };
     } catch {
       return {};
     }

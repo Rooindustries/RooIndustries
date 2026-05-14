@@ -1,4 +1,7 @@
 import { publicClient } from "../sanityClient";
+import packagePricing from "./packagePricing";
+
+const { applyPackagesPricing } = packagePricing;
 
 export const HOME_SECTION_DATA_KEYS = Object.freeze({
   reviews: "reviews",
@@ -190,6 +193,13 @@ const homeSectionQueries = {
 
 const getStorageKey = (key) => `${STORAGE_PREFIX}${key}`;
 
+const normalizeHomeSectionData = (key, value) => {
+  if (key === HOME_SECTION_DATA_KEYS.packagesList) {
+    return applyPackagesPricing(value);
+  }
+  return value;
+};
+
 const isSessionCacheExpired = () => {
   if (typeof window === "undefined") return false;
   try {
@@ -213,7 +223,7 @@ export const readHomeSectionData = (key) => {
   try {
     const raw = sessionStorage.getItem(getStorageKey(key));
     if (!raw) return null;
-    const parsed = JSON.parse(raw);
+    const parsed = normalizeHomeSectionData(key, JSON.parse(raw));
     memoryCache.set(key, parsed);
     return parsed;
   } catch {
@@ -222,10 +232,14 @@ export const readHomeSectionData = (key) => {
 };
 
 const writeHomeSectionData = (key, value) => {
-  memoryCache.set(key, value ?? null);
+  const normalizedValue = normalizeHomeSectionData(key, value ?? null);
+  memoryCache.set(key, normalizedValue ?? null);
   if (typeof window === "undefined") return;
   try {
-    sessionStorage.setItem(getStorageKey(key), JSON.stringify(value ?? null));
+    sessionStorage.setItem(
+      getStorageKey(key),
+      JSON.stringify(normalizedValue ?? null)
+    );
     if (!sessionStorage.getItem(STORAGE_TS_KEY)) {
       sessionStorage.setItem(STORAGE_TS_KEY, String(Date.now()));
     }
@@ -250,9 +264,10 @@ export const fetchHomeSectionData = (key) => {
   const request = publicClient
     .fetch(config.query, {}, config.options || undefined)
     .then((data) => {
-      writeHomeSectionData(key, data);
+      const normalizedData = normalizeHomeSectionData(key, data);
+      writeHomeSectionData(key, normalizedData);
       inflightCache.delete(key);
-      return data;
+      return normalizedData;
     })
     .catch((error) => {
       inflightCache.delete(key);

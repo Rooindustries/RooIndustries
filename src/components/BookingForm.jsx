@@ -4,7 +4,14 @@ import { client } from "../sanityClient";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
+import packagePricing from "../lib/packagePricing";
+import PriceDisplay from "./PriceDisplay";
 
+const { applyPackagePricing } = packagePricing;
+const DEFAULT_VERTEX_PACKAGE = applyPackagePricing({
+  title: "Performance Vertex Overhaul",
+  price: "$79.95",
+});
 
 const IST_OFFSET_MINUTES = 330;
 const FORM_PREFILL_KEY = "booking_form_prefill";
@@ -388,9 +395,9 @@ export default function BookingForm({ isMobile }) {
       price: q.get("price") || "",
       tag: q.get("tag") || "",
     };
-    if (queryPkg.title) return queryPkg;
-    if (persistedPackage) return persistedPackage;
-    return queryPkg;
+    if (queryPkg.title) return applyPackagePricing(queryPkg);
+    if (persistedPackage) return applyPackagePricing(persistedPackage);
+    return applyPackagePricing(queryPkg);
   }, [q, persistedPackage]);
 
   const prevPackageRef = useRef(selectedPackage.title);
@@ -1071,7 +1078,7 @@ export default function BookingForm({ isMobile }) {
             buttonText
           }`
         );
-        setVertexPackage(data);
+        setVertexPackage(applyPackagePricing(data));
       } catch (err) {
         console.error("Error fetching Performance Vertex package:", err);
       }
@@ -1091,7 +1098,7 @@ export default function BookingForm({ isMobile }) {
             buttonText
           }`
         );
-        setVertexEssentialsPackage(data);
+        setVertexEssentialsPackage(applyPackagePricing(data));
       } catch (err) {
         console.error("Error fetching Vertex Essentials package:", err);
       }
@@ -1114,7 +1121,7 @@ export default function BookingForm({ isMobile }) {
           }`,
           { title: selectedPackage.title }
         );
-        setPlanPackage(data);
+        setPlanPackage(applyPackagePricing(data));
       } catch (err) {
         console.error("Error fetching current package:", err);
       }
@@ -1741,9 +1748,7 @@ export default function BookingForm({ isMobile }) {
                 <h3 className="text-2xl font-bold text-sky-300">
                   {selectedPackage.title}
                 </h3>
-                <p className="text-3xl font-semibold text-sky-400 mt-2">
-                  {selectedPackage.price}
-                </p>
+                <PriceDisplay pkg={selectedPackage} size="summary" className="mt-3" />
               </div>
             )}
 
@@ -2472,15 +2477,18 @@ export default function BookingForm({ isMobile }) {
                     variants={itemVariants}
                     className="text-2xl font-bold text-sky-100"
                   >
-                    {displayPackage?.title || "Performance Vertex Overhaul"}
+                    {displayPackage?.title || DEFAULT_VERTEX_PACKAGE.title}
                   </motion.h3>
 
-                  <motion.p
+                  <motion.div
                     variants={itemVariants}
-                    className="text-4xl font-bold text-sky-300 mt-2"
+                    className="mt-2"
                   >
-                    {displayPackage?.price || "$84.99"}
-                  </motion.p>
+                    <PriceDisplay
+                      pkg={displayPackage || DEFAULT_VERTEX_PACKAGE}
+                      size="modal"
+                    />
+                  </motion.div>
 
                   <motion.ul className="mt-4 space-y-2 text-sm text-sky-100 text-left">
                     {(displayPackage?.features &&
@@ -2531,8 +2539,10 @@ export default function BookingForm({ isMobile }) {
                             const nextPackage = {
                               title:
                                 displayPackage?.title ||
-                                "Performance Vertex Overhaul",
-                              price: displayPackage?.price || "$84.99",
+                                DEFAULT_VERTEX_PACKAGE.title,
+                              price:
+                                displayPackage?.price ||
+                                DEFAULT_VERTEX_PACKAGE.price,
                               tag: displayPackage?.tag || "",
                             };
                             persistDraft({
@@ -2549,9 +2559,10 @@ export default function BookingForm({ isMobile }) {
                           navigate(
                             `/booking?title=${encodeURIComponent(
                               displayPackage?.title ||
-                                "Performance Vertex Overhaul"
+                                DEFAULT_VERTEX_PACKAGE.title
                             )}&price=${encodeURIComponent(
-                              displayPackage?.price || "$84.99"
+                              displayPackage?.price ||
+                                DEFAULT_VERTEX_PACKAGE.price
                             )}&tag=${encodeURIComponent(
                               displayPackage?.tag || ""
                             )}&xoc=0`,

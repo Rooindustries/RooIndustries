@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import PackageDetailsModal from "./PackageDetailsModal";
+import PriceDisplay from "./PriceDisplay";
 import {
   fetchHomeSectionData,
   HOME_SECTION_DATA_KEYS,
   readHomeSectionData,
 } from "../lib/homeSectionData";
+import packagePricing from "../lib/packagePricing";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 
 const REFERRAL_STORAGE_KEY = "referral_session";
+const { applyPackagesPricing } = packagePricing;
 
 const MINOR_WORDS = new Set([
   "a","an","and","as","at","but","by","for","if","in","nor","of","on","or","so","that","the","to","up","via","yet",
@@ -29,16 +32,16 @@ export default function Packages({
   const handleHomeSectionLink = useHomeSectionLinkHandler();
   const [packages, setPackages] = useState(() =>
     initialPackages !== null
-      ? Array.isArray(initialPackages)
-        ? initialPackages
-        : []
+      ? applyPackagesPricing(Array.isArray(initialPackages) ? initialPackages : [])
       : []
   );
   const [sectionCopy, setSectionCopy] = useState(() => initialSectionCopy);
 
   useEffect(() => {
     if (initialPackages !== null) {
-      setPackages(Array.isArray(initialPackages) ? initialPackages : []);
+      setPackages(
+        applyPackagesPricing(Array.isArray(initialPackages) ? initialPackages : [])
+      );
     }
 
     if (initialSectionCopy !== null) {
@@ -122,11 +125,11 @@ export default function Packages({
     if (packages.length === 0) {
       const cachedPackages = readHomeSectionData(HOME_SECTION_DATA_KEYS.packagesList);
       if (Array.isArray(cachedPackages)) {
-        setPackages(cachedPackages);
+        setPackages(applyPackagesPricing(cachedPackages));
       } else {
         fetchHomeSectionData(HOME_SECTION_DATA_KEYS.packagesList)
           .then((pkgs) => {
-            setPackages(Array.isArray(pkgs) ? pkgs : []);
+            setPackages(applyPackagesPricing(Array.isArray(pkgs) ? pkgs : []));
           })
           .catch(console.error);
       }
@@ -239,9 +242,7 @@ export default function Packages({
                   <div>
                     <h3 className="text-3xl font-semibold">{p.title}</h3>
 
-                    <p className="mt-6 text-6xl font-bold text-sky-400">
-                      {p.price}
-                    </p>
+                    <PriceDisplay pkg={p} className="mt-6" />
 
                     {p.description && (() => {
                       const bestForMatch = p.description.match(/Best for:\s*(.+)/i);
