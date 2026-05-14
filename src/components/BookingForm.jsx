@@ -19,6 +19,7 @@ const HOLD_STORAGE_KEY = "my_slot_hold";
 const BOOKING_DRAFT_KEY = "booking_draft";
 const SESSION_STATE_KEY = "booking_modal_state";
 const REFERRAL_STORAGE_KEY = "referral_session";
+const BOOKING_FETCH_TIMEOUT_MS = 8000;
 const readReferralFromSession = () => {
   try {
     return sessionStorage.getItem(REFERRAL_STORAGE_KEY) || "";
@@ -27,16 +28,12 @@ const readReferralFromSession = () => {
   }
 };
 const getDraftKey = (pkg) => (pkg?.title ? pkg.title : "_default");
-const isDraftEmpty = (formObj, moboId, ramId, customMobo, customRam) =>
+const isDraftEmpty = (formObj) =>
   !formObj.discord.trim() &&
   !formObj.email.trim() &&
   !formObj.specs.trim() &&
   !formObj.mainGame.trim() &&
-  !formObj.notes.trim() &&
-  !moboId &&
-  !ramId &&
-  !customMobo.trim() &&
-  !customRam.trim();
+  !formObj.notes.trim();
 
 // Read query params
 function useQuery() {
@@ -120,18 +117,45 @@ const formatCountdown = (ms) => {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 };
 
-const fetchWithRetry = async (query, params = {}, attempts = 3, delayMs = 250) => {
+const fetchJsonWithRetry = async (
+  url,
+  options = {},
+  attempts = 3,
+  delayMs = 250,
+  timeoutMs = BOOKING_FETCH_TIMEOUT_MS
+) => {
   let lastErr;
   for (let i = 0; i < attempts; i++) {
+    const controller =
+      typeof AbortController === "function" ? new AbortController() : null;
+    const timeoutId = controller
+      ? setTimeout(() => {
+          controller.abort();
+        }, timeoutMs)
+      : null;
+
     try {
-      return await client.fetch(query, params);
+      const response = await fetch(url, {
+        ...options,
+        cache: "no-store",
+        signal: controller?.signal,
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || data?.ok === false) {
+        throw new Error(
+          data?.error || data?.message || "Request failed."
+        );
+      }
+      return data;
     } catch (err) {
       lastErr = err;
       if (i === attempts - 1) break;
       await new Promise((res) => setTimeout(res, delayMs));
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
     }
   }
-  throw lastErr;
+  throw lastErr || new Error("Unable to fetch booking data.");
 };
 
 const broadcastHold = (payload) => {
@@ -208,134 +232,6 @@ const getUtcDateFromHold = (hold) => {
   return Number.isNaN(fromStart.getTime()) ? null : fromStart;
 };
 
-function XocDropdown({
-  label,
-  items,
-  value,
-  onChange,
-  placeholder = "Select...",
-  emptyMessage = "No options found",
-  getId,
-  getLabel,
-  customOptionId,
-  customOptionLabel,
-}) {
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const wrapperRef = useRef(null);
-  const isCustomSelected = value === customOptionId;
-
-  // close on outside click
-  useEffect(() => {
-    function handleClick(e) {
-      if (!wrapperRef.current) return;
-      if (!wrapperRef.current.contains(e.target)) {
-        setOpen(false);
-      }
-    }
-    if (open) {
-      document.addEventListener("mousedown", handleClick);
-    } else {
-      document.removeEventListener("mousedown", handleClick);
-    }
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [open]);
-
-  const filtered = useMemo(() => {
-    if (!search.trim()) return items;
-    const q = search.toLowerCase();
-    return items.filter((item) => getLabel(item).toLowerCase().includes(q));
-  }, [items, search, getLabel]);
-
-  const selectedItem = items.find((i) => getId(i) === value);
-  const hasSelection = Boolean(selectedItem || isCustomSelected);
-  const displayText = selectedItem
-    ? getLabel(selectedItem)
-    : isCustomSelected
-    ? customOptionLabel
-    : placeholder;
-
-  return (
-    <div className="text-left relative" ref={wrapperRef}>
-      {label && (
-        <label className="block text-xs font-semibold text-sky-400 mb-1">
-          {label}
-        </label>
-      )}
-
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="w-full bg-[#020617] border border-sky-700/60 rounded-lg px-3 py-2.5 text-sm flex items-center justify-between gap-2 focus:outline-none focus:border-sky-400"
-      >
-        <span className={hasSelection ? "" : "text-slate-500"}>
-          {displayText}
-        </span>
-        <span className="text-sky-400 text-xs">▾</span>
-      </button>
-
-      {open && (
-        <div className="absolute mt-1 w-full bg-[#020617] border border-sky-700/70 rounded-lg shadow-xl z-30 overflow-hidden">
-          <div className="border-b border-sky-800/60">
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              autoFocus
-              placeholder="Search..."
-              className="w-full bg-transparent px-3 py-2 text-xs text-sky-100 placeholder-slate-500 focus:outline-none"
-            />
-          </div>
-
-          <div className="max-h-56 overflow-y-auto text-sm">
-            {filtered.length === 0 ? (
-              <div className="px-3 py-2 text-xs text-slate-400 border-b border-sky-800/60">
-                {emptyMessage}
-              </div>
-            ) : (
-              filtered.map((item) => {
-                const id = getId(item);
-                const labelText = getLabel(item);
-                const isSelected = id === value;
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => {
-                      onChange(id);
-                      setOpen(false);
-                    }}
-                    className={`w-full text-left px-3 py-2 text-xs sm:text-sm transition ${
-                      isSelected
-                        ? "bg-sky-700/70 text-sky-50"
-                        : "hover:bg-sky-700/40 text-sky-100"
-                    }`}
-                  >
-                    {labelText}
-                  </button>
-                );
-              })
-            )}
-
-            {customOptionId && customOptionLabel && (
-              <button
-                type="button"
-                onClick={() => {
-                  onChange(customOptionId);
-                  setOpen(false);
-                }}
-                className="w-full text-left px-3 py-2 text-xs sm:text-sm text-sky-100 hover:bg-sky-700/40 transition border-t border-sky-800/60"
-              >
-                {customOptionLabel}
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // Accepts isMobile prop from BookingModal to force layout styles
 export default function BookingForm({ isMobile }) {
   const handleHomeSectionLink = useHomeSectionLinkHandler();
@@ -345,6 +241,8 @@ export default function BookingForm({ isMobile }) {
 
   const [step, setStep] = useState(1);
   const [settings, setSettings] = useState(null);
+  const [settingsError, setSettingsError] = useState("");
+  const [settingsReloadKey, setSettingsReloadKey] = useState(0);
 
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedSlot, setSelectedSlot] = useState(null);
@@ -370,12 +268,6 @@ export default function BookingForm({ isMobile }) {
     notes: "",
   });
 
-  // XOC hardware data loaded from /api/xocParts
-  const [xocMotherboards, setXocMotherboards] = useState([]);
-  const [xocRams, setXocRams] = useState([]);
-  const [xocPartsError, setXocPartsError] = useState("");
-  const [xocMoboId, setXocMoboId] = useState("");
-  const [xocRamId, setXocRamId] = useState("");
   const [showVertexModal, setShowVertexModal] = useState(false);
   const [vertexPackage, setVertexPackage] = useState(null);
   const [vertexEssentialsPackage, setVertexEssentialsPackage] = useState(null);
@@ -461,15 +353,11 @@ export default function BookingForm({ isMobile }) {
       const prevPkgData = prevPackageDataRef.current;
       if (
         prevPkgData &&
-        !isDraftEmpty(form, xocMoboId, xocRamId, xocCustomMobo, xocCustomRam)
+        !isDraftEmpty(form)
       ) {
         persistDraft({
           form: { ...form },
           selectedPackage: { ...prevPkgData },
-          xocMoboId,
-          xocRamId,
-          xocCustomMobo,
-          xocCustomRam,
         });
       }
       setPreventHoldAutoload(true);
@@ -564,10 +452,6 @@ export default function BookingForm({ isMobile }) {
       mainGame: "",
       notes: "",
     });
-    setXocMoboId("");
-    setXocRamId("");
-    setXocCustomMobo("");
-    setXocCustomRam("");
     setSelectedSlot(null);
     setStep(1);
     clearedNoHoldRef.current = true;
@@ -688,13 +572,7 @@ export default function BookingForm({ isMobile }) {
     return () => clearInterval(id);
   }, [myHold]);
 
-  const clearErrorIfResolved = (
-    nextForm = form,
-    nextMobo = xocMoboId,
-    nextRam = xocRamId,
-    nextCustomMobo = xocCustomMobo,
-    nextCustomRam = xocCustomRam
-  ) => {
+  const clearErrorIfResolved = (nextForm = form) => {
     if (!errorStep2) return;
 
     const baseFilled =
@@ -703,21 +581,10 @@ export default function BookingForm({ isMobile }) {
       nextForm.specs.trim() &&
       nextForm.mainGame.trim();
 
-    const xocFieldsOk =
-      !isXoc ||
-      (nextMobo &&
-        nextRam &&
-        (nextMobo !== "__CUSTOM_MOBO__" || nextCustomMobo.trim()) &&
-        (nextRam !== "__CUSTOM_RAM__" || nextCustomRam.trim()));
-
-    if (baseFilled && xocFieldsOk) {
+    if (baseFilled) {
       setErrorStep2("");
     }
   };
-
-  // custom XOC fields
-  const [xocCustomMobo, setXocCustomMobo] = useState("");
-  const [xocCustomRam, setXocCustomRam] = useState("");
 
   const normalizedPackageTitle = normalizePackageKey(selectedPackage.title);
 
@@ -732,30 +599,17 @@ export default function BookingForm({ isMobile }) {
 
   const displayPackage = modalPackage || vertexPackage;
   const isStep2Complete = useMemo(() => {
-    const baseFilled =
+    return Boolean(
       form.discord.trim() &&
       form.email.trim() &&
       form.specs.trim() &&
-      form.mainGame.trim();
-
-    const xocFilled = !isXoc
-      ? true
-      : xocMoboId &&
-        xocRamId &&
-        (xocMoboId !== "__CUSTOM_MOBO__" || xocCustomMobo.trim()) &&
-        (xocRamId !== "__CUSTOM_RAM__" || xocCustomRam.trim());
-
-    return Boolean(baseFilled && xocFilled);
+        form.mainGame.trim()
+    );
   }, [
     form.discord,
     form.email,
     form.specs,
     form.mainGame,
-    isXoc,
-    xocMoboId,
-    xocRamId,
-    xocCustomMobo,
-    xocCustomRam,
   ]);
 
   const getStep2Error = () => {
@@ -766,24 +620,6 @@ export default function BookingForm({ isMobile }) {
       !form.mainGame.trim()
     ) {
       return "Please fill out all required fields.";
-    }
-
-    if (isXoc) {
-      if (!xocMoboId && !xocRamId) {
-        return "Please select your motherboard and RAM kit for XOC.";
-      }
-      if (!xocMoboId) {
-        return "Please select your motherboard for XOC.";
-      }
-      if (!xocRamId) {
-        return "Please select your RAM kit for XOC.";
-      }
-      if (xocMoboId === "__CUSTOM_MOBO__" && !xocCustomMobo.trim()) {
-        return "Please type your motherboard model for XOC.";
-      }
-      if (xocRamId === "__CUSTOM_RAM__" && !xocCustomRam.trim()) {
-        return "Please type your RAM kit details for XOC.";
-      }
     }
 
     return "";
@@ -873,32 +709,17 @@ export default function BookingForm({ isMobile }) {
 
   // ---------- FETCH SETTINGS + ACTIVE HOLDS ----------
   useEffect(() => {
+    let isActive = true;
+
     const fetchData = async () => {
+      setSettingsError("");
       try {
-        const [sRaw, booked, holds] = await Promise.all([
-          fetchWithRetry(
-            `*[_type == "bookingSettings"][0]{
-              ...,
-              packageDateSlots[]{
-                package->{_id,title},
-                dateSlots
-              }
-            }`
-          ),
-          fetchWithRetry(
-            `*[_type == "booking"]{startTimeUTC, packageTitle}`
-          ),
-          fetchWithRetry(
-            `*[_type == "slotHold" && expiresAt > now()]{
-              startTimeUTC,
-              _id
-            }`
-          ),
-        ]);
+        const data = await fetchJsonWithRetry("/api/bookingAvailability");
+        if (!data?.settings) {
+          throw new Error("Missing booking availability settings.");
+        }
 
-        if (!sRaw) throw new Error("Missing bookingSettings in Sanity.");
-
-        const s = { ...sRaw };
+        const s = { ...data.settings };
 
         s.dateSlotMap = normalizeDateSlots(s.dateSlots);
         s.xocDateSlotMap = normalizeDateSlots(s.xocDateSlots);
@@ -906,34 +727,24 @@ export default function BookingForm({ isMobile }) {
           s.vertexEssentialsDateSlots
         );
         s.packageDateSlotMaps = normalizePackageDateSlots(s.packageDateSlots);
+        s.bookedSlots = Array.isArray(data.bookedSlots)
+          ? data.bookedSlots
+          : [];
 
-        const holdsMapped =
-          (holds || [])
-            .map((h) => ({
-              startTimeUTC: h.startTimeUTC,
-              isHold: true,
-              holdId: h._id,
-            }))
-            .filter((h) => h.startTimeUTC) || [];
-
-        const bookedMapped =
-          booked
-            ?.map((b) => ({
-              startTimeUTC: b.startTimeUTC,
-              isHold: false,
-            }))
-            .filter((b) => b.startTimeUTC) || [];
-
-        s.bookedSlots = [...bookedMapped, ...holdsMapped];
-
-        setSettings(s);
+        if (isActive) setSettings(s);
       } catch (err) {
         console.error("Error fetching booking data:", err);
+        if (isActive) {
+          setSettingsError("Booking availability took too long to load.");
+        }
       }
     };
 
     fetchData();
-  }, []);
+    return () => {
+      isActive = false;
+    };
+  }, [settingsReloadKey]);
 
   // page fade-in on route change
   useEffect(() => {
@@ -977,10 +788,6 @@ export default function BookingForm({ isMobile }) {
           if (draftForPkg.selectedPackage) {
             setPersistedPackage(draftForPkg.selectedPackage);
           }
-          if (draftForPkg.xocMoboId) setXocMoboId(draftForPkg.xocMoboId);
-          if (draftForPkg.xocRamId) setXocRamId(draftForPkg.xocRamId);
-          if (draftForPkg.xocCustomMobo) setXocCustomMobo(draftForPkg.xocCustomMobo);
-          if (draftForPkg.xocCustomRam) setXocCustomRam(draftForPkg.xocCustomRam);
           setPreventHoldAutoload(false);
           setStep(2);
         }
@@ -1128,51 +935,6 @@ export default function BookingForm({ isMobile }) {
     };
     fetchPlan();
   }, [selectedPackage.title]);
-
-  // ---------- LOAD XOC PARTS FROM LOCAL OPENDB (API) ----------
-  useEffect(() => {
-    if (!isXoc) return;
-    setXocPartsError("");
-
-    const loadXocParts = async () => {
-      try {
-        const res = await fetch("/api/xocParts");
-        if (!res.ok) {
-          setXocPartsError(
-            "Supported hardware list is temporarily unavailable. You can still continue by selecting custom parts."
-          );
-          console.warn("Failed to load XOC parts:", res.status);
-          return;
-        }
-        const data = await res.json();
-        if (!data.ok) {
-          setXocPartsError(
-            "Supported hardware list is temporarily unavailable. You can still continue by selecting custom parts."
-          );
-          console.warn("XOC parts error:", data.error);
-          return;
-        }
-
-        const sortedMobos = (data.motherboards || [])
-          .slice()
-          .sort((a, b) => a.name.localeCompare(b.name));
-        const sortedRams = (data.rams || [])
-          .slice()
-          .sort((a, b) => a.name.localeCompare(b.name));
-
-        setXocMotherboards(sortedMobos);
-        setXocRams(sortedRams);
-        setXocPartsError("");
-      } catch (err) {
-        setXocPartsError(
-          "Supported hardware list is temporarily unavailable. You can still continue by selecting custom parts."
-        );
-        console.warn("Error fetching /api/xocParts:", err);
-      }
-    };
-
-    loadXocParts();
-  }, [isXoc]);
 
   const times = useMemo(() => {
     if (!settings || !selectedDate || !localSlotMap) return [];
@@ -1336,24 +1098,14 @@ export default function BookingForm({ isMobile }) {
     const { name, value } = e.target;
     const nextForm = { ...form, [name]: value };
     setForm(nextForm);
-    clearErrorIfResolved(
-      nextForm,
-      xocMoboId,
-      xocRamId,
-      xocCustomMobo,
-      xocCustomRam
-    );
-    const empty = isDraftEmpty(nextForm, xocMoboId, xocRamId, xocCustomMobo, xocCustomRam);
+    clearErrorIfResolved(nextForm);
+    const empty = isDraftEmpty(nextForm);
     if (empty) {
       clearDraftForPackage(getDraftKey(selectedPackage));
     } else {
       persistDraft({
         form: nextForm,
         selectedPackage: { ...selectedPackage },
-        xocMoboId,
-        xocRamId,
-        xocCustomMobo,
-        xocCustomRam,
       });
     }
   };
@@ -1365,11 +1117,7 @@ export default function BookingForm({ isMobile }) {
       !form.email.trim() &&
       !form.specs.trim() &&
       !form.mainGame.trim() &&
-      !form.notes.trim() &&
-      !xocMoboId &&
-      !xocRamId &&
-      !xocCustomMobo.trim() &&
-      !xocCustomRam.trim();
+      !form.notes.trim();
     if (allEmpty) {
       clearDraftForPackage(getDraftKey(selectedPackage));
     }
@@ -1379,10 +1127,6 @@ export default function BookingForm({ isMobile }) {
     form.specs,
     form.mainGame,
     form.notes,
-    xocMoboId,
-    xocRamId,
-    xocCustomMobo,
-    xocCustomRam,
     selectedPackage,
     draftLoading,
   ]);
@@ -1399,10 +1143,6 @@ export default function BookingForm({ isMobile }) {
     persistDraft({
       form,
       selectedPackage: { ...selectedPackage },
-      xocMoboId,
-      xocRamId,
-      xocCustomMobo,
-      xocCustomRam,
     });
   };
 
@@ -1588,16 +1328,6 @@ export default function BookingForm({ isMobile }) {
     const referralFromSession = readReferralFromSession();
     const finalReferralCode = referralFromQuery || referralFromSession;
 
-    const isCustomMobo = isXoc && xocMoboId === "__CUSTOM_MOBO__";
-    const isCustomRam = isXoc && xocRamId === "__CUSTOM_RAM__";
-
-    const selectedMobo =
-      isXoc && !isCustomMobo
-        ? xocMotherboards.find((m) => m.id === xocMoboId)
-        : null;
-    const selectedRam =
-      isXoc && !isCustomRam ? xocRams.find((r) => r.id === xocRamId) : null;
-
     const payload = {
       displayDate,
       displayTime,
@@ -1624,41 +1354,12 @@ export default function BookingForm({ isMobile }) {
       slotHoldExpiresAt: myHold?.expiresAt || null,
 
       ...(finalReferralCode ? { referralCode: finalReferralCode } : {}),
-
-      ...(isXoc && selectedMobo && selectedRam
-        ? {
-            xocMotherboardId: selectedMobo.id,
-            xocMotherboardName: selectedMobo.name,
-            xocMotherboardSocket: selectedMobo.socket,
-            xocMotherboardRamType: selectedMobo.ram_type,
-            xocRamId: selectedRam.id,
-            xocRamName: selectedRam.name,
-            xocRamSpeedMtps: selectedRam.speed,
-            xocRamCl: selectedRam.cas_latency,
-            xocRamCapacityGb: selectedRam.capacityGb,
-          }
-        : {}),
-
-      ...(isXoc && isCustomMobo && xocCustomMobo.trim()
-        ? {
-            xocCustomMotherboard: xocCustomMobo.trim(),
-          }
-        : {}),
-      ...(isXoc && isCustomRam && xocCustomRam.trim()
-        ? {
-            xocCustomRam: xocCustomRam.trim(),
-          }
-        : {}),
     };
 
     try {
       persistDraft({
         form: { ...form },
         selectedPackage: { ...selectedPackage },
-        xocMoboId,
-        xocRamId,
-        xocCustomMobo,
-        xocCustomRam,
       });
     } catch (e) {
       console.error("Failed to persist booking draft:", e);
@@ -1733,7 +1434,20 @@ export default function BookingForm({ isMobile }) {
         }`}
       >
         {!settings ? (
-          <div className="text-center text-sky-300 mt-20">Loading...</div>
+          <div className="mt-20 flex flex-col items-center gap-3 text-center">
+            <div className="text-sky-300">
+              {settingsError || "Loading..."}
+            </div>
+            {settingsError && (
+              <button
+                type="button"
+                onClick={() => setSettingsReloadKey((key) => key + 1)}
+                className="rounded-lg border border-sky-400/60 bg-sky-500/10 px-4 py-2 text-sm font-semibold text-sky-100 transition hover:bg-sky-500/20 focus:outline-none focus:ring-2 focus:ring-sky-300/60"
+              >
+                Retry
+              </button>
+            )}
+          </div>
         ) : (
           <>
             {selectedPackage.title && (
@@ -2071,271 +1785,6 @@ export default function BookingForm({ isMobile }) {
                     </div>
                   )}
 
-                  {isXoc && (
-                    <div className="space-y-4 border border-sky-700/50 rounded-xl p-4 bg-slate-900/40">
-                      <h4 className="text-sky-300 font-semibold text-sm sm:text-base">
-                        XOC Hardware Eligibility
-                      </h4>
-                      <p className="text-xs text-sky-400/80">
-                        Choose your motherboard and RAM kit from the supported
-                        list below.
-                      </p>
-                      {xocPartsError ? (
-                        <p className="rounded-lg border border-amber-300/30 bg-amber-300/10 px-3 py-2 text-xs text-amber-100">
-                          {xocPartsError}
-                        </p>
-                      ) : null}
-
-                      <div
-                        className={`grid gap-4 ${
-                          isMobile ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2"
-                        }`}
-                      >
-                        <XocDropdown
-                          label="Motherboard"
-                          items={xocMotherboards}
-                          value={xocMoboId}
-                          onChange={(val) => {
-                            setXocMoboId(val);
-                            clearErrorIfResolved(
-                              form,
-                              val,
-                              xocRamId,
-                              xocCustomMobo,
-                              xocCustomRam
-                            );
-                            const nextEmpty = isDraftEmpty(
-                              form,
-                              val,
-                              xocRamId,
-                              xocCustomMobo,
-                              xocCustomRam
-                            );
-                            if (nextEmpty) {
-                              clearDraftForPackage(getDraftKey(selectedPackage));
-                            } else {
-                              persistDraft({
-                                form,
-                                selectedPackage: { ...selectedPackage },
-                                xocMoboId: val,
-                                xocRamId,
-                                xocCustomMobo,
-                                xocCustomRam,
-                              });
-                            }
-                          }}
-                          placeholder={
-                            xocMotherboards.length === 0
-                              ? "No supported boards loaded"
-                              : "Select Your Motherboard"
-                          }
-                          emptyMessage="No supported boards found"
-                          getId={(m) => m.id}
-                          getLabel={(m) => m.name}
-                          customOptionId="__CUSTOM_MOBO__"
-                          customOptionLabel="+ Add Your Own Motherboard"
-                        />
-
-                        <XocDropdown
-                          label="RAM Kit"
-                          items={xocRams}
-                          value={xocRamId}
-                          onChange={(val) => {
-                            setXocRamId(val);
-                            clearErrorIfResolved(
-                              form,
-                              xocMoboId,
-                              val,
-                              xocCustomMobo,
-                              xocCustomRam
-                            );
-                            const nextEmpty = isDraftEmpty(
-                              form,
-                              xocMoboId,
-                              val,
-                              xocCustomMobo,
-                              xocCustomRam
-                            );
-                            if (nextEmpty) {
-                              clearDraftForPackage(getDraftKey(selectedPackage));
-                            } else {
-                              persistDraft({
-                                form,
-                                selectedPackage: { ...selectedPackage },
-                                xocMoboId,
-                                xocRamId: val,
-                                xocCustomMobo,
-                                xocCustomRam,
-                              });
-                            }
-                          }}
-                          placeholder={
-                            xocRams.length === 0
-                              ? "No eligible RAM kits loaded"
-                              : "Select your RAM kit"
-                          }
-                          emptyMessage="No eligible RAM kits found"
-                          getId={(r) => r.id}
-                          getLabel={(r) =>
-                            `${r.name} — ${r.speed} MT/s, CL${r.cas_latency}, ${r.capacityGb}GB`
-                          }
-                          customOptionId="__CUSTOM_RAM__"
-                          customOptionLabel="+ Add your own RAM kit"
-                        />
-
-                        {xocMoboId === "__CUSTOM_MOBO__" && (
-                          <div className={isMobile ? "" : "sm:col-span-2"}>
-                            <input
-                              type="text"
-                              value={xocCustomMobo}
-                              onChange={(e) => {
-                                const next = e.target.value;
-                                setXocCustomMobo(next);
-                                clearErrorIfResolved(
-                                  form,
-                                  xocMoboId,
-                                  xocRamId,
-                                  next,
-                                  xocCustomRam
-                                );
-                                const nextEmpty = isDraftEmpty(
-                                  form,
-                                  xocMoboId,
-                                  xocRamId,
-                                  next,
-                                  xocCustomRam
-                                );
-                                if (nextEmpty) {
-                                  clearDraftForPackage(
-                                    getDraftKey(selectedPackage)
-                                  );
-                                } else {
-                                  persistDraft({
-                                    form,
-                                    selectedPackage: { ...selectedPackage },
-                                    xocMoboId,
-                                    xocRamId,
-                                    xocCustomMobo: next,
-                                    xocCustomRam,
-                                  });
-                                }
-                              }}
-                              placeholder="Type your Motherboard Model (e.g. ASUS ROG STRIX X670E-E)"
-                              className="w-full bg-[#020617] border border-sky-700/60 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400"
-                            />
-                          </div>
-                        )}
-
-                        {xocRamId === "__CUSTOM_RAM__" && (
-                          <div className={isMobile ? "" : "sm:col-span-2"}>
-                            <input
-                              type="text"
-                              value={xocCustomRam}
-                              onChange={(e) => {
-                                const next = e.target.value;
-                                setXocCustomRam(next);
-                                clearErrorIfResolved(
-                                  form,
-                                  xocMoboId,
-                                  xocRamId,
-                                  xocCustomMobo,
-                                  next
-                                );
-                                const nextEmpty = isDraftEmpty(
-                                  form,
-                                  xocMoboId,
-                                  xocRamId,
-                                  xocCustomMobo,
-                                  next
-                                );
-                                if (nextEmpty) {
-                                  clearDraftForPackage(
-                                    getDraftKey(selectedPackage)
-                                  );
-                                } else {
-                                  persistDraft({
-                                    form,
-                                    selectedPackage: { ...selectedPackage },
-                                    xocMoboId,
-                                    xocRamId,
-                                    xocCustomMobo,
-                                    xocCustomRam: next,
-                                  });
-                                }
-                              }}
-                              placeholder="Type your RAM kit (e.g. 32GB 6000MT/s CL30, brand/model)"
-                              className="w-full bg-[#020617] border border-sky-700/60 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-sky-400"
-                            />
-                          </div>
-                        )}
-
-                        {(xocMoboId === "__CUSTOM_MOBO__" ||
-                          xocRamId === "__CUSTOM_RAM__") && (
-                          <div className={isMobile ? "" : "sm:col-span-2"}>
-                            <div className="mt-1 rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-2">
-                              <p className="text-[11px] text-sky-100 leading-snug">
-                                Custom motherboards and RAM kits may not fully
-                                meet our XOC stability and compatibility criteria.
-                                For the best results and safety, please reach out
-                                on Discord so we can double-check your parts
-                                before the session.
-                              </p>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      <p className="text-[11px] text-sky-400/70 mt-2">
-                        Only DDR5 AM5 boards and RAM kits that meet the XOC
-                        requirements (6000 MT/s+ with CL limits) are shown in the
-                        supported list.
-                      </p>
-
-                      {(xocMoboId === "__CUSTOM_MOBO__" ||
-                        xocRamId === "__CUSTOM_RAM__") && (
-                        <>
-                          <div className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setModalMode("switch");
-                                setModalPackage(vertexPackage);
-                                setShowVertexModal(true);
-                              }}
-                              className="glow-button inline-flex items-center justify-center px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold text-white transition"
-                            >
-                              Switch to Performance Vertex Overhaul
-                              <span className="glow-line glow-line-top" />
-                              <span className="glow-line glow-line-right" />
-                              <span className="glow-line glow-line-bottom" />
-                              <span className="glow-line glow-line-left" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setModalMode("switch");
-                                setModalPackage(vertexEssentialsPackage);
-                                setShowVertexModal(true);
-                              }}
-                              className="glow-button inline-flex items-center justify-center px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold text-white transition"
-                            >
-                              Switch to Vertex Essentials
-                              <span className="glow-line glow-line-top" />
-                              <span className="glow-line glow-line-right" />
-                              <span className="glow-line glow-line-bottom" />
-                              <span className="glow-line glow-line-left" />
-                            </button>
-                          </div>
-                          <p className="mt-2 text-[11px] font-bold bg-gradient-to-r from-sky-300 via-cyan-300 to-indigo-300 bg-clip-text text-transparent">
-                            If your PC is found to be XOC eligible after booking
-                            Performance Vertex Overhaul/Vertex Essentials, you may pay
-                            the difference in price to upgrade.
-                          </p>
-                        </>
-                      )}
-                    </div>
-                  )}
-
                   <input
                     name="discord"
                     placeholder="Discord (e.g. Servi#1234 or @Servi)"
@@ -2353,9 +1802,7 @@ export default function BookingForm({ isMobile }) {
                   />
                   <input
                     name="specs"
-                    placeholder={
-                      isXoc ? "PC Specs (e.g. GPU, CPU, Cooling)" : "PC Specs"
-                    }
+                    placeholder="PC Specs"
                     onChange={handleChange}
                     value={form.specs}
                     className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 focus:outline-none focus:border-sky-500 transition"
@@ -2548,10 +1995,6 @@ export default function BookingForm({ isMobile }) {
                             persistDraft({
                               form: { ...form },
                               selectedPackage: nextPackage,
-                              xocMoboId,
-                              xocRamId,
-                              xocCustomMobo,
-                              xocCustomRam,
                             });
                           } catch (err) {
                             console.error("Failed to store form draft:", err);
