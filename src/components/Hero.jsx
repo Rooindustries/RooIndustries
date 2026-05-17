@@ -13,7 +13,6 @@ const fallbackHeroData = {
   ctaPrimaryText: "Optimize My PC",
   ctaSecondaryText: "See How It Works",
   ctaNote: "Former #16 3DMark HOF · 20–92% FPS Boost · Lifetime Warranty",
-  ctaNoteIcon: "🏆",
   bullets: [
     "20–92% FPS Boost",
     "10–76% Latency Reduction",
@@ -125,7 +124,6 @@ export default function Hero() {
           ctaPrimaryText,
           ctaSecondaryText,
           ctaNote,
-          ctaNoteIcon,
           bullets
         }`
       )
@@ -155,7 +153,6 @@ export default function Hero() {
   const secondaryCtaText =
     heroData?.ctaSecondaryText || fallbackHeroData.ctaSecondaryText;
   const ctaNote = heroData?.ctaNote || fallbackHeroData.ctaNote;
-  const ctaNoteIcon = heroData?.ctaNoteIcon || fallbackHeroData.ctaNoteIcon;
 
   const headingLine2BaseClass =
     "bg-gradient-to-r from-sky-400 to-blue-500 text-transparent bg-clip-text";
@@ -349,7 +346,7 @@ export default function Hero() {
         </div>
 
         {ctaNote && (
-          <CtaNoteBalanced icon={ctaNoteIcon} text={ctaNote} />
+          <CtaNoteBalanced text={ctaNote} />
         )}
       </section>
     </header>
