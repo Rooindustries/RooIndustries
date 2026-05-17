@@ -30,10 +30,12 @@ export default function Navbar({ routeShell = "browser" }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [proofOpen, setProofOpen] = useState(false);
+  const [referralsOpen, setReferralsOpen] = useState(false);
   const [activeHomeHash, setActiveHomeHash] = useState("");
   // Keep initial server/client markup identical, then upgrade to animated mode on mount.
   const [smallLogoMode, setSmallLogoMode] = useState("static");
   const proofDropdownRef = useRef(null);
+  const referralsDropdownRef = useRef(null);
   const headerRef = useRef(null);
   const navRowRef = useRef(null);
   const activeScrollCleanupRef = useRef(null);
@@ -62,6 +64,7 @@ export default function Navbar({ routeShell = "browser" }) {
     location.pathname === "/faq" ||
     (location.pathname === "/" && faqHashes.includes(activeHomeHash));
   const isProofActive = isActive("/benchmarks") || isActive("/reviews");
+  const isReferralsActive = location.pathname.startsWith("/referrals");
   const isTeamActive = isActive("/meet-the-team");
 
   const handleLogoAnimError = () => {
@@ -114,6 +117,7 @@ export default function Navbar({ routeShell = "browser" }) {
     (event) => {
       setOpen(false);
       setProofOpen(false);
+      setReferralsOpen(false);
       cancelSectionTransition();
 
       if (typeof window === "undefined") return;
@@ -148,6 +152,7 @@ export default function Navbar({ routeShell = "browser" }) {
     async (event, hash) => {
       setOpen(false);
       setProofOpen(false);
+      setReferralsOpen(false);
       if (typeof window === "undefined") return;
 
       const normalizedHash = normalizeSectionHash(hash);
@@ -275,6 +280,7 @@ export default function Navbar({ routeShell = "browser" }) {
   useEffect(() => {
     setOpen(false);
     setProofOpen(false);
+    setReferralsOpen(false);
   }, [location.pathname, location.hash]);
 
   useEffect(() => {
@@ -287,17 +293,25 @@ export default function Navbar({ routeShell = "browser" }) {
     }
   }, [location.pathname]);
 
-  // Close dropdown when clicking outside (desktop only)
+  // Close dropdowns when clicking outside (desktop only)
   useEffect(() => {
-    if (!proofOpen || typeof window === "undefined") return;
+    if ((!proofOpen && !referralsOpen) || typeof window === "undefined") return;
     if (!window.matchMedia("(min-width: 768px)").matches) return;
 
     const handleClickOutside = (event) => {
       if (
+        proofOpen &&
         proofDropdownRef.current &&
         !proofDropdownRef.current.contains(event.target)
       ) {
         setProofOpen(false);
+      }
+      if (
+        referralsOpen &&
+        referralsDropdownRef.current &&
+        !referralsDropdownRef.current.contains(event.target)
+      ) {
+        setReferralsOpen(false);
       }
     };
 
@@ -306,7 +320,7 @@ export default function Navbar({ routeShell = "browser" }) {
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [proofOpen]);
+  }, [proofOpen, referralsOpen]);
 
   useEffect(() => {
     if (location.pathname !== "/") return;
@@ -410,8 +424,7 @@ export default function Navbar({ routeShell = "browser" }) {
               <BackButton hidden={false} inline={true} />
             ) : null}
 
-            <Link
-              to="/"
+            <Link to="/"
               onClick={handleHomeClick}
               className="flex items-center gap-3 select-none"
               aria-label="Go to Roo Industries home"
@@ -469,7 +482,13 @@ export default function Navbar({ routeShell = "browser" }) {
               <div className="relative" ref={proofDropdownRef}>
                 <button
                   type="button"
-                  onClick={() => setProofOpen((v) => !v)}
+                  onClick={() =>
+                    setProofOpen((v) => {
+                      const next = !v;
+                      if (next) setReferralsOpen(false);
+                      return next;
+                    })
+                  }
                   className={`${linkBase} ${
                     isProofActive ? linkActive : linkIdle
                   } inline-flex items-center gap-1`}
@@ -536,13 +555,72 @@ export default function Navbar({ routeShell = "browser" }) {
               >
                 FAQ
               </a>
-              <Link
-                to="/meet-the-team"
-                onClick={cancelSectionTransition}
-                className={`${linkBase} ${isTeamActive ? linkActive : linkIdle}`}
-              >
-                Meet the Team
-              </Link>
+              <div className="relative" ref={referralsDropdownRef}>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setReferralsOpen((v) => {
+                      const next = !v;
+                      if (next) setProofOpen(false);
+                      return next;
+                    })
+                  }
+                  className={`${linkBase} ${
+                    isReferralsActive ? linkActive : linkIdle
+                  } inline-flex items-center gap-1`}
+                  aria-haspopup="menu"
+                  aria-expanded={referralsOpen}
+                  aria-controls="desktop-referrals-menu"
+                >
+                  Referrals
+                  <svg
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    className={`h-4 w-4 opacity-70 transition-transform duration-200 ${
+                      referralsOpen ? "rotate-180" : ""
+                    }`}
+                    aria-hidden="true"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.25a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                </button>
+                {referralsOpen ? (
+                  <div id="desktop-referrals-menu" className="glass-premium glass-menu-surface absolute right-0 top-full z-[80] mt-2 w-44 overflow-hidden rounded-2xl transition-all duration-200">
+                    <Link
+                      to="/referrals/register"
+                      onClick={() => {
+                        cancelSectionTransition();
+                        setReferralsOpen(false);
+                      }}
+                      className={`block px-4 py-3 text-sm transition ${
+                        isActive("/referrals/register")
+                          ? "bg-cyan-400 text-black"
+                          : "text-white/85 hover:text-cyan-200 hover:bg-white/5"
+                      }`}
+                    >
+                      Sign Up
+                    </Link>
+                    <Link
+                      to="/referrals/login"
+                      onClick={() => {
+                        cancelSectionTransition();
+                        setReferralsOpen(false);
+                      }}
+                      className={`block px-4 py-3 text-sm transition ${
+                        isReferralsActive && !isActive("/referrals/register")
+                          ? "bg-cyan-400 text-black"
+                          : "text-white/85 hover:text-cyan-200 hover:bg-white/5"
+                      }`}
+                    >
+                      Dashboard
+                    </Link>
+                  </div>
+                ) : null}
+              </div>
             </nav>
 
             <a
@@ -558,7 +636,10 @@ export default function Navbar({ routeShell = "browser" }) {
               onClick={() =>
                 setOpen((v) => {
                   const next = !v;
-                  if (!next) setProofOpen(false);
+                  if (!next) {
+                    setProofOpen(false);
+                    setReferralsOpen(false);
+                  }
                   return next;
                 })
               }
@@ -585,7 +666,7 @@ export default function Navbar({ routeShell = "browser" }) {
         <div
           className={`md:hidden overflow-hidden transition-all duration-300 ease-out ${
             open
-              ? "pb-4 max-h-[520px] opacity-100 translate-y-0"
+              ? "pb-4 max-h-[680px] opacity-100 translate-y-0"
               : "max-h-0 opacity-0 -translate-y-2 pointer-events-none"
           }`}
           aria-hidden={!open}
@@ -605,22 +686,15 @@ export default function Navbar({ routeShell = "browser" }) {
               >
                 Benefits
               </a>
-              <a
-                href={buildHomeSectionHref(SECTION_HASHES.plans)}
-                data-nav-surface="mobile"
-                data-nav-target="plans"
-                onClick={(event) =>
-                  handleSectionLinkClick(event, SECTION_HASHES.plans)
-                }
-                className={`${mobileLinkBase} ${
-                  isPlansActive ? mobileLinkActive : mobileLinkIdle
-                }`}
-              >
-                Packages
-              </a>
               <button
                 type="button"
-                onClick={() => setProofOpen((v) => !v)}
+                onClick={() =>
+                  setProofOpen((v) => {
+                    const next = !v;
+                    if (next) setReferralsOpen(false);
+                    return next;
+                  })
+                }
                 className={`${mobileLinkBase} flex w-full items-center justify-between ${
                   isProofActive ? mobileLinkActive : mobileLinkIdle
                 }`}
@@ -695,6 +769,76 @@ export default function Navbar({ routeShell = "browser" }) {
               >
                 FAQ
               </a>
+              <button
+                type="button"
+                onClick={() =>
+                  setReferralsOpen((v) => {
+                    const next = !v;
+                    if (next) setProofOpen(false);
+                    return next;
+                  })
+                }
+                className={`${mobileLinkBase} flex w-full items-center justify-between ${
+                  isReferralsActive ? mobileLinkActive : mobileLinkIdle
+                }`}
+                aria-expanded={referralsOpen}
+                aria-controls="mobile-referrals-menu"
+              >
+                Referrals
+                <svg
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  className={`h-4 w-4 transition ${
+                    referralsOpen ? "rotate-180" : ""
+                  }`}
+                  aria-hidden="true"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.25a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </button>
+              <div
+                id="mobile-referrals-menu"
+                className={`flex flex-col bg-[#071a33]/60 overflow-hidden transition-all duration-300 ${
+                  referralsOpen
+                    ? "max-h-32 opacity-100"
+                    : "max-h-0 opacity-0 pointer-events-none"
+                }`}
+              >
+                <Link
+                  to="/referrals/register"
+                  onClick={() => {
+                    cancelSectionTransition();
+                    setReferralsOpen(false);
+                    setOpen(false);
+                  }}
+                  className={`${mobileSubLinkBase} ${
+                    isActive("/referrals/register")
+                      ? mobileSubLinkActive
+                      : mobileSubLinkIdle
+                  }`}
+                >
+                  Sign Up
+                </Link>
+                <Link
+                  to="/referrals/login"
+                  onClick={() => {
+                    cancelSectionTransition();
+                    setReferralsOpen(false);
+                    setOpen(false);
+                  }}
+                  className={`${mobileSubLinkBase} ${
+                    isReferralsActive && !isActive("/referrals/register")
+                      ? mobileSubLinkActive
+                      : mobileSubLinkIdle
+                  }`}
+                >
+                  Dashboard
+                </Link>
+              </div>
               <Link
                 to="/meet-the-team"
                 onClick={cancelSectionTransition}
@@ -712,6 +856,19 @@ export default function Navbar({ routeShell = "browser" }) {
                 className={`${mobileLinkBase} ${mobileLinkIdle} inline-flex items-center gap-2`}
               >
                 Discord
+              </a>
+              <a
+                href={buildHomeSectionHref(SECTION_HASHES.plans)}
+                data-nav-surface="mobile"
+                data-nav-target="plans"
+                onClick={(event) =>
+                  handleSectionLinkClick(event, SECTION_HASHES.plans)
+                }
+                className={`${mobileLinkBase} ${
+                  isPlansActive ? mobileLinkActive : mobileLinkIdle
+                }`}
+              >
+                Packages
               </a>
             </div>
           </div>

@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 export default function RefRegister() {
   const nav = useNavigate();
 
-  const [name, setName] = useState("");
+  const [discordUsername, setDiscordUsername] = useState("");
   const [email, setEmail] = useState("");
   const [paypalEmail, setPaypalEmail] = useState("");
   const [slug, setSlug] = useState("");
@@ -54,7 +54,7 @@ export default function RefRegister() {
   async function handleRegister(e) {
     e.preventDefault();
 
-    const trimmedName = name.trim();
+    const trimmedDiscordUsername = discordUsername.trim();
     const trimmedEmail = email.trim().toLowerCase();
     const trimmedPaypalEmail = paypalEmail.trim().toLowerCase();
     const trimmedSlug = slug.trim().toLowerCase();
@@ -63,7 +63,7 @@ export default function RefRegister() {
 
     // Basic validation
     if (
-      !trimmedName ||
+      !trimmedDiscordUsername ||
       !trimmedEmail ||
       !trimmedPaypalEmail ||
       !trimmedSlug ||
@@ -122,7 +122,9 @@ export default function RefRegister() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: trimmedName,
+          name: trimmedDiscordUsername,
+          discordUsername: trimmedDiscordUsername,
+          contactDiscord: trimmedDiscordUsername,
           email: trimmedEmail,
           paypalEmail: trimmedPaypalEmail,
           slug: trimmedSlug,
@@ -150,7 +152,7 @@ export default function RefRegister() {
   }
 
   return (
-    <section className="pt-32 px-6 min-h-screen text-white flex flex-col items-center">
+    <section className="pt-32 px-6 pb-20 min-h-screen text-white flex flex-col items-center">
       <h1 className="text-4xl font-extrabold text-center text-sky-300 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
         Referral Creator Registration
       </h1>
@@ -166,15 +168,20 @@ export default function RefRegister() {
                   shadow-[0_0_35px_rgba(56,189,248,0.35)]
                   rounded-2xl p-8 space-y-7"
       >
-        {/* Name */}
+        {/* Discord Username */}
         <div>
-          <label className="text-sky-300 text-sm font-semibold">Name</label>
+          <label className="text-sky-300 text-sm font-semibold">
+            Discord Username
+          </label>
           <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Your full name"
+            value={discordUsername}
+            onChange={(e) => setDiscordUsername(e.target.value)}
+            placeholder="e.g. @serviroo"
             className="w-full p-4 mt-1 bg-[#0c162a] border border-sky-800/40 rounded-xl outline-none focus:border-sky-500 transition text-base"
           />
+          <p className="text-slate-400 text-xs mt-1">
+            Use your Discord username. Real name is not required.
+          </p>
         </div>
 
         {/* Email */}
