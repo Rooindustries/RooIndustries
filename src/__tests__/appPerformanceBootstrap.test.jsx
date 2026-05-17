@@ -39,7 +39,7 @@ const loadAppContent = () => {
 
   jest.doMock("../components/Navbar", mockComponent);
   jest.doMock("../components/ReservationBanner", mockComponent);
-  jest.doMock("../components/TawkTo", mockComponent);
+  jest.doMock("../components/IntercomMessenger", mockComponent);
   jest.doMock("../components/PerformanceModeNotice", mockComponent);
   jest.doMock("../components/PerfDebugOverlay", mockComponent);
   jest.doMock("../components/BookingModal", mockComponent);
