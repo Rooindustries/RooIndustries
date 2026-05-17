@@ -81,45 +81,7 @@ const DeferredTelemetry = () => {
   );
 };
 
-const DeferredIntercom = ({ disabledRoutes }) => {
-  const [enabled, setEnabled] = useState(false);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-    let timeoutId;
-    let activated = false;
-
-    const enable = () => {
-      if (activated) return;
-      activated = true;
-      setEnabled(true);
-      events.forEach((eventName) =>
-        window.removeEventListener(eventName, enable, true)
-      );
-    };
-
-    const events = ["pointerdown", "keydown", "touchstart", "scroll"];
-    events.forEach((eventName) =>
-      window.addEventListener(eventName, enable, {
-        once: true,
-        passive: true,
-        capture: true,
-      })
-    );
-
-    timeoutId = window.setTimeout(enable, 12000);
-
-    return () => {
-      events.forEach((eventName) =>
-        window.removeEventListener(eventName, enable, true)
-      );
-      if (typeof timeoutId === "number") {
-        window.clearTimeout(timeoutId);
-      }
-    };
-  }, []);
-
-  if (!enabled) return null;
+const IntercomRuntime = ({ disabledRoutes }) => {
   return <IntercomMessenger disabledRoutes={disabledRoutes} />;
 };
 
@@ -500,7 +462,7 @@ export function AppContent({
   return (
     <>
       <DeferredTelemetry />
-      <DeferredIntercom disabledRoutes={INTERCOM_DISABLED_ROUTES} />
+      <IntercomRuntime disabledRoutes={INTERCOM_DISABLED_ROUTES} />
 
       <div
         id="app-shell"
