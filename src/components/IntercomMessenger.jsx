@@ -59,16 +59,28 @@ const queueIntercom = () => {
   window.Intercom = queuedIntercom;
 };
 
-const loadIntercom = (settings) => {
-  window.intercomSettings = settings;
+const bootOrUpdateIntercom = (settings) => {
+  if (typeof window.Intercom !== "function") {
+    return;
+  }
 
-  if (typeof window.Intercom === "function") {
-    window.Intercom("reattach_activator");
+  if (window.__rooIntercomBooted) {
     window.Intercom("update", settings);
     return;
   }
 
-  queueIntercom();
+  window.Intercom("boot", settings);
+  window.__rooIntercomBooted = true;
+};
+
+const loadIntercom = (settings) => {
+  window.intercomSettings = settings;
+
+  if (typeof window.Intercom !== "function") {
+    queueIntercom();
+  }
+
+  bootOrUpdateIntercom(settings);
 
   if (document.getElementById(INTERCOM_SCRIPT_ID)) {
     return;
