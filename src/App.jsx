@@ -11,7 +11,7 @@ import Navbar from "./components/Navbar";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 import ReservationBanner from "./components/ReservationBanner";
-import TawkTo from "./components/TawkTo";
+import IntercomMessenger from "./components/IntercomMessenger";
 import PerfDebugOverlay from "./components/PerfDebugOverlay";
 import { initializePerformanceProfile } from "./lib/performanceProfile";
 import Home from "./legacyPages/Home";
@@ -48,6 +48,9 @@ const RefRegister = lazy(() => import("./legacyPages/RefRegister"));
 const MeetTheTeam = lazy(() => import("./legacyPages/MeetTheTeam"));
 const NotFound = lazy(() => import("./legacyPages/NotFound"));
 
+const INTERCOM_DISABLED_ROUTES = [];
+// const INTERCOM_DISABLED_ROUTES = ["/booking"]; // Disables chat on /booking and nested routes.
+
 const DeferredTelemetry = () => {
   const [enabled, setEnabled] = useState(false);
 
@@ -78,7 +81,7 @@ const DeferredTelemetry = () => {
   );
 };
 
-const DeferredTawk = ({ disabledRoutes }) => {
+const DeferredIntercom = ({ disabledRoutes }) => {
   const [enabled, setEnabled] = useState(false);
 
   useEffect(() => {
@@ -117,7 +120,7 @@ const DeferredTawk = ({ disabledRoutes }) => {
   }, []);
 
   if (!enabled) return null;
-  return <TawkTo disabledRoutes={disabledRoutes} />;
+  return <IntercomMessenger disabledRoutes={disabledRoutes} />;
 };
 
 const RouteFallback = () => (
@@ -497,6 +500,7 @@ export function AppContent({
   return (
     <>
       <DeferredTelemetry />
+      <DeferredIntercom disabledRoutes={INTERCOM_DISABLED_ROUTES} />
 
       <div
         id="app-shell"
@@ -564,13 +568,8 @@ export function AppContent({
 }
 
 function App() {
-  // Example: add routes here to disable chat without refactoring.
-  const tawkDisabledRoutes = [];
-  // const tawkDisabledRoutes = ["/booking"]; // Disables chat on /booking and nested routes.
-
   return (
     <Router>
-      <DeferredTawk disabledRoutes={tawkDisabledRoutes} />
       <AppContent routeShell="browser" />
     </Router>
   );
