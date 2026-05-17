@@ -12,7 +12,7 @@ const mockLocation = {
 
 jest.mock("../components/Navbar", () => () => null);
 jest.mock("../components/ReservationBanner", () => () => null);
-jest.mock("../components/TawkTo", () => () => null);
+jest.mock("../components/IntercomMessenger", () => () => null);
 jest.mock("../components/PerformanceModeNotice", () => () => null);
 jest.mock("../components/PerfDebugOverlay", () => () => null);
 jest.mock("../components/BookingModal", () => () => null);
