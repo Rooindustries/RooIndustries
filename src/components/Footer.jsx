@@ -51,6 +51,12 @@ export default function Footer() {
                 Tools
               </Link>
               <Link
+                to="/referrals/register"
+                className="hover:text-cyan-400 transition-colors"
+              >
+                Referrals
+              </Link>
+              <Link
                 to="/meet-the-team"
                 className="hover:text-cyan-400 transition-colors"
               >

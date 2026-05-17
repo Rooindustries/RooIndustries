@@ -2,6 +2,9 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { client } from "../sanityClient";
 
+const normalizeReferralLoginPath = (path) =>
+  !path || path === "/login" ? "/referrals/login" : path;
+
 export default function ReferralBox() {
   const nav = useNavigate();
   const [email, setEmail] = useState("");
@@ -13,7 +16,7 @@ export default function ReferralBox() {
     emailPlaceholder: "Enter your email...",
     startButtonText: "Get Started",
     loginButtonText: "Login",
-    loginPath: "/login",
+    loginPath: "/referrals/login",
     registerPath: "/referrals/register",
   });
 
@@ -63,7 +66,7 @@ export default function ReferralBox() {
   }
 
   function handleLogin() {
-    nav(content.loginPath || "/login");
+    nav(normalizeReferralLoginPath(content.loginPath));
   }
 
   const isValid = !!email && email.includes("@");

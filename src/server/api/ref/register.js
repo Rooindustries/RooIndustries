@@ -17,7 +17,15 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
 
   try {
-    const { name, email, paypalEmail, slug, password } = req.body;
+    const {
+      name,
+      discordUsername,
+      contactDiscord,
+      email,
+      paypalEmail,
+      slug,
+      password,
+    } = req.body;
 
     const clientAddress = getClientAddress(req);
     if (
@@ -31,7 +39,17 @@ export default async function handler(req, res) {
     }
 
     // Basic presence validation
-    if (!name || !email || !paypalEmail || !slug || !password) {
+    const trimmedDiscordUsername = String(
+      discordUsername || contactDiscord || name || ""
+    ).trim();
+
+    if (
+      !trimmedDiscordUsername ||
+      !email ||
+      !paypalEmail ||
+      !slug ||
+      !password
+    ) {
       return res.status(400).json({ ok: false, error: "All fields required" });
     }
 
@@ -79,11 +97,12 @@ export default async function handler(req, res) {
     // Create referral document
     const referral = await client.create({
       _type: "referral",
-      name: String(name).trim(),
+      name: trimmedDiscordUsername,
       slug: { _type: "slug", current: trimmedSlug },
       creatorEmail: trimmedEmail,
       creatorPassword: hash,
       paypalEmail: trimmedPaypalEmail,
+      contactDiscord: trimmedDiscordUsername,
       currentCommissionPercent: 10,
       successfulReferrals: 0,
       isFirstTime: true,
