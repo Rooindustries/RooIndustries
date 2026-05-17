@@ -51,8 +51,9 @@ export default {
     },
     {
       name: 'contactDiscord',
-      title: 'Discord (optional)',
+      title: 'Discord Username',
       type: 'string',
+      description: 'Creator Discord username from the referral registration form. Real name is not required.',
     },
     {
       name: 'contactTelegram',
