@@ -2,12 +2,14 @@ import React from "react";
 import { Link, useLocation } from "react-router-dom";
 import { FaDiscord } from "react-icons/fa";
 import marketConfig from "../lib/market";
+import indiaLaunchGate from "../lib/indiaLaunchGate";
 
 export default function Footer() {
   const location = useLocation();
   const { resolveCurrentMarket } = marketConfig;
   const market = resolveCurrentMarket();
   const isIndiaMarket = market.id === "india";
+  const bookingGate = indiaLaunchGate.getIndiaBookingGate({ market });
 
   const searchParams = new URLSearchParams(location.search);
   const isXocBookingForm =
@@ -95,7 +97,10 @@ export default function Footer() {
           <div className="inline-flex items-center gap-3 px-4 py-2 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md">
             {isIndiaMarket ? (
               <>
-                {["UPI", "EMI", "Cards"].map((label) => (
+                {(bookingGate.isComingSoon
+                  ? ["Bookings opening soon", bookingGate.copy.badge]
+                  : ["India checkout"]
+                ).map((label) => (
                   <span
                     key={label}
                     className="grid place-items-center h-10 min-w-14 rounded-xl border border-white/10 bg-[#0b1830]/60 px-3 text-[11px] font-bold uppercase tracking-wide text-cyan-100"

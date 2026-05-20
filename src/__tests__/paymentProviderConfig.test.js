@@ -28,6 +28,8 @@ describe("payment provider runtime policy", () => {
     delete process.env.SITE_MARKET;
     delete process.env.NEXT_PUBLIC_SITE_MARKET;
     delete process.env.ENABLE_RAZORPAY_INDIA_CHECKOUT;
+    delete process.env.INDIA_BOOKING_STATUS;
+    delete process.env.NEXT_PUBLIC_INDIA_BOOKING_STATUS;
   });
 
   afterAll(() => {
@@ -258,7 +260,7 @@ describe("payment provider runtime policy", () => {
     expect(providers.razorpay.enabled).toBe(false);
   });
 
-  test("India Razorpay requires an explicit override", () => {
+  test("India Razorpay override is blocked while bookings are coming soon", () => {
     process.env.VERCEL_ENV = "production";
     process.env.SITE_MARKET = "india";
     process.env.ENABLE_RAZORPAY_INDIA_CHECKOUT = "1";
@@ -268,6 +270,25 @@ describe("payment provider runtime policy", () => {
     const { resolvePaymentProviders } = loadProviderConfig();
     const providers = resolvePaymentProviders();
 
+    expect(providers.razorpay).toEqual({
+      enabled: false,
+      mode: "live",
+    });
+    expect(providers.bookingStatus).toBe("coming-soon");
+  });
+
+  test("India Razorpay remains reversible behind open gate and override", () => {
+    process.env.VERCEL_ENV = "production";
+    process.env.SITE_MARKET = "india";
+    process.env.INDIA_BOOKING_STATUS = "open";
+    process.env.ENABLE_RAZORPAY_INDIA_CHECKOUT = "1";
+    process.env.RAZORPAY_KEY_ID = "rzp_live_prod";
+    process.env.RAZORPAY_KEY_SECRET = "secret";
+
+    const { resolvePaymentProviders } = loadProviderConfig();
+    const providers = resolvePaymentProviders();
+
+    expect(providers.bookingStatus).toBe("open");
     expect(providers.razorpay).toEqual({
       enabled: true,
       mode: "live",

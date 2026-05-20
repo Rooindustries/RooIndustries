@@ -1,11 +1,23 @@
 import React from "react";
 import BookingForm from "../components/BookingForm";
 import Footer from "../components/Footer";
+import BookingComingSoon from "../components/BookingComingSoon";
+import indiaLaunchGate from "../lib/indiaLaunchGate";
 
 export default function Book({ hideFooter = false, compact = false }) {
   const padY = compact ? "pt-2 pb-6" : "pt-32 pb-24";
   const titleMargin = compact ? "mb-4" : "mb-10";
   const titleSize = compact ? "text-3xl sm:text-4xl" : "text-4xl sm:text-5xl";
+  const bookingGate = indiaLaunchGate.getCurrentIndiaBookingGate();
+
+  if (bookingGate.isComingSoon) {
+    return (
+      <>
+        <BookingComingSoon compact={compact} />
+        {!hideFooter && <Footer />}
+      </>
+    );
+  }
 
   return (
     <>

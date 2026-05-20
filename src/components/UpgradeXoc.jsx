@@ -1,5 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import BookingComingSoon from "./BookingComingSoon";
+import indiaLaunchGate from "../lib/indiaLaunchGate";
 
 const formatLocalDate = (utcDate, timeZone) => {
   try {
@@ -35,6 +37,8 @@ export default function UpgradeXoc() {
   const [error, setError] = useState(null);
 
   const navigate = useNavigate();
+  const bookingGate = indiaLaunchGate.getCurrentIndiaBookingGate();
+  const bookingsComingSoon = bookingGate.isComingSoon;
 
   async function handleCheckOrder() {
     setError(null);
@@ -132,6 +136,10 @@ export default function UpgradeXoc() {
     upgradeInfo && typeof upgradeInfo.upgradePrice === "number"
       ? upgradeInfo.upgradePrice
       : null;
+
+  if (bookingsComingSoon) {
+    return <BookingComingSoon />;
+  }
 
   return (
     <section className="relative z-10 pt-32 pb-24 px-6 max-w-3xl mx-auto text-white">

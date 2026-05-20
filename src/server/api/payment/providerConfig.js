@@ -1,8 +1,10 @@
 const TRUTHY_ENV_VALUES = ["1", "true", "yes", "on"];
 const KNOWN_RUNTIMES = new Set(["production", "preview", "development"]);
 const marketConfig = require("../../../lib/market.js");
+const indiaLaunchGate = require("../../../lib/indiaLaunchGate.js");
 
 const { resolveMarket } = marketConfig;
+const { getIndiaBookingGate } = indiaLaunchGate;
 
 const isTruthyEnv = (value) =>
   TRUTHY_ENV_VALUES.includes(String(value || "").trim().toLowerCase());
@@ -144,16 +146,24 @@ const resolvePaymentProviders = (options = {}) => {
     hostname: options.hostname || options.host || "",
     env: options.env || process.env,
   });
+  const bookingGate = getIndiaBookingGate({
+    market,
+    env: options.env || process.env,
+  });
+  const isIndiaMarket = market.id === "india";
+  const indiaBookingsOpen = !isIndiaMarket || bookingGate.isOpen;
 
   const razorpayKeyId = String(process.env.RAZORPAY_KEY_ID || "").trim();
   const razorpayKeySecret = String(process.env.RAZORPAY_KEY_SECRET || "").trim();
   const razorpayMode = resolveRazorpayMode(razorpayKeyId);
   const allowIndiaRazorpay =
-    market.id !== "india" ||
-    isTruthyEnv(process.env.ENABLE_RAZORPAY_INDIA_CHECKOUT);
+    !isIndiaMarket ||
+    (indiaBookingsOpen &&
+      isTruthyEnv(process.env.ENABLE_RAZORPAY_INDIA_CHECKOUT));
   const marketAllowsRazorpay =
-    market.razorpayEnabled || (market.id === "india" && allowIndiaRazorpay);
+    market.razorpayEnabled || (isIndiaMarket && allowIndiaRazorpay);
   const razorpayEnabled =
+    indiaBookingsOpen &&
     marketAllowsRazorpay &&
     allowIndiaRazorpay &&
     !!razorpayKeyId &&
@@ -171,6 +181,7 @@ const resolvePaymentProviders = (options = {}) => {
   ).trim();
   const paypalMode = resolvePayPalMode(runtimePolicy);
   const paypalEnabled =
+    indiaBookingsOpen &&
     market.paypalEnabled &&
     !!paypalClientId &&
     !!paypalClientSecret &&
@@ -182,7 +193,9 @@ const resolvePaymentProviders = (options = {}) => {
       label: market.label,
       currency: market.currency,
       siteUrl: market.siteUrl,
+      bookingStatus: bookingGate.status,
     },
+    bookingStatus: bookingGate.status,
     runtime: runtimePolicy.runtime,
     previewPaymentsEnabled: runtimePolicy.previewPaymentsEnabled,
     livePaymentsEnabled: runtimePolicy.livePaymentsEnabled,

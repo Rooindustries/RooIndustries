@@ -35,8 +35,12 @@ import {
   PAYMENT_STATUS_BOOKED,
   PAYMENT_STATUS_EMAIL_PARTIAL,
 } from "../payment/paymentRecord.js";
+import marketConfig from "../../../lib/market.js";
+import indiaLaunchGate from "../../../lib/indiaLaunchGate.js";
 
 const { resolvePaymentProviders } = providerConfig;
+const { resolveMarket } = marketConfig;
+const { getIndiaBookingGate } = indiaLaunchGate;
 
 const writeClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -208,6 +212,24 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
 
   try {
+    const requestHost =
+      req.headers?.["x-forwarded-host"] || req.headers?.host || "";
+    const requestMarket = resolveMarket({
+      hostname: requestHost,
+      env: process.env,
+    });
+    const bookingGate = getIndiaBookingGate({
+      market: requestMarket,
+      env: process.env,
+    });
+
+    if (bookingGate.isComingSoon) {
+      return res.status(503).json({
+        error: "Bookings are temporarily unavailable for Roo Industries India.",
+        bookingStatus: bookingGate.status,
+      });
+    }
+
     const {
       discord,
       email,

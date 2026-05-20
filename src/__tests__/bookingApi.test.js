@@ -447,6 +447,10 @@ beforeEach(() => {
   process.env.RAZORPAY_KEY_SECRET = "";
   process.env.PAYPAL_CLIENT_ID = "";
   process.env.PAYPAL_CLIENT_SECRET = "";
+  delete process.env.SITE_MARKET;
+  delete process.env.NEXT_PUBLIC_SITE_MARKET;
+  delete process.env.INDIA_BOOKING_STATUS;
+  delete process.env.NEXT_PUBLIC_INDIA_BOOKING_STATUS;
   globalThis.__rooRateLimitBuckets?.clear?.();
   delete global.fetch;
 });
@@ -457,6 +461,26 @@ afterEach(() => {
 });
 
 describe("booking reservation API", () => {
+  test("createBooking rejects India bookings while launch gate is closed", async () => {
+    process.env.SITE_MARKET = "india";
+
+    const req = createReq({
+      paymentProvider: "free",
+      packageTitle: "Performance Vertex Overhaul",
+      packagePrice: "₹2,999",
+    });
+    const res = createRes();
+
+    await createBooking(req, res);
+
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toMatchObject({
+      bookingStatus: "coming-soon",
+    });
+    expect(res.body.error).toMatch(/temporarily unavailable/i);
+    expect(store.bookings).toHaveLength(0);
+  });
+
   test("reservation creation locks slot for other users", async () => {
     expect(CLIENT_EMAIL).toBe("vihaann2.0@gmail.com");
     expect(OWNER_EMAIL).toBe("serviroo@rooindustries.com");

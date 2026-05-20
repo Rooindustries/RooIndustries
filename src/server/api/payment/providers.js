@@ -38,6 +38,7 @@ export default async function handler(req, res) {
       },
     },
     market: providers?.market || { id: "global", currency: "USD" },
+    bookingStatus: providers?.bookingStatus || "open",
     environment: {
       runtime: providers?.runtime || "development",
       previewPaymentsEnabled: providers?.previewPaymentsEnabled === true,

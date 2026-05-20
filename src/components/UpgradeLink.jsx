@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { client } from "../sanityClient";
+import BookingComingSoon from "./BookingComingSoon";
+import indiaLaunchGate from "../lib/indiaLaunchGate";
 
 const formatLocalDate = (utcDate, timeZone) => {
   try {
@@ -52,6 +54,8 @@ export default function UpgradeLink() {
     () => (slug ? String(slug).toLowerCase() : ""),
     [slug]
   );
+  const bookingGate = indiaLaunchGate.getCurrentIndiaBookingGate();
+  const bookingsComingSoon = bookingGate.isComingSoon;
 
   useEffect(() => {
     let active = true;
@@ -60,6 +64,13 @@ export default function UpgradeLink() {
     setLinkInfo(null);
     setUpgradeInfo(null);
     setError(null);
+
+    if (bookingsComingSoon) {
+      setLinkLoading(false);
+      return () => {
+        active = false;
+      };
+    }
 
     if (!normalizedSlug) {
       setLinkLoading(false);
@@ -92,7 +103,7 @@ export default function UpgradeLink() {
     return () => {
       active = false;
     };
-  }, [normalizedSlug]);
+  }, [normalizedSlug, bookingsComingSoon]);
 
   const headingText =
     linkInfo?.title ||
@@ -212,6 +223,10 @@ export default function UpgradeLink() {
     upgradeInfo && typeof upgradeInfo.upgradePrice === "number"
       ? upgradeInfo.upgradePrice
       : null;
+
+  if (bookingsComingSoon) {
+    return <BookingComingSoon />;
+  }
 
   return (
     <section className="relative z-10 pt-32 pb-24 px-6 max-w-3xl mx-auto text-white">

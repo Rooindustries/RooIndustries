@@ -4,6 +4,7 @@ import { client } from "../sanityClient";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
+import indiaLaunchGate from "../lib/indiaLaunchGate";
 
 
 const IST_OFFSET_MINUTES = 330;
@@ -335,6 +336,8 @@ export default function BookingForm({ isMobile }) {
   const location = useLocation();
   const q = useQuery();
   const navigate = useNavigate();
+  const bookingGate = indiaLaunchGate.getCurrentIndiaBookingGate();
+  const bookingsComingSoon = bookingGate.isComingSoon;
 
   const [step, setStep] = useState(1);
   const [settings, setSettings] = useState(null);
@@ -2520,6 +2523,7 @@ export default function BookingForm({ isMobile }) {
                       <button
                         type="button"
                         onClick={() => {
+                          if (bookingsComingSoon) return;
                           document.body.classList.remove("is-modal-blur");
                           setShowVertexModal(false);
                           setErrorStep2("");
@@ -2565,10 +2569,16 @@ export default function BookingForm({ isMobile }) {
                               : undefined
                           );
                         }}
-                        className="glow-button w-full mt-6 py-3 rounded-lg font-semibold text-white shadow-[0_0_20px_rgba(56,189,248,0.4)] inline-flex items-center justify-center gap-2 opacity-90 hover:opacity-100"
+                        disabled={bookingsComingSoon}
+                        aria-disabled={bookingsComingSoon}
+                        className={`glow-button w-full mt-6 py-3 rounded-lg font-semibold text-white shadow-[0_0_20px_rgba(56,189,248,0.4)] inline-flex items-center justify-center gap-2 opacity-90 hover:opacity-100 ${
+                          bookingsComingSoon ? "cursor-not-allowed opacity-60" : ""
+                        }`}
                         style={{ transition: "opacity 0.9s ease-in-out" }}
                       >
-                        {displayPackage?.buttonText || "Book Now"}
+                        {bookingsComingSoon
+                          ? bookingGate.copy.button
+                          : displayPackage?.buttonText || "Book Now"}
                         <span className="glow-line glow-line-top" />
                         <span className="glow-line glow-line-right" />
                         <span className="glow-line glow-line-bottom" />

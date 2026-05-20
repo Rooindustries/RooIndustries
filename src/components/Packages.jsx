@@ -7,6 +7,7 @@ import {
   readHomeSectionData,
 } from "../lib/homeSectionData";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
+import indiaLaunchGate from "../lib/indiaLaunchGate";
 
 const REFERRAL_STORAGE_KEY = "referral_session";
 
@@ -52,6 +53,8 @@ export default function Packages({
   const bookingState = {
     backgroundLocation: location.state?.backgroundLocation || location,
   };
+  const bookingGate = indiaLaunchGate.getCurrentIndiaBookingGate();
+  const bookingsComingSoon = bookingGate.isComingSoon;
   const UPGRADE_FAQ_HASH = "upgrade-path";
 
   const openDetails = (pkg) => {
@@ -311,23 +314,38 @@ export default function Packages({
                       {p.detailsButtonText || "See What's Included"}
                     </button>
 
-                    <Link
-                      to={`/booking?title=${encodeURIComponent(
-                        p.title
-                      )}&price=${encodeURIComponent(
-                        p.price
-                      )}&tag=${encodeURIComponent(p.tag || "")}&xoc=${
-                        isXoc ? "1" : "0"
-                      }`}
-                      state={bookingState}
-                      className="glow-button w-full sm:w-1/2 text-white text-lg py-3 rounded-md font-semibold shadow-[0_0_20px_rgba(56,189,248,0.4)] transition-all duration-300 text-center inline-flex items-center justify-center gap-2"
-                    >
-                      {p.buttonText || "Book Now"}
-                      <span className="glow-line glow-line-top" />
-                      <span className="glow-line glow-line-right" />
-                      <span className="glow-line glow-line-bottom" />
-                      <span className="glow-line glow-line-left" />
-                    </Link>
+                    {bookingsComingSoon ? (
+                      <button
+                        type="button"
+                        disabled
+                        aria-disabled="true"
+                        className="glow-button w-full sm:w-1/2 text-white text-lg py-3 rounded-md font-semibold shadow-[0_0_20px_rgba(56,189,248,0.4)] transition-all duration-300 text-center inline-flex items-center justify-center gap-2 opacity-60 cursor-not-allowed"
+                      >
+                        {bookingGate.copy.button}
+                        <span className="glow-line glow-line-top" />
+                        <span className="glow-line glow-line-right" />
+                        <span className="glow-line glow-line-bottom" />
+                        <span className="glow-line glow-line-left" />
+                      </button>
+                    ) : (
+                      <Link
+                        to={`/booking?title=${encodeURIComponent(
+                          p.title
+                        )}&price=${encodeURIComponent(
+                          p.price
+                        )}&tag=${encodeURIComponent(p.tag || "")}&xoc=${
+                          isXoc ? "1" : "0"
+                        }`}
+                        state={bookingState}
+                        className="glow-button w-full sm:w-1/2 text-white text-lg py-3 rounded-md font-semibold shadow-[0_0_20px_rgba(56,189,248,0.4)] transition-all duration-300 text-center inline-flex items-center justify-center gap-2"
+                      >
+                        {p.buttonText || "Book Now"}
+                        <span className="glow-line glow-line-top" />
+                        <span className="glow-line glow-line-right" />
+                        <span className="glow-line glow-line-bottom" />
+                        <span className="glow-line glow-line-left" />
+                      </Link>
+                    )}
                   </div>
                 </div>
               );

@@ -3,6 +3,8 @@ import { useLocation, Link, useNavigate } from "react-router-dom";
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 import { motion } from "framer-motion";
 import marketConfig from "../lib/market";
+import indiaLaunchGate from "../lib/indiaLaunchGate";
+import BookingComingSoon from "./BookingComingSoon";
 const formatLocalDate = (utcDate, timeZone) => {
   try {
     return new Intl.DateTimeFormat(undefined, {
@@ -373,7 +375,12 @@ export default function Payment({ hideFooter = false }) {
 
   const initialMarket = (() => {
     const market = marketConfig.resolveCurrentMarket();
-    return { id: market.id, currency: market.currency };
+    const bookingGate = indiaLaunchGate.getIndiaBookingGate({ market });
+    return {
+      id: market.id,
+      currency: market.currency,
+      bookingStatus: bookingGate.status,
+    };
   })();
 
   // Payment provider state
@@ -383,6 +390,7 @@ export default function Payment({ hideFooter = false }) {
     razorpay: { enabled: initialMarket.id !== "india", mode: "unknown" },
     paypal: { enabled: false, mode: "unknown", clientId: "" },
     market: initialMarket,
+    bookingStatus: initialMarket.bookingStatus,
   });
   const [showInternalPayments, setShowInternalPayments] = useState(false);
   const [paymentSession, setPaymentSession] = useState(null);
@@ -400,6 +408,10 @@ export default function Payment({ hideFooter = false }) {
   const canUseRazorpay = !!providerConfig?.razorpay?.enabled;
   const canUsePaypal = hasPaypalClientId && !!providerConfig?.paypal?.enabled;
   const isIndiaMarket = providerConfig?.market?.id === "india";
+  const bookingGate = indiaLaunchGate.getIndiaBookingGate({
+    market: providerConfig?.market || initialMarket,
+  });
+  const bookingsComingSoon = bookingGate.isComingSoon;
   const checkoutCurrency = providerConfig?.market?.currency || "USD";
   const formatPaymentAmount = (amount) =>
     checkoutCurrency === "INR"
@@ -483,6 +495,8 @@ export default function Payment({ hideFooter = false }) {
 
   // Load Razorpay checkout script
   useEffect(() => {
+    if (bookingsComingSoon) return undefined;
+
     const script = document.createElement("script");
     script.src = "https://checkout.razorpay.com/v1/checkout.js";
     script.async = true;
@@ -501,9 +515,11 @@ export default function Payment({ hideFooter = false }) {
       document.body.removeChild(script);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [bookingsComingSoon]);
 
   useEffect(() => {
+    if (bookingsComingSoon) return undefined;
+
     let active = true;
 
     fetch("/api/payment/providers")
@@ -523,7 +539,15 @@ export default function Payment({ hideFooter = false }) {
           market: {
             id: data.market?.id || "global",
             currency: data.market?.currency || "USD",
+            bookingStatus:
+              data.bookingStatus ||
+              data.market?.bookingStatus ||
+              initialMarket.bookingStatus,
           },
+          bookingStatus:
+            data.bookingStatus ||
+            data.market?.bookingStatus ||
+            initialMarket.bookingStatus,
         });
       })
       .catch(() => {
@@ -548,7 +572,7 @@ export default function Payment({ hideFooter = false }) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [bookingsComingSoon, initialMarket.bookingStatus]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1164,6 +1188,11 @@ export default function Payment({ hideFooter = false }) {
     } finally {
       setPayingRzp(false);
     }
+  }
+
+  // --- ANIMATION CONFIG ---
+  if (bookingsComingSoon) {
+    return <BookingComingSoon compact={hideFooterEffective} />;
   }
 
   // --- ANIMATION CONFIG ---
