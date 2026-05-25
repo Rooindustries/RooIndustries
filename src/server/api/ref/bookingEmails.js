@@ -7,7 +7,7 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 
 export const DISCORD_INVITE_URL = "https://discord.com/invite/qs5HKNyazD";
 export const OWNER_TZ_NAME = "Asia/Kolkata";
-const DEFAULT_LOGO_URL = "https://www.rooindustries.com/embed_logo.png";
+const DEFAULT_LOGO_URL = "https://www.rooindustries.in/email-avatar.gif";
 
 const escapeHtml = (value) =>
   String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -34,7 +34,7 @@ const emailHtml = ({
           <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:640px;background:#0f172a;border:1px solid rgba(56,189,248,.18);border-radius:18px;padding:28px">
             <tr>
               <td style="text-align:center;padding-bottom:20px">
-                <img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(siteName)}" style="height:48px;display:block;margin:0 auto 8px"/>
+                <img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(siteName)}" width="64" height="64" style="width:64px;height:64px;border-radius:50%;display:block;margin:0 auto 10px;background:#020617;border:1px solid rgba(125,211,252,.35)"/>
                 <div style="font-weight:700;font-size:18px;color:#7dd3fc">${escapeHtml(siteName)}</div>
               </td>
             </tr>
@@ -92,7 +92,10 @@ const emailHtml = ({
 `;
 
 const resolveLogoUrl = () =>
-  String(process.env.LOGO_URL || DEFAULT_LOGO_URL).trim() || DEFAULT_LOGO_URL;
+  String(
+    process.env.EMAIL_LOGO_URL || process.env.LOGO_URL || DEFAULT_LOGO_URL
+  ).trim() ||
+  DEFAULT_LOGO_URL;
 
 const buildEmailDispatchState = () => ({
   deliveryEnabled: false,
