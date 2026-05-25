@@ -2,14 +2,45 @@ import React from "react";
 import { Link, useLocation } from "react-router-dom";
 import { FaDiscord } from "react-icons/fa";
 import marketConfig from "../lib/market";
-import indiaLaunchGate from "../lib/indiaLaunchGate";
+
+const CardLogo = ({ src, alt, width, height, wide = false }) => (
+  <span
+    className={`grid h-9 place-items-center rounded-md border border-white/10 bg-[#0b1830]/70 px-2 ${
+      wide ? "w-[4.75rem]" : "w-14"
+    }`}
+  >
+    <img
+      src={src}
+      alt={alt}
+      className="max-h-6 w-auto object-contain"
+      loading="lazy"
+      decoding="async"
+      width={width}
+      height={height}
+    />
+  </span>
+);
+
+const PaymentMethodLogo = ({ src, alt, children, width, height }) => (
+  <span className="flex h-9 items-center gap-1.5 rounded-md border border-white/10 bg-[#0b1830]/70 px-2.5 text-[11px] font-bold tracking-wide text-cyan-100">
+    <img
+      src={src}
+      alt={alt}
+      className="h-[18px] w-[18px] object-contain"
+      loading="lazy"
+      decoding="async"
+      width={width}
+      height={height}
+    />
+    <span>{children}</span>
+  </span>
+);
 
 export default function Footer() {
   const location = useLocation();
   const { resolveCurrentMarket } = marketConfig;
   const market = resolveCurrentMarket();
   const isIndiaMarket = market.id === "india";
-  const bookingGate = indiaLaunchGate.getIndiaBookingGate({ market });
 
   const searchParams = new URLSearchParams(location.search);
   const isXocBookingForm =
@@ -94,67 +125,85 @@ export default function Footer() {
         </div>
 
         <div className="py-2 flex justify-center md:justify-end">
-          <div className="inline-flex items-center gap-3 px-4 py-2 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md">
+          <div
+            className="flex flex-wrap items-center justify-center gap-2"
+            aria-label={
+              isIndiaMarket
+                ? "Accepted payment methods in India"
+                : "Accepted payment methods"
+            }
+          >
             {isIndiaMarket ? (
               <>
-                {(bookingGate.isComingSoon
-                  ? ["Bookings opening soon", bookingGate.copy.badge]
-                  : ["India checkout"]
-                ).map((label) => (
-                  <span
-                    key={label}
-                    className="grid place-items-center h-10 min-w-14 rounded-xl border border-white/10 bg-[#0b1830]/60 px-3 text-[11px] font-bold uppercase tracking-wide text-cyan-100"
-                  >
-                    {label}
-                  </span>
-                ))}
+                <CardLogo
+                  src="/newVisa.png"
+                  alt="Visa"
+                  width={240}
+                  height={152}
+                />
+                <CardLogo
+                  src="/mastercard.jpg"
+                  alt="Mastercard"
+                  width={220}
+                  height={128}
+                />
+                <CardLogo
+                  src="/payment-icons/upi.svg"
+                  alt="UPI"
+                  width={487}
+                  height={172}
+                  wide
+                />
+                <CardLogo
+                  src="/payment-icons/rupay.svg"
+                  alt="RuPay"
+                  width={255}
+                  height={67}
+                  wide
+                />
+                <PaymentMethodLogo
+                  src="/payment-icons/netbanking.svg"
+                  alt="Netbanking icon"
+                  width={24}
+                  height={24}
+                >
+                  Netbanking
+                </PaymentMethodLogo>
+                <PaymentMethodLogo
+                  src="/payment-icons/wallets.svg"
+                  alt="Wallets icon"
+                  width={24}
+                  height={24}
+                >
+                  Wallets
+                </PaymentMethodLogo>
               </>
             ) : (
               <>
-                <span className="grid place-items-center h-10 w-14 rounded-xl border border-white/10 bg-[#0b1830]/60">
-                  <img
-                    src="/newVisa.png"
-                    alt="Visa"
-                    className="h-7 w-auto object-contain"
-                    loading="lazy"
-                    decoding="async"
-                    width={240}
-                    height={152}
-                  />
-                </span>
-                <span className="grid place-items-center h-10 w-14 rounded-xl border border-white/10 bg-[#0b1830]/60">
-                  <img
-                    src="/mastercard.jpg"
-                    alt="Mastercard"
-                    className="h-7 w-auto object-contain"
-                    loading="lazy"
-                    decoding="async"
-                    width={220}
-                    height={128}
-                  />
-                </span>
-                <span className="grid place-items-center h-10 w-14 rounded-xl border border-white/10 bg-[#0b1830]/60">
-                  <img
-                    src="/newAmex.png"
-                    alt="American Express"
-                    className="h-7 w-auto object-contain"
-                    loading="lazy"
-                    decoding="async"
-                    width={50}
-                    height={30}
-                  />
-                </span>
-                <span className="grid place-items-center h-10 w-14 rounded-xl border border-white/10 bg-[#0b1830]/60">
-                  <img
-                    src="/newPaypal.png"
-                    alt="PayPal"
-                    className="h-7 w-auto object-contain"
-                    loading="lazy"
-                    decoding="async"
-                    width={50}
-                    height={30}
-                  />
-                </span>
+                <CardLogo
+                  src="/newVisa.png"
+                  alt="Visa"
+                  width={240}
+                  height={152}
+                />
+                <CardLogo
+                  src="/mastercard.jpg"
+                  alt="Mastercard"
+                  width={220}
+                  height={128}
+                />
+                <CardLogo
+                  src="/newAmex.png"
+                  alt="American Express"
+                  width={50}
+                  height={30}
+                />
+                <CardLogo
+                  src="/newPaypal.png"
+                  alt="PayPal"
+                  width={50}
+                  height={30}
+                />
               </>
             )}
           </div>

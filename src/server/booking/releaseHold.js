@@ -1,14 +1,8 @@
-import { createClient } from "@sanity/client";
+import { createBookingStateWriteClient } from "./bookingStateClient.js";
 import { verifyHoldToken } from "./holdToken.js";
 import { getClientAddress, requireRateLimit } from "../api/ref/rateLimit.js";
 
-const client = createClient({
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || "production",
-  apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
-  token: process.env.SANITY_WRITE_TOKEN,
-  useCdn: false, // Important: Ensures we delete from the real dataset immediately
-});
+const client = createBookingStateWriteClient();
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {

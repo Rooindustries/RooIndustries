@@ -27,6 +27,7 @@ describe("payment provider runtime policy", () => {
     delete process.env.RAZORPAY_KEY_SECRET;
     delete process.env.SITE_MARKET;
     delete process.env.NEXT_PUBLIC_SITE_MARKET;
+    delete process.env.ENABLE_IDFC_RAZORPAY_INDIA_CHECKOUT;
     delete process.env.ENABLE_RAZORPAY_INDIA_CHECKOUT;
     delete process.env.INDIA_BOOKING_STATUS;
     delete process.env.NEXT_PUBLIC_INDIA_BOOKING_STATUS;
@@ -293,5 +294,50 @@ describe("payment provider runtime policy", () => {
       enabled: true,
       mode: "live",
     });
+  });
+
+  test("India IDFC Razorpay alias enables the approved checkout path", () => {
+    process.env.VERCEL_ENV = "production";
+    process.env.SITE_MARKET = "india";
+    process.env.INDIA_BOOKING_STATUS = "open";
+    process.env.ENABLE_IDFC_RAZORPAY_INDIA_CHECKOUT = "1";
+    process.env.RAZORPAY_KEY_ID = "rzp_live_prod";
+    process.env.RAZORPAY_KEY_SECRET = "secret";
+
+    const { resolvePaymentProviders } = loadProviderConfig();
+    const providers = resolvePaymentProviders();
+
+    expect(providers.bookingStatus).toBe("open");
+    expect(providers.paypal.enabled).toBe(false);
+    expect(providers.razorpay).toEqual({
+      enabled: true,
+      mode: "live",
+    });
+  });
+
+  test("resolvePaymentProviders accepts supplied India env credentials", () => {
+    process.env.VERCEL_ENV = "production";
+
+    const { resolvePaymentProviders } = loadProviderConfig();
+    const providers = resolvePaymentProviders({
+      env: {
+        SITE_MARKET: "india",
+        INDIA_BOOKING_STATUS: "open",
+        ENABLE_IDFC_RAZORPAY_INDIA_CHECKOUT: "1",
+        RAZORPAY_KEY_ID: "rzp_live_prod",
+        RAZORPAY_KEY_SECRET: "secret",
+      },
+    });
+
+    expect(providers.bookingStatus).toBe("open");
+    expect(providers.market).toMatchObject({
+      id: "india",
+      currency: "INR",
+    });
+    expect(providers.razorpay).toEqual({
+      enabled: true,
+      mode: "live",
+    });
+    expect(providers.paypal.enabled).toBe(false);
   });
 });

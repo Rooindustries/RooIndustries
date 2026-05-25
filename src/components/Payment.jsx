@@ -31,6 +31,44 @@ const formatLocalTime = (utcDate, timeZone) => {
   }
 };
 
+const getRazorpayCheckoutMethodConfig = (isIndiaMarket) => {
+  if (isIndiaMarket) {
+    return {
+      method: {
+        upi: true,
+        card: true,
+        netbanking: true,
+        wallet: true,
+        emi: true,
+      },
+    };
+  }
+
+  return {
+    method: {
+      card: true,
+      netbanking: false,
+      upi: false,
+      wallet: false,
+      emi: false,
+      paylater: false,
+    },
+    display: {
+      hide: [
+        { method: "upi" },
+        { method: "netbanking" },
+        { method: "wallet" },
+        { method: "emi" },
+        { method: "paylater" },
+        { method: "cardless_emi" },
+      ],
+      preferences: {
+        show_default_blocks: false,
+      },
+    },
+  };
+};
+
 export default function Payment({ hideFooter = false }) {
   const location = useLocation();
   const q = new URLSearchParams(location.search);
@@ -417,6 +455,13 @@ export default function Payment({ hideFooter = false }) {
     checkoutCurrency === "INR"
       ? `₹${Math.round(Number(amount) || 0).toLocaleString("en-IN")}`
       : `$${(Number(amount) || 0).toFixed(2)} USD`;
+  const razorpayCheckoutTitle = "RazorPay Secure Checkout";
+  const razorpayCheckoutDescription = isIndiaMarket
+    ? "UPI, cards, netbanking and wallets in INR"
+    : "Secure card checkout";
+  const razorpayButtonIdleLabel = isIndiaMarket
+    ? `Pay ${formatPaymentAmount(finalAmount)}`
+    : "Pay with RazorPay";
   // PayPal should be visible to all clients when provider is enabled.
   // `showInternalPayments` still allows internal preview/testing behavior.
   const shouldRenderPaypalBlock =
@@ -1018,7 +1063,7 @@ export default function Payment({ hideFooter = false }) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              currency: "USD",
+              currency: checkoutCurrency,
               notes: {
                 packageTitle,
                 date,
@@ -1051,29 +1096,7 @@ export default function Payment({ hideFooter = false }) {
         name: "Roo Industries",
         description: `${packageTitle} booking`,
         order_id: orderData.orderId,
-
-        method: {
-          card: true,
-          netbanking: false,
-          upi: false,
-          wallet: false,
-          emi: false,
-          paylater: false,
-        },
-
-        display: {
-          hide: [
-            { method: "upi" },
-            { method: "netbanking" },
-            { method: "wallet" },
-            { method: "emi" },
-            { method: "paylater" },
-            { method: "cardless_emi" },
-          ],
-          preferences: {
-            show_default_blocks: false,
-          },
-        },
+        ...getRazorpayCheckoutMethodConfig(isIndiaMarket),
 
         theme: {
           color: "#0ea5e9",
@@ -1462,41 +1485,6 @@ export default function Payment({ hideFooter = false }) {
             </div>
           ) : (
             <>
-              {isIndiaMarket && (
-                <div className="low-perf-surface glass-premium glass-card-surface mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-xl border border-sky-800/30 px-5 py-4">
-                  <div className="flex items-center gap-4">
-                    <div className="grid h-10 w-16 place-items-center rounded-lg border border-emerald-300/30 bg-emerald-400/10 text-xs font-bold uppercase tracking-wide text-emerald-200">
-                      INR
-                    </div>
-                    <div>
-                      <p className="text-slate-300 text-sm font-medium">
-                        India Secure Checkout
-                      </p>
-                      <p className="text-slate-400 text-xs">
-                        IDFC First Bank API pending
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    disabled
-                    className="glow-button px-4 py-2 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60"
-                  >
-                    Pay in INR
-                    <span className="glow-line glow-line-top" />
-                    <span className="glow-line glow-line-right" />
-                    <span className="glow-line glow-line-bottom" />
-                    <span className="glow-line glow-line-left" />
-                  </button>
-                </div>
-              )}
-              {isIndiaMarket && (
-                <p className="mt-2 text-xs text-amber-300">
-                  India checkout is currently unavailable until IDFC First Bank API is configured.
-                </p>
-              )}
-
-              {/* Razorpay option */}
-              {!isIndiaMarket && (
               <div className="low-perf-surface glass-premium glass-card-surface mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-xl border border-sky-800/30 px-5 py-4">
                 <div className="flex items-center gap-4">
                   <img
@@ -1509,10 +1497,10 @@ export default function Payment({ hideFooter = false }) {
                   />
                   <div>
                     <p className="text-slate-300 text-sm font-medium">
-                      RazorPay Secure Checkout
+                      {razorpayCheckoutTitle}
                     </p>
                     <p className="text-slate-400 text-xs">
-                      Secure card checkout
+                      {razorpayCheckoutDescription}
                     </p>
                   </div>
                 </div>
@@ -1525,15 +1513,14 @@ export default function Payment({ hideFooter = false }) {
                 >
                   {payingRzp || paymentStatusBusy
                     ? "Processing..."
-                    : "Pay with RazorPay"}
+                    : razorpayButtonIdleLabel}
                   <span className="glow-line glow-line-top" />
                   <span className="glow-line glow-line-right" />
                   <span className="glow-line glow-line-bottom" />
                   <span className="glow-line glow-line-left" />
                 </button>
               </div>
-              )}
-              {!isIndiaMarket && !canUseRazorpay && (
+              {!canUseRazorpay && (
                 <p className="mt-2 text-xs text-amber-300">
                   RazorPay secure checkout is currently unavailable.
                 </p>

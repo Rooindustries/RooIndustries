@@ -3,6 +3,7 @@ import createBookingHandler from "../ref/createBooking.js";
 import { createRefWriteClient } from "../ref/sanity.js";
 import { resolvePaymentQuote } from "../ref/pricing.js";
 import { getBookingSettings, isSlotAllowedForPackage } from "../../booking/slotPolicy.js";
+import { createBookingStateWriteClient } from "../../booking/bookingStateClient.js";
 import { buildSlotHoldId } from "../../booking/slotIdentity.js";
 import { issueHoldToken, verifyHoldToken } from "../../booking/holdToken.js";
 import marketConfig from "../../../lib/market.js";
@@ -150,8 +151,8 @@ const getHoldById = async (client, holdId) => {
   return client.fetch(`*[_type == "slotHold" && _id == $id][0]`, { id: holdId });
 };
 
-const resolveHoldSlot = async ({ client, bookingPayload }) => {
-  const settings = await getBookingSettings({ client });
+const resolveHoldSlot = async ({ contentClient, bookingPayload }) => {
+  const settings = await getBookingSettings({ client: contentClient });
   return isSlotAllowedForPackage({
     settings,
     packageTitle: bookingPayload.packageTitle,
@@ -159,7 +160,11 @@ const resolveHoldSlot = async ({ client, bookingPayload }) => {
   });
 };
 
-const assertStartableHold = async ({ client, bookingPayload }) => {
+const assertStartableHold = async ({
+  client,
+  contentClient = client,
+  bookingPayload,
+}) => {
   if (bookingPayload.originalOrderId) {
     return {
       holdDoc: null,
@@ -205,7 +210,7 @@ const assertStartableHold = async ({ client, bookingPayload }) => {
     throw error;
   }
 
-  const slotAllowance = await resolveHoldSlot({ client, bookingPayload });
+  const slotAllowance = await resolveHoldSlot({ contentClient, bookingPayload });
   if (!slotAllowance.allowed) {
     const error = new Error("The selected slot is not available for this package.");
     error.status = 400;
@@ -790,6 +795,7 @@ const markHoldPaymentPending = async ({
 
 const createOrRefreshRecoveryHold = async ({
   client,
+  contentClient = client,
   record,
   reason = "",
 }) => {
@@ -798,7 +804,10 @@ const createOrRefreshRecoveryHold = async ({
     return null;
   }
 
-  const slotAllowance = await resolveHoldSlot({ client, bookingPayload });
+  const slotAllowance = await resolveHoldSlot({
+    contentClient,
+    bookingPayload,
+  });
   if (!slotAllowance.allowed) {
     return null;
   }
@@ -979,6 +988,7 @@ const getVerificationFailureHttpStatus = (reason = "") => {
 
 const markRetryableFinalizeFailure = async ({
   client,
+  contentClient = client,
   record,
   source,
   reason,
@@ -986,6 +996,7 @@ const markRetryableFinalizeFailure = async ({
 }) => {
   const refreshedHold = await createOrRefreshRecoveryHold({
     client,
+    contentClient,
     record,
     reason,
   }).catch(() => null);
@@ -1062,6 +1073,7 @@ const resolveClientSourceStatus = (source = "") => {
 
 const finalizePaymentRecordInternal = async ({
   client,
+  contentClient = client,
   record,
   source = "client",
   providerData = {},
@@ -1098,6 +1110,7 @@ const finalizePaymentRecordInternal = async ({
   ) {
     return markRetryableFinalizeFailure({
       client,
+      contentClient,
       record,
       source: normalizedSource,
       reason: "payment_record_missing_booking_payload",
@@ -1153,6 +1166,7 @@ const finalizePaymentRecordInternal = async ({
     ) {
       return markRetryableFinalizeFailure({
         client,
+        contentClient,
         record: workingRecord,
         source: normalizedSource,
         reason: verification.reason,
@@ -1267,6 +1281,7 @@ const finalizePaymentRecordInternal = async ({
   ) {
     return markRetryableFinalizeFailure({
       client,
+      contentClient,
       record: workingRecord,
       source: normalizedSource,
       reason,
@@ -1447,7 +1462,8 @@ const createOrReusePaymentRecordForStart = async ({
 export const startPaymentSession = async ({
   body,
   headers = {},
-  client = createRefWriteClient(),
+  client = createBookingStateWriteClient(),
+  contentClient = createRefWriteClient(),
 }) => {
   const serverSessionsEnabled = resolveServerPaymentSessionsEnabled();
   if (!serverSessionsEnabled) {
@@ -1493,7 +1509,8 @@ export const startPaymentSession = async ({
       referralCode: bookingPayload.referralCode || "",
       couponCode: bookingPayload.couponCode || "",
       currency: market.currency,
-      client,
+      client: contentClient,
+      bookingClient: client,
     });
     quote.currency = market.currency;
     bookingPayload.market = market.id;
@@ -1567,7 +1584,11 @@ export const startPaymentSession = async ({
       };
     }
 
-    const { holdDoc } = await assertStartableHold({ client, bookingPayload });
+    const { holdDoc } = await assertStartableHold({
+      client,
+      contentClient,
+      bookingPayload,
+    });
     const record = await createOrReusePaymentRecordForStart({
       client,
       provider,
@@ -1600,6 +1621,7 @@ export const startPaymentSession = async ({
     if (provider === "free") {
       const finalized = await finalizePaymentRecordInternal({
         client,
+        contentClient,
         record: refreshed,
         source: "start",
         providerData: {},
@@ -1660,7 +1682,8 @@ const loadPaymentRecordForFinalize = async ({
 
 export const finalizePaymentSession = async ({
   body,
-  client = createRefWriteClient(),
+  client = createBookingStateWriteClient(),
+  contentClient = createRefWriteClient(),
 }) => {
   const requestBody = normalizeObject(body);
   const providerData = normalizeObject(requestBody.providerData);
@@ -1703,6 +1726,7 @@ export const finalizePaymentSession = async ({
 
   const finalized = await finalizePaymentRecordInternal({
     client,
+    contentClient,
     record,
     source: "client",
     providerData: flatProviderData,
@@ -1724,7 +1748,7 @@ const getPaymentAgeMinutes = (record = {}) => {
 
 export const getPaymentStatus = async ({
   query,
-  client = createRefWriteClient(),
+  client = createBookingStateWriteClient(),
 }) => {
   const paymentAccessToken = String(
     query?.paymentAccessToken || query?.payment || ""
@@ -1799,7 +1823,8 @@ const authorizeCron = (req) => {
 
 export const reconcilePaymentSessions = async ({
   req,
-  client = createRefWriteClient(),
+  client = createBookingStateWriteClient(),
+  contentClient = createRefWriteClient(),
 }) => {
   try {
     authorizeCron(req);
@@ -1860,6 +1885,7 @@ export const reconcilePaymentSessions = async ({
 
     const result = await finalizePaymentRecordInternal({
       client,
+      contentClient,
       record,
       source: "reconcile",
       providerData: {},
@@ -1962,7 +1988,8 @@ const findOrCreateWebhookRecoveryRecord = async ({
 
 export const handleRazorpayWebhook = async ({
   req,
-  client = createRefWriteClient(),
+  client = createBookingStateWriteClient(),
+  contentClient = createRefWriteClient(),
 }) => {
   const signature = String(req?.headers?.["x-razorpay-signature"] || "").trim();
   const verified = verifyRazorpayWebhookSignature({
@@ -2007,6 +2034,7 @@ export const handleRazorpayWebhook = async ({
 
   const finalized = await finalizePaymentRecordInternal({
     client,
+    contentClient,
     record,
     source: "webhook",
     providerData: {
@@ -2024,7 +2052,8 @@ export const handleRazorpayWebhook = async ({
 
 export const handlePayPalWebhook = async ({
   req,
-  client = createRefWriteClient(),
+  client = createBookingStateWriteClient(),
+  contentClient = createRefWriteClient(),
 }) => {
   const verified = await verifyPayPalWebhookSignature({
     rawBody: String(req?.rawBody || ""),
@@ -2065,6 +2094,7 @@ export const handlePayPalWebhook = async ({
 
   const finalized = await finalizePaymentRecordInternal({
     client,
+    contentClient,
     record,
     source: "webhook",
     providerData: {

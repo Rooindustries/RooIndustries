@@ -114,18 +114,15 @@ const formatCountdown = (ms) => {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 };
 
-const fetchWithRetry = async (query, params = {}, attempts = 3, delayMs = 250) => {
-  let lastErr;
-  for (let i = 0; i < attempts; i++) {
-    try {
-      return await client.fetch(query, params);
-    } catch (err) {
-      lastErr = err;
-      if (i === attempts - 1) break;
-      await new Promise((res) => setTimeout(res, delayMs));
-    }
+const fetchBookingAvailability = async () => {
+  const res = await fetch("/api/bookingAvailability", {
+    headers: { Accept: "application/json" },
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data?.ok) {
+    throw new Error(data?.error || "Booking availability unavailable.");
   }
-  throw lastErr;
+  return data;
 };
 
 const broadcastHold = (payload) => {
@@ -871,26 +868,11 @@ export default function BookingForm({ isMobile }) {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [sRaw, booked, holds] = await Promise.all([
-          fetchWithRetry(
-            `*[_type == "bookingSettings"][0]{
-              ...,
-              packageDateSlots[]{
-                package->{_id,title},
-                dateSlots
-              }
-            }`
-          ),
-          fetchWithRetry(
-            `*[_type == "booking"]{startTimeUTC, packageTitle}`
-          ),
-          fetchWithRetry(
-            `*[_type == "slotHold" && expiresAt > now()]{
-              startTimeUTC,
-              _id
-            }`
-          ),
-        ]);
+        const availability = await fetchBookingAvailability();
+        const sRaw = availability.settings;
+        const bookedSlots = Array.isArray(availability.bookedSlots)
+          ? availability.bookedSlots.filter((slot) => !slot?.isExpiredHold)
+          : [];
 
         if (!sRaw) throw new Error("Missing bookingSettings in Sanity.");
 
@@ -903,24 +885,7 @@ export default function BookingForm({ isMobile }) {
         );
         s.packageDateSlotMaps = normalizePackageDateSlots(s.packageDateSlots);
 
-        const holdsMapped =
-          (holds || [])
-            .map((h) => ({
-              startTimeUTC: h.startTimeUTC,
-              isHold: true,
-              holdId: h._id,
-            }))
-            .filter((h) => h.startTimeUTC) || [];
-
-        const bookedMapped =
-          booked
-            ?.map((b) => ({
-              startTimeUTC: b.startTimeUTC,
-              isHold: false,
-            }))
-            .filter((b) => b.startTimeUTC) || [];
-
-        s.bookedSlots = [...bookedMapped, ...holdsMapped];
+        s.bookedSlots = bookedSlots;
 
         setSettings(s);
       } catch (err) {

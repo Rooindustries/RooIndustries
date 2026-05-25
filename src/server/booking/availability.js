@@ -3,6 +3,7 @@ import {
   filterActiveBookings,
   getBookingSettings,
 } from "./slotPolicy.js";
+import { createBookingStateReadClient } from "./bookingStateClient.js";
 
 const BOOKINGS_QUERY = `*[_type == "booking"]{
   startTimeUTC,
@@ -26,12 +27,17 @@ const isExpiredHold = (hold, now = Date.now()) => {
   return Number.isFinite(expiresAtMs) && expiresAtMs <= now;
 };
 
-export async function getBookingAvailability({ client } = {}) {
-  const readClient = client || createRefReadClient();
+export async function getBookingAvailability({
+  client,
+  settingsClient,
+  bookingStateClient,
+} = {}) {
+  const readClient = settingsClient || client || createRefReadClient();
+  const stateClient = bookingStateClient || client || createBookingStateReadClient();
   const [settings, bookings, holds] = await Promise.all([
     getBookingSettings({ client: readClient }),
-    readClient.fetch(BOOKINGS_QUERY),
-    readClient.fetch(HOLDS_QUERY),
+    stateClient.fetch(BOOKINGS_QUERY),
+    stateClient.fetch(HOLDS_QUERY),
   ]);
   const now = Date.now();
 

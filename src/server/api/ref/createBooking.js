@@ -5,6 +5,7 @@ import {
   buildSlotBookingId,
   buildSlotHoldId,
 } from "../../booking/slotIdentity.js";
+import { createBookingStateWriteClient } from "../../booking/bookingStateClient.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import {
   buildDeferredEmailDispatch,
@@ -49,6 +50,7 @@ const writeClient = createClient({
   token: process.env.SANITY_WRITE_TOKEN,
   useCdn: false,
 });
+const bookingStateClient = createBookingStateWriteClient();
 
 const OWNER_TZ_NAME = "Asia/Kolkata";
 
@@ -299,6 +301,7 @@ export default async function handler(req, res) {
           String(currency || "").trim().toUpperCase() ||
           DEFAULT_RAZORPAY_CURRENCY,
         client: writeClient,
+        bookingClient: bookingStateClient,
       });
       originalBooking = upgradeContext.booking;
       const allowedUpgradeEmails = [originalBooking.email, originalBooking.payerEmail]
@@ -395,7 +398,7 @@ export default async function handler(req, res) {
         return null;
       }
 
-      const bookingDoc = await writeClient.fetch(
+      const bookingDoc = await bookingStateClient.fetch(
         `*[_type == "booking" && _id == $id][0]`,
         { id: normalizedBookingId }
       );
@@ -404,7 +407,7 @@ export default async function handler(req, res) {
       }
 
       const existingRecord = await findPaymentRecordForBooking({
-        client: writeClient,
+        client: bookingStateClient,
         paymentRecordId,
         paymentProvider: normalizedProvider,
         paypalOrderId:
@@ -601,7 +604,7 @@ export default async function handler(req, res) {
       delete recordSet._type;
 
       if (existingRecord?._id) {
-        await writeClient
+        await bookingStateClient
           .patch(existingRecord._id)
           .set(recordSet)
           .setIfMissing({
@@ -609,19 +612,19 @@ export default async function handler(req, res) {
             createdAt: existingRecord.createdAt || now,
           })
           .commit();
-        return writeClient.fetch(
+        return bookingStateClient.fetch(
           `*[_type == $type && _id == $id][0]`,
           { type: PAYMENT_RECORD_TYPE, id: existingRecord._id }
         );
       }
 
       try {
-        await writeClient.create(doc);
+        await bookingStateClient.create(doc);
       } catch (error) {
         const conflict =
           Number(error?.statusCode || error?.status || 0) === 409;
         if (!conflict) throw error;
-        await writeClient
+        await bookingStateClient
           .patch(recordId)
           .set(recordSet)
           .setIfMissing({
@@ -631,7 +634,7 @@ export default async function handler(req, res) {
           .commit();
       }
 
-      return writeClient.fetch(
+      return bookingStateClient.fetch(
         `*[_type == $type && _id == $id][0]`,
         { type: PAYMENT_RECORD_TYPE, id: recordId }
       );
@@ -646,7 +649,7 @@ export default async function handler(req, res) {
 
       const booking = await getBookingForEmailDispatch({
         bookingId: normalizedBookingId,
-        client: writeClient,
+        client: bookingStateClient,
       });
 
       if (!booking?._id) {
@@ -671,7 +674,7 @@ export default async function handler(req, res) {
           emailDispatchLastError: "",
         };
         const patchedBooking =
-          (await writeClient
+          (await bookingStateClient
             .patch(booking._id)
             .set(patchValues)
             .commit()) || {
@@ -707,7 +710,7 @@ export default async function handler(req, res) {
       const sendResult = await sendBookingEmailsForBooking({
         bookingId: booking._id,
         booking,
-        client: writeClient,
+        client: bookingStateClient,
       });
       await syncPaidPaymentRecordForBooking({
         bookingId: booking._id,
@@ -797,7 +800,7 @@ export default async function handler(req, res) {
     }
 
     if (paymentProvider === "paypal" && paypalOrderId) {
-      const existingByPaypal = await writeClient.fetch(
+      const existingByPaypal = await bookingStateClient.fetch(
         `*[_type == "booking" && paypalOrderId == $paypalOrderId][0]{_id}`,
         { paypalOrderId }
       );
@@ -810,7 +813,7 @@ export default async function handler(req, res) {
     }
 
     if (paymentProvider === "razorpay" && razorpayPaymentId) {
-      const existingByRazorpay = await writeClient.fetch(
+      const existingByRazorpay = await bookingStateClient.fetch(
         `*[_type == "booking" && razorpayPaymentId == $razorpayPaymentId][0]{_id}`,
         { razorpayPaymentId }
       );
@@ -871,7 +874,7 @@ export default async function handler(req, res) {
       (paymentProvider === "paypal" || paymentProvider === "razorpay");
 
     if (!isUpgrade) {
-      const existingBooking = await writeClient.fetch(
+      const existingBooking = await bookingStateClient.fetch(
         `*[_type == "booking" && hostDate == $date && hostTime == $time][0]`,
         { date: bookingDate, time: bookingTime }
       );
@@ -883,7 +886,7 @@ export default async function handler(req, res) {
       }
 
       fetchActiveHold = () =>
-        writeClient.fetch(
+        bookingStateClient.fetch(
           `*[_type == "slotHold"
               && hostDate == $date
               && hostTime == $time
@@ -897,7 +900,7 @@ export default async function handler(req, res) {
           .json({ error: "Your slot reservation expired." });
       }
 
-      holdDoc = await writeClient.fetch(
+      holdDoc = await bookingStateClient.fetch(
         `*[_type == "slotHold" && _id == $id][0]`,
         { id: slotHoldId }
       );
@@ -944,6 +947,7 @@ export default async function handler(req, res) {
       couponCode,
       paymentProvider,
       client: writeClient,
+      bookingClient: bookingStateClient,
       upgradeContext,
       currency:
         String(currency || "").trim().toUpperCase() ||
@@ -1095,7 +1099,7 @@ export default async function handler(req, res) {
 
     let doc;
     try {
-      doc = await writeClient.create({
+      doc = await bookingStateClient.create({
         ...(bookingDocId ? { _id: bookingDocId } : {}),
         _type: "booking",
         date: bookingDate,
@@ -1148,7 +1152,7 @@ export default async function handler(req, res) {
       const statusCode =
         Number(createError?.statusCode || createError?.status || 0) || 0;
       if (bookingDocId && statusCode === 409) {
-        const existingBooking = await writeClient.fetch(
+        const existingBooking = await bookingStateClient.fetch(
           `*[_type == "booking" && hostDate == $date && hostTime == $time][0]{
             _id,
             paymentProvider,
@@ -1183,7 +1187,7 @@ export default async function handler(req, res) {
     }
 
     try {
-      await writeClient
+      await bookingStateClient
         .patch(doc._id)
         .setIfMissing({ orderId: doc._id })
         .commit();
@@ -1193,7 +1197,7 @@ export default async function handler(req, res) {
 
     if (!isUpgrade && slotHoldId) {
       try {
-        await writeClient.delete(slotHoldId);
+        await bookingStateClient.delete(slotHoldId);
       } catch {}
     }
 

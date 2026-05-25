@@ -1,13 +1,7 @@
-import { createClient } from "@sanity/client";
+import { createBookingStateWriteClient } from "../../booking/bookingStateClient.js";
 import { requireAdminKey } from "./auth.js";
 
-const client = createClient({
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || "production",
-  apiVersion: "2023-10-01",
-  token: process.env.SANITY_WRITE_TOKEN,
-  useCdn: false,
-});
+const client = createBookingStateWriteClient();
 
 export default async function handler(req, res) {
   if (req.method !== "POST")

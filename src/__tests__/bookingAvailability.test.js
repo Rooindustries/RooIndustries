@@ -12,6 +12,10 @@ jest.mock("../server/api/ref/sanity.js", () => ({
   createRefReadClient: jest.fn(),
 }));
 
+jest.mock("../server/booking/bookingStateClient.js", () => ({
+  createBookingStateReadClient: jest.fn(),
+}));
+
 import { getBookingAvailability } from "../server/booking/availability.js";
 
 describe("getBookingAvailability", () => {
@@ -66,5 +70,36 @@ describe("getBookingAvailability", () => {
         }),
       ])
     );
+  });
+
+  test("reads settings from the market client and booking state from the shared client", async () => {
+    const settingsClient = {
+      fetch: jest.fn(),
+    };
+    const bookingStateClient = {
+      fetch: jest
+        .fn()
+        .mockResolvedValueOnce([
+          {
+            startTimeUTC: "2099-01-05T04:30:00.000Z",
+            status: "captured",
+          },
+        ])
+        .mockResolvedValueOnce([]),
+    };
+
+    const availability = await getBookingAvailability({
+      settingsClient,
+      bookingStateClient,
+    });
+
+    expect(getBookingSettings).toHaveBeenCalledWith({ client: settingsClient });
+    expect(bookingStateClient.fetch).toHaveBeenCalledTimes(2);
+    expect(availability.bookedSlots).toEqual([
+      {
+        startTimeUTC: "2099-01-05T04:30:00.000Z",
+        isHold: false,
+      },
+    ]);
   });
 });

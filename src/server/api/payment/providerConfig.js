@@ -1,5 +1,9 @@
 const TRUTHY_ENV_VALUES = ["1", "true", "yes", "on"];
 const KNOWN_RUNTIMES = new Set(["production", "preview", "development"]);
+const INDIA_RAZORPAY_CHECKOUT_ENV_KEYS = [
+  "ENABLE_IDFC_RAZORPAY_INDIA_CHECKOUT",
+  "ENABLE_RAZORPAY_INDIA_CHECKOUT",
+];
 const marketConfig = require("../../../lib/market.js");
 const indiaLaunchGate = require("../../../lib/indiaLaunchGate.js");
 
@@ -8,6 +12,9 @@ const { getIndiaBookingGate } = indiaLaunchGate;
 
 const isTruthyEnv = (value) =>
   TRUTHY_ENV_VALUES.includes(String(value || "").trim().toLowerCase());
+
+const hasTruthyEnv = (env, keys = []) =>
+  keys.some((key) => isTruthyEnv(env?.[key]));
 
 const normalizeRuntime = (value) => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -142,24 +149,24 @@ const resolveRazorpayMode = (keyId = "") => {
 
 const resolvePaymentProviders = (options = {}) => {
   const runtimePolicy = resolvePaymentRuntimePolicy();
+  const env = options.env || process.env;
   const market = resolveMarket({
     hostname: options.hostname || options.host || "",
-    env: options.env || process.env,
+    env,
   });
   const bookingGate = getIndiaBookingGate({
     market,
-    env: options.env || process.env,
+    env,
   });
   const isIndiaMarket = market.id === "india";
   const indiaBookingsOpen = !isIndiaMarket || bookingGate.isOpen;
 
-  const razorpayKeyId = String(process.env.RAZORPAY_KEY_ID || "").trim();
-  const razorpayKeySecret = String(process.env.RAZORPAY_KEY_SECRET || "").trim();
+  const razorpayKeyId = String(env.RAZORPAY_KEY_ID || "").trim();
+  const razorpayKeySecret = String(env.RAZORPAY_KEY_SECRET || "").trim();
   const razorpayMode = resolveRazorpayMode(razorpayKeyId);
   const allowIndiaRazorpay =
     !isIndiaMarket ||
-    (indiaBookingsOpen &&
-      isTruthyEnv(process.env.ENABLE_RAZORPAY_INDIA_CHECKOUT));
+    (indiaBookingsOpen && hasTruthyEnv(env, INDIA_RAZORPAY_CHECKOUT_ENV_KEYS));
   const marketAllowsRazorpay =
     market.razorpayEnabled || (isIndiaMarket && allowIndiaRazorpay);
   const razorpayEnabled =
@@ -171,13 +178,13 @@ const resolvePaymentProviders = (options = {}) => {
     allowProviderModeInRuntime(razorpayMode, runtimePolicy);
 
   const paypalClientId = String(
-    process.env.PAYPAL_CLIENT_ID ||
-      process.env.REACT_APP_PAYPAL_CLIENT_ID ||
-      process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID ||
+    env.PAYPAL_CLIENT_ID ||
+      env.REACT_APP_PAYPAL_CLIENT_ID ||
+      env.NEXT_PUBLIC_PAYPAL_CLIENT_ID ||
       ""
   ).trim();
   const paypalClientSecret = String(
-    process.env.PAYPAL_CLIENT_SECRET || process.env.REACT_APP_PAYPAL_CLIENT_SECRET || ""
+    env.PAYPAL_CLIENT_SECRET || env.REACT_APP_PAYPAL_CLIENT_SECRET || ""
   ).trim();
   const paypalMode = resolvePayPalMode(runtimePolicy);
   const paypalEnabled =

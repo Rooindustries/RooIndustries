@@ -1,10 +1,41 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
+import { IntercomMessengerCore } from "./IntercomMessengerCore";
+
+const DeferredMaintenanceIntercom = () => {
+  const [enabled, setEnabled] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (enabled) return;
+
+    let timeoutId = null;
+    const markIntent = () => setEnabled(true);
+    const passiveOpts = { passive: true };
+
+    window.addEventListener("pointerdown", markIntent, passiveOpts);
+    window.addEventListener("keydown", markIntent, passiveOpts);
+    window.addEventListener("touchstart", markIntent, passiveOpts);
+    timeoutId = window.setTimeout(markIntent, 12000);
+
+    return () => {
+      window.removeEventListener("pointerdown", markIntent, passiveOpts);
+      window.removeEventListener("keydown", markIntent, passiveOpts);
+      window.removeEventListener("touchstart", markIntent, passiveOpts);
+      if (timeoutId) window.clearTimeout(timeoutId);
+    };
+  }, [enabled]);
+
+  if (!enabled) return null;
+
+  return <IntercomMessengerCore pathname="/" />;
+};
 
 const MaintenancePage = () => {
   return (
     <>
+      <DeferredMaintenanceIntercom />
       <style>{`
         .cs-page {
           --metal-1: #5a82a6;

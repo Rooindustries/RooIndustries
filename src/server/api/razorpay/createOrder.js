@@ -3,9 +3,11 @@ import {
   resolveUpgradeContext,
 } from "../ref/pricing.js";
 import { createClient } from "@sanity/client";
+import { createBookingStateWriteClient } from "../../booking/bookingStateClient.js";
 import { getClientAddress, requireRateLimit } from "../ref/rateLimit.js";
 import providerConfig from "../payment/providerConfig.js";
 import { createPaymentAccessToken } from "../payment/accessToken.js";
+import marketConfig from "../../../lib/market.js";
 import {
   buildBookingSeedKey,
   buildPaymentRecordEvent,
@@ -18,6 +20,7 @@ import {
 } from "../payment/paymentRecord.js";
 
 const { resolvePaymentProviders } = providerConfig;
+const { resolveMarketCurrency } = marketConfig;
 
 const writeClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -26,6 +29,7 @@ const writeClient = createClient({
   token: process.env.SANITY_WRITE_TOKEN,
   useCdn: false,
 });
+const bookingStateClient = createBookingStateWriteClient();
 
 function getCredentials() {
   const keyId = process.env.RAZORPAY_KEY_ID || "";
@@ -42,10 +46,21 @@ function toSubunits(amount, currency = "USD") {
   return Math.round(amount * factor);
 }
 
-function resolveServerCurrency() {
+function resolveServerCurrency({
+  hostname = "",
+  requestedCurrency = "",
+  bookingPayload = null,
+} = {}) {
   return (
-    String(process.env.RAZORPAY_CURRENCY || "USD").trim().toUpperCase() ||
-    "USD"
+    String(
+      process.env.RAZORPAY_CURRENCY ||
+        requestedCurrency ||
+        bookingPayload?.currency ||
+        resolveMarketCurrency({ hostname, env: process.env }) ||
+        "USD"
+    )
+      .trim()
+      .toUpperCase() || "USD"
   );
 }
 
@@ -110,6 +125,8 @@ const upsertLegacyStartedPaymentRecord = async ({
         normalizedBookingPayload.slotHoldExpiresAt || ""
       ).trim(),
       paymentProvider: "razorpay",
+      market: String(normalizedBookingPayload.market || "").trim(),
+      currency,
     },
     pricingSnapshot: {
       grossAmount: Number(pricing?.effectiveGrossAmount || 0),
@@ -167,13 +184,13 @@ const upsertLegacyStartedPaymentRecord = async ({
   };
 
   try {
-    await writeClient.create(doc);
+    await bookingStateClient.create(doc);
   } catch (error) {
     const conflict =
       Number(error?.statusCode || error?.status || 0) === 409;
     if (!conflict) throw error;
 
-    await writeClient
+    await bookingStateClient
       .patch(recordId)
       .set({
         ...doc,
@@ -204,7 +221,10 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, message: "Method not allowed" });
   }
 
-  const providers = resolvePaymentProviders();
+  const hostname = String(
+    req.headers?.host || req.headers?.["x-forwarded-host"] || ""
+  ).trim();
+  const providers = resolvePaymentProviders({ hostname });
   if (!providers?.razorpay?.enabled) {
     return res.status(400).json({
       ok: false,
@@ -222,7 +242,11 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { notes = {}, bookingPayload = null } = req.body || {};
+    const {
+      notes = {},
+      bookingPayload = null,
+      currency: requestedCurrency = "",
+    } = req.body || {};
     const clientAddress = getClientAddress(req);
     const rateLimitKey = [
       "razorpay-create-order",
@@ -241,7 +265,11 @@ export default async function handler(req, res) {
     ) {
       return;
     }
-    const currency = resolveServerCurrency();
+    const currency = resolveServerCurrency({
+      hostname,
+      requestedCurrency,
+      bookingPayload,
+    });
 
     if (!notes?.packageTitle) {
       return res.status(400).json({
@@ -254,6 +282,8 @@ export default async function handler(req, res) {
       ? await resolveUpgradeContext({
           originalOrderId: notes.originalOrderId || "",
           packageTitle: notes.packageTitle,
+          client: writeClient,
+          bookingClient: bookingStateClient,
         })
       : null;
 
@@ -263,6 +293,8 @@ export default async function handler(req, res) {
       referralCode: notes.referralCode || "",
       couponCode: notes.couponCode || "",
       paymentProvider: "razorpay",
+      client: writeClient,
+      bookingClient: bookingStateClient,
       upgradeContext,
     });
 

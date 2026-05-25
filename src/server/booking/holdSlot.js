@@ -1,17 +1,10 @@
-// api/holdSlot.js
-import { createClient } from "@sanity/client";
 import crypto from "crypto";
+import { createBookingStateWriteClient } from "./bookingStateClient.js";
 import { issueHoldToken, verifyHoldToken } from "./holdToken.js";
 import { buildSlotHoldId } from "./slotIdentity.js";
 import { getClientAddress, requireRateLimit } from "../api/ref/rateLimit.js";
 
-const client = createClient({
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || "production",
-  apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
-  token: process.env.SANITY_WRITE_TOKEN,
-  useCdn: false,
-});
+const client = createBookingStateWriteClient();
 
 const OWNER_TZ_NAME = "Asia/Kolkata";
 

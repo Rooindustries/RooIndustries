@@ -10,6 +10,7 @@ let paymentRecordConstants;
 const mockCreateBooking = jest.fn();
 const mockResolvePaymentQuote = jest.fn();
 const mockCreateRefWriteClient = jest.fn();
+const mockCreateBookingStateWriteClient = jest.fn();
 const mockGetBookingSettings = jest.fn();
 const mockIsSlotAllowedForPackage = jest.fn();
 const mockResolvePaymentProviders = jest.fn();
@@ -35,6 +36,12 @@ jest.mock("../server/api/ref/pricing", () => ({
 jest.mock("../server/api/ref/sanity", () => ({
   __esModule: true,
   createRefWriteClient: (...args) => mockCreateRefWriteClient(...args),
+}));
+
+jest.mock("../server/booking/bookingStateClient", () => ({
+  __esModule: true,
+  createBookingStateWriteClient: (...args) =>
+    mockCreateBookingStateWriteClient(...args),
 }));
 
 jest.mock("../server/booking/slotPolicy", () => ({
@@ -394,6 +401,7 @@ beforeEach(() => {
   jest.clearAllMocks();
 
   mockCreateRefWriteClient.mockReturnValue(mockClient);
+  mockCreateBookingStateWriteClient.mockReturnValue(mockClient);
   mockResolvePaymentQuote.mockResolvedValue(baseQuote());
   mockGetBookingSettings.mockResolvedValue({});
   mockIsSlotAllowedForPackage.mockResolvedValue({

@@ -65,13 +65,15 @@ export async function resolveUpgradeContext({
   packageTitle = "",
   currency = resolveMarketCurrency(),
   client = pricingClient,
+  bookingClient = client,
+  packageClient = client,
 }) {
   const normalizedUpgradeTitle = String(packageTitle || "")
     .replace(/\s*\(upgrade\)\s*$/i, "")
     .trim();
   const normalizedTargetTitle = normalizePackageTitle(normalizedUpgradeTitle);
 
-  const booking = await client.fetch(
+  const booking = await bookingClient.fetch(
     `*[_type == "booking" && _id == $id][0]{
       _id,
       status,
@@ -116,7 +118,7 @@ export async function resolveUpgradeContext({
 
   const rootOrderId = booking.originalOrderId || booking._id;
   const paidBookings =
-    (await client.fetch(
+    (await bookingClient.fetch(
       `*[_type == "booking"
         && status in ["captured", "completed"]
         && (_id == $rootId || originalOrderId == $rootId)
@@ -149,7 +151,7 @@ export async function resolveUpgradeContext({
     );
   }
 
-  const targetPackage = await client.fetch(
+  const targetPackage = await packageClient.fetch(
     `*[_type == "package" && title == $title][0]{title, price}`,
     { title: normalizedUpgradeTitle }
   );
@@ -199,6 +201,7 @@ export async function resolveBookingPricing({
   paymentProvider = "",
   allowZeroPayable = false,
   client = pricingClient,
+  bookingClient = client,
   upgradeContext = null,
   currency = resolveMarketCurrency(),
 }) {
@@ -223,6 +226,7 @@ export async function resolveBookingPricing({
         packageTitle,
         currency,
         client,
+        bookingClient,
       }));
 
     effectiveGrossAmount = resolvedUpgradeContext.upgradePrice;
@@ -402,6 +406,7 @@ export async function resolvePaymentQuote({
   couponCode = "",
   currency = resolveMarketCurrency(),
   client,
+  bookingClient = client,
 }) {
   const quote = await resolveBookingPricing({
     packageTitle,
@@ -413,6 +418,7 @@ export async function resolvePaymentQuote({
     allowZeroPayable: true,
     currency,
     client,
+    bookingClient,
   });
 
   return {

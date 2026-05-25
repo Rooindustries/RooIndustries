@@ -79,6 +79,10 @@ const renderPayment = (bookingData, { paymentFlow = "session" } = {}) => {
 
 beforeEach(() => {
   process.env.REACT_APP_PAYPAL_CLIENT_ID = "test-client";
+  delete process.env.NEXT_PUBLIC_SITE_MARKET;
+  delete process.env.SITE_MARKET;
+  delete process.env.NEXT_PUBLIC_INDIA_BOOKING_STATUS;
+  delete process.env.INDIA_BOOKING_STATUS;
   paypalButtonsProps = null;
   mockNavigate.mockReset();
   window.sessionStorage.clear();
@@ -205,6 +209,21 @@ describe("payment flows", () => {
     });
 
     await waitFor(() => expect(razorpayOptions).toBeTruthy());
+    expect(razorpayOptions.method).toMatchObject({
+      card: true,
+      netbanking: false,
+      upi: false,
+      wallet: false,
+      emi: false,
+      paylater: false,
+    });
+    expect(razorpayOptions.display.hide).toEqual(
+      expect.arrayContaining([
+        { method: "upi" },
+        { method: "netbanking" },
+        { method: "wallet" },
+      ])
+    );
     const orderCall = fetchCalls.find(
       (call) => call.url === "/api/payment/start"
     );
@@ -237,6 +256,154 @@ describe("payment flows", () => {
     ).toEqual({
       bookingId: "b1",
       emailDispatchToken: "dispatch-token-rzp",
+    });
+  });
+
+  test("India Razorpay checkout uses INR and local payment methods", async () => {
+    process.env.NEXT_PUBLIC_SITE_MARKET = "india";
+    process.env.NEXT_PUBLIC_INDIA_BOOKING_STATUS = "open";
+
+    const timeZone = "Asia/Kolkata";
+    const startTimeUTC = "2026-06-01T08:30:00.000Z";
+    const utcDate = new Date(startTimeUTC);
+    const displayDate = formatClientDate(utcDate, timeZone);
+    const displayTime = formatClientTime(utcDate, timeZone);
+    const bookingData = {
+      email: CLIENT_EMAIL,
+      packageTitle: "Roo India Essential",
+      packagePrice: "₹999",
+      startTimeUTC,
+      displayDate,
+      displayTime,
+      localTimeZone: timeZone,
+      slotHoldId: "hold_idfc_razorpay",
+      slotHoldToken: "hold_token_idfc_razorpay",
+      slotHoldExpiresAt: "2099-01-05T06:00:00.000Z",
+    };
+
+    const fetchCalls = [];
+    global.fetch = jest.fn(async (url, options = {}) => {
+      if (url === "/api/payment/providers") {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            providers: {
+              razorpay: { enabled: true, mode: "live" },
+              paypal: { enabled: false, mode: "live" },
+            },
+            market: {
+              id: "india",
+              currency: "INR",
+              bookingStatus: "open",
+            },
+            bookingStatus: "open",
+          }),
+        };
+      }
+      if (url === "/api/payment/start") {
+        const body = JSON.parse(options.body || "{}");
+        fetchCalls.push({ url, body });
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            paymentAccessToken: "payment_access_idfc_rzp",
+            providerPayload: {
+              orderId: "order_idfc_rzp_1",
+              amount: 99900,
+              currency: "INR",
+              key: "rzp_key",
+            },
+          }),
+        };
+      }
+      if (url === "/api/payment/finalize") {
+        const body = JSON.parse(options.body || "{}");
+        fetchCalls.push({ url, body });
+        return {
+          ok: true,
+          json: async () => ({
+            bookingId: "india-b1",
+            emailDispatchToken: "dispatch-token-idfc-rzp",
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ ok: true }) };
+    });
+
+    let razorpayOptions = null;
+    window.Razorpay = jest.fn().mockImplementation((options) => {
+      razorpayOptions = options;
+      return {
+        open: jest.fn(() => {
+          options.handler({
+            razorpay_order_id: "order_idfc_rzp_1",
+            razorpay_payment_id: "pay_idfc_rzp_1",
+            razorpay_signature: "sig_idfc_rzp_1",
+          });
+        }),
+      };
+    });
+
+    renderPayment(bookingData);
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const script = document.querySelector(
+      'script[src="https://checkout.razorpay.com/v1/checkout.js"]'
+    );
+    expect(script).toBeTruthy();
+    await act(async () => {
+      script.onload();
+    });
+
+    expect(
+      await screen.findByText("RazorPay Secure Checkout")
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("IDFC First Bank Secure Checkout")
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("PayPal Buttons")).not.toBeInTheDocument();
+
+    const idfcButton = await screen.findByRole("button", {
+      name: /pay ₹999/i,
+    });
+    await waitFor(() => expect(idfcButton).not.toBeDisabled());
+
+    await act(async () => {
+      await userEvent.click(idfcButton);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    await waitFor(() => expect(razorpayOptions).toBeTruthy());
+    expect(razorpayOptions.currency).toBe("INR");
+    expect(razorpayOptions.method).toMatchObject({
+      upi: true,
+      card: true,
+      netbanking: true,
+      wallet: true,
+      emi: true,
+    });
+    expect(razorpayOptions.display).toBeUndefined();
+
+    const startCall = fetchCalls.find(
+      (call) => call.url === "/api/payment/start"
+    );
+    expect(startCall.body.provider).toBe("razorpay");
+    expect(startCall.body.bookingPayload.market).toBe("india");
+    expect(startCall.body.bookingPayload.currency).toBe("INR");
+
+    const finalizeCall = fetchCalls.find(
+      (call) => call.url === "/api/payment/finalize"
+    );
+    expect(finalizeCall.body.paymentAccessToken).toBe("payment_access_idfc_rzp");
+    expect(finalizeCall.body.providerData).toEqual({
+      razorpayOrderId: "order_idfc_rzp_1",
+      razorpayPaymentId: "pay_idfc_rzp_1",
+      razorpaySignature: "sig_idfc_rzp_1",
     });
   });
 

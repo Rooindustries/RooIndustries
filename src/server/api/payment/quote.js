@@ -1,4 +1,8 @@
 const { resolvePaymentQuote } = require("../ref/pricing.js");
+const { createRefWriteClient } = require("../ref/sanity.js");
+const {
+  createBookingStateWriteClient,
+} = require("../../booking/bookingStateClient.js");
 const { resolvePaymentProviders } = require("./providerConfig.js");
 const { resolveMarket } = require("../../../lib/market.js");
 
@@ -34,6 +38,8 @@ module.exports = async function handler(req, res) {
       referralCode,
       couponCode,
       currency: market.currency,
+      client: createRefWriteClient(),
+      bookingClient: createBookingStateWriteClient(),
     });
     const providers = resolvePaymentProviders({
       hostname: req.headers?.host || req.headers?.["x-forwarded-host"] || "",

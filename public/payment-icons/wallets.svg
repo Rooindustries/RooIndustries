@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-labelledby="title desc">
+  <title id="title">Wallets</title>
+  <desc id="desc">Digital wallet payment method icon</desc>
+  <path fill="#BFF7FF" d="M4.25 5.25h13.5A2.75 2.75 0 0 1 20.5 8v1.25H17a3.75 3.75 0 0 0 0 7.5h3.5V18a2.75 2.75 0 0 1-2.75 2.75H4.25A2.75 2.75 0 0 1 1.5 18V8a2.75 2.75 0 0 1 2.75-2.75Z"/>
+  <path fill="#35D9F5" d="M17 11.25h4.5v3.5H17a1.75 1.75 0 1 1 0-3.5Zm0 2.25a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1ZM5.25 3.25h10A2.75 2.75 0 0 1 18 6H5.25v-2.75Z"/>
+</svg>

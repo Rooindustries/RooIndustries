@@ -1,4 +1,5 @@
 import {createClient} from '@sanity/client';
+import {createBookingStateReadClient} from '../../booking/bookingStateClient.js';
 import {requireSecret} from './auth.js';
 import {
   buildBalance,
@@ -13,6 +14,7 @@ const readClient = createClient({
   useCdn: false,
   perspective: 'published',
 });
+const bookingReadClient = createBookingStateReadClient();
 
 const writeClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -58,7 +60,7 @@ export default async function handler(req, res) {
 
     for (const referral of referrals) {
       const code = (referral?.slug?.current || '').toLowerCase();
-      const bookings = await readClient.fetch(
+      const bookings = await bookingReadClient.fetch(
         `*[_type == "booking"
             && status in ["captured", "completed"]
             && (

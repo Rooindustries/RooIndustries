@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-labelledby="title desc">
+  <title id="title">Netbanking</title>
+  <desc id="desc">Bank building payment method icon</desc>
+  <path fill="#BFF7FF" d="M3 9.25h18v2H3v-2Zm1.75 3.25h2v6h-2v-6Zm4.25 0h2v6H9v-6Zm4.25 0h2v6h-2v-6Zm4.25 0h2v6h-2v-6ZM3.5 19.75h17v2h-17v-2Z"/>
+  <path fill="#35D9F5" d="m12 2.25 9 4.5v1.5H3v-1.5l9-4.5Z"/>
+</svg>

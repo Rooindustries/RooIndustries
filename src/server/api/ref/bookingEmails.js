@@ -1,13 +1,7 @@
-import { createClient } from "@sanity/client";
 import { Resend } from "resend";
+import { createBookingStateWriteClient } from "../../booking/bookingStateClient.js";
 
-const writeClient = createClient({
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || "production",
-  apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
-  token: process.env.SANITY_WRITE_TOKEN,
-  useCdn: false,
-});
+const bookingStateClient = createBookingStateWriteClient();
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -142,7 +136,7 @@ const resolveBookingOwnerEmail = async (client) => {
 
 export const getBookingForEmailDispatch = async ({
   bookingId,
-  client = writeClient,
+  client = bookingStateClient,
 }) => {
   const normalizedBookingId = String(bookingId || "").trim();
   if (!normalizedBookingId) return null;
@@ -285,7 +279,7 @@ const buildBookingFieldGroups = (booking = {}) => {
 
 export const sendBookingEmailsForBooking = async ({
   bookingId,
-  client = writeClient,
+  client = bookingStateClient,
   booking = null,
 }) => {
   const resolvedBooking =

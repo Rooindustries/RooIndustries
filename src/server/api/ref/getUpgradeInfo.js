@@ -3,6 +3,7 @@ import {
   getPaidAmount,
   resolveUpgradeContext,
 } from "./pricing.js";
+import { createBookingStateWriteClient } from "../../booking/bookingStateClient.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 
 const client = createClient({
@@ -12,6 +13,7 @@ const client = createClient({
   token: process.env.SANITY_WRITE_TOKEN,
   useCdn: false,
 });
+const bookingStateClient = createBookingStateWriteClient();
 
 const parseMoney = (value) =>
   parseFloat(String(value || "").replace(/[^0-9.]/g, "")) || 0;
@@ -59,7 +61,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const booking = await client.getDocument(id);
+    const booking = await bookingStateClient.getDocument(id);
 
     if (!booking || booking._type !== "booking") {
       return res
@@ -151,6 +153,7 @@ export default async function handler(req, res) {
       originalOrderId: booking._id,
       packageTitle: targetPackage.title,
       client,
+      bookingClient: bookingStateClient,
     });
     const targetPriceNum = parseMoney(upgradeContext.targetPackage.price);
     const originalPaid = upgradeContext.paidBookings.reduce(

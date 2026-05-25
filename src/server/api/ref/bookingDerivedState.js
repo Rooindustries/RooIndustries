@@ -1,4 +1,4 @@
-import { createRefReadClient } from "./sanity.js";
+import { createBookingStateReadClient } from "../../booking/bookingStateClient.js";
 
 export const COUNTED_BOOKING_STATUSES = ["captured", "completed"];
 
@@ -13,7 +13,7 @@ export const getSuccessfulReferralCount = async ({
   referralId = "",
 }) => {
   if (!referralId) return 0;
-  const resolvedClient = client || createRefReadClient();
+  const resolvedClient = client || createBookingStateReadClient();
   const count = await resolvedClient.fetch(
     `count(*[
       _type == "booking"
@@ -36,7 +36,7 @@ export const getCouponUsageCount = async ({
 }) => {
   const normalizedCode = normalizeCouponCode(couponCode);
   if (!normalizedCode) return 0;
-  const resolvedClient = client || createRefReadClient();
+  const resolvedClient = client || createBookingStateReadClient();
   const count = await resolvedClient.fetch(
     `count(*[
       _type == "booking"
@@ -55,10 +55,14 @@ export const getCouponUsageCount = async ({
 
 export const syncReferralSuccessCount = async ({
   client,
+  bookingClient,
   referralId = "",
 }) => {
   if (!referralId) return 0;
-  const count = await getSuccessfulReferralCount({ client, referralId });
+  const count = await getSuccessfulReferralCount({
+    client: bookingClient,
+    referralId,
+  });
   const referral = await client.fetch(
     `*[_type == "referral" && _id == $id][0]{ _id, successfulReferrals }`,
     { id: referralId }
@@ -76,6 +80,7 @@ export const syncReferralSuccessCount = async ({
 
 export const syncCouponUsage = async ({
   client,
+  bookingClient,
   couponCode = "",
 }) => {
   const normalizedCode = normalizeCouponCode(couponCode);
@@ -95,7 +100,7 @@ export const syncCouponUsage = async ({
   if (!coupon?._id) return 0;
 
   const timesUsed = await getCouponUsageCount({
-    client,
+    client: bookingClient,
     couponCode: normalizedCode,
   });
 
