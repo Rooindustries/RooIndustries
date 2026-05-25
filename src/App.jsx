@@ -250,6 +250,7 @@ export function AppContent({
 }) {
   const [, setIsModalOpen] = useState(false);
   const [showRouteTransition, setShowRouteTransition] = useState(false);
+  const [hasHydrated, setHasHydrated] = useState(false);
 
   const location = useLocation();
   const navigate = useNavigate();
@@ -295,6 +296,10 @@ export function AppContent({
 
   useEffect(() => {
     initializePerformanceProfile();
+  }, []);
+
+  useEffect(() => {
+    setHasHydrated(true);
   }, []);
 
 
@@ -467,19 +472,16 @@ export function AppContent({
     }
   }, [location.pathname, location.search, location.hash, location.state, isFlowRoute]);
 
-  const storedBackground = readStoredBackground();
+  const storedBackground = hasHydrated ? readStoredBackground() : null;
   const backgroundLocation =
     location.state && location.state.backgroundLocation
       ? location.state.backgroundLocation
       : isFlowRoute
       ? storedBackground
       : null;
-  const fallbackLocation =
-    isFlowRoute && !backgroundLocation
-      ? { ...location, pathname: "/", search: "", hash: "" }
-      : null;
-  const routesLocation = backgroundLocation || fallbackLocation || location;
+  const routesLocation = backgroundLocation || location;
   const routesKey = `${routesLocation.pathname}${routesLocation.search || ""}`;
+  const showFlowModal = hasHydrated && isFlowRoute && Boolean(backgroundLocation);
 
   const closeBookingModal = () => {
     const target = backgroundLocation || {
@@ -545,7 +547,7 @@ export function AppContent({
           />
         </main>
       </div>
-      {isFlowRoute && (
+      {showFlowModal && (
         <Suspense fallback={null}>
           <BookingModal open onClose={closeBookingModal}>
             <Suspense fallback={<RouteFallback />}>
