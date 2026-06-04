@@ -302,6 +302,8 @@ const baseQuote = (overrides = {}) => ({
   commissionAmount: 0,
   couponDiscountPercent: 0,
   couponDiscountAmount: 0,
+  couponDiscountType: "",
+  couponDiscountValue: 0,
   canCombineWithReferral: false,
   effectiveReferralCode: "",
   effectiveReferralId: "",

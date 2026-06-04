@@ -108,11 +108,9 @@ export default async function handler(req, res) {
       payments.push(entry);
     }
 
-    // Build next payment arrays for both package types
     const nextXocPayments = packageType === 'xoc' ? payments : referral.xocPayments || [];
     const nextVertexPayments = packageType === 'vertex' ? payments : referral.vertexPayments || [];
 
-    // Compute earnings + balances using all captured/completed bookings
     const code = (referral?.slug?.current || '').toLowerCase();
     const bookings = await readClient.fetch(
       `*[_type == "booking"
@@ -163,9 +161,13 @@ export default async function handler(req, res) {
     const paidXoc = sumPayments(nextXocPayments);
     const paidVertex = sumPayments(nextVertexPayments);
 
-    const {payments: paymentsTotal, remaining} = buildBalance(earnings, paidXoc, paidVertex);
+    const {
+      payments: paymentsTotal,
+      remaining,
+      owed,
+      overpaid,
+    } = buildBalance(earnings, paidXoc, paidVertex);
 
-    // Persist payment logs + computed totals
     const patch = writeClient
       .patch(referralId)
       .set({
@@ -177,7 +179,9 @@ export default async function handler(req, res) {
         paidXoc,
         paidVertex,
         paidTotal: paymentsTotal.total,
-        owedTotal: remaining.total,
+        owedXoc: owed.xoc,
+        owedVertex: owed.vertex,
+        owedTotal: owed.total,
       });
 
     if (typeof internalNotes === 'string') {
@@ -201,6 +205,8 @@ export default async function handler(req, res) {
       packageBreakdown,
       payments: paymentsTotal,
       remaining,
+      owed,
+      overpaid,
       logs: {
         xoc: nextXocPayments,
         vertex: nextVertexPayments,
