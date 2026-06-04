@@ -23,8 +23,9 @@ const isDevelopmentBuild = paymentRuntimePolicy.runtime === "development";
 const previewPaymentsEnabled = paymentRuntimePolicy.previewPaymentsEnabled === true;
 const livePaymentsEnabled = paymentRuntimePolicy.livePaymentsEnabled === true;
 
+const isReleaseBuild = isProdBuild || isPreviewBuild;
 const shouldFailClosed =
-  missing => missing.length > 0 && isProdBuild && (isCi || isVercelBuild || isNextProductionBuild || forceStrict);
+  missing => missing.length > 0 && isReleaseBuild && (isCi || isVercelBuild || isNextProductionBuild || forceStrict);
 
 const hasAny = (keys = []) => keys.some((key) => !!process.env[key]);
 const getFirstValue = (keys = []) => {
@@ -81,6 +82,22 @@ const requiredChecks = [
   {
     keys: webhookSecretKeys,
     label: "SANITY_WEBHOOK_SECRET (or CRON_SECRET fallback)",
+  },
+  {
+    keys: ["TOURNEY_SESSION_SECRET"],
+    label: "TOURNEY_SESSION_SECRET",
+  },
+  {
+    keys: ["TOURNEY_DATABASE_URL", "POSTGRES_URL"],
+    label: "TOURNEY_DATABASE_URL (or POSTGRES_URL fallback)",
+  },
+  {
+    keys: ["RESEND_API_KEY"],
+    label: "RESEND_API_KEY",
+  },
+  {
+    keys: ["FROM_EMAIL"],
+    label: "FROM_EMAIL",
   },
 ];
 
@@ -179,7 +196,7 @@ if (missing.length === 0) {
   console.log("[env] Runtime secret validation passed.");
 } else if (shouldFailClosed(missing)) {
   console.error(
-    `[env] Production build blocked: missing required runtime secrets:\n- ${missing.join(
+    `[env] Release build blocked: missing required runtime secrets:\n- ${missing.join(
       "\n- "
     )}`
   );
@@ -195,7 +212,7 @@ if (missing.length === 0) {
 if (providerConsistencyFailures.length > 0) {
   const rendered = providerConsistencyFailures.join("\n- ");
   if (shouldFailClosed(providerConsistencyFailures)) {
-    console.error(`[env] Production build blocked:\n- ${rendered}`);
+    console.error(`[env] Release build blocked:\n- ${rendered}`);
     process.exit(1);
   }
 
