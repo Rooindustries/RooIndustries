@@ -30,3 +30,6 @@ yarn-error.log*
 
 .vercel
 .env*.local
+
+# Local worktree snapshots and parked dirty files.
+/dirty-archive/
