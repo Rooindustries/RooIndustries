@@ -32,11 +32,43 @@ const clampPercent = (value) => {
   return Math.min(100, Math.max(0, parsed));
 };
 
+const normalizeDiscountType = (value) =>
+  String(value || "").trim().toLowerCase() === "fixed" ? "fixed" : "percent";
+
 export const normalizePackageTitle = (value) =>
   String(value || "")
     .replace(/\s*\(upgrade\)\s*$/i, "")
     .trim()
     .toLowerCase();
+
+const normalizePackageId = (value) => String(value || "").trim();
+
+const getCouponEligiblePackages = (couponDoc = {}) =>
+  Array.isArray(couponDoc?.eligiblePackages)
+    ? couponDoc.eligiblePackages.filter(Boolean)
+    : [];
+
+export const isCouponEligibleForPackage = ({
+  couponDoc,
+  packageId = "",
+  packageTitle = "",
+}) => {
+  const eligiblePackages = getCouponEligiblePackages(couponDoc);
+  if (eligiblePackages.length === 0) return true;
+
+  const normalizedPackageId = normalizePackageId(packageId);
+  const normalizedPackageTitle = normalizePackageTitle(packageTitle);
+
+  return eligiblePackages.some((pkg) => {
+    const eligibleId = normalizePackageId(pkg?._id || pkg?._ref);
+    const eligibleTitle = normalizePackageTitle(pkg?.title || pkg?.packageTitle);
+
+    return (
+      (!!normalizedPackageId && eligibleId === normalizedPackageId) ||
+      (!!normalizedPackageTitle && eligibleTitle === normalizedPackageTitle)
+    );
+  });
+};
 
 export const getPaidAmount = (booking) => {
   if (
@@ -129,7 +161,7 @@ export async function resolveUpgradeContext({
     )) || [];
 
   const targetPackage = await client.fetch(
-    `*[_type == "package" && title == $title][0]{title, price}`,
+    `*[_type == "package" && title == $title][0]{_id, title, price}`,
     { title: normalizedUpgradeTitle }
   );
 
@@ -186,15 +218,19 @@ export async function resolveBookingPricing({
   const normalizedReferralCode = normalizeReferralCode(referralCode);
 
   let effectiveGrossAmount = 0;
+  let effectivePackageId = "";
+  let effectivePackageTitle = String(packageTitle || "").trim();
 
   if (!isUpgrade) {
     const packageDoc = await client.fetch(
-      `*[_type == "package" && title == $title][0]{price}`,
+      `*[_type == "package" && title == $title][0]{_id, title, price}`,
       { title: packageTitle }
     );
 
     const pricing = getPackagePricePresentation(packageTitle, packageDoc?.price);
     effectiveGrossAmount = toMoney(pricing.price);
+    effectivePackageId = packageDoc?._id || "";
+    effectivePackageTitle = packageDoc?.title || effectivePackageTitle;
   } else {
     const resolvedUpgradeContext =
       upgradeContext ||
@@ -205,6 +241,9 @@ export async function resolveBookingPricing({
       }));
 
     effectiveGrossAmount = resolvedUpgradeContext.upgradePrice;
+    effectivePackageId = resolvedUpgradeContext.targetPackage?._id || "";
+    effectivePackageTitle =
+      resolvedUpgradeContext.targetPackage?.title || effectivePackageTitle;
   }
 
   if (!effectiveGrossAmount || effectiveGrossAmount <= 0) {
@@ -262,7 +301,14 @@ export async function resolveBookingPricing({
         validFrom,
         validTo,
         canCombineWithReferral,
-        discountPercent
+        discountType,
+        discountPercent,
+        discountAmount,
+        eligiblePackages[]{
+          _ref,
+          "_id": @->_id,
+          "title": @->title
+        }
       }`,
       { code: normalizedCouponCode }
     );
@@ -287,28 +333,68 @@ export async function resolveBookingPricing({
         "coupon_inactive"
       );
     }
+
+    if (
+      !isCouponEligibleForPackage({
+        couponDoc,
+        packageId: effectivePackageId,
+        packageTitle: effectivePackageTitle,
+      })
+    ) {
+      throw createApiError(
+        400,
+        "This coupon is not valid for the selected package.",
+        "coupon_package_mismatch"
+      );
+    }
   }
 
-  const couponDiscountPercent = clampPercent(couponDoc?.discountPercent || 0);
+  const couponDiscountType = couponDoc
+    ? normalizeDiscountType(couponDoc.discountType)
+    : "";
+  const configuredCouponPercent =
+    couponDiscountType === "percent"
+      ? clampPercent(couponDoc?.discountPercent || 0)
+      : 0;
+  const configuredCouponAmount =
+    couponDiscountType === "fixed" ? toMoney(couponDoc?.discountAmount || 0) : 0;
+  const couponDiscountValue =
+    couponDiscountType === "fixed"
+      ? configuredCouponAmount
+      : configuredCouponPercent;
+  const rawCouponDiscountAmount =
+    couponDiscountType === "fixed"
+      ? configuredCouponAmount
+      : toMoney(effectiveGrossAmount * (configuredCouponPercent / 100));
+  const couponDiscountAmount = couponDoc
+    ? Math.min(effectiveGrossAmount, rawCouponDiscountAmount)
+    : 0;
+  const couponDiscountPercent =
+    couponDiscountType === "fixed"
+      ? effectiveGrossAmount > 0
+        ? toMoney((couponDiscountAmount / effectiveGrossAmount) * 100)
+        : 0
+      : configuredCouponPercent;
   const canCombineWithReferral = couponDoc?.canCombineWithReferral === true;
+  const hasCouponAndReferral = !!couponDoc && !!referralDoc;
 
-  const referralDiscountAmount = toMoney(
-    effectiveGrossAmount * (referralDiscountPercent / 100)
-  );
-  const couponDiscountAmount = toMoney(
-    effectiveGrossAmount * (couponDiscountPercent / 100)
-  );
-
-  let effectiveDiscountAmount = 0;
-  if (couponDoc && referralDoc) {
-    effectiveDiscountAmount = canCombineWithReferral
-      ? toMoney(referralDiscountAmount + couponDiscountAmount)
-      : Math.max(referralDiscountAmount, couponDiscountAmount);
-  } else if (couponDoc) {
-    effectiveDiscountAmount = couponDiscountAmount;
-  } else {
-    effectiveDiscountAmount = referralDiscountAmount;
+  if (hasCouponAndReferral && !canCombineWithReferral) {
+    throw createApiError(
+      400,
+      "This coupon can't be combined with a referral discount.",
+      "coupon_referral_not_combinable"
+    );
   }
+
+  const referralBaseAmount = toMoney(
+    Math.max(0, effectiveGrossAmount - couponDiscountAmount)
+  );
+  const referralDiscountAmount = toMoney(
+    referralBaseAmount * (referralDiscountPercent / 100)
+  );
+  let effectiveDiscountAmount = toMoney(
+    couponDiscountAmount + referralDiscountAmount
+  );
 
   effectiveDiscountAmount = Math.min(
     effectiveGrossAmount,
@@ -316,6 +402,13 @@ export async function resolveBookingPricing({
   );
 
   if (paymentProvider === "free") {
+    if (!couponDoc || couponDiscountAmount < effectiveGrossAmount) {
+      throw createApiError(
+        400,
+        "This coupon does not provide a full discount.",
+        "free_coupon_not_full"
+      );
+    }
     effectiveDiscountAmount = effectiveGrossAmount;
   }
 
@@ -348,7 +441,7 @@ export async function resolveBookingPricing({
   const commissionBase =
     paymentProvider === "free"
       ? 0
-      : effectiveNetAmount || effectiveGrossAmount || 0;
+      : referralBaseAmount || effectiveGrossAmount || 0;
   const commissionAmount = toMoney(
     commissionBase * (effectiveCommissionPercent / 100)
   );
@@ -357,6 +450,8 @@ export async function resolveBookingPricing({
     canCombineWithReferral,
     couponDiscountAmount,
     couponDiscountPercent,
+    couponDiscountType,
+    couponDiscountValue,
     couponDoc,
     effectiveCommissionPercent,
     effectiveDiscountAmount,

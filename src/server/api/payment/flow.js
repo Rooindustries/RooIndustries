@@ -235,6 +235,8 @@ const buildPricingSnapshot = (quote = {}) => ({
   commissionAmount: Number(quote.commissionAmount || 0),
   couponDiscountPercent: Number(quote.couponDiscountPercent || 0),
   couponDiscountAmount: Number(quote.couponDiscountAmount || 0),
+  couponDiscountType: String(quote.couponDiscountType || "").trim(),
+  couponDiscountValue: Number(quote.couponDiscountValue || 0),
   canCombineWithReferral: quote.canCombineWithReferral === true,
   effectiveReferralCode: String(quote.effectiveReferralCode || "").trim(),
   effectiveReferralId: String(quote.effectiveReferralId || "").trim(),
@@ -324,6 +326,8 @@ const buildQuotePayload = (quote = {}) => ({
   commissionPercent: Number(quote.effectiveCommissionPercent || 0),
   couponDiscountPercent: Number(quote.couponDiscountPercent || 0),
   couponDiscountAmount: Number(quote.couponDiscountAmount || 0),
+  couponDiscountType: String(quote.couponDiscountType || "").trim(),
+  couponDiscountValue: Number(quote.couponDiscountValue || 0),
   canCombineWithReferral: quote.canCombineWithReferral === true,
 });
 
@@ -516,6 +520,8 @@ const mirrorLegacyBookingToPaymentRecord = async ({
       commissionPercent: Number(booking.commissionPercent || 0),
       couponDiscountPercent: Number(booking.couponDiscountPercent || 0),
       couponDiscountAmount: Number(booking.couponDiscountAmount || 0),
+      couponDiscountType: String(booking.couponDiscountType || "").trim(),
+      couponDiscountValue: Number(booking.couponDiscountValue || 0),
       canCombineWithReferral: false,
       effectiveReferralCode: String(booking.referralCode || "").trim(),
       effectiveReferralId: "",

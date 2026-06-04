@@ -74,13 +74,12 @@ export default async function handler(req, res) {
       const earnings = computeEarningsFromBookings(bookings || []);
       const paidXoc = sumPayments(referral?.xocPayments || []);
       const paidVertex = sumPayments(referral?.vertexPayments || []);
-      const {payments, remaining} = buildBalance(earnings, paidXoc, paidVertex);
+      const {payments, owed} = buildBalance(earnings, paidXoc, paidVertex);
 
-      // Only write if values actually changed
       const changed =
         referral.earnedTotal !== earnings.total ||
         referral.paidTotal !== payments.total ||
-        referral.owedTotal !== remaining.total;
+        referral.owedTotal !== owed.total;
 
       if (changed) {
         await writeClient
@@ -92,9 +91,9 @@ export default async function handler(req, res) {
             paidXoc,
             paidVertex,
             paidTotal: payments.total,
-            owedXoc: remaining.xoc,
-            owedVertex: remaining.vertex,
-            owedTotal: remaining.total,
+            owedXoc: owed.xoc,
+            owedVertex: owed.vertex,
+            owedTotal: owed.total,
           })
           .commit();
 
