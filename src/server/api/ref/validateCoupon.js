@@ -9,12 +9,36 @@ const client = createClient({
   useCdn: false,
 });
 
+const normalizePackageTitle = (value) =>
+  String(value || "")
+    .replace(/\s*\(upgrade\)\s*$/i, "")
+    .trim()
+    .toLowerCase();
+
+const normalizeDiscountType = (value) =>
+  String(value || "").trim().toLowerCase() === "fixed" ? "fixed" : "percent";
+
+const isCouponEligibleForPackage = ({ coupon, packageTitle = "" }) => {
+  const eligiblePackages = Array.isArray(coupon?.eligiblePackages)
+    ? coupon.eligiblePackages.filter(Boolean)
+    : [];
+  if (eligiblePackages.length === 0) return true;
+
+  const normalizedPackageTitle = normalizePackageTitle(packageTitle);
+  if (!normalizedPackageTitle) return false;
+
+  return eligiblePackages.some(
+    (pkg) => normalizePackageTitle(pkg?.title || pkg?.packageTitle) === normalizedPackageTitle
+  );
+};
+
 export default async function handler(req, res) {
   if (req.method !== "GET") {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
   }
 
   const rawCode = (req.query.code || "").trim();
+  const packageTitle = String(req.query.packageTitle || "").trim();
   const clientAddress = getClientAddress(req);
   if (
     !requireRateLimit(res, {
@@ -37,13 +61,20 @@ export default async function handler(req, res) {
         _id,
         title,
         code,
+        discountType,
         discountPercent,
+        discountAmount,
         isActive,
         canCombineWithReferral,
         validFrom,
         validTo,
         maxUses,
-        timesUsed
+        timesUsed,
+        eligiblePackages[]{
+          _ref,
+          "_id": @->_id,
+          "title": @->title
+        }
       }`,
       { code }
     );
@@ -76,7 +107,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // 🔥 NEW: enforce maxUses limit
     const used = coupon.timesUsed ?? 0;
     const max = coupon.maxUses;
 
@@ -87,15 +117,31 @@ export default async function handler(req, res) {
       });
     }
 
+    if (!isCouponEligibleForPackage({ coupon, packageTitle })) {
+      return res.status(400).json({
+        ok: false,
+        error: packageTitle
+          ? "This coupon is not valid for the selected package."
+          : "Package details are required for this coupon.",
+      });
+    }
+
+    const discountType = normalizeDiscountType(coupon.discountType);
+    const discountAmount =
+      discountType === "fixed" ? Number(coupon.discountAmount || 0) : null;
+    const discountPercent =
+      discountType === "percent" ? Number(coupon.discountPercent || 0) : 0;
+
     return res.status(200).json({
       ok: true,
       coupon: {
         id: coupon._id,
         title: coupon.title,
         code: coupon.code,
-        discountPercent: coupon.discountPercent,
+        discountType,
+        discountPercent,
+        discountAmount,
         canCombineWithReferral: coupon.canCombineWithReferral ?? false,
-        // optional: send usage info if you ever want to show it in UI
         maxUses: max ?? null,
         timesUsed: used,
       },

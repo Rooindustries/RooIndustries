@@ -112,7 +112,11 @@ export default async function handler(req, res) {
     const paidXoc = sumPayments(referral?.xocPayments || []);
     const paidVertex = sumPayments(referral?.vertexPayments || []);
 
-    const {payments, remaining} = buildBalance(earnings, paidXoc, paidVertex);
+    const {payments, remaining, owed, overpaid} = buildBalance(
+      earnings,
+      paidXoc,
+      paidVertex
+    );
 
     await writeClient
       .patch(referralId)
@@ -123,9 +127,9 @@ export default async function handler(req, res) {
         paidXoc,
         paidVertex,
         paidTotal: payments.total,
-        owedXoc: remaining.xoc,
-        owedVertex: remaining.vertex,
-        owedTotal: remaining.total,
+        owedXoc: owed.xoc,
+        owedVertex: owed.vertex,
+        owedTotal: owed.total,
       })
       .commit();
 
@@ -144,6 +148,8 @@ export default async function handler(req, res) {
       packageBreakdown,
       payments,
       remaining,
+      owed,
+      overpaid,
       logs: {
         xoc: referral?.xocPayments || [],
         vertex: referral?.vertexPayments || [],

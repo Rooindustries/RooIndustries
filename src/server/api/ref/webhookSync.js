@@ -57,14 +57,12 @@ export default async function handler(req, res) {
   try {
     const body = req.body || {};
 
-    // Sanity webhook sends the document (or projection) as the body
     const referralId = body._id;
 
     if (!referralId) {
       return res.status(400).json({ok: false, error: 'No _id in webhook payload'});
     }
 
-    // Fetch fresh referral data
     const referral = await readClient.fetch(
       `*[_type == "referral" && _id == $id][0]{
         _id, name, slug, xocPayments, vertexPayments
@@ -93,7 +91,11 @@ export default async function handler(req, res) {
     const earnings = computeEarningsFromBookings(bookings || []);
     const paidXoc = sumPayments(referral?.xocPayments || []);
     const paidVertex = sumPayments(referral?.vertexPayments || []);
-    const {payments, remaining} = buildBalance(earnings, paidXoc, paidVertex);
+    const {payments, remaining, owed, overpaid} = buildBalance(
+      earnings,
+      paidXoc,
+      paidVertex
+    );
 
     await writeClient
       .patch(referralId)
@@ -104,9 +106,9 @@ export default async function handler(req, res) {
         paidXoc,
         paidVertex,
         paidTotal: payments.total,
-        owedXoc: remaining.xoc,
-        owedVertex: remaining.vertex,
-        owedTotal: remaining.total,
+        owedXoc: owed.xoc,
+        owedVertex: owed.vertex,
+        owedTotal: owed.total,
       })
       .commit();
 
@@ -115,6 +117,8 @@ export default async function handler(req, res) {
       synced: referralId,
       payments,
       remaining,
+      owed,
+      overpaid,
     });
   } catch (err) {
     console.error('WEBHOOK SYNC ERROR:', err);

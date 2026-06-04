@@ -64,7 +64,6 @@ export default function RefDashboard() {
 
         const ref = data.referral || {};
 
-        // normalize successfulReferrals (in case it's missing)
         const successfulReferrals = ref.successfulReferrals ?? 0;
 
         const normalized = {
@@ -107,7 +106,12 @@ export default function RefDashboard() {
     setTimeout(() => setToast(null), 2500);
   }
 
-  const formatCurrency = (value) => `$${(Number(value) || 0).toFixed(2)}`;
+  const toMoneyNumber = (value) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const formatCurrency = (value) => `$${toMoneyNumber(value).toFixed(2)}`;
 
   const formatDate = (value) => {
     if (!value) return "--";
@@ -136,7 +140,49 @@ export default function RefDashboard() {
     </div>
   );
 
-  // Prevent background scroll while modal is open
+  const BalanceCard = ({ label, earned, paid, owed, overpaid }) => (
+    <div className={cardClass}>
+      <div>
+        <p className="text-[14px] uppercase text-slate-400 tracking-wide">
+          {label}
+        </p>
+        <p className="text-lg font-bold text-white">Balance</p>
+      </div>
+      <div className="mt-4 space-y-2 text-sm">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-slate-400">Earned</span>
+          <span className="font-semibold text-sky-200">
+            {formatCurrency(earned)}
+          </span>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-slate-400">Paid</span>
+          <span className="font-semibold text-emerald-300">
+            {formatCurrency(paid)}
+          </span>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-slate-400">Owed</span>
+          <span
+            className={`font-semibold ${
+              toMoneyNumber(owed) > 0 ? "text-amber-300" : "text-emerald-300"
+            }`}
+          >
+            {formatCurrency(owed)}
+          </span>
+        </div>
+        {toMoneyNumber(overpaid) > 0 && (
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-slate-400">Overpaid</span>
+            <span className="font-semibold text-fuchsia-300">
+              {formatCurrency(overpaid)}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     if (showLogsModal) {
@@ -160,7 +206,6 @@ export default function RefDashboard() {
     }, 200);
   };
 
-  // trigger fade-in on open
   useEffect(() => {
     if (showLogsModal) {
       setLogsModalAnimatingIn(false);
@@ -228,7 +273,6 @@ export default function RefDashboard() {
   const currentRefs = creator.successfulReferrals ?? 0;
   const refsLeft = Math.max(0, 5 - currentRefs);
 
-  // referral code + link
   const referralCode = creator.slug?.current || "";
   const referralOrigin =
     typeof window !== "undefined"
@@ -241,6 +285,40 @@ export default function RefDashboard() {
   const payoutData = payout || {};
   const earnings = payoutData.earnings || {};
   const payments = payoutData.payments || {};
+  const remaining = payoutData.remaining || {};
+  const owedRaw = payoutData.owed || {};
+  const overpaidRaw = payoutData.overpaid || {};
+  const positiveMoney = (value) => Math.max(0, toMoneyNumber(value));
+  const owed = {
+    xoc: positiveMoney(owedRaw.xoc ?? remaining.xoc),
+    vertex: positiveMoney(owedRaw.vertex ?? remaining.vertex),
+    total: positiveMoney(owedRaw.total ?? remaining.total),
+  };
+  const overpaid = {
+    xoc: positiveMoney(overpaidRaw.xoc ?? -toMoneyNumber(remaining.xoc)),
+    vertex: positiveMoney(
+      overpaidRaw.vertex ?? -toMoneyNumber(remaining.vertex)
+    ),
+    total: positiveMoney(overpaidRaw.total ?? -toMoneyNumber(remaining.total)),
+  };
+  const payoutBuckets = [
+    {
+      key: "xoc",
+      label: "XOC",
+      earned: earnings.xoc,
+      paid: payments.xoc,
+      owed: owed.xoc,
+      overpaid: overpaid.xoc,
+    },
+    {
+      key: "vertex",
+      label: "Vertex",
+      earned: earnings.vertex,
+      paid: payments.vertex,
+      owed: owed.vertex,
+      overpaid: overpaid.vertex,
+    },
+  ];
   const logs = payoutData.logs || {};
   const packageBreakdownRaw = Array.isArray(payoutData.packageBreakdown)
     ? payoutData.packageBreakdown
@@ -278,7 +356,7 @@ export default function RefDashboard() {
         Referral Code: <b className="text-sky-400">{referralCode}</b>
       </p>
 
-      {/* 🔗 Referral Link */}
+
       <div className={`mt-8 ${panelClass} space-y-2`}>
         <p className="text-sm font-semibold text-sky-200 mb-2">
           Your referral link
@@ -307,7 +385,7 @@ export default function RefDashboard() {
       </div>
 
       <div className={`mt-12 ${panelClass} space-y-8`}>
-        {/* STATS CARD */}
+
         <div className="bg-[#050b16] border border-sky-800/40 rounded-xl px-4 py-3 flex items-center justify-between">
           <div>
             <p className="text-xs uppercase text-slate-400 tracking-wide">
@@ -333,7 +411,7 @@ export default function RefDashboard() {
           </div>
         </div>
 
-        {/* COMMISSION CONTROL */}
+
         <div
           className={`space-y-2 ${
             !unlocked ? "opacity-40 pointer-events-none" : ""
@@ -357,7 +435,7 @@ export default function RefDashboard() {
           </div>
         </div>
 
-        {/* DISCOUNT CONTROL */}
+
         <div
           className={`space-y-2 ${
             !unlocked ? "opacity-40 pointer-events-none" : ""
@@ -381,7 +459,7 @@ export default function RefDashboard() {
           </div>
         </div>
 
-        {/* TOTAL */}
+
         <div
           className={`text-center font-semibold text-lg ${
             invalid ? "text-red-400" : "text-green-300"
@@ -390,7 +468,7 @@ export default function RefDashboard() {
           Total: {total}% / Max {max}%
         </div>
 
-        {/* SAVE BUTTON */}
+
         <button
           onClick={save}
           disabled={invalid || saving || !unlocked}
@@ -404,7 +482,7 @@ export default function RefDashboard() {
         </button>
       </div>
 
-      {/* PAYOUT SUMMARY (read-only for creators) */}
+
       <div className={`mt-10 ${panelClass} space-y-4`}>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <div>
@@ -433,49 +511,80 @@ export default function RefDashboard() {
           <p className="text-sm text-slate-400">Loading payout data...</p>
         )}
 
-            {payout && (
-              <>
-            {packageBreakdown.length > 0 && (
-              <div className="grid sm:grid-cols-3 gap-3 auto-rows-fr">
-                {packageBreakdown.map((item) => (
-                  <StatCard
-                    key={`pkg-${item.title}`}
-                    label={`Total owed - ${item.title}`}
-                    value={item.amount}
-                  />
-                ))}
-              </div>
-            )}
-
-            <div className="mt-3 grid sm:grid-cols-2 gap-3 auto-rows-fr">
+        {payout && (
+          <>
+            <div className="grid sm:grid-cols-3 gap-3 auto-rows-fr">
+              <StatCard label="Total earned" value={earnings.total} />
               <StatCard
                 label="Total paid"
                 value={payments.total}
                 accent="text-emerald-300"
               />
-              <div className={`${cardClass} flex flex-col gap-2`}>
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold text-white">
-                    Payment Logs
-                  </p>
-                  <span className="text-xs text-slate-400">
-                    {logs.xoc?.length + logs.vertex?.length || 0} entries
-                  </span>
-                </div>
-                <p className="text-xs text-slate-400">
-                  View your XOC and Vertex payment history.
-                </p>
-                <button
-                  onClick={() => setShowLogsModal(true)}
-                  className="glow-button inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-semibold text-white w-full sm:w-auto"
-                >
-                  View my payment logs
-                  <span className="glow-line glow-line-top" />
-                  <span className="glow-line glow-line-right" />
-                  <span className="glow-line glow-line-bottom" />
-                  <span className="glow-line glow-line-left" />
-                </button>
+              <StatCard
+                label="Remaining owed"
+                value={owed.total}
+                accent={owed.total > 0 ? "text-amber-300" : "text-emerald-300"}
+              />
+            </div>
+
+            {overpaid.total > 0 && (
+              <div className="bg-fuchsia-500/10 border border-fuchsia-400/40 rounded-xl px-3 py-2 text-sm text-fuchsia-100">
+                Paid ahead by {formatCurrency(overpaid.total)}.
               </div>
+            )}
+
+            <div className="grid sm:grid-cols-2 gap-3 auto-rows-fr">
+              {payoutBuckets.map((bucket) => (
+                <BalanceCard
+                  key={bucket.key}
+                  label={bucket.label}
+                  earned={bucket.earned}
+                  paid={bucket.paid}
+                  owed={bucket.owed}
+                  overpaid={bucket.overpaid}
+                />
+              ))}
+            </div>
+
+            {packageBreakdown.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs uppercase tracking-wide text-slate-400">
+                  Package earnings
+                </p>
+                <div className="grid sm:grid-cols-3 gap-3 auto-rows-fr">
+                  {packageBreakdown.map((item) => (
+                    <StatCard
+                      key={`pkg-${item.title}`}
+                      label={`Earned - ${item.title}`}
+                      value={item.amount}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className={`${cardClass} flex flex-col gap-2`}>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-white">
+                  Payment Logs
+                </p>
+                <span className="text-xs text-slate-400">
+                  {(logs.xoc?.length || 0) + (logs.vertex?.length || 0)} entries
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">
+                View your XOC and Vertex payment history.
+              </p>
+              <button
+                onClick={() => setShowLogsModal(true)}
+                className="glow-button inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-semibold text-white w-full sm:w-auto"
+              >
+                View my payment logs
+                <span className="glow-line glow-line-top" />
+                <span className="glow-line glow-line-right" />
+                <span className="glow-line glow-line-bottom" />
+                <span className="glow-line glow-line-left" />
+              </button>
             </div>
 
           </>
@@ -488,7 +597,7 @@ export default function RefDashboard() {
         )}
       </div>
 
-      {/* CHANGE PASSWORD */}
+
       <button
         onClick={() => nav("/referrals/change-password")}
         className="mt-6 w-full py-3 bg-[#0f1a2e] border border-sky-700/40 rounded-xl text-sky-300 font-semibold text-center hover:bg-sky-900/30 hover:border-sky-500/40 transition-all shadow-[0_0_10px_rgba(56,189,248,0.2)] hover:shadow-[0_0_20px_rgba(56,189,248,0.35)]"
@@ -496,7 +605,7 @@ export default function RefDashboard() {
         Change Password
       </button>
 
-      {/* LOGOUT */}
+
       <button
         onClick={async () => {
           try {
@@ -513,7 +622,7 @@ export default function RefDashboard() {
         Log Out
       </button>
 
-      {/* TOAST */}
+
       {toast && (
         <div
           className={`fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-xl text-white text-sm font-semibold shadow-lg transition-all ${
@@ -526,7 +635,7 @@ export default function RefDashboard() {
         </div>
       )}
 
-      {/* PAYMENT LOGS MODAL (full-screen) */}
+
       {showLogsModal && (
         <div
           className={`fixed inset-0 z-[120] bg-black/60 backdrop-blur-lg flex items-center justify-center px-4 sm:px-6 transition-opacity duration-200 ${
@@ -567,7 +676,8 @@ export default function RefDashboard() {
                 </p>
               </div>
               <span className="text-xs text-slate-400">
-                Total entries: {(logs.xoc?.length || 0) + (logs.vertex?.length || 0)}
+                Total paid: {formatCurrency(payments.total)} | Entries:{" "}
+                {(logs.xoc?.length || 0) + (logs.vertex?.length || 0)}
               </span>
             </div>
 

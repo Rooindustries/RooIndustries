@@ -166,6 +166,8 @@ export const getBookingForEmailDispatch = async ({
       couponCode,
       couponDiscountPercent,
       couponDiscountAmount,
+      couponDiscountType,
+      couponDiscountValue,
       hostDate,
       hostTime,
       hostTimeZone,
@@ -214,9 +216,13 @@ const buildBookingFieldGroups = (booking = {}) => {
   const discountAmountValue = Number(booking.discountAmount || 0);
   const couponPercentValue = Number(booking.couponDiscountPercent || 0);
   const couponAmountValue = Number(booking.couponDiscountAmount || 0);
+  const couponType = String(booking.couponDiscountType || "").trim().toLowerCase();
+  const couponValue = Number(booking.couponDiscountValue || 0);
   const couponSuffix =
     couponPercentValue > 0 || couponAmountValue > 0
-      ? ` (${couponPercentValue}% - $${formatMoney(couponAmountValue)})`
+      ? couponType === "fixed"
+        ? ` ($${formatMoney(couponValue || couponAmountValue)} off - $${formatMoney(couponAmountValue)})`
+        : ` (${couponPercentValue}% - $${formatMoney(couponAmountValue)})`
       : "";
   const couponDisplay = booking.couponCode
     ? `${booking.couponCode}${couponSuffix}`

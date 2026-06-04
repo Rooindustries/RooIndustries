@@ -419,6 +419,12 @@ export default async function handler(req, res) {
       const resolvedCouponDiscountAmount = Number(
         bookingDoc.couponDiscountAmount || 0
       );
+      const resolvedCouponDiscountType = String(
+        bookingDoc.couponDiscountType || ""
+      ).trim();
+      const resolvedCouponDiscountValue = Number(
+        bookingDoc.couponDiscountValue || 0
+      );
       const resolvedReferralCode = String(
         bookingDoc.referralCode || referralCode || ""
       ).trim();
@@ -516,6 +522,8 @@ export default async function handler(req, res) {
           commissionPercent: resolvedCommissionPercent,
           couponDiscountPercent: resolvedCouponDiscountPercent,
           couponDiscountAmount: resolvedCouponDiscountAmount,
+          couponDiscountType: resolvedCouponDiscountType,
+          couponDiscountValue: resolvedCouponDiscountValue,
           canCombineWithReferral: false,
           effectiveReferralCode: resolvedReferralCode,
           effectiveReferralId: resolvedReferralId,
@@ -709,7 +717,9 @@ export default async function handler(req, res) {
           isActive,
           timesUsed,
           maxUses,
-          discountPercent
+          discountType,
+          discountPercent,
+          discountAmount
         }`,
         { code: String(couponCode).toLowerCase() }
       );
@@ -732,14 +742,6 @@ export default async function handler(req, res) {
         });
       }
 
-      if (
-        typeof freeCoupon.discountPercent === "number" &&
-        freeCoupon.discountPercent < 100
-      ) {
-        return res.status(400).json({
-          error: "This coupon does not provide a full (100%) discount.",
-        });
-      }
     }
 
     if (paymentProvider === "paypal" || paymentProvider === "razorpay") {
@@ -893,6 +895,8 @@ export default async function handler(req, res) {
     const {
       couponDiscountAmount,
       couponDiscountPercent,
+      couponDiscountType,
+      couponDiscountValue,
       couponDoc,
       effectiveCommissionPercent,
       effectiveDiscountAmount,
@@ -1094,6 +1098,8 @@ export default async function handler(req, res) {
               couponCode,
               couponDiscountPercent,
               couponDiscountAmount,
+              couponDiscountType,
+              couponDiscountValue,
             }
           : {}),
         ...(effectiveReferralId
