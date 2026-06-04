@@ -108,11 +108,14 @@ export default async function handler(req, res) {
     const paidXoc = sumPayments(xocPayments);
     const paidVertex = sumPayments(vertexPayments);
 
-    const {payments, remaining} = buildBalance(earnings, paidXoc, paidVertex);
+    const {payments, remaining, owed, overpaid} = buildBalance(
+      earnings,
+      paidXoc,
+      paidVertex
+    );
 
     let syncStatus = {attempted: false, success: false, error: ''};
 
-    // Auto-sync computed totals back to Sanity for admin read-only fields (best-effort).
     if (writeClient && referral._id) {
       syncStatus.attempted = true;
       try {
@@ -125,7 +128,9 @@ export default async function handler(req, res) {
             paidXoc,
             paidVertex,
             paidTotal: payments.total,
-            owedTotal: remaining.total,
+            owedXoc: owed.xoc,
+            owedVertex: owed.vertex,
+            owedTotal: owed.total,
           })
           .commit({autoGenerateArrayKeys: true});
         syncStatus.success = true;
@@ -150,6 +155,8 @@ export default async function handler(req, res) {
       packageBreakdown,
       payments,
       remaining,
+      owed,
+      overpaid,
       logs: {
         xoc: xocPayments,
         vertex: vertexPayments,

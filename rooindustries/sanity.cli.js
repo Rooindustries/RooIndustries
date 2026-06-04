@@ -5,4 +5,8 @@ export default defineCliConfig({
     projectId: '9g42k3ur',
     dataset: 'production',
   },
+  studioHost: 'rooindustries',
+  deployment: {
+    appId: 'augcrlftzdbrxe68ln5yywqo',
+  },
 })

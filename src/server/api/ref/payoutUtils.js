@@ -24,7 +24,6 @@ export function classifyPackage(packageTitle = '') {
     return 'vertex';
   }
 
-  // default fallback
   return 'vertex';
 }
 
@@ -74,21 +73,45 @@ export function sumPayments(payments = []) {
   return +total.toFixed(2);
 }
 
-export function buildBalance(earnings, paidXoc, paidVertex) {
-  const remainingXoc = +(earnings.xoc - paidXoc).toFixed(2);
-  const remainingVertex = +(earnings.vertex - paidVertex).toFixed(2);
-  const remainingTotal = +(remainingXoc + remainingVertex).toFixed(2);
+function roundMoney(value) {
+  return +normalizeNumber(value).toFixed(2);
+}
+
+function positiveMoney(value) {
+  return Math.max(0, roundMoney(value));
+}
+
+export function buildBalance(earnings = {}, paidXoc = 0, paidVertex = 0) {
+  const earnedXoc = roundMoney(earnings.xoc);
+  const earnedVertex = roundMoney(earnings.vertex);
+  const earnedTotal = roundMoney(earnings.total || earnedXoc + earnedVertex);
+  const paidXocTotal = roundMoney(paidXoc);
+  const paidVertexTotal = roundMoney(paidVertex);
+  const paidTotal = roundMoney(paidXocTotal + paidVertexTotal);
+  const remainingXoc = roundMoney(earnedXoc - paidXocTotal);
+  const remainingVertex = roundMoney(earnedVertex - paidVertexTotal);
+  const remainingTotal = roundMoney(earnedTotal - paidTotal);
 
   return {
     payments: {
-      xoc: paidXoc,
-      vertex: paidVertex,
-      total: +(paidXoc + paidVertex).toFixed(2),
+      xoc: paidXocTotal,
+      vertex: paidVertexTotal,
+      total: paidTotal,
     },
     remaining: {
       xoc: remainingXoc,
       vertex: remainingVertex,
       total: remainingTotal,
+    },
+    owed: {
+      xoc: positiveMoney(remainingXoc),
+      vertex: positiveMoney(remainingVertex),
+      total: positiveMoney(remainingTotal),
+    },
+    overpaid: {
+      xoc: positiveMoney(-remainingXoc),
+      vertex: positiveMoney(-remainingVertex),
+      total: positiveMoney(-remainingTotal),
     },
   };
 }

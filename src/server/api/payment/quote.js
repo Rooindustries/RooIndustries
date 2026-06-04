@@ -46,6 +46,8 @@ module.exports = async function handler(req, res) {
         commissionPercent: resolvedQuote.effectiveCommissionPercent,
         couponDiscountPercent: resolvedQuote.couponDiscountPercent,
         couponDiscountAmount: resolvedQuote.couponDiscountAmount,
+        couponDiscountType: resolvedQuote.couponDiscountType,
+        couponDiscountValue: resolvedQuote.couponDiscountValue,
         canCombineWithReferral: resolvedQuote.canCombineWithReferral === true,
       },
       providers: isFree
