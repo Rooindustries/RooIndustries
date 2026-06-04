@@ -169,6 +169,8 @@ function buildMetadata({
     metadataBase: new URL(siteUrl),
     title,
     description,
+    applicationName: SITE_NAME,
+    manifest: "/manifest.json",
     alternates: {
       canonical: canonicalUrl,
     },
