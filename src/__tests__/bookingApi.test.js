@@ -147,6 +147,24 @@ const mockSanityClient = {
         store.packages.find((pkg) => pkg.title === params.title) || null
       );
     }
+    if (
+      q.includes('_type == "referral"') &&
+      q.includes("_id == $id")
+    ) {
+      return store.referrals.find((ref) => ref._id === params.id) || null;
+    }
+    if (
+      q.includes('_type == "referral"') &&
+      q.includes("slug.current == $code")
+    ) {
+      return (
+        store.referrals.find(
+          (ref) =>
+            String(ref.slug?.current || "").toLowerCase() ===
+            String(params.code || "").toLowerCase()
+        ) || null
+      );
+    }
     if (q.includes("_type == $type && _id == $id")) {
       return store.paymentRecords.find((entry) => entry._id === params.id) || null;
     }
@@ -614,6 +632,220 @@ describe("booking reservation API", () => {
       paymentProvider: "paypal",
     });
     expect(store.paymentRecords[0].pricingSnapshot.netAmount).toBeCloseTo(84.99, 2);
+  });
+
+  test("clubbed coupons reduce the referral base before referral discount and commission", async () => {
+    store.referrals.push({
+      _id: "ref_creator",
+      _type: "referral",
+      slug: { current: "creator" },
+      currentCommissionPercent: 20,
+      currentDiscountPercent: 10,
+    });
+    store.coupons.push({
+      _id: "coupon_five",
+      _type: "coupon",
+      code: "FIVE",
+      discountType: "percent",
+      discountPercent: 5,
+      canCombineWithReferral: true,
+      isActive: true,
+      timesUsed: 0,
+    });
+
+    const startTimeUTC = "2025-01-15T08:22:00.000Z";
+    const timeZone = "America/Los_Angeles";
+    const utcDate = new Date(startTimeUTC);
+    const hold = await reserveSlot(startTimeUTC, "Test Package");
+    const res = createRes();
+
+    await createBooking(
+      createReq({
+        email: CLIENT_EMAIL,
+        packageTitle: "Test Package",
+        packagePrice: "$49.95",
+        status: "captured",
+        paymentProvider: "paypal",
+        paypalOrderId: "paypal_coupon_referral",
+        payerEmail: CLIENT_EMAIL,
+        referralCode: "creator",
+        couponCode: "FIVE",
+        startTimeUTC,
+        localTimeZone: timeZone,
+        displayDate: formatClientDate(utcDate, timeZone),
+        displayTime: formatClientTime(utcDate, timeZone),
+        slotHoldId: hold.body.holdId,
+        slotHoldToken: hold.body.holdToken,
+        slotHoldExpiresAt: hold.body.expiresAt,
+      }),
+      res
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(store.bookings).toHaveLength(1);
+    expect(store.bookings[0]).toMatchObject({
+      grossAmount: 49.95,
+      couponDiscountPercent: 5,
+      couponDiscountAmount: 2.5,
+      discountAmount: 7.25,
+      netAmount: 42.7,
+      commissionPercent: 20,
+      commissionAmount: 9.49,
+    });
+  });
+
+  test("rejects targeted coupons for the wrong package", async () => {
+    store.coupons.push({
+      _id: "coupon_xoc_only",
+      _type: "coupon",
+      code: "XOCONLY",
+      discountType: "fixed",
+      discountAmount: 10,
+      eligiblePackages: [{ _ref: "pkg_xoc" }],
+      canCombineWithReferral: true,
+      isActive: true,
+      timesUsed: 0,
+    });
+
+    const startTimeUTC = "2025-01-15T08:24:00.000Z";
+    const timeZone = "America/Los_Angeles";
+    const utcDate = new Date(startTimeUTC);
+    const hold = await reserveSlot(startTimeUTC, "Test Package");
+    const res = createRes();
+
+    await createBooking(
+      createReq({
+        email: CLIENT_EMAIL,
+        packageTitle: "Test Package",
+        packagePrice: "$49.95",
+        status: "captured",
+        paymentProvider: "paypal",
+        paypalOrderId: "paypal_wrong_package_coupon",
+        payerEmail: CLIENT_EMAIL,
+        couponCode: "XOCONLY",
+        startTimeUTC,
+        localTimeZone: timeZone,
+        displayDate: formatClientDate(utcDate, timeZone),
+        displayTime: formatClientTime(utcDate, timeZone),
+        slotHoldId: hold.body.holdId,
+        slotHoldToken: hold.body.holdToken,
+        slotHoldExpiresAt: hold.body.expiresAt,
+      }),
+      res
+    );
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({
+      error: "This coupon is not valid for the selected package.",
+    });
+    expect(store.bookings).toHaveLength(0);
+  });
+
+  test("fixed coupons can fully discount the selected package", async () => {
+    store.coupons.push({
+      _id: "coupon_free_fixed",
+      _type: "coupon",
+      code: "FIXEDFREE",
+      discountType: "fixed",
+      discountAmount: 50,
+      eligiblePackages: [{ _ref: "pkg_test" }],
+      canCombineWithReferral: true,
+      isActive: true,
+      timesUsed: 0,
+    });
+
+    const startTimeUTC = "2025-01-15T08:26:00.000Z";
+    const timeZone = "America/Los_Angeles";
+    const utcDate = new Date(startTimeUTC);
+    const hold = await reserveSlot(startTimeUTC, "Test Package");
+    const res = createRes();
+
+    await createBooking(
+      createReq({
+        email: CLIENT_EMAIL,
+        packageTitle: "Test Package",
+        packagePrice: "$49.95",
+        status: "captured",
+        paymentProvider: "free",
+        couponCode: "FIXEDFREE",
+        startTimeUTC,
+        localTimeZone: timeZone,
+        displayDate: formatClientDate(utcDate, timeZone),
+        displayTime: formatClientTime(utcDate, timeZone),
+        slotHoldId: hold.body.holdId,
+        slotHoldToken: hold.body.holdToken,
+        slotHoldExpiresAt: hold.body.expiresAt,
+      }),
+      res
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(store.bookings).toHaveLength(1);
+    expect(store.bookings[0]).toMatchObject({
+      grossAmount: 49.95,
+      netAmount: 0,
+      couponCode: "FIXEDFREE",
+      couponDiscountType: "fixed",
+      couponDiscountValue: 50,
+      couponDiscountPercent: 100,
+      couponDiscountAmount: 49.95,
+      commissionAmount: 0,
+    });
+    expect(store.coupons[0].timesUsed).toBe(1);
+  });
+
+  test("rejects non-clubbable coupons when a referral is also present", async () => {
+    store.referrals.push({
+      _id: "ref_no_club",
+      _type: "referral",
+      slug: { current: "noclub" },
+      currentCommissionPercent: 20,
+      currentDiscountPercent: 10,
+    });
+    store.coupons.push({
+      _id: "coupon_no_club",
+      _type: "coupon",
+      code: "NOCLUB",
+      discountType: "percent",
+      discountPercent: 5,
+      canCombineWithReferral: false,
+      isActive: true,
+      timesUsed: 0,
+    });
+
+    const startTimeUTC = "2025-01-15T08:28:00.000Z";
+    const timeZone = "America/Los_Angeles";
+    const utcDate = new Date(startTimeUTC);
+    const hold = await reserveSlot(startTimeUTC, "Test Package");
+    const res = createRes();
+
+    await createBooking(
+      createReq({
+        email: CLIENT_EMAIL,
+        packageTitle: "Test Package",
+        packagePrice: "$49.95",
+        status: "captured",
+        paymentProvider: "paypal",
+        paypalOrderId: "paypal_no_club_coupon",
+        payerEmail: CLIENT_EMAIL,
+        referralCode: "noclub",
+        couponCode: "NOCLUB",
+        startTimeUTC,
+        localTimeZone: timeZone,
+        displayDate: formatClientDate(utcDate, timeZone),
+        displayTime: formatClientTime(utcDate, timeZone),
+        slotHoldId: hold.body.holdId,
+        slotHoldToken: hold.body.holdToken,
+        slotHoldExpiresAt: hold.body.expiresAt,
+      }),
+      res
+    );
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({
+      error: "This coupon can't be combined with a referral discount.",
+    });
+    expect(store.bookings).toHaveLength(0);
   });
 
   test("sendBookingEmails dispatches deferred emails once and stays idempotent", async () => {

@@ -48,12 +48,30 @@ export default {
       name: 'paypalEmail',
       title: 'PayPal Email',
       type: 'string',
+      description: 'Global payout email. Leave empty for India-market creators.',
+    },
+    {
+      name: 'upiId',
+      title: 'UPI ID',
+      type: 'string',
+      description: 'India-market payout UPI ID.',
+    },
+    {
+      name: 'bankAccountNumber',
+      title: 'Bank Account Number',
+      type: 'string',
+      description: 'Optional India payout bank account.',
+    },
+    {
+      name: 'bankIfsc',
+      title: 'Bank IFSC',
+      type: 'string',
+      description: 'Optional India payout IFSC.',
     },
     {
       name: 'contactDiscord',
-      title: 'Discord Username',
+      title: 'Discord (optional)',
       type: 'string',
-      description: 'Creator Discord username from the referral registration form. Real name is not required.',
     },
     {
       name: 'contactTelegram',
@@ -77,7 +95,7 @@ export default {
           fields: [
             {
               name: 'amount',
-              title: 'Amount Paid (USD)',
+              title: 'Amount Paid',
               type: 'number',
               validation: (Rule) => Rule.required().min(0),
             },
@@ -98,7 +116,7 @@ export default {
             select: {amount: 'amount', paidOn: 'paidOn', note: 'note'},
             prepare({amount, paidOn, note}) {
               const date = paidOn ? new Date(paidOn).toLocaleDateString() : '';
-              const title = amount ? `$${amount} paid` : 'Payment';
+              const title = amount ? `${amount} paid` : 'Payment';
               const subtitle = [date, note].filter(Boolean).join(' • ');
               return {title, subtitle};
             },
@@ -118,7 +136,7 @@ export default {
           fields: [
             {
               name: 'amount',
-              title: 'Amount Paid (USD)',
+              title: 'Amount Paid',
               type: 'number',
               validation: (Rule) => Rule.required().min(0),
             },
@@ -139,7 +157,7 @@ export default {
             select: {amount: 'amount', paidOn: 'paidOn', note: 'note'},
             prepare({amount, paidOn, note}) {
               const date = paidOn ? new Date(paidOn).toLocaleDateString() : '';
-              const title = amount ? `$${amount} paid` : 'Payment';
+              const title = amount ? `${amount} paid` : 'Payment';
               const subtitle = [date, note].filter(Boolean).join(' • ');
               return {title, subtitle};
             },
@@ -188,6 +206,20 @@ export default {
       type: 'number',
       readOnly: true,
       description: 'Sum of all payments. Not editable.',
+    },
+    {
+      name: 'owedXoc',
+      title: 'Owed (XOC)',
+      type: 'number',
+      readOnly: true,
+      description: 'Remaining XOC balance after payment logs. Not editable.',
+    },
+    {
+      name: 'owedVertex',
+      title: 'Owed (Vertex)',
+      type: 'number',
+      readOnly: true,
+      description: 'Remaining Vertex balance after payment logs. Not editable.',
     },
     {
       name: 'owedTotal',

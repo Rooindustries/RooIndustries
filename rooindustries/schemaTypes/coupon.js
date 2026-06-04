@@ -18,11 +18,61 @@ export default {
       validation: (Rule) => Rule.required().min(2).max(32),
     },
     {
+      name: 'discountType',
+      title: 'Discount Type',
+      type: 'string',
+      description: 'Percent off or a fixed USD amount off.',
+      initialValue: 'percent',
+      options: {
+        list: [
+          {title: 'Percent off', value: 'percent'},
+          {title: 'Fixed USD off', value: 'fixed'},
+        ],
+        layout: 'radio',
+      },
+      validation: (Rule) => Rule.required(),
+    },
+    {
       name: 'discountPercent',
       title: 'Discount Percentage',
       type: 'number',
       description: 'How much discount this coupon gives (0–100)',
-      validation: (Rule) => Rule.required().min(0).max(100),
+      hidden: ({parent}) => parent?.discountType === 'fixed',
+      validation: (Rule) =>
+        Rule.custom((value, context) => {
+          const type = context?.parent?.discountType || 'percent'
+          if (type !== 'percent') return true
+          if (typeof value !== 'number') return 'Percent coupons need a discount percentage.'
+          if (value < 0 || value > 100) return 'Discount percentage must be between 0 and 100.'
+          return true
+        }),
+    },
+    {
+      name: 'discountAmount',
+      title: 'Discount Amount (USD)',
+      type: 'number',
+      description: 'Fixed USD amount off the selected package.',
+      hidden: ({parent}) => (parent?.discountType || 'percent') !== 'fixed',
+      validation: (Rule) =>
+        Rule.custom((value, context) => {
+          const type = context?.parent?.discountType || 'percent'
+          if (type !== 'fixed') return true
+          if (typeof value !== 'number') return 'Fixed coupons need a USD amount.'
+          if (value <= 0) return 'Discount amount must be greater than 0.'
+          return true
+        }),
+    },
+    {
+      name: 'eligiblePackages',
+      title: 'Eligible Packages',
+      type: 'array',
+      description: 'Limit this coupon to selected packages. Leave empty to allow all packages.',
+      of: [
+        {
+          type: 'reference',
+          to: [{type: 'package'}],
+        },
+      ],
     },
     {
       name: 'isActive',
