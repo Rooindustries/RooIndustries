@@ -572,7 +572,7 @@ describe("payment flows", () => {
     });
   });
 
-  test("free booking flow defers email dispatch until the thank-you page", async () => {
+  test("fixed full coupon free booking flow defers email dispatch until the thank-you page", async () => {
     const timeZone = "America/Los_Angeles";
     const startTimeUTC = "2025-01-15T08:30:00.000Z";
     const utcDate = new Date(startTimeUTC);
@@ -607,13 +607,16 @@ describe("payment flows", () => {
         };
       }
       if (String(url).startsWith("/api/ref/validateCoupon")) {
+        fetchCalls.push({ url });
         return {
           ok: true,
           json: async () => ({
             ok: true,
             coupon: {
               code: "FREE100",
-              discountPercent: 100,
+              discountType: "fixed",
+              discountPercent: 0,
+              discountAmount: 10,
               canCombineWithReferral: true,
             },
           }),
@@ -664,9 +667,16 @@ describe("payment flows", () => {
     const bookingCall = fetchCalls.find(
       (call) => call.url === "/api/ref/createBooking"
     );
+    const validateCall = fetchCalls.find((call) =>
+      String(call.url).startsWith("/api/ref/validateCoupon")
+    );
+    expect(validateCall.url).toContain("packageTitle=Performance%20Vertex%20Overhaul");
     expect(bookingCall.body.paymentProvider).toBe("free");
     expect(bookingCall.body.netAmount).toBe(0);
     expect(bookingCall.body.couponCode).toBe("FREE100");
+    expect(bookingCall.body.couponDiscountType).toBe("fixed");
+    expect(bookingCall.body.couponDiscountValue).toBe(10);
+    expect(bookingCall.body.couponDiscountAmount).toBe(10);
     expect(bookingCall.body.deferEmailsUntilConfirmation).toBe(true);
     expect(mockNavigate).toHaveBeenCalledWith("/thank-you", {
       state: {

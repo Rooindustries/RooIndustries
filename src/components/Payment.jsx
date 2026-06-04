@@ -31,6 +31,49 @@ const formatLocalTime = (utcDate, timeZone) => {
   }
 };
 
+const toMoney = (value) => {
+  const parsed = Number(
+    typeof value === "string" ? value.replace(/[^0-9.]/g, "") : value
+  );
+  if (!Number.isFinite(parsed)) return 0;
+  return +parsed.toFixed(2);
+};
+
+const getCouponDiscountType = (coupon) =>
+  String(coupon?.discountType || "").trim().toLowerCase() === "fixed"
+    ? "fixed"
+    : "percent";
+
+const getCouponDiscountValue = (coupon) =>
+  getCouponDiscountType(coupon) === "fixed"
+    ? toMoney(coupon?.discountAmount || 0)
+    : toMoney(coupon?.discountPercent || 0);
+
+const getCouponDiscountAmount = (coupon, baseAmount) => {
+  if (!coupon || baseAmount <= 0) return 0;
+  const discountType = getCouponDiscountType(coupon);
+  const rawAmount =
+    discountType === "fixed"
+      ? getCouponDiscountValue(coupon)
+      : baseAmount * (getCouponDiscountValue(coupon) / 100);
+  return Math.min(baseAmount, toMoney(rawAmount));
+};
+
+const getCouponEffectivePercent = (coupon, baseAmount, discountAmount) => {
+  if (!coupon || baseAmount <= 0) return 0;
+  if (getCouponDiscountType(coupon) === "percent") {
+    return getCouponDiscountValue(coupon);
+  }
+  return toMoney((discountAmount / baseAmount) * 100);
+};
+
+const formatCouponValue = (coupon) => {
+  if (getCouponDiscountType(coupon) === "fixed") {
+    return `$${getCouponDiscountValue(coupon).toFixed(2)} off`;
+  }
+  return `${getCouponDiscountValue(coupon)}% off`;
+};
+
 export default function Payment({ hideFooter = false }) {
   const location = useLocation();
   const q = new URLSearchParams(location.search);
@@ -272,12 +315,10 @@ export default function Payment({ hideFooter = false }) {
   const baseAmount =
     parseFloat(String(packagePrice).replace(/[^0-9.]/g, "")) || 0;
 
-  // Referral state
   const [referralInput, setReferralInput] = useState("");
   const [referral, setReferral] = useState(null);
   const [validating, setValidating] = useState(false);
 
-  // Coupon state
   const [couponInput, setCouponInput] = useState("");
   const [coupon, setCoupon] = useState(null);
   const [validatingCoupon, setValidatingCoupon] = useState(false);
@@ -322,38 +363,40 @@ export default function Payment({ hideFooter = false }) {
     return () => clearTimeout(timeoutId);
   }, [holdExpiresAt, navigate, navState, location]);
 
-  // Referral discount
   const referralPercent = referral?.currentDiscountPercent || 0;
   const commissionPercent = referral?.currentCommissionPercent || 0;
 
-  // Coupon discount
-  const couponPercent = coupon?.discountPercent || 0;
+  const couponDiscountType = coupon ? getCouponDiscountType(coupon) : "";
+  const couponDiscountValue = coupon ? getCouponDiscountValue(coupon) : 0;
+  const couponDiscountAmount = getCouponDiscountAmount(coupon, baseAmount);
+  const couponPercent = getCouponEffectivePercent(
+    coupon,
+    baseAmount,
+    couponDiscountAmount
+  );
   const canStackCouponWithReferral =
     coupon?.canCombineWithReferral === true || false;
 
-  // Compute discount breakdown
   let referralDiscountAmount = 0;
-  let couponDiscountAmount = 0;
 
   if (baseAmount > 0) {
     if (referralPercent > 0) {
-      referralDiscountAmount = +(baseAmount * (referralPercent / 100)).toFixed(
-        2
-      );
-    }
-
-    if (couponPercent > 0 && coupon) {
-      if (canStackCouponWithReferral && referralPercent > 0) {
-        couponDiscountAmount = +(baseAmount * (couponPercent / 100)).toFixed(2);
-      } else {
-        couponDiscountAmount = +(baseAmount * (couponPercent / 100)).toFixed(2);
-      }
+      const referralBase =
+        coupon && canStackCouponWithReferral
+          ? Math.max(0, baseAmount - couponDiscountAmount)
+          : baseAmount;
+      referralDiscountAmount = +(
+        referralBase *
+        (referralPercent / 100)
+      ).toFixed(2);
     }
   }
 
-  const uncappedTotalDiscount = +(
-    (referralDiscountAmount || 0) + (couponDiscountAmount || 0)
-  ).toFixed(2);
+  const canApplyCouponWithReferral =
+    !(coupon && referral && !canStackCouponWithReferral);
+  const uncappedTotalDiscount = canApplyCouponWithReferral
+    ? +((referralDiscountAmount || 0) + (couponDiscountAmount || 0)).toFixed(2)
+    : Math.max(referralDiscountAmount || 0, couponDiscountAmount || 0);
 
   const totalDiscountAmount =
     baseAmount > 0 ? Math.min(baseAmount, uncappedTotalDiscount) : 0;
@@ -363,7 +406,7 @@ export default function Payment({ hideFooter = false }) {
     +(baseAmount - totalDiscountAmount).toFixed(2)
   );
 
-  const hasFreeCoupon = coupon?.discountPercent === 100;
+  const hasFreeCoupon = !!coupon && couponDiscountAmount >= baseAmount;
   const isFree = hasFreeCoupon && rawFinalAmount === 0;
   const preventedFreeReduction =
     !isFree && rawFinalAmount === 0 && baseAmount > 0;
@@ -381,7 +424,6 @@ export default function Payment({ hideFooter = false }) {
     ? +((totalDiscountAmount / baseAmount) * 100 || 0).toFixed(2)
     : 0;
 
-  // Razorpay state
   const [rzpReady, setRzpReady] = useState(false);
   const [payingRzp, setPayingRzp] = useState(false);
   const [providerConfig, setProviderConfig] = useState({
@@ -403,13 +445,10 @@ export default function Payment({ hideFooter = false }) {
   const hasPaypalClientId = !!paypalClientId;
   const canUseRazorpay = !!providerConfig?.razorpay?.enabled;
   const canUsePaypal = hasPaypalClientId && !!providerConfig?.paypal?.enabled;
-  // PayPal should be visible to all clients when provider is enabled.
-  // `showInternalPayments` still allows internal preview/testing behavior.
   const shouldRenderPaypalBlock =
     !!providerConfig?.paypal?.enabled || showInternalPayments;
   const canDisplayPaypalMethod = shouldRenderPaypalBlock && canUsePaypal;
 
-  // Free booking state
   const [creatingFree, setCreatingFree] = useState(false);
 
   const buildCheckoutPayload = () => ({
@@ -451,7 +490,6 @@ export default function Payment({ hideFooter = false }) {
     ]
   );
 
-  // Auto-load referral
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const fromUrl = params.get("ref");
@@ -473,7 +511,6 @@ export default function Payment({ hideFooter = false }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.search]);
 
-  // Load Razorpay checkout script
   useEffect(() => {
     const script = document.createElement("script");
     script.src = "https://checkout.razorpay.com/v1/checkout.js";
@@ -515,8 +552,6 @@ export default function Payment({ hideFooter = false }) {
         });
       })
       .catch(() => {
-        // Local `next dev` does not mount `/api/*` from root serverless files.
-        // Keep PayPal testable on localhost when a client ID is configured.
         if (typeof window === "undefined") return;
         const host = String(window.location.hostname || "").toLowerCase();
         const isLocalHost = host === "localhost" || host === "127.0.0.1";
@@ -751,7 +786,6 @@ export default function Payment({ hideFooter = false }) {
     }
   };
 
-  // ----------------- REFERRAL VALIDATION -----------------
   async function validateReferral(code) {
     if (!code) {
       setReferral(null);
@@ -799,7 +833,6 @@ export default function Payment({ hideFooter = false }) {
     }
   }
 
-  // ----------------- COUPON VALIDATION -----------------
   async function validateCoupon(code) {
     if (!code) {
       setCoupon(null);
@@ -808,7 +841,9 @@ export default function Payment({ hideFooter = false }) {
     try {
       setValidatingCoupon(true);
       const r = await fetch(
-        `/api/ref/validateCoupon?code=${encodeURIComponent(code)}`
+        `/api/ref/validateCoupon?code=${encodeURIComponent(
+          code
+        )}&packageTitle=${encodeURIComponent(packageTitle)}`
       );
       const data = await r.json();
       if (data.ok && data.coupon) {
@@ -824,7 +859,7 @@ export default function Payment({ hideFooter = false }) {
         setCoupon(data.coupon);
         showBanner(
           "success",
-          `Coupon applied: ${data.coupon.discountPercent}% off`
+          `Coupon applied: ${formatCouponValue(data.coupon)}`
         );
       } else {
         setCoupon(null);
@@ -842,7 +877,6 @@ export default function Payment({ hideFooter = false }) {
     }
   }
 
-  // ----------------- FREE BOOKING FLOW -----------------
   async function handleFreeBooking() {
     if (!isFree) return;
     if (!ensureSlotBeforeAction()) return;
@@ -860,6 +894,8 @@ export default function Payment({ hideFooter = false }) {
         couponCode: coupon?.code || couponInput || "",
         couponDiscountPercent: couponPercent,
         couponDiscountAmount,
+        couponDiscountType,
+        couponDiscountValue,
 
         discountPercent: discountPercentCombined,
         discountAmount: effectiveDiscountAmount,
@@ -926,7 +962,6 @@ export default function Payment({ hideFooter = false }) {
       setCreatingFree(false);
     }
   }
-  // Razorpay payment flow
   async function handleRazorpayPay() {
     if (!canUseRazorpay) {
       showBanner(
@@ -1067,7 +1102,9 @@ export default function Payment({ hideFooter = false }) {
 
               couponCode: coupon?.code || couponInput || "",
               couponDiscountPercent: couponPercent,
-              couponDiscountAmount: couponDiscountAmount,
+              couponDiscountAmount,
+              couponDiscountType,
+              couponDiscountValue,
 
               discountPercent: discountPercentCombined,
               discountAmount: effectiveDiscountAmount,
@@ -1137,13 +1174,12 @@ export default function Payment({ hideFooter = false }) {
     }
   }
 
-  // --- ANIMATION CONFIG ---
   const containerVariants = {
     hidden: { opacity: 0 },
     visible: {
       opacity: 1,
       transition: {
-        staggerChildren: 0.1, // Each child appears 0.1s after the prev one
+        staggerChildren: 0.1,
         delayChildren: 0.1,
       },
     },
@@ -1159,7 +1195,6 @@ export default function Payment({ hideFooter = false }) {
   };
 
   return (
-    // Converted to motion.section to handle page fade-in
     <motion.section
       className="relative z-10 py-4 md:py-32 px-6 max-w-3xl mx-auto text-white"
       variants={containerVariants}
@@ -1206,7 +1241,7 @@ export default function Payment({ hideFooter = false }) {
         )}
       </motion.div>
 
-      {/* Booking Summary Card */}
+
       <motion.div
         variants={itemVariants}
         className="low-perf-surface glass-premium glass-card-surface glass-scroll-lite mt-8 rounded-2xl border border-sky-700/40"
@@ -1222,7 +1257,7 @@ export default function Payment({ hideFooter = false }) {
           <div className="mt-6">
             <p className="font-semibold text-lg text-white">{packageTitle}</p>
             <div className="mt-2 space-y-1">
-              {(referralPercent > 0 || couponPercent > 0) && (
+              {(referralPercent > 0 || couponDiscountAmount > 0) && (
                 <p className="text-xl text-slate-300 line-through">
                   ${baseAmount.toFixed(2)}
                 </p>
@@ -1238,9 +1273,9 @@ export default function Payment({ hideFooter = false }) {
                   {referral?.name ? ` via ${referral.name}` : ""})
                 </p>
               )}
-              {couponPercent > 0 && coupon && (
+              {couponDiscountAmount > 0 && coupon && (
                 <p className="text-sm text-emerald-300">
-                  Coupon "{coupon.code}": {couponPercent}% ($
+                  Coupon "{coupon.code}": {formatCouponValue(coupon)} ($
                   {couponDiscountAmount.toFixed(2)})
                   {canStackCouponWithReferral && referralPercent > 0
                     ? " (stacked with referral)"
@@ -1285,9 +1320,9 @@ export default function Payment({ hideFooter = false }) {
 
           <div className="mt-6 h-px w-full bg-sky-800/40" />
 
-          {/* Referral & Coupon inputs */}
+
           <>
-            {/* Referral input */}
+
             <div className="mt-6">
               <label className="block text-sm font-semibold mb-1">
                 Referral Code (optional)
@@ -1319,7 +1354,7 @@ export default function Payment({ hideFooter = false }) {
               )}
             </div>
 
-            {/* Coupon input */}
+
             <div className="mt-5">
               <label className="block text-sm font-semibold mb-1">
                 Coupon Code (optional)
@@ -1368,7 +1403,7 @@ export default function Payment({ hideFooter = false }) {
         </div>
       </motion.div>
 
-      {/* Payment Method / Free Booking */}
+
       <motion.div
         variants={itemVariants}
         className="low-perf-surface glass-premium glass-card-surface glass-scroll-lite mt-8 rounded-2xl border border-sky-700/40"
@@ -1383,7 +1418,7 @@ export default function Payment({ hideFooter = false }) {
               : "Secure online payment checkout"}
           </p>
 
-          {/* FREE BOOKING MODE (100% discount) */}
+
           {isFree ? (
             <div className="mt-6 flex flex-col gap-4 border border-emerald-500/40 bg-emerald-500/10 rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(16,185,129,0.35)]">
               <p className="text-sm text-emerald-100">
@@ -1404,7 +1439,7 @@ export default function Payment({ hideFooter = false }) {
             </div>
           ) : (
             <>
-              {/* Razorpay option */}
+
               <div className="low-perf-surface glass-premium glass-card-surface mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-xl border border-sky-800/30 px-5 py-4">
                 <div className="flex items-center gap-4">
                   <img
@@ -1446,7 +1481,7 @@ export default function Payment({ hideFooter = false }) {
                 </p>
               )}
 
-              {/* PayPal option */}
+
               {shouldRenderPaypalBlock && (
                 <div className="low-perf-surface glass-premium glass-card-surface mt-4 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-xl border border-sky-800/30 px-5 py-4">
                   <div className="flex items-center gap-4">
@@ -1495,7 +1530,7 @@ export default function Payment({ hideFooter = false }) {
                               return session?.providerPayload?.orderId || "";
                             }
 
-                            return actions.order.create({
+                            const orderId = await actions.order.create({
                               purchase_units: [
                                 {
                                   description: `${packageTitle} booking`,
@@ -1504,6 +1539,7 @@ export default function Payment({ hideFooter = false }) {
                                 },
                               ],
                             });
+                            return orderId;
                           }}
                           onApprove={async (data, actions) => {
                             if (!ensureSlotBeforeAction()) return;
@@ -1534,7 +1570,9 @@ export default function Payment({ hideFooter = false }) {
 
                                 couponCode: coupon?.code || couponInput || "",
                                 couponDiscountPercent: couponPercent,
-                                couponDiscountAmount: couponDiscountAmount,
+                                couponDiscountAmount,
+                                couponDiscountType,
+                                couponDiscountValue,
 
                                 discountPercent: discountPercentCombined,
                                 discountAmount: effectiveDiscountAmount,
@@ -1615,10 +1653,7 @@ export default function Payment({ hideFooter = false }) {
         </div>
       </motion.div>
 
-      {/* Modern Back Button 
-         ALWAYS render this if we are in modal mode OR if hideFooter is false. 
-         This ensures a navigation method exists inside the popup.
-      */}
+
       {(isModalMode || !hideFooter) && (
         <motion.div
           variants={itemVariants}

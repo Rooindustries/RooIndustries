@@ -1,0 +1,106 @@
+import React from "react";
+import { render, screen } from "@testing-library/react";
+import RefDashboard from "../components/RefDashboard";
+
+const mockNavigate = jest.fn();
+
+jest.mock(
+  "react-router-dom",
+  () => ({
+    __esModule: true,
+    useNavigate: () => mockNavigate,
+  }),
+  { virtual: true }
+);
+
+const referralPayload = {
+  ok: true,
+  referral: {
+    name: "Creator",
+    slug: { current: "creator-code" },
+    successfulReferrals: 6,
+    currentCommissionPercent: 10,
+    currentDiscountPercent: 5,
+    maxCommissionPercent: 15,
+  },
+};
+
+const payoutPayload = {
+  ok: true,
+  earnings: {
+    xoc: 60,
+    vertex: 40,
+    total: 100,
+    byPackage: {
+      "XOC Tune": 60,
+      "Performance Vertex Overhaul": 40,
+    },
+  },
+  packageBreakdown: [
+    { title: "XOC Tune", amount: 60 },
+    { title: "Performance Vertex Overhaul", amount: 40 },
+  ],
+  payments: {
+    xoc: 30,
+    vertex: 40,
+    total: 70,
+  },
+  remaining: {
+    xoc: 30,
+    vertex: 0,
+    total: 30,
+  },
+  owed: {
+    xoc: 30,
+    vertex: 0,
+    total: 30,
+  },
+  overpaid: {
+    xoc: 0,
+    vertex: 0,
+    total: 0,
+  },
+  logs: {
+    xoc: [{ _key: "x1", amount: 30, paidOn: "2026-05-01T00:00:00.000Z" }],
+    vertex: [{ _key: "v1", amount: 40, paidOn: "2026-05-02T00:00:00.000Z" }],
+  },
+};
+
+describe("RefDashboard payout summary", () => {
+  beforeEach(() => {
+    mockNavigate.mockReset();
+    global.fetch = jest.fn(async (url) => {
+      if (url === "/api/ref/getData") {
+        return { ok: true, json: async () => referralPayload };
+      }
+
+      if (url === "/api/ref/payouts") {
+        return { ok: true, json: async () => payoutPayload };
+      }
+
+      return { ok: true, json: async () => ({ ok: true }) };
+    });
+  });
+
+  afterEach(() => {
+    if (global.fetch && global.fetch.mockReset) {
+      global.fetch.mockReset();
+    }
+  });
+
+  test("shows earned, paid, and remaining owed without labeling package earnings as owed", async () => {
+    render(<RefDashboard />);
+
+    expect(await screen.findByText("Remaining owed")).toBeInTheDocument();
+    expect(screen.getByText("Total earned")).toBeInTheDocument();
+    expect(screen.getByText("Total paid")).toBeInTheDocument();
+    expect(screen.getByText("Package earnings")).toBeInTheDocument();
+    expect(screen.getByText("Earned - XOC Tune")).toBeInTheDocument();
+    expect(
+      screen.getByText("Earned - Performance Vertex Overhaul")
+    ).toBeInTheDocument();
+    expect(screen.getByText("$70.00")).toBeInTheDocument();
+    expect(screen.getAllByText("$30.00").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Total owed -/i)).not.toBeInTheDocument();
+  });
+});
