@@ -3,8 +3,10 @@ const mockGetClientAddressFromHeaders = jest.fn();
 const mockReadTourneySessionFromStore = jest.fn();
 const mockApplyRegistrationDecision = jest.fn();
 const mockCreateApprovedTourneyPlayer = jest.fn();
+const mockGetTourneyRoleCapacitySnapshot = jest.fn();
 const mockKickTourneyPlayer = jest.fn();
 const mockListManageTourneyPlayers = jest.fn();
+const mockUpdateTourneyRegistrationConfig = jest.fn();
 const mockUpdateTourneyPlayerDetails = jest.fn();
 const mockSendTourneyPlayerApprovedEmail = jest.fn();
 const originalResponseJson = Response.json;
@@ -19,6 +21,16 @@ if (!Response.json) {
       },
     });
 }
+
+jest.mock("next/server", () => ({
+  NextResponse: {
+    json: (body, init = {}) => ({
+      status: init.status || 200,
+      json: async () => body,
+      headers: init.headers || {},
+    }),
+  },
+}));
 
 jest.mock("../server/tourney/auth", () => ({
   TOURNEY_SESSION_COOKIE: "tourney_session",
@@ -36,8 +48,12 @@ jest.mock("../server/tourney/email", () => ({
 jest.mock("../server/tourney/playerStore", () => ({
   applyRegistrationDecision: (...args) => mockApplyRegistrationDecision(...args),
   createApprovedTourneyPlayer: (...args) => mockCreateApprovedTourneyPlayer(...args),
+  getTourneyRoleCapacitySnapshot: (...args) =>
+    mockGetTourneyRoleCapacitySnapshot(...args),
   kickTourneyPlayer: (...args) => mockKickTourneyPlayer(...args),
   listManageTourneyPlayers: (...args) => mockListManageTourneyPlayers(...args),
+  updateTourneyRegistrationConfig: (...args) =>
+    mockUpdateTourneyRegistrationConfig(...args),
   updateTourneyPlayerDetails: (...args) => mockUpdateTourneyPlayerDetails(...args),
 }));
 
@@ -73,8 +89,10 @@ describe("tourney players API route", () => {
     mockReadTourneySessionFromStore.mockReset();
     mockApplyRegistrationDecision.mockReset();
     mockCreateApprovedTourneyPlayer.mockReset();
+    mockGetTourneyRoleCapacitySnapshot.mockReset();
     mockKickTourneyPlayer.mockReset();
     mockListManageTourneyPlayers.mockReset();
+    mockUpdateTourneyRegistrationConfig.mockReset();
     mockUpdateTourneyPlayerDetails.mockReset();
     mockSendTourneyPlayerApprovedEmail.mockReset();
 
@@ -85,6 +103,10 @@ describe("tourney players API route", () => {
     mockGetClientAddressFromHeaders.mockReturnValue("127.0.0.1");
     mockCheckTourneyRateLimit.mockReturnValue({ ok: true });
     mockListManageTourneyPlayers.mockResolvedValue([]);
+    mockGetTourneyRoleCapacitySnapshot.mockResolvedValue({
+      teamCount: 8,
+      roles: [],
+    });
     mockSendTourneyPlayerApprovedEmail.mockResolvedValue({ id: "email_1" });
   });
 
@@ -118,6 +140,7 @@ describe("tourney players API route", () => {
       id: "player_1",
       displayName: "Skinz",
       teamName: "Team Cyber",
+      registrationPool: "substitute",
       twitchUsername: "skinz_ow",
     });
     mockListManageTourneyPlayers.mockResolvedValue([
@@ -125,6 +148,7 @@ describe("tourney players API route", () => {
         id: "player_1",
         displayName: "Skinz",
         teamName: "Team Cyber",
+        registrationPool: "substitute",
         twitchUsername: "skinz_ow",
       },
     ]);
@@ -135,6 +159,7 @@ describe("tourney players API route", () => {
         playerId: "player_1",
         displayName: "Skinz",
         teamName: "Team Cyber",
+        registrationPool: "substitute",
         twitchUsername: "skinz_ow",
       })
     );
@@ -148,9 +173,35 @@ describe("tourney players API route", () => {
         playerId: "player_1",
         displayName: "Skinz",
         teamName: "Team Cyber",
+        registrationPool: "substitute",
         twitchUsername: "skinz_ow",
       },
       actorUsername: "yukari",
+    });
+  });
+
+  test("allows admins and casters to update registration capacity", async () => {
+    mockGetTourneyRoleCapacitySnapshot.mockResolvedValue({
+      teamCount: 10,
+      roles: [{ role: "Support", cap: 20, mainCount: 16 }],
+    });
+
+    const response = await POST(
+      makeJsonRequest({
+        action: "update-capacity",
+        teamCount: 10,
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(mockUpdateTourneyRegistrationConfig).toHaveBeenCalledWith({
+      teamCount: 10,
+      actorUsername: "yukari",
+    });
+    expect(body.capacity).toMatchObject({
+      teamCount: 10,
+      roles: [{ role: "Support", cap: 20, mainCount: 16 }],
     });
   });
 
@@ -172,5 +223,22 @@ describe("tourney players API route", () => {
 
     expect(response.status).toBe(404);
     expect(mockUpdateTourneyPlayerDetails).not.toHaveBeenCalled();
+  });
+
+  test("blocks non-admin users from updating registration capacity", async () => {
+    mockReadTourneySessionFromStore.mockResolvedValue({
+      username: "player-one",
+      role: "player",
+    });
+
+    const response = await POST(
+      makeJsonRequest({
+        action: "update-capacity",
+        teamCount: 10,
+      })
+    );
+
+    expect(response.status).toBe(404);
+    expect(mockUpdateTourneyRegistrationConfig).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,6 @@
 import {
   Section,
+  TourneyHosts,
   TourneyShell,
   getTourneySession,
 } from "./TourneyShared";
@@ -9,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 export const metadata = {
   title: "6v6 Legacy Series | Roo Industries",
-  description: "6v6 Legacy Series presented by Roo Industries.",
+  description: "6v6 Legacy Series event information, rules, roster, and bracket.",
   robots: {
     index: false,
     follow: false,
@@ -19,100 +20,63 @@ export const metadata = {
 
 const competitiveRules = [
   {
-    title: "Tournament Format",
-    items: [
-      "This is a 6v6 Overwatch tournament with double elimination.",
-      "Every bracket match is Best of 5.",
-      "Grand Final is Best of 7.",
-      "There is no bracket reset. The winners-side team receives first map and side priority in Grand Final.",
-    ],
+    title: "Format",
+    body: "6v6 Overwatch. Double elimination. Bracket matches are Best of 5 and Grand Final is Best of 7 with no bracket reset.",
   },
   {
-    title: "Teams and Subs",
-    items: [
-      "Each team has two captains: one captain and one co-captain.",
-      "Rosters lock at 6 starters and 2 substitutes.",
-      "Captains draft from the player pool.",
-      "Each team gets 3 random player rolls for substitute availability. Captains do not hand-pick those extra players.",
-      "The first 2 eligible random-roll players become subs. The third roll is only backup if an earlier roll is invalid, unavailable, or declined before roster lock.",
-    ],
+    title: "Teams",
+    body: "Captains draft teams from the approved player pool. Rosters lock at 6 starters and 2 substitutes.",
   },
   {
-    title: "Roster Lock",
-    items: [
-      "Teams can swap players only before official start or check-in close, whichever admins announce.",
-      "After the tournament starts, team changes are closed.",
-      "Only registered subs can play after roster lock.",
-      "Subs can enter only between maps. Never mid-map.",
-      "No player can play for more than one team after roster lock.",
-    ],
+    title: "Roles",
+    body: "No role swaps. Players must play the role they registered, drafted, or were assigned for that series.",
   },
   {
-    title: "Late Players and Leaves",
-    items: [
-      "Field 6 eligible players within 10 minutes of scheduled match time.",
-      "Miss that window and admins may call map forfeit, match forfeit, or disqualification.",
-      "If a player leaves mid-map after game-of-record, the map continues unless admins rule otherwise.",
-      "No eligible sub? You play short or forfeit.",
-    ],
+    title: "Subs",
+    body: "Only registered substitutes can play after roster lock. Subs enter between maps, never mid-map.",
   },
   {
-    title: "Maps, Hero Bans, and Lobbies",
-    items: [
-      "Admins publish the map pool and mode order before tournament start.",
-      "Map 1 uses admin or seed priority.",
-      "After Map 1, the previous map loser picks the next legal map in the mode order. The previous map winner picks side.",
-      "No map may repeat in the same series unless admins announce a tiebreaker exception.",
-      "Each team gets 1 hero ban per map.",
-      "The map picker bans first. Hero bans reset every map.",
-      "The lobby host must apply bans and settings before the map starts.",
-    ],
+    title: "Check-In",
+    body: "Teams must field 6 eligible players within 10 minutes of match time or admins may call a forfeit.",
   },
   {
-    title: "No Throwing or Griefing",
-    items: [
-      "Do not feed on purpose, AFK, refuse objective play, sabotage teammates, leak comms or strats, stream snipe, leak lobby codes, abuse comms, harass players, cheat, abuse bugs, fix matches, play on alts, or stall on purpose.",
-      "Bad games happen. They are not griefing unless evidence shows intent or repeated sabotage.",
-      "Play on your own account. Do not impersonate another player.",
-      "Keep comms about the match and keep it respectful.",
-    ],
+    title: "Maps",
+    body: "Map 1 is Control. After that, the previous map loser picks the next legal map, mode, and starting side.",
   },
   {
-    title: "Disputes and Proof",
-    items: [
-      "Captains or co-captains file disputes unless the issue is harassment, abuse, or player safety.",
-      "Bring proof: clips or screenshots with scoreboard, lobby, chat, timer, and player names where possible.",
-      "Raise disputes right away, ideally within 10 minutes after the map ends.",
-      "Teams must keep playing unless owner, caster, or admin pauses the match.",
-      "Owner and designated casters make the final call.",
-    ],
+    title: "Hero Bans",
+    body: "Each team bans 1 hero per map. Teams cannot repeat their own ban in a series, and both bans cannot be from the same role.",
+  },
+  {
+    title: "Conduct",
+    body: "No cheating, throwing, griefing, harassment, stream sniping, lobby leaks, alt play, impersonation, or intentional stalling.",
   },
   {
     title: "Penalties",
-    items: [
-      "Penalties can be a warning, loss of map or side priority, map forfeit, match forfeit, player removal, team disqualification, prize forfeiture if prizes exist, dashboard access removal, or a future Roo tournament ban.",
-      "Cheating, throwing on purpose, severe harassment, abandoning a match, or tampering with proof can skip warnings and go straight to disqualification or ban.",
-      "Admins judge based on the proof available, match impact, repeated behavior, and whether the player or team cooperates.",
-    ],
+    body: "Rule breaks can result in immediate penalty or disqualification. No warnings are required.",
   },
   {
     title: "Community Event Notice",
-    items: [
-      "Roo Industries runs this tournament independently.",
-      "This event is not endorsed by, sponsored by, or affiliated with Blizzard Entertainment.",
-      "Matches must be decided by player skill inside the game.",
-    ],
+    body: "Roo Industries runs this tournament independently. It is not endorsed, sponsored, or affiliated with Blizzard Entertainment.",
   },
 ];
 
 const scheduleItems = [
   {
-    title: "Match windows",
-    body: "Round times, check-in windows, and stream blocks will be posted once teams are confirmed.",
+    title: "Registration closes",
+    body: "Registration closes July 22, 2026 at 00:00 UTC.",
+  },
+  {
+    title: "Draft day",
+    body: "Teams will be picked in drafts on July 25, 2026. Draft time is TBD.",
   },
   {
     title: "Event dates",
-    body: "The tournament runs August 1-2, 2026. Exact match times are still TBA.",
+    body: "The tournament runs August 15-16, 2026. Exact match times are TBD.",
+  },
+  {
+    title: "Match windows",
+    body: "Round times, check-in windows, and stream blocks will be posted once teams are confirmed.",
   },
 ];
 
@@ -125,18 +89,38 @@ const bracketItems = [
     title: "Format",
     body: "Double elimination, Best of 5 bracket matches, and a Best of 7 Grand Final.",
   },
+  {
+    title: "Grand Final path",
+    body: "The winners-side finalist and the losers-side finalist both qualify for Grand Final.",
+  },
+];
+
+const infoItems = [
+  {
+    title: "Format",
+    body: "6v6 Overwatch, double elimination, Best of 5 bracket matches, and a Best of 7 Grand Final.",
+  },
+  {
+    title: "Prize pool",
+    body: "$2,000 USD for 1st and 2nd place. Split is TBD and payouts are handled after final results are confirmed.",
+  },
+  {
+    title: "Website proceeds",
+    body: "Sales from July 25 through August 16, 2026 fund separate 3rd-place and match-MVP payouts.",
+  },
+  {
+    title: "Giveaways",
+    body: "9850X3D client draw and Superstrike mouse community giveaway. Entry and draw details are TBD.",
+  },
 ];
 
 const DashboardPage = ({ session }) => (
   <TourneyShell session={session}>
     <section className="tourney-hero" aria-labelledby="tourney-title">
       <div>
-        <span className="tourney-badge">Official Roo Industries Tournament</span>
+        <span className="tourney-badge">Community Overwatch Tournament</span>
         <h1 id="tourney-title">
           <span className="tourney-title-line">6v6 Legacy Series</span>
-          <span className="tourney-title-line tourney-title-accent">
-            Presented by Roo Industries
-          </span>
         </h1>
         <p>
           Event information, rules, roster status, signups, and bracket access
@@ -145,62 +129,40 @@ const DashboardPage = ({ session }) => (
       </div>
     </section>
 
+    <TourneyHosts />
+
     <div className="tourney-grid">
+      <Section id="dates" eyebrow="Important Dates" title="Important Dates" wide>
+        <ul className="tourney-card-list tourney-date-list">
+          {scheduleItems.map((item) => (
+            <li key={item.title}>
+              <strong>{item.title}</strong>
+              <span>{item.body}</span>
+            </li>
+          ))}
+        </ul>
+      </Section>
+
       <Section
         id="info"
         eyebrow="Tourney Information"
         title="Tourney Information"
         wide
       >
+        <div className="tourney-action-callout">
+          <strong>No warnings for rule breaks</strong>
+          <span>
+            Any rule break can result in immediate penalty or disqualification.
+            Hosts and admins will rule based on proof, impact, and cooperation.
+          </span>
+        </div>
         <ul className="tourney-info-list">
-          <li>
-            <strong>Format</strong>
-            <span>6v6 Overwatch. Double-elimination bracket.</span>
-          </li>
-          <li>
-            <strong>Dates</strong>
-            <span>
-              August 1-2, 2026. Match times go up after check-in and teams are
-              locked.
-            </span>
-          </li>
-          <li>
-            <strong>Prize pool</strong>
-            <span>
-              At least $1,000 USD. Final split comes after bracket size is
-              locked.
-            </span>
-          </li>
-          <li>
-            <strong>Payouts</strong>
-            <span>
-              All cash payouts are sent through PayPal. Tournament result
-              payouts go out within 7 days after final results are confirmed.
-              Roo Industries does not cover PayPal transaction fees.
-            </span>
-          </li>
-          <li>
-            <strong>Client giveaway</strong>
-            <span>9800X3D draw for Roo Industries clients only.</span>
-          </li>
-          <li>
-            <strong>Community giveaway</strong>
-            <span>
-              Logitech X2 Superstrike draw for the community. You don't need to
-              be a client for this one.
-            </span>
-          </li>
-          <li>
-            <strong>Giveaway window</strong>
-            <span>Giveaway entries run from August 3 to September 3, 2026.</span>
-          </li>
-          <li>
-            <strong>Prize delivery</strong>
-            <span>
-              CPU and mouse prizes ship only inside the US. Winners outside the
-              US receive the cash equivalent by PayPal.
-            </span>
-          </li>
+          {infoItems.map((item) => (
+            <li key={item.title}>
+              <strong>{item.title}</strong>
+              <span>{item.body}</span>
+            </li>
+          ))}
         </ul>
       </Section>
 
@@ -209,29 +171,25 @@ const DashboardPage = ({ session }) => (
           If you join, check in, or play a map, these rules apply. Owner and
           designated caster rulings are final.
         </p>
+        <div className="tourney-map-process">
+          <strong>Map and hero-ban process in plain English</strong>
+          <p>
+            This tournament uses an OWCS-style map and hero-ban process. Map 1
+            is Control and the higher seed chooses the Control map and starting
+            side. After that, the team that lost the previous map picks the next
+            legal map, mode, and starting side. Each team bans one hero per map;
+            teams cannot repeat their own hero ban in the same series, and both
+            bans on a map cannot be from the same role.
+          </p>
+        </div>
         <ol className="tourney-rulebook">
           {competitiveRules.map((section) => (
             <li className="tourney-rule" key={section.title}>
               <h3>{section.title}</h3>
-              <ul>
-                {section.items.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
+              <p>{section.body}</p>
             </li>
           ))}
         </ol>
-      </Section>
-
-      <Section id="schedule" eyebrow="Schedule" title="Schedule" wide>
-        <ul className="tourney-card-list">
-          {scheduleItems.map((item) => (
-            <li key={item.title}>
-              <strong>{item.title}</strong>
-              <span>{item.body}</span>
-            </li>
-          ))}
-        </ul>
       </Section>
 
       <Section id="bracket" eyebrow="Bracket" title="Bracket" wide>
