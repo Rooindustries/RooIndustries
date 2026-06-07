@@ -23,6 +23,12 @@ const getTwitchButtonLabel = (player) => {
   return String(player?.twitchUsername || "").trim();
 };
 
+const getRosterInitial = (player) =>
+  String(player?.displayName || player?.twitchUsername || "P")
+    .trim()
+    .charAt(0)
+    .toUpperCase() || "P";
+
 const compareText = (left, right) =>
   normalizeSortValue(left).localeCompare(normalizeSortValue(right));
 
@@ -71,10 +77,78 @@ const TwitchIcon = () => (
 
 export default function TourneyRosterList({ players = [] }) {
   const [sortKey, setSortKey] = useState("name");
-  const sortedPlayers = useMemo(() => sortPlayers(players, sortKey), [
-    players,
-    sortKey,
-  ]);
+  const groupedPlayers = useMemo(() => {
+    const mainPlayers = players.filter(
+      (player) => player.registrationPool !== "substitute"
+    );
+    const substitutePlayers = players.filter(
+      (player) => player.registrationPool === "substitute"
+    );
+    return {
+      mainPlayers: sortPlayers(mainPlayers, sortKey),
+      substitutePlayers: sortPlayers(substitutePlayers, sortKey),
+    };
+  }, [players, sortKey]);
+
+  const renderPlayerList = (playerList) => (
+    <ul className="tourney-roster-list">
+      {playerList.map((player) => {
+        const teamLabel = getTeamLabel(player.teamName);
+        const streamUrl = twitchUrl(player.twitchUsername);
+        const twitchLabel = getTwitchButtonLabel(player);
+        const displayName = player.displayName || "Player";
+        const profileImageUrl = String(player.twitchProfileImageUrl || "").trim();
+
+        return (
+          <li className="tourney-roster-player" key={player.id}>
+            <span className="tourney-roster-identity">
+              <span className="tourney-roster-avatar" aria-hidden="true">
+                {profileImageUrl ? (
+                  <>
+                    <img
+                      alt=""
+                      loading="lazy"
+                      src={profileImageUrl}
+                      onError={(event) => {
+                        event.currentTarget.hidden = true;
+                        const fallback = event.currentTarget.nextElementSibling;
+                        if (fallback) fallback.hidden = false;
+                      }}
+                    />
+                    <span hidden>{getRosterInitial(player)}</span>
+                  </>
+                ) : (
+                  <span>{getRosterInitial(player)}</span>
+                )}
+              </span>
+              <span className="tourney-roster-name-copy">
+                <strong>{displayName}</strong>
+                <span className="tourney-roster-label">Player</span>
+              </span>
+            </span>
+            <span className="tourney-roster-detail">
+              <strong>{player.rolePlay}</strong>
+              <span className="tourney-roster-label">Primary role</span>
+            </span>
+            <span className="tourney-roster-detail">
+              <strong>{teamLabel}</strong>
+              <span className="tourney-roster-label">Team</span>
+            </span>
+            <span className="tourney-roster-cta">
+              {streamUrl ? (
+                <a href={streamUrl} rel="noreferrer" target="_blank">
+                  <TwitchIcon />
+                  <span>{twitchLabel}</span>
+                </a>
+              ) : (
+                <span className="tourney-roster-no-stream">No Twitch</span>
+              )}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  );
 
   return (
     <>
@@ -92,40 +166,21 @@ export default function TourneyRosterList({ players = [] }) {
         ))}
       </div>
 
-      <ul className="tourney-roster-list">
-        {sortedPlayers.map((player) => {
-          const teamLabel = getTeamLabel(player.teamName);
-          const streamUrl = twitchUrl(player.twitchUsername);
-          const twitchLabel = getTwitchButtonLabel(player);
+      <div className="tourney-roster-group">
+        <p className="tourney-player-group-title">Main Pool</p>
+        {groupedPlayers.mainPlayers.length > 0 ? (
+          renderPlayerList(groupedPlayers.mainPlayers)
+        ) : (
+          <p className="tourney-empty">No main-pool players yet.</p>
+        )}
+      </div>
 
-          return (
-            <li className="tourney-roster-player" key={player.id}>
-              <span className="tourney-roster-identity">
-                <strong>{player.displayName || "Player"}</strong>
-                <span>Player</span>
-              </span>
-              <span>
-                <strong>{player.rolePlay}</strong>
-                <span>Primary role</span>
-              </span>
-              <span>
-                <strong>{teamLabel}</strong>
-                <span>Team</span>
-              </span>
-              <span className="tourney-roster-cta">
-                {streamUrl ? (
-                  <a href={streamUrl} rel="noreferrer" target="_blank">
-                    <TwitchIcon />
-                    <span>{twitchLabel}</span>
-                  </a>
-                ) : (
-                  <span className="tourney-roster-no-stream">No Twitch</span>
-                )}
-              </span>
-            </li>
-          );
-        })}
-      </ul>
+      {groupedPlayers.substitutePlayers.length > 0 ? (
+        <div className="tourney-roster-group">
+          <p className="tourney-player-group-title">Substitute Pool</p>
+          {renderPlayerList(groupedPlayers.substitutePlayers)}
+        </div>
+      ) : null}
     </>
   );
 }

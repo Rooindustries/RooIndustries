@@ -1,6 +1,10 @@
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
-import { extractTwitchLogin, normalizeTwitchUsername } from "./twitch";
+import {
+  extractTwitchLogin,
+  getTwitchProfileImageMap,
+  normalizeTwitchUsername,
+} from "./twitch";
 
 export const TOURNEY_PLAYER_STATUSES = Object.freeze([
   "pending",
@@ -19,6 +23,17 @@ export const TOURNEY_ROLE_PLAYS = Object.freeze([
   "Support",
   "Flex",
 ]);
+export const TOURNEY_REGISTRATION_POOLS = Object.freeze([
+  "main",
+  "substitute",
+]);
+export const TOURNEY_DEFAULT_TEAM_COUNT = 8;
+export const TOURNEY_REGISTRATION_CLOSES_AT_UTC =
+  "2026-07-22T00:00:00.000Z";
+export const TOURNEY_FROGGER_RESERVED_ROLE = "Support";
+export const TOURNEY_FROGGER_DISPLAY_NAME = "Frogger";
+export const TOURNEY_FROGGER_TWITCH_USERNAME = "froggerow";
+const TOURNEY_CONFIG_ID = "legacy-series-2026";
 export const TOURNEY_TIMEZONES = Object.freeze([
   "Pacific Time (PT)",
   "Mountain Time (MT)",
@@ -56,6 +71,11 @@ const MEMORY_STORE =
   (globalThis.__rooTourneyPlayerStore = {
     players: [],
     tokens: [],
+    registrationConfig: {
+      teamCount: TOURNEY_DEFAULT_TEAM_COUNT,
+      updatedAt: "",
+      updatedBy: "",
+    },
   });
 const SQL_CLIENTS =
   globalThis.__rooTourneySqlClients ||
@@ -75,6 +95,61 @@ const normalizeText = (value) => String(value || "").trim();
 const USERNAME_PATTERN = /^[a-z0-9_.-]{3,24}$/;
 
 const nowIso = () => new Date().toISOString();
+
+const getRegistrationCloseTime = (env = process.env) => {
+  const configured = normalizeText(env.TOURNEY_REGISTRATION_CLOSES_AT_UTC);
+  const value = configured || TOURNEY_REGISTRATION_CLOSES_AT_UTC;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp)
+    ? timestamp
+    : Date.parse(TOURNEY_REGISTRATION_CLOSES_AT_UTC);
+};
+
+export const isTourneyRegistrationClosed = ({
+  env = process.env,
+  now = Date.now(),
+} = {}) => Number(now) >= getRegistrationCloseTime(env);
+
+export const getTourneyRegistrationCloseIso = (env = process.env) =>
+  new Date(getRegistrationCloseTime(env)).toISOString();
+
+const normalizeRegistrationPool = (value) =>
+  TOURNEY_REGISTRATION_POOLS.includes(String(value || "").trim().toLowerCase())
+    ? String(value || "").trim().toLowerCase()
+    : "main";
+
+const parseBooleanField = (value) =>
+  value === true || value === "true" || value === "on" || value === "1";
+
+const isFroggerReservedRegistration = (player = {}) =>
+  normalizeText(player.rolePlay || player.role_play) ===
+    TOURNEY_FROGGER_RESERVED_ROLE &&
+  normalizeTourneyUsername(player.displayName || player.display_name) ===
+    normalizeTourneyUsername(TOURNEY_FROGGER_DISPLAY_NAME) &&
+  normalizeTwitchUsername(player.twitchUsername || player.twitch_username) ===
+    TOURNEY_FROGGER_TWITCH_USERNAME;
+
+const normalizeTeamCount = (value) => {
+  const teamCount = Number(value);
+  if (!Number.isInteger(teamCount) || teamCount < 2 || teamCount > 64) {
+    throw Object.assign(
+      new Error("Team count must be a whole number from 2 to 64."),
+      { status: 400 }
+    );
+  }
+  return teamCount;
+};
+
+const getMemoryRegistrationConfig = () => {
+  if (!MEMORY_STORE.registrationConfig) {
+    MEMORY_STORE.registrationConfig = {
+      teamCount: TOURNEY_DEFAULT_TEAM_COUNT,
+      updatedAt: "",
+      updatedBy: "",
+    };
+  }
+  return MEMORY_STORE.registrationConfig;
+};
 
 const tokenHash = (token) =>
   crypto.createHash("sha256").update(String(token || "")).digest("hex");
@@ -132,6 +207,11 @@ export const hashTourneyToken = tokenHash;
 export const resetMemoryTourneyPlayerStoreForTests = () => {
   MEMORY_STORE.players = [];
   MEMORY_STORE.tokens = [];
+  MEMORY_STORE.registrationConfig = {
+    teamCount: TOURNEY_DEFAULT_TEAM_COUNT,
+    updatedAt: "",
+    updatedBy: "",
+  };
 };
 
 const mapPlayer = (row = {}) => ({
@@ -145,10 +225,17 @@ const mapPlayer = (row = {}) => ({
   battlenet: row.battlenet,
   rank: row.rank_name || row.rank,
   rolePlay: row.role_play || row.rolePlay,
+  registrationPool: normalizeRegistrationPool(
+    row.registration_pool || row.registrationPool
+  ),
   timezone: row.time_zone || row.timezone || "",
   twitchUsername: extractTwitchLogin(row.twitch_username || row.twitchUsername),
   teamName: row.team_name || row.teamName || "",
   availableAug12: Boolean(row.available_aug_1_2 ?? row.availableAug12),
+  acceptedRules: Boolean(row.accepted_rules ?? row.acceptedRules),
+  acceptedRooVisibility: Boolean(
+    row.accepted_roo_visibility ?? row.acceptedRooVisibility
+  ),
   notes: row.notes || "",
   version: String(row.version || "1"),
   createdAt: row.created_at || row.createdAt || "",
@@ -167,9 +254,23 @@ const publicPlayer = (row) => {
     id: player.id,
     displayName: player.displayName,
     rolePlay: player.rolePlay,
+    registrationPool: player.registrationPool,
     teamName: player.teamName,
     twitchUsername: player.twitchUsername,
   };
+};
+
+const attachTwitchProfileImages = async (players, { env = process.env } = {}) => {
+  const profileImages = await getTwitchProfileImageMap(
+    players.map((player) => player.twitchUsername),
+    { env }
+  ).catch(() => new Map());
+  if (!profileImages.size) return players;
+
+  return players.map((player) => {
+    const imageUrl = profileImages.get(player.twitchUsername);
+    return imageUrl ? { ...player, twitchProfileImageUrl: imageUrl } : player;
+  });
 };
 
 const managePlayer = (row) => {
@@ -182,10 +283,13 @@ const managePlayer = (row) => {
     battlenet: player.battlenet,
     rank: player.rank,
     rolePlay: player.rolePlay,
+    registrationPool: player.registrationPool,
     timezone: player.timezone,
     twitchUsername: player.twitchUsername,
     teamName: player.teamName,
     availableAug12: player.availableAug12,
+    acceptedRules: player.acceptedRules,
+    acceptedRooVisibility: player.acceptedRooVisibility,
     email: player.email,
     status: player.status,
     notes: player.notes,
@@ -199,7 +303,10 @@ const managePlayer = (row) => {
   };
 };
 
-export const validateTourneyPlayerPayload = (payload = {}) => {
+export const validateTourneyPlayerPayload = (
+  payload = {},
+  { requireAgreements = false } = {}
+) => {
   const email = normalizeTourneyEmail(payload.email);
   const password = String(payload.password || "");
   const passwordConfirm = String(
@@ -215,6 +322,9 @@ export const validateTourneyPlayerPayload = (payload = {}) => {
   const battlenet = normalizeText(payload.battlenet);
   const rank = normalizeText(payload.rank);
   const rolePlay = normalizeText(payload.rolePlay || payload.role_play);
+  const registrationPool = normalizeRegistrationPool(
+    payload.registrationPool || payload.registration_pool
+  );
   const timezone = normalizeText(payload.timezone || payload.time_zone);
   const twitchUsername = normalizeTwitchUsername(
     payload.twitchUsername || payload.twitch_username
@@ -222,12 +332,17 @@ export const validateTourneyPlayerPayload = (payload = {}) => {
   const teamName = normalizeText(payload.teamName || payload.team_name);
   const notes = normalizeText(payload.notes);
   const availableAug12 =
-    payload.availableAug12 === true ||
-    payload.available_aug_1_2 === true ||
-    payload.availableAug12 === "true" ||
-    payload.available_aug_1_2 === "true" ||
-    payload.availableAug12 === "on" ||
-    payload.available_aug_1_2 === "on";
+    parseBooleanField(payload.availableAug12) ||
+    parseBooleanField(payload.available_aug_1_2);
+  const acceptedRules =
+    parseBooleanField(payload.acceptedRules) ||
+    parseBooleanField(payload.accepted_rules);
+  const acceptedRooVisibility =
+    parseBooleanField(payload.acceptedRooVisibility) ||
+    parseBooleanField(payload.accepted_roo_visibility);
+  const acceptSubstitutePool =
+    parseBooleanField(payload.acceptSubstitutePool) ||
+    parseBooleanField(payload.accept_substitute_pool);
 
   const errors = [];
   if (!USERNAME_PATTERN.test(username)) {
@@ -251,7 +366,13 @@ export const validateTourneyPlayerPayload = (payload = {}) => {
   if (!twitchUsername) {
     errors.push("Enter a valid Twitch username.");
   }
-  if (!availableAug12) errors.push("You must confirm August 1st and 2nd availability.");
+  if (!availableAug12) errors.push("You must confirm August 15th and 16th availability.");
+  if (requireAgreements && !acceptedRules) {
+    errors.push("You must agree to follow the tournament rules.");
+  }
+  if (requireAgreements && !acceptedRooVisibility) {
+    errors.push("You must acknowledge the event visibility note.");
+  }
 
   return {
     ok: errors.length === 0,
@@ -266,10 +387,14 @@ export const validateTourneyPlayerPayload = (payload = {}) => {
       battlenet,
       rank,
       rolePlay,
+      registrationPool,
       timezone,
       twitchUsername,
       teamName,
       availableAug12,
+      acceptedRules,
+      acceptedRooVisibility,
+      acceptSubstitutePool,
       notes,
     },
   };
@@ -283,6 +408,9 @@ export const validateTourneyPlayerDetailsPayload = (payload = {}) => {
     payload.twitchUsername || payload.twitch_username
   );
   const teamName = normalizeText(payload.teamName || payload.team_name);
+  const registrationPool = normalizeRegistrationPool(
+    payload.registrationPool || payload.registration_pool
+  );
   const errors = [];
 
   if (!displayName) errors.push("Display Name is required.");
@@ -295,6 +423,7 @@ export const validateTourneyPlayerDetailsPayload = (payload = {}) => {
       displayName,
       twitchUsername,
       teamName,
+      registrationPool,
     },
   };
 };
@@ -316,10 +445,13 @@ export async function ensureTourneyPlayerSchema(env = process.env) {
       battlenet text not null,
       rank_name text not null,
       role_play text not null,
+      registration_pool text not null default 'main',
       time_zone text not null default '',
       twitch_username text,
       team_name text,
       available_aug_1_2 boolean not null default false,
+      accepted_rules boolean not null default false,
+      accepted_roo_visibility boolean not null default false,
       notes text,
       version integer not null default 1,
       created_at timestamptz not null default now(),
@@ -331,8 +463,14 @@ export async function ensureTourneyPlayerSchema(env = process.env) {
       removed_at timestamptz,
       removed_by text,
       constraint tourney_players_status_check
-        check (status in ('pending', 'approved', 'denied', 'removed'))
+        check (status in ('pending', 'approved', 'denied', 'removed')),
+      constraint tourney_players_registration_pool_check
+        check (registration_pool in ('main', 'substitute'))
     )
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists registration_pool text not null default 'main'
   `;
   await sql`
     alter table tourney_players
@@ -345,6 +483,14 @@ export async function ensureTourneyPlayerSchema(env = process.env) {
   await sql`
     alter table tourney_players
     add column if not exists team_name text
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists accepted_rules boolean not null default false
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists accepted_roo_visibility boolean not null default false
   `;
   await sql`
     create table if not exists tourney_player_tokens (
@@ -364,8 +510,200 @@ export async function ensureTourneyPlayerSchema(env = process.env) {
         check (purpose in ('approve', 'deny', 'reset'))
     )
   `;
+  await sql`
+    create table if not exists tourney_registration_config (
+      id text primary key,
+      team_count integer not null default 8,
+      updated_at timestamptz not null default now(),
+      updated_by text
+    )
+  `;
+  await sql`
+    insert into tourney_registration_config (id, team_count)
+    values (${TOURNEY_CONFIG_ID}, ${TOURNEY_DEFAULT_TEAM_COUNT})
+    on conflict (id) do nothing
+  `;
   schemaReady = true;
 }
+
+export async function getTourneyRegistrationConfig({ env = process.env } = {}) {
+  if (isMemoryMode(env)) {
+    const config = getMemoryRegistrationConfig();
+    return {
+      teamCount: normalizeTeamCount(config.teamCount || TOURNEY_DEFAULT_TEAM_COUNT),
+      updatedAt: config.updatedAt || "",
+      updatedBy: config.updatedBy || "",
+    };
+  }
+
+  await ensureTourneyPlayerSchema(env);
+  const sql = await getSql(env);
+  const rows = await sql`
+    select *
+    from tourney_registration_config
+    where id = ${TOURNEY_CONFIG_ID}
+    limit 1
+  `;
+  const row = rows?.[0] || {};
+  return {
+    teamCount: normalizeTeamCount(row.team_count || TOURNEY_DEFAULT_TEAM_COUNT),
+    updatedAt: row.updated_at || "",
+    updatedBy: row.updated_by || "",
+  };
+}
+
+export async function updateTourneyRegistrationConfig({
+  teamCount,
+  actorUsername,
+  env = process.env,
+} = {}) {
+  const nextTeamCount = normalizeTeamCount(teamCount);
+  const actor = normalizeTourneyUsername(actorUsername);
+  const updatedAt = nowIso();
+
+  if (isMemoryMode(env)) {
+    MEMORY_STORE.registrationConfig = {
+      teamCount: nextTeamCount,
+      updatedAt,
+      updatedBy: actor,
+    };
+    return getTourneyRegistrationConfig({ env });
+  }
+
+  await ensureTourneyPlayerSchema(env);
+  const sql = await getSql(env);
+  const rows = await sql`
+    insert into tourney_registration_config (
+      id, team_count, updated_at, updated_by
+    )
+    values (
+      ${TOURNEY_CONFIG_ID}, ${nextTeamCount}, ${updatedAt}, ${actor}
+    )
+    on conflict (id) do update set
+      team_count = excluded.team_count,
+      updated_at = excluded.updated_at,
+      updated_by = excluded.updated_by
+    returning *
+  `;
+  const row = rows?.[0] || {};
+  return {
+    teamCount: normalizeTeamCount(row.team_count || nextTeamCount),
+    updatedAt: row.updated_at || updatedAt,
+    updatedBy: row.updated_by || actor,
+  };
+}
+
+const listCapacityPlayers = async ({ env = process.env } = {}) => {
+  if (isMemoryMode(env)) {
+    return MEMORY_STORE.players
+      .filter((player) => player.status === "approved")
+      .map(mapPlayer);
+  }
+
+  await ensureTourneyPlayerSchema(env);
+  const sql = await getSql(env);
+  const rows = await sql`
+    select *
+    from tourney_players
+    where status = 'approved'
+  `;
+  return rows.map(mapPlayer);
+};
+
+export const buildTourneyRoleCapacitySnapshot = ({
+  players = [],
+  config = { teamCount: TOURNEY_DEFAULT_TEAM_COUNT },
+} = {}) => {
+  const teamCount = normalizeTeamCount(
+    config.teamCount || TOURNEY_DEFAULT_TEAM_COUNT
+  );
+  const totalCap = teamCount * 2;
+  const roles = TOURNEY_ROLE_PLAYS.map((role) => {
+    const hasReservedSlot = role === TOURNEY_FROGGER_RESERVED_ROLE;
+    const reservedCap = hasReservedSlot ? 1 : 0;
+    const cap = Math.max(totalCap - reservedCap, 0);
+    const rolePlayers = players.filter((player) => player.rolePlay === role);
+    const mainPlayers = rolePlayers.filter(
+      (player) => normalizeRegistrationPool(player.registrationPool) === "main"
+    );
+    const reservedMainPlayers = mainPlayers.filter(isFroggerReservedRegistration);
+    const regularMainPlayers = mainPlayers.filter(
+      (player) => !isFroggerReservedRegistration(player)
+    );
+    const pendingMainPlayers = mainPlayers.filter(
+      (player) => player.status === "pending"
+    );
+    const pendingRegularMainPlayers = regularMainPlayers.filter(
+      (player) => player.status === "pending"
+    );
+    const approvedMainPlayers = regularMainPlayers.filter(
+      (player) => player.status === "approved"
+    );
+    const approvedReservedMainPlayers = reservedMainPlayers.filter(
+      (player) => player.status === "approved"
+    );
+    const substitutePlayers = rolePlayers.filter(
+      (player) =>
+        normalizeRegistrationPool(player.registrationPool) === "substitute"
+    );
+    return {
+      role,
+      cap,
+      totalCap,
+      mainCount: approvedMainPlayers.length,
+      totalMainCount:
+        approvedMainPlayers.length + approvedReservedMainPlayers.length,
+      substituteCount: substitutePlayers.length,
+      pendingMainCount: pendingRegularMainPlayers.length,
+      totalPendingMainCount: pendingMainPlayers.length,
+      approvedMainCount: approvedMainPlayers.length,
+      reservedFor: hasReservedSlot ? TOURNEY_FROGGER_DISPLAY_NAME : "",
+      reservedCap,
+      reservedCount: approvedReservedMainPlayers.length,
+      reservedIsFull: approvedReservedMainPlayers.length >= reservedCap,
+      isFull: approvedMainPlayers.length >= cap,
+    };
+  });
+
+  return {
+    teamCount,
+    updatedAt: config.updatedAt || "",
+    updatedBy: config.updatedBy || "",
+    roles,
+  };
+};
+
+export async function getTourneyRoleCapacitySnapshot({
+  env = process.env,
+} = {}) {
+  const [config, players] = await Promise.all([
+    getTourneyRegistrationConfig({ env }),
+    listCapacityPlayers({ env }),
+  ]);
+  return buildTourneyRoleCapacitySnapshot({ config, players });
+}
+
+const getRoleCapacity = (snapshot, rolePlay) =>
+  snapshot.roles.find((role) => role.role === rolePlay) || null;
+
+const isRoleCapacityFullForRegistration = ({ roleCapacity, value }) => {
+  if (!roleCapacity) return false;
+  if (isFroggerReservedRegistration(value)) {
+    return roleCapacity.reservedIsFull;
+  }
+  return roleCapacity.isFull;
+};
+
+const createRoleCapacityError = ({ roleCapacity, snapshot }) =>
+  Object.assign(
+    new Error("This role is at maximum capacity for the main bracket."),
+    {
+      status: 409,
+      code: "ROLE_CAPACITY_FULL",
+      capacity: roleCapacity,
+      capacitySnapshot: snapshot,
+    }
+  );
 
 const assertNoDuplicatePlayer = async ({ value, env }) => {
   if (isMemoryMode(env)) {
@@ -420,7 +758,9 @@ export async function createPendingTourneyPlayer({
   recipients = [],
   env = process.env,
 } = {}) {
-  const validation = validateTourneyPlayerPayload(payload);
+  const validation = validateTourneyPlayerPayload(payload, {
+    requireAgreements: true,
+  });
   if (!validation.ok) {
     throw Object.assign(new Error(validation.errors[0] || "Invalid registration."), {
       status: 400,
@@ -430,6 +770,13 @@ export async function createPendingTourneyPlayer({
 
   const value = validation.value;
   await assertNoDuplicatePlayer({ value, env });
+  const capacitySnapshot = await getTourneyRoleCapacitySnapshot({ env });
+  const roleCapacity = getRoleCapacity(capacitySnapshot, value.rolePlay);
+  const isFull = isRoleCapacityFullForRegistration({ roleCapacity, value });
+  const registrationPool = isFull ? "substitute" : "main";
+  if (isFull && !value.acceptSubstitutePool) {
+    throw createRoleCapacityError({ roleCapacity, snapshot: capacitySnapshot });
+  }
 
   const id = crypto.randomUUID();
   const passwordHash = await bcrypt.hash(value.password, 12);
@@ -446,10 +793,13 @@ export async function createPendingTourneyPlayer({
     battlenet: value.battlenet,
     rank_name: value.rank,
     role_play: value.rolePlay,
+    registration_pool: registrationPool,
     time_zone: value.timezone,
     twitch_username: value.twitchUsername,
     team_name: value.teamName,
     available_aug_1_2: value.availableAug12,
+    accepted_rules: value.acceptedRules,
+    accepted_roo_visibility: value.acceptedRooVisibility,
     notes: value.notes,
     version: 1,
     created_at: createdAt,
@@ -491,15 +841,19 @@ export async function createPendingTourneyPlayer({
     await sql`
       insert into tourney_players (
         id, username, email, password_hash, status, discord, display_name,
-        discord_key, battlenet, rank_name, role_play, time_zone, twitch_username,
-        team_name, available_aug_1_2, notes, version, created_at, updated_at
+        discord_key, battlenet, rank_name, role_play, registration_pool,
+        time_zone, twitch_username, team_name, available_aug_1_2,
+        accepted_rules, accepted_roo_visibility, notes,
+        version, created_at, updated_at
       )
       values (
         ${playerRow.id}, ${playerRow.username}, ${playerRow.email},
         ${playerRow.password_hash}, ${playerRow.status}, ${playerRow.discord},
         ${playerRow.display_name}, ${playerRow.discord_key}, ${playerRow.battlenet}, ${playerRow.rank_name},
-        ${playerRow.role_play}, ${playerRow.time_zone}, ${playerRow.twitch_username},
-        ${playerRow.team_name}, ${playerRow.available_aug_1_2}, ${playerRow.notes}, ${playerRow.version},
+        ${playerRow.role_play}, ${playerRow.registration_pool}, ${playerRow.time_zone}, ${playerRow.twitch_username},
+        ${playerRow.team_name}, ${playerRow.available_aug_1_2},
+        ${playerRow.accepted_rules}, ${playerRow.accepted_roo_visibility},
+        ${playerRow.notes}, ${playerRow.version},
         ${playerRow.created_at}, ${playerRow.updated_at}
       )
     `;
@@ -560,10 +914,13 @@ export async function createApprovedTourneyPlayer({
     battlenet: value.battlenet,
     rank_name: value.rank,
     role_play: value.rolePlay,
+    registration_pool: value.registrationPool,
     time_zone: value.timezone,
     twitch_username: value.twitchUsername,
     team_name: value.teamName,
     available_aug_1_2: value.availableAug12,
+    accepted_rules: value.acceptedRules,
+    accepted_roo_visibility: value.acceptedRooVisibility,
     notes: value.notes,
     version: 1,
     created_at: createdAt,
@@ -582,16 +939,19 @@ export async function createApprovedTourneyPlayer({
   await sql`
     insert into tourney_players (
       id, username, email, password_hash, status, discord, display_name,
-      discord_key, battlenet, rank_name, role_play, time_zone, twitch_username,
-      team_name, available_aug_1_2, notes, version, created_at, updated_at,
-      approved_at, approved_by
+      discord_key, battlenet, rank_name, role_play, registration_pool,
+      time_zone, twitch_username, team_name, available_aug_1_2,
+      accepted_rules, accepted_roo_visibility, notes,
+      version, created_at, updated_at, approved_at, approved_by
     )
     values (
       ${playerRow.id}, ${playerRow.username}, ${playerRow.email},
       ${playerRow.password_hash}, ${playerRow.status}, ${playerRow.discord},
       ${playerRow.display_name}, ${playerRow.discord_key}, ${playerRow.battlenet}, ${playerRow.rank_name},
-      ${playerRow.role_play}, ${playerRow.time_zone}, ${playerRow.twitch_username},
-      ${playerRow.team_name}, ${playerRow.available_aug_1_2}, ${playerRow.notes}, ${playerRow.version},
+      ${playerRow.role_play}, ${playerRow.registration_pool}, ${playerRow.time_zone}, ${playerRow.twitch_username},
+      ${playerRow.team_name}, ${playerRow.available_aug_1_2},
+      ${playerRow.accepted_rules}, ${playerRow.accepted_roo_visibility},
+      ${playerRow.notes}, ${playerRow.version},
       ${playerRow.created_at}, ${playerRow.updated_at}, ${playerRow.approved_at},
       ${playerRow.approved_by}
     )
@@ -601,10 +961,11 @@ export async function createApprovedTourneyPlayer({
 
 export async function listApprovedTourneyPlayers({ env = process.env } = {}) {
   if (isMemoryMode(env)) {
-    return MEMORY_STORE.players
+    const players = MEMORY_STORE.players
       .filter((player) => player.status === "approved")
       .map(publicPlayer)
       .sort((left, right) => left.displayName.localeCompare(right.displayName));
+    return attachTwitchProfileImages(players, { env });
   }
 
   await ensureTourneyPlayerSchema(env);
@@ -615,7 +976,7 @@ export async function listApprovedTourneyPlayers({ env = process.env } = {}) {
     where status = 'approved'
     order by lower(coalesce(nullif(display_name, ''), discord)) asc
   `;
-  return rows.map(publicPlayer);
+  return attachTwitchProfileImages(rows.map(publicPlayer), { env });
 }
 
 export async function listManageTourneyPlayers({ env = process.env } = {}) {
@@ -661,6 +1022,7 @@ export async function updateTourneyPlayerDetails({
     player.display_name = value.displayName;
     player.twitch_username = value.twitchUsername;
     player.team_name = value.teamName;
+    player.registration_pool = value.registrationPool;
     player.updated_at = now;
     player.updated_by = actor;
     player.version = Number(player.version || 1) + 1;
@@ -674,6 +1036,7 @@ export async function updateTourneyPlayerDetails({
     set display_name = ${value.displayName},
         twitch_username = ${value.twitchUsername},
         team_name = ${value.teamName},
+        registration_pool = ${value.registrationPool},
         updated_at = ${now},
         version = version + 1
     where id = ${playerId}
@@ -740,6 +1103,24 @@ export async function applyRegistrationDecision({
         status: 409,
       });
     }
+    if (
+      status === "approved" &&
+      normalizeRegistrationPool(player.registration_pool || player.registrationPool) ===
+        "main"
+    ) {
+      const capacitySnapshot = await getTourneyRoleCapacitySnapshot({ env });
+      const roleCapacity = getRoleCapacity(
+        capacitySnapshot,
+        player.role_play || player.rolePlay
+      );
+      const isFull = isRoleCapacityFullForRegistration({
+        roleCapacity,
+        value: mapPlayer(player),
+      });
+      if (isFull) {
+        player.registration_pool = "substitute";
+      }
+    }
     player.status = status;
     player.version = Number(player.version || 1) + 1;
     player.updated_at = now;
@@ -761,11 +1142,42 @@ export async function applyRegistrationDecision({
 
   await ensureTourneyPlayerSchema(env);
   const sql = await getSql(env);
+  const pendingRows = await sql`
+    select *
+    from tourney_players
+    where id = ${playerId}
+      and status = 'pending'
+    limit 1
+  `;
+  const pendingPlayer = pendingRows?.[0];
+  if (!pendingPlayer) {
+    throw Object.assign(new Error("Registration is no longer pending."), {
+      status: 409,
+    });
+  }
+
+  let nextRegistrationPool = pendingPlayer.registration_pool || "main";
+  if (
+    status === "approved" &&
+    normalizeRegistrationPool(nextRegistrationPool) === "main"
+  ) {
+    const capacitySnapshot = await getTourneyRoleCapacitySnapshot({ env });
+    const roleCapacity = getRoleCapacity(capacitySnapshot, pendingPlayer.role_play);
+    const isFull = isRoleCapacityFullForRegistration({
+      roleCapacity,
+      value: mapPlayer(pendingPlayer),
+    });
+    if (isFull) {
+      nextRegistrationPool = "substitute";
+    }
+  }
+
   const rows =
     status === "approved"
       ? await sql`
           update tourney_players
           set status = 'approved',
+              registration_pool = ${nextRegistrationPool},
               approved_at = ${now},
               approved_by = ${actor},
               updated_at = ${now},

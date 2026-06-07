@@ -5,7 +5,11 @@ import {
   getTourneyApprovalRecipients,
 } from "../../../../src/server/tourney/auth";
 import { sendTourneyRegistrationApprovalEmails } from "../../../../src/server/tourney/email";
-import { createPendingTourneyPlayer } from "../../../../src/server/tourney/playerStore";
+import {
+  createPendingTourneyPlayer,
+  getTourneyRegistrationCloseIso,
+  isTourneyRegistrationClosed,
+} from "../../../../src/server/tourney/playerStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,14 +34,24 @@ const readPayload = async (request) => {
     battlenet: form.get("battlenet"),
     rank: form.get("rank"),
     rolePlay: form.get("rolePlay"),
+    acceptSubstitutePool: form.get("acceptSubstitutePool"),
     timezone: form.get("timezone"),
     twitchUsername: form.get("twitchUsername"),
     availableAug12: form.get("availableAug12"),
+    acceptedRules: form.get("acceptedRules"),
+    acceptedRooVisibility: form.get("acceptedRooVisibility"),
     notes: form.get("notes"),
   };
 };
 
 export async function POST(request) {
+  if (isTourneyRegistrationClosed()) {
+    return jsonError("Registration is closed.", 403, {
+      code: "REGISTRATION_CLOSED",
+      registrationClosesAt: getTourneyRegistrationCloseIso(),
+    });
+  }
+
   const clientAddress = getClientAddressFromHeaders(request.headers);
   const rateLimit = checkTourneyRateLimit({
     key: `tourney-register:${clientAddress}`,
@@ -80,6 +94,9 @@ export async function POST(request) {
     });
   } catch (error) {
     return jsonError(error?.message || "Unable to submit registration.", error?.status || 500, {
+      code: error?.code || undefined,
+      capacity: error?.capacity || undefined,
+      capacitySnapshot: error?.capacitySnapshot || undefined,
       errors: error?.errors || undefined,
     });
   }

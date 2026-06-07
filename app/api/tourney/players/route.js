@@ -9,8 +9,10 @@ import { sendTourneyPlayerApprovedEmail } from "../../../../src/server/tourney/e
 import {
   applyRegistrationDecision,
   createApprovedTourneyPlayer,
+  getTourneyRoleCapacitySnapshot,
   kickTourneyPlayer,
   listManageTourneyPlayers,
+  updateTourneyRegistrationConfig,
   updateTourneyPlayerDetails,
 } from "../../../../src/server/tourney/playerStore";
 
@@ -40,6 +42,7 @@ const getPlayersResponse = async () =>
   NextResponse.json({
     ok: true,
     players: await listManageTourneyPlayers(),
+    capacity: await getTourneyRoleCapacitySnapshot(),
   });
 
 const notifyApprovedPlayer = async ({ player, request }) => {
@@ -121,6 +124,14 @@ export async function POST(request) {
       await updateTourneyPlayerDetails({
         playerId: payload.playerId,
         payload,
+        actorUsername: session.username,
+      });
+      return getPlayersResponse();
+    }
+
+    if (action === "update-capacity") {
+      await updateTourneyRegistrationConfig({
+        teamCount: payload.teamCount,
         actorUsername: session.username,
       });
       return getPlayersResponse();

@@ -1,6 +1,12 @@
 import { Resend } from "resend";
+import tourneyEmailTemplates from "./emailTemplates.cjs";
 
 const DEFAULT_FROM = "Roo Industries <onboarding@resend.dev>";
+const {
+  buildTourneyAppealAdminEmail,
+  buildTourneyAppealConfirmationEmail,
+  buildTourneyPayoutNotificationEmail,
+} = tourneyEmailTemplates;
 
 const escapeHtml = (value) =>
   String(value || "")
@@ -30,6 +36,93 @@ const buildDecisionUrl = ({ baseUrl, token, purpose }) => {
 
 const getTokenForPurpose = (tokens, purpose) =>
   tokens.find((token) => token.purpose === purpose);
+
+export {
+  buildTourneyAppealAdminEmail,
+  buildTourneyAppealConfirmationEmail,
+  buildTourneyPayoutNotificationEmail,
+};
+
+const normalizeRecipients = (to) =>
+  (Array.isArray(to) ? to : [to])
+    .map((recipient) => String(recipient || "").trim())
+    .filter(Boolean);
+
+const sendTemplateEmail = async ({ to, template, env = process.env } = {}) => {
+  const recipients = normalizeRecipients(to);
+  if (recipients.length === 0) {
+    throw new Error("At least one email recipient is required.");
+  }
+  const resend = getResend(env);
+  const from = getFromAddress(env);
+  const { data, error } = await resend.emails.send({
+    from,
+    to: recipients,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
+  });
+  if (error) {
+    throw new Error(error.message || "Unable to send tournament email.");
+  }
+  return data;
+};
+
+export async function sendTourneyAppealAdminEmail({
+  appeal,
+  submitter,
+  recipients = [],
+  baseUrl,
+  sampleMode = false,
+  env = process.env,
+} = {}) {
+  return sendTemplateEmail({
+    to: recipients,
+    env,
+    template: buildTourneyAppealAdminEmail({
+      appeal,
+      submitter,
+      baseUrl,
+      sampleMode,
+    }),
+  });
+}
+
+export async function sendTourneyAppealConfirmationEmail({
+  appeal,
+  to,
+  baseUrl,
+  sampleMode = false,
+  env = process.env,
+} = {}) {
+  return sendTemplateEmail({
+    to,
+    env,
+    template: buildTourneyAppealConfirmationEmail({
+      appeal,
+      baseUrl,
+      sampleMode,
+    }),
+  });
+}
+
+export async function sendTourneyPayoutNotificationEmail({
+  payout,
+  to,
+  baseUrl,
+  sampleMode = false,
+  env = process.env,
+} = {}) {
+  return sendTemplateEmail({
+    to,
+    env,
+    template: buildTourneyPayoutNotificationEmail({
+      payout,
+      baseUrl,
+      sampleMode,
+    }),
+  });
+}
 
 export async function sendTourneyRegistrationApprovalEmails({
   player,
@@ -77,7 +170,7 @@ export async function sendTourneyRegistrationApprovalEmails({
           <li>Role: ${escapeHtml(player.rolePlay)}</li>
           <li>Timezone: ${escapeHtml(player.timezone)}</li>
           <li>Twitch: ${escapeHtml(player.twitchUsername)}</li>
-          <li>Free on August 1st and 2nd: ${player.availableAug12 ? "Yes" : "No"}</li>
+          <li>Free on August 15th and 16th: ${player.availableAug12 ? "Yes" : "No"}</li>
         </ul>
         ${
           player.notes

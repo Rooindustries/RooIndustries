@@ -6,6 +6,10 @@ import {
   getTourneySession,
 } from "../TourneyShared";
 import { canAccessTourneyRegistration } from "../../../src/server/tourney/access";
+import {
+  getTourneyRegistrationCloseIso,
+  isTourneyRegistrationClosed,
+} from "../../../src/server/tourney/playerStore";
 import TourneyRegistrationForm from "../TourneyRegistrationForm";
 
 export const runtime = "nodejs";
@@ -23,6 +27,8 @@ export const metadata = {
 
 export default async function TourneyRegisterPage() {
   const session = await getTourneySession();
+  const registrationClosed = isTourneyRegistrationClosed();
+  const registrationClosesAt = getTourneyRegistrationCloseIso();
 
   if (!canAccessTourneyRegistration(session)) {
     redirect("/tourney");
@@ -37,7 +43,10 @@ export default async function TourneyRegisterPage() {
 
       <div className="tourney-grid">
         <Section id="registration-form" eyebrow="Register" title="Player Signup" wide>
-          <TourneyRegistrationForm />
+          <TourneyRegistrationForm
+            registrationClosed={registrationClosed}
+            registrationClosesAt={registrationClosesAt}
+          />
         </Section>
       </div>
     </TourneyShell>

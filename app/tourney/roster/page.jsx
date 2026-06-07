@@ -2,6 +2,7 @@ import {
   RouteTitle,
   Section,
   StatusPanel,
+  TourneyRosterHosts,
   TourneyShell,
   getTourneySession,
 } from "../TourneyShared";
@@ -30,6 +31,12 @@ export default async function TourneyRosterPage() {
       <RouteTitle eyebrow="Roster" title="Tournament" accent="Roster">
         Approved players appear here before captains draft teams.
       </RouteTitle>
+
+      <div className="tourney-grid">
+        <Section id="hosts" eyebrow="Hosts" title="Tournament Hosts" wide>
+          <TourneyRosterHosts />
+        </Section>
+      </div>
 
       <div className="tourney-grid">
         <Section id="unassigned" eyebrow="Roster" title="Unassigned Players" wide>

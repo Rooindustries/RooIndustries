@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const rankOptions = [
   "Master",
@@ -48,21 +48,33 @@ const initialForm = {
   timezone: "",
   twitchUsername: "",
   availableAug12: false,
+  acceptedRules: false,
+  acceptedRooVisibility: false,
   notes: "",
 };
 
-export default function TourneyRegistrationForm() {
+const hydrationSafeControlProps = { suppressHydrationWarning: true };
+
+export default function TourneyRegistrationForm({
+  registrationClosed = false,
+  registrationClosesAt = "",
+}) {
   const [form, setForm] = useState(initialForm);
   const [message, setMessage] = useState("");
   const [isSuccess, setIsSuccess] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+  const [capacityConflict, setCapacityConflict] = useState(null);
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   const updateField = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
   };
 
-  const handleSubmit = async (event) => {
-    event.preventDefault();
+  const submitRegistration = async ({ acceptSubstitutePool = false } = {}) => {
     setIsBusy(true);
     setMessage("");
     setIsSuccess(false);
@@ -75,14 +87,19 @@ export default function TourneyRegistrationForm() {
       const response = await fetch("/api/tourney/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, acceptSubstitutePool }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.ok !== true) {
+        if (response.status === 409 && data.code === "ROLE_CAPACITY_FULL") {
+          setCapacityConflict(data.capacity || { role: form.rolePlay });
+          return;
+        }
         throw new Error(data.error || "Unable to submit registration.");
       }
 
       setForm(initialForm);
+      setCapacityConflict(null);
       setMessage(data.message || "Registration submitted.");
       setIsSuccess(true);
     } catch (error) {
@@ -92,12 +109,57 @@ export default function TourneyRegistrationForm() {
     }
   };
 
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    await submitRegistration();
+  };
+
+  const handleJoinSubstitutePool = async () => {
+    setCapacityConflict(null);
+    await submitRegistration({ acceptSubstitutePool: true });
+  };
+
+  const handleChangeRole = () => {
+    setCapacityConflict(null);
+    const roleField = document.querySelector("[name='rolePlay']");
+    if (roleField) roleField.focus();
+  };
+
+  if (registrationClosed) {
+    return (
+      <div className="tourney-status-panel">
+        <p className="tourney-kicker">Closed</p>
+        <h3>Registration is closed</h3>
+        <p>
+          Registration closed on{" "}
+          <time dateTime={registrationClosesAt}>July 22, 2026 at 00:00 UTC</time>.
+          Drafts are July 25, 2026 with the exact draft time still TBD.
+        </p>
+      </div>
+    );
+  }
+
+  if (!isHydrated) {
+    return (
+      <div className="tourney-status-panel">
+        <p className="tourney-kicker">Registration</p>
+        <h3>Loading registration form</h3>
+      </div>
+    );
+  }
+
   return (
     <form className="tourney-form" onSubmit={handleSubmit}>
+      <p className="tourney-form-note">
+        Registration closes{" "}
+        <time dateTime={registrationClosesAt}>July 22, 2026 at 00:00 UTC</time>.
+        Drafts happen July 25, 2026 at a TBD time.
+      </p>
       <div className="tourney-form-grid">
         <label>
           Discord Username
           <input
+            {...hydrationSafeControlProps}
             type="text"
             autoComplete="username"
             required
@@ -109,6 +171,7 @@ export default function TourneyRegistrationForm() {
         <label>
           Display Name
           <input
+            {...hydrationSafeControlProps}
             type="text"
             autoComplete="nickname"
             required
@@ -120,6 +183,7 @@ export default function TourneyRegistrationForm() {
         <label>
           Email
           <input
+            {...hydrationSafeControlProps}
             type="email"
             autoComplete="email"
             required
@@ -130,6 +194,7 @@ export default function TourneyRegistrationForm() {
         <label>
           Password
           <input
+            {...hydrationSafeControlProps}
             type="password"
             autoComplete="new-password"
             minLength={8}
@@ -141,6 +206,7 @@ export default function TourneyRegistrationForm() {
         <label>
           Confirm password
           <input
+            {...hydrationSafeControlProps}
             type="password"
             autoComplete="new-password"
             minLength={8}
@@ -152,6 +218,7 @@ export default function TourneyRegistrationForm() {
         <label>
           Battle.net BattleTag
           <input
+            {...hydrationSafeControlProps}
             type="text"
             autoComplete="off"
             required
@@ -162,6 +229,7 @@ export default function TourneyRegistrationForm() {
         <label>
           Current Overwatch rank
           <select
+            {...hydrationSafeControlProps}
             required
             value={form.rank}
             onChange={(event) => updateField("rank", event.target.value)}
@@ -177,6 +245,8 @@ export default function TourneyRegistrationForm() {
         <label>
           Primary Role
           <select
+            {...hydrationSafeControlProps}
+            name="rolePlay"
             required
             value={form.rolePlay}
             onChange={(event) => updateField("rolePlay", event.target.value)}
@@ -192,6 +262,7 @@ export default function TourneyRegistrationForm() {
         <label>
           Timezone
           <select
+            {...hydrationSafeControlProps}
             required
             value={form.timezone}
             onChange={(event) => updateField("timezone", event.target.value)}
@@ -209,6 +280,7 @@ export default function TourneyRegistrationForm() {
           <span className="tourney-prefixed-input">
             <span aria-hidden="true">twitch.tv/</span>
             <input
+              {...hydrationSafeControlProps}
               type="text"
               autoComplete="off"
               maxLength={25}
@@ -225,17 +297,50 @@ export default function TourneyRegistrationForm() {
 
       <label className="tourney-checkbox">
         <input
+          {...hydrationSafeControlProps}
+          name="availableAug12"
           type="checkbox"
           required
           checked={form.availableAug12}
           onChange={(event) => updateField("availableAug12", event.target.checked)}
         />
-        <span>Are you free on August 1st and 2nd?</span>
+        <span>Are you free on August 15th and 16th?</span>
+      </label>
+
+      <label className="tourney-checkbox">
+        <input
+          {...hydrationSafeControlProps}
+          name="acceptedRules"
+          type="checkbox"
+          required
+          checked={form.acceptedRules}
+          onChange={(event) => updateField("acceptedRules", event.target.checked)}
+        />
+        <span>I have read the tournament rules and agree to follow them.</span>
+      </label>
+
+      <label className="tourney-checkbox">
+        <input
+          {...hydrationSafeControlProps}
+          name="acceptedRooVisibility"
+          type="checkbox"
+          required
+          checked={form.acceptedRooVisibility}
+          onChange={(event) =>
+            updateField("acceptedRooVisibility", event.target.checked)
+          }
+        />
+        <span>
+          I understand the event stream or Discord may include a small pinned
+          message, command, or banner linking to rooindustries.com so viewers can
+          find the event hub, giveaways, and Roo Industries info.
+        </span>
       </label>
 
       <label>
         Extra notes
         <textarea
+          {...hydrationSafeControlProps}
           rows={5}
           value={form.notes}
           onChange={(event) => updateField("notes", event.target.value)}
@@ -253,6 +358,48 @@ export default function TourneyRegistrationForm() {
         >
           {message}
         </p>
+      ) : null}
+
+      {capacityConflict ? (
+        <div
+          className="tourney-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) handleChangeRole();
+          }}
+        >
+          <div
+            aria-labelledby="tourney-capacity-title"
+            aria-modal="true"
+            className="tourney-modal"
+            role="dialog"
+          >
+            <p className="tourney-kicker">Substitute Pool</p>
+            <h3 id="tourney-capacity-title">{capacityConflict.role} is full</h3>
+            <p>
+              This role is at maximum capacity for the main bracket. You can
+              still register and be added to the substitute pool.
+            </p>
+            <div className="tourney-modal-actions">
+              <button
+                className="tourney-owner-button"
+                type="button"
+                disabled={isBusy}
+                onClick={handleJoinSubstitutePool}
+              >
+                Join substitute pool
+              </button>
+              <button
+                className="tourney-owner-link"
+                type="button"
+                disabled={isBusy}
+                onClick={handleChangeRole}
+              >
+                Change role
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </form>
   );
