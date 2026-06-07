@@ -14,7 +14,10 @@ import {
   summarizeTourneyAccounts,
 } from "../../../src/server/tourney/auth";
 import { getTourneyBracketSnapshot } from "../../../src/server/tourney/bracketStore";
-import { listManageTourneyPlayers } from "../../../src/server/tourney/playerStore";
+import {
+  getTourneyRoleCapacitySnapshot,
+  listManageTourneyPlayers,
+} from "../../../src/server/tourney/playerStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,8 +57,12 @@ export default async function TourneyManagePage({ searchParams }) {
     session.role === "owner"
       ? summarizeTourneyAccounts(await readEffectiveTourneyAccounts())
       : [];
-  const [players, bracketSnapshot] = await Promise.all([
+  const [players, capacitySnapshot, bracketSnapshot] = await Promise.all([
     listManageTourneyPlayers().catch(() => []),
+    getTourneyRoleCapacitySnapshot().catch(() => ({
+      teamCount: 8,
+      roles: [],
+    })),
     getTourneyBracketSnapshot({ includeAudit: true }).catch(() => ({
       ok: true,
       meta: {},
@@ -76,7 +83,10 @@ export default async function TourneyManagePage({ searchParams }) {
 
       <div className="tourney-grid">
         <Section id="players" eyebrow="Players" title="Player Management" wide>
-          <TourneyPlayerManager initialPlayers={players} />
+          <TourneyPlayerManager
+            initialPlayers={players}
+            initialCapacity={capacitySnapshot}
+          />
         </Section>
 
         {session.role === "owner" ? (

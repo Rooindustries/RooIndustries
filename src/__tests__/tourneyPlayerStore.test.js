@@ -8,11 +8,14 @@ const loadAuth = () => {
   return require("../server/tourney/auth.js");
 };
 
+const originalFetch = global.fetch;
+
 const env = {
   NODE_ENV: "production",
   TOURNEY_SESSION_SECRET: "test_tourney_session_secret",
   TOURNEY_PLAYER_STORE_MODE: "memory",
   TOURNEY_ACCOUNTS_JSON: "[]",
+  TOURNEY_TWITCH_PROFILE_LOOKUP: "0",
 };
 
 const basePayload = {
@@ -27,6 +30,8 @@ const basePayload = {
   timezone: "Eastern Time (ET)",
   twitchUsername: "playerone",
   availableAug12: true,
+  acceptedRules: true,
+  acceptedRooVisibility: true,
   notes: "Can sub if needed.",
 };
 
@@ -49,6 +54,7 @@ describe("tourney player store", () => {
   afterEach(() => {
     const store = require("../server/tourney/playerStore.js");
     store.resetMemoryTourneyPlayerStoreForTests();
+    global.fetch = originalFetch;
     jest.resetModules();
   });
 
@@ -70,6 +76,9 @@ describe("tourney player store", () => {
       timezone: "Eastern Time (ET)",
       twitchUsername: "playerone",
       teamName: "",
+      registrationPool: "main",
+      acceptedRules: true,
+      acceptedRooVisibility: true,
     });
     expect(created.player.username).toMatch(/^[a-z0-9_.-]{3,24}$/);
     expect(created.player.username).not.toBe("PlayerOne#1234");
@@ -135,7 +144,7 @@ describe("tourney player store", () => {
     ).rejects.toThrow("Choose a rank.");
   });
 
-  test("requires display name, password confirmation, timezone, Twitch username, and August availability", async () => {
+  test("requires display name, password confirmation, timezone, Twitch username, August availability, and agreements", async () => {
     const store = loadStore();
     store.resetMemoryTourneyPlayerStoreForTests();
 
@@ -220,7 +229,33 @@ describe("tourney player store", () => {
         recipients: approvers,
         env,
       })
-    ).rejects.toThrow("You must confirm August 1st and 2nd availability.");
+    ).rejects.toThrow("You must confirm August 15th and 16th availability.");
+
+    await expect(
+      store.createPendingTourneyPlayer({
+        payload: {
+          ...basePayload,
+          email: "norules@example.com",
+          discord: "NoRules#1234",
+          acceptedRules: false,
+        },
+        recipients: approvers,
+        env,
+      })
+    ).rejects.toThrow("You must agree to follow the tournament rules.");
+
+    await expect(
+      store.createPendingTourneyPlayer({
+        payload: {
+          ...basePayload,
+          email: "nopromo@example.com",
+          discord: "NoPromo#1234",
+          acceptedRooVisibility: false,
+        },
+        recipients: approvers,
+        env,
+      })
+    ).rejects.toThrow("You must acknowledge the event visibility note.");
   });
 
   test("approves players, allows Discord or email login, and invalidates sessions after kick", async () => {
@@ -267,6 +302,7 @@ describe("tourney player store", () => {
     expect(publicPlayers[0]).toMatchObject({
       displayName: "Player One",
       rolePlay: "Support",
+      registrationPool: "main",
       teamName: "",
       twitchUsername: "playerone",
     });
@@ -331,6 +367,52 @@ describe("tourney player store", () => {
     ).resolves.toBeNull();
   });
 
+  test("adds Twitch profile images to public roster players when lookup is enabled", async () => {
+    const store = loadStore();
+    store.resetMemoryTourneyPlayerStoreForTests();
+    const imageUrl =
+      "https://static-cdn.jtvnw.net/jtv_user_pictures/player-profile_image-300x300.png";
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      text: async () => `<meta property="og:image" content="${imageUrl}">`,
+      json: async () => ({}),
+    }));
+
+    const player = await store.createApprovedTourneyPlayer({
+      payload: {
+        ...basePayload,
+        twitchUsername: "PlayerOne",
+      },
+      actorUsername: "yukari",
+      env,
+    });
+
+    await expect(
+      store.listApprovedTourneyPlayers({
+        env: {
+          ...env,
+          TOURNEY_TWITCH_PROFILE_LOOKUP: "1",
+        },
+      })
+    ).resolves.toEqual([
+      {
+        id: player.id,
+        displayName: "Player One",
+        rolePlay: "Support",
+        registrationPool: "main",
+        teamName: "",
+        twitchUsername: "playerone",
+        twitchProfileImageUrl: imageUrl,
+      },
+    ]);
+    expect(global.fetch).toHaveBeenCalledWith(
+      "https://www.twitch.tv/playerone",
+      expect.objectContaining({
+        headers: expect.objectContaining({ Accept: "text/html" }),
+      })
+    );
+  });
+
   test("resets approved player passwords and rejects the old password", async () => {
     const store = loadStore();
     store.resetMemoryTourneyPlayerStoreForTests();
@@ -392,6 +474,7 @@ describe("tourney player store", () => {
         payload: {
           displayName: "Skinz",
           teamName: "Team Cyber",
+          registrationPool: "substitute",
           twitchUsername: "skinz_ow",
         },
         actorUsername: "yukari",
@@ -400,6 +483,7 @@ describe("tourney player store", () => {
     ).resolves.toMatchObject({
       displayName: "Skinz",
       teamName: "Team Cyber",
+      registrationPool: "substitute",
       twitchUsername: "skinz_ow",
     });
 
@@ -408,8 +492,395 @@ describe("tourney player store", () => {
       id: player.id,
       displayName: "Skinz",
       rolePlay: "Support",
+      registrationPool: "substitute",
       teamName: "Team Cyber",
       twitchUsername: "skinz_ow",
+    });
+  });
+
+  test("calculates formula role caps from the configured team count", async () => {
+    const store = loadStore();
+    store.resetMemoryTourneyPlayerStoreForTests();
+
+    await expect(store.getTourneyRoleCapacitySnapshot({ env })).resolves.toMatchObject({
+      teamCount: 8,
+      roles: expect.arrayContaining([
+        expect.objectContaining({
+          role: "Support",
+          cap: 15,
+          totalCap: 16,
+          mainCount: 0,
+          reservedFor: "Frogger",
+          reservedCap: 1,
+          reservedCount: 0,
+          isFull: false,
+        }),
+      ]),
+    });
+
+    await store.updateTourneyRegistrationConfig({
+      teamCount: 10,
+      actorUsername: "serviroo",
+      env,
+    });
+
+    await expect(store.getTourneyRoleCapacitySnapshot({ env })).resolves.toMatchObject({
+      teamCount: 10,
+      roles: expect.arrayContaining([
+        expect.objectContaining({
+          role: "Support",
+          cap: 19,
+          totalCap: 20,
+          reservedFor: "Frogger",
+          reservedCap: 1,
+        }),
+      ]),
+    });
+  });
+
+  test("uses only approved main-pool players for role caps and confirmed substitute overflow", async () => {
+    const store = loadStore();
+    store.resetMemoryTourneyPlayerStoreForTests();
+    await store.updateTourneyRegistrationConfig({
+      teamCount: 2,
+      actorUsername: "serviroo",
+      env,
+    });
+
+    const payloadFor = (index) => ({
+      ...basePayload,
+      email: `support${index}@example.com`,
+      discord: `Support${index}#1234`,
+      displayName: `Support ${index}`,
+      twitchUsername: `support${index}`,
+    });
+
+    for (let index = 1; index <= 4; index += 1) {
+      await store.createPendingTourneyPlayer({
+        payload: payloadFor(index),
+        recipients: approvers,
+        env,
+      });
+    }
+
+    await expect(store.getTourneyRoleCapacitySnapshot({ env })).resolves.toMatchObject({
+      teamCount: 2,
+      roles: expect.arrayContaining([
+        expect.objectContaining({
+          role: "Support",
+          cap: 3,
+          totalCap: 4,
+          mainCount: 0,
+          pendingMainCount: 0,
+          approvedMainCount: 0,
+          isFull: false,
+        }),
+      ]),
+    });
+
+    await store.createPendingTourneyPlayer({
+      payload: payloadFor(5),
+      recipients: approvers,
+      env,
+    });
+
+    for (let index = 6; index <= 8; index += 1) {
+      await store.createApprovedTourneyPlayer({
+        payload: payloadFor(index),
+        actorUsername: "serviroo",
+        env,
+      });
+    }
+
+    await expect(
+      store.createPendingTourneyPlayer({
+        payload: payloadFor(10),
+        recipients: approvers,
+        env,
+      })
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "ROLE_CAPACITY_FULL",
+    });
+
+    const substitute = await store.createPendingTourneyPlayer({
+      payload: {
+        ...payloadFor(10),
+        acceptSubstitutePool: true,
+      },
+      recipients: approvers,
+      env,
+    });
+
+    expect(substitute.player).toMatchObject({
+      rolePlay: "Support",
+      registrationPool: "substitute",
+    });
+    await expect(store.getTourneyRoleCapacitySnapshot({ env })).resolves.toMatchObject({
+      roles: expect.arrayContaining([
+        expect.objectContaining({
+          role: "Support",
+          cap: 3,
+          totalCap: 4,
+          mainCount: 3,
+          pendingMainCount: 0,
+          approvedMainCount: 3,
+          substituteCount: 0,
+          isFull: true,
+        }),
+      ]),
+    });
+  });
+
+  test("excludes denied and removed players from role-cap counts", async () => {
+    const store = loadStore();
+    store.resetMemoryTourneyPlayerStoreForTests();
+    await store.updateTourneyRegistrationConfig({
+      teamCount: 2,
+      actorUsername: "serviroo",
+      env,
+    });
+
+    const payloadFor = (index) => ({
+      ...basePayload,
+      email: `cap${index}@example.com`,
+      discord: `Cap${index}#1234`,
+      displayName: `Cap ${index}`,
+      twitchUsername: `cap${index}`,
+    });
+
+    const pendingOne = await store.createPendingTourneyPlayer({
+      payload: payloadFor(1),
+      recipients: approvers,
+      env,
+    });
+    const deniedCandidate = await store.createPendingTourneyPlayer({
+      payload: payloadFor(2),
+      recipients: approvers,
+      env,
+    });
+    const approvedOne = await store.createApprovedTourneyPlayer({
+      payload: payloadFor(3),
+      actorUsername: "serviroo",
+      env,
+    });
+    const removedCandidate = await store.createApprovedTourneyPlayer({
+      payload: payloadFor(4),
+      actorUsername: "serviroo",
+      env,
+    });
+
+    await expect(store.getTourneyRoleCapacitySnapshot({ env })).resolves.toMatchObject({
+      roles: expect.arrayContaining([
+        expect.objectContaining({
+          role: "Support",
+          cap: 3,
+          totalCap: 4,
+          mainCount: 2,
+          pendingMainCount: 0,
+          approvedMainCount: 2,
+          isFull: false,
+        }),
+      ]),
+    });
+
+    await store.applyRegistrationDecision({
+      tokenHash: "",
+      playerId: deniedCandidate.player.id,
+      purpose: "deny",
+      actorUsername: "serviroo",
+      env,
+    });
+    await store.kickTourneyPlayer({
+      playerId: removedCandidate.id,
+      actorUsername: "serviroo",
+      env,
+    });
+
+    await expect(store.getTourneyRoleCapacitySnapshot({ env })).resolves.toMatchObject({
+      roles: expect.arrayContaining([
+        expect.objectContaining({
+          role: "Support",
+          cap: 3,
+          totalCap: 4,
+          mainCount: 1,
+          pendingMainCount: 0,
+          approvedMainCount: 1,
+          isFull: false,
+        }),
+      ]),
+    });
+
+    expect(pendingOne.player.registrationPool).toBe("main");
+    expect(approvedOne.registrationPool).toBe("main");
+    for (let index = 5; index <= 6; index += 1) {
+      await store.createApprovedTourneyPlayer({
+        payload: payloadFor(index),
+        actorUsername: "serviroo",
+        env,
+      });
+    }
+    await expect(store.getTourneyRoleCapacitySnapshot({ env })).resolves.toMatchObject({
+      roles: expect.arrayContaining([
+        expect.objectContaining({
+          role: "Support",
+          cap: 3,
+          totalCap: 4,
+          mainCount: 3,
+          pendingMainCount: 0,
+          approvedMainCount: 3,
+          isFull: true,
+        }),
+      ]),
+    });
+    await expect(
+      store.createPendingTourneyPlayer({
+        payload: payloadFor(8),
+        recipients: approvers,
+        env,
+      })
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "ROLE_CAPACITY_FULL",
+    });
+  });
+
+  test("moves a pending main-pool player to substitute when approval would exceed the role cap", async () => {
+    const store = loadStore();
+    store.resetMemoryTourneyPlayerStoreForTests();
+    await store.updateTourneyRegistrationConfig({
+      teamCount: 2,
+      actorUsername: "serviroo",
+      env,
+    });
+
+    const payloadFor = (index) => ({
+      ...basePayload,
+      email: `overflow${index}@example.com`,
+      discord: `Overflow${index}#1234`,
+      displayName: `Overflow ${index}`,
+      twitchUsername: `overflow${index}`,
+    });
+
+    const pending = await store.createPendingTourneyPlayer({
+      payload: payloadFor(1),
+      recipients: approvers,
+      env,
+    });
+
+    for (let index = 2; index <= 4; index += 1) {
+      await store.createApprovedTourneyPlayer({
+        payload: payloadFor(index),
+        actorUsername: "serviroo",
+        env,
+      });
+    }
+
+    const approved = await store.applyRegistrationDecision({
+      tokenHash: "",
+      playerId: pending.player.id,
+      purpose: "approve",
+      actorUsername: "serviroo",
+      env,
+    });
+
+    expect(approved).toMatchObject({
+      status: "approved",
+      registrationPool: "substitute",
+    });
+    await expect(store.getTourneyRoleCapacitySnapshot({ env })).resolves.toMatchObject({
+      roles: expect.arrayContaining([
+        expect.objectContaining({
+          role: "Support",
+          cap: 3,
+          totalCap: 4,
+          mainCount: 3,
+          substituteCount: 1,
+          approvedMainCount: 3,
+          isFull: true,
+        }),
+      ]),
+    });
+  });
+
+  test("reserves the final Support main-pool slot for Frogger", async () => {
+    const store = loadStore();
+    store.resetMemoryTourneyPlayerStoreForTests();
+    await store.updateTourneyRegistrationConfig({
+      teamCount: 2,
+      actorUsername: "serviroo",
+      env,
+    });
+
+    const payloadFor = (index) => ({
+      ...basePayload,
+      email: `reserved${index}@example.com`,
+      discord: `Reserved${index}#1234`,
+      displayName: `Reserved ${index}`,
+      twitchUsername: `reserved${index}`,
+    });
+
+    for (let index = 1; index <= 3; index += 1) {
+      await store.createApprovedTourneyPlayer({
+        payload: payloadFor(index),
+        actorUsername: "serviroo",
+        env,
+      });
+    }
+
+    await expect(
+      store.createPendingTourneyPlayer({
+        payload: payloadFor(4),
+        recipients: approvers,
+        env,
+      })
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "ROLE_CAPACITY_FULL",
+    });
+
+    const frogger = await store.createPendingTourneyPlayer({
+      payload: {
+        ...basePayload,
+        email: "frogger@example.com",
+        discord: "Frogger#1234",
+        displayName: "Frogger",
+        twitchUsername: "FroggerOW",
+      },
+      recipients: approvers,
+      env,
+    });
+
+    expect(frogger.player).toMatchObject({
+      displayName: "Frogger",
+      twitchUsername: "froggerow",
+      rolePlay: "Support",
+      registrationPool: "main",
+    });
+
+    await store.applyRegistrationDecision({
+      tokenHash: "",
+      playerId: frogger.player.id,
+      purpose: "approve",
+      actorUsername: "serviroo",
+      env,
+    });
+
+    await expect(store.getTourneyRoleCapacitySnapshot({ env })).resolves.toMatchObject({
+      roles: expect.arrayContaining([
+        expect.objectContaining({
+          role: "Support",
+          cap: 3,
+          totalCap: 4,
+          mainCount: 3,
+          reservedFor: "Frogger",
+          reservedCap: 1,
+          reservedCount: 1,
+          totalMainCount: 4,
+          isFull: true,
+          reservedIsFull: true,
+        }),
+      ]),
     });
   });
 });

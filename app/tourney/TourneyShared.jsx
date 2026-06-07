@@ -1,4 +1,6 @@
 import { cookies } from "next/headers";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import TourneyFooter from "./TourneyFooter";
 import {
   TOURNEY_SESSION_COOKIE,
@@ -51,6 +53,177 @@ export const StatusPanel = ({ label = "Reserved", title, children }) => (
     <h3>{title}</h3>
     <p>{children}</p>
   </div>
+);
+
+const TourneyTelemetry = () => (
+  <>
+    <Analytics />
+    <SpeedInsights />
+  </>
+);
+
+const tourneyHosts = [
+  {
+    name: "Yukari",
+    role: "Host",
+    image: "/tourney/hosts/yukari.png",
+    avatarFit: "contain",
+    twitchUrl: "https://www.twitch.tv/yukaripoi",
+    twitchLabel: "yukaripoi",
+  },
+  {
+    name: "Serviroo",
+    role: "Tournament Director",
+    image: "/tourney/hosts/serviroo.png",
+    twitchUrl: "",
+    twitchLabel: "",
+    featured: true,
+  },
+  {
+    name: "Supa",
+    role: "Host",
+    image: "/tourney/hosts/supa.png",
+    twitchUrl: "https://twitch.tv/supa_ow",
+    twitchLabel: "supa_ow",
+  },
+];
+
+export const TourneyTwitchIcon = () => (
+  <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+    <path
+      d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"
+      fill="currentColor"
+    />
+  </svg>
+);
+
+const HostCard = ({ host }) => (
+  <article className={host.featured ? "tourney-host-card is-featured" : "tourney-host-card"}>
+    <span
+      className={
+        host.avatarFit === "contain"
+          ? "tourney-host-avatar is-contained"
+          : "tourney-host-avatar"
+      }
+    >
+      <img src={host.image} alt={`${host.name} logo`} />
+    </span>
+    <span className="tourney-host-copy">
+      <strong>{host.name}</strong>
+      <span>{host.role}</span>
+    </span>
+    {host.twitchUrl ? (
+      <a
+        className="tourney-host-twitch"
+        href={host.twitchUrl}
+        rel="noreferrer"
+        target="_blank"
+      >
+        <TourneyTwitchIcon />
+        <span>{host.twitchLabel}</span>
+      </a>
+    ) : null}
+  </article>
+);
+
+export const TourneyHosts = ({ variant = "front" }) => {
+  const director = tourneyHosts.find((host) => host.featured);
+  const hosts = tourneyHosts.filter((host) => !host.featured);
+
+  if (variant === "roster") {
+    return (
+      <section
+        aria-labelledby="tourney-hosts-title"
+        className="tourney-host-showcase is-roster"
+      >
+        <div className="tourney-host-head">
+          <p className="tourney-eyebrow">Tournament Team</p>
+          <h2 id="tourney-hosts-title">Hosts</h2>
+        </div>
+        <div className="tourney-host-director">
+          <HostCard host={director} />
+        </div>
+        <div className="tourney-host-grid">
+          {hosts.map((host) => (
+            <HostCard host={host} key={host.name} />
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section
+      aria-labelledby="tourney-hosts-title"
+      className="tourney-host-showcase"
+    >
+      <div className="tourney-host-head">
+        <p className="tourney-eyebrow">Tournament Team</p>
+        <h2 id="tourney-hosts-title">Hosts</h2>
+      </div>
+      <div className="tourney-host-grid">
+        {tourneyHosts.map((host) => (
+          <HostCard host={host} key={host.name} />
+        ))}
+      </div>
+    </section>
+  );
+};
+
+export const TourneyRosterHosts = () => (
+  <ul className="tourney-roster-list tourney-roster-host-list">
+    {[...tourneyHosts]
+      .sort(
+        (first, second) =>
+          Number(Boolean(second.featured)) - Number(Boolean(first.featured))
+      )
+      .map((host) => (
+        <li
+          className={
+            host.featured
+              ? "tourney-roster-player tourney-roster-host-row is-featured"
+              : "tourney-roster-player tourney-roster-host-row"
+          }
+          key={host.name}
+        >
+          <span className="tourney-roster-identity">
+            <span
+              aria-hidden="true"
+              className={
+                host.avatarFit === "contain"
+                  ? "tourney-roster-avatar is-contained"
+                  : "tourney-roster-avatar"
+              }
+            >
+              <img alt="" loading="lazy" src={host.image} />
+            </span>
+            <span className="tourney-roster-name-copy">
+              <strong>{host.name}</strong>
+              <span className="tourney-roster-label">{host.role}</span>
+            </span>
+          </span>
+          <span className="tourney-roster-detail">
+            <strong>{host.featured ? "Director" : "Host"}</strong>
+            <span className="tourney-roster-label">Event role</span>
+          </span>
+          <span className="tourney-roster-detail">
+            <strong>Roo Industries</strong>
+            <span className="tourney-roster-label">Tournament team</span>
+          </span>
+          <span
+            aria-hidden={host.twitchUrl ? undefined : true}
+            className="tourney-roster-cta"
+          >
+            {host.twitchUrl ? (
+              <a href={host.twitchUrl} rel="noreferrer" target="_blank">
+                <TourneyTwitchIcon />
+                <span>{host.twitchLabel}</span>
+              </a>
+            ) : null}
+          </span>
+        </li>
+      ))}
+  </ul>
 );
 
 export const TourneyStyles = () => (
@@ -466,6 +639,170 @@ export const TourneyStyles = () => (
       font-weight: 500;
     }
 
+    .tourney-host-showcase {
+      display: grid;
+      gap: 18px;
+      margin: 0 auto 1.125rem;
+      width: 100%;
+      scroll-margin-top: calc(var(--tourney-nav-offset) + 1rem);
+      border: 1px solid rgba(14, 165, 233, 0.3);
+      border-radius: 1rem;
+      background:
+        linear-gradient(145deg, rgba(11, 17, 32, 0.78), rgba(7, 24, 49, 0.62)),
+        radial-gradient(circle at 50% 0%, rgba(168, 85, 247, 0.12), transparent 54%);
+      padding: clamp(1.25rem, 2.4vw, 1.75rem);
+      box-shadow:
+        inset 0 1px 0 rgba(186, 230, 253, 0.08),
+        0 0 25px rgba(14, 165, 233, 0.15);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+    }
+
+    .tourney-host-showcase.is-roster {
+      margin-bottom: 1.125rem;
+    }
+
+    .tourney-host-head {
+      display: grid;
+      gap: 4px;
+      justify-items: center;
+      text-align: center;
+    }
+
+    .tourney-host-head h2 {
+      margin: 0;
+      color: #fff;
+      font-size: clamp(1.65rem, 4vw, 2.35rem);
+      line-height: 1.08;
+      font-weight: 820;
+      letter-spacing: 0;
+    }
+
+    .tourney-host-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: clamp(14px, 2vw, 18px);
+      align-items: stretch;
+    }
+
+    .tourney-host-director {
+      display: grid;
+      width: min(100%, 24rem);
+      margin-inline: auto;
+    }
+
+    .tourney-host-showcase.is-roster .tourney-host-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      width: min(100%, 48rem);
+      margin-inline: auto;
+    }
+
+    .tourney-host-card {
+      display: grid;
+      grid-template-rows: auto auto minmax(46px, auto);
+      justify-items: center;
+      align-content: start;
+      gap: 12px;
+      min-height: 100%;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 0.85rem;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015)),
+        rgba(15, 23, 42, 0.6);
+      padding: 18px;
+      text-align: center;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.07),
+        0 14px 34px rgba(2, 6, 23, 0.22);
+    }
+
+    .tourney-host-card.is-featured {
+      border-color: rgba(34, 211, 238, 0.34);
+      background:
+        radial-gradient(circle at 50% 0%, rgba(34, 211, 238, 0.13), transparent 48%),
+        rgba(15, 23, 42, 0.62);
+    }
+
+    .tourney-host-avatar {
+      display: grid;
+      place-items: center;
+      width: clamp(94px, 10vw, 128px);
+      height: clamp(94px, 10vw, 128px);
+      overflow: hidden;
+      border-radius: 9999px;
+      border: 1px solid rgba(125, 211, 252, 0.34);
+      background: linear-gradient(145deg, rgba(15, 23, 42, 0.86), rgba(30, 41, 59, 0.72));
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 0 22px rgba(56, 189, 248, 0.18);
+    }
+
+    .tourney-host-avatar img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .tourney-host-avatar.is-contained {
+      border-radius: 9999px;
+      background: #fff;
+    }
+
+    .tourney-host-avatar.is-contained img {
+      width: 72%;
+      height: 72%;
+      object-fit: contain;
+    }
+
+    .tourney-host-copy {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+    }
+
+    .tourney-host-copy strong {
+      color: #fff;
+      font-size: 1.16rem;
+      line-height: 1.15;
+      font-weight: 820;
+      overflow-wrap: anywhere;
+    }
+
+    .tourney-host-copy span {
+      color: rgba(203, 213, 225, 0.8);
+      font-size: 0.9rem;
+      line-height: 1.3;
+      font-weight: 650;
+    }
+
+    .tourney-host-twitch {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      min-height: 44px;
+      width: min(100%, 12.25rem);
+      align-self: end;
+      border: 1px solid rgba(233, 213, 255, 0.24);
+      border-radius: 0.55rem;
+      color: #fff;
+      background: linear-gradient(135deg, #a855f7 0%, #9146ff 62%, #7e22ce 100%);
+      box-shadow: 0 14px 26px rgba(88, 28, 135, 0.28);
+      padding: 0 16px;
+      font-size: 0.92rem;
+      font-weight: 860;
+      line-height: 1;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .tourney-host-twitch svg {
+      width: 20px;
+      height: 20px;
+      flex: 0 0 auto;
+    }
+
     .tourney-route-title {
       max-width: 56rem;
       margin: 0 auto;
@@ -545,11 +882,18 @@ export const TourneyStyles = () => (
       padding-left: 20px;
     }
 
+    .tourney-section-body .tourney-info-list,
+    .tourney-section-body .tourney-card-list,
+    .tourney-section-body .tourney-rulebook {
+      padding: 0;
+    }
+
     .tourney-info-list {
       counter-reset: tourney-info;
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(min(100%, 31rem), 31rem));
-      justify-content: center;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-auto-rows: 1fr;
+      justify-content: stretch;
       align-items: stretch;
       gap: clamp(16px, 2vw, 22px);
       margin: 0;
@@ -560,13 +904,18 @@ export const TourneyStyles = () => (
     .tourney-card-list {
       counter-reset: tourney-card;
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(min(100%, 31rem), 31rem));
-      justify-content: center;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+      grid-auto-rows: 1fr;
+      justify-content: stretch;
       align-items: stretch;
       gap: clamp(16px, 2vw, 22px);
       margin: 0;
       padding: 0;
       list-style: none;
+    }
+
+    .tourney-date-list {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .tourney-info-list li,
@@ -669,9 +1018,61 @@ export const TourneyStyles = () => (
 
     .tourney-info-list > li:last-child:nth-child(odd),
     .tourney-card-list > li:last-child:nth-child(odd) {
-      grid-column: 1 / -1;
-      justify-self: center;
-      width: min(100%, 31rem);
+      grid-column: auto;
+      justify-self: stretch;
+      width: auto;
+    }
+
+    .tourney-action-callout {
+      display: grid;
+      gap: 8px;
+      margin: 0 0 18px;
+      border: 1px solid rgba(251, 146, 60, 0.42);
+      border-radius: 0.85rem;
+      background:
+        linear-gradient(145deg, rgba(154, 52, 18, 0.22), rgba(15, 23, 42, 0.7)),
+        radial-gradient(circle at 0% 0%, rgba(251, 146, 60, 0.22), transparent 42%);
+      padding: 18px;
+      text-align: center;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 237, 213, 0.08),
+        0 0 24px rgba(251, 146, 60, 0.14);
+    }
+
+    .tourney-action-callout strong {
+      color: #ffedd5;
+      font-size: clamp(1.1rem, 2vw, 1.35rem);
+      line-height: 1.2;
+      font-weight: 860;
+    }
+
+    .tourney-action-callout span {
+      color: rgba(255, 237, 213, 0.9);
+      font-size: 0.98rem;
+      line-height: 1.45;
+      font-weight: 650;
+    }
+
+    .tourney-map-process {
+      display: grid;
+      gap: 10px;
+      margin: 18px 0;
+      border: 1px solid rgba(125, 211, 252, 0.26);
+      border-radius: 0.85rem;
+      background: rgba(15, 23, 42, 0.48);
+      padding: 16px;
+    }
+
+    .tourney-map-process strong {
+      color: #fff;
+      font-size: 1.05rem;
+      line-height: 1.2;
+    }
+
+    .tourney-map-process p {
+      margin: 0;
+      color: rgba(226, 232, 240, 0.88);
+      line-height: 1.55;
     }
 
     .tourney-rulebook-intro {
@@ -687,10 +1088,10 @@ export const TourneyStyles = () => (
     .tourney-rulebook {
       counter-reset: tourney-rule;
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(min(100%, 31rem), 31rem));
-      justify-content: center;
+      grid-template-columns: 1fr;
+      justify-content: stretch;
       align-items: stretch;
-      gap: clamp(16px, 2vw, 22px);
+      gap: 14px;
       margin: 0;
       padding: 0;
       list-style: none;
@@ -700,14 +1101,13 @@ export const TourneyStyles = () => (
       counter-increment: tourney-rule;
       position: relative;
       display: grid;
-      grid-template-columns: 34px minmax(0, 1fr);
-      grid-auto-rows: max-content;
-      column-gap: 14px;
-      row-gap: 10px;
-      align-items: start;
-      align-content: start;
+      grid-template-columns: 34px minmax(10rem, 0.32fr) minmax(0, 1fr);
+      column-gap: 16px;
+      row-gap: 6px;
+      align-items: center;
+      align-content: center;
       min-width: 0;
-      min-height: 100%;
+      min-height: auto;
       overflow: hidden;
       border: 1px solid rgba(14, 165, 233, 0.34);
       border-radius: 0.8rem;
@@ -770,29 +1170,15 @@ export const TourneyStyles = () => (
       letter-spacing: 0;
     }
 
-    .tourney-rule ul {
+    .tourney-rule p {
       position: relative;
       z-index: 1;
-      grid-column: 2;
-      align-self: start;
-      list-style: disc;
-      gap: 8px;
-      margin-top: 0;
-      padding-left: 1.15rem;
-    }
-
-    .tourney-rulebook > .tourney-rule:last-child:nth-child(odd) {
-      grid-column: 1 / -1;
-      justify-self: center;
-      width: min(100%, 31rem);
-    }
-
-    .tourney-rule li {
+      grid-column: 3;
+      grid-row: 1;
+      margin: 0;
+      color: rgba(203, 213, 225, 0.9);
+      line-height: 1.5;
       overflow-wrap: anywhere;
-    }
-
-    .tourney-rule ul li::marker {
-      color: #7dd3fc;
     }
 
     .tourney-status-panel {
@@ -845,6 +1231,7 @@ export const TourneyStyles = () => (
     .tourney-owner-form label,
     .tourney-form label,
     .tourney-player-edit label,
+    .tourney-capacity-form label,
     .tourney-owner-json {
       display: grid;
       gap: 8px;
@@ -857,10 +1244,15 @@ export const TourneyStyles = () => (
 
     .tourney-owner-form input,
     .tourney-owner-form select,
+    .tourney-owner-form textarea,
     .tourney-form input,
     .tourney-form select,
     .tourney-form textarea,
     .tourney-player-edit input,
+    .tourney-player-edit select,
+    .tourney-inline-form input,
+    .tourney-inline-form select,
+    .tourney-capacity-form input,
     .tourney-owner-actions input,
     .tourney-owner-json textarea {
       width: 100%;
@@ -877,28 +1269,39 @@ export const TourneyStyles = () => (
 
     .tourney-owner-form input,
     .tourney-owner-form select,
+    .tourney-inline-form input,
+    .tourney-inline-form select,
     .tourney-form input,
     .tourney-form select,
     .tourney-player-edit input,
+    .tourney-player-edit select,
+    .tourney-capacity-form input,
     .tourney-owner-actions input {
       min-height: 46px;
       padding: 0 12px;
     }
 
     .tourney-owner-form input::placeholder,
+    .tourney-owner-form textarea::placeholder,
     .tourney-form input::placeholder,
     .tourney-form textarea::placeholder,
     .tourney-player-edit input::placeholder,
+    .tourney-inline-form input::placeholder,
     .tourney-owner-actions input::placeholder {
       color: rgba(148, 163, 184, 0.78);
     }
 
     .tourney-owner-form input:focus,
     .tourney-owner-form select:focus,
+    .tourney-owner-form textarea:focus,
     .tourney-form input:focus,
     .tourney-form select:focus,
     .tourney-form textarea:focus,
     .tourney-player-edit input:focus,
+    .tourney-player-edit select:focus,
+    .tourney-inline-form input:focus,
+    .tourney-inline-form select:focus,
+    .tourney-capacity-form input:focus,
     .tourney-owner-actions input:focus,
     .tourney-owner-json textarea:focus {
       border-color: rgba(56, 189, 248, 0.78);
@@ -1054,6 +1457,13 @@ export const TourneyStyles = () => (
       margin: 0;
     }
 
+    .tourney-form-note {
+      margin: 0;
+      color: rgba(226, 232, 240, 0.86);
+      font-size: 0.94rem;
+      line-height: 1.5;
+    }
+
     .tourney-form-narrow {
       width: min(100%, 34rem);
       margin-inline: auto;
@@ -1069,6 +1479,78 @@ export const TourneyStyles = () => (
       min-height: 130px;
       resize: vertical;
       padding: 12px;
+    }
+
+    .tourney-owner-form textarea {
+      min-height: 120px;
+      resize: vertical;
+      padding: 12px;
+    }
+
+    .tourney-record-panel {
+      display: grid;
+      gap: 18px;
+    }
+
+    .tourney-record-list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .tourney-record-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(220px, 0.42fr);
+      gap: 14px;
+      align-items: start;
+      border: 1px solid rgba(14, 165, 233, 0.28);
+      border-radius: 0.85rem;
+      background: rgba(11, 17, 32, 0.62);
+      padding: 16px;
+    }
+
+    .tourney-record-row h3,
+    .tourney-record-row p {
+      margin: 0;
+    }
+
+    .tourney-record-row h3 {
+      color: #fff;
+      font-size: 1.08rem;
+      line-height: 1.25;
+    }
+
+    .tourney-record-row p {
+      margin-top: 8px;
+      color: rgba(226, 232, 240, 0.86);
+      line-height: 1.5;
+    }
+
+    .tourney-record-row small,
+    .tourney-record-row a {
+      display: block;
+      margin-top: 8px;
+      color: rgba(203, 213, 225, 0.78);
+      font-size: 0.84rem;
+      line-height: 1.35;
+    }
+
+    .tourney-record-row a {
+      color: #7dd3fc;
+      font-weight: 760;
+    }
+
+    .tourney-inline-form {
+      display: grid;
+      gap: 10px;
+    }
+
+    .tourney-inline-form label {
+      display: grid;
+      gap: 6px;
+      color: #7dd3fc;
+      font-size: 0.72rem;
+      font-weight: 820;
+      text-transform: uppercase;
     }
 
     .tourney-prefixed-input {
@@ -1196,8 +1678,66 @@ export const TourneyStyles = () => (
       color: #a5f3fc;
     }
 
+    .tourney-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 80;
+      display: grid;
+      place-items: center;
+      padding: 18px;
+      background: rgba(3, 7, 18, 0.74);
+      backdrop-filter: blur(10px);
+    }
+
+    .tourney-modal {
+      display: grid;
+      gap: 12px;
+      width: min(100%, 31rem);
+      border: 1px solid rgba(168, 85, 247, 0.5);
+      border-radius: 1rem;
+      background:
+        linear-gradient(145deg, rgba(15, 23, 42, 0.96), rgba(30, 15, 68, 0.9)),
+        radial-gradient(circle at 18% 0%, rgba(168, 85, 247, 0.2), transparent 48%);
+      box-shadow:
+        0 0 0 1px rgba(233, 213, 255, 0.08),
+        0 24px 70px rgba(0, 0, 0, 0.46),
+        0 0 34px rgba(168, 85, 247, 0.24);
+      padding: 22px;
+    }
+
+    .tourney-modal h3,
+    .tourney-modal p {
+      margin: 0;
+    }
+
+    .tourney-modal h3 {
+      color: #fff;
+      font-size: clamp(1.35rem, 3vw, 1.85rem);
+      line-height: 1.1;
+    }
+
+    .tourney-modal p:not(.tourney-kicker) {
+      color: rgba(226, 232, 240, 0.86);
+      font-size: 0.95rem;
+      line-height: 1.5;
+    }
+
+    .tourney-modal-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-top: 4px;
+    }
+
     .tourney-section-link {
       margin: 18px 0 0;
+    }
+
+    .tourney-section-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
     }
 
     .tourney-section-link a {
@@ -1219,6 +1759,7 @@ export const TourneyStyles = () => (
     .tourney-roster-controls {
       display: flex;
       flex-wrap: wrap;
+      justify-content: center;
       gap: 8px;
       margin: 0 0 14px;
     }
@@ -1244,6 +1785,18 @@ export const TourneyStyles = () => (
       background: rgba(88, 28, 135, 0.72);
     }
 
+    .tourney-roster-group {
+      display: grid;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .tourney-roster-group + .tourney-roster-group {
+      margin-top: 20px;
+      padding-top: 18px;
+      border-top: 1px solid rgba(168, 85, 247, 0.28);
+    }
+
     .tourney-roster-list {
       display: grid;
       gap: 12px;
@@ -1252,24 +1805,35 @@ export const TourneyStyles = () => (
       list-style: none;
     }
 
+    .tourney-roster-host-list {
+      gap: 14px;
+    }
+
     .tourney-roster-player {
       display: grid;
       grid-template-columns:
-        minmax(180px, 1.15fr)
+        minmax(280px, 1.15fr)
         minmax(120px, 0.45fr)
         minmax(120px, 0.45fr)
         minmax(220px, 0.62fr);
       gap: clamp(14px, 2vw, 24px);
       align-items: center;
-      justify-items: center;
+      justify-items: stretch;
       border: 1px solid rgba(14, 165, 233, 0.26);
       border-radius: 0.8rem;
       background: rgba(11, 17, 32, 0.62);
       padding: 16px 18px;
     }
 
+    .tourney-roster-host-row.is-featured {
+      border-color: rgba(34, 211, 238, 0.34);
+      background:
+        radial-gradient(circle at 8% 50%, rgba(34, 211, 238, 0.12), transparent 32%),
+        rgba(11, 17, 32, 0.66);
+    }
+
     .tourney-roster-player strong,
-    .tourney-roster-player > span > span {
+    .tourney-roster-label {
       display: block;
     }
 
@@ -1279,7 +1843,7 @@ export const TourneyStyles = () => (
       overflow-wrap: anywhere;
     }
 
-    .tourney-roster-player > span > span {
+    .tourney-roster-label {
       margin-top: 4px;
       color: rgba(203, 213, 225, 0.78);
       font-size: 0.86rem;
@@ -1292,6 +1856,61 @@ export const TourneyStyles = () => (
       min-width: 0;
       width: 100%;
       text-align: center;
+    }
+
+    .tourney-roster-identity {
+      grid-template-columns: 56px minmax(0, 1fr);
+      align-items: center;
+      justify-items: start;
+      justify-self: stretch;
+      column-gap: 14px;
+      text-align: left;
+    }
+
+    .tourney-roster-detail {
+      justify-items: center;
+      text-align: center;
+    }
+
+    .tourney-roster-name-copy {
+      min-width: 0;
+    }
+
+    .tourney-roster-avatar {
+      display: grid;
+      place-items: center;
+      width: 56px;
+      height: 56px;
+      overflow: hidden;
+      border: 1px solid rgba(125, 211, 252, 0.34);
+      border-radius: 9999px;
+      color: #e0f2fe;
+      background:
+        radial-gradient(circle at 42% 22%, rgba(125, 211, 252, 0.18), transparent 44%),
+        rgba(15, 23, 42, 0.84);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 0 18px rgba(56, 189, 248, 0.18);
+      font-size: 1.18rem;
+      font-weight: 900;
+      line-height: 1;
+    }
+
+    .tourney-roster-avatar img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .tourney-roster-avatar.is-contained {
+      background: #fff;
+    }
+
+    .tourney-roster-avatar.is-contained img {
+      width: 72%;
+      height: 72%;
+      object-fit: contain;
     }
 
     .tourney-roster-cta {
@@ -1987,6 +2606,65 @@ export const TourneyStyles = () => (
       gap: 18px;
     }
 
+    .tourney-capacity-panel {
+      display: grid;
+      gap: 14px;
+      border: 1px solid rgba(14, 165, 233, 0.3);
+      border-radius: 1rem;
+      background:
+        linear-gradient(145deg, rgba(15, 23, 42, 0.8), rgba(7, 24, 49, 0.64));
+      box-shadow: 0 0 25px rgba(14, 165, 233, 0.13);
+      padding: 16px;
+    }
+
+    .tourney-capacity-form {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(120px, 150px) auto;
+      gap: 12px;
+      align-items: end;
+    }
+
+    .tourney-capacity-form > span {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .tourney-capacity-form strong,
+    .tourney-capacity-role strong {
+      color: #fff;
+      font-size: 0.96rem;
+      line-height: 1.2;
+    }
+
+    .tourney-capacity-form small,
+    .tourney-capacity-role small {
+      color: rgba(203, 213, 225, 0.82);
+      font-size: 0.78rem;
+      line-height: 1.3;
+    }
+
+    .tourney-capacity-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .tourney-capacity-role {
+      display: grid;
+      gap: 4px;
+      border: 1px solid rgba(14, 165, 233, 0.28);
+      border-radius: 0.78rem;
+      background: rgba(8, 17, 32, 0.5);
+      padding: 12px;
+    }
+
+    .tourney-capacity-role.is-full {
+      border-color: rgba(251, 146, 60, 0.46);
+      background:
+        linear-gradient(145deg, rgba(49, 24, 7, 0.38), rgba(8, 17, 32, 0.58));
+    }
+
     .tourney-player-layout {
       display: grid;
       grid-template-columns: 1fr;
@@ -2082,7 +2760,7 @@ export const TourneyStyles = () => (
     .tourney-player-edit {
       grid-column: 1 / -1;
       display: grid;
-      grid-template-columns: minmax(140px, 1fr) minmax(140px, 1fr) minmax(160px, 1fr) auto;
+      grid-template-columns: repeat(4, minmax(140px, 1fr)) auto;
       gap: 12px;
       align-items: end;
       border-top: 1px solid rgba(14, 165, 233, 0.22);
@@ -2148,7 +2826,18 @@ export const TourneyStyles = () => (
         grid-template-columns: 1fr;
       }
 
-      .tourney-info-list {
+      .tourney-host-grid,
+      .tourney-host-showcase.is-roster .tourney-host-grid {
+        grid-template-columns: 1fr;
+        width: 100%;
+      }
+
+      .tourney-host-director {
+        width: 100%;
+      }
+
+      .tourney-info-list,
+      .tourney-card-list {
         grid-template-columns: 1fr;
         justify-content: stretch;
       }
@@ -2180,12 +2869,26 @@ export const TourneyStyles = () => (
         grid-template-columns: 1fr;
       }
 
+      .tourney-capacity-form {
+        grid-template-columns: minmax(0, 1fr) minmax(120px, 150px) auto;
+      }
+
+      .tourney-capacity-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
       .tourney-roster-player,
       .tourney-player-row {
         grid-template-columns: 1fr 1fr;
       }
 
-      .tourney-roster-identity,
+      .tourney-roster-identity {
+        grid-column: 1 / -1;
+        justify-content: center;
+        justify-self: center;
+        width: auto;
+      }
+
       .tourney-roster-cta {
         grid-column: 1 / -1;
       }
@@ -2206,6 +2909,10 @@ export const TourneyStyles = () => (
 
       .tourney-player-edit {
         grid-template-columns: 1fr 1fr;
+      }
+
+      .tourney-record-row {
+        grid-template-columns: 1fr;
       }
 
       .tourney-player-edit-actions {
@@ -2300,10 +3007,37 @@ export const TourneyStyles = () => (
         padding: 22px;
       }
 
+      .tourney-host-card {
+        padding: 16px;
+      }
+
+      .tourney-host-twitch {
+        width: 100%;
+      }
+
+      .tourney-info-list li,
+      .tourney-card-list li {
+        grid-template-columns: 30px minmax(0, 1fr);
+        column-gap: 12px;
+        padding: 16px;
+      }
+
+      .tourney-info-list li::before,
+      .tourney-card-list li::before {
+        width: 30px;
+        height: 30px;
+        font-size: 0.82rem;
+      }
+
       .tourney-rule {
         grid-template-columns: 30px minmax(0, 1fr);
         column-gap: 12px;
         padding: 16px;
+      }
+
+      .tourney-rule p {
+        grid-column: 2;
+        grid-row: auto;
       }
 
       .tourney-rule::before {
@@ -2330,10 +3064,19 @@ export const TourneyStyles = () => (
       }
 
       .tourney-form-grid,
+      .tourney-capacity-form,
       .tourney-roster-player,
       .tourney-player-row,
       .tourney-player-edit {
         grid-template-columns: 1fr;
+      }
+
+      .tourney-capacity-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .tourney-modal-actions {
+        display: grid;
       }
 
       .tourney-match-controls form {
@@ -2628,6 +3371,7 @@ export const LockScreen = ({
   redirectTo = "/tourney",
 }) => (
   <>
+    <TourneyTelemetry />
     <LockStyles />
     <main className="cs-page">
       <div className="cs-shell">
@@ -2787,6 +3531,7 @@ export const RouteTitle = ({ eyebrow, title, accent, children }) => (
 
 export const TourneyShell = ({ session, activeHref = "", children, wide = false }) => (
   <>
+    <TourneyTelemetry />
     <TourneyStyles />
     <div
       id="app-shell"

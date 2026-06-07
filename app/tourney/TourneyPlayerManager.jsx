@@ -45,6 +45,7 @@ const emptyAddForm = {
   battlenet: "",
   rank: "",
   rolePlay: "",
+  registrationPool: "main",
   timezone: "",
   twitchUsername: "",
   teamName: "",
@@ -56,6 +57,20 @@ const emptyEditForm = {
   displayName: "",
   twitchUsername: "",
   teamName: "",
+  registrationPool: "main",
+};
+
+const defaultCapacity = {
+  teamCount: 8,
+  roles: roleOptions.map((role) => ({
+    role,
+    cap: 16,
+    mainCount: 0,
+    substituteCount: 0,
+    pendingMainCount: 0,
+    approvedMainCount: 0,
+    isFull: false,
+  })),
 };
 
 const statusOrder = {
@@ -70,8 +85,18 @@ const statusLabel = (status) => {
   return status || "unknown";
 };
 
-export default function TourneyPlayerManager({ initialPlayers = [] }) {
+const poolLabel = (pool) =>
+  pool === "substitute" ? "Substitute pool" : "Main pool";
+
+export default function TourneyPlayerManager({
+  initialPlayers = [],
+  initialCapacity = defaultCapacity,
+}) {
   const [players, setPlayers] = useState(initialPlayers);
+  const [capacity, setCapacity] = useState(initialCapacity || defaultCapacity);
+  const [capacityForm, setCapacityForm] = useState(
+    String(initialCapacity?.teamCount || 8)
+  );
   const [addForm, setAddForm] = useState(emptyAddForm);
   const [editingPlayerId, setEditingPlayerId] = useState("");
   const [editForm, setEditForm] = useState(emptyEditForm);
@@ -108,6 +133,10 @@ export default function TourneyPlayerManager({ initialPlayers = [] }) {
         throw new Error(data.error || "Unable to update players.");
       }
       setPlayers(data.players || []);
+      if (data.capacity) {
+        setCapacity(data.capacity);
+        setCapacityForm(String(data.capacity.teamCount || 8));
+      }
       setMessage("Player list updated.");
       return true;
     } catch (error) {
@@ -132,6 +161,7 @@ export default function TourneyPlayerManager({ initialPlayers = [] }) {
       displayName: player.displayName || player.discord || "",
       twitchUsername: player.twitchUsername || "",
       teamName: player.teamName || "",
+      registrationPool: player.registrationPool || "main",
     });
   };
 
@@ -164,6 +194,68 @@ export default function TourneyPlayerManager({ initialPlayers = [] }) {
     }
   };
 
+  const handleCapacitySubmit = async (event) => {
+    event.preventDefault();
+    await updatePlayers({
+      action: "update-capacity",
+      teamCount: capacityForm,
+    });
+  };
+
+  const renderCapacityPanel = () => {
+    const roles =
+      Array.isArray(capacity.roles) && capacity.roles.length > 0
+        ? capacity.roles
+        : defaultCapacity.roles;
+
+    return (
+      <div className="tourney-capacity-panel" aria-label="Role capacity">
+        <form className="tourney-capacity-form" onSubmit={handleCapacitySubmit}>
+          <span>
+            <strong>Role Capacity</strong>
+            <small>Only approved main-pool players count toward caps.</small>
+          </span>
+          <label>
+            Teams
+            <input
+              type="number"
+              min={2}
+              max={64}
+              required
+              value={capacityForm}
+              onChange={(event) => setCapacityForm(event.target.value)}
+            />
+          </label>
+          <button className="tourney-owner-link" type="submit" disabled={isBusy}>
+            Save
+          </button>
+        </form>
+        <div className="tourney-capacity-grid">
+          {roles.map((role) => (
+            <span
+              className={
+                role.isFull ? "tourney-capacity-role is-full" : "tourney-capacity-role"
+              }
+              key={role.role}
+            >
+              <strong>{role.role}</strong>
+              <small>
+                {role.mainCount}/{role.cap} approved
+              </small>
+              {role.reservedCap ? (
+                <small>
+                  {role.reservedCount || 0}/{role.reservedCap} reserved for{" "}
+                  {role.reservedFor}
+                </small>
+              ) : null}
+              <small>{role.substituteCount} substitute</small>
+            </span>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   const renderPlayerRows = (playerList) =>
     playerList.map((player) => (
       <div
@@ -192,7 +284,10 @@ export default function TourneyPlayerManager({ initialPlayers = [] }) {
         </span>
         <span>
           <strong>{statusLabel(player.status)}</strong>
-          <small>{player.availableAug12 ? "Aug 1-2 yes" : "Aug 1-2 no"}</small>
+          <small>
+            {poolLabel(player.registrationPool)} -{" "}
+            {player.availableAug12 ? "Aug 15-16 yes" : "Aug 15-16 no"}
+          </small>
         </span>
         <span>
           <strong>{player.email}</strong>
@@ -282,6 +377,18 @@ export default function TourneyPlayerManager({ initialPlayers = [] }) {
                 />
               </span>
             </label>
+            <label>
+              Player Pool
+              <select
+                value={editForm.registrationPool}
+                onChange={(event) =>
+                  updateEditField("registrationPool", event.target.value)
+                }
+              >
+                <option value="main">Main pool</option>
+                <option value="substitute">Substitute pool</option>
+              </select>
+            </label>
             <div className="tourney-player-edit-actions">
               <button className="tourney-owner-link" type="submit" disabled={isBusy}>
                 Save
@@ -303,6 +410,7 @@ export default function TourneyPlayerManager({ initialPlayers = [] }) {
 
   return (
     <div className="tourney-player-manager">
+      {renderCapacityPanel()}
       <div className="tourney-player-layout">
         <form className="tourney-form" onSubmit={handleAdd}>
           <p className="tourney-kicker">Add Player</p>
@@ -400,6 +508,19 @@ export default function TourneyPlayerManager({ initialPlayers = [] }) {
               </select>
             </label>
             <label>
+              Player Pool
+              <select
+                required
+                value={addForm.registrationPool}
+                onChange={(event) =>
+                  updateAddField("registrationPool", event.target.value)
+                }
+              >
+                <option value="main">Main pool</option>
+                <option value="substitute">Substitute pool</option>
+              </select>
+            </label>
+            <label>
               Timezone
               <select
                 required
@@ -450,7 +571,7 @@ export default function TourneyPlayerManager({ initialPlayers = [] }) {
                 updateAddField("availableAug12", event.target.checked)
               }
             />
-            <span>Are you free on August 1st and 2nd?</span>
+            <span>Are you free on August 15th and 16th?</span>
           </label>
           <label>
             Extra notes
