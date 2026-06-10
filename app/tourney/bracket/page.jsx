@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Bracket | Roo Industries Tourney",
+  title: "Bracket | Roo Industries",
   description: "Live 6v6 Legacy Series bracket.",
   robots: {
     index: false,

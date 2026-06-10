@@ -10,8 +10,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Forgot Password | Roo Industries Tourney",
-  description: "Reset a Roo Industries tournament account password.",
+  title: "Forgot Password | Roo Industries",
+  description: "Reset a Roo Industries account password.",
   robots: {
     index: false,
     follow: false,
@@ -25,7 +25,7 @@ export default async function TourneyForgotPage() {
   return (
     <TourneyShell session={session}>
       <RouteTitle eyebrow="Reset" title="Forgot" accent="Password">
-        Use your Discord username or email to get a reset link for tournament access.
+        Use your Discord username or email to get a reset link.
       </RouteTitle>
 
       <div className="tourney-grid">

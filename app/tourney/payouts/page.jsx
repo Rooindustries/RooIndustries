@@ -13,8 +13,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Payouts | Roo Industries Tourney",
-  description: "Hidden tournament payout dashboard.",
+  title: "Payouts | Roo Industries",
+  description: "Hidden Roo Industries payout dashboard.",
   robots: {
     index: false,
     follow: false,
@@ -31,7 +31,7 @@ export default async function TourneyPayoutsPage({ searchParams }) {
       <LockScreen
         error={resolvedSearchParams?.error || ""}
         heading="Sign in."
-        subtitle="Payouts require a tournament account."
+        subtitle="Payouts require a Roo Industries account."
         note="Use your approved player, caster, or owner account."
         buttonLabel="Sign in"
         redirectTo="/tourney/payouts"

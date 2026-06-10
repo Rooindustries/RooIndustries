@@ -42,7 +42,7 @@ const dashboardLink = ({ baseUrl, path }) => {
 
 const buildShell = ({ title, intro, rows = [], details = "", cta = null, sampleMode = false }) => {
   const sampleNotice = sampleMode
-    ? `<p style="margin:0 0 16px;padding:12px 14px;border-radius:10px;background:#fef3c7;color:#92400e"><strong>Sample only:</strong> This is a preview of the tournament email template.</p>`
+    ? `<p style="margin:0 0 16px;padding:12px 14px;border-radius:10px;background:#fef3c7;color:#92400e"><strong>Sample only:</strong> This is a preview of the Roo Industries email template.</p>`
     : "";
   const rowHtml = rows
     .filter((row) => row?.value)
@@ -85,17 +85,17 @@ function buildTourneyAppealAdminEmail({
   baseUrl = "",
   sampleMode = false,
 } = {}) {
-  const title = appeal.title || "Tournament appeal";
+  const title = appeal.title || "Roo Industries appeal";
   const appealUrl = dashboardLink({ baseUrl, path: "/tourney/appeals" });
   const evidenceUrl = safeUrl(appeal.evidenceUrl);
   return {
     subject: prefixSubject({
-      subject: `Tourney appeal submitted: ${title}`,
+      subject: `Roo Industries appeal submitted: ${title}`,
       sampleMode,
     }),
     html: buildShell({
       sampleMode,
-      title: "New tournament appeal",
+      title: "New Roo Industries appeal",
       intro: `${submitter.name || appeal.submitterUsername || "A player"} submitted an appeal for review.`,
       rows: [
         { label: "Appeal type", value: escapeHtml(titleCase(appeal.type)) },
@@ -115,7 +115,7 @@ function buildTourneyAppealAdminEmail({
       details: appeal.details || "",
       cta: appealUrl ? { href: appealUrl, label: "Open appeals dashboard" } : null,
     }),
-    text: `New tournament appeal: ${title}\nTeam: ${appeal.teamName || "TBD"}\nCaptain: ${appeal.captainName || "TBD"}\nDetails: ${appeal.details || ""}`,
+    text: `New Roo Industries appeal: ${title}\nTeam: ${appeal.teamName || "TBD"}\nCaptain: ${appeal.captainName || "TBD"}\nDetails: ${appeal.details || ""}`,
   };
 }
 
@@ -124,11 +124,11 @@ function buildTourneyAppealConfirmationEmail({
   baseUrl = "",
   sampleMode = false,
 } = {}) {
-  const title = appeal.title || "Tournament appeal";
+  const title = appeal.title || "Roo Industries appeal";
   const appealUrl = dashboardLink({ baseUrl, path: "/tourney/appeals" });
   return {
     subject: prefixSubject({
-      subject: "We received your Roo tourney appeal",
+      subject: "We received your Roo Industries appeal",
       sampleMode,
     }),
     html: buildShell({
@@ -157,13 +157,13 @@ function buildTourneyPayoutNotificationEmail({
   const payoutUrl = dashboardLink({ baseUrl, path: "/tourney/payouts" });
   return {
     subject: prefixSubject({
-      subject: `Tournament payout update: ${titleCase(payout.status || "pending")}`,
+      subject: `Roo Industries payout update: ${titleCase(payout.status || "pending")}`,
       sampleMode,
     }),
     html: buildShell({
       sampleMode,
-      title: "Tournament payout update",
-      intro: "Your tournament payout record has been updated.",
+      title: "Roo Industries payout update",
+      intro: "Your Roo Industries payout record has been updated.",
       rows: [
         { label: "Player", value: escapeHtml(payout.displayName || "Player") },
         { label: "Team", value: escapeHtml(payout.teamName || "TBD") },
@@ -174,10 +174,10 @@ function buildTourneyPayoutNotificationEmail({
       ],
       details:
         payout.notes ||
-        "Payouts are finalized after final tournament results are confirmed. Roo Industries does not cover PayPal transaction fees.",
+        "Payouts are finalized after final event results are confirmed. Roo Industries does not cover PayPal transaction fees.",
       cta: payoutUrl ? { href: payoutUrl, label: "View payout status" } : null,
     }),
-    text: `Tournament payout update\nPlayer: ${payout.displayName || "Player"}\nAmount: ${moneyUsd(payout.amountUsd)}\nStatus: ${payout.status || "pending"}`,
+    text: `Roo Industries payout update\nPlayer: ${payout.displayName || "Player"}\nAmount: ${moneyUsd(payout.amountUsd)}\nStatus: ${payout.status || "pending"}`,
   };
 }
 

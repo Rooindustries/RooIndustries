@@ -45,6 +45,15 @@ const migrate = async () => {
       denied_by text,
       removed_at timestamptz,
       removed_by text,
+      discord_invite_sent_at timestamptz,
+      discord_invite_email_id text,
+      discord_invite_last_error text,
+      discord_user_id text,
+      discord_oauth_username text,
+      discord_oauth_global_name text,
+      discord_linked_at timestamptz,
+      discord_role_assigned_at timestamptz,
+      discord_role_last_error text,
       constraint tourney_players_status_check
         check (status in ('pending', 'approved', 'denied', 'removed'))
     )
@@ -60,6 +69,59 @@ const migrate = async () => {
   await sql`
     alter table tourney_players
     add column if not exists team_name text
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists accepted_rules boolean not null default false
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists accepted_roo_visibility boolean not null default false
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists registration_pool text not null default 'main'
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists discord_invite_sent_at timestamptz
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists discord_invite_email_id text
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists discord_invite_last_error text
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists discord_user_id text
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists discord_oauth_username text
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists discord_oauth_global_name text
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists discord_linked_at timestamptz
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists discord_role_assigned_at timestamptz
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists discord_role_last_error text
+  `;
+  await sql`
+    create unique index if not exists tourney_players_discord_user_id_unique
+    on tourney_players (discord_user_id)
+    where discord_user_id is not null
   `;
   await sql`
     create table if not exists tourney_player_tokens (

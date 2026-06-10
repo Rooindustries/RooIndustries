@@ -11,8 +11,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Reset Password | Roo Industries Tourney",
-  description: "Set a new Roo Industries tournament player password.",
+  title: "Reset Password | Roo Industries",
+  description: "Set a new Roo Industries player password.",
   robots: {
     index: false,
     follow: false,
