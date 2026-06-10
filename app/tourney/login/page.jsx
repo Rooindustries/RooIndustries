@@ -5,8 +5,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Sign In | Roo Industries Tourney",
-  description: "Sign in to a Roo Industries tournament account.",
+  title: "Sign In | Roo Industries",
+  description: "Sign in to a Roo Industries event account.",
   robots: {
     index: false,
     follow: false,

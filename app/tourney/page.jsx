@@ -145,8 +145,8 @@ const DashboardPage = ({ session }) => (
 
       <Section
         id="info"
-        eyebrow="Tourney Information"
-        title="Tourney Information"
+        eyebrow="Event Information"
+        title="Event Information"
         wide
       >
         <div className="tourney-action-callout">
