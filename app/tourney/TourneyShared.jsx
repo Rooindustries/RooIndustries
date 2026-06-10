@@ -13,7 +13,7 @@ import {
 
 export const navItems = [
   { href: "/tourney/register", label: "Register" },
-  { href: "/tourney#info", label: "Tourney Information" },
+  { href: "/tourney#info", label: "Event Information" },
   { href: "/tourney#rules", label: "Rules" },
   { href: "/tourney/roster", label: "Roster" },
   { href: "/tourney/bracket", label: "Bracket" },
@@ -3398,7 +3398,7 @@ export const LockScreen = ({
               type="text"
               autoComplete="username"
               placeholder="Discord username or email"
-              aria-label="Tournament Discord username or email"
+              aria-label="Discord username or email"
               required
             />
             <input
@@ -3407,7 +3407,7 @@ export const LockScreen = ({
               type="password"
               autoComplete="current-password"
               placeholder="Password"
-              aria-label="Tournament password"
+              aria-label="Password"
               required
             />
             <label className="cs-remember">

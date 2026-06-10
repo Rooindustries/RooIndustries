@@ -29,11 +29,14 @@ describe("tourney emails", () => {
     await expect(
       email.sendTourneyPlayerApprovedEmail({
         player: {
+          id: "player_1",
+          version: "2",
           email: "playerone@example.com",
           discord: "PlayerOne#1234",
         },
         baseUrl: "https://www.rooindustries.com",
         env: {
+          NODE_ENV: "test",
           RESEND_API_KEY: "re_test",
           FROM_EMAIL: "Tourney <tourney@rooindustries.com>",
         },
@@ -51,6 +54,110 @@ describe("tourney emails", () => {
       })
     );
     expect(mockSendEmail.mock.calls[0][0].html).toContain("PlayerOne#1234");
+  });
+
+  test("includes Discord invite links in approved player emails when configured", async () => {
+    mockSendEmail.mockResolvedValue({
+      data: { id: "email_player_approved" },
+      error: null,
+    });
+    const email = loadEmail();
+
+    await email.sendTourneyPlayerApprovedEmail({
+      player: {
+        id: "player_1",
+        version: "2",
+        email: "playerone@example.com",
+        discord: "PlayerOne#1234",
+      },
+      baseUrl: "https://www.rooindustries.com",
+      env: {
+        RESEND_API_KEY: "re_test",
+        FROM_EMAIL: "Tourney <tourney@rooindustries.com>",
+        TOURNEY_SESSION_SECRET: "test-secret",
+        TOURNEY_DISCORD_INVITE_URL: "https://discord.gg/tourney",
+      },
+    });
+
+    expect(mockSendEmail.mock.calls[0][0].html).toContain(
+      "https://discord.gg/tourney"
+    );
+    expect(mockSendEmail.mock.calls[0][0].text).toContain(
+      "Join Roo Industries Discord"
+    );
+  });
+
+  test("uses the verified Discord start route when OAuth is configured", async () => {
+    mockSendEmail.mockResolvedValue({
+      data: { id: "email_player_approved" },
+      error: null,
+    });
+    const email = loadEmail();
+
+    await email.sendTourneyPlayerApprovedEmail({
+      player: {
+        id: "player_1",
+        version: "2",
+        email: "playerone@example.com",
+        discord: "PlayerOne#1234",
+      },
+      baseUrl: "https://www.rooindustries.com",
+      env: {
+        RESEND_API_KEY: "re_test",
+        FROM_EMAIL: "Tourney <tourney@rooindustries.com>",
+        TOURNEY_SESSION_SECRET: "test-secret",
+        TOURNEY_DISCORD_INVITE_URL: "https://discord.gg/tourney",
+        DISCORD_CLIENT_ID: "client_1",
+        DISCORD_CLIENT_SECRET: "secret_1",
+        DISCORD_BOT_TOKEN: "bot_1",
+        DISCORD_GUILD_ID: "guild_1",
+        DISCORD_PARTICIPANT_ROLE_ID: "role_1",
+      },
+    });
+
+    const html = mockSendEmail.mock.calls[0][0].html;
+    expect(html).toContain("/api/tourney/discord/start?token=");
+    expect(mockSendEmail.mock.calls[0][0].text).toContain(
+      "Join or verify Discord for the Participant role"
+    );
+  });
+
+  test("sends sample Discord invite emails only to the supplied sample recipient", async () => {
+    mockSendEmail.mockResolvedValue({
+      data: { id: "email_sample_discord" },
+      error: null,
+    });
+    const email = loadEmail();
+
+    await expect(
+      email.sendTourneyDiscordInviteEmail({
+        to: "serviroo@rooindustries.com",
+        sampleMode: true,
+        baseUrl: "https://www.rooindustries.com",
+        env: {
+          RESEND_API_KEY: "re_test",
+          FROM_EMAIL: "Tourney <tourney@rooindustries.com>",
+          TOURNEY_DISCORD_INVITE_URL: "https://discord.gg/tourney",
+        },
+        player: {
+          email: "playerone@example.com",
+          discord: "PlayerOne#1234",
+          displayName: "Player One",
+        },
+      })
+    ).resolves.toEqual({ id: "email_sample_discord" });
+
+    expect(mockSendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from: "Tourney <tourney@rooindustries.com>",
+        to: ["serviroo@rooindustries.com"],
+        subject: "[Sample] Roo Industries Discord invite",
+        html: expect.stringContaining("Sample only"),
+      })
+    );
+    expect(JSON.stringify(mockSendEmail.mock.calls[0][0])).not.toContain(
+      "playerone@example.com"
+    );
   });
 
   test("builds appeal and payout email templates", () => {
@@ -90,9 +197,9 @@ describe("tourney emails", () => {
     });
 
     expect(adminTemplate.subject).toBe(
-      "[Sample] Tourney appeal submitted: Map result dispute"
+      "[Sample] Roo Industries appeal submitted: Map result dispute"
     );
-    expect(adminTemplate.html).toContain("New tournament appeal");
+    expect(adminTemplate.html).toContain("New Roo Industries appeal");
     expect(adminTemplate.html).toContain("Sample only");
     expect(confirmationTemplate.html).toContain("Appeal received");
     expect(payoutTemplate.html).toContain("$125 USD");

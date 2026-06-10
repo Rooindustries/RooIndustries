@@ -16,8 +16,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Register | Roo Industries Tourney",
-  description: "Private tournament registration page.",
+  title: "Register | Roo Industries",
+  description: "Private Roo Industries registration page.",
   robots: {
     index: false,
     follow: false,
@@ -36,7 +36,7 @@ export default async function TourneyRegisterPage() {
 
   return (
     <TourneyShell session={session} activeHref="/tourney/register">
-      <RouteTitle title="Tournament" accent="Registration">
+      <RouteTitle title="Player" accent="Registration">
         Submit your player info once. Owner and caster admins review signups
         before accounts go live.
       </RouteTitle>

@@ -12,8 +12,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Appeals | Roo Industries Tourney",
-  description: "Hidden tournament appeals dashboard.",
+  title: "Appeals | Roo Industries",
+  description: "Hidden Roo Industries appeals dashboard.",
   robots: {
     index: false,
     follow: false,
@@ -30,7 +30,7 @@ export default async function TourneyAppealsPage({ searchParams }) {
       <LockScreen
         error={resolvedSearchParams?.error || ""}
         heading="Sign in."
-        subtitle="Appeals require a tournament account."
+        subtitle="Appeals require a Roo Industries account."
         note="Use your approved player, caster, or owner account."
         buttonLabel="Sign in"
         redirectTo="/tourney/appeals"

@@ -4,7 +4,7 @@ import {
   extractTwitchLogin,
   getTwitchProfileImageMap,
   normalizeTwitchUsername,
-} from "./twitch";
+} from "./twitch.js";
 
 export const TOURNEY_PLAYER_STATUSES = Object.freeze([
   "pending",
@@ -246,6 +246,20 @@ const mapPlayer = (row = {}) => ({
   deniedBy: row.denied_by || row.deniedBy || "",
   removedAt: row.removed_at || row.removedAt || "",
   removedBy: row.removed_by || row.removedBy || "",
+  discordInviteSentAt: row.discord_invite_sent_at || row.discordInviteSentAt || "",
+  discordInviteEmailId: row.discord_invite_email_id || row.discordInviteEmailId || "",
+  discordInviteLastError:
+    row.discord_invite_last_error || row.discordInviteLastError || "",
+  discordUserId: row.discord_user_id || row.discordUserId || "",
+  discordOauthUsername:
+    row.discord_oauth_username || row.discordOauthUsername || "",
+  discordOauthGlobalName:
+    row.discord_oauth_global_name || row.discordOauthGlobalName || "",
+  discordLinkedAt: row.discord_linked_at || row.discordLinkedAt || "",
+  discordRoleAssignedAt:
+    row.discord_role_assigned_at || row.discordRoleAssignedAt || "",
+  discordRoleLastError:
+    row.discord_role_last_error || row.discordRoleLastError || "",
 });
 
 const publicPlayer = (row) => {
@@ -300,6 +314,16 @@ const managePlayer = (row) => {
     deniedBy: player.deniedBy,
     removedAt: player.removedAt,
     removedBy: player.removedBy,
+    version: player.version,
+    discordInviteSentAt: player.discordInviteSentAt,
+    discordInviteEmailId: player.discordInviteEmailId,
+    discordInviteLastError: player.discordInviteLastError,
+    discordUserId: player.discordUserId,
+    discordOauthUsername: player.discordOauthUsername,
+    discordOauthGlobalName: player.discordOauthGlobalName,
+    discordLinkedAt: player.discordLinkedAt,
+    discordRoleAssignedAt: player.discordRoleAssignedAt,
+    discordRoleLastError: player.discordRoleLastError,
   };
 };
 
@@ -462,6 +486,15 @@ export async function ensureTourneyPlayerSchema(env = process.env) {
       denied_by text,
       removed_at timestamptz,
       removed_by text,
+      discord_invite_sent_at timestamptz,
+      discord_invite_email_id text,
+      discord_invite_last_error text,
+      discord_user_id text,
+      discord_oauth_username text,
+      discord_oauth_global_name text,
+      discord_linked_at timestamptz,
+      discord_role_assigned_at timestamptz,
+      discord_role_last_error text,
       constraint tourney_players_status_check
         check (status in ('pending', 'approved', 'denied', 'removed')),
       constraint tourney_players_registration_pool_check
@@ -491,6 +524,47 @@ export async function ensureTourneyPlayerSchema(env = process.env) {
   await sql`
     alter table tourney_players
     add column if not exists accepted_roo_visibility boolean not null default false
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists discord_invite_sent_at timestamptz
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists discord_invite_email_id text
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists discord_invite_last_error text
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists discord_user_id text
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists discord_oauth_username text
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists discord_oauth_global_name text
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists discord_linked_at timestamptz
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists discord_role_assigned_at timestamptz
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists discord_role_last_error text
+  `;
+  await sql`
+    create unique index if not exists tourney_players_discord_user_id_unique
+    on tourney_players (discord_user_id)
+    where discord_user_id is not null
   `;
   await sql`
     create table if not exists tourney_player_tokens (
@@ -994,6 +1068,226 @@ export async function listManageTourneyPlayers({ env = process.env } = {}) {
     order by created_at desc
   `;
   return rows.map(managePlayer);
+}
+
+export async function listApprovedTourneyDiscordInviteRecipients({
+  includeAlreadySent = false,
+  onlyEmail = "",
+  limit = 0,
+  env = process.env,
+} = {}) {
+  const normalizedOnlyEmail = normalizeTourneyEmail(onlyEmail);
+  const maxRows = Math.max(0, Number(limit) || 0);
+  const filterRows = (rows) => {
+    const filtered = rows
+      .map(managePlayer)
+      .filter((player) => player.status === "approved")
+      .filter((player) =>
+        normalizedOnlyEmail ? normalizeTourneyEmail(player.email) === normalizedOnlyEmail : true
+      )
+      .filter((player) => includeAlreadySent || !player.discordInviteSentAt)
+      .sort((left, right) =>
+        normalizeTourneyEmail(left.email).localeCompare(normalizeTourneyEmail(right.email))
+      );
+    return maxRows > 0 ? filtered.slice(0, maxRows) : filtered;
+  };
+
+  if (isMemoryMode(env)) {
+    return filterRows(MEMORY_STORE.players);
+  }
+
+  await ensureTourneyPlayerSchema(env);
+  const sql = await getSql(env);
+  const rows = await sql`
+    select *
+    from tourney_players
+    where status = 'approved'
+    order by lower(email) asc
+  `;
+  return filterRows(rows);
+}
+
+export async function markTourneyDiscordInviteEmailSent({
+  playerId,
+  emailId = "",
+  sentAt = nowIso(),
+  env = process.env,
+} = {}) {
+  if (isMemoryMode(env)) {
+    const player = MEMORY_STORE.players.find((entry) => entry.id === playerId);
+    if (!player) return null;
+    player.discord_invite_sent_at = sentAt;
+    player.discord_invite_email_id = String(emailId || "");
+    player.discord_invite_last_error = "";
+    return managePlayer(player);
+  }
+
+  await ensureTourneyPlayerSchema(env);
+  const sql = await getSql(env);
+  const rows = await sql`
+    update tourney_players
+    set discord_invite_sent_at = ${sentAt},
+        discord_invite_email_id = ${String(emailId || "")},
+        discord_invite_last_error = ''
+    where id = ${playerId}
+    returning *
+  `;
+  return rows?.[0] ? managePlayer(rows[0]) : null;
+}
+
+export async function markTourneyDiscordInviteEmailFailed({
+  playerId,
+  errorMessage = "",
+  env = process.env,
+} = {}) {
+  const message = normalizeText(errorMessage).slice(0, 500);
+  if (isMemoryMode(env)) {
+    const player = MEMORY_STORE.players.find((entry) => entry.id === playerId);
+    if (!player) return null;
+    player.discord_invite_last_error = message;
+    return managePlayer(player);
+  }
+
+  await ensureTourneyPlayerSchema(env);
+  const sql = await getSql(env);
+  const rows = await sql`
+    update tourney_players
+    set discord_invite_last_error = ${message}
+    where id = ${playerId}
+    returning *
+  `;
+  return rows?.[0] ? managePlayer(rows[0]) : null;
+}
+
+export async function getApprovedTourneyPlayerById({
+  playerId,
+  version = "",
+  env = process.env,
+} = {}) {
+  const expectedVersion = String(version || "").trim();
+  if (isMemoryMode(env)) {
+    const row = MEMORY_STORE.players.find(
+      (player) =>
+        player.id === playerId &&
+        player.status === "approved" &&
+        (!expectedVersion || String(player.version || "1") === expectedVersion)
+    );
+    return row ? managePlayer(row) : null;
+  }
+
+  const expectedVersionNumber = expectedVersion ? Number(expectedVersion) : 0;
+  if (expectedVersion && !Number.isInteger(expectedVersionNumber)) return null;
+
+  await ensureTourneyPlayerSchema(env);
+  const sql = await getSql(env);
+  const rows = expectedVersion
+    ? await sql`
+        select *
+        from tourney_players
+        where id = ${playerId}
+          and status = 'approved'
+          and version = ${expectedVersionNumber}
+        limit 1
+      `
+    : await sql`
+        select *
+        from tourney_players
+        where id = ${playerId}
+          and status = 'approved'
+        limit 1
+      `;
+  return rows?.[0] ? managePlayer(rows[0]) : null;
+}
+
+export async function recordTourneyPlayerDiscordLink({
+  playerId,
+  discordUser = {},
+  linkedAt = nowIso(),
+  env = process.env,
+} = {}) {
+  const discordUserId = normalizeText(discordUser.id);
+  if (!discordUserId) {
+    throw Object.assign(new Error("Discord user id is required."), { status: 400 });
+  }
+  const username = normalizeText(discordUser.username).slice(0, 120);
+  const globalName = normalizeText(discordUser.global_name).slice(0, 120);
+
+  if (isMemoryMode(env)) {
+    const player = MEMORY_STORE.players.find(
+      (entry) => entry.id === playerId && entry.status === "approved"
+    );
+    if (!player) return null;
+    player.discord_user_id = discordUserId;
+    player.discord_oauth_username = username;
+    player.discord_oauth_global_name = globalName;
+    player.discord_linked_at = linkedAt;
+    player.discord_role_last_error = "";
+    return managePlayer(player);
+  }
+
+  await ensureTourneyPlayerSchema(env);
+  const sql = await getSql(env);
+  const rows = await sql`
+    update tourney_players
+    set discord_user_id = ${discordUserId},
+        discord_oauth_username = ${username},
+        discord_oauth_global_name = ${globalName},
+        discord_linked_at = ${linkedAt},
+        discord_role_last_error = ''
+    where id = ${playerId}
+      and status = 'approved'
+    returning *
+  `;
+  return rows?.[0] ? managePlayer(rows[0]) : null;
+}
+
+export async function markTourneyPlayerDiscordRoleAssigned({
+  playerId,
+  assignedAt = nowIso(),
+  env = process.env,
+} = {}) {
+  if (isMemoryMode(env)) {
+    const player = MEMORY_STORE.players.find((entry) => entry.id === playerId);
+    if (!player) return null;
+    player.discord_role_assigned_at = assignedAt;
+    player.discord_role_last_error = "";
+    return managePlayer(player);
+  }
+
+  await ensureTourneyPlayerSchema(env);
+  const sql = await getSql(env);
+  const rows = await sql`
+    update tourney_players
+    set discord_role_assigned_at = ${assignedAt},
+        discord_role_last_error = ''
+    where id = ${playerId}
+    returning *
+  `;
+  return rows?.[0] ? managePlayer(rows[0]) : null;
+}
+
+export async function markTourneyPlayerDiscordRoleFailed({
+  playerId,
+  errorMessage = "",
+  env = process.env,
+} = {}) {
+  const message = normalizeText(errorMessage).slice(0, 500);
+  if (isMemoryMode(env)) {
+    const player = MEMORY_STORE.players.find((entry) => entry.id === playerId);
+    if (!player) return null;
+    player.discord_role_last_error = message;
+    return managePlayer(player);
+  }
+
+  await ensureTourneyPlayerSchema(env);
+  const sql = await getSql(env);
+  const rows = await sql`
+    update tourney_players
+    set discord_role_last_error = ${message}
+    where id = ${playerId}
+    returning *
+  `;
+  return rows?.[0] ? managePlayer(rows[0]) : null;
 }
 
 export async function updateTourneyPlayerDetails({

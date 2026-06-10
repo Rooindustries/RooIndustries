@@ -459,6 +459,91 @@ describe("tourney player store", () => {
     ).rejects.toThrow("Invalid or expired reset link.");
   });
 
+  test("tracks Discord invite email and role assignment state for approved players", async () => {
+    const store = loadStore();
+    store.resetMemoryTourneyPlayerStoreForTests();
+    const player = await store.createApprovedTourneyPlayer({
+      payload: basePayload,
+      actorUsername: "serviroo",
+      env,
+    });
+
+    await expect(
+      store.listApprovedTourneyDiscordInviteRecipients({ env })
+    ).resolves.toHaveLength(1);
+
+    await expect(
+      store.markTourneyDiscordInviteEmailFailed({
+        playerId: player.id,
+        errorMessage: "resend failed",
+        env,
+      })
+    ).resolves.toMatchObject({
+      discordInviteLastError: "resend failed",
+    });
+
+    await expect(
+      store.markTourneyDiscordInviteEmailSent({
+        playerId: player.id,
+        emailId: "email_123",
+        sentAt: "2026-06-08T00:00:00.000Z",
+        env,
+      })
+    ).resolves.toMatchObject({
+      discordInviteSentAt: "2026-06-08T00:00:00.000Z",
+      discordInviteEmailId: "email_123",
+      discordInviteLastError: "",
+    });
+
+    await expect(
+      store.listApprovedTourneyDiscordInviteRecipients({ env })
+    ).resolves.toHaveLength(0);
+    await expect(
+      store.listApprovedTourneyDiscordInviteRecipients({
+        includeAlreadySent: true,
+        env,
+      })
+    ).resolves.toHaveLength(1);
+
+    await expect(
+      store.recordTourneyPlayerDiscordLink({
+        playerId: player.id,
+        discordUser: {
+          id: "1234567890",
+          username: "servi",
+          global_name: "Serviroo",
+        },
+        linkedAt: "2026-06-08T00:01:00.000Z",
+        env,
+      })
+    ).resolves.toMatchObject({
+      discordUserId: "1234567890",
+      discordOauthUsername: "servi",
+      discordOauthGlobalName: "Serviroo",
+      discordLinkedAt: "2026-06-08T00:01:00.000Z",
+    });
+
+    await expect(
+      store.markTourneyPlayerDiscordRoleFailed({
+        playerId: player.id,
+        errorMessage: "missing permissions",
+        env,
+      })
+    ).resolves.toMatchObject({
+      discordRoleLastError: "missing permissions",
+    });
+    await expect(
+      store.markTourneyPlayerDiscordRoleAssigned({
+        playerId: player.id,
+        assignedAt: "2026-06-08T00:02:00.000Z",
+        env,
+      })
+    ).resolves.toMatchObject({
+      discordRoleAssignedAt: "2026-06-08T00:02:00.000Z",
+      discordRoleLastError: "",
+    });
+  });
+
   test("updates player-facing details for roster display", async () => {
     const store = loadStore();
     store.resetMemoryTourneyPlayerStoreForTests();

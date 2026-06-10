@@ -13,8 +13,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Roster | Roo Industries Tourney",
-  description: "Private tournament roster dashboard.",
+  title: "Roster | Roo Industries",
+  description: "Private Roo Industries roster dashboard.",
   robots: {
     index: false,
     follow: false,
@@ -28,12 +28,12 @@ export default async function TourneyRosterPage() {
 
   return (
     <TourneyShell session={session} activeHref="/tourney/roster">
-      <RouteTitle eyebrow="Roster" title="Tournament" accent="Roster">
+      <RouteTitle eyebrow="Roster" title="Roo Industries" accent="Roster">
         Approved players appear here before captains draft teams.
       </RouteTitle>
 
       <div className="tourney-grid">
-        <Section id="hosts" eyebrow="Hosts" title="Tournament Hosts" wide>
+        <Section id="hosts" eyebrow="Hosts" title="Roo Industries Hosts" wide>
           <TourneyRosterHosts />
         </Section>
       </div>

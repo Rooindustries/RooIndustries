@@ -23,8 +23,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Manage | Roo Industries Tourney",
-  description: "Tournament registration and account management.",
+  title: "Manage | Roo Industries",
+  description: "Roo Industries registration and account management.",
   robots: {
     index: false,
     follow: false,
@@ -42,7 +42,7 @@ export default async function TourneyManagePage({ searchParams }) {
         error={resolvedSearchParams?.error || ""}
         heading="Sign in."
         subtitle="Manage access requires an owner or caster account."
-        note="Use your assigned tourney admin account."
+        note="Use your assigned Roo Industries admin account."
         buttonLabel="Sign in"
         redirectTo="/tourney/manage"
       />
