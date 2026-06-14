@@ -127,11 +127,11 @@ export default function RefDashboard() {
   const StatCard = ({
     label,
     value,
-    accent = "text-sky-300",
+    accent = "text-accent",
     className = "",
   }) => (
     <div className={`${cardClass} ${className}`}>
-      <p className="text-[14px] uppercase text-slate-400 tracking-wide">
+      <p className="text-[14px] uppercase text-ink-muted tracking-wide">
         {label}
       </p>
       <p className={`text-[30px] font-extrabold ${accent}`}>
@@ -143,29 +143,29 @@ export default function RefDashboard() {
   const BalanceCard = ({ label, earned, paid, owed, overpaid }) => (
     <div className={cardClass}>
       <div>
-        <p className="text-[14px] uppercase text-slate-400 tracking-wide">
+        <p className="text-[14px] uppercase text-ink-muted tracking-wide">
           {label}
         </p>
-        <p className="text-lg font-bold text-white">Balance</p>
+        <p className="text-lg font-bold text-ink">Balance</p>
       </div>
       <div className="mt-4 space-y-2 text-sm">
         <div className="flex items-center justify-between gap-3">
-          <span className="text-slate-400">Earned</span>
-          <span className="font-semibold text-sky-200">
+          <span className="text-ink-muted">Earned</span>
+          <span className="font-semibold text-info-text">
             {formatCurrency(earned)}
           </span>
         </div>
         <div className="flex items-center justify-between gap-3">
-          <span className="text-slate-400">Paid</span>
-          <span className="font-semibold text-emerald-300">
+          <span className="text-ink-muted">Paid</span>
+          <span className="font-semibold text-success-text">
             {formatCurrency(paid)}
           </span>
         </div>
         <div className="flex items-center justify-between gap-3">
-          <span className="text-slate-400">Owed</span>
+          <span className="text-ink-muted">Owed</span>
           <span
             className={`font-semibold ${
-              toMoneyNumber(owed) > 0 ? "text-amber-300" : "text-emerald-300"
+              toMoneyNumber(owed) > 0 ? "text-warning-text" : "text-success-text"
             }`}
           >
             {formatCurrency(owed)}
@@ -173,7 +173,7 @@ export default function RefDashboard() {
         </div>
         {toMoneyNumber(overpaid) > 0 && (
           <div className="flex items-center justify-between gap-3">
-            <span className="text-slate-400">Overpaid</span>
+            <span className="text-ink-muted">Overpaid</span>
             <span className="font-semibold text-fuchsia-300">
               {formatCurrency(overpaid)}
             </span>
@@ -221,9 +221,9 @@ export default function RefDashboard() {
   const total = commission + discount;
   const invalid = total > max;
   const panelClass =
-    "bg-gradient-to-b from-[#0c1a2f] via-[#0a1324] to-[#072239] p-6 rounded-2xl border border-sky-700/40 shadow-[0_0_25px_rgba(56,189,248,0.3)] backdrop-blur-md";
+    "bg-panel p-6 rounded-2xl border border-line-input shadow-glow-soft backdrop-blur-md";
   const cardClass =
-    "bg-[#0c162a] border border-sky-800/50 rounded-xl p-4 h-full flex flex-col justify-between";
+    "bg-surface-input border border-line-input rounded-xl p-4 h-full flex flex-col justify-between";
 
   function adjustCommission(delta) {
     if (!unlocked) return;
@@ -267,7 +267,7 @@ export default function RefDashboard() {
   }
 
   if (loading)
-    return <p className="text-center text-white pt-32">Loading...</p>;
+    return <p className="text-center text-ink pt-32">Loading...</p>;
   if (!creator) return null;
 
   const currentRefs = creator.successfulReferrals ?? 0;
@@ -347,18 +347,18 @@ export default function RefDashboard() {
   return (
     <>
       <style>{noScrollbarStyles}</style>
-      <section className="pt-28 px-6 max-w-xl mx-auto text-white mb-20">
-      <h1 className="text-4xl font-extrabold text-center text-sky-300 drop-shadow">
+      <section className="pt-28 px-6 max-w-xl mx-auto text-ink mb-20">
+      <h1 className="text-4xl font-extrabold text-center text-accent drop-shadow">
         Welcome, {creator.name}
       </h1>
 
       <p className="mt-1 text-center opacity-70">
-        Referral Code: <b className="text-sky-400">{referralCode}</b>
+        Referral Code: <b className="text-accent">{referralCode}</b>
       </p>
 
 
       <div className={`mt-8 ${panelClass} space-y-2`}>
-        <p className="text-sm font-semibold text-sky-200 mb-2">
+        <p className="text-sm font-semibold text-info-text mb-2">
           Your referral link
         </p>
 
@@ -367,18 +367,18 @@ export default function RefDashboard() {
             type="text"
             value={referralLink}
             readOnly
-            className="flex-1 bg-[#050b16] border border-sky-800/40 rounded-md px-3 py-2 text-xs sm:text-sm text-slate-100 truncate"
+            className="flex-1 bg-surface-input border border-line-input rounded-md px-3 py-2 text-xs sm:text-sm text-ink truncate"
           />
 
           <button
             onClick={copyReferralLink}
-            className="px-4 py-2 bg-sky-600 hover:bg-sky-500 rounded-md text-xs sm:text-sm font-semibold"
+            className="px-4 py-2 bg-accent-strong hover:bg-accent text-accent-contrast rounded-md text-xs sm:text-sm font-semibold"
           >
             Copy
           </button>
         </div>
 
-        <p className="mt-2 text-[11px] text-slate-400">
+        <p className="mt-2 text-[11px] text-ink-muted">
           Share this link with your viewers. Anyone who books through it will
           use your code.
         </p>
@@ -386,18 +386,18 @@ export default function RefDashboard() {
 
       <div className={`mt-12 ${panelClass} space-y-8`}>
 
-        <div className="bg-[#050b16] border border-sky-800/40 rounded-xl px-4 py-3 flex items-center justify-between">
+        <div className="bg-surface-input border border-line-input rounded-xl px-4 py-3 flex items-center justify-between">
           <div>
-            <p className="text-xs uppercase text-slate-400 tracking-wide">
+            <p className="text-xs uppercase text-ink-muted tracking-wide">
               Total successful referrals
             </p>
-            <p className="text-2xl font-extrabold text-sky-300">
+            <p className="text-2xl font-extrabold text-accent">
               {currentRefs}
             </p>
           </div>
-          <div className="text-right text-xs text-slate-400">
+          <div className="text-right text-xs text-ink-muted">
             {unlocked ? (
-              <p className="text-green-300 font-semibold">
+              <p className="text-success-text font-semibold">
                 Perks unlocked 🎉
                 <br />
                 You can now adjust commission & discount.
@@ -417,18 +417,18 @@ export default function RefDashboard() {
             !unlocked ? "opacity-40 pointer-events-none" : ""
           }`}
         >
-          <p className="text-sky-300 font-semibold">Commission (%)</p>
-          <div className="flex items-center justify-between bg-[#0c162a] p-3 rounded-xl border border-sky-800/40">
+          <p className="text-accent font-semibold">Commission (%)</p>
+          <div className="flex items-center justify-between bg-surface-input p-3 rounded-xl border border-line-input">
             <button
               onClick={() => adjustCommission(-1)}
-              className="px-4 py-2 bg-sky-700/40 hover:bg-sky-600/40 rounded-xl text-xl font-bold transition"
+              className="px-4 py-2 bg-surface-hover-accent hover:bg-info-soft rounded-xl text-xl font-bold transition"
             >
               –
             </button>
             <span className="text-xl font-bold">{commission}%</span>
             <button
               onClick={() => adjustCommission(1)}
-              className="px-4 py-2 bg-sky-700/40 hover:bg-sky-600/40 rounded-xl text-xl font-bold transition"
+              className="px-4 py-2 bg-surface-hover-accent hover:bg-info-soft rounded-xl text-xl font-bold transition"
             >
               +
             </button>
@@ -441,18 +441,18 @@ export default function RefDashboard() {
             !unlocked ? "opacity-40 pointer-events-none" : ""
           }`}
         >
-          <p className="text-sky-300 font-semibold">Viewer Discount (%)</p>
-          <div className="flex items-center justify-between bg-[#0c162a] p-3 rounded-xl border border-sky-800/40">
+          <p className="text-accent font-semibold">Viewer Discount (%)</p>
+          <div className="flex items-center justify-between bg-surface-input p-3 rounded-xl border border-line-input">
             <button
               onClick={() => adjustDiscount(-1)}
-              className="px-4 py-2 bg-sky-700/40 hover:bg-sky-600/40 rounded-xl text-xl font-bold transition"
+              className="px-4 py-2 bg-surface-hover-accent hover:bg-info-soft rounded-xl text-xl font-bold transition"
             >
               –
             </button>
             <span className="text-xl font-bold">{discount}%</span>
             <button
               onClick={() => adjustDiscount(1)}
-              className="px-4 py-2 bg-sky-700/40 hover:bg-sky-600/40 rounded-xl text-xl font-bold transition"
+              className="px-4 py-2 bg-surface-hover-accent hover:bg-info-soft rounded-xl text-xl font-bold transition"
             >
               +
             </button>
@@ -462,7 +462,7 @@ export default function RefDashboard() {
 
         <div
           className={`text-center font-semibold text-lg ${
-            invalid ? "text-red-400" : "text-green-300"
+            invalid ? "text-danger-text" : "text-success-text"
           }`}
         >
           Total: {total}% / Max {max}%
@@ -474,8 +474,8 @@ export default function RefDashboard() {
           disabled={invalid || saving || !unlocked}
           className={`w-full py-3 rounded-xl font-bold transition-all ${
             invalid || !unlocked
-              ? "bg-gray-700 cursor-not-allowed opacity-40"
-              : "bg-sky-600 hover:bg-sky-500 shadow-[0_0_20px_rgba(56,189,248,0.4)]"
+              ? "bg-surface-input cursor-not-allowed opacity-40"
+              : "bg-accent-strong hover:bg-accent text-accent-contrast shadow-glow-soft"
           }`}
         >
           {saving ? "Saving..." : "Save Settings"}
@@ -486,29 +486,29 @@ export default function RefDashboard() {
       <div className={`mt-10 ${panelClass} space-y-4`}>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <div>
-            <p className="text-xs uppercase tracking-wide text-slate-400">
+            <p className="text-xs uppercase tracking-wide text-ink-muted">
               Payouts
             </p>
-            <h3 className="text-lg sm:text-xl font-bold text-white">
+            <h3 className="text-lg sm:text-xl font-bold text-ink">
               Earnings & Payments
             </h3>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-ink-muted">
               Calculated from your referral sales.
             </p>
           </div>
-          <span className="text-xs text-slate-400">
+          <span className="text-xs text-ink-muted">
             {payoutLoading ? "Updating..." : "Auto-updated"}
           </span>
         </div>
 
         {payoutError && (
-          <div className="bg-red-500/10 border border-red-500/40 text-red-200 text-sm rounded-xl px-3 py-2">
+          <div className="bg-danger-soft border border-danger-border text-danger-text text-sm rounded-xl px-3 py-2">
             {payoutError}
           </div>
         )}
 
         {!payout && payoutLoading && (
-          <p className="text-sm text-slate-400">Loading payout data...</p>
+          <p className="text-sm text-ink-muted">Loading payout data...</p>
         )}
 
         {payout && (
@@ -518,12 +518,12 @@ export default function RefDashboard() {
               <StatCard
                 label="Total paid"
                 value={payments.total}
-                accent="text-emerald-300"
+                accent="text-success-text"
               />
               <StatCard
                 label="Remaining owed"
                 value={owed.total}
-                accent={owed.total > 0 ? "text-amber-300" : "text-emerald-300"}
+                accent={owed.total > 0 ? "text-warning-text" : "text-success-text"}
               />
             </div>
 
@@ -548,7 +548,7 @@ export default function RefDashboard() {
 
             {packageBreakdown.length > 0 && (
               <div className="space-y-2">
-                <p className="text-xs uppercase tracking-wide text-slate-400">
+                <p className="text-xs uppercase tracking-wide text-ink-muted">
                   Package earnings
                 </p>
                 <div className="grid sm:grid-cols-3 gap-3 auto-rows-fr">
@@ -565,14 +565,14 @@ export default function RefDashboard() {
 
             <div className={`${cardClass} flex flex-col gap-2`}>
               <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold text-white">
+                <p className="text-sm font-semibold text-ink">
                   Payment Logs
                 </p>
-                <span className="text-xs text-slate-400">
+                <span className="text-xs text-ink-muted">
                   {(logs.xoc?.length || 0) + (logs.vertex?.length || 0)} entries
                 </span>
               </div>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-ink-muted">
                 View your XOC and Vertex payment history.
               </p>
               <button
@@ -591,7 +591,7 @@ export default function RefDashboard() {
         )}
 
         {!payout && !payoutLoading && !payoutError && (
-          <p className="text-sm text-slate-400">
+          <p className="text-sm text-ink-muted">
             No payout data recorded yet.
           </p>
         )}
@@ -600,7 +600,7 @@ export default function RefDashboard() {
 
       <button
         onClick={() => nav("/referrals/change-password")}
-        className="mt-6 w-full py-3 bg-[#0f1a2e] border border-sky-700/40 rounded-xl text-sky-300 font-semibold text-center hover:bg-sky-900/30 hover:border-sky-500/40 transition-all shadow-[0_0_10px_rgba(56,189,248,0.2)] hover:shadow-[0_0_20px_rgba(56,189,248,0.35)]"
+        className="mt-6 w-full py-3 bg-surface-card border border-line-input rounded-xl text-accent font-semibold text-center hover:bg-surface-hover-accent hover:border-line-accent transition-all shadow-glow-soft"
       >
         Change Password
       </button>
@@ -617,7 +617,7 @@ export default function RefDashboard() {
             nav("/referrals/login");
           }
         }}
-        className="mt-3 w-full py-3 bg-[#0a1220] border border-red-700/30 rounded-xl text-red-300 text-center font-semibold hover:bg-red-900/30 hover:border-red-500/40 transition-all shadow-[0_0_10px_rgba(239,68,68,0.25)] hover:shadow-[0_0_20px_rgba(239,68,68,0.45)]"
+        className="mt-3 w-full py-3 bg-danger-soft border border-danger-border rounded-xl text-danger-text text-center font-semibold hover:bg-danger-soft hover:border-danger-border transition-all shadow-danger-soft"
       >
         Log Out
       </button>
@@ -627,8 +627,8 @@ export default function RefDashboard() {
         <div
           className={`fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-xl text-white text-sm font-semibold shadow-lg transition-all ${
             toast.type === "success"
-              ? "bg-green-600 shadow-[0_0_25px_rgba(34,197,94,0.5)]"
-              : "bg-red-600 shadow-[0_0_25px_rgba(239,68,68,0.5)]"
+              ? "bg-success shadow-success-soft"
+              : "bg-danger shadow-danger-soft"
           }`}
         >
           {toast.message}
@@ -648,18 +648,18 @@ export default function RefDashboard() {
           onClick={closeLogsModal}
         >
           <div
-            className={`relative w-full max-w-5xl max-h-[70vh] sm:max-h-[50vh] bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 border border-sky-400/60 rounded-2xl shadow-[0_0_35px_rgba(56,189,248,0.4)] p-6 transition-all duration-500 ease-in-out ${
+            className={`relative w-full max-w-5xl max-h-[70vh] sm:max-h-[50vh] bg-panel border border-info-border rounded-2xl shadow-glow-strong p-6 transition-all duration-500 ease-in-out ${
               closingLogsModal
                 ? "opacity-0 scale-95"
                 : logsModalAnimatingIn
                 ? "opacity-100 scale-100"
                 : "opacity-0 scale-95"
-            } hover:shadow-[0_0_42px_rgba(56,189,248,0.5)]`}
+            } hover:shadow-glow-strong`}
             onClick={(e) => e.stopPropagation()}
           >
             <button
               onClick={closeLogsModal}
-              className="absolute right-3 top-3 text-sky-200 hover:text-white transition text-2xl"
+              className="absolute right-3 top-3 text-info-text hover:text-white transition text-2xl"
               aria-label="Close payment logs"
             >
               ×
@@ -667,27 +667,27 @@ export default function RefDashboard() {
 
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
               <div>
-                <p className="text-xs uppercase tracking-wide text-slate-400">
+                <p className="text-xs uppercase tracking-wide text-ink-muted">
                   Payment history
                 </p>
-                <h4 className="text-xl font-bold text-white">Payment Logs</h4>
-                <p className="text-xs text-slate-400">
+                <h4 className="text-xl font-bold text-ink">Payment Logs</h4>
+                <p className="text-xs text-ink-muted">
                   Read-only. Only admins can add or edit payments.
                 </p>
               </div>
-              <span className="text-xs text-slate-400">
+              <span className="text-xs text-ink-muted">
                 Total paid: {formatCurrency(payments.total)} | Entries:{" "}
                 {(logs.xoc?.length || 0) + (logs.vertex?.length || 0)}
               </span>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-[45vh] max-h-[45vh] sm:h-[35vh] sm:max-h-[35vh]">
-              <div className="bg-[#0c162a] border border-sky-700/60 rounded-2xl p-4 no-scrollbar overflow-y-auto shadow-[0_0_20px_rgba(15,23,42,0.4)]">
+              <div className="bg-surface-input border border-line-input rounded-2xl p-4 no-scrollbar overflow-y-auto shadow-[0_0_20px_rgba(15,23,42,0.4)]">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-semibold text-white">
+                  <p className="text-sm font-semibold text-ink">
                     XOC payments
                   </p>
-                  <span className="text-xs text-slate-400">
+                  <span className="text-xs text-ink-muted">
                     {logs.xoc?.length || 0} entries
                   </span>
                 </div>
@@ -696,37 +696,37 @@ export default function RefDashboard() {
                     logs.xoc.map((entry) => (
                       <div
                         key={entry._key || entry.paidOn}
-                        className="bg-[#0a1324] border border-sky-900/50 rounded-lg px-3 py-2 flex items-center justify-between"
+                        className="bg-surface-card border border-line-input rounded-lg px-3 py-2 flex items-center justify-between"
                       >
                         <div>
-                          <p className="text-sm font-semibold text-sky-200">
+                          <p className="text-sm font-semibold text-info-text">
                             {formatCurrency(entry.amount)}
                           </p>
                           {entry.note && (
-                            <p className="text-xs text-slate-400">
+                            <p className="text-xs text-ink-muted">
                               {entry.note}
                             </p>
                           )}
                         </div>
-                        <span className="text-xs text-slate-400">
+                        <span className="text-xs text-ink-muted">
                           {formatDate(entry.paidOn)}
                         </span>
                       </div>
                     ))
                   ) : (
-                    <p className="text-sm text-slate-400">
+                    <p className="text-sm text-ink-muted">
                       No payments logged yet.
                     </p>
                   )}
                 </div>
               </div>
 
-              <div className="bg-[#0c162a] border border-sky-700/60 rounded-2xl p-4 no-scrollbar overflow-y-auto shadow-[0_0_20px_rgba(15,23,42,0.4)]">
+              <div className="bg-surface-input border border-line-input rounded-2xl p-4 no-scrollbar overflow-y-auto shadow-[0_0_20px_rgba(15,23,42,0.4)]">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-semibold text-white">
+                  <p className="text-sm font-semibold text-ink">
                     Vertex payments
                   </p>
-                  <span className="text-xs text-slate-400">
+                  <span className="text-xs text-ink-muted">
                     {logs.vertex?.length || 0} entries
                   </span>
                 </div>
@@ -735,25 +735,25 @@ export default function RefDashboard() {
                     logs.vertex.map((entry) => (
                       <div
                         key={entry._key || entry.paidOn}
-                        className="bg-[#0a1324] border border-sky-900/50 rounded-lg px-3 py-2 flex items-center justify-between"
+                        className="bg-surface-card border border-line-input rounded-lg px-3 py-2 flex items-center justify-between"
                       >
                         <div>
-                          <p className="text-sm font-semibold text-sky-200">
+                          <p className="text-sm font-semibold text-info-text">
                             {formatCurrency(entry.amount)}
                           </p>
                           {entry.note && (
-                            <p className="text-xs text-slate-400">
+                            <p className="text-xs text-ink-muted">
                               {entry.note}
                             </p>
                           )}
                         </div>
-                        <span className="text-xs text-slate-400">
+                        <span className="text-xs text-ink-muted">
                           {formatDate(entry.paidOn)}
                         </span>
                       </div>
                     ))
                   ) : (
-                    <p className="text-sm text-slate-400">
+                    <p className="text-sm text-ink-muted">
                       No payments logged yet.
                     </p>
                   )}

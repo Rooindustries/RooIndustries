@@ -51,14 +51,14 @@ export default function PriceDisplay({
     >
       <span
         aria-hidden="true"
-        className={`${classes.current} font-extrabold leading-none text-sky-400 drop-shadow-[0_0_18px_rgba(56,189,248,0.35)]`}
+        className={`${classes.current} font-extrabold leading-none text-accent drop-shadow-[0_0_18px_rgba(56,189,248,0.35)]`}
       >
         {currentPrice}
       </span>
       {oldPrice && oldPrice !== currentPrice && (
         <span
           aria-hidden="true"
-          className={`${classes.compare} relative inline-flex -translate-y-1 items-center font-bold leading-none text-slate-400/85`}
+          className={`${classes.compare} relative inline-flex -translate-y-1 items-center font-bold leading-none text-ink-muted`}
         >
           <span>{oldPrice}</span>
           <span

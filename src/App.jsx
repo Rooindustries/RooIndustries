@@ -86,7 +86,7 @@ const IntercomRuntime = ({ disabledRoutes }) => {
 };
 
 const RouteFallback = () => (
-  <div className="pt-16 text-center text-slate-300 text-sm">Loading...</div>
+  <div className="pt-16 text-center text-ink-secondary text-sm">Loading...</div>
 );
 
 const withRouteSuspense = (node, fallback = <RouteFallback />) => (
@@ -464,31 +464,21 @@ export function AppContent({
       <DeferredTelemetry />
       <IntercomRuntime disabledRoutes={INTERCOM_DISABLED_ROUTES} />
 
+      {/* Theme surfaces (gradients, grid, radial, veil) live in src/index.css
+          behind semantic tokens — see ROO INDUSTRIES THEME TOKENS. */}
       <div
         id="app-shell"
-        className="relative min-h-screen flex flex-col text-white overflow-hidden
-        bg-[linear-gradient(to_top,#00b7c0_0%,#006185_30%,#001f5a_65%,#000040_100%)]
-        bg-scroll md:bg-fixed"
+        className="relative min-h-screen flex flex-col overflow-hidden bg-scroll md:bg-fixed"
       >
         <div
-          className={`fixed inset-0 z-[90] pointer-events-none transition-opacity duration-300 ${
+          className={`route-transition-veil fixed inset-0 z-[90] pointer-events-none transition-opacity duration-300 ${
             showRouteTransition ? "opacity-100" : "opacity-0"
           }`}
           aria-hidden="true"
-          style={{
-            background:
-              "linear-gradient(180deg, rgba(1,8,34,0.32), rgba(1,8,34,0.18) 35%, rgba(1,8,34,0.28) 100%)",
-          }}
         />
         {/* Background layers */}
-        <div
-          className="app-bg-grid-layer absolute inset-0 bg-[linear-gradient(45deg,rgba(255,255,255,0.05)_1px,transparent_1px)] 
-                      bg-[size:40px_40px] opacity-50"
-        ></div>
-        <div
-          className="app-bg-radial-layer absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(14,165,233,0.25),rgba(3,7,18,1) 80%)] 
-                      "
-        ></div>
+        <div className="app-bg-grid-layer absolute inset-0"></div>
+        <div className="app-bg-radial-layer absolute inset-0"></div>
 
         {/* Navbar and pages */}
         <main

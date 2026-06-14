@@ -177,15 +177,15 @@ export default function PerfDebugOverlay() {
   if (!ready || !enabled) return null;
 
   return (
-    <aside className="fixed right-3 sm:right-4 bottom-3 sm:bottom-4 z-[95] w-[min(92vw,420px)] rounded-2xl border border-cyan-400/45 bg-[#061226]/95 p-3 sm:p-4 shadow-[0_0_36px_rgba(34,211,238,0.22)] backdrop-blur-md text-slate-100">
+    <aside className="fixed right-3 sm:right-4 bottom-3 sm:bottom-4 z-[95] w-[min(92vw,420px)] rounded-2xl border border-info-border bg-surface-solid p-3 sm:p-4 shadow-glow-soft backdrop-blur-md text-ink">
       <div className="flex items-center justify-between">
-        <div className="text-xs uppercase tracking-wider text-cyan-200/90 font-semibold">
+        <div className="text-xs uppercase tracking-wider text-info-text font-semibold">
           Perf Debug
         </div>
         <button
           type="button"
           onClick={() => setPerfDebugEnabled(false)}
-          className="rounded-md border border-white/20 bg-white/5 px-2 py-1 text-[11px] font-semibold hover:bg-white/10"
+          className="rounded-md border border-line-soft bg-surface-hover px-2 py-1 text-[11px] font-semibold hover:bg-surface-hover-accent"
         >
           Hide
         </button>
@@ -204,7 +204,7 @@ export default function PerfDebugOverlay() {
         <div>Long task ms: {toFixed(stats.longTaskTotalMs, 1)}</div>
       </div>
 
-      <div className="mt-3 space-y-2 border-t border-white/10 pt-3">
+      <div className="mt-3 space-y-2 border-t border-line-soft pt-3">
         {toggleConfig.map((item) => (
           <label key={item.key} className="flex items-center gap-2 text-xs">
             <input
@@ -220,14 +220,14 @@ export default function PerfDebugOverlay() {
         ))}
       </div>
 
-      <div className="mt-3 flex items-center justify-between gap-2 border-t border-white/10 pt-3">
+      <div className="mt-3 flex items-center justify-between gap-2 border-t border-line-soft pt-3">
         <button
           type="button"
           onClick={() => {
             toggleConfig.forEach((item) => setPerfDebugToggle(item.key, false));
             setToggles(readPerfDebugToggles());
           }}
-          className="rounded-md border border-white/20 bg-white/5 px-2.5 py-1.5 text-[11px] font-semibold hover:bg-white/10"
+          className="rounded-md border border-line-soft bg-white/5 px-2.5 py-1.5 text-[11px] font-semibold hover:bg-white/10"
         >
           Reset toggles
         </button>
@@ -248,7 +248,7 @@ export default function PerfDebugOverlay() {
               clsDelta: 0,
             }));
           }}
-          className="rounded-md border border-cyan-300/40 bg-cyan-500/15 px-2.5 py-1.5 text-[11px] font-semibold hover:bg-cyan-500/25"
+          className="rounded-md border border-line-accent bg-surface-hover-accent px-2.5 py-1.5 text-[11px] font-semibold hover:bg-surface-hover"
         >
           Reset metrics
         </button>

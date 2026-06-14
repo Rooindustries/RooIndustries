@@ -78,7 +78,6 @@ export default function HowItWorks({ initialData = null }) {
     2: "bios",
     3: "tuning",
   };
-
   const VideoBadge = ({ name, pauseVideos }) => {
     const cardRef = useRef(null);
     const videoRef = useRef(null);
@@ -132,8 +131,8 @@ export default function HowItWorks({ initialData = null }) {
     return (
       <div
         ref={cardRef}
-        className="relative overflow-hidden rounded-2xl border border-sky-700/40 bg-[#081225]/70
-                   shadow-[0_0_26px_rgba(14,165,233,0.3)]
+        className="ri-hiw-video relative overflow-hidden rounded-2xl border border-line-input bg-surface-card
+                   shadow-[var(--shadow-card-glow-info)]
                    w-[calc(100%+0.75rem)] sm:w-[calc(100%+1rem)] -mx-1.5 sm:-mx-2 aspect-video sm:aspect-[16/10]"
       >
         <video
@@ -144,7 +143,7 @@ export default function HowItWorks({ initialData = null }) {
           muted
           playsInline
           preload="metadata"
-            fetchPriority="low"
+          fetchPriority="low"
           poster={poster}
         >
           <source src={webm} type="video/webm" />
@@ -158,15 +157,15 @@ export default function HowItWorks({ initialData = null }) {
   };
 
   return (
-    <section className="relative z-10 py-16 px-4 sm:px-6 text-white max-w-[110rem] mx-auto">
+    <section className="ri-hiw-section relative z-10 py-16 px-4 sm:px-6 text-ink max-w-[110rem] mx-auto">
       {data.title && (
-        <h2 className="text-4xl sm:text-5xl font-extrabold text-center tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+        <h2 className="ri-hiw-heading text-4xl sm:text-5xl font-extrabold text-center tracking-tight text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
           {data.title}
         </h2>
       )}
 
       {data.subtitle && (
-        <p className="mt-3 text-slate-150 text-center text-sm sm:text-base">
+        <p className="ri-hiw-subtitle mt-3 text-ink-secondary text-center text-sm sm:text-base">
           {data.subtitle}
         </p>
       )}
@@ -176,8 +175,8 @@ export default function HowItWorks({ initialData = null }) {
           {data.steps.map((s, i) => (
             <div
               key={i}
-              className="group scroll-blur-lite backdrop-blur-sm bg-[#0b1120]/80 border border-sky-700/30 rounded-2xl p-4
-                         shadow-[0_0_25px_rgba(14,165,233,0.15)] hover:shadow-[0_0_35px_rgba(14,165,233,0.25)]
+              className="ri-hiw-card group scroll-blur-lite backdrop-blur-sm bg-surface-card border border-line-input rounded-2xl p-4
+                         shadow-[var(--shadow-card-glow-info)] hover:shadow-[var(--shadow-card-glow)]
                          transition-all duration-300"
             >
               {/* Video stacked on top of the text content */}
@@ -192,25 +191,25 @@ export default function HowItWorks({ initialData = null }) {
                 <div className="w-full">
                   {s.badge && (
                     <span
-                      className="inline-flex items-center gap-2 text-sm sm:text-base font-semibold tracking-wide
-                                 text-sky-100 bg-sky-900/40 border border-sky-700/50 px-3.5 py-1.5 rounded-full
-                                 shadow-[0_0_12px_rgba(14,165,233,0.3)]"
+                      className="ri-hiw-step-badge inline-flex items-center gap-2 text-sm sm:text-base font-semibold tracking-wide
+                                 text-info-text bg-info-soft border border-line-input px-3.5 py-1.5 rounded-full
+                                 shadow-[var(--shadow-step-badge)]"
                     >
                       {s.badge}
                     </span>
                   )}
 
                   {s.title && (
-                    <h3 className="mt-4 text-xl font-bold text-white">
+                    <h3 className="ri-hiw-step-title mt-4 text-xl font-bold text-ink">
                       {s.title}
                     </h3>
                   )}
 
                   {s.text && (
-                    <p className="mt-2 text-slate-300/90 leading-relaxed">
+                    <p className="ri-hiw-step-copy mt-2 text-ink-secondary leading-relaxed">
                       {s.text}
                       {s.title?.toLowerCase().includes("install") && (
-                        <span className="text-slate-400/90 font-medium">
+                        <span className="ri-hiw-trust-copy text-ink-muted font-medium">
                           {" "}
                           (
                           <Link
@@ -218,9 +217,7 @@ export default function HowItWorks({ initialData = null }) {
                             onClick={(event) =>
                               handleHomeSectionLink(event, "#trust")
                             }
-                            className="bg-gradient-to-r from-sky-400 to-cyan-400 bg-clip-text text-transparent font-semibold
-                                       hover:from-cyan-300 hover:to-sky-300 transition-all duration-300
-                                       hover:drop-shadow-[0_0_6px_rgba(56,189,248,0.8)]"
+                            className="ri-hiw-trust-link text-accent font-semibold transition-colors duration-300 hover:text-[color:var(--color-link-hover)]"
                           >
                             Read How can I trust you? Is this secure?
                           </Link>

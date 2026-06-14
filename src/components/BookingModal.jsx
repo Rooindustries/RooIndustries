@@ -258,7 +258,7 @@ export default function BookingModal({ open, onClose, children }) {
                   <button
                     id="booking-modal-close"
                     aria-label="Close"
-                    className="absolute left-0 top-0 z-50 ml-4 md:ml-8 text-sky-200 hover:text-white transition text-2xl md:text-4xl leading-none opacity-80 hover:opacity-100"
+                    className="absolute left-0 top-0 z-50 ml-4 md:ml-8 text-info-text hover:text-white transition text-2xl md:text-4xl leading-none opacity-80 hover:opacity-100"
                     onClick={(e) => {
                       e.stopPropagation();
                       onClose();

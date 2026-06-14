@@ -38,7 +38,7 @@ export default function Terms() {
           <a
             key={i}
             href="mailto:serviroo@rooindustries.com"
-            className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition-colors"
+            className="text-accent hover:text-[color:var(--color-link-hover)] underline underline-offset-2 transition-colors"
           >
             {part}
           </a>
@@ -51,16 +51,16 @@ export default function Terms() {
   if (!data) return null;
 
   return (
-    <section className="max-w-4xl mx-auto px-6 py-28 text-white">
+    <section className="max-w-4xl mx-auto px-6 py-28 text-ink">
       {/* Title */}
       {data.title && <h1 className="text-3xl font-bold mb-6">{data.title}</h1>}
 
       {/* Last updated */}
       {data.lastUpdated && (
-        <p className="text-white mb-6">Last Updated: {data.lastUpdated}</p>
+        <p className="text-ink-secondary mb-6">Last Updated: {data.lastUpdated}</p>
       )}
 
-      <div className="space-y-6 text-white leading-relaxed">
+      <div className="space-y-6 text-ink-secondary leading-relaxed">
         {data.sections?.map((sec, i) => (
           <div key={i}>
             {sec.heading && (
@@ -89,8 +89,8 @@ export default function Terms() {
 
                       // Apply Cyan style if it's an email, otherwise keep standard white style
                       const linkClasses = isEmail
-                        ? "text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition-colors"
-                        : "underline text-white hover:text-cyan-400 transition-colors";
+                        ? "text-accent hover:text-[color:var(--color-link-hover)] underline underline-offset-2 transition-colors"
+                        : "underline text-ink hover:text-[color:var(--color-link-hover)] transition-colors";
 
                       return (
                         <a
@@ -106,7 +106,7 @@ export default function Terms() {
                   },
                   block: {
                     normal: ({ children }) => (
-                      <p className="text-white">
+                      <p className="text-ink-secondary">
                         {/* Map over children to intercept the email string */}
                         {React.Children.map(children, (child) =>
                           renderTextWithLinks(child)

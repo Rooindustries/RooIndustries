@@ -49,7 +49,7 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
   }, []);
 
   return (
-    <section className="relative py-28 px-4 max-w-7xl mx-auto text-white">
+    <section className="relative py-28 px-4 max-w-7xl mx-auto text-ink">
       {selectedImage && (
         <ImageZoomModal
           src={selectedImage}
@@ -59,14 +59,14 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
         />
       )}
 
-      <h1 className="text-4xl sm:text-5xl font-extrabold text-center mb-2 text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+      <h1 className="text-4xl sm:text-5xl font-extrabold text-center mb-2 text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
         Performance Benchmarks
       </h1>
-      <p className="text-center text-gray-100 mb-12">
+      <p className="text-center text-ink-secondary mb-12">
         Real results from real tuning.
       </p>
 
-      <div className="py-5 px-4 max-w-7xl mx-auto text-white">
+      <div className="py-5 px-4 max-w-7xl mx-auto text-ink">
         {benchmarks.map((b, i) => {
           const beforeDims = b.beforeImage?.dimensions;
           const afterDims = b.afterImage?.dimensions;
@@ -85,15 +85,15 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
             <div key={i} className="mb-12">
               <h2 className="text-3xl font-bold text-center mb-1">{b.title}</h2>
               {b.subtitle && (
-                <p className="text-center text-slate-300 mb-4 text-sm">
+                <p className="text-center text-ink-secondary mb-4 text-sm">
                   {b.subtitle}
                 </p>
               )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Before */}
-                <div className="border-2 border-red-600 rounded-lg p-2">
-                  <div className="bg-red-600 text-white text-xs font-bold px-2 py-1 inline-block rounded mb-2">
+                <div className="border-2 border-danger-border rounded-lg p-2">
+                  <div className="bg-danger text-white text-xs font-bold px-2 py-1 inline-block rounded mb-2">
                     BEFORE
                   </div>
                   {/* SEO/CLS: keep benchmark images in semantic figures with intrinsic sizing. */}
@@ -106,7 +106,7 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
                       loading="lazy"
                       decoding="async"
                       sizes="(max-width: 768px) 94vw, 46vw"
-                      className="rounded w-full cursor-pointer shadow-lg border border-red-600 hover:border-red-500 hover:shadow-red-500/40 transition duration-300"
+                      className="rounded w-full cursor-pointer shadow-lg border border-danger-border hover:border-danger hover:shadow-danger-soft transition duration-300"
                       onClick={() =>
                         handleOpenZoom(urlFor(b.beforeImage).url(), beforeAlt)
                       }
@@ -116,8 +116,8 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
                 </div>
 
                 {/* After */}
-                <div className="border-2 border-cyan-600 rounded-lg p-2">
-                  <div className="bg-cyan-600 text-white text-xs font-bold px-2 py-1 inline-block rounded mb-2">
+                <div className="border-2 border-success-border rounded-lg p-2">
+                  <div className="bg-success text-black text-xs font-bold px-2 py-1 inline-block rounded mb-2">
                     AFTER
                   </div>
                   {/* SEO/CLS: keep benchmark images in semantic figures with intrinsic sizing. */}
@@ -130,7 +130,7 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
                       loading="lazy"
                       decoding="async"
                       sizes="(max-width: 768px) 94vw, 46vw"
-                      className="rounded w-full cursor-pointer shadow-lg border border-cyan-600 hover:border-cyan-500 hover:shadow-cyan-500/40 transition duration-300"
+                      className="rounded w-full cursor-pointer shadow-lg border border-success-border hover:border-success hover:shadow-success-soft transition duration-300"
                       onClick={() =>
                         handleOpenZoom(urlFor(b.afterImage).url(), afterAlt)
                       }
@@ -153,7 +153,7 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
                       loading="lazy"
                       decoding="async"
                       sizes="(max-width: 768px) 94vw, 62vw"
-                      className="rounded-lg shadow-lg mx-auto cursor-pointer border border-gray-500 hover:border-green-500 hover:shadow-green-500/40 transition duration-300"
+                      className="rounded-lg shadow-lg mx-auto cursor-pointer border border-line-strong hover:border-success hover:shadow-success-soft transition duration-300"
                       onClick={() =>
                         handleOpenZoom(urlFor(b.reviewImage).url(), reviewAlt)
                       }

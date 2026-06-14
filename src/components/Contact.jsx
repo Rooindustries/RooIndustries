@@ -31,23 +31,23 @@ export default function Contact() {
   };
 
   return (
-    <section className="text-white px-4 py-28 flex flex-col items-center">
+    <section className="text-ink px-4 py-28 flex flex-col items-center">
       {/* Heading */}
       <div className="text-center mb-10">
-        <h2 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)] mb-2">
+        <h2 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)] mb-2">
           {contactData?.title || "Get In Touch"}
         </h2>
-        <p className="text-gray-200 text-lg">
+        <p className="text-ink-secondary text-lg">
           {contactData?.subtitle ||
             "Ready to optimize your PC? Let's discuss how I can help improve your system's performance."}
         </p>
       </div>
 
       {/* Email block */}
-      <div className="p-4 rounded-lg flex items-center justify-between w-full max-w-xl mb-8 border border-cyan-400/20 bg-[#0e1623]/90 backdrop-blur-sm">
+      <div className="p-4 rounded-lg flex items-center justify-between w-full max-w-xl mb-8 border border-line-input bg-surface-card backdrop-blur-sm">
         <div className="flex items-center space-x-3">
           <svg
-            className="w-6 h-6 text-cyan-400"
+            className="w-6 h-6 text-accent"
             fill="currentColor"
             viewBox="0 0 24 24"
           >
@@ -58,7 +58,7 @@ export default function Contact() {
           </span>
         </div>
         <button
-          className="text-cyan-400 hover:text-cyan-300 transition duration-200"
+          className="text-accent hover:text-[color:var(--color-link-hover)] transition duration-200"
           onClick={handleCopy}
         >
           {copied ? "Copied!" : "Copy"}
@@ -67,13 +67,13 @@ export default function Contact() {
 
       {/* Contact Form */}
       {state.succeeded ? (
-        <div className="w-full max-w-xl p-6 rounded-lg border border-cyan-400/20 bg-[#0e1623]/90 backdrop-blur-sm text-center text-green-400 font-semibold">
+        <div className="w-full max-w-xl p-6 rounded-lg border border-success-border bg-success-soft backdrop-blur-sm text-center text-success-text font-semibold">
           Thank you! Your message has been sent.
         </div>
       ) : (
         <form
           onSubmit={handleSubmit}
-          className="p-6 rounded-lg w-full max-w-xl space-y-5 border border-cyan-400/20 bg-[#0e1623]/90 backdrop-blur-sm"
+          className="p-6 rounded-lg w-full max-w-xl space-y-5 border border-line-input bg-surface-card backdrop-blur-sm"
         >
           <div>
             <label className="block mb-1 font-semibold">Name</label>
@@ -82,7 +82,7 @@ export default function Contact() {
               name="name"
               placeholder="Your name"
               required
-              className="w-full p-3 bg-transparent rounded text-white border border-gray-700 focus:border-cyan-400 focus:outline-none"
+              className="w-full p-3 bg-surface-input rounded text-ink border border-line-input focus:border-info-border focus:outline-none placeholder:text-ink-muted"
             />
             <ValidationError prefix="Name" field="name" errors={state.errors} />
           </div>
@@ -93,7 +93,7 @@ export default function Contact() {
               name="email"
               placeholder="your.email@example.com"
               required
-              className="w-full p-3 bg-transparent rounded text-white border border-gray-700 focus:border-cyan-400 focus:outline-none"
+              className="w-full p-3 bg-surface-input rounded text-ink border border-line-input focus:border-info-border focus:outline-none placeholder:text-ink-muted"
             />
             <ValidationError
               prefix="Email"
@@ -108,7 +108,7 @@ export default function Contact() {
               placeholder="Tell me about your PC and what you'd like to optimize..."
               rows="5"
               required
-              className="w-full p-3 bg-transparent rounded text-white border border-gray-700 focus:border-cyan-400 focus:outline-none"
+              className="w-full p-3 bg-surface-input rounded text-ink border border-line-input focus:border-info-border focus:outline-none placeholder:text-ink-muted"
             ></textarea>
             <ValidationError
               prefix="Message"
@@ -129,9 +129,9 @@ export default function Contact() {
             <span className="glow-line glow-line-left" />
           </button>
 
-          <p className="text-sm text-gray-400 text-center pt-2">
+          <p className="text-sm text-ink-muted text-center pt-2">
             Your message will be sent{" "}
-            <span className="text-white font-medium">directly</span> to{" "}
+            <span className="text-ink font-medium">directly</span> to{" "}
             {contactData?.email || "serviroo@rooindustries.com"}
           </p>
         </form>
@@ -140,13 +140,13 @@ export default function Contact() {
       <div className="h-3" />
 
       {/* Designed by Nerky */}
-      <p className="mt-4 text-xs text-slate-400">
+      <p className="mt-4 text-xs text-ink-muted">
         Designed by{" "}
         <a
           href="https://discord.com/users/286457824081346570"
           target="_blank"
           rel="noopener noreferrer"
-          className="text-cyan-400 hover:text-cyan-300 underline transition-colors"
+          className="text-accent hover:text-[color:var(--color-link-hover)] underline transition-colors"
         >
           Nerky
         </a>{" "}
@@ -155,7 +155,7 @@ export default function Contact() {
           href="https://discord.com/users/1074948989083979837"
           target="_blank"
           rel="noopener noreferrer"
-          className="text-cyan-400 hover:text-cyan-300 underline transition-colors"
+          className="text-accent hover:text-[color:var(--color-link-hover)] underline transition-colors"
         >
           Exyy
         </a>

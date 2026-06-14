@@ -3,7 +3,29 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#000000" />
+    <meta name="theme-color" content="#000040" />
+    <script>
+      // Two themes only: "default" (Roo Blue) and "dark" (Blackout).
+      // Legacy stored values ("light"/"system") normalize to default.
+      (function() {
+        try {
+          var root = document.documentElement;
+          var key = "roo-theme";
+          var stored = window.localStorage ? window.localStorage.getItem(key) : null;
+          var theme = stored === "dark" ? "dark" : "default";
+          root.dataset.theme = theme;
+          if (stored !== "dark" && stored !== "default" && stored !== null && window.localStorage) {
+            window.localStorage.setItem(key, theme);
+          }
+          var themeMeta = document.querySelector('meta[name="theme-color"]');
+          if (themeMeta) {
+            themeMeta.setAttribute("content", theme === "dark" ? "#070707" : "#000040");
+          }
+        } catch (_) {
+          document.documentElement.dataset.theme = "default";
+        }
+      })();
+    </script>
     <meta
       name="description"
       content="World-class PC optimization, BIOS tuning, and game performance boosts delivered fully online."
