@@ -32,15 +32,43 @@ const getResend = (env = process.env) => {
 const getFromAddress = (env = process.env) =>
   String(env.FROM_EMAIL || DEFAULT_FROM).trim();
 
-const buildDecisionUrl = ({ baseUrl, token, purpose }) => {
+const buildDecisionUrl = ({ baseUrl, token, purpose, role }) => {
   const url = new URL("/api/tourney/registration-decision", baseUrl);
   url.searchParams.set("token", token);
   url.searchParams.set("decision", purpose);
+  if (role) url.searchParams.set("role", role);
   return url.toString();
 };
 
 const getTokenForPurpose = (tokens, purpose) =>
   tokens.find((token) => token.purpose === purpose);
+
+const getPrimaryRolePlay = (player = {}) =>
+  String(player.primaryRolePlay || player.role_play || player.rolePlay || "")
+    .trim();
+
+const getSecondaryRolePlay = (player = {}) =>
+  String(player.secondaryRolePlay || player.secondary_role_play || "").trim();
+
+const getApprovedRolePlay = (player = {}) =>
+  String(
+    player.approvedRolePlay ||
+      player.approved_role_play ||
+      player.rolePlay ||
+      player.role_play ||
+      ""
+  ).trim();
+
+const getApprovalRoleOptions = (player = {}) =>
+  [...new Set([getPrimaryRolePlay(player), getSecondaryRolePlay(player)])].filter(
+    Boolean
+  );
+
+const getPoolLabel = (player = {}) =>
+  player.registrationPool === "substitute" ||
+  player.registration_pool === "substitute"
+    ? "substitute pool"
+    : "main pool";
 
 export {
   buildTourneyAppealAdminEmail,
@@ -239,11 +267,22 @@ export async function sendTourneyRegistrationApprovalEmails({
     const denyToken = getTokenForPurpose(recipientTokens, "deny");
     if (!approveToken || !denyToken) continue;
 
-    const approveUrl = buildDecisionUrl({
-      baseUrl,
-      token: approveToken.token,
-      purpose: "approve",
-    });
+    const approvalRoles = getApprovalRoleOptions(player);
+    const approveButtons = approvalRoles
+      .map((role, index) => {
+        const approveUrl = buildDecisionUrl({
+          baseUrl,
+          token: approveToken.token,
+          purpose: "approve",
+          role,
+        });
+        return `<a href="${escapeHtml(approveUrl)}" style="display:inline-block;${
+          index === approvalRoles.length - 1 ? "" : "margin-right:12px;"
+        }padding:12px 18px;border-radius:10px;background:#0891b2;color:#fff;text-decoration:none;font-weight:700">Accept as ${escapeHtml(
+          role
+        )}</a>`;
+      })
+      .join("");
     const denyUrl = buildDecisionUrl({
       baseUrl,
       token: denyToken.token,
@@ -261,7 +300,12 @@ export async function sendTourneyRegistrationApprovalEmails({
           <li>Discord: ${escapeHtml(player.discord)}</li>
           <li>Battle.net: ${escapeHtml(player.battlenet)}</li>
           <li>Rank: ${escapeHtml(player.rank)}</li>
-          <li>Role: ${escapeHtml(player.rolePlay)}</li>
+          <li>Primary Role: ${escapeHtml(getPrimaryRolePlay(player))}</li>
+          ${
+            getSecondaryRolePlay(player)
+              ? `<li>Secondary Role: ${escapeHtml(getSecondaryRolePlay(player))}</li>`
+              : ""
+          }
           <li>Timezone: ${escapeHtml(player.timezone)}</li>
           <li>Twitch: ${escapeHtml(player.twitchUsername)}</li>
           <li>Free on August 15th and 16th: ${player.availableAug12 ? "Yes" : "No"}</li>
@@ -272,8 +316,10 @@ export async function sendTourneyRegistrationApprovalEmails({
             : ""
         }
         <p>
-          <a href="${approveUrl}" style="display:inline-block;margin-right:12px;padding:12px 18px;border-radius:10px;background:#0891b2;color:#fff;text-decoration:none;font-weight:700">Approve</a>
-          <a href="${denyUrl}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#7f1d1d;color:#fff;text-decoration:none;font-weight:700">Deny</a>
+          ${approveButtons}
+          <a href="${escapeHtml(denyUrl)}" style="display:inline-block;margin-left:${
+            approvalRoles.length ? "12px" : "0"
+          };padding:12px 18px;border-radius:10px;background:#7f1d1d;color:#fff;text-decoration:none;font-weight:700">Deny</a>
         </p>
         <p style="font-size:13px;color:#475569">These links are single-use and tied to your active caster/owner account.</p>
       </div>
@@ -306,6 +352,8 @@ export async function sendTourneyPlayerApprovedEmail({
   const loginUrl = new URL("/tourney/login", baseUrl);
   const discordLink = resolveDiscordLink({ player, baseUrl, env });
   const discordUrl = discordLink.url;
+  const approvedRole = getApprovedRolePlay(player) || "your selected role";
+  const poolLabel = getPoolLabel(player);
   const discordCta = discordUrl
     ? `<p>${
         discordLink.usesOAuth
@@ -327,18 +375,22 @@ export async function sendTourneyPlayerApprovedEmail({
   const { data, error } = await resend.emails.send({
     from,
     to: [player.email],
-    subject: "You're approved for Roo Industries",
+    subject: `You're approved as ${approvedRole} for Roo Industries`,
     html: `
       <div style="font-family:Arial,sans-serif;line-height:1.5;color:#0f172a">
         <h2>You're approved</h2>
         <p><strong>${escapeHtml(
           player.displayName || player.discord
-        )}</strong> has been approved for the Roo Industries Overwatch 6v6 Legacy Series.</p>
+        )}</strong> has been approved as <strong>${escapeHtml(
+          approvedRole
+        )}</strong> for the Roo Industries Overwatch 6v6 Legacy Series.</p>
+        <p>Your tournament pool is <strong>${escapeHtml(poolLabel)}</strong>.</p>
         ${discordCta}
       </div>
     `,
     text: [
-      `${player.displayName || player.discord || "Player"} has been approved for the Roo Industries Overwatch 6v6 Legacy Series.`,
+      `${player.displayName || player.discord || "Player"} has been approved as ${approvedRole} for the Roo Industries Overwatch 6v6 Legacy Series.`,
+      `Tournament pool: ${poolLabel}.`,
       discordUrl
         ? `${
             discordLink.usesOAuth

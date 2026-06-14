@@ -45,6 +45,7 @@ const initialForm = {
   battlenet: "",
   rank: "",
   rolePlay: "",
+  secondaryRolePlay: "",
   timezone: "",
   twitchUsername: "",
   availableAug12: false,
@@ -63,7 +64,6 @@ export default function TourneyRegistrationForm({
   const [message, setMessage] = useState("");
   const [isSuccess, setIsSuccess] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
-  const [capacityConflict, setCapacityConflict] = useState(null);
   const [isHydrated, setIsHydrated] = useState(false);
 
   useEffect(() => {
@@ -74,7 +74,7 @@ export default function TourneyRegistrationForm({
     setForm((current) => ({ ...current, [field]: value }));
   };
 
-  const submitRegistration = async ({ acceptSubstitutePool = false } = {}) => {
+  const submitRegistration = async () => {
     setIsBusy(true);
     setMessage("");
     setIsSuccess(false);
@@ -83,23 +83,21 @@ export default function TourneyRegistrationForm({
       if (form.password !== form.passwordConfirm) {
         throw new Error("Passwords must match.");
       }
+      if (form.secondaryRolePlay && form.secondaryRolePlay === form.rolePlay) {
+        throw new Error("Secondary role must be different from primary role.");
+      }
 
       const response = await fetch("/api/tourney/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, acceptSubstitutePool }),
+        body: JSON.stringify(form),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.ok !== true) {
-        if (response.status === 409 && data.code === "ROLE_CAPACITY_FULL") {
-          setCapacityConflict(data.capacity || { role: form.rolePlay });
-          return;
-        }
         throw new Error(data.error || "Unable to submit registration.");
       }
 
       setForm(initialForm);
-      setCapacityConflict(null);
       setMessage(data.message || "Registration submitted.");
       setIsSuccess(true);
     } catch (error) {
@@ -112,17 +110,6 @@ export default function TourneyRegistrationForm({
   const handleSubmit = async (event) => {
     event.preventDefault();
     await submitRegistration();
-  };
-
-  const handleJoinSubstitutePool = async () => {
-    setCapacityConflict(null);
-    await submitRegistration({ acceptSubstitutePool: true });
-  };
-
-  const handleChangeRole = () => {
-    setCapacityConflict(null);
-    const roleField = document.querySelector("[name='rolePlay']");
-    if (roleField) roleField.focus();
   };
 
   if (registrationClosed) {
@@ -249,11 +236,43 @@ export default function TourneyRegistrationForm({
             name="rolePlay"
             required
             value={form.rolePlay}
-            onChange={(event) => updateField("rolePlay", event.target.value)}
+            onChange={(event) => {
+              const nextRole = event.target.value;
+              setForm((current) => ({
+                ...current,
+                rolePlay: nextRole,
+                secondaryRolePlay:
+                  current.secondaryRolePlay === nextRole
+                    ? ""
+                    : current.secondaryRolePlay,
+              }));
+            }}
           >
             <option value="">Choose role</option>
             {roleOptions.map((role) => (
               <option key={role} value={role}>
+                {role}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Secondary Role
+          <select
+            {...hydrationSafeControlProps}
+            name="secondaryRolePlay"
+            value={form.secondaryRolePlay}
+            onChange={(event) =>
+              updateField("secondaryRolePlay", event.target.value)
+            }
+          >
+            <option value="">No secondary role</option>
+            {roleOptions.map((role) => (
+              <option
+                disabled={role === form.rolePlay}
+                key={role}
+                value={role}
+              >
                 {role}
               </option>
             ))}
@@ -360,47 +379,6 @@ export default function TourneyRegistrationForm({
         </p>
       ) : null}
 
-      {capacityConflict ? (
-        <div
-          className="tourney-modal-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) handleChangeRole();
-          }}
-        >
-          <div
-            aria-labelledby="tourney-capacity-title"
-            aria-modal="true"
-            className="tourney-modal"
-            role="dialog"
-          >
-            <p className="tourney-kicker">Substitute Pool</p>
-            <h3 id="tourney-capacity-title">{capacityConflict.role} is full</h3>
-            <p>
-              This role is at maximum capacity for the main bracket. You can
-              still register and be added to the substitute pool.
-            </p>
-            <div className="tourney-modal-actions">
-              <button
-                className="tourney-owner-button"
-                type="button"
-                disabled={isBusy}
-                onClick={handleJoinSubstitutePool}
-              >
-                Join substitute pool
-              </button>
-              <button
-                className="tourney-owner-link"
-                type="button"
-                disabled={isBusy}
-                onClick={handleChangeRole}
-              >
-                Change role
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </form>
   );
 }

@@ -18,7 +18,7 @@ module.exports = defineConfig({
   webServer: shouldUseExternalServer
     ? undefined
     : {
-        command: `sh -c 'TZ=UTC rm -rf ${internalDistDir} && node scripts/validate-runtime-env.js && node scripts/generate-sitemap.js && node scripts/generate-robots.js && NEXT_DIST_DIR=${internalDistDir} next build && NEXT_DIST_DIR=${internalDistDir} next start --hostname 127.0.0.1 --port ${internalPort}'`,
+        command: `sh -c 'export TOURNEY_DATABASE_MODE=memory; TZ=UTC rm -rf ${internalDistDir} && node scripts/validate-runtime-env.js && node scripts/generate-sitemap.js && node scripts/generate-robots.js && NEXT_DIST_DIR=${internalDistDir} next build && NEXT_DIST_DIR=${internalDistDir} next start --hostname 127.0.0.1 --port ${internalPort}'`,
         url: `http://127.0.0.1:${internalPort}`,
         reuseExistingServer: false,
         timeout: 180000,

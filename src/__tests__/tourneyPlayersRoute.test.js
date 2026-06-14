@@ -119,7 +119,11 @@ describe("tourney players API route", () => {
     mockApplyRegistrationDecision.mockResolvedValue(approvedPlayer);
 
     const response = await POST(
-      makeJsonRequest({ action: "approve", playerId: "player_1" })
+      makeJsonRequest({
+        action: "approve",
+        playerId: "player_1",
+        approvedRolePlay: "Support",
+      })
     );
 
     expect(response.status).toBe(200);
@@ -128,6 +132,7 @@ describe("tourney players API route", () => {
       playerId: "player_1",
       purpose: "approve",
       actorUsername: "yukari",
+      approvedRolePlay: "Support",
     });
     expect(mockSendTourneyPlayerApprovedEmail).toHaveBeenCalledWith({
       player: approvedPlayer,

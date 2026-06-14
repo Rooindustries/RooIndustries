@@ -50,15 +50,15 @@ export default function Reviews() {
   return (
     <section className="px-4 mt-20 py-12 max-w-7xl mx-auto">
       <header className="mx-auto max-w-3xl py-10 sm:py-12 md:py-16 flex flex-col items-center justify-center text-center">
-        <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+        <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
           Community Reviews
         </h1>
-        <p className="mt-5 text-slate-200/90 text-base sm:text-lg leading-relaxed">
+        <p className="mt-5 text-ink-secondary text-base sm:text-lg leading-relaxed">
           Real feedback from clients who booked optimization sessions with Roo
           Industries, including FPS gains, frametime improvements, and
           day-to-day smoothness results.
         </p>
-        <p className="mt-3 text-sky-300/90 text-sm sm:text-base font-semibold">
+        <p className="mt-3 text-accent text-sm sm:text-base font-semibold">
           Scroll down to view the full gallery.
         </p>
       </header>
@@ -72,7 +72,7 @@ export default function Reviews() {
                 className="break-inside-avoid overflow-hidden rounded-xl"
                 aria-hidden="true"
               >
-                <div className="w-full rounded-xl border border-white/10 bg-slate-900/60 shadow-lg aspect-[4/5] animate-pulse" />
+                <div className="w-full rounded-xl border border-line-soft bg-skeleton shadow-lg aspect-[4/5] animate-pulse" />
               </div>
             );
           }

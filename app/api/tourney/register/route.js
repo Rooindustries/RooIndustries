@@ -34,6 +34,7 @@ const readPayload = async (request) => {
     battlenet: form.get("battlenet"),
     rank: form.get("rank"),
     rolePlay: form.get("rolePlay"),
+    secondaryRolePlay: form.get("secondaryRolePlay"),
     acceptSubstitutePool: form.get("acceptSubstitutePool"),
     timezone: form.get("timezone"),
     twitchUsername: form.get("twitchUsername"),

@@ -5,17 +5,17 @@ import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS, readHomeSectionData } fro
 /*  Record card design tokens — single source of truth.
     Two accents only: gold (title, via gold-flair-text CSS class) + cyan (everything else). */
 const RC = {
-  "--rc-bg":          "#0a1320",
-  "--rc-bg-mid":      "#0e1526",
-  "--rc-bg-deep":     "#07111f",
-  "--rc-text":        "#f0f4f8",
-  "--rc-text-muted":  "#94a3b8",
-  "--rc-accent":      "#22d3ee",
+  "--rc-bg":          "var(--color-surface-solid)",
+  "--rc-bg-mid":      "var(--color-surface-card)",
+  "--rc-bg-deep":     "var(--color-surface-elevated)",
+  "--rc-text":        "var(--color-text-primary)",
+  "--rc-text-muted":  "var(--color-text-muted)",
+  "--rc-accent":      "var(--color-accent)",
   "--rc-accent-soft": "rgba(34, 211, 238, 0.12)",
-  "--rc-border":      "rgba(34, 211, 238, 0.18)",
-  "--rc-border-sub":  "rgba(34, 211, 238, 0.08)",
-  "--rc-cta":         "#0d8fa0",
-  "--rc-cta-end":     "#0a7585",
+  "--rc-border":      "var(--color-border-accent)",
+  "--rc-border-sub":  "var(--color-border-soft)",
+  "--rc-cta":         "var(--color-accent-strong)",
+  "--rc-cta-end":     "var(--color-accent)",
 };
 
 export default function About({ initialData = null }) {

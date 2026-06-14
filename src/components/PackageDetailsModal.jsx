@@ -167,7 +167,7 @@ export default function PackageDetailsModal({
                   }
                 : modalContainerVariants
             }
-            className="low-perf-surface glass-premium glass-card-surface relative w-full max-w-md rounded-2xl border border-sky-400/60 p-6 text-center transition-all duration-500 ease-in-out hover:shadow-[0_0_42px_rgba(56,189,248,0.5)]"
+            className="low-perf-surface glass-premium glass-card-surface relative w-full max-w-md rounded-2xl border border-info-border p-6 text-center transition-all duration-500 ease-in-out hover:shadow-glow-strong"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
@@ -175,21 +175,21 @@ export default function PackageDetailsModal({
             <motion.button
               aria-label="Close"
               variants={itemVariants}
-              className="absolute right-3 top-3 text-sky-200 hover:text-white transition text-2xl z-10"
+              className="absolute right-3 top-3 text-info-text hover:text-white transition text-2xl z-10"
               onClick={handleClose}
             >
               &times;
             </motion.button>
 
             <motion.div variants={itemVariants}>
-              <div className="inline-flex items-center px-4 py-1.5 rounded-full text-xs font-semibold text-white bg-[#1fa7ff] shadow-[0_0_18px_rgba(31,167,255,0.6)] mb-4">
+              <div className="inline-flex items-center px-4 py-1.5 rounded-full text-xs font-semibold text-accent-contrast bg-info shadow-info-soft mb-4">
                 {tagText}
               </div>
             </motion.div>
 
             <motion.h3
               variants={itemVariants}
-              className="text-2xl font-bold text-sky-100"
+              className="text-2xl font-bold text-info-text"
             >
               {pkg?.title}
             </motion.h3>
@@ -201,7 +201,7 @@ export default function PackageDetailsModal({
               <PriceDisplay pkg={pkg} size="modal" />
             </motion.div>
 
-            <motion.ul className="mt-4 space-y-2 text-sm text-sky-100 text-left">
+            <motion.ul className="mt-4 space-y-2 text-sm text-info-text text-left">
               {featureItems.map((item, i) => (
                 <motion.li
                   key={`${item.label}-${i}`}
@@ -210,7 +210,7 @@ export default function PackageDetailsModal({
                     item.included === false ? "opacity-40" : ""
                   }`}
                 >
-                  <span className="text-sky-400 mt-1">&#10004;</span>
+                  <span className="text-accent mt-1">&#10004;</span>
                   <span className="flex-1">
                     {renderFeature ? renderFeature(item.label) : item.label}
                   </span>

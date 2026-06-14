@@ -10,11 +10,11 @@ export default function Book({ hideFooter = false, compact = false }) {
   return (
     <>
       <section
-        className={`relative z-10 ${padY} px-6 text-white text-center`}
+        className={`relative z-10 ${padY} px-6 text-ink text-center`}
         style={{ margin: 0 }}
       >
         <h2
-          className={`${titleSize} font-extrabold text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)] ${titleMargin}`}
+          className={`${titleSize} font-extrabold text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)] ${titleMargin}`}
         >
           Schedule Your Session
         </h2>

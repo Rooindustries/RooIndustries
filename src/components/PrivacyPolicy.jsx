@@ -26,8 +26,7 @@ export default function PrivacyPolicy() {
           <a
             key={i}
             href="mailto:serviroo@rooindustries.com"
-            // Applied the requested cyan styling
-            className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition-colors"
+            className="text-accent hover:text-[color:var(--color-link-hover)] underline underline-offset-2 transition-colors"
           >
             {part}
           </a>
@@ -54,7 +53,7 @@ export default function PrivacyPolicy() {
   if (!data) return null;
 
   return (
-    <div className="py-20 max-w-3xl mx-auto p-6 text-white">
+    <div className="py-20 max-w-3xl mx-auto p-6 text-ink">
       {/* Title */}
       {data.title && <h1 className="text-3xl font-bold mb-6">{data.title}</h1>}
 
@@ -62,7 +61,7 @@ export default function PrivacyPolicy() {
       {data.sections?.map((section, i) => (
         <div key={i} className="mb-8">
           {section.heading && (
-            <h2 className="text-2xl font-semibold mt-6 mb-2 text-white">
+            <h2 className="text-2xl font-semibold mt-6 mb-2 text-ink">
               {section.heading}
             </h2>
           )}
@@ -87,8 +86,8 @@ export default function PrivacyPolicy() {
                       ? "mailto:serviroo@rooindustries.com"
                       : value?.href;
                     const linkClasses = isTargetEmail
-                      ? "text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition-colors"
-                      : "underline hover:text-cyan-400 transition-colors text-slate-200";
+                      ? "text-accent hover:text-[color:var(--color-link-hover)] underline underline-offset-2 transition-colors"
+                      : "underline hover:text-[color:var(--color-link-hover)] transition-colors text-ink-secondary";
 
                     const target = finalHref?.startsWith("http")
                       ? "_blank"
@@ -112,7 +111,7 @@ export default function PrivacyPolicy() {
                 },
                 block: {
                   normal: ({ children }) => (
-                    <p className="mb-4 leading-relaxed text-slate-200">
+                    <p className="mb-4 leading-relaxed text-ink-secondary">
                       {/* Use the helper function here to process plain text children */}
                       {React.Children.map(children, (child) =>
                         renderTextWithLinks(child)
@@ -122,7 +121,7 @@ export default function PrivacyPolicy() {
                 },
                 list: {
                   bullet: ({ children }) => (
-                    <ul className="list-disc list-inside mb-4 text-slate-200">
+                    <ul className="list-disc list-inside mb-4 text-ink-secondary">
                       {children}
                     </ul>
                   ),
@@ -135,7 +134,7 @@ export default function PrivacyPolicy() {
 
       {/* Last updated */}
       {data.lastUpdated && (
-        <p className="mt-8 text-sm text-slate-400">
+        <p className="mt-8 text-sm text-ink-muted">
           Last updated: {data.lastUpdated}
         </p>
       )}
