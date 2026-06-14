@@ -170,6 +170,19 @@ export const getPaymentRecordById = async (client, id) => {
   );
 };
 
+const hasPaymentRecordBookingPayload = (record = {}) => {
+  const payload = record?.bookingPayload;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return false;
+  }
+
+  return !!(
+    String(payload.packageTitle || "").trim() ||
+    String(payload.originalOrderId || "").trim() ||
+    String(payload.startTimeUTC || "").trim()
+  );
+};
+
 export const findPaymentRecordByProviderData = async ({
   client,
   provider = "",
@@ -179,18 +192,23 @@ export const findPaymentRecordByProviderData = async ({
   const normalizedProvider = String(provider || "").trim().toLowerCase();
   if (!normalizedProvider) return null;
 
+  let razorpayByPaymentId = null;
   if (normalizedProvider === "razorpay" && providerPaymentId) {
-    return client.fetch(
+    const byPaymentId = await client.fetch(
       `*[_type == $type && provider == "razorpay" && providerPaymentId == $providerPaymentId][0]`,
       {
         type: PAYMENT_RECORD_TYPE,
         providerPaymentId,
       }
     );
+    if (byPaymentId?._id && hasPaymentRecordBookingPayload(byPaymentId)) {
+      return byPaymentId;
+    }
+    razorpayByPaymentId = byPaymentId;
   }
 
   if (providerOrderId) {
-    return client.fetch(
+    const byOrderId = await client.fetch(
       `*[_type == $type && provider == $provider && providerOrderId == $providerOrderId][0]`,
       {
         type: PAYMENT_RECORD_TYPE,
@@ -198,9 +216,10 @@ export const findPaymentRecordByProviderData = async ({
         providerOrderId,
       }
     );
+    if (byOrderId?._id) return byOrderId;
   }
 
-  return null;
+  return razorpayByPaymentId || null;
 };
 
 export const findReusablePaymentRecord = async ({

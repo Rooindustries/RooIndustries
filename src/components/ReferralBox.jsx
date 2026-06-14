@@ -72,13 +72,13 @@ export default function ReferralBox() {
   const isValid = !!email && email.includes("@");
 
   return (
-    <div className="mt-12 mb-8 bg-[#0a1324]/80 border border-indigo-500/30 rounded-2xl p-6 shadow-[0_0_30px_rgba(99,102,241,0.2)] backdrop-blur-md max-w-4xl mx-auto md:flex md:items-center md:justify-between md:gap-8">
+    <div className="mt-12 mb-8 bg-surface-card border border-line-accent rounded-2xl p-6 shadow-[var(--shadow-referral-glow)] backdrop-blur-md max-w-4xl mx-auto md:flex md:items-center md:justify-between md:gap-8">
       {/* Left Side: Text Content */}
       <div className="text-left mb-5 md:mb-0 md:flex-1">
-        <h3 className="text-2xl font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-sky-300 to-indigo-300 drop-shadow-sm">
+        <h3 className="text-2xl font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-accent to-accent-strong drop-shadow-sm">
           {content.heading}
         </h3>
-        <p className="text-sm text-slate-400 leading-relaxed">
+        <p className="text-sm text-ink-secondary leading-relaxed">
           {content.description}
         </p>
       </div>
@@ -90,7 +90,7 @@ export default function ReferralBox() {
           placeholder={content.emailPlaceholder}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="flex-1 md:w-64 bg-[#050b16] border border-indigo-900/60 focus:border-sky-500/60 rounded-xl px-4 py-3 text-sm text-slate-200 outline-none transition-all placeholder:text-slate-600 shadow-inner"
+          className="flex-1 md:w-64 bg-surface-input border border-line-input focus:border-info-border rounded-xl px-4 py-3 text-sm text-ink-secondary outline-none transition-all placeholder:text-ink-muted shadow-inner"
         />
 
         <button
@@ -102,17 +102,17 @@ export default function ReferralBox() {
             rounded-xl
             px-4 sm:px-5 py-3
             text-sm font-semibold text-white
-            ring-1 ring-sky-700/50
+            ring-1 ring-line-accent
             transition-all duration-300
             active:translate-y-px
             w-full sm:w-auto
 
-            bg-gradient-to-r from-sky-600 to-indigo-600
-            hover:from-sky-500 hover:to-indigo-500
-            shadow-[0_10px_30px_rgba(56,189,248,0.35)]
+            bg-gradient-to-r from-accent to-accent-strong
+            hover:from-accent-strong hover:to-accent
+            shadow-[var(--shadow-button-accent)]
 
             disabled:opacity-50 disabled:cursor-not-allowed
-            disabled:hover:from-sky-600 disabled:hover:to-indigo-600
+            disabled:hover:from-accent disabled:hover:to-accent-strong
           "
         >
           <span className="relative z-10 drop-shadow">
@@ -133,13 +133,13 @@ export default function ReferralBox() {
             px-4 sm:px-5 py-3
             text-sm font-semibold
             w-full sm:w-auto
-            border border-indigo-500/35
-            bg-[#050b16]
-            text-slate-200
-            hover:border-sky-500/50
-            hover:text-white
+            border border-line-accent
+            bg-surface-input
+            text-ink-secondary
+            hover:border-line-accent
+            hover:text-[color:var(--color-link-hover)]
             transition-all duration-300
-            shadow-[0_10px_30px_rgba(99,102,241,0.15)]
+            shadow-[var(--shadow-referral-glow)]
             active:translate-y-px
           "
         >

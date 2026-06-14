@@ -1307,4 +1307,132 @@ describe("payment session flow", () => {
     );
     expect(store.bookings).toHaveLength(1);
   });
+
+  test("Razorpay webhooks finalize the started order record before payment id is stored", async () => {
+    const hold = createHold();
+    const bookingPayload = baseBookingPayload();
+    bookingPayload.slotHoldToken = issueTokenForHold(hold);
+
+    await startPaymentSession({
+      body: {
+        provider: "razorpay",
+        bookingPayload,
+      },
+      client: mockClient,
+    });
+
+    const event = {
+      event: "payment.captured",
+      payload: {
+        payment: {
+          entity: {
+            id: "razorpay_payment_1",
+            order_id: "razorpay_order_1",
+            email: "payer@example.com",
+          },
+        },
+      },
+    };
+    const rawBody = JSON.stringify(event);
+
+    const result = await handleRazorpayWebhook({
+      req: {
+        method: "POST",
+        body: event,
+        rawBody,
+        headers: {
+          "x-razorpay-signature": "webhook_signature",
+        },
+      },
+      client: mockClient,
+    });
+
+    expect(result.httpStatus).toBe(200);
+    expect(result.body).toMatchObject({
+      ok: true,
+      status: paymentRecordConstants.PAYMENT_STATUS_EMAIL_PARTIAL,
+      provider: "razorpay",
+      recoveryReason: "",
+    });
+    expect(store.paymentRecords).toHaveLength(1);
+    expect(getOnlyPaymentRecord()).toMatchObject({
+      providerOrderId: "razorpay_order_1",
+      providerPaymentId: "razorpay_payment_1",
+      status: paymentRecordConstants.PAYMENT_STATUS_EMAIL_PARTIAL,
+      bookingId: store.bookings[0]._id,
+    });
+    expect(store.bookings).toHaveLength(1);
+  });
+
+  test("Razorpay webhooks prefer the started order record over an empty recovery duplicate", async () => {
+    const hold = createHold();
+    const bookingPayload = baseBookingPayload();
+    bookingPayload.slotHoldToken = issueTokenForHold(hold);
+
+    await startPaymentSession({
+      body: {
+        provider: "razorpay",
+        bookingPayload,
+      },
+      client: mockClient,
+    });
+
+    store.paymentRecords.push({
+      _id: "paymentRecord.razorpay.payment.razorpay_payment_1",
+      _type: "paymentRecord",
+      provider: "razorpay",
+      status: paymentRecordConstants.PAYMENT_STATUS_NEEDS_RECOVERY,
+      bookingPayload: {},
+      providerOrderId: "razorpay_order_1",
+      providerPaymentId: "razorpay_payment_1",
+      recoveryReason: "payment_record_missing_booking_payload",
+      events: [],
+      createdAt: "2099-01-15T08:05:00.000Z",
+      updatedAt: "2099-01-15T08:05:00.000Z",
+    });
+
+    const event = {
+      event: "payment.captured",
+      payload: {
+        payment: {
+          entity: {
+            id: "razorpay_payment_1",
+            order_id: "razorpay_order_1",
+            email: "payer@example.com",
+          },
+        },
+      },
+    };
+    const rawBody = JSON.stringify(event);
+
+    const result = await handleRazorpayWebhook({
+      req: {
+        method: "POST",
+        body: event,
+        rawBody,
+        headers: {
+          "x-razorpay-signature": "webhook_signature",
+        },
+      },
+      client: mockClient,
+    });
+
+    const orderRecord = store.paymentRecords.find(
+      (entry) =>
+        entry.providerOrderId === "razorpay_order_1" &&
+        entry.bookingPayload?.packageTitle
+    );
+
+    expect(result.httpStatus).toBe(200);
+    expect(result.body.status).toBe(
+      paymentRecordConstants.PAYMENT_STATUS_EMAIL_PARTIAL
+    );
+    expect(store.paymentRecords).toHaveLength(2);
+    expect(orderRecord).toMatchObject({
+      providerPaymentId: "razorpay_payment_1",
+      status: paymentRecordConstants.PAYMENT_STATUS_EMAIL_PARTIAL,
+      bookingId: store.bookings[0]._id,
+    });
+    expect(store.bookings).toHaveLength(1);
+  });
 });
