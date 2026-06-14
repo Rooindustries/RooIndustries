@@ -20,7 +20,7 @@ function GameCard({ game, index }) {
       }}
     >
       {/* Card container */}
-      <div className="relative h-full w-full rounded-xl overflow-hidden bg-slate-900/90 ring-1 ring-white/10 group-hover:ring-sky-500/40 transition-all duration-500">
+      <div className="relative h-full w-full rounded-xl overflow-hidden bg-surface-solid ring-1 ring-line-soft group-hover:ring-line-accent transition-all duration-500">
         {/* Slightly wider portrait aspect ratio (3:4) */}
         <div className="aspect-[3/4] relative">
           {imageUrl ? (
@@ -39,10 +39,10 @@ function GameCard({ game, index }) {
               <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
 
               {/* Bottom glow line on hover */}
-              <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-sky-500 via-sky-400 to-sky-500 opacity-0 group-hover:opacity-100 transition-opacity duration-500 shadow-[0_0_15px_rgba(56,189,248,0.8)]" />
+              <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-accent-strong via-accent to-accent-strong opacity-0 group-hover:opacity-100 transition-opacity duration-500 shadow-[var(--shadow-divider-extra)]" />
             </>
           ) : (
-            <div className="absolute inset-0 bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950" />
+            <div className="absolute inset-0 bg-skeleton" />
           )}
         </div>
       </div>
@@ -88,10 +88,10 @@ export default function SupportedGames({ initialData = null }) {
     return (
       <section
         id="supported-games"
-        className="relative z-10 py-16 sm:py-20 px-4 sm:px-6 text-center text-white"
+        className="relative z-10 py-16 sm:py-20 px-4 sm:px-6 text-center text-ink"
         aria-hidden="true"
       >
-        <div className="max-w-6xl mx-auto min-h-[720px] rounded-3xl border border-sky-700/20 bg-gradient-to-b from-[#0d1526]/70 to-[#08101d]/80" />
+        <div className="max-w-6xl mx-auto min-h-[720px] rounded-3xl border border-line-input bg-skeleton" />
       </section>
     );
   }
@@ -126,18 +126,18 @@ export default function SupportedGames({ initialData = null }) {
 
       <section
         id="supported-games"
-        className="relative z-10 py-16 sm:py-20 px-4 sm:px-6 text-center text-white"
+        className="relative z-10 py-16 sm:py-20 px-4 sm:px-6 text-center text-ink"
       >
         <div className="max-w-6xl mx-auto">
           {/* Header - matching Packages style */}
           <div className="text-center mb-10 sm:mb-12">
             {data.title && (
-              <h2 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+              <h2 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
                 {data.title}
               </h2>
             )}
             {data.subtitle && (
-              <p className="mt-3 text-slate-300/80 text-sm sm:text-base">
+              <p className="mt-3 text-ink-secondary text-sm sm:text-base">
                 {data.subtitle}
               </p>
             )}
@@ -145,7 +145,7 @@ export default function SupportedGames({ initialData = null }) {
 
           {/* Games grid */}
           {featuredGames.length > 0 && (
-            <div className="scroll-blur-lite rounded-2xl bg-gradient-to-b from-slate-900/50 to-slate-950/50 ring-1 ring-white/10 backdrop-blur-sm p-4 sm:p-5 shadow-[0_0_30px_rgba(0,0,0,0.3)]">
+            <div className="scroll-blur-lite rounded-2xl bg-surface-card ring-1 ring-line-soft backdrop-blur-sm p-4 sm:p-5 shadow-surface">
               {/* Featured games grid - 3 on mobile, 6 on large screens */}
               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2 sm:gap-3 md:gap-4">
                 {featuredGames.map((game, index) => (
@@ -171,11 +171,11 @@ export default function SupportedGames({ initialData = null }) {
                 >
                   {/* Divider */}
                   <div className="flex items-center gap-4 mb-4">
-                    <div className="flex-1 h-px bg-gradient-to-r from-transparent via-sky-500/30 to-transparent" />
-                    <span className="text-xs font-medium text-slate-500 uppercase tracking-widest">
+                    <div className="flex-1 h-px bg-gradient-to-r from-transparent via-[color:var(--color-accent-soft)] to-transparent" />
+                    <span className="text-xs font-medium text-ink-muted uppercase tracking-widest">
                       More Games
                     </span>
-                    <div className="flex-1 h-px bg-gradient-to-r from-transparent via-sky-500/30 to-transparent" />
+                    <div className="flex-1 h-px bg-gradient-to-r from-transparent via-[color:var(--color-accent-soft)] to-transparent" />
                   </div>
 
                   <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2 sm:gap-3 md:gap-4">
@@ -200,12 +200,7 @@ export default function SupportedGames({ initialData = null }) {
                 onClick={() => setShowAll((prev) => !prev)}
                 aria-expanded={showAll}
                 aria-controls="supported-games-more"
-                className="glow-button relative inline-flex items-center justify-center gap-2 rounded-md px-5 sm:px-6 py-2.5 sm:py-3 text-sm sm:text-base font-semibold text-white ring-1 ring-sky-700/60 hover:text-white active:translate-y-px transition-all duration-300"
-                style={{
-                  background: "#0b63d1",
-                  boxShadow:
-                    "0 0 26px rgba(59,130,246,0.35), 0 0 38px rgba(59,130,246,0.2)",
-                }}
+                className="glow-button relative inline-flex items-center justify-center gap-2 rounded-md px-5 sm:px-6 py-2.5 sm:py-3 text-sm sm:text-base font-semibold text-white ring-1 ring-line-accent hover:text-white active:translate-y-px transition-all duration-300 shadow-[var(--shadow-button-accent)]"
               >
                 {buttonLabel}
                 <span

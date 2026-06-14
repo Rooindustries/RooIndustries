@@ -122,7 +122,7 @@ export default function Tools() {
 
   return (
     <section
-      className="relative z-10 pt-28 pb-24 px-6 max-w-6xl mx-auto text-white"
+      className="relative z-10 pt-28 pb-24 px-6 max-w-6xl mx-auto text-ink"
       style={{
         width: "100%",
         maxWidth: "1152px",
@@ -131,13 +131,13 @@ export default function Tools() {
     >
       {/* Heading */}
       <header className="text-center mb-10">
-        <p className="text-xs tracking-[0.3em] uppercase text-sky-400/80 mb-2">
+        <p className="text-xs tracking-[0.3em] uppercase text-accent mb-2">
           Tools I Use
         </p>
-        <h1 className="text-4xl sm:text-5xl font-extrabold text-sky-100 drop-shadow-[0_0_30px_rgba(56,189,248,0.45)]">
+        <h1 className="text-4xl sm:text-5xl font-extrabold text-info-text drop-shadow-[0_0_30px_rgba(56,189,248,0.45)]">
           All Tools & Utilities
         </h1>
-        <p className="mt-3 text-sm sm:text-base text-slate-300/80 max-w-2xl mx-auto">
+        <p className="mt-3 text-sm sm:text-base text-ink-secondary max-w-2xl mx-auto">
           Quick access to the exact software I use during optimization, stress
           testing, overclocking and troubleshooting. Downloads are either direct
           from the official developer or securely hosted by Roo Industries.
@@ -145,7 +145,7 @@ export default function Tools() {
       </header>
 
       {!loading && tools.length === 0 ? (
-        <div className="mt-16 text-center text-slate-300">
+        <div className="mt-16 text-center text-ink-secondary">
           No tools configured yet. Add some in Sanity Studio.
         </div>
       ) : (
@@ -155,14 +155,14 @@ export default function Tools() {
               return (
                 <article
                   key={tool._id}
-                  className="group relative rounded-2xl border border-sky-800/40 bg-[#020617]/80 overflow-hidden p-6"
+                  className="group relative rounded-2xl border border-line-input bg-[color:var(--color-surface-solid)] overflow-hidden p-6"
                   aria-hidden="true"
                 >
-                  <div className="h-5 w-24 rounded bg-slate-700/60 animate-pulse" />
-                  <div className="mt-4 h-6 w-3/4 rounded bg-slate-700/60 animate-pulse" />
-                  <div className="mt-3 h-4 w-full rounded bg-slate-700/50 animate-pulse" />
-                  <div className="mt-2 h-4 w-5/6 rounded bg-slate-700/50 animate-pulse" />
-                  <div className="mt-8 h-10 w-full rounded-xl bg-slate-700/60 animate-pulse" />
+                  <div className="h-5 w-24 rounded bg-surface-hover-accent animate-pulse" />
+                  <div className="mt-4 h-6 w-3/4 rounded bg-surface-hover-accent animate-pulse" />
+                  <div className="mt-3 h-4 w-full rounded bg-surface-hover animate-pulse" />
+                  <div className="mt-2 h-4 w-5/6 rounded bg-surface-hover animate-pulse" />
+                  <div className="mt-8 h-10 w-full rounded-xl bg-surface-hover-accent animate-pulse" />
                 </article>
               );
             }
@@ -197,7 +197,7 @@ export default function Tools() {
             return (
               <article
                 key={_id}
-                className="group relative rounded-2xl border border-sky-800/50 bg-[#020617]/95 shadow-[0_0_25px_rgba(15,23,42,0.9)] hover:shadow-[0_0_35px_rgba(56,189,248,0.35)] overflow-hidden transition-all duration-300"
+                className="group relative rounded-2xl border border-line-input bg-[color:var(--color-surface-solid)] shadow-[0_0_25px_rgba(15,23,42,0.9)] hover:shadow-[var(--shadow-card-glow)] overflow-hidden transition-all duration-300"
               >
                 {/* subtle gradient glow background */}
                 <div className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.18),transparent_55%),radial-gradient(circle_at_bottom,_rgba(8,47,73,0.7),transparent_55%)]" />
@@ -205,7 +205,7 @@ export default function Tools() {
                 <div className="relative p-5 sm:p-6 flex flex-col h-full">
                   {/* top row: icon + tag */}
                   <div className="flex items-start justify-between gap-3 mb-5">
-                    <div className="w-9 h-9 rounded-xl bg-slate-900/80 border border-sky-700/50 flex items-center justify-center overflow-hidden shrink-0">
+                    <div className="w-9 h-9 rounded-xl bg-surface-input border border-line-input flex items-center justify-center overflow-hidden shrink-0">
                       {/* SEO: ensure tool icons are crawlable with descriptive alt text. */}
                       {iconUrl ? (
                         <img
@@ -218,12 +218,12 @@ export default function Tools() {
                           className="w-7 h-7 object-contain"
                         />
                       ) : (
-                        <span className="text-sky-400 text-lg">⚙️</span>
+                        <span className="text-accent text-lg">⚙️</span>
                       )}
                     </div>
 
                     {category && (
-                      <span className="px-3 py-1 rounded-full text-[10px] tracking-[0.18em] uppercase border border-sky-600/60 bg-sky-500/10 text-sky-200">
+                      <span className="px-3 py-1 rounded-full text-[10px] tracking-[0.18em] uppercase border border-info-border bg-info-soft text-info-text">
                         {categoryLabel(category)}
                       </span>
                     )}
@@ -231,17 +231,17 @@ export default function Tools() {
 
                   {/* title + desc */}
                   <div className="flex-1">
-                    <h2 className="text-lg sm:text-xl font-semibold text-sky-100">
+                    <h2 className="text-lg sm:text-xl font-semibold text-info-text">
                       {title}
                     </h2>
                     {shortDescription && (
-                      <p className="mt-1.5 text-xs sm:text-sm text-slate-300/85 leading-snug">
+                      <p className="mt-1.5 text-xs sm:text-sm text-ink-secondary leading-snug">
                         {shortDescription}
                       </p>
                     )}
 
                     {/* editable note about where it downloads from */}
-                    <p className="mt-2 text-[10px] text-slate-400/80">
+                    <p className="mt-2 text-[10px] text-ink-muted">
                       {downloadNote
                         ? downloadNote
                         : downloadMode === "hosted"
@@ -257,7 +257,7 @@ export default function Tools() {
                         href={officialSite}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex-1 inline-flex items-center justify-center px-4 py-2.5 rounded-xl text-sm font-semibold border border-sky-700/60 text-sky-200 hover:border-sky-400 hover:bg-sky-500/10 transition-colors"
+                        className="flex-1 inline-flex items-center justify-center px-4 py-2.5 rounded-xl text-sm font-semibold border border-line-input text-info-text hover:border-line-accent hover:bg-info-soft transition-colors"
                       >
                         Official Site
                       </a>
@@ -298,18 +298,18 @@ export default function Tools() {
           onClick={closeDownloadModal}
         >
           <div
-            className="relative w-full max-w-md bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 border border-sky-500/60 rounded-2xl shadow-[0_0_40px_rgba(56,189,248,0.45)] p-6 text-center transition-all duration-300 hover:shadow-[0_0_52px_rgba(56,189,248,0.6)]"
+            className="relative w-full max-w-md bg-panel border border-info-border rounded-2xl shadow-glow-strong p-6 text-center transition-all duration-300 hover:shadow-glow-strong"
             onClick={(e) => e.stopPropagation()}
           >
             <button
               aria-label="Close"
-              className="absolute right-3 top-3 text-sky-200 hover:text-white transition text-2xl"
+              className="absolute right-3 top-3 text-info-text hover:text-white transition text-2xl"
               onClick={closeDownloadModal}
             >
               ×
             </button>
 
-            <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-slate-900/80 border border-sky-700/60 flex items-center justify-center shadow-[0_0_25px_rgba(56,189,248,0.35)]">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-surface-input border border-line-input flex items-center justify-center shadow-info-soft">
               {/* SEO: keep the modal icon descriptive for screen readers. */}
               {pendingDownload.iconUrl ? (
                 <img
@@ -325,14 +325,14 @@ export default function Tools() {
                   className="w-12 h-12 object-contain"
                 />
               ) : (
-                <span className="text-sky-300 font-semibold text-lg">Tool</span>
+                <span className="text-accent font-semibold text-lg">Tool</span>
               )}
             </div>
 
-            <h3 className="text-2xl font-bold text-white">
+            <h3 className="text-2xl font-bold text-ink">
               {pendingDownload.title || "Download"}
             </h3>
-            <p className="mt-2 text-sm text-slate-300/90">
+            <p className="mt-2 text-sm text-ink-secondary">
               You&apos;re about to download this tool. Continue?
             </p>
 

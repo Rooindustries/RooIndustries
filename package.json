@@ -5,6 +5,7 @@
   "dependencies": {
     "@fontsource-variable/roboto-flex": "^5.2.8",
     "@formspree/react": "^3.0.0",
+    "@neondatabase/serverless": "^1.1.0",
     "@paypal/react-paypal-js": "^8.9.2",
     "@portabletext/react": "^4.0.3",
     "@sanity/client": "^7.14.0",
@@ -16,6 +17,8 @@
     "@vercel/analytics": "^1.6.1",
     "@vercel/speed-insights": "^1.2.0",
     "bcryptjs": "^3.0.3",
+    "brackets-manager": "^1.11.0",
+    "brackets-model": "^1.7.0",
     "crypto": "^1.0.1",
     "dayjs": "^1.11.19",
     "dotenv": "^17.2.3",

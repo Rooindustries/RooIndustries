@@ -227,7 +227,7 @@ const AvatarHex = ({
     <div className={`relative ${sizeClassName}`}>
       <div className={`absolute inset-0 ${accentClassName}`} style={clipStyle} />
       <div
-        className="absolute inset-[3px] bg-gradient-to-br from-[#1a2332] to-[#0d1525]"
+        className="absolute inset-[3px] bg-panel"
         style={clipStyle}
       >
         {imageUrl ? (
@@ -257,7 +257,7 @@ const AvatarHex = ({
 
 const Tag = ({ label, size = "sm" }) => {
   const baseClasses =
-    "inline-flex items-center rounded border border-cyan-300/30 bg-cyan-400/10 text-cyan-200";
+    "inline-flex items-center rounded border border-info-border bg-info-soft text-info-text";
   const sizeClasses =
     size === "lg"
       ? "px-3 py-1 text-xs font-semibold tracking-wide"
@@ -399,16 +399,16 @@ export default function MeetTheTeam({ onSeoData }) {
   );
 
   return (
-    <section className="w-full text-white">
-      <div className="w-full bg-gradient-to-b from-[#0a0f1a] to-[#0d1525]">
+    <section className="w-full text-ink">
+      <div className="w-full bg-panel">
         {/* Hero */}
         <div className="px-5">
           <div className="mx-auto max-w-6xl text-center pt-20 pb-16 relative">
-            <h1 className="text-4xl sm:text-5xl font-bold bg-gradient-to-br from-white to-cyan-300 bg-clip-text text-transparent">
+            <h1 className="text-4xl sm:text-5xl font-bold bg-gradient-to-br from-ink to-accent bg-clip-text text-transparent">
               {resolved.heroTitle}
             </h1>
             {resolved.heroSubtitle && (
-              <p className="mt-4 text-lg text-slate-400 max-w-[520px] mx-auto">
+              <p className="mt-4 text-lg text-ink-muted max-w-[520px] mx-auto">
                 {resolved.heroSubtitle}
               </p>
             )}
@@ -420,9 +420,9 @@ export default function MeetTheTeam({ onSeoData }) {
           <div className="px-5">
             <div className="mx-auto max-w-6xl py-10">
               <div className="flex justify-center">
-                <div className="relative w-full max-w-[600px] rounded-2xl border border-cyan-300/20 bg-white/[0.03] px-8 py-10 text-center transition-all duration-300 hover:-translate-y-1 hover:border-cyan-300/50 hover:shadow-[0_20px_40px_rgba(0,212,255,0.1)]">
+                <div className="relative w-full max-w-[600px] rounded-2xl border border-line-input bg-surface-card px-8 py-10 text-center transition-all duration-300 hover:-translate-y-1 hover:border-line-accent hover:shadow-glow-soft">
                   {resolved.founder.badgeText && (
-                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-gradient-to-br from-cyan-300 to-sky-500 px-5 py-1 text-[11px] font-bold uppercase tracking-[0.2em] text-[#0a0f1a]">
+                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-gradient-to-br from-accent to-accent-strong px-5 py-1 text-[11px] font-bold uppercase tracking-[0.2em] text-accent-contrast">
                       {resolved.founder.badgeText}
                     </span>
                   )}
@@ -432,8 +432,8 @@ export default function MeetTheTeam({ onSeoData }) {
                       alt={resolved.founder.name}
                       initials={getInitials(resolved.founder.name)}
                       sizeClassName="h-[120px] w-[120px]"
-                      accentClassName="bg-gradient-to-br from-cyan-300 to-sky-600"
-                      placeholderClassName="text-2xl font-bold text-cyan-300"
+                      accentClassName="bg-gradient-to-br from-accent to-accent-strong"
+                      placeholderClassName="text-2xl font-bold text-accent"
                       priority
                       imageSize={400}
                     />
@@ -442,12 +442,12 @@ export default function MeetTheTeam({ onSeoData }) {
                     {resolved.founder.name}
                   </div>
                   {resolved.founder.title && (
-                    <div className="text-cyan-300 text-sm font-medium mt-1">
+                    <div className="text-accent text-sm font-medium mt-1">
                       {resolved.founder.title}
                     </div>
                   )}
                   {resolved.founder.bio && (
-                    <p className="mt-4 text-slate-400 text-base">
+                    <p className="mt-4 text-ink-muted text-base">
                       {resolved.founder.bio}
                     </p>
                   )}
@@ -458,10 +458,10 @@ export default function MeetTheTeam({ onSeoData }) {
                           key={stat?._key || `${stat?.value}-${index}`}
                           className="text-center"
                         >
-                          <div className="text-2xl font-bold text-cyan-300">
+                          <div className="text-2xl font-bold text-accent">
                             {stat?.value}
                           </div>
-                          <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                          <div className="text-[11px] uppercase tracking-[0.2em] text-ink-muted">
                             {stat?.label}
                           </div>
                         </div>
@@ -485,7 +485,7 @@ export default function MeetTheTeam({ onSeoData }) {
                             key={link?._key || `${linkLabel}-${index}`}
                             href={link.url}
                             {...getLinkProps(link.url)}
-                            className="inline-flex items-center gap-2 rounded-md bg-white/5 px-4 py-2 text-sm text-slate-300 transition-all duration-200 hover:bg-cyan-400/10 hover:text-cyan-200"
+                            className="inline-flex items-center gap-2 rounded-md bg-surface-hover px-4 py-2 text-sm text-ink-secondary transition-all duration-200 hover:bg-surface-hover-accent hover:text-[color:var(--color-link-hover)]"
                           >
                             <SocialIcon type={link?.icon || "x"} />
                             {linkLabel}
@@ -509,10 +509,10 @@ export default function MeetTheTeam({ onSeoData }) {
                 <div className="mx-auto max-w-6xl py-10">
                   {section.title && (
                     <div className="text-center mb-10">
-                      <h2 className="text-2xl font-semibold uppercase tracking-[0.2em] text-cyan-300">
+                      <h2 className="text-2xl font-semibold uppercase tracking-[0.2em] text-accent">
                         {section.title}
                       </h2>
-                      <div className="mx-auto mt-3 h-0.5 w-16 bg-gradient-to-r from-transparent via-cyan-300 to-transparent" />
+                      <div className="mx-auto mt-3 h-0.5 w-16 bg-gradient-to-r from-transparent via-accent to-transparent" />
                     </div>
                   )}
                   <div className="flex flex-wrap justify-center gap-6">
@@ -524,7 +524,7 @@ export default function MeetTheTeam({ onSeoData }) {
                         return (
                           <div
                             key={card?._key || `${card?.name}-${cardIndex}`}
-                            className="relative w-full max-w-[300px] rounded-xl border border-purple-400/30 bg-white/[0.02] px-6 pt-7 pb-5 text-center transition-all duration-300 hover:-translate-y-1 hover:border-purple-400/60 hover:shadow-[0_12px_30px_rgba(145,70,255,0.15)] flex flex-col items-center"
+                            className="relative w-full max-w-[300px] rounded-xl border border-purple-400/30 bg-surface-card px-6 pt-7 pb-5 text-center transition-all duration-300 hover:-translate-y-1 hover:border-purple-400/60 hover:shadow-[0_12px_30px_rgba(145,70,255,0.15)] flex flex-col items-center"
                           >
                             {card?.platformBadge && (
                               <span className="absolute top-4 right-4 rounded bg-purple-500 px-2.5 py-1 text-[10px] font-semibold tracking-[0.2em] text-white">
@@ -537,8 +537,8 @@ export default function MeetTheTeam({ onSeoData }) {
                                 alt={card?.name || "Team member"}
                                 initials={initials}
                                 sizeClassName="h-[90px] w-[90px]"
-                                accentClassName="bg-gradient-to-br from-[#9146ff] to-[#6633cc]"
-                                placeholderClassName="text-xl font-bold text-cyan-300"
+                                accentClassName="bg-platform-twitch"
+                                placeholderClassName="text-xl font-bold text-accent"
                               />
                             </div>
                             <div className="flex-1 flex flex-col">
@@ -551,7 +551,7 @@ export default function MeetTheTeam({ onSeoData }) {
                                 </div>
                               )}
                               {card?.bio && (
-                                <p className="mt-3 text-sm text-slate-400">
+                                <p className="mt-3 text-sm text-ink-muted">
                                   {card.bio}
                                 </p>
                               )}
@@ -573,7 +573,7 @@ export default function MeetTheTeam({ onSeoData }) {
                       return (
                         <div
                           key={card?._key || `${card?.name}-${cardIndex}`}
-                          className="w-full max-w-[300px] rounded-xl border border-white/10 bg-white/[0.02] px-6 py-7 text-center transition-all duration-300 hover:-translate-y-1 hover:border-cyan-300/40 hover:shadow-[0_12px_30px_rgba(0,0,0,0.3)]"
+                          className="w-full max-w-[300px] rounded-xl border border-line-soft bg-surface-card px-6 py-7 text-center transition-all duration-300 hover:-translate-y-1 hover:border-line-accent hover:shadow-glow-soft"
                         >
                           <div className="mx-auto mb-4 flex justify-center">
                             <AvatarHex
@@ -581,20 +581,20 @@ export default function MeetTheTeam({ onSeoData }) {
                               alt={card?.name || "Team member"}
                               initials={initials}
                               sizeClassName="h-[90px] w-[90px]"
-                              accentClassName="bg-gradient-to-br from-cyan-300 to-sky-600"
-                              placeholderClassName="text-xl font-bold text-cyan-300"
+                              accentClassName="bg-gradient-to-br from-accent to-accent-strong"
+                              placeholderClassName="text-xl font-bold text-accent"
                             />
                           </div>
                           <div className="text-xl font-semibold">
                             {card?.name}
                           </div>
                           {card?.title && (
-                            <div className="mt-1 text-xs font-medium text-cyan-300">
+                            <div className="mt-1 text-xs font-medium text-accent">
                               {card.title}
                             </div>
                           )}
                           {card?.bio && (
-                            <p className="mt-3 text-sm text-slate-400 min-h-[40px]">
+                            <p className="mt-3 text-sm text-ink-muted min-h-[40px]">
                               {card.bio}
                             </p>
                           )}
@@ -620,7 +620,7 @@ export default function MeetTheTeam({ onSeoData }) {
           <div className="px-5">
             <div className="mx-auto max-w-6xl py-16 text-center">
               {resolved.footer.note && (
-                <p className="text-sm text-slate-500">
+                <p className="text-sm text-ink-muted">
                   {resolved.footer.note}
                 </p>
               )}
@@ -628,7 +628,7 @@ export default function MeetTheTeam({ onSeoData }) {
                 <a
                   href={resolved.footer.buttonUrl}
                   {...getLinkProps(resolved.footer.buttonUrl)}
-                  className="mt-5 inline-flex items-center gap-2 rounded-lg bg-gradient-to-br from-cyan-300 to-sky-500 px-7 py-3 text-sm font-semibold text-[#0a0f1a] transition-all duration-200 hover:-translate-y-1 hover:shadow-[0_8px_20px_rgba(0,212,255,0.3)]"
+                  className="mt-5 inline-flex items-center gap-2 rounded-lg bg-gradient-to-br from-accent to-accent-strong px-7 py-3 text-sm font-semibold text-accent-contrast transition-all duration-200 hover:-translate-y-1 hover:shadow-glow-soft"
                 >
                   {resolved.footer.showDiscordIcon && (
                     <SocialIcon type="discord" />
