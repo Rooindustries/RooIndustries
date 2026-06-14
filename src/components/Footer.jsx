@@ -15,9 +15,9 @@ export default function Footer() {
 
   return (
     <footer className="relative mt-auto">
-      <div className="relative bg-gradient-to-b from-[#07162d]/95 to-[#061226]/95">
+      <div className="relative bg-panel">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 pt-8 pb-4">
-        <div className="flex flex-col md:flex-row items-center gap-3 pb-3 border-b border-cyan-300/10">
+        <div className="flex flex-col md:flex-row items-center gap-3 pb-3 border-b border-line-soft">
           <Link to="/" className="flex items-center gap-3 select-none">
             <img
               src="/favicon-96x96.png"
@@ -31,34 +31,34 @@ export default function Footer() {
           </Link>
 
           <div className="w-full md:w-auto md:ml-auto flex flex-col md:flex-row items-center md:items-center gap-4">
-            <nav className="flex flex-wrap items-center justify-center md:justify-end gap-x-7 gap-y-2 text-xs font-semibold tracking-wide uppercase text-white/70">
+            <nav className="flex flex-wrap items-center justify-center md:justify-end gap-x-7 gap-y-2 text-xs font-semibold tracking-wide uppercase text-ink-secondary">
               <Link
                 to="/privacy"
-                className="hover:text-cyan-400 transition-colors"
+                className="hover:text-[color:var(--color-link-hover)] transition-colors"
               >
                 Privacy Policy
               </Link>
               <Link
                 to="/terms"
-                className="hover:text-cyan-400 transition-colors"
+                className="hover:text-[color:var(--color-link-hover)] transition-colors"
               >
                 Terms of Service
               </Link>
               <Link
                 to="/tools"
-                className="hover:text-cyan-400 transition-colors"
+                className="hover:text-[color:var(--color-link-hover)] transition-colors"
               >
                 Tools
               </Link>
               <Link
                 to="/referrals/register"
-                className="hover:text-cyan-400 transition-colors"
+                className="hover:text-[color:var(--color-link-hover)] transition-colors"
               >
                 Referrals
               </Link>
               <Link
                 to="/meet-the-team"
-                className="hover:text-cyan-400 transition-colors"
+                className="hover:text-[color:var(--color-link-hover)] transition-colors"
               >
                 Meet the team
               </Link>
@@ -66,7 +66,7 @@ export default function Footer() {
                 href="https://www.trustpilot.com/review/rooindustries.com"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 text-xs font-semibold tracking-wide uppercase text-white/70 hover:text-cyan-400 transition-colors"
+                className="inline-flex items-center gap-2 text-xs font-semibold tracking-wide uppercase text-ink-secondary hover:text-[color:var(--color-link-hover)] transition-colors"
               >
                 <img
                   src="/trustpilot-star.png"
@@ -85,7 +85,7 @@ export default function Footer() {
               href="https://discord.com/invite/qs5HKNyazD"
               target="_blank"
               rel="noopener noreferrer"
-              className="h-12 w-12 rounded-full border border-cyan-300/25 bg-cyan-400/10 flex items-center justify-center text-white/90 hover:text-cyan-200 hover:border-cyan-300/55 hover:bg-cyan-400/20 transition-all shadow-[0_0_18px_rgba(34,211,238,0.12)]"
+              className="h-12 w-12 rounded-full border border-line-accent bg-info-soft flex items-center justify-center text-ink-secondary hover:text-[color:var(--color-link-hover)] hover:border-line-accent hover:bg-surface-hover-accent transition-all shadow-info-soft"
               aria-label="Discord"
             >
               <FaDiscord className="text-[28px]" />
@@ -94,8 +94,8 @@ export default function Footer() {
         </div>
 
         <div className="py-2 flex justify-center md:justify-end">
-          <div className="inline-flex items-center gap-3 px-4 py-2 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md">
-            <span className="grid place-items-center h-10 w-14 rounded-xl border border-white/10 bg-[#0b1830]/60">
+          <div className="inline-flex items-center gap-3 px-4 py-2 rounded-2xl border border-line-soft bg-surface-veil backdrop-blur-md">
+            <span className="grid place-items-center h-10 w-14 rounded-xl border border-line-soft bg-surface-input">
               <img
                 src="/newVisa.png"
                 alt="Visa"
@@ -106,7 +106,7 @@ export default function Footer() {
                 height={152}
               />
             </span>
-            <span className="grid place-items-center h-10 w-14 rounded-xl border border-white/10 bg-[#0b1830]/60">
+            <span className="grid place-items-center h-10 w-14 rounded-xl border border-line-soft bg-surface-input">
               <img
                 src="/mastercard.jpg"
                 alt="Mastercard"
@@ -117,7 +117,7 @@ export default function Footer() {
                 height={128}
               />
             </span>
-            <span className="grid place-items-center h-10 w-14 rounded-xl border border-white/10 bg-[#0b1830]/60">
+            <span className="grid place-items-center h-10 w-14 rounded-xl border border-line-soft bg-surface-input">
               <img
                 src="/newAmex.png"
                 alt="American Express"
@@ -128,7 +128,7 @@ export default function Footer() {
                 height={30}
               />
             </span>
-            <span className="grid place-items-center h-10 w-14 rounded-xl border border-white/10 bg-[#0b1830]/60">
+            <span className="grid place-items-center h-10 w-14 rounded-xl border border-line-soft bg-surface-input">
               <img
                 src="/newPaypal.png"
                 alt="PayPal"
@@ -144,17 +144,17 @@ export default function Footer() {
 
         <div className="flex flex-col md:flex-row items-center justify-between gap-3 pt-1">
           <div className="flex flex-col items-center md:items-start gap-1">
-            <p className="text-[11px] text-white/45">
+            <p className="text-[11px] text-ink-muted">
               © {new Date().getFullYear()} Roo Industries. All rights reserved.
             </p>
 
-            <p className="text-[11px] text-white/35">
+            <p className="text-[11px] text-ink-muted">
               Designed by{" "}
               <a
                 href="https://discord.com/users/286457824081346570"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-cyan-400/70 hover:text-cyan-400 transition-colors"
+                className="text-accent hover:text-[color:var(--color-link-hover)] transition-colors"
               >
                 Nerky
               </a>{" "}
@@ -163,7 +163,7 @@ export default function Footer() {
                 href="https://discord.com/users/1074948989083979837"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-cyan-400/70 hover:text-cyan-400 transition-colors"
+                className="text-accent hover:text-[color:var(--color-link-hover)] transition-colors"
               >
                 Exyy
               </a>
@@ -172,17 +172,17 @@ export default function Footer() {
 
           <button
             onClick={scrollToTop}
-            className="flex items-center gap-2 text-[11px] font-medium tracking-wider uppercase text-white/45 hover:text-cyan-400 transition-colors group"
+            className="flex items-center gap-2 text-[11px] font-medium tracking-wider uppercase text-ink-muted hover:text-[color:var(--color-link-hover)] transition-colors group"
           >
             To the top
-            <span className="text-cyan-400 group-hover:translate-y-[-2px] transition-transform">
+            <span className="text-accent group-hover:translate-y-[-2px] transition-transform">
               ▲
             </span>
           </button>
         </div>
 
         {isXocBookingForm && (
-          <p className="mt-2 text-center text-[11px] text-cyan-400/50">
+          <p className="mt-2 text-center text-[11px] text-ink-muted">
             Refunds will not be issued in case you proceed with
             unsupported/custom parts. Please join the Discord and open a ticket
             or DM <span className="font-semibold">serviroo</span> to check for

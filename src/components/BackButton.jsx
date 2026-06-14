@@ -14,10 +14,10 @@ export default function BackButton({ hidden, inline = false }) {
     <button
       onClick={() => navigate(-1)}
       aria-label="Go Back"
-      className={`${inline ? "" : "fixed top-[80px] left-20"} 
-        bg-cyan-500 hover:bg-cyan-400 text-black p-2 sm:p-3 rounded-full border border-cyan-400 
-        transition-all duration-500 ease-in-out shadow-[0_0_15px_rgba(0,255,255,0.3)] 
-        hover:shadow-[0_0_20px_rgba(0,255,255,0.5)] 
+      className={`${inline ? "" : "fixed top-[80px] left-20"}
+        bg-accent hover:bg-accent-strong text-accent-contrast p-2 sm:p-3 rounded-full border border-line-accent
+        transition-all duration-500 ease-in-out shadow-[var(--shadow-back-button)]
+        hover:shadow-[var(--shadow-back-button-hover)]
         z-40 flex items-center justify-center
         ${isVisible ? "translate-y-0 opacity-100" : "-translate-y-10 opacity-0"}
         scale-90 active:scale-95

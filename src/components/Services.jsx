@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { client } from "../sanityClient";
-import { createImageUrlBuilder } from "@sanity/image-url";
+import { urlFor } from "../sanityClient";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS, readHomeSectionData } from "../lib/homeSectionData";
 import {
   Clock,
@@ -19,11 +18,6 @@ import {
   animate,
   useMotionValue,
 } from "framer-motion";
-
-const builder = createImageUrlBuilder(client);
-function urlFor(source) {
-  return builder.image(source);
-}
 
 const CANONICAL_SERVICE_CARDS = [
   { iconType: "clock",  title: "Zero Lag",         description: "Click. It happens. No delay in between." },
@@ -156,7 +150,7 @@ export default function Services({ initialData = null }) {
   if (!data) {
     return (
       <section className="mx-auto max-w-[92rem] py-16 px-4 sm:px-6" aria-hidden="true">
-        <div className="min-h-[980px] rounded-3xl border border-sky-700/20 bg-gradient-to-b from-[#0d1526]/70 to-[#08101d]/80" />
+        <div className="ri-services-skeleton min-h-[980px] rounded-3xl border border-line-input bg-skeleton" />
       </section>
     );
   }
@@ -172,12 +166,12 @@ export default function Services({ initialData = null }) {
     <section className="mx-auto max-w-[92rem] pt-8 pb-16 px-4 sm:px-6">
       <div className="text-center">
         {data.heading && (
-          <h3 className="text-4xl sm:text-5xl font-bold tracking-tight text-sky-200">
+          <h3 className="ri-services-heading text-4xl sm:text-5xl font-bold tracking-tight text-info-text">
             {data.heading}
           </h3>
         )}
         {data.subheading && (
-          <p className="mt-2 text-slate-300/90 text-sm sm:text-[15px]">
+          <p className="ri-services-subheading mt-2 text-ink-secondary text-sm sm:text-[15px]">
             {data.subheading}
           </p>
         )}
@@ -195,13 +189,13 @@ export default function Services({ initialData = null }) {
           return (
             <motion.div
               key={card._key || `svc-${i}`}
-              className="rounded-2xl border border-sky-700/35 bg-gradient-to-b from-[#0a1830] to-[#091427] p-6 min-h-[220px]"
+              className="ri-service-card rounded-2xl border border-line-input bg-panel p-6 min-h-[220px]"
               initial={{ opacity: 0, y: 14 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ duration: 0.35, delay: i * 0.04, ease: "easeOut" }}
             >
-              <div className="w-12 h-12 rounded-xl grid place-items-center bg-[#0b2642] border border-sky-600/35">
+              <div className="ri-service-icon-shell w-12 h-12 rounded-xl grid place-items-center bg-surface-input border border-line-input">
                 {card.customIcon ? (
                   <img
                     src={urlFor(card.customIcon).width(64).url()}
@@ -213,13 +207,13 @@ export default function Services({ initialData = null }) {
                     className="w-[22px] h-[22px] object-contain"
                   />
                 ) : (
-                  <Icon className="w-[22px] h-[22px] text-sky-300" />
+                  <Icon className="ri-service-icon w-[22px] h-[22px] text-accent" />
                 )}
               </div>
-              <h4 className="text-[21px] font-semibold tracking-[-0.01em] text-slate-100 mt-5">
+              <h4 className="ri-service-title text-[21px] font-semibold tracking-[-0.01em] text-ink mt-5">
                 {title}
               </h4>
-              <p className="mt-3 text-[16px] leading-relaxed text-slate-300">
+              <p className="ri-service-copy mt-3 text-[16px] leading-relaxed text-ink-secondary">
                 {desc}
               </p>
             </motion.div>
@@ -234,14 +228,14 @@ export default function Services({ initialData = null }) {
           {/* CONTAINER BOX */}
           <motion.div
             layout
-            className={`relative rounded-[28px] ring-1 ring-white/10 bg-gradient-to-b from-[#0d1526]/70 to-[#070c15]/85 shadow-[0_32px_110px_rgba(0,0,0,.7)] overflow-hidden mx-auto ${containerClass}`}
+            className={`ri-bench-shell relative rounded-[28px] ring-1 ring-line-soft bg-panel shadow-surface-deep overflow-hidden mx-auto ${containerClass}`}
           >
             <div className="pointer-events-none absolute inset-0">
-              <div className="absolute inset-0 opacity-[0.35] bg-[radial-gradient(80%_60%_at_50%_0%,rgba(56,189,248,.18),transparent_65%)]" />
+              <div className="ri-bench-radial absolute inset-0 opacity-[0.35] bg-[radial-gradient(80%_60%_at_50%_0%,var(--color-surface-hover-accent),transparent_65%)]" />
               <div className="absolute inset-0 opacity-[0.28] bg-[linear-gradient(to_bottom,transparent,rgba(0,0,0,.22))]" />
-              <div className="absolute -top-56 left-1/2 -translate-x-1/2 h-[32rem] w-[52rem] rounded-full bg-white/5 blur-3xl hidden sm:block" />
-              <div className="absolute -bottom-48 left-0 h-[30rem] w-[30rem] rounded-full bg-cyan-400/10 blur-3xl hidden sm:block" />
-              <div className="absolute -bottom-48 right-0 h-[30rem] w-[30rem] rounded-full bg-sky-400/10 blur-3xl hidden sm:block" />
+              <div className="ri-bench-top-glow absolute -top-56 left-1/2 -translate-x-1/2 h-[32rem] w-[52rem] rounded-full bg-surface-hover blur-3xl hidden sm:block" />
+              <div className="ri-bench-left-glow absolute -bottom-48 left-0 h-[30rem] w-[30rem] rounded-full bg-surface-hover-accent blur-3xl hidden sm:block" />
+              <div className="ri-bench-right-glow absolute -bottom-48 right-0 h-[30rem] w-[30rem] rounded-full bg-surface-hover-accent blur-3xl hidden sm:block" />
             </div>
 
             <div className="relative p-5 sm:p-6">
@@ -270,15 +264,14 @@ export default function Services({ initialData = null }) {
                       layout
                       key={idx}
                       className={
-                        "relative overflow-hidden rounded-2xl " +
-                        "bg-gradient-to-b from-white/6 to-white/[0.015] " +
-                        "ring-1 ring-white/10 shadow-[0_18px_60px_rgba(0,0,0,.55)]"
+                        "ri-bench-card relative overflow-hidden rounded-2xl " +
+                        "bg-surface-card ring-1 ring-line-soft shadow-surface-deep"
                       }
                     >
                       <div className="pointer-events-none absolute inset-0">
-                        <div className="absolute -top-16 -right-16 h-44 w-44 rounded-full bg-cyan-400/10 blur-2xl hidden sm:block" />
-                        <div className="absolute -bottom-16 -left-16 h-44 w-44 rounded-full bg-sky-400/8 blur-2xl hidden sm:block" />
-                        <div className="absolute left-0 top-0 h-full w-[3px] bg-gradient-to-b from-cyan-300/70 via-sky-300/30 to-transparent opacity-60" />
+                        <div className="ri-bench-card-top-glow absolute -top-16 -right-16 h-44 w-44 rounded-full bg-surface-hover-accent blur-2xl hidden sm:block" />
+                        <div className="ri-bench-card-bottom-glow absolute -bottom-16 -left-16 h-44 w-44 rounded-full bg-surface-hover-accent blur-2xl hidden sm:block" />
+                        <div className="ri-bench-card-rail absolute left-0 top-0 h-full w-[3px] bg-gradient-to-b from-accent via-accent-soft to-transparent opacity-60" />
                       </div>
 
                       <div className="relative p-5">
@@ -312,17 +305,17 @@ export default function Services({ initialData = null }) {
                                       className="h-5 w-5 sm:h-6 sm:w-6 shrink-0 rounded-sm object-contain"
                                     />
                                   ) : null}
-                                  <div className="truncate text-[16px] sm:text-[17px] font-extrabold tracking-tight text-white">
+                                  <div className="ri-bench-game-title truncate text-[16px] sm:text-[17px] font-extrabold tracking-tight text-ink">
                                     {g?.gameTitle || "-"}
                                   </div>
                                 </div>
-                                <div className="mt-1 h-[2px] w-14 rounded-full bg-gradient-to-r from-cyan-300/70 to-transparent opacity-70" />
+                                <div className="ri-bench-game-rule mt-1 h-[2px] w-14 rounded-full bg-gradient-to-r from-accent to-transparent opacity-70" />
                                 {metricText ? (
                                   <div className="mt-3">
                                     <span
                                       className={
-                                        "inline-flex items-center rounded-full px-2.5 py-1 text-[13px] font-semibold " +
-                                        "bg-white/5 text-slate-100/90 ring-1 ring-white/10 " +
+                                        "ri-bench-metric-pill inline-flex items-center rounded-full px-2.5 py-1 text-[13px] font-semibold " +
+                                        "bg-surface-hover text-ink-secondary ring-1 ring-line-soft " +
                                         "shadow-[0_8px_22px_rgba(0,0,0,.3)]"
                                       }
                                     >
@@ -334,23 +327,22 @@ export default function Services({ initialData = null }) {
 
                               <span
                                 className={
-                                  "inline-flex items-center rounded-full px-3 py-1 text-[12px] font-extrabold " +
-                                  "bg-white/5 text-cyan-100 ring-1 ring-cyan-300/25 " +
-                                  "shadow-[0_10px_30px_rgba(0,0,0,.35)]"
+                                  "ri-bench-boost-pill inline-flex items-center rounded-full px-3 py-1 text-[12px] font-extrabold " +
+                                  "bg-surface-hover-accent text-accent ring-1 ring-line-accent shadow-glow-soft"
                                 }
                               >
                                 {pct === null ? "—" : `+${pct}% ${badgeSuffix}`}
                               </span>
                             </div>
 
-                            <div className="mt-4 rounded-2xl bg-black/25 ring-1 ring-white/10 p-3">
+                            <div className="ri-bench-bars mt-4 rounded-2xl bg-surface-input ring-1 ring-line-input p-3">
                               <div className="space-y-3">
                                 <div>
                                   <div className="flex items-center justify-between text-[12px]">
-                                    <span className="text-slate-300/80">
+                                    <span className="ri-bench-before-label text-ink-secondary">
                                       {beforeLabel}
                                     </span>
-                                    <span className="font-extrabold text-white">
+                                    <span className="ri-bench-number font-extrabold text-ink">
                                       {beforeNum === null ? (
                                         "—"
                                       ) : (
@@ -359,9 +351,9 @@ export default function Services({ initialData = null }) {
                                     </span>
                                   </div>
 
-                                  <div className="mt-2 h-[10px] rounded-full bg-white/10 ring-1 ring-white/10 overflow-hidden">
+                                  <div className="ri-bench-before-track mt-2 h-[10px] rounded-full bg-surface-hover ring-1 ring-line-soft overflow-hidden">
                                     <motion.div
-                                      className="h-full rounded-full bg-gradient-to-r from-white/30 via-white/15 to-transparent"
+                                      className="ri-bench-before-fill h-full rounded-full bg-gradient-to-r from-ink-muted via-line-soft to-transparent"
                                       initial={{ width: 0 }}
                                       animate={{
                                         width: `${beforeNum ? bf : 0}%`,
@@ -376,10 +368,10 @@ export default function Services({ initialData = null }) {
 
                                 <div>
                                   <div className="flex items-center justify-between text-[12px]">
-                                    <span className="text-cyan-100/80">
+                                    <span className="ri-bench-after-label text-accent">
                                       {afterLabel}
                                     </span>
-                                    <span className="font-extrabold text-white">
+                                    <span className="ri-bench-number font-extrabold text-ink">
                                       {afterNum === null ? (
                                         "—"
                                       ) : (
@@ -388,9 +380,9 @@ export default function Services({ initialData = null }) {
                                     </span>
                                   </div>
 
-                                  <div className="mt-2 h-[10px] rounded-full bg-cyan-400/10 ring-1 ring-cyan-300/20 overflow-hidden">
+                                  <div className="ri-bench-after-track mt-2 h-[10px] rounded-full bg-surface-hover-accent ring-1 ring-line-accent overflow-hidden">
                                     <motion.div
-                                      className="h-full rounded-full bg-[linear-gradient(90deg,rgba(56,189,248,.55),rgba(125,211,252,.22),transparent)]"
+                                      className="ri-bench-after-fill h-full rounded-full bg-gradient-to-r from-accent via-accent-soft to-transparent"
                                       initial={{ width: 0 }}
                                       animate={{
                                         width: `${afterNum ? af : 0}%`,
@@ -404,41 +396,41 @@ export default function Services({ initialData = null }) {
                                 </div>
                               </div>
 
-                              <div className="mt-3 flex items-center gap-5 text-[12px] text-slate-300/80">
+                              <div className="ri-bench-legend mt-3 flex items-center gap-5 text-[12px] text-ink-secondary">
                                 <div className="flex items-center gap-2">
-                                  <span className="h-2 w-2 rounded-full bg-white/60" />
+                                  <span className="ri-bench-before-dot h-2 w-2 rounded-full bg-ink-muted" />
                                   <span>{beforeLabel}</span>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  <span className="h-2 w-2 rounded-full bg-cyan-300/80 shadow-[0_0_14px_rgba(56,189,248,.28)]" />
+                                  <span className="ri-bench-after-dot h-2 w-2 rounded-full bg-accent shadow-glow-soft" />
                                   <span>{afterLabel}</span>
                                 </div>
                               </div>
                             </div>
 
-                            <div className="mt-4 rounded-xl bg-black/40 ring-1 ring-white/5 p-3">
-                              <div className="grid grid-cols-3 gap-2 divide-x divide-white/10 text-center">
+                            <div className="ri-bench-hardware mt-4 rounded-xl bg-surface-veil ring-1 ring-line-soft p-3">
+                              <div className="ri-bench-hardware-grid grid grid-cols-3 gap-2 divide-x divide-line-soft text-center">
                                 <div className="flex flex-col px-1">
-                                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                                  <span className="ri-bench-hardware-label text-[10px] font-bold uppercase tracking-wider text-ink-muted mb-1">
                                     GPU
                                   </span>
-                                  <span className="text-[11px] font-medium text-slate-300 leading-tight break-words">
+                                  <span className="ri-bench-hardware-value text-[11px] font-medium text-ink-secondary leading-tight break-words">
                                     {g?.gpu || "—"}
                                   </span>
                                 </div>
                                 <div className="flex flex-col px-1">
-                                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                                  <span className="ri-bench-hardware-label text-[10px] font-bold uppercase tracking-wider text-ink-muted mb-1">
                                     CPU
                                   </span>
-                                  <span className="text-[11px] font-medium text-slate-300 leading-tight break-words">
+                                  <span className="ri-bench-hardware-value text-[11px] font-medium text-ink-secondary leading-tight break-words">
                                     {g?.cpu || "—"}
                                   </span>
                                 </div>
                                 <div className="flex flex-col px-1">
-                                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                                  <span className="ri-bench-hardware-label text-[10px] font-bold uppercase tracking-wider text-ink-muted mb-1">
                                     RAM
                                   </span>
-                                  <span className="text-[11px] font-medium text-slate-300 leading-tight break-words">
+                                  <span className="ri-bench-hardware-value text-[11px] font-medium text-ink-secondary leading-tight break-words">
                                     {g?.ram || "—"}
                                   </span>
                                 </div>
@@ -455,23 +447,23 @@ export default function Services({ initialData = null }) {
           </motion.div>
 
           <div className="mt-4 flex items-center justify-center">
-            <div className="inline-flex items-center gap-3 rounded-full bg-white/5 ring-1 ring-white/10 px-3 py-2 shadow-[0_14px_45px_rgba(0,0,0,.55)]">
+            <div className="ri-bench-pager inline-flex items-center gap-3 rounded-full bg-surface-card ring-1 ring-line-soft px-3 py-2 shadow-surface">
               <button
                 type="button"
                 onClick={() => canPrev && setPage((p) => Math.max(0, p - 1))}
                 disabled={!canPrev}
                 className={
                   "h-9 w-9 rounded-full grid place-items-center " +
-                  "bg-black/20 ring-1 ring-white/10 " +
-                  "transition hover:bg-white/10 active:scale-95 " +
+                  "ri-bench-page-button bg-surface-hover ring-1 ring-line-soft " +
+                  "transition hover:bg-surface-hover-accent active:scale-95 " +
                   (canPrev ? "" : "opacity-40 cursor-not-allowed")
                 }
                 aria-label="Previous page"
               >
-                <ChevronLeft className="h-5 w-5 text-slate-200" />
+                <ChevronLeft className="ri-bench-page-icon h-5 w-5 text-ink-secondary" />
               </button>
 
-              <div className="min-w-[92px] text-center text-[13px] font-extrabold text-slate-200/90">
+              <div className="ri-bench-page-label min-w-[92px] text-center text-[13px] font-extrabold text-ink-secondary">
                 {pagePrefix} {safePage + 1}
               </div>
 
@@ -483,13 +475,13 @@ export default function Services({ initialData = null }) {
                 disabled={!canNext}
                 className={
                   "h-9 w-9 rounded-full grid place-items-center " +
-                  "bg-black/20 ring-1 ring-white/10 " +
-                  "transition hover:bg-white/10 active:scale-95 " +
+                  "ri-bench-page-button bg-surface-hover ring-1 ring-line-soft " +
+                  "transition hover:bg-surface-hover-accent active:scale-95 " +
                   (canNext ? "" : "opacity-40 cursor-not-allowed")
                 }
                 aria-label="Next page"
               >
-                <ChevronRight className="h-5 w-5 text-slate-200" />
+                <ChevronRight className="ri-bench-page-icon h-5 w-5 text-ink-secondary" />
               </button>
             </div>
           </div>

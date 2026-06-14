@@ -128,7 +128,7 @@ export default function TourneyRosterList({ players = [] }) {
             </span>
             <span className="tourney-roster-detail">
               <strong>{player.rolePlay}</strong>
-              <span className="tourney-roster-label">Primary role</span>
+              <span className="tourney-roster-label">Role</span>
             </span>
             <span className="tourney-roster-detail">
               <strong>{teamLabel}</strong>

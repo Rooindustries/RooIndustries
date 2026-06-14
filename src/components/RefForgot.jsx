@@ -42,32 +42,32 @@ export default function RefForgot() {
   }
 
   return (
-    <section className="pt-32 px-6 min-h-screen text-white flex flex-col items-center">
-      <h1 className="text-4xl font-extrabold text-center text-sky-300 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+    <section className="pt-32 px-6 min-h-screen text-ink flex flex-col items-center">
+      <h1 className="text-4xl font-extrabold text-center text-accent drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
         Forgot Password
       </h1>
 
-      <p className="text-slate-400 mt-3 text-center max-w-md text-base">
+      <p className="text-ink-muted mt-3 text-center max-w-md text-base">
         Enter the email attached to your referral account and we&apos;ll send
         you a reset link.
       </p>
 
       <form
         onSubmit={handleSubmit}
-        className="mt-10 w-full max-w-md 
-                  bg-[#0a1324]/70 backdrop-blur-xl 
-                  border border-sky-700/40 
-                  shadow-[0_0_35px_rgba(56,189,248,0.35)]
+        className="mt-10 w-full max-w-md
+                  bg-surface-card backdrop-blur-xl
+                  border border-line-input
+                  shadow-[var(--shadow-card-glow)]
                   rounded-2xl p-8 space-y-6"
       >
         <div>
-          <label className="text-sky-300 text-sm font-semibold">
+          <label className="text-accent text-sm font-semibold">
             Creator Email
           </label>
           <input
             type="email"
-            className="w-full p-4 mt-1 bg-[#0c162a] border border-sky-800/40 rounded-xl
-                       outline-none focus:border-sky-500 transition text-base text-white"
+            className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl
+                       outline-none focus:border-info-border transition text-base text-ink"
             placeholder="you@example.com"
             value={email}
             onChange={(e) => setEmail(e.target.value.trim())}
@@ -79,8 +79,8 @@ export default function RefForgot() {
           disabled={loading}
           className={`w-full py-4 rounded-xl font-bold text-lg transition-all ${
             loading
-              ? "bg-gray-700 opacity-40 cursor-not-allowed"
-              : "bg-sky-600 hover:bg-sky-500 shadow-[0_0_25px_rgba(56,189,248,0.5)]"
+              ? "bg-surface-input opacity-40 cursor-not-allowed"
+              : "bg-accent-strong hover:bg-accent text-accent-contrast shadow-glow-soft"
           }`}
         >
           {loading ? "Sending..." : "Send Reset Link"}
@@ -89,7 +89,7 @@ export default function RefForgot() {
         <button
           type="button"
           onClick={() => nav("/referrals/login")}
-          className="w-full text-sm text-sky-400 opacity-80 hover:opacity-100 mt-1"
+          className="w-full text-sm text-accent opacity-80 hover:opacity-100 mt-1"
         >
           Back to Login
         </button>
@@ -99,8 +99,8 @@ export default function RefForgot() {
         <div
           className={`fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-xl text-white text-sm font-semibold shadow-lg transition-all ${
             toast.type === "success"
-              ? "bg-green-600 shadow-[0_0_25px_rgba(34,197,94,0.5)]"
-              : "bg-red-600 shadow-[0_0_25px_rgba(239,68,68,0.5)]"
+              ? "bg-success shadow-success-soft"
+              : "bg-danger shadow-danger-soft"
           }`}
         >
           {toast.message}

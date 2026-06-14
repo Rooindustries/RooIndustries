@@ -83,6 +83,7 @@ export async function GET(request) {
   const url = new URL(request.url);
   const token = url.searchParams.get("token");
   const decision = String(url.searchParams.get("decision") || "").toLowerCase();
+  const approvedRolePlay = String(url.searchParams.get("role") || "").trim();
 
   if (!token || !["approve", "deny"].includes(decision)) {
     return renderDecisionPage({
@@ -142,6 +143,7 @@ export async function GET(request) {
       playerId: tokenRow.player_id,
       purpose: decision,
       actorUsername: approver.username,
+      approvedRolePlay,
     });
 
     let emailNotice = "";

@@ -82,21 +82,24 @@ test.describe("Route smoke", () => {
           page.getByRole("heading", { name: /6v6 Legacy Series/i })
         ).toBeVisible();
         await expect(page.getByText("Tournament access locked")).toHaveCount(0);
-        await expect(page.getByRole("heading", { name: "Schedule" })).toBeVisible();
+        await expect(
+          page.getByRole("heading", { name: "Important Dates" })
+        ).toBeVisible();
         await expect(page.getByText("Match windows")).toBeVisible();
         await expect(page.getByRole("heading", { name: "Bracket" })).toBeVisible();
         await expect(page.getByText("Bracket access", { exact: true })).toBeVisible();
         await expect(
           page.getByRole("link", { name: "Sign in", exact: true })
         ).toBeVisible();
+        await expect(page.getByRole("switch")).toBeVisible();
       }
 
       if (route === "/tourney/login") {
         await expect(page.getByRole("heading", { name: "Sign in." })).toBeVisible();
         await expect(
-          page.getByLabel("Tournament Discord username or email")
+          page.getByLabel("Discord username or email")
         ).toBeVisible();
-        await expect(page.getByLabel("Tournament password")).toBeVisible();
+        await expect(page.getByLabel("Password")).toBeVisible();
         await expect(page.getByLabel("Remember me")).toBeVisible();
         await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
       }
@@ -143,6 +146,7 @@ test.describe("Route smoke", () => {
     await expect(nav.locator(".tourney-brand-copy")).toBeHidden();
     await expect(nav.locator(".tourney-links")).toBeHidden();
     await expect(nav.locator(".tourney-mobile-menu")).toBeVisible();
+    await expect(nav.getByRole("switch")).toBeVisible();
     await expect(
       nav.getByRole("link", { name: "Sign in", exact: true })
     ).toBeVisible();
@@ -161,7 +165,7 @@ test.describe("Route smoke", () => {
     await expect(
       nav
         .locator(".tourney-mobile-panel")
-        .getByRole("link", { name: "Tourney Information" })
+        .getByRole("link", { name: "Event Information" })
     ).toBeVisible();
 
     const navBox = await nav.boundingBox();
@@ -180,5 +184,29 @@ test.describe("Route smoke", () => {
           getComputedStyle(element).webkitBackdropFilter
       );
     expect(backdropFilter).toContain("blur(34px)");
+  });
+
+  test("tourney theme switch toggles Blackout", async ({ page }) => {
+    const response = await page.goto("/tourney", {
+      waitUntil: "domcontentloaded",
+    });
+
+    expect(response?.status()).toBeLessThan(400);
+    await expect(page.locator(".tourney-page")).toBeVisible();
+
+    const themeSwitch = page.getByRole("switch");
+    await expect(themeSwitch).toBeVisible();
+    await expect(themeSwitch).toHaveAttribute("aria-checked", "false");
+
+    await themeSwitch.click();
+    await expect(themeSwitch).toHaveAttribute("aria-checked", "true");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+
+    const accent = await page
+      .locator(".tourney-page")
+      .evaluate((element) =>
+        getComputedStyle(element).getPropertyValue("--tourney-accent").trim()
+      );
+    expect(accent.toLowerCase()).toBe("#e8b94a");
   });
 });

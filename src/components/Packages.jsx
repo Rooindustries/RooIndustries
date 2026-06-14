@@ -91,7 +91,7 @@ export default function Packages({
                 handleHomeSectionLink(event, `#${UPGRADE_FAQ_HASH}`)
               }
               className="underline underline-offset-2 transition"
-              style={{ color: "#22D3EE" }}
+              style={{ color: "var(--color-accent)" }}
             >
               {subPart}
             </Link>
@@ -158,43 +158,43 @@ export default function Packages({
 
   if (isLoading) {
     return (
-      <section className="relative z-10 pt-16 pb-24 text-center text-white" aria-hidden="true">
+      <section className="ri-packages-section relative z-10 pt-16 pb-24 text-center text-ink" aria-hidden="true">
         <div className="mt-12 px-6">
-          <div className="mx-auto max-w-6xl min-h-[1320px] rounded-3xl border border-sky-700/20 bg-gradient-to-b from-[#0d1526]/70 to-[#08101d]/80" />
+          <div className="ri-packages-skeleton mx-auto max-w-6xl min-h-[1320px] rounded-3xl border border-line-input bg-skeleton" />
         </div>
       </section>
     );
   }
 
   return (
-    <section className="relative z-10 pt-8 pb-24 text-center text-white">
+    <section className="ri-packages-section relative z-10 pt-8 pb-24 text-center text-ink">
       {headingText && (
-        <h2 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+        <h2 className="ri-packages-heading text-4xl sm:text-5xl font-extrabold tracking-tight text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
           {headingText}
         </h2>
       )}
 
       {badgeText && (
         <div className="mt-4 flex justify-center">
-          <span className="inline-flex items-center gap-2.5 px-5 py-2 rounded-full text-sm sm:text-[0.95rem] font-semibold bg-slate-900 text-cyan-50 border border-cyan-400/40 shadow-[0_0_18px_rgba(56,189,248,0.7)]">
-            <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]" />
+          <span className="ri-packages-badge inline-flex items-center gap-2.5 px-5 py-2 rounded-full text-sm sm:text-[0.95rem] font-semibold bg-info-soft text-info-text border border-info-border shadow-info-soft">
+            <span className="ri-packages-badge-dot h-2.5 w-2.5 rounded-full bg-success shadow-success-soft" />
             {badgeText}
           </span>
         </div>
       )}
 
       {subheadingText && (
-        <p className="mt-3 text-slate-300/80 text-sm sm:text-base">
+        <p className="ri-packages-subheading mt-3 text-ink-secondary text-sm sm:text-base">
           {subheadingText}
         </p>
       )}
 
       <Link
         to="/reviews"
-        className="mt-3 inline-flex items-center justify-center gap-2 text-sm font-semibold text-slate-200 hover:text-white transition-colors"
+        className="ri-packages-review-link mt-3 inline-flex items-center justify-center gap-2 text-sm font-semibold text-ink-secondary hover:text-[color:var(--color-link-hover)] transition-colors"
       >
-        <span className="text-amber-400">{"★".repeat(5)}</span>
-        <span className="underline underline-offset-2 decoration-sky-400">5.0 avg from 89+ verified reviews</span>
+        <span className="ri-packages-review-stars text-warning-text">{"★".repeat(5)}</span>
+        <span className="ri-packages-review-text underline underline-offset-2 decoration-[color:var(--color-accent)]">5.0 avg from 89+ verified reviews</span>
       </Link>
 
       <div className="mt-12 px-4 sm:px-6">
@@ -214,10 +214,10 @@ export default function Packages({
               return (
                 <div
                   key={p._id || i}
-                  className={`relative w-full sm:w-[500px] border rounded-xl px-5 sm:px-7 py-6 sm:py-7 transition-all duration-500 flex flex-col bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 text-base sm:text-lg ${
+                  className={`ri-package-card relative w-full sm:w-[500px] border rounded-xl px-5 sm:px-7 py-6 sm:py-7 transition-all duration-500 flex flex-col bg-panel text-base sm:text-lg ${
                     p.isHighlighted
-                      ? "border-sky-400/60 shadow-[0_0_35px_rgba(56,189,248,0.4)] hover:shadow-[0_0_50px_rgba(56,189,248,0.6)]"
-                      : "border-sky-600/40 shadow-[0_0_25px_rgba(14,165,233,0.25)] hover:shadow-[0_0_35px_rgba(14,165,233,0.4)]"
+                      ? "ri-package-card-highlighted border-info-border shadow-glow-strong hover:shadow-glow-strong"
+                      : "ri-package-card-standard border-line-input shadow-glow-soft hover:shadow-glow-strong"
                   } sm:min-h-[620px]`}
                 >
                   {p.tag && (
@@ -225,8 +225,8 @@ export default function Packages({
                       <span
                         className={`inline-flex items-center whitespace-nowrap text-sm font-bold px-4 py-1 rounded-full ${
                           p.tagGoldGlow
-                            ? "border border-amber-300/70 gold-flair-pill"
-                            : "bg-sky-700 shadow-[0_0_15px_rgba(56,189,248,0.6)]"
+                            ? "ri-package-tag-gold border border-[color:var(--color-gold-border)] gold-flair-pill"
+                            : "ri-package-tag-blue bg-info text-accent-contrast shadow-info-soft"
                         }`}
                       >
                         {p.tagGoldGlow ? (
@@ -252,14 +252,14 @@ export default function Packages({
                       const bestFor = bestForMatch ? bestForMatch[1].trim().replace(/\.+$/, "") : null;
                       return (
                         <>
-                          <p className="mt-4 text-center text-base sm:text-lg leading-relaxed text-slate-300/85">
+                          <p className="ri-package-description mt-4 text-center text-base sm:text-lg leading-relaxed text-ink-secondary">
                             {mainDesc}
                           </p>
                           {bestFor && (
                             <div className="mt-3 flex flex-col items-center gap-1.5">
-                              <span className="text-xs font-bold text-white">Suitable for:</span>
-                              <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-600/40 bg-sky-900/30 px-3 py-1 text-xs font-semibold text-sky-200">
-                                <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+                              <span className="ri-package-suitable-label text-xs font-bold text-ink">Suitable for:</span>
+                              <span className="ri-package-suitable-pill inline-flex items-center gap-1.5 rounded-full border border-info-border bg-info-soft px-3 py-1 text-xs font-semibold text-info-text">
+                                <span className="ri-package-suitable-dot h-1.5 w-1.5 rounded-full bg-info" />
                                 {toTitleCase(bestFor)}
                               </span>
                             </div>
@@ -268,10 +268,10 @@ export default function Packages({
                       );
                     })()}
 
-                    <div className="mt-5 border-t border-white/10" />
+                    <div className="ri-package-divider mt-5 border-t border-line-soft" />
 
                     <div className="mt-5">
-                      <ul className="w-full space-y-2.5 text-left text-base sm:text-lg text-slate-300 leading-relaxed">
+                      <ul className="ri-package-bullets w-full space-y-2.5 text-left text-base sm:text-lg text-ink-secondary leading-relaxed">
                         {hasBullets ? (
                           orderedBullets.map((b, index) => {
                             const on = b.checked;
@@ -284,7 +284,7 @@ export default function Packages({
                               >
                                 <span
                                   className={`mt-0.5 inline-flex h-5 w-6 shrink-0 items-center justify-center ${
-                                    on ? "text-sky-400" : "text-slate-500"
+                                    on ? "ri-package-check text-accent" : "ri-package-empty text-ink-muted"
                                   }`}
                                 >
                                   {on ? "\u2713" : "\u25CB"}
@@ -294,7 +294,7 @@ export default function Packages({
                             );
                           })
                         ) : (
-                          <li className="text-sm text-slate-400/70">
+                          <li className="ri-package-empty-note text-sm text-ink-muted">
                             (No package bullets yet)
                           </li>
                         )}
@@ -307,7 +307,7 @@ export default function Packages({
                     <button
                       type="button"
                       onClick={() => openDetails(p)}
-                      className="w-full sm:w-1/2 rounded-md border border-sky-500/40 bg-slate-900/40 py-3 text-base font-semibold text-sky-100 shadow-[0_0_15px_rgba(56,189,248,0.2)] transition hover:bg-slate-900/70 hover:text-white"
+                      className="ri-package-details-button w-full sm:w-1/2 rounded-md border border-info-border bg-surface-input py-3 text-base font-semibold text-info-text shadow-info-soft transition hover:bg-surface-hover-accent hover:text-[color:var(--color-link-hover)]"
                     >
                       {p.detailsButtonText || "See What's Included"}
                     </button>
@@ -321,7 +321,7 @@ export default function Packages({
                         isXoc ? "1" : "0"
                       }`}
                       state={bookingState}
-                      className="glow-button w-full sm:w-1/2 text-white text-lg py-3 rounded-md font-semibold shadow-[0_0_20px_rgba(56,189,248,0.4)] transition-all duration-300 text-center inline-flex items-center justify-center gap-2"
+                      className="ri-package-book-button glow-button w-full sm:w-1/2 text-white text-lg py-3 rounded-md font-semibold shadow-[var(--shadow-button-accent)] transition-all duration-300 text-center inline-flex items-center justify-center gap-2"
                     >
                       {p.buttonText || "Book Now"}
                       <span className="glow-line glow-line-top" />
@@ -336,11 +336,11 @@ export default function Packages({
           </div>
 
           {dividerText && (
-            <div className="mt-8 flex w-full flex-col items-stretch text-center text-slate-300/85 gap-[0.5em]">
-              <p className="w-full text-[1.1875rem] sm:text-[1.1875rem] font-bold leading-relaxed whitespace-pre-line break-words text-slate-100">
+            <div className="ri-packages-divider-wrap mt-8 flex w-full flex-col items-stretch text-center text-ink-secondary gap-[0.5em]">
+              <p className="ri-packages-divider-text w-full text-[1.1875rem] sm:text-[1.1875rem] font-bold leading-relaxed whitespace-pre-line break-words text-ink">
                 {dividerText}
               </p>
-              <div className="glow-button packages-divider-line h-[6px] w-full rounded-full opacity-90 shadow-[0_0_30px_rgba(56,189,248,0.8)]" />
+              <div className="ri-packages-divider-line glow-button packages-divider-line h-[6px] w-full rounded-full opacity-90 shadow-[var(--shadow-divider-extra)]" />
             </div>
           )}
         </div>

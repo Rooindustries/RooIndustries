@@ -33,6 +33,9 @@ describe("tourney emails", () => {
           version: "2",
           email: "playerone@example.com",
           discord: "PlayerOne#1234",
+          displayName: "Player One",
+          approvedRolePlay: "Support",
+          registrationPool: "main",
         },
         baseUrl: "https://www.rooindustries.com",
         env: {
@@ -53,7 +56,64 @@ describe("tourney emails", () => {
         ),
       })
     );
-    expect(mockSendEmail.mock.calls[0][0].html).toContain("PlayerOne#1234");
+    expect(mockSendEmail.mock.calls[0][0].html).toContain("Player One");
+    expect(mockSendEmail.mock.calls[0][0].html).toContain("approved as");
+    expect(mockSendEmail.mock.calls[0][0].html).toContain("Support");
+    expect(mockSendEmail.mock.calls[0][0].text).toContain(
+      "Tournament pool: main pool."
+    );
+  });
+
+  test("sends host approval emails with one accept link per submitted role", async () => {
+    mockSendEmail.mockResolvedValue({
+      data: { id: "email_host_approval" },
+      error: null,
+    });
+    const email = loadEmail();
+
+    await expect(
+      email.sendTourneyRegistrationApprovalEmails({
+        player: {
+          displayName: "Player One",
+          discord: "PlayerOne#1234",
+          battlenet: "PlayerOne#9876",
+          rank: "Master",
+          rolePlay: "Support",
+          primaryRolePlay: "Support",
+          secondaryRolePlay: "Damage",
+          timezone: "Eastern Time (ET)",
+          twitchUsername: "playerone",
+          availableAug12: true,
+        },
+        tokens: [
+          {
+            token: "approve_token",
+            purpose: "approve",
+            recipient_email: "host@rooindustries.com",
+          },
+          {
+            token: "deny_token",
+            purpose: "deny",
+            recipient_email: "host@rooindustries.com",
+          },
+        ],
+        baseUrl: "https://www.rooindustries.com",
+        env: {
+          NODE_ENV: "test",
+          RESEND_API_KEY: "re_test",
+          FROM_EMAIL: "Tourney <tourney@rooindustries.com>",
+        },
+      })
+    ).resolves.toEqual([{ id: "email_host_approval" }]);
+
+    const html = mockSendEmail.mock.calls[0][0].html;
+    expect(html).toContain("Primary Role: Support");
+    expect(html).toContain("Secondary Role: Damage");
+    expect(html).toContain("Accept as Support");
+    expect(html).toContain("Accept as Damage");
+    expect(html).toContain("decision=approve&amp;role=Support");
+    expect(html).toContain("decision=approve&amp;role=Damage");
+    expect(html).toContain("Deny");
   });
 
   test("includes Discord invite links in approved player emails when configured", async () => {
@@ -69,6 +129,7 @@ describe("tourney emails", () => {
         version: "2",
         email: "playerone@example.com",
         discord: "PlayerOne#1234",
+        approvedRolePlay: "Support",
       },
       baseUrl: "https://www.rooindustries.com",
       env: {
@@ -100,6 +161,7 @@ describe("tourney emails", () => {
         version: "2",
         email: "playerone@example.com",
         discord: "PlayerOne#1234",
+        approvedRolePlay: "Support",
       },
       baseUrl: "https://www.rooindustries.com",
       env: {

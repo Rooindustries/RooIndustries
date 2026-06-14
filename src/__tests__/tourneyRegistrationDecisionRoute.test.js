@@ -40,8 +40,10 @@ const approver = {
   version: "1",
 };
 
-const makeRequest = ({ cookie = "" } = {}) => ({
-  url: "https://www.rooindustries.com/api/tourney/registration-decision?token=abc123&decision=approve",
+const makeRequest = ({ cookie = "", role = "" } = {}) => ({
+  url: `https://www.rooindustries.com/api/tourney/registration-decision?token=abc123&decision=approve${
+    role ? `&role=${encodeURIComponent(role)}` : ""
+  }`,
   cookies: {
     get: (name) =>
       name === "tourney_session" && cookie ? { value: cookie } : undefined,
@@ -109,6 +111,7 @@ describe("tourney registration decision route", () => {
       playerId: "player_1",
       purpose: "approve",
       actorUsername: "yukari",
+      approvedRolePlay: "",
     });
     expect(mockSendTourneyPlayerApprovedEmail).toHaveBeenCalledWith({
       player: approvedPlayer,
@@ -116,5 +119,37 @@ describe("tourney registration decision route", () => {
     });
     expect(html).toContain("Approved");
     expect(html).toContain("approval email was sent");
+  });
+
+  test("passes the selected approval role from role-specific accept links", async () => {
+    const approvedPlayer = {
+      id: "player_1",
+      email: "playerone@example.com",
+      discord: "PlayerOne#1234",
+      approvedRolePlay: "Damage",
+    };
+    mockReadTourneySessionFromStore.mockResolvedValue({
+      username: "yukari",
+      role: "caster",
+    });
+    mockApplyRegistrationDecision.mockResolvedValue(approvedPlayer);
+
+    const response = await GET(
+      makeRequest({ cookie: "caster-session", role: "Damage" })
+    );
+    const html = await response.text();
+
+    expect(mockApplyRegistrationDecision).toHaveBeenCalledWith({
+      tokenHash: "hashed:abc123",
+      playerId: "player_1",
+      purpose: "approve",
+      actorUsername: "yukari",
+      approvedRolePlay: "Damage",
+    });
+    expect(mockSendTourneyPlayerApprovedEmail).toHaveBeenCalledWith({
+      player: approvedPlayer,
+      baseUrl: "https://www.rooindustries.com",
+    });
+    expect(html).toContain("Approved");
   });
 });

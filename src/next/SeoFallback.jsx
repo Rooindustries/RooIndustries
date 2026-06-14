@@ -48,11 +48,11 @@ export default function SeoFallback({ pathname }) {
   return (
     <noscript>
       <section aria-label="No-JS SEO fallback">
-        <div className="mx-auto max-w-4xl px-6 pt-28 pb-8 text-white">
-          <h2 className="text-4xl font-extrabold tracking-tight text-sky-100">
+        <div className="mx-auto max-w-4xl px-6 pt-28 pb-8 text-ink">
+          <h2 className="text-4xl font-extrabold tracking-tight text-info-text">
             {copy.title}
           </h2>
-          <p className="mt-4 text-base text-slate-200/90 leading-relaxed">
+          <p className="mt-4 text-base text-ink-secondary leading-relaxed">
             {copy.body}
           </p>
         </div>

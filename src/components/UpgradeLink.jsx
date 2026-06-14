@@ -214,32 +214,32 @@ export default function UpgradeLink() {
       : null;
 
   return (
-    <section className="relative z-10 pt-32 pb-24 px-6 max-w-3xl mx-auto text-white">
-      <h2 className="text-4xl sm:text-5xl font-extrabold text-center text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+    <section className="relative z-10 pt-32 pb-24 px-6 max-w-3xl mx-auto text-ink">
+      <h2 className="text-4xl sm:text-5xl font-extrabold text-center text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
         {headingText}
       </h2>
-      <p className="mt-3 text-slate-300/80 text-center text-sm sm:text-base">
+      <p className="mt-3 text-ink-secondary text-center text-sm sm:text-base">
         {introText}
       </p>
 
       {linkLoading && (
-        <p className="mt-4 text-center text-sm text-slate-400">
+        <p className="mt-4 text-center text-sm text-ink-muted">
           Loading upgrade link...
         </p>
       )}
 
       {linkError && (
-        <div className="mt-6 rounded-xl border border-red-500/40 bg-red-500/10 text-red-200 text-sm px-4 py-3 text-center">
+        <div className="mt-6 rounded-xl border border-danger-border bg-danger-soft text-danger-text text-sm px-4 py-3 text-center">
           {linkError}
         </div>
       )}
 
       {!linkError && (
-        <div className="mt-8 rounded-2xl border border-sky-700/40 bg-[#0a1324]/90 shadow-[0_0_35px_rgba(14,165,233,0.15)] backdrop-blur-md p-6 sm:p-7">
+        <div className="mt-8 rounded-2xl border border-line-input bg-surface-card shadow-[var(--shadow-card-glow-info)] backdrop-blur-md p-6 sm:p-7">
           <label className="block text-sm font-semibold mb-2">
             Enter your Order ID
           </label>
-          <p className="text-xs text-slate-400 mb-3">
+          <p className="text-xs text-ink-muted mb-3">
             You can find this in your Roo Industries booking email (labelled
             "Order ID").
           </p>
@@ -251,7 +251,7 @@ export default function UpgradeLink() {
               value={orderEmail}
               onChange={(e) => setOrderEmail(e.target.value)}
               placeholder="Email used on the original booking"
-              className="w-full bg-[#0c162a] border border-sky-800/40 rounded-md px-3 py-2 outline-none text-sm"
+              className="w-full bg-surface-input border border-line-input rounded-md px-3 py-2 outline-none text-sm"
               type="email"
               autoComplete="email"
             />
@@ -261,7 +261,7 @@ export default function UpgradeLink() {
               value={orderId}
               onChange={(e) => setOrderId(e.target.value)}
               placeholder="e.g. 1a2b3c4d5e6f7g8h9i"
-              className="flex-1 bg-[#0c162a] border border-sky-800/40 rounded-md px-3 py-2 outline-none text-sm"
+              className="flex-1 bg-surface-input border border-line-input rounded-md px-3 py-2 outline-none text-sm"
             />
             <button
               onClick={handleCheckOrder}
@@ -277,7 +277,7 @@ export default function UpgradeLink() {
           </div>
 
           {error && (
-            <p className="mt-3 text-sm text-red-300 bg-red-500/10 border border-red-500/40 rounded-md px-3 py-2">
+            <p className="mt-3 text-sm text-danger-text bg-danger-soft border border-danger-border rounded-md px-3 py-2">
               {error}
             </p>
           )}
@@ -285,50 +285,50 @@ export default function UpgradeLink() {
       )}
 
       {upgradeInfo && (
-        <div className="mt-8 rounded-2xl border border-emerald-600/40 bg-[#04121a]/95 shadow-[0_0_45px_rgba(16,185,129,0.25)] backdrop-blur-lg p-6 sm:p-7">
-          <h3 className="text-[20px] font-bold text-white">
+        <div className="mt-8 rounded-2xl border border-success-border bg-success-soft shadow-success-soft backdrop-blur-lg p-6 sm:p-7">
+          <h3 className="text-[20px] font-bold text-ink">
             Upgrade Summary
           </h3>
-          <p className="text-slate-400 text-sm mt-1">
+          <p className="text-ink-muted text-sm mt-1">
             Here is how your upgrade price is calculated.
           </p>
 
           <div className="mt-5 space-y-2 text-sm">
             <div className="flex justify-between gap-4">
-              <span className="text-slate-300">Original package</span>
-              <span className="font-semibold text-sky-300 text-right">
+              <span className="text-ink-secondary">Original package</span>
+              <span className="font-semibold text-accent text-right">
                 {upgradeInfo.booking.packageTitle || "--"}
               </span>
             </div>
             <div className="flex justify-between gap-4">
-              <span className="text-slate-300">You already paid</span>
-              <span className="font-semibold text-emerald-300 text-right">
+              <span className="text-ink-secondary">You already paid</span>
+              <span className="font-semibold text-success-text text-right">
                 ${upgradeInfo.originalPaid.toFixed(2)}
               </span>
             </div>
             <div className="flex justify-between gap-4">
-              <span className="text-slate-300">
+              <span className="text-ink-secondary">
                 Full {targetPackage?.title || "package"} price
               </span>
-              <span className="font-semibold text-sky-400 text-right">
+              <span className="font-semibold text-accent text-right">
                 {targetPackage?.priceString ||
                   `$${targetPackage?.price?.toFixed(2) || "0.00"}`}
               </span>
             </div>
-            <div className="h-px w-full bg-sky-900/60 my-3" />
+            <div className="h-px w-full bg-line-soft my-3" />
             <div className="flex justify-between gap-4 items-center">
-              <span className="text-slate-100 font-semibold">
+              <span className="text-ink font-semibold">
                 Upgrade price
               </span>
-              <span className="text-2xl font-extrabold text-emerald-400">
+              <span className="text-2xl font-extrabold text-success-text">
                 ${upgradePrice?.toFixed(2)}
               </span>
             </div>
           </div>
 
-          <p className="mt-3 text-xs text-slate-400">
+          <p className="mt-3 text-xs text-ink-muted">
             This is the amount you pay now to upgrade your existing booking to{" "}
-            <span className="text-sky-300">
+            <span className="text-accent">
               {targetPackage?.title || "the new package"}
             </span>
             .
@@ -337,7 +337,7 @@ export default function UpgradeLink() {
           <button
             onClick={handleProceedToPayment}
             disabled={!upgradePrice || upgradePrice <= 0}
-            className="glow-button mt-6 w-full text-white py-3 rounded-md font-semibold shadow-[0_0_20px_rgba(16,185,129,0.4)] transition-all duration-300 inline-flex items-center justify-center gap-2 disabled:opacity-60"
+            className="glow-button mt-6 w-full text-white py-3 rounded-md font-semibold shadow-[var(--shadow-cta-success)] transition-all duration-300 inline-flex items-center justify-center gap-2 disabled:opacity-60"
           >
             Proceed to Payment
             <span className="glow-line glow-line-top" />

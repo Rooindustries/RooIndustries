@@ -125,10 +125,10 @@ export default function ImageZoomModal({
     >
       <button
         onClick={handleClose}
-        className="fixed top-6 right-6 p-2 bg-slate-900/70 border border-sky-700/30 rounded-lg hover:bg-slate-800 transition z-[10001] flex items-center justify-center"
+        className="fixed top-6 right-6 p-2 bg-surface-solid border border-line-input rounded-lg hover:bg-surface-hover transition z-[10001] flex items-center justify-center"
         title="Close"
       >
-        <X className="w-4 h-4 text-cyan-300" />
+        <X className="w-4 h-4 text-info-text" />
       </button>
 
       <div
@@ -163,15 +163,15 @@ export default function ImageZoomModal({
       >
         <button
           onClick={handleZoomOut}
-          className="p-3 rounded-full bg-slate-900/90 border border-sky-600/40 hover:bg-slate-800 transition shadow-[0_0_10px_rgba(14,165,233,0.4)] flex items-center justify-center"
+          className="p-3 rounded-full bg-surface-solid border border-info-border hover:bg-surface-hover transition shadow-info-soft flex items-center justify-center"
         >
-          <Minus className="w-5 h-5 text-cyan-300" />
+          <Minus className="w-5 h-5 text-info-text" />
         </button>
         <button
           onClick={handleZoomIn}
-          className="p-3 rounded-full bg-slate-900/90 border border-sky-600/40 hover:bg-slate-800 transition shadow-[0_0_10px_rgba(14,165,233,0.4)] flex items-center justify-center"
+          className="p-3 rounded-full bg-surface-solid border border-info-border hover:bg-surface-hover transition shadow-info-soft flex items-center justify-center"
         >
-          <Plus className="w-5 h-5 text-cyan-300" />
+          <Plus className="w-5 h-5 text-info-text" />
         </button>
       </div>
     </div>,

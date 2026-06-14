@@ -270,28 +270,28 @@ export default function FaqSection({
     <>
     <section
       id={sectionId}
-      className={`relative z-10 scroll-mt-32 ${sectionPaddingClass} px-4 sm:px-6 text-white`}
+      className={`relative z-10 scroll-mt-32 ${sectionPaddingClass} px-4 sm:px-6 text-ink`}
     >
       <div className="relative max-w-6xl mx-auto">
         <div className="text-center">
-          <span className="inline-flex items-center gap-2 px-4 py-1 rounded-full bg-sky-900/40 border border-sky-500/30 text-xs sm:text-sm font-semibold uppercase tracking-wide text-cyan-100 shadow-[0_0_18px_rgba(56,189,248,0.5)]">
+          <span className="inline-flex items-center gap-2 px-4 py-1 rounded-full bg-info-soft border border-info-border text-xs sm:text-sm font-semibold uppercase tracking-wide text-info-text shadow-info-soft">
             {eyebrowText}
           </span>
-          <h2 className="mt-4 text-4xl sm:text-5xl font-extrabold tracking-tight text-sky-100 drop-shadow-[0_0_20px_rgba(56,189,248,0.35)]">
+          <h2 className="mt-4 text-4xl sm:text-5xl font-extrabold tracking-tight text-info-text drop-shadow-[0_0_20px_rgba(56,189,248,0.35)]">
             {headingText}
           </h2>
-          <p className="mt-3 text-slate-200/80 text-sm sm:text-base">
+          <p className="mt-3 text-ink-secondary text-sm sm:text-base">
             {subtitleText}
           </p>
         </div>
 
         <div className="mt-12">
           {isLoading && (
-            <div className="rounded-2xl border border-sky-800/30 bg-slate-900/60 p-6 animate-pulse">
-              <div className="h-4 w-24 rounded-full bg-sky-800/60" />
+            <div className="rounded-2xl border border-line-input bg-skeleton p-6 animate-pulse">
+              <div className="h-4 w-24 rounded-full bg-surface-hover-accent" />
               <div className="mt-3 space-y-2">
-                <div className="h-3 w-full rounded bg-sky-900/60" />
-                <div className="h-3 w-5/6 rounded bg-sky-900/60" />
+                <div className="h-3 w-full rounded bg-surface-hover-accent" />
+                <div className="h-3 w-5/6 rounded bg-surface-hover-accent" />
               </div>
             </div>
           )}
@@ -331,7 +331,7 @@ export default function FaqSection({
                         layout="position"
                         key={q.key}
                         id={q.id}
-                        className="rounded-xl border border-sky-800/60 bg-slate-950/60 px-4 sm:px-5 py-3 transition-all duration-200 hover:border-cyan-300/60"
+                        className="rounded-xl border border-line-input bg-surface-card px-4 sm:px-5 py-3 transition-all duration-200 hover:border-line-accent"
                       >
                         <button
                           type="button"
@@ -339,8 +339,8 @@ export default function FaqSection({
                           className="w-full flex items-start justify-between gap-3 text-left"
                           aria-expanded={isAnswerOpen}
                         >
-                          <div className="flex-1 text-[15px] sm:text-[16px] font-semibold text-sky-50">
-                            <span className="mr-2 text-sky-200/80 font-semibold">
+                          <div className="flex-1 text-[15px] sm:text-[16px] font-semibold text-ink">
+                            <span className="mr-2 text-info-text font-semibold">
                               {questionNumber})
                             </span>
                             {q.question}
@@ -348,7 +348,7 @@ export default function FaqSection({
                           <motion.span
                             animate={{ rotate: isAnswerOpen ? 180 : 0 }}
                             transition={{ duration: 0.2 }}
-                            className="ml-2 text-cyan-200"
+                            className="ml-2 text-info-text"
                           >
                             <ChevronDown className="h-4 w-4" />
                           </motion.span>
@@ -364,7 +364,7 @@ export default function FaqSection({
                               transition={{ duration: 0.3, ease: "easeOut" }}
                               className="overflow-hidden"
                             >
-                              <div className="pt-2 text-slate-200/90 leading-relaxed font-normal">
+                              <div className="pt-2 text-ink-secondary leading-relaxed font-normal">
                                 {q.answer}
                               </div>
                             </motion.div>
@@ -375,7 +375,7 @@ export default function FaqSection({
                   })}
 
                   {!isLoading && flatQuestions.length === 0 && (
-                    <div className="text-slate-300/70 text-sm">
+                    <div className="text-ink-secondary text-sm">
                       No questions added yet.
                     </div>
                   )}
@@ -386,23 +386,23 @@ export default function FaqSection({
 
           {/* Pagination Controls */}
           {totalPages > 1 && (
-            <div className="pt-6 flex items-center justify-center gap-2 sm:gap-3 text-sm text-slate-300">
+            <div className="pt-6 flex items-center justify-center gap-2 sm:gap-3 text-sm text-ink-secondary">
               <button
                 type="button"
                 onClick={() => paginate(-1)}
                 disabled={safePage <= 0}
-                className="w-24 sm:w-28 shrink-0 rounded-full border border-sky-700/60 bg-slate-900/70 px-3 sm:px-4 py-2 font-semibold text-slate-100 text-center transition hover:border-cyan-300/60 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
+                className="w-24 sm:w-28 shrink-0 rounded-full border border-line-input bg-surface-card px-3 sm:px-4 py-2 font-semibold text-ink text-center transition hover:border-line-accent disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
               >
                 Previous
               </button>
-              <span className="min-w-[96px] sm:min-w-[110px] text-center text-slate-300/80 font-medium">
+              <span className="min-w-[96px] sm:min-w-[110px] text-center text-ink-secondary font-medium">
                 Page {safePage + 1} of {totalPages}
               </span>
               <button
                 type="button"
                 onClick={() => paginate(1)}
                 disabled={safePage >= totalPages - 1}
-                className="w-24 sm:w-28 shrink-0 rounded-full border border-sky-700/60 bg-slate-900/70 px-3 sm:px-4 py-2 font-semibold text-slate-100 text-center transition hover:border-cyan-300/60 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
+                className="w-24 sm:w-28 shrink-0 rounded-full border border-line-input bg-surface-card px-3 sm:px-4 py-2 font-semibold text-ink text-center transition hover:border-line-accent disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
               >
                 Next
               </button>

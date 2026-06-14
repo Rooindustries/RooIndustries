@@ -16,6 +16,521 @@
   }
 }
 
+/* ════════════════════════════════════════════════════════════════════════
+   ROO INDUSTRIES THEME TOKENS
+
+   Two designed themes share one semantic token contract. There is NO light
+   mode — both themes are dark; they differ in depth and color temperature.
+
+   • "Roo Blue" (default, canonical) — the brand identity: abyssal #000040 →
+     energized teal #00b7c0 field, slate-navy glass lit by a cyan top-light,
+     electric #03e9f4 energy lines. The default must never drift.
+
+   • "Blackout" (dark) — Obsidian & Gold. Premium minimal black: graphite
+     and smoked-glass surfaces, crisp silver ink, warm benchmark gold as
+     the only accent. NO blue or cyan anywhere in this theme. Real media
+     must always stay visible — never cover it with opaque overlays.
+
+   Rules:
+   - Components consume tokens (or the Tailwind names mapped to them in
+     tailwind.config.js) — never raw hex/rgba for themed surfaces.
+   - Low-performance fallbacks must use --color-surface-solid so degraded
+     rendering follows the active theme.
+   - The theme runtime sets data-theme="default|dark" on <html> before
+     paint. With no attribute, :root resolves to Roo Blue.
+   ════════════════════════════════════════════════════════════════════════ */
+:root,
+html[data-theme="default"] {
+  color-scheme: dark;
+
+  /* Canvas + background layers */
+  --color-canvas: #020617;
+  --color-canvas-deep: #000040;
+  --gradient-app-bg: linear-gradient(
+    to top,
+    #00b7c0 0%,
+    #006185 30%,
+    #001f5a 65%,
+    #000040 100%
+  );
+  --gradient-app-radial: radial-gradient(
+    circle at center,
+    rgba(14, 165, 233, 0.25),
+    rgba(3, 7, 18, 1) 80%
+  );
+  --color-grid-line: rgba(255, 255, 255, 0.05);
+  --app-grid-opacity: 0.5;
+  --navbar-grid-line: rgba(255, 255, 255, 0.07);
+
+  /* Surfaces */
+  --color-surface: #07162d;
+  --color-surface-elevated: #061226;
+  --color-surface-solid: rgba(6, 18, 38, 0.95);
+  --color-surface-veil: rgba(7, 26, 51, 0.6);
+  --color-surface-hover: rgba(255, 255, 255, 0.05);
+  --color-surface-hover-accent: rgba(34, 211, 238, 0.1);
+  --color-surface-card: rgba(10, 19, 36, 0.7);
+  --color-surface-frost: rgba(15, 23, 42, 0.25);
+  --color-surface-input: #0c162a;
+  --color-border-input: rgba(3, 105, 161, 0.4);
+  --gradient-glass: linear-gradient(
+      180deg,
+      rgba(7, 22, 45, 0.88),
+      rgba(6, 18, 38, 0.72)
+    ),
+    radial-gradient(
+      circle at top center,
+      rgba(34, 211, 238, 0.08),
+      transparent 58%
+    );
+  --gradient-glass-lite: linear-gradient(
+      180deg,
+      rgba(7, 22, 45, 0.96),
+      rgba(6, 18, 38, 0.92)
+    ),
+    radial-gradient(
+      circle at top center,
+      rgba(34, 211, 238, 0.07),
+      transparent 58%
+    );
+  --gradient-glass-menu: linear-gradient(
+      180deg,
+      rgba(6, 18, 38, 0.95),
+      rgba(6, 18, 38, 0.88)
+    ),
+    radial-gradient(
+      circle at top center,
+      rgba(34, 211, 238, 0.06),
+      transparent 55%
+    );
+  --gradient-overlay-scrim: linear-gradient(
+    180deg,
+    rgba(2, 6, 23, 0.48),
+    rgba(2, 6, 23, 0.62)
+  );
+  --color-overlay-solid: rgba(2, 6, 23, 0.85);
+  --gradient-route-veil: linear-gradient(
+    180deg,
+    rgba(1, 8, 34, 0.32),
+    rgba(1, 8, 34, 0.18) 35%,
+    rgba(1, 8, 34, 0.28) 100%
+  );
+  --highlight-glass-top: inset 0 1px 0 rgba(186, 230, 253, 0.08);
+  --shadow-surface: 0 12px 30px rgba(2, 6, 23, 0.28);
+  --shadow-surface-deep: 0 14px 34px rgba(2, 6, 23, 0.3);
+  --shadow-navbar-scrolled: 0 10px 30px rgba(0, 0, 0, 0.25);
+
+  /* Text */
+  --color-text-primary: #ffffff;
+  --color-text-secondary: rgba(255, 255, 255, 0.85);
+  --color-text-muted: rgba(255, 255, 255, 0.55);
+  --color-text-display: #22d3ee;
+  --color-text-accent: #67e8f9;
+  --color-link-hover: #a5f3fc;
+  --gradient-display-text: linear-gradient(to right, #38bdf8, #3b82f6);
+
+  /* Borders */
+  --color-border-soft: rgba(255, 255, 255, 0.1);
+  --color-border-strong: rgba(148, 163, 184, 0.45);
+  --color-border-accent: rgba(103, 232, 249, 0.3);
+  --navbar-border-rest: rgba(255, 255, 255, 0.05);
+  --navbar-border-scrolled: rgba(103, 232, 249, 0.1);
+
+  /* Accent — electric cyan energy */
+  --color-accent: #22d3ee;
+  --color-accent-strong: #0284c7;
+  --color-accent-contrast: #000000;
+  --color-accent-glow: #03e9f4;
+  --color-accent-soft: rgba(103, 232, 249, 0.5);
+  --color-focus-ring: rgba(103, 232, 249, 0.7);
+
+  /* Status */
+  --color-success: #34d399;
+  --color-warning: #fbbf24;
+  --color-danger: #f87171;
+  --color-info: #38bdf8;
+  --color-success-soft: rgba(16, 185, 129, 0.1);
+  --color-warning-soft: rgba(251, 191, 36, 0.14);
+  --color-danger-soft: rgba(239, 68, 68, 0.1);
+  --color-info-soft: rgba(14, 165, 233, 0.1);
+  --color-success-border: rgba(16, 185, 129, 0.45);
+  --color-warning-border: rgba(251, 191, 36, 0.4);
+  --color-danger-border: rgba(239, 68, 68, 0.45);
+  --color-info-border: rgba(34, 211, 238, 0.4);
+  --color-success-text: #bbf7d0;
+  --color-warning-text: #fde68a;
+  --color-danger-text: #fecaca;
+  --color-info-text: #bae6fd;
+
+  /* Glow */
+  --shadow-glow-soft: 0 0 15px rgba(3, 233, 244, 0.25),
+    0 0 30px rgba(3, 233, 244, 0.15);
+  --shadow-glow-strong: 0 0 24px rgba(56, 189, 248, 0.5),
+    0 0 44px rgba(56, 189, 248, 0.32);
+  --shadow-success-soft: 0 0 25px rgba(34, 197, 94, 0.5);
+  --shadow-danger-soft: 0 0 25px rgba(239, 68, 68, 0.5);
+  --shadow-info-soft: 0 0 25px rgba(14, 165, 233, 0.15);
+  --gradient-skeleton: linear-gradient(
+    180deg,
+    rgba(13, 21, 38, 0.7),
+    rgba(8, 16, 29, 0.8)
+  );
+  --gradient-panel: linear-gradient(
+    180deg,
+    #0f172a 0%,
+    #020617 52%,
+    #0f172a 100%
+  );
+
+  /* Primary action gradients */
+  --gradient-button-primary: linear-gradient(
+    90deg,
+    rgba(56, 189, 248, 1) 0%,
+    rgba(2, 132, 199, 1) 38%,
+    rgba(29, 78, 216, 1) 100%
+  );
+  --gradient-button-booking: linear-gradient(
+    120deg,
+    rgba(102, 185, 250, 1) 0%,
+    rgba(38, 145, 220, 1) 45%,
+    rgba(18, 95, 195, 1) 100%
+  );
+  --gradient-platform-twitch: linear-gradient(135deg, #9146ff, #6633cc);
+
+  /* Effect layer — buttons, traces, flair. Values are the legacy Roo Blue
+     look, verbatim, so the default theme stays pixel-identical. */
+  --shadow-button: 0 0 15px rgba(3, 233, 244, 0.25),
+    0 0 30px rgba(3, 233, 244, 0.15);
+  --shadow-button-accent: 0 0 20px rgba(56, 189, 248, 0.4);
+  --shadow-cta-success: 0 0 20px rgba(16, 185, 129, 0.4);
+  --gradient-nav-cta: linear-gradient(to right, #06b6d4, #3b82f6);
+  --gradient-nav-cta-hover: linear-gradient(to right, #22d3ee, #60a5fa);
+  --color-divider-line: rgba(60, 190, 220, 1);
+  --shadow-divider-line: 0 0 14px rgba(56, 189, 248, 0.55),
+    0 0 30px rgba(56, 189, 248, 0.4), 0 0 52px rgba(37, 99, 235, 0.35);
+  --shadow-divider-pulse: 0 0 40px rgba(147, 197, 253, 1),
+    0 0 90px rgba(59, 130, 246, 1), 0 0 160px rgba(37, 99, 235, 1);
+  --shadow-divider-extra: 0 0 30px rgba(56, 189, 248, 0.8);
+  --shadow-booking-glow: 0 0 14px rgba(45, 212, 191, 0.28),
+    0 0 26px rgba(45, 212, 191, 0.2);
+  --shadow-frost-glow: 0 0 8px rgba(3, 233, 244, 0.16),
+    0 0 16px rgba(3, 233, 244, 0.1);
+  --gradient-glow-beam: conic-gradient(
+    from 0deg,
+    transparent 45%,
+    #a855f7 70%,
+    #ec4899 85%,
+    #03e9f4 100%
+  );
+  --sparkle-glow: drop-shadow(0 0 5px rgba(255, 255, 255, 0.8));
+  --gradient-gold-text: linear-gradient(
+    90deg,
+    #fde68a 0%,
+    #fdba74 45%,
+    #fef3c7 100%
+  );
+  --text-shadow-gold: 0 0 10px rgba(245, 158, 11, 0.9),
+    0 0 22px rgba(217, 119, 6, 0.75), 0 0 44px rgba(180, 83, 9, 0.6),
+    0 0 80px rgba(124, 45, 18, 0.55);
+  --color-gold-pill-surface: rgba(15, 23, 42, 0.9);
+  --gradient-gold-pill: linear-gradient(
+    90deg,
+    rgba(245, 158, 11, 0.35) 0%,
+    rgba(251, 191, 36, 0.22) 45%,
+    rgba(245, 158, 11, 0.35) 100%
+  );
+  --shadow-gold-pill: 0 0 16px rgba(245, 158, 11, 0.9),
+    0 0 30px rgba(217, 119, 6, 0.65);
+  --color-gold-border: rgba(252, 211, 77, 0.7);
+  --gradient-glint-text: linear-gradient(
+    90deg,
+    #7dd3fc 0%,
+    #22d3ee 38%,
+    #dbeafe 52%,
+    #38bdf8 70%,
+    #2563eb 100%
+  );
+  --text-shadow-glint: 0 0 12px rgba(56, 189, 248, 0.75),
+    0 0 28px rgba(14, 165, 233, 0.52), 0 0 52px rgba(37, 99, 235, 0.36);
+  --text-shadow-heading: 0 0 15px rgba(56, 189, 248, 0.5);
+  --text-shadow-heading-soft: 0 0 18px rgba(34, 211, 238, 0.25);
+  --shadow-step-badge: 0 0 12px rgba(14, 165, 233, 0.3);
+  --shadow-card-glow: 0 0 35px rgba(56, 189, 248, 0.35);
+  --shadow-card-glow-info: 0 0 35px rgba(14, 165, 233, 0.15);
+  --shadow-referral-glow: 0 0 30px rgba(99, 102, 241, 0.2);
+  --shadow-back-button: 0 0 15px rgba(0, 255, 255, 0.3);
+  --shadow-back-button-hover: 0 0 20px rgba(0, 255, 255, 0.5);
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* BLACKOUT — Obsidian & Gold. Monochrome graphite/gunmetal canvas, soft
+     silver ink, warm benchmark gold as the only accent. NO blue or cyan
+     anywhere in this theme. */
+  --color-canvas: #030303;
+  --color-canvas-deep: #070707;
+  --gradient-app-bg: linear-gradient(
+    to top,
+    #0a0a0a 0%,
+    #060606 30%,
+    #030303 65%,
+    #000000 100%
+  );
+  --gradient-app-radial: radial-gradient(
+    circle at center,
+    rgba(255, 255, 255, 0.05),
+    rgba(0, 0, 0, 1) 78%
+  );
+  --color-grid-line: rgba(255, 255, 255, 0.04);
+  --app-grid-opacity: 0.35;
+  --navbar-grid-line: rgba(255, 255, 255, 0.045);
+
+  /* Surfaces — true black stack; depth from layering and white light */
+  --color-surface: #0d0d0d;
+  --color-surface-elevated: #090909;
+  --color-surface-solid: rgba(9, 9, 9, 0.97);
+  --color-surface-veil: rgba(10, 10, 10, 0.65);
+  --color-surface-hover: rgba(255, 255, 255, 0.05);
+  --color-surface-hover-accent: rgba(240, 195, 90, 0.08);
+  --color-surface-card: rgba(9, 9, 9, 0.75);
+  --color-surface-frost: rgba(12, 12, 12, 0.35);
+  --color-surface-input: #0c0c0c;
+  --color-border-input: rgba(255, 255, 255, 0.14);
+  --gradient-glass: linear-gradient(
+      180deg,
+      rgba(24, 24, 24, 0.94),
+      rgba(5, 5, 5, 0.88)
+    ),
+    radial-gradient(
+      circle at top center,
+      rgba(255, 250, 240, 0.05),
+      transparent 58%
+    );
+  --gradient-glass-lite: linear-gradient(
+      180deg,
+      rgba(19, 19, 19, 0.97),
+      rgba(7, 7, 7, 0.94)
+    ),
+    radial-gradient(
+      circle at top center,
+      rgba(255, 250, 240, 0.04),
+      transparent 58%
+    );
+  --gradient-glass-menu: linear-gradient(
+      180deg,
+      rgba(14, 14, 14, 0.97),
+      rgba(7, 7, 7, 0.92)
+    ),
+    radial-gradient(
+      circle at top center,
+      rgba(255, 250, 240, 0.04),
+      transparent 55%
+    );
+  --gradient-overlay-scrim: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0.55),
+    rgba(0, 0, 0, 0.7)
+  );
+  --color-overlay-solid: rgba(2, 4, 7, 0.9);
+  --gradient-route-veil: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0.4),
+    rgba(0, 0, 0, 0.22) 35%,
+    rgba(0, 0, 0, 0.34) 100%
+  );
+  --highlight-glass-top: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  --shadow-surface: 0 12px 30px rgba(0, 0, 0, 0.5);
+  --shadow-surface-deep: 0 16px 38px rgba(0, 0, 0, 0.55);
+  --shadow-navbar-scrolled: 0 10px 30px rgba(0, 0, 0, 0.55);
+
+  /* Text — black + white hierarchy: white headings, off-white body,
+     light silver secondary. Gray is reserved for true muted/disabled. */
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #deded7;
+  --color-text-muted: #8f8f86;
+  --color-text-display: #f7f7f2;
+  --color-text-accent: var(--color-text-display);
+  --color-link-hover: #ffe08a;
+  --gradient-display-text: linear-gradient(
+    92deg,
+    #fff3cd 0%,
+    #ffd76e 28%,
+    #e8b94a 52%,
+    #c9962e 74%,
+    #ffe9a8 100%
+  );
+
+  /* Borders — fine white rims on black-on-black depth, gold reserved */
+  --color-border-soft: rgba(255, 255, 255, 0.16);
+  --color-border-strong: rgba(255, 255, 255, 0.26);
+  --color-border-accent: rgba(240, 195, 90, 0.32);
+  --navbar-border-rest: rgba(255, 255, 255, 0.05);
+  --navbar-border-scrolled: rgba(240, 195, 90, 0.18);
+
+  /* Accent — benchmark gold + dark copper */
+  --color-accent: #e8b94a;
+  --color-accent-strong: #c9962e;
+  --color-accent-contrast: #161208;
+  --color-accent-glow: #ffd76e;
+  --color-accent-soft: rgba(240, 195, 90, 0.4);
+  --color-focus-ring: rgba(240, 195, 90, 0.55);
+  /* Micro voltage accent — use rarely (heat/limit moments only) */
+  --color-voltage: #ff5a2f;
+
+  /* Status — success/warning/danger stay semantic; info goes neutral
+     steel (no blue in Blackout) */
+  --color-success: #34d399;
+  --color-warning: #fbbf24;
+  --color-danger: #f87171;
+  --color-info: #e8c97a;
+  --color-success-soft: rgba(16, 185, 129, 0.08);
+  --color-warning-soft: rgba(251, 191, 36, 0.1);
+  --color-danger-soft: rgba(239, 68, 68, 0.08);
+  --color-info-soft: rgba(232, 185, 74, 0.09);
+  --color-success-border: rgba(16, 185, 129, 0.38);
+  --color-warning-border: rgba(251, 191, 36, 0.34);
+  --color-danger-border: rgba(239, 68, 68, 0.38);
+  --color-info-border: rgba(240, 195, 90, 0.45);
+  --color-success-text: #bbf7d0;
+  --color-warning-text: #fde68a;
+  --color-danger-text: #fecaca;
+  --color-info-text: #f6e6bd;
+
+  /* Glow — thin warm-silver halos, no wash */
+  --shadow-glow-soft: 0 0 10px rgba(240, 234, 220, 0.13),
+    0 0 22px rgba(244, 206, 116, 0.06);
+  --shadow-glow-strong: 0 0 16px rgba(255, 215, 110, 0.3),
+    0 0 30px rgba(255, 215, 110, 0.15);
+  --shadow-success-soft: 0 0 12px rgba(34, 197, 94, 0.3);
+  --shadow-danger-soft: 0 0 12px rgba(239, 68, 68, 0.3);
+  --shadow-info-soft: 0 0 12px rgba(240, 195, 90, 0.14);
+  --gradient-skeleton: linear-gradient(
+    180deg,
+    rgba(18, 18, 18, 0.8),
+    rgba(7, 7, 7, 0.9)
+  );
+  --gradient-panel: linear-gradient(
+    180deg,
+    #111111 0%,
+    #0a0a0a 52%,
+    #0f0f0f 100%
+  );
+
+  /* Primary action surfaces — machined gunmetal keys. Four layers, top to
+     bottom: brushed hairline micro-texture, top bevel light, warm base
+     glow, and the graphite body (oversized so the slow gradientA sweep
+     reads as a sheen moving across dark metal). */
+  --gradient-button-primary: repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.022) 0 1px,
+      transparent 1px 3px
+    ),
+    linear-gradient(
+      180deg,
+      rgba(244, 244, 240, 0.16) 0%,
+      rgba(244, 244, 240, 0.04) 28%,
+      transparent 52%
+    ),
+    linear-gradient(0deg, rgba(240, 195, 90, 0.09) 0%, transparent 36%),
+    linear-gradient(
+      160deg,
+      #272727 0%,
+      #161616 35%,
+      #0a0a0a 72%,
+      #191919 100%
+    );
+  --gradient-button-booking: repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.022) 0 1px,
+      transparent 1px 3px
+    ),
+    linear-gradient(
+      180deg,
+      rgba(244, 244, 240, 0.14) 0%,
+      rgba(244, 244, 240, 0.04) 28%,
+      transparent 50%
+    ),
+    linear-gradient(0deg, rgba(240, 195, 90, 0.08) 0%, transparent 34%),
+    linear-gradient(
+      140deg,
+      #222222 0%,
+      #151515 45%,
+      #0c0c0c 100%
+    );
+  --gradient-platform-twitch: linear-gradient(135deg, #7a3df0, #4c22a8);
+
+  /* Effect layer — embedded, machined. Buttons seat into the dark via an
+     inset rim light + bottom shadow instead of a halo wash; traces and
+     flair drop to thin precise halos; gold becomes burnished brass; the
+     beam trades neon pink/purple for gunmetal and brass. */
+  --shadow-button: 0 2px 6px rgba(0, 0, 0, 0.5),
+    0 1px 0 rgba(0, 0, 0, 0.6),
+    inset 0 0 0 1px rgba(240, 195, 90, 0.34),
+    inset 0 1px 0 rgba(255, 248, 230, 0.24),
+    inset 0 -2px 6px rgba(0, 0, 0, 0.55);
+  --shadow-button-accent: 0 0 12px rgba(255, 215, 110, 0.14);
+  --shadow-cta-success: 0 0 12px rgba(16, 185, 129, 0.22);
+  --gradient-nav-cta: linear-gradient(to right, #1c1c20, #121215);
+  --gradient-nav-cta-hover: linear-gradient(to right, #26262b, #18181c);
+  --color-divider-line: rgba(240, 195, 90, 0.85);
+  --shadow-divider-line: 0 0 8px rgba(240, 195, 90, 0.3),
+    0 0 18px rgba(240, 195, 90, 0.15);
+  --shadow-divider-pulse: 0 0 16px rgba(255, 215, 110, 0.4),
+    0 0 36px rgba(176, 141, 74, 0.25);
+  --shadow-divider-extra: 0 0 14px rgba(240, 195, 90, 0.25);
+  --shadow-booking-glow: 0 0 10px rgba(240, 240, 235, 0.1),
+    0 0 18px rgba(240, 240, 235, 0.05);
+  --shadow-frost-glow: 0 0 6px rgba(240, 240, 235, 0.08),
+    0 0 12px rgba(240, 240, 235, 0.04);
+  --gradient-glow-beam: conic-gradient(
+    from 0deg,
+    transparent 50%,
+    #3a3a40 72%,
+    #8a703e 86%,
+    #ffd76e 100%
+  );
+  --sparkle-glow: drop-shadow(0 0 3px rgba(244, 244, 240, 0.55));
+  --gradient-gold-text: linear-gradient(
+    90deg,
+    #f6d889 0%,
+    #e9b53e 45%,
+    #fff1c4 100%
+  );
+  --text-shadow-gold: 0 0 8px rgba(233, 181, 62, 0.45),
+    0 0 18px rgba(180, 122, 30, 0.3), 0 0 34px rgba(96, 58, 12, 0.2);
+  --color-gold-pill-surface: rgba(10, 12, 17, 0.92);
+  --gradient-gold-pill: linear-gradient(
+    90deg,
+    rgba(233, 181, 62, 0.22) 0%,
+    rgba(222, 178, 96, 0.12) 45%,
+    rgba(233, 181, 62, 0.22) 100%
+  );
+  --shadow-gold-pill: 0 0 9px rgba(233, 181, 62, 0.4),
+    0 0 18px rgba(180, 122, 30, 0.24);
+  --color-gold-border: rgba(196, 150, 60, 0.5);
+  /* Glint becomes chrome on graphite — silver sweep with a warm gold
+     whisper at the tail. */
+  --gradient-glint-text: linear-gradient(
+    90deg,
+    #dfe2e4 0%,
+    #ffffff 38%,
+    #c6cac8 52%,
+    #f4f4f0 70%,
+    #f4d27c 100%
+  );
+  --text-shadow-glint: 0 0 8px rgba(244, 244, 240, 0.25),
+    0 0 18px rgba(240, 195, 90, 0.15);
+  --text-shadow-heading: 0 0 10px rgba(240, 232, 216, 0.25);
+  --text-shadow-heading-soft: 0 0 12px rgba(240, 232, 216, 0.12);
+  --shadow-step-badge: 0 0 12px rgba(240, 195, 90, 0.18);
+  --shadow-card-glow: 0 0 22px rgba(244, 206, 116, 0.1);
+  --shadow-card-glow-info: 0 0 22px rgba(244, 206, 116, 0.07);
+  --shadow-referral-glow: 0 0 18px rgba(150, 150, 160, 0.12);
+  --shadow-back-button: 0 0 10px rgba(255, 215, 110, 0.16);
+  --shadow-back-button-hover: 0 0 14px rgba(255, 215, 110, 0.28);
+}
+
 /* Defer layout/paint cost of below-the-fold sections.
    Content stays in DOM for SEO — browser skips rendering until near viewport. */
 .deferred-section-content {
@@ -24,7 +539,7 @@
 }
 
 html {
-  background-color: #000040;
+  background-color: var(--color-canvas-deep);
   font-family: "Manrope Variable", system-ui, sans-serif;
   scroll-behavior: smooth;
   -webkit-font-smoothing: antialiased;
@@ -41,13 +556,33 @@ body::-webkit-scrollbar {
 }
 
 body {
-  background: linear-gradient(
-    to top,
-    #00b7c0 0%,
-    #006185 30%,
-    #001f5a 65%,
-    #000040 100%
+  background: var(--gradient-app-bg);
+  color: var(--color-text-primary);
+}
+
+/* App shell + decorative background layers (markup in src/App.jsx).
+   The radial layer is the dominant visible field; the grid sits under it. */
+#app-shell {
+  background-image: var(--gradient-app-bg);
+  color: var(--color-text-primary);
+}
+
+.app-bg-grid-layer {
+  background-image: linear-gradient(
+    45deg,
+    var(--color-grid-line) 1px,
+    transparent 1px
   );
+  background-size: 40px 40px;
+  opacity: var(--app-grid-opacity);
+}
+
+.app-bg-radial-layer {
+  background-image: var(--gradient-app-radial);
+}
+
+.route-transition-veil {
+  background: var(--gradient-route-veil);
 }
 
 .trustpilot-widget,
@@ -119,14 +654,9 @@ body.view-plan-open #booking-modal-close {
 .glow-button {
   position: relative;
   overflow: hidden;
-  background: linear-gradient(
-    90deg,
-    rgba(56, 189, 248, 1) 0%,
-    rgba(2, 132, 199, 1) 38%,
-    rgba(29, 78, 216, 1) 100%
-  );
+  background: var(--gradient-button-primary);
   background-size: 400% 400%;
-  box-shadow: 0 0 15px rgba(3, 233, 244, 0.25), 0 0 30px rgba(3, 233, 244, 0.15);
+  box-shadow: var(--shadow-button);
 }
 
 html.animations-ready .glow-button {
@@ -136,23 +666,19 @@ html.animations-ready .glow-button {
 
 .glow-button.packages-divider-line {
   background-image: none;
-  background-color: rgba(60, 190, 220, 1);
-  box-shadow: 0 0 14px rgba(56, 189, 248, 0.55),
-    0 0 30px rgba(56, 189, 248, 0.4),
-    0 0 52px rgba(37, 99, 235, 0.35);
+  background-color: var(--color-divider-line);
+  box-shadow: var(--shadow-divider-line);
 }
 
 .glow-button.book-optimization-button {
-  background: linear-gradient(
-    120deg,
-    rgba(102, 185, 250, 1) 0%,
-    rgba(38, 145, 220, 1) 45%,
-    rgba(18, 95, 195, 1) 100%
-  );
+  background: var(--gradient-button-booking);
   background-size: 200% 200%;
   background-position: 0% 50%;
-  box-shadow: 0 0 14px rgba(45, 212, 191, 0.28),
-    0 0 26px rgba(45, 212, 191, 0.2);
+  box-shadow: var(--shadow-booking-glow);
+}
+
+html:not([data-theme="dark"]) .glow-button.book-optimization-button {
+  --tw-ring-color: rgba(103, 232, 249, 0.7);
 }
 
 html.animations-ready .glow-button.book-optimization-button {
@@ -161,13 +687,17 @@ html.animations-ready .glow-button.book-optimization-button {
 }
 
 .glow-button.fps-boosts-button {
-  background: rgba(15, 23, 42, 0.25);
-  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: var(--color-surface-frost);
+  border: 1px solid var(--color-border-strong);
   backdrop-filter: blur(12px) saturate(140%);
   -webkit-backdrop-filter: blur(12px) saturate(140%);
   background-clip: padding-box;
   animation: none;
-  box-shadow: 0 0 8px rgba(3, 233, 244, 0.16), 0 0 16px rgba(3, 233, 244, 0.1);
+  box-shadow: var(--shadow-frost-glow);
+}
+
+html:not([data-theme="dark"]) .glow-button.fps-boosts-button {
+  --tw-ring-color: rgba(3, 105, 161, 0.5);
 }
 
 .glow-button:disabled,
@@ -187,7 +717,7 @@ html.animations-ready .glow-button.book-optimization-button {
   left: 0;
   width: 100%;
   height: 2px;
-  background: linear-gradient(90deg, transparent, #03e9f4);
+  background: linear-gradient(90deg, transparent, var(--color-accent-glow));
   animation: topb 4.5s infinite;
   animation-delay: 2.35s;
 }
@@ -197,7 +727,7 @@ html.animations-ready .glow-button.book-optimization-button {
   right: 0;
   width: 2px;
   height: 100%;
-  background: linear-gradient(180deg, transparent, #03e9f4);
+  background: linear-gradient(180deg, transparent, var(--color-accent-glow));
   animation: rightb 4.5s infinite;
   animation-delay: 3.47s;
 }
@@ -207,7 +737,7 @@ html.animations-ready .glow-button.book-optimization-button {
   right: 0;
   width: 100%;
   height: 2px;
-  background: linear-gradient(270deg, transparent, #03e9f4);
+  background: linear-gradient(270deg, transparent, var(--color-accent-glow));
   animation: bottomb 4.5s infinite;
   animation-delay: 0s;
 }
@@ -217,7 +747,7 @@ html.animations-ready .glow-button.book-optimization-button {
   left: 0;
   width: 2px;
   height: 100%;
-  background: linear-gradient(360deg, transparent, #03e9f4);
+  background: linear-gradient(360deg, transparent, var(--color-accent-glow));
   animation: leftb 4.5s infinite;
   animation-delay: 1.12s;
 }
@@ -244,9 +774,7 @@ html.animations-ready .glow-button.book-optimization-button {
   border-radius: inherit;
   pointer-events: none;
   opacity: 0;
-  box-shadow: 0 0 40px rgba(147, 197, 253, 1),
-    0 0 90px rgba(59, 130, 246, 1),
-    0 0 160px rgba(37, 99, 235, 1);
+  box-shadow: var(--shadow-divider-pulse);
 }
 html.animations-ready .glow-button.packages-divider-line::before {
   animation: packagesDividerPulse 9s ease-in-out infinite;
@@ -339,13 +867,7 @@ html.animations-ready .glow-button.packages-divider-line::before {
   width: 200%;
   aspect-ratio: 1;
   transform: translate(-50%, -50%);
-  background: conic-gradient(
-    from 0deg,
-    transparent 45%,
-    #a855f7 70%,
-    #ec4899 85%,
-    #03e9f4 100%
-  );
+  background: var(--gradient-glow-beam);
 }
 
 html.animations-ready .glow-beam {
@@ -363,7 +885,7 @@ html.animations-ready .glow-beam {
 }
 
 .sparkle-icon {
-  filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.8));
+  filter: var(--sparkle-glow);
 }
 
 html.animations-ready .sparkle-icon {
@@ -372,14 +894,12 @@ html.animations-ready .sparkle-icon {
 }
 
 .gold-flair-text {
-  background: linear-gradient(90deg, #fde68a 0%, #fdba74 45%, #fef3c7 100%);
+  background: var(--gradient-gold-text);
   background-size: 200% 200%;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  text-shadow: 0 0 10px rgba(245, 158, 11, 0.9),
-    0 0 22px rgba(217, 119, 6, 0.75), 0 0 44px rgba(180, 83, 9, 0.6),
-    0 0 80px rgba(124, 45, 18, 0.55);
+  text-shadow: var(--text-shadow-gold);
 }
 
 html.animations-ready .gold-flair-text {
@@ -388,13 +908,12 @@ html.animations-ready .gold-flair-text {
 }
 
 .blue-glint-text {
-  background: linear-gradient(90deg, #7dd3fc 0%, #22d3ee 38%, #dbeafe 52%, #38bdf8 70%, #2563eb 100%);
+  background: var(--gradient-glint-text);
   background-size: 220% 220%;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  text-shadow: 0 0 12px rgba(56, 189, 248, 0.75),
-    0 0 28px rgba(14, 165, 233, 0.52), 0 0 52px rgba(37, 99, 235, 0.36);
+  text-shadow: var(--text-shadow-glint);
 }
 
 html.animations-ready .blue-glint-text {
@@ -403,15 +922,10 @@ html.animations-ready .blue-glint-text {
 }
 
 .gold-flair-pill {
-  background-color: rgba(15, 23, 42, 0.9);
-  background-image: linear-gradient(
-    90deg,
-    rgba(245, 158, 11, 0.35) 0%,
-    rgba(251, 191, 36, 0.22) 45%,
-    rgba(245, 158, 11, 0.35) 100%
-  );
+  background-color: var(--color-gold-pill-surface);
+  background-image: var(--gradient-gold-pill);
   background-size: 200% 200%;
-  box-shadow: 0 0 16px rgba(245, 158, 11, 0.9), 0 0 30px rgba(217, 119, 6, 0.65);
+  box-shadow: var(--shadow-gold-pill);
 }
 
 html.animations-ready .gold-flair-pill {
@@ -429,6 +943,886 @@ html.animations-ready .gold-flair-pill {
   100% {
     background-position: 0% 50%;
   }
+}
+
+/* ── Blackout motion integration ──────────────────────────────────────────
+   Lights-off lab: same keyframes, slower pace, thinner traces. Effects
+   should feel like instruments idling, not an arcade attract loop. */
+html[data-theme="dark"].animations-ready .glow-button {
+  animation-duration: 10s;
+}
+
+html[data-theme="dark"].animations-ready .glow-button.book-optimization-button {
+  animation-duration: 18s;
+}
+
+html[data-theme="dark"].animations-ready .glow-beam {
+  animation-duration: 10s;
+}
+
+html[data-theme="dark"].animations-ready .sparkle-icon {
+  animation-duration: 3.2s;
+}
+
+html[data-theme="dark"].animations-ready .gold-flair-text,
+html[data-theme="dark"].animations-ready .gold-flair-pill,
+html[data-theme="dark"].animations-ready .blue-glint-text {
+  animation-duration: 9s;
+}
+
+html[data-theme="dark"].animations-ready .glow-button.packages-divider-line::before {
+  animation-duration: 13s;
+}
+
+html[data-theme="dark"] .glow-button:hover .glow-line-top,
+html[data-theme="dark"] .glow-button:hover .glow-line-bottom {
+  height: 1px;
+}
+
+html[data-theme="dark"] .glow-button:hover .glow-line-left,
+html[data-theme="dark"] .glow-button:hover .glow-line-right {
+  width: 1px;
+}
+
+html[data-theme="dark"] .glow-button:hover .glow-line {
+  animation-duration: 6s;
+}
+
+/* ── Blackout material treatment ─────────────────────────────────────────
+   Buttons are dark metal at rest — gunmetal body, thin warm rim, top
+   light. Hover brings the energy forward. Filled CTAs become smoked
+   glass with a brass rim and warm-silver label. Roo Blue is untouched. */
+/* Keep micro-texture and bevel layers at natural scale; only the body
+   layer is oversized so the sweep animation moves a sheen, not the
+   texture. Button labels read off-white, not pure white. */
+html[data-theme="dark"] .glow-button {
+  background-size: auto, auto, auto, 400% 400%;
+  color: var(--color-text-primary);
+}
+
+html[data-theme="dark"] .glow-button.book-optimization-button {
+  background-size: auto, auto, auto, 200% 200%;
+}
+
+html[data-theme="dark"]
+  .glow-button:not(.packages-divider-line):not(.fps-boosts-button):hover {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5),
+    0 1px 0 rgba(0, 0, 0, 0.6),
+    0 0 16px rgba(255, 215, 110, 0.22),
+    inset 0 0 0 1px rgba(255, 215, 110, 0.55),
+    inset 0 1px 0 rgba(244, 244, 240, 0.26),
+    inset 0 -2px 6px rgba(0, 0, 0, 0.45);
+}
+
+/* Secondary CTA: smoked glass slab — top light, quiet steel edge, warm
+   rim only on hover. */
+html[data-theme="dark"] .glow-button.fps-boosts-button {
+  background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.09) 0%,
+      transparent 34%
+    ),
+    linear-gradient(180deg, rgba(22, 22, 22, 0.62), rgba(7, 7, 7, 0.76));
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.45), 0 2px 5px rgba(0, 0, 0, 0.4);
+}
+
+html[data-theme="dark"] .glow-button.fps-boosts-button:hover {
+  border-color: rgba(255, 215, 110, 0.4);
+  box-shadow: inset 0 1px 0 rgba(244, 244, 240, 0.18),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.45), 0 0 12px rgba(255, 215, 110, 0.12);
+}
+
+/* Hero headline, line 1 — machined silver lit from the top, not a flat
+   white slab. Applies to nested .text-ink spans too (the heading split
+   renderer wraps segments in them). No-op in Roo Blue. */
+html[data-theme="dark"] .text-metal-display,
+html[data-theme="dark"] .text-metal-display .text-ink {
+  background-image: linear-gradient(
+    180deg,
+    #ffffff 0%,
+    #eceee9 52%,
+    #c0c4c2 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+html[data-theme="dark"] a.bg-accent,
+html[data-theme="dark"] button.bg-accent,
+html[data-theme="dark"] a.bg-accent-strong,
+html[data-theme="dark"] button.bg-accent-strong {
+  background-color: transparent;
+  background-image: linear-gradient(
+    180deg,
+    rgba(34, 34, 38, 0.95),
+    rgba(14, 14, 17, 0.95)
+  );
+  color: #f5dc9e;
+  box-shadow: inset 0 0 0 1px rgba(240, 195, 90, 0.4),
+    inset 0 1px 0 rgba(244, 244, 240, 0.14),
+    inset 0 -2px 5px rgba(0, 0, 0, 0.45), 0 0 10px rgba(240, 195, 90, 0.1);
+}
+
+html[data-theme="dark"] a.bg-accent:hover,
+html[data-theme="dark"] button.bg-accent:hover,
+html[data-theme="dark"] a.bg-accent-strong:hover,
+html[data-theme="dark"] button.bg-accent-strong:hover {
+  background-image: linear-gradient(
+    180deg,
+    rgba(44, 44, 49, 0.97),
+    rgba(18, 18, 22, 0.97)
+  );
+  color: #ffe9b8;
+  box-shadow: inset 0 0 0 1px rgba(255, 215, 110, 0.6),
+    inset 0 1px 0 rgba(244, 244, 240, 0.18), 0 0 16px rgba(255, 215, 110, 0.18);
+}
+
+/* Referral "Get Started" (the one glow-button carrying from-accent
+   classes): a polished gold key with dark ink — matches the gold heading
+   and the gold-rimmed Login beside it. */
+html[data-theme="dark"] .glow-button[class*="from-accent"] {
+  background-image: linear-gradient(
+    135deg,
+    #fff3cd 0%,
+    #ffd76e 30%,
+    #f0c45a 62%,
+    #d6a338 100%
+  );
+  background-size: auto;
+  color: #161208;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 250, 230, 0.6),
+    inset 0 -2px 5px rgba(110, 75, 20, 0.4);
+}
+
+/* Accent gradient-clipped headings (e.g. "Join the Referral Program"):
+   keep the whole sweep bright — champagne to gold, never dark brass. */
+html[data-theme="dark"] .bg-clip-text.from-accent {
+  background-image: linear-gradient(
+    92deg,
+    #fff3cd 0%,
+    #ffd76e 35%,
+    #e8b94a 70%,
+    #ffe9a8 100%
+  );
+}
+
+/* Disabled: never a dimmed gold fill (reads muddy on black). Smoked
+   graphite with a quiet gold rim until the form is valid. */
+html[data-theme="dark"] .glow-button[class*="from-accent"]:disabled,
+html[data-theme="dark"] .glow-button[class*="from-accent"][aria-disabled="true"] {
+  background-image: linear-gradient(
+    180deg,
+    rgba(34, 34, 38, 0.95),
+    rgba(14, 14, 17, 0.95)
+  );
+  color: rgba(246, 230, 189, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(240, 195, 90, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 1px 0 rgba(0, 0, 0, 0.5);
+  opacity: 1;
+  filter: none;
+}
+
+html[data-theme="dark"]
+  .glow-button[class*="from-accent"][class*="from-accent"]:hover {
+  background-image: linear-gradient(
+    135deg,
+    #fff8e0 0%,
+    #ffe08a 28%,
+    #f0c45a 58%,
+    #d6a338 100%
+  );
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5),
+    0 0 14px rgba(255, 215, 110, 0.25),
+    inset 0 1px 0 rgba(255, 250, 230, 0.7),
+    inset 0 -2px 5px rgba(110, 75, 20, 0.35);
+}
+
+/* Package divider: a precise energy line — thin bright core centered in
+   the 6px track, not a neon bar. */
+html[data-theme="dark"] .glow-button.packages-divider-line {
+  background-color: transparent;
+  background-image: linear-gradient(
+    180deg,
+    transparent 0%,
+    transparent 33%,
+    rgba(240, 195, 90, 0.8) 46%,
+    rgba(255, 240, 200, 0.95) 50%,
+    rgba(240, 195, 90, 0.8) 54%,
+    transparent 67%,
+    transparent 100%
+  );
+}
+
+/* ── Theme switch ────────────────────────────────────────────────────────
+   Two-state Roo Blue ⇄ Blackout control. CRT icon = Roo Blue side, moon =
+   Blackout side. The thumb carries each theme's identity: cyan-blue
+   gradient in default, polished champagne-to-brass gold in dark. */
+.theme-switch {
+  align-items: center;
+  border-radius: 9999px;
+}
+
+.theme-switch-track {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 3.6rem;
+  height: 1.9rem;
+  /* Icon cells are thumb-sized and sit exactly on the thumb's two landing
+     positions, so each icon is dead-center under the thumb. */
+  padding: 0 3px;
+  border-radius: 9999px;
+  background-color: var(--color-surface-veil);
+  border: 1px solid var(--color-border-soft);
+  box-shadow: var(--highlight-glass-top), inset 0 2px 5px rgba(0, 0, 0, 0.35);
+  transition: border-color 200ms ease;
+}
+
+.theme-switch:hover .theme-switch-track {
+  border-color: var(--color-border-accent);
+}
+
+.theme-switch-thumb {
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 9999px;
+  transform: translateY(-50%);
+  background-image: linear-gradient(to right, #06b6d4, #3b82f6);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  transition: left 250ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+html[data-theme="dark"] .theme-switch-thumb {
+  left: calc(100% - 1.5rem - 3px);
+  background-image: linear-gradient(
+    135deg,
+    #ffe9b8 0%,
+    #e8b94a 45%,
+    #c9962e 100%
+  );
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(255, 250, 230, 0.55),
+    0 0 10px rgba(240, 195, 90, 0.35);
+}
+
+.theme-switch-icon {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  color: var(--color-text-muted);
+  transition: color 200ms ease;
+}
+
+.theme-switch-icon svg {
+  display: block;
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+/* The icon the thumb covers is the ACTIVE side — ink it for contrast. */
+html:not([data-theme="dark"]) .theme-switch-icon-default {
+  color: #ffffff;
+}
+
+html[data-theme="dark"] .theme-switch-icon-dark {
+  color: #161208;
+}
+
+/* Compact switch on narrow screens so the nav row never overflows. */
+@media (max-width: 639px) {
+  .theme-switch-track {
+    width: 3rem;
+    height: 1.7rem;
+  }
+
+  .theme-switch-icon,
+  .theme-switch-thumb {
+    width: 1.3rem;
+    height: 1.3rem;
+  }
+
+  html[data-theme="dark"] .theme-switch-thumb {
+    left: calc(100% - 1.3rem - 3px);
+  }
+
+  .theme-switch-icon svg {
+    width: 0.75rem;
+    height: 0.75rem;
+  }
+}
+
+/* Navbar CTA: smoked metal pill with a brass rim in Blackout. */
+.nav-cta {
+  background-image: var(--gradient-nav-cta);
+}
+
+.nav-cta:hover {
+  background-image: var(--gradient-nav-cta-hover);
+}
+
+html[data-theme="dark"] .nav-cta {
+  color: #ece7da;
+  box-shadow: inset 0 0 0 1px rgba(240, 195, 90, 0.24),
+    inset 0 1px 0 rgba(246, 240, 228, 0.16),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(0, 0, 0, 0.5);
+}
+
+html[data-theme="dark"] .nav-cta:hover {
+  box-shadow: inset 0 0 0 1px rgba(255, 215, 110, 0.45),
+    inset 0 1px 0 rgba(244, 244, 240, 0.18),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.45), 0 0 12px rgba(255, 215, 110, 0.12);
+}
+
+/* ── Blackout typography ──────────────────────────────────────────────────
+   Silver text on graphite; warm brass is precision light, not prose.
+   Static text set in the accent color (headings, prices, labels, stat
+   values) demotes to soft silver. Interactive elements (links, buttons)
+   keep the warm accent: active states are exactly where it belongs. Roo
+   Blue is untouched. */
+html[data-theme="dark"] .text-accent,
+html[data-theme="dark"] .text-cyan-300 {
+  color: var(--color-text-display);
+}
+
+.hero-subtext-accent {
+  color: var(--color-text-accent);
+}
+
+html[data-theme="dark"] a.text-accent,
+html[data-theme="dark"] button.text-accent,
+html[data-theme="dark"] [role="button"].text-accent,
+html[data-theme="dark"] svg.text-accent {
+  color: var(--color-accent);
+}
+
+/* Gradient-clipped display text (hero line 2). Roo Blue keeps the brand
+   sweep. Blackout uses polished silver with a warm whisper at the tail. */
+.text-gradient-display {
+  background-image: var(--gradient-display-text);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Line 2: polished chrome — silver sweep with a warm whisper at the
+   tail. No blue. */
+/* Hero emphasis line: polished metallic gold — champagne specular at the
+   start, bright gold core, brass depth, champagne flash at the tail. */
+html[data-theme="dark"] .text-gradient-display {
+  background-image: linear-gradient(
+    92deg,
+    #fff3cd 0%,
+    #ffd76e 28%,
+    #e8b94a 52%,
+    #c9962e 74%,
+    #ffe9a8 100%
+  );
+}
+
+/* ── Roo Blue legacy visual compatibility ────────────────────────────────
+   Default mode is the pre-Blackout site. Tokenized components may keep
+   their semantic classes for Blackout, but these marker classes restore
+   the original Roo Blue surfaces, rings, and glows where broad tokens
+   changed the visual weight. */
+html:not([data-theme="dark"]) .ri-services-skeleton {
+  border-color: rgba(3, 105, 161, 0.2);
+  background-image: linear-gradient(
+    180deg,
+    rgba(13, 21, 38, 0.7),
+    rgba(8, 16, 29, 0.8)
+  );
+}
+
+html:not([data-theme="dark"]) .ri-services-heading {
+  color: #bae6fd;
+}
+
+html:not([data-theme="dark"]) .ri-services-subheading {
+  color: rgba(203, 213, 225, 0.9);
+}
+
+html:not([data-theme="dark"]) .ri-service-card {
+  border-color: rgba(3, 105, 161, 0.35);
+  background-image: linear-gradient(180deg, #0a1830, #091427);
+}
+
+html:not([data-theme="dark"]) .ri-service-icon-shell {
+  background-color: #0b2642;
+  border-color: rgba(2, 132, 199, 0.35);
+}
+
+html:not([data-theme="dark"]) .ri-service-icon {
+  color: #7dd3fc;
+}
+
+html:not([data-theme="dark"]) .ri-service-title {
+  color: #f1f5f9;
+}
+
+html:not([data-theme="dark"]) .ri-service-copy {
+  color: #cbd5e1;
+}
+
+html:not([data-theme="dark"]) .ri-bench-shell {
+  --tw-ring-color: rgba(255, 255, 255, 0.1);
+  background-image: linear-gradient(
+    180deg,
+    rgba(13, 21, 38, 0.7),
+    rgba(7, 12, 21, 0.85)
+  );
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1),
+    0 32px 110px rgba(0, 0, 0, 0.7);
+}
+
+html:not([data-theme="dark"]) .ri-bench-radial {
+  background-image: radial-gradient(
+    80% 60% at 50% 0%,
+    rgba(56, 189, 248, 0.18),
+    transparent 65%
+  );
+}
+
+html:not([data-theme="dark"]) .ri-bench-top-glow {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+html:not([data-theme="dark"]) .ri-bench-left-glow {
+  background-color: rgba(34, 211, 238, 0.1);
+}
+
+html:not([data-theme="dark"]) .ri-bench-right-glow {
+  background-color: rgba(56, 189, 248, 0.1);
+}
+
+html:not([data-theme="dark"]) .ri-bench-card {
+  --tw-ring-color: rgba(255, 255, 255, 0.1);
+  background-image: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.06),
+    rgba(255, 255, 255, 0.015)
+  );
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1),
+    0 18px 60px rgba(0, 0, 0, 0.55);
+}
+
+html:not([data-theme="dark"]) .ri-bench-card-top-glow {
+  background-color: rgba(34, 211, 238, 0.1);
+}
+
+html:not([data-theme="dark"]) .ri-bench-card-bottom-glow {
+  background-color: rgba(56, 189, 248, 0.08);
+}
+
+html:not([data-theme="dark"]) .ri-bench-card-rail {
+  background-image: linear-gradient(
+    180deg,
+    rgba(103, 232, 249, 0.7),
+    rgba(125, 211, 252, 0.3),
+    transparent
+  );
+}
+
+html:not([data-theme="dark"]) .ri-bench-game-title,
+html:not([data-theme="dark"]) .ri-bench-number {
+  color: #ffffff;
+}
+
+html:not([data-theme="dark"]) .ri-bench-game-rule {
+  background-image: linear-gradient(
+    90deg,
+    rgba(103, 232, 249, 0.7),
+    transparent
+  );
+}
+
+html:not([data-theme="dark"]) .ri-bench-metric-pill {
+  --tw-ring-color: rgba(255, 255, 255, 0.1);
+  background-color: rgba(255, 255, 255, 0.05);
+  color: rgba(241, 245, 249, 0.9);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1),
+    0 8px 22px rgba(0, 0, 0, 0.3);
+}
+
+html:not([data-theme="dark"]) .ri-bench-boost-pill {
+  --tw-ring-color: rgba(103, 232, 249, 0.25);
+  background-color: rgba(255, 255, 255, 0.05);
+  color: #cffafe;
+  box-shadow: 0 0 0 1px rgba(103, 232, 249, 0.25),
+    0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+html:not([data-theme="dark"]) .ri-bench-bars {
+  --tw-ring-color: rgba(255, 255, 255, 0.1);
+  background-color: rgba(0, 0, 0, 0.25);
+}
+
+html:not([data-theme="dark"]) .ri-bench-before-label,
+html:not([data-theme="dark"]) .ri-bench-legend {
+  color: rgba(203, 213, 225, 0.8);
+}
+
+html:not([data-theme="dark"]) .ri-bench-after-label {
+  color: rgba(207, 250, 254, 0.8);
+}
+
+html:not([data-theme="dark"]) .ri-bench-before-track {
+  --tw-ring-color: rgba(255, 255, 255, 0.1);
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+html:not([data-theme="dark"]) .ri-bench-before-fill {
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.3),
+    rgba(255, 255, 255, 0.15),
+    transparent
+  );
+}
+
+html:not([data-theme="dark"]) .ri-bench-after-track {
+  --tw-ring-color: rgba(103, 232, 249, 0.2);
+  background-color: rgba(34, 211, 238, 0.1);
+}
+
+html:not([data-theme="dark"]) .ri-bench-after-fill {
+  background-image: linear-gradient(
+    90deg,
+    rgba(56, 189, 248, 0.55),
+    rgba(125, 211, 252, 0.22),
+    transparent
+  );
+}
+
+html:not([data-theme="dark"]) .ri-bench-before-dot {
+  background-color: rgba(255, 255, 255, 0.6);
+}
+
+html:not([data-theme="dark"]) .ri-bench-after-dot {
+  background-color: rgba(103, 232, 249, 0.8);
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.28);
+}
+
+html:not([data-theme="dark"]) .ri-bench-hardware {
+  --tw-ring-color: rgba(255, 255, 255, 0.05);
+  background-color: rgba(0, 0, 0, 0.4);
+}
+
+html:not([data-theme="dark"]) .ri-bench-hardware-grid {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+html:not([data-theme="dark"]) .ri-bench-hardware-label {
+  color: #64748b;
+}
+
+html:not([data-theme="dark"]) .ri-bench-hardware-value {
+  color: #cbd5e1;
+}
+
+html:not([data-theme="dark"]) .ri-bench-pager {
+  --tw-ring-color: rgba(255, 255, 255, 0.1);
+  background-color: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1),
+    0 14px 45px rgba(0, 0, 0, 0.55);
+}
+
+html:not([data-theme="dark"]) .ri-bench-page-button {
+  --tw-ring-color: rgba(255, 255, 255, 0.1);
+  background-color: rgba(0, 0, 0, 0.2);
+}
+
+html:not([data-theme="dark"]) .ri-bench-page-button:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+html:not([data-theme="dark"]) .ri-bench-page-icon,
+html:not([data-theme="dark"]) .ri-bench-page-label {
+  color: rgba(226, 232, 240, 0.9);
+}
+
+html:not([data-theme="dark"]) .ri-packages-section {
+  color: #ffffff;
+}
+
+html:not([data-theme="dark"]) .ri-packages-skeleton {
+  border-color: rgba(3, 105, 161, 0.2);
+  background-image: linear-gradient(
+    180deg,
+    rgba(13, 21, 38, 0.7),
+    rgba(8, 16, 29, 0.8)
+  );
+}
+
+html:not([data-theme="dark"]) .ri-packages-heading {
+  color: #bae6fd;
+  filter: drop-shadow(0 0 15px rgba(56, 189, 248, 0.5));
+}
+
+html:not([data-theme="dark"]) .ri-packages-badge {
+  background-color: #0f172a;
+  color: #ecfeff;
+  border-color: rgba(34, 211, 238, 0.4);
+  box-shadow: 0 0 18px rgba(56, 189, 248, 0.7);
+}
+
+html:not([data-theme="dark"]) .ri-packages-badge-dot {
+  background-color: #34d399;
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.9);
+}
+
+html:not([data-theme="dark"]) .ri-packages-subheading {
+  color: rgba(203, 213, 225, 0.8);
+}
+
+html:not([data-theme="dark"]) .ri-packages-review-link {
+  color: #e2e8f0;
+}
+
+html:not([data-theme="dark"]) .ri-packages-review-link:hover {
+  color: #ffffff;
+}
+
+html:not([data-theme="dark"]) .ri-packages-review-stars {
+  color: #fbbf24;
+}
+
+html:not([data-theme="dark"]) .ri-packages-review-text {
+  text-decoration-color: #38bdf8;
+}
+
+html:not([data-theme="dark"]) .ri-package-card {
+  background-image: linear-gradient(180deg, #0f172a, #020617 52%, #0f172a);
+}
+
+html:not([data-theme="dark"]) .ri-package-card-highlighted {
+  border-color: rgba(56, 189, 248, 0.6);
+  box-shadow: 0 0 35px rgba(56, 189, 248, 0.4);
+}
+
+html:not([data-theme="dark"]) .ri-package-card-highlighted:hover {
+  box-shadow: 0 0 50px rgba(56, 189, 248, 0.6);
+}
+
+html:not([data-theme="dark"]) .ri-package-card-standard {
+  border-color: rgba(2, 132, 199, 0.4);
+  box-shadow: 0 0 25px rgba(14, 165, 233, 0.25);
+}
+
+html:not([data-theme="dark"]) .ri-package-card-standard:hover {
+  box-shadow: 0 0 35px rgba(14, 165, 233, 0.4);
+}
+
+html:not([data-theme="dark"]) .ri-package-tag-gold {
+  border-color: rgba(252, 211, 77, 0.7);
+}
+
+html:not([data-theme="dark"]) .ri-package-tag-blue {
+  background-color: #0369a1;
+  color: #ffffff;
+  box-shadow: 0 0 15px rgba(56, 189, 248, 0.6);
+}
+
+html:not([data-theme="dark"]) .ri-package-description,
+html:not([data-theme="dark"]) .ri-package-bullets,
+html:not([data-theme="dark"]) .ri-packages-divider-wrap {
+  color: rgba(203, 213, 225, 0.85);
+}
+
+html:not([data-theme="dark"]) .ri-package-suitable-label {
+  color: #ffffff;
+}
+
+html:not([data-theme="dark"]) .ri-package-suitable-pill {
+  background-color: rgba(12, 74, 110, 0.3);
+  color: #bae6fd;
+  border-color: rgba(2, 132, 199, 0.4);
+}
+
+html:not([data-theme="dark"]) .ri-package-suitable-dot {
+  background-color: #38bdf8;
+}
+
+html:not([data-theme="dark"]) .ri-package-divider {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+html:not([data-theme="dark"]) .ri-package-check {
+  color: #38bdf8;
+}
+
+html:not([data-theme="dark"]) .ri-package-empty {
+  color: #64748b;
+}
+
+html:not([data-theme="dark"]) .ri-package-empty-note {
+  color: rgba(148, 163, 184, 0.7);
+}
+
+html:not([data-theme="dark"]) .ri-package-details-button {
+  background-color: rgba(15, 23, 42, 0.4);
+  color: #e0f2fe;
+  border-color: rgba(14, 165, 233, 0.4);
+  box-shadow: 0 0 15px rgba(56, 189, 248, 0.2);
+}
+
+html:not([data-theme="dark"]) .ri-package-details-button:hover {
+  background-color: rgba(15, 23, 42, 0.7);
+  color: #ffffff;
+}
+
+html:not([data-theme="dark"]) .ri-package-book-button {
+  box-shadow: 0 0 20px rgba(56, 189, 248, 0.4);
+}
+
+html:not([data-theme="dark"]) .ri-packages-divider-text {
+  color: #f1f5f9;
+}
+
+html:not([data-theme="dark"]) .ri-packages-divider-line {
+  box-shadow: 0 0 30px rgba(56, 189, 248, 0.8);
+}
+
+html:not([data-theme="dark"]) .ri-hiw-section {
+  color: #ffffff;
+}
+
+html:not([data-theme="dark"]) .ri-hiw-video {
+  border-color: rgba(3, 105, 161, 0.4);
+  background-color: rgba(8, 18, 37, 0.7);
+  box-shadow: 0 0 26px rgba(14, 165, 233, 0.3);
+}
+
+html:not([data-theme="dark"]) .ri-hiw-heading {
+  color: #bae6fd;
+  filter: drop-shadow(0 0 15px rgba(56, 189, 248, 0.5));
+}
+
+html:not([data-theme="dark"]) .ri-hiw-subtitle {
+  color: #e6eef8;
+}
+
+html:not([data-theme="dark"]) .ri-hiw-card {
+  border-color: rgba(3, 105, 161, 0.3);
+  background-color: rgba(11, 17, 32, 0.8);
+  box-shadow: 0 0 25px rgba(14, 165, 233, 0.15);
+}
+
+html:not([data-theme="dark"]) .ri-hiw-card:hover {
+  box-shadow: 0 0 35px rgba(14, 165, 233, 0.25);
+}
+
+html:not([data-theme="dark"]) .ri-hiw-step-badge {
+  color: #e0f2fe;
+  background-color: rgba(12, 74, 110, 0.4);
+  border-color: rgba(3, 105, 161, 0.5);
+  box-shadow: 0 0 12px rgba(14, 165, 233, 0.3);
+}
+
+html:not([data-theme="dark"]) .ri-hiw-step-title {
+  color: #ffffff;
+}
+
+html:not([data-theme="dark"]) .ri-hiw-step-copy {
+  color: rgba(203, 213, 225, 0.9);
+}
+
+html:not([data-theme="dark"]) .ri-hiw-trust-copy {
+  color: rgba(148, 163, 184, 0.9);
+}
+
+html:not([data-theme="dark"]) .ri-hiw-trust-link {
+  background-image: linear-gradient(90deg, #38bdf8, #22d3ee);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+html:not([data-theme="dark"]) .ri-hiw-trust-link:hover {
+  background-image: linear-gradient(90deg, #67e8f9, #38bdf8);
+  filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.8));
+}
+
+/* ── Blackout de-blue compat layer ──────────────────────────────────────
+   Neutralizes literal sky/cyan/indigo Tailwind utilities that survive in
+   components. Gradient-clipped TEXT goes silver; gradient FILLS go
+   graphite; legacy sky borders/text go steel; legacy cyan-filled buttons
+   become black metal. Roo Blue is untouched. */
+html[data-theme="dark"] .bg-clip-text[class*="from-sky-"] {
+  background-image: linear-gradient(90deg, #f4f4f0, #b9bdc0);
+}
+
+/* Gradient FILLS go graphite ONLY on interactive elements. Generic divs
+   are excluded on purpose: translucent gradient overlays sit on top of
+   real media (How It Works videos) and must never become opaque. */
+html[data-theme="dark"] a[class*="from-sky-"]:not(.bg-clip-text),
+html[data-theme="dark"] button[class*="from-sky-"]:not(.bg-clip-text) {
+  background-image: linear-gradient(90deg, #2e2e33, #17171a);
+}
+
+/* Media tint overlays (video cards): keep them translucent — faint
+   silver-to-gold instead of sky/cyan. The video stays visible. */
+html[data-theme="dark"] [class*="from-sky-500/12"] {
+  background-image: linear-gradient(
+    135deg,
+    rgba(244, 244, 240, 0.05),
+    transparent 50%,
+    rgba(240, 195, 90, 0.07)
+  );
+}
+
+/* Decorative sky accent hairlines become gold energy lines. */
+html[data-theme="dark"] .h-1[class*="from-sky-"] {
+  background-image: linear-gradient(
+    90deg,
+    transparent,
+    rgba(240, 195, 90, 0.7),
+    transparent
+  );
+}
+
+html[data-theme="dark"] [class*="border-sky-"] {
+  border-color: rgba(178, 178, 172, 0.32);
+}
+
+html[data-theme="dark"] [class*="text-sky-"] {
+  color: #deded7;
+}
+
+html[data-theme="dark"] a[class*="bg-sky-"],
+html[data-theme="dark"] button[class*="bg-sky-"] {
+  background-color: rgba(32, 32, 36, 0.85);
+}
+
+html[data-theme="dark"] button[class*="bg-cyan-5"],
+html[data-theme="dark"] a[class*="bg-cyan-5"] {
+  background-color: #141417;
+  background-image: linear-gradient(
+    180deg,
+    rgba(244, 244, 240, 0.08),
+    transparent 40%
+  );
+  color: #ece7da;
+  border-color: rgba(240, 195, 90, 0.28);
+}
+
+html[data-theme="dark"] [class*="border-cyan-"] {
+  border-color: rgba(240, 195, 90, 0.3);
+}
+
+html[data-theme="dark"] [class*="border-indigo-"] {
+  border-color: rgba(160, 160, 158, 0.3);
 }
 
 /* CSS containment: prevent animation repaints from invalidating parent/sibling elements. */
@@ -489,13 +1883,9 @@ html.nav-past-logo .roo-logo {
 .glass-premium,
 .glass-lite {
   isolation: isolate;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background-image:
-    linear-gradient(180deg, rgba(7, 22, 45, 0.88), rgba(6, 18, 38, 0.72)),
-    radial-gradient(circle at top center, rgba(34, 211, 238, 0.08), transparent 58%);
-  box-shadow:
-    inset 0 1px 0 rgba(186, 230, 253, 0.08),
-    0 12px 30px rgba(2, 6, 23, 0.28);
+  border: 1px solid var(--color-border-soft);
+  background-image: var(--gradient-glass);
+  box-shadow: var(--highlight-glass-top), var(--shadow-surface);
 }
 
 html.animations-ready .glass-premium {
@@ -504,37 +1894,30 @@ html.animations-ready .glass-premium {
 }
 
 .glass-lite {
-  background-image:
-    linear-gradient(180deg, rgba(7, 22, 45, 0.96), rgba(6, 18, 38, 0.92)),
-    radial-gradient(circle at top center, rgba(34, 211, 238, 0.07), transparent 58%);
+  background-image: var(--gradient-glass-lite);
 }
 
 .glass-overlay {
-  background:
-    linear-gradient(180deg, rgba(2, 6, 23, 0.48), rgba(2, 6, 23, 0.62));
+  background: var(--gradient-overlay-scrim);
   -webkit-backdrop-filter: saturate(120%) blur(16px);
   backdrop-filter: saturate(120%) blur(16px);
 }
 
 .glass-card-surface {
-  box-shadow:
-    inset 0 1px 0 rgba(186, 230, 253, 0.08),
-    0 14px 34px rgba(2, 6, 23, 0.3);
+  box-shadow: var(--highlight-glass-top), var(--shadow-surface-deep);
 }
 
 .glass-menu-surface {
-  background-image:
-    linear-gradient(180deg, rgba(6, 18, 38, 0.95), rgba(6, 18, 38, 0.88)),
-    radial-gradient(circle at top center, rgba(34, 211, 238, 0.06), transparent 55%);
+  background-image: var(--gradient-glass-menu);
 }
 
-[class*="drop-shadow-[0_0"][class*="189,248"] {
+html[data-theme="dark"] [class*="drop-shadow-[0_0"][class*="189,248"] {
   filter: none !important;
-  text-shadow: 0 0 15px rgba(56, 189, 248, 0.5);
+  text-shadow: var(--text-shadow-heading);
 }
-[class*="drop-shadow-[0_0"][class*="211,238"] {
+html[data-theme="dark"] [class*="drop-shadow-[0_0"][class*="211,238"] {
   filter: none !important;
-  text-shadow: 0 0 18px rgba(34, 211, 238, 0.25);
+  text-shadow: var(--text-shadow-heading-soft);
 }
 
 /* Lightweight rendering path for browsers likely running software compositing. */
@@ -574,8 +1957,8 @@ html.low-performance-mode .low-perf-surface {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
   background-image: none !important;
-  background-color: rgba(6, 18, 38, 0.95) !important;
-  box-shadow: inset 0 1px 0 rgba(186, 230, 253, 0.05) !important;
+  background-color: var(--color-surface-solid) !important;
+  box-shadow: var(--highlight-glass-top) !important;
 }
 
 html.low-performance-mode .is-modal-blur .site-nav {
@@ -587,7 +1970,7 @@ html.low-performance-mode .low-perf-overlay,
 html.low-performance-mode .glass-overlay {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
-  background: rgba(2, 6, 23, 0.85) !important;
+  background: var(--color-overlay-solid) !important;
 }
 
 html.low-performance-mode .low-perf-glow {
@@ -659,7 +2042,7 @@ html.low-performance-mode .glass-lite,
 html.low-performance-mode .glass-menu-surface {
   box-shadow: none !important;
   background-image: none !important;
-  background-color: rgba(6, 18, 38, 0.95) !important;
+  background-color: var(--color-surface-solid) !important;
 }
 
 
@@ -680,7 +2063,7 @@ html.low-performance-mode .reservation-banner-surface {
 html.low-performance-mode .fps-boosts-button {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
-  background: rgba(15, 23, 42, 0.5) !important;
+  background: var(--color-surface-veil) !important;
 }
 
 /* Contain each major section to prevent cross-section paint invalidation.
@@ -744,7 +2127,7 @@ html.low-performance-mode .fixed[class*="bottom-4"] {
 /* Cheap text-shadow replacement for the drop-shadow glow on headings.
    text-shadow renders inline during text paint (no bitmap rasterization). */
 html.low-performance-mode [class*="drop-shadow-[0_0"][class*="189,248"] {
-  text-shadow: 0 0 8px rgba(56, 189, 248, 0.35);
+  text-shadow: var(--text-shadow-heading);
 }
 
 /* Navbar/banner layer promotion moved to low-perf mode only —
