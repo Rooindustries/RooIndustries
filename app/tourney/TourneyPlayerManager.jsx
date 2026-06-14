@@ -45,6 +45,7 @@ const emptyAddForm = {
   battlenet: "",
   rank: "",
   rolePlay: "",
+  secondaryRolePlay: "",
   registrationPool: "main",
   timezone: "",
   twitchUsername: "",
@@ -87,6 +88,14 @@ const statusLabel = (status) => {
 
 const poolLabel = (pool) =>
   pool === "substitute" ? "Substitute pool" : "Main pool";
+
+const getApprovalRoleOptions = (player = {}) =>
+  [
+    ...new Set([
+      player.primaryRolePlay || player.rolePlay,
+      player.secondaryRolePlay,
+    ]),
+  ].filter(Boolean);
 
 export default function TourneyPlayerManager({
   initialPlayers = [],
@@ -273,6 +282,12 @@ export default function TourneyPlayerManager({
         <span>
           <strong>{player.rolePlay}</strong>
           <small>{player.rank}</small>
+          {player.secondaryRolePlay ? (
+            <small>
+              Primary {player.primaryRolePlay || player.rolePlay} / Secondary{" "}
+              {player.secondaryRolePlay}
+            </small>
+          ) : null}
         </span>
         <span>
           <strong>{player.teamName || "TBD"}</strong>
@@ -304,16 +319,23 @@ export default function TourneyPlayerManager({
           </button>
           {player.status === "pending" ? (
             <>
-              <button
-                className="tourney-owner-link"
-                type="button"
-                disabled={isBusy}
-                onClick={() =>
-                  updatePlayers({ action: "approve", playerId: player.id })
-                }
-              >
-                Approve
-              </button>
+              {getApprovalRoleOptions(player).map((role) => (
+                <button
+                  className="tourney-owner-link"
+                  type="button"
+                  disabled={isBusy}
+                  key={role}
+                  onClick={() =>
+                    updatePlayers({
+                      action: "approve",
+                      playerId: player.id,
+                      approvedRolePlay: role,
+                    })
+                  }
+                >
+                  Accept as {role}
+                </button>
+              ))}
               <button
                 className="tourney-owner-link is-danger"
                 type="button"
@@ -497,11 +519,41 @@ export default function TourneyPlayerManager({
               <select
                 required
                 value={addForm.rolePlay}
-                onChange={(event) => updateAddField("rolePlay", event.target.value)}
+                onChange={(event) => {
+                  const nextRole = event.target.value;
+                  setAddForm((current) => ({
+                    ...current,
+                    rolePlay: nextRole,
+                    secondaryRolePlay:
+                      current.secondaryRolePlay === nextRole
+                        ? ""
+                        : current.secondaryRolePlay,
+                  }));
+                }}
               >
                 <option value="">Choose role</option>
                 {roleOptions.map((role) => (
                   <option key={role} value={role}>
+                    {role}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Secondary Role
+              <select
+                value={addForm.secondaryRolePlay}
+                onChange={(event) =>
+                  updateAddField("secondaryRolePlay", event.target.value)
+                }
+              >
+                <option value="">No secondary role</option>
+                {roleOptions.map((role) => (
+                  <option
+                    disabled={role === addForm.rolePlay}
+                    key={role}
+                    value={role}
+                  >
                     {role}
                   </option>
                 ))}

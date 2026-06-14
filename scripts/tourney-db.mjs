@@ -31,6 +31,8 @@ const migrate = async () => {
       battlenet text not null,
       rank_name text not null,
       role_play text not null,
+      secondary_role_play text not null default '',
+      approved_role_play text not null default '',
       time_zone text not null default '',
       twitch_username text,
       team_name text,
@@ -81,6 +83,14 @@ const migrate = async () => {
   await sql`
     alter table tourney_players
     add column if not exists registration_pool text not null default 'main'
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists secondary_role_play text not null default ''
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists approved_role_play text not null default ''
   `;
   await sql`
     alter table tourney_players

@@ -317,7 +317,7 @@ export default function BookingForm({ isMobile }) {
             key={`upgrade-link-${idx}`}
             to={`/#${UPGRADE_FAQ_HASH}`}
             className="underline underline-offset-2 transition"
-            style={{ color: "#22D3EE" }}
+            style={{ color: "var(--color-accent)" }}
             onClick={(event) => {
               handleHomeSectionLink(event, `#${UPGRADE_FAQ_HASH}`);
               closeVertexModal();
@@ -1429,20 +1429,20 @@ export default function BookingForm({ isMobile }) {
   return (
     <>
       <div
-        className={`text-white transition-opacity duration-300 ${
+        className={`text-ink transition-opacity duration-300 ${
           pageFadeIn ? "opacity-100" : "opacity-0"
         }`}
       >
         {!settings ? (
           <div className="mt-20 flex flex-col items-center gap-3 text-center">
-            <div className="text-sky-300">
+            <div className="text-accent">
               {settingsError || "Loading..."}
             </div>
             {settingsError && (
               <button
                 type="button"
                 onClick={() => setSettingsReloadKey((key) => key + 1)}
-                className="rounded-lg border border-sky-400/60 bg-sky-500/10 px-4 py-2 text-sm font-semibold text-sky-100 transition hover:bg-sky-500/20 focus:outline-none focus:ring-2 focus:ring-sky-300/60"
+                className="rounded-lg border border-info-border bg-info-soft px-4 py-2 text-sm font-semibold text-info-text transition hover:bg-surface-hover-accent focus:outline-none focus:ring-2 focus:ring-[color:var(--color-focus-ring)]"
               >
                 Retry
               </button>
@@ -1451,15 +1451,15 @@ export default function BookingForm({ isMobile }) {
         ) : (
           <>
             {selectedPackage.title && (
-              <div className="mb-8 max-w-lg mx-auto bg-[#0b1120]/70 border border-sky-700/40 rounded-xl p-6 text-center shadow-[0_0_15px_rgba(14,165,233,0.25)]">
+              <div className="mb-8 max-w-lg mx-auto bg-surface-card border border-line-input rounded-xl p-6 text-center shadow-[0_0_15px_rgba(14,165,233,0.25)]">
                 {selectedPackage.tag && (
                   <div className="mb-2">
-                    <span className="bg-sky-500/80 text-xs font-semibold px-3 py-1 rounded-full shadow-[0_0_8px_rgba(56,189,248,0.4)]">
+                    <span className="bg-info text-accent-contrast text-xs font-semibold px-3 py-1 rounded-full shadow-info-soft">
                       {selectedPackage.tag}
                     </span>
                   </div>
                 )}
-                <h3 className="text-2xl font-bold text-sky-300">
+                <h3 className="text-2xl font-bold text-accent">
                   {selectedPackage.title}
                 </h3>
                 <PriceDisplay pkg={selectedPackage} size="summary" className="mt-3" />
@@ -1475,12 +1475,12 @@ export default function BookingForm({ isMobile }) {
                   exit={{ opacity: 0, y: -10 }}
                   transition={{ duration: 0.3, ease: "easeInOut" }}
                   // NOTE: removed backdrop-blur-sm to fix text fuzziness
-                  className="max-w-3xl mx-auto bg-[#0b1120]/90 border border-sky-700/30 rounded-2xl p-8 text-center shadow-[0_0_25px_rgba(14,165,233,0.15)]"
+                  className="max-w-3xl mx-auto bg-surface-card border border-line-input rounded-2xl p-8 text-center shadow-[0_0_25px_rgba(14,165,233,0.15)]"
                 >
-                  <h3 className="text-sky-300 text-lg font-semibold mb-2">
+                  <h3 className="text-accent text-lg font-semibold mb-2">
                     Select a Date and Time for Your Session
                   </h3>
-                  <p className="text-xs text-sky-400/70 mb-5">
+                  <p className="text-xs text-accent mb-5">
                     Times are shown in{" "}
                     <span className="font-semibold">your local time</span> (
                     {userTimeZone}).
@@ -1488,10 +1488,10 @@ export default function BookingForm({ isMobile }) {
                   {hasActiveHold && (
                     <div className="mb-6 rounded-xl border border-purple-500/40 bg-purple-500/10 px-4 py-3 text-left">
                       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                        <p className="text-xs sm:text-sm text-white font-medium">
+                        <p className="text-xs sm:text-sm text-ink font-medium">
                           Slot <strong>{holdLocalTimeLabel || "--"}</strong> is
                           reserved.{" "}
-                          <span className="text-sky-200">
+                          <span className="text-info-text">
                             Expires in {formatCountdown(holdCountdownMs)}.
                           </span>
                         </p>
@@ -1523,11 +1523,11 @@ export default function BookingForm({ isMobile }) {
                               )
                             )
                           }
-                          className="text-sky-400 hover:text-sky-300 transition"
+                          className="text-accent hover:text-accent transition"
                         >
                           ‹
                         </button>
-                        <h4 className="text-xl font-semibold text-sky-200">
+                        <h4 className="text-xl font-semibold text-info-text">
                           {month.toLocaleString("default", {
                             month: "long",
                           })}{" "}
@@ -1543,16 +1543,16 @@ export default function BookingForm({ isMobile }) {
                               )
                             )
                           }
-                          className="text-sky-400 hover:text-sky-300 transition"
+                          className="text-accent hover:text-accent transition"
                         >
                           ›
                         </button>
                       </div>
 
-                      <div className="grid grid-cols-7 gap-2 text-sm text-sky-300 mb-2">
+                      <div className="grid grid-cols-7 gap-2 text-sm text-accent mb-2">
                         {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
                           (d) => (
-                            <div key={d} className="font-semibold text-sky-400/70">
+                            <div key={d} className="font-semibold text-accent">
                               {d}
                             </div>
                           )
@@ -1582,13 +1582,13 @@ export default function BookingForm({ isMobile }) {
                           let dotClass = "";
                           if (slotInfo?.color === "red") {
                             dotClass =
-                              "bg-red-500 shadow-[0_0_6px_rgba(248,113,113,0.9)]";
+                              "bg-danger shadow-danger-soft";
                           } else if (slotInfo?.color === "yellow") {
                             dotClass =
-                              "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.9)]";
+                              "bg-warning shadow-[0_0_6px_rgba(251,191,36,0.55)]";
                           } else if (slotInfo?.color === "green") {
                             dotClass =
-                              "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)]";
+                              "bg-success shadow-success-soft";
                           }
 
                           return (
@@ -1598,10 +1598,10 @@ export default function BookingForm({ isMobile }) {
                               onClick={() => handleDayClick(day)}
                               className={`p-2 rounded-lg transition-all duration-200 flex flex-col items-center justify-center ${
                                 isSelected
-                                  ? "bg-sky-600 text-white shadow-[0_0_12px_rgba(56,189,248,0.6)]"
+                                  ? "bg-accent-strong text-accent-contrast shadow-glow-soft"
                                   : disabled
-                                  ? "text-slate-500 cursor-not-allowed"
-                                  : "hover:bg-sky-700/40 text-sky-200"
+                                  ? "text-ink-muted cursor-not-allowed"
+                                  : "hover:bg-surface-hover-accent text-info-text"
                               }`}
                             >
                               <span>{day}</span>
@@ -1614,17 +1614,17 @@ export default function BookingForm({ isMobile }) {
                           );
                         })}
                       </div>
-                      <div className="mt-3 flex flex-wrap justify-center gap-3 text-[10px] text-sky-300">
+                      <div className="mt-3 flex flex-wrap justify-center gap-3 text-[10px] text-accent">
                         <div className="flex items-center gap-1 whitespace-nowrap">
-                          <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)]" />
+                          <span className="h-2 w-2 rounded-full bg-success shadow-success-soft" />
                           <span>Fully Available</span>
                         </div>
                         <div className="flex items-center gap-1 whitespace-nowrap">
-                          <span className="h-2 w-2 rounded-full bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.9)]" />
+                          <span className="h-2 w-2 rounded-full bg-warning shadow-[0_0_6px_rgba(251,191,36,0.55)]" />
                           <span>Limited Slots</span>
                         </div>
                         <div className="flex items-center gap-1 whitespace-nowrap">
-                          <span className="h-2 w-2 rounded-full bg-red-500 shadow-[0_0_6px_rgba(248,113,113,0.9)]" />
+                          <span className="h-2 w-2 rounded-full bg-danger shadow-danger-soft" />
                           <span>Fully Booked</span>
                         </div>
                         <div className="flex items-center gap-1 whitespace-nowrap">
@@ -1632,14 +1632,14 @@ export default function BookingForm({ isMobile }) {
                           <span>Temporarily Reserved</span>
                         </div>
                       </div>
-                      <p className="mt-2 text-[10px] font-bold text-sky-100 text-center">
+                      <p className="mt-2 text-[10px] font-bold text-info-text text-center">
                         All times shown are in your local timezone ({userTimeZone.replace(/_/g, " ")})
                       </p>
                     </div>
 
                     {selectedDate && (
                       <div className="flex-1">
-                        <p className="text-sky-200 mb-3 font-semibold">
+                        <p className="text-info-text mb-3 font-semibold">
                           Availability for{" "}
                           {selectedDate.toLocaleDateString(undefined, {
                             weekday: "long",
@@ -1680,20 +1680,20 @@ export default function BookingForm({ isMobile }) {
                                 disabled={t.disabled && !isMyHold}
                                 className={`py-2 rounded-lg border transition-all duration-200 ${
                                   t.isUnavailable
-                                    ? "bg-slate-900/30 border-slate-700/30 text-slate-600 cursor-not-allowed"
+                                    ? "bg-surface-input border-line-soft text-ink-muted cursor-not-allowed opacity-60"
                                     : t.isExpiredHold
-                                    ? "bg-slate-800/30 border-slate-600/30 text-slate-500 cursor-not-allowed line-through opacity-50"
+                                    ? "bg-surface-input border-line-soft text-ink-muted cursor-not-allowed line-through opacity-50"
                                     : t.isBooked
-                                    ? "bg-red-900/40 border-red-700/40 text-red-400 cursor-not-allowed"
+                                    ? "bg-danger-soft border-danger-border text-danger-text cursor-not-allowed"
                                     : t.isHeldOther
                                     ? "bg-purple-900/40 border-purple-700/50 text-purple-300 cursor-not-allowed"
                                     : isMyHold
                                     ? "bg-purple-900/50 border-purple-500/60 text-purple-100 shadow-[0_0_14px_rgba(168,85,247,0.7)] hover:border-purple-400 hover:bg-purple-800/50"
                                     : t.disabled
-                                    ? "bg-slate-800/40 text-slate-500 border-slate-700/50 cursor-not-allowed"
+                                    ? "bg-surface-input text-ink-muted border-line-soft cursor-not-allowed"
                                     : selectedSlot?.slotId === t.slotId
-                                    ? "bg-sky-600 text-white border-sky-400 shadow-[0_0_15px_rgba(56,189,248,0.6)]"
-                                    : "border-sky-700/40 hover:border-sky-500/60 hover:bg-sky-700/20"
+                                    ? "bg-accent-strong text-accent-contrast border-info-border shadow-glow-soft"
+                                    : "border-line-input hover:border-info-border hover:bg-surface-hover-accent"
                                 }`}
                               >
                                 {t.localLabel}
@@ -1748,7 +1748,7 @@ export default function BookingForm({ isMobile }) {
                   </div>
 
                   {errorStep1 && (
-                    <p className="text-red-400 mt-3 text-sm">{errorStep1}</p>
+                    <p className="text-danger-text mt-3 text-sm">{errorStep1}</p>
                   )}
                 </motion.div>
               )}
@@ -1761,14 +1761,14 @@ export default function BookingForm({ isMobile }) {
                   exit={{ opacity: 0, y: -10 }}
                   transition={{ duration: 0.3, ease: "easeInOut" }}
                   // NOTE: removed backdrop-blur-sm
-                  className="max-w-2xl mx-auto bg-[#0b1120]/90 border border-sky-700/30 rounded-2xl p-8 shadow-[0_0_25px_rgba(14,165,233,0.15)] space-y-6"
+                  className="max-w-2xl mx-auto bg-surface-card border border-line-input rounded-2xl p-8 shadow-[0_0_25px_rgba(14,165,233,0.15)] space-y-6"
                 >
                   {hasActiveHold && (
                     <div className="bg-purple-500/10 border border-purple-500/40 p-3 rounded-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                      <p className="text-xs text-white font-medium">
+                        <p className="text-xs text-ink font-medium">
                         Slot <strong>{holdLocalTimeLabel || "--"}</strong> is
                         reserved.{" "}
-                        <span className="text-sky-200">
+                        <span className="text-info-text">
                           Expires in {formatCountdown(holdCountdownMs)}.
                         </span>
                       </p>
@@ -1790,7 +1790,7 @@ export default function BookingForm({ isMobile }) {
                     placeholder="Discord (e.g. Servi#1234 or @Servi)"
                     onChange={handleChange}
                     value={form.discord}
-                    className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 focus:outline-none focus:border-sky-500 transition"
+                    className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
                   />
                   <input
                     name="email"
@@ -1798,21 +1798,21 @@ export default function BookingForm({ isMobile }) {
                     placeholder="Email"
                     onChange={handleChange}
                     value={form.email}
-                    className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 focus:outline-none focus:border-sky-500 transition"
+                    className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
                   />
                   <input
                     name="specs"
                     placeholder="PC Specs"
                     onChange={handleChange}
                     value={form.specs}
-                    className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 focus:outline-none focus:border-sky-500 transition"
+                    className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
                   />
                   <input
                     name="mainGame"
                     placeholder="Main use case (Game/Apps)"
                     onChange={handleChange}
                     value={form.mainGame}
-                    className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 focus:outline-none focus:border-sky-500 transition"
+                    className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
                   />
 
                   <textarea
@@ -1820,10 +1820,10 @@ export default function BookingForm({ isMobile }) {
                     placeholder="Any extra requirements?"
                     onChange={handleChange}
                     value={form.notes}
-                    className="w-full bg-[#0b1120]/60 border border-sky-700/30 rounded-lg p-3 h-24 focus:outline-none focus:border-sky-500 transition"
+                    className="w-full bg-surface-input border border-line-input rounded-lg p-3 h-24 focus:outline-none focus:border-info-border transition"
                   ></textarea>
 
-                  <p className="text-sky-400/60 text-xs">
+                  <p className="text-accent text-xs">
                     Please read the FAQ before booking — it answers everything you
                     need to know.
                   </p>
@@ -1834,7 +1834,7 @@ export default function BookingForm({ isMobile }) {
                         releaseHold(true);
                         setStep(1);
                       }}
-                      className="w-1/2 bg-slate-700/40 hover:bg-slate-700/60 py-3 rounded-lg font-semibold transition"
+                      className="w-1/2 bg-surface-input hover:bg-surface-hover py-3 rounded-lg font-semibold transition"
                     >
                       Back
                     </button>
@@ -1868,7 +1868,7 @@ export default function BookingForm({ isMobile }) {
                     </button>
 
                     {errorStep2 && (
-                      <p className="text-red-400 text-sm mt-3">{errorStep2}</p>
+                      <p className="text-danger-text text-sm mt-3">{errorStep2}</p>
                     )}
                   </div>
                 </motion.div>
@@ -1898,13 +1898,13 @@ export default function BookingForm({ isMobile }) {
                   variants={modalContainerVariants}
                   // We don't set initial/animate here because they inherit from the parent,
                   // but since we defined specific variants for the children, it works automatically.
-                  className="relative w-full max-w-md bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 border border-sky-400/60 rounded-2xl shadow-[0_0_35px_rgba(56,189,248,0.4)] p-6 text-center transition-all duration-500 ease-in-out hover:shadow-[0_0_42px_rgba(56,189,248,0.5)]"
+                  className="relative w-full max-w-md bg-panel border border-info-border rounded-2xl shadow-glow-strong p-6 text-center transition-all duration-500 ease-in-out hover:shadow-glow-strong"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <motion.button
                     aria-label="Close"
                     variants={itemVariants}
-                    className="absolute right-3 top-3 text-sky-200 hover:text-white transition text-2xl z-10"
+                    className="absolute right-3 top-3 text-info-text hover:text-white transition text-2xl z-10"
                     onClick={() => {
                       document.body.classList.remove("is-modal-blur");
                       setShowVertexModal(false);
@@ -1914,7 +1914,7 @@ export default function BookingForm({ isMobile }) {
                   </motion.button>
 
                   <motion.div variants={itemVariants}>
-                    <div className="inline-flex items-center px-4 py-1.5 rounded-full text-xs font-semibold text-white bg-[#1fa7ff] shadow-[0_0_18px_rgba(31,167,255,0.6)] mb-4">
+                    <div className="inline-flex items-center px-4 py-1.5 rounded-full text-xs font-semibold text-accent-contrast bg-info shadow-info-soft mb-4">
                       {displayPackage?.tag ||
                         "For All Budget, Mid-Ranged and High End PCs"}
                     </div>
@@ -1922,7 +1922,7 @@ export default function BookingForm({ isMobile }) {
 
                   <motion.h3
                     variants={itemVariants}
-                    className="text-2xl font-bold text-sky-100"
+                    className="text-2xl font-bold text-info-text"
                   >
                     {displayPackage?.title || DEFAULT_VERTEX_PACKAGE.title}
                   </motion.h3>
@@ -1937,7 +1937,7 @@ export default function BookingForm({ isMobile }) {
                     />
                   </motion.div>
 
-                  <motion.ul className="mt-4 space-y-2 text-sm text-sky-100 text-left">
+                  <motion.ul className="mt-4 space-y-2 text-sm text-info-text text-left">
                     {(displayPackage?.features &&
                     displayPackage.features.length > 0
                       ? displayPackage.features
@@ -1962,7 +1962,7 @@ export default function BookingForm({ isMobile }) {
                         variants={itemVariants}
                         className="flex items-start gap-2"
                       >
-                        <span className="text-sky-400 mt-0.5">-</span>
+                        <span className="text-accent mt-0.5">-</span>
                         <span className="flex-1">
                           {renderFeatureWithUpgradeLink(text)}
                         </span>

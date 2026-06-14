@@ -152,41 +152,41 @@ export default function RefRegister() {
   }
 
   return (
-    <section className="pt-32 px-6 pb-20 min-h-screen text-white flex flex-col items-center">
-      <h1 className="text-4xl font-extrabold text-center text-sky-300 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+    <section className="pt-32 px-6 pb-20 min-h-screen text-ink flex flex-col items-center">
+      <h1 className="text-4xl font-extrabold text-center text-accent drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
         Referral Creator Registration
       </h1>
-      <p className="text-slate-400 mt-3 text-center max-w-md text-base">
+      <p className="text-ink-muted mt-3 text-center max-w-md text-base">
         Create your referral account and start earning commissions.
       </p>
 
       <form
         onSubmit={handleRegister}
-        className="mt-12 w-full max-w-md 
-                  bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 backdrop-blur-xl 
-                  border border-sky-700/40 
-                  shadow-[0_0_35px_rgba(56,189,248,0.35)]
+        className="mt-12 w-full max-w-md
+                  bg-panel backdrop-blur-xl
+                  border border-line-input
+                  shadow-[var(--shadow-card-glow)]
                   rounded-2xl p-8 space-y-7"
       >
         {/* Discord Username */}
         <div>
-          <label className="text-sky-300 text-sm font-semibold">
+          <label className="text-accent text-sm font-semibold">
             Discord Username
           </label>
           <input
             value={discordUsername}
             onChange={(e) => setDiscordUsername(e.target.value)}
             placeholder="e.g. @serviroo"
-            className="w-full p-4 mt-1 bg-[#0c162a] border border-sky-800/40 rounded-xl outline-none focus:border-sky-500 transition text-base"
+            className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl outline-none focus:border-info-border transition text-base"
           />
-          <p className="text-slate-400 text-xs mt-1">
+          <p className="text-ink-muted text-xs mt-1">
             Use your Discord username. Real name is not required.
           </p>
         </div>
 
         {/* Email */}
         <div>
-          <label className="text-sky-300 text-sm font-semibold">
+          <label className="text-accent text-sm font-semibold">
             Login Email
           </label>
           <input
@@ -194,13 +194,13 @@ export default function RefRegister() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="Email you sign in with"
-            className="w-full p-4 mt-1 bg-[#0c162a] border border-sky-800/40 rounded-xl outline-none focus:border-sky-500 transition text-base"
+            className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl outline-none focus:border-info-border transition text-base"
           />
         </div>
 
         {/* PayPal Email */}
         <div>
-          <label className="text-sky-300 text-sm font-semibold">
+          <label className="text-accent text-sm font-semibold">
             PayPal Email (for payouts)
           </label>
           <input
@@ -208,33 +208,33 @@ export default function RefRegister() {
             value={paypalEmail}
             onChange={(e) => setPaypalEmail(e.target.value)}
             placeholder="Email used for your PayPal account"
-            className="w-full p-4 mt-1 bg-[#0c162a] border border-sky-800/40 rounded-xl outline-none focus:border-sky-500 transition text-base"
+            className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl outline-none focus:border-info-border transition text-base"
           />
-          <p className="text-slate-400 text-xs mt-1">
+          <p className="text-ink-muted text-xs mt-1">
             We’ll send your commissions to this PayPal address.
           </p>
         </div>
 
         {/* Referral Code */}
         <div>
-          <label className="text-sky-300 text-sm font-semibold">
+          <label className="text-accent text-sm font-semibold">
             Referral Code
           </label>
           <input
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
             placeholder="Custom referral code (e.g. yourname)"
-            className={`w-full p-4 mt-1 bg-[#0c162a] border rounded-xl outline-none focus:border-sky-500 transition text-base ${
-              slugAvailable === false ? "border-red-500" : "border-sky-800/40"
+            className={`w-full p-4 mt-1 bg-surface-input border rounded-xl outline-none focus:border-info-border transition text-base ${
+              slugAvailable === false ? "border-danger-border" : "border-line-input"
             }`}
           />
           {slugAvailable === false && (
-            <p className="text-red-400 text-sm mt-1">
+            <p className="text-danger-text text-sm mt-1">
               This referral code is already taken.
             </p>
           )}
           {slugAvailable === true && slug && (
-            <p className="text-green-400 text-sm mt-1">
+            <p className="text-success-text text-sm mt-1">
               Referral code is available.
             </p>
           )}
@@ -242,19 +242,19 @@ export default function RefRegister() {
 
         {/* Password */}
         <div>
-          <label className="text-sky-300 text-sm font-semibold">Password</label>
+          <label className="text-accent text-sm font-semibold">Password</label>
           <input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Enter password"
-            className="w-full p-4 mt-1 bg-[#0c162a] border border-sky-800/40 rounded-xl outline-none focus:border-sky-500 transition text-base"
+            className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl outline-none focus:border-info-border transition text-base"
           />
         </div>
 
         {/* Confirm Password */}
         <div>
-          <label className="text-sky-300 text-sm font-semibold">
+          <label className="text-accent text-sm font-semibold">
             Confirm Password
           </label>
           <input
@@ -262,7 +262,7 @@ export default function RefRegister() {
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
             placeholder="Confirm password"
-            className="w-full p-4 mt-1 bg-[#0c162a] border border-sky-800/40 rounded-xl outline-none focus:border-sky-500 transition text-base"
+            className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl outline-none focus:border-info-border transition text-base"
           />
         </div>
 
@@ -287,8 +287,8 @@ export default function RefRegister() {
         <div
           className={`fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-xl text-white text-sm font-semibold shadow-lg transition-all ${
             toast.type === "success"
-              ? "bg-green-600 shadow-[0_0_25px_rgba(34,197,94,0.5)]"
-              : "bg-red-600 shadow-[0_0_25px_rgba(239,68,68,0.5)]"
+              ? "bg-success shadow-success-soft"
+              : "bg-danger shadow-danger-soft"
           }`}
         >
           {toast.message}

@@ -11,7 +11,7 @@ import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS, readHomeSectionData } fro
 
 const titleClass =
   "text-3xl sm:text-[40px] md:text-[48px] leading-tight font-extrabold text-center tracking-tight " +
-  "text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]";
+  "text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]";
 
 const getReviewAvatarUrl = (pfp) => {
   const optimized = urlFor(pfp)
@@ -46,7 +46,7 @@ export default function StreamerYoutuberReviews({ initialData = null }) {
   }, [initialData]);
 
   const sectionClass =
-    "pt-6 sm:pt-8 pb-4 sm:pb-6 text-center text-white relative overflow-hidden";
+    "pt-6 sm:pt-8 pb-4 sm:pb-6 text-center text-ink relative overflow-hidden";
 
   useEffect(() => {
     if (typeof IntersectionObserver === "undefined" || !sectionRef.current) {
@@ -100,15 +100,15 @@ export default function StreamerYoutuberReviews({ initialData = null }) {
     <section ref={sectionRef} className={sectionClass}>
       <div className="px-4 sm:px-6 mb-8">
         <h2 className={`${titleClass} mb-3`}>{data?.title || defaultTitle}</h2>
-        <p className="text-slate-300/90 text-base sm:text-lg">
+        <p className="text-ink-secondary text-base sm:text-lg">
           {data?.subtitle || defaultSubtitle}
         </p>
       </div>
 
       {isLoading ? (
         <div className="px-4 flex gap-5 overflow-hidden justify-center">
-          <div className="w-[420px] sm:w-[520px] h-[260px] sm:h-[290px] rounded-2xl bg-slate-900/60 border border-slate-700/50 animate-pulse" />
-          <div className="hidden sm:block w-[520px] h-[290px] rounded-2xl bg-slate-900/60 border border-slate-700/50 animate-pulse" />
+          <div className="w-[420px] sm:w-[520px] h-[260px] sm:h-[290px] rounded-2xl bg-skeleton border border-line-input animate-pulse" />
+          <div className="hidden sm:block w-[520px] h-[290px] rounded-2xl bg-skeleton border border-line-input animate-pulse" />
         </div>
       ) : (
         <InfiniteDraggableCarousel reviews={reviews} />
@@ -143,7 +143,7 @@ function CompactStarRating({ rating = 5 }) {
             )}
             {isHalf ? (
               <div className="relative">
-                <Star className="w-4 h-4 text-slate-600 absolute" />
+                <Star className="w-4 h-4 text-ink-muted absolute" />
                 <div className="overflow-hidden w-[50%]">
                   <Star
                     className="w-4 h-4 text-yellow-400 fill-yellow-400"
@@ -156,7 +156,7 @@ function CompactStarRating({ rating = 5 }) {
             ) : (
               <Star
                 className={`w-4 h-4 relative ${
-                  isEmpty ? "text-slate-600" : "text-yellow-400 fill-yellow-400"
+                  isEmpty ? "text-ink-muted" : "text-yellow-400 fill-yellow-400"
                 }`}
                 style={{
                   filter: isEmpty
@@ -190,9 +190,9 @@ function ReviewCard({ review }) {
     <div
       className="flex-shrink-0 w-[420px] sm:w-[520px] h-[260px] sm:h-[290px] rounded-2xl select-none pointer-events-none flex flex-col transition-all duration-300"
       style={{
-        background: "rgba(12,22,40,0.95)",
+        background: "var(--color-surface-solid)",
         boxShadow: "none",
-        border: isVip ? "2px solid #fbbf24" : "1px solid rgba(71,85,105,0.5)",
+        border: isVip ? "2px solid #fbbf24" : "1px solid var(--color-border-soft)",
       }}
     >
       <div className="relative px-4 py-5 sm:px-6 sm:py-6 flex flex-col h-full overflow-hidden">
@@ -214,7 +214,7 @@ function ReviewCard({ review }) {
               className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full object-cover flex-shrink-0 ${
                 isVip
                   ? "border-2 border-yellow-300"
-                  : "border-2 border-sky-500/30"
+                  : "border-2 border-info-border"
               }`}
               loading="lazy"
               decoding="async"
@@ -234,7 +234,7 @@ function ReviewCard({ review }) {
 
           <span
             className={`font-semibold text-lg sm:text-xl truncate ${
-              isVip ? "text-yellow-300" : "text-sky-300"
+              isVip ? "text-yellow-300" : "text-accent"
             }`}
           >
             {review.name}
@@ -262,7 +262,7 @@ function ReviewCard({ review }) {
           )}
 
           {/* Review Text - Quotes removed here */}
-          <p className="text-slate-300 text-sm sm:text-base leading-relaxed italic break-words overflow-hidden line-clamp-3 mb-1">
+          <p className="text-ink-secondary text-sm sm:text-base leading-relaxed italic break-words overflow-hidden line-clamp-3 mb-1">
             {review.text}
           </p>
 
@@ -270,7 +270,7 @@ function ReviewCard({ review }) {
           {review.profession && (
             <p
               className={`font-medium text-sm sm:text-base flex-shrink-0 mt-auto pt-1 ${
-                isVip ? "text-yellow-300" : "text-cyan-400"
+                isVip ? "text-yellow-300" : "text-accent"
               }`}
             >
               {review.profession}
@@ -543,7 +543,7 @@ function InfiniteDraggableCarousel({ reviews }) {
 
   if (reviews.length === 0) {
     return (
-      <div className="text-slate-400 text-center py-12">No reviews yet</div>
+      <div className="text-ink-muted text-center py-12">No reviews yet</div>
     );
   }
 

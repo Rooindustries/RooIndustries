@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { FaDiscord } from "react-icons/fa";
+import { Moon, Tv } from "lucide-react";
 import BackButton from "./BackButton";
 import DiscordGuideBanner from "./DiscordGuideBanner";
 import {
@@ -25,6 +26,59 @@ const canAnimateLogo = () => {
     !navigator?.connection?.saveData;
 };
 
+// Two themes only: "default" (Roo Blue, the existing site) and "dark"
+// (Blackout). There is no light mode. Legacy stored values normalize
+// to "default".
+const THEME_STORAGE_KEY = "roo-theme";
+const THEME_LABELS = {
+  default: "Roo Blue",
+  dark: "Blackout",
+};
+
+const normalizeTheme = (value) => (value === "dark" ? "dark" : "default");
+
+const updateThemeMeta = (theme) => {
+  if (typeof document === "undefined") return;
+  const themeMeta = document.querySelector('meta[name="theme-color"]');
+  if (!themeMeta) return;
+  themeMeta.setAttribute(
+    "content",
+    theme === "dark" ? "#070707" : "#000040"
+  );
+};
+
+const readTheme = () => {
+  if (typeof window === "undefined") return "default";
+  try {
+    return normalizeTheme(window.localStorage.getItem(THEME_STORAGE_KEY));
+  } catch {
+    return "default";
+  }
+};
+
+const applyTheme = (theme, { persist = true } = {}) => {
+  const normalized = normalizeTheme(theme);
+
+  if (typeof document !== "undefined") {
+    document.documentElement.dataset.theme = normalized;
+    updateThemeMeta(normalized);
+  }
+
+  if (persist && typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, normalized);
+    } catch {}
+
+    window.dispatchEvent(
+      new CustomEvent("roo:theme-change", {
+        detail: { theme: normalized },
+      })
+    );
+  }
+
+  return normalized;
+};
+
 export default function Navbar({ routeShell = "browser" }) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -32,6 +86,7 @@ export default function Navbar({ routeShell = "browser" }) {
   const [proofOpen, setProofOpen] = useState(false);
   const [referralsOpen, setReferralsOpen] = useState(false);
   const [activeHomeHash, setActiveHomeHash] = useState("");
+  const [theme, setTheme] = useState("default");
   // Keep initial server/client markup identical, then upgrade to animated mode on mount.
   const [smallLogoMode, setSmallLogoMode] = useState("static");
   const proofDropdownRef = useRef(null);
@@ -264,6 +319,35 @@ export default function Navbar({ routeShell = "browser" }) {
   }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    setTheme(applyTheme(readTheme(), { persist: false }));
+
+    const handleThemeChange = (event) => {
+      const next = event?.detail?.theme;
+      setTheme(
+        next
+          ? normalizeTheme(next)
+          : applyTheme(readTheme(), { persist: false })
+      );
+    };
+
+    const handleStorage = (event) => {
+      if (event.key === THEME_STORAGE_KEY) {
+        setTheme(applyTheme(readTheme(), { persist: false }));
+      }
+    };
+
+    window.addEventListener("roo:theme-change", handleThemeChange);
+    window.addEventListener("storage", handleStorage);
+
+    return () => {
+      window.removeEventListener("roo:theme-change", handleThemeChange);
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, []);
+
+  useEffect(() => {
     updateHeaderOffset();
     if (typeof ResizeObserver === "undefined" || !headerRef.current) {
       const handleResize = () => updateHeaderOffset();
@@ -370,17 +454,31 @@ export default function Navbar({ routeShell = "browser" }) {
     };
   }, [cancelSectionTransition]);
 
+  // Theme-token interaction states — values per theme in src/index.css.
   const focusRing =
-    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#061226]";
-  const linkBase = `px-3 sm:px-5 py-2 rounded-full text-base font-medium transition border border-white/10 hover:border-cyan-300/30 ${focusRing}`;
-  const linkIdle = "text-white/85 hover:text-cyan-200";
-  const linkActive = "bg-cyan-400 text-black border-cyan-400";
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--color-canvas-deep)]";
+  const linkBase = `px-3 sm:px-5 py-2 rounded-full text-base font-medium transition border border-line-soft hover:border-line-accent ${focusRing}`;
+  const linkIdle =
+    "text-ink-secondary hover:text-[color:var(--color-link-hover)]";
+  const linkActive = "bg-accent text-accent-contrast border-accent";
   const mobileLinkBase = `px-5 py-4 text-base transition ${focusRing}`;
-  const mobileLinkIdle = "text-white/85 hover:text-cyan-200";
-  const mobileLinkActive = "bg-cyan-400 text-black";
+  const mobileLinkIdle =
+    "text-ink-secondary hover:text-[color:var(--color-link-hover)]";
+  const mobileLinkActive = "bg-accent text-accent-contrast";
   const mobileSubLinkBase = `px-9 py-3 text-sm transition ${focusRing}`;
-  const mobileSubLinkIdle = "text-white/85 hover:text-cyan-200";
-  const mobileSubLinkActive = "bg-cyan-400 text-black";
+  const mobileSubLinkIdle =
+    "text-ink-secondary hover:text-[color:var(--color-link-hover)]";
+  const mobileSubLinkActive = "bg-accent text-accent-contrast";
+  const menuItemIdle =
+    "text-ink-secondary hover:text-[color:var(--color-link-hover)] hover:bg-[color:var(--color-surface-hover)]";
+  const menuItemActive = "bg-accent text-accent-contrast";
+  const nextTheme = theme === "dark" ? "default" : "dark";
+  const themeLabel = THEME_LABELS[theme] || THEME_LABELS.default;
+  const nextThemeLabel = THEME_LABELS[nextTheme];
+
+  const handleThemeToggle = () => {
+    setTheme(applyTheme(nextTheme));
+  };
 
   const smallLogoSizeClassName = "h-14 w-14 rounded-xl";
   const smallLogoGlowClassName =
@@ -392,41 +490,39 @@ export default function Navbar({ routeShell = "browser" }) {
     <header
       ref={headerRef}
       className={`site-nav site-navbar-glass glass-premium glass-scroll-lite fixed top-0 left-0 right-0 z-50 overflow-visible border-b transition-all duration-300 ${
-        scrolled ? "border-cyan-300/10" : "border-white/5"
-      } ${
         scrolled
-          ? "shadow-[0_10px_30px_rgba(0,0,0,0.25)]"
-          : ""
-      }`}
+          ? "border-[color:var(--navbar-border-scrolled)]"
+          : "border-[color:var(--navbar-border-rest)]"
+      } ${scrolled ? "shadow-[var(--shadow-navbar-scrolled)]" : ""}`}
     >
       {/* subtle grid overlay */}
       <div
         className="pointer-events-none absolute inset-0 opacity-[0.14] z-0"
         style={{
           backgroundImage:
-            "linear-gradient(to right, rgba(255,255,255,0.08) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.06) 1px, transparent 1px)",
+            "linear-gradient(to right, var(--navbar-grid-line) 1px, transparent 1px), linear-gradient(to bottom, var(--navbar-grid-line) 1px, transparent 1px)",
           backgroundSize: "80px 80px",
         }}
       />
 
       {/* cyan glow line */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-cyan-300/50 to-transparent z-0" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-[color:var(--color-accent-soft)] to-transparent z-0" />
 
-      <div className="relative z-10">
+      <div className="relative z-10 hidden md:block">
         <DiscordGuideBanner hidden={bannerHidden} />
       </div>
 
       <div className="relative z-10 mx-auto max-w-7xl overflow-visible px-4 sm:px-6">
         <div ref={navRowRef} className="flex h-20 items-center overflow-visible sm:h-24">
           {/* Left: Logo / Back */}
-          <div className="flex items-center gap-4">
+          <div className="hidden min-w-0 flex-1 items-center gap-4 md:flex">
             {location.pathname !== "/" ? (
               <BackButton hidden={false} inline={true} />
             ) : null}
 
             <Link to="/"
               onClick={handleHomeClick}
-              className="flex items-center gap-3 select-none"
+              className="flex min-w-0 items-center gap-3 select-none"
               aria-label="Go to Roo Industries home"
             >
               <div className="relative h-14 w-14 grid place-items-center overflow-hidden rounded-xl">
@@ -452,11 +548,11 @@ export default function Navbar({ routeShell = "browser" }) {
                 )}
               </div>
 
-              <div className="block leading-tight">
-                <div className="text-white font-semibold tracking-wide text-sm sm:text-lg">
+              <div className="block leading-tight min-w-0">
+                <div className="text-ink font-semibold tracking-wide text-sm sm:text-lg truncate">
                   Roo Industries
                 </div>
-                <div className="text-[9px] sm:text-xs text-white/55 whitespace-nowrap">
+                <div className="text-[9px] sm:text-xs text-ink-muted whitespace-nowrap truncate">
                   Precision Performance Engineering
                 </div>
               </div>
@@ -464,7 +560,47 @@ export default function Navbar({ routeShell = "browser" }) {
           </div>
 
           {/* Right: Links + CTA + Mobile */}
-          <div className="ml-auto flex items-center gap-3">
+          <div className="ml-0 flex w-full min-w-0 items-center gap-2 md:ml-auto md:w-auto md:justify-end md:gap-3">
+            <Link
+              to="/"
+              onClick={handleHomeClick}
+              className="flex min-w-0 flex-1 items-center gap-2 select-none md:hidden"
+              aria-label="Go to Roo Industries home"
+            >
+              <div className="relative grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-lg sm:h-12 sm:w-12 sm:rounded-xl">
+                <img
+                  src="/favicon-96x96.png"
+                  alt="Roo Industries"
+                  className="h-10 w-10 rounded-lg object-contain drop-shadow-none sm:h-12 sm:w-12 sm:rounded-xl"
+                  loading="eager"
+                  fetchPriority="high"
+                  width={48}
+                  height={48}
+                />
+                {smallLogoMode === "animated" && (
+                  <img
+                    src="/logo-animated-small.apng"
+                    alt=""
+                    className="absolute inset-0 h-10 w-10 rounded-lg object-contain drop-shadow-none transition-opacity duration-500 sm:h-12 sm:w-12 sm:rounded-xl"
+                    aria-hidden="true"
+                    loading="lazy"
+                    decoding="async"
+                    onError={handleLogoAnimError}
+                  />
+                )}
+              </div>
+
+              <div className="min-w-0 leading-tight">
+                <div className="truncate text-sm font-semibold tracking-wide text-ink sm:text-base">
+                  Roo Industries
+                </div>
+                <div className="truncate text-[10px] text-ink-muted sm:text-xs">
+                  Precision Performance Engineering
+                </div>
+              </div>
+            </Link>
+
+            <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
             <nav className="hidden md:flex items-center gap-2">
               <a
                 href={buildHomeSectionHref(SECTION_HASHES.benefits)}
@@ -521,8 +657,8 @@ export default function Navbar({ routeShell = "browser" }) {
                       }}
                       className={`block px-4 py-3 text-sm transition ${
                         isActive("/benchmarks")
-                          ? "bg-cyan-400 text-black"
-                          : "text-white/85 hover:text-cyan-200 hover:bg-white/5"
+                          ? menuItemActive
+                          : menuItemIdle
                       }`}
                     >
                       Benchmarks
@@ -535,8 +671,8 @@ export default function Navbar({ routeShell = "browser" }) {
                       }}
                       className={`block px-4 py-3 text-sm transition ${
                         isActive("/reviews")
-                          ? "bg-cyan-400 text-black"
-                          : "text-white/85 hover:text-cyan-200 hover:bg-white/5"
+                          ? menuItemActive
+                          : menuItemIdle
                       }`}
                     >
                       Reviews
@@ -598,8 +734,8 @@ export default function Navbar({ routeShell = "browser" }) {
                       }}
                       className={`block px-4 py-3 text-sm transition ${
                         isActive("/referrals/register")
-                          ? "bg-cyan-400 text-black"
-                          : "text-white/85 hover:text-cyan-200 hover:bg-white/5"
+                          ? menuItemActive
+                          : menuItemIdle
                       }`}
                     >
                       Sign Up
@@ -612,8 +748,8 @@ export default function Navbar({ routeShell = "browser" }) {
                       }}
                       className={`block px-4 py-3 text-sm transition ${
                         isReferralsActive && !isActive("/referrals/register")
-                          ? "bg-cyan-400 text-black"
-                          : "text-white/85 hover:text-cyan-200 hover:bg-white/5"
+                          ? menuItemActive
+                          : menuItemIdle
                       }`}
                     >
                       Dashboard
@@ -626,13 +762,14 @@ export default function Navbar({ routeShell = "browser" }) {
             <a
               href="/#packages"
               onClick={(event) => handleSectionLinkClick(event, SECTION_HASHES.plans)}
-              className="inline-flex items-center gap-2 px-2.5 py-1.5 text-xs sm:px-5 sm:py-3 sm:text-base font-semibold whitespace-nowrap rounded-full text-white bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 transition"
+              className="nav-cta inline-flex items-center gap-2 px-2.5 py-1.5 text-xs sm:px-5 sm:py-3 sm:text-base font-semibold whitespace-nowrap rounded-full text-white transition"
             >
               Packages
             </a>
 
             {/* Mobile menu button */}
             <button
+              type="button"
               onClick={() =>
                 setOpen((v) => {
                   const next = !v;
@@ -645,10 +782,10 @@ export default function Navbar({ routeShell = "browser" }) {
               }
               className="
                   md:hidden
-                  h-12 w-12 grid place-items-center
-                  text-white/90 hover:text-cyan-200
-                  border border-white/15 hover:border-cyan-300/30
-                  bg-white/5 hover:bg-cyan-400/10
+                  h-10 w-10 sm:h-12 sm:w-12 grid place-items-center rounded-full
+                  text-ink-secondary hover:text-[color:var(--color-link-hover)]
+                  border border-line-soft hover:border-line-accent
+                  bg-[color:var(--color-surface-hover)] hover:bg-[color:var(--color-surface-hover-accent)]
                   transition
                 "
               aria-label="Open menu"
@@ -659,6 +796,31 @@ export default function Navbar({ routeShell = "browser" }) {
                 <div className="h-[2px] w-6 bg-current opacity-60" />
               </div>
             </button>
+
+            {/* Theme switch: CRT/retro-PC side = Roo Blue, moon side =
+                Blackout. Last child + extra margin keeps it pinned to the
+                far right, clear of the primary buttons. */}
+            <button
+              type="button"
+              role="switch"
+              aria-checked={theme === "dark"}
+              onClick={handleThemeToggle}
+              className={`theme-switch hidden shrink-0 md:inline-flex md:ml-3 ${focusRing}`}
+              aria-label={`Switch to ${nextThemeLabel} theme. Current theme: ${themeLabel}`}
+              title={`Theme: ${themeLabel} — switch to ${nextThemeLabel}`}
+            >
+              <span className="theme-switch-track" aria-hidden="true">
+                <span className="theme-switch-icon theme-switch-icon-default">
+                  <Tv />
+                </span>
+                <span className="theme-switch-icon theme-switch-icon-dark">
+                  <Moon />
+                </span>
+                <span className="theme-switch-thumb" />
+              </span>
+              <span className="sr-only">{`Switch to ${nextThemeLabel} theme`}</span>
+            </button>
+            </div>
           </div>
         </div>
 
@@ -673,6 +835,31 @@ export default function Navbar({ routeShell = "browser" }) {
         >
           <div className="glass-premium glass-menu-surface mt-2 transition-all duration-300">
             <div className="flex flex-col">
+              <div className="flex items-center justify-between border-b border-line-soft px-5 py-4">
+                <span className="text-base font-medium text-ink-secondary">
+                  Theme
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={theme === "dark"}
+                  onClick={handleThemeToggle}
+                  className={`theme-switch inline-flex ${focusRing}`}
+                  aria-label={`Switch to ${nextThemeLabel} theme. Current theme: ${themeLabel}`}
+                  title={`Theme: ${themeLabel} — switch to ${nextThemeLabel}`}
+                >
+                  <span className="theme-switch-track" aria-hidden="true">
+                    <span className="theme-switch-icon theme-switch-icon-default">
+                      <Tv />
+                    </span>
+                    <span className="theme-switch-icon theme-switch-icon-dark">
+                      <Moon />
+                    </span>
+                    <span className="theme-switch-thumb" />
+                  </span>
+                  <span className="sr-only">{`Switch to ${nextThemeLabel} theme`}</span>
+                </button>
+              </div>
               <a
                 href={buildHomeSectionHref(SECTION_HASHES.benefits)}
                 data-nav-surface="mobile"
@@ -719,7 +906,7 @@ export default function Navbar({ routeShell = "browser" }) {
               </button>
               <div
                 id="mobile-proof-menu"
-                className={`flex flex-col bg-[#071a33]/60 overflow-hidden transition-all duration-300 ${
+                className={`flex flex-col bg-[color:var(--color-surface-veil)] overflow-hidden transition-all duration-300 ${
                   proofOpen
                     ? "max-h-40 opacity-100"
                     : "max-h-0 opacity-0 pointer-events-none"
@@ -802,7 +989,7 @@ export default function Navbar({ routeShell = "browser" }) {
               </button>
               <div
                 id="mobile-referrals-menu"
-                className={`flex flex-col bg-[#071a33]/60 overflow-hidden transition-all duration-300 ${
+                className={`flex flex-col bg-[color:var(--color-surface-veil)] overflow-hidden transition-all duration-300 ${
                   referralsOpen
                     ? "max-h-32 opacity-100"
                     : "max-h-0 opacity-0 pointer-events-none"

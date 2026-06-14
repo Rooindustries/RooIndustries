@@ -347,11 +347,11 @@ export default function ReservationBanner() {
       >
         {/* Text Block */}
         <div className={`min-w-0 z-10 ${textAlignmentClass}`}>
-          <p className={`font-semibold text-white truncate drop-shadow-md ${titleSizeClass}`}>
+          <p className={`font-semibold text-ink truncate drop-shadow-md ${titleSizeClass}`}>
             Slot {holdLocalTimeLabel || "--"}
             {hold?.packageTitle ? ` — ${hold.packageTitle}` : ""}
           </p>
-          <p className={`text-sky-200/90 truncate drop-shadow-sm ${subtitleSizeClass}`}>
+          <p className={`text-info-text truncate drop-shadow-sm ${subtitleSizeClass}`}>
             Expires in {formatCountdown(countdown)}
           </p>
         </div>
@@ -363,7 +363,7 @@ export default function ReservationBanner() {
           <button
             type="button"
             onClick={() => releaseHold(false, true)}
-            className={`rounded-lg border border-red-400/30 bg-red-500/20 px-2.5 py-1.5 sm:px-3 sm:py-2 ${buttonTextSizeClass} font-semibold text-red-50 hover:bg-red-500/30 transition shadow-sm`}
+            className={`rounded-lg border border-danger-border bg-danger-soft px-2.5 py-1.5 sm:px-3 sm:py-2 ${buttonTextSizeClass} font-semibold text-danger-text hover:bg-danger-soft transition shadow-sm`}
           >
             Release
           </button>
@@ -373,7 +373,7 @@ export default function ReservationBanner() {
               <button
                 type="button"
                 onClick={continueBooking}
-                className={`rounded-lg border border-sky-400/30 bg-sky-500/20 px-2.5 py-1.5 sm:px-3 sm:py-2 ${buttonTextSizeClass} font-semibold text-sky-50 hover:bg-sky-500/30 transition whitespace-nowrap shadow-sm`}
+                className={`rounded-lg border border-info-border bg-info-soft px-2.5 py-1.5 sm:px-3 sm:py-2 ${buttonTextSizeClass} font-semibold text-info-text hover:bg-info-soft transition whitespace-nowrap shadow-sm`}
               >
                 Continue booking
               </button>

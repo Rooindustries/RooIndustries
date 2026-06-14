@@ -121,9 +121,43 @@ const normalizeRegistrationPool = (value) =>
 const parseBooleanField = (value) =>
   value === true || value === "true" || value === "on" || value === "1";
 
+const normalizeRolePlay = (value) => normalizeText(value);
+
+const getPrimaryRolePlay = (player = {}) =>
+  normalizeRolePlay(player.role_play || player.primaryRolePlay || player.rolePlay);
+
+const getSecondaryRolePlay = (player = {}) =>
+  normalizeRolePlay(player.secondary_role_play || player.secondaryRolePlay);
+
+const getApprovedRolePlay = (player = {}) =>
+  normalizeRolePlay(player.approved_role_play || player.approvedRolePlay);
+
+const getEffectiveRolePlay = (player = {}) =>
+  getApprovedRolePlay(player) || getPrimaryRolePlay(player);
+
+const getSubmittedRolePlays = (player = {}) =>
+  [...new Set([getPrimaryRolePlay(player), getSecondaryRolePlay(player)])].filter(
+    (role) => TOURNEY_ROLE_PLAYS.includes(role)
+  );
+
+const resolveApprovedRolePlay = (player = {}, requestedRole = "") => {
+  const submittedRoles = getSubmittedRolePlays(player);
+  const selectedRole = normalizeRolePlay(requestedRole) || submittedRoles[0] || "";
+  if (!TOURNEY_ROLE_PLAYS.includes(selectedRole)) {
+    throw Object.assign(new Error("Choose a valid approval role."), {
+      status: 400,
+    });
+  }
+  if (!submittedRoles.includes(selectedRole)) {
+    throw Object.assign(new Error("Approval role must match a submitted role."), {
+      status: 400,
+    });
+  }
+  return selectedRole;
+};
+
 const isFroggerReservedRegistration = (player = {}) =>
-  normalizeText(player.rolePlay || player.role_play) ===
-    TOURNEY_FROGGER_RESERVED_ROLE &&
+  getEffectiveRolePlay(player) === TOURNEY_FROGGER_RESERVED_ROLE &&
   normalizeTourneyUsername(player.displayName || player.display_name) ===
     normalizeTourneyUsername(TOURNEY_FROGGER_DISPLAY_NAME) &&
   normalizeTwitchUsername(player.twitchUsername || player.twitch_username) ===
@@ -224,7 +258,10 @@ const mapPlayer = (row = {}) => ({
   discordKey: row.discord_key || row.discordKey,
   battlenet: row.battlenet,
   rank: row.rank_name || row.rank,
-  rolePlay: row.role_play || row.rolePlay,
+  primaryRolePlay: getPrimaryRolePlay(row),
+  secondaryRolePlay: getSecondaryRolePlay(row),
+  approvedRolePlay: getApprovedRolePlay(row),
+  rolePlay: getEffectiveRolePlay(row),
   registrationPool: normalizeRegistrationPool(
     row.registration_pool || row.registrationPool
   ),
@@ -297,6 +334,9 @@ const managePlayer = (row) => {
     battlenet: player.battlenet,
     rank: player.rank,
     rolePlay: player.rolePlay,
+    primaryRolePlay: player.primaryRolePlay,
+    secondaryRolePlay: player.secondaryRolePlay,
+    approvedRolePlay: player.approvedRolePlay,
     registrationPool: player.registrationPool,
     timezone: player.timezone,
     twitchUsername: player.twitchUsername,
@@ -346,6 +386,9 @@ export const validateTourneyPlayerPayload = (
   const battlenet = normalizeText(payload.battlenet);
   const rank = normalizeText(payload.rank);
   const rolePlay = normalizeText(payload.rolePlay || payload.role_play);
+  const secondaryRolePlay = normalizeText(
+    payload.secondaryRolePlay || payload.secondary_role_play
+  );
   const registrationPool = normalizeRegistrationPool(
     payload.registrationPool || payload.registration_pool
   );
@@ -386,6 +429,12 @@ export const validateTourneyPlayerPayload = (
   if (!battlenet) errors.push("Battle.net BattleTag is required.");
   if (!TOURNEY_RANKS.includes(rank)) errors.push("Choose a rank.");
   if (!TOURNEY_ROLE_PLAYS.includes(rolePlay)) errors.push("Choose a role.");
+  if (secondaryRolePlay && !TOURNEY_ROLE_PLAYS.includes(secondaryRolePlay)) {
+    errors.push("Choose a valid secondary role.");
+  }
+  if (secondaryRolePlay && secondaryRolePlay === rolePlay) {
+    errors.push("Secondary role must be different from primary role.");
+  }
   if (!TOURNEY_TIMEZONES.includes(timezone)) errors.push("Choose a timezone.");
   if (!twitchUsername) {
     errors.push("Enter a valid Twitch username.");
@@ -411,6 +460,7 @@ export const validateTourneyPlayerPayload = (
       battlenet,
       rank,
       rolePlay,
+      secondaryRolePlay,
       registrationPool,
       timezone,
       twitchUsername,
@@ -469,6 +519,8 @@ export async function ensureTourneyPlayerSchema(env = process.env) {
       battlenet text not null,
       rank_name text not null,
       role_play text not null,
+      secondary_role_play text not null default '',
+      approved_role_play text not null default '',
       registration_pool text not null default 'main',
       time_zone text not null default '',
       twitch_username text,
@@ -504,6 +556,14 @@ export async function ensureTourneyPlayerSchema(env = process.env) {
   await sql`
     alter table tourney_players
     add column if not exists registration_pool text not null default 'main'
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists secondary_role_play text not null default ''
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists approved_role_play text not null default ''
   `;
   await sql`
     alter table tourney_players
@@ -768,17 +828,6 @@ const isRoleCapacityFullForRegistration = ({ roleCapacity, value }) => {
   return roleCapacity.isFull;
 };
 
-const createRoleCapacityError = ({ roleCapacity, snapshot }) =>
-  Object.assign(
-    new Error("This role is at maximum capacity for the main bracket."),
-    {
-      status: 409,
-      code: "ROLE_CAPACITY_FULL",
-      capacity: roleCapacity,
-      capacitySnapshot: snapshot,
-    }
-  );
-
 const assertNoDuplicatePlayer = async ({ value, env }) => {
   if (isMemoryMode(env)) {
     const getDiscordKey = (player) => player.discord_key || player.discordKey;
@@ -844,13 +893,6 @@ export async function createPendingTourneyPlayer({
 
   const value = validation.value;
   await assertNoDuplicatePlayer({ value, env });
-  const capacitySnapshot = await getTourneyRoleCapacitySnapshot({ env });
-  const roleCapacity = getRoleCapacity(capacitySnapshot, value.rolePlay);
-  const isFull = isRoleCapacityFullForRegistration({ roleCapacity, value });
-  const registrationPool = isFull ? "substitute" : "main";
-  if (isFull && !value.acceptSubstitutePool) {
-    throw createRoleCapacityError({ roleCapacity, snapshot: capacitySnapshot });
-  }
 
   const id = crypto.randomUUID();
   const passwordHash = await bcrypt.hash(value.password, 12);
@@ -867,7 +909,9 @@ export async function createPendingTourneyPlayer({
     battlenet: value.battlenet,
     rank_name: value.rank,
     role_play: value.rolePlay,
-    registration_pool: registrationPool,
+    secondary_role_play: value.secondaryRolePlay,
+    approved_role_play: "",
+    registration_pool: "main",
     time_zone: value.timezone,
     twitch_username: value.twitchUsername,
     team_name: value.teamName,
@@ -915,7 +959,8 @@ export async function createPendingTourneyPlayer({
     await sql`
       insert into tourney_players (
         id, username, email, password_hash, status, discord, display_name,
-        discord_key, battlenet, rank_name, role_play, registration_pool,
+        discord_key, battlenet, rank_name, role_play, secondary_role_play,
+        approved_role_play, registration_pool,
         time_zone, twitch_username, team_name, available_aug_1_2,
         accepted_rules, accepted_roo_visibility, notes,
         version, created_at, updated_at
@@ -924,7 +969,8 @@ export async function createPendingTourneyPlayer({
         ${playerRow.id}, ${playerRow.username}, ${playerRow.email},
         ${playerRow.password_hash}, ${playerRow.status}, ${playerRow.discord},
         ${playerRow.display_name}, ${playerRow.discord_key}, ${playerRow.battlenet}, ${playerRow.rank_name},
-        ${playerRow.role_play}, ${playerRow.registration_pool}, ${playerRow.time_zone}, ${playerRow.twitch_username},
+        ${playerRow.role_play}, ${playerRow.secondary_role_play}, ${playerRow.approved_role_play},
+        ${playerRow.registration_pool}, ${playerRow.time_zone}, ${playerRow.twitch_username},
         ${playerRow.team_name}, ${playerRow.available_aug_1_2},
         ${playerRow.accepted_rules}, ${playerRow.accepted_roo_visibility},
         ${playerRow.notes}, ${playerRow.version},
@@ -988,6 +1034,8 @@ export async function createApprovedTourneyPlayer({
     battlenet: value.battlenet,
     rank_name: value.rank,
     role_play: value.rolePlay,
+    secondary_role_play: value.secondaryRolePlay,
+    approved_role_play: value.rolePlay,
     registration_pool: value.registrationPool,
     time_zone: value.timezone,
     twitch_username: value.twitchUsername,
@@ -1013,7 +1061,8 @@ export async function createApprovedTourneyPlayer({
   await sql`
     insert into tourney_players (
       id, username, email, password_hash, status, discord, display_name,
-      discord_key, battlenet, rank_name, role_play, registration_pool,
+      discord_key, battlenet, rank_name, role_play, secondary_role_play,
+      approved_role_play, registration_pool,
       time_zone, twitch_username, team_name, available_aug_1_2,
       accepted_rules, accepted_roo_visibility, notes,
       version, created_at, updated_at, approved_at, approved_by
@@ -1022,7 +1071,8 @@ export async function createApprovedTourneyPlayer({
       ${playerRow.id}, ${playerRow.username}, ${playerRow.email},
       ${playerRow.password_hash}, ${playerRow.status}, ${playerRow.discord},
       ${playerRow.display_name}, ${playerRow.discord_key}, ${playerRow.battlenet}, ${playerRow.rank_name},
-      ${playerRow.role_play}, ${playerRow.registration_pool}, ${playerRow.time_zone}, ${playerRow.twitch_username},
+      ${playerRow.role_play}, ${playerRow.secondary_role_play}, ${playerRow.approved_role_play},
+      ${playerRow.registration_pool}, ${playerRow.time_zone}, ${playerRow.twitch_username},
       ${playerRow.team_name}, ${playerRow.available_aug_1_2},
       ${playerRow.accepted_rules}, ${playerRow.accepted_roo_visibility},
       ${playerRow.notes}, ${playerRow.version},
@@ -1380,6 +1430,7 @@ export async function applyRegistrationDecision({
   playerId,
   purpose,
   actorUsername,
+  approvedRolePlay = "",
   env = process.env,
 } = {}) {
   const actor = normalizeTourneyUsername(actorUsername);
@@ -1397,19 +1448,18 @@ export async function applyRegistrationDecision({
         status: 409,
       });
     }
+    const selectedApprovedRole =
+      status === "approved" ? resolveApprovedRolePlay(player, approvedRolePlay) : "";
     if (
       status === "approved" &&
       normalizeRegistrationPool(player.registration_pool || player.registrationPool) ===
         "main"
     ) {
       const capacitySnapshot = await getTourneyRoleCapacitySnapshot({ env });
-      const roleCapacity = getRoleCapacity(
-        capacitySnapshot,
-        player.role_play || player.rolePlay
-      );
+      const roleCapacity = getRoleCapacity(capacitySnapshot, selectedApprovedRole);
       const isFull = isRoleCapacityFullForRegistration({
         roleCapacity,
-        value: mapPlayer(player),
+        value: mapPlayer({ ...player, approved_role_play: selectedApprovedRole }),
       });
       if (isFull) {
         player.registration_pool = "substitute";
@@ -1419,6 +1469,7 @@ export async function applyRegistrationDecision({
     player.version = Number(player.version || 1) + 1;
     player.updated_at = now;
     if (status === "approved") {
+      player.approved_role_play = selectedApprovedRole;
       player.approved_at = now;
       player.approved_by = actor;
     } else {
@@ -1450,16 +1501,23 @@ export async function applyRegistrationDecision({
     });
   }
 
+  const selectedApprovedRole =
+    status === "approved"
+      ? resolveApprovedRolePlay(pendingPlayer, approvedRolePlay)
+      : "";
   let nextRegistrationPool = pendingPlayer.registration_pool || "main";
   if (
     status === "approved" &&
     normalizeRegistrationPool(nextRegistrationPool) === "main"
   ) {
     const capacitySnapshot = await getTourneyRoleCapacitySnapshot({ env });
-    const roleCapacity = getRoleCapacity(capacitySnapshot, pendingPlayer.role_play);
+    const roleCapacity = getRoleCapacity(capacitySnapshot, selectedApprovedRole);
     const isFull = isRoleCapacityFullForRegistration({
       roleCapacity,
-      value: mapPlayer(pendingPlayer),
+      value: mapPlayer({
+        ...pendingPlayer,
+        approved_role_play: selectedApprovedRole,
+      }),
     });
     if (isFull) {
       nextRegistrationPool = "substitute";
@@ -1471,6 +1529,7 @@ export async function applyRegistrationDecision({
       ? await sql`
           update tourney_players
           set status = 'approved',
+              approved_role_play = ${selectedApprovedRole},
               registration_pool = ${nextRegistrationPool},
               approved_at = ${now},
               approved_by = ${actor},

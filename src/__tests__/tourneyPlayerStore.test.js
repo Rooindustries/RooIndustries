@@ -76,6 +76,10 @@ describe("tourney player store", () => {
       timezone: "Eastern Time (ET)",
       twitchUsername: "playerone",
       teamName: "",
+      rolePlay: "Support",
+      primaryRolePlay: "Support",
+      secondaryRolePlay: "",
+      approvedRolePlay: "",
       registrationPool: "main",
       acceptedRules: true,
       acceptedRooVisibility: true,
@@ -110,6 +114,53 @@ describe("tourney player store", () => {
         env,
       })
     ).rejects.toThrow("Discord is already registered.");
+  });
+
+  test("accepts an optional distinct secondary role and rejects invalid secondary role choices", async () => {
+    const store = loadStore();
+    store.resetMemoryTourneyPlayerStoreForTests();
+
+    const created = await store.createPendingTourneyPlayer({
+      payload: {
+        ...basePayload,
+        secondaryRolePlay: "Damage",
+      },
+      recipients: approvers,
+      env,
+    });
+
+    expect(created.player).toMatchObject({
+      rolePlay: "Support",
+      primaryRolePlay: "Support",
+      secondaryRolePlay: "Damage",
+      approvedRolePlay: "",
+    });
+
+    await expect(
+      store.createPendingTourneyPlayer({
+        payload: {
+          ...basePayload,
+          email: "samerole@example.com",
+          discord: "SameRole#1234",
+          secondaryRolePlay: "Support",
+        },
+        recipients: approvers,
+        env,
+      })
+    ).rejects.toThrow("Secondary role must be different from primary role.");
+
+    await expect(
+      store.createPendingTourneyPlayer({
+        payload: {
+          ...basePayload,
+          email: "badrole@example.com",
+          discord: "BadRole#1234",
+          secondaryRolePlay: "Lucio",
+        },
+        recipients: approvers,
+        env,
+      })
+    ).rejects.toThrow("Choose a valid secondary role.");
   });
 
   test("rejects ranks below Master", async () => {
@@ -289,6 +340,9 @@ describe("tourney player store", () => {
       discord: "PlayerOne#1234",
       status: "approved",
       approvedBy: "yukari",
+      rolePlay: "Support",
+      primaryRolePlay: "Support",
+      approvedRolePlay: "Support",
     });
     await expect(
       store.getRegistrationDecisionToken({
@@ -365,6 +419,48 @@ describe("tourney player store", () => {
         readPersistedAccountsJson: async () => "[]",
       })
     ).resolves.toBeNull();
+  });
+
+  test("approves a pending player as either submitted role", async () => {
+    const store = loadStore();
+    store.resetMemoryTourneyPlayerStoreForTests();
+    const created = await store.createPendingTourneyPlayer({
+      payload: {
+        ...basePayload,
+        secondaryRolePlay: "Damage",
+      },
+      recipients: approvers,
+      env,
+    });
+
+    const approved = await store.applyRegistrationDecision({
+      tokenHash: "",
+      playerId: created.player.id,
+      purpose: "approve",
+      actorUsername: "serviroo",
+      approvedRolePlay: "Damage",
+      env,
+    });
+
+    expect(approved).toMatchObject({
+      status: "approved",
+      rolePlay: "Damage",
+      primaryRolePlay: "Support",
+      secondaryRolePlay: "Damage",
+      approvedRolePlay: "Damage",
+      registrationPool: "main",
+    });
+
+    await expect(store.listApprovedTourneyPlayers({ env })).resolves.toEqual([
+      {
+        id: approved.id,
+        displayName: "Player One",
+        rolePlay: "Damage",
+        registrationPool: "main",
+        teamName: "",
+        twitchUsername: "playerone",
+      },
+    ]);
   });
 
   test("adds Twitch profile images to public roster players when lookup is enabled", async () => {
@@ -677,28 +773,28 @@ describe("tourney player store", () => {
       });
     }
 
-    await expect(
-      store.createPendingTourneyPlayer({
-        payload: payloadFor(10),
-        recipients: approvers,
-        env,
-      })
-    ).rejects.toMatchObject({
-      status: 409,
-      code: "ROLE_CAPACITY_FULL",
-    });
-
-    const substitute = await store.createPendingTourneyPlayer({
-      payload: {
-        ...payloadFor(10),
-        acceptSubstitutePool: true,
-      },
+    const overflowPending = await store.createPendingTourneyPlayer({
+      payload: payloadFor(10),
       recipients: approvers,
       env,
     });
 
-    expect(substitute.player).toMatchObject({
+    expect(overflowPending.player).toMatchObject({
       rolePlay: "Support",
+      registrationPool: "main",
+    });
+
+    const substitute = await store.applyRegistrationDecision({
+      tokenHash: "",
+      playerId: overflowPending.player.id,
+      purpose: "approve",
+      actorUsername: "serviroo",
+      env,
+    });
+
+    expect(substitute).toMatchObject({
+      rolePlay: "Support",
+      approvedRolePlay: "Support",
       registrationPool: "substitute",
     });
     await expect(store.getTourneyRoleCapacitySnapshot({ env })).resolves.toMatchObject({
@@ -710,7 +806,7 @@ describe("tourney player store", () => {
           mainCount: 3,
           pendingMainCount: 0,
           approvedMainCount: 3,
-          substituteCount: 0,
+          substituteCount: 1,
           isFull: true,
         }),
       ]),
@@ -824,9 +920,12 @@ describe("tourney player store", () => {
         recipients: approvers,
         env,
       })
-    ).rejects.toMatchObject({
-      status: 409,
-      code: "ROLE_CAPACITY_FULL",
+    ).resolves.toMatchObject({
+      player: {
+        rolePlay: "Support",
+        registrationPool: "main",
+        status: "pending",
+      },
     });
   });
 
@@ -913,15 +1012,22 @@ describe("tourney player store", () => {
       });
     }
 
+    const overflowPending = await store.createPendingTourneyPlayer({
+      payload: payloadFor(4),
+      recipients: approvers,
+      env,
+    });
     await expect(
-      store.createPendingTourneyPlayer({
-        payload: payloadFor(4),
-        recipients: approvers,
+      store.applyRegistrationDecision({
+        tokenHash: "",
+        playerId: overflowPending.player.id,
+        purpose: "approve",
+        actorUsername: "serviroo",
         env,
       })
-    ).rejects.toMatchObject({
-      status: 409,
-      code: "ROLE_CAPACITY_FULL",
+    ).resolves.toMatchObject({
+      rolePlay: "Support",
+      registrationPool: "substitute",
     });
 
     const frogger = await store.createPendingTourneyPlayer({

@@ -16,7 +16,7 @@ export default function ThankYou() {
 
   return (
     <motion.section
-      className="pt-40 text-center text-white max-w-lg mx-auto"
+      className="pt-40 text-center text-ink max-w-lg mx-auto"
       variants={containerVariants}
       initial="hidden"
       animate="visible"
@@ -24,12 +24,12 @@ export default function ThankYou() {
     >
       <BookingEmailDispatchEffect />
       <motion.h1
-        className="text-4xl font-bold text-sky-300 drop-shadow-[0_0_20px_rgba(56,189,248,0.5)]"
+        className="text-4xl font-bold text-accent drop-shadow-[0_0_20px_rgba(56,189,248,0.5)]"
         variants={containerVariants}
       >
         Thank You!
       </motion.h1>
-      <motion.p className="mt-4 text-slate-300" variants={containerVariants}>
+      <motion.p className="mt-4 text-ink-secondary" variants={containerVariants}>
         Your booking has been confirmed. You&apos;ll receive a confirmation
         email shortly.
       </motion.p>

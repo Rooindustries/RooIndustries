@@ -1196,16 +1196,16 @@ export default function Payment({ hideFooter = false }) {
 
   return (
     <motion.section
-      className="relative z-10 py-4 md:py-32 px-6 max-w-3xl mx-auto text-white"
+      className="relative z-10 py-4 md:py-32 px-6 max-w-3xl mx-auto text-ink"
       variants={containerVariants}
       initial="hidden"
       animate="visible"
     >
       <motion.div variants={itemVariants}>
-        <h2 className="text-4xl sm:text-5xl font-extrabold text-center text-sky-200 drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+        <h2 className="text-4xl sm:text-5xl font-extrabold text-center text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
           {isUpgrade ? "Complete Upgrade Payment" : "Complete Payment"}
         </h2>
-        <p className="mt-3 text-slate-300/80 text-center text-sm sm:text-base">
+        <p className="mt-3 text-ink-secondary text-center text-sm sm:text-base">
           {isUpgrade
             ? "Review your upgrade details and proceed to payment"
             : "Review your booking details and proceed to payment"}
@@ -1217,10 +1217,10 @@ export default function Payment({ hideFooter = false }) {
           <div
             className={`mt-6 rounded-xl border px-4 py-3 text-sm flex items-center gap-3 shadow-[0_0_25px_rgba(15,23,42,0.8)] ${
               banner.type === "error"
-                ? "border-red-500/60 bg-red-500/10 text-red-200"
+                ? "border-danger-border bg-danger-soft text-danger-text"
                 : banner.type === "success"
-                ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-200"
-                : "border-sky-500/60 bg-sky-500/10 text-sky-100"
+                ? "border-success-border bg-success-soft text-success-text"
+                : "border-info-border bg-info-soft text-info-text"
             }`}
           >
             <span className="text-lg">
@@ -1244,37 +1244,37 @@ export default function Payment({ hideFooter = false }) {
 
       <motion.div
         variants={itemVariants}
-        className="low-perf-surface glass-premium glass-card-surface glass-scroll-lite mt-8 rounded-2xl border border-sky-700/40"
+        className="low-perf-surface glass-premium glass-card-surface glass-scroll-lite mt-8 rounded-2xl border border-line-input"
       >
         <div className="p-6 sm:p-7">
-          <h3 className="text-[20px] font-bold text-white">
+          <h3 className="text-[20px] font-bold text-ink">
             {isUpgrade ? "Upgrade Summary" : "Booking Summary"}
           </h3>
-          <p className="text-slate-400 text-sm mt-1">
+          <p className="text-ink-muted text-sm mt-1">
             Please review your {isUpgrade ? "upgrade" : "booking"} details
           </p>
 
           <div className="mt-6">
-            <p className="font-semibold text-lg text-white">{packageTitle}</p>
+            <p className="font-semibold text-lg text-ink">{packageTitle}</p>
             <div className="mt-2 space-y-1">
               {(referralPercent > 0 || couponDiscountAmount > 0) && (
-                <p className="text-xl text-slate-300 line-through">
+                <p className="text-xl text-ink-secondary line-through">
                   ${baseAmount.toFixed(2)}
                 </p>
               )}
-              <p className="text-3xl font-extrabold text-sky-400">
+              <p className="text-3xl font-extrabold text-accent">
                 ${finalAmount.toFixed(2)} USD
               </p>
 
               {referralPercent > 0 && (
-                <p className="text-sm text-green-300">
+                <p className="text-sm text-success-text">
                   Referral: {referralPercent}% ($
                   {referralDiscountAmount.toFixed(2)}
                   {referral?.name ? ` via ${referral.name}` : ""})
                 </p>
               )}
               {couponDiscountAmount > 0 && coupon && (
-                <p className="text-sm text-emerald-300">
+                <p className="text-sm text-success-text">
                   Coupon "{coupon.code}": {formatCouponValue(coupon)} ($
                   {couponDiscountAmount.toFixed(2)})
                   {canStackCouponWithReferral && referralPercent > 0
@@ -1283,42 +1283,42 @@ export default function Payment({ hideFooter = false }) {
                 </p>
               )}
               {effectiveDiscountAmount > 0 && (
-                <p className="text-xs text-slate-300">
+                <p className="text-xs text-ink-secondary">
                   Total savings: {discountPercentCombined}% (${effectiveDiscountAmount.toFixed(2)})
                 </p>
               )}
 
-              <p className="text-sm text-slate-400 mt-1">
-                Your time: <span className="text-sky-300">{date}</span> at{" "}
-                <span className="text-sky-300">{time}</span>
+              <p className="text-sm text-ink-muted mt-1">
+                Your time: <span className="text-accent">{date}</span> at{" "}
+                <span className="text-accent">{time}</span>
               </p>
               {userTimeZone && (
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-ink-muted">
                   Time zone:{" "}
-                  <span className="text-slate-300">{userTimeZone}</span>
+                  <span className="text-ink-secondary">{userTimeZone}</span>
                 </p>
               )}
 
               {isFree && (
-                <p className="text-xs text-emerald-300 mt-2">
+                <p className="text-xs text-success-text mt-2">
                   This booking has a 100% discount applied. No payment is required - just confirm your free booking below.
                 </p>
               )}
               {!isFree && preventedFreeReduction && (
-                <p className="text-xs text-amber-200 mt-2">
+                <p className="text-xs text-warning-text mt-2">
                   A minimum charge applies unless you use an approved
                   free-booking code.
                 </p>
               )}
               {isUpgrade && (
-                <p className="text-xs text-slate-400 mt-2">
+                <p className="text-xs text-ink-muted mt-2">
                   Upgrade price reflects the difference between the target package and your original payment.
                 </p>
               )}
             </div>
           </div>
 
-          <div className="mt-6 h-px w-full bg-sky-800/40" />
+          <div className="mt-6 h-px w-full bg-line-soft" />
 
 
           <>
@@ -1332,7 +1332,7 @@ export default function Payment({ hideFooter = false }) {
                   value={referralInput}
                   onChange={(e) => setReferralInput(e.target.value.trim())}
                   placeholder="e.g. vouch"
-                  className="w-60 bg-[#0c162a] border border-sky-800/40 rounded-md px-3 py-2 outline-none text-sm"
+                  className="w-60 bg-surface-input border border-line-input rounded-md px-3 py-2 outline-none text-sm"
                 />
 
                 <button
@@ -1348,7 +1348,7 @@ export default function Payment({ hideFooter = false }) {
                 </button>
               </div>
               {referralInput && !referral && !validating && (
-                <p className="text-sm text-red-300 mt-2">
+                <p className="text-sm text-danger-text mt-2">
                   Invalid or inactive referral code.
                 </p>
               )}
@@ -1364,7 +1364,7 @@ export default function Payment({ hideFooter = false }) {
                   value={couponInput}
                   onChange={(e) => setCouponInput(e.target.value.trim())}
                   placeholder="e.g. BF10"
-                  className="w-60 bg-[#0c162a] border border-sky-800/40 rounded-md px-3 py-2 outline-none text-sm"
+                  className="w-60 bg-surface-input border border-line-input rounded-md px-3 py-2 outline-none text-sm"
                 />
 
                 <button
@@ -1385,7 +1385,7 @@ export default function Payment({ hideFooter = false }) {
                       setCoupon(null);
                       setCouponInput("");
                     }}
-                    className="text-xs text-slate-300 underline underline-offset-2"
+                    className="text-xs text-ink-secondary underline underline-offset-2"
                   >
                     Remove coupon
                   </button>
@@ -1394,7 +1394,7 @@ export default function Payment({ hideFooter = false }) {
               {coupon &&
                 coupon.canCombineWithReferral === false &&
                 referral && (
-                  <p className="text-xs text-amber-300 mt-1">
+                  <p className="text-xs text-warning-text mt-1">
                     This coupon cannot be clubbed with a referral discount.
                   </p>
                 )}
@@ -1406,13 +1406,13 @@ export default function Payment({ hideFooter = false }) {
 
       <motion.div
         variants={itemVariants}
-        className="low-perf-surface glass-premium glass-card-surface glass-scroll-lite mt-8 rounded-2xl border border-sky-700/40"
+        className="low-perf-surface glass-premium glass-card-surface glass-scroll-lite mt-8 rounded-2xl border border-line-input"
       >
         <div className="p-6 sm:p-7">
-          <h3 className="text-[20px] font-bold text-white">
+          <h3 className="text-[20px] font-bold text-ink">
             {isFree ? "Confirm Free Booking" : "Payment Method"}
           </h3>
-          <p className="text-slate-400 text-sm mt-1">
+          <p className="text-ink-muted text-sm mt-1">
             {isFree
               ? "This booking is fully discounted. Confirm below to finalize it."
               : "Secure online payment checkout"}
@@ -1420,8 +1420,8 @@ export default function Payment({ hideFooter = false }) {
 
 
           {isFree ? (
-            <div className="mt-6 flex flex-col gap-4 border border-emerald-500/40 bg-emerald-500/10 rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(16,185,129,0.35)]">
-              <p className="text-sm text-emerald-100">
+            <div className="mt-6 flex flex-col gap-4 border border-success-border bg-success-soft rounded-xl px-5 py-4 shadow-[0_0_25px_rgba(16,185,129,0.35)]">
+              <p className="text-sm text-success-text">
                 No payment is required. Click the button below to confirm your
                 free booking.
               </p>
@@ -1440,7 +1440,7 @@ export default function Payment({ hideFooter = false }) {
           ) : (
             <>
 
-              <div className="low-perf-surface glass-premium glass-card-surface mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-xl border border-sky-800/30 px-5 py-4">
+              <div className="low-perf-surface glass-premium glass-card-surface mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-xl border border-line-input px-5 py-4">
                 <div className="flex items-center gap-4">
                   <img
                     src="https://razorpay.com/assets/razorpay-logo.svg"
@@ -1451,10 +1451,10 @@ export default function Payment({ hideFooter = false }) {
                     className="h-5 w-auto"
                   />
                   <div>
-                    <p className="text-slate-300 text-sm font-medium">
+                    <p className="text-ink-secondary text-sm font-medium">
                       RazorPay Secure Checkout
                     </p>
-                    <p className="text-slate-400 text-xs">
+                    <p className="text-ink-muted text-xs">
                       Cards, UPI, wallets, and local methods
                     </p>
                   </div>
@@ -1476,14 +1476,14 @@ export default function Payment({ hideFooter = false }) {
                 </button>
               </div>
               {!canUseRazorpay && (
-                <p className="mt-2 text-xs text-amber-300">
+                <p className="mt-2 text-xs text-warning-text">
                   RazorPay secure checkout is currently unavailable.
                 </p>
               )}
 
 
               {shouldRenderPaypalBlock && (
-                <div className="low-perf-surface glass-premium glass-card-surface mt-4 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-xl border border-sky-800/30 px-5 py-4">
+                <div className="low-perf-surface glass-premium glass-card-surface mt-4 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-xl border border-line-input px-5 py-4">
                   <div className="flex items-center gap-4">
                     <img
                       src="https://www.paypalobjects.com/webstatic/mktg/Logo/pp-logo-100px.png"
@@ -1493,7 +1493,7 @@ export default function Payment({ hideFooter = false }) {
                       decoding="async"
                       className="w-20"
                     />
-                    <p className="text-slate-300 text-sm font-medium hidden sm:block">
+                    <p className="text-ink-secondary text-sm font-medium hidden sm:block">
                       Secure global payment
                     </p>
                   </div>
@@ -1636,7 +1636,7 @@ export default function Payment({ hideFooter = false }) {
                         />
                       </PayPalScriptProvider>
                     ) : (
-                      <p className="text-xs text-amber-300 text-center">
+                      <p className="text-xs text-warning-text text-center">
                         This payment method is currently unavailable.
                       </p>
                     )}
@@ -1644,7 +1644,7 @@ export default function Payment({ hideFooter = false }) {
                 </div>
               )}
               {paymentStatusBusy && (
-                <p className="mt-3 text-xs text-sky-200">
+                <p className="mt-3 text-xs text-info-text">
                   Finalizing your payment and booking. Please keep this window open.
                 </p>
               )}
@@ -1662,7 +1662,7 @@ export default function Payment({ hideFooter = false }) {
           <Link
             to="/booking"
             state={backToBookingState}
-            className="glow-button inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-sky-50 hover:text-white transition-all duration-300"
+            className="glow-button inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white hover:text-white transition-all duration-300"
           >
             <span aria-hidden="true" className="text-lg leading-none">
               ←

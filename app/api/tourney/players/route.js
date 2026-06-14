@@ -97,6 +97,7 @@ export async function POST(request) {
         playerId: payload.playerId,
         purpose: action,
         actorUsername: session.username,
+        approvedRolePlay: payload.approvedRolePlay || payload.role || "",
       });
       if (action === "approve") {
         await notifyApprovedPlayer({ player, request });
