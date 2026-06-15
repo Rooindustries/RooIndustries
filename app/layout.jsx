@@ -1,11 +1,10 @@
 import "../src/roboto-latin.css";
 import "../src/index.css";
 import seo from "@/src/lib/seo";
+import AppClientRuntime from "@/src/next/AppClientRuntime";
 
 // Keep root metadata static at layout level so core tags appear immediately.
 export const metadata = seo.getMetadataForPath("/");
-
-const seorceProjectId = "6a2e76bf3f9dac8c30e27b89";
 
 // Two themes only: "default" (Roo Blue) and "dark" (Blackout). Legacy
 // stored values ("light"/"system") normalize to default.
@@ -36,11 +35,6 @@ export default function RootLayout({ children }) {
       <head>
         <meta name="theme-color" content="#000040" />
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
-        <script
-          src={`https://scripts.seorce.com/api?projectId=${seorceProjectId}`}
-          defer
-          data-uuid={seorceProjectId}
-        />
         <link
           rel="preload"
           href="/fonts/manrope-latin-variable.woff2"
@@ -55,7 +49,10 @@ export default function RootLayout({ children }) {
           type="image/png"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        <AppClientRuntime />
+        {children}
+      </body>
     </html>
   );
 }

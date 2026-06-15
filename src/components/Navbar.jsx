@@ -564,14 +564,14 @@ export default function Navbar({ routeShell = "browser" }) {
             <Link
               to="/"
               onClick={handleHomeClick}
-              className="flex min-w-0 flex-1 items-center gap-2 select-none md:hidden"
+              className="flex min-w-0 flex-1 items-center gap-1.5 select-none md:hidden min-[360px]:gap-2"
               aria-label="Go to Roo Industries home"
             >
-              <div className="relative grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-lg sm:h-12 sm:w-12 sm:rounded-xl">
+              <div className="relative grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-lg min-[360px]:h-10 min-[360px]:w-10 sm:h-12 sm:w-12 sm:rounded-xl">
                 <img
                   src="/favicon-96x96.png"
                   alt="Roo Industries"
-                  className="h-10 w-10 rounded-lg object-contain drop-shadow-none sm:h-12 sm:w-12 sm:rounded-xl"
+                  className="h-8 w-8 rounded-lg object-contain drop-shadow-none min-[360px]:h-10 min-[360px]:w-10 sm:h-12 sm:w-12 sm:rounded-xl"
                   loading="eager"
                   fetchPriority="high"
                   width={48}
@@ -581,7 +581,7 @@ export default function Navbar({ routeShell = "browser" }) {
                   <img
                     src="/logo-animated-small.apng"
                     alt=""
-                    className="absolute inset-0 h-10 w-10 rounded-lg object-contain drop-shadow-none transition-opacity duration-500 sm:h-12 sm:w-12 sm:rounded-xl"
+                    className="absolute inset-0 h-8 w-8 rounded-lg object-contain drop-shadow-none transition-opacity duration-500 min-[360px]:h-10 min-[360px]:w-10 sm:h-12 sm:w-12 sm:rounded-xl"
                     aria-hidden="true"
                     loading="lazy"
                     decoding="async"
@@ -594,13 +594,13 @@ export default function Navbar({ routeShell = "browser" }) {
                 <div className="truncate text-sm font-semibold tracking-wide text-ink sm:text-base">
                   Roo Industries
                 </div>
-                <div className="truncate text-[10px] text-ink-muted sm:text-xs">
+                <div className="whitespace-nowrap text-[8px] leading-tight text-ink-muted min-[340px]:text-[8.6px] min-[360px]:text-[9.2px] min-[375px]:text-[10px] sm:text-xs">
                   Precision Performance Engineering
                 </div>
               </div>
             </Link>
 
-            <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
+            <div className="ml-auto flex shrink-0 items-center gap-1 min-[360px]:gap-2 sm:gap-3">
             <nav className="hidden md:flex items-center gap-2">
               <a
                 href={buildHomeSectionHref(SECTION_HASHES.benefits)}
@@ -762,7 +762,7 @@ export default function Navbar({ routeShell = "browser" }) {
             <a
               href="/#packages"
               onClick={(event) => handleSectionLinkClick(event, SECTION_HASHES.plans)}
-              className="nav-cta inline-flex items-center gap-2 px-2.5 py-1.5 text-xs sm:px-5 sm:py-3 sm:text-base font-semibold whitespace-nowrap rounded-full text-white transition"
+              className="nav-cta inline-flex items-center gap-2 px-2 py-1.5 text-[11px] min-[360px]:px-2.5 min-[360px]:text-xs sm:px-5 sm:py-3 sm:text-base font-semibold whitespace-nowrap rounded-full text-white transition"
             >
               Packages
             </a>
@@ -782,7 +782,7 @@ export default function Navbar({ routeShell = "browser" }) {
               }
               className="
                   md:hidden
-                  h-10 w-10 sm:h-12 sm:w-12 grid place-items-center rounded-full
+                  h-9 w-9 min-[360px]:h-10 min-[360px]:w-10 sm:h-12 sm:w-12 grid place-items-center rounded-full
                   text-ink-secondary hover:text-[color:var(--color-link-hover)]
                   border border-line-soft hover:border-line-accent
                   bg-[color:var(--color-surface-hover)] hover:bg-[color:var(--color-surface-hover-accent)]
@@ -791,9 +791,9 @@ export default function Navbar({ routeShell = "browser" }) {
               aria-label="Open menu"
             >
               <div className="space-y-1.5">
-                <div className="h-[2px] w-6 bg-current" />
-                <div className="h-[2px] w-6 bg-current opacity-80" />
-                <div className="h-[2px] w-6 bg-current opacity-60" />
+                <div className="h-[2px] w-5 bg-current min-[360px]:w-6" />
+                <div className="h-[2px] w-5 bg-current opacity-80 min-[360px]:w-6" />
+                <div className="h-[2px] w-5 bg-current opacity-60 min-[360px]:w-6" />
               </div>
             </button>
 

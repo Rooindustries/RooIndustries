@@ -1,7 +1,6 @@
 import { cookies } from "next/headers";
-import { Analytics } from "@vercel/analytics/next";
-import { SpeedInsights } from "@vercel/speed-insights/next";
 import TourneyFooter from "./TourneyFooter";
+import TourneyTelemetry from "./TourneyTelemetry";
 import TourneyThemeToggle from "./TourneyThemeToggle";
 import {
   TOURNEY_SESSION_COOKIE,
@@ -54,13 +53,6 @@ export const StatusPanel = ({ label = "Reserved", title, children }) => (
     <h3>{title}</h3>
     <p>{children}</p>
   </div>
-);
-
-const TourneyTelemetry = () => (
-  <>
-    <Analytics />
-    <SpeedInsights />
-  </>
 );
 
 const tourneyHosts = [
@@ -922,8 +914,10 @@ export const TourneyStyles = () => (
 
     .tourney-section-body .tourney-info-list,
     .tourney-section-body .tourney-card-list,
+    .tourney-section-body .tourney-roster-list,
     .tourney-section-body .tourney-rulebook {
       padding: 0;
+      list-style: none;
     }
 
     .tourney-info-list {
@@ -3423,11 +3417,21 @@ export const TourneyStyles = () => (
         grid-template-columns: 1fr 1fr;
       }
 
-      .tourney-roster-identity {
+      .tourney-section-body .tourney-roster-list,
+      .tourney-roster-group,
+      .tourney-roster-player {
+        width: 100%;
+        min-width: 0;
+        justify-self: stretch;
+      }
+
+      .tourney-roster-player > .tourney-roster-identity {
         grid-column: 1 / -1;
         justify-content: center;
+        justify-items: center;
         justify-self: center;
-        width: auto;
+        width: 100%;
+        text-align: center;
       }
 
       .tourney-roster-cta {
@@ -3435,7 +3439,8 @@ export const TourneyStyles = () => (
       }
 
       .tourney-roster-cta {
-        justify-self: stretch;
+        justify-self: center;
+        width: min(100%, 18rem);
       }
 
       .tourney-roster-cta a {
@@ -3617,6 +3622,36 @@ export const TourneyStyles = () => (
         grid-template-columns: 1fr;
       }
 
+      .tourney-roster-player {
+        align-items: center;
+        gap: 14px;
+        justify-items: center;
+        padding: 16px;
+        text-align: center;
+      }
+
+      .tourney-roster-player > .tourney-roster-identity {
+        grid-template-columns: minmax(0, 1fr);
+        row-gap: 10px;
+        justify-content: center;
+        justify-items: center;
+        text-align: center;
+      }
+
+      .tourney-roster-player > .tourney-roster-detail {
+        justify-items: center;
+        text-align: center;
+      }
+
+      .tourney-roster-cta {
+        justify-self: center;
+        width: min(100%, 18rem);
+      }
+
+      .tourney-roster-cta a {
+        width: 100%;
+      }
+
       .tourney-capacity-grid {
         grid-template-columns: 1fr;
       }
@@ -3646,6 +3681,45 @@ export const TourneyStyles = () => (
       .tourney-player-edit-actions .tourney-owner-link {
         flex: 1 1 120px;
       }
+    }
+
+    html.low-performance-mode .tourney-page {
+      background-attachment: scroll;
+    }
+
+    html.low-performance-mode .tourney-nav,
+    html.low-performance-mode .tourney-mobile-panel {
+      -webkit-backdrop-filter: none !important;
+      backdrop-filter: none !important;
+      background-image: none !important;
+      background-color: var(--tourney-surface-strong) !important;
+      box-shadow: var(--highlight-glass-top) !important;
+      isolation: auto !important;
+    }
+
+    html.low-performance-mode .tourney-mobile-panel::before,
+    html.low-performance-mode .app-bg-grid-layer,
+    html.low-performance-mode .app-bg-radial-layer {
+      display: none !important;
+    }
+
+    html.low-performance-mode .tourney-brand-logo img,
+    html.low-performance-mode .tourney-menu-bars span,
+    html.low-performance-mode .tourney-title-accent,
+    html.low-performance-mode .tourney-host-avatar,
+    html.low-performance-mode .tourney-roster-avatar {
+      filter: none !important;
+      text-shadow: none !important;
+      box-shadow: none !important;
+    }
+
+    html.low-performance-mode .tourney-mobile-panel,
+    html.low-performance-mode .tourney-mobile-panel a,
+    html.low-performance-mode .tourney-mobile-trigger,
+    html.low-performance-mode .tourney-menu-bars span,
+    html.low-performance-mode .tourney-roster-cta a {
+      animation: none !important;
+      transition-property: opacity, transform !important;
     }
   `}</style>
 );
