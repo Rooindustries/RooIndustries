@@ -40,6 +40,13 @@ const paymentSmokeData = encodeURIComponent(
   })
 );
 
+const waitForPerformanceProfile = async (page) => {
+  await page.waitForFunction(
+    () => document.documentElement.classList.contains("low-performance-mode"),
+    { timeout: 10000 }
+  );
+};
+
 test.describe("Route smoke", () => {
   for (const route of routes) {
     test(`loads ${route}`, async ({ page }) => {
@@ -141,6 +148,7 @@ test.describe("Route smoke", () => {
     });
 
     expect(response?.status()).toBeLessThan(400);
+    await waitForPerformanceProfile(page);
 
     const nav = page.locator(".tourney-nav");
     await expect(nav.locator(".tourney-brand-copy")).toBeHidden();
@@ -183,7 +191,145 @@ test.describe("Route smoke", () => {
           getComputedStyle(element).backdropFilter ||
           getComputedStyle(element).webkitBackdropFilter
       );
-    expect(backdropFilter).toContain("blur(34px)");
+    expect(String(backdropFilter).toLowerCase()).toBe("none");
+  });
+
+  test("home mobile navbar tagline fits narrow phones", async ({ page }) => {
+    for (const width of [320, 340, 360, 375, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      const response = await page.goto("/", {
+        waitUntil: "domcontentloaded",
+      });
+
+      expect(response?.status()).toBeLessThan(400);
+      await waitForPerformanceProfile(page);
+
+      const metrics = await page.evaluate(() => {
+        const nav = document.querySelector(".site-nav");
+        const tagline = Array.from(nav?.querySelectorAll("div") || []).find(
+          (element) =>
+            element.textContent?.trim() ===
+            "Precision Performance Engineering"
+        );
+        const controls = nav?.querySelector(".nav-cta")?.parentElement;
+        const taglineRect = tagline?.getBoundingClientRect();
+        const controlsRect = controls?.getBoundingClientRect();
+
+        return {
+          width: window.innerWidth,
+          documentWidth: document.documentElement.scrollWidth,
+          taglineOverflow:
+            tagline && tagline.scrollWidth > tagline.clientWidth + 1,
+          taglineRight: taglineRect?.right || 0,
+          controlsRight: controlsRect?.right || 0,
+        };
+      });
+
+      expect(metrics.taglineOverflow, `${width}px tagline overflow`).toBe(
+        false
+      );
+      expect(metrics.taglineRight, `${width}px tagline right edge`).toBeLessThan(
+        metrics.controlsRight
+      );
+      expect(metrics.controlsRight, `${width}px controls right edge`).toBeLessThanOrEqual(
+        width + 1
+      );
+      expect(metrics.documentWidth, `${width}px document overflow`).toBeLessThanOrEqual(
+        width + 1
+      );
+    }
+  });
+
+  test("tourney roster rows stretch cleanly on mobile", async ({ page }) => {
+    for (const width of [320, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      const response = await page.goto("/tourney/roster", {
+        waitUntil: "domcontentloaded",
+      });
+
+      expect(response?.status()).toBeLessThan(400);
+      await waitForPerformanceProfile(page);
+
+      const metrics = await page.evaluate(() => {
+        const sectionBody = document.querySelector(
+          "#hosts .tourney-section-body"
+        );
+        const list = sectionBody?.querySelector(".tourney-roster-list");
+        const row = list?.querySelector(".tourney-roster-player");
+        const identity = row?.querySelector(".tourney-roster-identity");
+        const detail = row?.querySelector(".tourney-roster-detail");
+        const cta = row?.querySelector(".tourney-roster-cta");
+        const bodyRect = sectionBody?.getBoundingClientRect();
+        const listRect = list?.getBoundingClientRect();
+        const rowRect = row?.getBoundingClientRect();
+        const identityRect = identity?.getBoundingClientRect();
+        const detailRect = detail?.getBoundingClientRect();
+        const ctaRect = cta?.getBoundingClientRect();
+        const listStyle = list ? getComputedStyle(list) : null;
+        const rowStyle = row ? getComputedStyle(row) : null;
+        const identityStyle = identity ? getComputedStyle(identity) : null;
+        const detailStyle = detail ? getComputedStyle(detail) : null;
+        const ctaStyle = cta ? getComputedStyle(cta) : null;
+
+        return {
+          width: window.innerWidth,
+          listPaddingLeft: listStyle?.paddingLeft || "",
+          listPaddingInlineStart: listStyle?.paddingInlineStart || "",
+          bodyWidth: bodyRect?.width || 0,
+          listWidth: listRect?.width || 0,
+          rowWidth: rowRect?.width || 0,
+          rowLeft: rowRect?.left || 0,
+          bodyLeft: bodyRect?.left || 0,
+          rowRight: rowRect?.right || 0,
+          bodyRight: bodyRect?.right || 0,
+          identityWidth: identityRect?.width || 0,
+          identityCenter:
+            identityRect ? identityRect.left + identityRect.width / 2 : 0,
+          detailWidth: detailRect?.width || 0,
+          detailCenter: detailRect ? detailRect.left + detailRect.width / 2 : 0,
+          ctaWidth: ctaRect?.width || 0,
+          ctaCenter: ctaRect ? ctaRect.left + ctaRect.width / 2 : 0,
+          rowCenter: rowRect ? rowRect.left + rowRect.width / 2 : 0,
+          rowJustifyItems: rowStyle?.justifyItems || "",
+          identityTextAlign: identityStyle?.textAlign || "",
+          detailTextAlign: detailStyle?.textAlign || "",
+          detailJustifyItems: detailStyle?.justifyItems || "",
+          ctaJustifySelf: ctaStyle?.justifySelf || "",
+        };
+      });
+
+      expect(metrics.listPaddingLeft).toBe("0px");
+      expect(metrics.listPaddingInlineStart).toBe("0px");
+      expect(Math.abs(metrics.listWidth - metrics.bodyWidth)).toBeLessThanOrEqual(
+        1
+      );
+      expect(Math.abs(metrics.rowWidth - metrics.bodyWidth)).toBeLessThanOrEqual(
+        1
+      );
+      expect(Math.abs(metrics.rowLeft - metrics.bodyLeft)).toBeLessThanOrEqual(
+        1
+      );
+      expect(Math.abs(metrics.rowRight - metrics.bodyRight)).toBeLessThanOrEqual(
+        1
+      );
+      expect(metrics.identityWidth).toBeGreaterThan(0);
+      expect(metrics.detailWidth).toBeGreaterThan(0);
+      expect(metrics.ctaWidth).toBeGreaterThan(0);
+      expect(metrics.rowJustifyItems).toBe("center");
+      expect(metrics.identityTextAlign).toBe("center");
+      expect(metrics.detailTextAlign).toBe("center");
+      expect(metrics.detailJustifyItems).toBe("center");
+      expect(metrics.ctaJustifySelf).toBe("center");
+      expect(Math.abs(metrics.identityCenter - metrics.rowCenter)).toBeLessThanOrEqual(
+        1
+      );
+      expect(Math.abs(metrics.detailCenter - metrics.rowCenter)).toBeLessThanOrEqual(
+        1
+      );
+      expect(Math.abs(metrics.ctaCenter - metrics.rowCenter)).toBeLessThanOrEqual(
+        1
+      );
+    }
   });
 
   test("tourney theme switch toggles Blackout", async ({ page }) => {
