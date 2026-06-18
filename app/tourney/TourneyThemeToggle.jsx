@@ -78,13 +78,19 @@ export default function TourneyThemeToggle() {
   const nextTheme = theme === "dark" ? "default" : "dark";
   const themeLabel = THEME_LABELS[theme] || THEME_LABELS.default;
   const nextThemeLabel = THEME_LABELS[nextTheme];
+  const handleToggleTheme = () => {
+    const currentTheme = normalizeTheme(
+      document.documentElement.dataset.theme || readTheme()
+    );
+    setTheme(applyTheme(currentTheme === "dark" ? "default" : "dark"));
+  };
 
   return (
     <button
       type="button"
       role="switch"
       aria-checked={theme === "dark"}
-      onClick={() => setTheme(applyTheme(nextTheme))}
+      onClick={handleToggleTheme}
       className="theme-switch tourney-theme-switch"
       aria-label={`Switch to ${nextThemeLabel} theme. Current theme: ${themeLabel}`}
       title={`Theme: ${themeLabel} - switch to ${nextThemeLabel}`}

@@ -30,6 +30,65 @@ const createRes = () => ({
   },
 });
 
+const paidBooking = (overrides = {}) => ({
+  _id: "booking_1",
+  _type: "booking",
+  status: "completed",
+  email: "client@example.com",
+  payerEmail: "payer@example.com",
+  packageTitle: "Performance Vertex Overhaul",
+  packagePrice: "$84.99",
+  displayDate: "Wednesday, January 15, 2025",
+  displayTime: "12:00 AM",
+  localTimeZone: "America/Los_Angeles",
+  startTimeUTC: "2025-01-15T08:00:00.000Z",
+  ...overrides,
+});
+
+const setupFetch = ({ booking = paidBooking(), extraFetch = null } = {}) => {
+  mockFetch.mockImplementation(async (query, params = {}) => {
+    const q = String(query || "");
+    const extra = extraFetch ? await extraFetch(q, params) : undefined;
+    if (extra !== undefined) return extra;
+
+    if (
+      q.includes('_type == "package"') &&
+      q.includes('title == "XOC / Extreme Overclocking"')
+    ) {
+      return {
+        title: "XOC / Extreme Overclocking",
+        price: "$149.95",
+      };
+    }
+    if (q.includes('_type == "booking"') && q.includes("_id == $id")) {
+      return booking;
+    }
+    if (
+      q.includes('_type == "booking"') &&
+      q.includes("originalOrderId == $rootId")
+    ) {
+      return [
+        {
+          _id: booking._id,
+          packageTitle: booking.packageTitle,
+          netAmount: 84.99,
+        },
+      ];
+    }
+    if (
+      q.includes('_type == "package"') &&
+      q.includes("title == $title") &&
+      params.title === "XOC / Extreme Overclocking"
+    ) {
+      return {
+        title: "XOC / Extreme Overclocking",
+        price: "$149.95",
+      };
+    }
+    return null;
+  });
+};
+
 beforeAll(() => {
   const mod = require("../../src/server/api/ref/getUpgradeInfo");
   getUpgradeInfo = mod && mod.default ? mod.default : mod;
@@ -81,75 +140,15 @@ describe("getUpgradeInfo API", () => {
   });
 
   test("returns upgrade pricing without leaking booking PII", async () => {
-    mockGetDocument.mockResolvedValue({
-      _id: "booking_1",
-      _type: "booking",
-      status: "completed",
-      email: "client@example.com",
+    const booking = paidBooking({
       discord: "servi",
       specs: "secret specs",
       mainGame: "Overwatch 2",
       message: "private notes",
-      packageTitle: "Performance Vertex Overhaul",
-      packagePrice: "$84.99",
-      displayDate: "Wednesday, January 15, 2025",
-      displayTime: "12:00 AM",
-      localTimeZone: "America/Los_Angeles",
-      startTimeUTC: "2025-01-15T08:00:00.000Z",
     });
 
-    mockFetch.mockImplementation(async (query, params = {}) => {
-      const q = String(query || "");
-      if (
-        q.includes('_type == "package"') &&
-        q.includes('title == "XOC / Extreme Overclocking"')
-      ) {
-        return {
-          title: "XOC / Extreme Overclocking",
-          price: "$149.95",
-        };
-      }
-      if (q.includes('_type == "booking"') && q.includes("_id == $id")) {
-        return {
-          _id: "booking_1",
-          status: "completed",
-          originalOrderId: "",
-          packageTitle: "Performance Vertex Overhaul",
-          packagePrice: "$84.99",
-          grossAmount: 84.99,
-          netAmount: 84.99,
-          email: "client@example.com",
-          payerEmail: "payer@example.com",
-          localTimeZone: "America/Los_Angeles",
-          startTimeUTC: "2025-01-15T08:00:00.000Z",
-          displayDate: "Wednesday, January 15, 2025",
-          displayTime: "12:00 AM",
-        };
-      }
-      if (
-        q.includes('_type == "booking"') &&
-        q.includes("originalOrderId == $rootId")
-      ) {
-        return [
-          {
-            _id: "booking_1",
-            packageTitle: "Performance Vertex Overhaul",
-            netAmount: 84.99,
-          },
-        ];
-      }
-      if (
-        q.includes('_type == "package"') &&
-        q.includes("title == $title") &&
-        params.title === "XOC / Extreme Overclocking"
-      ) {
-        return {
-          title: "XOC / Extreme Overclocking",
-          price: "$149.95",
-        };
-      }
-      return null;
-    });
+    mockGetDocument.mockResolvedValue(booking);
+    setupFetch({ booking });
 
     const req = createReq({
       id: "booking_1",
@@ -176,5 +175,103 @@ describe("getUpgradeInfo API", () => {
     expect(res.body.booking.mainGame).toBeUndefined();
     expect(res.body.booking.message).toBeUndefined();
     expect(res.body.upgradePrice).toBeCloseTo(64.96, 2);
+  });
+
+  test("looks up upgrades by booking orderId", async () => {
+    const booking = paidBooking({ orderId: "public_order_1" });
+    mockGetDocument.mockResolvedValue(null);
+    setupFetch({
+      booking,
+      extraFetch: async (q, params) => {
+        if (
+          q.includes('_type == "booking"') &&
+          q.includes("orderId == $id") &&
+          params.id === "public_order_1"
+        ) {
+          return booking;
+        }
+        return undefined;
+      },
+    });
+
+    const req = createReq({
+      id: "public_order_1",
+      email: "client@example.com",
+    });
+    const res = createRes();
+
+    await getUpgradeInfo(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.booking._id).toBe("booking_1");
+  });
+
+  test("looks up upgrades by paymentRecord _id with bookingId", async () => {
+    const booking = paidBooking();
+    mockGetDocument.mockResolvedValue({
+      _id: "paymentRecord.razorpay.order.razorpay_order_1",
+      _type: "paymentRecord",
+      provider: "razorpay",
+      providerOrderId: "razorpay_order_1",
+      providerPaymentId: "razorpay_payment_1",
+      bookingId: "booking_1",
+    });
+    setupFetch({ booking });
+
+    const req = createReq({
+      id: "paymentRecord.razorpay.order.razorpay_order_1",
+      email: "client@example.com",
+    });
+    const res = createRes();
+
+    await getUpgradeInfo(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.booking._id).toBe("booking_1");
+  });
+
+  test("looks up upgrades by paymentRecord providerPaymentId", async () => {
+    const booking = paidBooking({ razorpayPaymentId: "razorpay_payment_1" });
+    mockGetDocument.mockResolvedValue(null);
+    setupFetch({
+      booking,
+      extraFetch: async (q, params) => {
+        if (
+          q.includes('_type == "paymentRecord"') &&
+          q.includes("providerPaymentId == $id") &&
+          params.id === "razorpay_payment_1"
+        ) {
+          return {
+            _id: "paymentRecord.razorpay.payment.razorpay_payment_1",
+            _type: "paymentRecord",
+            provider: "razorpay",
+            providerOrderId: "razorpay_order_1",
+            providerPaymentId: "razorpay_payment_1",
+          };
+        }
+        if (
+          q.includes('_type == "booking"') &&
+          q.includes("razorpayPaymentId == $id") &&
+          params.id === "razorpay_payment_1"
+        ) {
+          return booking;
+        }
+        return undefined;
+      },
+    });
+
+    const req = createReq({
+      id: "razorpay_payment_1",
+      email: "client@example.com",
+    });
+    const res = createRes();
+
+    await getUpgradeInfo(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.booking._id).toBe("booking_1");
   });
 });
