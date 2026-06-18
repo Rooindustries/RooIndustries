@@ -1377,6 +1377,109 @@ describe("booking reservation API", () => {
     expect(res.body).toEqual({ error: "Payment verification failed." });
   });
 
+  test("internal Razorpay webhook recovery can book without client signature", async () => {
+    process.env.RAZORPAY_KEY_ID = "rzp_test_123";
+    process.env.RAZORPAY_KEY_SECRET = "rzp_secret";
+
+    const baseTime = new Date("2025-01-01T00:00:00.000Z").getTime();
+    const nowSpy = jest.spyOn(Date, "now").mockReturnValue(baseTime);
+    const startTimeUTC = "2025-01-15T10:00:00.000Z";
+    const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
+    expect(hold.res.statusCode).toBe(200);
+
+    store.slotHolds = [];
+    nowSpy.mockReturnValue(baseTime + 16 * 60 * 1000);
+
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        order_id: "razorpay_order_webhook",
+        currency: "USD",
+        amount: 8499,
+        status: "captured",
+      }),
+    }));
+
+    const utcDate = new Date(startTimeUTC);
+    const res = createRes();
+    await createBooking(
+      {
+        ...createReq({
+          discord: "webhook-user",
+          email: CLIENT_EMAIL,
+          specs: "Webhook recovery PC",
+          mainGame: "Payment QA",
+          packageTitle: "Performance Vertex Overhaul",
+          packagePrice: "$84.99",
+          status: "captured",
+          paymentProvider: "razorpay",
+          paymentRecordId: "paymentRecord.razorpay.order.razorpay_order_webhook",
+          razorpayOrderId: "razorpay_order_webhook",
+          razorpayPaymentId: "razorpay_payment_webhook",
+          localTimeZone: "America/Los_Angeles",
+          startTimeUTC,
+          displayDate: formatClientDate(utcDate, "America/Los_Angeles"),
+          displayTime: formatClientTime(utcDate, "America/Los_Angeles"),
+          slotHoldId: hold.body.holdId,
+          slotHoldToken: hold.body.holdToken,
+          slotHoldExpiresAt: hold.body.expiresAt,
+          deferEmailsUntilConfirmation: true,
+        }),
+        internalContext: { paymentFinalizeSource: "webhook" },
+      },
+      res
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(store.bookings).toHaveLength(1);
+    expect(store.bookings[0]).toMatchObject({
+      paymentProvider: "razorpay",
+      razorpayOrderId: "razorpay_order_webhook",
+      razorpayPaymentId: "razorpay_payment_webhook",
+      slotReservationState: "reconciled_after_missing_hold",
+    });
+
+    nowSpy.mockRestore();
+  });
+
+  test("public Razorpay createBooking still requires client signature", async () => {
+    process.env.RAZORPAY_KEY_ID = "rzp_test_123";
+    process.env.RAZORPAY_KEY_SECRET = "rzp_secret";
+
+    const startTimeUTC = "2025-01-15T11:00:00.000Z";
+    const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
+    expect(hold.res.statusCode).toBe(200);
+
+    const utcDate = new Date(startTimeUTC);
+    const res = createRes();
+    await createBooking(
+      createReq({
+        discord: "public-user",
+        email: CLIENT_EMAIL,
+        specs: "Public payment PC",
+        mainGame: "Payment QA",
+        packageTitle: "Performance Vertex Overhaul",
+        packagePrice: "$84.99",
+        status: "captured",
+        paymentProvider: "razorpay",
+        paymentRecordId: "paymentRecord.razorpay.order.razorpay_order_public",
+        razorpayOrderId: "razorpay_order_public",
+        razorpayPaymentId: "razorpay_payment_public",
+        localTimeZone: "America/Los_Angeles",
+        startTimeUTC,
+        displayDate: formatClientDate(utcDate, "America/Los_Angeles"),
+        displayTime: formatClientTime(utcDate, "America/Los_Angeles"),
+        slotHoldId: hold.body.holdId,
+        slotHoldToken: hold.body.holdToken,
+        slotHoldExpiresAt: hold.body.expiresAt,
+      }),
+      res
+    );
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: "Missing payment verification fields." });
+  });
+
   test("rejects PayPal payments with the wrong captured currency", async () => {
     process.env.PAYPAL_CLIENT_ID = "paypal_client";
     process.env.PAYPAL_CLIENT_SECRET = "paypal_secret";
