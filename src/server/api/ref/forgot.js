@@ -3,8 +3,12 @@ import { Resend } from "resend";
 import crypto from "crypto";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 
-// 1. Initialize Resend
-const resend = new Resend(process.env.RESEND_API_KEY);
+const createResendClient = () => {
+  const apiKey = String(process.env.RESEND_API_KEY || "").trim();
+  return apiKey ? new Resend(apiKey) : null;
+};
+
+const resend = createResendClient();
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -78,7 +82,12 @@ export default async function handler(req, res) {
 
     const fromAddress = process.env.FROM_EMAIL || "onboarding@resend.dev";
 
-    const { data, error } = await resend.emails.send({
+    if (!resend) {
+      console.error("Resend Error: RESEND_API_KEY is not configured");
+      return res.status(500).json({ ok: false, error: "Failed to send email" });
+    }
+
+    const { error } = await resend.emails.send({
       from: fromAddress,
       to: [normalizedEmail],
       subject: "Reset your Password",
