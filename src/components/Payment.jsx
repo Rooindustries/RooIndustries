@@ -740,12 +740,14 @@ export default function Payment({ hideFooter = false }) {
         }),
       });
 
-      if (!response.ok && response.status !== 202) {
+      const status = String(data?.status || "").trim().toLowerCase();
+      const isFinalizedStatus = status === "booked" || status === "email_partial";
+
+      if (!response.ok && response.status !== 202 && !isFinalizedStatus) {
         throw new Error(data?.error || "Unable to finalize payment.");
       }
 
-      const status = String(data?.status || "").trim().toLowerCase();
-      if (status === "booked" || status === "email_partial") {
+      if (isFinalizedStatus) {
         navigate("/payment-success", {
           state: buildFinalizeNavigation(data),
           replace: true,
