@@ -5,9 +5,14 @@ const maxInitialJsBytes = 250 * 1024;
 const maxMediaBytes = 25 * 1024 * 1024;
 
 const errors = [];
+const warnings = [];
+
+const isProductionNextBuild = () =>
+  fs.existsSync(path.join(process.cwd(), ".next", "BUILD_ID")) &&
+  fs.existsSync(path.join(process.cwd(), ".next", "build-manifest.json"));
 
 const nextChunkDir = path.join(process.cwd(), ".next", "static", "chunks");
-if (fs.existsSync(nextChunkDir)) {
+if (fs.existsSync(nextChunkDir) && isProductionNextBuild()) {
   const chunkFiles = fs
     .readdirSync(nextChunkDir)
     .filter((name) => name.endsWith(".js"));
@@ -21,6 +26,10 @@ if (fs.existsSync(nextChunkDir)) {
       );
     }
   }
+} else if (fs.existsSync(nextChunkDir)) {
+  warnings.push(
+    "Skipping initial JS chunk budget because .next is not a production build. Run npm run build before checking release bundle size."
+  );
 }
 
 const publicDir = path.join(process.cwd(), "public");
@@ -53,4 +62,5 @@ if (errors.length) {
   process.exit(1);
 }
 
+warnings.forEach((warning) => console.warn(`Performance budget warning: ${warning}`));
 console.log("Performance budgets passed.");

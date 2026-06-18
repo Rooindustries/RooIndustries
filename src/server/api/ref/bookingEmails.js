@@ -9,11 +9,20 @@ const writeClient = createClient({
   useCdn: false,
 });
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-
 export const DISCORD_INVITE_URL = "https://discord.com/invite/qs5HKNyazD";
 export const OWNER_TZ_NAME = "Asia/Kolkata";
 const DEFAULT_LOGO_URL = "https://www.rooindustries.com/embed_logo.png";
+
+const hasEmailDeliveryConfig = () =>
+  !!String(process.env.FROM_EMAIL || "").trim() &&
+  !!String(process.env.RESEND_API_KEY || "").trim();
+
+const createResendClient = () => {
+  const apiKey = String(process.env.RESEND_API_KEY || "").trim();
+  return apiKey ? new Resend(apiKey) : null;
+};
+
+const resend = createResendClient();
 
 const escapeHtml = (value) =>
   String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -188,7 +197,7 @@ export const getBookingForEmailDispatch = async ({
 
 export const buildDeferredEmailDispatch = ({ booking = {} }) => {
   const dispatch = buildEmailDispatchState();
-  dispatch.deliveryEnabled = !!process.env.FROM_EMAIL && !!process.env.RESEND_API_KEY;
+  dispatch.deliveryEnabled = hasEmailDeliveryConfig();
   dispatch.deferred = true;
 
   dispatch.client.sent = !!booking.emailDispatchClientSentAt;
@@ -310,7 +319,7 @@ export const sendBookingEmailsForBooking = async ({
   }
 
   const dispatch = buildEmailDispatchState();
-  dispatch.deliveryEnabled = !!process.env.FROM_EMAIL && !!process.env.RESEND_API_KEY;
+  dispatch.deliveryEnabled = !!String(process.env.FROM_EMAIL || "").trim() && !!resend;
   const now = new Date().toISOString();
   const patchValues = {
     emailDispatchLastAttemptAt: now,

@@ -2,25 +2,45 @@ const DEFAULT_SANITY_PROJECT_ID =
   process.env.NEXT_PUBLIC_SANITY_PROJECT_ID ||
   process.env.SANITY_PROJECT_ID ||
   "9g42k3ur";
+const DEFAULT_SANITY_DATASET =
+  process.env.NEXT_PUBLIC_SANITY_DATASET ||
+  process.env.SANITY_DATASET ||
+  "production";
 
-const HOP_BY_HOP_HEADERS = new Set([
-  "connection",
-  "host",
-  "origin",
-  "referer",
-  "content-length",
+const FORWARD_HEADER_ALLOWLIST = new Set([
+  "accept",
+  "accept-language",
+  "content-type",
+  "sanity-client",
+  "x-sanity-api-version",
+  "x-sanity-perspective",
 ]);
 
-function resolveSanityOrigin(requestHeaders) {
-  const projectId =
-    requestHeaders.get("x-sanity-project-id") || DEFAULT_SANITY_PROJECT_ID;
-  return `https://${projectId}.apicdn.sanity.io`;
+function resolveSanityOrigin() {
+  return `https://${DEFAULT_SANITY_PROJECT_ID}.apicdn.sanity.io`;
 }
 
-function buildUpstreamUrl(requestUrl, pathSegments, requestHeaders) {
+function assertAllowedDataset(pathSegments) {
+  const segments = Array.isArray(pathSegments) ? pathSegments : [];
+  const dataIndex = segments.indexOf("data");
+  if (dataIndex === -1) return null;
+
+  const dataset = segments[dataIndex + 2] || "";
+  if (!dataset || dataset === DEFAULT_SANITY_DATASET) return null;
+
+  return new Response(
+    JSON.stringify({ ok: false, error: "Sanity dataset is not allowed." }),
+    {
+      status: 403,
+      headers: { "content-type": "application/json" },
+    }
+  );
+}
+
+function buildUpstreamUrl(requestUrl, pathSegments) {
   const incoming = new URL(requestUrl);
   const path = Array.isArray(pathSegments) ? pathSegments.join("/") : "";
-  const upstream = new URL(`${resolveSanityOrigin(requestHeaders)}/${path}`);
+  const upstream = new URL(`${resolveSanityOrigin()}/${path}`);
   upstream.search = incoming.search;
   return upstream;
 }
@@ -30,7 +50,7 @@ function buildForwardHeaders(requestHeaders) {
 
   requestHeaders.forEach((value, key) => {
     const lower = key.toLowerCase();
-    if (HOP_BY_HOP_HEADERS.has(lower)) return;
+    if (!FORWARD_HEADER_ALLOWLIST.has(lower)) return;
     headers.set(key, value);
   });
 
@@ -39,11 +59,10 @@ function buildForwardHeaders(requestHeaders) {
 
 async function proxySanity(request, context) {
   const params = await context?.params;
-  const upstreamUrl = buildUpstreamUrl(
-    request.url,
-    params?.path,
-    request.headers
-  );
+  const datasetError = assertAllowedDataset(params?.path);
+  if (datasetError) return datasetError;
+
+  const upstreamUrl = buildUpstreamUrl(request.url, params?.path);
   const method = request.method || "GET";
   const headers = buildForwardHeaders(request.headers);
 

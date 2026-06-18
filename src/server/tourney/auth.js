@@ -5,6 +5,7 @@ import {
   findTourneyPlayerForSession,
   verifyTourneyPlayerCredentials,
 } from "./playerStore";
+import { getClientAddressFromFetchHeaders } from "../request/clientAddress";
 
 export const TOURNEY_SESSION_COOKIE = "tourney_session";
 export const TOURNEY_ADMIN_ROLES = Object.freeze(["viewer", "caster", "owner"]);
@@ -635,7 +636,5 @@ export const getClearTourneyCookieOptions = (env = process.env) => ({
 });
 
 export const getClientAddressFromHeaders = (headers) => {
-  const forwarded = String(headers?.get?.("x-forwarded-for") || "").trim();
-  if (forwarded) return forwarded.split(",")[0].trim();
-  return String(headers?.get?.("x-real-ip") || "unknown").trim() || "unknown";
+  return getClientAddressFromFetchHeaders(headers);
 };
