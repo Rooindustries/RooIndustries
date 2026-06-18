@@ -1,3 +1,5 @@
+import { getClientAddressFromRequestHeaders } from "../../request/clientAddress.js";
+
 const RATE_LIMIT_BUCKETS =
   globalThis.__rooRateLimitBuckets ||
   (globalThis.__rooRateLimitBuckets = new Map());
@@ -10,17 +12,8 @@ const pruneExpiredBuckets = (now) => {
   }
 };
 
-export const getClientAddress = (req) => {
-  const forwarded = String(req?.headers?.["x-forwarded-for"] || "").trim();
-  if (forwarded) {
-    return forwarded.split(",")[0].trim();
-  }
-
-  const realIp = String(req?.headers?.["x-real-ip"] || "").trim();
-  if (realIp) return realIp;
-
-  return "unknown";
-};
+export const getClientAddress = (req) =>
+  getClientAddressFromRequestHeaders(req?.headers || {});
 
 export const requireRateLimit = (
   res,
