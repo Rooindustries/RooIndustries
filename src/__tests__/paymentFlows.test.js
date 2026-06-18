@@ -240,6 +240,107 @@ describe("payment flows", () => {
     });
   });
 
+  test("session Razorpay treats already-terminal finalize as success", async () => {
+    const bookingData = {
+      email: CLIENT_EMAIL,
+      packageTitle: "Performance Vertex Overhaul",
+      packagePrice: "$10.00",
+      startTimeUTC: "2025-01-15T07:59:00.000Z",
+      displayDate: "Wednesday, January 15, 2025",
+      displayTime: "11:59 PM",
+      localTimeZone: "America/Los_Angeles",
+      slotHoldId: "hold_razorpay_terminal",
+      slotHoldToken: "hold_token_razorpay_terminal",
+      slotHoldExpiresAt: "2099-01-05T06:00:00.000Z",
+    };
+
+    global.fetch = jest.fn(async (url) => {
+      if (url === "/api/payment/providers") {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            providers: {
+              razorpay: { enabled: true, mode: "live" },
+              paypal: { enabled: false, mode: "live" },
+            },
+          }),
+        };
+      }
+      if (url === "/api/payment/start") {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            paymentAccessToken: "payment_access_terminal_rzp",
+            providerPayload: {
+              orderId: "order_rzp_terminal",
+              amount: 1000,
+              currency: "USD",
+              key: "rzp_key",
+            },
+          }),
+        };
+      }
+      if (url === "/api/payment/finalize") {
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({
+            ok: true,
+            error: "Payment session is already terminal.",
+            status: "email_partial",
+            bookingId: "b-terminal",
+            emailDispatchToken: "dispatch-token-terminal-rzp",
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ ok: true }) };
+    });
+
+    window.Razorpay = jest.fn().mockImplementation((options) => ({
+      open: jest.fn(() => {
+        options.handler({
+          razorpay_order_id: "order_rzp_terminal",
+          razorpay_payment_id: "pay_rzp_terminal",
+          razorpay_signature: "sig_rzp_terminal",
+        });
+      }),
+    }));
+
+    renderPayment(bookingData);
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const script = document.querySelector(
+      'script[src="https://checkout.razorpay.com/v1/checkout.js"]'
+    );
+    await act(async () => {
+      script.onload();
+    });
+
+    await act(async () => {
+      await userEvent.click(
+        await screen.findByRole("button", { name: /pay with razorpay/i })
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    await waitFor(() =>
+      expect(mockNavigate).toHaveBeenCalledWith("/payment-success", {
+        state: {
+          bookingConfirmation: {
+            bookingId: "b-terminal",
+            emailDispatchToken: "dispatch-token-terminal-rzp",
+          },
+        },
+        replace: true,
+      })
+    );
+  });
+
   test("legacy Razorpay flow remains available when requested explicitly", async () => {
     const timeZone = "America/Los_Angeles";
     const startTimeUTC = "2025-01-15T07:59:00.000Z";
