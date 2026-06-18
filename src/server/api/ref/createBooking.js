@@ -203,6 +203,8 @@ const findPaymentRecordForBooking = async ({
 };
 
 const isTestEnv = process.env.NODE_ENV === "test";
+const TRUSTED_PAYMENT_FINALIZE_SOURCES = new Set(["webhook", "reconcile"]);
+
 export default async function handler(req, res) {
   if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
@@ -238,6 +240,13 @@ export default async function handler(req, res) {
       deferEmailsUntilConfirmation = false,
     } = req.body || {};
     const isUpgrade = !!originalOrderId;
+    const paymentFinalizeSource = String(
+      req.internalContext?.paymentFinalizeSource || ""
+    )
+      .trim()
+      .toLowerCase();
+    const trustedPaymentFinalizeSource =
+      TRUSTED_PAYMENT_FINALIZE_SOURCES.has(paymentFinalizeSource);
     const clientAddress = getClientAddress(req);
     const rateLimitKeyParts = [
       "create-booking",
@@ -921,7 +930,16 @@ export default async function handler(req, res) {
     let verifiedPayerEmail = payerEmail;
 
     if (paymentProvider === "razorpay") {
-      if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+      const canUseServerVerifiedCapture =
+        trustedPaymentFinalizeSource &&
+        !!paymentRecordId &&
+        !!razorpayOrderId &&
+        !!razorpayPaymentId;
+      if (
+        !razorpayOrderId ||
+        !razorpayPaymentId ||
+        (!razorpaySignature && !canUseServerVerifiedCapture)
+      ) {
         return res.status(400).json({
           error: "Missing payment verification fields.",
         });
@@ -938,14 +956,16 @@ export default async function handler(req, res) {
       }
 
       if (hasRazorpayCreds) {
-        const validSignature = verifyRazorpaySignature({
-          orderId: razorpayOrderId,
-          paymentId: razorpayPaymentId,
-          signature: razorpaySignature,
-          secret: razorpaySecret,
-        });
-        if (!validSignature) {
-          return res.status(400).json({ error: "Payment verification failed." });
+        if (razorpaySignature) {
+          const validSignature = verifyRazorpaySignature({
+            orderId: razorpayOrderId,
+            paymentId: razorpayPaymentId,
+            signature: razorpaySignature,
+            secret: razorpaySecret,
+          });
+          if (!validSignature) {
+            return res.status(400).json({ error: "Payment verification failed." });
+          }
         }
 
         const paymentVerification = await verifyRazorpayPayment({
