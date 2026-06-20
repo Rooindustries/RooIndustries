@@ -553,7 +553,7 @@ export default function Navbar({ routeShell = "browser" }) {
                   Roo Industries
                 </div>
                 <div className="text-[9px] sm:text-xs text-ink-muted whitespace-nowrap truncate">
-                  FPS & Game Tuning
+                  Precision Performance Engineering
                 </div>
               </div>
             </Link>
@@ -595,7 +595,7 @@ export default function Navbar({ routeShell = "browser" }) {
                   Roo Industries
                 </div>
                 <div className="whitespace-nowrap text-[8px] leading-tight text-ink-muted min-[340px]:text-[8.6px] min-[360px]:text-[9.2px] min-[375px]:text-[10px] sm:text-xs">
-                  FPS & Game Tuning
+                  Precision Performance Engineering
                 </div>
               </div>
             </Link>
