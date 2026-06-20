@@ -1,7 +1,9 @@
 import { publicClient } from "../sanityClient";
+import homeCopy from "./homeCopy";
 import packagePricing from "./packagePricing";
 
 const { applyPackagesPricing } = packagePricing;
+const { applyHomeSectionCopyOverride } = homeCopy;
 
 export const HOME_SECTION_DATA_KEYS = Object.freeze({
   reviews: "reviews",
@@ -194,10 +196,11 @@ const homeSectionQueries = {
 const getStorageKey = (key) => `${STORAGE_PREFIX}${key}`;
 
 const normalizeHomeSectionData = (key, value) => {
+  const copyValue = applyHomeSectionCopyOverride(key, value);
   if (key === HOME_SECTION_DATA_KEYS.packagesList) {
-    return applyPackagesPricing(value);
+    return applyPackagesPricing(copyValue);
   }
-  return value;
+  return copyValue;
 };
 
 const isSessionCacheExpired = () => {

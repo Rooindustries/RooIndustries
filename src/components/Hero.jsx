@@ -1,26 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { publicClient } from "../sanityClient";
+import homeCopy from "../lib/homeCopy";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 
-const fallbackHeroData = {
-  tagline: "",
-  headingLine1: "More FPS. Less Input Lag.",
-  headingLine2: "Tuned for Your Exact Hardware.",
-  description:
-    "We optimize your BIOS, memory timings, Windows, and game configs remotely. You keep using your PC while we make it faster.",
-  subtext: "Measurable gains. Competitive standard. No guesswork.",
-  ctaPrimaryText: "Optimize My PC",
-  ctaSecondaryText: "See How It Works",
-  ctaNote: "Former #16 3DMark HOF · 20–92% FPS Boost · Lifetime Warranty",
-  bullets: [
-    "20–92% FPS Boost",
-    "10–76% Latency Reduction",
-    "Up to Lifetime Warranty",
-    "Same-Day Sessions Available",
-  ],
-};
-const enableLiveHeroContent = true;
+const { HOME_COPY, applyHeroCopyOverride } = homeCopy;
+const fallbackHeroData = HOME_COPY.hero;
+const enableLiveHeroContent = false;
 
 const normalizeText = (s = "") =>
   String(s)
@@ -129,10 +115,7 @@ export default function Hero() {
       )
       .then((data) => {
         if (!data || typeof data !== "object") return;
-        setHeroData((prev) => ({
-          ...prev,
-          ...data,
-        }));
+        setHeroData((prev) => applyHeroCopyOverride({ ...prev, ...data }));
       })
       .catch(() => {});
   }, []);

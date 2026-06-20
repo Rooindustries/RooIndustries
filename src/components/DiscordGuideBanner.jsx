@@ -3,7 +3,7 @@ import { FaDiscord } from "react-icons/fa";
 import { client } from "../sanityClient";
 
 const DEFAULT_BANNER = {
-  text: "Free optimization guide in our Discord",
+  text: "Free FPS tuning guide in Discord",
   mobileText: "Free guide in Discord",
   link: "https://discord.com/invite/qs5HKNyazD",
 };
@@ -18,8 +18,8 @@ export default function DiscordGuideBanner({ hidden = false }) {
       .then((data) => {
         if (!mounted || !data) return;
         setBanner((prev) => ({
-          text: data.text || prev.text,
-          mobileText: data.mobileText || prev.mobileText,
+          text: DEFAULT_BANNER.text,
+          mobileText: DEFAULT_BANNER.mobileText,
           link: data.link || prev.link,
         }));
       })

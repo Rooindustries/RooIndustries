@@ -1,5 +1,18 @@
 /** @type {import('next').NextConfig} */
 const isProduction = process.env.NODE_ENV === "production";
+const immutableAssetHeaders = [
+  {
+    key: "Cache-Control",
+    value: "public, max-age=31536000, immutable",
+  },
+];
+const devAssetHeaders = [
+  {
+    key: "Cache-Control",
+    value: "no-store, must-revalidate",
+  },
+];
+const assetCacheHeaders = isProduction ? immutableAssetHeaders : devAssetHeaders;
 const globalSecurityHeaders = [
   {
     key: "X-Content-Type-Options",
@@ -56,21 +69,11 @@ const nextConfig = {
       },
       {
         source: '/_next/static/:path*',
-        headers: [
-          {
-            key: 'Cache-Control',
-            value: 'public, max-age=31536000, immutable',
-          },
-        ],
+        headers: assetCacheHeaders,
       },
       {
         source: '/:path*.:ext(png|jpg|jpeg|gif|webp|avif|svg|ico|woff2|woff|ttf|otf|webm|mp4)',
-        headers: [
-          {
-            key: 'Cache-Control',
-            value: 'public, max-age=31536000, immutable',
-          },
-        ],
+        headers: assetCacheHeaders,
       },
     ];
   },

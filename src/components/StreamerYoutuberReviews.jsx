@@ -90,8 +90,9 @@ export default function StreamerYoutuberReviews({ initialData = null }) {
     };
   }, [data, shouldLoad]);
 
-  const defaultTitle = "What professionals say about us";
-  const defaultSubtitle = "Feedback from pros who rely on us.";
+  const defaultTitle = "Results Players Felt";
+  const defaultSubtitle =
+    "The FPS graph matters. The real test is whether ranked feels cleaner after the tune.";
   const reviews = data?.reviews || [];
 
   const isLoading = shouldLoad && !data;

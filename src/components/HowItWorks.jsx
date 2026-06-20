@@ -5,35 +5,12 @@ import {
   getPerfToggleEnabled,
   subscribePerfDebugChanges,
 } from "../lib/perfDebug";
+import homeCopy from "../lib/homeCopy";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS, readHomeSectionData } from "../lib/homeSectionData";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 
-const fallbackData = {
-  title: "How It Works",
-  subtitle: "From first contact to measurable gains — here's the process.",
-  steps: [
-    {
-      badge: "Step 1 — Join",
-      title: "Open a Ticket on Discord",
-      text: "Hop into our Discord server, open a ticket, and tell us about your rig and goals. We'll match you with the right plan.",
-    },
-    {
-      badge: "Step 2 — Connect",
-      title: "Install Our Secure Tools",
-      text: "We send you a lightweight, audited remote-access package. You stay in control the entire time.",
-    },
-    {
-      badge: "Step 3 — Optimize",
-      title: "BIOS & System Tuning",
-      text: "We dial in your BIOS, memory timings, Windows services, power plan, and game configs for your exact hardware.",
-    },
-    {
-      badge: "Step 4 — Verify",
-      title: "Benchmark & Deliver",
-      text: "We run before/after benchmarks so you can see the gains. You get a full report and lifetime support.",
-    },
-  ],
-};
+const { HOME_COPY } = homeCopy;
+const fallbackData = HOME_COPY.howItWorks;
 
 export default function HowItWorks({ initialData = null }) {
   const [data, setData] = useState(
