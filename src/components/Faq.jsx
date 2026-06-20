@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState, useRef, useLayoutEffect } from "re
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronDown } from "lucide-react";
 import { useLocation } from "react-router-dom";
+import homeCopy from "../lib/homeCopy";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS, readHomeSectionData } from "../lib/homeSectionData";
 import { alignToHashTarget, getCssHeaderOffsetPx } from "../lib/scrollCoordinator";
 
@@ -17,6 +18,7 @@ const slugify = (text = "") =>
 const UPGRADE_HASH = "upgrade-path";
 const TRUST_HASH = "trust";
 const QUESTIONS_PER_PAGE = 10;
+const { HOME_COPY } = homeCopy;
 const UPGRADE_PATTERNS = [
   /upgrade path/i,
   /upgrade a single component/i,
@@ -260,9 +262,9 @@ export default function FaqSection({
     }
   }, [activeHash, flatQuestions, safePage]);
 
-  const eyebrowText = faqCopy?.eyebrow || "Answers without the fluff";
-  const headingText = faqCopy?.title || "Frequently Asked Questions";
-  const subtitleText = faqCopy?.subtitle || "Click a question to expand its answer.";
+  const eyebrowText = faqCopy?.eyebrow || HOME_COPY.faqSettings.eyebrow;
+  const headingText = faqCopy?.title || HOME_COPY.faqSettings.title;
+  const subtitleText = faqCopy?.subtitle || HOME_COPY.faqSettings.subtitle;
   const sectionPaddingClass = compact ? "pt-20 pb-10" : "pt-20 pb-24";
   const sectionId = compact ? undefined : "faq";
 

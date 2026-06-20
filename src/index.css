@@ -1331,6 +1331,21 @@ html[data-theme="dark"] .text-gradient-display {
   );
 }
 
+/* Background-clipped text needs a little paint room for Manrope descenders
+   in WebKit. Cancel the layout impact so font and sizing stay unchanged. */
+.gold-flair-text,
+.blue-glint-text,
+.text-gradient-display,
+.text-metal-display,
+.text-metal-display .text-ink,
+.bg-clip-text.text-transparent,
+.ri-hiw-trust-link {
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  padding-bottom: 0.12em;
+  margin-bottom: -0.12em;
+}
+
 /* ── Roo Blue legacy visual compatibility ────────────────────────────────
    Default mode is the pre-Blackout site. Tokenized components may keep
    their semantic classes for Blackout, but these marker classes restore

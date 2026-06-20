@@ -1,19 +1,19 @@
 const routeCopy = {
   "/": {
-    title: "Professional PC Optimization",
-    body: "Roo Industries delivers online PC optimization, BIOS tuning, and game performance improvements with stability-first workflows and measurable results.",
+    title: "PC Game Optimization",
+    body: "Roo Industries tunes gaming PCs for higher FPS, lower input lag, cleaner frametimes, and smoother ranked games.",
   },
   "/benchmarks": {
     title: "Benchmark Results",
-    body: "Review before-and-after benchmark improvements from real optimization sessions.",
+    body: "Review before and after FPS numbers from real Roo Industries sessions.",
   },
   "/reviews": {
     title: "Client Reviews & Results",
-    body: "Read verified customer feedback about FPS gains, latency improvements, and system stability.",
+    body: "Read what players say after their FPS climbs, input lag drops, and games feel smoother.",
   },
   "/contact": {
     title: "Contact Roo Industries",
-    body: "Reach out for questions, booking support, and service guidance.",
+    body: "Send your PC details, ask what package fits, or start a remote game tuning session.",
   },
   "/terms": {
     title: "Terms & Conditions",
@@ -25,11 +25,11 @@ const routeCopy = {
   },
   "/meet-the-team": {
     title: "Meet The Team",
-    body: "Learn about the specialists behind Roo Industries optimization sessions.",
+    body: "Meet the people behind Roo Industries FPS tuning, BIOS work, Windows setup, and game-specific performance sessions.",
   },
   "/tools": {
     title: "Free PC Tools & Downloads",
-    body: "Access free tools and resources for diagnostics, benchmarking, and pre-session preparation.",
+    body: "Grab tools for benchmarks, FPS testing, prep checks, and getting the PC ready before a session.",
   },
   "/referrals/login": {
     title: "Referral Partner Login",

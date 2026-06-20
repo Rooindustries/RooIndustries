@@ -7,11 +7,13 @@ import {
   HOME_SECTION_DATA_KEYS,
   readHomeSectionData,
 } from "../lib/homeSectionData";
+import homeCopy from "../lib/homeCopy";
 import packagePricing from "../lib/packagePricing";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 
 const REFERRAL_STORAGE_KEY = "referral_session";
 const { applyPackagesPricing } = packagePricing;
+const { HOME_COPY } = homeCopy;
 
 const MINOR_WORDS = new Set([
   "a","an","and","as","at","but","by","for","if","in","nor","of","on","or","so","that","the","to","up","via","yet",
@@ -149,10 +151,10 @@ export default function Packages({
     }
   }, [packages.length, sectionCopy]);
 
-  const headingText = sectionCopy?.heading ?? "Choose Your Package";
-  const badgeText = sectionCopy?.badgeText ?? "Remote Sessions";
+  const headingText = sectionCopy?.heading ?? HOME_COPY.packagesSettings.heading;
+  const badgeText = sectionCopy?.badgeText ?? HOME_COPY.packagesSettings.badgeText;
   const subheadingText =
-    sectionCopy?.subheading ?? "Select the tuning package that best fits your needs";
+    sectionCopy?.subheading ?? HOME_COPY.packagesSettings.subheading;
   const dividerText = sectionCopy?.dividerText;
   const isLoading = !sectionCopy && packages.length === 0;
 

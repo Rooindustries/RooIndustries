@@ -1,4 +1,5 @@
 const { createClient } = require("@sanity/client");
+const { applyHomePageCopyOverrides } = require("./homeCopy");
 const { applyPackagesPricing } = require("./packagePricing");
 
 const sanity = createClient({
@@ -174,7 +175,7 @@ async function fetchHomePageData() {
     ),
   ]);
 
-  return {
+  return applyHomePageCopyOverrides({
     reviews,
     about,
     services,
@@ -186,7 +187,7 @@ async function fetchHomePageData() {
     supportedGames,
     faqSettings,
     faqQuestions: Array.isArray(faqQuestions) ? faqQuestions : [],
-  };
+  });
 }
 
 module.exports = {

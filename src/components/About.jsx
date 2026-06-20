@@ -109,7 +109,7 @@ export default function About({ initialData = null }) {
           <div className="relative px-5 sm:px-8 py-5 sm:py-7">
             {/* Header: Label + Title + CTA */}
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div className="space-y-1.5 text-left">
+              <div className="space-y-1.5 text-center lg:text-left">
                 {/* Badge as plain uppercase label — no pill, no border, no bg */}
                 <p className="text-[11px] font-bold uppercase tracking-[0.3em]" style={{ color: "var(--rc-accent)" }}>
                   {recordBadgeText}
@@ -127,7 +127,7 @@ export default function About({ initialData = null }) {
                 href={leaderboardHref}
                 target="_blank"
                 rel="noreferrer"
-                className="glow-button relative inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-xs sm:text-sm font-semibold text-white hover:brightness-110 active:translate-y-px transition-all duration-300 self-start shrink-0"
+                className="glow-button relative inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-xs sm:text-sm font-semibold text-white hover:brightness-110 active:translate-y-px transition-all duration-300 self-center shrink-0 lg:self-start"
                 style={{
                   background: "linear-gradient(135deg, var(--rc-cta), var(--rc-cta-end))",
                   border: "1px solid var(--rc-border)",
@@ -146,7 +146,7 @@ export default function About({ initialData = null }) {
             </div>
 
             {/* Stats: Pure typography hero + spec list */}
-            <div className="mt-6 flex flex-col lg:flex-row gap-4 lg:gap-8 items-start">
+            <div className="mt-6 flex flex-col lg:flex-row gap-4 lg:gap-8 items-center lg:items-start">
               {/* Hero stat — pure type, no card treatment */}
               {heroStat && (
                 <div className="flex flex-col items-center justify-center px-6 sm:px-10 py-3 lg:min-w-[160px]">
@@ -161,21 +161,21 @@ export default function About({ initialData = null }) {
 
               {/* Motion 2/3: Spec rows — staggered slide-in, 300ms each */}
               {specStats.length > 0 && (
-                <div className="flex-1 flex flex-col justify-center">
+                <div className="flex-1 flex flex-col items-center justify-center lg:items-stretch">
                   {specStats.map((detail, index) => (
                     <motion.div
                       key={detail?._key || `${detail?.label || "detail"}-${index}`}
-                      className="flex items-baseline gap-3 sm:gap-4 py-2.5"
+                      className="flex flex-wrap items-baseline justify-center gap-2 sm:gap-4 py-2.5 lg:justify-start"
                       style={index > 0 ? { borderTop: "1px solid var(--rc-border-sub)" } : undefined}
                       initial={{ opacity: 0, x: -12 }}
                       whileInView={{ opacity: 1, x: 0 }}
                       viewport={{ once: true }}
                       transition={{ duration: 0.3, delay: 0.1 + index * 0.06, ease: "easeOut" }}
                     >
-                      <span className="w-11 sm:w-14 shrink-0 text-[11px] font-semibold uppercase tracking-[0.2em]" style={{ color: "var(--rc-text-muted)" }}>
+                      <span className="shrink-0 text-center text-[11px] font-semibold uppercase tracking-[0.2em] lg:w-14 lg:text-left" style={{ color: "var(--rc-text-muted)" }}>
                         {detail?.label || ""}
                       </span>
-                      <span className="text-sm sm:text-base font-semibold truncate" style={{ color: "var(--rc-text)" }}>
+                      <span className="text-center text-sm sm:text-base font-semibold lg:truncate lg:text-left" style={{ color: "var(--rc-text)" }}>
                         {detail?.value || ""}
                       </span>
                     </motion.div>
@@ -187,7 +187,7 @@ export default function About({ initialData = null }) {
             {/* Note */}
             {recordNote && (
               <p
-                className="mt-5 text-left text-[11px] sm:text-xs pt-4 font-semibold"
+                className="mt-5 text-center text-[11px] sm:text-xs pt-4 font-semibold lg:text-left"
                 style={{ borderTop: "1px solid var(--rc-border-sub)" }}
               >
                 <span className="blue-glint-text">{recordNote}</span>

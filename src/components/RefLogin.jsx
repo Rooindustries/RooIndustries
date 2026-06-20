@@ -56,7 +56,7 @@ export default function RefLogin() {
 
       const data = await res.json();
       if (!data.ok) {
-        showToast("error", "Wrong referral code or password.");
+        showToast("error", "Wrong referral code/email or password.");
         setLoading(false);
         return;
       }
@@ -67,7 +67,7 @@ export default function RefLogin() {
 
       // Handle remember me
       if (rememberMe) {
-        localStorage.setItem("refLoginCode", code);
+        localStorage.setItem("refLoginCode", data.code || code);
         localStorage.setItem("refRememberMe", "true");
       } else {
         localStorage.removeItem("refLoginCode");
@@ -105,15 +105,15 @@ export default function RefLogin() {
                   shadow-[var(--shadow-card-glow)]
                   rounded-2xl p-8 space-y-7"
       >
-        {/* Referral Code */}
+        {/* Referral Code or Email */}
         <div>
           <label className="text-accent text-sm font-semibold">
-            Referral Code
+            Referral code or login email
           </label>
           <input
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl
                        outline-none focus:border-info-border transition text-base"
-            placeholder="Referral Code"
+            placeholder="Referral code or login email"
             value={code}
             onChange={(e) => setCode(e.target.value.trim())}
           />
