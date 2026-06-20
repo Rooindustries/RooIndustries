@@ -655,7 +655,10 @@ export const TourneyStyles = () => (
       -webkit-background-clip: text;
       background-clip: text;
       color: transparent;
-      padding-bottom: 0.08em;
+      -webkit-box-decoration-break: clone;
+      box-decoration-break: clone;
+      padding-bottom: 0.12em;
+      margin-bottom: -0.12em;
       text-shadow: 0 0 15px rgba(56, 189, 248, 0.5);
     }
 

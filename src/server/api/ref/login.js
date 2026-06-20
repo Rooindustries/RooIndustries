@@ -17,12 +17,12 @@ export default async function handler(req, res) {
 
   try {
     const { code, password, rememberMe = false } = req.body || {};
-    const normalizedCode = String(code || "").trim().toLowerCase();
+    const normalizedIdentifier = String(code || "").trim().toLowerCase();
     const clientAddress = getClientAddress(req);
 
     if (
       !requireRateLimit(res, {
-        key: `ref-login:${clientAddress}:${normalizedCode || "unknown"}`,
+        key: `ref-login:${clientAddress}:${normalizedIdentifier || "unknown"}`,
         max: 10,
         windowMs: 15 * 60 * 1000,
       })
@@ -30,10 +30,25 @@ export default async function handler(req, res) {
       return;
     }
 
-    const referral = await client.fetch(
-      `*[_type == "referral" && slug.current == $code][0]`,
-      { code: normalizedCode }
+    let referral = await client.fetch(
+      `*[
+        _type == "referral"
+        && defined(slug.current)
+        && lower(slug.current) == $identifier
+      ][0]`,
+      { identifier: normalizedIdentifier }
     );
+
+    if (!referral) {
+      referral = await client.fetch(
+        `*[
+          _type == "referral"
+          && defined(creatorEmail)
+          && lower(creatorEmail) == $identifier
+        ][0]`,
+        { identifier: normalizedIdentifier }
+      );
+    }
 
     if (!referral) {
       return res.status(404).json({ ok: false });

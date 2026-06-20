@@ -207,9 +207,7 @@ test.describe("Route smoke", () => {
       const metrics = await page.evaluate(() => {
         const nav = document.querySelector(".site-nav");
         const tagline = Array.from(nav?.querySelectorAll("div") || []).find(
-          (element) =>
-            element.textContent?.trim() ===
-            "Precision Performance Engineering"
+          (element) => element.textContent?.trim() === "FPS & Game Tuning"
         );
         const controls = nav?.querySelector(".nav-cta")?.parentElement;
         const taglineRect = tagline?.getBoundingClientRect();

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { urlFor } from "../sanityClient";
+import homeCopy from "../lib/homeCopy";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS, readHomeSectionData } from "../lib/homeSectionData";
 import {
   Clock,
@@ -19,14 +20,8 @@ import {
   useMotionValue,
 } from "framer-motion";
 
-const CANONICAL_SERVICE_CARDS = [
-  { iconType: "clock",  title: "Zero Lag",         description: "Click. It happens. No delay in between." },
-  { iconType: "zap",    title: "Stutter Free",     description: "Consistent frametimes across the board." },
-  { iconType: "shield", title: "FPS Unlocked",     description: "You had more headroom than you thought." },
-  { iconType: "wrench", title: "Deep Scan",        description: "Shows you the actual bottleneck, not a guess." },
-  { iconType: "video",  title: "Go Live",          description: "OBS and your game stop competing for CPU." },
-  { iconType: "cpu",    title: "No Throttle",      description: "Stays fast through long renders and edits." },
-];
+const { HOME_COPY } = homeCopy;
+const CANONICAL_SERVICE_CARDS = HOME_COPY.services.cards;
 
 function AnimatedNumber({ value, duration = 0.65 }) {
   const mv = useMotionValue(0);
@@ -156,7 +151,7 @@ export default function Services({ initialData = null }) {
   }
 
   const beforeLabel = data.benchBeforeLabel || "Before";
-  const afterLabel = data.benchAfterLabel || "Optimized";
+  const afterLabel = data.benchAfterLabel || "After Tune";
   const badgeSuffix = data.benchBadgeSuffix || "FPS";
   const pagePrefix = data.benchPagePrefix || "Page";
 

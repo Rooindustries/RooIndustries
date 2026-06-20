@@ -553,7 +553,7 @@ export default function Navbar({ routeShell = "browser" }) {
                   Roo Industries
                 </div>
                 <div className="text-[9px] sm:text-xs text-ink-muted whitespace-nowrap truncate">
-                  Precision Performance Engineering
+                  FPS & Game Tuning
                 </div>
               </div>
             </Link>
@@ -595,7 +595,7 @@ export default function Navbar({ routeShell = "browser" }) {
                   Roo Industries
                 </div>
                 <div className="whitespace-nowrap text-[8px] leading-tight text-ink-muted min-[340px]:text-[8.6px] min-[360px]:text-[9.2px] min-[375px]:text-[10px] sm:text-xs">
-                  Precision Performance Engineering
+                  FPS & Game Tuning
                 </div>
               </div>
             </Link>
@@ -807,7 +807,7 @@ export default function Navbar({ routeShell = "browser" }) {
               onClick={handleThemeToggle}
               className={`theme-switch hidden shrink-0 md:inline-flex md:ml-3 ${focusRing}`}
               aria-label={`Switch to ${nextThemeLabel} theme. Current theme: ${themeLabel}`}
-              title={`Theme: ${themeLabel} — switch to ${nextThemeLabel}`}
+              title={`Theme: ${themeLabel}, switch to ${nextThemeLabel}`}
             >
               <span className="theme-switch-track" aria-hidden="true">
                 <span className="theme-switch-icon theme-switch-icon-default">
@@ -846,7 +846,7 @@ export default function Navbar({ routeShell = "browser" }) {
                   onClick={handleThemeToggle}
                   className={`theme-switch inline-flex ${focusRing}`}
                   aria-label={`Switch to ${nextThemeLabel} theme. Current theme: ${themeLabel}`}
-                  title={`Theme: ${themeLabel} — switch to ${nextThemeLabel}`}
+                  title={`Theme: ${themeLabel}, switch to ${nextThemeLabel}`}
                 >
                   <span className="theme-switch-track" aria-hidden="true">
                     <span className="theme-switch-icon theme-switch-icon-default">

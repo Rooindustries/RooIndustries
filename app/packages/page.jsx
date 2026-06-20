@@ -6,7 +6,7 @@ export const metadata = seo.getMetadataForPath("/packages");
 export default function Page({ searchParams }) {
   return (
     <>
-      <h1 className="sr-only">PC Optimization Packages</h1>
+      <h1 className="sr-only">PC Game Optimization Packages</h1>
       <RouteRenderer pathname="/packages" searchParams={searchParams} />
     </>
   );

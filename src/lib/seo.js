@@ -2,36 +2,35 @@ const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || "ht
 
 const SITE_NAME = "Roo Industries";
 const DEFAULT_OG_IMAGE = "/embed_logo.png";
+const DEFAULT_DESCRIPTION =
+  "Remote PC game optimization for competitive players who want more FPS, lower input lag, cleaner frametimes, and stable performance in the games they play.";
 
 const routeMeta = {
   "/": {
-    title: "Roo Industries | Professional PC Optimization",
-    description:
-      "World-class PC optimization, BIOS tuning, and game performance boosts delivered fully online.",
+    title: "Roo Industries | PC Game Optimization",
+    description: DEFAULT_DESCRIPTION,
     noindex: false,
   },
   "/benchmarks": {
     title: "Benchmark Results | Roo Industries",
-    description:
-      "See real before-and-after FPS gains from Roo Industries optimizations.",
+    description: "See before and after FPS numbers from real Roo Industries game tuning sessions.",
     noindex: false,
   },
   "/reviews": {
     title: "Client Reviews & Results | Roo Industries Performance Tuning",
     description:
-      "Read verified Roo Industries client reviews covering FPS gains, latency improvements, and system stability results from professional PC optimization sessions.",
+      "Read how players describe the FPS gains, lower input lag, smoother mouse feel, and cleaner frametimes after real Roo Industries game tuning sessions online.",
     noindex: false,
   },
   "/faq": {
-    title: "PC Optimization FAQ | Roo Industries",
+    title: "PC Game Optimization FAQ | Roo Industries",
     description:
-      "Read Roo Industries answers on PC optimization, BIOS tuning, booking, upgrades, warranties, and what to expect from a professional tuning session.",
+      "Read the first questions players ask about FPS, input lag, booking, remote access, warranty, and what happens during the session.",
     noindex: false,
   },
   "/contact": {
     title: "Contact | Roo Industries",
-    description:
-      "Get in touch to start your PC optimization or ask a question.",
+    description: "Send your PC details, ask what package fits, or start a remote game tuning session.",
     noindex: false,
   },
   "/terms": {
@@ -47,31 +46,29 @@ const routeMeta = {
   "/meet-the-team": {
     title: "Meet The Team | Roo Industries",
     description:
-      "Meet the Roo Industries specialists behind your optimization sessions, from diagnostics and BIOS tuning to game-specific performance engineering.",
+      "Meet the people behind Roo Industries FPS tuning, BIOS work, Windows setup, and game-specific performance sessions.",
     noindex: false,
   },
   "/tools": {
-    title: "Free PC Tools & Downloads | Roo Industries Optimization Hub",
+    title: "Free PC Performance Tools & Downloads | Roo Industries",
     description:
-      "Access free Roo Industries tools and downloads to benchmark performance, support diagnostics, and prepare your system for safe optimization sessions online.",
+      "Grab Roo Industries tools for benchmarks, prep checks, FPS testing, and PC performance notes before your remote tuning session starts around real games.",
     noindex: false,
   },
   "/packages": {
-    title: "PC Optimization Packages | Roo Industries Performance Plans",
+    title: "PC Game Optimization Packages | Roo Industries",
     description:
-      "Compare Roo Industries optimization packages, service inclusions, and pricing to choose the right performance tuning plan for your PC and gaming goals.",
+      "Compare packages for game settings, FPS tuning, Windows and BIOS work, input lag, and full PC performance tuning.",
     noindex: false,
   },
   "/booking": {
-    title: "Book PC Optimization Session | Roo Industries",
-    description:
-      "Schedule your Roo Industries optimization session and lock in your preferred tuning window online.",
+    title: "Book PC Game Tuning | Roo Industries",
+    description: "Book the remote session, send specs, and lock in a time for your Roo Industries tuning session.",
     noindex: true,
   },
   "/payment": {
     title: "Complete Booking Payment | Roo Industries",
-    description:
-      "Finish your secure Roo Industries booking payment and confirm your scheduled optimization session details.",
+    description: "Finish payment and confirm the booking details for your Roo Industries session.",
     noindex: true,
   },
   "/payment-success": {
@@ -82,8 +79,7 @@ const routeMeta = {
   },
   "/thank-you": {
     title: "Thank You | Roo Industries",
-    description:
-      "Thank you for booking with Roo Industries. We are preparing your optimization session details.",
+    description: "Your booking is in. Roo Industries is getting the session details ready.",
     noindex: true,
   },
   "/upgrade-xoc": {
@@ -129,9 +125,9 @@ const routeMeta = {
     noindex: true,
   },
   "/404": {
-    title: "404 Page Not Found | Roo Industries PC Optimization Services",
+    title: "404 Page Not Found | Roo Industries PC Game Optimization",
     description:
-      "The page you requested is unavailable. Explore Roo Industries services, reviews, tools, and support to continue improving your PC performance online today.",
+      "That page is not here. Use the nav to get back to packages, reviews, tools, contact, or booking for Roo Industries game tuning, FPS results, and reviews.",
     noindex: true,
   },
 };
@@ -237,13 +233,14 @@ const buildOrganizationJsonLd = () => ({
   "@context": "https://schema.org",
   "@type": "Organization",
   name: SITE_NAME,
+  description: DEFAULT_DESCRIPTION,
   url: siteUrl,
   logo: `${siteUrl}${DEFAULT_OG_IMAGE}`,
   sameAs: ["https://discord.com/invite/qs5HKNyazD"],
   areaServed: "Worldwide",
 });
 
-const buildOfferCatalogJsonLd = (name = "Optimization Services") => ({
+const buildOfferCatalogJsonLd = (name = "PC Game Optimization Services") => ({
   "@context": "https://schema.org",
   "@type": "OfferCatalog",
   name,
@@ -253,8 +250,8 @@ const buildOfferCatalogJsonLd = (name = "Optimization Services") => ({
       position: 1,
       item: {
         "@type": "Service",
-        name: "PC Optimization",
-        description: "System-wide performance and stability tuning.",
+        name: "PC Game Optimization",
+        description: "Tune BIOS, Windows, GPU, RAM, and game settings for higher FPS and smoother ranked games.",
       },
     },
     {
@@ -262,8 +259,8 @@ const buildOfferCatalogJsonLd = (name = "Optimization Services") => ({
       position: 2,
       item: {
         "@type": "Service",
-        name: "BIOS Optimization",
-        description: "Safe BIOS configuration and stability testing.",
+        name: "FPS Tuning",
+        description: "Measure average FPS, 1% lows, and frametime spikes, then tune around the titles you play.",
       },
     },
     {
@@ -271,8 +268,8 @@ const buildOfferCatalogJsonLd = (name = "Optimization Services") => ({
       position: 3,
       item: {
         "@type": "Service",
-        name: "Game Optimization",
-        description: "Per-title settings to maximize FPS and consistency.",
+        name: "Input Lag Reduction",
+        description: "Dial in Windows, drivers, power behavior, polling, and game settings for a cleaner mouse feel.",
       },
     },
     {
@@ -280,8 +277,26 @@ const buildOfferCatalogJsonLd = (name = "Optimization Services") => ({
       position: 4,
       item: {
         "@type": "Service",
+        name: "Competitive Game Settings",
+        description: "Set up the PC around ranked play, not generic benchmark runs.",
+      },
+    },
+    {
+      "@type": "ListItem",
+      position: 5,
+      item: {
+        "@type": "Service",
+        name: "Streaming Performance Tuning",
+        description: "Balance OBS, capture, encoder, and recording settings around the game first.",
+      },
+    },
+    {
+      "@type": "ListItem",
+      position: 6,
+      item: {
+        "@type": "Service",
         name: "Overclocking",
-        description: "CPU, GPU, and RAM tuning with stability checks.",
+        description: "CPU, GPU, and RAM tuning when it supports stable real-game performance.",
       },
     },
   ],

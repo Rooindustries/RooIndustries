@@ -219,7 +219,7 @@ export default function Home({ initialData = null }) {
           onClick={(event) => handleHomeSectionLink(event, "#packages")}
           className="glow-button book-optimization-button relative inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white ring-2 ring-line-accent hover:text-white active:translate-y-px transition-all duration-300"
         >
-          Optimize My PC
+          Tune My PC
           <span className="glow-line glow-line-top" />
           <span className="glow-line glow-line-right" />
           <span className="glow-line glow-line-bottom" />
