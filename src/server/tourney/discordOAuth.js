@@ -4,7 +4,6 @@ import {
   getTourneyDiscordOAuthConfig,
 } from "./discordConfig.js";
 
-const EMAIL_TOKEN_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 const OAUTH_STATE_MAX_AGE_SECONDS = 60 * 15;
 const DISCORD_SCOPES = Object.freeze(["identify", "guilds.join"]);
 
@@ -44,7 +43,7 @@ const createSignedToken = ({
     v: 1,
     p: purpose,
     iat: now,
-    exp: now + maxAgeSeconds,
+    ...(maxAgeSeconds ? { exp: now + maxAgeSeconds } : {}),
     ...payload,
   };
   const encodedPayload = base64UrlEncode(JSON.stringify(body));
@@ -56,6 +55,7 @@ const readSignedToken = ({
   purpose,
   env = process.env,
   nowSeconds = Math.floor(Date.now() / 1000),
+  ignoreExpiration = false,
 } = {}) => {
   try {
     const secret = getStateSecret(env);
@@ -67,7 +67,10 @@ const readSignedToken = ({
     if (!timingSafeEqualString(signature, expected)) return null;
 
     const payload = JSON.parse(base64UrlDecode(encodedPayload));
-    if (payload?.p !== purpose || !payload.exp || payload.exp <= nowSeconds) {
+    if (
+      payload?.p !== purpose ||
+      (!ignoreExpiration && (!payload.exp || payload.exp <= nowSeconds))
+    ) {
       return null;
     }
     return payload;
@@ -85,7 +88,7 @@ const normalizeReturnTo = (value) => {
 export const createTourneyDiscordEmailToken = ({
   player,
   env = process.env,
-  maxAgeSeconds = EMAIL_TOKEN_MAX_AGE_SECONDS,
+  maxAgeSeconds = 0,
 } = {}) =>
   createSignedToken({
     purpose: "discord-email-link",
@@ -93,7 +96,6 @@ export const createTourneyDiscordEmailToken = ({
     maxAgeSeconds,
     payload: {
       playerId: player?.id || "",
-      version: String(player?.version || "1"),
     },
   });
 
@@ -102,11 +104,11 @@ export const readTourneyDiscordEmailToken = ({ token, env = process.env } = {}) 
     token,
     purpose: "discord-email-link",
     env,
+    ignoreExpiration: true,
   });
-  if (!payload?.playerId || !payload?.version) return null;
+  if (!payload?.playerId) return null;
   return {
     playerId: String(payload.playerId),
-    version: String(payload.version),
   };
 };
 
@@ -260,7 +262,6 @@ export async function assignTourneyDiscordParticipantRole({
     headers,
     body: JSON.stringify({
       access_token: accessToken,
-      roles: [config.participantRoleId],
     }),
   });
   if (!memberResponse.ok && memberResponse.status !== 204) {

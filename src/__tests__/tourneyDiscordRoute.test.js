@@ -1,5 +1,6 @@
 const mockReadTourneySessionFromStore = jest.fn();
 const mockGetApprovedTourneyPlayerById = jest.fn();
+const mockListManageTourneyPlayers = jest.fn();
 const mockRecordTourneyPlayerDiscordLink = jest.fn();
 const mockMarkTourneyPlayerDiscordRoleAssigned = jest.fn();
 const mockMarkTourneyPlayerDiscordRoleFailed = jest.fn();
@@ -26,6 +27,7 @@ jest.mock("../server/tourney/auth", () => ({
 jest.mock("../server/tourney/playerStore", () => ({
   getApprovedTourneyPlayerById: (...args) =>
     mockGetApprovedTourneyPlayerById(...args),
+  listManageTourneyPlayers: (...args) => mockListManageTourneyPlayers(...args),
   recordTourneyPlayerDiscordLink: (...args) =>
     mockRecordTourneyPlayerDiscordLink(...args),
   markTourneyPlayerDiscordRoleAssigned: (...args) =>
@@ -36,6 +38,7 @@ jest.mock("../server/tourney/playerStore", () => ({
 
 const startRoute = require("../../app/api/tourney/discord/start/route.js");
 const callbackRoute = require("../../app/api/tourney/discord/callback/route.js");
+const backfillRoute = require("../../app/api/tourney/discord/backfill/route.js");
 const discordOAuth = require("../server/tourney/discordOAuth.js");
 
 const originalEnv = process.env;
@@ -83,6 +86,7 @@ describe("tourney Discord OAuth routes", () => {
     global.fetch = jest.fn();
     mockReadTourneySessionFromStore.mockReset();
     mockGetApprovedTourneyPlayerById.mockReset();
+    mockListManageTourneyPlayers.mockReset();
     mockRecordTourneyPlayerDiscordLink.mockReset();
     mockMarkTourneyPlayerDiscordRoleAssigned.mockReset();
     mockMarkTourneyPlayerDiscordRoleFailed.mockReset();
@@ -132,6 +136,84 @@ describe("tourney Discord OAuth routes", () => {
     expect(response.url).toContain("scope=identify+guilds.join");
   });
 
+  test("keeps approved-player Discord email links valid without expiry", () => {
+    jest.useFakeTimers();
+    try {
+      jest.setSystemTime(new Date("2026-06-01T00:00:00.000Z"));
+      const newToken = discordOAuth.createTourneyDiscordEmailToken({
+        player,
+        env: process.env,
+      });
+      const legacyExpiringToken = discordOAuth.createTourneyDiscordEmailToken({
+        player,
+        env: process.env,
+        maxAgeSeconds: 1,
+      });
+
+      jest.setSystemTime(new Date("2026-06-01T00:00:05.000Z"));
+
+      expect(
+        discordOAuth.readTourneyDiscordEmailToken({
+          token: newToken,
+          env: process.env,
+        })
+      ).toEqual({ playerId: "player_1" });
+      expect(
+        discordOAuth.readTourneyDiscordEmailToken({
+          token: legacyExpiringToken,
+          env: process.env,
+        })
+      ).toEqual({ playerId: "player_1" });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test("starts Discord OAuth from permanent approved-player email links", async () => {
+    const token = discordOAuth.createTourneyDiscordEmailToken({
+      player,
+      env: process.env,
+    });
+    mockReadTourneySessionFromStore.mockResolvedValue(null);
+    mockGetApprovedTourneyPlayerById.mockResolvedValue(player);
+
+    const response = await startRoute.GET(
+      makeRequest({
+        url: `https://www.rooindustries.com/api/tourney/discord/start?token=${token}`,
+        cookie: "",
+      })
+    );
+
+    expect(mockGetApprovedTourneyPlayerById).toHaveBeenCalledWith({
+      playerId: "player_1",
+    });
+    expect(response.status).toBe(303);
+    expect(response.url).toContain("https://discord.com/oauth2/authorize");
+  });
+
+  test("keeps Discord OAuth state tokens time-limited", () => {
+    jest.useFakeTimers();
+    try {
+      jest.setSystemTime(new Date("2026-06-01T00:00:00.000Z"));
+      const state = discordOAuth.createTourneyDiscordOAuthStateToken({
+        player,
+        env: process.env,
+        maxAgeSeconds: 1,
+      });
+
+      jest.setSystemTime(new Date("2026-06-01T00:00:05.000Z"));
+
+      expect(
+        discordOAuth.readTourneyDiscordOAuthStateToken({
+          token: state,
+          env: process.env,
+        })
+      ).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   test("rejects callback requests with invalid state", async () => {
     const response = await callbackRoute.GET(
       makeRequest({
@@ -179,6 +261,9 @@ describe("tourney Discord OAuth routes", () => {
     expect(global.fetch.mock.calls[2][0]).toContain(
       "/guilds/guild_1/members/discord_user_1"
     );
+    expect(JSON.parse(global.fetch.mock.calls[2][1].body)).toEqual({
+      access_token: "user_access_token",
+    });
     expect(global.fetch.mock.calls[3][0]).toContain(
       "/guilds/guild_1/members/discord_user_1/roles/role_1"
     );
@@ -216,5 +301,104 @@ describe("tourney Discord OAuth routes", () => {
       errorMessage: "Missing Permissions",
     });
     expect(response.url).toContain("discord=role-failed");
+  });
+
+  test("requires an admin session for Discord backfills", async () => {
+    mockReadTourneySessionFromStore.mockResolvedValue(null);
+
+    const response = await backfillRoute.POST(
+      makeRequest({
+        url: "https://www.rooindustries.com/api/tourney/discord/backfill",
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(body).toEqual({ ok: false, error: "Not found." });
+    expect(mockListManageTourneyPlayers).not.toHaveBeenCalled();
+  });
+
+  test("backfills linked Discord members from current guild state", async () => {
+    mockReadTourneySessionFromStore.mockResolvedValue({
+      username: "yukari",
+      role: "caster",
+    });
+    mockListManageTourneyPlayers.mockResolvedValue([
+      {
+        id: "player_1",
+        status: "approved",
+        discordUserId: "discord_user_1",
+        discordRoleAssignedAt: "",
+      },
+      {
+        id: "player_2",
+        status: "approved",
+        discordUserId: "discord_user_2",
+        discordRoleAssignedAt: "",
+      },
+      {
+        id: "player_3",
+        status: "approved",
+        discordUserId: "discord_user_3",
+        discordRoleAssignedAt: "",
+      },
+      {
+        id: "player_4",
+        status: "approved",
+        discordUserId: "discord_user_4",
+        discordRoleAssignedAt: "",
+      },
+      {
+        id: "player_5",
+        status: "approved",
+        discordUserId: "discord_user_5",
+        discordRoleAssignedAt: "2026-06-08T00:02:00.000Z",
+      },
+      {
+        id: "player_6",
+        status: "pending",
+        discordUserId: "discord_user_6",
+        discordRoleAssignedAt: "",
+      },
+    ]);
+    global.fetch
+      .mockResolvedValueOnce(jsonResponse({ roles: ["role_1"] }))
+      .mockResolvedValueOnce(jsonResponse({ roles: [] }))
+      .mockResolvedValueOnce(jsonResponse({}, 204))
+      .mockResolvedValueOnce(jsonResponse({ message: "Unknown Member" }, 404))
+      .mockResolvedValueOnce(jsonResponse({ roles: [] }))
+      .mockResolvedValueOnce(jsonResponse({ message: "Missing Permissions" }, 403));
+
+    const response = await backfillRoute.POST(
+      makeRequest({
+        url: "https://www.rooindustries.com/api/tourney/discord/backfill",
+      })
+    );
+    const body = await response.json();
+
+    expect(body).toEqual({
+      ok: true,
+      checked: 4,
+      alreadyHadRole: 1,
+      roleAdded: 1,
+      notInGuildNeedsReauth: 1,
+      failed: 1,
+    });
+    expect(mockMarkTourneyPlayerDiscordRoleAssigned).toHaveBeenCalledWith({
+      playerId: "player_1",
+    });
+    expect(mockMarkTourneyPlayerDiscordRoleAssigned).toHaveBeenCalledWith({
+      playerId: "player_2",
+    });
+    expect(mockMarkTourneyPlayerDiscordRoleFailed).toHaveBeenCalledWith({
+      playerId: "player_3",
+      errorMessage:
+        "Discord member not found after OAuth; user must re-authorize after the join fix.",
+    });
+    expect(mockMarkTourneyPlayerDiscordRoleFailed).toHaveBeenCalledWith({
+      playerId: "player_4",
+      errorMessage: "Missing Permissions",
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(6);
   });
 });
