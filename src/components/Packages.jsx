@@ -196,7 +196,7 @@ export default function Packages({
         className="ri-packages-review-link mt-3 inline-flex items-center justify-center gap-2 text-sm font-semibold text-ink-secondary hover:text-[color:var(--color-link-hover)] transition-colors"
       >
         <span className="ri-packages-review-stars text-warning-text">{"★".repeat(5)}</span>
-        <span className="ri-packages-review-text underline underline-offset-2 decoration-[color:var(--color-accent)]">5.0 avg from 89+ verified reviews</span>
+        <span className="ri-packages-review-text underline underline-offset-2 decoration-[color:var(--color-accent)]">5.0 avg from 139+ verified reviews</span>
       </Link>
 
       <div className="mt-12 px-4 sm:px-6">
