@@ -31,6 +31,7 @@ const basePayload = {
   twitchUsername: "playerone",
   availableAug12: true,
   acceptedRules: true,
+  acceptedCreatorEligibility: true,
   acceptedRooVisibility: true,
   notes: "Can sub if needed.",
 };
@@ -114,6 +115,37 @@ describe("tourney player store", () => {
         env,
       })
     ).rejects.toThrow("Discord is already registered.");
+  });
+
+  test("keeps approval decision links valid without a time cutoff", async () => {
+    const store = loadStore();
+    store.resetMemoryTourneyPlayerStoreForTests();
+
+    const created = await store.createPendingTourneyPlayer({
+      payload: basePayload,
+      recipients: approvers,
+      env,
+    });
+    const approveToken = created.tokens.find(
+      (token) =>
+        token.purpose === "approve" &&
+        token.recipient_email === "yukariipoi@gmail.com"
+    );
+    const storedToken = globalThis.__rooTourneyPlayerStore.tokens.find(
+      (token) => token.token_hash === store.hashTourneyToken(approveToken.token)
+    );
+    storedToken.expires_at = "2000-01-01T00:00:00.000Z";
+
+    await expect(
+      store.getRegistrationDecisionToken({
+        token: approveToken.token,
+        purpose: "approve",
+        env,
+      })
+    ).resolves.toMatchObject({
+      player_id: created.player.id,
+      purpose: "approve",
+    });
   });
 
   test("accepts an optional distinct secondary role and rejects invalid secondary role choices", async () => {
@@ -294,6 +326,19 @@ describe("tourney player store", () => {
         env,
       })
     ).rejects.toThrow("You must agree to follow the tournament rules.");
+
+    await expect(
+      store.createPendingTourneyPlayer({
+        payload: {
+          ...basePayload,
+          email: "nocreator@example.com",
+          discord: "NoCreator#1234",
+          acceptedCreatorEligibility: false,
+        },
+        recipients: approvers,
+        env,
+      })
+    ).rejects.toThrow("You must confirm creator eligibility.");
 
     await expect(
       store.createPendingTourneyPlayer({

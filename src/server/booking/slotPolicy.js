@@ -1,4 +1,7 @@
 import { createRefReadClient } from "../api/ref/sanity.js";
+import packagePricing from "../../lib/packagePricing.js";
+
+const { getPackageTitleAliases, isTopPackageTitle } = packagePricing;
 
 export const BOOKING_SETTINGS_ID = "6d8a3646-0ed2-44b5-ad45-c5c9d578126a";
 export const OWNER_TZ_NAME = "Asia/Kolkata";
@@ -147,11 +150,15 @@ export const normalizePackageDateSlots = (entries) => {
   const map = {};
 
   for (const entry of sanitizePackageDateSlots(entries)) {
-    const titleKey = normalizePackageKey(entry?.package?.title);
-    if (!titleKey) continue;
+    const titleKeys = getPackageTitleAliases(entry?.package?.title).map(
+      normalizePackageKey
+    );
+    if (!titleKeys.length) continue;
     const slots = normalizeDateSlots(entry.dateSlots);
     if (!Object.keys(slots).length) continue;
-    map[titleKey] = slots;
+    titleKeys.forEach((titleKey) => {
+      map[titleKey] = slots;
+    });
   }
 
   return map;
@@ -178,17 +185,21 @@ export const normalizeBookingSettings = (settings = {}) => {
 };
 
 export const isXocPackageTitle = (title) =>
-  normalizePackageKey(title).includes("xoc");
+  isTopPackageTitle(title);
 
 export const isVertexEssentialsPackageTitle = (title) =>
   normalizePackageKey(title).includes("vertex essential");
 
 export const resolvePackageSlotMap = (settings, packageTitle = "") => {
   const normalizedSettings = normalizeBookingSettings(settings);
-  const packageTitleKey = normalizePackageKey(packageTitle);
-  const packageMap = packageTitleKey
-    ? normalizedSettings.packageDateSlotMaps?.[packageTitleKey]
-    : null;
+  const packageMap = getPackageTitleAliases(packageTitle)
+    .map(normalizePackageKey)
+    .map((packageTitleKey) =>
+      packageTitleKey
+        ? normalizedSettings.packageDateSlotMaps?.[packageTitleKey]
+        : null
+    )
+    .find(Boolean);
   const baseMap = normalizedSettings.dateSlotMap;
   const xocMap = normalizedSettings.xocDateSlotMap;
   const essentialsMap = normalizedSettings.vertexEssentialsDateSlotMap;

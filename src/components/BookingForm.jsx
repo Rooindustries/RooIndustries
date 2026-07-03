@@ -4,11 +4,19 @@ import { client } from "../sanityClient";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
+import packageContent from "../lib/packageContent";
 import packagePricing from "../lib/packagePricing";
 import PriceDisplay from "./PriceDisplay";
 
-const { applyPackagePricing } = packagePricing;
-const DEFAULT_VERTEX_PACKAGE = applyPackagePricing({
+const { applyPackageContentOverrides } = packageContent;
+const {
+  applyPackagePricing,
+  getPackageTitleAliases,
+  isTopPackageTitle,
+} = packagePricing;
+const preparePackage = (pkg) =>
+  applyPackageContentOverrides(applyPackagePricing(pkg));
+const DEFAULT_VERTEX_PACKAGE = preparePackage({
   title: "Performance Vertex Overhaul",
   price: "$79.95",
 });
@@ -217,11 +225,15 @@ const normalizePackageKey = (value) =>
 const normalizePackageDateSlots = (entries) => {
   const map = {};
   (entries || []).forEach((entry) => {
-    const titleKey = normalizePackageKey(entry?.package?.title);
-    if (!titleKey) return;
+    const titleKeys = getPackageTitleAliases(entry?.package?.title).map(
+      normalizePackageKey
+    );
+    if (!titleKeys.length) return;
     const slots = normalizeDateSlots(entry?.dateSlots);
     if (!Object.keys(slots).length) return;
-    map[titleKey] = slots;
+    titleKeys.forEach((titleKey) => {
+      map[titleKey] = slots;
+    });
   });
   return map;
 };
@@ -287,9 +299,9 @@ export default function BookingForm({ isMobile }) {
       price: q.get("price") || "",
       tag: q.get("tag") || "",
     };
-    if (queryPkg.title) return applyPackagePricing(queryPkg);
-    if (persistedPackage) return applyPackagePricing(persistedPackage);
-    return applyPackagePricing(queryPkg);
+    if (queryPkg.title) return preparePackage(queryPkg);
+    if (persistedPackage) return preparePackage(persistedPackage);
+    return preparePackage(queryPkg);
   }, [q, persistedPackage]);
 
   const prevPackageRef = useRef(selectedPackage.title);
@@ -588,11 +600,9 @@ export default function BookingForm({ isMobile }) {
 
   const normalizedPackageTitle = normalizePackageKey(selectedPackage.title);
 
-  // is this XOC?
   const isXoc =
     q.get("xoc") === "1" ||
-    selectedPackage.title === "XOC / Extreme Overclocking" ||
-    normalizedPackageTitle.includes("xoc");
+    isTopPackageTitle(selectedPackage.title || selectedPackage.sourceTitle);
 
   const isVertexEssentials =
     normalizedPackageTitle.includes("vertex essential");
@@ -637,9 +647,12 @@ export default function BookingForm({ isMobile }) {
     const xocMap = settings.xocDateSlotMap;
     const essentialsMap = settings.vertexEssentialsDateSlotMap;
     const packageMaps = settings.packageDateSlotMaps;
-    const packageTitleKey = normalizePackageKey(selectedPackage.title);
-    const packageMap =
-      packageTitleKey && packageMaps ? packageMaps[packageTitleKey] : null;
+    const packageMap = getPackageTitleAliases(selectedPackage.title)
+      .map(normalizePackageKey)
+      .map((packageTitleKey) =>
+        packageTitleKey && packageMaps ? packageMaps[packageTitleKey] : null
+      )
+      .find(Boolean);
     const hasBase = baseMap && Object.keys(baseMap).length > 0;
     const hasXoc = xocMap && Object.keys(xocMap).length > 0;
     const hasEssentials =
@@ -885,7 +898,7 @@ export default function BookingForm({ isMobile }) {
             buttonText
           }`
         );
-        setVertexPackage(applyPackagePricing(data));
+        setVertexPackage(preparePackage(data));
       } catch (err) {
         console.error("Error fetching Performance Vertex package:", err);
       }
@@ -905,7 +918,7 @@ export default function BookingForm({ isMobile }) {
             buttonText
           }`
         );
-        setVertexEssentialsPackage(applyPackagePricing(data));
+        setVertexEssentialsPackage(preparePackage(data));
       } catch (err) {
         console.error("Error fetching Vertex Essentials package:", err);
       }
@@ -919,16 +932,16 @@ export default function BookingForm({ isMobile }) {
     const fetchPlan = async () => {
       try {
         const data = await client.fetch(
-          `*[_type == "package" && title == $title][0]{
+          `*[_type == "package" && title in $titles][0]{
             title,
             price,
             tag,
             features,
             buttonText
           }`,
-          { title: selectedPackage.title }
+          { titles: getPackageTitleAliases(selectedPackage.title) }
         );
-        setPlanPackage(applyPackagePricing(data));
+        setPlanPackage(preparePackage(data));
       } catch (err) {
         console.error("Error fetching current package:", err);
       }

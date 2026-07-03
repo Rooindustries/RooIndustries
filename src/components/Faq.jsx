@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ChevronDown } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import homeCopy from "../lib/homeCopy";
+import packageContent from "../lib/packageContent";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS, readHomeSectionData } from "../lib/homeSectionData";
 import { alignToHashTarget, getCssHeaderOffsetPx } from "../lib/scrollCoordinator";
 
@@ -19,6 +20,7 @@ const UPGRADE_HASH = "upgrade-path";
 const TRUST_HASH = "trust";
 const QUESTIONS_PER_PAGE = 10;
 const { HOME_COPY } = homeCopy;
+const { normalizeFaqQuestions } = packageContent;
 const UPGRADE_PATTERNS = [
   /upgrade path/i,
   /upgrade a single component/i,
@@ -110,13 +112,15 @@ export default function FaqSection({
   const [questions, setQuestions] = useState(() =>
     initialQuestions !== null
       ? Array.isArray(initialQuestions)
-        ? initialQuestions
+        ? normalizeFaqQuestions(initialQuestions)
         : []
       : (() => {
           const cachedQuestions = readHomeSectionData(
             HOME_SECTION_DATA_KEYS.faqQuestions
           );
-          return Array.isArray(cachedQuestions) ? cachedQuestions : [];
+          return Array.isArray(cachedQuestions)
+            ? normalizeFaqQuestions(cachedQuestions)
+            : [];
         })()
   );
 
@@ -126,7 +130,11 @@ export default function FaqSection({
     }
 
     if (initialQuestions !== null) {
-      setQuestions(Array.isArray(initialQuestions) ? initialQuestions : []);
+      setQuestions(
+        Array.isArray(initialQuestions)
+          ? normalizeFaqQuestions(initialQuestions)
+          : []
+      );
     }
   }, [initialFaqCopy, initialQuestions]);
 
@@ -197,7 +205,9 @@ export default function FaqSection({
   useEffect(() => {
     if (questions !== null) return;
     fetchHomeSectionData(HOME_SECTION_DATA_KEYS.faqQuestions)
-      .then((res) => setQuestions(Array.isArray(res) ? res : []))
+      .then((res) =>
+        setQuestions(normalizeFaqQuestions(Array.isArray(res) ? res : []))
+      )
       .catch(console.error);
   }, [questions]);
 

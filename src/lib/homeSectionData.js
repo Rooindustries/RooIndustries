@@ -1,8 +1,10 @@
 import { publicClient } from "../sanityClient";
 import homeCopy from "./homeCopy";
+import packageContent from "./packageContent";
 import packagePricing from "./packagePricing";
 
 const { applyPackagesPricing } = packagePricing;
+const { applyPackagesContentOverrides, normalizeFaqQuestions } = packageContent;
 const { applyHomeSectionCopyOverride } = homeCopy;
 
 export const HOME_SECTION_DATA_KEYS = Object.freeze({
@@ -198,7 +200,10 @@ const getStorageKey = (key) => `${STORAGE_PREFIX}${key}`;
 const normalizeHomeSectionData = (key, value) => {
   const copyValue = applyHomeSectionCopyOverride(key, value);
   if (key === HOME_SECTION_DATA_KEYS.packagesList) {
-    return applyPackagesPricing(copyValue);
+    return applyPackagesContentOverrides(applyPackagesPricing(copyValue));
+  }
+  if (key === HOME_SECTION_DATA_KEYS.faqQuestions) {
+    return normalizeFaqQuestions(copyValue);
   }
   return copyValue;
 };

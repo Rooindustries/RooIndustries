@@ -31,7 +31,7 @@ export default function UpgradeXoc() {
   const [orderId, setOrderId] = useState("");
   const [orderEmail, setOrderEmail] = useState("");
   const [loading, setLoading] = useState(false);
-  const [upgradeInfo, setUpgradeInfo] = useState(null); // { booking, xoc, upgradePrice, originalPaid }
+  const [upgradeInfo, setUpgradeInfo] = useState(null);
   const [error, setError] = useState(null);
 
   const navigate = useNavigate();
@@ -136,14 +136,14 @@ export default function UpgradeXoc() {
   return (
     <section className="relative z-10 pt-32 pb-24 px-6 max-w-3xl mx-auto text-ink">
       <h2 className="text-4xl sm:text-5xl font-extrabold text-center text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
-        Upgrade to XOC / Extreme Overclocking
+        Upgrade to Performance Vertex Max
       </h2>
       <p className="mt-3 text-ink-secondary text-center text-sm sm:text-base">
         This page is only for existing{" "}
         <span className="font-semibold text-accent">
           Performance Vertex Overhaul
         </span>{" "}
-        customers who want to upgrade to XOC.
+        customers who want to upgrade to Performance Vertex Max.
       </p>
 
       {/* Order ID input */}
@@ -199,7 +199,7 @@ export default function UpgradeXoc() {
       {upgradeInfo && (
         <div className="mt-8 rounded-2xl border border-success-border bg-success-soft shadow-success-soft backdrop-blur-lg p-6 sm:p-7">
           <h3 className="text-[20px] font-bold text-ink">
-            Upgrade Summary (PVO → XOC)
+            Upgrade Summary
           </h3>
           <p className="text-ink-muted text-sm mt-1">
             Here&apos;s how your upgrade price is calculated.
@@ -219,7 +219,9 @@ export default function UpgradeXoc() {
               </span>
             </div>
             <div className="flex justify-between gap-4">
-              <span className="text-ink-secondary">Full XOC price</span>
+              <span className="text-ink-secondary">
+                Full Performance Vertex Max price
+              </span>
               <span className="font-semibold text-accent text-right">
                 {upgradeInfo.xoc.priceString ||
                   `$${upgradeInfo.xoc.price.toFixed(2)}`}
@@ -228,7 +230,7 @@ export default function UpgradeXoc() {
             <div className="h-px w-full bg-line-soft my-3" />
             <div className="flex justify-between gap-4 items-center">
               <span className="text-ink font-semibold">
-                XOC upgrade price
+                Upgrade price
               </span>
               <span className="text-2xl font-extrabold text-success-text">
                 ${upgradePrice?.toFixed(2)}
@@ -238,7 +240,7 @@ export default function UpgradeXoc() {
 
           <p className="mt-3 text-xs text-ink-muted">
             This is the amount you pay now to upgrade your existing booking to{" "}
-            <span className="text-accent">XOC / Extreme Overclocking</span>.
+            <span className="text-accent">Performance Vertex Max</span>.
           </p>
 
           <button

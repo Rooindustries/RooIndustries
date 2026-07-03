@@ -18,7 +18,7 @@ const fallbackData = {
       { value: "200+", label: "Clients" },
       { value: "WR", label: "Holder" },
     ],
-    tags: ["BIOS", "RAM", "Windows", "XOC", "OC"],
+    tags: ["BIOS", "RAM", "Windows", "Tuning", "OC"],
     socialLinks: [
       {
         label: "@serviroo",

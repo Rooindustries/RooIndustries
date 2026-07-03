@@ -611,6 +611,107 @@ body.route-transition-lock {
     transform 500ms ease-in-out;
 }
 
+.home-tourney-announcement {
+  position: relative;
+  z-index: 1;
+  padding: 1rem 1rem 0;
+}
+
+.home-tourney-announcement-shell {
+  position: relative;
+  margin: 0 auto;
+  max-width: 58rem;
+  overflow: hidden;
+  border-radius: 8px;
+  padding: 1rem;
+  text-align: center;
+  box-shadow: var(--highlight-glass-top), var(--shadow-surface),
+    var(--shadow-glow-soft);
+}
+
+.home-tourney-announcement-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-accent),
+    transparent
+  );
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.home-tourney-announcement-kicker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  color: var(--color-text-accent);
+  font-size: 0.78rem;
+  font-weight: 800;
+  margin: 0 0 0.45rem;
+}
+
+.home-tourney-announcement h2 {
+  color: var(--color-text-primary);
+  font-size: clamp(1.2rem, 1.03rem + 0.75vw, 1.65rem);
+  font-weight: 850;
+  line-height: 1.16;
+  margin: 0;
+}
+
+.home-tourney-announcement-body {
+  color: var(--color-text-secondary);
+  font-size: 0.95rem;
+  line-height: 1.6;
+  margin: 0.65rem auto 0;
+  max-width: 44rem;
+}
+
+.home-tourney-announcement-button {
+  align-items: center;
+  border: 1px solid var(--color-border-accent);
+  border-radius: 8px;
+  color: var(--color-text-primary);
+  display: inline-flex;
+  font-size: 0.92rem;
+  font-weight: 800;
+  gap: 0.5rem;
+  justify-content: center;
+  margin-top: 0.9rem;
+  min-height: 2.75rem;
+  padding: 0.72rem 1rem;
+  text-decoration: none;
+  transform: none;
+  transition: border-color 180ms ease, box-shadow 180ms ease, filter 180ms ease;
+}
+
+.home-tourney-announcement-button:hover,
+.home-tourney-announcement-button:focus-visible {
+  border-color: var(--color-accent);
+  box-shadow: var(--shadow-glow-strong);
+  color: var(--color-text-primary);
+  filter: brightness(1.06);
+  transform: none;
+}
+
+.home-tourney-announcement-button:active {
+  transform: none;
+}
+
+@media (min-width: 640px) {
+  .home-tourney-announcement {
+    padding-top: 1.25rem;
+  }
+
+  .home-tourney-announcement-shell {
+    padding: 1.15rem 1.4rem 1.2rem;
+  }
+}
+
 .is-modal-blur .site-nav {
   pointer-events: none;
   filter: blur(8px) brightness(0.6);
@@ -1641,6 +1742,288 @@ html:not([data-theme="dark"]) .ri-package-card-standard:hover {
 
 html:not([data-theme="dark"]) .ri-package-tag-gold {
   border-color: rgba(252, 211, 77, 0.7);
+}
+
+html[data-theme="dark"] .ri-package-tag-gold.gold-flair-pill {
+  position: relative;
+  isolation: isolate;
+  overflow: visible;
+  border-color: rgba(255, 237, 174, 0.96);
+  background-color: #f3d26c;
+  background-image:
+    repeating-linear-gradient(
+      100deg,
+      rgba(255, 255, 245, 0.16) 0 1px,
+      transparent 1px 4px
+    ),
+    radial-gradient(
+      ellipse at 50% -95%,
+      rgba(255, 255, 238, 0.8),
+      rgba(255, 236, 158, 0.38) 42%,
+      transparent 66%
+    ),
+    linear-gradient(
+      180deg,
+      #fff1b0 0%,
+      #f5d36a 46%,
+      #d7b13f 100%
+    );
+  padding: 0.32rem 1.12rem;
+  outline: 1px solid rgba(255, 238, 171, 0.44);
+  outline-offset: 2px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 234, 0.84),
+    inset 0 -1px 0 rgba(118, 93, 24, 0.36),
+    inset 0 -8px 14px rgba(111, 88, 22, 0.1),
+    0 0 0 1px rgba(255, 244, 197, 0.28),
+    0 0 18px rgba(246, 215, 119, 0.68),
+    0 0 44px rgba(193, 161, 63, 0.34),
+    0 12px 30px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(18px) saturate(165%);
+}
+
+html[data-theme="dark"].animations-ready
+  .ri-package-tag-gold.gold-flair-pill {
+  animation: none;
+}
+
+html[data-theme="dark"] .ri-package-tag-gold.gold-flair-pill::before {
+  content: "";
+  position: absolute;
+  inset: 1px 12px auto;
+  height: 1px;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 252, 221, 0.98),
+    transparent
+  );
+  opacity: 0.95;
+  pointer-events: none;
+  z-index: 0;
+}
+
+html[data-theme="dark"] .ri-package-tag-gold.gold-flair-pill::after {
+  content: "";
+  position: absolute;
+  inset: -5px -8px;
+  z-index: -1;
+  border-radius: inherit;
+  background: linear-gradient(
+    100deg,
+    rgba(112, 91, 26, 0.94),
+    rgba(232, 198, 84, 0.98) 28%,
+    rgba(255, 249, 214, 1) 52%,
+    rgba(210, 176, 61, 0.98) 76%,
+    rgba(96, 78, 22, 0.94)
+  );
+  box-shadow:
+    0 0 16px rgba(246, 215, 119, 0.54),
+    0 0 42px rgba(189, 158, 57, 0.34);
+  opacity: 0.92;
+  pointer-events: none;
+}
+
+html[data-theme="dark"] .ri-package-tag-gold .gold-flair-text {
+  position: relative;
+  z-index: 1;
+  background: none;
+  color: #171102;
+  font-weight: 900;
+  -webkit-text-fill-color: #171102;
+  text-shadow:
+    0 1px 0 rgba(255, 249, 214, 0.6),
+    0 0 10px rgba(255, 232, 158, 0.34);
+}
+
+html[data-theme="dark"].animations-ready
+  .ri-package-tag-gold
+  .gold-flair-text {
+  animation: none;
+}
+
+.ri-package-warranty-callout {
+  align-items: center;
+  border: 1px solid var(--color-border-accent);
+  border-radius: 8px;
+  box-shadow: var(--highlight-glass-top), var(--shadow-glow-soft);
+  display: inline-flex;
+  gap: 0.6rem;
+  justify-content: center;
+  margin: 1rem auto 0;
+  max-width: 21rem;
+  min-height: 3.65rem;
+  overflow: hidden;
+  padding: 0.7rem 0.85rem;
+  position: relative;
+  text-align: left;
+  width: min(100%, 21rem);
+}
+
+.ri-package-warranty-callout::before {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-accent-glow),
+    transparent
+  );
+  content: "";
+  height: 1px;
+  inset: 0 12%;
+  opacity: 0.75;
+  position: absolute;
+}
+
+.ri-package-warranty-icon {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 2rem;
+  justify-content: center;
+  width: 2rem;
+}
+
+.ri-package-warranty-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.ri-package-warranty-title {
+  color: var(--color-text-primary);
+  font-size: 0.92rem;
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.ri-package-warranty-note {
+  color: var(--color-text-secondary);
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+html[data-theme="dark"] .ri-package-warranty-callout-standard {
+  background:
+    linear-gradient(180deg, rgba(15, 15, 14, 0.94), rgba(6, 6, 5, 0.94)),
+    radial-gradient(
+      circle at 50% 0%,
+      rgba(255, 232, 157, 0.1),
+      transparent 68%
+    );
+  border-color: rgba(255, 225, 144, 0.28);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 247, 210, 0.13),
+    0 0 0 1px rgba(255, 232, 160, 0.06),
+    0 0 14px rgba(221, 185, 80, 0.13);
+}
+
+html[data-theme="dark"] .ri-package-warranty-callout-standard
+  .ri-package-warranty-icon {
+  background: linear-gradient(180deg, #e8d68e, #8f7730);
+  color: #151006;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 230, 0.48),
+    0 0 10px rgba(228, 195, 91, 0.24);
+}
+
+html[data-theme="dark"] .ri-package-warranty-callout-standard
+  .ri-package-warranty-title {
+  color: #eadb9a;
+  text-shadow: 0 0 10px rgba(231, 198, 99, 0.18);
+}
+
+html[data-theme="dark"] .ri-package-warranty-callout-max {
+  background:
+    linear-gradient(180deg, rgba(21, 17, 8, 0.96), rgba(6, 6, 5, 0.95)),
+    radial-gradient(
+      circle at 50% 0%,
+      rgba(255, 232, 157, 0.18),
+      transparent 68%
+    );
+  border-color: rgba(255, 225, 144, 0.5);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 247, 210, 0.22),
+    0 0 0 1px rgba(255, 232, 160, 0.08),
+    0 0 22px rgba(221, 185, 80, 0.26);
+}
+
+html[data-theme="dark"] .ri-package-warranty-callout-max
+  .ri-package-warranty-icon {
+  background: linear-gradient(180deg, #fff0aa, #c7a23d);
+  color: #151006;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 230, 0.64),
+    0 0 15px rgba(228, 195, 91, 0.46);
+}
+
+html[data-theme="dark"] .ri-package-warranty-callout-max
+  .ri-package-warranty-title {
+  color: #fff0aa;
+  text-shadow: 0 0 13px rgba(231, 198, 99, 0.38);
+}
+
+html:not([data-theme="dark"]) .ri-package-warranty-callout-standard {
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.7), rgba(2, 6, 23, 0.7)),
+    radial-gradient(
+      circle at 50% 0%,
+      rgba(252, 211, 77, 0.1),
+      transparent 68%
+    );
+  border-color: rgba(252, 211, 77, 0.3);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 0 14px rgba(252, 211, 77, 0.14),
+    0 0 22px rgba(14, 165, 233, 0.1);
+}
+
+html:not([data-theme="dark"]) .ri-package-warranty-callout-standard
+  .ri-package-warranty-icon {
+  background: linear-gradient(180deg, #fef3c7, #d97706);
+  color: #0f172a;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 0 10px rgba(252, 211, 77, 0.28);
+}
+
+html:not([data-theme="dark"]) .ri-package-warranty-callout-standard
+  .ri-package-warranty-title {
+  color: #fde68a;
+  text-shadow: 0 0 10px rgba(252, 211, 77, 0.22);
+}
+
+html:not([data-theme="dark"]) .ri-package-warranty-callout-max {
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.88), rgba(2, 6, 23, 0.84)),
+    radial-gradient(
+      circle at 50% 0%,
+      rgba(252, 211, 77, 0.18),
+      transparent 68%
+    );
+  border-color: rgba(252, 211, 77, 0.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 0 19px rgba(252, 211, 77, 0.24),
+    0 0 30px rgba(14, 165, 233, 0.16);
+}
+
+html:not([data-theme="dark"]) .ri-package-warranty-callout-max
+  .ri-package-warranty-icon {
+  background: linear-gradient(180deg, #fde68a, #f59e0b);
+  color: #0f172a;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.62),
+    0 0 13px rgba(252, 211, 77, 0.44);
+}
+
+html:not([data-theme="dark"]) .ri-package-warranty-callout-max
+  .ri-package-warranty-title {
+  color: #fde68a;
+  text-shadow: 0 0 12px rgba(252, 211, 77, 0.35);
 }
 
 html:not([data-theme="dark"]) .ri-package-tag-blue {

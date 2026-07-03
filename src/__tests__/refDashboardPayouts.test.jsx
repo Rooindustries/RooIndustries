@@ -32,12 +32,12 @@ const payoutPayload = {
     vertex: 40,
     total: 100,
     byPackage: {
-      "XOC Tune": 60,
+      "XOC / Extreme Overclocking": 60,
       "Performance Vertex Overhaul": 40,
     },
   },
   packageBreakdown: [
-    { title: "XOC Tune", amount: 60 },
+    { title: "XOC / Extreme Overclocking", amount: 60 },
     { title: "Performance Vertex Overhaul", amount: 40 },
   ],
   payments: {
@@ -95,12 +95,22 @@ describe("RefDashboard payout summary", () => {
     expect(screen.getByText("Total earned")).toBeInTheDocument();
     expect(screen.getByText("Total paid")).toBeInTheDocument();
     expect(screen.getByText("Package earnings")).toBeInTheDocument();
-    expect(screen.getByText("Earned - XOC Tune")).toBeInTheDocument();
+    expect(screen.getByText("Earned - Performance Vertex Max")).toBeInTheDocument();
     expect(
       screen.getByText("Earned - Performance Vertex Overhaul")
     ).toBeInTheDocument();
     expect(screen.getByText("$70.00")).toBeInTheDocument();
     expect(screen.getAllByText("$30.00").length).toBeGreaterThan(0);
     expect(screen.queryByText(/Total owed -/i)).not.toBeInTheDocument();
+  });
+
+  test("shows referral links without the packages anchor", async () => {
+    render(<RefDashboard />);
+
+    const referralInput = await screen.findByDisplayValue(
+      `${window.location.origin}/?ref=creator-code`
+    );
+
+    expect(referralInput.value).not.toContain("#packages");
   });
 });

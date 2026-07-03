@@ -6,7 +6,7 @@ export const metadata = seo.getMetadataForPath("/upgrade-xoc");
 export default function Page({ searchParams }) {
   return (
     <>
-      <h1 className="sr-only">Upgrade to XOC</h1>
+      <h1 className="sr-only">Upgrade to Performance Vertex Max</h1>
       <RouteRenderer pathname="/upgrade-xoc" searchParams={searchParams} />
     </>
   );

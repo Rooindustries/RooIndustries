@@ -1,5 +1,9 @@
 const { createClient } = require("@sanity/client");
 const { applyHomePageCopyOverrides } = require("./homeCopy");
+const {
+  applyPackagesContentOverrides,
+  normalizeFaqQuestions,
+} = require("./packageContent");
 const { applyPackagesPricing } = require("./packagePricing");
 
 const sanity = createClient({
@@ -21,7 +25,7 @@ async function fetchFaqQuestions() {
 
     if (!Array.isArray(rows)) return [];
 
-    return rows
+    return normalizeFaqQuestions(rows)
       .map((item) => ({
         question: String(item?.question || "").trim(),
         answer: String(item?.answer || "").trim(),
@@ -179,14 +183,14 @@ async function fetchHomePageData() {
     reviews,
     about,
     services,
-    packagesList: applyPackagesPricing(
-      Array.isArray(packagesList) ? packagesList : []
+    packagesList: applyPackagesContentOverrides(
+      applyPackagesPricing(Array.isArray(packagesList) ? packagesList : [])
     ),
     packagesSettings,
     howItWorks,
     supportedGames,
     faqSettings,
-    faqQuestions: Array.isArray(faqQuestions) ? faqQuestions : [],
+    faqQuestions: normalizeFaqQuestions(Array.isArray(faqQuestions) ? faqQuestions : []),
   });
 }
 

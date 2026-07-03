@@ -1,5 +1,6 @@
 import React, { lazy, Suspense, useEffect, useRef, useState } from "react";
 import Hero from "../components/Hero";
+import TournamentAnnouncement from "../components/TournamentAnnouncement";
 import { Link, useLocation } from "react-router-dom";
 import {
   HOME_SECTION_PREFETCH_BY_HASH,
@@ -153,6 +154,7 @@ export default function Home({ initialData = null }) {
 
   return (
     <>
+      <TournamentAnnouncement />
       <Hero />
       <DeferredSection
         fallbackClassName="min-h-[510px]"

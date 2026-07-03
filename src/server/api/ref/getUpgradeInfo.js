@@ -4,6 +4,15 @@ import {
   resolveUpgradeContext,
 } from "./pricing.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
+import packageContent from "../../../lib/packageContent.js";
+import packagePricing from "../../../lib/packagePricing.js";
+
+const { normalizePackageText } = packageContent;
+const {
+  TOP_PACKAGE_PUBLIC_TITLE,
+  applyPackagePricing,
+  getPackageTitleAliases,
+} = packagePricing;
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -219,7 +228,7 @@ export default async function handler(req, res) {
         });
       }
 
-      targetPackage = upgradeLink.targetPackage;
+      targetPackage = applyPackagePricing(upgradeLink.targetPackage);
     } else {
       const title = String(booking.packageTitle || "").toLowerCase();
       const isPvo =
@@ -234,24 +243,27 @@ export default async function handler(req, res) {
       }
 
       targetPackage = await client.fetch(
-        `*[_type == "package" && title == "XOC / Extreme Overclocking"][0]{
+        `*[_type == "package" && title in $titles][0]{
           title,
           price
-        }`
+        }`,
+        { titles: getPackageTitleAliases(TOP_PACKAGE_PUBLIC_TITLE) }
       );
 
       if (!targetPackage) {
         return res.status(500).json({
           ok: false,
           error:
-            "XOC / Extreme Overclocking package not found in CMS. Please contact support.",
+            "Performance Vertex Max package not found in CMS. Please contact support.",
         });
       }
 
+      targetPackage = applyPackagePricing(targetPackage);
+
       upgradeLink = {
-        title: "Upgrade to XOC / Extreme Overclocking",
+        title: "Upgrade to Performance Vertex Max",
         intro:
-          "This page is only for existing Performance Vertex Overhaul customers who want to upgrade to XOC.",
+          "This page is only for existing Performance Vertex Overhaul customers who want to upgrade to Performance Vertex Max.",
       };
     }
 
@@ -288,8 +300,8 @@ export default async function handler(req, res) {
       booking: bookingPayload,
       upgradeLink: upgradeLink
         ? {
-            title: upgradeLink.title,
-            intro: upgradeLink.intro || "",
+            title: normalizePackageText(upgradeLink.title),
+            intro: normalizePackageText(upgradeLink.intro || ""),
           }
         : null,
       targetPackage: packagePayload,

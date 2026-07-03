@@ -36,4 +36,18 @@ describe("referral payout utilities", () => {
     expect(earnings.total).toBe(12.5);
     expect(earnings.byPackage["Performance Vertex Overhaul"]).toBe(12.5);
   });
+
+  test("classifies Performance Vertex Max in the top package bucket", () => {
+    const earnings = computeEarningsFromBookings([
+      {
+        packageTitle: "Performance Vertex Max",
+        commissionAmount: 15,
+        netAmount: 100,
+      },
+    ]);
+
+    expect(earnings.xoc).toBe(15);
+    expect(earnings.vertex).toBe(0);
+    expect(earnings.total).toBe(15);
+  });
 });

@@ -40,6 +40,7 @@ const readPayload = async (request) => {
     twitchUsername: form.get("twitchUsername"),
     availableAug12: form.get("availableAug12"),
     acceptedRules: form.get("acceptedRules"),
+    acceptedCreatorEligibility: form.get("acceptedCreatorEligibility"),
     acceptedRooVisibility: form.get("acceptedRooVisibility"),
     notes: form.get("notes"),
   };

@@ -1,7 +1,12 @@
 import { createClient } from "@sanity/client";
 import packagePricing from "../../../lib/packagePricing.js";
 
-const { applyPackagePricing, getPackagePricePresentation } = packagePricing;
+const {
+  applyPackagePricing,
+  getPackagePricePresentation,
+  getPackageTitleAliases,
+  normalizePackageTitleForMatch,
+} = packagePricing;
 
 const pricingClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -36,10 +41,7 @@ const normalizeDiscountType = (value) =>
   String(value || "").trim().toLowerCase() === "fixed" ? "fixed" : "percent";
 
 export const normalizePackageTitle = (value) =>
-  String(value || "")
-    .replace(/\s*\(upgrade\)\s*$/i, "")
-    .trim()
-    .toLowerCase();
+  normalizePackageTitleForMatch(value);
 
 const normalizePackageId = (value) => String(value || "").trim();
 
@@ -47,6 +49,12 @@ const getCouponEligiblePackages = (couponDoc = {}) =>
   Array.isArray(couponDoc?.eligiblePackages)
     ? couponDoc.eligiblePackages.filter(Boolean)
     : [];
+
+const fetchPackageByTitle = (client, packageTitle) =>
+  client.fetch(
+    `*[_type == "package" && title in $titles][0]{_id, title, price}`,
+    { titles: getPackageTitleAliases(packageTitle) }
+  );
 
 export const isCouponEligibleForPackage = ({
   couponDoc,
@@ -160,10 +168,7 @@ export async function resolveUpgradeContext({
       { rootId: rootOrderId }
     )) || [];
 
-  const targetPackage = await client.fetch(
-    `*[_type == "package" && title == $title][0]{_id, title, price}`,
-    { title: normalizedUpgradeTitle }
-  );
+  const targetPackage = await fetchPackageByTitle(client, normalizedUpgradeTitle);
 
   if (!targetPackage?.title) {
     throw createApiError(
@@ -222,10 +227,7 @@ export async function resolveBookingPricing({
   let effectivePackageTitle = String(packageTitle || "").trim();
 
   if (!isUpgrade) {
-    const packageDoc = await client.fetch(
-      `*[_type == "package" && title == $title][0]{_id, title, price}`,
-      { title: packageTitle }
-    );
+    const packageDoc = await fetchPackageByTitle(client, packageTitle);
 
     const pricing = getPackagePricePresentation(packageTitle, packageDoc?.price);
     effectiveGrossAmount = toMoney(pricing.price);

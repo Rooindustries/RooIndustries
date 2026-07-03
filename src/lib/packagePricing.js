@@ -1,3 +1,13 @@
+const TOP_PACKAGE_PUBLIC_TITLE = "Performance Vertex Max";
+const TOP_PACKAGE_LEGACY_TITLE = "XOC / Extreme Overclocking";
+const TOP_PACKAGE_TITLE_ALIASES = [
+  TOP_PACKAGE_PUBLIC_TITLE,
+  TOP_PACKAGE_LEGACY_TITLE,
+  "XOC",
+];
+const TOP_PACKAGE_PATTERN =
+  /^(?:performance vertex max|xoc(?:\s*\/\s*extreme overclocking)?)$/i;
+
 const PRICE_OVERRIDES = [
   {
     titlePattern: /^vertex essentials$/i,
@@ -10,11 +20,44 @@ const PRICE_OVERRIDES = [
     price: "$54.95",
   },
   {
-    titlePattern: /^xoc(?:\s*\/\s*extreme overclocking)?$/i,
-    compareAtPrice: "$179.95",
-    price: "$149.95",
+    titlePattern: TOP_PACKAGE_PATTERN,
+    compareAtPrice: "$149.95",
+    price: "$99.95",
+    sourcePriceAliases: ["$179.95"],
   },
 ];
+
+const stripUpgradeSuffix = (value = "") =>
+  String(value || "")
+    .replace(/\s*\(upgrade\)\s*$/i, "")
+    .trim();
+
+const normalizePackageTitleForMatch = (value = "") => {
+  const normalized = stripUpgradeSuffix(value).toLowerCase();
+  return TOP_PACKAGE_PATTERN.test(stripUpgradeSuffix(value))
+    ? TOP_PACKAGE_PUBLIC_TITLE.toLowerCase()
+    : normalized;
+};
+
+const isTopPackageTitle = (title = "") =>
+  TOP_PACKAGE_PATTERN.test(stripUpgradeSuffix(title));
+
+const getPublicPackageTitle = (title = "") =>
+  isTopPackageTitle(title) ? TOP_PACKAGE_PUBLIC_TITLE : String(title || "");
+
+const uniqueValues = (values = []) =>
+  Array.from(
+    new Set(
+      values
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    )
+  );
+
+const getPackageTitleAliases = (title = "") =>
+  isTopPackageTitle(title)
+    ? uniqueValues([stripUpgradeSuffix(title), ...TOP_PACKAGE_TITLE_ALIASES])
+    : uniqueValues([stripUpgradeSuffix(title)]);
 
 const toMoney = (value) => {
   const parsed = Number(
@@ -36,7 +79,9 @@ const shouldApplyOverride = (override, sourcePrice) => {
   if (!sourcePrice) return true;
   return (
     sameMoney(sourcePrice, override.compareAtPrice) ||
-    sameMoney(sourcePrice, override.price)
+    sameMoney(sourcePrice, override.price) ||
+    (Array.isArray(override.sourcePriceAliases) &&
+      override.sourcePriceAliases.some((alias) => sameMoney(sourcePrice, alias)))
   );
 };
 
@@ -65,6 +110,8 @@ const applyPackagePricing = (pkg) => {
 
   return {
     ...pkg,
+    title: getPublicPackageTitle(pkg.title),
+    sourceTitle: pkg.sourceTitle || pkg.title,
     price: pricing.price,
     originalPrice: pricing.compareAtPrice,
     compareAtPrice: pricing.compareAtPrice,
@@ -76,6 +123,12 @@ const applyPackagesPricing = (packages) =>
 
 const api = {
   PRICE_OVERRIDES,
+  TOP_PACKAGE_LEGACY_TITLE,
+  TOP_PACKAGE_PUBLIC_TITLE,
+  getPackageTitleAliases,
+  getPublicPackageTitle,
+  isTopPackageTitle,
+  normalizePackageTitleForMatch,
   applyPackagePricing,
   applyPackagesPricing,
   getPackagePricePresentation,
