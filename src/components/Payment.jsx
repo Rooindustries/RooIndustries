@@ -212,6 +212,7 @@ export default function Payment({ hideFooter = false }) {
       });
       return {
         ...parsed,
+        packageTitle: pricedPackage?.title || parsed.packageTitle,
         packagePrice: pricedPackage?.price || parsed.packagePrice,
       };
     } catch {

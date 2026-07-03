@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useLocation } from "react-router-dom";
+import packagePricing from "../lib/packagePricing";
+
+const { getPublicPackageTitle, isTopPackageTitle } = packagePricing;
 
 const HOLD_STORAGE_KEY = "my_slot_hold";
 const BOOKING_DRAFT_KEY = "booking_draft";
@@ -245,12 +248,10 @@ export default function ReservationBanner() {
 
       if (pkg?.title) {
         const params = new URLSearchParams();
-        params.set("title", pkg.title);
+        params.set("title", getPublicPackageTitle(pkg.title));
         if (pkg.price) params.set("price", pkg.price);
         if (pkg.tag) params.set("tag", pkg.tag);
-        const isXoc =
-          typeof pkg.title === "string" &&
-          pkg.title.toLowerCase().includes("xoc");
+        const isXoc = isTopPackageTitle(pkg.title);
         params.set("xoc", isXoc ? "1" : "0");
         if (pkg.price) params.set("price", pkg.price);
         if (pkg.tag) params.set("tag", pkg.tag);
@@ -349,7 +350,9 @@ export default function ReservationBanner() {
         <div className={`min-w-0 z-10 ${textAlignmentClass}`}>
           <p className={`font-semibold text-ink truncate drop-shadow-md ${titleSizeClass}`}>
             Slot {holdLocalTimeLabel || "--"}
-            {hold?.packageTitle ? ` — ${hold.packageTitle}` : ""}
+            {hold?.packageTitle
+              ? ` — ${getPublicPackageTitle(hold.packageTitle)}`
+              : ""}
           </p>
           <p className={`text-info-text truncate drop-shadow-sm ${subtitleSizeClass}`}>
             Expires in {formatCountdown(countdown)}

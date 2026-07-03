@@ -141,6 +141,13 @@ const mockSanityClient = {
     }
     if (
       q.includes('_type == "package"') &&
+      q.includes("title in $titles")
+    ) {
+      const titles = Array.isArray(params.titles) ? params.titles : [];
+      return store.packages.find((pkg) => titles.includes(pkg.title)) || null;
+    }
+    if (
+      q.includes('_type == "package"') &&
       q.includes("title == $title")
     ) {
       return (
@@ -1104,8 +1111,8 @@ describe("booking reservation API", () => {
     await createBooking(
       createReq({
         email: CLIENT_EMAIL,
-        packageTitle: "XOC / Extreme Overclocking (Upgrade)",
-        packagePrice: "$64.96",
+        packageTitle: "Performance Vertex Max (Upgrade)",
+        packagePrice: "$14.96",
         status: "captured",
         paymentProvider: "paypal",
         paypalOrderId: "paypal_upgrade_1",
@@ -1157,8 +1164,8 @@ describe("booking reservation API", () => {
     const res = createRes();
     await createBooking(
       createReq({
-        packageTitle: "XOC / Extreme Overclocking",
-        packagePrice: "$64.96",
+        packageTitle: "Performance Vertex Max",
+        packagePrice: "$14.96",
         status: "captured",
         paymentProvider: "paypal",
         paypalOrderId: "paypal_upgrade_missing_email",
@@ -1199,8 +1206,8 @@ describe("booking reservation API", () => {
     await createBooking(
       createReq({
         email: "wrong@example.com",
-        packageTitle: "XOC / Extreme Overclocking",
-        packagePrice: "$64.96",
+        packageTitle: "Performance Vertex Max",
+        packagePrice: "$14.96",
         status: "captured",
         paymentProvider: "paypal",
         paypalOrderId: "paypal_upgrade_wrong_email",
@@ -1242,17 +1249,17 @@ describe("booking reservation API", () => {
       email: CLIENT_EMAIL,
       originalOrderId: "booking_original",
       packageTitle: "Cooling Tuning Add-On",
-      packagePrice: "$20.00",
-      grossAmount: 20,
-      netAmount: 20,
+      packagePrice: "$5.00",
+      grossAmount: 5,
+      netAmount: 5,
     });
 
     const res = createRes();
     await createBooking(
       createReq({
         email: CLIENT_EMAIL,
-        packageTitle: "XOC / Extreme Overclocking",
-        packagePrice: "$44.96",
+        packageTitle: "Performance Vertex Max",
+        packagePrice: "$9.96",
         status: "captured",
         paymentProvider: "paypal",
         paypalOrderId: "paypal_upgrade_cumulative",
@@ -1263,9 +1270,9 @@ describe("booking reservation API", () => {
 
     expect(res.statusCode).toBe(200);
     const upgrade = store.bookings.find((b) => b._id === res.body.bookingId);
-    expect(upgrade.grossAmount).toBeCloseTo(44.96, 2);
-    expect(upgrade.netAmount).toBeCloseTo(44.96, 2);
-    expect(upgrade.packagePrice).toBe("$44.96");
+    expect(upgrade.grossAmount).toBeCloseTo(9.96, 2);
+    expect(upgrade.netAmount).toBeCloseTo(9.96, 2);
+    expect(upgrade.packagePrice).toBe("$9.96");
   });
 
   test("upgrade booking rejects orders already at the target package", async () => {
@@ -1293,17 +1300,17 @@ describe("booking reservation API", () => {
       status: "captured",
       email: CLIENT_EMAIL,
       originalOrderId: "booking_original",
-      packageTitle: "XOC / Extreme Overclocking",
-      packagePrice: "$64.96",
-      grossAmount: 64.96,
-      netAmount: 64.96,
+      packageTitle: "Performance Vertex Max",
+      packagePrice: "$14.96",
+      grossAmount: 14.96,
+      netAmount: 14.96,
     });
 
     const res = createRes();
     await createBooking(
       createReq({
         email: CLIENT_EMAIL,
-        packageTitle: "XOC / Extreme Overclocking",
+        packageTitle: "Performance Vertex Max",
         packagePrice: "$0.00",
         status: "captured",
         paymentProvider: "paypal",
@@ -1347,7 +1354,7 @@ describe("booking reservation API", () => {
       json: async () => ({
         order_id: "razorpay_order_1",
         currency: "USD",
-        amount: 6496,
+        amount: 1496,
         status: "authorized",
       }),
     }));
@@ -1361,8 +1368,8 @@ describe("booking reservation API", () => {
     await createBooking(
       createReq({
         email: CLIENT_EMAIL,
-        packageTitle: "XOC / Extreme Overclocking",
-        packagePrice: "$64.96",
+        packageTitle: "Performance Vertex Max",
+        packagePrice: "$14.96",
         status: "captured",
         paymentProvider: "razorpay",
         razorpayOrderId: "razorpay_order_1",
@@ -1523,7 +1530,7 @@ describe("booking reservation API", () => {
                 captures: [
                   {
                     amount: {
-                      value: "64.96",
+                      value: "14.96",
                       currency_code: "EUR",
                     },
                   },
@@ -1539,8 +1546,8 @@ describe("booking reservation API", () => {
     await createBooking(
       createReq({
         email: CLIENT_EMAIL,
-        packageTitle: "XOC / Extreme Overclocking",
-        packagePrice: "$64.96",
+        packageTitle: "Performance Vertex Max",
+        packagePrice: "$14.96",
         status: "captured",
         paymentProvider: "paypal",
         paypalOrderId: "paypal_upgrade_currency_mismatch",

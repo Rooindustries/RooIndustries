@@ -2,6 +2,8 @@ import React, { useState, useEffect } from "react";
 import { client, urlFor } from "../sanityClient";
 import ImageZoomModal from "./ImageZoomModal";
 
+const localDiscordReviews = [];
+
 export default function Reviews() {
   const [selectedImage, setSelectedImage] = useState(null);
   const [selectedAlt, setSelectedAlt] = useState("");
@@ -33,7 +35,7 @@ export default function Reviews() {
         key: `placeholder-${index}`,
       }))
     : Array.isArray(reviews)
-    ? reviews
+    ? [...localDiscordReviews, ...reviews]
     : [];
 
   // SEO/a11y: keep the alt text aligned with the zoomed review image.
@@ -78,11 +80,20 @@ export default function Reviews() {
           }
 
           const reviewAlt = rev.alt || "Client review screenshot";
-          const reviewDims = rev.image?.dimensions;
-          const reviewSrc = rev.image
+          const reviewDims = rev.image?.dimensions || {
+            width: rev.width,
+            height: rev.height,
+          };
+          const reviewSrc = rev.src
+            ? rev.src
+            : rev.image
             ? urlFor(rev.image).width(800).format("webp").quality(85).url()
             : "";
-          const reviewZoomSrc = rev.image ? urlFor(rev.image).url() : reviewSrc;
+          const reviewZoomSrc = rev.src
+            ? rev.src
+            : rev.image
+            ? urlFor(rev.image).url()
+            : reviewSrc;
 
           return (
             <div

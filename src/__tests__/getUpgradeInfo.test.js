@@ -51,10 +51,7 @@ const setupFetch = ({ booking = paidBooking(), extraFetch = null } = {}) => {
     const extra = extraFetch ? await extraFetch(q, params) : undefined;
     if (extra !== undefined) return extra;
 
-    if (
-      q.includes('_type == "package"') &&
-      q.includes('title == "XOC / Extreme Overclocking"')
-    ) {
+    if (q.includes('_type == "package"') && q.includes("title in $titles")) {
       return {
         title: "XOC / Extreme Overclocking",
         price: "$149.95",
@@ -77,8 +74,8 @@ const setupFetch = ({ booking = paidBooking(), extraFetch = null } = {}) => {
     }
     if (
       q.includes('_type == "package"') &&
-      q.includes("title == $title") &&
-      params.title === "XOC / Extreme Overclocking"
+      q.includes("title in $titles") &&
+      Array.isArray(params.titles)
     ) {
       return {
         title: "XOC / Extreme Overclocking",
@@ -174,7 +171,8 @@ describe("getUpgradeInfo API", () => {
     expect(res.body.booking.specs).toBeUndefined();
     expect(res.body.booking.mainGame).toBeUndefined();
     expect(res.body.booking.message).toBeUndefined();
-    expect(res.body.upgradePrice).toBeCloseTo(64.96, 2);
+    expect(res.body.targetPackage.title).toBe("Performance Vertex Max");
+    expect(res.body.upgradePrice).toBeCloseTo(14.96, 2);
   });
 
   test("looks up upgrades by booking orderId", async () => {

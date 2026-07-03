@@ -16,8 +16,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Register | Roo Industries",
-  description: "Private Roo Industries registration page.",
+  title: "Creator Registration | Roo Industries",
+  description: "Private creator Roo Industries tournament registration page.",
   robots: {
     index: false,
     follow: false,
@@ -36,13 +36,14 @@ export default async function TourneyRegisterPage() {
 
   return (
     <TourneyShell session={session} activeHref="/tourney/register">
-      <RouteTitle title="Player" accent="Registration">
-        Submit your player info once. Owner and caster admins review signups
-        before accounts go live.
+      <RouteTitle title="Creator" accent="Registration">
+        Submit your player info once. This Overwatch tournament is for creators,
+        and owner/caster admins use your Twitch username during review before
+        accounts go live.
       </RouteTitle>
 
       <div className="tourney-grid">
-        <Section id="registration-form" eyebrow="Register" title="Player Signup" wide>
+        <Section id="registration-form" eyebrow="Register" title="Creator Signup" wide>
           <TourneyRegistrationForm
             registrationClosed={registrationClosed}
             registrationClosesAt={registrationClosesAt}

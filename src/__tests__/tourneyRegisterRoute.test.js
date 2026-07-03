@@ -62,6 +62,7 @@ const basePayload = {
   twitchUsername: "playerone",
   availableAug12: true,
   acceptedRules: true,
+  acceptedCreatorEligibility: true,
   acceptedRooVisibility: true,
   notes: "",
 };
@@ -122,6 +123,32 @@ describe("tourney register API route", () => {
     expect(response.status).toBe(200);
     expect(mockCreatePendingTourneyPlayer).toHaveBeenCalledWith({
       payload: { ...basePayload, acceptSubstitutePool: true },
+      recipients: expect.any(Array),
+    });
+  });
+
+  test("passes creator eligibility acknowledgement through from form submissions", async () => {
+    const formValues = new Map(
+      Object.entries({
+        ...basePayload,
+        acceptedCreatorEligibility: "on",
+      })
+    );
+    const request = {
+      url: "https://www.rooindustries.com/api/tourney/register",
+      headers: { get: () => "" },
+      formData: async () => ({
+        get: (key) => formValues.get(key) || null,
+      }),
+    };
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(200);
+    expect(mockCreatePendingTourneyPlayer).toHaveBeenCalledWith({
+      payload: expect.objectContaining({
+        acceptedCreatorEligibility: "on",
+      }),
       recipients: expect.any(Array),
     });
   });

@@ -6,13 +6,9 @@ import {
   TOURNEY_SESSION_COOKIE,
   readTourneySessionFromStore,
 } from "../../src/server/tourney/auth";
-import {
-  canAccessTourneyRegistration,
-  isTourneyAdminSession,
-} from "../../src/server/tourney/access";
+import { isTourneyAdminSession } from "../../src/server/tourney/access";
 
 export const navItems = [
-  { href: "/tourney/register", label: "Register" },
   { href: "/tourney#info", label: "Event Information" },
   { href: "/tourney#rules", label: "Rules" },
   { href: "/tourney/roster", label: "Roster" },
@@ -20,13 +16,9 @@ export const navItems = [
 ];
 
 export const getNavItems = (session) => {
-  const items = canAccessTourneyRegistration(session)
-    ? navItems
-    : navItems.filter((item) => item.href !== "/tourney/register");
-
   return isTourneyAdminSession(session)
-    ? [...items, { href: "/tourney/manage", label: "Manage" }]
-    : items;
+    ? [...navItems, { href: "/tourney/manage", label: "Manage" }]
+    : navItems;
 };
 
 export const getTourneySession = async () => {
@@ -672,6 +664,123 @@ export const TourneyStyles = () => (
       font-weight: 500;
     }
 
+    .tourney-hero-actions {
+      display: flex;
+      justify-content: center;
+      margin-top: 1.35rem;
+    }
+
+    .tourney-register-button {
+      position: relative;
+      isolation: isolate;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: min(100%, 12rem);
+      min-height: 3.1rem;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.34);
+      border-radius: 9999px;
+      color: rgba(255, 255, 255, 0.96);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04)),
+        rgba(8, 18, 32, 0.52);
+      padding: 0 2rem;
+      font-size: 1rem;
+      font-weight: 820;
+      line-height: 1;
+      text-decoration: none;
+      text-shadow: 0 1px 2px rgba(2, 6, 23, 0.45);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.36),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.09),
+        inset 0 -1px 0 rgba(255, 255, 255, 0.08),
+        0 14px 32px rgba(2, 6, 23, 0.24);
+      backdrop-filter: blur(30px) saturate(175%) brightness(1.08);
+      -webkit-backdrop-filter: blur(30px) saturate(175%) brightness(1.08);
+      transition:
+        border-color 180ms ease,
+        color 180ms ease,
+        background 180ms ease,
+        box-shadow 180ms ease;
+    }
+
+    .tourney-register-button::before {
+      content: "";
+      position: absolute;
+      inset: 1px;
+      z-index: 0;
+      border-radius: inherit;
+      background:
+        linear-gradient(110deg, rgba(255, 255, 255, 0.22), transparent 30%),
+        linear-gradient(290deg, rgba(255, 255, 255, 0.08), transparent 38%);
+      opacity: 0.7;
+      pointer-events: none;
+    }
+
+    .tourney-register-button::after {
+      content: "";
+      position: absolute;
+      inset: 1px;
+      z-index: 1;
+      border-radius: inherit;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 44%),
+        linear-gradient(90deg, transparent 10%, rgba(255, 255, 255, 0.12) 50%, transparent 90%) top / 100% 1px no-repeat;
+      box-shadow:
+        inset 0 -1px 0 rgba(255, 255, 255, 0.06),
+        inset 0 -12px 18px rgba(2, 6, 23, 0.08);
+      opacity: 0.88;
+      pointer-events: none;
+    }
+
+    .tourney-register-button > span {
+      position: relative;
+      z-index: 2;
+    }
+
+    .tourney-register-button:hover {
+      border-color: rgba(103, 232, 249, 0.72);
+      color: #ecfeff;
+      background:
+        radial-gradient(circle at 50% 0%, rgba(125, 211, 252, 0.38), transparent 46%),
+        linear-gradient(135deg, rgba(56, 189, 248, 0.34), rgba(14, 165, 233, 0.24) 48%, rgba(37, 99, 235, 0.3)),
+        rgba(8, 47, 73, 0.62);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.46),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+        inset 0 -1px 0 rgba(186, 230, 253, 0.22),
+        0 0 22px rgba(56, 189, 248, 0.34),
+        0 14px 32px rgba(2, 6, 23, 0.24);
+      transform: none;
+    }
+
+    .tourney-register-button:hover::before {
+      background:
+        radial-gradient(110% 90% at 50% 0%, rgba(186, 230, 253, 0.4), transparent 48%),
+        linear-gradient(110deg, rgba(255, 255, 255, 0.26), transparent 30%),
+        linear-gradient(290deg, rgba(56, 189, 248, 0.14), transparent 38%);
+      opacity: 0.9;
+    }
+
+    .tourney-register-button:hover::after {
+      border-color: rgba(125, 211, 252, 0.34);
+      background:
+        linear-gradient(180deg, rgba(224, 242, 254, 0.14), transparent 44%),
+        linear-gradient(90deg, transparent 10%, rgba(125, 211, 252, 0.26) 50%, transparent 90%) top / 100% 1px no-repeat;
+      box-shadow:
+        inset 0 -1px 0 rgba(125, 211, 252, 0.14),
+        inset 0 -12px 18px rgba(8, 47, 73, 0.08);
+    }
+
+    .tourney-register-button:focus-visible {
+      outline: none;
+      box-shadow:
+        0 0 0 3px color-mix(in srgb, var(--tourney-focus) 42%, transparent),
+        0 0 22px rgba(56, 189, 248, 0.22);
+    }
+
     .tourney-host-showcase {
       display: grid;
       gap: 18px;
@@ -872,6 +981,7 @@ export const TourneyStyles = () => (
       border-radius: 1rem;
       background: rgba(11, 17, 32, 0.8);
       padding: 1.75rem;
+      text-align: center;
       box-shadow: 0 0 25px rgba(14, 165, 233, 0.15);
       backdrop-filter: blur(4px);
       -webkit-backdrop-filter: blur(4px);
@@ -882,12 +992,13 @@ export const TourneyStyles = () => (
     }
 
     .tourney-section h2 {
-      margin: 0;
+      margin: 0 auto;
       color: #fff;
       font-size: 1.72rem;
       line-height: 1.16;
       font-weight: 780;
       letter-spacing: 0;
+      text-align: center;
     }
 
     .tourney-eyebrow,
@@ -906,6 +1017,7 @@ export const TourneyStyles = () => (
       color: rgba(203, 213, 225, 0.9);
       font-size: 0.98rem;
       line-height: 1.62;
+      text-align: left;
     }
 
     .tourney-section-body ul {
@@ -924,32 +1036,43 @@ export const TourneyStyles = () => (
     }
 
     .tourney-info-list {
+      --tourney-list-gap: clamp(16px, 2vw, 22px);
+      --tourney-list-half-gap: clamp(8px, 1vw, 11px);
       counter-reset: tourney-info;
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       grid-auto-rows: 1fr;
       justify-content: stretch;
       align-items: stretch;
-      gap: clamp(16px, 2vw, 22px);
+      gap: var(--tourney-list-gap);
       margin: 0;
       padding: 0;
       list-style: none;
     }
 
     .tourney-card-list {
+      --tourney-list-gap: clamp(16px, 2vw, 22px);
+      --tourney-list-half-gap: clamp(8px, 1vw, 11px);
       counter-reset: tourney-card;
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
       grid-auto-rows: 1fr;
       justify-content: stretch;
       align-items: stretch;
-      gap: clamp(16px, 2vw, 22px);
+      gap: var(--tourney-list-gap);
       margin: 0;
       padding: 0;
       list-style: none;
     }
 
-    .tourney-date-list {
+    .tourney-section-body .tourney-info-list,
+    .tourney-section-body .tourney-card-list {
+      gap: var(--tourney-list-gap);
+    }
+
+    .tourney-date-list,
+    .tourney-giveaway-list,
+    .tourney-bracket-list {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
@@ -1000,10 +1123,15 @@ export const TourneyStyles = () => (
       border-radius: 9999px;
       color: #ecfeff;
       background:
-        linear-gradient(180deg, rgba(8, 47, 73, 0.92), rgba(12, 74, 110, 0.72));
+        linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.045)),
+        rgba(8, 47, 73, 0.5);
       box-shadow:
-        0 0 0 4px rgba(14, 165, 233, 0.08),
-        0 0 18px rgba(56, 189, 248, 0.2);
+        inset 0 1px 0 rgba(255, 255, 255, 0.28),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+        0 0 0 4px rgba(14, 165, 233, 0.06),
+        0 0 18px rgba(56, 189, 248, 0.14);
+      backdrop-filter: blur(18px) saturate(145%);
+      -webkit-backdrop-filter: blur(18px) saturate(145%);
       font-size: 0.88rem;
       font-weight: 820;
       line-height: 1;
@@ -1058,6 +1186,17 @@ export const TourneyStyles = () => (
       width: auto;
     }
 
+    @media (min-width: 721px) {
+      .tourney-info-list > li:last-child:nth-child(odd),
+      .tourney-date-list > li:last-child:nth-child(odd),
+      .tourney-giveaway-list > li:last-child:nth-child(odd),
+      .tourney-bracket-list > li:last-child:nth-child(odd) {
+        grid-column: 1 / -1;
+        justify-self: center;
+        width: min(100%, calc(50% - var(--tourney-list-half-gap)));
+      }
+    }
+
     .tourney-action-callout {
       display: grid;
       gap: 8px;
@@ -1086,6 +1225,194 @@ export const TourneyStyles = () => (
       font-size: 0.98rem;
       line-height: 1.45;
       font-weight: 650;
+    }
+
+    .tourney-date-callout,
+    .tourney-giveaway-callout {
+      display: grid;
+      gap: 9px;
+      margin: 0 0 18px;
+      border: 1px solid rgba(125, 211, 252, 0.38);
+      border-radius: 0.95rem;
+      background:
+        linear-gradient(145deg, rgba(8, 47, 73, 0.32), rgba(15, 23, 42, 0.72)),
+        radial-gradient(circle at 0% 0%, rgba(125, 211, 252, 0.22), transparent 42%);
+      padding: 18px;
+      text-align: center;
+      box-shadow:
+        inset 0 1px 0 rgba(186, 230, 253, 0.1),
+        0 0 24px rgba(56, 189, 248, 0.12);
+    }
+
+    .tourney-date-callout strong,
+    .tourney-giveaway-callout strong {
+      color: #ecfeff;
+      font-size: clamp(1.16rem, 2vw, 1.42rem);
+      line-height: 1.2;
+      font-weight: 860;
+    }
+
+    .tourney-date-callout span,
+    .tourney-giveaway-callout span {
+      color: rgba(226, 232, 240, 0.9);
+      font-size: 0.98rem;
+      line-height: 1.55;
+      font-weight: 650;
+    }
+
+    .tourney-card-list .tourney-date-highlight {
+      width: fit-content;
+      max-width: 100%;
+      margin-top: -2px;
+      color: #bae6fd;
+      background: linear-gradient(90deg, #e0f2fe, #38bdf8 52%, #0ea5e9);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      font-size: 0.98rem;
+      line-height: 1.18;
+      font-weight: 920;
+      letter-spacing: 0;
+      text-shadow: 0 0 16px rgba(56, 189, 248, 0.16);
+    }
+
+    .tourney-giveaway-list {
+      margin-top: 0;
+    }
+
+    .tourney-charity-callout {
+      display: grid;
+      gap: 9px;
+      border: 1px solid rgba(52, 211, 153, 0.32);
+      border-radius: 0.95rem;
+      background:
+        linear-gradient(145deg, rgba(6, 78, 59, 0.22), rgba(15, 23, 42, 0.72)),
+        radial-gradient(circle at 0% 0%, rgba(45, 212, 191, 0.18), transparent 42%);
+      padding: 18px;
+      text-align: center;
+      box-shadow:
+        inset 0 1px 0 rgba(209, 250, 229, 0.08),
+        0 0 24px rgba(20, 184, 166, 0.12);
+    }
+
+    .tourney-charity-callout strong {
+      color: #d1fae5;
+      font-size: clamp(1.16rem, 2vw, 1.42rem);
+      line-height: 1.2;
+      font-weight: 860;
+    }
+
+    .tourney-charity-callout span,
+    .tourney-charity-callout small {
+      color: rgba(226, 232, 240, 0.9);
+      line-height: 1.55;
+    }
+
+    .tourney-charity-callout span {
+      font-size: 0.98rem;
+      font-weight: 650;
+    }
+
+    .tourney-charity-callout small {
+      font-size: 0.82rem;
+      font-weight: 620;
+    }
+
+    .tourney-charity-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 16px;
+    }
+
+    .tourney-charity-card {
+      position: relative;
+      display: grid;
+      align-content: start;
+      justify-items: center;
+      gap: 11px;
+      min-width: 0;
+      min-height: 100%;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 0.9rem;
+      color: rgba(226, 232, 240, 0.9);
+      background:
+        linear-gradient(145deg, rgba(15, 23, 42, 0.82), rgba(7, 24, 49, 0.68));
+      padding: 16px;
+      text-align: center;
+      text-decoration: none;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        0 16px 38px rgba(2, 6, 23, 0.18);
+      transition:
+        border-color 180ms ease,
+        background 180ms ease,
+        box-shadow 180ms ease;
+    }
+
+    .tourney-charity-card:hover {
+      border-color: rgba(255, 255, 255, 0.18);
+      background:
+        linear-gradient(145deg, rgba(15, 23, 42, 0.84), rgba(7, 24, 49, 0.7));
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        0 16px 38px rgba(2, 6, 23, 0.2);
+    }
+
+    .tourney-charity-logo {
+      display: grid;
+      place-items: center;
+      width: min(100%, 22rem);
+      min-height: 5.25rem;
+      border: 1px solid rgba(255, 255, 255, 0.62);
+      border-radius: 0.7rem;
+      background: rgba(255, 255, 255, 0.94);
+      padding: 14px 16px;
+    }
+
+    .tourney-charity-logo picture,
+    .tourney-charity-logo img {
+      display: block;
+      max-width: 100%;
+    }
+
+    .tourney-charity-logo img {
+      width: min(100%, 19rem);
+      height: auto;
+      object-fit: contain;
+      object-position: center;
+    }
+
+    .tourney-charity-name {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      min-height: 5.25rem;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 0.7rem;
+      color: rgba(255, 255, 255, 0.96);
+      background: rgba(8, 17, 32, 0.56);
+      padding: 12px;
+      font-size: clamp(1.16rem, 2.4vw, 1.55rem);
+      font-weight: 860;
+      line-height: 1.12;
+      text-align: center;
+    }
+
+    .tourney-charity-card strong {
+      color: #fff;
+      font-size: 1.05rem;
+      line-height: 1.2;
+      font-weight: 820;
+    }
+
+    .tourney-charity-card span:not(.tourney-charity-logo):not(.tourney-charity-name) {
+      color: rgba(203, 213, 225, 0.9);
+      font-size: 0.9rem;
+      line-height: 1.48;
+      text-align: center;
     }
 
     .tourney-map-process {
@@ -1172,10 +1499,15 @@ export const TourneyStyles = () => (
       border-radius: 9999px;
       color: #ecfeff;
       background:
-        linear-gradient(180deg, rgba(8, 47, 73, 0.92), rgba(12, 74, 110, 0.72));
+        linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.045)),
+        rgba(8, 47, 73, 0.5);
       box-shadow:
-        0 0 0 4px rgba(14, 165, 233, 0.08),
-        0 0 18px rgba(56, 189, 248, 0.2);
+        inset 0 1px 0 rgba(255, 255, 255, 0.28),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+        0 0 0 4px rgba(14, 165, 233, 0.06),
+        0 0 18px rgba(56, 189, 248, 0.14);
+      backdrop-filter: blur(18px) saturate(145%);
+      -webkit-backdrop-filter: blur(18px) saturate(145%);
       font-size: 0.88rem;
       font-weight: 820;
       line-height: 1;
@@ -1714,20 +2046,42 @@ export const TourneyStyles = () => (
     }
 
     .tourney-modal-backdrop {
+      --tourney-text: #ffffff;
+      --tourney-text-soft: rgba(226, 232, 240, 0.86);
+      --tourney-text-muted: rgba(148, 163, 184, 0.86);
+      --tourney-surface: rgba(10, 19, 36, 0.72);
+      --tourney-surface-strong: rgba(6, 18, 38, 0.95);
+      --tourney-surface-soft: rgba(255, 255, 255, 0.05);
+      --tourney-input: #0c162a;
+      --tourney-border: rgba(255, 255, 255, 0.1);
+      --tourney-border-strong: rgba(148, 163, 184, 0.45);
+      --tourney-border-accent: rgba(103, 232, 249, 0.3);
+      --tourney-accent: #22d3ee;
+      --tourney-accent-strong: #0284c7;
+      --tourney-accent-glow: #03e9f4;
+      --tourney-accent-soft: rgba(103, 232, 249, 0.5);
+      --tourney-focus: rgba(103, 232, 249, 0.7);
       position: fixed;
       inset: 0;
       z-index: 80;
       display: grid;
       place-items: center;
+      box-sizing: border-box;
+      min-height: 100dvh;
+      overflow-y: auto;
       padding: 18px;
+      font-family: "Manrope Variable", system-ui, sans-serif;
       background: rgba(3, 7, 18, 0.74);
       backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
     }
 
     .tourney-modal {
       display: grid;
       gap: 12px;
       width: min(100%, 31rem);
+      max-height: calc(100dvh - 36px);
+      overflow-y: auto;
       border: 1px solid rgba(168, 85, 247, 0.5);
       border-radius: 1rem;
       background:
@@ -1746,14 +2100,16 @@ export const TourneyStyles = () => (
     }
 
     .tourney-modal h3 {
-      color: #fff;
-      font-size: clamp(1.35rem, 3vw, 1.85rem);
-      line-height: 1.1;
+      color: var(--tourney-text);
+      font-size: 1.72rem;
+      line-height: 1.16;
+      font-weight: 780;
+      letter-spacing: 0;
     }
 
     .tourney-modal p:not(.tourney-kicker) {
-      color: rgba(226, 232, 240, 0.86);
-      font-size: 0.95rem;
+      color: var(--tourney-text-soft);
+      font-size: 0.94rem;
       line-height: 1.5;
     }
 
@@ -1763,6 +2119,22 @@ export const TourneyStyles = () => (
       gap: 10px;
       align-items: center;
       margin-top: 4px;
+    }
+
+    .tourney-modal-actions .tourney-owner-button,
+    .tourney-modal-actions .tourney-owner-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 11.5rem;
+      min-height: 46px;
+      padding: 0.72rem 1.2rem;
+      border-radius: 0.75rem;
+      font-size: 0.88rem;
+      font-weight: 820;
+      line-height: 1.05;
+      text-align: center;
+      white-space: nowrap;
     }
 
     .tourney-section-link {
@@ -2872,6 +3244,7 @@ export const TourneyStyles = () => (
     .tourney-owner-row strong,
     .tourney-record-row h3,
     .tourney-bracket-page-head h2,
+    .tourney-charity-card strong,
     .tourney-match-side strong,
     .tourney-bracket-toolbar strong,
     .tourney-team-row strong,
@@ -2890,6 +3263,9 @@ export const TourneyStyles = () => (
     .tourney-section-body,
     .tourney-info-list span,
     .tourney-card-list span,
+    .tourney-charity-card span:not(.tourney-charity-logo):not(.tourney-charity-name),
+    .tourney-charity-callout span,
+    .tourney-charity-callout small,
     .tourney-rule p,
     .tourney-form-note,
     .tourney-record-row p,
@@ -2951,6 +3327,7 @@ export const TourneyStyles = () => (
     .tourney-mobile-trigger,
     .tourney-roster-controls button,
     .tourney-section-link a,
+    .tourney-register-button,
     .tourney-badge {
       border-color: var(--tourney-border);
       color: var(--tourney-text-soft);
@@ -2967,10 +3344,40 @@ export const TourneyStyles = () => (
     .tourney-mobile-panel a.is-active,
     .tourney-roster-controls button:hover,
     .tourney-roster-controls button.is-active,
-    .tourney-section-link a:hover {
+    .tourney-section-link a:hover,
+    .tourney-register-button:hover {
       border-color: var(--tourney-border-accent);
       color: var(--tourney-accent);
       background: var(--color-surface-hover-accent);
+    }
+
+    .tourney-register-button {
+      border-color: rgba(255, 255, 255, 0.34);
+      color: rgba(255, 255, 255, 0.96);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04)),
+        color-mix(in srgb, var(--tourney-surface-strong) 62%, transparent);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.36),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.09),
+        inset 0 -1px 0 rgba(255, 255, 255, 0.08),
+        0 14px 32px rgba(0, 0, 0, 0.24);
+    }
+
+    .tourney-register-button:hover {
+      border-color: rgba(103, 232, 249, 0.72);
+      color: #ecfeff;
+      background:
+        radial-gradient(circle at 50% 0%, rgba(125, 211, 252, 0.38), transparent 46%),
+        linear-gradient(135deg, rgba(56, 189, 248, 0.34), rgba(14, 165, 233, 0.24) 48%, rgba(37, 99, 235, 0.3)),
+        rgba(8, 47, 73, 0.62);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.46),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+        inset 0 -1px 0 rgba(186, 230, 253, 0.22),
+        0 0 22px rgba(56, 189, 248, 0.34),
+        0 14px 32px rgba(0, 0, 0, 0.24);
+      transform: none;
     }
 
     .tourney-mobile-menu[open] .tourney-mobile-trigger {
@@ -3032,10 +3439,16 @@ export const TourneyStyles = () => (
     .tourney-info-list li::before,
     .tourney-card-list li::before,
     .tourney-rule::before {
-      border-color: var(--tourney-border-accent);
-      color: var(--tourney-accent-contrast);
-      background: var(--gradient-button-primary);
-      box-shadow: var(--shadow-button-accent);
+      border-color: color-mix(in srgb, var(--tourney-accent) 46%, rgba(255, 255, 255, 0.28));
+      color: var(--tourney-text);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.045)),
+        color-mix(in srgb, var(--tourney-surface-strong) 54%, transparent);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.24),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+        0 0 0 4px color-mix(in srgb, var(--tourney-accent) 8%, transparent),
+        0 0 18px color-mix(in srgb, var(--tourney-accent-glow) 14%, transparent);
     }
 
     .tourney-info-list li::after,
@@ -3294,7 +3707,8 @@ export const TourneyStyles = () => (
       background: var(--tourney-surface-soft);
     }
 
-    html[data-theme="dark"] .tourney-page {
+    html[data-theme="dark"] .tourney-page,
+    html[data-theme="dark"] .tourney-modal-backdrop {
       --tourney-text: var(--color-text-primary);
       --tourney-text-soft: var(--color-text-secondary);
       --tourney-text-muted: #9f9a8a;
@@ -3311,6 +3725,9 @@ export const TourneyStyles = () => (
       --tourney-accent-soft: var(--color-accent-soft);
       --tourney-focus: var(--color-focus-ring);
       --tourney-card-shadow: var(--highlight-glass-top), var(--shadow-surface);
+    }
+
+    html[data-theme="dark"] .tourney-page {
       background-image: var(--gradient-app-bg);
     }
 
@@ -3327,6 +3744,117 @@ export const TourneyStyles = () => (
     html[data-theme="dark"] .tourney-eyebrow,
     html[data-theme="dark"] .tourney-kicker {
       text-shadow: 0 0 10px rgba(255, 215, 110, 0.18);
+    }
+
+    html[data-theme="dark"] .tourney-register-button:hover {
+      border-color: rgba(253, 224, 71, 0.72);
+      color: #fff7d6;
+      background:
+        radial-gradient(circle at 50% 0%, rgba(254, 240, 138, 0.38), transparent 46%),
+        linear-gradient(135deg, rgba(251, 191, 36, 0.34), rgba(245, 158, 11, 0.24) 48%, rgba(253, 224, 71, 0.32)),
+        rgba(46, 29, 8, 0.62);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.46),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+        inset 0 -1px 0 rgba(254, 243, 199, 0.22),
+        0 0 22px rgba(251, 191, 36, 0.34),
+        0 14px 32px rgba(0, 0, 0, 0.24);
+      transform: none;
+    }
+
+    html[data-theme="dark"] .tourney-register-button:hover::before {
+      background:
+        radial-gradient(110% 90% at 50% 0%, rgba(255, 247, 190, 0.4), transparent 48%),
+        linear-gradient(110deg, rgba(255, 255, 255, 0.26), transparent 30%),
+        linear-gradient(290deg, rgba(253, 224, 71, 0.14), transparent 38%);
+      opacity: 0.9;
+    }
+
+    html[data-theme="dark"] .tourney-register-button:hover::after {
+      border-color: rgba(253, 230, 138, 0.34);
+      background:
+        linear-gradient(180deg, rgba(255, 248, 209, 0.14), transparent 44%),
+        linear-gradient(90deg, transparent 10%, rgba(254, 240, 138, 0.26) 50%, transparent 90%) top / 100% 1px no-repeat;
+      box-shadow:
+        inset 0 -1px 0 rgba(253, 230, 138, 0.14),
+        inset 0 -12px 18px rgba(69, 26, 3, 0.08);
+    }
+
+    html[data-theme="dark"] .tourney-charity-callout {
+      border-color: rgba(255, 215, 110, 0.24);
+      background:
+        linear-gradient(145deg, rgba(13, 13, 13, 0.88), rgba(24, 20, 12, 0.7)),
+        radial-gradient(circle at 0% 0%, rgba(255, 215, 110, 0.12), transparent 42%);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 244, 214, 0.08),
+        0 0 24px rgba(255, 215, 110, 0.08);
+    }
+
+    html[data-theme="dark"] .tourney-charity-callout strong {
+      color: #fff4d6;
+    }
+
+    html[data-theme="dark"] .tourney-charity-callout span,
+    html[data-theme="dark"] .tourney-charity-callout small {
+      color: color-mix(in srgb, var(--tourney-text-soft) 92%, #fff4d6);
+    }
+
+    html[data-theme="dark"] .tourney-date-callout,
+    html[data-theme="dark"] .tourney-giveaway-callout {
+      border-color: rgba(255, 215, 110, 0.26);
+      background:
+        linear-gradient(145deg, rgba(13, 13, 13, 0.88), rgba(24, 20, 12, 0.7)),
+        radial-gradient(circle at 0% 0%, rgba(255, 215, 110, 0.13), transparent 42%);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 244, 214, 0.08),
+        0 0 24px rgba(255, 215, 110, 0.08);
+    }
+
+    html[data-theme="dark"] .tourney-date-callout strong,
+    html[data-theme="dark"] .tourney-giveaway-callout strong {
+      color: #fff4d6;
+    }
+
+    html[data-theme="dark"] .tourney-date-callout span,
+    html[data-theme="dark"] .tourney-giveaway-callout span {
+      color: color-mix(in srgb, var(--tourney-text-soft) 92%, #fff4d6);
+    }
+
+    html[data-theme="dark"] .tourney-card-list .tourney-date-highlight {
+      background: linear-gradient(90deg, #fff7d6, #ffd76e 52%, #c78b16);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      text-shadow: 0 0 16px rgba(255, 215, 110, 0.14);
+    }
+
+    html[data-theme="dark"] .tourney-charity-card {
+      border-color: rgba(255, 215, 110, 0.2);
+      background:
+        linear-gradient(145deg, rgba(13, 13, 13, 0.84), rgba(22, 18, 9, 0.58));
+      box-shadow:
+        inset 0 1px 0 rgba(255, 244, 214, 0.08),
+        0 16px 38px rgba(0, 0, 0, 0.26);
+    }
+
+    html[data-theme="dark"] .tourney-charity-card:hover {
+      border-color: rgba(255, 215, 110, 0.24);
+      background:
+        linear-gradient(145deg, rgba(15, 15, 15, 0.86), rgba(24, 20, 12, 0.6));
+      box-shadow:
+        inset 0 1px 0 rgba(255, 244, 214, 0.08),
+        0 16px 38px rgba(0, 0, 0, 0.28);
+    }
+
+    html[data-theme="dark"] .tourney-charity-name {
+      border-color: rgba(255, 215, 110, 0.16);
+      color: var(--tourney-text);
+      background: rgba(8, 8, 8, 0.56);
+    }
+
+    html[data-theme="dark"] .tourney-charity-logo {
+      border-color: rgba(255, 244, 214, 0.58);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34);
     }
 
     @media (max-width: 980px) {
@@ -3375,7 +3903,8 @@ export const TourneyStyles = () => (
       }
 
       .tourney-info-list,
-      .tourney-card-list {
+      .tourney-card-list,
+      .tourney-charity-grid {
         grid-template-columns: 1fr;
         justify-content: stretch;
       }
@@ -3548,6 +4077,15 @@ export const TourneyStyles = () => (
         font-size: 2.28rem;
       }
 
+      .tourney-hero-actions {
+        margin-top: 1.1rem;
+      }
+
+      .tourney-register-button {
+        width: min(100%, 15rem);
+        min-height: 2.85rem;
+      }
+
       .tourney-route-title {
         padding-top: 0.85rem;
         padding-bottom: 1.1rem;
@@ -3661,6 +4199,12 @@ export const TourneyStyles = () => (
 
       .tourney-modal-actions {
         display: grid;
+      }
+
+      .tourney-modal-actions .tourney-owner-button,
+      .tourney-modal-actions .tourney-owner-link {
+        width: 100%;
+        min-width: 0;
       }
 
       .tourney-match-controls form {

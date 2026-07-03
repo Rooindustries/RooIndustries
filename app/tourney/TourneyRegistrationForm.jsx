@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 const rankOptions = [
   "Master",
@@ -9,6 +10,9 @@ const rankOptions = [
 ];
 
 const roleOptions = ["Tank", "Damage", "Support", "Flex"];
+const supportRole = "Support";
+const supportWarningTitleId = "support-role-warning-title";
+const supportWarningDescriptionId = "support-role-warning-description";
 
 const timezoneOptions = [
   "Pacific Time (PT)",
@@ -50,6 +54,7 @@ const initialForm = {
   twitchUsername: "",
   availableAug12: false,
   acceptedRules: false,
+  acceptedCreatorEligibility: false,
   acceptedRooVisibility: false,
   notes: "",
 };
@@ -65,13 +70,72 @@ export default function TourneyRegistrationForm({
   const [isSuccess, setIsSuccess] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
+  const [supportWarning, setSupportWarning] = useState(null);
+  const [supportWarningAccepted, setSupportWarningAccepted] = useState(false);
+  const primaryRoleRef = useRef(null);
+  const secondaryRoleRef = useRef(null);
+  const supportApplyRef = useRef(null);
 
   useEffect(() => {
     setIsHydrated(true);
   }, []);
 
+  useEffect(() => {
+    if (supportWarning) {
+      supportApplyRef.current?.focus();
+    }
+  }, [supportWarning]);
+
+  const hasSupportSelection = (values = form) =>
+    values.rolePlay === supportRole || values.secondaryRolePlay === supportRole;
+
+  const resetSupportAcknowledgementIfNeeded = (values) => {
+    if (!hasSupportSelection(values)) {
+      setSupportWarningAccepted(false);
+    }
+  };
+
+  const openSupportWarning = (field, submitAfterApply = false) => {
+    setSupportWarning({ field, submitAfterApply });
+  };
+
   const updateField = (field, value) => {
-    setForm((current) => ({ ...current, [field]: value }));
+    const nextForm = { ...form, [field]: value };
+    setForm(nextForm);
+    resetSupportAcknowledgementIfNeeded(nextForm);
+  };
+
+  const updatePrimaryRole = (nextRole) => {
+    const nextForm = {
+      ...form,
+      rolePlay: nextRole,
+      secondaryRolePlay:
+        form.secondaryRolePlay === nextRole ? "" : form.secondaryRolePlay,
+    };
+
+    setForm(nextForm);
+
+    if (nextRole === supportRole) {
+      setSupportWarningAccepted(false);
+      openSupportWarning("rolePlay");
+      return;
+    }
+
+    resetSupportAcknowledgementIfNeeded(nextForm);
+  };
+
+  const updateSecondaryRole = (nextRole) => {
+    const nextForm = { ...form, secondaryRolePlay: nextRole };
+
+    setForm(nextForm);
+
+    if (nextRole === supportRole) {
+      setSupportWarningAccepted(false);
+      openSupportWarning("secondaryRolePlay");
+      return;
+    }
+
+    resetSupportAcknowledgementIfNeeded(nextForm);
   };
 
   const submitRegistration = async () => {
@@ -109,14 +173,62 @@ export default function TourneyRegistrationForm({
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+
+    if (hasSupportSelection() && !supportWarningAccepted) {
+      openSupportWarning(
+        form.rolePlay === supportRole ? "rolePlay" : "secondaryRolePlay",
+        true
+      );
+      return;
+    }
+
     await submitRegistration();
+  };
+
+  const handleApplyAnyway = async () => {
+    const shouldSubmit = Boolean(supportWarning?.submitAfterApply);
+
+    setSupportWarningAccepted(true);
+    setSupportWarning(null);
+
+    if (shouldSubmit) {
+      await submitRegistration();
+    }
+  };
+
+  const handleChangeRole = () => {
+    const field = supportWarning?.field || "rolePlay";
+
+    setSupportWarning(null);
+    setSupportWarningAccepted(false);
+    setForm((current) => {
+      if (field === "secondaryRolePlay") {
+        return { ...current, secondaryRolePlay: "" };
+      }
+
+      return {
+        ...current,
+        rolePlay: "",
+        secondaryRolePlay:
+          current.secondaryRolePlay === supportRole ? "" : current.secondaryRolePlay,
+      };
+    });
+
+    window.setTimeout(() => {
+      if (field === "secondaryRolePlay") {
+        secondaryRoleRef.current?.focus();
+        return;
+      }
+
+      primaryRoleRef.current?.focus();
+    }, 0);
   };
 
   if (registrationClosed) {
     return (
       <div className="tourney-status-panel">
         <p className="tourney-kicker">Closed</p>
-        <h3>Registration is closed</h3>
+        <h3>Creator registration is closed</h3>
         <p>
           Registration closed on{" "}
           <time dateTime={registrationClosesAt}>July 22, 2026 at 00:00 UTC</time>.
@@ -135,12 +247,51 @@ export default function TourneyRegistrationForm({
     );
   }
 
+  const supportWarningDialog = supportWarning ? (
+    <div className="tourney-modal-backdrop">
+      <div
+        aria-describedby={supportWarningDescriptionId}
+        aria-labelledby={supportWarningTitleId}
+        aria-modal="true"
+        className="tourney-modal"
+        role="dialog"
+      >
+        <p className="tourney-kicker">Role Warning</p>
+        <h3 id={supportWarningTitleId}>Support signups are crowded</h3>
+        <p id={supportWarningDescriptionId}>
+          A lot of support players are signing up, so your chances of being
+          accepted as Support may be lower. Choose a different role for a
+          higher chance of being selected.
+        </p>
+        <div className="tourney-modal-actions">
+          <button
+            className="tourney-owner-button"
+            onClick={handleApplyAnyway}
+            ref={supportApplyRef}
+            type="button"
+          >
+            Apply anyway
+          </button>
+          <button
+            className="tourney-owner-link"
+            onClick={handleChangeRole}
+            type="button"
+          >
+            Change role
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   return (
-    <form className="tourney-form" onSubmit={handleSubmit}>
+    <>
+      <form className="tourney-form" onSubmit={handleSubmit}>
       <p className="tourney-form-note">
-        Registration closes{" "}
+        Creator registration closes{" "}
         <time dateTime={registrationClosesAt}>July 22, 2026 at 00:00 UTC</time>.
-        Drafts happen July 25, 2026 at a TBD time.
+        Your Twitch username is required for eligibility review. Drafts happen
+        July 25, 2026 at a TBD time.
       </p>
       <div className="tourney-form-grid">
         <label>
@@ -234,19 +385,10 @@ export default function TourneyRegistrationForm({
           <select
             {...hydrationSafeControlProps}
             name="rolePlay"
+            ref={primaryRoleRef}
             required
             value={form.rolePlay}
-            onChange={(event) => {
-              const nextRole = event.target.value;
-              setForm((current) => ({
-                ...current,
-                rolePlay: nextRole,
-                secondaryRolePlay:
-                  current.secondaryRolePlay === nextRole
-                    ? ""
-                    : current.secondaryRolePlay,
-              }));
-            }}
+            onChange={(event) => updatePrimaryRole(event.target.value)}
           >
             <option value="">Choose role</option>
             {roleOptions.map((role) => (
@@ -261,10 +403,9 @@ export default function TourneyRegistrationForm({
           <select
             {...hydrationSafeControlProps}
             name="secondaryRolePlay"
+            ref={secondaryRoleRef}
             value={form.secondaryRolePlay}
-            onChange={(event) =>
-              updateField("secondaryRolePlay", event.target.value)
-            }
+            onChange={(event) => updateSecondaryRole(event.target.value)}
           >
             <option value="">No secondary role</option>
             {roleOptions.map((role) => (
@@ -341,6 +482,23 @@ export default function TourneyRegistrationForm({
       <label className="tourney-checkbox">
         <input
           {...hydrationSafeControlProps}
+          name="acceptedCreatorEligibility"
+          type="checkbox"
+          required
+          checked={form.acceptedCreatorEligibility}
+          onChange={(event) =>
+            updateField("acceptedCreatorEligibility", event.target.checked)
+          }
+        />
+        <span>
+          I understand this is a creator tournament and my Twitch username
+          will be used for eligibility review.
+        </span>
+      </label>
+
+      <label className="tourney-checkbox">
+        <input
+          {...hydrationSafeControlProps}
           name="acceptedRooVisibility"
           type="checkbox"
           required
@@ -379,6 +537,10 @@ export default function TourneyRegistrationForm({
         </p>
       ) : null}
 
-    </form>
+      </form>
+      {supportWarningDialog && typeof document !== "undefined"
+        ? createPortal(supportWarningDialog, document.body)
+        : null}
+    </>
   );
 }

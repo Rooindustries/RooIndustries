@@ -1,6 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { client } from "../sanityClient";
+import packageContent from "../lib/packageContent";
+import packagePricing from "../lib/packagePricing";
+
+const { normalizePackageText } = packageContent;
+const { applyPackagePricing } = packagePricing;
 
 const formatLocalDate = (utcDate, timeZone) => {
   try {
@@ -77,7 +82,12 @@ export default function UpgradeLink() {
           setLinkError("Upgrade link not found. Please contact support.");
           return;
         }
-        setLinkInfo(data);
+        setLinkInfo({
+          ...data,
+          title: normalizePackageText(data.title || ""),
+          intro: normalizePackageText(data.intro || ""),
+          targetPackage: applyPackagePricing(data.targetPackage),
+        });
       })
       .catch((err) => {
         console.error("Upgrade link load error:", err);
@@ -148,8 +158,8 @@ export default function UpgradeLink() {
       setUpgradeInfo(data);
       if (!linkInfo && data.upgradeLink) {
         setLinkInfo({
-          title: data.upgradeLink.title,
-          intro: data.upgradeLink.intro,
+          title: normalizePackageText(data.upgradeLink.title),
+          intro: normalizePackageText(data.upgradeLink.intro),
           targetPackage: data.targetPackage,
         });
       }

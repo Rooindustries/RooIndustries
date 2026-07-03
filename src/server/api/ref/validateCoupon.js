@@ -1,5 +1,8 @@
 import { createClient } from "@sanity/client";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
+import packagePricing from "../../../lib/packagePricing.js";
+
+const { normalizePackageTitleForMatch } = packagePricing;
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -10,10 +13,7 @@ const client = createClient({
 });
 
 const normalizePackageTitle = (value) =>
-  String(value || "")
-    .replace(/\s*\(upgrade\)\s*$/i, "")
-    .trim()
-    .toLowerCase();
+  normalizePackageTitleForMatch(value);
 
 const normalizeDiscountType = (value) =>
   String(value || "").trim().toLowerCase() === "fixed" ? "fixed" : "percent";
