@@ -111,7 +111,9 @@ describe("FaqSection", () => {
       />
     );
 
-    expect(screen.queryByText(/buy once and never again/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/windows-side optimization once every 6 months/i)
+    ).not.toBeInTheDocument();
 
     act(() => {
       window.dispatchEvent(
@@ -122,7 +124,9 @@ describe("FaqSection", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText(/buy once and never again/i)).toBeInTheDocument();
+      expect(
+        screen.getByText(/windows-side optimization once every 6 months/i)
+      ).toBeInTheDocument();
     });
 
     expect(mockAlignToHashTarget).toHaveBeenCalledWith(

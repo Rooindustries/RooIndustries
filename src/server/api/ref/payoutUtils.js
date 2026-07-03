@@ -12,7 +12,11 @@ export function normalizePackageTitle(title = '') {
 export function classifyPackage(packageTitle = '') {
   const normalized = String(packageTitle || '').toLowerCase();
 
-  if (normalized.includes('xoc') || normalized.includes('extreme overclock')) {
+  if (
+    normalized.includes('xoc') ||
+    normalized.includes('extreme overclock') ||
+    normalized.includes('performance vertex max')
+  ) {
     return 'xoc';
   }
 

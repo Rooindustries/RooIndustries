@@ -72,6 +72,23 @@ test.describe("Route smoke", () => {
         await expect(page.locator("h1")).toHaveCount(1);
       }
 
+      if (route === "/") {
+        await expect(
+          page.getByRole("heading", {
+            name: "Overwatch Creator Tournament signups are open.",
+          })
+        ).toBeVisible();
+        await expect(
+          page.getByText(
+            "We're running the Overwatch 6v6 Legacy Series on August 15-16."
+          )
+        ).toBeVisible();
+        await expect(page.getByText("approved creators")).toBeVisible();
+        await expect(
+          page.getByRole("link", { name: "Go to the tournament page" })
+        ).toHaveAttribute("href", "/tourney");
+      }
+
       if (route === "/booking") {
         await expect(
           page.getByText("Select a Date and Time for Your Session")
@@ -88,6 +105,12 @@ test.describe("Route smoke", () => {
         await expect(
           page.getByRole("heading", { name: /6v6 Legacy Series/i })
         ).toBeVisible();
+        await expect(
+          page.getByText("Overwatch Creator Tournament")
+        ).toBeVisible();
+        await expect(
+          page.getByText("Overwatch Creator Tournament")
+        ).toBeVisible();
         await expect(page.getByText("Tournament access locked")).toHaveCount(0);
         await expect(
           page.getByRole("heading", { name: "Important Dates" })
@@ -95,8 +118,39 @@ test.describe("Route smoke", () => {
         await expect(page.getByText("Match windows")).toBeVisible();
         await expect(page.getByRole("heading", { name: "Bracket" })).toBeVisible();
         await expect(page.getByText("Bracket access", { exact: true })).toBeVisible();
+        await expect(page.getByText("$2,000 USD for 1st and 2nd place")).toBeVisible();
+        await expect(
+          page
+            .getByText("100% of Roo Industries website revenue from August 1-16, 2026")
+            .first()
+        ).toBeVisible();
+        await expect(
+          page.getByText("3 Logitech G PRO X2 SUPERSTRIKE wireless gaming mice")
+        ).toBeVisible();
+        await expect(page.getByText("32 GB of RAM")).toBeVisible();
+        await expect(
+          page.getByText("July 25, 2026", { exact: true })
+        ).toBeVisible();
+        await expect(
+          page.getByText("By August 30, 2026")
+        ).toBeVisible();
+        await expect(page.getByText("By October 31, 2026")).toBeVisible();
+        await expect(
+          page.getByRole("heading", { name: "Giveaway Details" })
+        ).toBeVisible();
+        await expect(
+          page.getByText("A qualifying Roo Industries purchase is required")
+        ).toBeVisible();
+        await expect(
+          page.getByRole("img", { name: "GAWS - Geelong Animal Welfare Society" })
+        ).toBeVisible();
         await expect(
           page.getByRole("link", { name: "Sign in", exact: true })
+        ).toBeVisible();
+        await expect(
+          page
+            .locator(".tourney-hero")
+            .getByRole("link", { name: "Register", exact: true })
         ).toBeVisible();
         await expect(page.getByRole("switch")).toBeVisible();
       }
@@ -112,13 +166,32 @@ test.describe("Route smoke", () => {
       }
 
       if (route === "/tourney/register") {
+        await expect(
+          page.getByRole("heading", { name: "Creator Registration" })
+        ).toBeVisible();
+        await expect(
+          page.getByText("This Overwatch tournament is for creators")
+        ).toBeVisible();
         await expect(page.getByLabel("Discord Username")).toBeVisible();
         await expect(page.getByLabel("Display Name")).toBeVisible();
         await expect(page.getByLabel("Timezone")).toBeVisible();
         await expect(page.getByLabel("Extra notes")).toBeVisible();
-        await expect(page.getByLabel("Twitch Username")).toBeVisible();
+        await expect(
+          page.getByRole("textbox", { name: "Twitch Username" })
+        ).toBeVisible();
+        await expect(
+          page.getByLabel(
+            "I understand this is a creator tournament and my Twitch username will be used for eligibility review."
+          )
+        ).toBeVisible();
         await expect(page.getByText("twitch.tv/")).toBeVisible();
         await expect(page.getByLabel("Username", { exact: true })).toHaveCount(0);
+        await page.getByLabel("Primary Role").selectOption("Support");
+        await expect(
+          page.getByRole("dialog", { name: "Support signups are crowded" })
+        ).toBeVisible();
+        await page.getByRole("button", { name: "Change role" }).click();
+        await expect(page.getByLabel("Primary Role")).toHaveValue("");
       }
 
       if (route === "/booking" || route === "/payment") {
@@ -168,12 +241,19 @@ test.describe("Route smoke", () => {
 
     await nav.locator(".tourney-mobile-trigger").click();
     await expect(
-      nav.locator(".tourney-mobile-panel").getByRole("link", { name: "Register" })
-    ).toBeVisible();
+      nav
+        .locator(".tourney-mobile-panel")
+        .getByRole("link", { name: "Register", exact: true })
+    ).toHaveCount(0);
     await expect(
       nav
         .locator(".tourney-mobile-panel")
         .getByRole("link", { name: "Event Information" })
+    ).toBeVisible();
+    await expect(
+      page
+        .locator(".tourney-hero")
+        .getByRole("link", { name: "Register", exact: true })
     ).toBeVisible();
 
     const navBox = await nav.boundingBox();

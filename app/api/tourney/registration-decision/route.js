@@ -100,8 +100,8 @@ export async function GET(request) {
     });
     if (!tokenRow) {
       return renderDecisionPage({
-        title: "Link expired",
-        body: "This approval link was already used, expired, or revoked.",
+        title: "Link unavailable",
+        body: "This approval link was already used, revoked, or is invalid.",
         tone: "danger",
       });
     }

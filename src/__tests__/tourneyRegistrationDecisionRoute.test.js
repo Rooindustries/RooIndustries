@@ -91,6 +91,19 @@ describe("tourney registration decision route", () => {
     expect(mockSendTourneyPlayerApprovedEmail).not.toHaveBeenCalled();
   });
 
+  test("does not call invalid decision tokens expired", async () => {
+    mockGetRegistrationDecisionToken.mockResolvedValue(null);
+
+    const response = await GET(makeRequest());
+    const html = await response.text();
+
+    expect(html).toContain("Link unavailable");
+    expect(html).not.toContain("Link expired");
+    expect(html).not.toContain("expired, or revoked");
+    expect(mockApplyRegistrationDecision).not.toHaveBeenCalled();
+    expect(mockSendTourneyPlayerApprovedEmail).not.toHaveBeenCalled();
+  });
+
   test("approves and emails the player from the assigned approver session", async () => {
     const approvedPlayer = {
       id: "player_1",

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { Shield, ShieldCheck } from "lucide-react";
 import PackageDetailsModal from "./PackageDetailsModal";
 import PriceDisplay from "./PriceDisplay";
 import {
@@ -8,11 +9,13 @@ import {
   readHomeSectionData,
 } from "../lib/homeSectionData";
 import homeCopy from "../lib/homeCopy";
+import packageContent from "../lib/packageContent";
 import packagePricing from "../lib/packagePricing";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 
 const REFERRAL_STORAGE_KEY = "referral_session";
-const { applyPackagesPricing } = packagePricing;
+const { applyPackagesContentOverrides } = packageContent;
+const { applyPackagesPricing, isTopPackageTitle } = packagePricing;
 const { HOME_COPY } = homeCopy;
 
 const MINOR_WORDS = new Set([
@@ -27,6 +30,24 @@ const toTitleCase = (str) =>
     return word.split("-").map(capitalizeWord).join("-");
   });
 
+const getWarrantyCallout = (pkg) => {
+  const isMax = isTopPackageTitle(pkg?.title || pkg?.sourceTitle);
+
+  return {
+    Icon: isMax ? ShieldCheck : Shield,
+    className: isMax
+      ? "ri-package-warranty-callout-max"
+      : "ri-package-warranty-callout-standard",
+    title: isMax ? "Lifetime warranty included" : "90 day warranty included",
+    note: isMax
+      ? "Priority support for long-term tuning issues."
+      : "Support coverage after your session.",
+    ariaLabel: isMax
+      ? "Performance Vertex Max includes lifetime warranty support"
+      : `${pkg?.title || "This package"} includes 90 day warranty support`,
+  };
+};
+
 export default function Packages({
   initialPackages = null,
   initialSectionCopy = null,
@@ -34,7 +55,9 @@ export default function Packages({
   const handleHomeSectionLink = useHomeSectionLinkHandler();
   const [packages, setPackages] = useState(() =>
     initialPackages !== null
-      ? applyPackagesPricing(Array.isArray(initialPackages) ? initialPackages : [])
+      ? applyPackagesContentOverrides(
+          applyPackagesPricing(Array.isArray(initialPackages) ? initialPackages : [])
+        )
       : []
   );
   const [sectionCopy, setSectionCopy] = useState(() => initialSectionCopy);
@@ -42,7 +65,9 @@ export default function Packages({
   useEffect(() => {
     if (initialPackages !== null) {
       setPackages(
-        applyPackagesPricing(Array.isArray(initialPackages) ? initialPackages : [])
+        applyPackagesContentOverrides(
+          applyPackagesPricing(Array.isArray(initialPackages) ? initialPackages : [])
+        )
       );
     }
 
@@ -127,11 +152,15 @@ export default function Packages({
     if (packages.length === 0) {
       const cachedPackages = readHomeSectionData(HOME_SECTION_DATA_KEYS.packagesList);
       if (Array.isArray(cachedPackages)) {
-        setPackages(applyPackagesPricing(cachedPackages));
+        setPackages(applyPackagesContentOverrides(applyPackagesPricing(cachedPackages)));
       } else {
         fetchHomeSectionData(HOME_SECTION_DATA_KEYS.packagesList)
           .then((pkgs) => {
-            setPackages(applyPackagesPricing(Array.isArray(pkgs) ? pkgs : []));
+            setPackages(
+              applyPackagesContentOverrides(
+                applyPackagesPricing(Array.isArray(pkgs) ? pkgs : [])
+              )
+            );
           })
           .catch(console.error);
       }
@@ -203,7 +232,9 @@ export default function Packages({
         <div className="mx-auto w-fit max-w-full">
           <div className="flex flex-col sm:flex-row justify-center gap-6 sm:gap-10 flex-wrap">
             {packages.map((p, i) => {
-              const isXoc = /^xoc/i.test(p.title);
+              const isXoc = isTopPackageTitle(p.title || p.sourceTitle);
+              const warranty = getWarrantyCallout(p);
+              const WarrantyIcon = warranty.Icon;
 
               const checkedBullets = normalizeBullets(p.checkedBullets);
               const uncheckedBullets = normalizeBullets(p.uncheckedBullets);
@@ -246,6 +277,25 @@ export default function Packages({
 
                     <PriceDisplay pkg={p} className="mt-6" />
 
+                    {warranty && (
+                      <div
+                        className={`ri-package-warranty-callout ${warranty.className}`}
+                        aria-label={warranty.ariaLabel}
+                      >
+                        <span className="ri-package-warranty-icon" aria-hidden="true">
+                          <WarrantyIcon size={18} strokeWidth={2.4} />
+                        </span>
+                        <span className="ri-package-warranty-copy">
+                          <span className="ri-package-warranty-title">
+                            {warranty.title}
+                          </span>
+                          <span className="ri-package-warranty-note">
+                            {warranty.note}
+                          </span>
+                        </span>
+                      </div>
+                    )}
+
                     {p.description && (() => {
                       const bestForMatch = p.description.match(/Best for:\s*(.+)/i);
                       const mainDesc = bestForMatch
@@ -286,7 +336,9 @@ export default function Packages({
                               >
                                 <span
                                   className={`mt-0.5 inline-flex h-5 w-6 shrink-0 items-center justify-center ${
-                                    on ? "ri-package-check text-accent" : "ri-package-empty text-ink-muted"
+                                    on
+                                      ? "ri-package-check text-accent"
+                                      : "ri-package-empty text-ink-muted"
                                   }`}
                                 >
                                   {on ? "\u2713" : "\u25CB"}

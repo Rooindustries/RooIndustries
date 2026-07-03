@@ -83,9 +83,9 @@ const routeMeta = {
     noindex: true,
   },
   "/upgrade-xoc": {
-    title: "Upgrade to XOC | Roo Industries",
+    title: "Upgrade to Performance Vertex Max | Roo Industries",
     description:
-      "Check your order eligibility and upgrade to XOC / Extreme Overclocking with Roo Industries.",
+      "Check your order eligibility and upgrade to Performance Vertex Max with Roo Industries.",
     noindex: true,
   },
   "/referrals/login": {

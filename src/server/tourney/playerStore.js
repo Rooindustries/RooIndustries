@@ -61,7 +61,7 @@ export const TOURNEY_TIMEZONES = Object.freeze([
 ]);
 
 const TOKEN_BYTES = 32;
-const APPROVAL_TOKEN_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const APPROVAL_TOKEN_NO_EXPIRES_AT = "9999-12-31T23:59:59.999Z";
 const RESET_TOKEN_MAX_AGE_MS = 60 * 60 * 1000;
 const DUMMY_PLAYER_HASH =
   "$2b$10$t6/bHTKT3hABxzcK8HIMauYsrY88CioIiiq0Cwci4RPXbOq30kAWy";
@@ -404,6 +404,9 @@ export const validateTourneyPlayerPayload = (
   const acceptedRules =
     parseBooleanField(payload.acceptedRules) ||
     parseBooleanField(payload.accepted_rules);
+  const acceptedCreatorEligibility =
+    parseBooleanField(payload.acceptedCreatorEligibility) ||
+    parseBooleanField(payload.accepted_creator_eligibility);
   const acceptedRooVisibility =
     parseBooleanField(payload.acceptedRooVisibility) ||
     parseBooleanField(payload.accepted_roo_visibility);
@@ -443,6 +446,9 @@ export const validateTourneyPlayerPayload = (
   if (requireAgreements && !acceptedRules) {
     errors.push("You must agree to follow the tournament rules.");
   }
+  if (requireAgreements && !acceptedCreatorEligibility) {
+    errors.push("You must confirm creator eligibility.");
+  }
   if (requireAgreements && !acceptedRooVisibility) {
     errors.push("You must acknowledge the event visibility note.");
   }
@@ -467,6 +473,7 @@ export const validateTourneyPlayerPayload = (
       teamName,
       availableAug12,
       acceptedRules,
+      acceptedCreatorEligibility,
       acceptedRooVisibility,
       acceptSubstitutePool,
       notes,
@@ -938,7 +945,7 @@ export async function createPendingTourneyPlayer({
         recipient_email: recipient.email,
         recipient_role: recipient.role,
         recipient_version: String(recipient.version || "1"),
-        expires_at: new Date(Date.now() + APPROVAL_TOKEN_MAX_AGE_MS).toISOString(),
+        expires_at: APPROVAL_TOKEN_NO_EXPIRES_AT,
         created_at: createdAt,
       });
     }
@@ -1397,16 +1404,16 @@ export async function getRegistrationDecisionToken({
   purpose,
   env = process.env,
 } = {}) {
+  if (!["approve", "deny"].includes(purpose)) return null;
+
   const hashed = tokenHash(token);
-  const now = nowIso();
 
   if (isMemoryMode(env)) {
     const row = MEMORY_STORE.tokens.find(
       (entry) =>
         entry.token_hash === hashed &&
         entry.purpose === purpose &&
-        !entry.used_at &&
-        entry.expires_at > now
+        !entry.used_at
     );
     return row ? { ...row } : null;
   }
@@ -1419,7 +1426,6 @@ export async function getRegistrationDecisionToken({
     where token_hash = ${hashed}
       and purpose = ${purpose}
       and used_at is null
-      and expires_at > now()
     limit 1
   `;
   return rows?.[0] || null;

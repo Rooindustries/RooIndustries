@@ -1,5 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import packageContent from "../lib/packageContent";
+
+const { normalizePackageText } = packageContent;
 
 export default function RefDashboard() {
   const nav = useNavigate();
@@ -280,7 +283,7 @@ export default function RefDashboard() {
       : "https://www.rooindustries.com";
   const referralLink = `${referralOrigin}/?ref=${encodeURIComponent(
     referralCode
-  )}#packages`;
+  )}`;
 
   const payoutData = payout || {};
   const earnings = payoutData.earnings || {};
@@ -304,7 +307,7 @@ export default function RefDashboard() {
   const payoutBuckets = [
     {
       key: "xoc",
-      label: "XOC",
+      label: "Vertex Max",
       earned: earnings.xoc,
       paid: payments.xoc,
       owed: owed.xoc,
@@ -327,12 +330,17 @@ export default function RefDashboard() {
     ? Object.keys(earnings.byPackage)
         .sort((a, b) => a.localeCompare(b))
         .map((title) => ({
-          title,
+          title: normalizePackageText(title),
           amount: earnings.byPackage[title],
         }))
     : [];
   const packageBreakdown =
-    packageBreakdownRaw.length > 0 ? packageBreakdownRaw : fallbackBreakdown;
+    packageBreakdownRaw.length > 0
+      ? packageBreakdownRaw.map((item) => ({
+          ...item,
+          title: normalizePackageText(item.title),
+        }))
+      : fallbackBreakdown;
 
   async function copyReferralLink() {
     try {
@@ -573,7 +581,7 @@ export default function RefDashboard() {
                 </span>
               </div>
               <p className="text-xs text-ink-muted">
-                View your XOC and Vertex payment history.
+                View your Vertex Max and Vertex payment history.
               </p>
               <button
                 onClick={() => setShowLogsModal(true)}
@@ -685,7 +693,7 @@ export default function RefDashboard() {
               <div className="bg-surface-input border border-line-input rounded-2xl p-4 no-scrollbar overflow-y-auto shadow-[0_0_20px_rgba(15,23,42,0.4)]">
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-sm font-semibold text-ink">
-                    XOC payments
+                    Vertex Max payments
                   </p>
                   <span className="text-xs text-ink-muted">
                     {logs.xoc?.length || 0} entries

@@ -4,13 +4,15 @@ import {
   TourneyShell,
   getTourneySession,
 } from "./TourneyShared";
+import { canAccessTourneyRegistration } from "../../src/server/tourney/access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "6v6 Legacy Series | Roo Industries",
-  description: "6v6 Legacy Series event information, rules, roster, and bracket.",
+  title: "Overwatch Creator Tournament | Roo Industries",
+  description:
+    "Overwatch Creator Tournament event information, rules, roster, and bracket.",
   robots: {
     index: false,
     follow: false,
@@ -25,7 +27,7 @@ const competitiveRules = [
   },
   {
     title: "Teams",
-    body: "Captains draft teams from the approved player pool. Rosters lock at 6 starters and 2 substitutes.",
+    body: "Captains draft their own teams from the approved player pool using a tier-based draft format. Rosters lock at 6 starters and 2 substitutes.",
   },
   {
     title: "Roles",
@@ -64,19 +66,32 @@ const competitiveRules = [
 const scheduleItems = [
   {
     title: "Registration closes",
-    body: "Registration closes July 22, 2026 at 00:00 UTC.",
+    dateLabel: "July 22, 2026",
+    body: "Registration closes at 00:00 UTC.",
   },
   {
     title: "Draft day",
-    body: "Teams will be picked in drafts on July 25, 2026. Draft time is TBD.",
+    dateLabel: "July 25, 2026",
+    body: "Captains will draft their own teams from the approved player pool using a tier-based format. Exact draft time is TBD.",
   },
   {
     title: "Event dates",
-    body: "The tournament runs August 15-16, 2026. Exact match times are TBD.",
+    dateLabel: "August 15-16, 2026",
+    body: "The tournament runs across both event days. Exact match times are TBD.",
   },
   {
     title: "Match windows",
     body: "Round times, check-in windows, and stream blocks will be posted once teams are confirmed.",
+  },
+  {
+    title: "Winner payouts",
+    dateLabel: "By August 30, 2026",
+    body: "Tournament winner payouts will be sent within 14 days after the tournament ends.",
+  },
+  {
+    title: "Charity payouts",
+    dateLabel: "By October 31, 2026",
+    body: "Charity donations will be finalized and sent. Proof of each donation will be posted publicly in the Roo Industries Discord.",
   },
 ];
 
@@ -105,12 +120,58 @@ const infoItems = [
     body: "$2,000 USD for 1st and 2nd place. Split is TBD and payouts are handled after final results are confirmed.",
   },
   {
+    title: "Payment method",
+    body: "All tournament-related payments will be made by PayPal only, including winner payouts, prize-equivalent payouts, and charity donations.",
+  },
+  {
     title: "Website proceeds",
-    body: "Sales from July 25 through August 16, 2026 fund separate 3rd-place and match-MVP payouts.",
+    body: "100% of Roo Industries website revenue from August 1-16, 2026 goes to charity recipients including GAWS, (RED), and The Trevor Project.",
   },
   {
     title: "Giveaways",
-    body: "9850X3D client draw and Superstrike mouse community giveaway. Entry and draw details are TBD.",
+    body: "Community prizes and the client-only 9850X3D draw are listed in the giveaway section below. The 9850X3D draw requires a qualifying Roo Industries purchase.",
+  },
+];
+
+const giveawayItems = [
+  {
+    title: "Community Discord giveaway",
+    body: "3 Logitech G PRO X2 SUPERSTRIKE wireless gaming mice and 32 GB of RAM. Community entry requirements will be posted before entries open.",
+  },
+  {
+    title: "Client-only 9850X3D draw",
+    body: "A qualifying Roo Industries purchase is required for the 9850X3D draw. This draw is separate from the community giveaway.",
+  },
+  {
+    title: "Giveaway window",
+    body: "The giveaway window will run for 30 days. Roo Industries may start the community giveaway before the tournament so players can join the Discord early.",
+  },
+  {
+    title: "Prize fulfillment",
+    body: "Winners will receive the promised item when U.S. shipping is available, or the USD price equivalent based on the U.S. pricing market. Fulfillment will happen within 14 days after winners are confirmed.",
+  },
+];
+
+const charityRecipients = [
+  {
+    title: "(RED)",
+    body: "Donation recipient.",
+    href: "https://www.red.org/",
+  },
+  {
+    title: "GAWS",
+    body: "Geelong Animal Welfare Society supports animals in need across the Geelong region.",
+    href: "https://www.gaws.org.au/",
+    logo: {
+      src: "/tourney/charities/gaws-logo.png",
+      webp: "/tourney/charities/gaws-logo.webp",
+      alt: "GAWS - Geelong Animal Welfare Society",
+    },
+  },
+  {
+    title: "The Trevor Project",
+    body: "Donation recipient.",
+    href: "https://www.thetrevorproject.org/",
   },
 ];
 
@@ -118,14 +179,21 @@ const DashboardPage = ({ session }) => (
   <TourneyShell session={session}>
     <section className="tourney-hero" aria-labelledby="tourney-title">
       <div>
-        <span className="tourney-badge">Community Overwatch Tournament</span>
+        <span className="tourney-badge">Overwatch Creator Tournament</span>
         <h1 id="tourney-title">
           <span className="tourney-title-line">6v6 Legacy Series</span>
         </h1>
         <p>
-          Event information, rules, roster status, signups, and bracket access
-          for the 6v6 Legacy Series.
+          Event information, rules, roster status, creator signups, and bracket
+          access for the Overwatch Creator Tournament.
         </p>
+        {canAccessTourneyRegistration(session) ? (
+          <div className="tourney-hero-actions">
+            <a className="tourney-register-button" href="/tourney/register">
+              <span>Register</span>
+            </a>
+          </div>
+        ) : null}
       </div>
     </section>
 
@@ -133,10 +201,22 @@ const DashboardPage = ({ session }) => (
 
     <div className="tourney-grid">
       <Section id="dates" eyebrow="Important Dates" title="Important Dates" wide>
+        <div className="tourney-date-callout">
+          <strong>Drafts begin July 25, 2026</strong>
+          <span>
+            Captains start drafting their own teams from the approved player
+            pool on the already-posted draft date. The draft will be tier-based
+            to keep teams balanced, with exact timing and tier details posted
+            before draft day.
+          </span>
+        </div>
         <ul className="tourney-card-list tourney-date-list">
           {scheduleItems.map((item) => (
             <li key={item.title}>
               <strong>{item.title}</strong>
+              {item.dateLabel ? (
+                <span className="tourney-date-highlight">{item.dateLabel}</span>
+              ) : null}
               <span>{item.body}</span>
             </li>
           ))}
@@ -158,6 +238,75 @@ const DashboardPage = ({ session }) => (
         </div>
         <ul className="tourney-info-list">
           {infoItems.map((item) => (
+            <li key={item.title}>
+              <strong>{item.title}</strong>
+              <span>{item.body}</span>
+            </li>
+          ))}
+        </ul>
+      </Section>
+
+      <Section id="charities" eyebrow="Charity Drive" title="Charity Revenue Window" wide>
+        <div className="tourney-charity-callout">
+          <strong>August 1-16, 2026</strong>
+          <span>
+            Roo Industries is independently donating 100% of website revenue
+            from the two weeks before the tournament and the August 15-16
+            tournament days to charity recipients including GAWS, (RED), and
+            The Trevor Project.
+          </span>
+          <small>
+            Charity listing does not imply sponsorship, endorsement, or
+            administration of the tournament.
+          </small>
+        </div>
+        <div className="tourney-charity-grid">
+          {charityRecipients.map((recipient) => (
+            <a
+              className={
+                recipient.logo
+                  ? "tourney-charity-card has-logo"
+                  : "tourney-charity-card"
+              }
+              href={recipient.href}
+              key={recipient.title}
+              rel="noreferrer"
+              target="_blank"
+            >
+              {recipient.logo ? (
+                <span className="tourney-charity-logo">
+                  <picture>
+                    <source srcSet={recipient.logo.webp} type="image/webp" />
+                    <img
+                      alt={recipient.logo.alt}
+                      height="259"
+                      loading="lazy"
+                      src={recipient.logo.src}
+                      width="640"
+                    />
+                  </picture>
+                </span>
+              ) : (
+                <span className="tourney-charity-name">{recipient.title}</span>
+              )}
+              <strong>{recipient.title}</strong>
+              <span>{recipient.body}</span>
+            </a>
+          ))}
+        </div>
+      </Section>
+
+      <Section id="giveaway" eyebrow="Giveaway" title="Giveaway Details" wide>
+        <div className="tourney-giveaway-callout">
+          <strong>Community prizes and a client-only draw</strong>
+          <span>
+            The public giveaway details will separate Discord community entries
+            from the client-only 9850X3D draw, which requires a qualifying Roo
+            Industries purchase.
+          </span>
+        </div>
+        <ul className="tourney-card-list tourney-giveaway-list">
+          {giveawayItems.map((item) => (
             <li key={item.title}>
               <strong>{item.title}</strong>
               <span>{item.body}</span>
@@ -193,7 +342,7 @@ const DashboardPage = ({ session }) => (
       </Section>
 
       <Section id="bracket" eyebrow="Bracket" title="Bracket" wide>
-        <ul className="tourney-card-list">
+        <ul className="tourney-card-list tourney-bracket-list">
           {bracketItems.map((item) => (
             <li key={item.title}>
               <strong>{item.title}</strong>
