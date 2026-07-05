@@ -12,8 +12,10 @@ import {
   getTourneyRoleCapacitySnapshot,
   kickTourneyPlayer,
   listManageTourneyPlayers,
+  updateTourneyPlayerApprovedRole,
   updateTourneyRegistrationConfig,
   updateTourneyPlayerDetails,
+  withdrawTourneyPlayer,
 } from "../../../../src/server/tourney/playerStore";
 
 export const runtime = "nodejs";
@@ -113,6 +115,14 @@ export async function POST(request) {
       return getPlayersResponse();
     }
 
+    if (action === "withdraw") {
+      await withdrawTourneyPlayer({
+        playerId: payload.playerId,
+        actorUsername: session.username,
+      });
+      return getPlayersResponse();
+    }
+
     if (action === "add") {
       await createApprovedTourneyPlayer({
         payload,
@@ -125,6 +135,15 @@ export async function POST(request) {
       await updateTourneyPlayerDetails({
         playerId: payload.playerId,
         payload,
+        actorUsername: session.username,
+      });
+      return getPlayersResponse();
+    }
+
+    if (action === "update-role") {
+      await updateTourneyPlayerApprovedRole({
+        playerId: payload.playerId,
+        rolePlay: payload.rolePlay || payload.approvedRolePlay || payload.role || "",
         actorUsername: session.username,
       });
       return getPlayersResponse();

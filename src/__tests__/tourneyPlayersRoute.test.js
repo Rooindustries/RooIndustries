@@ -6,9 +6,11 @@ const mockCreateApprovedTourneyPlayer = jest.fn();
 const mockGetTourneyRoleCapacitySnapshot = jest.fn();
 const mockKickTourneyPlayer = jest.fn();
 const mockListManageTourneyPlayers = jest.fn();
+const mockUpdateTourneyPlayerApprovedRole = jest.fn();
 const mockUpdateTourneyRegistrationConfig = jest.fn();
 const mockUpdateTourneyPlayerDetails = jest.fn();
 const mockSendTourneyPlayerApprovedEmail = jest.fn();
+const mockWithdrawTourneyPlayer = jest.fn();
 const originalResponseJson = Response.json;
 
 if (!Response.json) {
@@ -52,9 +54,12 @@ jest.mock("../server/tourney/playerStore", () => ({
     mockGetTourneyRoleCapacitySnapshot(...args),
   kickTourneyPlayer: (...args) => mockKickTourneyPlayer(...args),
   listManageTourneyPlayers: (...args) => mockListManageTourneyPlayers(...args),
+  updateTourneyPlayerApprovedRole: (...args) =>
+    mockUpdateTourneyPlayerApprovedRole(...args),
   updateTourneyRegistrationConfig: (...args) =>
     mockUpdateTourneyRegistrationConfig(...args),
   updateTourneyPlayerDetails: (...args) => mockUpdateTourneyPlayerDetails(...args),
+  withdrawTourneyPlayer: (...args) => mockWithdrawTourneyPlayer(...args),
 }));
 
 const { POST } = require("../../app/api/tourney/players/route.js");
@@ -92,9 +97,11 @@ describe("tourney players API route", () => {
     mockGetTourneyRoleCapacitySnapshot.mockReset();
     mockKickTourneyPlayer.mockReset();
     mockListManageTourneyPlayers.mockReset();
+    mockUpdateTourneyPlayerApprovedRole.mockReset();
     mockUpdateTourneyRegistrationConfig.mockReset();
     mockUpdateTourneyPlayerDetails.mockReset();
     mockSendTourneyPlayerApprovedEmail.mockReset();
+    mockWithdrawTourneyPlayer.mockReset();
 
     mockReadTourneySessionFromStore.mockResolvedValue({
       username: "yukari",
@@ -181,6 +188,66 @@ describe("tourney players API route", () => {
         registrationPool: "substitute",
         twitchUsername: "skinz_ow",
       },
+      actorUsername: "yukari",
+    });
+  });
+
+  test("allows admins and casters to correct an approved player role", async () => {
+    mockUpdateTourneyPlayerApprovedRole.mockResolvedValue({
+      id: "player_1",
+      rolePlay: "Flex",
+      approvedRolePlay: "Flex",
+    });
+    mockListManageTourneyPlayers.mockResolvedValue([
+      {
+        id: "player_1",
+        rolePlay: "Flex",
+        approvedRolePlay: "Flex",
+      },
+    ]);
+
+    const response = await POST(
+      makeJsonRequest({
+        action: "update-role",
+        playerId: "player_1",
+        rolePlay: "Flex",
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockListManageTourneyPlayers).toHaveBeenCalled();
+    expect(mockUpdateTourneyPlayerApprovedRole).toHaveBeenCalledWith({
+      playerId: "player_1",
+      rolePlay: "Flex",
+      actorUsername: "yukari",
+    });
+  });
+
+  test("allows admins and casters to mark an approved player as opted out", async () => {
+    mockWithdrawTourneyPlayer.mockResolvedValue({
+      id: "player_1",
+      status: "withdrawn",
+      withdrawnBy: "yukari",
+    });
+    mockListManageTourneyPlayers.mockResolvedValue([
+      {
+        id: "player_1",
+        status: "withdrawn",
+        withdrawnBy: "yukari",
+      },
+    ]);
+
+    const response = await POST(
+      makeJsonRequest({
+        action: "withdraw",
+        playerId: "player_1",
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockListManageTourneyPlayers).toHaveBeenCalled();
+    expect(mockWithdrawTourneyPlayer).toHaveBeenCalledWith({
+      playerId: "player_1",
       actorUsername: "yukari",
     });
   });
