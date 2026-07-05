@@ -78,10 +78,12 @@ const statusOrder = {
   pending: 0,
   approved: 1,
   denied: 2,
-  removed: 3,
+  withdrawn: 3,
+  removed: 4,
 };
 
 const statusLabel = (status) => {
+  if (status === "withdrawn") return "Opted out";
   if (status === "removed") return "Kicked";
   return status || "unknown";
 };
@@ -122,7 +124,10 @@ export default function TourneyPlayerManager({
       );
     });
     return {
-      currentPlayers: sorted.filter((player) => player.status !== "removed"),
+      currentPlayers: sorted.filter(
+        (player) => !["removed", "withdrawn"].includes(player.status)
+      ),
+      withdrawnPlayers: sorted.filter((player) => player.status === "withdrawn"),
       removedPlayers: sorted.filter((player) => player.status === "removed"),
     };
   }, [players]);
@@ -657,6 +662,14 @@ export default function TourneyPlayerManager({
                     Kicked / Banned Players
                   </p>
                   {renderPlayerRows(groupedPlayers.removedPlayers)}
+                </div>
+              ) : null}
+              {groupedPlayers.withdrawnPlayers.length > 0 ? (
+                <div className="tourney-player-group">
+                  <p className="tourney-player-group-title">
+                    Opted Out Players
+                  </p>
+                  {renderPlayerRows(groupedPlayers.withdrawnPlayers)}
                 </div>
               ) : null}
             </>

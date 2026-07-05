@@ -10,6 +10,7 @@ export const TOURNEY_PLAYER_STATUSES = Object.freeze([
   "pending",
   "approved",
   "denied",
+  "withdrawn",
   "removed",
 ]);
 export const TOURNEY_RANKS = Object.freeze([
@@ -283,6 +284,8 @@ const mapPlayer = (row = {}) => ({
   deniedBy: row.denied_by || row.deniedBy || "",
   removedAt: row.removed_at || row.removedAt || "",
   removedBy: row.removed_by || row.removedBy || "",
+  withdrawnAt: row.withdrawn_at || row.withdrawnAt || "",
+  withdrawnBy: row.withdrawn_by || row.withdrawnBy || "",
   discordInviteSentAt: row.discord_invite_sent_at || row.discordInviteSentAt || "",
   discordInviteEmailId: row.discord_invite_email_id || row.discordInviteEmailId || "",
   discordInviteLastError:
@@ -354,6 +357,8 @@ const managePlayer = (row) => {
     deniedBy: player.deniedBy,
     removedAt: player.removedAt,
     removedBy: player.removedBy,
+    withdrawnAt: player.withdrawnAt,
+    withdrawnBy: player.withdrawnBy,
     version: player.version,
     discordInviteSentAt: player.discordInviteSentAt,
     discordInviteEmailId: player.discordInviteEmailId,
@@ -545,6 +550,8 @@ export async function ensureTourneyPlayerSchema(env = process.env) {
       denied_by text,
       removed_at timestamptz,
       removed_by text,
+      withdrawn_at timestamptz,
+      withdrawn_by text,
       discord_invite_sent_at timestamptz,
       discord_invite_email_id text,
       discord_invite_last_error text,
@@ -555,7 +562,7 @@ export async function ensureTourneyPlayerSchema(env = process.env) {
       discord_role_assigned_at timestamptz,
       discord_role_last_error text,
       constraint tourney_players_status_check
-        check (status in ('pending', 'approved', 'denied', 'removed')),
+        check (status in ('pending', 'approved', 'denied', 'withdrawn', 'removed')),
       constraint tourney_players_registration_pool_check
         check (registration_pool in ('main', 'substitute'))
     )
@@ -627,6 +634,23 @@ export async function ensureTourneyPlayerSchema(env = process.env) {
   await sql`
     alter table tourney_players
     add column if not exists discord_role_last_error text
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists withdrawn_at timestamptz
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists withdrawn_by text
+  `;
+  await sql`
+    alter table tourney_players
+    drop constraint if exists tourney_players_status_check
+  `;
+  await sql`
+    alter table tourney_players
+    add constraint tourney_players_status_check
+      check (status in ('pending', 'approved', 'denied', 'withdrawn', 'removed'))
   `;
   await sql`
     create unique index if not exists tourney_players_discord_user_id_unique
@@ -1399,6 +1423,64 @@ export async function updateTourneyPlayerDetails({
   return managePlayer(rows[0]);
 }
 
+export async function updateTourneyPlayerApprovedRole({
+  playerId,
+  rolePlay,
+  actorUsername,
+  env = process.env,
+} = {}) {
+  const selectedRole = normalizeRolePlay(rolePlay);
+  if (!TOURNEY_ROLE_PLAYS.includes(selectedRole)) {
+    throw Object.assign(new Error("Choose a valid role."), { status: 400 });
+  }
+
+  const actor = normalizeTourneyUsername(actorUsername);
+  const now = nowIso();
+
+  if (isMemoryMode(env)) {
+    const player = MEMORY_STORE.players.find((entry) => entry.id === playerId);
+    if (!player || player.status !== "approved") {
+      throw Object.assign(new Error("Only approved players can have roles changed."), {
+        status: 400,
+      });
+    }
+    player.approved_role_play = selectedRole;
+    if (!getSubmittedRolePlays(player).includes(selectedRole)) {
+      player.role_play = selectedRole;
+      if (player.secondary_role_play === selectedRole) {
+        player.secondary_role_play = "";
+      }
+    }
+    player.updated_at = now;
+    player.updated_by = actor;
+    player.version = Number(player.version || 1) + 1;
+    return managePlayer(player);
+  }
+
+  await ensureTourneyPlayerSchema(env);
+  const sql = await getSql(env);
+  const rows = await sql`
+    update tourney_players
+    set approved_role_play = ${selectedRole},
+        role_play = case
+          when role_play = ${selectedRole} or secondary_role_play = ${selectedRole}
+            then role_play
+          else ${selectedRole}
+        end,
+        updated_at = ${now},
+        version = version + 1
+    where id = ${playerId}
+      and status = 'approved'
+    returning *
+  `;
+  if (!rows?.[0]) {
+    throw Object.assign(new Error("Only approved players can have roles changed."), {
+      status: 400,
+    });
+  }
+  return managePlayer(rows[0]);
+}
+
 export async function getRegistrationDecisionToken({
   token,
   purpose,
@@ -1618,6 +1700,50 @@ export async function kickTourneyPlayer({
   `;
   if (!rows?.[0]) {
     throw Object.assign(new Error("Only approved players can be kicked."), {
+      status: 400,
+    });
+  }
+  return managePlayer(rows[0]);
+}
+
+export async function withdrawTourneyPlayer({
+  playerId,
+  actorUsername,
+  env = process.env,
+} = {}) {
+  const actor = normalizeTourneyUsername(actorUsername);
+  const now = nowIso();
+
+  if (isMemoryMode(env)) {
+    const player = MEMORY_STORE.players.find((entry) => entry.id === playerId);
+    if (!player || player.status !== "approved") {
+      throw Object.assign(new Error("Only approved players can opt out."), {
+        status: 400,
+      });
+    }
+    player.status = "withdrawn";
+    player.version = Number(player.version || 1) + 1;
+    player.updated_at = now;
+    player.withdrawn_at = now;
+    player.withdrawn_by = actor;
+    return managePlayer(player);
+  }
+
+  await ensureTourneyPlayerSchema(env);
+  const sql = await getSql(env);
+  const rows = await sql`
+    update tourney_players
+    set status = 'withdrawn',
+        withdrawn_at = ${now},
+        withdrawn_by = ${actor},
+        updated_at = ${now},
+        version = version + 1
+    where id = ${playerId}
+      and status = 'approved'
+    returning *
+  `;
+  if (!rows?.[0]) {
+    throw Object.assign(new Error("Only approved players can opt out."), {
       status: 400,
     });
   }
