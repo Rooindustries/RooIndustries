@@ -31,7 +31,7 @@ const RUN_ID = String(
 ).trim();
 const BOOKING_DISCORD = String(
   process.env.FREE_BOOKING_DISCORD ||
-    `codex-${RUN_ID.replace(/[^a-z0-9]/gi, "").slice(-10) || "smoke"}`
+    `qa-${RUN_ID.replace(/[^a-z0-9]/gi, "").slice(-10) || "smoke"}`
 ).trim();
 const REQUESTED_COUPON_CODE = String(
   process.env.FREE_BOOKING_COUPON_CODE || ""
@@ -392,13 +392,13 @@ const waitForNewPage = async (context, knownPages) => {
 
 const installPageInstrumentation = async (page) => {
   await page.addInitScript((nextRunId) => {
-    window.__codexRunId = nextRunId;
-    window.__codexFetchLog = [];
-    window.__codexPageErrors = [];
+    window.__automationRunId = nextRunId;
+    window.__automationFetchLog = [];
+    window.__automationPageErrors = [];
     const originalFetch = window.fetch.bind(window);
 
     window.addEventListener("error", (event) => {
-      window.__codexPageErrors.push({
+      window.__automationPageErrors.push({
         type: "error",
         message: String(event?.message || ""),
       });
@@ -406,7 +406,7 @@ const installPageInstrumentation = async (page) => {
 
     window.addEventListener("unhandledrejection", (event) => {
       const reason = event?.reason;
-      window.__codexPageErrors.push({
+      window.__automationPageErrors.push({
         type: "unhandledrejection",
         message:
           typeof reason === "string"
@@ -436,7 +436,7 @@ const installPageInstrumentation = async (page) => {
         bodyText = await response.clone().text();
       } catch {}
 
-      window.__codexFetchLog.push({
+      window.__automationFetchLog.push({
         url: requestUrl,
         method,
         status: response.status,
@@ -560,8 +560,8 @@ const waitForFetchLog = async (
   while (Date.now() - startedAt < timeout) {
     matched = await page.evaluate(
       ({ nextUrlIncludes, nextMethod, nextStatus }) => {
-        const entries = Array.isArray(window.__codexFetchLog)
-          ? window.__codexFetchLog
+        const entries = Array.isArray(window.__automationFetchLog)
+          ? window.__automationFetchLog
           : [];
         return (
           entries.find((entry) => {
@@ -612,7 +612,9 @@ const waitForFetchLog = async (
 
 const getPageErrors = async (page) =>
   page.evaluate(() =>
-    Array.isArray(window.__codexPageErrors) ? window.__codexPageErrors : []
+    Array.isArray(window.__automationPageErrors)
+      ? window.__automationPageErrors
+      : []
   );
 
 const fetchProviderReadiness = async (page) =>
@@ -729,7 +731,7 @@ const runBookingFlow = async ({ page, packageDoc, slot, couponCode }) => {
   await bookingDialog.getByPlaceholder("Email").fill(BOOKING_EMAIL);
   await bookingDialog
     .getByPlaceholder("PC Specs")
-    .fill(`Codex free-booking smoke ${RUN_ID}`);
+    .fill(`Automated free-booking smoke ${RUN_ID}`);
   await bookingDialog
     .getByPlaceholder("Main use case (Game/Apps)")
     .fill("Booking email smoke test");

@@ -6,7 +6,7 @@ const { execSync } = require("child_process");
 const APPLY = process.env.APPLY_CLEANUP === "1";
 const AUTOMATION_MARKERS = [
   "/tmp/roo-e2e-chrome",
-  "/tmp/codex-automation-chrome",
+  "/tmp/roo-automation-chrome",
   "/tmp/playwright_chromium",
   "/tmp/playwright-firefox",
   "/tmp/playwright-webkit",
