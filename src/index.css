@@ -1886,10 +1886,12 @@ html[data-theme="dark"].animations-ready
 }
 
 .ri-package-warranty-copy {
+  align-items: center;
   display: flex;
   flex-direction: column;
   gap: 0.12rem;
   min-width: 0;
+  text-align: center;
 }
 
 .ri-package-warranty-title {
