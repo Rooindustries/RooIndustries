@@ -106,10 +106,7 @@ test.describe("Route smoke", () => {
           page.getByRole("heading", { name: /6v6 Legacy Series/i })
         ).toBeVisible();
         await expect(
-          page.getByText("Overwatch Creator Tournament")
-        ).toBeVisible();
-        await expect(
-          page.getByText("Overwatch Creator Tournament")
+          page.getByText("Overwatch Creator Tournament", { exact: true })
         ).toBeVisible();
         await expect(page.getByText("Tournament access locked")).toHaveCount(0);
         await expect(
