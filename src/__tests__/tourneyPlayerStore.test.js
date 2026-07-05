@@ -508,6 +508,95 @@ describe("tourney player store", () => {
     ]);
   });
 
+  test("updates the approved/effective role for an approved player", async () => {
+    const store = loadStore();
+    store.resetMemoryTourneyPlayerStoreForTests();
+    const player = await store.createApprovedTourneyPlayer({
+      payload: {
+        ...basePayload,
+        rolePlay: "Flex",
+        secondaryRolePlay: "Support",
+      },
+      actorUsername: "serviroo",
+      env,
+    });
+
+    await expect(
+      store.updateTourneyPlayerApprovedRole({
+        playerId: player.id,
+        rolePlay: "Support",
+        actorUsername: "serviroo",
+        env,
+      })
+    ).resolves.toMatchObject({
+      status: "approved",
+      rolePlay: "Support",
+      primaryRolePlay: "Flex",
+      secondaryRolePlay: "Support",
+      approvedRolePlay: "Support",
+    });
+
+    await expect(
+      store.updateTourneyPlayerApprovedRole({
+        playerId: player.id,
+        rolePlay: "Flex",
+        actorUsername: "serviroo",
+        env,
+      })
+    ).resolves.toMatchObject({
+      status: "approved",
+      rolePlay: "Flex",
+      primaryRolePlay: "Flex",
+      secondaryRolePlay: "Support",
+      approvedRolePlay: "Flex",
+    });
+
+    await expect(store.listApprovedTourneyPlayers({ env })).resolves.toEqual([
+      {
+        id: player.id,
+        displayName: "Player One",
+        rolePlay: "Flex",
+        registrationPool: "main",
+        teamName: "",
+        twitchUsername: "playerone",
+      },
+    ]);
+  });
+
+  test("withdraws an approved player without marking them suspended", async () => {
+    const store = loadStore();
+    store.resetMemoryTourneyPlayerStoreForTests();
+    const player = await store.createApprovedTourneyPlayer({
+      payload: basePayload,
+      actorUsername: "serviroo",
+      env,
+    });
+
+    await expect(
+      store.withdrawTourneyPlayer({
+        playerId: player.id,
+        actorUsername: "serviroo",
+        env,
+      })
+    ).resolves.toMatchObject({
+      status: "withdrawn",
+      withdrawnBy: "serviroo",
+    });
+
+    await expect(store.listApprovedTourneyPlayers({ env })).resolves.toEqual([]);
+    await expect(
+      store.verifyTourneyPlayerCredentials({
+        login: "PlayerOne#1234",
+        password: "player-password",
+        env,
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      account: null,
+      reason: "",
+    });
+  });
+
   test("adds Twitch profile images to public roster players when lookup is enabled", async () => {
     const store = loadStore();
     store.resetMemoryTourneyPlayerStoreForTests();
@@ -858,7 +947,7 @@ describe("tourney player store", () => {
     });
   });
 
-  test("excludes denied and removed players from role-cap counts", async () => {
+  test("excludes denied, withdrawn, and removed players from role-cap counts", async () => {
     const store = loadStore();
     store.resetMemoryTourneyPlayerStoreForTests();
     await store.updateTourneyRegistrationConfig({
@@ -895,6 +984,11 @@ describe("tourney player store", () => {
       actorUsername: "serviroo",
       env,
     });
+    const withdrawnCandidate = await store.createApprovedTourneyPlayer({
+      payload: payloadFor(5),
+      actorUsername: "serviroo",
+      env,
+    });
 
     await expect(store.getTourneyRoleCapacitySnapshot({ env })).resolves.toMatchObject({
       roles: expect.arrayContaining([
@@ -902,10 +996,10 @@ describe("tourney player store", () => {
           role: "Support",
           cap: 3,
           totalCap: 4,
-          mainCount: 2,
+          mainCount: 3,
           pendingMainCount: 0,
-          approvedMainCount: 2,
-          isFull: false,
+          approvedMainCount: 3,
+          isFull: true,
         }),
       ]),
     });
@@ -919,6 +1013,11 @@ describe("tourney player store", () => {
     });
     await store.kickTourneyPlayer({
       playerId: removedCandidate.id,
+      actorUsername: "serviroo",
+      env,
+    });
+    await store.withdrawTourneyPlayer({
+      playerId: withdrawnCandidate.id,
       actorUsername: "serviroo",
       env,
     });
@@ -939,7 +1038,7 @@ describe("tourney player store", () => {
 
     expect(pendingOne.player.registrationPool).toBe("main");
     expect(approvedOne.registrationPool).toBe("main");
-    for (let index = 5; index <= 6; index += 1) {
+    for (let index = 6; index <= 7; index += 1) {
       await store.createApprovedTourneyPlayer({
         payload: payloadFor(index),
         actorUsername: "serviroo",

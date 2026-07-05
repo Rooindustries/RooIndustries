@@ -47,6 +47,8 @@ const migrate = async () => {
       denied_by text,
       removed_at timestamptz,
       removed_by text,
+      withdrawn_at timestamptz,
+      withdrawn_by text,
       discord_invite_sent_at timestamptz,
       discord_invite_email_id text,
       discord_invite_last_error text,
@@ -57,7 +59,7 @@ const migrate = async () => {
       discord_role_assigned_at timestamptz,
       discord_role_last_error text,
       constraint tourney_players_status_check
-        check (status in ('pending', 'approved', 'denied', 'removed'))
+        check (status in ('pending', 'approved', 'denied', 'withdrawn', 'removed'))
     )
   `;
   await sql`
@@ -127,6 +129,23 @@ const migrate = async () => {
   await sql`
     alter table tourney_players
     add column if not exists discord_role_last_error text
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists withdrawn_at timestamptz
+  `;
+  await sql`
+    alter table tourney_players
+    add column if not exists withdrawn_by text
+  `;
+  await sql`
+    alter table tourney_players
+    drop constraint if exists tourney_players_status_check
+  `;
+  await sql`
+    alter table tourney_players
+    add constraint tourney_players_status_check
+      check (status in ('pending', 'approved', 'denied', 'withdrawn', 'removed'))
   `;
   await sql`
     create unique index if not exists tourney_players_discord_user_id_unique
