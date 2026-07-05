@@ -9,6 +9,7 @@ const INDEXABLE_ROUTES = [
   "/privacy",
   "/meet-the-team",
   "/tools",
+  "/tourney",
 ];
 
 const NOINDEX_ROUTES = [

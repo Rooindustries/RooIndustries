@@ -61,6 +61,12 @@ const routeMeta = {
       "Compare packages for game settings, FPS tuning, Windows and BIOS work, input lag, and full PC performance tuning.",
     noindex: false,
   },
+  "/tourney": {
+    title: "Overwatch Creator Tournament | Roo Industries",
+    description:
+      "Roo Industries Overwatch Creator Tournament event information, rules, roster status, creator signups, charity details, giveaways, and bracket access for the 6v6 Legacy Series.",
+    noindex: false,
+  },
   "/booking": {
     title: "Book PC Game Tuning | Roo Industries",
     description: "Book the remote session, send specs, and lock in a time for your Roo Industries tuning session.",
@@ -232,12 +238,64 @@ function getMetadataForPath(pathname) {
 const buildOrganizationJsonLd = () => ({
   "@context": "https://schema.org",
   "@type": "Organization",
+  "@id": `${siteUrl}/#organization`,
   name: SITE_NAME,
   description: DEFAULT_DESCRIPTION,
   url: siteUrl,
   logo: `${siteUrl}${DEFAULT_OG_IMAGE}`,
   sameAs: ["https://discord.com/invite/qs5HKNyazD"],
   areaServed: "Worldwide",
+});
+
+const buildHomePageJsonLd = () => ({
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": `${siteUrl}/#website`,
+      name: SITE_NAME,
+      url: siteUrl,
+      publisher: {
+        "@id": `${siteUrl}/#organization`,
+      },
+    },
+    {
+      "@type": "WebPage",
+      "@id": `${siteUrl}/#webpage`,
+      url: siteUrl,
+      name: "Roo Industries | PC Game Optimization",
+      headline: "More FPS. Less Input Lag. Tuned For Ranked Games.",
+      description:
+        "Roo Industries tunes BIOS, Windows, memory, GPU, and game settings around the games players actually play for smoother ranked games, higher FPS, lower input lag, and cleaner frametimes.",
+      isPartOf: {
+        "@id": `${siteUrl}/#website`,
+      },
+      publisher: {
+        "@id": `${siteUrl}/#organization`,
+      },
+      mainEntity: {
+        "@id": `${siteUrl}/#pc-game-optimization-service`,
+      },
+    },
+    {
+      "@type": "Service",
+      "@id": `${siteUrl}/#pc-game-optimization-service`,
+      name: "Remote PC Game Optimization",
+      serviceType: "PC game optimization",
+      url: siteUrl,
+      provider: {
+        "@id": `${siteUrl}/#organization`,
+      },
+      areaServed: "Worldwide",
+      description:
+        "Remote optimization for BIOS, Windows, memory, GPU, RAM, and in-game settings focused on FPS, input lag, frametime stability, and ranked-game performance.",
+      hasOfferCatalog: {
+        "@type": "OfferCatalog",
+        name: "Roo Industries PC Game Optimization Packages",
+        url: `${siteUrl}/packages`,
+      },
+    },
+  ],
 });
 
 const buildOfferCatalogJsonLd = (name = "PC Game Optimization Services") => ({
@@ -317,6 +375,29 @@ const buildFaqJsonLd = (items = []) => ({
     })),
 });
 
+const buildTourneyEventJsonLd = () => ({
+  "@context": "https://schema.org",
+  "@type": "Event",
+  "@id": `${siteUrl}/tourney#event`,
+  name: "Overwatch Creator Tournament: 6v6 Legacy Series",
+  description:
+    "Roo Industries Overwatch Creator Tournament with event information, rules, roster status, creator signups, charity details, giveaways, and bracket access.",
+  url: `${siteUrl}/tourney`,
+  startDate: "2026-08-15",
+  endDate: "2026-08-16",
+  eventStatus: "https://schema.org/EventScheduled",
+  eventAttendanceMode: "https://schema.org/OnlineEventAttendanceMode",
+  location: {
+    "@type": "VirtualLocation",
+    url: `${siteUrl}/tourney`,
+  },
+  organizer: {
+    "@id": `${siteUrl}/#organization`,
+    name: SITE_NAME,
+    url: siteUrl,
+  },
+});
+
 module.exports = {
   SITE_NAME,
   SITE_URL: siteUrl,
@@ -326,6 +407,8 @@ module.exports = {
   buildMetadata,
   getMetadataForPath,
   buildOrganizationJsonLd,
+  buildHomePageJsonLd,
   buildOfferCatalogJsonLd,
   buildFaqJsonLd,
+  buildTourneyEventJsonLd,
 };

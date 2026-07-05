@@ -1,7 +1,7 @@
 const routeCopy = {
   "/": {
-    title: "PC Game Optimization",
-    body: "Roo Industries tunes gaming PCs for higher FPS, lower input lag, cleaner frametimes, and smoother ranked games.",
+    title: "More FPS. Less Input Lag. Tuned For Ranked Games.",
+    body: "Roo Industries tunes BIOS, Windows, memory, GPU, and game settings around the games you actually play, so ranked feels smoother, FPS climbs, and the mouse does what your hand tells it to.",
   },
   "/benchmarks": {
     title: "Benchmark Results",
