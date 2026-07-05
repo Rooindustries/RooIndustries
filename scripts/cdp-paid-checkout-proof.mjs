@@ -44,7 +44,7 @@ const RUN_ID = String(
 ).trim();
 const BOOKING_DISCORD = String(
   process.env.PAID_BOOKING_DISCORD ||
-    `codex-${RUN_ID.replace(/[^a-z0-9]/gi, "").slice(-10) || "proof"}`
+    `qa-${RUN_ID.replace(/[^a-z0-9]/gi, "").slice(-10) || "proof"}`
 ).trim();
 
 const sanityClient = createClient({
@@ -228,17 +228,17 @@ const exportCookiesFromCdp = async () => {
 
 const installPageInstrumentation = async (page) => {
   await page.addInitScript((nextRunId) => {
-    window.__codexRunId = nextRunId;
-    window.__codexPageErrors = [];
+    window.__automationRunId = nextRunId;
+    window.__automationPageErrors = [];
     window.addEventListener("error", (event) => {
-      window.__codexPageErrors.push({
+      window.__automationPageErrors.push({
         type: "error",
         message: String(event?.message || ""),
       });
     });
     window.addEventListener("unhandledrejection", (event) => {
       const reason = event?.reason;
-      window.__codexPageErrors.push({
+      window.__automationPageErrors.push({
         type: "unhandledrejection",
         message:
           typeof reason === "string"
@@ -314,7 +314,9 @@ const captureScreenshot = async (context, page, filePath) => {
 
 const getPageErrors = async (page) =>
   page.evaluate(() =>
-    Array.isArray(window.__codexPageErrors) ? window.__codexPageErrors : []
+    Array.isArray(window.__automationPageErrors)
+      ? window.__automationPageErrors
+      : []
   );
 
 const waitForCount = async (locator, minimum = 1, timeout = 15000) => {
@@ -446,7 +448,7 @@ const reserveHoldFromPage = async (page, { startTimeUTC, packageTitle }) => {
 const buildBookingPayload = ({ packageDoc, slot, hold }) => ({
   discord: BOOKING_DISCORD,
   email: BOOKING_EMAIL,
-  specs: `Codex paid proof ${RUN_ID}`,
+  specs: `Automated paid proof ${RUN_ID}`,
   mainGame: "Paid payment proof",
   message: `Automated paid proof ${RUN_ID}`,
   packageTitle: packageDoc.title,
