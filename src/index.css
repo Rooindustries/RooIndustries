@@ -1968,62 +1968,62 @@ html[data-theme="dark"] .ri-package-warranty-callout-max
 
 html:not([data-theme="dark"]) .ri-package-warranty-callout-standard {
   background:
-    linear-gradient(180deg, rgba(15, 23, 42, 0.7), rgba(2, 6, 23, 0.7)),
+    linear-gradient(180deg, rgba(8, 47, 73, 0.72), rgba(3, 22, 49, 0.74)),
     radial-gradient(
       circle at 50% 0%,
-      rgba(252, 211, 77, 0.1),
+      rgba(125, 211, 252, 0.16),
       transparent 68%
     );
-  border-color: rgba(252, 211, 77, 0.3);
+  border-color: rgba(125, 211, 252, 0.42);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    0 0 14px rgba(252, 211, 77, 0.14),
-    0 0 22px rgba(14, 165, 233, 0.1);
+    0 0 14px rgba(56, 189, 248, 0.18),
+    0 0 22px rgba(14, 165, 233, 0.16);
 }
 
 html:not([data-theme="dark"]) .ri-package-warranty-callout-standard
   .ri-package-warranty-icon {
-  background: linear-gradient(180deg, #fef3c7, #d97706);
-  color: #0f172a;
+  background: linear-gradient(180deg, #bae6fd, #0284c7);
+  color: #02111f;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.5),
-    0 0 10px rgba(252, 211, 77, 0.28);
+    0 0 10px rgba(56, 189, 248, 0.34);
 }
 
 html:not([data-theme="dark"]) .ri-package-warranty-callout-standard
   .ri-package-warranty-title {
-  color: #fde68a;
-  text-shadow: 0 0 10px rgba(252, 211, 77, 0.22);
+  color: #bae6fd;
+  text-shadow: 0 0 10px rgba(56, 189, 248, 0.24);
 }
 
 html:not([data-theme="dark"]) .ri-package-warranty-callout-max {
   background:
-    linear-gradient(180deg, rgba(15, 23, 42, 0.88), rgba(2, 6, 23, 0.84)),
+    linear-gradient(180deg, rgba(7, 89, 133, 0.88), rgba(3, 22, 49, 0.84)),
     radial-gradient(
       circle at 50% 0%,
-      rgba(252, 211, 77, 0.18),
+      rgba(186, 230, 253, 0.25),
       transparent 68%
     );
-  border-color: rgba(252, 211, 77, 0.55);
+  border-color: rgba(125, 211, 252, 0.62);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.18),
-    0 0 19px rgba(252, 211, 77, 0.24),
-    0 0 30px rgba(14, 165, 233, 0.16);
+    0 0 19px rgba(56, 189, 248, 0.3),
+    0 0 30px rgba(14, 165, 233, 0.22);
 }
 
 html:not([data-theme="dark"]) .ri-package-warranty-callout-max
   .ri-package-warranty-icon {
-  background: linear-gradient(180deg, #fde68a, #f59e0b);
-  color: #0f172a;
+  background: linear-gradient(180deg, #e0f2fe, #0ea5e9);
+  color: #02111f;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.62),
-    0 0 13px rgba(252, 211, 77, 0.44);
+    0 0 13px rgba(56, 189, 248, 0.48);
 }
 
 html:not([data-theme="dark"]) .ri-package-warranty-callout-max
   .ri-package-warranty-title {
-  color: #fde68a;
-  text-shadow: 0 0 12px rgba(252, 211, 77, 0.35);
+  color: #e0f2fe;
+  text-shadow: 0 0 12px rgba(56, 189, 248, 0.36);
 }
 
 html:not([data-theme="dark"]) .ri-package-tag-blue {
