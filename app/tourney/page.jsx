@@ -4,21 +4,14 @@ import {
   TourneyShell,
   getTourneySession,
 } from "./TourneyShared";
+import JsonLd from "../../src/next/JsonLd";
+import seo from "../../src/lib/seo";
 import { canAccessTourneyRegistration } from "../../src/server/tourney/access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export const metadata = {
-  title: "Overwatch Creator Tournament | Roo Industries",
-  description:
-    "Overwatch Creator Tournament event information, rules, roster, and bracket.",
-  robots: {
-    index: false,
-    follow: false,
-    nocache: true,
-  },
-};
+export const metadata = seo.getMetadataForPath("/tourney");
 
 const competitiveRules = [
   {
@@ -362,5 +355,10 @@ const DashboardPage = ({ session }) => (
 export default async function TourneyPage() {
   const session = await getTourneySession();
 
-  return <DashboardPage session={session} />;
+  return (
+    <>
+      <JsonLd data={seo.buildTourneyEventJsonLd()} />
+      <DashboardPage session={session} />
+    </>
+  );
 }
