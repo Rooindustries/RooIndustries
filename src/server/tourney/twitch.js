@@ -11,7 +11,10 @@ const TWITCH_RESERVED_PATHS = new Set([
 const TWITCH_PROFILE_LOOKUP_LIMIT = 100;
 const TWITCH_PROFILE_CACHE_MS = 6 * 60 * 60 * 1000;
 const TWITCH_PROFILE_NEGATIVE_CACHE_MS = 15 * 60 * 1000;
+const TWITCH_STREAM_LOOKUP_LIMIT = 100;
+const TWITCH_STREAM_CACHE_MS = 60 * 1000;
 const TWITCH_REQUEST_TIMEOUT_MS = 4500;
+const TWITCH_STREAMS_API = "https://api.twitch.tv/helix/streams";
 const TWITCH_USERS_API = "https://api.twitch.tv/helix/users";
 const TWITCH_TOKEN_API = "https://id.twitch.tv/oauth2/token";
 
@@ -21,7 +24,10 @@ const TWITCH_CACHE =
     token: "",
     tokenExpiresAt: 0,
     profileImages: new Map(),
+    liveStreams: new Map(),
   });
+
+if (!TWITCH_CACHE.liveStreams) TWITCH_CACHE.liveStreams = new Map();
 
 const normalizeLogin = (value) => {
   const login = String(value || "")
@@ -75,6 +81,14 @@ const shouldSkipProfileLookup = (env) => {
   );
 };
 
+const shouldSkipLiveLookup = (env) => {
+  const nodeEnv = env?.NODE_ENV || process.env.NODE_ENV;
+  return (
+    env?.TOURNEY_TWITCH_LIVE_LOOKUP === "0" ||
+    (env?.TOURNEY_TWITCH_LIVE_LOOKUP !== "1" && nodeEnv === "test")
+  );
+};
+
 const isSafeTwitchImageUrl = (value) => {
   try {
     const url = new URL(String(value || "").replaceAll("&amp;", "&"));
@@ -122,6 +136,19 @@ const setCachedProfileImage = (login, url) => {
     url,
     expiresAt:
       nowMs() + (url ? TWITCH_PROFILE_CACHE_MS : TWITCH_PROFILE_NEGATIVE_CACHE_MS),
+  });
+};
+
+const getCachedLiveStream = (login) => {
+  const cached = TWITCH_CACHE.liveStreams.get(login);
+  if (!cached || cached.expiresAt <= nowMs()) return undefined;
+  return cached.status || null;
+};
+
+const setCachedLiveStream = (login, status) => {
+  TWITCH_CACHE.liveStreams.set(login, {
+    status,
+    expiresAt: nowMs() + TWITCH_STREAM_CACHE_MS,
   });
 };
 
@@ -182,6 +209,53 @@ const fetchProfileImagesFromHelix = async ({ logins, env, fetchImpl }) => {
     const login = normalizeTwitchUsername(user.login);
     const imageUrl = normalizeProfileImageUrl(user.profile_image_url);
     if (login && imageUrl) results.set(login, imageUrl);
+  }
+  return results;
+};
+
+const normalizeTwitchStreamStatus = (stream) => {
+  const login = normalizeTwitchUsername(stream?.user_login || stream?.user_name);
+  if (!login) return null;
+
+  const streamType = String(stream?.type || "live").trim().toLowerCase();
+  if (streamType && streamType !== "live") return null;
+
+  const viewerCount = Number(stream?.viewer_count || 0);
+  return {
+    isLive: true,
+    userLogin: login,
+    userName: String(stream?.user_name || stream?.user_login || login).trim(),
+    title: String(stream?.title || "").trim(),
+    gameName: String(stream?.game_name || "").trim(),
+    viewerCount: Number.isFinite(viewerCount) ? viewerCount : 0,
+    startedAt: String(stream?.started_at || "").trim(),
+  };
+};
+
+const fetchLiveStreamsFromHelix = async ({ logins, env, fetchImpl }) => {
+  const clientId = String(env?.TWITCH_CLIENT_ID || "").trim();
+  const token = await getTwitchAppAccessToken({ env, fetchImpl });
+  if (!clientId || !token) return new Map();
+
+  const url = new URL(TWITCH_STREAMS_API);
+  url.searchParams.set("type", "live");
+  for (const login of logins) url.searchParams.append("user_login", login);
+
+  const response = await fetchImpl(url.toString(), {
+    cache: "no-store",
+    headers: {
+      "Client-ID": clientId,
+      Authorization: `Bearer ${token}`,
+    },
+    signal: withTimeoutSignal(),
+  });
+  if (!response.ok) return new Map();
+
+  const data = await response.json().catch(() => ({}));
+  const results = new Map();
+  for (const stream of Array.isArray(data.data) ? data.data : []) {
+    const status = normalizeTwitchStreamStatus(stream);
+    if (status) results.set(status.userLogin, status);
   }
   return results;
 };
@@ -263,8 +337,46 @@ export async function getTwitchProfileImageMap(
   return results;
 }
 
+export async function getTwitchLiveStatusMap(
+  logins,
+  { env = process.env, fetchImpl = fetch } = {}
+) {
+  if (!Array.isArray(logins) || shouldSkipLiveLookup(env)) return new Map();
+  const uniqueLogins = [
+    ...new Set(logins.map(normalizeTwitchUsername).filter(Boolean)),
+  ].slice(0, TWITCH_STREAM_LOOKUP_LIMIT);
+  if (uniqueLogins.length === 0) return new Map();
+
+  const results = new Map();
+  const misses = [];
+  for (const login of uniqueLogins) {
+    const cached = getCachedLiveStream(login);
+    if (cached !== undefined) {
+      if (cached?.isLive) results.set(login, cached);
+    } else {
+      misses.push(login);
+    }
+  }
+  if (misses.length === 0) return results;
+
+  const liveResults = await fetchLiveStreamsFromHelix({
+    logins: misses,
+    env,
+    fetchImpl,
+  }).catch(() => new Map());
+
+  for (const login of misses) {
+    const status = liveResults.get(login) || null;
+    setCachedLiveStream(login, status);
+    if (status?.isLive) results.set(login, status);
+  }
+
+  return results;
+}
+
 export const resetTwitchProfileCacheForTests = () => {
   TWITCH_CACHE.token = "";
   TWITCH_CACHE.tokenExpiresAt = 0;
   TWITCH_CACHE.profileImages = new Map();
+  TWITCH_CACHE.liveStreams = new Map();
 };
