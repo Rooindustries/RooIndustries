@@ -225,6 +225,15 @@ function getMetadataForPath(pathname) {
       noindex: true,
     });
   }
+  if (normalized.startsWith("/downloads/")) {
+    return buildMetadata({
+      pathname: normalized,
+      title: "Customer Download | Roo Industries",
+      description:
+        "Verify your Roo Industries order details to access a customer download securely.",
+      noindex: true,
+    });
+  }
 
   const entry = routeMeta[normalized] || routeMeta["/404"];
   return buildMetadata({
