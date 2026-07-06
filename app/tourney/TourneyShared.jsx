@@ -2232,6 +2232,13 @@ export const TourneyStyles = () => (
       padding: 16px 18px;
     }
 
+    .tourney-roster-player.is-live {
+      border-color: rgba(248, 113, 113, 0.42);
+      background:
+        radial-gradient(circle at 7% 50%, rgba(239, 68, 68, 0.14), transparent 30%),
+        rgba(11, 17, 32, 0.66);
+    }
+
     .tourney-roster-host-row.is-featured {
       border-color: rgba(34, 211, 238, 0.34);
       background:
@@ -2281,6 +2288,34 @@ export const TourneyStyles = () => (
 
     .tourney-roster-name-copy {
       min-width: 0;
+    }
+
+    .tourney-roster-live-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-left: 10px;
+      vertical-align: middle;
+      border: 1px solid rgba(248, 113, 113, 0.56);
+      border-radius: 9999px;
+      color: #fff;
+      background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+      box-shadow: 0 0 16px rgba(239, 68, 68, 0.32);
+      padding: 3px 8px;
+      font-size: 0.68rem;
+      font-weight: 900;
+      letter-spacing: 0.02em;
+      line-height: 1;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .tourney-roster-live-badge > span {
+      width: 7px;
+      height: 7px;
+      border-radius: 9999px;
+      background: #fff;
+      box-shadow: 0 0 10px rgba(255, 255, 255, 0.72);
     }
 
     .tourney-roster-avatar {
@@ -4177,6 +4212,10 @@ export const TourneyStyles = () => (
         justify-content: center;
         justify-items: center;
         text-align: center;
+      }
+
+      .tourney-roster-live-badge {
+        margin-left: 8px;
       }
 
       .tourney-roster-player > .tourney-roster-detail {

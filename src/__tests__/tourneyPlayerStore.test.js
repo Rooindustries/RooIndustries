@@ -643,6 +643,72 @@ describe("tourney player store", () => {
     );
   });
 
+  test("adds Twitch live status to public roster players when lookup is enabled", async () => {
+    const store = loadStore();
+    store.resetMemoryTourneyPlayerStoreForTests();
+    require("../server/tourney/twitch.js").resetTwitchProfileCacheForTests();
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        data: [
+          {
+            user_login: "playerone",
+            user_name: "PlayerOne",
+            type: "live",
+            title: "Tournament warmups",
+            game_name: "Overwatch 2",
+            viewer_count: 123,
+            started_at: "2026-07-07T14:30:00Z",
+          },
+        ],
+      }),
+    }));
+
+    const player = await store.createApprovedTourneyPlayer({
+      payload: {
+        ...basePayload,
+        twitchUsername: "PlayerOne",
+      },
+      actorUsername: "yukari",
+      env,
+    });
+
+    await expect(
+      store.listApprovedTourneyPlayers({
+        env: {
+          ...env,
+          TOURNEY_TWITCH_PROFILE_LOOKUP: "0",
+          TOURNEY_TWITCH_LIVE_LOOKUP: "1",
+          TWITCH_CLIENT_ID: "client-id",
+          TWITCH_APP_ACCESS_TOKEN: "app-token",
+        },
+      })
+    ).resolves.toEqual([
+      {
+        id: player.id,
+        displayName: "Player One",
+        rolePlay: "Support",
+        registrationPool: "main",
+        teamName: "",
+        twitchUsername: "playerone",
+        twitchLive: true,
+        twitchLiveTitle: "Tournament warmups",
+        twitchLiveGameName: "Overwatch 2",
+        twitchLiveViewerCount: 123,
+        twitchLiveStartedAt: "2026-07-07T14:30:00Z",
+      },
+    ]);
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining("https://api.twitch.tv/helix/streams"),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "Client-ID": "client-id",
+          Authorization: "Bearer app-token",
+        }),
+      })
+    );
+  });
+
   test("resets approved player passwords and rejects the old password", async () => {
     const store = loadStore();
     store.resetMemoryTourneyPlayerStoreForTests();

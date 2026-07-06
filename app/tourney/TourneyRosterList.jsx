@@ -98,9 +98,16 @@ export default function TourneyRosterList({ players = [] }) {
         const twitchLabel = getTwitchButtonLabel(player);
         const displayName = player.displayName || "Player";
         const profileImageUrl = String(player.twitchProfileImageUrl || "").trim();
+        const isLive = Boolean(player.twitchLive);
+        const liveTitle = String(player.twitchLiveTitle || "").trim();
 
         return (
-          <li className="tourney-roster-player" key={player.id}>
+          <li
+            className={
+              isLive ? "tourney-roster-player is-live" : "tourney-roster-player"
+            }
+            key={player.id}
+          >
             <span className="tourney-roster-identity">
               <span className="tourney-roster-avatar" aria-hidden="true">
                 {profileImageUrl ? (
@@ -122,7 +129,19 @@ export default function TourneyRosterList({ players = [] }) {
                 )}
               </span>
               <span className="tourney-roster-name-copy">
-                <strong>{displayName}</strong>
+                <strong>
+                  {displayName}
+                  {isLive ? (
+                    <span
+                      aria-label={`${displayName} is live on Twitch`}
+                      className="tourney-roster-live-badge"
+                      title={liveTitle || `${displayName} is live on Twitch`}
+                    >
+                      <span aria-hidden="true" />
+                      Live
+                    </span>
+                  ) : null}
+                </strong>
                 <span className="tourney-roster-label">Player</span>
               </span>
             </span>
