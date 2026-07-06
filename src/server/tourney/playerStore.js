@@ -2,6 +2,7 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import {
   extractTwitchLogin,
+  getTwitchLiveStatusMap,
   getTwitchProfileImageMap,
   normalizeTwitchUsername,
 } from "./twitch.js";
@@ -314,16 +315,34 @@ const publicPlayer = (row) => {
   };
 };
 
-const attachTwitchProfileImages = async (players, { env = process.env } = {}) => {
-  const profileImages = await getTwitchProfileImageMap(
-    players.map((player) => player.twitchUsername),
-    { env }
-  ).catch(() => new Map());
-  if (!profileImages.size) return players;
+const attachTwitchRosterMetadata = async (
+  players,
+  { env = process.env } = {}
+) => {
+  const twitchUsernames = players.map((player) => player.twitchUsername);
+  const [profileImages, liveStatuses] = await Promise.all([
+    getTwitchProfileImageMap(twitchUsernames, { env }).catch(() => new Map()),
+    getTwitchLiveStatusMap(twitchUsernames, { env }).catch(() => new Map()),
+  ]);
+
+  if (!profileImages.size && !liveStatuses.size) return players;
 
   return players.map((player) => {
     const imageUrl = profileImages.get(player.twitchUsername);
-    return imageUrl ? { ...player, twitchProfileImageUrl: imageUrl } : player;
+    const liveStatus = liveStatuses.get(player.twitchUsername);
+    return {
+      ...player,
+      ...(imageUrl ? { twitchProfileImageUrl: imageUrl } : {}),
+      ...(liveStatus?.isLive
+        ? {
+            twitchLive: true,
+            twitchLiveTitle: liveStatus.title,
+            twitchLiveGameName: liveStatus.gameName,
+            twitchLiveViewerCount: liveStatus.viewerCount,
+            twitchLiveStartedAt: liveStatus.startedAt,
+          }
+        : {}),
+    };
   });
 };
 
@@ -1120,7 +1139,7 @@ export async function listApprovedTourneyPlayers({ env = process.env } = {}) {
       .filter((player) => player.status === "approved")
       .map(publicPlayer)
       .sort((left, right) => left.displayName.localeCompare(right.displayName));
-    return attachTwitchProfileImages(players, { env });
+    return attachTwitchRosterMetadata(players, { env });
   }
 
   await ensureTourneyPlayerSchema(env);
@@ -1131,7 +1150,7 @@ export async function listApprovedTourneyPlayers({ env = process.env } = {}) {
     where status = 'approved'
     order by lower(coalesce(nullif(display_name, ''), discord)) asc
   `;
-  return attachTwitchProfileImages(rows.map(publicPlayer), { env });
+  return attachTwitchRosterMetadata(rows.map(publicPlayer), { env });
 }
 
 export async function listManageTourneyPlayers({ env = process.env } = {}) {

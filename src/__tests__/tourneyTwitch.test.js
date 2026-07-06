@@ -82,4 +82,67 @@ describe("tourney Twitch helpers", () => {
       })
     );
   });
+
+  test("resolves live stream status through Twitch streams", async () => {
+    const twitch = loadTwitch();
+    twitch.resetTwitchProfileCacheForTests();
+    const fetchImpl = jest.fn(async (url) => {
+      const href = String(url);
+      if (href.startsWith("https://id.twitch.tv/oauth2/token")) {
+        return {
+          ok: true,
+          json: async () => ({
+            access_token: "app-token",
+            expires_in: 3600,
+          }),
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          data: [
+            {
+              user_login: "player_one",
+              user_name: "Player_One",
+              type: "live",
+              title: "Ranked scrims",
+              game_name: "Overwatch 2",
+              viewer_count: 42,
+              started_at: "2026-07-07T12:00:00Z",
+            },
+          ],
+        }),
+      };
+    });
+
+    const statuses = await twitch.getTwitchLiveStatusMap(
+      ["Player_One", "Offline_Player"],
+      {
+        env: {
+          NODE_ENV: "test",
+          TOURNEY_TWITCH_LIVE_LOOKUP: "1",
+          TWITCH_CLIENT_ID: "client-id",
+          TWITCH_CLIENT_SECRET: "client-secret",
+        },
+        fetchImpl,
+      }
+    );
+
+    expect(statuses.get("player_one")).toMatchObject({
+      isLive: true,
+      title: "Ranked scrims",
+      gameName: "Overwatch 2",
+      viewerCount: 42,
+      startedAt: "2026-07-07T12:00:00Z",
+    });
+    expect(statuses.has("offline_player")).toBe(false);
+
+    const streamsUrl = new URL(fetchImpl.mock.calls[1][0]);
+    expect(streamsUrl.href).toContain("https://api.twitch.tv/helix/streams");
+    expect(streamsUrl.searchParams.get("type")).toBe("live");
+    expect(streamsUrl.searchParams.getAll("user_login")).toEqual([
+      "player_one",
+      "offline_player",
+    ]);
+  });
 });
