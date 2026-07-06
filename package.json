@@ -15,6 +15,7 @@
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^13.5.0",
     "@vercel/analytics": "^1.6.1",
+    "@vercel/blob": "^2.5.0",
     "@vercel/speed-insights": "^1.2.0",
     "bcryptjs": "^3.0.3",
     "brackets-manager": "^1.11.0",

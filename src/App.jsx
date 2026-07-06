@@ -37,6 +37,7 @@ const PaymentSuccess = lazy(() => import("./legacyPages/PaymentSuccess"));
 const Thankyou = lazy(() => import("./legacyPages/Thankyou"));
 const UpgradeXoc = lazy(() => import("./legacyPages/UpgradeXoc"));
 const Upgrade = lazy(() => import("./legacyPages/Upgrade"));
+const Download = lazy(() => import("./legacyPages/Download"));
 const BookingModal = lazy(() => import("./components/BookingModal"));
 
 const RefLogin = lazy(() => import("./legacyPages/RefLogin"));
@@ -168,6 +169,10 @@ function AnimatedRoutes({
           <Route
             path="/upgrade-xoc"
             element={withRouteSuspense(<UpgradeXoc />)}
+          />
+          <Route
+            path="/downloads/:slug"
+            element={withRouteSuspense(<Download />)}
           />
 
           {/* Referral system routes */}
