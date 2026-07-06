@@ -12,6 +12,7 @@ const routes = [
   "/booking",
   "/payment",
   "/upgrade-xoc",
+  "/downloads/optimizer-pack-v1",
   "/tourney",
   "/tourney/bracket",
   "/tourney/roster",

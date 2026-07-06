@@ -36,6 +36,9 @@ const nextConfig = {
   poweredByHeader: false,
   distDir: process.env.NEXT_DIST_DIR || ".next",
   outputFileTracingRoot: process.cwd(),
+  outputFileTracingIncludes: {
+    "/api/downloads/file": ["./downloads/**/*"],
+  },
   htmlLimitedBots: /.*/,
   experimental: {
     devtoolSegmentExplorer: false,
