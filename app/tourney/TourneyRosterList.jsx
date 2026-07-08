@@ -135,8 +135,16 @@ export default function TourneyRosterList({ players = [] }) {
                 )}
               </span>
               <span className="tourney-roster-name-copy">
-                <strong>
-                  {displayName}
+                <strong
+                  className={
+                    isLive
+                      ? "tourney-roster-name-line has-live"
+                      : "tourney-roster-name-line"
+                  }
+                >
+                  <span className="tourney-roster-player-name">
+                    {displayName}
+                  </span>
                   {isLive ? (
                     <span
                       aria-label={`${displayName} is live on Twitch`}

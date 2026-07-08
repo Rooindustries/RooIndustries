@@ -2288,13 +2288,36 @@ export const TourneyStyles = () => (
 
     .tourney-roster-name-copy {
       min-width: 0;
+      width: 100%;
+    }
+
+    .tourney-roster-player .tourney-roster-name-line {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      width: 100%;
+    }
+
+    .tourney-roster-player
+      .tourney-roster-name-line.has-live
+      .tourney-roster-player-name {
+      flex: 0 1 8.75rem;
+      max-width: 8.75rem;
+      min-width: 0;
+      text-align: right;
+    }
+
+    .tourney-roster-player-name {
+      min-width: 0;
+      overflow-wrap: anywhere;
     }
 
     .tourney-roster-live-badge {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      margin-left: 10px;
+      flex: 0 0 auto;
       vertical-align: middle;
       border: 1px solid rgba(248, 113, 113, 0.56);
       border-radius: 9999px;
@@ -4214,8 +4237,18 @@ export const TourneyStyles = () => (
         text-align: center;
       }
 
-      .tourney-roster-live-badge {
-        margin-left: 8px;
+      .tourney-roster-player .tourney-roster-name-line.has-live {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        justify-content: center;
+        column-gap: 10px;
+      }
+
+      .tourney-roster-player
+        .tourney-roster-name-line.has-live
+        .tourney-roster-player-name {
+        flex-basis: auto;
+        max-width: min(11rem, 58vw);
       }
 
       .tourney-roster-player > .tourney-roster-detail {
