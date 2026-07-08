@@ -218,6 +218,18 @@ export const buildDeferredEmailDispatch = ({ booking = {} }) => {
   return dispatch;
 };
 
+const hasRenderableBookingEmailFields = (booking = {}) =>
+  !!booking?._id &&
+  !!String(booking.packageTitle || "").trim() &&
+  !!String(booking.packagePrice || "").trim() &&
+  !!String(booking.hostDate || "").trim() &&
+  !!String(booking.hostTime || "").trim() &&
+  !!String(booking.hostTimeZone || "").trim() &&
+  !!String(booking.displayDate || "").trim() &&
+  !!String(booking.displayTime || "").trim() &&
+  !!String(booking.localTimeZone || "").trim() &&
+  !!String(booking.email || booking.payerEmail || "").trim();
+
 const buildBookingFieldGroups = (booking = {}) => {
   const siteName = process.env.SITE_NAME || "Roo Industries";
   const logoUrl = resolveLogoUrl();
@@ -304,7 +316,9 @@ export const sendBookingEmailsForBooking = async ({
   booking = null,
 }) => {
   const resolvedBooking =
-    booking && booking._id === bookingId
+    booking &&
+    booking._id === bookingId &&
+    hasRenderableBookingEmailFields(booking)
       ? booking
       : await getBookingForEmailDispatch({ bookingId, client });
 
@@ -330,6 +344,11 @@ export const sendBookingEmailsForBooking = async ({
   const { siteName, logoUrl, bookingRef, clientFields, ownerFields } =
     buildBookingFieldGroups(resolvedBooking);
   const from = process.env.FROM_EMAIL;
+  const ownerScheduleLabel =
+    [resolvedBooking.hostDate, resolvedBooking.hostTime]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .join(" ") || "time TBD";
   const clientRecipient = String(
     resolvedBooking.email || resolvedBooking.payerEmail || ""
   ).trim();
@@ -407,7 +426,7 @@ export const sendBookingEmailsForBooking = async ({
       const { error } = await resend.emails.send({
         from,
         to: owner,
-        subject: `New booking ${bookingRef} - ${resolvedBooking.packageTitle} (${resolvedBooking.hostDate} ${resolvedBooking.hostTime})`,
+        subject: `New booking ${bookingRef} - ${resolvedBooking.packageTitle} (${ownerScheduleLabel})`,
         html: emailHtml({
           logoUrl,
           siteName,

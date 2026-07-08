@@ -1134,8 +1134,84 @@ describe("payment session flow", () => {
       },
     });
     expect(getOnlyPaymentRecord().status).toBe(
+      paymentRecordConstants.PAYMENT_STATUS_BOOKED
+    );
+    expect(mockCreateBooking.mock.calls.at(-1)?.[0]?.body).toMatchObject({
+      deferEmailsUntilConfirmation: false,
+    });
+  });
+
+  test("reconcile completes stale email_partial sessions without duplicate bookings", async () => {
+    const hold = createHold();
+    const bookingPayload = baseBookingPayload();
+    bookingPayload.slotHoldToken = issueTokenForHold(hold);
+
+    const started = await startPaymentSession({
+      body: {
+        provider: "razorpay",
+        bookingPayload,
+      },
+      client: mockClient,
+    });
+
+    const finalized = await finalizePaymentSession({
+      body: {
+        paymentAccessToken: started.body.paymentAccessToken,
+        providerData: {
+          razorpayOrderId: "razorpay_order_1",
+          razorpayPaymentId: "razorpay_payment_1",
+          razorpaySignature: "razorpay_signature_1",
+        },
+      },
+      client: mockClient,
+    });
+
+    expect(finalized.body.status).toBe(
       paymentRecordConstants.PAYMENT_STATUS_EMAIL_PARTIAL
     );
+    expect(store.bookings).toHaveLength(1);
+
+    const existingBookingId = store.bookings[0]._id;
+    const record = getOnlyPaymentRecord();
+    record.lastAttemptAt = "2000-01-01T00:00:00.000Z";
+    record.updatedAt = "2000-01-01T00:00:00.000Z";
+
+    mockCreateBooking.mockImplementationOnce(async (req, res) =>
+      res.status(200).json({
+        bookingId: existingBookingId,
+        emailDispatchToken: "",
+        emailDispatch: {
+          deliveryEnabled: true,
+          client: { attempted: true, sent: true, skippedReason: "" },
+          owner: { attempted: true, sent: true, skippedReason: "" },
+          allSent: true,
+        },
+      })
+    );
+
+    const reconciled = await reconcilePaymentSessions({
+      req: createReq({}, { "x-cron-secret": "cron-secret" }),
+      client: mockClient,
+    });
+
+    expect(reconciled.httpStatus).toBe(200);
+    expect(reconciled.body.summary).toMatchObject({
+      scanned: 1,
+      finalized: 1,
+      recovery: 0,
+    });
+    expect(store.bookings).toHaveLength(1);
+    expect(getOnlyPaymentRecord()).toMatchObject({
+      status: paymentRecordConstants.PAYMENT_STATUS_BOOKED,
+      bookingId: existingBookingId,
+      emailDispatchToken: "",
+      emailDispatch: {
+        allSent: true,
+      },
+    });
+    expect(mockCreateBooking.mock.calls.at(-1)?.[0]?.body).toMatchObject({
+      deferEmailsUntilConfirmation: false,
+    });
   });
 
   test("reconcile moves retryable verification failures into needs_recovery", async () => {
@@ -1303,7 +1379,7 @@ describe("payment session flow", () => {
     expect(first.httpStatus).toBe(200);
     expect(second.httpStatus).toBe(200);
     expect(second.body.status).toBe(
-      paymentRecordConstants.PAYMENT_STATUS_EMAIL_PARTIAL
+      paymentRecordConstants.PAYMENT_STATUS_BOOKED
     );
     expect(store.bookings).toHaveLength(1);
   });
@@ -1350,16 +1426,22 @@ describe("payment session flow", () => {
     expect(result.httpStatus).toBe(200);
     expect(result.body).toMatchObject({
       ok: true,
-      status: paymentRecordConstants.PAYMENT_STATUS_EMAIL_PARTIAL,
+      status: paymentRecordConstants.PAYMENT_STATUS_BOOKED,
       provider: "razorpay",
       recoveryReason: "",
+      emailDispatch: {
+        allSent: true,
+      },
     });
     expect(store.paymentRecords).toHaveLength(1);
     expect(getOnlyPaymentRecord()).toMatchObject({
       providerOrderId: "razorpay_order_1",
       providerPaymentId: "razorpay_payment_1",
-      status: paymentRecordConstants.PAYMENT_STATUS_EMAIL_PARTIAL,
+      status: paymentRecordConstants.PAYMENT_STATUS_BOOKED,
       bookingId: store.bookings[0]._id,
+    });
+    expect(mockCreateBooking.mock.calls.at(-1)?.[0]?.body).toMatchObject({
+      deferEmailsUntilConfirmation: false,
     });
     expect(store.bookings).toHaveLength(1);
   });
@@ -1425,12 +1507,12 @@ describe("payment session flow", () => {
 
     expect(result.httpStatus).toBe(200);
     expect(result.body.status).toBe(
-      paymentRecordConstants.PAYMENT_STATUS_EMAIL_PARTIAL
+      paymentRecordConstants.PAYMENT_STATUS_BOOKED
     );
     expect(store.paymentRecords).toHaveLength(2);
     expect(orderRecord).toMatchObject({
       providerPaymentId: "razorpay_payment_1",
-      status: paymentRecordConstants.PAYMENT_STATUS_EMAIL_PARTIAL,
+      status: paymentRecordConstants.PAYMENT_STATUS_BOOKED,
       bookingId: store.bookings[0]._id,
     });
     expect(store.bookings).toHaveLength(1);
