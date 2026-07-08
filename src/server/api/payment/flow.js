@@ -137,6 +137,19 @@ const getLegacySuccessStatus = (emailDispatch = {}) =>
     ? PAYMENT_STATUS_EMAIL_PARTIAL
     : PAYMENT_STATUS_BOOKED;
 
+const isEmailDispatchComplete = (emailDispatch = {}) => {
+  const dispatch = normalizeObject(emailDispatch);
+  if (dispatch.allSent === true) return true;
+  return !!dispatch.client?.sent && !!dispatch.owner?.sent;
+};
+
+const shouldRetryEmailPartialDispatch = ({ record, source = "" }) => {
+  const status = String(record?.status || "").trim().toLowerCase();
+  if (status !== PAYMENT_STATUS_EMAIL_PARTIAL) return false;
+  if (String(source || "").trim().toLowerCase() === "client") return false;
+  return !isEmailDispatchComplete(record?.emailDispatch);
+};
+
 const logPayment = (message, details = {}) => {
   console.error(message, details);
 };
@@ -936,6 +949,7 @@ const buildLegacyBookingPayload = ({
     paymentProvider: record.provider,
     status: "captured",
     deferEmailsUntilConfirmation:
+      normalizedSource === "client" &&
       String(record.provider || "").trim().toLowerCase() !== "free",
     paypalOrderId:
       String(providerData.paypalOrderId || record.providerOrderId || "").trim(),
@@ -1064,6 +1078,8 @@ const finalizePaymentRecordInternal = async ({
   source = "client",
   providerData = {},
 }) => {
+  const normalizedSource = String(source || "client").trim().toLowerCase();
+
   if (!record?._id) {
     return {
       ok: false,
@@ -1075,9 +1091,15 @@ const finalizePaymentRecordInternal = async ({
     };
   }
 
+  const shouldRetryEmailDispatch = shouldRetryEmailPartialDispatch({
+    record,
+    source: normalizedSource,
+  });
+
   if (
     isPaymentTerminalStatus(record.status) &&
-    String(record.status || "").trim().toLowerCase() !== PAYMENT_STATUS_NEEDS_RECOVERY
+    String(record.status || "").trim().toLowerCase() !== PAYMENT_STATUS_NEEDS_RECOVERY &&
+    !shouldRetryEmailDispatch
   ) {
     return {
       ok: true,
@@ -1087,7 +1109,6 @@ const finalizePaymentRecordInternal = async ({
     };
   }
 
-  const normalizedSource = String(source || "client").trim().toLowerCase();
   const bookingPayload = sanitizeBookingPayload(record.bookingPayload);
   if (
     !String(bookingPayload.packageTitle || "").trim() ||
@@ -1783,6 +1804,7 @@ export const reconcilePaymentSessions = async ({
         PAYMENT_STATUS_CAPTURED_CLIENT,
         PAYMENT_STATUS_CAPTURED_WEBHOOK,
         PAYMENT_STATUS_FINALIZING,
+        PAYMENT_STATUS_EMAIL_PARTIAL,
       ],
     }
   );
@@ -1809,7 +1831,12 @@ export const reconcilePaymentSessions = async ({
       continue;
     }
 
-    if (!isPaymentPendingStatus(status)) {
+    const shouldRetryEmailDispatch = shouldRetryEmailPartialDispatch({
+      record,
+      source: "reconcile",
+    });
+
+    if (!isPaymentPendingStatus(status) && !shouldRetryEmailDispatch) {
       continue;
     }
 

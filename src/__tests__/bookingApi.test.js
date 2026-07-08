@@ -2,6 +2,7 @@ let holdSlot;
 let createBooking;
 let releaseHold;
 let sendBookingEmails;
+let sendBookingEmailsForBooking;
 
 const CLIENT_EMAIL = "vihaann2.0@gmail.com";
 const OWNER_EMAIL = "serviroo@rooindustries.com";
@@ -461,6 +462,8 @@ beforeAll(() => {
   createBooking = load("../../src/server/api/ref/createBooking");
   releaseHold = load("../../src/server/booking/releaseHold");
   sendBookingEmails = load("../../src/server/api/ref/sendBookingEmails");
+  sendBookingEmailsForBooking =
+    require("../../src/server/api/ref/bookingEmails").sendBookingEmailsForBooking;
 });
 
 beforeEach(() => {
@@ -904,6 +907,58 @@ describe("booking reservation API", () => {
     expect(secondDispatchRes.statusCode).toBe(200);
     expect(secondDispatchRes.body.ok).toBe(true);
     expect(mockSendEmail).toHaveBeenCalledTimes(2);
+  });
+
+  test("sendBookingEmailsForBooking refetches full booking data before rendering", async () => {
+    const startTimeUTC = "2025-01-15T08:25:00.000Z";
+    const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
+
+    const { res: bookingRes } = await createPaidBooking({
+      startTimeUTC,
+      timeZone: "America/Los_Angeles",
+      paymentProvider: "razorpay",
+      holdId: hold.body.holdId,
+      holdToken: hold.body.holdToken,
+      holdExpiresAt: hold.body.expiresAt,
+      deferEmailsUntilConfirmation: true,
+    });
+
+    expect(bookingRes.statusCode).toBe(200);
+    expect(mockSendEmail).not.toHaveBeenCalled();
+
+    const booking = store.bookings.find(
+      (entry) => entry._id === bookingRes.body.bookingId
+    );
+    const partialBooking = {
+      _id: booking._id,
+      email: booking.email,
+      packageTitle: booking.packageTitle,
+    };
+
+    const result = await sendBookingEmailsForBooking({
+      bookingId: booking._id,
+      booking: partialBooking,
+      client: mockSanityClient,
+    });
+
+    expect(result.httpStatus).toBe(200);
+    expect(result.body.emailDispatch.allSent).toBe(true);
+    expect(mockSendEmail).toHaveBeenCalledTimes(2);
+
+    const ownerCall = mockSendEmail.mock.calls.find(
+      ([args]) => args.to === OWNER_EMAIL
+    );
+    expect(ownerCall).toBeTruthy();
+    expect(ownerCall[0].subject).toMatch(
+      /^New booking [A-Z0-9]{6} - Performance Vertex Overhaul \(Wed Jan 15 2025 1:55 PM\)$/
+    );
+
+    const renderedOwnerEmail = JSON.stringify(ownerCall[0]);
+    expect(renderedOwnerEmail).not.toContain("undefined");
+    expect(renderedOwnerEmail).toContain("servi");
+    expect(renderedOwnerEmail).toContain("GPU/CPU");
+    expect(renderedOwnerEmail).toContain("Shooter");
+    expect(renderedOwnerEmail).toContain("$84.99");
   });
 
   test("captured paid bookings auto-reconcile after the original hold expires", async () => {
