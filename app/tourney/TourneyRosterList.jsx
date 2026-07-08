@@ -44,8 +44,14 @@ const compareByTeam = (left, right) => {
   return teamCompare || compareByName(left, right);
 };
 
+const compareLiveStatus = (left, right) =>
+  Number(Boolean(right.twitchLive)) - Number(Boolean(left.twitchLive));
+
 const sortPlayers = (players, sortKey) =>
   [...players].sort((left, right) => {
+    const liveCompare = compareLiveStatus(left, right);
+    if (liveCompare) return liveCompare;
+
     if (sortKey === "role") {
       return compareText(left.rolePlay, right.rolePlay) || compareByName(left, right);
     }
