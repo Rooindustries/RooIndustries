@@ -2,6 +2,7 @@ import {
   Section,
   TourneyHosts,
   TourneyShell,
+  getTourneyHostsWithLiveStatus,
   getTourneySession,
 } from "./TourneyShared";
 import JsonLd from "../../src/next/JsonLd";
@@ -168,7 +169,7 @@ const charityRecipients = [
   },
 ];
 
-const DashboardPage = ({ session }) => (
+const DashboardPage = ({ hosts, session }) => (
   <TourneyShell session={session}>
     <section className="tourney-hero" aria-labelledby="tourney-title">
       <div>
@@ -190,7 +191,7 @@ const DashboardPage = ({ session }) => (
       </div>
     </section>
 
-    <TourneyHosts />
+    <TourneyHosts hosts={hosts} />
 
     <div className="tourney-grid">
       <Section id="dates" eyebrow="Important Dates" title="Important Dates" wide>
@@ -353,12 +354,15 @@ const DashboardPage = ({ session }) => (
 );
 
 export default async function TourneyPage() {
-  const session = await getTourneySession();
+  const [session, hosts] = await Promise.all([
+    getTourneySession(),
+    getTourneyHostsWithLiveStatus(),
+  ]);
 
   return (
     <>
       <JsonLd data={seo.buildTourneyEventJsonLd()} />
-      <DashboardPage session={session} />
+      <DashboardPage hosts={hosts} session={session} />
     </>
   );
 }

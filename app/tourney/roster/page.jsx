@@ -4,6 +4,7 @@ import {
   StatusPanel,
   TourneyRosterHosts,
   TourneyShell,
+  getTourneyHostsWithLiveStatus,
   getTourneySession,
 } from "../TourneyShared";
 import TourneyRosterList from "../TourneyRosterList";
@@ -23,8 +24,11 @@ export const metadata = {
 };
 
 export default async function TourneyRosterPage() {
-  const session = await getTourneySession();
-  const players = await listApprovedTourneyPlayers().catch(() => []);
+  const [session, hosts, players] = await Promise.all([
+    getTourneySession(),
+    getTourneyHostsWithLiveStatus().catch(() => undefined),
+    listApprovedTourneyPlayers().catch(() => []),
+  ]);
 
   return (
     <TourneyShell session={session} activeHref="/tourney/roster">
@@ -34,7 +38,7 @@ export default async function TourneyRosterPage() {
 
       <div className="tourney-grid">
         <Section id="hosts" eyebrow="Hosts" title="Roo Industries Hosts" wide>
-          <TourneyRosterHosts />
+          <TourneyRosterHosts hosts={hosts} />
         </Section>
       </div>
 

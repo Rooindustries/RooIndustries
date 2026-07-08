@@ -32,7 +32,7 @@ describe("tourney public page content", () => {
     const source = readTourneyPageSource();
     const copyIndex = source.indexOf("Event information, rules, roster status");
     const registerIndex = source.indexOf('className="tourney-register-button"');
-    const hostsIndex = source.indexOf("<TourneyHosts />");
+    const hostsIndex = source.indexOf("<TourneyHosts hosts={hosts} />");
     const datesIndex = source.indexOf('id="dates"');
     const infoIndex = source.indexOf('id="info"');
 

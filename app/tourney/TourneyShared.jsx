@@ -7,6 +7,10 @@ import {
   readTourneySessionFromStore,
 } from "../../src/server/tourney/auth";
 import { isTourneyAdminSession } from "../../src/server/tourney/access";
+import {
+  extractTwitchLogin,
+  getTwitchLiveStatusMap,
+} from "../../src/server/tourney/twitch";
 
 export const navItems = [
   { href: "/tourney#info", label: "Event Information" },
@@ -47,7 +51,7 @@ export const StatusPanel = ({ label = "Reserved", title, children }) => (
   </div>
 );
 
-const tourneyHosts = [
+export const tourneyHosts = [
   {
     name: "Yukari",
     role: "Host",
@@ -73,6 +77,40 @@ const tourneyHosts = [
   },
 ];
 
+const getHostTwitchLogin = (host = {}) =>
+  extractTwitchLogin(host.twitchUrl || host.twitchLabel);
+
+const attachLiveStatusToHost = (host, liveStatusMap) => {
+  const twitchLogin = getHostTwitchLogin(host);
+  const liveStatus = twitchLogin ? liveStatusMap.get(twitchLogin) : null;
+
+  return {
+    ...host,
+    twitchLogin,
+    ...(liveStatus?.isLive
+      ? {
+          twitchLive: true,
+          twitchLiveTitle: liveStatus.title,
+          twitchLiveGameName: liveStatus.gameName,
+          twitchLiveViewerCount: liveStatus.viewerCount,
+          twitchLiveStartedAt: liveStatus.startedAt,
+        }
+      : {}),
+  };
+};
+
+export const getTourneyHostsWithLiveStatus = async ({
+  env = process.env,
+} = {}) => {
+  const twitchLogins = tourneyHosts.map(getHostTwitchLogin).filter(Boolean);
+  const liveStatusMap = await getTwitchLiveStatusMap(twitchLogins, {
+    env,
+  }).catch(() => new Map());
+
+  if (!liveStatusMap.size) return tourneyHosts;
+  return tourneyHosts.map((host) => attachLiveStatusToHost(host, liveStatusMap));
+};
+
 export const TourneyTwitchIcon = () => (
   <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
     <path
@@ -82,8 +120,27 @@ export const TourneyTwitchIcon = () => (
   </svg>
 );
 
+const TourneyLiveBadge = ({ name, title = "" }) => (
+  <span
+    aria-label={`${name} is live on Twitch`}
+    className="tourney-roster-live-badge"
+    title={title || `${name} is live on Twitch`}
+  >
+    <span aria-hidden="true" />
+    Live
+  </span>
+);
+
 const HostCard = ({ host }) => (
-  <article className={host.featured ? "tourney-host-card is-featured" : "tourney-host-card"}>
+  <article
+    className={[
+      "tourney-host-card",
+      host.featured ? "is-featured" : "",
+      host.twitchLive ? "is-live" : "",
+    ]
+      .filter(Boolean)
+      .join(" ")}
+  >
     <span
       className={
         host.avatarFit === "contain"
@@ -94,8 +151,19 @@ const HostCard = ({ host }) => (
       <img src={host.image} alt={`${host.name} logo`} />
     </span>
     <span className="tourney-host-copy">
-      <strong>{host.name}</strong>
-      <span>{host.role}</span>
+      <span
+        className={
+          host.twitchLive
+            ? "tourney-host-name-line has-live"
+            : "tourney-host-name-line"
+        }
+      >
+        <strong>{host.name}</strong>
+        {host.twitchLive ? (
+          <TourneyLiveBadge name={host.name} title={host.twitchLiveTitle} />
+        ) : null}
+      </span>
+      <span className="tourney-host-role">{host.role}</span>
     </span>
     {host.twitchUrl ? (
       <a
@@ -111,9 +179,9 @@ const HostCard = ({ host }) => (
   </article>
 );
 
-export const TourneyHosts = ({ variant = "front" }) => {
-  const director = tourneyHosts.find((host) => host.featured);
-  const hosts = tourneyHosts.filter((host) => !host.featured);
+export const TourneyHosts = ({ variant = "front", hosts = tourneyHosts }) => {
+  const director = hosts.find((host) => host.featured);
+  const hostCards = hosts.filter((host) => !host.featured);
 
   if (variant === "roster") {
     return (
@@ -129,7 +197,7 @@ export const TourneyHosts = ({ variant = "front" }) => {
           <HostCard host={director} />
         </div>
         <div className="tourney-host-grid">
-          {hosts.map((host) => (
+          {hostCards.map((host) => (
             <HostCard host={host} key={host.name} />
           ))}
         </div>
@@ -147,7 +215,7 @@ export const TourneyHosts = ({ variant = "front" }) => {
         <h2 id="tourney-hosts-title">Hosts</h2>
       </div>
       <div className="tourney-host-grid">
-        {tourneyHosts.map((host) => (
+        {hosts.map((host) => (
           <HostCard host={host} key={host.name} />
         ))}
       </div>
@@ -155,9 +223,9 @@ export const TourneyHosts = ({ variant = "front" }) => {
   );
 };
 
-export const TourneyRosterHosts = () => (
+export const TourneyRosterHosts = ({ hosts = tourneyHosts }) => (
   <ul className="tourney-roster-list tourney-roster-host-list">
-    {[...tourneyHosts]
+    {[...hosts]
       .sort(
         (first, second) =>
           Number(Boolean(second.featured)) - Number(Boolean(first.featured))
@@ -165,9 +233,14 @@ export const TourneyRosterHosts = () => (
       .map((host) => (
         <li
           className={
-            host.featured
-              ? "tourney-roster-player tourney-roster-host-row is-featured"
-              : "tourney-roster-player tourney-roster-host-row"
+            [
+              "tourney-roster-player",
+              "tourney-roster-host-row",
+              host.featured ? "is-featured" : "",
+              host.twitchLive ? "is-live" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")
           }
           key={host.name}
         >
@@ -183,7 +256,21 @@ export const TourneyRosterHosts = () => (
               <img alt="" loading="lazy" src={host.image} />
             </span>
             <span className="tourney-roster-name-copy">
-              <strong>{host.name}</strong>
+              <strong
+                className={
+                  host.twitchLive
+                    ? "tourney-roster-name-line has-live"
+                    : "tourney-roster-name-line"
+                }
+              >
+                <span className="tourney-roster-player-name">{host.name}</span>
+                {host.twitchLive ? (
+                  <TourneyLiveBadge
+                    name={host.name}
+                    title={host.twitchLiveTitle}
+                  />
+                ) : null}
+              </strong>
               <span className="tourney-roster-label">{host.role}</span>
             </span>
           </span>
@@ -865,6 +952,13 @@ export const TourneyStyles = () => (
         rgba(15, 23, 42, 0.62);
     }
 
+    .tourney-host-card.is-live {
+      border-color: rgba(248, 113, 113, 0.4);
+      background:
+        radial-gradient(circle at 50% 0%, rgba(239, 68, 68, 0.14), transparent 48%),
+        rgba(15, 23, 42, 0.64);
+    }
+
     .tourney-host-avatar {
       display: grid;
       place-items: center;
@@ -911,7 +1005,27 @@ export const TourneyStyles = () => (
       overflow-wrap: anywhere;
     }
 
-    .tourney-host-copy span {
+    .tourney-host-name-line {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-width: 0;
+      width: 100%;
+    }
+
+    .tourney-host-name-line.has-live strong {
+      flex: 0 1 8.5rem;
+      max-width: 8.5rem;
+      min-width: 0;
+      text-align: right;
+    }
+
+    .tourney-host-name-line .tourney-roster-live-badge {
+      transform: translateY(0);
+    }
+
+    .tourney-host-role {
       color: rgba(203, 213, 225, 0.8);
       font-size: 0.9rem;
       line-height: 1.3;
