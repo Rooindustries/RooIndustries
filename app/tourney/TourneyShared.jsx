@@ -2413,13 +2413,36 @@ export const TourneyStyles = () => (
       width: 100%;
     }
 
+    .tourney-roster-player .tourney-roster-name-line.has-live {
+      --tourney-live-badge-slot: 5.25rem;
+      display: grid;
+      grid-template-columns:
+        var(--tourney-live-badge-slot)
+        minmax(0, 1fr)
+        var(--tourney-live-badge-slot);
+      align-items: center;
+      justify-items: center;
+      column-gap: 0;
+    }
+
+    .tourney-roster-player .tourney-roster-name-line.has-live::before {
+      content: "";
+      width: var(--tourney-live-badge-slot);
+      height: 1px;
+    }
+
     .tourney-roster-player
       .tourney-roster-name-line.has-live
       .tourney-roster-player-name {
-      flex: 0 1 8.75rem;
-      max-width: 8.75rem;
+      max-width: 100%;
       min-width: 0;
-      text-align: right;
+      text-align: center;
+    }
+
+    .tourney-roster-player
+      .tourney-roster-name-line.has-live
+      .tourney-roster-live-badge {
+      justify-self: center;
     }
 
     .tourney-roster-player-name {
@@ -4351,18 +4374,10 @@ export const TourneyStyles = () => (
         text-align: center;
       }
 
-      .tourney-roster-player .tourney-roster-name-line.has-live {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        justify-content: center;
-        column-gap: 10px;
-      }
-
       .tourney-roster-player
         .tourney-roster-name-line.has-live
         .tourney-roster-player-name {
-        flex-basis: auto;
-        max-width: min(11rem, 58vw);
+        max-width: min(14rem, 48vw);
       }
 
       .tourney-roster-player > .tourney-roster-detail {
