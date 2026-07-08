@@ -152,6 +152,8 @@ describe("tourney public page content", () => {
     expect(source).toContain(
       "color-mix(in srgb, var(--tourney-surface-strong) 54%, transparent)"
     );
+    expect(source).toContain("--tourney-live-badge-slot");
+    expect(source).toContain(".tourney-roster-name-line.has-live::before");
     expect(source).toContain(
       'html[data-theme="dark"] .tourney-charity-callout'
     );
