@@ -1,0 +1,28 @@
+export default {
+  name: 'couponRedemption',
+  title: 'Coupon Redemption',
+  type: 'document',
+  fields: [
+    {name: 'coupon', title: 'Coupon', type: 'reference', to: [{type: 'coupon'}]},
+    {name: 'couponCode', title: 'Coupon Code', type: 'string'},
+    {name: 'ownerId', title: 'Reservation Owner ID', type: 'string', readOnly: true},
+    {name: 'bookingId', title: 'Booking ID', type: 'string', readOnly: true},
+    {name: 'paymentRecordId', title: 'Payment Record ID', type: 'string', readOnly: true},
+    {
+      name: 'status',
+      title: 'Status',
+      type: 'string',
+      options: {list: ['reserved', 'consumed', 'released', 'refunded']},
+    },
+    {name: 'reservedAt', title: 'Reserved At', type: 'datetime'},
+    {name: 'expiresAt', title: 'Expires At', type: 'datetime'},
+    {name: 'consumedAt', title: 'Consumed At', type: 'datetime'},
+    {name: 'releasedAt', title: 'Released At', type: 'datetime'},
+    {name: 'refundedAt', title: 'Refunded At', type: 'datetime'},
+    {name: 'releaseReason', title: 'Release Reason', type: 'string'},
+    {name: 'deactivatedCouponAtConsume', title: 'Deactivated Coupon At Consume', type: 'boolean', readOnly: true},
+    {name: 'autoDeactivationKey', type: 'string', readOnly: true, hidden: true},
+    {name: 'recoveredAfterRelease', type: 'boolean', readOnly: true},
+    {name: 'capacityExceededAtRecovery', type: 'boolean', readOnly: true},
+  ],
+}

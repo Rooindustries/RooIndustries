@@ -6,6 +6,7 @@ import {
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import packageContent from "../../../lib/packageContent.js";
 import packagePricing from "../../../lib/packagePricing.js";
+import { issueUpgradeIntentToken } from "./upgradeIntentToken.js";
 
 const { normalizePackageText } = packageContent;
 const {
@@ -142,14 +143,25 @@ export const resolveBookingFromSubmittedOrderId = async ({ id, client }) => {
 };
 
 export default async function handler(req, res) {
-  if (req.method !== "GET") {
+  const method = String(req?.method || "GET").toUpperCase();
+  const legacyGetDeadline = new Date(
+    process.env.LEGACY_UPGRADE_GET_UNTIL ||
+      process.env.PAYMENT_LEGACY_COMPLETION_UNTIL ||
+      ""
+  ).getTime();
+  const allowLegacyGet =
+    process.env.NODE_ENV === "test" ||
+    (Number.isFinite(legacyGetDeadline) && legacyGetDeadline > Date.now());
+  if (method !== "POST" && !(method === "GET" && allowLegacyGet)) {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
   }
 
+  const input = method === "POST" ? req.body || {} : req.query || {};
+
   const clientAddress = getClientAddress(req);
   const rateLimitKey = `get-upgrade-info:${clientAddress}:${String(
-    req.query?.id || ""
-  ).trim().toLowerCase()}:${String(req.query?.email || "")
+    input.id || ""
+  ).trim().toLowerCase()}:${String(input.email || "")
     .trim()
     .toLowerCase()}`;
   if (
@@ -162,7 +174,7 @@ export default async function handler(req, res) {
     return;
   }
 
-  const { id, slug, email } = req.query;
+  const { id, slug, email } = input;
   if (!id) {
     return res
       .status(400)
@@ -188,7 +200,10 @@ export default async function handler(req, res) {
       .map(normalizeEmail)
       .filter(Boolean);
 
-    if (allowedEmails.length > 0 && !allowedEmails.includes(normalizedEmail)) {
+    if (
+      allowedEmails.length === 0 ||
+      !allowedEmails.includes(normalizedEmail)
+    ) {
       return res
         .status(404)
         .json({ ok: false, error: "No booking found with that Order ID." });
@@ -294,6 +309,11 @@ export default async function handler(req, res) {
       localTimeZone: booking.localTimeZone,
       startTimeUTC: booking.startTimeUTC,
     };
+    const upgradeIntentToken = issueUpgradeIntentToken({
+      bookingId: booking._id,
+      email: normalizedEmail,
+      targetPackageTitle: upgradeContext.targetPackage.title,
+    });
 
     return res.status(200).json({
       ok: true,
@@ -308,6 +328,7 @@ export default async function handler(req, res) {
       xoc: packagePayload,
       originalPaid,
       upgradePrice,
+      upgradeIntentToken,
     });
   } catch (err) {
     const status = Number(err?.status) || 500;

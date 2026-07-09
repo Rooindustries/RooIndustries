@@ -1,8 +1,17 @@
-// api/holdSlot.js
 import { createClient } from "@sanity/client";
 import crypto from "crypto";
 import { issueHoldToken, verifyHoldToken } from "./holdToken.js";
-import { buildSlotHoldId } from "./slotIdentity.js";
+import {
+  buildBookingSlotId,
+  buildSlotHoldId,
+  isExactWholeMinute,
+  normalizeStartTimeUTC,
+} from "./slotIdentity.js";
+import {
+  getBookingSettings,
+  isBookingBlockingStatus,
+  isSlotAllowedForPackage,
+} from "./slotPolicy.js";
 import { getClientAddress, requireRateLimit } from "../api/ref/rateLimit.js";
 
 const client = createClient({
@@ -13,286 +22,346 @@ const client = createClient({
   useCdn: false,
 });
 
-const OWNER_TZ_NAME = "Asia/Kolkata";
+export const HOLD_DURATION_MS = 20 * 60 * 1000;
 
-const formatOwnerDateLabel = (utcDate, timeZone = OWNER_TZ_NAME) => {
-  try {
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      weekday: "short",
-      month: "short",
-      day: "2-digit",
-      year: "numeric",
-    })
-      .formatToParts(utcDate)
-      .reduce((acc, cur) => {
-        acc[cur.type] = cur.value;
-        return acc;
-      }, {});
+const isConflict = (error) =>
+  Number(error?.statusCode || error?.status || 0) === 409;
 
-    const day = parts.day || "";
-    const weekday = parts.weekday || "";
-    const month = parts.month || "";
-    const year = parts.year || "";
-
-    return `${weekday} ${month} ${day} ${year}`.trim();
-  } catch (err) {
-    console.error("Failed to format owner date label", err);
-    return "";
-  }
+const isHoldActive = (hold, now = Date.now()) => {
+  const phase = String(hold?.phase || "active").trim().toLowerCase();
+  const expiresAt = new Date(hold?.expiresAt || "").getTime();
+  return (
+    phase !== "released" &&
+    phase !== "consumed" &&
+    Number.isFinite(expiresAt) &&
+    expiresAt > now
+  );
 };
 
-const formatOwnerTimeLabel = (utcDate, timeZone = OWNER_TZ_NAME) => {
+const normalizeBookingList = (bookings) =>
+  Array.isArray(bookings) ? bookings : bookings ? [bookings] : [];
+
+const hasBlockingBooking = (bookings) =>
+  normalizeBookingList(bookings).some(
+    (booking) =>
+      !String(booking?.originalOrderId || "").trim() &&
+      isBookingBlockingStatus(booking?.status)
+  );
+
+const patchAtRevision = async (document, values) => {
+  let patch = client.patch(document._id);
+  if (document?._rev && typeof patch.ifRevisionId === "function") {
+    patch = patch.ifRevisionId(document._rev);
+  }
+  return patch.set(values).commit();
+};
+
+const issueResponse = ({ hold, startTimeUTC, expiresAt, holdNonce, res }) => {
+  const holdToken = issueHoldToken({
+    holdId: hold._id,
+    startTimeUTC,
+    expiresAt,
+    holdNonce,
+  });
+  return res.status(200).json({
+    ok: true,
+    holdId: hold._id,
+    holdToken,
+    expiresAt,
+  });
+};
+
+const releasePreviousHold = async ({
+  previousHoldId,
+  previousHoldToken,
+  currentHoldId,
+}) => {
+  if (!previousHoldId || previousHoldId === currentHoldId || !previousHoldToken) {
+    return;
+  }
+
   try {
-    return new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      hour: "numeric",
-      minute: "2-digit",
-    }).format(utcDate);
-  } catch (err) {
-    console.error("Failed to format owner time label", err);
-    return "";
+    const previousHold = await client.fetch(
+      `*[_type == "slotHold" && _id == $id][0]`,
+      { id: previousHoldId }
+    );
+    if (!previousHold?._id) return;
+    if (
+      String(previousHold.phase || "").trim().toLowerCase() ===
+      "payment_pending"
+    ) {
+      return;
+    }
+    const validToken = verifyHoldToken({
+      token: previousHoldToken,
+      holdId: previousHoldId,
+      startTimeUTC: previousHold.startTimeUTC,
+      holdNonce: previousHold.holdNonce || "",
+    });
+    if (!validToken) return;
+    const releasedAt = new Date().toISOString();
+    await patchAtRevision(previousHold, {
+      phase: "released",
+      releasedAt,
+      expiresAt: releasedAt,
+      holdNonce: crypto.randomUUID(),
+    });
+  } catch {
+    // Moving to a new slot must not fail because a stale previous hold changed.
   }
 };
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
+  if (String(req?.method || "").toUpperCase() !== "POST") {
     return res.status(405).json({ ok: false, message: "Method not allowed" });
   }
 
+  const { startTimeUTC, packageTitle, previousHoldId, previousHoldToken } =
+    req.body || {};
+  const clientAddress = getClientAddress(req);
+  if (
+    !requireRateLimit(res, {
+      key: `hold-slot:${clientAddress}`,
+      max: 20,
+      message: "Too many slot hold requests. Please try again later.",
+    })
+  ) {
+    return;
+  }
+
+  const normalizedStartTimeUTC = normalizeStartTimeUTC(startTimeUTC);
+  if (!normalizedStartTimeUTC || !isExactWholeMinute(normalizedStartTimeUTC)) {
+    return res.status(400).json({
+      ok: false,
+      message: "startTimeUTC must be an exact configured minute.",
+    });
+  }
+
   try {
-    const { startTimeUTC, packageTitle, previousHoldId, previousHoldToken } =
-      req.body || {};
-    const clientAddress = getClientAddress(req);
-    const rateLimitKey = [
-      "hold-slot",
-      clientAddress,
-      String(startTimeUTC || "").trim().toLowerCase(),
-      String(previousHoldId || "").trim().toLowerCase(),
-    ].join(":");
-
-    if (
-      !requireRateLimit(res, {
-        key: rateLimitKey,
-        max: 20,
-        message: "Too many slot hold requests. Please try again later.",
-      })
-    ) {
-      return;
-    }
-
-    if (!startTimeUTC) {
+    const settings = await getBookingSettings({ client });
+    const slot = isSlotAllowedForPackage({
+      settings,
+      packageTitle,
+      startTimeUTC: normalizedStartTimeUTC,
+    });
+    if (!slot.allowed) {
       return res.status(400).json({
         ok: false,
-        message: "Missing startTimeUTC.",
+        message: "This time is not available for the selected package.",
       });
     }
 
-    const utcDate = new Date(startTimeUTC);
-    if (!Number.isFinite(utcDate.getTime())) {
-      return res.status(400).json({
-        ok: false,
-        message: "Invalid startTimeUTC.",
-      });
-    }
-    const normalizedStartTimeUTC = utcDate.toISOString();
     const holdId = buildSlotHoldId(normalizedStartTimeUTC);
-    if (!holdId) {
-      return res.status(400).json({
-        ok: false,
-        message: "Invalid startTimeUTC.",
+    const slotLockId = buildBookingSlotId(normalizedStartTimeUTC);
+    if (previousHoldId && previousHoldId !== holdId && previousHoldToken) {
+      const previousHold = await client.fetch(
+        `*[_type == "slotHold" && _id == $id][0]`,
+        { id: previousHoldId }
+      );
+      const ownsPreviousHold = previousHold?._id && verifyHoldToken({
+        token: previousHoldToken,
+        holdId: previousHoldId,
+        startTimeUTC: previousHold.startTimeUTC,
+        holdNonce: previousHold.holdNonce || "",
       });
+      if (
+        ownsPreviousHold &&
+        String(previousHold.phase || "").trim().toLowerCase() ===
+          "payment_pending"
+      ) {
+        return res.status(409).json({
+          ok: false,
+          message: "The existing payment session must finish before changing slots.",
+        });
+      }
     }
-
-    const hostDate = formatOwnerDateLabel(utcDate);
-    const hostTime = formatOwnerTimeLabel(utcDate);
-
-    if (!hostDate || !hostTime) {
-      return res.status(400).json({
-        ok: false,
-        message: "Invalid owner date/time.",
-      });
-    }
-
-    // 1) Is the slot already booked? (Permanent booking)
-    const existingBooking = await client.fetch(
-      `*[_type == "booking" && hostDate == $date && hostTime == $time][0]`,
-      { date: hostDate, time: hostTime }
+    const [slotLock, matchingBookings] = await Promise.all([
+      client.fetch(`*[_type == "bookingSlot" && _id == $id][0]`, {
+        id: slotLockId,
+      }),
+      client.fetch(
+        `*[_type == "booking" && startTimeUTC == $startTimeUTC]{_id,status,originalOrderId}`,
+        { startTimeUTC: normalizedStartTimeUTC }
+      ),
+    ]);
+    const matchingBookingList = normalizeBookingList(matchingBookings);
+    const activeLegacyBooking = hasBlockingBooking(matchingBookingList);
+    const lockOwner = matchingBookingList.find(
+      (booking) => booking?._id === slotLock?.bookingId
     );
-
-    if (existingBooking) {
-      return res
-        .status(409)
-        .json({ ok: false, message: "This slot is already booked." });
+    const staleReleasedLock =
+      slotLock?.status !== "released" &&
+      lockOwner?._id &&
+      (!!String(lockOwner.originalOrderId || "").trim() ||
+        !isBookingBlockingStatus(lockOwner.status));
+    if (staleReleasedLock) {
+      try {
+        await patchAtRevision(slotLock, {
+          status: "released",
+          releasedAt: new Date().toISOString(),
+          releaseReason: "booking_status_repair",
+        });
+      } catch (error) {
+        if (isConflict(error)) {
+          return res.status(409).json({
+            ok: false,
+            message: "This slot changed while its booking status was repaired.",
+          });
+        }
+        throw error;
+      }
+    }
+    const activeLock =
+      slotLock && slotLock.status !== "released" && !staleReleasedLock;
+    if (activeLock || activeLegacyBooking) {
+      return res.status(409).json({
+        ok: false,
+        message: "This slot is already booked.",
+      });
     }
 
     const now = Date.now();
-    const fetchExistingHold = () =>
+    const expiresAt = new Date(now + HOLD_DURATION_MS).toISOString();
+    const fetchHold = () =>
       client.fetch(`*[_type == "slotHold" && _id == $id][0]`, { id: holdId });
+    const existingHold = await fetchHold();
 
-    let existingHold = await fetchExistingHold();
+    // The booking can be reactivated after the first availability read. Recheck
+    // after reading the deterministic hold barrier; from this point onward, its
+    // revision guard makes the hold write and admin reactivation mutually exclusive.
+    const [currentSlotLock, currentMatchingBookings] = await Promise.all([
+      client.fetch(`*[_type == "bookingSlot" && _id == $id][0]`, {
+        id: slotLockId,
+      }),
+      client.fetch(
+        `*[_type == "booking" && startTimeUTC == $startTimeUTC]{_id,status,originalOrderId}`,
+        { startTimeUTC: normalizedStartTimeUTC }
+      ),
+    ]);
     if (
-      existingHold?.expiresAt &&
-      new Date(existingHold.expiresAt) <= new Date(now)
+      (currentSlotLock && currentSlotLock.status !== "released") ||
+      hasBlockingBooking(currentMatchingBookings)
     ) {
-      await client.delete(holdId).catch(() => {});
-      existingHold = null;
+      return res.status(409).json({
+        ok: false,
+        message: "This slot is already booked.",
+      });
     }
 
-    // If the same holder is refreshing the same slot, renew it in place.
-    if (existingHold && previousHoldId === holdId && previousHoldToken) {
-      const validPreviousToken = verifyHoldToken({
-        token: previousHoldToken,
-        holdId,
-        startTimeUTC: existingHold.startTimeUTC || normalizedStartTimeUTC,
-        holdNonce: existingHold.holdNonce || "",
-      });
-
-      if (validPreviousToken) {
-        const expiresAt = new Date(now + 15 * 60 * 1000).toISOString();
-        const holdNonce = crypto.randomUUID();
-        await client
-          .patch(holdId)
-          .set({
-            packageTitle: packageTitle || "",
-            expiresAt,
-            startTimeUTC: normalizedStartTimeUTC,
-            holdNonce,
-          })
-          .commit();
-
-        const holdToken = issueHoldToken({
+    if (isHoldActive(existingHold, now)) {
+      if (
+        String(existingHold.phase || "").trim().toLowerCase() ===
+        "payment_pending"
+      ) {
+        return res.status(409).json({
+          ok: false,
+          message: "This slot already has a payment session in progress.",
+        });
+      }
+      const mayRefresh =
+        previousHoldId === holdId &&
+        verifyHoldToken({
+          token: previousHoldToken,
           holdId,
+          startTimeUTC: existingHold.startTimeUTC || normalizedStartTimeUTC,
+          holdNonce: existingHold.holdNonce || "",
+        });
+      if (!mayRefresh) {
+        return res.status(409).json({
+          ok: false,
+          message: "This slot is currently reserved by someone else.",
+        });
+      }
+
+      const holdNonce = crypto.randomUUID();
+      try {
+        const refreshed = await patchAtRevision(existingHold, {
+          packageTitle: String(packageTitle || "").trim(),
+          startTimeUTC: normalizedStartTimeUTC,
+          hostDate: slot.hostDate,
+          hostTime: slot.hostTime,
+          expiresAt,
+          phase: "active",
+          releasedAt: "",
+          consumedAt: "",
+          paymentRecordId: "",
+          holdNonce,
+        });
+        return issueResponse({
+          hold: refreshed || existingHold,
           startTimeUTC: normalizedStartTimeUTC,
           expiresAt,
           holdNonce,
+          res,
         });
-
-        return res.status(200).json({
-          ok: true,
-          holdId,
-          holdToken,
-          expiresAt,
-        });
+      } catch (error) {
+        if (isConflict(error)) {
+          return res.status(409).json({
+            ok: false,
+            message: "This slot changed while it was being refreshed.",
+          });
+        }
+        throw error;
       }
     }
 
-    if (existingHold) {
-      return res.status(409).json({
-        ok: false,
-        message: "This slot is currently reserved by someone else.",
-      });
-    }
-
-    // 3) Create new 15-minute hold
-    const expiresAt = new Date(now + 15 * 60 * 1000).toISOString();
     const holdNonce = crypto.randomUUID();
-
-    const createHold = () =>
-      client.create({
-        _id: holdId,
-        _type: "slotHold",
-        hostDate,
-        hostTime,
-        startTimeUTC: normalizedStartTimeUTC,
-        packageTitle: packageTitle || "",
-        expiresAt,
-        holdNonce,
-      });
+    const holdValues = {
+      _id: holdId,
+      _type: "slotHold",
+      hostDate: slot.hostDate,
+      hostTime: slot.hostTime,
+      startTimeUTC: normalizedStartTimeUTC,
+      packageTitle: String(packageTitle || "").trim(),
+      expiresAt,
+      holdNonce,
+      phase: "active",
+      releasedAt: "",
+      consumedAt: "",
+      paymentRecordId: "",
+    };
 
     let created;
     try {
-      created = await createHold();
-    } catch (createError) {
-      const statusCode =
-        Number(createError?.statusCode || createError?.status || 0) || 0;
-      if (statusCode === 409) {
-        const activeHold = await fetchExistingHold();
-        const activeHoldExpired =
-          !!activeHold?.expiresAt && new Date(activeHold.expiresAt) <= new Date();
-
-        if (activeHoldExpired) {
-          await client.delete(holdId).catch(() => {});
-          try {
-            created = await createHold();
-          } catch (retryError) {
-            const retryStatusCode =
-              Number(retryError?.statusCode || retryError?.status || 0) || 0;
-            if (retryStatusCode !== 409) throw retryError;
-          }
-        }
-
-        if (created) {
-          // reclaimed expired hold successfully
-        } else if (
-          activeHold?.expiresAt &&
-          new Date(activeHold.expiresAt) > new Date()
-        ) {
-          return res.status(409).json({
-            ok: false,
-            message: "This slot is currently reserved by someone else.",
-          });
-        } else {
-          return res.status(409).json({
-            ok: false,
-            message: "This slot is currently being refreshed. Please try again.",
-          });
-        }
+      created = existingHold
+        ? await patchAtRevision(existingHold, holdValues)
+        : await client.create(holdValues);
+    } catch (error) {
+      if (isConflict(error)) {
+        return res.status(409).json({
+          ok: false,
+          message: "This slot is currently being reserved. Please try again.",
+        });
       }
-      if (!created) {
-        throw createError;
-      }
+      throw error;
     }
 
-    let holdToken = "";
     try {
-      holdToken = issueHoldToken({
-        holdId: created._id,
+      const response = issueResponse({
+        hold: created || holdValues,
         startTimeUTC: normalizedStartTimeUTC,
         expiresAt,
         holdNonce,
+        res,
       });
-    } catch (tokenError) {
-      console.error("Failed to issue hold token:", tokenError);
-      await client.delete(created._id).catch(() => {});
-      return res.status(500).json({
-        ok: false,
-        message: "Server misconfigured for hold security.",
+      await releasePreviousHold({
+        previousHoldId,
+        previousHoldToken,
+        currentHoldId: holdId,
       });
+      return response;
+    } catch (error) {
+      const failedAt = new Date().toISOString();
+      await patchAtRevision(created || holdValues, {
+        phase: "released",
+        releasedAt: failedAt,
+        expiresAt: failedAt,
+        holdNonce: crypto.randomUUID(),
+      }).catch(() => {});
+      throw error;
     }
-
-    // 4) Clean up previous hold (Unreserve the old one)
-    if (previousHoldId && previousHoldId !== created._id) {
-      try {
-        const previousHold = await client.fetch(
-          `*[_type == "slotHold" && _id == $id][0]`,
-          { id: previousHoldId }
-        );
-        const validPreviousToken = verifyHoldToken({
-          token: previousHoldToken,
-          holdId: previousHoldId,
-          startTimeUTC: previousHold?.startTimeUTC,
-          holdNonce: previousHold?.holdNonce || "",
-        });
-        if (
-          validPreviousToken &&
-          previousHoldId !== created._id
-        ) {
-          await client.delete(previousHoldId);
-        }
-      } catch {
-        // Don't fail the request.
-      }
-    }
-
-    return res.status(200).json({
-      ok: true,
-      holdId: created._id,
-      holdToken,
-      expiresAt,
-    });
-  } catch (err) {
-    console.error("Error in /api/holdSlot:", err);
+  } catch (error) {
+    console.error("Error in /api/holdSlot:", error);
     return res.status(500).json({
       ok: false,
       message: "Failed to reserve this slot. Please try again.",

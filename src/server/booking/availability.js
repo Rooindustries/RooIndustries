@@ -7,6 +7,7 @@ import {
 const BOOKINGS_QUERY = `*[_type == "booking"]{
   startTimeUTC,
   packageTitle,
+  originalOrderId,
   status
 }`;
 const HOLDS_QUERY = `*[_type == "slotHold"]{
@@ -18,12 +19,16 @@ const HOLDS_QUERY = `*[_type == "slotHold"]{
 
 const HOLD_STATES = Object.freeze({
   ACTIVE: "active",
-  EXPIRED: "expired",
 });
 
 const isExpiredHold = (hold, now = Date.now()) => {
   const expiresAtMs = new Date(hold?.expiresAt || "").getTime();
-  return Number.isFinite(expiresAtMs) && expiresAtMs <= now;
+  return !Number.isFinite(expiresAtMs) || expiresAtMs <= now;
+};
+
+const isActiveHold = (hold, now) => {
+  const phase = String(hold?.phase || "active").trim().toLowerCase();
+  return phase !== "released" && phase !== "consumed" && !isExpiredHold(hold, now);
 };
 
 export async function getBookingAvailability({ client } = {}) {
@@ -50,16 +55,15 @@ export async function getBookingAvailability({ client } = {}) {
         }))
         .filter((booking) => booking.startTimeUTC),
       ...((Array.isArray(holds) ? holds : [])
+        .filter((hold) => isActiveHold(hold, now))
         .map((hold) => ({
           startTimeUTC: String(hold?.startTimeUTC || "").trim(),
           isHold: true,
           holdId: String(hold?._id || "").trim(),
           phase: String(hold?.phase || "").trim(),
           expiresAt: String(hold?.expiresAt || "").trim(),
-          isExpiredHold: isExpiredHold(hold, now),
-          holdState: isExpiredHold(hold, now)
-            ? HOLD_STATES.EXPIRED
-            : HOLD_STATES.ACTIVE,
+          isExpiredHold: false,
+          holdState: HOLD_STATES.ACTIVE,
         }))
         .filter((hold) => hold.startTimeUTC && hold.holdId)),
     ],
