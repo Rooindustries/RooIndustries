@@ -212,6 +212,36 @@ test.describe("Route smoke", () => {
     await expect(page.locator("body")).toContainText(/not found|404/i);
   });
 
+  test("home desktop exposes the document scrollbar", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const response = await page.goto("/", {
+      waitUntil: "domcontentloaded",
+    });
+
+    expect(response?.status()).toBeLessThan(400);
+
+    const metrics = await page.evaluate(() => {
+      const root = document.documentElement;
+      const rootStyles = getComputedStyle(root);
+      const bodyStyles = getComputedStyle(document.body);
+
+      return {
+        scrollHeight: root.scrollHeight,
+        viewportHeight: window.innerHeight,
+        rootOverflowY: rootStyles.overflowY,
+        bodyOverflowY: bodyStyles.overflowY,
+        rootScrollbarWidth: rootStyles.scrollbarWidth,
+        bodyScrollbarWidth: bodyStyles.scrollbarWidth,
+      };
+    });
+
+    expect(metrics.scrollHeight).toBeGreaterThan(metrics.viewportHeight);
+    expect(metrics.rootOverflowY).not.toBe("hidden");
+    expect(metrics.bodyOverflowY).not.toBe("hidden");
+    expect(metrics.rootScrollbarWidth).not.toBe("none");
+    expect(metrics.bodyScrollbarWidth).not.toBe("none");
+  });
+
   test("tourney mobile navbar uses dropdown", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     const response = await page.goto("/tourney", {
