@@ -4,6 +4,7 @@ let releaseHold;
 let sendBookingEmails;
 let sendBookingEmailsForBooking;
 let dispatchRescheduleNotifications;
+let formatRequestedTimeFields;
 let applyBookingRefund;
 let applyBookingStatusTransition;
 let createRequiresRescheduleBooking;
@@ -665,6 +666,8 @@ beforeAll(() => {
     require("../../src/server/api/ref/bookingEmails").sendBookingEmailsForBooking;
   dispatchRescheduleNotifications =
     require("../../src/server/api/ref/bookingEmails").dispatchRescheduleNotifications;
+  formatRequestedTimeFields =
+    require("../../src/server/api/ref/bookingEmails").formatRequestedTimeFields;
   ({ applyBookingRefund, applyBookingStatusTransition } = require(
     "../../src/server/api/ref/bookingRefunds"
   ));
@@ -1885,6 +1888,9 @@ describe("booking reservation API", () => {
       packageTitle: "Performance Vertex Overhaul",
       netAmount: 84.99,
       originalRequestedStartTimeUTC: "2025-01-15T08:00:00.000Z",
+      localTimeZone: "America/Los_Angeles",
+      displayDate: "Wednesday, January 15, 2025",
+      displayTime: "12:00 AM",
     });
 
     const first = await dispatchRescheduleNotifications({
@@ -1905,7 +1911,43 @@ describe("booking reservation API", () => {
     expect(mockSendEmail.mock.calls[1][1].idempotencyKey).toMatch(
       /-reschedule-owner$/
     );
+    const clientEmail = mockSendEmail.mock.calls[0][0];
+    expect(clientEmail.subject).toBe(
+      "We need to reschedule your Roo Industries booking"
+    );
+    expect(clientEmail.html).toContain("We need to reschedule your booking");
+    expect(clientEmail.html).toContain("Wednesday, January 15, 2025");
+    expect(clientEmail.html).toContain("12:00 AM");
+    expect(clientEmail.html).toContain(
+      "Pacific Standard Time (America/Los_Angeles)"
+    );
+    expect(clientEmail.html).not.toContain("2025-01-15T08:00:00.000Z");
     expect(store.bookings[0].recoveryNotificationStatus).toBe("sent");
+  });
+
+  test("reschedule emails render the requested time without exposing an ISO timestamp", () => {
+    expect(
+      formatRequestedTimeFields({
+        originalRequestedStartTimeUTC: "2026-03-18T03:30:00.000Z",
+        localTimeZone: "Asia/Kolkata",
+      })
+    ).toEqual([
+      { label: "Requested Date", value: "Wednesday, March 18, 2026" },
+      { label: "Requested Time", value: "9:00 AM" },
+      {
+        label: "Time Zone",
+        value: "India Standard Time (Asia/Kolkata)",
+      },
+    ]);
+    expect(
+      formatRequestedTimeFields({
+        originalRequestedStartTimeUTC: "2026-03-18T03:30:00.000Z",
+      })
+    ).toEqual([
+      { label: "Requested Date", value: "Wednesday, March 18, 2026" },
+      { label: "Requested Time", value: "3:30 AM" },
+      { label: "Time Zone", value: "UTC" },
+    ]);
   });
 
   test("captured unreconstructable payments create one visible recovery case", async () => {
@@ -1919,6 +1961,9 @@ describe("booking reservation API", () => {
         email: CLIENT_EMAIL,
         packageTitle: "Performance Vertex Overhaul",
         startTimeUTC: "2025-01-15T08:00:00.000Z",
+        localTimeZone: "America/Los_Angeles",
+        displayDate: "Wednesday, January 15, 2025",
+        displayTime: "12:00 AM",
       },
       pricingSnapshot: { grossAmount: 84.99, netAmount: 84.99 },
     };
@@ -1944,6 +1989,9 @@ describe("booking reservation API", () => {
       status: "captured",
       requiresReschedule: true,
       recoveryNotificationStatus: "sent",
+      localTimeZone: "America/Los_Angeles",
+      displayDate: "Wednesday, January 15, 2025",
+      displayTime: "12:00 AM",
     });
     expect(store.recoveryCases).toHaveLength(1);
     expect(mockSendEmail).toHaveBeenCalledTimes(2);
