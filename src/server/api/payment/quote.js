@@ -1,5 +1,6 @@
 const { resolvePaymentQuote } = require("../ref/pricing.js");
 const { resolvePaymentProviders } = require("./providerConfig.js");
+const { buildQuoteFingerprint } = require("./paymentRecord.js");
 
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
@@ -8,13 +9,18 @@ module.exports = async function handler(req, res) {
   }
 
   try {
+    const requestBody = req.body || {};
+    const bookingPayload =
+      requestBody.bookingPayload && typeof requestBody.bookingPayload === "object"
+        ? requestBody.bookingPayload
+        : requestBody;
     const {
       packageTitle = "",
       originalOrderId = "",
       referralId = "",
       referralCode = "",
       couponCode = "",
-    } = req.body || {};
+    } = bookingPayload;
 
     if (!String(packageTitle || "").trim()) {
       return res.status(400).json({
@@ -32,9 +38,14 @@ module.exports = async function handler(req, res) {
     });
     const providers = resolvePaymentProviders();
     const isFree = resolvedQuote.paymentProvider === "free";
+    const quoteFingerprint = buildQuoteFingerprint({
+      bookingPayload,
+      quote: resolvedQuote,
+    });
 
     return res.status(200).json({
       ok: true,
+      quoteFingerprint,
       quote: {
         grossAmount: resolvedQuote.effectiveGrossAmount,
         discountAmount: resolvedQuote.effectiveDiscountAmount,
