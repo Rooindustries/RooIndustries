@@ -25,6 +25,7 @@ const IST_OFFSET_MINUTES = 330;
 const FORM_PREFILL_KEY = "booking_form_prefill";
 const HOLD_STORAGE_KEY = "my_slot_hold";
 const BOOKING_DRAFT_KEY = "booking_draft";
+const CHECKOUT_BOOKING_STORAGE_KEY = "checkout_booking_state";
 const SESSION_STATE_KEY = "booking_modal_state";
 const REFERRAL_STORAGE_KEY = "referral_session";
 const BOOKING_FETCH_TIMEOUT_MS = 8000;
@@ -958,16 +959,12 @@ export default function BookingForm({ isMobile }) {
 
     const bookedSet = new Set();
     const heldMap = new Map();
-    const expiredHoldSet = new Set();
 
     (settings.bookedSlots || []).forEach((slot) => {
       if (!slot.startTimeUTC) return;
       if (slot.isHold) {
-        if (slot.isExpiredHold) {
-          expiredHoldSet.add(slot.startTimeUTC);
-        } else {
-          heldMap.set(slot.startTimeUTC, slot.holdId || "");
-        }
+        if (slot.isExpiredHold) return;
+        heldMap.set(slot.startTimeUTC, slot.holdId || "");
       } else {
         bookedSet.add(slot.startTimeUTC);
       }
@@ -978,17 +975,16 @@ export default function BookingForm({ isMobile }) {
       const isBooked = bookedSet.has(slot.slotId);
       const holdId = heldMap.get(slot.slotId);
       const isHeldOther = !!holdId && holdId !== myHold?.holdId;
-      const isExpired = expiredHoldSet.has(slot.slotId);
       const isPast = slot.utcStart <= now;
-      const disabled = isBooked || isHeldOther || isExpired || isPast;
+      const disabled = isBooked || isHeldOther || isPast;
 
       return {
         ...slot,
         disabled,
         isBooked,
         isHeldOther,
-        isExpiredHold: isExpired,
-        isAllowed: !isExpired,
+        isExpiredHold: false,
+        isAllowed: true,
         isPast,
         isUnavailable: false,
       };
@@ -1381,8 +1377,20 @@ export default function BookingForm({ isMobile }) {
     // Keep hold persisted for banner
     const backgroundLocation =
       location.state?.backgroundLocation || location.state || null;
-    navigate(`/payment?data=${encodeURIComponent(JSON.stringify(payload))}`, {
-      state: backgroundLocation ? { backgroundLocation } : undefined,
+    try {
+      sessionStorage.setItem(
+        CHECKOUT_BOOKING_STORAGE_KEY,
+        JSON.stringify(payload)
+      );
+    } catch (error) {
+      console.error("Failed to persist checkout state:", error);
+    }
+
+    navigate("/payment", {
+      state: {
+        bookingData: payload,
+        ...(backgroundLocation ? { backgroundLocation } : {}),
+      },
     });
   };
 

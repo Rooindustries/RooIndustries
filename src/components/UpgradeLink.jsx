@@ -138,13 +138,15 @@ export default function UpgradeLink() {
 
     setLoading(true);
     try {
-      const res = await fetch(
-        `/api/ref/getUpgradeInfo?id=${encodeURIComponent(
-          trimmed
-        )}&email=${encodeURIComponent(
-          trimmedEmail
-        )}&slug=${encodeURIComponent(normalizedSlug)}`
-      );
+      const res = await fetch("/api/ref/getUpgradeInfo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: trimmed,
+          email: trimmedEmail,
+          slug: normalizedSlug,
+        }),
+      });
       const data = await res.json();
 
       if (!res.ok || !data.ok) {
@@ -211,10 +213,16 @@ export default function UpgradeLink() {
       startTimeUTC: booking.startTimeUTC || "",
 
       originalOrderId: booking._id,
+      upgradeIntentToken: String(upgradeInfo.upgradeIntentToken || "").trim(),
     };
 
-    const encoded = encodeURIComponent(JSON.stringify(bookingData));
-    navigate(`/payment?data=${encoded}`);
+    try {
+      sessionStorage.setItem(
+        "checkout_booking_state",
+        JSON.stringify(bookingData)
+      );
+    } catch {}
+    navigate("/payment", { state: { bookingData } });
   }
 
   const targetPackage = upgradeInfo?.targetPackage;
@@ -259,7 +267,11 @@ export default function UpgradeLink() {
             </label>
             <input
               value={orderEmail}
-              onChange={(e) => setOrderEmail(e.target.value)}
+              onChange={(e) => {
+                setOrderEmail(e.target.value);
+                setUpgradeInfo(null);
+                setError(null);
+              }}
               placeholder="Email used on the original booking"
               className="w-full bg-surface-input border border-line-input rounded-md px-3 py-2 outline-none text-sm"
               type="email"
@@ -269,7 +281,11 @@ export default function UpgradeLink() {
           <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
             <input
               value={orderId}
-              onChange={(e) => setOrderId(e.target.value)}
+              onChange={(e) => {
+                setOrderId(e.target.value);
+                setUpgradeInfo(null);
+                setError(null);
+              }}
               placeholder="e.g. 1a2b3c4d5e6f7g8h9i"
               className="flex-1 bg-surface-input border border-line-input rounded-md px-3 py-2 outline-none text-sm"
             />

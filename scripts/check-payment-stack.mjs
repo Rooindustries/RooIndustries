@@ -17,6 +17,11 @@ const REQUIRED_PROD_ENV = [
   "PAYPAL_CLIENT_SECRET",
   "RAZORPAY_KEY_ID",
   "RAZORPAY_KEY_SECRET",
+  "CRON_SECRET",
+  "PAYMENT_SESSION_SECRET",
+  "HOLD_TOKEN_SECRET",
+  "SANITY_WRITE_TOKEN",
+  "RESEND_API_KEY",
 ];
 
 const run = async (cmd, args) => {
@@ -148,8 +153,10 @@ const main = async () => {
   const previewOk =
     report.previewProviders.ok &&
     report.previewProviders.body?.ok === true &&
-    report.previewProviders.body?.providers?.paypal?.enabled === true &&
-    report.previewProviders.body?.providers?.razorpay?.enabled === true;
+    report.previewProviders.body?.environment?.runtime === "preview" &&
+    report.previewProviders.body?.environment?.livePaymentsEnabled === false &&
+    report.previewProviders.body?.providers?.paypal?.enabled === false &&
+    report.previewProviders.body?.providers?.razorpay?.enabled === false;
   const productionOk =
     report.productionProviders.ok &&
     report.productionProviders.body?.ok === true &&
