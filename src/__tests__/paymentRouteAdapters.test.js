@@ -10,6 +10,26 @@ const buildJsonRequest = (url, { method = "GET", body, headers = {} } = {}) =>
 
 const originalResponseJson = Response.json;
 
+const createLegacyResponse = () => {
+  const headers = {};
+  const state = { status: 200, body: null, headers };
+  const response = {
+    setHeader(name, value) {
+      headers[String(name).toLowerCase()] = value;
+      return response;
+    },
+    status(status) {
+      state.status = status;
+      return response;
+    },
+    json(body) {
+      state.body = body;
+      return body;
+    },
+  };
+  return { response, state };
+};
+
 const buildEchoHandler = (name) =>
   jest.fn((req, res) =>
     res.status(200).json({
@@ -156,6 +176,7 @@ describe("payment app route adapters", () => {
     const { route, handlers } = await loadPaymentActionRoute();
     const request = buildJsonRequest("https://example.com/api/payment/finalize", {
       method: "POST",
+      headers: { authorization: "Bearer payment_access_token" },
       body: {
         paymentAccessToken: "payment_access_token",
         source: "webhook",
@@ -178,6 +199,8 @@ describe("payment app route adapters", () => {
       },
     });
     expect(body.body.source).toBeUndefined();
+    expect(body.headers.authorization).toBe("Bearer payment_access_token");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(handlers.finalize).toHaveBeenCalledTimes(1);
   });
 
@@ -203,6 +226,52 @@ describe("payment app route adapters", () => {
       },
     });
     expect(handlers.status).toHaveBeenCalledTimes(1);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
+
+  test("status accepts POST with a bearer token and no URL credential", async () => {
+    const { route, handlers } = await loadPaymentActionRoute();
+    const request = buildJsonRequest("https://example.com/api/payment/status", {
+      method: "POST",
+      body: {},
+      headers: { authorization: "Bearer payment_access_token" },
+    });
+
+    const response = await route.POST(request, {
+      params: Promise.resolve({ action: "status" }),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      route: "status",
+      method: "POST",
+      query: {},
+      headers: { authorization: "Bearer payment_access_token" },
+    });
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(handlers.status).toHaveBeenCalledTimes(1);
+  });
+
+  test("reconcile accepts authenticated GET requests from Vercel Cron", async () => {
+    const { route, handlers } = await loadPaymentActionRoute();
+    const request = buildJsonRequest("https://example.com/api/payment/reconcile", {
+      method: "GET",
+      headers: { authorization: "Bearer cron-secret" },
+    });
+
+    const response = await route.GET(request, {
+      params: Promise.resolve({ action: "reconcile" }),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      route: "reconcile",
+      method: "GET",
+      headers: { authorization: "Bearer cron-secret" },
+    });
+    expect(handlers.reconcile).toHaveBeenCalledTimes(1);
   });
 
   test("unknown payment actions return a 404 JSON response", async () => {
@@ -324,5 +393,77 @@ describe("payment webhook route adapters", () => {
       },
     });
     expect(handler).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("payment bearer-token handlers", () => {
+  afterEach(() => {
+    jest.resetModules();
+    jest.clearAllMocks();
+    delete process.env.PAYMENT_LEGACY_COMPLETION_UNTIL;
+    delete process.env.PAYMENT_LEGACY_STATUS_GET_UNTIL;
+  });
+
+  test("finalize ignores an expired legacy body token and forwards only bearer auth", async () => {
+    jest.dontMock("../server/api/payment/finalize.js");
+    const finalizePaymentSession = jest.fn().mockResolvedValue({
+      httpStatus: 401,
+      body: { ok: false },
+    });
+    jest.doMock("../server/api/payment/flow.js", () => ({
+      __esModule: true,
+      finalizePaymentSession,
+    }));
+    process.env.PAYMENT_LEGACY_COMPLETION_UNTIL = "2000-01-01T00:00:00.000Z";
+    const handler = require("../server/api/payment/finalize.js").default;
+    const { response, state } = createLegacyResponse();
+
+    await handler(
+      {
+        method: "POST",
+        headers: {},
+        body: { paymentAccessToken: "legacy_url_or_body_token" },
+      },
+      response
+    );
+
+    expect(finalizePaymentSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        paymentAccessToken: "",
+        allowLegacyTokenFallback: false,
+      })
+    );
+    expect(state.headers["cache-control"]).toBe("private, no-store");
+  });
+
+  test("status POST forwards bearer auth and disables query fallback", async () => {
+    jest.dontMock("../server/api/payment/status.js");
+    const getPaymentStatus = jest.fn().mockResolvedValue({
+      httpStatus: 200,
+      body: { ok: true },
+    });
+    jest.doMock("../server/api/payment/flow.js", () => ({
+      __esModule: true,
+      getPaymentStatus,
+    }));
+    const handler = require("../server/api/payment/status.js").default;
+    const { response, state } = createLegacyResponse();
+
+    await handler(
+      {
+        method: "POST",
+        headers: { authorization: "Bearer secure_payment_token" },
+        body: {},
+        query: {},
+      },
+      response
+    );
+
+    expect(getPaymentStatus).toHaveBeenCalledWith({
+      query: {},
+      paymentAccessToken: "secure_payment_token",
+      allowLegacyTokenFallback: false,
+    });
+    expect(state.headers["cache-control"]).toBe("private, no-store");
   });
 });

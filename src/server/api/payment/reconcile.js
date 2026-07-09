@@ -1,8 +1,8 @@
 import { reconcilePaymentSessions } from "./flow.js";
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    res.setHeader("Allow", ["POST"]);
+  if (req.method !== "GET" && req.method !== "POST") {
+    res.setHeader("Allow", ["GET", "POST"]);
     return res.status(405).json({ ok: false, error: "Method not allowed" });
   }
 
