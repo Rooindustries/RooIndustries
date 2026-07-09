@@ -32,3 +32,33 @@ describe("hold token secret fallback", () => {
     expect(payload.hid).toBe("hold_1");
   });
 });
+
+describe("booking identity", () => {
+  test("free booking request keys are stable without collapsing every free booking", () => {
+    const { buildDeterministicBookingId } = require("../../src/server/booking/slotIdentity");
+    const first = buildDeterministicBookingId({
+      paymentProvider: "free",
+      idempotencyKey: "request-one",
+      startTimeUTC: "2099-01-10T10:00:00.000Z",
+      email: "client@example.com",
+      couponCode: "FREE",
+    });
+    const retry = buildDeterministicBookingId({
+      paymentProvider: "free",
+      idempotencyKey: "request-one",
+      startTimeUTC: "2099-01-10T10:00:00.000Z",
+      email: "client@example.com",
+      couponCode: "FREE",
+    });
+    const second = buildDeterministicBookingId({
+      paymentProvider: "free",
+      idempotencyKey: "request-two",
+      startTimeUTC: "2099-01-10T11:00:00.000Z",
+      email: "client@example.com",
+      couponCode: "FREE",
+    });
+
+    expect(retry).toBe(first);
+    expect(second).not.toBe(first);
+  });
+});

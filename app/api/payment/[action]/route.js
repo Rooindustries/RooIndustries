@@ -59,11 +59,16 @@ async function handle(request, context, methodOverride) {
       ? await sanitizePublicFinalizeRequest(request)
       : request;
 
-  return runLegacyApiHandler({
+  const response = await runLegacyApiHandler({
     request: sanitizedRequest,
     handler,
     methodOverride,
   });
+  if (action === "finalize" || action === "status") {
+    response.headers.set("cache-control", "private, no-store");
+    response.headers.set("pragma", "no-cache");
+  }
+  return response;
 }
 
 export const GET = (request, context) => handle(request, context, "GET");

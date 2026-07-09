@@ -53,11 +53,11 @@ export default function UpgradeXoc() {
 
     setLoading(true);
     try {
-      const res = await fetch(
-        `/api/ref/getUpgradeInfo?id=${encodeURIComponent(
-          trimmed
-        )}&email=${encodeURIComponent(trimmedEmail)}`
-      );
+      const res = await fetch("/api/ref/getUpgradeInfo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: trimmed, email: trimmedEmail }),
+      });
       const data = await res.json();
 
       if (!res.ok || !data.ok) {
@@ -122,10 +122,16 @@ export default function UpgradeXoc() {
 
       // NEW: link this upgrade back to original booking in emails / DB
       originalOrderId: booking._id,
+      upgradeIntentToken: String(upgradeInfo.upgradeIntentToken || "").trim(),
     };
 
-    const encoded = encodeURIComponent(JSON.stringify(bookingData));
-    navigate(`/payment?data=${encoded}`);
+    try {
+      sessionStorage.setItem(
+        "checkout_booking_state",
+        JSON.stringify(bookingData)
+      );
+    } catch {}
+    navigate("/payment", { state: { bookingData } });
   }
 
   const upgradePrice =
@@ -161,7 +167,11 @@ export default function UpgradeXoc() {
           </label>
           <input
             value={orderEmail}
-            onChange={(e) => setOrderEmail(e.target.value)}
+            onChange={(e) => {
+              setOrderEmail(e.target.value);
+              setUpgradeInfo(null);
+              setError(null);
+            }}
             placeholder="Email used on the original booking"
             className="w-full bg-surface-input border border-line-input rounded-md px-3 py-2 outline-none text-sm"
             type="email"
@@ -171,7 +181,11 @@ export default function UpgradeXoc() {
         <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
           <input
             value={orderId}
-            onChange={(e) => setOrderId(e.target.value)}
+            onChange={(e) => {
+              setOrderId(e.target.value);
+              setUpgradeInfo(null);
+              setError(null);
+            }}
             placeholder="e.g. 1a2b3c4d5e6f7g8h9i"
             className="flex-1 bg-surface-input border border-line-input rounded-md px-3 py-2 outline-none text-sm"
           />

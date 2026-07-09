@@ -204,6 +204,19 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, message: "Method not allowed" });
   }
 
+  const compatibilityDeadline = new Date(
+    String(process.env.PAYMENT_LEGACY_COMPLETION_UNTIL || "")
+  ).getTime();
+  if (
+    !Number.isFinite(compatibilityDeadline) ||
+    compatibilityDeadline <= Date.now()
+  ) {
+    return res.status(410).json({
+      ok: false,
+      message: "This checkout session expired. Please restart checkout.",
+    });
+  }
+
   const providers = resolvePaymentProviders();
   if (!providers?.razorpay?.enabled) {
     return res.status(400).json({

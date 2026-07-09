@@ -1,10 +1,7 @@
 import React from "react";
-import { render, screen, act, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Payment from "../components/Payment";
-
-const CLIENT_EMAIL = "vihaann2.0@gmail.com";
-const OWNER_EMAIL = "serviroo@rooindustries.com";
 
 let paypalButtonsProps = null;
 let mockLocation = {
@@ -23,15 +20,15 @@ jest.mock(
       mockLocation = { ...mockLocation, ...next };
     },
     useLocation: () => mockLocation,
-  useNavigate: () => mockNavigate,
-  Link: ({ to, children, ...rest }) => {
-    const href = typeof to === "string" ? to : to?.pathname || "#";
-    return (
-      <a href={href} {...rest}>
-        {children}
-      </a>
-    );
-  },
+    useNavigate: () => mockNavigate,
+    Link: ({ to, children, state, ...rest }) => {
+      const href = typeof to === "string" ? to : to?.pathname || "#";
+      return (
+        <a href={href} {...rest}>
+          {children}
+        </a>
+      );
+    },
   }),
   { virtual: true }
 );
@@ -48,33 +45,45 @@ jest.mock("@paypal/react-paypal-js", () => ({
   },
 }));
 
-const formatClientDate = (utcDate, timeZone) =>
-  new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  }).format(utcDate);
+const response = (body, { ok = true, status = 200 } = {}) => ({
+  ok,
+  status,
+  json: async () => body,
+  text: async () => JSON.stringify(body),
+});
 
-const formatClientTime = (utcDate, timeZone) =>
-  new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(utcDate);
+const bookingFixture = (overrides = {}) => ({
+  email: "client@example.com",
+  packageTitle: "Performance Vertex Overhaul",
+  packagePrice: "$10.00",
+  startTimeUTC: "2099-01-15T08:00:00.000Z",
+  displayDate: "Thursday, January 15, 2099",
+  displayTime: "1:30 PM",
+  localTimeZone: "Asia/Kolkata",
+  slotHoldId: "hold_1",
+  slotHoldToken: "hold_token_1",
+  slotHoldExpiresAt: "2099-01-15T08:20:00.000Z",
+  ...overrides,
+});
 
-const renderPayment = (bookingData, { paymentFlow = "session" } = {}) => {
-  const encoded = encodeURIComponent(JSON.stringify(bookingData));
+const renderPayment = (bookingData, search = "") => {
   __setMockLocation({
     pathname: "/payment",
-    search:
-      paymentFlow === "legacy"
-        ? `?data=${encoded}&paymentFlow=legacy`
-        : `?data=${encoded}`,
-    state: null,
+    search,
+    hash: "",
+    state: { bookingData },
   });
   return render(<Payment />);
+};
+
+const loadRazorpay = async () => {
+  const script = document.querySelector(
+    'script[src="https://checkout.razorpay.com/v1/checkout.js"]'
+  );
+  expect(script).toBeTruthy();
+  await act(async () => {
+    script.onload();
+  });
 };
 
 beforeEach(() => {
@@ -82,258 +91,510 @@ beforeEach(() => {
   paypalButtonsProps = null;
   mockNavigate.mockReset();
   window.sessionStorage.clear();
+  window.localStorage.clear();
+  __setMockLocation({ pathname: "/payment", search: "", hash: "", state: null });
 });
 
 afterEach(() => {
-  if (global.fetch && global.fetch.mockReset) {
-    global.fetch.mockReset();
-  }
+  delete window.Razorpay;
+  if (global.fetch?.mockReset) global.fetch.mockReset();
 });
 
-describe("payment flows", () => {
-  test("session Razorpay flow attaches UTC and keeps client email data", async () => {
-    expect(CLIENT_EMAIL).toBe("vihaann2.0@gmail.com");
-    expect(OWNER_EMAIL).toBe("serviroo@rooindustries.com");
-
-    const timeZone = "America/Los_Angeles";
-    const startTimeUTC = "2025-01-15T07:59:00.000Z";
-    const utcDate = new Date(startTimeUTC);
-    const displayDate = formatClientDate(utcDate, timeZone);
-    const displayTime = formatClientTime(utcDate, timeZone);
-
-    const bookingData = {
-      email: CLIENT_EMAIL,
-      packageTitle: "Performance Vertex Overhaul",
-      packagePrice: "$10.00",
-      startTimeUTC,
-      displayDate,
-      displayTime,
-      localTimeZone: timeZone,
-      slotHoldId: "hold_razorpay",
-      slotHoldToken: "hold_token_razorpay",
-      slotHoldExpiresAt: "2099-01-05T06:00:00.000Z",
-    };
-
+describe("payment session UI", () => {
+  test("Razorpay uses a server quote, bearer finalize, and refreshed hold", async () => {
+    const bookingData = bookingFixture();
     const fetchCalls = [];
     global.fetch = jest.fn(async (url, options = {}) => {
+      fetchCalls.push({ url, options, body: JSON.parse(options.body || "{}") });
       if (url === "/api/payment/providers") {
-        return {
+        return response({
           ok: true,
-          json: async () => ({
-            ok: true,
-            providers: {
-              razorpay: { enabled: true, mode: "live" },
-              paypal: { enabled: false, mode: "live" },
-            },
-          }),
-        };
+          providers: {
+            razorpay: { enabled: true, mode: "live" },
+            paypal: { enabled: false, mode: "live" },
+          },
+        });
+      }
+      if (url === "/api/payment/quote") {
+        return response({
+          ok: true,
+          quoteFingerprint: "quote_fp_1",
+          quote: { grossAmount: 10, discountAmount: 0, netAmount: 10, isFree: false },
+        });
       }
       if (url === "/api/payment/start") {
-        const body = JSON.parse(options.body || "{}");
-        fetchCalls.push({ url, body });
-        return {
+        return response({
           ok: true,
-          json: async () => ({
-            ok: true,
-            paymentAccessToken: "payment_access_rzp",
-            providerPayload: {
-              orderId: "order_rzp_1",
-              amount: 1000,
-              currency: "USD",
-              key: "rzp_key",
-            },
-          }),
-        };
+          quoteFingerprint: "quote_fp_1",
+          quote: { grossAmount: 10, discountAmount: 0, netAmount: 10, isFree: false },
+          paymentAccessToken: "payment_access_rzp",
+          sessionExpiresAt: "2099-01-15T08:20:00.000Z",
+          refreshedHold: {
+            slotHoldId: "hold_1",
+            slotHoldToken: "hold_token_refreshed",
+            slotHoldExpiresAt: "2099-01-15T08:20:00.000Z",
+          },
+          providerPayload: {
+            orderId: "order_rzp_1",
+            amount: 1000,
+            currency: "USD",
+            key: "rzp_key",
+          },
+        });
       }
       if (url === "/api/payment/finalize") {
-        const body = JSON.parse(options.body || "{}");
-        fetchCalls.push({ url, body });
-        return {
+        return response({
           ok: true,
-          json: async () => ({
-            bookingId: "b1",
-            status: "email_partial",
-            emailDispatch: {
-              deferred: true,
-              allSent: false,
-            },
-            emailDispatchToken: "dispatch-token-rzp",
-          }),
-        };
+          bookingId: "booking_1",
+          status: "email_partial",
+          emailDispatchToken: "dispatch_1",
+        });
       }
-      return { ok: true, json: async () => ({ ok: true }) };
+      return response({ ok: true });
     });
 
     let razorpayOptions = null;
-    window.Razorpay = jest.fn().mockImplementation((options) => {
+    window.Razorpay = jest.fn((options) => {
       razorpayOptions = options;
       return {
-        open: jest.fn(() => {
+        open: jest.fn(() =>
           options.handler({
             razorpay_order_id: "order_rzp_1",
             razorpay_payment_id: "pay_rzp_1",
             razorpay_signature: "sig_rzp_1",
-          });
-        }),
+          })
+        ),
       };
     });
 
     renderPayment(bookingData);
+    await loadRazorpay();
+    const button = await screen.findByRole("button", { name: /pay with razorpay/i });
+    await waitFor(() => expect(button).not.toBeDisabled());
 
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await userEvent.click(button);
     });
-
-    const script = document.querySelector(
-      'script[src="https://checkout.razorpay.com/v1/checkout.js"]'
-    );
-    expect(script).toBeTruthy();
-
-    await act(async () => {
-      script.onload();
-    });
-
-    const razorpayButton = await screen.findByRole("button", {
-      name: /pay with razorpay/i,
-    });
-
-    await waitFor(() => expect(razorpayButton).not.toBeDisabled());
-
-    await act(async () => {
-      await userEvent.click(razorpayButton);
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
     await waitFor(() => expect(razorpayOptions).toBeTruthy());
-    const orderCall = fetchCalls.find(
-      (call) => call.url === "/api/payment/start"
+    await waitFor(() =>
+      expect(mockNavigate).toHaveBeenCalledWith("/payment-success", expect.anything())
     );
-    expect(orderCall.body.provider).toBe("razorpay");
-    expect(orderCall.body.bookingPayload.startTimeUTC).toBe(startTimeUTC);
-    expect(orderCall.body.bookingPayload.displayDate).toBe(displayDate);
-    expect(orderCall.body.bookingPayload.displayTime).toBe(displayTime);
-    expect(orderCall.body.bookingPayload.email).toBe(CLIENT_EMAIL);
 
-    const finalizeCall = fetchCalls.find(
+    const start = fetchCalls.find((call) => call.url === "/api/payment/start");
+    const quote = fetchCalls.find((call) => call.url === "/api/payment/quote");
+    expect(quote.body.startTimeUTC).toBe(bookingData.startTimeUTC);
+    expect(quote.body.email).toBe(bookingData.email);
+    expect(start.body.quoteFingerprint).toBe("quote_fp_1");
+    expect(start.body.bookingPayload.email).toBe("client@example.com");
+    expect(start.body.bookingPayload.slotHoldToken).toBe("hold_token_1");
+
+    const finalize = fetchCalls.find(
       (call) => call.url === "/api/payment/finalize"
     );
-    expect(finalizeCall.body.paymentAccessToken).toBe("payment_access_rzp");
-    expect(finalizeCall.body.providerData).toEqual({
+    expect(finalize.options.headers.Authorization).toBe(
+      "Bearer payment_access_rzp"
+    );
+    expect(finalize.body.paymentAccessToken).toBeUndefined();
+    expect(finalize.body.providerData).toEqual({
       razorpayOrderId: "order_rzp_1",
       razorpayPaymentId: "pay_rzp_1",
       razorpaySignature: "sig_rzp_1",
     });
-    expect(mockNavigate).toHaveBeenCalledWith("/payment-success", {
-      state: {
-        bookingConfirmation: {
-          bookingId: "b1",
-          emailDispatchToken: "dispatch-token-rzp",
-        },
-      },
-      replace: true,
-    });
     expect(
-      JSON.parse(window.sessionStorage.getItem("booking_confirmation_state"))
-    ).toEqual({
-      bookingId: "b1",
-      emailDispatchToken: "dispatch-token-rzp",
-    });
+      JSON.parse(window.localStorage.getItem("my_slot_hold"))?.holdToken
+    ).toBeUndefined();
   });
 
-  test("session Razorpay treats already-terminal finalize as success", async () => {
-    const bookingData = {
-      email: CLIENT_EMAIL,
-      packageTitle: "Performance Vertex Overhaul",
-      packagePrice: "$10.00",
-      startTimeUTC: "2025-01-15T07:59:00.000Z",
-      displayDate: "Wednesday, January 15, 2025",
-      displayTime: "11:59 PM",
-      localTimeZone: "America/Los_Angeles",
-      slotHoldId: "hold_razorpay_terminal",
-      slotHoldToken: "hold_token_razorpay_terminal",
-      slotHoldExpiresAt: "2099-01-05T06:00:00.000Z",
-    };
-
-    global.fetch = jest.fn(async (url) => {
+  test("PayPal uses only the server-created order and bearer finalize", async () => {
+    const fetchCalls = [];
+    global.fetch = jest.fn(async (url, options = {}) => {
+      fetchCalls.push({ url, options, body: JSON.parse(options.body || "{}") });
       if (url === "/api/payment/providers") {
-        return {
+        return response({
           ok: true,
-          json: async () => ({
-            ok: true,
-            providers: {
-              razorpay: { enabled: true, mode: "live" },
-              paypal: { enabled: false, mode: "live" },
-            },
-          }),
-        };
+          providers: {
+            razorpay: { enabled: true, mode: "live" },
+            paypal: { enabled: true, mode: "live", clientId: "test-client" },
+          },
+        });
+      }
+      if (url === "/api/payment/quote") {
+        return response({
+          ok: true,
+          quoteFingerprint: "quote_paypal",
+          quote: { grossAmount: 10, netAmount: 10, isFree: false },
+        });
       }
       if (url === "/api/payment/start") {
-        return {
+        return response({
           ok: true,
-          json: async () => ({
-            ok: true,
-            paymentAccessToken: "payment_access_terminal_rzp",
-            providerPayload: {
-              orderId: "order_rzp_terminal",
-              amount: 1000,
-              currency: "USD",
-              key: "rzp_key",
-            },
-          }),
-        };
+          quoteFingerprint: "quote_paypal",
+          paymentAccessToken: "payment_access_paypal",
+          providerPayload: {
+            orderId: "paypal_order_1",
+            currency: "USD",
+            clientId: "test-client",
+          },
+        });
       }
       if (url === "/api/payment/finalize") {
-        return {
-          ok: false,
-          status: 409,
-          json: async () => ({
-            ok: true,
-            error: "Payment session is already terminal.",
-            status: "email_partial",
-            bookingId: "b-terminal",
-            emailDispatchToken: "dispatch-token-terminal-rzp",
-          }),
-        };
-      }
-      return { ok: true, json: async () => ({ ok: true }) };
-    });
-
-    window.Razorpay = jest.fn().mockImplementation((options) => ({
-      open: jest.fn(() => {
-        options.handler({
-          razorpay_order_id: "order_rzp_terminal",
-          razorpay_payment_id: "pay_rzp_terminal",
-          razorpay_signature: "sig_rzp_terminal",
+        return response({
+          ok: true,
+          bookingId: "booking_paypal",
+          status: "booked",
+          emailDispatchToken: "dispatch_paypal",
         });
-      }),
-    }));
-
-    renderPayment(bookingData);
-
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      return response({ ok: true });
     });
 
-    const script = document.querySelector(
-      'script[src="https://checkout.razorpay.com/v1/checkout.js"]'
-    );
-    await act(async () => {
-      script.onload();
-    });
+    renderPayment(bookingFixture());
+    await waitFor(() => expect(paypalButtonsProps?.disabled).toBe(false));
 
+    const clientCreate = jest.fn();
+    let orderId;
     await act(async () => {
-      await userEvent.click(
-        await screen.findByRole("button", { name: /pay with razorpay/i })
+      orderId = await paypalButtonsProps.createOrder(
+        {},
+        { order: { create: clientCreate } }
       );
-      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(orderId).toBe("paypal_order_1");
+    expect(clientCreate).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await paypalButtonsProps.onApprove(
+        { orderID: "paypal_order_1" },
+        {
+          order: {
+            capture: jest.fn().mockResolvedValue({
+              id: "paypal_order_1",
+              payer: { email_address: "payer@example.com" },
+            }),
+          },
+        }
+      );
     });
 
+    const finalize = fetchCalls.find(
+      (call) => call.url === "/api/payment/finalize"
+    );
+    expect(finalize.options.headers.Authorization).toBe(
+      "Bearer payment_access_paypal"
+    );
+    expect(finalize.body.providerData.paypalOrderId).toBe("paypal_order_1");
+  });
+
+  test("a concurrent finalizer is polled by bearer token without putting the token in the URL", async () => {
+    const fetchCalls = [];
+    let statusReads = 0;
+    global.fetch = jest.fn(async (url, options = {}) => {
+      fetchCalls.push({ url, options });
+      if (url === "/api/payment/providers") {
+        return response({
+          ok: true,
+          providers: {
+            razorpay: { enabled: true, mode: "live" },
+            paypal: { enabled: true, mode: "live", clientId: "test-client" },
+          },
+        });
+      }
+      if (url === "/api/payment/quote") {
+        return response({
+          ok: true,
+          quoteFingerprint: "quote_poll",
+          quote: { grossAmount: 10, netAmount: 10, isFree: false },
+        });
+      }
+      if (url === "/api/payment/start") {
+        return response({
+          ok: true,
+          quoteFingerprint: "quote_poll",
+          paymentAccessToken: "private_poll_token",
+          providerPayload: { orderId: "paypal_order_poll" },
+        });
+      }
+      if (url === "/api/payment/finalize") {
+        return response(
+          { ok: true, status: "finalizing" },
+          { ok: false, status: 202 }
+        );
+      }
+      if (url === "/api/payment/status") {
+        statusReads += 1;
+        return response({
+          ok: true,
+          status: "booked",
+          bookingId: "booking_poll",
+          emailDispatchToken: "dispatch_poll",
+        });
+      }
+      return response({ ok: true });
+    });
+
+    renderPayment(bookingFixture());
+    await waitFor(() => expect(paypalButtonsProps?.disabled).toBe(false));
+    await act(async () => {
+      await paypalButtonsProps.createOrder({}, {});
+      await paypalButtonsProps.onApprove(
+        { orderID: "paypal_order_poll" },
+        {
+          order: {
+            capture: jest.fn().mockResolvedValue({ id: "paypal_order_poll" }),
+          },
+        }
+      );
+    });
+
+    expect(statusReads).toBe(1);
+    const statusCall = fetchCalls.find((call) => call.url === "/api/payment/status");
+    expect(statusCall.options.method).toBe("POST");
+    expect(statusCall.options.headers.Authorization).toBe(
+      "Bearer private_poll_token"
+    );
+    expect(
+      fetchCalls.some((call) => String(call.url).includes("private_poll_token"))
+    ).toBe(false);
+  });
+
+  test("reload resumes the same provider session and keeps the other provider disabled", async () => {
+    let starts = 0;
+    global.fetch = jest.fn(async (url) => {
+      if (url === "/api/payment/providers") {
+        return response({
+          ok: true,
+          providers: {
+            razorpay: { enabled: true, mode: "live" },
+            paypal: { enabled: true, mode: "live", clientId: "test-client" },
+          },
+        });
+      }
+      if (url === "/api/payment/quote") {
+        return response({
+          ok: true,
+          quoteFingerprint: "quote_resume",
+          quote: { grossAmount: 10, netAmount: 10, isFree: false },
+        });
+      }
+      if (url === "/api/payment/start") {
+        starts += 1;
+        return response({
+          ok: true,
+          quoteFingerprint: "quote_resume",
+          paymentAccessToken: "resume_access",
+          providerPayload: { orderId: "paypal_order_resume" },
+        });
+      }
+      return response({ ok: true });
+    });
+
+    const first = renderPayment(bookingFixture());
+    await waitFor(() => expect(paypalButtonsProps?.disabled).toBe(false));
+    await act(async () => {
+      expect(await paypalButtonsProps.createOrder({}, {})).toBe(
+        "paypal_order_resume"
+      );
+    });
+    expect(starts).toBe(1);
+    first.unmount();
+
+    renderPayment(bookingFixture());
+    const razorpayButton = await screen.findByRole("button", {
+      name: /pay with razorpay/i,
+    });
+    await waitFor(() => expect(razorpayButton).toBeDisabled());
+    await waitFor(() => expect(paypalButtonsProps?.disabled).toBe(false));
+    await act(async () => {
+      expect(await paypalButtonsProps.createOrder({}, {})).toBe(
+        "paypal_order_resume"
+      );
+    });
+    expect(starts).toBe(1);
+    expect(screen.getByText(/pricing and provider selection are locked/i)).toBeInTheDocument();
+  });
+
+  test("reload checks server status before reusing a completed provider order", async () => {
+    let starts = 0;
+    global.fetch = jest.fn(async (url) => {
+      if (url === "/api/payment/providers") {
+        return response({
+          ok: true,
+          providers: {
+            razorpay: { enabled: false, mode: "live" },
+            paypal: { enabled: true, mode: "live", clientId: "test-client" },
+          },
+        });
+      }
+      if (url === "/api/payment/quote") {
+        return response({
+          ok: true,
+          quoteFingerprint: "quote_completed_resume",
+          quote: { grossAmount: 10, netAmount: 10, isFree: false },
+        });
+      }
+      if (url === "/api/payment/start") {
+        starts += 1;
+        return response({
+          ok: true,
+          status: "started",
+          quoteFingerprint: "quote_completed_resume",
+          paymentAccessToken: "completed_resume_access",
+          providerPayload: { orderId: "paypal_completed_resume" },
+        });
+      }
+      if (url === "/api/payment/status") {
+        return response({
+          ok: true,
+          status: "booked",
+          bookingId: "booking_completed_resume",
+        });
+      }
+      return response({ ok: true });
+    });
+
+    const first = renderPayment(bookingFixture());
+    await waitFor(() => expect(paypalButtonsProps?.disabled).toBe(false));
+    await act(async () => {
+      expect(await paypalButtonsProps.createOrder({}, {})).toBe(
+        "paypal_completed_resume"
+      );
+    });
+    first.unmount();
+
+    renderPayment(bookingFixture());
+    await waitFor(() => expect(paypalButtonsProps?.disabled).toBe(false));
+    await act(async () => {
+      await expect(paypalButtonsProps.createOrder({}, {})).rejects.toThrow(
+        /already complete/i
+      );
+    });
+
+    expect(starts).toBe(1);
+    expect(mockNavigate).toHaveBeenCalledWith(
+      "/payment-success",
+      expect.objectContaining({ replace: true })
+    );
+  });
+
+  test("quote changes never create an order until the customer retries", async () => {
+    let startAttempts = 0;
+    global.fetch = jest.fn(async (url) => {
+      if (url === "/api/payment/providers") {
+        return response({
+          ok: true,
+          providers: {
+            razorpay: { enabled: true, mode: "live" },
+            paypal: { enabled: false, mode: "live" },
+          },
+        });
+      }
+      if (url === "/api/payment/quote") {
+        return response({
+          ok: true,
+          quoteFingerprint: "quote_old",
+          quote: { grossAmount: 10, netAmount: 10, isFree: false },
+        });
+      }
+      if (url === "/api/payment/start") {
+        startAttempts += 1;
+        return response(
+          {
+            ok: false,
+            code: "quote_changed",
+            error: "Quote changed",
+            quoteFingerprint: "quote_new",
+            quote: { grossAmount: 12, netAmount: 12, isFree: false },
+          },
+          { ok: false, status: 409 }
+        );
+      }
+      return response({ ok: true });
+    });
+
+    window.Razorpay = jest.fn();
+    renderPayment(bookingFixture());
+    await loadRazorpay();
+    const button = await screen.findByRole("button", { name: /pay with razorpay/i });
+    await waitFor(() => expect(button).not.toBeDisabled());
+    await userEvent.click(button);
+
+    await screen.findByText(/price changed/i);
+    expect(startAttempts).toBe(1);
+    expect(window.Razorpay).not.toHaveBeenCalled();
+    expect(screen.getByText("$12.00 USD")).toBeInTheDocument();
+  });
+
+  test("free checkout also uses the payment session endpoint", async () => {
+    const fetchCalls = [];
+    global.fetch = jest.fn(async (url, options = {}) => {
+      const body = JSON.parse(options.body || "{}");
+      fetchCalls.push({ url, body });
+      if (url === "/api/payment/providers") {
+        return response({ ok: true, providers: {} });
+      }
+      if (String(url).startsWith("/api/ref/validateCoupon")) {
+        return response({
+          ok: true,
+          coupon: {
+            code: "FREE100",
+            discountType: "fixed",
+            discountAmount: 10,
+            canCombineWithReferral: true,
+          },
+        });
+      }
+      if (url === "/api/payment/quote") {
+        const free = body.couponCode === "FREE100";
+        return response({
+          ok: true,
+          quoteFingerprint: free ? "quote_free" : "quote_paid",
+          quote: {
+            grossAmount: 10,
+            discountAmount: free ? 10 : 0,
+            netAmount: free ? 0 : 10,
+            isFree: free,
+          },
+        });
+      }
+      if (url === "/api/payment/start") {
+        return response({
+          ok: true,
+          provider: "free",
+          status: "booked",
+          bookingId: "booking_free",
+          emailDispatchToken: "dispatch_free",
+          paymentAccessToken: "free_access",
+        });
+      }
+      return response({ ok: true });
+    });
+
+    renderPayment(bookingFixture());
+    await userEvent.type(screen.getByPlaceholderText(/e\.g\. BF10/i), "FREE100");
+    const applyButtons = screen.getAllByRole("button", { name: /apply/i });
+    await userEvent.click(applyButtons[1]);
+
+    const freeButton = await screen.findByRole("button", {
+      name: /confirm free booking/i,
+    });
+    await waitFor(() => expect(freeButton).not.toBeDisabled());
+    await act(async () => {
+      await userEvent.click(freeButton);
+    });
+
+    const start = fetchCalls.find(
+      (call) => call.url === "/api/payment/start" && call.body.provider === "free"
+    );
+    expect(start.body.quoteFingerprint).toBe("quote_free");
+    expect(fetchCalls.some((call) => call.url === "/api/ref/createBooking")).toBe(
+      false
+    );
     await waitFor(() =>
-      expect(mockNavigate).toHaveBeenCalledWith("/payment-success", {
+      expect(mockNavigate).toHaveBeenCalledWith("/thank-you", {
         state: {
           bookingConfirmation: {
-            bookingId: "b-terminal",
-            emailDispatchToken: "dispatch-token-terminal-rzp",
+            bookingId: "booking_free",
+            emailDispatchToken: "dispatch_free",
           },
         },
         replace: true,
@@ -341,452 +602,38 @@ describe("payment flows", () => {
     );
   });
 
-  test("legacy Razorpay flow remains available when requested explicitly", async () => {
-    const timeZone = "America/Los_Angeles";
-    const startTimeUTC = "2025-01-15T07:59:00.000Z";
-    const utcDate = new Date(startTimeUTC);
-    const displayDate = formatClientDate(utcDate, timeZone);
-    const displayTime = formatClientTime(utcDate, timeZone);
-
-    const bookingData = {
-      email: CLIENT_EMAIL,
-      packageTitle: "Performance Vertex Overhaul",
-      packagePrice: "$10.00",
-      startTimeUTC,
-      displayDate,
-      displayTime,
-      localTimeZone: timeZone,
-      slotHoldId: "hold_legacy_rzp",
-      slotHoldToken: "hold_token_legacy_rzp",
-      slotHoldExpiresAt: "2099-01-05T06:00:00.000Z",
-    };
-
-    const fetchCalls = [];
-    global.fetch = jest.fn(async (url, options = {}) => {
+  test("legacy query payload is scrubbed immediately and never enables legacy flow", async () => {
+    const bookingData = bookingFixture();
+    const encoded = encodeURIComponent(JSON.stringify(bookingData));
+    global.fetch = jest.fn(async (url) => {
+      if (url === "/api/payment/quote") {
+        return response({
+          ok: true,
+          quoteFingerprint: "quote_legacy",
+          quote: { grossAmount: 10, netAmount: 10, isFree: false },
+        });
+      }
       if (url === "/api/payment/providers") {
-        return {
-          ok: true,
-          json: async () => ({
-            ok: true,
-            providers: {
-              razorpay: { enabled: true, mode: "live" },
-              paypal: { enabled: false, mode: "live" },
-            },
-          }),
-        };
+        return response({ ok: true, providers: {} });
       }
-      if (url === "/api/razorpay/createOrder") {
-        const body = JSON.parse(options.body || "{}");
-        fetchCalls.push({ url, body });
-        return {
-          ok: true,
-          json: async () => ({
-            ok: true,
-            orderId: "order_rzp_legacy",
-            amount: 1000,
-            currency: "USD",
-            key: "rzp_key",
-            paymentRecordId: "paymentRecord.legacy",
-          }),
-        };
-      }
-      if (url === "/api/razorpay/verify") {
-        const body = JSON.parse(options.body || "{}");
-        fetchCalls.push({ url, body });
-        return { ok: true, json: async () => ({ ok: true }) };
-      }
-      if (url === "/api/ref/createBooking") {
-        const body = JSON.parse(options.body || "{}");
-        fetchCalls.push({ url, body });
-        return {
-          ok: true,
-          json: async () => ({
-            bookingId: "b1-legacy",
-            emailDispatchToken: "dispatch-token-rzp-legacy",
-          }),
-        };
-      }
-      return { ok: true, json: async () => ({ ok: true }) };
+      return response({ ok: true });
     });
 
-    let razorpayOptions = null;
-    window.Razorpay = jest.fn().mockImplementation((options) => {
-      razorpayOptions = options;
-      return {
-        open: jest.fn(() => {
-          options.handler({
-            razorpay_order_id: "order_rzp_legacy",
-            razorpay_payment_id: "pay_rzp_legacy",
-            razorpay_signature: "sig_rzp_legacy",
-          });
-        }),
-      };
+    __setMockLocation({
+      pathname: "/payment",
+      search: `?data=${encoded}&paymentFlow=legacy`,
+      hash: "",
+      state: null,
     });
+    render(<Payment />);
 
-    renderPayment(bookingData, { paymentFlow: "legacy" });
-
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    const script = document.querySelector(
-      'script[src="https://checkout.razorpay.com/v1/checkout.js"]'
+    await waitFor(() =>
+      expect(mockNavigate).toHaveBeenCalledWith(
+        { pathname: "/payment", search: "", hash: "" },
+        { replace: true, state: {} }
+      )
     );
-    await act(async () => {
-      script.onload();
-    });
-
-    await act(async () => {
-      await userEvent.click(
-        await screen.findByRole("button", { name: /pay with razorpay/i })
-      );
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    await waitFor(() => expect(razorpayOptions).toBeTruthy());
-    const orderCall = fetchCalls.find(
-      (call) => call.url === "/api/razorpay/createOrder"
-    );
-    expect(orderCall.body.notes.startTimeUTC).toBe(startTimeUTC);
-
-    const bookingCall = fetchCalls.find(
-      (call) => call.url === "/api/ref/createBooking"
-    );
-    expect(bookingCall.body.paymentProvider).toBe("razorpay");
-    expect(bookingCall.body.paymentRecordId).toBe("paymentRecord.legacy");
-    expect(mockNavigate).toHaveBeenCalledWith("/payment-success", {
-      state: {
-        bookingConfirmation: {
-          bookingId: "b1-legacy",
-          emailDispatchToken: "dispatch-token-rzp-legacy",
-        },
-      },
-      replace: true,
-    });
-  });
-
-  test("session PayPal flow attaches UTC and keeps client email data", async () => {
-    expect(CLIENT_EMAIL).toBe("vihaann2.0@gmail.com");
-    expect(OWNER_EMAIL).toBe("serviroo@rooindustries.com");
-
-    const timeZone = "America/Los_Angeles";
-    const startTimeUTC = "2025-01-15T08:00:00.000Z";
-    const utcDate = new Date(startTimeUTC);
-    const displayDate = formatClientDate(utcDate, timeZone);
-    const displayTime = formatClientTime(utcDate, timeZone);
-
-    const bookingData = {
-      email: CLIENT_EMAIL,
-      packageTitle: "Performance Vertex Overhaul",
-      packagePrice: "$10.00",
-      startTimeUTC,
-      displayDate,
-      displayTime,
-      localTimeZone: timeZone,
-      slotHoldId: "hold_paypal",
-      slotHoldToken: "hold_token_paypal",
-      slotHoldExpiresAt: "2099-01-05T06:00:00.000Z",
-    };
-
-    const fetchCalls = [];
-    global.fetch = jest.fn(async (url, options = {}) => {
-      if (url === "/api/payment/providers") {
-        return {
-          ok: true,
-          json: async () => ({
-            ok: true,
-            providers: {
-              razorpay: { enabled: true, mode: "live" },
-              paypal: { enabled: true, mode: "live" },
-            },
-          }),
-        };
-      }
-      if (url === "/api/payment/start") {
-        const body = JSON.parse(options.body || "{}");
-        fetchCalls.push({ url, body });
-        return {
-          ok: true,
-          json: async () => ({
-            ok: true,
-            paymentAccessToken: "payment_access_paypal",
-            providerPayload: {
-              orderId: "paypal_order_1",
-              currency: "USD",
-              clientId: "test-client",
-            },
-          }),
-        };
-      }
-      if (url === "/api/payment/finalize") {
-        const body = JSON.parse(options.body || "{}");
-        fetchCalls.push({ url, body });
-        return {
-          ok: true,
-          json: async () => ({
-            bookingId: "b2",
-            status: "email_partial",
-            emailDispatch: {
-              deferred: true,
-              allSent: false,
-            },
-            emailDispatchToken: "dispatch-token-paypal",
-          }),
-        };
-      }
-      return { ok: true, json: async () => ({ ok: true }) };
-    });
-
-    renderPayment(bookingData);
-
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    expect(paypalButtonsProps).toBeTruthy();
-
-    const createSpy = jest.fn().mockResolvedValue("paypal_order_1");
-    const orderId = await paypalButtonsProps.createOrder({}, { order: { create: createSpy } });
-
-    expect(orderId).toBe("paypal_order_1");
-    expect(createSpy).not.toHaveBeenCalled();
-    const startCall = fetchCalls.find((call) => call.url === "/api/payment/start");
-    expect(startCall.body.provider).toBe("paypal");
-    expect(startCall.body.bookingPayload.startTimeUTC).toBe(startTimeUTC);
-    expect(startCall.body.bookingPayload.displayDate).toBe(displayDate);
-    expect(startCall.body.bookingPayload.displayTime).toBe(displayTime);
-    expect(startCall.body.bookingPayload.email).toBe(CLIENT_EMAIL);
-
-    const captureSpy = jest.fn().mockResolvedValue({
-      id: "paypal_order_1",
-      payer: { email_address: CLIENT_EMAIL },
-    });
-
-    await paypalButtonsProps.onApprove(
-      { orderID: "paypal_order_1" },
-      { order: { capture: captureSpy } }
-    );
-
-    const finalizeCall = fetchCalls.find(
-      (call) => call.url === "/api/payment/finalize"
-    );
-    expect(finalizeCall.body.paymentAccessToken).toBe("payment_access_paypal");
-    expect(finalizeCall.body.providerData).toEqual({
-      paypalOrderId: "paypal_order_1",
-      payerEmail: CLIENT_EMAIL,
-    });
-    expect(mockNavigate).toHaveBeenCalledWith("/payment-success", {
-      state: {
-        bookingConfirmation: {
-          bookingId: "b2",
-          emailDispatchToken: "dispatch-token-paypal",
-        },
-      },
-      replace: true,
-    });
-  });
-
-  test("legacy PayPal flow remains available when requested explicitly", async () => {
-    const timeZone = "America/Los_Angeles";
-    const startTimeUTC = "2025-01-15T08:00:00.000Z";
-    const utcDate = new Date(startTimeUTC);
-    const displayDate = formatClientDate(utcDate, timeZone);
-    const displayTime = formatClientTime(utcDate, timeZone);
-
-    const bookingData = {
-      email: CLIENT_EMAIL,
-      packageTitle: "Performance Vertex Overhaul",
-      packagePrice: "$10.00",
-      startTimeUTC,
-      displayDate,
-      displayTime,
-      localTimeZone: timeZone,
-      slotHoldId: "hold_paypal_legacy",
-      slotHoldToken: "hold_token_paypal_legacy",
-      slotHoldExpiresAt: "2099-01-05T06:00:00.000Z",
-    };
-
-    const fetchCalls = [];
-    global.fetch = jest.fn(async (url, options = {}) => {
-      if (url === "/api/payment/providers") {
-        return {
-          ok: true,
-          json: async () => ({
-            ok: true,
-            providers: {
-              razorpay: { enabled: true, mode: "live" },
-              paypal: { enabled: true, mode: "live" },
-            },
-          }),
-        };
-      }
-      if (url === "/api/ref/createBooking") {
-        const body = JSON.parse(options.body || "{}");
-        fetchCalls.push({ url, body });
-        return {
-          ok: true,
-          json: async () => ({
-            bookingId: "b2-legacy",
-            emailDispatchToken: "dispatch-token-paypal-legacy",
-          }),
-        };
-      }
-      return { ok: true, json: async () => ({ ok: true }) };
-    });
-
-    renderPayment(bookingData, { paymentFlow: "legacy" });
-
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    const createSpy = jest.fn().mockResolvedValue("paypal_order_legacy");
-    await paypalButtonsProps.createOrder({}, { order: { create: createSpy } });
-
-    const createArgs = createSpy.mock.calls[0][0];
-    expect(createArgs.purchase_units[0].custom_id).toBe(startTimeUTC);
-
-    const captureSpy = jest.fn().mockResolvedValue({
-      id: "paypal_order_legacy",
-      payer: { email_address: CLIENT_EMAIL },
-    });
-
-    await paypalButtonsProps.onApprove(
-      {},
-      { order: { capture: captureSpy } }
-    );
-
-    const bookingCall = fetchCalls.find(
-      (call) => call.url === "/api/ref/createBooking"
-    );
-    expect(bookingCall.body.paymentProvider).toBe("paypal");
-    expect(bookingCall.body.payerEmail).toBe(CLIENT_EMAIL);
-    expect(bookingCall.body.deferEmailsUntilConfirmation).toBe(true);
-    expect(mockNavigate).toHaveBeenCalledWith("/payment-success", {
-      state: {
-        bookingConfirmation: {
-          bookingId: "b2-legacy",
-          emailDispatchToken: "dispatch-token-paypal-legacy",
-        },
-      },
-      replace: true,
-    });
-  });
-
-  test("fixed full coupon free booking flow defers email dispatch until the thank-you page", async () => {
-    const timeZone = "America/Los_Angeles";
-    const startTimeUTC = "2025-01-15T08:30:00.000Z";
-    const utcDate = new Date(startTimeUTC);
-    const displayDate = formatClientDate(utcDate, timeZone);
-    const displayTime = formatClientTime(utcDate, timeZone);
-
-    const bookingData = {
-      email: CLIENT_EMAIL,
-      packageTitle: "Performance Vertex Overhaul",
-      packagePrice: "$10.00",
-      startTimeUTC,
-      displayDate,
-      displayTime,
-      localTimeZone: timeZone,
-      slotHoldId: "hold_free",
-      slotHoldToken: "hold_token_free",
-      slotHoldExpiresAt: "2099-01-05T06:00:00.000Z",
-    };
-
-    const fetchCalls = [];
-    global.fetch = jest.fn(async (url, options = {}) => {
-      if (url === "/api/payment/providers") {
-        return {
-          ok: true,
-          json: async () => ({
-            ok: true,
-            providers: {
-              razorpay: { enabled: true, mode: "live" },
-              paypal: { enabled: true, mode: "live" },
-            },
-          }),
-        };
-      }
-      if (String(url).startsWith("/api/ref/validateCoupon")) {
-        fetchCalls.push({ url });
-        return {
-          ok: true,
-          json: async () => ({
-            ok: true,
-            coupon: {
-              code: "FREE100",
-              discountType: "fixed",
-              discountPercent: 0,
-              discountAmount: 10,
-              canCombineWithReferral: true,
-            },
-          }),
-        };
-      }
-      if (url === "/api/ref/createBooking") {
-        const body = JSON.parse(options.body || "{}");
-        fetchCalls.push({ url, body });
-        return {
-          ok: true,
-          json: async () => ({
-            bookingId: "b3",
-            emailDispatchToken: "dispatch-token-free",
-          }),
-        };
-      }
-      return { ok: true, json: async () => ({ ok: true }) };
-    });
-
-    renderPayment(bookingData);
-
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    await act(async () => {
-      await userEvent.type(
-        screen.getByPlaceholderText(/e\.g\. BF10/i),
-        "FREE100"
-      );
-    });
-
-    const applyButtons = screen.getAllByRole("button", { name: /apply/i });
-    await act(async () => {
-      await userEvent.click(applyButtons[1]);
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    const freeButton = await screen.findByRole("button", {
-      name: /confirm free booking/i,
-    });
-
-    await act(async () => {
-      await userEvent.click(freeButton);
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    const bookingCall = fetchCalls.find(
-      (call) => call.url === "/api/ref/createBooking"
-    );
-    const validateCall = fetchCalls.find((call) =>
-      String(call.url).startsWith("/api/ref/validateCoupon")
-    );
-    expect(validateCall.url).toContain("packageTitle=Performance%20Vertex%20Overhaul");
-    expect(bookingCall.body.paymentProvider).toBe("free");
-    expect(bookingCall.body.netAmount).toBe(0);
-    expect(bookingCall.body.couponCode).toBe("FREE100");
-    expect(bookingCall.body.couponDiscountType).toBe("fixed");
-    expect(bookingCall.body.couponDiscountValue).toBe(10);
-    expect(bookingCall.body.couponDiscountAmount).toBe(10);
-    expect(bookingCall.body.deferEmailsUntilConfirmation).toBe(true);
-    expect(mockNavigate).toHaveBeenCalledWith("/thank-you", {
-      state: {
-        bookingConfirmation: {
-          bookingId: "b3",
-          emailDispatchToken: "dispatch-token-free",
-        },
-      },
-      replace: true,
-    });
+    expect(screen.getByText("Performance Vertex Overhaul")).toBeInTheDocument();
+    expect(screen.queryByText(/legacy/i)).not.toBeInTheDocument();
   });
 });

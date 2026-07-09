@@ -58,10 +58,16 @@ export default function BookingEmailDispatchEffect() {
       }),
       keepalive: true,
     })
-      .then((response) => {
+      .then(async (response) => {
         if (cancelled) return;
 
-        if (response.ok || TERMINAL_FAILURE_STATUSES.has(response.status)) {
+        const body = await response.json().catch(() => ({}));
+        const allSent =
+          body?.emailDispatch?.allSent === true ||
+          (body?.emailDispatch?.client?.sent === true &&
+            body?.emailDispatch?.owner?.sent === true);
+
+        if (allSent || TERMINAL_FAILURE_STATUSES.has(response.status)) {
           clearStoredBookingConfirmation();
           return;
         }

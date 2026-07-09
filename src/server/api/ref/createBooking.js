@@ -2,9 +2,16 @@ import { createClient } from "@sanity/client";
 import { verifyHoldToken } from "../../booking/holdToken.js";
 import { resolveBookingPricing, resolveUpgradeContext } from "./pricing.js";
 import {
-  buildSlotBookingId,
+  buildDeterministicBookingId,
   buildSlotHoldId,
+  isExactWholeMinute,
 } from "../../booking/slotIdentity.js";
+import {
+  getBookingSettings,
+  isBookingBlockingStatus,
+  isSlotAllowedForPackage,
+} from "../../booking/slotPolicy.js";
+import { normalizeBookingStatus } from "../../booking/bookingStatus.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import {
   buildDeferredEmailDispatch,
@@ -34,7 +41,14 @@ import {
   PAYMENT_RECORD_TYPE,
   PAYMENT_STATUS_BOOKED,
   PAYMENT_STATUS_EMAIL_PARTIAL,
+  PAYMENT_STATUS_REFUNDED,
 } from "../payment/paymentRecord.js";
+import { commitBookingTransaction } from "./bookingCommit.js";
+import { reserveCouponUse } from "./couponReservations.js";
+import {
+  verifyFrozenUpgradeIntent,
+  verifyUpgradeIntentToken,
+} from "./upgradeIntentToken.js";
 
 const { resolvePaymentProviders } = providerConfig;
 
@@ -203,7 +217,11 @@ const findPaymentRecordForBooking = async ({
 };
 
 const isTestEnv = process.env.NODE_ENV === "test";
-const TRUSTED_PAYMENT_FINALIZE_SOURCES = new Set(["webhook", "reconcile"]);
+const TRUSTED_PAYMENT_FINALIZE_SOURCES = new Set([
+  "client",
+  "webhook",
+  "reconcile",
+]);
 
 export default async function handler(req, res) {
   if (req.method !== "POST")
@@ -237,8 +255,14 @@ export default async function handler(req, res) {
       slotHoldExpiresAt = "",
       paymentProvider = "",
       paymentRecordId = "",
+      bookingRequestId = "",
+      upgradeIntentToken = "",
       deferEmailsUntilConfirmation = false,
     } = req.body || {};
+    const normalizedStatus = normalizeBookingStatus(status);
+    if (!normalizedStatus) {
+      return res.status(400).json({ error: "Invalid booking status." });
+    }
     const isUpgrade = !!originalOrderId;
     const paymentFinalizeSource = String(
       req.internalContext?.paymentFinalizeSource || ""
@@ -247,21 +271,61 @@ export default async function handler(req, res) {
       .toLowerCase();
     const trustedPaymentFinalizeSource =
       TRUSTED_PAYMENT_FINALIZE_SOURCES.has(paymentFinalizeSource);
-    const clientAddress = getClientAddress(req);
-    const rateLimitKeyParts = [
-      "create-booking",
-      clientAddress,
-      String(paymentProvider || "").trim().toLowerCase(),
-      String(originalOrderId || "").trim().toLowerCase(),
-      String(startTimeUTC || "").trim().toLowerCase(),
-      String(paypalOrderId || "").trim().toLowerCase(),
-      String(razorpayPaymentId || "").trim().toLowerCase(),
-    ];
-
+    const paymentProofClaimId = String(
+      req.internalContext?.paymentProofClaimId || ""
+    ).trim();
+    const paymentFinalizationLeaseId = String(
+      req.internalContext?.paymentFinalizationLeaseId || ""
+    ).trim();
+    const existingCouponReservationId = String(
+      req.internalContext?.couponReservationId || ""
+    ).trim();
+    const emailDispatchAlreadyComplete =
+      req.internalContext?.emailDispatchAlreadyComplete === true;
+    const emailDispatchCompletedAt = String(
+      req.internalContext?.emailDispatchCompletedAt || ""
+    ).trim();
+    const isInternalPaymentFinalization = !!req.internalContext && (
+      !!paymentFinalizeSource || !!paymentProofClaimId || !!paymentFinalizationLeaseId
+    );
+    const preserveHistoricalAccounting =
+      isInternalPaymentFinalization &&
+      req.internalContext?.preserveHistoricalAccounting === true;
+    const legacyCompletionDeadline = new Date(
+      process.env.PAYMENT_LEGACY_COMPLETION_UNTIL || ""
+    ).getTime();
+    const allowLegacyCompletion =
+      isTestEnv ||
+      (Number.isFinite(legacyCompletionDeadline) &&
+        legacyCompletionDeadline > Date.now());
+    const isLegacyPublicCompletion =
+      !isInternalPaymentFinalization &&
+      ["paypal", "razorpay", "free"].includes(paymentProvider);
+    if (isLegacyPublicCompletion && !allowLegacyCompletion) {
+      return res.status(410).json({
+        error: "This checkout session expired. Please restart checkout.",
+      });
+    }
+    const internalPaymentRecord = isInternalPaymentFinalization && paymentRecordId
+      ? await writeClient.fetch(
+          `*[_type == $type && _id == $id][0]{...}`,
+          { type: PAYMENT_RECORD_TYPE, id: paymentRecordId }
+        )
+      : null;
     if (
+      isInternalPaymentFinalization &&
+      (!internalPaymentRecord?._id || internalPaymentRecord.provider !== paymentProvider)
+    ) {
+      return res.status(409).json({
+        error: "Payment finalization record is no longer valid.",
+      });
+    }
+    const clientAddress = getClientAddress(req);
+    if (
+      !isInternalPaymentFinalization &&
       !requireRateLimit(res, {
-        key: rateLimitKeyParts.join(":"),
-        max: 10,
+        key: `create-booking:${clientAddress}`,
+        max: 30,
         message: "Too many booking attempts. Please try again later.",
       })
     ) {
@@ -278,17 +342,59 @@ export default async function handler(req, res) {
         });
       }
 
-      upgradeContext = await resolveUpgradeContext({
-        originalOrderId,
-        packageTitle,
-        client: writeClient,
-      });
-      originalBooking = upgradeContext.booking;
-      const allowedUpgradeEmails = [originalBooking.email, originalBooking.payerEmail]
+      if (isInternalPaymentFinalization) {
+        originalBooking = await writeClient.fetch(
+          `*[_type == "booking" && _id == $id][0]{...}`,
+          { id: originalOrderId }
+        );
+      } else {
+        upgradeContext = await resolveUpgradeContext({
+          originalOrderId,
+          packageTitle,
+          client: writeClient,
+        });
+        originalBooking = upgradeContext.booking;
+      }
+      if (isInternalPaymentFinalization) {
+        const frozenIntentMatches = verifyFrozenUpgradeIntent({
+          snapshot: internalPaymentRecord.upgradeIntentSnapshot,
+          bookingId: originalOrderId,
+          email: normalizedUpgradeEmail,
+          targetPackageTitle: packageTitle,
+        });
+        if (!frozenIntentMatches) {
+          return res.status(403).json({
+            error: "The frozen upgrade authorization no longer matches.",
+          });
+        }
+      } else {
+        const mayOmitLegacyUpgradeIntent =
+          isLegacyPublicCompletion && allowLegacyCompletion;
+        if (!upgradeIntentToken && !mayOmitLegacyUpgradeIntent) {
+          return res.status(403).json({
+            error: "Upgrade authorization is required.",
+          });
+        }
+      }
+      if (!isInternalPaymentFinalization && upgradeIntentToken) {
+        const intent = verifyUpgradeIntentToken({
+          token: upgradeIntentToken,
+          bookingId: originalBooking?._id || originalOrderId,
+          email: normalizedUpgradeEmail,
+          targetPackageTitle: packageTitle,
+        });
+        if (!intent) {
+          return res.status(403).json({
+            error: "Upgrade authorization expired or no longer matches.",
+          });
+        }
+      }
+      const allowedUpgradeEmails = [originalBooking?.email, originalBooking?.payerEmail]
         .map(normalizeEmail)
         .filter(Boolean);
 
       if (
+        !isInternalPaymentFinalization &&
         allowedUpgradeEmails.length > 0 &&
         !allowedUpgradeEmails.includes(normalizedUpgradeEmail)
       ) {
@@ -584,14 +690,29 @@ export default async function handler(req, res) {
       delete recordSet._type;
 
       if (existingRecord?._id) {
-        await writeClient
-          .patch(existingRecord._id)
-          .set(recordSet)
-          .setIfMissing({
-            _type: PAYMENT_RECORD_TYPE,
-            createdAt: existingRecord.createdAt || now,
-          })
-          .commit();
+        if (existingRecord.status === PAYMENT_STATUS_REFUNDED) {
+          return existingRecord;
+        }
+        let recordPatch = writeClient.patch(existingRecord._id);
+        if (
+          existingRecord._rev &&
+          typeof recordPatch.ifRevisionId === "function"
+        ) {
+          recordPatch = recordPatch.ifRevisionId(existingRecord._rev);
+        }
+        try {
+          await recordPatch
+            .set(recordSet)
+            .setIfMissing({
+              _type: PAYMENT_RECORD_TYPE,
+              createdAt: existingRecord.createdAt || now,
+            })
+            .commit();
+        } catch (error) {
+          if (Number(error?.statusCode || error?.status || 0) !== 409) {
+            throw error;
+          }
+        }
         return writeClient.fetch(
           `*[_type == $type && _id == $id][0]`,
           { type: PAYMENT_RECORD_TYPE, id: existingRecord._id }
@@ -604,14 +725,28 @@ export default async function handler(req, res) {
         const conflict =
           Number(error?.statusCode || error?.status || 0) === 409;
         if (!conflict) throw error;
-        await writeClient
-          .patch(recordId)
-          .set(recordSet)
-          .setIfMissing({
-            _type: PAYMENT_RECORD_TYPE,
-            createdAt: now,
-          })
-          .commit();
+        const racedRecord = await writeClient.fetch(
+          `*[_type == $type && _id == $id][0]`,
+          { type: PAYMENT_RECORD_TYPE, id: recordId }
+        );
+        if (racedRecord?.status !== PAYMENT_STATUS_REFUNDED) {
+          let racedPatch = writeClient.patch(recordId);
+          if (racedRecord?._rev && typeof racedPatch.ifRevisionId === "function") {
+            racedPatch = racedPatch.ifRevisionId(racedRecord._rev);
+          }
+          await racedPatch
+            .set(recordSet)
+            .setIfMissing({
+              _type: PAYMENT_RECORD_TYPE,
+              createdAt: now,
+            })
+            .commit()
+            .catch((patchError) => {
+              if (Number(patchError?.statusCode || patchError?.status || 0) !== 409) {
+                throw patchError;
+              }
+            });
+        }
       }
 
       return writeClient.fetch(
@@ -708,7 +843,7 @@ export default async function handler(req, res) {
     };
 
     if (paymentProvider === "free") {
-      if (status !== "captured") {
+      if (normalizedStatus !== "captured") {
         return res.status(400).json({
           error: "Free bookings must have status 'captured'.",
         });
@@ -720,48 +855,51 @@ export default async function handler(req, res) {
         });
       }
 
-      const freeCoupon = await writeClient.fetch(
-        `*[_type == "coupon" && lower(code) == $code][0]{
-          _id,
-          isActive,
-          timesUsed,
-          maxUses,
-          discountType,
-          discountPercent,
-          discountAmount
-        }`,
-        { code: String(couponCode).toLowerCase() }
-      );
+      const freeCoupon = preserveHistoricalAccounting
+        ? null
+        : await writeClient.fetch(
+            `*[_type == "coupon" && lower(code) == $code][0]{
+              _id,
+              isActive,
+              timesUsed,
+              maxUses,
+              discountType,
+              discountPercent,
+              discountAmount
+            }`,
+            { code: String(couponCode).toLowerCase() }
+          );
 
-      if (!freeCoupon) {
+      if (!preserveHistoricalAccounting && !freeCoupon) {
         return res.status(400).json({
           error: "Coupon not found or inactive for free booking.",
         });
       }
 
-      const currentUsed = freeCoupon.timesUsed ?? 0;
-      const maxUses = freeCoupon.maxUses;
+      const currentUsed = freeCoupon?.timesUsed ?? 0;
+      const maxUses = freeCoupon?.maxUses;
 
       if (
-        freeCoupon.isActive === false ||
-        (typeof maxUses === "number" && maxUses > 0 && currentUsed >= maxUses)
+        !preserveHistoricalAccounting &&
+        (freeCoupon?.isActive === false ||
+          (typeof maxUses === "number" && maxUses > 0 && currentUsed >= maxUses)
+        )
       ) {
         return res.status(400).json({
           error: "This coupon can no longer be used for free bookings.",
         });
       }
-
     }
 
     if (paymentProvider === "paypal" || paymentProvider === "razorpay") {
-      if (status !== "captured") {
+      if (normalizedStatus !== "captured") {
         return res.status(400).json({
           error: "Only captured payments can create bookings.",
         });
       }
     }
 
-    if (status === "captured" && paymentProvider !== "free") {
+    if (normalizedStatus === "captured" && paymentProvider !== "free") {
       const hasPaypalProof = !!paypalOrderId;
       const hasRazorpayProof = !!razorpayPaymentId;
 
@@ -807,9 +945,22 @@ export default async function handler(req, res) {
     }
 
     const normalizedStartTimeUTC = utcDate.toISOString();
-    const bookingDocId = !isUpgrade
-      ? buildSlotBookingId(normalizedStartTimeUTC)
-      : "";
+    if (!isExactWholeMinute(normalizedStartTimeUTC)) {
+      return res.status(400).json({
+        error: "startTimeUTC must be an exact configured minute.",
+      });
+    }
+    const bookingDocId = buildDeterministicBookingId({
+      paymentRecordId,
+      paymentProvider,
+      providerOrderId: paypalOrderId || razorpayOrderId,
+      providerPaymentId: razorpayPaymentId,
+      idempotencyKey: bookingRequestId,
+      originalOrderId,
+      startTimeUTC: normalizedStartTimeUTC,
+      email: resolvedEmail,
+      couponCode,
+    });
     const expectedHoldId = !isUpgrade
       ? buildSlotHoldId(normalizedStartTimeUTC)
       : "";
@@ -820,6 +971,20 @@ export default async function handler(req, res) {
       return res.status(400).json({
         error: "Missing booking date/time.",
       });
+    }
+
+    if (!isUpgrade) {
+      const settings = await getBookingSettings({ client: writeClient });
+      const slotPolicy = isSlotAllowedForPackage({
+        settings,
+        packageTitle,
+        startTimeUTC: normalizedStartTimeUTC,
+      });
+      if (!slotPolicy.allowed) {
+        return res.status(400).json({
+          error: "This time is not available for the selected package.",
+        });
+      }
     }
 
     const clientTimeZone = resolvedLocalTimeZone;
@@ -844,16 +1009,18 @@ export default async function handler(req, res) {
     let holdUtcIso = "";
     let slotReservationState = isUpgrade ? "upgrade" : "hold_active";
     const isCapturedPaidPayment =
-      status === "captured" &&
+      normalizedStatus === "captured" &&
       (paymentProvider === "paypal" || paymentProvider === "razorpay");
 
     if (!isUpgrade) {
-      const existingBooking = await writeClient.fetch(
-        `*[_type == "booking" && hostDate == $date && hostTime == $time][0]`,
-        { date: bookingDate, time: bookingTime }
+      const existingBookings = await writeClient.fetch(
+        `*[_type == "booking" && startTimeUTC == $startTimeUTC]{_id,status}`,
+        { startTimeUTC: normalizedStartTimeUTC }
       );
 
-      if (existingBooking) {
+      if ((Array.isArray(existingBookings) ? existingBookings : []).some(
+        (booking) => isBookingBlockingStatus(booking?.status)
+      )) {
         return res.status(409).json({
           error: "This slot is already booked.",
         });
@@ -864,6 +1031,7 @@ export default async function handler(req, res) {
           `*[_type == "slotHold"
               && hostDate == $date
               && hostTime == $time
+              && (!defined(phase) || phase in ["active", "payment_pending"])
               && expiresAt > now()][0]`,
           { date: bookingDate, time: bookingTime }
         );
@@ -901,6 +1069,50 @@ export default async function handler(req, res) {
       }
     }
 
+    const livePricing = isInternalPaymentFinalization
+      ? null
+      : await resolveBookingPricing({
+          packageTitle,
+          originalOrderId,
+          referralId,
+          referralCode,
+          couponCode,
+          paymentProvider,
+          client: writeClient,
+          upgradeContext,
+        });
+    const frozenPricing = internalPaymentRecord?.pricingSnapshot;
+    if (
+      isInternalPaymentFinalization &&
+      (!frozenPricing ||
+        !Number.isFinite(Number(frozenPricing.grossAmount)) ||
+        !Number.isFinite(Number(frozenPricing.netAmount)))
+    ) {
+      return res.status(409).json({
+        error: "Frozen payment pricing is unavailable.",
+      });
+    }
+    const resolvedPricing = isInternalPaymentFinalization
+      ? {
+          couponDiscountAmount: Number(frozenPricing.couponDiscountAmount || 0),
+          couponDiscountPercent: Number(frozenPricing.couponDiscountPercent || 0),
+          couponDiscountType: String(frozenPricing.couponDiscountType || "").trim(),
+          couponDiscountValue: Number(frozenPricing.couponDiscountValue || 0),
+          couponDoc: null,
+          effectiveCommissionPercent: Number(frozenPricing.commissionPercent || 0),
+          effectiveDiscountAmount: Number(frozenPricing.discountAmount || 0),
+          effectiveDiscountPercent: Number(frozenPricing.discountPercent || 0),
+          effectiveGrossAmount: Number(frozenPricing.grossAmount || 0),
+          effectiveNetAmount: Number(frozenPricing.netAmount || 0),
+          effectiveReferralCode: String(
+            frozenPricing.effectiveReferralCode || ""
+          ).trim(),
+          effectiveReferralId: String(
+            frozenPricing.effectiveReferralId || ""
+          ).trim(),
+          commissionAmount: Number(frozenPricing.commissionAmount || 0),
+        }
+      : livePricing;
     const {
       couponDiscountAmount,
       couponDiscountPercent,
@@ -915,16 +1127,7 @@ export default async function handler(req, res) {
       effectiveReferralCode,
       effectiveReferralId,
       commissionAmount,
-    } = await resolveBookingPricing({
-      packageTitle,
-      originalOrderId,
-      referralId,
-      referralCode,
-      couponCode,
-      paymentProvider,
-      client: writeClient,
-      upgradeContext,
-    });
+    } = resolvedPricing;
     const resolvedPackagePrice = `$${effectiveGrossAmount.toFixed(2)}`;
 
     let verifiedPayerEmail = payerEmail;
@@ -1074,150 +1277,182 @@ export default async function handler(req, res) {
       }
     }
 
-    let doc;
-    try {
-      doc = await writeClient.create({
-        ...(bookingDocId ? { _id: bookingDocId } : {}),
-        _type: "booking",
-        date: bookingDate,
-        time: bookingTime,
-        discord: resolvedDiscord,
-        email: resolvedEmail,
-        specs: resolvedSpecs,
-        mainGame: resolvedMainGame,
-        message: resolvedMessage,
-        packageTitle,
-        packagePrice: resolvedPackagePrice,
-        status,
-        paymentProvider,
-        paypalOrderId,
-        payerEmail: verifiedPayerEmail,
-        razorpayOrderId,
-        razorpayPaymentId,
-        referralCode: effectiveReferralCode,
-        discountPercent: effectiveDiscountPercent,
-        discountAmount: effectiveDiscountAmount,
-        grossAmount: effectiveGrossAmount,
-        netAmount: effectiveNetAmount,
-        commissionPercent: effectiveCommissionPercent,
-        commissionAmount,
-        hostDate: bookingDate,
-        hostTime: bookingTime,
-        hostTimeZone: OWNER_TZ_NAME,
-        localTimeZone: clientTimeZone,
-        localTimeLabel: clientTime,
-        startTimeUTC: normalizedStartTimeUTC,
-        displayDate: clientDate,
-        displayTime: clientTime,
-        ...(slotReservationState
-          ? { slotReservationState }
-          : {}),
-        ...(originalOrderId ? { originalOrderId } : {}),
-        ...(couponCode
-          ? {
-              couponCode,
-              couponDiscountPercent,
-              couponDiscountAmount,
-              couponDiscountType,
-              couponDiscountValue,
-            }
-          : {}),
-        ...(effectiveReferralId
-          ? { referral: { _type: "reference", _ref: effectiveReferralId } }
-          : {}),
-      });
-    } catch (createError) {
-      const statusCode =
-        Number(createError?.statusCode || createError?.status || 0) || 0;
-      if (bookingDocId && statusCode === 409) {
-        const existingBooking = await writeClient.fetch(
-          `*[_type == "booking" && hostDate == $date && hostTime == $time][0]{
-            _id,
-            paymentProvider,
-            paypalOrderId,
-            razorpayPaymentId
-          }`,
-          { date: bookingDate, time: bookingTime }
-        );
-
-        if (existingBooking?._id) {
-          const samePaypalProof =
-            paymentProvider === "paypal" &&
-            !!paypalOrderId &&
-            existingBooking.paypalOrderId === paypalOrderId;
-          const sameRazorpayProof =
-            paymentProvider === "razorpay" &&
-            !!razorpayPaymentId &&
-            existingBooking.razorpayPaymentId === razorpayPaymentId;
-
-          if (samePaypalProof || sameRazorpayProof) {
-            return respondWithStoredBooking({
-              bookingId: existingBooking._id,
-              idempotent: true,
-            });
-          }
-        }
-
+    let paymentProofClaim = null;
+    let paymentRecordForLease = null;
+    if (paymentProofClaimId || paymentFinalizationLeaseId) {
+      const requiresPaymentProofClaim = paymentProvider !== "free";
+      if (
+        !paymentRecordId ||
+        !paymentFinalizationLeaseId ||
+        (requiresPaymentProofClaim && !paymentProofClaimId)
+      ) {
         return res.status(409).json({
-          error: "This slot is already booked.",
+          error: "Payment finalization authorization is incomplete.",
         });
       }
-      throw createError;
+      [paymentProofClaim, paymentRecordForLease] = await Promise.all([
+        paymentProofClaimId
+          ? writeClient.fetch(
+              `*[_type == "paymentProofClaim" && _id == $id][0]{...}`,
+              { id: paymentProofClaimId }
+            )
+          : null,
+        Promise.resolve(internalPaymentRecord),
+      ]);
+      const expectedOrderId = paypalOrderId || razorpayOrderId;
+      const leaseExpiresAt = new Date(
+        paymentRecordForLease?.finalizationLeaseExpiresAt || ""
+      ).getTime();
+      const invalidClaim = requiresPaymentProofClaim && (
+        !paymentProofClaim?._id ||
+        paymentProofClaim.paymentRecordId !== paymentRecordId ||
+        paymentProofClaim.provider !== paymentProvider ||
+        paymentProofClaim.providerOrderId !== expectedOrderId ||
+        (razorpayPaymentId &&
+          paymentProofClaim.providerPaymentId !== razorpayPaymentId) ||
+        (paymentProofClaim.bookingId && paymentProofClaim.bookingId !== bookingDocId)
+      );
+      const invalidLease =
+        !paymentRecordForLease?._id ||
+        paymentRecordForLease.provider !== paymentProvider ||
+        paymentRecordForLease.status !== "finalizing" ||
+        (requiresPaymentProofClaim &&
+          paymentRecordForLease.paymentProofClaimId !== paymentProofClaimId) ||
+        paymentRecordForLease.finalizationLeaseId !== paymentFinalizationLeaseId ||
+        !Number.isFinite(leaseExpiresAt) ||
+        leaseExpiresAt <= Date.now();
+      if (invalidClaim || invalidLease) {
+        return res.status(409).json({
+          error: "Payment finalization authorization is no longer valid.",
+        });
+      }
     }
 
-    try {
-      await writeClient
-        .patch(doc._id)
-        .setIfMissing({ orderId: doc._id })
-        .commit();
-    } catch (err) {
-      console.error("Failed to set booking orderId:", err);
-    }
-
-    if (!isUpgrade && slotHoldId) {
-      try {
-        await writeClient.delete(slotHoldId);
-      } catch {}
-    }
-
-    if (effectiveReferralId && status === "captured") {
-      try {
-        await writeClient
-          .patch(effectiveReferralId)
-          .inc({ successfulReferrals: 1 })
-          .commit();
-      } catch {}
-    }
-
-    if (couponCode && status === "captured") {
-      try {
-        const couponDoc = await writeClient.fetch(
-          `*[_type == "coupon" && lower(code) == $code][0]{
-            _id, timesUsed, maxUses
-          }`,
-          { code: couponCode.toLowerCase() }
+    let couponReservation = null;
+    if (
+      couponCode &&
+      normalizedStatus === "captured" &&
+      !preserveHistoricalAccounting
+    ) {
+      if (existingCouponReservationId) {
+        const redemption = await writeClient.fetch(
+          `*[_type == "couponRedemption" && _id == $id][0]{...}`,
+          { id: existingCouponReservationId }
         );
-
-        if (couponDoc) {
-          const currentUsed = couponDoc.timesUsed ?? 0;
-          const max = couponDoc.maxUses;
-
-          const patch = writeClient.patch(couponDoc._id).inc({
-            timesUsed: 1,
+        if (!redemption?._id || redemption.status !== "reserved") {
+          return res.status(409).json({
+            error: "Coupon reservation is no longer available.",
           });
-
-          if (typeof max === "number" && max > 0 && currentUsed + 1 >= max) {
-            patch.set({ isActive: false });
-          }
-
-          await patch.commit();
         }
-      } catch {}
+        const reservedCoupon = await writeClient.fetch(
+          `*[_type == "coupon" && _id == $id][0]{...}`,
+          { id: redemption.coupon?._ref || couponDoc?._id }
+        );
+        couponReservation = { coupon: reservedCoupon, redemption, idempotent: true };
+      } else {
+        couponReservation = await reserveCouponUse({
+          client: writeClient,
+          couponCode,
+          ownerId: paymentRecordId || bookingDocId,
+          bookingId: bookingDocId,
+          paymentRecordId,
+        });
+      }
     }
+
+    const bookingDocument = {
+      _id: bookingDocId,
+      _type: "booking",
+      paymentRecordId,
+      paymentProofClaimId,
+      paymentFinalizationLeaseId,
+      date: bookingDate,
+      time: bookingTime,
+      discord: resolvedDiscord,
+      email: resolvedEmail,
+      specs: resolvedSpecs,
+      mainGame: resolvedMainGame,
+      message: resolvedMessage,
+      packageTitle,
+      packagePrice: resolvedPackagePrice,
+      status: normalizedStatus,
+      paymentProvider,
+      paypalOrderId,
+      payerEmail: verifiedPayerEmail,
+      razorpayOrderId,
+      razorpayPaymentId,
+      referralCode: effectiveReferralCode,
+      discountPercent: effectiveDiscountPercent,
+      discountAmount: effectiveDiscountAmount,
+      grossAmount: effectiveGrossAmount,
+      netAmount: effectiveNetAmount,
+      commissionPercent: effectiveCommissionPercent,
+      commissionAmount,
+      hostDate: bookingDate,
+      hostTime: bookingTime,
+      hostTimeZone: OWNER_TZ_NAME,
+      localTimeZone: clientTimeZone,
+      localTimeLabel: clientTime,
+      startTimeUTC: normalizedStartTimeUTC,
+      displayDate: clientDate,
+      displayTime: clientTime,
+      slotReservationState,
+      ...(isInternalPaymentFinalization && emailDispatchAlreadyComplete
+        ? {
+            emailDispatchStatus: "sent",
+            emailDispatchDeferred: false,
+            emailDispatchClientSentAt:
+              emailDispatchCompletedAt || new Date().toISOString(),
+            emailDispatchOwnerSentAt:
+              emailDispatchCompletedAt || new Date().toISOString(),
+          }
+        : {}),
+      ...(originalOrderId ? { originalOrderId } : {}),
+      ...(couponCode
+        ? {
+            couponCode,
+            couponDiscountPercent,
+            couponDiscountAmount,
+            couponDiscountType,
+            couponDiscountValue,
+          }
+        : {}),
+      ...(effectiveReferralId
+        ? { referral: { _type: "reference", _ref: effectiveReferralId } }
+        : {}),
+    };
+    const committed = await commitBookingTransaction({
+      client: writeClient,
+      booking: bookingDocument,
+      idempotencyKey: bookingRequestId,
+      slot: isUpgrade ? null : { startTimeUTC: normalizedStartTimeUTC },
+      hold: holdDoc,
+      couponReservation,
+      referralId:
+        normalizedStatus === "captured" && !preserveHistoricalAccounting
+          ? effectiveReferralId || ""
+          : "",
+      paymentProofClaim,
+      paymentRecordMutation: paymentRecordForLease
+        ? {
+            id: paymentRecordForLease._id,
+            revision: paymentRecordForLease._rev,
+            set: {
+              status: PAYMENT_STATUS_BOOKED,
+              finalizationLeaseId: "",
+              finalizationLeaseExpiresAt: "",
+              recoveryReason: "",
+            },
+          }
+        : null,
+      allowMissingHold:
+        slotReservationState === "reconciled_after_expired_hold" ||
+        slotReservationState === "reconciled_after_missing_hold",
+    });
 
     return respondWithStoredBooking({
-      bookingId: doc._id,
-      idempotent: false,
+      bookingId: committed.bookingId,
+      idempotent: committed.idempotent,
     });
   } catch (err) {
     const message = err?.message || "Server error";

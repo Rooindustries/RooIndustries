@@ -6,6 +6,22 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
   }
 
-  const result = await finalizePaymentSession({ body: req.body });
+  res.setHeader("Cache-Control", "private, no-store");
+  res.setHeader("Pragma", "no-cache");
+  const bearerToken = String(req?.headers?.authorization || "")
+    .replace(/^Bearer\s+/i, "")
+    .trim();
+  const legacyDeadline = new Date(
+    String(process.env.PAYMENT_LEGACY_COMPLETION_UNTIL || "")
+  ).getTime();
+  const legacyOpen = Number.isFinite(legacyDeadline) && legacyDeadline > Date.now();
+  const paymentAccessToken =
+    bearerToken ||
+    (legacyOpen ? String(req?.body?.paymentAccessToken || "").trim() : "");
+  const result = await finalizePaymentSession({
+    body: req.body,
+    paymentAccessToken,
+    allowLegacyTokenFallback: false,
+  });
   return res.status(result.httpStatus).json(result.body);
 }

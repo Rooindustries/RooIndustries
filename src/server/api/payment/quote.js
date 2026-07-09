@@ -1,5 +1,7 @@
 const { resolvePaymentQuote } = require("../ref/pricing.js");
 const { resolvePaymentProviders } = require("./providerConfig.js");
+const { buildQuoteFingerprint } = require("./paymentRecord.js");
+const { verifyUpgradeIntentToken } = require("../ref/upgradeIntentToken.js");
 
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
@@ -8,18 +10,49 @@ module.exports = async function handler(req, res) {
   }
 
   try {
+    const requestBody = req.body || {};
+    const bookingPayload =
+      requestBody.bookingPayload && typeof requestBody.bookingPayload === "object"
+        ? requestBody.bookingPayload
+        : requestBody;
     const {
       packageTitle = "",
       originalOrderId = "",
       referralId = "",
       referralCode = "",
       couponCode = "",
-    } = req.body || {};
+      email = "",
+      upgradeIntentToken = "",
+    } = bookingPayload;
 
     if (!String(packageTitle || "").trim()) {
       return res.status(400).json({
         ok: false,
         error: "Package details are required to quote payment.",
+      });
+    }
+
+    if (originalOrderId && !String(email || "").trim()) {
+      return res.status(400).json({
+        ok: false,
+        code: "upgrade_email_required",
+        error: "The original booking email is required to quote an upgrade.",
+      });
+    }
+
+    if (
+      originalOrderId &&
+      !verifyUpgradeIntentToken({
+        token: upgradeIntentToken,
+        bookingId: originalOrderId,
+        email,
+        targetPackageTitle: packageTitle,
+      })
+    ) {
+      return res.status(403).json({
+        ok: false,
+        code: "upgrade_intent_invalid",
+        error: "Upgrade authorization expired or no longer matches.",
       });
     }
 
@@ -32,9 +65,14 @@ module.exports = async function handler(req, res) {
     });
     const providers = resolvePaymentProviders();
     const isFree = resolvedQuote.paymentProvider === "free";
+    const quoteFingerprint = buildQuoteFingerprint({
+      bookingPayload,
+      quote: resolvedQuote,
+    });
 
     return res.status(200).json({
       ok: true,
+      quoteFingerprint,
       quote: {
         grossAmount: resolvedQuote.effectiveGrossAmount,
         discountAmount: resolvedQuote.effectiveDiscountAmount,
