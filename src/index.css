@@ -548,11 +548,57 @@ html {
 html,
 body {
   overflow-x: hidden;
-  scrollbar-width: none;
 }
 
-body::-webkit-scrollbar {
-  display: none;
+@media (max-width: 767px) {
+  html,
+  body {
+    scrollbar-width: none;
+  }
+
+  html::-webkit-scrollbar,
+  body::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@media (min-width: 768px) {
+  html,
+  body {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-accent-soft) var(--color-canvas-deep);
+  }
+
+  html {
+    scrollbar-gutter: stable;
+  }
+
+  html::-webkit-scrollbar,
+  body::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+
+  html::-webkit-scrollbar-track,
+  body::-webkit-scrollbar-track {
+    background: var(--color-canvas-deep);
+  }
+
+  html::-webkit-scrollbar-thumb,
+  body::-webkit-scrollbar-thumb {
+    background: linear-gradient(
+      180deg,
+      var(--color-accent-soft),
+      var(--color-accent-strong)
+    );
+    border: 3px solid var(--color-canvas-deep);
+    border-radius: 999px;
+  }
+
+  html::-webkit-scrollbar-thumb:hover,
+  body::-webkit-scrollbar-thumb:hover {
+    background: var(--color-accent);
+  }
 }
 
 body {
@@ -2501,9 +2547,9 @@ html.low-performance-mode .app-bg-radial-layer {
 }
 
 /* Contain the fixed navbar to prevent its repaint from invalidating the
-   entire document tree. Safe on fixed-pos elements whose content stays
-   within bounds. */
-html.low-performance-mode .site-nav {
+   entire document tree. Disable it while menus are open because dropdowns
+   intentionally overflow the header bounds. */
+html.low-performance-mode .site-nav:not(.nav-menu-open) {
   contain: layout style !important;
 }
 
