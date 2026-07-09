@@ -25,7 +25,7 @@ describe("getBookingAvailability", () => {
     filterActiveBookings.mockImplementation((bookings = []) => bookings);
   });
 
-  test("returns active and expired holds with explicit hold state and no cleanup mutation", async () => {
+  test("returns only active holds and performs no cleanup mutation", async () => {
     const client = {
       fetch: jest
         .fn()
@@ -58,13 +58,27 @@ describe("getBookingAvailability", () => {
           isExpiredHold: false,
           holdState: "active",
         }),
-        expect.objectContaining({
-          holdId: "hold_expired",
-          isHold: true,
-          isExpiredHold: true,
-          holdState: "expired",
-        }),
       ])
     );
+    expect(availability.bookedSlots).toHaveLength(1);
+  });
+
+  test("treats missing and invalid hold expiry as expired", async () => {
+    const client = {
+      fetch: jest
+        .fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          { _id: "missing", startTimeUTC: "2099-01-05T04:30:00.000Z" },
+          {
+            _id: "invalid",
+            startTimeUTC: "2099-01-05T05:30:00.000Z",
+            expiresAt: "not-a-date",
+          },
+        ]),
+    };
+
+    const availability = await getBookingAvailability({ client });
+    expect(availability.bookedSlots).toEqual([]);
   });
 });

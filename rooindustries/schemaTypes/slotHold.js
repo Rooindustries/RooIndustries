@@ -32,5 +32,16 @@ export default {
       type: 'datetime',
       description: 'After this time the hold is ignored.',
     },
+    {name: 'holdNonce', title: 'Hold Nonce', type: 'string', readOnly: true},
+    {
+      name: 'phase',
+      title: 'Lifecycle Phase',
+      type: 'string',
+      options: {list: ['active', 'payment_pending', 'released', 'consumed']},
+      initialValue: 'active',
+    },
+    {name: 'paymentRecordId', title: 'Payment Record ID', type: 'string', readOnly: true},
+    {name: 'releasedAt', title: 'Released At', type: 'datetime', readOnly: true},
+    {name: 'consumedAt', title: 'Consumed At', type: 'datetime', readOnly: true},
   ],
 }
