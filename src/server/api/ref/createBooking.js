@@ -280,9 +280,17 @@ export default async function handler(req, res) {
     const existingCouponReservationId = String(
       req.internalContext?.couponReservationId || ""
     ).trim();
+    const emailDispatchAlreadyComplete =
+      req.internalContext?.emailDispatchAlreadyComplete === true;
+    const emailDispatchCompletedAt = String(
+      req.internalContext?.emailDispatchCompletedAt || ""
+    ).trim();
     const isInternalPaymentFinalization = !!req.internalContext && (
       !!paymentFinalizeSource || !!paymentProofClaimId || !!paymentFinalizationLeaseId
     );
+    const preserveHistoricalAccounting =
+      isInternalPaymentFinalization &&
+      req.internalContext?.preserveHistoricalAccounting === true;
     const legacyCompletionDeadline = new Date(
       process.env.PAYMENT_LEGACY_COMPLETION_UNTIL || ""
     ).getTime();
@@ -847,37 +855,40 @@ export default async function handler(req, res) {
         });
       }
 
-      const freeCoupon = await writeClient.fetch(
-        `*[_type == "coupon" && lower(code) == $code][0]{
-          _id,
-          isActive,
-          timesUsed,
-          maxUses,
-          discountType,
-          discountPercent,
-          discountAmount
-        }`,
-        { code: String(couponCode).toLowerCase() }
-      );
+      const freeCoupon = preserveHistoricalAccounting
+        ? null
+        : await writeClient.fetch(
+            `*[_type == "coupon" && lower(code) == $code][0]{
+              _id,
+              isActive,
+              timesUsed,
+              maxUses,
+              discountType,
+              discountPercent,
+              discountAmount
+            }`,
+            { code: String(couponCode).toLowerCase() }
+          );
 
-      if (!freeCoupon) {
+      if (!preserveHistoricalAccounting && !freeCoupon) {
         return res.status(400).json({
           error: "Coupon not found or inactive for free booking.",
         });
       }
 
-      const currentUsed = freeCoupon.timesUsed ?? 0;
-      const maxUses = freeCoupon.maxUses;
+      const currentUsed = freeCoupon?.timesUsed ?? 0;
+      const maxUses = freeCoupon?.maxUses;
 
       if (
-        freeCoupon.isActive === false ||
-        (typeof maxUses === "number" && maxUses > 0 && currentUsed >= maxUses)
+        !preserveHistoricalAccounting &&
+        (freeCoupon?.isActive === false ||
+          (typeof maxUses === "number" && maxUses > 0 && currentUsed >= maxUses)
+        )
       ) {
         return res.status(400).json({
           error: "This coupon can no longer be used for free bookings.",
         });
       }
-
     }
 
     if (paymentProvider === "paypal" || paymentProvider === "razorpay") {
@@ -1318,7 +1329,11 @@ export default async function handler(req, res) {
     }
 
     let couponReservation = null;
-    if (couponCode && normalizedStatus === "captured") {
+    if (
+      couponCode &&
+      normalizedStatus === "captured" &&
+      !preserveHistoricalAccounting
+    ) {
       if (existingCouponReservationId) {
         const redemption = await writeClient.fetch(
           `*[_type == "couponRedemption" && _id == $id][0]{...}`,
@@ -1382,6 +1397,16 @@ export default async function handler(req, res) {
       displayDate: clientDate,
       displayTime: clientTime,
       slotReservationState,
+      ...(isInternalPaymentFinalization && emailDispatchAlreadyComplete
+        ? {
+            emailDispatchStatus: "sent",
+            emailDispatchDeferred: false,
+            emailDispatchClientSentAt:
+              emailDispatchCompletedAt || new Date().toISOString(),
+            emailDispatchOwnerSentAt:
+              emailDispatchCompletedAt || new Date().toISOString(),
+          }
+        : {}),
       ...(originalOrderId ? { originalOrderId } : {}),
       ...(couponCode
         ? {
@@ -1404,7 +1429,9 @@ export default async function handler(req, res) {
       hold: holdDoc,
       couponReservation,
       referralId:
-        normalizedStatus === "captured" ? effectiveReferralId || "" : "",
+        normalizedStatus === "captured" && !preserveHistoricalAccounting
+          ? effectiveReferralId || ""
+          : "",
       paymentProofClaim,
       paymentRecordMutation: paymentRecordForLease
         ? {

@@ -206,15 +206,16 @@ export const createRequiresRescheduleBooking = async ({
   couponReservation = null,
   referralId = "",
   paymentHold = null,
+  preserveHistoricalAccounting = false,
 }) => {
   if (!client || !paymentRecord?._id) {
     throw new Error("A payment record is required to create a reschedule booking.");
   }
   const payload = paymentRecord.bookingPayload || {};
   const pricing = paymentRecord.pricingSnapshot || {};
-  const resolvedReferralId = normalize(
-    referralId || pricing.effectiveReferralId || ""
-  );
+  const resolvedReferralId = preserveHistoricalAccounting
+    ? ""
+    : normalize(referralId || pricing.effectiveReferralId || "");
   const booking = prepareDeterministicBooking({
     booking: {
       paymentRecordId: paymentRecord._id,
