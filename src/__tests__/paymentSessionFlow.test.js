@@ -1414,6 +1414,13 @@ describe("payment session flow", () => {
     });
     const record = getPaymentRecord(decoded.payload.paymentRecordId);
     record.status = paymentRecordConstants.PAYMENT_STATUS_CAPTURED_CLIENT;
+    record.emailDispatch = {
+      allSent: true,
+      client: { attempted: true, sent: true },
+      owner: { attempted: true, sent: true },
+    };
+    record.historicalBookingReconstruction = true;
+    record.lastEmailDispatchAt = "2000-01-01T00:05:00.000Z";
     record.updatedAt = "2000-01-01T00:00:00.000Z";
 
     const reconciled = await reconcilePaymentSessions({
@@ -1434,8 +1441,17 @@ describe("payment session flow", () => {
     expect(getOnlyPaymentRecord().status).toBe(
       paymentRecordConstants.PAYMENT_STATUS_BOOKED
     );
+    expect(getOnlyPaymentRecord()).toMatchObject({
+      historicalBookingReconstruction: false,
+      historicalAccountingPreserved: true,
+    });
     expect(mockCreateBooking.mock.calls.at(-1)?.[0]?.body).toMatchObject({
       deferEmailsUntilConfirmation: false,
+    });
+    expect(mockCreateBooking.mock.calls.at(-1)?.[0]?.internalContext).toMatchObject({
+      emailDispatchAlreadyComplete: true,
+      emailDispatchCompletedAt: "2000-01-01T00:05:00.000Z",
+      preserveHistoricalAccounting: true,
     });
   });
 
@@ -1588,6 +1604,8 @@ describe("payment session flow", () => {
     const record = getPaymentRecord(decoded.payload.paymentRecordId);
     record.status = paymentRecordConstants.PAYMENT_STATUS_CAPTURED_CLIENT;
     record.updatedAt = "2000-01-01T00:00:00.000Z";
+    record.holdSnapshot.slotHoldExpiresAt = "2000-01-01T00:00:00.000Z";
+    hold.expiresAt = "2000-01-01T00:00:00.000Z";
 
     const reconciled = await reconcilePaymentSessions({
       req: createReq({}, { "x-cron-secret": "cron-secret" }),
@@ -1599,6 +1617,12 @@ describe("payment session flow", () => {
     expect(getOnlyPaymentRecord()).toMatchObject({
       status: paymentRecordConstants.PAYMENT_STATUS_NEEDS_RECOVERY,
       recoveryReason: "paypal_lookup_exception",
+      holdSnapshot: { phase: "released" },
+    });
+    expect(hold).toMatchObject({
+      phase: "released",
+      paymentRecordId: "",
+      releaseReason: "payment_recovery_hold_expired",
     });
   });
 
@@ -1835,6 +1859,43 @@ describe("payment session flow", () => {
       recoveryReason: "provider_confirmed_unpaid_before_expiry",
       recoveryAttemptCount: 1,
       nextRecoveryAt: expect.any(String),
+    });
+  });
+
+  test("provider-pending recovery releases an expired hold without guessing payment state", async () => {
+    const hold = createHold();
+    const bookingPayload = baseBookingPayload({
+      slotHoldToken: issueTokenForHold(hold),
+    });
+    const started = await startPaymentSession({
+      body: { provider: "paypal", bookingPayload },
+      client: mockClient,
+    });
+    const decoded = verifyPaymentAccessToken({
+      token: started.body.paymentAccessToken,
+    });
+    const record = getPaymentRecord(decoded.payload.paymentRecordId);
+    record.createdAt = "2000-01-01T00:00:00.000Z";
+    record.updatedAt = "2000-01-01T00:00:00.000Z";
+    record.holdSnapshot.slotHoldExpiresAt = "2000-01-01T00:00:00.000Z";
+    hold.expiresAt = "2000-01-01T00:00:00.000Z";
+    mockInspectPayPalOrder.mockResolvedValue({ state: "pending" });
+
+    const result = await reconcilePaymentSessions({
+      req: createReq({}, { authorization: "Bearer cron-secret" }),
+      client: mockClient,
+    });
+
+    expect(result.body.summary).toMatchObject({ scanned: 1, pending: 1 });
+    expect(getOnlyPaymentRecord()).toMatchObject({
+      status: paymentRecordConstants.PAYMENT_STATUS_STARTED,
+      recoveryReason: "provider_payment_pending",
+      holdSnapshot: { phase: "released" },
+    });
+    expect(hold).toMatchObject({
+      phase: "released",
+      paymentRecordId: "",
+      releaseReason: "payment_recovery_hold_expired",
     });
   });
 
@@ -3169,7 +3230,13 @@ describe("payment session flow", () => {
       providerOrderId: "paypal_order_missing_payload",
       status: paymentRecordConstants.PAYMENT_STATUS_NEEDS_RECOVERY,
       bookingPayload: {},
-      pricingSnapshot: { netAmount: 84.99 },
+      pricingSnapshot: {
+        netAmount: 84.99,
+        effectiveReferralId: "ref_historical_missing_payload",
+      },
+      couponReservationId: "couponRedemption.historical_missing_payload",
+      historicalBookingReconstruction: true,
+      historicalAccountingPreserved: true,
       providerPublicData: { currency: "USD" },
       nextRecoveryAt: "2000-01-01T00:00:00.000Z",
       createdAt: "2000-01-01T00:00:00.000Z",
@@ -3202,13 +3269,104 @@ describe("payment session flow", () => {
 
     expect(result.body.summary.finalized).toBe(1);
     expect(createRequiresRescheduleBooking).toHaveBeenCalledTimes(1);
+    expect(createRequiresRescheduleBooking).toHaveBeenCalledWith(
+      expect.objectContaining({
+        couponReservation: null,
+        referralId: "",
+        preserveHistoricalAccounting: true,
+      })
+    );
     expect(getOnlyPaymentRecord()).toMatchObject({
       status: paymentRecordConstants.PAYMENT_STATUS_BOOKED,
       bookingId: "booking_requires_reschedule",
       requiresReschedule: true,
       recoveryCaseId: "bookingRecoveryCase.missing-payload",
       recoveryNotificationRequired: false,
+      historicalBookingReconstruction: false,
+      historicalAccountingPreserved: true,
     });
+  });
+
+  test("reconcile links migration-marked duplicate payment records to the canonical booking", async () => {
+    const canonicalId = "paymentRecord.razorpay.order.canonical";
+    const duplicateId = "paymentRecord.razorpay.payment.duplicate";
+    const claimId = paymentRecordConstants.buildPaymentProofClaimId({
+      provider: "razorpay",
+      providerOrderId: "razorpay_order_duplicate",
+      providerPaymentId: "razorpay_payment_duplicate",
+    });
+    store.paymentRecords.push(
+      {
+        _id: canonicalId,
+        _rev: nextRevision(),
+        _type: "paymentRecord",
+        provider: "razorpay",
+        providerOrderId: "razorpay_order_duplicate",
+        providerPaymentId: "razorpay_payment_duplicate",
+        paymentProofClaimId: claimId,
+        bookingId: "booking_canonical",
+        status: paymentRecordConstants.PAYMENT_STATUS_BOOKED,
+        bookingPayload: baseBookingPayload(),
+        createdAt: "2000-01-01T00:00:00.000Z",
+        updatedAt: "2000-01-01T00:00:00.000Z",
+        events: [],
+      },
+      {
+        _id: duplicateId,
+        _rev: nextRevision(),
+        _type: "paymentRecord",
+        provider: "razorpay",
+        providerOrderId: "razorpay_order_duplicate",
+        providerPaymentId: "razorpay_payment_duplicate",
+        paymentProofClaimId: claimId,
+        canonicalPaymentRecordId: canonicalId,
+        duplicatePaymentRecord: true,
+        status: paymentRecordConstants.PAYMENT_STATUS_NEEDS_RECOVERY,
+        bookingPayload: {},
+        nextRecoveryAt: "2000-01-01T00:00:00.000Z",
+        createdAt: "2000-01-01T00:00:00.000Z",
+        updatedAt: "2000-01-01T00:00:00.000Z",
+        events: [],
+      }
+    );
+    store.paymentProofClaims.push({
+      _id: claimId,
+      _rev: nextRevision(),
+      _type: "paymentProofClaim",
+      paymentRecordId: canonicalId,
+      provider: "razorpay",
+      providerOrderId: "razorpay_order_duplicate",
+      providerPaymentId: "razorpay_payment_duplicate",
+      bookingId: "booking_canonical",
+      status: "claimed",
+    });
+    mockInspectRazorpayOrder.mockResolvedValue({
+      state: "captured",
+      providerOrderId: "razorpay_order_duplicate",
+      providerPaymentId: "razorpay_payment_duplicate",
+    });
+    const createRequiresRescheduleBooking = jest.fn();
+
+    const result = await reconcilePaymentSessions({
+      req: createReq({}, { authorization: "Bearer cron-secret" }),
+      client: mockClient,
+      createRequiresRescheduleBooking,
+    });
+
+    expect(result).toMatchObject({
+      httpStatus: 200,
+      body: { ok: true, summary: { finalized: 1 } },
+    });
+    expect(getPaymentRecord(duplicateId)).toMatchObject({
+      status: paymentRecordConstants.PAYMENT_STATUS_BOOKED,
+      bookingId: "booking_canonical",
+      canonicalPaymentRecordId: canonicalId,
+      duplicatePaymentRecord: true,
+      recoveryReason: "",
+      nextRecoveryAt: "",
+    });
+    expect(createRequiresRescheduleBooking).not.toHaveBeenCalled();
+    expect(store.bookings).toHaveLength(0);
   });
 
   test("reschedule notification failure retries email only without recreating booking", async () => {

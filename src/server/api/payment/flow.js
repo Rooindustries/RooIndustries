@@ -1049,14 +1049,13 @@ const attachImmutableProviderOrder = async ({ client, record, providerPayload })
   }
 };
 
-const claimPaymentProof = async ({
-  client,
+const getPaymentProofClaimIdForRecord = ({
   record,
   providerOrderId = "",
   providerPaymentId = "",
 }) => {
   const provider = String(record?.provider || "").trim().toLowerCase();
-  const claimId =
+  return (
     provider === "free"
       ? `paymentProofClaim.free.${crypto
           .createHash("sha256")
@@ -1067,7 +1066,21 @@ const claimPaymentProof = async ({
           provider: record.provider,
           providerOrderId,
           providerPaymentId,
-        });
+        })
+  );
+};
+
+const claimPaymentProof = async ({
+  client,
+  record,
+  providerOrderId = "",
+  providerPaymentId = "",
+}) => {
+  const claimId = getPaymentProofClaimIdForRecord({
+    record,
+    providerOrderId,
+    providerPaymentId,
+  });
   if (!claimId) {
     const error = new Error("Captured payment proof is incomplete.");
     error.status = 400;
@@ -1115,6 +1128,87 @@ const claimPaymentProof = async ({
     conflict.status = 409;
     conflict.code = "payment_proof_already_claimed";
     throw conflict;
+  }
+};
+
+const normalizeMarkedDuplicatePaymentRecord = async ({
+  client,
+  record,
+  providerOrderId = "",
+  providerPaymentId = "",
+  error = null,
+}) => {
+  if (String(error?.code || "") !== "payment_proof_already_claimed") return null;
+  const canonicalPaymentRecordId = String(
+    record?.canonicalPaymentRecordId || ""
+  ).trim();
+  if (record?.duplicatePaymentRecord !== true || !canonicalPaymentRecordId) {
+    return null;
+  }
+
+  const claimId =
+    String(record.paymentProofClaimId || "").trim() ||
+    getPaymentProofClaimIdForRecord({
+      record,
+      providerOrderId,
+      providerPaymentId,
+    });
+  const claim = await getDocumentById({
+    client,
+    id: claimId,
+    type: PAYMENT_PROOF_CLAIM_TYPE,
+  });
+  if (
+    !claim?._id ||
+    String(claim.paymentRecordId || "").trim() !== canonicalPaymentRecordId
+  ) {
+    return null;
+  }
+
+  const canonical = await getPaymentRecordById(client, canonicalPaymentRecordId);
+  if (!canonical?._id) return null;
+  const bookingId = String(claim.bookingId || canonical.bookingId || "").trim();
+  const canonicalStatus = String(canonical.status || "").trim().toLowerCase();
+  const recoveryAttemptCount = Number(record.recoveryAttemptCount || 0) + 1;
+  const status = bookingId
+    ? canonicalStatus === PAYMENT_STATUS_REFUNDED
+      ? PAYMENT_STATUS_REFUNDED
+      : PAYMENT_STATUS_BOOKED
+    : PAYMENT_STATUS_NEEDS_RECOVERY;
+  const set = {
+    canonicalPaymentRecordId,
+    duplicatePaymentRecord: true,
+    paymentProofClaimId: claim._id,
+    bookingId,
+    status,
+    recoveryReason: bookingId ? "" : "canonical_payment_pending",
+    recoveryAttemptCount,
+    nextRecoveryAt: bookingId
+      ? ""
+      : getNextPaymentRecoveryAt(recoveryAttemptCount),
+    emailDispatchRequired: false,
+    finalizationLeaseId: "",
+    finalizationLeaseExpiresAt: "",
+  };
+
+  try {
+    return await patchPaymentRecord({
+      client,
+      record,
+      revisionGuard: true,
+      set,
+      event: buildPaymentRecordEvent({
+        status,
+        source: "reconcile",
+        reason: bookingId
+          ? "duplicate_payment_record_linked"
+          : "duplicate_payment_record_waiting_for_canonical",
+        data: { canonicalPaymentRecordId, bookingId },
+      }),
+    });
+  } catch (patchError) {
+    if (!isConflictError(patchError)) throw patchError;
+    return getPaymentRecordById(client, record._id);
   }
 };
 
@@ -1328,6 +1422,56 @@ const releasePendingHold = async ({ client, record }) => {
   }
 };
 
+const releaseExpiredRecoveryHold = async ({ client, record }) => {
+  const holdSnapshot = normalizeObject(record?.holdSnapshot);
+  const holdId = String(holdSnapshot.slotHoldId || "").trim();
+  if (!holdId) return null;
+  const holdDoc = await getHoldById(client, holdId);
+  const expiry = new Date(
+    holdDoc?.expiresAt || holdSnapshot.slotHoldExpiresAt || ""
+  ).getTime();
+  if (Number.isFinite(expiry) && expiry > Date.now()) return null;
+
+  const releasedAt = nowIso();
+  if (
+    holdDoc?._id &&
+    String(holdDoc.paymentRecordId || "").trim() === String(record?._id || "").trim()
+  ) {
+    try {
+      let patch = client.patch(holdId).set({
+        phase: "released",
+        expiresAt: releasedAt,
+        paymentRecordId: "",
+        paymentProvider: "",
+        releaseReason: "payment_recovery_hold_expired",
+      });
+      if (holdDoc._rev && typeof patch.ifRevisionId === "function") {
+        patch = patch.ifRevisionId(holdDoc._rev);
+      }
+      await patch.commit();
+    } catch (error) {
+      if (!isConflictError(error)) throw error;
+      const current = await getHoldById(client, holdId);
+      if (
+        current?._id &&
+        String(current.paymentRecordId || "").trim() ===
+          String(record?._id || "").trim() &&
+        !["released", "consumed"].includes(
+          String(current.phase || "").trim().toLowerCase()
+        )
+      ) {
+        return null;
+      }
+    }
+  }
+
+  return {
+    ...holdSnapshot,
+    phase: "released",
+    slotHoldExpiresAt: releasedAt,
+  };
+};
+
 const releaseCouponForPaymentRecord = async ({
   client,
   record,
@@ -1465,6 +1609,10 @@ const markRetryableFinalizeFailure = async ({
     };
   }
   const recoveryAttemptCount = Number(current.recoveryAttemptCount || 0) + 1;
+  const releasedHoldSnapshot = await releaseExpiredRecoveryHold({
+    client,
+    record: current,
+  });
   let nextRecord;
   try {
     nextRecord = await patchPaymentRecord({
@@ -1479,6 +1627,9 @@ const markRetryableFinalizeFailure = async ({
         finalizationLeaseId: "",
         finalizationLeaseExpiresAt: "",
         source,
+        ...(releasedHoldSnapshot
+          ? { holdSnapshot: releasedHoldSnapshot }
+          : {}),
         ...(Number(details?.createBookingStatus || 0) > 0
           ? {
               recoveryCategory: "booking_finalize",
@@ -1804,6 +1955,24 @@ const finalizePaymentRecordInternal = async ({
         verification.providerPaymentId || workingRecord.providerPaymentId || "",
     });
   } catch (error) {
+    const duplicate = await normalizeMarkedDuplicatePaymentRecord({
+      client,
+      record: workingRecord,
+      providerOrderId:
+        verification.providerOrderId || workingRecord.providerOrderId || "",
+      providerPaymentId:
+        verification.providerPaymentId || workingRecord.providerPaymentId || "",
+      error,
+    });
+    if (duplicate?._id) {
+      const linked = !!String(duplicate.bookingId || "").trim();
+      return {
+        ok: linked,
+        httpStatus: linked ? 200 : 202,
+        paymentRecord: duplicate,
+        response: buildPublicStatusBody(duplicate),
+      };
+    }
     return markRetryableFinalizeFailure({
       client,
       record: workingRecord,
@@ -1924,6 +2093,17 @@ const finalizePaymentRecordInternal = async ({
     paymentProofClaimId: String(proofClaim?._id || "").trim(),
     paymentFinalizationLeaseId: lease.leaseId,
     couponReservationId: String(workingRecord.couponReservationId || "").trim(),
+    emailDispatchAlreadyComplete: isEmailDispatchComplete(
+      workingRecord.emailDispatch
+    ),
+    emailDispatchCompletedAt: String(
+      workingRecord.lastEmailDispatchAt ||
+        workingRecord.updatedAt ||
+        workingRecord.createdAt ||
+        ""
+    ).trim(),
+    preserveHistoricalAccounting:
+      workingRecord.historicalBookingReconstruction === true,
   });
 
   if (result.status >= 200 && result.status < 300 && result.body?.bookingId) {
@@ -1976,6 +2156,13 @@ const finalizePaymentRecordInternal = async ({
             verificationWarning: String(
               bookingDoc?.paymentVerificationWarning || ""
             ).trim(),
+            ...(workingRecord.historicalBookingReconstruction === true
+              ? {
+                  historicalBookingReconstruction: false,
+                  historicalBookingReconstructedAt: nowIso(),
+                  historicalAccountingPreserved: true,
+                }
+              : {}),
           },
           event: buildPaymentRecordEvent({
             status: nextStatus,
@@ -2837,6 +3024,10 @@ const scheduleProviderRecoveryCheck = async ({
   reason,
 }) => {
   const recoveryAttemptCount = Number(record.recoveryAttemptCount || 0) + 1;
+  const releasedHoldSnapshot = await releaseExpiredRecoveryHold({
+    client,
+    record,
+  });
   return patchPaymentRecord({
     client,
     record,
@@ -2846,6 +3037,9 @@ const scheduleProviderRecoveryCheck = async ({
       lastAttemptAt: nowIso(),
       nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
       source: "reconcile",
+      ...(releasedHoldSnapshot
+        ? { holdSnapshot: releasedHoldSnapshot }
+        : {}),
     },
     event: buildPaymentRecordEvent({
       status: String(record.status || PAYMENT_STATUS_STARTED).trim().toLowerCase(),
@@ -2937,7 +3131,12 @@ const recoverCapturedPaymentAsReschedule = async ({
       providerOrderId: recoveredProviderOrderId,
       providerPaymentId: recoveredProviderPaymentId,
     }));
-  const couponRedemptionId = String(record.couponReservationId || "").trim();
+  const preserveHistoricalAccounting =
+    record.historicalBookingReconstruction === true ||
+    record.historicalAccountingPreserved === true;
+  const couponRedemptionId = preserveHistoricalAccounting
+    ? ""
+    : String(record.couponReservationId || "").trim();
   const holdId = String(record?.holdSnapshot?.slotHoldId || "").trim();
   const [couponRedemption, candidateHold] = await Promise.all([
     couponRedemptionId
@@ -2975,7 +3174,9 @@ const recoverCapturedPaymentAsReschedule = async ({
       ? candidateHold
       : null;
   const referralId = String(
-    record?.pricingSnapshot?.effectiveReferralId || ""
+    preserveHistoricalAccounting
+      ? ""
+      : record?.pricingSnapshot?.effectiveReferralId || ""
   ).trim();
   const normalizedReason = reason || "captured_payment_requires_reschedule";
   const recoveryAttemptCount = Number(record.recoveryAttemptCount || 0) + 1;
@@ -3008,7 +3209,16 @@ const recoverCapturedPaymentAsReschedule = async ({
       : {}),
     couponAccountingRecoveredAfterRelease:
       couponRedemption?.status === "released",
-    referralAccountingApplied: !!referralId,
+    referralAccountingApplied: preserveHistoricalAccounting
+      ? record.referralAccountingApplied === true
+      : !!referralId,
+    ...(record.historicalBookingReconstruction === true
+      ? {
+          historicalBookingReconstruction: false,
+          historicalBookingReconstructedAt: nowIso(),
+          historicalAccountingPreserved: true,
+        }
+      : {}),
     nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
     events: mergePaymentRecordEvents(
       record.events,
@@ -3040,6 +3250,7 @@ const recoverCapturedPaymentAsReschedule = async ({
       couponReservation,
       referralId,
       paymentHold,
+      preserveHistoricalAccounting,
     });
   } catch (error) {
     const current = await getPaymentRecordById(client, record._id);
@@ -3567,16 +3778,37 @@ export const reconcilePaymentSessions = async ({
       if (inspection.state === "captured") {
         providerData = inspection.providerData || {};
         if (!hasRecoverableBookingPayload(record)) {
-          const recovered = await recoverCapturedPaymentAsReschedule({
-            client,
-            record,
-            reason: "captured_payment_missing_booking_payload",
-            createRequiresRescheduleBooking,
-            dispatchRescheduleNotifications,
-            providerData,
-          });
+          let recovered;
+          try {
+            recovered = await recoverCapturedPaymentAsReschedule({
+              client,
+              record,
+              reason: "captured_payment_missing_booking_payload",
+              createRequiresRescheduleBooking,
+              dispatchRescheduleNotifications,
+              providerData,
+            });
+          } catch (error) {
+            const duplicate = await normalizeMarkedDuplicatePaymentRecord({
+              client,
+              record,
+              providerOrderId: record.providerOrderId,
+              providerPaymentId:
+                providerData.providerPaymentId ||
+                providerData.razorpayPaymentId ||
+                providerData.paypalPaymentId ||
+                record.providerPaymentId,
+              error,
+            });
+            if (!duplicate?._id) throw error;
+            recovered = duplicate;
+          }
           if (recovered?._id) {
-            summary.finalized += 1;
+            if (String(recovered.bookingId || "").trim()) {
+              summary.finalized += 1;
+            } else {
+              summary.recovery += 1;
+            }
           } else {
             summary.recovery += 1;
           }
@@ -3645,16 +3877,37 @@ export const reconcilePaymentSessions = async ({
         recoveryHttpStatus >= 400 &&
         recoveryHttpStatus < 500
       ) {
-        const recovered = await recoverCapturedPaymentAsReschedule({
-          client,
-          record: result.paymentRecord,
-          reason: result.paymentRecord.recoveryReason,
-          createRequiresRescheduleBooking,
-          dispatchRescheduleNotifications,
-          providerData,
-        });
+        let recovered;
+        try {
+          recovered = await recoverCapturedPaymentAsReschedule({
+            client,
+            record: result.paymentRecord,
+            reason: result.paymentRecord.recoveryReason,
+            createRequiresRescheduleBooking,
+            dispatchRescheduleNotifications,
+            providerData,
+          });
+        } catch (error) {
+          const duplicate = await normalizeMarkedDuplicatePaymentRecord({
+            client,
+            record: result.paymentRecord,
+            providerOrderId: result.paymentRecord.providerOrderId,
+            providerPaymentId:
+              providerData.providerPaymentId ||
+              providerData.razorpayPaymentId ||
+              providerData.paypalPaymentId ||
+              result.paymentRecord.providerPaymentId,
+            error,
+          });
+          if (!duplicate?._id) throw error;
+          recovered = duplicate;
+        }
         if (recovered?._id) {
-          summary.finalized += 1;
+          if (String(recovered.bookingId || "").trim()) {
+            summary.finalized += 1;
+          } else {
+            summary.recovery += 1;
+          }
         } else {
           summary.recovery += 1;
         }

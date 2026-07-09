@@ -2619,6 +2619,94 @@ describe("booking reservation API", () => {
     });
   });
 
+  test("internal reconstruction preserves completed email delivery without resending", async () => {
+    const startTimeUTC = "2025-01-15T10:00:00.000Z";
+    const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
+    const paymentRecordId = "paymentRecord.paypal.order.email_reconstruction";
+    const claimId = "paymentProofClaim.paypal.email_reconstruction";
+    const leaseId = "lease_email_reconstruction";
+    const completedAt = "2025-01-15T10:05:00.000Z";
+    store.referrals.push({
+      _id: "ref_historical_reconstruction",
+      _type: "referral",
+      successfulReferrals: 4,
+    });
+    store.paymentRecords.push({
+      _id: paymentRecordId,
+      _rev: "payment_record_email_reconstruction_rev",
+      _type: "paymentRecord",
+      provider: "paypal",
+      providerOrderId: "email_reconstruction",
+      status: "finalizing",
+      paymentProofClaimId: claimId,
+      finalizationLeaseId: leaseId,
+      finalizationLeaseExpiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      pricingSnapshot: {
+        grossAmount: 84.99,
+        netAmount: 84.99,
+        couponDiscountAmount: 0,
+        couponDiscountPercent: 0,
+        effectiveReferralId: "ref_historical_reconstruction",
+      },
+    });
+    store.paymentProofClaims.push({
+      _id: claimId,
+      _rev: "proof_claim_email_reconstruction_rev",
+      _type: "paymentProofClaim",
+      paymentRecordId,
+      provider: "paypal",
+      providerOrderId: "email_reconstruction",
+      providerPaymentId: "",
+    });
+    const utcDate = new Date(startTimeUTC);
+    const res = createRes();
+
+    await createBooking(
+      {
+        ...createReq({
+          email: CLIENT_EMAIL,
+          packageTitle: "Performance Vertex Overhaul",
+          status: "captured",
+          paymentProvider: "paypal",
+          paypalOrderId: "email_reconstruction",
+          paymentRecordId,
+          couponCode: "HISTORICAL",
+          startTimeUTC,
+          localTimeZone: "America/Los_Angeles",
+          displayDate: formatClientDate(utcDate, "America/Los_Angeles"),
+          displayTime: formatClientTime(utcDate, "America/Los_Angeles"),
+          slotHoldId: hold.body.holdId,
+          slotHoldToken: hold.body.holdToken,
+          deferEmailsUntilConfirmation: false,
+        }),
+        internalContext: {
+          paymentFinalizeSource: "reconcile",
+          paymentProofClaimId: claimId,
+          paymentFinalizationLeaseId: leaseId,
+          emailDispatchAlreadyComplete: true,
+          emailDispatchCompletedAt: completedAt,
+          preserveHistoricalAccounting: true,
+        },
+      },
+      res
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(store.bookings).toHaveLength(1);
+    expect(store.bookings[0]).toMatchObject({
+      emailDispatchStatus: "sent",
+      emailDispatchClientSentAt: completedAt,
+      emailDispatchOwnerSentAt: completedAt,
+    });
+    expect(mockSendEmail).not.toHaveBeenCalled();
+    expect(store.couponRedemptions).toHaveLength(0);
+    expect(store.referrals[0].successfulReferrals).toBe(4);
+    expect(store.paymentRecords[0]).toMatchObject({
+      status: "booked",
+      bookingId: res.body.bookingId,
+    });
+  });
+
   test("free internal finalization requires a valid lease but no payment proof claim", async () => {
     store.coupons.push({
       _id: "coupon_internal_free",
