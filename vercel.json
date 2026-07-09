@@ -48,6 +48,10 @@
   ],
   "crons": [
     {
+      "path": "/api/payment/reconcile",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/ref/cronSyncAll",
       "schedule": "*/10 * * * *"
     }
