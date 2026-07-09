@@ -1,5 +1,6 @@
 import { createClient } from "@sanity/client";
 import { Resend } from "resend";
+import crypto from "crypto";
 
 const writeClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -159,6 +160,7 @@ export const getBookingForEmailDispatch = async ({
   return client.fetch(
     `*[_type == "booking" && _id == $id][0]{
       _id,
+      _rev,
       discord,
       email,
       payerEmail,
@@ -188,6 +190,10 @@ export const getBookingForEmailDispatch = async ({
       emailDispatchQueuedAt,
       emailDispatchLastAttemptAt,
       emailDispatchLastError,
+      emailDispatchAttemptCount,
+      emailDispatchNextAttemptAt,
+      emailDispatchLeaseId,
+      emailDispatchLeaseExpiresAt,
       emailDispatchClientSentAt,
       emailDispatchOwnerSentAt
     }`,
@@ -315,12 +321,12 @@ export const sendBookingEmailsForBooking = async ({
   client = writeClient,
   booking = null,
 }) => {
-  const resolvedBooking =
-    booking &&
-    booking._id === bookingId &&
-    hasRenderableBookingEmailFields(booking)
+  const suppliedBooking =
+    booking && booking._id === bookingId && hasRenderableBookingEmailFields(booking)
       ? booking
-      : await getBookingForEmailDispatch({ bookingId, client });
+      : null;
+  const resolvedBooking =
+    (await getBookingForEmailDispatch({ bookingId, client })) || suppliedBooking;
 
   if (!resolvedBooking?._id) {
     return {
@@ -334,7 +340,64 @@ export const sendBookingEmailsForBooking = async ({
 
   const dispatch = buildEmailDispatchState();
   dispatch.deliveryEnabled = !!String(process.env.FROM_EMAIL || "").trim() && !!resend;
-  const now = new Date().toISOString();
+  const nowMs = Date.now();
+  const now = new Date(nowMs).toISOString();
+  const existingLeaseExpiresAt = new Date(
+    resolvedBooking.emailDispatchLeaseExpiresAt || ""
+  ).getTime();
+  if (
+    resolvedBooking.emailDispatchLeaseId &&
+    Number.isFinite(existingLeaseExpiresAt) &&
+    existingLeaseExpiresAt > nowMs
+  ) {
+    return {
+      httpStatus: 202,
+      body: {
+        ok: true,
+        bookingId: resolvedBooking._id,
+        retryable: true,
+        emailDispatch: {
+          ...buildDeferredEmailDispatch({ booking: resolvedBooking }),
+          skippedReason: "dispatch_in_progress",
+        },
+      },
+    };
+  }
+
+  const leaseId = crypto.randomUUID();
+  const leaseExpiresAt = new Date(nowMs + 2 * 60 * 1000).toISOString();
+  try {
+    let leasePatch = client.patch(resolvedBooking._id);
+    if (resolvedBooking._rev && typeof leasePatch.ifRevisionId === "function") {
+      leasePatch = leasePatch.ifRevisionId(resolvedBooking._rev);
+    }
+    await leasePatch
+      .set({
+        emailDispatchLeaseId: leaseId,
+        emailDispatchLeaseExpiresAt: leaseExpiresAt,
+        emailDispatchLastAttemptAt: now,
+      })
+      .setIfMissing({ emailDispatchAttemptCount: 0 })
+      .inc({ emailDispatchAttemptCount: 1 })
+      .commit();
+  } catch (error) {
+    if (Number(error?.statusCode || error?.status || 0) === 409) {
+      return {
+        httpStatus: 202,
+        body: {
+          ok: true,
+          bookingId: resolvedBooking._id,
+          retryable: true,
+          emailDispatch: {
+            ...buildDeferredEmailDispatch({ booking: resolvedBooking }),
+            skippedReason: "dispatch_in_progress",
+          },
+        },
+      };
+    }
+    throw error;
+  }
+
   const patchValues = {
     emailDispatchLastAttemptAt: now,
     emailDispatchLastError: "",
@@ -368,12 +431,18 @@ export const sendBookingEmailsForBooking = async ({
     dispatch.allSent = dispatch.client.sent && dispatch.owner.sent;
     patchValues.emailDispatchStatus = dispatch.allSent ? "sent" : "delivery_disabled";
     patchValues.emailDispatchDeferred = false;
+    patchValues.emailDispatchLeaseId = "";
+    patchValues.emailDispatchLeaseExpiresAt = "";
+    patchValues.emailDispatchNextAttemptAt = dispatch.allSent
+      ? ""
+      : new Date(nowMs + 5 * 60 * 1000).toISOString();
     await client.patch(resolvedBooking._id).set(patchValues).commit();
     return {
-      httpStatus: 200,
+      httpStatus: dispatch.allSent ? 200 : 503,
       body: {
-        ok: true,
+        ok: dispatch.allSent,
         bookingId: resolvedBooking._id,
+        retryable: !dispatch.allSent,
         emailDispatch: dispatch,
       },
     };
@@ -387,20 +456,23 @@ export const sendBookingEmailsForBooking = async ({
   } else {
     dispatch.client.attempted = true;
     try {
-      const { error } = await resend.emails.send({
-        from,
-        to: clientRecipient,
-        subject: `Your ${siteName} booking`,
-        html: emailHtml({
-          logoUrl,
-          siteName,
-          heading: "Booking Received ✨",
-          intro:
-            "To continue with your booking, please join the Roo Industries Discord using the button above. I'll contact you there (or by email if needed) to confirm your time and details.",
-          fields: clientFields,
-          discordInviteUrl: DISCORD_INVITE_URL,
-        }),
-      });
+      const { error } = await resend.emails.send(
+        {
+          from,
+          to: clientRecipient,
+          subject: `Your ${siteName} booking`,
+          html: emailHtml({
+            logoUrl,
+            siteName,
+            heading: "Booking Received ✨",
+            intro:
+              "To continue with your booking, please join the Roo Industries Discord using the button above. I'll contact you there (or by email if needed) to confirm your time and details.",
+            fields: clientFields,
+            discordInviteUrl: DISCORD_INVITE_URL,
+          }),
+        },
+        { idempotencyKey: `booking-${resolvedBooking._id}-client` }
+      );
 
       if (error) {
         dispatch.client.skippedReason =
@@ -423,18 +495,21 @@ export const sendBookingEmailsForBooking = async ({
   } else {
     dispatch.owner.attempted = true;
     try {
-      const { error } = await resend.emails.send({
-        from,
-        to: owner,
-        subject: `New booking ${bookingRef} - ${resolvedBooking.packageTitle} (${ownerScheduleLabel})`,
-        html: emailHtml({
-          logoUrl,
-          siteName,
-          heading: "New Booking Received",
-          intro: "A new booking was submitted:",
-          fields: ownerFields,
-        }),
-      });
+      const { error } = await resend.emails.send(
+        {
+          from,
+          to: owner,
+          subject: `New booking ${bookingRef} - ${resolvedBooking.packageTitle} (${ownerScheduleLabel})`,
+          html: emailHtml({
+            logoUrl,
+            siteName,
+            heading: "New Booking Received",
+            intro: "A new booking was submitted:",
+            fields: ownerFields,
+          }),
+        },
+        { idempotencyKey: `booking-${resolvedBooking._id}-owner` }
+      );
 
       if (error) {
         dispatch.owner.skippedReason =
@@ -462,15 +537,253 @@ export const sendBookingEmailsForBooking = async ({
       : "failed";
   patchValues.emailDispatchDeferred = false;
   patchValues.emailDispatchLastError = lastErrors;
+  patchValues.emailDispatchLeaseId = "";
+  patchValues.emailDispatchLeaseExpiresAt = "";
+  patchValues.emailDispatchNextAttemptAt = dispatch.allSent
+    ? ""
+    : new Date(nowMs + 5 * 60 * 1000).toISOString();
 
-  await client.patch(resolvedBooking._id).set(patchValues).commit();
+  const latestBooking = await getBookingForEmailDispatch({
+    bookingId: resolvedBooking._id,
+    client,
+  });
+  if (!latestBooking?.emailDispatchLeaseId || latestBooking.emailDispatchLeaseId === leaseId) {
+    let completionPatch = client.patch(resolvedBooking._id);
+    if (latestBooking?._rev && typeof completionPatch.ifRevisionId === "function") {
+      completionPatch = completionPatch.ifRevisionId(latestBooking._rev);
+    }
+    await completionPatch.set(patchValues).commit();
+  }
 
   return {
-    httpStatus: 200,
+    httpStatus: dispatch.allSent ? 200 : 503,
     body: {
-      ok: true,
+      ok: dispatch.allSent,
       bookingId: resolvedBooking._id,
+      retryable: !dispatch.allSent,
       emailDispatch: dispatch,
     },
+  };
+};
+
+export const dispatchRescheduleNotifications = async ({
+  client = writeClient,
+  bookingId,
+  booking = null,
+}) => {
+  const recoveryBooking =
+    booking?._id === bookingId
+      ? booking
+      : await client.fetch(
+          `*[_type == "booking" && _id == $id][0]{...}`,
+          { id: bookingId }
+        );
+  if (!recoveryBooking?._id) {
+    return { ok: false, notificationRequired: true, reason: "booking_missing" };
+  }
+  if (
+    recoveryBooking.recoveryClientNotifiedAt &&
+    recoveryBooking.recoveryOwnerNotifiedAt
+  ) {
+    return {
+      ok: true,
+      notificationRequired: false,
+      idempotent: true,
+      bookingId: recoveryBooking._id,
+    };
+  }
+
+  const nowMs = Date.now();
+  const leaseExpiry = new Date(
+    recoveryBooking.recoveryNotificationLeaseExpiresAt || ""
+  ).getTime();
+  if (
+    recoveryBooking.recoveryNotificationLeaseId &&
+    Number.isFinite(leaseExpiry) &&
+    leaseExpiry > nowMs
+  ) {
+    return {
+      ok: true,
+      notificationRequired: true,
+      inProgress: true,
+      bookingId: recoveryBooking._id,
+    };
+  }
+
+  const leaseId = crypto.randomUUID();
+  const now = new Date(nowMs).toISOString();
+  try {
+    let leasePatch = client.patch(recoveryBooking._id);
+    if (recoveryBooking._rev && typeof leasePatch.ifRevisionId === "function") {
+      leasePatch = leasePatch.ifRevisionId(recoveryBooking._rev);
+    }
+    await leasePatch
+      .set({
+        recoveryNotificationLeaseId: leaseId,
+        recoveryNotificationLeaseExpiresAt: new Date(
+          nowMs + 2 * 60 * 1000
+        ).toISOString(),
+        recoveryNotificationLastAttemptAt: now,
+      })
+      .setIfMissing({ recoveryNotificationAttemptCount: 0 })
+      .inc({ recoveryNotificationAttemptCount: 1 })
+      .commit();
+  } catch (error) {
+    if (Number(error?.statusCode || error?.status || 0) === 409) {
+      return {
+        ok: true,
+        notificationRequired: true,
+        inProgress: true,
+        bookingId: recoveryBooking._id,
+      };
+    }
+    throw error;
+  }
+
+  const owner = await resolveBookingOwnerEmail(client);
+  const customer = String(
+    recoveryBooking.email || recoveryBooking.payerEmail || ""
+  ).trim();
+  const siteName = process.env.SITE_NAME || "Roo Industries";
+  const from = String(process.env.FROM_EMAIL || "").trim();
+  const deliveryEnabled = !!from && !!resend;
+  const amount = formatMoney(
+    recoveryBooking.netAmount || recoveryBooking.grossAmount || 0
+  );
+  const fields = [
+    { label: "Order ID", value: recoveryBooking._id },
+    { label: "Package", value: recoveryBooking.packageTitle || "-" },
+    { label: "Paid Amount", value: `$${amount}` },
+    {
+      label: "Originally Requested",
+      value: recoveryBooking.originalRequestedStartTimeUTC || "Unavailable",
+    },
+  ];
+  const patchValues = {
+    recoveryNotificationLeaseId: "",
+    recoveryNotificationLeaseExpiresAt: "",
+    recoveryNotificationLastAttemptAt: now,
+  };
+  const errors = [];
+
+  if (!deliveryEnabled) {
+    errors.push("delivery_disabled");
+  } else {
+    if (!recoveryBooking.recoveryClientNotifiedAt && customer) {
+      try {
+        const { error } = await resend.emails.send(
+          {
+            from,
+            to: customer,
+            subject: `Action needed: reschedule your ${siteName} booking`,
+            html: emailHtml({
+              logoUrl: resolveLogoUrl(),
+              siteName,
+              heading: "Your payment is safe — please choose a new time",
+              intro:
+                "Your payment was completed, but the original time could not be confirmed. Reply to this email or join the Roo Industries Discord so we can arrange a new time. You will not be charged again.",
+              fields,
+              discordInviteUrl: DISCORD_INVITE_URL,
+              discordLabel: "Join the Roo Industries Discord",
+            }),
+          },
+          { idempotencyKey: `booking-${recoveryBooking._id}-reschedule-client` }
+        );
+        if (error) errors.push(error.message || "reschedule_client_error");
+        else patchValues.recoveryClientNotifiedAt = now;
+      } catch (error) {
+        errors.push(error?.message || "reschedule_client_exception");
+      }
+    } else if (!recoveryBooking.recoveryClientNotifiedAt) {
+      errors.push("missing_client_recipient");
+    }
+
+    if (!recoveryBooking.recoveryOwnerNotifiedAt && owner) {
+      try {
+        const { error } = await resend.emails.send(
+          {
+            from,
+            to: owner,
+            subject: `Paid booking requires reschedule - ${recoveryBooking._id}`,
+            html: emailHtml({
+              logoUrl: resolveLogoUrl(),
+              siteName,
+              heading: "Captured payment requires manual rescheduling",
+              intro:
+                "The payment was captured, but the original booking slot could not be reconstructed or is no longer available. Contact the customer and assign a new time.",
+              fields: [
+                ...fields,
+                { label: "Customer Email", value: customer || "Unavailable" },
+                {
+                  label: "Recovery Reason",
+                  value: recoveryBooking.recoveryReason || "Unavailable",
+                },
+              ],
+            }),
+          },
+          { idempotencyKey: `booking-${recoveryBooking._id}-reschedule-owner` }
+        );
+        if (error) errors.push(error.message || "reschedule_owner_error");
+        else patchValues.recoveryOwnerNotifiedAt = now;
+      } catch (error) {
+        errors.push(error?.message || "reschedule_owner_exception");
+      }
+    } else if (!recoveryBooking.recoveryOwnerNotifiedAt) {
+      errors.push("missing_owner_recipient");
+    }
+  }
+
+  const clientSent =
+    !!recoveryBooking.recoveryClientNotifiedAt ||
+    !!patchValues.recoveryClientNotifiedAt;
+  const ownerSent =
+    !!recoveryBooking.recoveryOwnerNotifiedAt ||
+    !!patchValues.recoveryOwnerNotifiedAt;
+  const allSent = clientSent && ownerSent;
+  patchValues.recoveryNotificationStatus = allSent
+    ? "sent"
+    : clientSent || ownerSent
+      ? "partial"
+      : "pending";
+  patchValues.recoveryNotificationLastError = errors.join(" | ");
+  patchValues.recoveryNotificationNextAttemptAt = allSent
+    ? ""
+    : new Date(nowMs + 5 * 60 * 1000).toISOString();
+
+  const latest = await client.fetch(
+    `*[_type == "booking" && _id == $id][0]{_id,_rev,recoveryNotificationLeaseId}`,
+    { id: recoveryBooking._id }
+  );
+  if (!latest?.recoveryNotificationLeaseId || latest.recoveryNotificationLeaseId === leaseId) {
+    let completionPatch = client.patch(recoveryBooking._id);
+    if (latest?._rev && typeof completionPatch.ifRevisionId === "function") {
+      completionPatch = completionPatch.ifRevisionId(latest._rev);
+    }
+    await completionPatch.set(patchValues).commit();
+  }
+  const recoveryCase = await client.fetch(
+    `*[_type == "bookingRecoveryCase" && bookingId == $bookingId][0]{_id,_rev}`,
+    { bookingId: recoveryBooking._id }
+  );
+  if (recoveryCase?._id) {
+    let casePatch = client.patch(recoveryCase._id);
+    if (recoveryCase._rev && typeof casePatch.ifRevisionId === "function") {
+      casePatch = casePatch.ifRevisionId(recoveryCase._rev);
+    }
+    await casePatch
+      .set({
+        notificationStatus: patchValues.recoveryNotificationStatus,
+        ...(allSent ? { notifiedAt: now, status: "notified" } : {}),
+      })
+      .commit()
+      .catch(() => {});
+  }
+
+  return {
+    ok: allSent,
+    bookingId: recoveryBooking._id,
+    notificationRequired: !allSent,
+    status: patchValues.recoveryNotificationStatus,
+    errors,
   };
 };

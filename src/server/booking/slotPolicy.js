@@ -1,5 +1,9 @@
 import { createRefReadClient } from "../api/ref/sanity.js";
 import packagePricing from "../../lib/packagePricing.js";
+import {
+  isBookingBlockingStatus,
+} from "./bookingStatus.js";
+import { isExactWholeMinute } from "./slotIdentity.js";
 
 const { getPackageTitleAliases, isTopPackageTitle } = packagePricing;
 
@@ -83,15 +87,27 @@ const normalizeDateKey = (value) => {
   return `${year}-${month}-${day}`;
 };
 
-const parseHourValue = (value) => {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
+const parseTimeValue = (value) => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value >= 0 && value <= 23 ? value * 60 : null;
+  }
   const raw = String(value || "").trim();
   if (!raw) return null;
-  const match = raw.match(/^(\d{1,2})(?::\d{2})?$/);
+  const match = raw.match(/^(\d{1,2})(?::(\d{2}))?$/);
   if (!match) return null;
   const hour = Number(match[1]);
-  if (!Number.isFinite(hour) || hour < 0 || hour > 23) return null;
-  return hour;
+  const minute = Number(match[2] || 0);
+  if (
+    !Number.isFinite(hour) ||
+    hour < 0 ||
+    hour > 23 ||
+    !Number.isFinite(minute) ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return null;
+  }
+  return hour * 60 + minute;
 };
 
 export const normalizePackageKey = (value) =>
@@ -135,12 +151,12 @@ export const normalizeDateSlots = (slots) => {
   const map = {};
 
   for (const slot of sanitizeSlots(slots)) {
-    const hours = slot.times
-      .map((time) => parseHourValue(time))
+    const minutes = slot.times
+      .map((time) => parseTimeValue(time))
       .filter((time) => Number.isFinite(time));
-    const uniqueHours = [...new Set(hours)].sort((a, b) => a - b);
-    if (!uniqueHours.length) continue;
-    map[slot.date] = uniqueHours;
+    const uniqueMinutes = [...new Set(minutes)].sort((a, b) => a - b);
+    if (!uniqueMinutes.length) continue;
+    map[slot.date] = uniqueMinutes;
   }
 
   return map;
@@ -241,15 +257,7 @@ export const getOwnerSlotDetails = (value, timeZone = OWNER_TZ_NAME) => {
   };
 };
 
-export const isBookingBlockingStatus = (value) => {
-  const normalized = String(value || "").trim().toLowerCase();
-  return (
-    !normalized ||
-    normalized === "pending" ||
-    normalized === "captured" ||
-    normalized === "completed"
-  );
-};
+export { isBookingBlockingStatus };
 
 export const filterActiveBookings = (bookings) =>
   (Array.isArray(bookings) ? bookings : []).filter((booking) =>
@@ -263,13 +271,17 @@ export const isSlotAllowedForPackage = ({
 }) => {
   const slotMap = resolvePackageSlotMap(settings, packageTitle);
   const ownerSlot = getOwnerSlotDetails(startTimeUTC);
-  const allowedHours = slotMap?.[ownerSlot.dateKey] || [];
+  const allowedMinutes = slotMap?.[ownerSlot.dateKey] || [];
+  const minuteOfDay = ownerSlot.hour * 60 + ownerSlot.minute;
+  const exactWholeMinute = isExactWholeMinute(startTimeUTC);
   return {
     ...ownerSlot,
     slotMap,
-    allowedMinute: ownerSlot.minute === 0,
-    allowed: Array.isArray(allowedHours)
-      ? ownerSlot.minute === 0 && allowedHours.includes(ownerSlot.hour)
+    allowedMinute: exactWholeMinute,
+    exactWholeMinute,
+    minuteOfDay,
+    allowed: Array.isArray(allowedMinutes)
+      ? exactWholeMinute && allowedMinutes.includes(minuteOfDay)
       : false,
   };
 };
