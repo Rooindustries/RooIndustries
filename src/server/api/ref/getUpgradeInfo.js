@@ -200,7 +200,10 @@ export default async function handler(req, res) {
       .map(normalizeEmail)
       .filter(Boolean);
 
-    if (allowedEmails.length > 0 && !allowedEmails.includes(normalizedEmail)) {
+    if (
+      allowedEmails.length === 0 ||
+      !allowedEmails.includes(normalizedEmail)
+    ) {
       return res
         .status(404)
         .json({ ok: false, error: "No booking found with that Order ID." });

@@ -260,8 +260,10 @@ export const getOwnerSlotDetails = (value, timeZone = OWNER_TZ_NAME) => {
 export { isBookingBlockingStatus };
 
 export const filterActiveBookings = (bookings) =>
-  (Array.isArray(bookings) ? bookings : []).filter((booking) =>
-    isBookingBlockingStatus(booking?.status)
+  (Array.isArray(bookings) ? bookings : []).filter(
+    (booking) =>
+      !String(booking?.originalOrderId || "").trim() &&
+      isBookingBlockingStatus(booking?.status)
   );
 
 export const isSlotAllowedForPackage = ({

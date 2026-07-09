@@ -79,6 +79,27 @@ const main = async () => {
     "refunded",
     "cancelled",
   ]);
+  const blockingStatuses = new Set(["pending", "captured", "completed"]);
+  const blockingBookings = bookings.filter((booking) => {
+    const start = new Date(booking.startTimeUTC || "").getTime();
+    return (
+      Number.isFinite(start) &&
+      start > now &&
+      blockingStatuses.has(
+        lower(booking.status) === "canceled" ? "cancelled" : lower(booking.status)
+      ) &&
+      !booking.originalOrderId
+    );
+  });
+  const activeLocksByStart = new Map();
+  for (const lock of activeLocks) {
+    const start = normalize(lock.startTimeUTC);
+    if (!start) continue;
+    const list = activeLocksByStart.get(start) || [];
+    list.push(lock);
+    activeLocksByStart.set(start, list);
+  }
+  const bookingsById = new Map(bookings.map((booking) => [booking._id, booking]));
 
   const staleCapturedWithoutOutcome = payments.filter((record) => {
     const reference = new Date(record.updatedAt || record.createdAt || "").getTime();
@@ -123,6 +144,23 @@ const main = async () => {
     ),
     orphanActiveSlotLocks: activeLocks.filter(
       (lock) => !bookingIds.has(normalize(lock.bookingId))
+    ).length,
+    activeLocksForNonBlockingBookings: activeLocks.filter((lock) => {
+      const booking = bookingsById.get(normalize(lock.bookingId));
+      if (!booking) return false;
+      const status = lower(booking.status) === "canceled"
+        ? "cancelled"
+        : lower(booking.status);
+      return !blockingStatuses.has(status) || !!booking.originalOrderId;
+    }).length,
+    duplicateBlockingBookingsPerSlot: groupDuplicates(
+      blockingBookings,
+      (booking) => normalize(booking.startTimeUTC)
+    ),
+    blockingBookingsMissingActiveLock: blockingBookings.filter((booking) =>
+      !(activeLocksByStart.get(normalize(booking.startTimeUTC)) || []).some(
+        (lock) => normalize(lock.bookingId) === booking._id
+      )
     ).length,
     expiredHoldsPastCleanupThreshold: holds.filter((hold) => {
       const expiry = new Date(hold.expiresAt || "").getTime();

@@ -83,23 +83,40 @@ const normalizeRazorpayOrder = ({ order = {}, credentials, currency, receipt }) 
   receipt: String(order.receipt || receipt || "").trim(),
 });
 
-export const findRazorpayOrderByReceipt = async ({
+export const inspectRazorpayOrderByReceipt = async ({
   receipt,
   amount,
   currency = DEFAULT_RAZORPAY_CURRENCY,
   credentials = resolveRazorpayCredentials(),
 }) => {
-  if (!credentials.enabled || !receipt) return null;
+  if (!credentials.enabled || !receipt) {
+    return {
+      state: "unavailable",
+      reason: !receipt
+        ? "razorpay_receipt_missing"
+        : "razorpay_credentials_missing",
+    };
+  }
 
-  const response = await fetch(
-    `https://api.razorpay.com/v1/orders?receipt=${encodeURIComponent(receipt)}&count=10`,
-    {
-      headers: {
-        Authorization: getRazorpayAuthorization(credentials),
-      },
-    }
-  );
-  if (!response.ok) return null;
+  let response;
+  try {
+    response = await fetch(
+      `https://api.razorpay.com/v1/orders?receipt=${encodeURIComponent(receipt)}&count=10`,
+      {
+        headers: {
+          Authorization: getRazorpayAuthorization(credentials),
+        },
+      }
+    );
+  } catch {
+    return { state: "unavailable", reason: "razorpay_receipt_lookup_exception" };
+  }
+  if (!response.ok) {
+    return {
+      state: "unavailable",
+      reason: `razorpay_receipt_lookup_failed_${response.status}`,
+    };
+  }
 
   const payload = await response.json().catch(() => ({}));
   const expectedAmount = toSubunits(amount, currency);
@@ -111,8 +128,16 @@ export const findRazorpayOrderByReceipt = async ({
         String(currency || "").trim().toUpperCase()
   );
   return order
-    ? normalizeRazorpayOrder({ order, credentials, currency, receipt })
-    : null;
+    ? {
+        state: "found",
+        order: normalizeRazorpayOrder({ order, credentials, currency, receipt }),
+      }
+    : { state: "not_found", reason: "" };
+};
+
+export const findRazorpayOrderByReceipt = async (options) => {
+  const result = await inspectRazorpayOrderByReceipt(options);
+  return result.state === "found" ? result.order : null;
 };
 
 export const verifyRazorpaySignature = ({
@@ -138,6 +163,7 @@ export const createRazorpayOrder = async ({
   currency = DEFAULT_RAZORPAY_CURRENCY,
   notes = {},
   receipt = `booking_${Date.now()}`,
+  lookupOnly = false,
 }) => {
   const credentials = resolveRazorpayCredentials();
   if (!credentials.enabled) {
@@ -155,13 +181,27 @@ export const createRazorpayOrder = async ({
   }
 
   const stableReceipt = String(receipt || "").trim();
-  const existing = await findRazorpayOrderByReceipt({
+  const lookup = await inspectRazorpayOrderByReceipt({
     receipt: stableReceipt,
     amount,
     currency,
     credentials,
-  }).catch(() => null);
-  if (existing?.orderId) return existing;
+  });
+  if (lookup.state === "found" && lookup.order?.orderId) return lookup.order;
+  if (lookupOnly) {
+    const error = new Error(
+      lookup.state === "unavailable"
+        ? "Razorpay receipt lookup is temporarily unavailable."
+        : "The ambiguous Razorpay order is not visible yet."
+    );
+    error.status = 503;
+    error.code =
+      lookup.reason ||
+      (lookup.state === "not_found"
+        ? "razorpay_ambiguous_order_not_found"
+        : "razorpay_receipt_lookup_unavailable");
+    throw error;
+  }
 
   let upstream;
   try {
@@ -179,25 +219,29 @@ export const createRazorpayOrder = async ({
       }),
     });
   } catch (error) {
-    const recovered = await findRazorpayOrderByReceipt({
+    const recovered = await inspectRazorpayOrderByReceipt({
       receipt: stableReceipt,
       amount,
       currency,
       credentials,
-    }).catch(() => null);
-    if (recovered?.orderId) return recovered;
+    });
+    if (recovered.state === "found" && recovered.order?.orderId) {
+      return recovered.order;
+    }
     throw error;
   }
 
   const order = await upstream.json().catch(() => ({}));
   if (!upstream.ok || !order?.id) {
-    const recovered = await findRazorpayOrderByReceipt({
+    const recovered = await inspectRazorpayOrderByReceipt({
       receipt: stableReceipt,
       amount,
       currency,
       credentials,
-    }).catch(() => null);
-    if (recovered?.orderId) return recovered;
+    });
+    if (recovered.state === "found" && recovered.order?.orderId) {
+      return recovered.order;
+    }
 
     const message =
       order?.error?.description ||
@@ -258,6 +302,50 @@ export const inspectRazorpayOrder = async ({ orderId }) => {
     return { state: pending ? "pending" : "unpaid", reason: "" };
   } catch {
     return { state: "unavailable", reason: "razorpay_lookup_exception" };
+  }
+};
+
+export const inspectRazorpayPayment = async ({ paymentId }) => {
+  const credentials = resolveRazorpayCredentials();
+  if (!credentials.enabled || !paymentId) {
+    return {
+      state: "unavailable",
+      reason: !paymentId
+        ? "razorpay_payment_id_missing"
+        : "razorpay_credentials_missing",
+    };
+  }
+
+  try {
+    const response = await fetch(
+      `https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}`,
+      { headers: { Authorization: getRazorpayAuthorization(credentials) } }
+    );
+    if (!response.ok) {
+      return {
+        state: "unavailable",
+        reason: `razorpay_payment_lookup_failed_${response.status}`,
+      };
+    }
+    const payment = await response.json().catch(() => ({}));
+    const orderId = String(payment?.order_id || "").trim();
+    if (!orderId) {
+      return {
+        state: "unavailable",
+        reason: "razorpay_payment_order_id_missing",
+      };
+    }
+    return {
+      state: "found",
+      providerOrderId: orderId,
+      providerPaymentId: String(payment?.id || paymentId).trim(),
+      status: String(payment?.status || "").trim().toLowerCase(),
+      amountInSubunits: Number(payment?.amount || 0),
+      currency: String(payment?.currency || "").trim().toUpperCase(),
+      payerEmail: String(payment?.email || "").trim(),
+    };
+  } catch {
+    return { state: "unavailable", reason: "razorpay_payment_lookup_exception" };
   }
 };
 

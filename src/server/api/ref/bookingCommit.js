@@ -201,12 +201,20 @@ export const createRequiresRescheduleBooking = async ({
   paymentRecord,
   reason = "captured_payment_requires_reschedule",
   notify = true,
+  paymentProofClaim = null,
+  paymentRecordMutation = null,
+  couponReservation = null,
+  referralId = "",
+  paymentHold = null,
 }) => {
   if (!client || !paymentRecord?._id) {
     throw new Error("A payment record is required to create a reschedule booking.");
   }
   const payload = paymentRecord.bookingPayload || {};
   const pricing = paymentRecord.pricingSnapshot || {};
+  const resolvedReferralId = normalize(
+    referralId || pricing.effectiveReferralId || ""
+  );
   const booking = prepareDeterministicBooking({
     booking: {
       paymentRecordId: paymentRecord._id,
@@ -225,6 +233,27 @@ export const createRequiresRescheduleBooking = async ({
       packagePrice: `$${Number(pricing.grossAmount || pricing.netAmount || 0).toFixed(2)}`,
       grossAmount: Number(pricing.grossAmount || 0),
       netAmount: Number(pricing.netAmount || 0),
+      discountPercent: Number(pricing.discountPercent || 0),
+      discountAmount: Number(pricing.discountAmount || 0),
+      referralCode: pricing.effectiveReferralCode || payload.referralCode || "",
+      ...(resolvedReferralId
+        ? {
+            referral: { _type: "reference", _ref: resolvedReferralId },
+            referralAccountingApplied: true,
+          }
+        : {}),
+      ...(couponReservation?.redemption?._id
+        ? { couponRedemptionId: couponReservation.redemption._id }
+        : {}),
+      ...(payload.couponCode
+        ? {
+            couponCode: payload.couponCode,
+            couponDiscountPercent: Number(pricing.couponDiscountPercent || 0),
+            couponDiscountAmount: Number(pricing.couponDiscountAmount || 0),
+            couponDiscountType: pricing.couponDiscountType || "",
+            couponDiscountValue: Number(pricing.couponDiscountValue || 0),
+          }
+        : {}),
       status: "captured",
       requiresReschedule: true,
       recoveryStatus: "requires_reschedule",
@@ -244,10 +273,78 @@ export const createRequiresRescheduleBooking = async ({
     notificationStatus: "pending",
     createdAt: new Date().toISOString(),
   };
+  const proofClaim = paymentProofClaim?.document || paymentProofClaim;
+  if (proofClaim?.bookingId && proofClaim.bookingId !== booking._id) {
+    throw bookingConflict("Payment proof was already used.", "payment_proof_reused");
+  }
+
   let resolvedBooking = booking;
   let idempotent = false;
   try {
-    await client.transaction().create(booking).create(recoveryCase).commit();
+    const now = new Date().toISOString();
+    const transaction = client.transaction().create(booking).create(recoveryCase);
+
+    if (proofClaim?._id) {
+      if (proofClaim._rev) {
+        patchRevision(transaction, proofClaim, (patch) =>
+          patch.set({ bookingId: booking._id, claimedAt: now, status: "claimed" })
+        );
+      } else {
+        transaction.create({
+          ...proofClaim,
+          _type: proofClaim._type || "paymentProofClaim",
+          bookingId: booking._id,
+          claimedAt: now,
+          status: "claimed",
+        });
+      }
+    }
+
+    if (couponReservation?.redemption?._id) {
+      appendCouponConsumption({
+        transaction,
+        coupon: couponReservation.coupon,
+        redemption: couponReservation.redemption,
+        bookingId: booking._id,
+        consumedAt: now,
+        allowReleasedRecovery: true,
+      });
+    }
+
+    if (resolvedReferralId) {
+      transaction.patch(resolvedReferralId, (patch) =>
+        patch
+          .setIfMissing({ successfulReferrals: 0 })
+          .inc({ successfulReferrals: 1 })
+      );
+    }
+
+    if (paymentHold?._id) {
+      patchRevision(transaction, paymentHold, (patch) =>
+        patch.set({
+          phase: "consumed",
+          consumedAt: now,
+          expiresAt: now,
+          bookingId: booking._id,
+          releaseReason: "",
+        })
+      );
+    }
+
+    if (paymentRecordMutation?.id) {
+      transaction.patch(paymentRecordMutation.id, (patch) => {
+        const guarded = paymentRecordMutation.revision
+          ? patch.ifRevisionId(paymentRecordMutation.revision)
+          : patch;
+        return guarded.set({
+          ...paymentRecordMutation.set,
+          bookingId: booking._id,
+          updatedAt: now,
+        });
+      });
+    }
+
+    await transaction.commit();
     resolvedBooking =
       (await client.fetch(`*[_type == "booking" && _id == $id][0]{...}`, {
         id: booking._id,
@@ -259,6 +356,18 @@ export const createRequiresRescheduleBooking = async ({
       { id: booking._id }
     );
     if (!resolvedBooking?._id) throw error;
+    if (paymentRecordMutation?.id) {
+      const linkedPaymentRecord = await client.fetch(
+        `*[_type == "paymentRecord" && _id == $id][0]{_id, bookingId}`,
+        { id: paymentRecordMutation.id }
+      );
+      if (normalize(linkedPaymentRecord?.bookingId) !== booking._id) {
+        throw bookingConflict(
+          "Recovery booking exists but the payment state changed.",
+          "payment_recovery_state_changed"
+        );
+      }
+    }
     idempotent = true;
   }
   const notification = notify
@@ -285,5 +394,6 @@ export const createRequiresRescheduleBooking = async ({
     notificationRequired: notification.notificationRequired,
     notification,
     idempotent,
+    paymentRecordLinked: !!paymentRecordMutation?.id,
   };
 };

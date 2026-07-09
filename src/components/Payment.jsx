@@ -832,6 +832,34 @@ export default function Payment({ hideFooter = false }) {
       paymentSession?.paymentAccessToken &&
       paymentSession?.providerPayload
     ) {
+      const { response, data } = await fetchJson("/api/payment/status", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${paymentSession.paymentAccessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      });
+      const resumedStatus = String(data?.status || "").trim().toLowerCase();
+      if (
+        response.ok &&
+        (resumedStatus === "booked" || resumedStatus === "email_partial")
+      ) {
+        navigate("/payment-success", {
+          state: buildFinalizeNavigation(data),
+          replace: true,
+        });
+        return { ...paymentSession, result: data, terminal: true };
+      }
+      if (
+        response.ok &&
+        ["refunded", "failed", "abandoned"].includes(resumedStatus)
+      ) {
+        clearPaymentSession();
+        throw new Error(
+          data?.recoveryReason || "This payment session is no longer payable."
+        );
+      }
       return paymentSession;
     }
 
@@ -900,6 +928,7 @@ export default function Payment({ hideFooter = false }) {
               refreshedHold.slotHoldExpiresAt || refreshedHold.expiresAt || "",
             startTimeUTC: bookingData.startTimeUTC || "",
             packageTitle,
+            phase: refreshedHold.phase || "payment_pending",
           };
           localStorage.setItem("my_slot_hold", JSON.stringify(holdState));
           window.dispatchEvent(new CustomEvent("hold-state", { detail: holdState }));
@@ -914,6 +943,17 @@ export default function Payment({ hideFooter = false }) {
         sessionExpiresAt: String(data.sessionExpiresAt || "").trim(),
         result: data,
       };
+      const returnedStatus = String(data.status || "").trim().toLowerCase();
+      if (
+        provider !== "free" &&
+        (returnedStatus === "booked" || returnedStatus === "email_partial")
+      ) {
+        navigate("/payment-success", {
+          state: buildFinalizeNavigation(data),
+          replace: true,
+        });
+        return { ...nextSession, terminal: true };
+      }
       if (provider !== "free") persistPaymentSession(nextSession);
       return nextSession;
     })();
@@ -1148,16 +1188,16 @@ export default function Payment({ hideFooter = false }) {
       setPayingRzp(true);
       showBanner("info", "Opening secure checkout...");
 
-      const orderData = await startSessionCheckout("razorpay").then(
-        (session) => ({
+      const razorpaySession = await startSessionCheckout("razorpay");
+      if (razorpaySession?.terminal) return;
+      const orderData = {
           ok: true,
-          orderId: session.providerPayload.orderId,
-          amount: session.providerPayload.amount,
-          currency: session.providerPayload.currency,
-          key: session.providerPayload.key,
-          paymentAccessToken: session.paymentAccessToken,
-        })
-      );
+          orderId: razorpaySession.providerPayload.orderId,
+          amount: razorpaySession.providerPayload.amount,
+          currency: razorpaySession.providerPayload.currency,
+          key: razorpaySession.providerPayload.key,
+          paymentAccessToken: razorpaySession.paymentAccessToken,
+        };
 
       if (!orderData.ok) {
         console.error("Razorpay order error:", orderData);
@@ -1609,6 +1649,9 @@ export default function Payment({ hideFooter = false }) {
                           }}
                           createOrder={async () => {
                             const session = await startSessionCheckout("paypal");
+                            if (session?.terminal) {
+                              throw new Error("This payment is already complete.");
+                            }
                             return session?.providerPayload?.orderId || "";
                           }}
                           onApprove={async (data, actions) => {

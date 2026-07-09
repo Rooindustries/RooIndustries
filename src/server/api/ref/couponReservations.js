@@ -165,16 +165,59 @@ export const appendCouponConsumption = ({
   redemption,
   bookingId,
   consumedAt = new Date().toISOString(),
+  allowReleasedRecovery = false,
 }) => {
   if (!redemption?._id) return transaction;
   if (redemption.status === COUPON_REDEMPTION_STATUS.CONSUMED) return transaction;
+  if (
+    redemption.status === COUPON_REDEMPTION_STATUS.RELEASED &&
+    allowReleasedRecovery &&
+    coupon?._id
+  ) {
+    const used = Number(coupon.timesUsed || 0);
+    const reserved = Number(coupon.activeReservations || 0);
+    const maxUses = Number(coupon.maxUses || 0);
+    const capacityExceededAtRecovery =
+      maxUses > 0 && used + reserved >= maxUses;
+    const deactivatesCoupon =
+      coupon.isActive !== false && maxUses > 0 && used + 1 >= maxUses;
+    const autoDeactivationKey = deactivatesCoupon ? redemption._id : "";
+    patchRevision(transaction, redemption, (patch) =>
+      patch.set({
+        status: COUPON_REDEMPTION_STATUS.CONSUMED,
+        bookingId: normalize(bookingId),
+        consumedAt,
+        releasedAt: "",
+        releaseReason: "",
+        recoveredAfterRelease: true,
+        capacityExceededAtRecovery,
+        deactivatedCouponAtConsume: deactivatesCoupon,
+        autoDeactivationKey,
+      })
+    );
+    patchRevision(transaction, coupon, (patch) => {
+      const next = patch
+        .setIfMissing({ activeReservations: reserved, timesUsed: used })
+        .inc({ timesUsed: 1 });
+      return deactivatesCoupon
+        ? next.set({
+            isActive: false,
+            autoDeactivatedByRedemptionId: redemption._id,
+            autoDeactivatedAt: consumedAt,
+          })
+        : next;
+    });
+    return transaction;
+  }
   if (redemption.status !== COUPON_REDEMPTION_STATUS.RESERVED || !coupon?._id) {
     throw conflict("Coupon reservation is no longer available.");
   }
 
   const used = Number(coupon.timesUsed || 0);
   const maxUses = Number(coupon.maxUses || 0);
-  const deactivatesCoupon = maxUses > 0 && used + 1 >= maxUses;
+  const deactivatesCoupon =
+    coupon.isActive !== false && maxUses > 0 && used + 1 >= maxUses;
+  const autoDeactivationKey = deactivatesCoupon ? redemption._id : "";
   patchRevision(transaction, redemption, (patch) =>
     patch.set({
       status: COUPON_REDEMPTION_STATUS.CONSUMED,
@@ -182,6 +225,7 @@ export const appendCouponConsumption = ({
       consumedAt,
       releasedAt: "",
       deactivatedCouponAtConsume: deactivatesCoupon,
+      autoDeactivationKey,
     })
   );
   patchRevision(transaction, coupon, (patch) => {
@@ -189,7 +233,13 @@ export const appendCouponConsumption = ({
       .setIfMissing({ activeReservations: 0, timesUsed: used })
       .dec({ activeReservations: 1 })
       .inc({ timesUsed: 1 });
-    return deactivatesCoupon ? next.set({ isActive: false }) : next;
+    return deactivatesCoupon
+      ? next.set({
+          isActive: false,
+          autoDeactivatedByRedemptionId: redemption._id,
+          autoDeactivatedAt: consumedAt,
+        })
+      : next;
   });
   return transaction;
 };
@@ -266,10 +316,25 @@ export const appendCouponRefund = ({
   );
   if (coupon?._id) {
     const used = Math.max(0, Number(coupon.timesUsed || 0));
+    const autoDeactivatedAt = new Date(coupon.autoDeactivatedAt || "").getTime();
+    const lastCouponUpdate = new Date(coupon._updatedAt || "").getTime();
+    const markerMatches =
+      redemption.deactivatedCouponAtConsume === true &&
+      redemption.autoDeactivationKey === redemption._id &&
+      coupon.autoDeactivatedByRedemptionId === redemption._id;
+    const noLaterAdminWrite =
+      Number.isFinite(autoDeactivatedAt) &&
+      (!Number.isFinite(lastCouponUpdate) ||
+        lastCouponUpdate <= autoDeactivatedAt + 5000);
+    const mayReactivate = markerMatches && noLaterAdminWrite;
     patchRevision(transaction, coupon, (patch) => {
       const next = used > 0 ? patch.dec({ timesUsed: 1 }) : patch;
-      return redemption.deactivatedCouponAtConsume === true
-        ? next.set({ isActive: true })
+      return mayReactivate
+        ? next.set({
+            isActive: true,
+            autoDeactivatedByRedemptionId: "",
+            autoDeactivatedAt: "",
+          })
         : next;
     });
   }

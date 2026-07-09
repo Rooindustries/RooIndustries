@@ -232,4 +232,69 @@ describe("payment webhook security", () => {
       receipt: "roo_stable_receipt",
     });
   });
+
+  test("lookup-only Razorpay retries never POST and recover when the ambiguous receipt appears", async () => {
+    process.env.RAZORPAY_KEY_ID = "rzp_test_key";
+    process.env.RAZORPAY_KEY_SECRET = "razorpay_secret";
+    const recoveredOrder = {
+      id: "order_eventually_visible",
+      amount: 8499,
+      currency: "USD",
+      receipt: "roo_ambiguous_receipt",
+    };
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ items: [] }),
+      })
+      .mockRejectedValueOnce(new Error("connection reset after upstream accepted"))
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        json: async () => ({}),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        json: async () => ({}),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ items: [recoveredOrder] }),
+      });
+
+    const { createRazorpayOrder } = loadProviderClients();
+    const orderInput = {
+      amount: 84.99,
+      currency: "USD",
+      receipt: "roo_ambiguous_receipt",
+    };
+
+    await expect(createRazorpayOrder(orderInput)).rejects.toThrow(
+      "connection reset after upstream accepted"
+    );
+    await expect(
+      createRazorpayOrder({ ...orderInput, lookupOnly: true })
+    ).rejects.toMatchObject({
+      status: 503,
+      code: "razorpay_receipt_lookup_failed_503",
+    });
+
+    expect(
+      global.fetch.mock.calls.filter(([, options]) => options?.method === "POST")
+    ).toHaveLength(1);
+
+    await expect(
+      createRazorpayOrder({ ...orderInput, lookupOnly: true })
+    ).resolves.toMatchObject({
+      orderId: "order_eventually_visible",
+      receipt: "roo_ambiguous_receipt",
+    });
+
+    expect(
+      global.fetch.mock.calls.filter(([, options]) => options?.method === "POST")
+    ).toHaveLength(1);
+    expect(global.fetch).toHaveBeenCalledTimes(5);
+  });
 });
