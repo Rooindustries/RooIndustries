@@ -109,6 +109,23 @@ const paymentProofClaimId = (record) => {
       : normalize(record?.providerOrderId || record?.providerPaymentId);
   return proof ? `paymentProofClaim.${provider}.${hash(proof, 40)}` : "";
 };
+const bookingProofClaimId = (booking) => {
+  const provider = normalizeLower(booking?.paymentProvider) ||
+    (normalize(booking?.razorpayPaymentId || booking?.razorpayOrderId)
+      ? "razorpay"
+      : normalize(booking?.paypalOrderId)
+        ? "paypal"
+        : "");
+  return paymentProofClaimId({
+    provider,
+    providerOrderId:
+      provider === "paypal"
+        ? booking?.paypalOrderId
+        : booking?.razorpayOrderId,
+    providerPaymentId:
+      provider === "razorpay" ? booking?.razorpayPaymentId : "",
+  });
+};
 
 const TYPES = [
   "booking",
@@ -224,10 +241,46 @@ const paymentScore = ({ record, booking }) => {
   return score;
 };
 
+const isLegacyRazorpayLedgerAlias = (record, canonicalRecord) => {
+  const recordId = normalize(record?._id);
+  const canonicalId = normalize(canonicalRecord?._id);
+  const pair = [recordId, canonicalId];
+  const hasOrderRecord = pair.some((id) =>
+    id.startsWith("paymentRecord.razorpay.order.")
+  );
+  const hasPaymentRecord = pair.some((id) =>
+    id.startsWith("paymentRecord.razorpay.payment.")
+  );
+  return !!(
+    normalizeLower(record?.provider) === "razorpay" &&
+    normalizeLower(canonicalRecord?.provider) === "razorpay" &&
+    hasOrderRecord &&
+    hasPaymentRecord &&
+    normalize(record?.providerOrderId) &&
+    normalize(record?.providerOrderId) === normalize(canonicalRecord?.providerOrderId) &&
+    normalize(record?.providerPaymentId) &&
+    normalize(record?.providerPaymentId) ===
+      normalize(canonicalRecord?.providerPaymentId)
+  );
+};
+
 const buildPlan = ({ bookings, payments, holds, coupons, existingLocks, existingClaims }) => {
   const bookingIndexes = indexBookings(bookings);
   const locksById = new Map(existingLocks.map((doc) => [doc._id, doc]));
   const claimsById = new Map(existingClaims.map((doc) => [doc._id, doc]));
+  const staleHoldPaymentIds = new Set(
+    holds
+      .filter((hold) => {
+        const expiry = new Date(hold.expiresAt || "").getTime();
+        const phase = normalizeLower(hold.phase);
+        return (
+          !["released", "consumed"].includes(phase) &&
+          (!Number.isFinite(expiry) || expiry <= now.getTime() - 5 * 60 * 1000)
+        );
+      })
+      .map((hold) => normalize(hold.paymentRecordId))
+      .filter(Boolean)
+  );
   const paymentMatches = new Map();
   const proofGroups = new Map();
 
@@ -254,14 +307,59 @@ const buildPlan = ({ bookings, payments, holds, coupons, existingLocks, existing
   }
 
   const canonicalByRecordId = new Map();
+  const unsafeProofRecordIds = new Set();
   const claimsToCreate = [];
+  const claimPatches = [];
+  const bookingIdsByProof = new Map();
+  for (const booking of bookings) {
+    const claimId = bookingProofClaimId(booking);
+    if (!claimId) continue;
+    const bookingIds = bookingIdsByProof.get(claimId) || new Set();
+    bookingIds.add(booking._id);
+    bookingIdsByProof.set(claimId, bookingIds);
+  }
+  const proofConflicts = [...bookingIdsByProof]
+    .filter(([, bookingIds]) => bookingIds.size > 1)
+    .map(([claimId]) => claimId);
   for (const [claimId, group] of proofGroups) {
     const ranked = [...group].sort(
       (a, b) => paymentScore(b) - paymentScore(a) || a.record._id.localeCompare(b.record._id)
     );
-    const canonical = ranked[0];
-    for (const entry of group) canonicalByRecordId.set(entry.record._id, canonical);
-    if (!claimsById.has(claimId)) {
+    const existingClaim = claimsById.get(claimId);
+    const existingOwner = existingClaim?.paymentRecordId
+      ? group.find((entry) => entry.record._id === existingClaim.paymentRecordId)
+      : null;
+    if (existingClaim?.paymentRecordId && !existingOwner) {
+      proofConflicts.push(claimId);
+      continue;
+    }
+    const canonical = existingOwner || ranked[0];
+    const bookingIds = new Set(
+      group.map((entry) => normalize(entry.booking?._id)).filter(Boolean)
+    );
+    if (bookingIds.size > 1) {
+      proofConflicts.push(claimId);
+      continue;
+    }
+    const unsafeNonAliases = group.filter(
+      (entry) =>
+        entry.record._id !== canonical.record._id &&
+        !isLegacyRazorpayLedgerAlias(entry.record, canonical.record)
+    );
+    if (!existingClaim && unsafeNonAliases.length) {
+      proofConflicts.push(claimId);
+      continue;
+    }
+    for (const entry of unsafeNonAliases) {
+      unsafeProofRecordIds.add(entry.record._id);
+    }
+    canonicalByRecordId.set(canonical.record._id, canonical);
+    for (const entry of group) {
+      if (isLegacyRazorpayLedgerAlias(entry.record, canonical.record)) {
+        canonicalByRecordId.set(entry.record._id, canonical);
+      }
+    }
+    if (!existingClaim) {
       claimsToCreate.push({
         _id: claimId,
         _type: "paymentProofClaim",
@@ -274,6 +372,31 @@ const buildPlan = ({ bookings, payments, holds, coupons, existingLocks, existing
         claimedAt: nowIso,
         migratedAt: nowIso,
       });
+    } else {
+      const bookingId = normalize(canonical.booking?._id);
+      if (
+        bookingId &&
+        normalize(existingClaim.bookingId) &&
+        normalize(existingClaim.bookingId) !== bookingId
+      ) {
+        proofConflicts.push(claimId);
+        continue;
+      }
+      const values = {};
+      if (!normalize(existingClaim.paymentRecordId)) {
+        values.paymentRecordId = canonical.record._id;
+      }
+      if (bookingId && normalize(existingClaim.bookingId) !== bookingId) {
+        values.bookingId = bookingId;
+      }
+      if (bookingId && normalizeLower(existingClaim.status) !== "claimed") {
+        values.status = "claimed";
+        values.claimedAt = existingClaim.claimedAt || nowIso;
+      }
+      if (Object.keys(values).length) {
+        values.migratedAt = nowIso;
+        claimPatches.push({ document: existingClaim, values });
+      }
     }
   }
 
@@ -354,15 +477,48 @@ const buildPlan = ({ bookings, payments, holds, coupons, existingLocks, existing
 
   const paymentPatches = [];
   for (const record of payments) {
-    const booking = paymentMatches.get(record._id);
     const canonical = canonicalByRecordId.get(record._id);
+    const booking = unsafeProofRecordIds.has(record._id)
+      ? null
+      : paymentMatches.get(record._id) || canonical?.booking || null;
     const values = {};
     if (booking?._id && normalize(record.bookingId) !== booking._id) {
       values.bookingId = booking._id;
     }
-    if (booking?._id && canonical?.record?._id && canonical.record._id !== record._id) {
-      values.canonicalPaymentRecordId = canonical.record._id;
-      values.duplicatePaymentRecord = true;
+    if (canonical?.record?._id && canonical.record._id !== record._id) {
+      if (normalize(record.canonicalPaymentRecordId) !== canonical.record._id) {
+        values.canonicalPaymentRecordId = canonical.record._id;
+      }
+      if (record.duplicatePaymentRecord !== true) {
+        values.duplicatePaymentRecord = true;
+      }
+      if (booking?._id) {
+        const canonicalStatus = normalizeLower(canonical.record.status);
+        const bookingStatus = canonicalBookingStatus(booking.status);
+        const desiredStatus =
+          canonicalStatus === "refunded" || bookingStatus === "refunded"
+            ? "refunded"
+            : "booked";
+        if (normalizeLower(record.status) !== desiredStatus) values.status = desiredStatus;
+        if (normalize(record.recoveryReason)) values.recoveryReason = "";
+        if (normalize(record.nextRecoveryAt)) values.nextRecoveryAt = "";
+        if (record.emailDispatchRequired === true) values.emailDispatchRequired = false;
+        if (record.resourceReleasePending === true) values.resourceReleasePending = false;
+      } else {
+        const nextRecoveryAtMs = new Date(record.nextRecoveryAt || "").getTime();
+        if (normalizeLower(record.status) !== "needs_recovery") {
+          values.status = "needs_recovery";
+        }
+        if (normalize(record.recoveryReason) !== "canonical_payment_pending") {
+          values.recoveryReason = "canonical_payment_pending";
+        }
+        if (!Number.isFinite(nextRecoveryAtMs) || nextRecoveryAtMs <= now.getTime()) {
+          values.nextRecoveryAt = new Date(
+            now.getTime() + 60 * 60 * 1000
+          ).toISOString();
+        }
+        if (record.emailDispatchRequired === true) values.emailDispatchRequired = false;
+      }
     }
     const proofClaimId = canonical ? paymentProofClaimId(canonical.record) : "";
     if (proofClaimId && record.paymentProofClaimId !== proofClaimId) {
@@ -371,7 +527,40 @@ const buildPlan = ({ bookings, payments, holds, coupons, existingLocks, existing
     const emailsSent =
       !!booking?.emailDispatchClientSentAt && !!booking?.emailDispatchOwnerSentAt;
     const status = normalizeLower(record.status);
-    if (booking?._id && emailsSent && ["email_partial", "needs_recovery"].includes(status)) {
+    const isCanonicalRecord = !canonical || canonical.record._id === record._id;
+    const hasDanglingBooking = !!normalize(record.bookingId) && !booking?._id;
+    const hasCapturedEvidence =
+      normalizeLower(record.verificationState) === "server_verified" ||
+      !!normalize(record.providerPaymentId) ||
+      (normalizeLower(record.provider) === "free" && status === "booked") ||
+      ["captured_client", "captured_webhook", "finalizing"].includes(status);
+    if (
+      isCanonicalRecord &&
+      hasDanglingBooking &&
+      hasCapturedEvidence &&
+      [
+        "booked",
+        "email_partial",
+        "captured_client",
+        "captured_webhook",
+        "finalizing",
+        "needs_recovery",
+      ].includes(status)
+    ) {
+      values.status = "needs_recovery";
+      values.recoveryReason = "payment_booking_missing";
+      values.nextRecoveryAt = nowIso;
+      values.emailDispatchRequired = false;
+      if (["booked", "email_partial"].includes(status)) {
+        values.historicalBookingReconstruction = true;
+        values.historicalBookingStatus = status;
+        values.historicalAccountingPreserved = true;
+      }
+    } else if (
+      booking?._id &&
+      emailsSent &&
+      ["email_partial", "needs_recovery"].includes(status)
+    ) {
       values.status = "booked";
       values.recoveryReason = "";
       values.nextRecoveryAt = "";
@@ -386,6 +575,24 @@ const buildPlan = ({ bookings, payments, holds, coupons, existingLocks, existing
       values.recoveryReason = "email_dispatch_pending";
       values.emailDispatchRequired = true;
     }
+    const resultingStatus = normalizeLower(values.status || status);
+    if (
+      staleHoldPaymentIds.has(record._id) &&
+      [
+        "started",
+        "captured_client",
+        "captured_webhook",
+        "finalizing",
+        "needs_recovery",
+        "email_partial",
+      ].includes(resultingStatus)
+    ) {
+      const nextRecoveryAt = new Date(values.nextRecoveryAt || record.nextRecoveryAt || "")
+        .getTime();
+      if (Number.isFinite(nextRecoveryAt) && nextRecoveryAt > now.getTime()) {
+        values.nextRecoveryAt = nowIso;
+      }
+    }
     if (Object.keys(values).length) {
       values.migrationVersion = 1;
       values.migratedAt = nowIso;
@@ -395,6 +602,7 @@ const buildPlan = ({ bookings, payments, holds, coupons, existingLocks, existing
 
   const bookingPaymentOwner = new Map();
   for (const record of payments) {
+    if (unsafeProofRecordIds.has(record._id)) continue;
     const canonical = canonicalByRecordId.get(record._id)?.record || record;
     const booking = paymentMatches.get(record._id);
     if (booking?._id && !bookingPaymentOwner.has(booking._id)) {
@@ -441,7 +649,8 @@ const buildPlan = ({ bookings, payments, holds, coupons, existingLocks, existing
     const resultingPhase = normalizeLower(values.phase || phase);
     const linkedPending = linked && !terminalPaymentStatuses.has(linkedStatus);
     const terminal = ["released", "consumed"].includes(resultingPhase) || !linked;
-    if (expired && terminal && !linkedPending) {
+    const releasedOrConsumed = ["released", "consumed"].includes(resultingPhase);
+    if (expired && (releasedOrConsumed || (terminal && !linkedPending))) {
       holdsToDelete.push(hold);
     } else if (Object.keys(values).length) {
       holdPatches.push({ document: hold, values });
@@ -454,6 +663,8 @@ const buildPlan = ({ bookings, payments, holds, coupons, existingLocks, existing
     lockPatches,
     slotConflicts,
     claimsToCreate,
+    claimPatches,
+    proofConflicts,
     paymentPatches,
     couponPatches,
     holdPatches,
@@ -474,6 +685,7 @@ const applyPlan = async (plan) => {
   for (const entry of [
     ...plan.bookingPatches,
     ...plan.lockPatches,
+    ...plan.claimPatches,
     ...plan.paymentPatches,
     ...plan.couponPatches,
     ...plan.holdPatches,
@@ -629,6 +841,8 @@ const summarizePlan = (plan) => ({
   slotLockPatches: plan.lockPatches.length,
   slotConflicts: plan.slotConflicts.length,
   proofClaimsToCreate: plan.claimsToCreate.length,
+  proofClaimPatches: plan.claimPatches.length,
+  proofConflicts: plan.proofConflicts.length,
   paymentPatches: plan.paymentPatches.length,
   couponBaselinePatches: plan.couponPatches.length,
   holdPatches: plan.holdPatches.length,
@@ -654,8 +868,8 @@ const main = async () => {
     ? await inspectStalePayments(input.payments)
     : null;
 
-  if (apply && plan.slotConflicts.length) {
-    throw new Error("Migration found conflicting future booking slots.");
+  if (apply && (plan.slotConflicts.length || plan.proofConflicts.length)) {
+    throw new Error("Migration found conflicting booking slots or payment proofs.");
   }
   if (apply) await applyPlan(plan);
   const reconciliation = apply ? await runReconcile() : null;
@@ -674,8 +888,8 @@ const main = async () => {
       existingLocks: refreshed.filter((doc) => doc._type === "bookingSlot"),
       existingClaims: refreshed.filter((doc) => doc._type === "paymentProofClaim"),
     });
-    if (followUpPlan.slotConflicts.length) {
-      throw new Error("Migration produced conflicting future booking slots.");
+    if (followUpPlan.slotConflicts.length || followUpPlan.proofConflicts.length) {
+      throw new Error("Migration produced conflicting booking slots or payment proofs.");
     }
     await applyPlan(followUpPlan);
     const finalDocuments = await client.fetch(`*[_type in $types]`, { types: TYPES });
@@ -710,7 +924,7 @@ const main = async () => {
   if (after && Object.values(after).some((count) => Number(count) !== 0)) {
     process.exitCode = 3;
   }
-  if (plan.slotConflicts.length) process.exitCode = 2;
+  if (plan.slotConflicts.length || plan.proofConflicts.length) process.exitCode = 2;
 };
 
 main().catch((error) => {

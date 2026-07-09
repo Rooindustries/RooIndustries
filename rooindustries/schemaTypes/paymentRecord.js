@@ -39,6 +39,10 @@ export default {
     {name: 'couponAccountingRecoveredAfterRelease', type: 'boolean'},
     {name: 'referralAccountingApplied', type: 'boolean'},
     {name: 'bookingId', type: 'string'},
+    {name: 'historicalBookingReconstruction', type: 'boolean'},
+    {name: 'historicalBookingStatus', type: 'string'},
+    {name: 'historicalBookingReconstructedAt', type: 'datetime'},
+    {name: 'historicalAccountingPreserved', type: 'boolean'},
     {name: 'bookingPayload', type: 'object', fields: [{name: 'dataJson', type: 'text'}]},
     {name: 'pricingSnapshot', type: 'object', fields: [{name: 'netAmount', type: 'number'}]},
     {
