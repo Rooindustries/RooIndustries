@@ -2,8 +2,11 @@ import crypto from "crypto";
 import createBookingHandler from "../ref/createBooking.js";
 import { createRefWriteClient } from "../ref/sanity.js";
 import { resolvePaymentQuote } from "../ref/pricing.js";
+import {
+  freezeUpgradeIntent,
+  verifyUpgradeIntentToken,
+} from "../ref/upgradeIntentToken.js";
 import { getBookingSettings, isSlotAllowedForPackage } from "../../booking/slotPolicy.js";
-import { buildSlotHoldId } from "../../booking/slotIdentity.js";
 import { issueHoldToken, verifyHoldToken } from "../../booking/holdToken.js";
 import providerConfig from "./providerConfig.js";
 import {
@@ -11,6 +14,11 @@ import {
   createRazorpayOrder,
   DEFAULT_PAYPAL_CURRENCY,
   DEFAULT_RAZORPAY_CURRENCY,
+  inspectPayPalOrder,
+  inspectRazorpayOrder,
+  inspectRazorpayPayment,
+  toMoney,
+  toSubunits,
   verifyPayPalOrder,
   verifyPayPalWebhookSignature,
   verifyRazorpayPayment,
@@ -25,12 +33,20 @@ import {
 } from "./accessToken.js";
 import {
   buildBookingSeedKey,
+  buildPaymentProofClaimId,
+  buildPaymentProviderIdempotencyKey,
   buildPricingFingerprint,
+  buildQuoteFingerprint,
   buildPaymentRecordEvent,
   buildPaymentRecordId,
+  buildPaymentSessionRecordId,
+  buildPaymentSessionScope,
+  buildPaymentStartClaimId,
+  buildPaymentUpgradeLockId,
+  buildWebhookReceiptId,
   findPaymentRecordByProviderData,
-  findReusablePaymentRecord,
   getPaymentHoldExpiryIso,
+  getNextPaymentRecoveryAt,
   getPaymentRecordById,
   HOLD_PHASE_HOLDING,
   HOLD_PHASE_PAYMENT_PENDING,
@@ -40,6 +56,10 @@ import {
   PAYMENT_HOLD_MINUTES,
   PAYMENT_RECOVERY_MINUTES,
   PAYMENT_RECORD_TYPE,
+  PAYMENT_PROOF_CLAIM_TYPE,
+  PAYMENT_START_CLAIM_TYPE,
+  PAYMENT_UPGRADE_LOCK_TYPE,
+  PAYMENT_WEBHOOK_RECEIPT_TYPE,
   PAYMENT_STATUS_ABANDONED,
   PAYMENT_STATUS_BOOKED,
   PAYMENT_STATUS_CAPTURED_CLIENT,
@@ -55,12 +75,90 @@ import {
 const { resolvePaymentProviders, resolveServerPaymentSessionsEnabled } =
   providerConfig;
 
-const RECOVERY_HOLD_HOURS = 72;
+const FINALIZATION_LEASE_SECONDS = 90;
+const WEBHOOK_LEASE_SECONDS = 120;
+const LATE_CAPTURE_WATCH_HOURS = 24;
 
 const normalizeObject = (value) =>
   value && typeof value === "object" && !Array.isArray(value) ? value : {};
 
 const nowIso = () => new Date().toISOString();
+
+const getFutureIso = (seconds) =>
+  new Date(Date.now() + Math.max(1, Number(seconds) || 1) * 1000).toISOString();
+
+const isConflictError = (error) =>
+  Number(error?.statusCode || error?.status || 0) === 409;
+
+const isFutureIso = (value) => {
+  const timestamp = new Date(value || "").getTime();
+  return Number.isFinite(timestamp) && timestamp > Date.now();
+};
+
+const fromSubunits = (value, currency = "USD") => {
+  const factor = String(currency || "").trim().toUpperCase() === "JPY" ? 1 : 100;
+  return toMoney(Number(value || 0) / factor);
+};
+
+const isLegacyCheckoutCompatibilityOpen = () => {
+  const deadline = String(process.env.PAYMENT_LEGACY_CHECKOUT_UNTIL || "").trim();
+  return !!deadline && isFutureIso(deadline);
+};
+
+const loadBookingRefundHandler = async () => {
+  try {
+    const module = await import("../ref/bookingRefunds.js");
+    return module.applyBookingRefund || module.applyFullPaymentRefund || null;
+  } catch (error) {
+    if (String(error?.code || "") === "MODULE_NOT_FOUND") return null;
+    throw error;
+  }
+};
+
+const loadRequiresRescheduleHandler = async () => {
+  try {
+    const module = await import("../ref/bookingCommit.js");
+    return module.createRequiresRescheduleBooking || null;
+  } catch (error) {
+    if (String(error?.code || "") === "MODULE_NOT_FOUND") return null;
+    throw error;
+  }
+};
+
+const loadCouponReservationHandlers = async () => {
+  try {
+    const module = await import("../ref/couponReservations.js");
+    return {
+      prepareCouponReservation: module.prepareCouponReservation || null,
+      appendCouponReservation: module.appendCouponReservation || null,
+      releaseCouponReservation: module.releaseCouponReservation || null,
+    };
+  } catch (error) {
+    if (String(error?.code || "") === "MODULE_NOT_FOUND") return {};
+    throw error;
+  }
+};
+
+const loadRescheduleNotificationHandler = async () => {
+  try {
+    const module = await import("../ref/bookingEmails.js");
+    return module.dispatchRescheduleNotifications || null;
+  } catch (error) {
+    if (String(error?.code || "") === "MODULE_NOT_FOUND") return null;
+    throw error;
+  }
+};
+
+const buildRefreshedHoldBody = (record = {}) => {
+  const hold = normalizeObject(record.holdSnapshot);
+  if (!String(hold.slotHoldId || "").trim()) return null;
+  return {
+    slotHoldId: String(hold.slotHoldId || "").trim(),
+    slotHoldToken: String(hold.slotHoldToken || "").trim(),
+    slotHoldExpiresAt: String(hold.slotHoldExpiresAt || "").trim(),
+    phase: String(hold.phase || HOLD_PHASE_PAYMENT_PENDING).trim(),
+  };
+};
 
 const createMemoryResponse = () => {
   const state = {
@@ -132,6 +230,18 @@ const sanitizeBookingPayload = (payload = {}) => {
   };
 };
 
+const sanitizeProviderFinalizeData = (payload = {}) => {
+  const normalized = normalizeObject(payload);
+  return {
+    paypalOrderId: String(normalized.paypalOrderId || "").trim(),
+    paypalPaymentId: String(normalized.paypalPaymentId || "").trim(),
+    payerEmail: String(normalized.payerEmail || "").trim(),
+    razorpayOrderId: String(normalized.razorpayOrderId || "").trim(),
+    razorpayPaymentId: String(normalized.razorpayPaymentId || "").trim(),
+    razorpaySignature: String(normalized.razorpaySignature || "").trim(),
+  };
+};
+
 const getLegacySuccessStatus = (emailDispatch = {}) =>
   emailDispatch?.allSent === false
     ? PAYMENT_STATUS_EMAIL_PARTIAL
@@ -145,13 +255,13 @@ const isEmailDispatchComplete = (emailDispatch = {}) => {
 
 const shouldRetryEmailPartialDispatch = ({ record, source = "" }) => {
   const status = String(record?.status || "").trim().toLowerCase();
-  if (status !== PAYMENT_STATUS_EMAIL_PARTIAL) return false;
+  if (record?.requiresReschedule === true) return false;
+  const emailRecoveryPending =
+    status === PAYMENT_STATUS_EMAIL_PARTIAL ||
+    (status === PAYMENT_STATUS_BOOKED && record?.emailDispatchRequired === true);
+  if (!emailRecoveryPending) return false;
   if (String(source || "").trim().toLowerCase() === "client") return false;
   return !isEmailDispatchComplete(record?.emailDispatch);
-};
-
-const logPayment = (message, details = {}) => {
-  console.error(message, details);
 };
 
 const getHoldById = async (client, holdId) => {
@@ -195,7 +305,6 @@ const assertStartableHold = async ({ client, bookingPayload }) => {
     new Date(holdDoc.expiresAt).getTime() <= Date.now() &&
     String(holdDoc.phase || HOLD_PHASE_HOLDING) !== HOLD_PHASE_PAYMENT_PENDING
   ) {
-    await client.delete(bookingPayload.slotHoldId).catch(() => {});
     const error = new Error("Your slot reservation expired.");
     error.status = 409;
     throw error;
@@ -289,6 +398,12 @@ const buildPublicStatusBody = (record = {}) => ({
   provider: String(record.provider || "").trim(),
   bookingId: String(record.bookingId || "").trim(),
   recoveryReason: String(record.recoveryReason || "").trim(),
+  nextRecoveryAt: String(record.nextRecoveryAt || "").trim(),
+  sessionExpiresAt: String(
+    record?.holdSnapshot?.slotHoldExpiresAt || record.sessionExpiresAt || ""
+  ).trim(),
+  refundState: String(record.refundState || "").trim(),
+  refundRequiresBookingSync: record.refundRequiresBookingSync === true,
   emailDispatch: normalizeObject(record.emailDispatch),
   emailDispatchToken: String(record.emailDispatchToken || "").trim(),
 });
@@ -324,6 +439,10 @@ const isTransientVerificationFailure = (reason = "") => {
 
 const isTrustedRecoverySource = (source = "") =>
   source === "client" || source === "webhook" || source === "reconcile";
+
+const canFinalizeAbandonedRecord = ({ status = "", source = "" }) =>
+  String(status || "").trim().toLowerCase() === PAYMENT_STATUS_ABANDONED &&
+  isTrustedRecoverySource(String(source || "").trim().toLowerCase());
 
 const buildQuotePayload = (quote = {}) => ({
   grossAmount: Number(quote.effectiveGrossAmount || 0),
@@ -586,6 +705,7 @@ const resolveRecordFromAccessToken = async ({
   client,
   paymentAccessToken = "",
   allowRecoveryExtension = false,
+  allowStatusReadExtension = false,
 }) => {
   const tokenResult = verifyPaymentAccessToken({ token: paymentAccessToken });
   if (!tokenResult.ok && !tokenResult.expired) {
@@ -613,11 +733,10 @@ const resolveRecordFromAccessToken = async ({
 
   if (tokenResult.expired) {
     const status = String(record.status || "").trim().toLowerCase();
-    if (
-      !allowRecoveryExtension ||
-      status !== PAYMENT_STATUS_NEEDS_RECOVERY ||
-      !isWithinPaymentAccessRecoveryWindow({ payload })
-    ) {
+    const withinHardCap = isWithinPaymentAccessRecoveryWindow({ payload });
+    const recoveryMutationAllowed =
+      allowRecoveryExtension && status === PAYMENT_STATUS_NEEDS_RECOVERY;
+    if (!withinHardCap || (!allowStatusReadExtension && !recoveryMutationAllowed)) {
       const error = new Error("Payment session expired.");
       error.status = 401;
       error.code = tokenResult.reason || "payment_access_token_expired";
@@ -626,6 +745,45 @@ const resolveRecordFromAccessToken = async ({
   }
 
   return { payload, record };
+};
+
+const getSubmittedProviderIdentifiers = ({ record = {}, providerData = {} }) => {
+  const provider = String(record.provider || "").trim().toLowerCase();
+  if (provider === "razorpay") {
+    return {
+      providerOrderId: String(providerData.razorpayOrderId || "").trim(),
+      providerPaymentId: String(providerData.razorpayPaymentId || "").trim(),
+    };
+  }
+  if (provider === "paypal") {
+    return {
+      providerOrderId: String(providerData.paypalOrderId || "").trim(),
+      providerPaymentId: String(providerData.paypalPaymentId || "").trim(),
+    };
+  }
+  return { providerOrderId: "", providerPaymentId: "" };
+};
+
+const validateImmutableProviderBinding = ({ record = {}, providerData = {} }) => {
+  const submitted = getSubmittedProviderIdentifiers({ record, providerData });
+  const storedOrderId = String(record.providerOrderId || "").trim();
+  const storedPaymentId = String(record.providerPaymentId || "").trim();
+
+  if (
+    submitted.providerOrderId &&
+    storedOrderId &&
+    submitted.providerOrderId !== storedOrderId
+  ) {
+    return { ok: false, reason: "provider_order_id_mismatch" };
+  }
+  if (
+    submitted.providerPaymentId &&
+    storedPaymentId &&
+    submitted.providerPaymentId !== storedPaymentId
+  ) {
+    return { ok: false, reason: "provider_payment_id_mismatch" };
+  }
+  return { ok: true, ...submitted };
 };
 
 const verifyProviderCapture = async ({
@@ -638,12 +796,15 @@ const verifyProviderCapture = async ({
     return { ok: true, trustedCapture: false, payerEmail: "" };
   }
 
+  const binding = validateImmutableProviderBinding({ record, providerData });
+  if (!binding.ok) {
+    return { ok: false, retryable: false, reason: binding.reason };
+  }
+
   if (provider === "razorpay") {
-    const orderId = String(
-      providerData.razorpayOrderId || record.providerOrderId || ""
-    ).trim();
+    const orderId = String(record.providerOrderId || binding.providerOrderId || "").trim();
     const paymentId = String(
-      providerData.razorpayPaymentId || record.providerPaymentId || ""
+      binding.providerPaymentId || record.providerPaymentId || ""
     ).trim();
     const signature = String(providerData.razorpaySignature || "").trim();
 
@@ -674,18 +835,23 @@ const verifyProviderCapture = async ({
     if (!verification.ok) {
       return {
         ok: false,
+        captured: verification.captured === true,
         retryable: isTransientVerificationFailure(verification.reason),
         reason: verification.reason || "razorpay_verification_failed",
       };
     }
 
-    return { ok: true, trustedCapture: true, payerEmail: "" };
+    return {
+      ok: true,
+      trustedCapture: true,
+      payerEmail: "",
+      providerOrderId: orderId,
+      providerPaymentId: paymentId,
+    };
   }
 
   if (provider === "paypal") {
-    const orderId = String(
-      providerData.paypalOrderId || record.providerOrderId || ""
-    ).trim();
+    const orderId = String(record.providerOrderId || binding.providerOrderId || "").trim();
     if (!orderId) {
       return { ok: false, retryable: false, reason: "paypal_order_id_missing" };
     }
@@ -700,6 +866,7 @@ const verifyProviderCapture = async ({
     if (!verification.ok) {
       return {
         ok: false,
+        captured: verification.captured === true,
         retryable: isTransientVerificationFailure(verification.reason),
         reason: verification.reason || "paypal_verification_failed",
       };
@@ -709,28 +876,42 @@ const verifyProviderCapture = async ({
       ok: true,
       trustedCapture: true,
       payerEmail: String(verification.payerEmail || "").trim(),
+      providerOrderId: orderId,
+      providerPaymentId: String(
+        verification.providerPaymentId || binding.providerPaymentId || ""
+      ).trim(),
     };
   }
 
   return { ok: false, retryable: false, reason: "payment_provider_unsupported" };
 };
 
-const patchPaymentRecord = async ({ client, record, set = {}, event = null }) => {
+const patchPaymentRecord = async ({
+  client,
+  record,
+  set = {},
+  event = null,
+  revisionGuard = false,
+}) => {
   const existingEvents = Array.isArray(record?.events) ? record.events : [];
   const mergedEvents = event
     ? mergePaymentRecordEvents(existingEvents, event)
     : existingEvents;
-  await client
+  let patch = client
     .patch(record._id)
     .set({
       ...set,
       ...(event ? { events: mergedEvents } : {}),
       updatedAt: nowIso(),
-    })
-    .commit();
+    });
+  if (revisionGuard && record?._rev && typeof patch.ifRevisionId === "function") {
+    patch = patch.ifRevisionId(record._rev);
+  }
+  const committed = await patch.commit();
 
   return {
     ...record,
+    ...normalizeObject(committed),
     ...set,
     ...(event ? { events: mergedEvents } : {}),
     updatedAt: nowIso(),
@@ -739,22 +920,7 @@ const patchPaymentRecord = async ({ client, record, set = {}, event = null }) =>
 
 const upsertPaymentRecord = async ({ client, doc }) => {
   const existing = await getPaymentRecordById(client, doc._id);
-  if (existing?._id) {
-    await client
-      .patch(doc._id)
-      .set({
-        ...doc,
-        _id: undefined,
-        _type: undefined,
-        updatedAt: nowIso(),
-      })
-      .setIfMissing({
-        _type: PAYMENT_RECORD_TYPE,
-        createdAt: doc.createdAt || nowIso(),
-      })
-      .commit();
-    return getPaymentRecordById(client, doc._id);
-  }
+  if (existing?._id) return existing;
 
   try {
     await client.create({
@@ -769,122 +935,466 @@ const upsertPaymentRecord = async ({ client, doc }) => {
   return getPaymentRecordById(client, doc._id);
 };
 
-const markHoldPaymentPending = async ({
-  client,
-  holdDoc,
-  bookingPayload,
-  paymentRecordId,
-}) => {
-  if (!holdDoc?._id) return null;
-  const expiresAt = getPaymentHoldExpiryIso(PAYMENT_HOLD_MINUTES);
-  await client
-    .patch(holdDoc._id)
-    .set({
-      phase: HOLD_PHASE_PAYMENT_PENDING,
-      paymentRecordId,
-      paymentProvider: bookingPayload.paymentProvider || "",
-      packageTitle: bookingPayload.packageTitle || holdDoc.packageTitle || "",
-      expiresAt,
-    })
-    .commit();
-
-  return {
-    ...holdDoc,
-    _id: holdDoc._id,
-    hostDate: holdDoc.hostDate,
-    hostTime: holdDoc.hostTime,
-    phase: HOLD_PHASE_PAYMENT_PENDING,
-    paymentRecordId,
-    expiresAt,
-  };
+const getDocumentById = async ({ client, id, type }) => {
+  if (!id) return null;
+  return client.fetch(`*[_type == $type && _id == $id][0]`, { type, id });
 };
 
-const createOrRefreshRecoveryHold = async ({
+const createStartClaimAndRecord = async ({
+  client,
+  claim,
+  record,
+  holdDoc = null,
+  holdPatch = {},
+  couponReservationPlan = null,
+  appendCouponReservation = null,
+}) => {
+  try {
+    if (typeof client.transaction === "function") {
+      let transaction = client.transaction().create(claim).create(record);
+      if (couponReservationPlan && typeof appendCouponReservation === "function") {
+        transaction = appendCouponReservation({
+          transaction,
+          ...couponReservationPlan,
+        });
+      }
+      if (holdDoc?._id) {
+        transaction = transaction.patch(holdDoc._id, (patch) => {
+          let next = patch.set(holdPatch);
+          if (holdDoc._rev && typeof next.ifRevisionId === "function") {
+            next = next.ifRevisionId(holdDoc._rev);
+          }
+          return next;
+        });
+      }
+      await transaction.commit();
+    } else {
+      if (couponReservationPlan) {
+        throw new Error("Coupon reservations require transactional storage support.");
+      }
+      await client.create(claim);
+      await client.create(record);
+      if (holdDoc?._id) {
+        await client.patch(holdDoc._id).set(holdPatch).commit();
+      }
+    }
+    return getPaymentRecordById(client, record._id);
+  } catch (error) {
+    if (!isConflictError(error)) throw error;
+    const existingClaim = await getDocumentById({
+      client,
+      id: claim._id,
+      type: claim._type || PAYMENT_START_CLAIM_TYPE,
+    });
+    const existingRecordId = String(existingClaim?.paymentRecordId || "").trim();
+    const existingRecord = await getPaymentRecordById(client, existingRecordId);
+    if (!existingRecord?._id) throw error;
+    return existingRecord;
+  }
+};
+
+const attachImmutableProviderOrder = async ({ client, record, providerPayload }) => {
+  const providerOrderId = String(providerPayload?.orderId || "").trim();
+  if (!providerOrderId) {
+    const error = new Error("Provider order creation did not return an order ID.");
+    error.status = 502;
+    error.code = "provider_order_id_missing";
+    throw error;
+  }
+
+  const existingOrderId = String(record?.providerOrderId || "").trim();
+  if (existingOrderId) {
+    if (existingOrderId !== providerOrderId) {
+      const error = new Error("Payment provider order is already bound to this session.");
+      error.status = 409;
+      error.code = "provider_order_immutable";
+      throw error;
+    }
+    return record;
+  }
+
+  try {
+    return await patchPaymentRecord({
+      client,
+      record,
+      revisionGuard: true,
+      set: {
+        providerOrderId,
+        providerPublicData: providerPayload,
+        bookingFinalizationKey:
+          record.provider === "paypal"
+            ? `paypal:${providerOrderId}`
+            : `razorpay-order:${providerOrderId}`,
+        orderState: "created",
+        orderCreationLeaseId: "",
+        orderCreationLeaseExpiresAt: "",
+      },
+      event: buildPaymentRecordEvent({
+        status: PAYMENT_STATUS_STARTED,
+        source: "start",
+        reason: "provider_order_created",
+        data: { providerOrderId },
+      }),
+    });
+  } catch (error) {
+    if (!isConflictError(error)) throw error;
+    const current = await getPaymentRecordById(client, record._id);
+    if (String(current?.providerOrderId || "").trim() === providerOrderId) {
+      return current;
+    }
+    const conflict = new Error("Payment session changed while creating the order.");
+    conflict.status = 409;
+    conflict.code = "provider_order_bind_conflict";
+    throw conflict;
+  }
+};
+
+const getPaymentProofClaimIdForRecord = ({
+  record,
+  providerOrderId = "",
+  providerPaymentId = "",
+}) => {
+  const provider = String(record?.provider || "").trim().toLowerCase();
+  return (
+    provider === "free"
+      ? `paymentProofClaim.free.${crypto
+          .createHash("sha256")
+          .update(String(record._id || ""))
+          .digest("hex")
+          .slice(0, 40)}`
+      : buildPaymentProofClaimId({
+          provider: record.provider,
+          providerOrderId,
+          providerPaymentId,
+        })
+  );
+};
+
+const claimPaymentProof = async ({
   client,
   record,
-  reason = "",
+  providerOrderId = "",
+  providerPaymentId = "",
 }) => {
-  const bookingPayload = sanitizeBookingPayload(record.bookingPayload);
-  if (!bookingPayload.startTimeUTC || bookingPayload.originalOrderId) {
+  const claimId = getPaymentProofClaimIdForRecord({
+    record,
+    providerOrderId,
+    providerPaymentId,
+  });
+  if (!claimId) {
+    const error = new Error("Captured payment proof is incomplete.");
+    error.status = 400;
+    error.code = "payment_proof_missing";
+    throw error;
+  }
+
+  const existing = await getDocumentById({
+    client,
+    id: claimId,
+    type: PAYMENT_PROOF_CLAIM_TYPE,
+  });
+  if (existing?._id) {
+    if (String(existing.paymentRecordId || "") !== String(record._id || "")) {
+      const error = new Error("This payment has already been used for another booking.");
+      error.status = 409;
+      error.code = "payment_proof_already_claimed";
+      throw error;
+    }
+    return existing;
+  }
+
+  const claim = {
+    _id: claimId,
+    _type: PAYMENT_PROOF_CLAIM_TYPE,
+    paymentRecordId: record._id,
+    provider: record.provider,
+    providerOrderId: String(providerOrderId || "").trim(),
+    providerPaymentId: String(providerPaymentId || "").trim(),
+    claimedAt: nowIso(),
+  };
+  try {
+    return await client.create(claim);
+  } catch (error) {
+    if (!isConflictError(error)) throw error;
+    const current = await getDocumentById({
+      client,
+      id: claimId,
+      type: PAYMENT_PROOF_CLAIM_TYPE,
+    });
+    if (String(current?.paymentRecordId || "") === String(record._id || "")) {
+      return current;
+    }
+    const conflict = new Error("This payment has already been used for another booking.");
+    conflict.status = 409;
+    conflict.code = "payment_proof_already_claimed";
+    throw conflict;
+  }
+};
+
+const normalizeMarkedDuplicatePaymentRecord = async ({
+  client,
+  record,
+  providerOrderId = "",
+  providerPaymentId = "",
+  error = null,
+}) => {
+  if (String(error?.code || "") !== "payment_proof_already_claimed") return null;
+  const canonicalPaymentRecordId = String(
+    record?.canonicalPaymentRecordId || ""
+  ).trim();
+  if (record?.duplicatePaymentRecord !== true || !canonicalPaymentRecordId) {
     return null;
   }
 
-  const slotAllowance = await resolveHoldSlot({ client, bookingPayload });
-  if (!slotAllowance.allowed) {
+  const claimId =
+    String(record.paymentProofClaimId || "").trim() ||
+    getPaymentProofClaimIdForRecord({
+      record,
+      providerOrderId,
+      providerPaymentId,
+    });
+  const claim = await getDocumentById({
+    client,
+    id: claimId,
+    type: PAYMENT_PROOF_CLAIM_TYPE,
+  });
+  if (
+    !claim?._id ||
+    String(claim.paymentRecordId || "").trim() !== canonicalPaymentRecordId
+  ) {
     return null;
   }
 
-  const holdId =
-    String(record?.holdSnapshot?.slotHoldId || "").trim() ||
-    buildSlotHoldId(bookingPayload.startTimeUTC);
-  if (!holdId) return null;
+  const canonical = await getPaymentRecordById(client, canonicalPaymentRecordId);
+  if (!canonical?._id) return null;
+  const bookingId = String(claim.bookingId || canonical.bookingId || "").trim();
+  const canonicalStatus = String(canonical.status || "").trim().toLowerCase();
+  const recoveryAttemptCount = Number(record.recoveryAttemptCount || 0) + 1;
+  const status = bookingId
+    ? canonicalStatus === PAYMENT_STATUS_REFUNDED
+      ? PAYMENT_STATUS_REFUNDED
+      : PAYMENT_STATUS_BOOKED
+    : PAYMENT_STATUS_NEEDS_RECOVERY;
+  const set = {
+    canonicalPaymentRecordId,
+    duplicatePaymentRecord: true,
+    paymentProofClaimId: claim._id,
+    bookingId,
+    status,
+    recoveryReason: bookingId ? "" : "canonical_payment_pending",
+    recoveryAttemptCount,
+    nextRecoveryAt: bookingId
+      ? ""
+      : getNextPaymentRecoveryAt(recoveryAttemptCount),
+    emailDispatchRequired: false,
+    finalizationLeaseId: "",
+    finalizationLeaseExpiresAt: "",
+  };
 
-  const expiresAt = new Date(Date.now() + RECOVERY_HOLD_HOURS * 60 * 60 * 1000).toISOString();
-  let holdDoc = await getHoldById(client, holdId);
-  const holdNonce = crypto.randomUUID();
-  if (!holdDoc?._id) {
+  try {
+    return await patchPaymentRecord({
+      client,
+      record,
+      revisionGuard: true,
+      set,
+      event: buildPaymentRecordEvent({
+        status,
+        source: "reconcile",
+        reason: bookingId
+          ? "duplicate_payment_record_linked"
+          : "duplicate_payment_record_waiting_for_canonical",
+        data: { canonicalPaymentRecordId, bookingId },
+      }),
+    });
+  } catch (patchError) {
+    if (!isConflictError(patchError)) throw patchError;
+    return getPaymentRecordById(client, record._id);
+  }
+};
+
+const acquireFinalizationLease = async ({ client, record, source }) => {
+  const current = (await getPaymentRecordById(client, record._id)) || record;
+  const currentStatus = String(current.status || "").trim().toLowerCase();
+  const abandonedCaptureRecovery = canFinalizeAbandonedRecord({
+    status: currentStatus,
+    source,
+  });
+  const emailRecoveryPending = shouldRetryEmailPartialDispatch({
+    record: current,
+    source,
+  });
+  if (
+    isPaymentTerminalStatus(currentStatus) &&
+    currentStatus !== PAYMENT_STATUS_NEEDS_RECOVERY &&
+    !abandonedCaptureRecovery &&
+    !emailRecoveryPending
+  ) {
+    return {
+      acquired: false,
+      terminal: true,
+      record: current,
+      leaseId: "",
+      previousStatus: currentStatus,
+    };
+  }
+  if (
+    currentStatus === PAYMENT_STATUS_FINALIZING &&
+    isFutureIso(current.finalizationLeaseExpiresAt)
+  ) {
+    return {
+      acquired: false,
+      record: current,
+      leaseId: "",
+      previousStatus: currentStatus,
+    };
+  }
+
+  const leaseId = crypto.randomUUID();
+  try {
+    const leased = await patchPaymentRecord({
+      client,
+      record: current,
+      revisionGuard: true,
+      set: {
+        status: PAYMENT_STATUS_FINALIZING,
+        source,
+        finalizationLeaseId: leaseId,
+        finalizationLeaseExpiresAt: getFutureIso(FINALIZATION_LEASE_SECONDS),
+        attemptCount: Number(current.attemptCount || 0) + 1,
+        lastAttemptAt: nowIso(),
+      },
+      event: buildPaymentRecordEvent({
+        status: PAYMENT_STATUS_FINALIZING,
+        source,
+        reason: "finalization_lease_acquired",
+      }),
+    });
+    return {
+      acquired: true,
+      record: leased,
+      leaseId,
+      previousStatus: currentStatus,
+    };
+  } catch (error) {
+    if (!isConflictError(error)) throw error;
+    const fresh = (await getPaymentRecordById(client, record._id)) || current;
+    const freshStatus = String(fresh.status || "").trim().toLowerCase();
+    const freshEmailRecovery = shouldRetryEmailPartialDispatch({
+      record: fresh,
+      source,
+    });
+    const freshAbandonedCaptureRecovery = canFinalizeAbandonedRecord({
+      status: freshStatus,
+      source,
+    });
+    return {
+      acquired: false,
+      terminal:
+        isPaymentTerminalStatus(freshStatus) &&
+        freshStatus !== PAYMENT_STATUS_NEEDS_RECOVERY &&
+        !freshAbandonedCaptureRecovery &&
+        !freshEmailRecovery,
+      record: fresh,
+      leaseId: "",
+      previousStatus: freshStatus,
+    };
+  }
+};
+
+const getWebhookReceipt = ({ client, id }) =>
+  getDocumentById({ client, id, type: PAYMENT_WEBHOOK_RECEIPT_TYPE });
+
+const claimWebhookReceipt = async ({
+  client,
+  provider,
+  eventId,
+  eventType,
+  rawBody,
+}) => {
+  const receiptId = buildWebhookReceiptId({ provider, eventId, eventType, rawBody });
+  const existing = await getWebhookReceipt({ client, id: receiptId });
+  if (existing?._id && existing.status === "processed") {
+    return { acquired: false, processed: true, receipt: existing };
+  }
+  if (
+    existing?._id &&
+    existing.status === "processing" &&
+    isFutureIso(existing.leaseExpiresAt)
+  ) {
+    return { acquired: false, processed: false, receipt: existing };
+  }
+
+  const leaseId = crypto.randomUUID();
+  if (!existing?._id) {
+    const receipt = {
+      _id: receiptId,
+      _type: PAYMENT_WEBHOOK_RECEIPT_TYPE,
+      provider,
+      eventId,
+      eventType,
+      status: "processing",
+      leaseId,
+      leaseExpiresAt: getFutureIso(WEBHOOK_LEASE_SECONDS),
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    };
     try {
-      holdDoc = await client.create({
-        _id: holdId,
-        _type: "slotHold",
-        hostDate: slotAllowance.hostDate,
-        hostTime: slotAllowance.hostTime,
-        startTimeUTC: bookingPayload.startTimeUTC,
-        packageTitle: bookingPayload.packageTitle,
-        expiresAt,
-        holdNonce,
-        phase: HOLD_PHASE_PAYMENT_PENDING,
-        paymentRecordId: record._id,
-        recoveryReason: reason,
-      });
+      return { acquired: true, processed: false, receipt: await client.create(receipt) };
     } catch (error) {
-      const status = Number(error?.statusCode || error?.status || 0) || 0;
-      if (status !== 409) throw error;
-      holdDoc = await getHoldById(client, holdId);
+      if (!isConflictError(error)) throw error;
+      return claimWebhookReceipt({ client, provider, eventId, eventType, rawBody });
     }
   }
 
-  const nextNonce = holdDoc?.holdNonce || holdNonce;
+  try {
+    const receipt = await patchPaymentRecord({
+      client,
+      record: existing,
+      revisionGuard: true,
+      set: {
+        status: "processing",
+        leaseId,
+        leaseExpiresAt: getFutureIso(WEBHOOK_LEASE_SECONDS),
+      },
+    });
+    return { acquired: true, processed: false, receipt };
+  } catch (error) {
+    if (!isConflictError(error)) throw error;
+    return { acquired: false, processed: false, receipt: await getWebhookReceipt({ client, id: receiptId }) };
+  }
+};
+
+const completeWebhookReceipt = async ({ client, receipt, result }) => {
+  if (!receipt?._id) return;
   await client
-    .patch(holdId)
+    .patch(receipt._id)
     .set({
-      hostDate: slotAllowance.hostDate,
-      hostTime: slotAllowance.hostTime,
-      startTimeUTC: bookingPayload.startTimeUTC,
-      packageTitle: bookingPayload.packageTitle,
-      expiresAt,
-      phase: HOLD_PHASE_PAYMENT_PENDING,
-      paymentRecordId: record._id,
-      holdNonce: nextNonce,
-      recoveryReason: reason,
-    })
-    .commit();
-
-  const holdToken = issueHoldToken({
-    holdId,
-    startTimeUTC: bookingPayload.startTimeUTC,
-    expiresAt,
-    holdNonce: nextNonce,
-  });
-
-  const holdSnapshot = {
-    slotHoldId: holdId,
-    slotHoldToken: holdToken,
-    slotHoldExpiresAt: expiresAt,
-    hostDate: slotAllowance.hostDate,
-    hostTime: slotAllowance.hostTime,
-    phase: HOLD_PHASE_PAYMENT_PENDING,
-  };
-
-  await client
-    .patch(record._id)
-    .set({
-      holdSnapshot,
+      status: "processed",
+      httpStatus: Number(result?.httpStatus || 200),
+      processedAt: nowIso(),
       updatedAt: nowIso(),
     })
     .commit();
+};
 
-  return holdSnapshot;
+const releaseWebhookReceiptForRetry = async ({ client, receipt, result }) => {
+  if (!receipt?._id) return;
+  try {
+    await patchPaymentRecord({
+      client,
+      record: receipt,
+      revisionGuard: true,
+      set: {
+        status: "retryable",
+        httpStatus: Number(result?.httpStatus || 503),
+        leaseId: "",
+        leaseExpiresAt: "",
+        processedAt: "",
+      },
+    });
+  } catch (error) {
+    if (!isConflictError(error)) throw error;
+  }
 };
 
 const releasePendingHold = async ({ client, record }) => {
@@ -895,44 +1405,132 @@ const releasePendingHold = async ({ client, record }) => {
   if (String(holdDoc.paymentRecordId || "").trim() !== String(record._id || "").trim()) {
     return;
   }
-  await client.delete(holdId).catch(() => {});
+  try {
+    let patch = client.patch(holdId).set({
+      phase: "released",
+      expiresAt: nowIso(),
+      paymentRecordId: "",
+      paymentProvider: "",
+      releaseReason: "payment_session_released",
+    });
+    if (holdDoc._rev && typeof patch.ifRevisionId === "function") {
+      patch = patch.ifRevisionId(holdDoc._rev);
+    }
+    await patch.commit();
+  } catch (error) {
+    if (!isConflictError(error)) throw error;
+  }
 };
 
-const syncPaymentRecordHoldState = async ({
-  client,
-  record,
-  holdDoc,
-  slotHoldToken = "",
-}) => {
-  if (!record?._id || !holdDoc?._id) {
-    return record;
+const releaseExpiredRecoveryHold = async ({ client, record }) => {
+  const holdSnapshot = normalizeObject(record?.holdSnapshot);
+  const holdId = String(holdSnapshot.slotHoldId || "").trim();
+  if (!holdId) return null;
+  const holdDoc = await getHoldById(client, holdId);
+  const expiry = new Date(
+    holdDoc?.expiresAt || holdSnapshot.slotHoldExpiresAt || ""
+  ).getTime();
+  if (Number.isFinite(expiry) && expiry > Date.now()) return null;
+
+  const releasedAt = nowIso();
+  if (
+    holdDoc?._id &&
+    String(holdDoc.paymentRecordId || "").trim() === String(record?._id || "").trim()
+  ) {
+    try {
+      let patch = client.patch(holdId).set({
+        phase: "released",
+        expiresAt: releasedAt,
+        paymentRecordId: "",
+        paymentProvider: "",
+        releaseReason: "payment_recovery_hold_expired",
+      });
+      if (holdDoc._rev && typeof patch.ifRevisionId === "function") {
+        patch = patch.ifRevisionId(holdDoc._rev);
+      }
+      await patch.commit();
+    } catch (error) {
+      if (!isConflictError(error)) throw error;
+      const current = await getHoldById(client, holdId);
+      if (
+        current?._id &&
+        String(current.paymentRecordId || "").trim() ===
+          String(record?._id || "").trim() &&
+        !["released", "consumed"].includes(
+          String(current.phase || "").trim().toLowerCase()
+        )
+      ) {
+        return null;
+      }
+    }
   }
 
-  const holdSnapshot = {
-    slotHoldId: String(holdDoc._id || "").trim(),
-    slotHoldToken: String(
-      slotHoldToken || record?.holdSnapshot?.slotHoldToken || ""
-    ).trim(),
-    slotHoldExpiresAt: String(holdDoc.expiresAt || "").trim(),
-    hostDate: String(holdDoc.hostDate || "").trim(),
-    hostTime: String(holdDoc.hostTime || "").trim(),
-    phase:
-      String(holdDoc.phase || "").trim().toLowerCase() || HOLD_PHASE_HOLDING,
+  return {
+    ...holdSnapshot,
+    phase: "released",
+    slotHoldExpiresAt: releasedAt,
   };
+};
 
-  return patchPaymentRecord({
+const releaseCouponForPaymentRecord = async ({
+  client,
+  record,
+  reason,
+  releaseCouponReservation = null,
+}) => {
+  const redemptionId = String(record?.couponReservationId || "").trim();
+  if (!redemptionId) return null;
+  const handler =
+    releaseCouponReservation ||
+    (await loadCouponReservationHandlers()).releaseCouponReservation;
+  if (typeof handler !== "function") {
+    throw new Error("Coupon reservation release service is unavailable.");
+  }
+  return handler({ client, redemptionId, reason });
+};
+
+const releaseUpgradeLockForPaymentRecord = async ({ client, record }) => {
+  const lockId = String(record?.startClaimId || "").trim();
+  if (!lockId.startsWith("paymentUpgradeLock.")) return;
+  const lock = await getDocumentById({
     client,
-    record,
-    set: {
-      holdSnapshot,
-      bookingPayload: {
-        ...sanitizeBookingPayload(record.bookingPayload),
-        slotHoldId: holdSnapshot.slotHoldId,
-        slotHoldToken: holdSnapshot.slotHoldToken,
-        slotHoldExpiresAt: holdSnapshot.slotHoldExpiresAt,
-      },
+    id: lockId,
+    type: PAYMENT_UPGRADE_LOCK_TYPE,
+  });
+  if (String(lock?.paymentRecordId || "").trim() !== String(record?._id || "").trim()) {
+    return;
+  }
+  await client.delete({
+    query: `*[_type == $type && _id == $id && _rev == $revision && paymentRecordId == $paymentRecordId]`,
+    params: {
+      type: PAYMENT_UPGRADE_LOCK_TYPE,
+      id: lockId,
+      revision: lock._rev,
+      paymentRecordId: record._id,
     },
   });
+};
+
+const releasePaymentResources = async ({
+  client,
+  record,
+  reason,
+  releaseCouponReservation = null,
+}) => {
+  const results = await Promise.allSettled([
+    releasePendingHold({ client, record }),
+    releaseCouponForPaymentRecord({
+      client,
+      record,
+      reason,
+      releaseCouponReservation,
+    }),
+    releaseUpgradeLockForPaymentRecord({ client, record }),
+  ]);
+  const errors = results
+    .filter((result) => result.status === "rejected")
+    .map((result) => String(result.reason?.message || "resource_release_failed"));
+  return { ok: errors.length === 0, errors };
 };
 
 const buildLegacyBookingPayload = ({
@@ -952,13 +1550,13 @@ const buildLegacyBookingPayload = ({
       normalizedSource === "client" &&
       String(record.provider || "").trim().toLowerCase() !== "free",
     paypalOrderId:
-      String(providerData.paypalOrderId || record.providerOrderId || "").trim(),
+      String(record.providerOrderId || providerData.paypalOrderId || "").trim(),
     payerEmail:
       String(providerData.payerEmail || record.payerEmail || "").trim(),
     razorpayOrderId:
-      String(providerData.razorpayOrderId || record.providerOrderId || "").trim(),
+      String(record.providerOrderId || providerData.razorpayOrderId || "").trim(),
     razorpayPaymentId:
-      String(providerData.razorpayPaymentId || record.providerPaymentId || "").trim(),
+      String(record.providerPaymentId || providerData.razorpayPaymentId || "").trim(),
     razorpaySignature:
       String(providerData.razorpaySignature || record.providerSignature || "").trim(),
     slotHoldId:
@@ -996,28 +1594,60 @@ const markRetryableFinalizeFailure = async ({
   reason,
   details = {},
 }) => {
-  const refreshedHold = await createOrRefreshRecoveryHold({
+  const current = (await getPaymentRecordById(client, record._id)) || record;
+  const currentStatus = String(current.status || "").trim().toLowerCase();
+  if (
+    isPaymentTerminalStatus(currentStatus) &&
+    currentStatus !== PAYMENT_STATUS_NEEDS_RECOVERY &&
+    !shouldRetryEmailPartialDispatch({ record: current, source })
+  ) {
+    return {
+      ok: true,
+      httpStatus: 200,
+      paymentRecord: current,
+      response: buildPublicStatusBody(current),
+    };
+  }
+  const recoveryAttemptCount = Number(current.recoveryAttemptCount || 0) + 1;
+  const releasedHoldSnapshot = await releaseExpiredRecoveryHold({
     client,
-    record,
-    reason,
-  }).catch(() => null);
-
-  const nextRecord = await patchPaymentRecord({
-    client,
-    record,
-    set: {
-      status: PAYMENT_STATUS_NEEDS_RECOVERY,
-      recoveryReason: reason,
-      source,
-      ...(refreshedHold ? { holdSnapshot: refreshedHold } : {}),
-    },
-    event: buildPaymentRecordEvent({
-      status: PAYMENT_STATUS_NEEDS_RECOVERY,
-      source,
-      reason,
-      data: details,
-    }),
+    record: current,
   });
+  let nextRecord;
+  try {
+    nextRecord = await patchPaymentRecord({
+      client,
+      record: current,
+      revisionGuard: true,
+      set: {
+        status: PAYMENT_STATUS_NEEDS_RECOVERY,
+        recoveryReason: reason,
+        recoveryAttemptCount,
+        nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
+        finalizationLeaseId: "",
+        finalizationLeaseExpiresAt: "",
+        source,
+        ...(releasedHoldSnapshot
+          ? { holdSnapshot: releasedHoldSnapshot }
+          : {}),
+        ...(Number(details?.createBookingStatus || 0) > 0
+          ? {
+              recoveryCategory: "booking_finalize",
+              recoveryHttpStatus: Number(details.createBookingStatus),
+            }
+          : {}),
+      },
+      event: buildPaymentRecordEvent({
+        status: PAYMENT_STATUS_NEEDS_RECOVERY,
+        source,
+        reason,
+        data: details,
+      }),
+    });
+  } catch (error) {
+    if (!isConflictError(error)) throw error;
+    nextRecord = (await getPaymentRecordById(client, current._id)) || current;
+  }
 
   return {
     ok: false,
@@ -1025,6 +1655,74 @@ const markRetryableFinalizeFailure = async ({
     paymentRecord: nextRecord,
     response: {
       ...buildPublicStatusBody(nextRecord),
+    },
+  };
+};
+
+const rejectUntrustedFinalizeAttempt = async ({
+  client,
+  record,
+  previousStatus = PAYMENT_STATUS_STARTED,
+  source,
+  reason,
+  details = {},
+  httpStatus = 400,
+}) => {
+  const safeStatus =
+    String(previousStatus || "").trim().toLowerCase() === PAYMENT_STATUS_FINALIZING
+      ? PAYMENT_STATUS_STARTED
+      : String(previousStatus || PAYMENT_STATUS_STARTED).trim().toLowerCase();
+  let nextRecord;
+  try {
+    nextRecord = await patchPaymentRecord({
+      client,
+      record,
+      revisionGuard: true,
+      set: {
+        status: safeStatus,
+        source,
+        finalizationLeaseId: "",
+        finalizationLeaseExpiresAt: "",
+      },
+      event: buildPaymentRecordEvent({
+        status: safeStatus,
+        source,
+        reason,
+        data: details,
+      }),
+    });
+  } catch (error) {
+    if (!isConflictError(error)) throw error;
+    nextRecord = (await getPaymentRecordById(client, record._id)) || record;
+    const currentStatus = String(nextRecord.status || "").trim().toLowerCase();
+    const terminal =
+      isPaymentTerminalStatus(currentStatus) &&
+      currentStatus !== PAYMENT_STATUS_NEEDS_RECOVERY;
+    return {
+      ok: terminal,
+      httpStatus: terminal ? 200 : 202,
+      paymentRecord: nextRecord,
+      response: {
+        ...buildPublicStatusBody(nextRecord),
+        ok: terminal,
+        ...(terminal
+          ? {}
+          : {
+              error: "Payment state changed while verification was running.",
+              code: "payment_state_changed",
+            }),
+      },
+    };
+  }
+  return {
+    ok: false,
+    httpStatus,
+    paymentRecord: nextRecord,
+    response: {
+      ...buildPublicStatusBody(nextRecord),
+      ok: false,
+      error: "Payment could not be verified.",
+      code: reason,
     },
   };
 };
@@ -1037,7 +1735,42 @@ const markTerminalFinalizeFailure = async ({
   details = {},
   httpStatus = 400,
 }) => {
-  await releasePendingHold({ client, record });
+  const release = await releasePaymentResources({
+    client,
+    record,
+    reason,
+  });
+  if (!release.ok) {
+    const recoveryAttemptCount = Number(record.recoveryAttemptCount || 0) + 1;
+    const pendingRecord = await patchPaymentRecord({
+      client,
+      record,
+      set: {
+        status: PAYMENT_STATUS_NEEDS_RECOVERY,
+        recoveryReason: "resource_release_pending",
+        recoveryAttemptCount,
+        nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
+        resourceReleasePending: true,
+        resourceReleaseTargetStatus: PAYMENT_STATUS_FAILED,
+        resourceReleaseReason: reason,
+        source,
+        finalizationLeaseId: "",
+        finalizationLeaseExpiresAt: "",
+      },
+      event: buildPaymentRecordEvent({
+        status: PAYMENT_STATUS_NEEDS_RECOVERY,
+        source,
+        reason: "resource_release_pending",
+        data: { errors: release.errors },
+      }),
+    });
+    return {
+      ok: false,
+      httpStatus: 202,
+      paymentRecord: pendingRecord,
+      response: buildPublicStatusBody(pendingRecord),
+    };
+  }
   const nextRecord = await patchPaymentRecord({
     client,
     record,
@@ -1045,6 +1778,11 @@ const markTerminalFinalizeFailure = async ({
       status: PAYMENT_STATUS_FAILED,
       recoveryReason: reason,
       source,
+      resourceReleasePending: false,
+      resourceReleaseTargetStatus: "",
+      resourceReleaseReason: "",
+      finalizationLeaseId: "",
+      finalizationLeaseExpiresAt: "",
     },
     event: buildPaymentRecordEvent({
       status: PAYMENT_STATUS_FAILED,
@@ -1059,9 +1797,9 @@ const markTerminalFinalizeFailure = async ({
     httpStatus,
     paymentRecord: nextRecord,
     response: {
+      ...buildPublicStatusBody(nextRecord),
       ok: false,
       error: "Payment finalization failed.",
-      ...buildPublicStatusBody(nextRecord),
     },
   };
 };
@@ -1095,10 +1833,15 @@ const finalizePaymentRecordInternal = async ({
     record,
     source: normalizedSource,
   });
+  const abandonedCaptureRecovery = canFinalizeAbandonedRecord({
+    status: record.status,
+    source: normalizedSource,
+  });
 
   if (
     isPaymentTerminalStatus(record.status) &&
     String(record.status || "").trim().toLowerCase() !== PAYMENT_STATUS_NEEDS_RECOVERY &&
+    !abandonedCaptureRecovery &&
     !shouldRetryEmailDispatch
   ) {
     return {
@@ -1111,9 +1854,10 @@ const finalizePaymentRecordInternal = async ({
 
   const bookingPayload = sanitizeBookingPayload(record.bookingPayload);
   if (
-    !String(bookingPayload.packageTitle || "").trim() ||
-    (!String(bookingPayload.originalOrderId || "").trim() &&
-      !String(bookingPayload.startTimeUTC || "").trim())
+    !abandonedCaptureRecovery &&
+    (!String(bookingPayload.packageTitle || "").trim() ||
+      (!String(bookingPayload.originalOrderId || "").trim() &&
+        !String(bookingPayload.startTimeUTC || "").trim()))
   ) {
     return markRetryableFinalizeFailure({
       client,
@@ -1124,30 +1868,48 @@ const finalizePaymentRecordInternal = async ({
     });
   }
 
-  const captureStatus = resolveClientSourceStatus(normalizedSource);
-  let workingRecord = await patchPaymentRecord({
+  const binding = validateImmutableProviderBinding({ record, providerData });
+  if (!binding.ok) {
+    return {
+      ok: false,
+      httpStatus: 409,
+      paymentRecord: record,
+      response: {
+        ...buildPublicStatusBody(record),
+        ok: false,
+        error: "Payment proof does not belong to this checkout session.",
+        code: binding.reason,
+      },
+    };
+  }
+
+  const lease = await acquireFinalizationLease({
     client,
     record,
-    set: {
-      status: captureStatus,
-      providerOrderId:
-        String(providerData.paypalOrderId || providerData.razorpayOrderId || record.providerOrderId || "").trim(),
-      providerPaymentId:
-        String(providerData.razorpayPaymentId || providerData.paypalPaymentId || record.providerPaymentId || "").trim(),
-      providerSignature:
-        String(providerData.razorpaySignature || record.providerSignature || "").trim(),
-      payerEmail: String(providerData.payerEmail || record.payerEmail || "").trim(),
-      source: normalizedSource,
-      attemptCount: Number(record.attemptCount || 0) + 1,
-      lastAttemptAt: nowIso(),
-    },
-    event: buildPaymentRecordEvent({
-      status: captureStatus,
-      source: normalizedSource,
-      reason: "",
-      data: providerData,
-    }),
+    source: normalizedSource,
   });
+  if (!lease.acquired) {
+    if (lease.terminal) {
+      return {
+        ok: true,
+        httpStatus: 200,
+        paymentRecord: lease.record,
+        response: buildPublicStatusBody(lease.record),
+      };
+    }
+    return {
+      ok: false,
+      httpStatus: 202,
+      paymentRecord: lease.record,
+      response: {
+        ...buildPublicStatusBody(lease.record),
+        status: PAYMENT_STATUS_FINALIZING,
+      },
+    };
+  }
+  let workingRecord = lease.record;
+  const lateCaptureFromAbandoned =
+    lease.previousStatus === PAYMENT_STATUS_ABANDONED;
 
   const verification = await verifyProviderCapture({
     record: workingRecord,
@@ -1156,7 +1918,9 @@ const finalizePaymentRecordInternal = async ({
   });
   if (!verification.ok) {
     if (
-      verification.retryable &&
+      (verification.retryable ||
+        verification.captured === true ||
+        normalizedSource === "webhook") &&
       String(workingRecord.provider || "").trim().toLowerCase() !== "free" &&
       isTrustedRecoverySource(normalizedSource)
     ) {
@@ -1169,9 +1933,10 @@ const finalizePaymentRecordInternal = async ({
       });
     }
 
-    return markTerminalFinalizeFailure({
+    return rejectUntrustedFinalizeAttempt({
       client,
       record: workingRecord,
+      previousStatus: record.status,
       source: normalizedSource,
       reason: verification.reason,
       details: providerData,
@@ -1179,40 +1944,144 @@ const finalizePaymentRecordInternal = async ({
     });
   }
 
-  if (verification.payerEmail) {
-    workingRecord = await patchPaymentRecord({
+  let proofClaim;
+  try {
+    proofClaim = await claimPaymentProof({
       client,
       record: workingRecord,
-      set: {
-        payerEmail: verification.payerEmail,
-        verificationState: "server_verified",
-        verificationWarning: "",
-      },
+      providerOrderId:
+        verification.providerOrderId || workingRecord.providerOrderId || "",
+      providerPaymentId:
+        verification.providerPaymentId || workingRecord.providerPaymentId || "",
     });
-  } else if (String(workingRecord.provider || "").trim().toLowerCase() !== "free") {
-    workingRecord = await patchPaymentRecord({
+  } catch (error) {
+    const duplicate = await normalizeMarkedDuplicatePaymentRecord({
       client,
       record: workingRecord,
-      set: {
-        verificationState: "server_verified",
-        verificationWarning: "",
-      },
+      providerOrderId:
+        verification.providerOrderId || workingRecord.providerOrderId || "",
+      providerPaymentId:
+        verification.providerPaymentId || workingRecord.providerPaymentId || "",
+      error,
+    });
+    if (duplicate?._id) {
+      const linked = !!String(duplicate.bookingId || "").trim();
+      return {
+        ok: linked,
+        httpStatus: linked ? 200 : 202,
+        paymentRecord: duplicate,
+        response: buildPublicStatusBody(duplicate),
+      };
+    }
+    return markRetryableFinalizeFailure({
+      client,
+      record: workingRecord,
+      source: normalizedSource,
+      reason: error?.code || "payment_proof_claim_failed",
+      details: providerData,
     });
   }
 
-  workingRecord = await patchPaymentRecord({
-    client,
-    record: workingRecord,
-    set: {
-      status: PAYMENT_STATUS_FINALIZING,
+  const captureStatus = resolveClientSourceStatus(normalizedSource);
+  try {
+    workingRecord = await patchPaymentRecord({
+      client,
+      record: workingRecord,
+      revisionGuard: true,
+      set: {
+        status: PAYMENT_STATUS_FINALIZING,
+        providerPaymentId: String(
+          workingRecord.providerPaymentId || verification.providerPaymentId || ""
+        ).trim(),
+        providerSignature: String(
+          workingRecord.providerSignature || providerData.razorpaySignature || ""
+        ).trim(),
+        payerEmail: String(
+          verification.payerEmail || providerData.payerEmail || workingRecord.payerEmail || ""
+        ).trim(),
+        verificationState:
+          String(workingRecord.provider || "").trim().toLowerCase() === "free"
+            ? String(workingRecord.verificationState || "").trim()
+            : "server_verified",
+        verificationWarning: "",
+        paymentProofClaimId: String(proofClaim?._id || "").trim(),
+      },
+      event: buildPaymentRecordEvent({
+        status: captureStatus,
+        source: normalizedSource,
+        reason: "provider_capture_verified",
+        data: {
+          providerOrderId: workingRecord.providerOrderId || "",
+          providerPaymentId:
+            workingRecord.providerPaymentId || verification.providerPaymentId || "",
+        },
+      }),
+    });
+  } catch (error) {
+    if (!isConflictError(error)) throw error;
+    const current = await getPaymentRecordById(client, workingRecord._id);
+    return {
+      ok: false,
+      httpStatus: isPaymentTerminalStatus(current?.status) ? 200 : 202,
+      paymentRecord: current || workingRecord,
+      response: buildPublicStatusBody(current || workingRecord),
+    };
+  }
+
+  if (lateCaptureFromAbandoned) {
+    try {
+      const recovered = await recoverCapturedPaymentAsReschedule({
+        client,
+        record: workingRecord,
+        reason: "captured_after_abandonment",
+        providerData: {
+          ...providerData,
+          providerOrderId:
+            verification.providerOrderId || workingRecord.providerOrderId || "",
+          providerPaymentId:
+            verification.providerPaymentId || workingRecord.providerPaymentId || "",
+          payerEmail:
+            verification.payerEmail || providerData.payerEmail || workingRecord.payerEmail || "",
+        },
+        paymentProofClaim: proofClaim,
+      });
+      if (recovered?._id) {
+        return {
+          ok: true,
+          httpStatus: 200,
+          paymentRecord: recovered,
+          response: buildPublicStatusBody(recovered),
+        };
+      }
+    } catch (error) {
+      const current = await getPaymentRecordById(client, workingRecord._id);
+      if (
+        String(current?.status || "").trim().toLowerCase() ===
+        PAYMENT_STATUS_REFUNDED
+      ) {
+        return {
+          ok: true,
+          httpStatus: 200,
+          paymentRecord: current,
+          response: buildPublicStatusBody(current),
+        };
+      }
+      return markRetryableFinalizeFailure({
+        client,
+        record: current || workingRecord,
+        source: normalizedSource,
+        reason: error?.code || "late_capture_reschedule_failed",
+        details: { message: String(error?.message || "") },
+      });
+    }
+
+    return markRetryableFinalizeFailure({
+      client,
+      record: workingRecord,
       source: normalizedSource,
-    },
-    event: buildPaymentRecordEvent({
-      status: PAYMENT_STATUS_FINALIZING,
-      source: normalizedSource,
-      reason: "",
-    }),
-  });
+      reason: "late_capture_reschedule_incomplete",
+    });
+  }
 
   const createPayload = buildLegacyBookingPayload({
     record: workingRecord,
@@ -1221,6 +2090,20 @@ const finalizePaymentRecordInternal = async ({
   });
   const result = await invokeCreateBooking(createPayload, {
     paymentFinalizeSource: normalizedSource,
+    paymentProofClaimId: String(proofClaim?._id || "").trim(),
+    paymentFinalizationLeaseId: lease.leaseId,
+    couponReservationId: String(workingRecord.couponReservationId || "").trim(),
+    emailDispatchAlreadyComplete: isEmailDispatchComplete(
+      workingRecord.emailDispatch
+    ),
+    emailDispatchCompletedAt: String(
+      workingRecord.lastEmailDispatchAt ||
+        workingRecord.updatedAt ||
+        workingRecord.createdAt ||
+        ""
+    ).trim(),
+    preserveHistoricalAccounting:
+      workingRecord.historicalBookingReconstruction === true,
   });
 
   if (result.status >= 200 && result.status < 300 && result.body?.bookingId) {
@@ -1234,29 +2117,67 @@ const finalizePaymentRecordInternal = async ({
       { id: bookingId }
     );
 
-    const nextRecord = await patchPaymentRecord({
-      client,
-      record: workingRecord,
-      set: {
-        status: nextStatus,
-        bookingId,
-        recoveryReason: "",
-        emailDispatch: normalizeObject(result.body?.emailDispatch),
-        emailDispatchToken: String(result.body?.emailDispatchToken || "").trim(),
-        verificationState: String(bookingDoc?.paymentVerificationState || "").trim(),
-        verificationWarning: String(
-          bookingDoc?.paymentVerificationWarning || ""
-        ).trim(),
-      },
-      event: buildPaymentRecordEvent({
-        status: nextStatus,
-        source: normalizedSource,
-        data: {
-          bookingId,
-          emailDispatch: normalizeObject(result.body?.emailDispatch),
-        },
-      }),
-    });
+    let nextRecord = null;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const current = await getPaymentRecordById(client, workingRecord._id);
+      const currentStatus = String(current?.status || "").trim().toLowerCase();
+      if (
+        current?._id &&
+        [
+          PAYMENT_STATUS_REFUNDED,
+          PAYMENT_STATUS_FAILED,
+          PAYMENT_STATUS_ABANDONED,
+        ].includes(currentStatus)
+      ) {
+        nextRecord = current;
+        break;
+      }
+      try {
+        nextRecord = await patchPaymentRecord({
+          client,
+          record: current || workingRecord,
+          revisionGuard: true,
+          set: {
+            status: nextStatus,
+            bookingId,
+            recoveryReason: "",
+            recoveryAttemptCount: 0,
+            nextRecoveryAt: "",
+            finalizationLeaseId: "",
+            finalizationLeaseExpiresAt: "",
+            emailDispatch: normalizeObject(result.body?.emailDispatch),
+            emailDispatchToken: String(
+              result.body?.emailDispatchToken || ""
+            ).trim(),
+            emailDispatchRequired: nextStatus === PAYMENT_STATUS_EMAIL_PARTIAL,
+            verificationState: String(
+              bookingDoc?.paymentVerificationState || ""
+            ).trim(),
+            verificationWarning: String(
+              bookingDoc?.paymentVerificationWarning || ""
+            ).trim(),
+            ...(workingRecord.historicalBookingReconstruction === true
+              ? {
+                  historicalBookingReconstruction: false,
+                  historicalBookingReconstructedAt: nowIso(),
+                  historicalAccountingPreserved: true,
+                }
+              : {}),
+          },
+          event: buildPaymentRecordEvent({
+            status: nextStatus,
+            source: normalizedSource,
+            data: {
+              bookingId,
+              emailDispatch: normalizeObject(result.body?.emailDispatch),
+            },
+          }),
+        });
+        break;
+      } catch (error) {
+        if (!isConflictError(error) || attempt === 4) throw error;
+      }
+    }
 
     return {
       ok: true,
@@ -1269,8 +2190,24 @@ const finalizePaymentRecordInternal = async ({
   const reason =
     String(result.body?.error || result.body?.message || "").trim() ||
     `finalize_failed_${result.status}`;
+  const currentAfterBookingAttempt = await getPaymentRecordById(
+    client,
+    workingRecord._id
+  );
   if (
-    result.status >= 500 &&
+    currentAfterBookingAttempt?._id &&
+    isPaymentTerminalStatus(currentAfterBookingAttempt.status) &&
+    String(currentAfterBookingAttempt.status || "").trim().toLowerCase() !==
+      PAYMENT_STATUS_NEEDS_RECOVERY
+  ) {
+    return {
+      ok: true,
+      httpStatus: 200,
+      paymentRecord: currentAfterBookingAttempt,
+      response: buildPublicStatusBody(currentAfterBookingAttempt),
+    };
+  }
+  if (
     String(workingRecord.provider || "").trim().toLowerCase() !== "free" &&
     isTrustedRecoverySource(normalizedSource)
   ) {
@@ -1299,28 +2236,199 @@ const finalizePaymentRecordInternal = async ({
   });
 };
 
-const abandonStartedPaymentRecord = async ({ client, record, reason }) => {
-  await releasePendingHold({ client, record });
-  const nextRecord = await patchPaymentRecord({
+const abandonStartedPaymentRecord = async ({
+  client,
+  record,
+  reason,
+  releaseCouponReservation = null,
+}) => {
+  const current = (await getPaymentRecordById(client, record._id)) || record;
+  const currentStatus = String(current.status || "").trim().toLowerCase();
+  const canStageAbandonment =
+    currentStatus === PAYMENT_STATUS_STARTED ||
+    currentStatus === PAYMENT_STATUS_NEEDS_RECOVERY ||
+    (currentStatus === PAYMENT_STATUS_ABANDONED &&
+      current.resourceReleasePending === true);
+
+  if (!canStageAbandonment) {
+    return {
+      ok: currentStatus === PAYMENT_STATUS_ABANDONED,
+      httpStatus: isPaymentTerminalStatus(currentStatus) ? 200 : 202,
+      paymentRecord: current,
+      response: buildPublicStatusBody(current),
+    };
+  }
+
+  let stagedRecord = current;
+  if (currentStatus !== PAYMENT_STATUS_ABANDONED) {
+    const recoveryAttemptCount = Number(current.recoveryAttemptCount || 0) + 1;
+    try {
+      stagedRecord = await patchPaymentRecord({
+        client,
+        record: current,
+        revisionGuard: true,
+        set: {
+          status: PAYMENT_STATUS_ABANDONED,
+          recoveryReason: reason,
+          recoveryAttemptCount,
+          nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
+          resourceReleasePending: true,
+          resourceReleaseTargetStatus: PAYMENT_STATUS_ABANDONED,
+          resourceReleaseReason: reason,
+          finalizationLeaseId: "",
+          finalizationLeaseExpiresAt: "",
+        },
+        event: buildPaymentRecordEvent({
+          status: PAYMENT_STATUS_ABANDONED,
+          source: "reconcile",
+          reason: `${reason}_release_staged`,
+        }),
+      });
+    } catch (error) {
+      if (!isConflictError(error)) throw error;
+      const fresh = (await getPaymentRecordById(client, current._id)) || current;
+      return {
+        ok:
+          String(fresh.status || "").trim().toLowerCase() ===
+          PAYMENT_STATUS_ABANDONED,
+        httpStatus: 202,
+        paymentRecord: fresh,
+        response: buildPublicStatusBody(fresh),
+      };
+    }
+  }
+
+  const release = await releasePaymentResources({
     client,
-    record,
-    set: {
-      status: PAYMENT_STATUS_ABANDONED,
-      recoveryReason: reason,
-    },
-    event: buildPaymentRecordEvent({
-      status: PAYMENT_STATUS_ABANDONED,
-      source: "reconcile",
-      reason,
-    }),
+    record: stagedRecord,
+    reason,
+    releaseCouponReservation,
   });
+  if (!release.ok) {
+    const recoveryAttemptCount = Number(stagedRecord.recoveryAttemptCount || 0) + 1;
+    let pendingRecord;
+    try {
+      pendingRecord = await patchPaymentRecord({
+        client,
+        record: stagedRecord,
+        revisionGuard: true,
+        set: {
+          status: PAYMENT_STATUS_ABANDONED,
+          recoveryReason: "resource_release_pending",
+          recoveryAttemptCount,
+          nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
+          resourceReleasePending: true,
+          resourceReleaseTargetStatus: PAYMENT_STATUS_ABANDONED,
+          resourceReleaseReason: reason,
+        },
+        event: buildPaymentRecordEvent({
+          status: PAYMENT_STATUS_ABANDONED,
+          source: "reconcile",
+          reason: "resource_release_pending",
+          data: { errors: release.errors },
+        }),
+      });
+    } catch (error) {
+      if (!isConflictError(error)) throw error;
+      pendingRecord =
+        (await getPaymentRecordById(client, stagedRecord._id)) || stagedRecord;
+    }
+    return {
+      ok: false,
+      httpStatus: 202,
+      paymentRecord: pendingRecord,
+      response: buildPublicStatusBody(pendingRecord),
+    };
+  }
+  const shouldWatchForLateCapture = !!String(
+    stagedRecord.providerOrderId || ""
+  ).trim();
+  let nextRecord;
+  try {
+    nextRecord = await patchPaymentRecord({
+      client,
+      record: stagedRecord,
+      revisionGuard: true,
+      set: {
+        status: PAYMENT_STATUS_ABANDONED,
+        recoveryReason: reason,
+        resourceReleasePending: false,
+        resourceReleaseTargetStatus: "",
+        resourceReleaseReason: "",
+        lateCaptureWatchUntil: shouldWatchForLateCapture
+          ? getFutureIso(LATE_CAPTURE_WATCH_HOURS * 60 * 60)
+          : "",
+        nextRecoveryAt: shouldWatchForLateCapture ? getFutureIso(60 * 60) : "",
+      },
+      event: buildPaymentRecordEvent({
+        status: PAYMENT_STATUS_ABANDONED,
+        source: "reconcile",
+        reason,
+      }),
+    });
+  } catch (error) {
+    if (!isConflictError(error)) throw error;
+    nextRecord =
+      (await getPaymentRecordById(client, stagedRecord._id)) || stagedRecord;
+  }
 
   return {
-    ok: true,
+    ok:
+      String(nextRecord.status || "").trim().toLowerCase() ===
+      PAYMENT_STATUS_ABANDONED,
     httpStatus: 200,
     paymentRecord: nextRecord,
     response: buildPublicStatusBody(nextRecord),
   };
+};
+
+const createProviderOrderForRecord = async (
+  record = {},
+  { allowProviderCreate = false } = {}
+) => {
+  const provider = String(record.provider || "").trim().toLowerCase();
+  const bookingPayload = sanitizeBookingPayload(record.bookingPayload);
+  const pricing = normalizeObject(record.pricingSnapshot);
+  const amount = Number(pricing.netAmount || 0);
+  const idempotencyKey = String(record.providerIdempotencyKey || "").trim();
+
+  if (provider === "razorpay") {
+    return createRazorpayOrder({
+      amount,
+      currency: DEFAULT_RAZORPAY_CURRENCY,
+      receipt: idempotencyKey,
+      lookupOnly: !allowProviderCreate,
+      notes: {
+        paymentRecordId: record._id,
+        bookingSeedKey: record.bookingSeedKey || "",
+        holdId: bookingPayload.slotHoldId || "",
+        startTimeUTC: bookingPayload.startTimeUTC || "",
+        packageTitle: bookingPayload.packageTitle || "",
+        originalOrderId: bookingPayload.originalOrderId || "",
+        referralCode: bookingPayload.referralCode || "",
+        couponCode: bookingPayload.couponCode || "",
+      },
+    });
+  }
+
+  if (provider === "paypal") {
+    const providerPayload = await createPayPalOrder({
+      amount,
+      currency: DEFAULT_PAYPAL_CURRENCY,
+      description: `${bookingPayload.packageTitle} booking`,
+      customId: record._id,
+      requestId: idempotencyKey,
+    });
+    return {
+      ...providerPayload,
+      clientId: resolvePaymentProviders()?.paypal?.clientId || "",
+    };
+  }
+
+  throw Object.assign(new Error("Unsupported payment provider."), {
+    status: 400,
+    code: "unsupported_payment_provider",
+  });
 };
 
 const createOrReusePaymentRecordForStart = async ({
@@ -1329,6 +2437,10 @@ const createOrReusePaymentRecordForStart = async ({
   bookingPayload,
   holdDoc,
   quote,
+  quoteFingerprint,
+  upgradeIntentSnapshot = null,
+  prepareCouponReservation = null,
+  appendCouponReservation = null,
 }) => {
   const bookingSeedKey = buildBookingSeedKey({
     provider,
@@ -1343,83 +2455,88 @@ const createOrReusePaymentRecordForStart = async ({
     quote,
   });
 
-  const reusable = await findReusablePaymentRecord({
-    client,
-    provider,
-    pricingFingerprint,
-    slotHoldId: bookingPayload.slotHoldId,
+  const sessionScope = buildPaymentSessionScope({
+    bookingPayload,
+    holdNonce: holdDoc?.holdNonce || "",
   });
-  if (reusable?._id) {
-    return reusable;
-  }
-
-  let providerPayload = {};
-  let providerOrderId = "";
-  if (provider === "razorpay") {
-    providerPayload = await createRazorpayOrder({
-      amount: quote.effectiveNetAmount,
-      currency: DEFAULT_RAZORPAY_CURRENCY,
-      notes: {
-        bookingSeedKey,
-        holdId: bookingPayload.slotHoldId || "",
-        startTimeUTC: bookingPayload.startTimeUTC || "",
-        packageTitle: bookingPayload.packageTitle || "",
-        originalOrderId: bookingPayload.originalOrderId || "",
-        referralCode: bookingPayload.referralCode || "",
-        couponCode: bookingPayload.couponCode || "",
-      },
-    });
-    providerOrderId = providerPayload.orderId;
-  } else if (provider === "paypal") {
-    providerPayload = await createPayPalOrder({
-      amount: quote.effectiveNetAmount,
-      currency: DEFAULT_PAYPAL_CURRENCY,
-      description: `${bookingPayload.packageTitle} booking`,
-      customId: bookingPayload.startTimeUTC || "",
-    });
-    providerOrderId = providerPayload.orderId;
-    providerPayload = {
-      ...providerPayload,
-      clientId: resolvePaymentProviders()?.paypal?.clientId || "",
-    };
-  }
-
-  const paymentRecordId = buildPaymentRecordId({
-    provider,
-    providerOrderId,
-    bookingSeedKey,
-  });
-
+  const isUpgrade = !!String(bookingPayload.originalOrderId || "").trim();
+  const paymentRecordId = buildPaymentSessionRecordId(
+    isUpgrade ? `${sessionScope}:${crypto.randomUUID()}` : sessionScope
+  );
+  const startClaimId = isUpgrade
+    ? buildPaymentUpgradeLockId(sessionScope)
+    : buildPaymentStartClaimId(sessionScope);
+  const providerIdempotencyKey = buildPaymentProviderIdempotencyKey(paymentRecordId);
+  const orderCreationLeaseId =
+    provider === "free" ? "" : crypto.randomUUID();
   const expiresAt = getPaymentHoldExpiryIso(PAYMENT_HOLD_MINUTES);
+  let couponReservationPlan = null;
+  let appendReservation = appendCouponReservation;
+  if (String(bookingPayload.couponCode || "").trim()) {
+    const loadedHandlers =
+      typeof prepareCouponReservation === "function" &&
+      typeof appendCouponReservation === "function"
+        ? {}
+        : await loadCouponReservationHandlers();
+    const prepare =
+      prepareCouponReservation || loadedHandlers.prepareCouponReservation;
+    appendReservation =
+      appendReservation || loadedHandlers.appendCouponReservation;
+    if (typeof prepare !== "function" || typeof appendReservation !== "function") {
+      const error = new Error("Coupon reservation service is unavailable.");
+      error.status = 503;
+      error.code = "coupon_reservation_unavailable";
+      throw error;
+    }
+    couponReservationPlan = await prepare({
+      client,
+      couponCode: bookingPayload.couponCode,
+      ownerId: paymentRecordId,
+      expiresAt,
+      paymentRecordId,
+    });
+  }
+  const refreshedHoldToken = holdDoc?._id
+    ? issueHoldToken({
+        holdId: holdDoc._id,
+        startTimeUTC: holdDoc.startTimeUTC || bookingPayload.startTimeUTC,
+        expiresAt,
+        holdNonce: holdDoc.holdNonce || "",
+      })
+    : "";
   const createdAt = nowIso();
   const doc = {
     _id: paymentRecordId,
+    _type: PAYMENT_RECORD_TYPE,
     provider,
     status: PAYMENT_STATUS_STARTED,
     bookingSeedKey,
     pricingFingerprint,
-    bookingFinalizationKey:
-      provider === "paypal"
-        ? `paypal:${providerOrderId}`
-        : provider === "free"
-        ? bookingSeedKey
-        : `razorpay-order:${providerOrderId}`,
+    quoteFingerprint,
+    sessionScope,
+    startClaimId,
+    providerIdempotencyKey,
+    couponReservationId: String(
+      couponReservationPlan?.redemption?._id || ""
+    ).trim(),
+    bookingFinalizationKey: provider === "free" ? bookingSeedKey : "",
     bookingPayload: {
       ...bookingPayload,
       paymentProvider: provider,
+      slotHoldToken: refreshedHoldToken || bookingPayload.slotHoldToken || "",
       slotHoldExpiresAt: expiresAt,
     },
     pricingSnapshot: buildPricingSnapshot(quote),
+    ...(upgradeIntentSnapshot ? { upgradeIntentSnapshot } : {}),
     holdSnapshot: {
       slotHoldId: bookingPayload.slotHoldId || "",
-      slotHoldToken: bookingPayload.slotHoldToken || "",
+      slotHoldToken: refreshedHoldToken || bookingPayload.slotHoldToken || "",
       slotHoldExpiresAt: expiresAt,
       hostDate: holdDoc?.hostDate || "",
       hostTime: holdDoc?.hostTime || "",
-      phase:
-        String(holdDoc?.phase || "").trim().toLowerCase() || HOLD_PHASE_HOLDING,
+      phase: holdDoc?._id ? HOLD_PHASE_PAYMENT_PENDING : HOLD_PHASE_HOLDING,
     },
-    providerOrderId,
+    providerOrderId: "",
     providerPaymentId: "",
     payerEmail: String(bookingPayload.email || "").trim(),
     verificationState: "",
@@ -1429,28 +2546,127 @@ const createOrReusePaymentRecordForStart = async ({
     attemptCount: 0,
     lastAttemptAt: "",
     source: "start",
-    providerPublicData: providerPayload,
+    providerPublicData: {},
+    orderState: provider === "free" ? "not_required" : "creating",
+    orderCreationLeaseId,
+    orderCreationLeaseExpiresAt:
+      provider === "free" ? "" : getFutureIso(FINALIZATION_LEASE_SECONDS),
+    sessionExpiresAt: expiresAt,
     emailDispatch: {},
+    emailDispatchRequired: true,
     events: [
       buildPaymentRecordEvent({
         status: PAYMENT_STATUS_STARTED,
         source: "start",
+        reason: "payment_session_claimed",
         data: {
-          providerOrderId,
           slotHoldId: bookingPayload.slotHoldId || "",
+          startClaimId,
         },
       }),
     ],
     createdAt,
     updatedAt: createdAt,
   };
+  const claim = {
+    _id: startClaimId,
+    _type: isUpgrade ? PAYMENT_UPGRADE_LOCK_TYPE : PAYMENT_START_CLAIM_TYPE,
+    scope: sessionScope,
+    paymentRecordId,
+    provider,
+    quoteFingerprint,
+    createdAt,
+    updatedAt: createdAt,
+  };
+  const holdPatch = holdDoc?._id
+    ? {
+        phase: HOLD_PHASE_PAYMENT_PENDING,
+        paymentRecordId,
+        paymentProvider: provider,
+        packageTitle: bookingPayload.packageTitle || holdDoc.packageTitle || "",
+        expiresAt,
+      }
+    : {};
+  let record = await createStartClaimAndRecord({
+    client,
+    claim,
+    record: doc,
+    holdDoc,
+    holdPatch,
+    couponReservationPlan,
+    appendCouponReservation: appendReservation,
+  });
 
-  return upsertPaymentRecord({ client, doc });
+  if (String(record.provider || "").trim().toLowerCase() !== provider) {
+    const error = new Error("This reservation already has a payment provider selected.");
+    error.status = 409;
+    error.code = "payment_provider_already_claimed";
+    throw error;
+  }
+  if (
+    record.quoteFingerprint &&
+    String(record.quoteFingerprint) !== String(quoteFingerprint)
+  ) {
+    const error = new Error("This reservation is already bound to a different quote.");
+    error.status = 409;
+    error.code = "payment_quote_already_claimed";
+    throw error;
+  }
+  if (provider === "free" || String(record.providerOrderId || "").trim()) {
+    return record;
+  }
+  if (
+    !orderCreationLeaseId ||
+    String(record.orderCreationLeaseId || "").trim() !== orderCreationLeaseId
+  ) {
+    const current = (await getPaymentRecordById(client, record._id)) || record;
+    if (String(current.providerOrderId || "").trim()) return current;
+    const error = new Error("This payment session is already creating its provider order.");
+    error.status = 409;
+    error.code = "provider_order_creation_in_progress";
+    throw error;
+  }
+
+  let providerPayload;
+  try {
+    providerPayload = await createProviderOrderForRecord(record, {
+      allowProviderCreate: true,
+    });
+  } catch (error) {
+    const recoveryAttemptCount = Number(record.recoveryAttemptCount || 0) + 1;
+    await patchPaymentRecord({
+      client,
+      record,
+      set: {
+        status: PAYMENT_STATUS_NEEDS_RECOVERY,
+        orderState: "creation_ambiguous",
+        recoveryReason: "provider_order_creation_ambiguous",
+        recoveryAttemptCount,
+        nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
+        orderCreationLeaseId: "",
+        orderCreationLeaseExpiresAt: "",
+      },
+      event: buildPaymentRecordEvent({
+        status: PAYMENT_STATUS_NEEDS_RECOVERY,
+        source: "start",
+        reason: "provider_order_creation_ambiguous",
+        data: { provider, code: String(error?.code || "").trim() },
+      }),
+    }).catch(() => null);
+    error.status = Number(error?.status) >= 400 ? Number(error.status) : 503;
+    error.code = error?.code || "provider_order_creation_ambiguous";
+    throw error;
+  }
+
+  record = await attachImmutableProviderOrder({ client, record, providerPayload });
+  return record;
 };
 
 export const startPaymentSession = async ({
   body,
   client = createRefWriteClient(),
+  prepareCouponReservation = null,
+  appendCouponReservation = null,
 }) => {
   const serverSessionsEnabled = resolveServerPaymentSessionsEnabled();
   if (!serverSessionsEnabled) {
@@ -1478,6 +2694,39 @@ export const startPaymentSession = async ({
   }
 
   try {
+    let upgradeIntentSnapshot = null;
+    if (bookingPayload.originalOrderId) {
+      if (!String(bookingPayload.email || "").trim()) {
+        return {
+          httpStatus: 400,
+          body: {
+            ok: false,
+            code: "upgrade_email_required",
+            error: "The original booking email is required to start an upgrade.",
+          },
+        };
+      }
+      const verifiedUpgradeIntent = verifyUpgradeIntentToken({
+        token: bookingPayload.upgradeIntentToken,
+        bookingId: bookingPayload.originalOrderId,
+        email: bookingPayload.email,
+        targetPackageTitle: bookingPayload.packageTitle,
+      });
+      if (!verifiedUpgradeIntent) {
+        return {
+          httpStatus: 403,
+          body: {
+            ok: false,
+            code: "upgrade_intent_invalid",
+            error: "Upgrade authorization expired or no longer matches.",
+          },
+        };
+      }
+      upgradeIntentSnapshot = freezeUpgradeIntent({
+        payload: verifiedUpgradeIntent,
+      });
+    }
+
     const quote = await resolvePaymentQuote({
       packageTitle: bookingPayload.packageTitle,
       originalOrderId: bookingPayload.originalOrderId || "",
@@ -1486,6 +2735,31 @@ export const startPaymentSession = async ({
       couponCode: bookingPayload.couponCode || "",
       client,
     });
+    const currentQuoteFingerprint = buildQuoteFingerprint({
+      bookingPayload,
+      quote,
+    });
+    const submittedQuoteFingerprint = String(
+      requestBody.quoteFingerprint || ""
+    ).trim();
+    if (
+      (!submittedQuoteFingerprint && !isLegacyCheckoutCompatibilityOpen()) ||
+      (submittedQuoteFingerprint &&
+        submittedQuoteFingerprint !== currentQuoteFingerprint)
+    ) {
+      return {
+        httpStatus: 409,
+        body: {
+          ok: false,
+          error: "The checkout price changed. Please review the updated total.",
+          code: submittedQuoteFingerprint
+            ? "quote_fingerprint_mismatch"
+            : "quote_fingerprint_required",
+          quote: buildQuotePayload(quote),
+          quoteFingerprint: currentQuoteFingerprint,
+        },
+      };
+    }
     const providers = resolvePaymentProviders();
     const quoteProvider = String(quote.paymentProvider || "").trim().toLowerCase();
     let provider = "";
@@ -1556,27 +2830,38 @@ export const startPaymentSession = async ({
       bookingPayload,
       holdDoc,
       quote,
+      quoteFingerprint: currentQuoteFingerprint,
+      upgradeIntentSnapshot,
+      prepareCouponReservation,
+      appendCouponReservation,
     });
-
-    let refreshed = record;
-    if (holdDoc?._id) {
-      const pendingHold = await markHoldPaymentPending({
-        client,
-        holdDoc,
-        bookingPayload: { ...bookingPayload, paymentProvider: provider },
-        paymentRecordId: record._id,
-      });
-      refreshed = await syncPaymentRecordHoldState({
-        client,
-        record,
-        holdDoc: pendingHold,
-        slotHoldToken: bookingPayload.slotHoldToken,
-      });
-    }
-    if (!refreshed?._id) {
-      refreshed = await getPaymentRecordById(client, record._id);
-    }
+    const refreshed = record?._id
+      ? record
+      : await getPaymentRecordById(client, record._id);
     const paymentAccessToken = issuePaymentAccessTokenForRecord(refreshed);
+    const refreshedStatus = String(refreshed.status || "").trim().toLowerCase();
+    if (
+      provider !== "free" &&
+      [
+        PAYMENT_STATUS_BOOKED,
+        PAYMENT_STATUS_EMAIL_PARTIAL,
+        PAYMENT_STATUS_REFUNDED,
+      ].includes(refreshedStatus)
+    ) {
+      return {
+        httpStatus: 200,
+        body: {
+          ...buildPublicStatusBody(refreshed),
+          provider,
+          quote: buildQuotePayload(quote),
+          quoteFingerprint: currentQuoteFingerprint,
+          providerPayload: {},
+          paymentAccessToken,
+          sessionExpiresAt: String(refreshed.sessionExpiresAt || "").trim(),
+          refreshedHold: buildRefreshedHoldBody(refreshed),
+        },
+      };
+    }
     if (provider === "free") {
       const finalized = await finalizePaymentRecordInternal({
         client,
@@ -1590,6 +2875,9 @@ export const startPaymentSession = async ({
           ...finalized.response,
           provider,
           quote: buildQuotePayload(quote),
+          quoteFingerprint: currentQuoteFingerprint,
+          sessionExpiresAt: String(refreshed.sessionExpiresAt || "").trim(),
+          refreshedHold: buildRefreshedHoldBody(refreshed),
           paymentAccessToken,
         },
       };
@@ -1602,8 +2890,11 @@ export const startPaymentSession = async ({
         status: PAYMENT_STATUS_STARTED,
         provider,
         quote: buildQuotePayload(quote),
+        quoteFingerprint: currentQuoteFingerprint,
         providerPayload: buildProviderPayloadFromRecord(refreshed),
         paymentAccessToken,
+        sessionExpiresAt: String(refreshed.sessionExpiresAt || "").trim(),
+        refreshedHold: buildRefreshedHoldBody(refreshed),
       },
     };
   } catch (error) {
@@ -1640,19 +2931,24 @@ const loadPaymentRecordForFinalize = async ({
 
 export const finalizePaymentSession = async ({
   body,
+  paymentAccessToken = "",
+  allowLegacyTokenFallback = true,
   client = createRefWriteClient(),
 }) => {
   const requestBody = normalizeObject(body);
-  const providerData = normalizeObject(requestBody.providerData);
-  const flatProviderData = {
-    ...providerData,
+  const flatProviderData = sanitizeProviderFinalizeData({
+    ...normalizeObject(requestBody.providerData),
     ...requestBody,
-  };
+  });
   let resolved = null;
   try {
     resolved = await resolveRecordFromAccessToken({
       client,
-      paymentAccessToken: String(requestBody.paymentAccessToken || "").trim(),
+      paymentAccessToken: String(
+        paymentAccessToken ||
+          (allowLegacyTokenFallback ? requestBody.paymentAccessToken : "") ||
+          ""
+      ).trim(),
       allowRecoveryExtension: true,
     });
   } catch (error) {
@@ -1667,16 +2963,23 @@ export const finalizePaymentSession = async ({
   }
 
   const record = resolved?.record;
+  const terminalStatus = String(record?.status || "").trim().toLowerCase();
   if (
     isPaymentTerminalStatus(record?.status) &&
-    String(record?.status || "").trim().toLowerCase() !== PAYMENT_STATUS_NEEDS_RECOVERY
+    terminalStatus !== PAYMENT_STATUS_NEEDS_RECOVERY &&
+    terminalStatus !== PAYMENT_STATUS_ABANDONED
   ) {
+    const completed = [
+      PAYMENT_STATUS_BOOKED,
+      PAYMENT_STATUS_EMAIL_PARTIAL,
+      PAYMENT_STATUS_REFUNDED,
+    ].includes(terminalStatus);
     return {
-      httpStatus: 409,
+      httpStatus: completed ? 200 : 409,
       body: {
-        ok: false,
-        error: "Payment session is already terminal.",
         ...buildPublicStatusBody(record),
+        ok: completed,
+        ...(completed ? {} : { error: "Payment session is already terminal." }),
       },
     };
   }
@@ -1702,12 +3005,435 @@ const getPaymentAgeMinutes = (record = {}) => {
   return diffMs / (60 * 1000);
 };
 
+const getPaymentCreatedAgeMinutes = (record = {}) => {
+  const reference = record.createdAt || record.updatedAt || record.lastAttemptAt;
+  if (!reference) return 0;
+  const diffMs = Date.now() - new Date(reference).getTime();
+  if (!Number.isFinite(diffMs) || diffMs <= 0) return 0;
+  return diffMs / (60 * 1000);
+};
+
+const isRecoveryAttemptDue = (record = {}) => {
+  const next = new Date(record.nextRecoveryAt || "").getTime();
+  return !Number.isFinite(next) || next <= Date.now();
+};
+
+const scheduleProviderRecoveryCheck = async ({
+  client,
+  record,
+  reason,
+}) => {
+  const recoveryAttemptCount = Number(record.recoveryAttemptCount || 0) + 1;
+  const releasedHoldSnapshot = await releaseExpiredRecoveryHold({
+    client,
+    record,
+  });
+  return patchPaymentRecord({
+    client,
+    record,
+    set: {
+      recoveryReason: String(reason || "provider_status_pending").trim(),
+      recoveryAttemptCount,
+      lastAttemptAt: nowIso(),
+      nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
+      source: "reconcile",
+      ...(releasedHoldSnapshot
+        ? { holdSnapshot: releasedHoldSnapshot }
+        : {}),
+    },
+    event: buildPaymentRecordEvent({
+      status: String(record.status || PAYMENT_STATUS_STARTED).trim().toLowerCase(),
+      source: "reconcile",
+      reason,
+    }),
+  });
+};
+
+const inspectProviderOrderForRecovery = async (record = {}) => {
+  const provider = String(record.provider || "").trim().toLowerCase();
+  const providerOrderId = String(record.providerOrderId || "").trim();
+  if (provider === "free") return { state: "captured", providerData: {} };
+  if (!providerOrderId) {
+    return { state: "unavailable", reason: "provider_order_id_missing" };
+  }
+
+  const result =
+    provider === "paypal"
+      ? await inspectPayPalOrder({ orderId: providerOrderId })
+      : await inspectRazorpayOrder({ orderId: providerOrderId });
+  if (result?.state !== "captured") return result || { state: "unavailable" };
+  return {
+    ...result,
+    providerData:
+      provider === "paypal"
+        ? {
+            paypalOrderId: providerOrderId,
+            paypalPaymentId: String(result.providerPaymentId || "").trim(),
+            payerEmail: String(result.payerEmail || "").trim(),
+          }
+        : {
+            razorpayOrderId: providerOrderId,
+            razorpayPaymentId: String(result.providerPaymentId || "").trim(),
+            payerEmail: String(result.payerEmail || "").trim(),
+          },
+  };
+};
+
+const hasRecoverableBookingPayload = (record = {}) => {
+  const payload = normalizeObject(record.bookingPayload);
+  return !!(
+    String(payload.packageTitle || "").trim() &&
+    (String(payload.originalOrderId || "").trim() ||
+      String(payload.startTimeUTC || "").trim())
+  );
+};
+
+const recoverCapturedPaymentAsReschedule = async ({
+  client,
+  record,
+  reason,
+  createRequiresRescheduleBooking,
+  dispatchRescheduleNotifications = null,
+  providerData = {},
+  paymentProofClaim = null,
+}) => {
+  const handler =
+    createRequiresRescheduleBooking || (await loadRequiresRescheduleHandler());
+  if (typeof handler !== "function") return null;
+
+  const recoveredProviderOrderId = String(
+    providerData.providerOrderId ||
+      providerData.paypalOrderId ||
+      providerData.razorpayOrderId ||
+      record.providerOrderId ||
+      ""
+  ).trim();
+  const recoveredProviderPaymentId = String(
+    providerData.providerPaymentId ||
+      providerData.paypalPaymentId ||
+      providerData.razorpayPaymentId ||
+      record.providerPaymentId ||
+      ""
+  ).trim();
+  const recoveryRecord = {
+    ...record,
+    providerOrderId: recoveredProviderOrderId,
+    providerPaymentId: recoveredProviderPaymentId,
+    payerEmail: String(
+      providerData.payerEmail || record.payerEmail || ""
+    ).trim(),
+  };
+  const proofClaim =
+    paymentProofClaim ||
+    (await claimPaymentProof({
+      client,
+      record: recoveryRecord,
+      providerOrderId: recoveredProviderOrderId,
+      providerPaymentId: recoveredProviderPaymentId,
+    }));
+  const preserveHistoricalAccounting =
+    record.historicalBookingReconstruction === true ||
+    record.historicalAccountingPreserved === true;
+  const couponRedemptionId = preserveHistoricalAccounting
+    ? ""
+    : String(record.couponReservationId || "").trim();
+  const holdId = String(record?.holdSnapshot?.slotHoldId || "").trim();
+  const [couponRedemption, candidateHold] = await Promise.all([
+    couponRedemptionId
+      ? getDocumentById({
+          client,
+          id: couponRedemptionId,
+          type: "couponRedemption",
+        })
+      : null,
+    holdId ? getHoldById(client, holdId) : null,
+  ]);
+  if (couponRedemptionId && !couponRedemption?._id) {
+    const error = new Error("Coupon accounting record is missing.");
+    error.code = "coupon_redemption_missing";
+    throw error;
+  }
+  const coupon = couponRedemption?.coupon?._ref
+    ? await getDocumentById({
+        client,
+        id: couponRedemption.coupon._ref,
+        type: "coupon",
+      })
+    : null;
+  if (couponRedemption?._id && !coupon?._id) {
+    const error = new Error("Coupon definition is missing.");
+    error.code = "coupon_definition_missing";
+    throw error;
+  }
+  const couponReservation = couponRedemption?._id
+    ? { coupon, redemption: couponRedemption, idempotent: false }
+    : null;
+  const paymentHold =
+    candidateHold?._id &&
+    String(candidateHold.paymentRecordId || "").trim() === String(record._id)
+      ? candidateHold
+      : null;
+  const referralId = String(
+    preserveHistoricalAccounting
+      ? ""
+      : record?.pricingSnapshot?.effectiveReferralId || ""
+  ).trim();
+  const normalizedReason = reason || "captured_payment_requires_reschedule";
+  const recoveryAttemptCount = Number(record.recoveryAttemptCount || 0) + 1;
+  const pendingSet = {
+    status: PAYMENT_STATUS_EMAIL_PARTIAL,
+    providerPaymentId: recoveredProviderPaymentId,
+    payerEmail: recoveryRecord.payerEmail,
+    verificationState: "server_verified",
+    verificationWarning: "",
+    paymentProofClaimId: String(proofClaim?._id || "").trim(),
+    requiresReschedule: true,
+    recoveryReason: "reschedule_notification_pending",
+    recoveryNotificationRequired: true,
+    emailDispatchRequired: false,
+    recoveryAttemptCount,
+    resourceReleasePending: false,
+    resourceReleaseTargetStatus: "",
+    resourceReleaseReason: "",
+    lateCaptureWatchUntil: "",
+    finalizationLeaseId: "",
+    finalizationLeaseExpiresAt: "",
+    ...(holdId
+      ? {
+          holdSnapshot: {
+            ...normalizeObject(record.holdSnapshot),
+            phase: paymentHold ? "consumed" : "released",
+            slotHoldExpiresAt: nowIso(),
+          },
+        }
+      : {}),
+    couponAccountingRecoveredAfterRelease:
+      couponRedemption?.status === "released",
+    referralAccountingApplied: preserveHistoricalAccounting
+      ? record.referralAccountingApplied === true
+      : !!referralId,
+    ...(record.historicalBookingReconstruction === true
+      ? {
+          historicalBookingReconstruction: false,
+          historicalBookingReconstructedAt: nowIso(),
+          historicalAccountingPreserved: true,
+        }
+      : {}),
+    nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
+    events: mergePaymentRecordEvents(
+      record.events,
+      buildPaymentRecordEvent({
+        status: PAYMENT_STATUS_EMAIL_PARTIAL,
+        source: "reconcile",
+        reason: normalizedReason,
+        data: {
+          providerOrderId: recoveredProviderOrderId,
+          providerPaymentId: recoveredProviderPaymentId,
+        },
+      })
+    ),
+  };
+
+  let recovery;
+  try {
+    recovery = await handler({
+      client,
+      paymentRecord: recoveryRecord,
+      reason: normalizedReason,
+      notify: false,
+      paymentProofClaim: proofClaim,
+      paymentRecordMutation: {
+        id: record._id,
+        revision: record._rev,
+        set: pendingSet,
+      },
+      couponReservation,
+      referralId,
+      paymentHold,
+      preserveHistoricalAccounting,
+    });
+  } catch (error) {
+    const current = await getPaymentRecordById(client, record._id);
+    if (
+      String(current?.status || "").trim().toLowerCase() ===
+      PAYMENT_STATUS_REFUNDED
+    ) {
+      return current;
+    }
+    throw error;
+  }
+  const bookingId = String(recovery?.bookingId || recovery?.booking?._id || "").trim();
+  if (!bookingId) return null;
+
+  let linkedRecord = await getPaymentRecordById(client, record._id);
+  if (String(linkedRecord?.bookingId || "").trim() !== bookingId) {
+    const linkedStatus = String(linkedRecord?.status || "").trim().toLowerCase();
+    if (
+      linkedRecord?._id &&
+      [PAYMENT_STATUS_REFUNDED, PAYMENT_STATUS_FAILED].includes(linkedStatus)
+    ) {
+      return linkedRecord;
+    }
+    linkedRecord = await patchPaymentRecord({
+      client,
+      record: linkedRecord || record,
+      revisionGuard: true,
+      set: { ...pendingSet, bookingId },
+    });
+  }
+
+  const notificationHandler =
+    dispatchRescheduleNotifications ||
+    (await loadRescheduleNotificationHandler());
+  let notification = {
+    ok: false,
+    notificationRequired: true,
+    reason: "notification_handler_unavailable",
+  };
+  if (typeof notificationHandler === "function") {
+    try {
+      notification = await notificationHandler({
+        client,
+        bookingId,
+        booking: recovery?.booking || null,
+      });
+    } catch (error) {
+      notification = {
+        ok: false,
+        notificationRequired: true,
+        reason: error?.message || "notification_dispatch_failed",
+      };
+    }
+  }
+  const notificationComplete =
+    notification?.ok === true && notification?.notificationRequired !== true;
+
+  const current = (await getPaymentRecordById(client, record._id)) || linkedRecord;
+  if (
+    String(current?.status || "").trim().toLowerCase() ===
+    PAYMENT_STATUS_REFUNDED
+  ) {
+    return current;
+  }
+
+  try {
+    return await patchPaymentRecord({
+      client,
+      record: current,
+      revisionGuard: true,
+      set: {
+        status: notificationComplete
+          ? PAYMENT_STATUS_BOOKED
+          : PAYMENT_STATUS_EMAIL_PARTIAL,
+        bookingId,
+        requiresReschedule: true,
+        recoveryReason: notificationComplete
+          ? "requires_reschedule"
+          : "reschedule_notification_pending",
+        recoveryCaseId: String(recovery?.recoveryCaseId || "").trim(),
+        recoveryNotificationRequired: !notificationComplete,
+        emailDispatchRequired: false,
+        recoveryNotification: normalizeObject(notification),
+        recoveryAttemptCount,
+        finalizationLeaseId: "",
+        finalizationLeaseExpiresAt: "",
+        nextRecoveryAt: notificationComplete
+          ? ""
+          : getNextPaymentRecoveryAt(recoveryAttemptCount),
+      },
+      event: buildPaymentRecordEvent({
+        status: notificationComplete
+          ? PAYMENT_STATUS_BOOKED
+          : PAYMENT_STATUS_EMAIL_PARTIAL,
+        source: "reconcile",
+        reason: "captured_payment_requires_reschedule",
+        data: {
+          bookingId,
+          recoveryCaseId: String(recovery?.recoveryCaseId || "").trim(),
+        },
+      }),
+    });
+  } catch (error) {
+    if (!isConflictError(error)) throw error;
+    return (await getPaymentRecordById(client, record._id)) || current;
+  }
+};
+
+const retryRescheduleNotification = async ({
+  client,
+  record,
+  dispatchRescheduleNotifications = null,
+}) => {
+  const handler =
+    dispatchRescheduleNotifications ||
+    (await loadRescheduleNotificationHandler());
+  if (typeof handler !== "function" || !record?.bookingId) return null;
+
+  let notification;
+  try {
+    notification = await handler({ client, bookingId: record.bookingId });
+  } catch (error) {
+    notification = {
+      ok: false,
+      notificationRequired: true,
+      reason: error?.message || "notification_dispatch_failed",
+    };
+  }
+  const complete =
+    notification?.ok === true && notification?.notificationRequired !== true;
+  const recoveryAttemptCount = Number(record.recoveryAttemptCount || 0) + 1;
+  const current = (await getPaymentRecordById(client, record._id)) || record;
+  const currentStatus = String(current.status || "").trim().toLowerCase();
+  if (
+    [PAYMENT_STATUS_REFUNDED, PAYMENT_STATUS_FAILED].includes(currentStatus)
+  ) {
+    return current;
+  }
+  try {
+    return await patchPaymentRecord({
+      client,
+      record: current,
+      revisionGuard: true,
+      set: {
+        status: complete ? PAYMENT_STATUS_BOOKED : PAYMENT_STATUS_EMAIL_PARTIAL,
+        recoveryReason: complete
+          ? "requires_reschedule"
+          : "reschedule_notification_pending",
+        recoveryNotificationRequired: !complete,
+        emailDispatchRequired: false,
+        recoveryNotification: normalizeObject(notification),
+        recoveryAttemptCount,
+        nextRecoveryAt: complete
+          ? ""
+          : getNextPaymentRecoveryAt(recoveryAttemptCount),
+      },
+      event: buildPaymentRecordEvent({
+        status: complete ? PAYMENT_STATUS_BOOKED : PAYMENT_STATUS_EMAIL_PARTIAL,
+        source: "reconcile",
+        reason: complete
+          ? "reschedule_notification_sent"
+          : "reschedule_notification_pending",
+        data: notification,
+      }),
+    });
+  } catch (error) {
+    if (!isConflictError(error)) throw error;
+    return (await getPaymentRecordById(client, record._id)) || current;
+  }
+};
+
 export const getPaymentStatus = async ({
   query,
+  paymentAccessToken: suppliedPaymentAccessToken = "",
+  allowLegacyTokenFallback = true,
   client = createRefWriteClient(),
 }) => {
   const paymentAccessToken = String(
-    query?.paymentAccessToken || query?.payment || ""
+    suppliedPaymentAccessToken ||
+      (allowLegacyTokenFallback
+        ? query?.paymentAccessToken || query?.payment
+        : "") ||
+      ""
   ).trim();
   if (!paymentAccessToken) {
     return {
@@ -1724,7 +3450,8 @@ export const getPaymentStatus = async ({
     resolved = await resolveRecordFromAccessToken({
       client,
       paymentAccessToken,
-      allowRecoveryExtension: true,
+      allowRecoveryExtension: false,
+      allowStatusReadExtension: true,
     });
   } catch (error) {
     return {
@@ -1736,23 +3463,9 @@ export const getPaymentStatus = async ({
       },
     };
   }
-  let record = resolved.record;
-
-  if (
-    String(record.status || "").trim().toLowerCase() === PAYMENT_STATUS_STARTED &&
-    getPaymentAgeMinutes(record) >= PAYMENT_HOLD_MINUTES
-  ) {
-    const abandoned = await abandonStartedPaymentRecord({
-      client,
-      record,
-      reason: "payment_session_expired_before_capture",
-    });
-    record = abandoned.paymentRecord;
-  }
-
   return {
     httpStatus: 200,
-    body: buildPublicStatusBody(record),
+    body: buildPublicStatusBody(resolved.record),
   };
 };
 
@@ -1780,6 +3493,10 @@ const authorizeCron = (req) => {
 export const reconcilePaymentSessions = async ({
   req,
   client = createRefWriteClient(),
+  createRequiresRescheduleBooking = null,
+  applyBookingRefund = null,
+  releaseCouponReservation = null,
+  dispatchRescheduleNotifications = null,
 }) => {
   try {
     authorizeCron(req);
@@ -1795,7 +3512,22 @@ export const reconcilePaymentSessions = async ({
 
   const records = await client.fetch(
     `*[_type == $type
-      && lower(status) in $statuses
+      && (
+        lower(status) in $statuses
+        || (lower(status) == $refundedStatus && refundRequiresBookingSync == true)
+        || (lower(status) == $bookedStatus && emailDispatchRequired == true)
+        || (lower(status) == $abandonedStatus && resourceReleasePending == true)
+        || (
+          lower(status) == $abandonedStatus
+          && defined(lateCaptureWatchUntil)
+          && lateCaptureWatchUntil != ""
+        )
+      )
+      && (
+        !defined(nextRecoveryAt)
+        || nextRecoveryAt == ""
+        || nextRecoveryAt <= $now
+      )
     ] | order(updatedAt asc)[0...50]`,
     {
       type: PAYMENT_RECORD_TYPE,
@@ -1805,7 +3537,12 @@ export const reconcilePaymentSessions = async ({
         PAYMENT_STATUS_CAPTURED_WEBHOOK,
         PAYMENT_STATUS_FINALIZING,
         PAYMENT_STATUS_EMAIL_PARTIAL,
+        PAYMENT_STATUS_NEEDS_RECOVERY,
       ],
+      refundedStatus: PAYMENT_STATUS_REFUNDED,
+      bookedStatus: PAYMENT_STATUS_BOOKED,
+      abandonedStatus: PAYMENT_STATUS_ABANDONED,
+      now: nowIso(),
     }
   );
 
@@ -1814,20 +3551,130 @@ export const reconcilePaymentSessions = async ({
     finalized: 0,
     abandoned: 0,
     recovery: 0,
+    pending: 0,
+    providerUnavailable: 0,
+    refundsSynced: 0,
   };
 
   for (const record of Array.isArray(records) ? records : []) {
     summary.scanned += 1;
     const ageMinutes = getPaymentAgeMinutes(record);
+    const createdAgeMinutes = getPaymentCreatedAgeMinutes(record);
     const status = String(record.status || "").trim().toLowerCase();
 
-    if (status === PAYMENT_STATUS_STARTED && ageMinutes >= PAYMENT_HOLD_MINUTES) {
-      const abandoned = await abandonStartedPaymentRecord({
+    if (status === PAYMENT_STATUS_REFUNDED && record.refundRequiresBookingSync) {
+      const refundHandler = applyBookingRefund || (await loadBookingRefundHandler());
+      const sideEffects = await applyFullRefundEffects({
         client,
         record,
-        reason: "payment_session_expired_before_capture",
+        refund: {
+          full: true,
+          type: record.refundState === "reversal" ? "reversal" : "full",
+          state: record.refundState || "full",
+          processedAmountInSubunits: Number(
+            record.refundProcessedAmountInSubunits || 0
+          ),
+        },
+        applyBookingRefund: refundHandler,
       });
-      if (abandoned.paymentRecord?._id) summary.abandoned += 1;
+      if (sideEffects.ok) {
+        await patchPaymentRecord({
+          client,
+          record,
+          set: {
+            refundRequiresBookingSync: false,
+            recoveryReason: "",
+            nextRecoveryAt: "",
+            refundBookingSync: normalizeObject(sideEffects.sync),
+          },
+        });
+        summary.refundsSynced += 1;
+      } else {
+        const recoveryAttemptCount = Number(record.recoveryAttemptCount || 0) + 1;
+        await patchPaymentRecord({
+          client,
+          record,
+          set: {
+            recoveryReason: sideEffects.reason || "refund_side_effect_pending",
+            recoveryAttemptCount,
+            nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
+          },
+        });
+        summary.recovery += 1;
+      }
+      continue;
+    }
+
+    if (record.resourceReleasePending === true) {
+      const targetStatus = String(record.resourceReleaseTargetStatus || "")
+        .trim()
+        .toLowerCase();
+      const reason = String(
+        record.resourceReleaseReason || "resource_release_retry"
+      ).trim();
+      const released = targetStatus === PAYMENT_STATUS_FAILED
+        ? await markTerminalFinalizeFailure({
+            client,
+            record,
+            source: "reconcile",
+            reason,
+          })
+        : await abandonStartedPaymentRecord({
+            client,
+            record,
+            reason,
+            releaseCouponReservation,
+          });
+      const releasedStatus = String(released?.paymentRecord?.status || "")
+        .trim()
+        .toLowerCase();
+      if (
+        releasedStatus !== PAYMENT_STATUS_ABANDONED ||
+        released?.paymentRecord?.resourceReleasePending === true
+      ) {
+        summary.recovery += 1;
+      } else {
+        summary.abandoned += 1;
+      }
+      continue;
+    }
+
+    if (status === PAYMENT_STATUS_ABANDONED) {
+      const inspection = await inspectProviderOrderForRecovery(record);
+      if (inspection.state === "captured") {
+        const recovered = await finalizePaymentRecordInternal({
+          client,
+          record,
+          source: "reconcile",
+          providerData: inspection.providerData || {},
+        });
+        const recoveredStatus = String(recovered?.paymentRecord?.status || "")
+          .trim()
+          .toLowerCase();
+        if (
+          recoveredStatus === PAYMENT_STATUS_BOOKED ||
+          recoveredStatus === PAYMENT_STATUS_EMAIL_PARTIAL ||
+          recoveredStatus === PAYMENT_STATUS_REFUNDED
+        ) {
+          summary.finalized += 1;
+        } else {
+          summary.recovery += 1;
+        }
+      } else {
+        await scheduleProviderRecoveryCheck({
+          client,
+          record,
+          reason:
+            inspection.state === "unavailable"
+              ? inspection.reason || "abandoned_provider_status_unavailable"
+              : `abandoned_provider_${inspection.state || "pending"}`,
+        });
+        if (inspection.state === "unavailable") {
+          summary.providerUnavailable += 1;
+        } else {
+          summary.pending += 1;
+        }
+      }
       continue;
     }
 
@@ -1836,25 +3683,237 @@ export const reconcilePaymentSessions = async ({
       source: "reconcile",
     });
 
-    if (!isPaymentPendingStatus(status) && !shouldRetryEmailDispatch) {
+    if (
+      !isPaymentPendingStatus(status) &&
+      status !== PAYMENT_STATUS_NEEDS_RECOVERY &&
+      !(
+        status === PAYMENT_STATUS_EMAIL_PARTIAL &&
+        record.requiresReschedule === true
+      ) &&
+      !shouldRetryEmailDispatch
+    ) {
       continue;
     }
 
-    if (ageMinutes < PAYMENT_RECOVERY_MINUTES && status !== PAYMENT_STATUS_FINALIZING) {
+    if (!isRecoveryAttemptDue(record)) {
       continue;
+    }
+
+    if (
+      status === PAYMENT_STATUS_EMAIL_PARTIAL &&
+      record.requiresReschedule === true
+    ) {
+      const notified = await retryRescheduleNotification({
+        client,
+        record,
+        dispatchRescheduleNotifications,
+      });
+      if (String(notified?.status || "").toLowerCase() === PAYMENT_STATUS_BOOKED) {
+        summary.finalized += 1;
+      } else {
+        summary.recovery += 1;
+      }
+      continue;
+    }
+
+    if (
+      ageMinutes < 1 &&
+      status !== PAYMENT_STATUS_FINALIZING &&
+      status !== PAYMENT_STATUS_EMAIL_PARTIAL &&
+      status !== PAYMENT_STATUS_NEEDS_RECOVERY
+    ) {
+      continue;
+    }
+
+    let providerData = {};
+    if (
+      String(record.provider || "").trim().toLowerCase() !== "free" &&
+      (status === PAYMENT_STATUS_STARTED ||
+        status === PAYMENT_STATUS_NEEDS_RECOVERY)
+    ) {
+      if (!String(record.providerOrderId || "").trim()) {
+        if (createdAgeMinutes >= PAYMENT_HOLD_MINUTES) {
+          const abandoned = await abandonStartedPaymentRecord({
+            client,
+            record,
+            reason: "provider_order_was_never_exposed",
+            releaseCouponReservation,
+          });
+          if (
+            String(abandoned?.paymentRecord?.status || "").trim().toLowerCase() ===
+              PAYMENT_STATUS_ABANDONED &&
+            abandoned?.paymentRecord?.resourceReleasePending !== true
+          ) {
+            summary.abandoned += 1;
+          } else {
+            summary.recovery += 1;
+          }
+          continue;
+        }
+        try {
+          const providerPayload = await createProviderOrderForRecord(record);
+          const recoveredRecord = await attachImmutableProviderOrder({
+            client,
+            record,
+            providerPayload,
+          });
+          Object.assign(record, recoveredRecord, {
+            recoveryReason: "",
+            orderState: "created",
+          });
+        } catch (error) {
+          await markRetryableFinalizeFailure({
+            client,
+            record,
+            source: "reconcile",
+            reason: "provider_order_creation_unavailable",
+            details: { code: String(error?.code || "").trim() },
+          });
+          summary.providerUnavailable += 1;
+          summary.recovery += 1;
+          continue;
+        }
+      }
+      const inspection = await inspectProviderOrderForRecovery(record);
+      if (inspection.state === "captured") {
+        providerData = inspection.providerData || {};
+        if (!hasRecoverableBookingPayload(record)) {
+          let recovered;
+          try {
+            recovered = await recoverCapturedPaymentAsReschedule({
+              client,
+              record,
+              reason: "captured_payment_missing_booking_payload",
+              createRequiresRescheduleBooking,
+              dispatchRescheduleNotifications,
+              providerData,
+            });
+          } catch (error) {
+            const duplicate = await normalizeMarkedDuplicatePaymentRecord({
+              client,
+              record,
+              providerOrderId: record.providerOrderId,
+              providerPaymentId:
+                providerData.providerPaymentId ||
+                providerData.razorpayPaymentId ||
+                providerData.paypalPaymentId ||
+                record.providerPaymentId,
+              error,
+            });
+            if (!duplicate?._id) throw error;
+            recovered = duplicate;
+          }
+          if (recovered?._id) {
+            if (String(recovered.bookingId || "").trim()) {
+              summary.finalized += 1;
+            } else {
+              summary.recovery += 1;
+            }
+          } else {
+            summary.recovery += 1;
+          }
+          continue;
+        }
+      } else if (inspection.state === "unpaid") {
+        if (createdAgeMinutes >= PAYMENT_HOLD_MINUTES) {
+          const abandoned = await abandonStartedPaymentRecord({
+            client,
+            record,
+            reason: "provider_confirmed_unpaid",
+            releaseCouponReservation,
+          });
+          if (
+            String(abandoned?.paymentRecord?.status || "").trim().toLowerCase() ===
+              PAYMENT_STATUS_ABANDONED &&
+            abandoned?.paymentRecord?.resourceReleasePending !== true
+          ) {
+            summary.abandoned += 1;
+          } else {
+            summary.recovery += 1;
+          }
+        } else {
+          await scheduleProviderRecoveryCheck({
+            client,
+            record,
+            reason: "provider_confirmed_unpaid_before_expiry",
+          });
+          summary.pending += 1;
+        }
+        continue;
+      } else if (inspection.state === "pending") {
+        await scheduleProviderRecoveryCheck({
+          client,
+          record,
+          reason: "provider_payment_pending",
+        });
+        summary.pending += 1;
+        continue;
+      } else {
+        await markRetryableFinalizeFailure({
+          client,
+          record,
+          source: "reconcile",
+          reason: inspection.reason || "provider_status_unavailable",
+        });
+        summary.providerUnavailable += 1;
+        summary.recovery += 1;
+        continue;
+      }
     }
 
     const result = await finalizePaymentRecordInternal({
       client,
       record,
       source: "reconcile",
-      providerData: {},
+      providerData,
     });
     const nextStatus = String(result?.response?.status || "").trim().toLowerCase();
     if (nextStatus === PAYMENT_STATUS_BOOKED || nextStatus === PAYMENT_STATUS_EMAIL_PARTIAL) {
       summary.finalized += 1;
     } else if (nextStatus === PAYMENT_STATUS_NEEDS_RECOVERY) {
-      summary.recovery += 1;
+      const recoveryHttpStatus = Number(result?.paymentRecord?.recoveryHttpStatus || 0);
+      if (
+        result?.paymentRecord?.recoveryCategory === "booking_finalize" &&
+        recoveryHttpStatus >= 400 &&
+        recoveryHttpStatus < 500
+      ) {
+        let recovered;
+        try {
+          recovered = await recoverCapturedPaymentAsReschedule({
+            client,
+            record: result.paymentRecord,
+            reason: result.paymentRecord.recoveryReason,
+            createRequiresRescheduleBooking,
+            dispatchRescheduleNotifications,
+            providerData,
+          });
+        } catch (error) {
+          const duplicate = await normalizeMarkedDuplicatePaymentRecord({
+            client,
+            record: result.paymentRecord,
+            providerOrderId: result.paymentRecord.providerOrderId,
+            providerPaymentId:
+              providerData.providerPaymentId ||
+              providerData.razorpayPaymentId ||
+              providerData.paypalPaymentId ||
+              result.paymentRecord.providerPaymentId,
+            error,
+          });
+          if (!duplicate?._id) throw error;
+          recovered = duplicate;
+        }
+        if (recovered?._id) {
+          if (String(recovered.bookingId || "").trim()) {
+            summary.finalized += 1;
+          } else {
+            summary.recovery += 1;
+          }
+        } else {
+          summary.recovery += 1;
+        }
+      } else {
+        summary.recovery += 1;
+      }
     }
   }
 
@@ -1946,9 +4005,413 @@ const findOrCreateWebhookRecoveryRecord = async ({
   });
 };
 
+const normalizeRefundStatus = (value = "") => {
+  const status = String(value || "").trim().toLowerCase();
+  if (["processed", "completed", "refunded", "reversed"].includes(status)) {
+    return "processed";
+  }
+  if (["failed", "denied", "cancelled", "canceled"].includes(status)) {
+    return "failed";
+  }
+  return "pending";
+};
+
+const buildRefundMutation = ({
+  record,
+  provider,
+  providerOrderId,
+  providerPaymentId,
+  providerRefundId,
+  eventType,
+  refundStatus,
+  amount,
+  amountInSubunits,
+  currency,
+  reversed,
+  expectedAmountInSubunits = 0,
+  expectedCurrency = "",
+}) => {
+  const normalizedStatus = normalizeRefundStatus(
+    reversed ? "reversed" : refundStatus
+  );
+  const refundKey =
+    String(providerRefundId || "").trim() ||
+    `${eventType}:${providerPaymentId || providerOrderId}`;
+  const existingRefunds = Array.isArray(record.refunds) ? record.refunds : [];
+  const previousRefund = existingRefunds.find(
+    (entry) =>
+      String(entry?.providerRefundId || "").trim() === refundKey ||
+      String(entry?._key || "").trim() === refundKey
+  );
+  const nextRefund = {
+    _key: crypto
+      .createHash("sha256")
+      .update(`${provider}:${refundKey}`)
+      .digest("hex")
+      .slice(0, 24),
+    providerRefundId: String(providerRefundId || "").trim(),
+    providerPaymentId: String(providerPaymentId || "").trim(),
+    eventType: String(eventType || "").trim(),
+    status:
+      previousRefund?.status === "processed" ? "processed" : normalizedStatus,
+    amount: Math.max(toMoney(previousRefund?.amount || 0), toMoney(amount)),
+    amountInSubunits: Math.max(
+      Number(previousRefund?.amountInSubunits || 0),
+      Number(amountInSubunits || 0)
+    ),
+    currency: String(currency || "").trim().toUpperCase(),
+    reversed: reversed === true,
+    updatedAt: nowIso(),
+  };
+  const refunds = [
+    ...existingRefunds.filter(
+      (entry) =>
+        String(entry?.providerRefundId || entry?._key || "") !== refundKey &&
+        String(entry?._key || "") !== nextRefund._key
+    ),
+    nextRefund,
+  ].slice(-100);
+  const storedExpectedAmount = Number(record?.pricingSnapshot?.netAmount || 0);
+  const resolvedExpectedCurrency =
+    String(expectedCurrency || record?.providerPublicData?.currency || currency || "USD")
+      .trim()
+      .toUpperCase() || "USD";
+  const processedAmount = refunds
+    .filter((entry) => entry.status === "processed")
+    .reduce((sum, entry) => {
+      if (provider === "razorpay" && Number(entry.amountInSubunits || 0) > 0) {
+        return sum + Number(entry.amountInSubunits || 0);
+      }
+      return sum + toSubunits(entry.amount || 0, resolvedExpectedCurrency);
+    }, 0);
+  const expectedSubunits =
+    storedExpectedAmount > 0
+      ? toSubunits(storedExpectedAmount, resolvedExpectedCurrency)
+      : Number(expectedAmountInSubunits || 0);
+  const wasFullRefund =
+    String(record.refundState || "").trim().toLowerCase() === "full" ||
+    String(record.status || "").trim().toLowerCase() === PAYMENT_STATUS_REFUNDED;
+  const isFullRefund =
+    wasFullRefund ||
+    reversed === true ||
+    (expectedSubunits > 0 && processedAmount >= expectedSubunits);
+  const refundState = isFullRefund
+    ? "full"
+    : processedAmount > 0
+    ? "partial"
+    : normalizedStatus;
+  return {
+    isFullRefund,
+    nextRefund,
+    processedAmount,
+    refundState,
+    set: {
+      refunds,
+      refundState,
+      refundProcessedAmountInSubunits: processedAmount,
+      refundCurrency: resolvedExpectedCurrency,
+      ...(storedExpectedAmount <= 0 && expectedSubunits > 0
+        ? {
+            pricingSnapshot: {
+              ...normalizeObject(record.pricingSnapshot),
+              netAmount: fromSubunits(expectedSubunits, resolvedExpectedCurrency),
+            },
+            providerPublicData: {
+              ...normalizeObject(record.providerPublicData),
+              currency: resolvedExpectedCurrency,
+            },
+          }
+        : {}),
+      refundRequiresBookingSync: isFullRefund
+        ? wasFullRefund
+          ? record.refundRequiresBookingSync === true
+          : true
+        : false,
+      ...(isFullRefund
+        ? {
+            status: PAYMENT_STATUS_REFUNDED,
+            recoveryReason: "refund_requires_booking_sync",
+          }
+        : {}),
+    },
+  };
+};
+
+const applyFullRefundEffects = async ({
+  client,
+  record,
+  refund,
+  applyBookingRefund,
+}) => {
+  try {
+    if (String(record?.bookingId || "").trim()) {
+      if (typeof applyBookingRefund !== "function") {
+        return { ok: false, reason: "booking_refund_handler_unavailable" };
+      }
+      const sync = await applyBookingRefund({
+        client,
+        paymentRecord: record,
+        refund,
+      });
+      return String(sync?.bookingId || "").trim()
+        ? { ok: true, sync }
+        : { ok: false, reason: "booking_refund_sync_incomplete", sync };
+    }
+
+    const release = await releasePaymentResources({
+      client,
+      record,
+      reason: "full_refund_before_booking",
+    });
+    return release.ok
+      ? {
+          ok: true,
+          sync: {
+            bookingId: "",
+            releasedUnbookedPaymentResources: true,
+          },
+        }
+      : {
+          ok: false,
+          reason: "refund_resource_release_pending",
+          errors: release.errors,
+        };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: error?.message || "refund_side_effect_failed",
+    };
+  }
+};
+
+const processPaymentRefund = async ({
+  client,
+  provider,
+  providerOrderId = "",
+  providerPaymentId = "",
+  providerRefundId = "",
+  eventType = "",
+  refundStatus = "",
+  amount = 0,
+  amountInSubunits = 0,
+  currency = "",
+  reversed = false,
+  applyBookingRefund = null,
+}) => {
+  let resolvedProviderOrderId = String(providerOrderId || "").trim();
+  let razorpayPaymentLookup = null;
+  let record = await loadPaymentRecordForFinalize({
+    client,
+    provider,
+    providerOrderId: resolvedProviderOrderId,
+    providerPaymentId,
+  });
+  if (
+    String(provider || "").trim().toLowerCase() === "razorpay" &&
+    String(providerPaymentId || "").trim() &&
+    (!record?._id || !hasRecoverableBookingPayload(record))
+  ) {
+    razorpayPaymentLookup = await inspectRazorpayPayment({
+      paymentId: String(providerPaymentId || "").trim(),
+    });
+    if (
+      razorpayPaymentLookup.state !== "found" ||
+      !razorpayPaymentLookup.providerOrderId
+    ) {
+      return {
+        httpStatus: 503,
+        retryWebhook: true,
+        body: {
+          ok: false,
+          error: "Razorpay payment details are temporarily unavailable.",
+          code:
+            razorpayPaymentLookup.reason ||
+            "razorpay_refund_order_resolution_failed",
+        },
+      };
+    }
+    resolvedProviderOrderId = String(
+      razorpayPaymentLookup.providerOrderId
+    ).trim();
+    const canonicalRecord = await loadPaymentRecordForFinalize({
+      client,
+      provider,
+      providerOrderId: resolvedProviderOrderId,
+      providerPaymentId,
+    });
+    if (canonicalRecord?._id) record = canonicalRecord;
+  }
+  if (!record?._id) {
+    record = await findOrCreateWebhookRecoveryRecord({
+      client,
+      provider,
+      providerOrderId: resolvedProviderOrderId,
+      providerPaymentId,
+      eventType,
+    });
+  }
+
+  let expectedAmountInSubunits = 0;
+  let expectedCurrency = String(
+    record?.providerPublicData?.currency || currency || ""
+  )
+    .trim()
+    .toUpperCase();
+  if (Number(record?.pricingSnapshot?.netAmount || 0) <= 0) {
+    if (String(provider || "").trim().toLowerCase() === "razorpay") {
+      if (!razorpayPaymentLookup) {
+        razorpayPaymentLookup = await inspectRazorpayPayment({
+          paymentId: String(providerPaymentId || "").trim(),
+        });
+      }
+      if (
+        razorpayPaymentLookup.state !== "found" ||
+        Number(razorpayPaymentLookup.amountInSubunits || 0) <= 0
+      ) {
+        return {
+          httpStatus: 503,
+          retryWebhook: true,
+          body: {
+            ok: false,
+            error: "Razorpay refund amount could not be verified.",
+            code:
+              razorpayPaymentLookup.reason ||
+              "razorpay_refund_baseline_unavailable",
+          },
+        };
+      }
+      expectedAmountInSubunits = Number(
+        razorpayPaymentLookup.amountInSubunits || 0
+      );
+      expectedCurrency = String(
+        razorpayPaymentLookup.currency || expectedCurrency || "USD"
+      )
+        .trim()
+        .toUpperCase();
+    } else if (String(provider || "").trim().toLowerCase() === "paypal") {
+      const orderInspection = await inspectPayPalOrder({
+        orderId: resolvedProviderOrderId,
+      });
+      const captureAmount = toMoney(
+        orderInspection?.details?.purchase_units?.[0]?.payments?.captures?.[0]
+          ?.amount?.value ||
+          orderInspection?.details?.purchase_units?.[0]?.amount?.value ||
+          0
+      );
+      const captureCurrency = String(
+        orderInspection?.details?.purchase_units?.[0]?.payments?.captures?.[0]
+          ?.amount?.currency_code ||
+          orderInspection?.details?.purchase_units?.[0]?.amount?.currency_code ||
+          ""
+      )
+        .trim()
+        .toUpperCase();
+      if (orderInspection?.state !== "captured" || captureAmount <= 0) {
+        return {
+          httpStatus: 503,
+          retryWebhook: true,
+          body: {
+            ok: false,
+            error: "PayPal refund amount could not be verified.",
+            code:
+              orderInspection?.reason || "paypal_refund_baseline_unavailable",
+          },
+        };
+      }
+      expectedCurrency = captureCurrency || expectedCurrency || "USD";
+      expectedAmountInSubunits = toSubunits(
+        captureAmount,
+        expectedCurrency
+      );
+    }
+  }
+
+  let mutation = null;
+  let nextRecord = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    mutation = buildRefundMutation({
+      record,
+      provider,
+      providerOrderId: resolvedProviderOrderId,
+      providerPaymentId,
+      providerRefundId,
+      eventType,
+      refundStatus,
+      amount,
+      amountInSubunits,
+      currency,
+      reversed,
+      expectedAmountInSubunits,
+      expectedCurrency,
+    });
+    try {
+      nextRecord = await patchPaymentRecord({
+        client,
+        record,
+        revisionGuard: true,
+        set: mutation.set,
+        event: buildPaymentRecordEvent({
+          status: mutation.isFullRefund
+            ? PAYMENT_STATUS_REFUNDED
+            : record.status,
+          source: "webhook",
+          reason: `refund_${mutation.refundState}`,
+          data: mutation.nextRefund,
+        }),
+      });
+      break;
+    } catch (error) {
+      if (!isConflictError(error) || attempt === 4) throw error;
+      record = await getPaymentRecordById(client, record._id);
+      if (!record?._id) throw error;
+    }
+  }
+  const {
+    isFullRefund,
+    nextRefund,
+    processedAmount,
+    refundState,
+  } = mutation;
+
+  if (isFullRefund && nextRecord.refundRequiresBookingSync === true) {
+    const sideEffects = await applyFullRefundEffects({
+      client,
+      record: nextRecord,
+      refund: {
+        ...nextRefund,
+        state: refundState,
+        type: reversed ? "reversal" : refundState,
+        full: isFullRefund,
+        processedAmountInSubunits: processedAmount,
+      },
+      applyBookingRefund,
+    });
+    if (sideEffects.ok) {
+      nextRecord = await patchPaymentRecord({
+        client,
+        record: nextRecord,
+        set: {
+          refundRequiresBookingSync: false,
+          recoveryReason: "",
+          refundBookingSync: normalizeObject(sideEffects.sync),
+        },
+      });
+    }
+  }
+
+  return {
+    httpStatus: isFullRefund && nextRecord.refundRequiresBookingSync ? 202 : 200,
+    body: {
+      ...buildPublicStatusBody(nextRecord),
+      refundState,
+    },
+  };
+};
+
 export const handleRazorpayWebhook = async ({
   req,
   client = createRefWriteClient(),
+  applyBookingRefund = null,
 }) => {
   const signature = String(req?.headers?.["x-razorpay-signature"] || "").trim();
   const verified = verifyRazorpayWebhookSignature({
@@ -1967,50 +4430,96 @@ export const handleRazorpayWebhook = async ({
 
   const event = normalizeObject(req?.body);
   const eventType = String(event?.event || "").trim();
-  const payment = normalizeObject(event?.payload?.payment?.entity);
-  if (!eventType || !payment?.id) {
-    return {
-      httpStatus: 200,
-      body: { ok: true, ignored: true },
-    };
-  }
-
-  if (eventType !== "payment.captured" && eventType !== "order.paid") {
-    return {
-      httpStatus: 200,
-      body: { ok: true, ignored: true },
-    };
-  }
-
-  const record = await findOrCreateWebhookRecoveryRecord({
+  const rawBody = String(req?.rawBody || "");
+  const eventId = String(event?.id || "").trim();
+  const receiptClaim = await claimWebhookReceipt({
     client,
     provider: "razorpay",
-    providerOrderId: String(payment.order_id || "").trim(),
-    providerPaymentId: String(payment.id || "").trim(),
-    payerEmail: String(payment.email || "").trim(),
+    eventId,
     eventType,
+    rawBody,
   });
+  if (!receiptClaim.acquired) {
+    return {
+      httpStatus: receiptClaim.processed ? 200 : 503,
+      body: {
+        ok: receiptClaim.processed,
+        duplicate: true,
+        processing: !receiptClaim.processed,
+        ...(!receiptClaim.processed
+          ? { error: "Webhook processing is still in progress. Please retry." }
+          : {}),
+      },
+    };
+  }
 
-  const finalized = await finalizePaymentRecordInternal({
-    client,
-    record,
-    source: "webhook",
-    providerData: {
-      razorpayOrderId: String(payment.order_id || "").trim(),
-      razorpayPaymentId: String(payment.id || "").trim(),
+  const payment = normalizeObject(event?.payload?.payment?.entity);
+  const refund = normalizeObject(event?.payload?.refund?.entity);
+  let result;
+  if (!eventType) {
+    result = {
+      httpStatus: 200,
+      body: { ok: true, ignored: true },
+    };
+  } else if (["refund.created", "refund.processed", "refund.failed"].includes(eventType)) {
+    const refundHandler = applyBookingRefund || (await loadBookingRefundHandler());
+    result = await processPaymentRefund({
+      client,
+      provider: "razorpay",
+      providerPaymentId: String(refund.payment_id || "").trim(),
+      providerRefundId: String(refund.id || "").trim(),
+      eventType,
+      refundStatus: String(refund.status || eventType.split(".")[1] || "").trim(),
+      amountInSubunits: Number(refund.amount || 0),
+      currency: String(refund.currency || "").trim(),
+      applyBookingRefund: refundHandler,
+    });
+  } else if (
+    (eventType !== "payment.captured" && eventType !== "order.paid") ||
+    !payment?.id
+  ) {
+    result = {
+      httpStatus: 200,
+      body: { ok: true, ignored: true },
+    };
+  } else {
+    const record = await findOrCreateWebhookRecoveryRecord({
+      client,
+      provider: "razorpay",
+      providerOrderId: String(payment.order_id || "").trim(),
+      providerPaymentId: String(payment.id || "").trim(),
       payerEmail: String(payment.email || "").trim(),
-    },
-  });
+      eventType,
+    });
+    const finalized = await finalizePaymentRecordInternal({
+      client,
+      record,
+      source: "webhook",
+      providerData: {
+        razorpayOrderId: String(payment.order_id || "").trim(),
+        razorpayPaymentId: String(payment.id || "").trim(),
+        payerEmail: String(payment.email || "").trim(),
+      },
+    });
+    result = { httpStatus: finalized.httpStatus, body: finalized.response };
+  }
 
-  return {
-    httpStatus: finalized.httpStatus,
-    body: finalized.response,
-  };
+  if (result?.retryWebhook === true) {
+    await releaseWebhookReceiptForRetry({
+      client,
+      receipt: receiptClaim.receipt,
+      result,
+    });
+  } else {
+    await completeWebhookReceipt({ client, receipt: receiptClaim.receipt, result });
+  }
+  return result;
 };
 
 export const handlePayPalWebhook = async ({
   req,
   client = createRefWriteClient(),
+  applyBookingRefund = null,
 }) => {
   const verified = await verifyPayPalWebhookSignature({
     rawBody: String(req?.rawBody || ""),
@@ -2028,40 +4537,100 @@ export const handlePayPalWebhook = async ({
 
   const event = normalizeObject(req?.body);
   const eventType = String(event?.event_type || "").trim();
-  if (eventType !== "PAYMENT.CAPTURE.COMPLETED") {
+  const rawBody = String(req?.rawBody || "");
+  const receiptClaim = await claimWebhookReceipt({
+    client,
+    provider: "paypal",
+    eventId:
+      String(event?.id || "").trim() ||
+      String(req?.headers?.["paypal-transmission-id"] || "").trim(),
+    eventType,
+    rawBody,
+  });
+  if (!receiptClaim.acquired) {
     return {
-      httpStatus: 200,
-      body: { ok: true, ignored: true },
+      httpStatus: receiptClaim.processed ? 200 : 503,
+      body: {
+        ok: receiptClaim.processed,
+        duplicate: true,
+        processing: !receiptClaim.processed,
+        ...(!receiptClaim.processed
+          ? { error: "Webhook processing is still in progress. Please retry." }
+          : {}),
+      },
     };
   }
 
   const resource = normalizeObject(event?.resource);
   const relatedIds = normalizeObject(resource?.supplementary_data?.related_ids);
-  const orderId = String(relatedIds.order_id || "").trim();
-  const captureId = String(resource.id || "").trim();
-  const payerEmail = String(resource?.payer?.email_address || "").trim();
-  const record = await findOrCreateWebhookRecoveryRecord({
-    client,
-    provider: "paypal",
-    providerOrderId: orderId,
-    providerPaymentId: captureId,
-    payerEmail,
-    eventType,
-  });
-
-  const finalized = await finalizePaymentRecordInternal({
-    client,
-    record,
-    source: "webhook",
-    providerData: {
-      paypalOrderId: orderId,
-      paypalPaymentId: captureId,
+  let result;
+  if (
+    eventType === "PAYMENT.CAPTURE.REFUNDED" ||
+    eventType === "PAYMENT.CAPTURE.REVERSED" ||
+    eventType === "PAYMENT.REFUND.PENDING" ||
+    eventType === "PAYMENT.REFUND.FAILED"
+  ) {
+    const refundHandler = applyBookingRefund || (await loadBookingRefundHandler());
+    result = await processPaymentRefund({
+      client,
+      provider: "paypal",
+      providerOrderId: String(relatedIds.order_id || "").trim(),
+      providerPaymentId: String(
+        relatedIds.capture_id || resource.capture_id || ""
+      ).trim(),
+      providerRefundId: String(resource.id || "").trim(),
+      eventType,
+      refundStatus: String(
+        resource.status ||
+          (eventType === "PAYMENT.REFUND.PENDING"
+            ? "PENDING"
+            : eventType === "PAYMENT.REFUND.FAILED"
+            ? "FAILED"
+            : "COMPLETED")
+      ).trim(),
+      amount: toMoney(resource?.amount?.value || 0),
+      currency: String(resource?.amount?.currency_code || "").trim(),
+      reversed: eventType === "PAYMENT.CAPTURE.REVERSED",
+      applyBookingRefund: refundHandler,
+    });
+  } else if (eventType !== "PAYMENT.CAPTURE.COMPLETED") {
+    result = {
+      httpStatus: 200,
+      body: { ok: true, ignored: true },
+    };
+  } else {
+    const orderId = String(relatedIds.order_id || "").trim();
+    const captureId = String(resource.id || "").trim();
+    const payerEmail = String(resource?.payer?.email_address || "").trim();
+    const record = await findOrCreateWebhookRecoveryRecord({
+      client,
+      provider: "paypal",
+      providerOrderId: orderId,
+      providerPaymentId: captureId,
       payerEmail,
-    },
-  });
+      eventType,
+    });
+    const finalized = await finalizePaymentRecordInternal({
+      client,
+      record,
+      source: "webhook",
+      providerData: {
+        paypalOrderId: orderId,
+        paypalPaymentId: captureId,
+        payerEmail,
+      },
+    });
+    result = { httpStatus: finalized.httpStatus, body: finalized.response };
+  }
 
-  return {
-    httpStatus: finalized.httpStatus,
-    body: finalized.response,
-  };
+  if (result?.retryWebhook === true) {
+    await releaseWebhookReceiptForRetry({
+      client,
+      receipt: receiptClaim.receipt,
+      result,
+    });
+  } else {
+    await completeWebhookReceipt({ client, receipt: receiptClaim.receipt, result });
+  }
+  return result;
 };

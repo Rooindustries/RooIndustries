@@ -1,4 +1,5 @@
 import { createClient } from "@sanity/client";
+import crypto from "crypto";
 import { verifyHoldToken } from "./holdToken.js";
 import { getClientAddress, requireRateLimit } from "../api/ref/rateLimit.js";
 
@@ -7,32 +8,25 @@ const client = createClient({
   dataset: process.env.SANITY_DATASET || "production",
   apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
   token: process.env.SANITY_WRITE_TOKEN,
-  useCdn: false, // Important: Ensures we delete from the real dataset immediately
+  useCdn: false,
 });
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
+  if (String(req?.method || "").toUpperCase() !== "POST") {
     return res.status(405).json({ message: "Method not allowed" });
   }
 
   const { holdId, holdToken } = req.body || {};
   const clientAddress = getClientAddress(req);
-  const rateLimitKey = [
-    "release-hold",
-    clientAddress,
-    String(holdId || "").trim().toLowerCase(),
-  ].join(":");
-
   if (
     !requireRateLimit(res, {
-      key: rateLimitKey,
+      key: `release-hold:${clientAddress}`,
       max: 25,
       message: "Too many hold release requests. Please try again later.",
     })
   ) {
     return;
   }
-
   if (!holdId || !holdToken) {
     return res.status(400).json({ ok: false, message: "Missing hold credentials" });
   }
@@ -41,7 +35,6 @@ export default async function handler(req, res) {
     const hold = await client.fetch(`*[_type == "slotHold" && _id == $id][0]`, {
       id: holdId,
     });
-
     if (!hold) {
       return res.status(404).json({ ok: false, message: "Hold not found" });
     }
@@ -52,17 +45,38 @@ export default async function handler(req, res) {
       startTimeUTC: hold.startTimeUTC,
       holdNonce: hold.holdNonce || "",
     });
-
     if (!validToken) {
       return res.status(403).json({ ok: false, message: "Invalid hold token" });
     }
+    if (String(hold.phase || "").trim().toLowerCase() === "payment_pending") {
+      return res.status(409).json({
+        ok: false,
+        message: "This hold belongs to an active payment session.",
+      });
+    }
 
-    await client.delete(holdId);
+    const releasedAt = new Date().toISOString();
+    let patch = client.patch(holdId);
+    if (hold._rev && typeof patch.ifRevisionId === "function") {
+      patch = patch.ifRevisionId(hold._rev);
+    }
+    await patch
+      .set({
+        phase: "released",
+        releasedAt,
+        expiresAt: releasedAt,
+        holdNonce: crypto.randomUUID(),
+      })
+      .commit();
     return res.status(200).json({ ok: true, message: "Hold released" });
-  } catch (err) {
-    console.error("Error releasing hold:", err);
-    return res
-      .status(500)
-      .json({ ok: false, message: "Failed to release hold" });
+  } catch (error) {
+    if (Number(error?.statusCode || error?.status || 0) === 409) {
+      return res.status(409).json({
+        ok: false,
+        message: "Hold changed before it could be released",
+      });
+    }
+    console.error("Error releasing hold:", error);
+    return res.status(500).json({ ok: false, message: "Failed to release hold" });
   }
 }
