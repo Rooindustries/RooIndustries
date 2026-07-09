@@ -114,6 +114,21 @@ export default {
       readOnly: true,
       initialValue: 0,
     },
+    {
+      name: 'activeReservations',
+      title: 'Active Checkout Reservations',
+      type: 'number',
+      readOnly: true,
+      initialValue: 0,
+      description: 'Temporary reservations made before a provider order is exposed.',
+    },
+    {
+      name: 'redemptionCount',
+      title: 'Tracked Redemption Documents',
+      type: 'number',
+      readOnly: true,
+      initialValue: 0,
+    },
 
     {
       name: 'notes',

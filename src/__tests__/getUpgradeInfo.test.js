@@ -15,7 +15,11 @@ jest.mock("dotenv", () => ({
   config: jest.fn(),
 }));
 
-const createReq = (query = {}, method = "GET") => ({ method, query });
+const createReq = (input = {}, method = "GET") => ({
+  method,
+  query: method === "GET" ? input : {},
+  body: method === "POST" ? input : {},
+});
 
 const createRes = () => ({
   statusCode: 200,
@@ -173,6 +177,47 @@ describe("getUpgradeInfo API", () => {
     expect(res.body.booking.message).toBeUndefined();
     expect(res.body.targetPackage.title).toBe("Performance Vertex Max");
     expect(res.body.upgradePrice).toBeCloseTo(14.96, 2);
+    expect(res.body.upgradeIntentToken).toBeTruthy();
+  });
+
+  test("accepts POST JSON and returns an intent bound to booking, email and package", async () => {
+    const booking = paidBooking();
+    mockGetDocument.mockResolvedValue(booking);
+    setupFetch({ booking });
+    const req = createReq(
+      { id: "booking_1", email: "client@example.com" },
+      "POST"
+    );
+    const res = createRes();
+
+    await getUpgradeInfo(req, res);
+
+    expect(res.statusCode).toBe(200);
+    const { verifyUpgradeIntentToken } = require("../../src/server/api/ref/upgradeIntentToken");
+    expect(
+      verifyUpgradeIntentToken({
+        token: res.body.upgradeIntentToken,
+        bookingId: "booking_1",
+        email: "client@example.com",
+        targetPackageTitle: "Performance Vertex Max",
+      })
+    ).toBeTruthy();
+    expect(
+      verifyUpgradeIntentToken({
+        token: res.body.upgradeIntentToken,
+        bookingId: "booking_1",
+        email: "client@example.com",
+        targetPackageTitle: "Performance Vertex Max (Upgrade)",
+      })
+    ).toBeTruthy();
+    expect(
+      verifyUpgradeIntentToken({
+        token: res.body.upgradeIntentToken,
+        bookingId: "booking_1",
+        email: "changed@example.com",
+        targetPackageTitle: "Performance Vertex Max",
+      })
+    ).toBeNull();
   });
 
   test("looks up upgrades by booking orderId", async () => {

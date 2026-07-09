@@ -17,7 +17,7 @@ export const getSuccessfulReferralCount = async ({
   const count = await resolvedClient.fetch(
     `count(*[
       _type == "booking"
-      && status in $statuses
+      && lower(status) in $statuses
       && defined(referral._ref)
       && referral._ref == $referralId
     ])`,
@@ -40,7 +40,7 @@ export const getCouponUsageCount = async ({
   const count = await resolvedClient.fetch(
     `count(*[
       _type == "booking"
-      && status in $statuses
+      && lower(status) in $statuses
       && defined(couponCode)
       && lower(couponCode) == $couponCode
     ])`,
@@ -86,6 +86,7 @@ export const syncCouponUsage = async ({
       _id,
       redemptionCount,
       timesUsed,
+      activeReservations,
       maxUses,
       isActive
     }`,
@@ -94,23 +95,28 @@ export const syncCouponUsage = async ({
 
   if (!coupon?._id) return 0;
 
-  const timesUsed = await getCouponUsageCount({
-    client,
-    couponCode: normalizedCode,
-  });
+  const trackedRedemptions = Number(
+    await client.fetch(
+      `count(*[
+        _type == "couponRedemption"
+        && coupon._ref == $couponId
+        && status == "consumed"
+      ])`,
+      { couponId: coupon._id }
+    )
+  ) || 0;
+  const timesUsed = Math.max(0, Number(coupon.timesUsed || 0));
+  const activeReservations = Math.max(0, Number(coupon.activeReservations || 0));
 
   const nextPatch = {};
-  if (Number(coupon.redemptionCount ?? 0) !== timesUsed) {
-    nextPatch.redemptionCount = timesUsed;
-  }
-  if (Number(coupon.timesUsed ?? 0) !== timesUsed) {
-    nextPatch.timesUsed = timesUsed;
+  if (Number(coupon.redemptionCount ?? 0) !== trackedRedemptions) {
+    nextPatch.redemptionCount = trackedRedemptions;
   }
 
   if (
     typeof coupon.maxUses === "number" &&
     coupon.maxUses > 0 &&
-    timesUsed >= coupon.maxUses &&
+    timesUsed + activeReservations >= coupon.maxUses &&
     coupon.isActive !== false
   ) {
     nextPatch.isActive = false;
