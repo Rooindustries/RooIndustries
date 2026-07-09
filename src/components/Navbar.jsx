@@ -121,6 +121,7 @@ export default function Navbar({ routeShell = "browser" }) {
   const isProofActive = isActive("/benchmarks") || isActive("/reviews");
   const isReferralsActive = location.pathname.startsWith("/referrals");
   const isTeamActive = isActive("/meet-the-team");
+  const navMenuOpen = open || proofOpen || referralsOpen;
 
   const handleLogoAnimError = () => {
     setSmallLogoMode("static");
@@ -233,10 +234,6 @@ export default function Navbar({ routeShell = "browser" }) {
 
         if (missingKeys.length > 0) {
           prefetchHomeSectionData(missingKeys).catch(() => {});
-        }
-
-        if (sectionTransitionInFlightRef.current) {
-          return;
         }
 
         sectionTransitionInFlightRef.current = true;
@@ -493,7 +490,9 @@ export default function Navbar({ routeShell = "browser" }) {
         scrolled
           ? "border-[color:var(--navbar-border-scrolled)]"
           : "border-[color:var(--navbar-border-rest)]"
-      } ${scrolled ? "shadow-[var(--shadow-navbar-scrolled)]" : ""}`}
+      } ${scrolled ? "shadow-[var(--shadow-navbar-scrolled)]" : ""} ${
+        navMenuOpen ? "nav-menu-open" : ""
+      }`}
     >
       {/* subtle grid overlay */}
       <div
@@ -761,6 +760,8 @@ export default function Navbar({ routeShell = "browser" }) {
 
             <a
               href="/#packages"
+              data-nav-surface="desktop"
+              data-nav-target="plans"
               onClick={(event) => handleSectionLinkClick(event, SECTION_HASHES.plans)}
               className="nav-cta inline-flex items-center gap-2 px-2 py-1.5 text-[11px] min-[360px]:px-2.5 min-[360px]:text-xs sm:px-5 sm:py-3 sm:text-base font-semibold whitespace-nowrap rounded-full text-white transition"
             >
@@ -789,6 +790,8 @@ export default function Navbar({ routeShell = "browser" }) {
                   transition
                 "
               aria-label="Open menu"
+              aria-expanded={open}
+              aria-controls="mobile-site-menu"
             >
               <div className="space-y-1.5">
                 <div className="h-[2px] w-5 bg-current min-[360px]:w-6" />
@@ -826,6 +829,7 @@ export default function Navbar({ routeShell = "browser" }) {
 
         {/* Mobile dropdown */}
         <div
+          id="mobile-site-menu"
           className={`md:hidden overflow-hidden transition-all duration-300 ease-out ${
             open
               ? "pb-4 max-h-[680px] opacity-100 translate-y-0"

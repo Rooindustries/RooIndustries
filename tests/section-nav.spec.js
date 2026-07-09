@@ -60,8 +60,15 @@ const FLOW_ORIGINS = [
     route: "/reviews",
     open: async (page) => {
       await page.goto("/", { waitUntil: "domcontentloaded" });
-      await page.getByRole("button", { name: "Proof" }).first().click();
-      await page.getByRole("link", { name: "Reviews" }).first().click();
+      await waitForReactHydratedSelector(page, 'button[aria-haspopup="menu"]');
+
+      const proofButton = page.getByRole("button", { name: "Proof" }).first();
+      await proofButton.click();
+      await expect(proofButton).toHaveAttribute("aria-expanded", "true");
+
+      const reviewsLink = page.getByRole("link", { name: "Reviews" }).first();
+      await reviewsLink.waitFor({ state: "visible" });
+      await reviewsLink.click();
       await page.waitForURL(`${BASE_URL}/reviews`);
     },
   },
@@ -70,8 +77,17 @@ const FLOW_ORIGINS = [
     route: "/benchmarks",
     open: async (page) => {
       await page.goto("/", { waitUntil: "domcontentloaded" });
-      await page.getByRole("button", { name: "Proof" }).first().click();
-      await page.getByRole("link", { name: "Benchmarks" }).first().click();
+      await waitForReactHydratedSelector(page, 'button[aria-haspopup="menu"]');
+
+      const proofButton = page.getByRole("button", { name: "Proof" }).first();
+      await proofButton.click();
+      await expect(proofButton).toHaveAttribute("aria-expanded", "true");
+
+      const benchmarksLink = page
+        .getByRole("link", { name: "Benchmarks" })
+        .first();
+      await benchmarksLink.waitFor({ state: "visible" });
+      await benchmarksLink.click();
       await page.waitForURL(`${BASE_URL}/benchmarks`);
     },
   },
@@ -128,13 +144,34 @@ const waitForTargetSettle = async (page, hash, timeoutMs) => {
   };
 };
 
+const waitForReactHydratedSelector = async (page, selector) => {
+  await page.waitForFunction(
+    (targetSelector) => {
+      const element = document.querySelector(targetSelector);
+      return Boolean(
+        element &&
+          Object.keys(element).some((key) => key.startsWith("__reactProps$"))
+      );
+    },
+    selector,
+    { timeout: 10000 }
+  );
+};
+
 const clickNav = async (page, target, viewportName) => {
   if (viewportName === "mobile") {
-    await page.getByRole("button", { name: "Open menu" }).click();
-    await page
+    const menuButtonSelector = 'button[aria-label="Open menu"]';
+    await waitForReactHydratedSelector(page, menuButtonSelector);
+
+    const menuButton = page.getByRole("button", { name: "Open menu" });
+    await menuButton.click();
+    await expect(menuButton).toHaveAttribute("aria-expanded", "true");
+
+    const mobileLink = page
       .locator(`[data-nav-surface="mobile"][data-nav-target="${target}"]`)
-      .first()
-      .click();
+      .first();
+    await mobileLink.waitFor({ state: "visible" });
+    await mobileLink.click();
     return;
   }
   await page
