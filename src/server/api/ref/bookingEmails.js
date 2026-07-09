@@ -129,6 +129,61 @@ const buildEmailDispatchState = () => ({
 const formatMoney = (value) =>
   Number.isFinite(Number(value)) ? Number(value).toFixed(2) : "0.00";
 
+export const formatRequestedTimeFields = (booking = {}) => {
+  const requestedAt = new Date(
+    String(booking.originalRequestedStartTimeUTC || "").trim()
+  );
+  if (!Number.isFinite(requestedAt.getTime())) {
+    return [{ label: "Time Selected", value: "Unavailable" }];
+  }
+
+  const requestedTimeZone = String(booking.localTimeZone || "").trim();
+  let timeZone = "UTC";
+  if (requestedTimeZone) {
+    try {
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: requestedTimeZone,
+      }).format(requestedAt);
+      timeZone = requestedTimeZone;
+    } catch {
+      timeZone = "UTC";
+    }
+  }
+
+  const canUseStoredLabels = timeZone !== "UTC";
+  const requestedDate =
+    (canUseStoredLabels && String(booking.displayDate || "").trim()) ||
+    new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    }).format(requestedAt);
+  const requestedTime =
+    (canUseStoredLabels && String(booking.displayTime || "").trim()) ||
+    new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(requestedAt);
+  const timeZoneName =
+    new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      timeZoneName: "long",
+    })
+      .formatToParts(requestedAt)
+      .find((part) => part.type === "timeZoneName")?.value || timeZone;
+  const timeZoneDisplay =
+    timeZone === "UTC" ? "UTC" : `${timeZoneName} (${timeZone})`;
+
+  return [
+    { label: "Requested Date", value: requestedDate },
+    { label: "Requested Time", value: requestedTime },
+    { label: "Time Zone", value: timeZoneDisplay },
+  ];
+};
+
 const resolveBookingOwnerEmail = async (client) => {
   let owner = String(process.env.OWNER_EMAIL || "").trim();
 
@@ -654,10 +709,7 @@ export const dispatchRescheduleNotifications = async ({
     { label: "Order ID", value: recoveryBooking._id },
     { label: "Package", value: recoveryBooking.packageTitle || "-" },
     { label: "Paid Amount", value: `$${amount}` },
-    {
-      label: "Originally Requested",
-      value: recoveryBooking.originalRequestedStartTimeUTC || "Unavailable",
-    },
+    ...formatRequestedTimeFields(recoveryBooking),
   ];
   const patchValues = {
     recoveryNotificationLeaseId: "",
@@ -675,16 +727,16 @@ export const dispatchRescheduleNotifications = async ({
           {
             from,
             to: customer,
-            subject: `Action needed: reschedule your ${siteName} booking`,
+            subject: `We need to reschedule your ${siteName} booking`,
             html: emailHtml({
               logoUrl: resolveLogoUrl(),
               siteName,
-              heading: "Your payment is safe — please choose a new time",
+              heading: "We need to reschedule your booking",
               intro:
-                "Your payment was completed, but the original time could not be confirmed. Reply to this email or join the Roo Industries Discord so we can arrange a new time. You will not be charged again.",
+                "Your payment went through, but we couldn't confirm the time you selected. Reply to this email or join the Roo Industries Discord and we'll arrange another time. You won't be charged again.",
               fields,
               discordInviteUrl: DISCORD_INVITE_URL,
-              discordLabel: "Join the Roo Industries Discord",
+              discordLabel: "Open the Roo Industries Discord",
             }),
           },
           { idempotencyKey: `booking-${recoveryBooking._id}-reschedule-client` }
