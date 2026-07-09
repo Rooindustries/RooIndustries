@@ -413,6 +413,69 @@ describe("payment session UI", () => {
     expect(screen.getByText(/pricing and provider selection are locked/i)).toBeInTheDocument();
   });
 
+  test("reload checks server status before reusing a completed provider order", async () => {
+    let starts = 0;
+    global.fetch = jest.fn(async (url) => {
+      if (url === "/api/payment/providers") {
+        return response({
+          ok: true,
+          providers: {
+            razorpay: { enabled: false, mode: "live" },
+            paypal: { enabled: true, mode: "live", clientId: "test-client" },
+          },
+        });
+      }
+      if (url === "/api/payment/quote") {
+        return response({
+          ok: true,
+          quoteFingerprint: "quote_completed_resume",
+          quote: { grossAmount: 10, netAmount: 10, isFree: false },
+        });
+      }
+      if (url === "/api/payment/start") {
+        starts += 1;
+        return response({
+          ok: true,
+          status: "started",
+          quoteFingerprint: "quote_completed_resume",
+          paymentAccessToken: "completed_resume_access",
+          providerPayload: { orderId: "paypal_completed_resume" },
+        });
+      }
+      if (url === "/api/payment/status") {
+        return response({
+          ok: true,
+          status: "booked",
+          bookingId: "booking_completed_resume",
+        });
+      }
+      return response({ ok: true });
+    });
+
+    const first = renderPayment(bookingFixture());
+    await waitFor(() => expect(paypalButtonsProps?.disabled).toBe(false));
+    await act(async () => {
+      expect(await paypalButtonsProps.createOrder({}, {})).toBe(
+        "paypal_completed_resume"
+      );
+    });
+    first.unmount();
+
+    renderPayment(bookingFixture());
+    await waitFor(() => expect(paypalButtonsProps?.disabled).toBe(false));
+    await act(async () => {
+      await expect(paypalButtonsProps.createOrder({}, {})).rejects.toThrow(
+        /already complete/i
+      );
+    });
+
+    expect(starts).toBe(1);
+    expect(mockNavigate).toHaveBeenCalledWith(
+      "/payment-success",
+      expect.objectContaining({ replace: true })
+    );
+  });
+
   test("quote changes never create an order until the customer retries", async () => {
     let startAttempts = 0;
     global.fetch = jest.fn(async (url) => {

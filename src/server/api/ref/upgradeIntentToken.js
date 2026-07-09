@@ -25,15 +25,23 @@ export const issueUpgradeIntentToken = ({
 }) => {
   const key = secret();
   if (!key) throw new Error("UPGRADE_INTENT_SECRET is required.");
+  const normalizedBookingId = String(bookingId || "").trim();
+  const normalizedEmail = normalize(email);
+  const normalizedPackage = normalizePackageTitle(targetPackageTitle);
+  if (!normalizedBookingId || !normalizedEmail || !normalizedPackage) {
+    throw new Error("Upgrade intent is incomplete.");
+  }
+  const issuedAt = Math.floor(Date.now() / 1000);
   const payload = {
     v: 1,
-    bid: String(bookingId || "").trim(),
-    emh: digestEmail(email),
-    pkg: normalizePackageTitle(targetPackageTitle),
+    bid: normalizedBookingId,
+    emh: digestEmail(normalizedEmail),
+    pkg: normalizedPackage,
+    iat: issuedAt,
     exp: Math.floor(new Date(expiresAt).getTime() / 1000),
     n: crypto.randomUUID(),
   };
-  if (!payload.bid || !payload.pkg || !Number.isFinite(payload.exp)) {
+  if (!Number.isFinite(payload.exp) || payload.exp <= issuedAt) {
     throw new Error("Upgrade intent is incomplete.");
   }
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -48,7 +56,18 @@ export const verifyUpgradeIntentToken = ({
 }) => {
   try {
     const key = secret();
-    if (!key || typeof token !== "string") return null;
+    const normalizedBookingId = String(bookingId || "").trim();
+    const normalizedEmail = normalize(email);
+    const normalizedPackage = normalizePackageTitle(targetPackageTitle);
+    if (
+      !key ||
+      typeof token !== "string" ||
+      !normalizedBookingId ||
+      !normalizedEmail ||
+      !normalizedPackage
+    ) {
+      return null;
+    }
     const [encoded, signature] = token.split(".");
     if (!encoded || !signature) return null;
     const expected = sign(encoded, key);
@@ -60,16 +79,56 @@ export const verifyUpgradeIntentToken = ({
     }
     const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
     if (payload.exp <= Math.floor(Date.now() / 1000)) return null;
-    if (bookingId && payload.bid !== String(bookingId).trim()) return null;
-    if (email && payload.emh !== digestEmail(email)) return null;
-    if (
-      targetPackageTitle &&
-      payload.pkg !== normalizePackageTitle(targetPackageTitle)
-    ) {
-      return null;
-    }
+    if (payload.bid !== normalizedBookingId) return null;
+    if (payload.emh !== digestEmail(normalizedEmail)) return null;
+    if (payload.pkg !== normalizedPackage) return null;
     return payload;
   } catch {
     return null;
   }
+};
+
+export const freezeUpgradeIntent = ({ payload, verifiedAt = new Date().toISOString() }) => {
+  if (!payload?.bid || !payload?.emh || !payload?.pkg || !Number.isFinite(payload?.exp)) {
+    return null;
+  }
+  return {
+    bookingId: String(payload.bid).trim(),
+    emailHash: String(payload.emh).trim(),
+    targetPackage: String(payload.pkg).trim(),
+    tokenIssuedAt: Number(payload.iat || 0)
+      ? new Date(Number(payload.iat) * 1000).toISOString()
+      : "",
+    tokenExpiresAt: new Date(Number(payload.exp) * 1000).toISOString(),
+    verifiedAt: new Date(verifiedAt).toISOString(),
+  };
+};
+
+export const verifyFrozenUpgradeIntent = ({
+  snapshot,
+  bookingId,
+  email,
+  targetPackageTitle,
+}) => {
+  const normalizedBookingId = String(bookingId || "").trim();
+  const normalizedEmail = normalize(email);
+  const normalizedPackage = normalizePackageTitle(targetPackageTitle);
+  if (
+    !snapshot ||
+    !normalizedBookingId ||
+    !normalizedEmail ||
+    !normalizedPackage
+  ) {
+    return false;
+  }
+  const verifiedAt = new Date(snapshot.verifiedAt || "").getTime();
+  const expiresAt = new Date(snapshot.tokenExpiresAt || "").getTime();
+  return (
+    Number.isFinite(verifiedAt) &&
+    Number.isFinite(expiresAt) &&
+    verifiedAt <= expiresAt &&
+    String(snapshot.bookingId || "").trim() === normalizedBookingId &&
+    String(snapshot.emailHash || "").trim() === digestEmail(normalizedEmail) &&
+    String(snapshot.targetPackage || "").trim() === normalizedPackage
+  );
 };

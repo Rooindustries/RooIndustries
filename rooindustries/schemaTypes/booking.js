@@ -33,6 +33,9 @@ export default {
       name: 'status',
       title: 'Status',
       type: 'string',
+      readOnly: true,
+      description:
+        'Change booking status through the backend/admin API so payment, refund, coupon, referral, and slot accounting stay consistent.',
       options: {
         list: ['pending', 'captured', 'completed', 'failed', 'refunded', 'cancelled'],
       },

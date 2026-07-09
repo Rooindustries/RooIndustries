@@ -21,5 +21,8 @@ export default {
     {name: 'refundedAt', title: 'Refunded At', type: 'datetime'},
     {name: 'releaseReason', title: 'Release Reason', type: 'string'},
     {name: 'deactivatedCouponAtConsume', title: 'Deactivated Coupon At Consume', type: 'boolean', readOnly: true},
+    {name: 'autoDeactivationKey', type: 'string', readOnly: true, hidden: true},
+    {name: 'recoveredAfterRelease', type: 'boolean', readOnly: true},
+    {name: 'capacityExceededAtRecovery', type: 'boolean', readOnly: true},
   ],
 }

@@ -7,6 +7,7 @@ import {
 const BOOKINGS_QUERY = `*[_type == "booking"]{
   startTimeUTC,
   packageTitle,
+  originalOrderId,
   status
 }`;
 const HOLDS_QUERY = `*[_type == "slotHold"]{

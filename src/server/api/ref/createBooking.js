@@ -45,7 +45,10 @@ import {
 } from "../payment/paymentRecord.js";
 import { commitBookingTransaction } from "./bookingCommit.js";
 import { reserveCouponUse } from "./couponReservations.js";
-import { verifyUpgradeIntentToken } from "./upgradeIntentToken.js";
+import {
+  verifyFrozenUpgradeIntent,
+  verifyUpgradeIntentToken,
+} from "./upgradeIntentToken.js";
 
 const { resolvePaymentProviders } = providerConfig;
 
@@ -289,15 +292,29 @@ export default async function handler(req, res) {
         legacyCompletionDeadline > Date.now());
     const isLegacyPublicCompletion =
       !isInternalPaymentFinalization &&
-      (["paypal", "razorpay"].includes(paymentProvider) ||
-        (paymentProvider === "free" && !bookingRequestId));
+      ["paypal", "razorpay", "free"].includes(paymentProvider);
     if (isLegacyPublicCompletion && !allowLegacyCompletion) {
       return res.status(410).json({
         error: "This checkout session expired. Please restart checkout.",
       });
     }
+    const internalPaymentRecord = isInternalPaymentFinalization && paymentRecordId
+      ? await writeClient.fetch(
+          `*[_type == $type && _id == $id][0]{...}`,
+          { type: PAYMENT_RECORD_TYPE, id: paymentRecordId }
+        )
+      : null;
+    if (
+      isInternalPaymentFinalization &&
+      (!internalPaymentRecord?._id || internalPaymentRecord.provider !== paymentProvider)
+    ) {
+      return res.status(409).json({
+        error: "Payment finalization record is no longer valid.",
+      });
+    }
     const clientAddress = getClientAddress(req);
     if (
+      !isInternalPaymentFinalization &&
       !requireRateLimit(res, {
         key: `create-booking:${clientAddress}`,
         max: 30,
@@ -317,23 +334,44 @@ export default async function handler(req, res) {
         });
       }
 
-      upgradeContext = await resolveUpgradeContext({
-        originalOrderId,
-        packageTitle,
-        client: writeClient,
-      });
-      originalBooking = upgradeContext.booking;
-      const mayOmitLegacyUpgradeIntent =
-        isLegacyPublicCompletion && allowLegacyCompletion;
-      if (!upgradeIntentToken && !mayOmitLegacyUpgradeIntent) {
-        return res.status(403).json({
-          error: "Upgrade authorization is required.",
+      if (isInternalPaymentFinalization) {
+        originalBooking = await writeClient.fetch(
+          `*[_type == "booking" && _id == $id][0]{...}`,
+          { id: originalOrderId }
+        );
+      } else {
+        upgradeContext = await resolveUpgradeContext({
+          originalOrderId,
+          packageTitle,
+          client: writeClient,
         });
+        originalBooking = upgradeContext.booking;
       }
-      if (upgradeIntentToken) {
+      if (isInternalPaymentFinalization) {
+        const frozenIntentMatches = verifyFrozenUpgradeIntent({
+          snapshot: internalPaymentRecord.upgradeIntentSnapshot,
+          bookingId: originalOrderId,
+          email: normalizedUpgradeEmail,
+          targetPackageTitle: packageTitle,
+        });
+        if (!frozenIntentMatches) {
+          return res.status(403).json({
+            error: "The frozen upgrade authorization no longer matches.",
+          });
+        }
+      } else {
+        const mayOmitLegacyUpgradeIntent =
+          isLegacyPublicCompletion && allowLegacyCompletion;
+        if (!upgradeIntentToken && !mayOmitLegacyUpgradeIntent) {
+          return res.status(403).json({
+            error: "Upgrade authorization is required.",
+          });
+        }
+      }
+      if (!isInternalPaymentFinalization && upgradeIntentToken) {
         const intent = verifyUpgradeIntentToken({
           token: upgradeIntentToken,
-          bookingId: originalBooking._id,
+          bookingId: originalBooking?._id || originalOrderId,
           email: normalizedUpgradeEmail,
           targetPackageTitle: packageTitle,
         });
@@ -343,11 +381,12 @@ export default async function handler(req, res) {
           });
         }
       }
-      const allowedUpgradeEmails = [originalBooking.email, originalBooking.payerEmail]
+      const allowedUpgradeEmails = [originalBooking?.email, originalBooking?.payerEmail]
         .map(normalizeEmail)
         .filter(Boolean);
 
       if (
+        !isInternalPaymentFinalization &&
         allowedUpgradeEmails.length > 0 &&
         !allowedUpgradeEmails.includes(normalizedUpgradeEmail)
       ) {
@@ -1019,6 +1058,50 @@ export default async function handler(req, res) {
       }
     }
 
+    const livePricing = isInternalPaymentFinalization
+      ? null
+      : await resolveBookingPricing({
+          packageTitle,
+          originalOrderId,
+          referralId,
+          referralCode,
+          couponCode,
+          paymentProvider,
+          client: writeClient,
+          upgradeContext,
+        });
+    const frozenPricing = internalPaymentRecord?.pricingSnapshot;
+    if (
+      isInternalPaymentFinalization &&
+      (!frozenPricing ||
+        !Number.isFinite(Number(frozenPricing.grossAmount)) ||
+        !Number.isFinite(Number(frozenPricing.netAmount)))
+    ) {
+      return res.status(409).json({
+        error: "Frozen payment pricing is unavailable.",
+      });
+    }
+    const resolvedPricing = isInternalPaymentFinalization
+      ? {
+          couponDiscountAmount: Number(frozenPricing.couponDiscountAmount || 0),
+          couponDiscountPercent: Number(frozenPricing.couponDiscountPercent || 0),
+          couponDiscountType: String(frozenPricing.couponDiscountType || "").trim(),
+          couponDiscountValue: Number(frozenPricing.couponDiscountValue || 0),
+          couponDoc: null,
+          effectiveCommissionPercent: Number(frozenPricing.commissionPercent || 0),
+          effectiveDiscountAmount: Number(frozenPricing.discountAmount || 0),
+          effectiveDiscountPercent: Number(frozenPricing.discountPercent || 0),
+          effectiveGrossAmount: Number(frozenPricing.grossAmount || 0),
+          effectiveNetAmount: Number(frozenPricing.netAmount || 0),
+          effectiveReferralCode: String(
+            frozenPricing.effectiveReferralCode || ""
+          ).trim(),
+          effectiveReferralId: String(
+            frozenPricing.effectiveReferralId || ""
+          ).trim(),
+          commissionAmount: Number(frozenPricing.commissionAmount || 0),
+        }
+      : livePricing;
     const {
       couponDiscountAmount,
       couponDiscountPercent,
@@ -1033,16 +1116,7 @@ export default async function handler(req, res) {
       effectiveReferralCode,
       effectiveReferralId,
       commissionAmount,
-    } = await resolveBookingPricing({
-      packageTitle,
-      originalOrderId,
-      referralId,
-      referralCode,
-      couponCode,
-      paymentProvider,
-      client: writeClient,
-      upgradeContext,
-    });
+    } = resolvedPricing;
     const resolvedPackagePrice = `$${effectiveGrossAmount.toFixed(2)}`;
 
     let verifiedPayerEmail = payerEmail;
@@ -1212,10 +1286,7 @@ export default async function handler(req, res) {
               { id: paymentProofClaimId }
             )
           : null,
-        writeClient.fetch(
-          `*[_type == $type && _id == $id][0]{...}`,
-          { type: PAYMENT_RECORD_TYPE, id: paymentRecordId }
-        ),
+        Promise.resolve(internalPaymentRecord),
       ]);
       const expectedOrderId = paypalOrderId || razorpayOrderId;
       const leaseExpiresAt = new Date(

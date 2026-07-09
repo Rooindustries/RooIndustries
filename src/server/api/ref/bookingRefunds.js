@@ -1,4 +1,7 @@
-import { buildBookingSlotId } from "../../booking/slotIdentity.js";
+import {
+  buildBookingSlotId,
+  buildSlotHoldId,
+} from "../../booking/slotIdentity.js";
 import {
   isBookingBlockingStatus,
   normalizeBookingStatus,
@@ -15,6 +18,74 @@ const patchRevision = (transaction, document, mutate) =>
     const guarded = document._rev ? patch.ifRevisionId(document._rev) : patch;
     return mutate(guarded);
   });
+
+const releaseRefundedUpgradeLock = async ({ client, paymentRecord }) => {
+  const lockId = String(paymentRecord?.startClaimId || "").trim();
+  if (!lockId.startsWith("paymentUpgradeLock.")) return false;
+  const lock = await client.fetch(
+    `*[_type == "paymentUpgradeLock" && _id == $id][0]{_id,_rev,paymentRecordId}`,
+    { id: lockId }
+  );
+  if (!lock?._id) return true;
+  if (String(lock.paymentRecordId || "").trim() !== String(paymentRecord._id || "").trim()) {
+    return false;
+  }
+  await client.delete({
+    query: `*[_type == "paymentUpgradeLock" && _id == $id && _rev == $rev && paymentRecordId == $paymentRecordId]`,
+    params: {
+      id: lock._id,
+      rev: lock._rev,
+      paymentRecordId: paymentRecord._id,
+    },
+  });
+  return true;
+};
+
+const markPaymentRecordRefunded = async ({ client, paymentRecord, now }) => {
+  if (!paymentRecord?._id) return false;
+  const current = await client.fetch(
+    `*[_type == "paymentRecord" && _id == $id][0]{...}`,
+    { id: paymentRecord._id }
+  );
+  if (!current?._id) return false;
+  let patch = client.patch(current._id);
+  if (current._rev && typeof patch.ifRevisionId === "function") {
+    patch = patch.ifRevisionId(current._rev);
+  }
+  await patch
+    .set({
+      status: "refunded",
+      refundState: "full",
+      refundRequiresBookingSync: false,
+      recoveryReason: "",
+      updatedAt: now,
+    })
+    .commit();
+  return true;
+};
+
+const markPaymentRecordRefundPending = async ({ client, paymentRecord, now }) => {
+  if (!paymentRecord?._id) return false;
+  const current = await client.fetch(
+    `*[_type == "paymentRecord" && _id == $id][0]{...}`,
+    { id: paymentRecord._id }
+  );
+  if (!current?._id) return false;
+  let patch = client.patch(current._id);
+  if (current._rev && typeof patch.ifRevisionId === "function") {
+    patch = patch.ifRevisionId(current._rev);
+  }
+  await patch
+    .set({
+      status: "refunded",
+      refundState: "full",
+      refundRequiresBookingSync: true,
+      recoveryReason: "refund_requires_booking_sync",
+      updatedAt: now,
+    })
+    .commit();
+  return true;
+};
 
 export const applyBookingRefund = async ({ client, paymentRecord, refund = {} }) => {
   if (!client || !paymentRecord?.bookingId) {
@@ -82,18 +153,27 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
   }
 
   if (booking.refundAccountingAppliedAt) {
+    await markPaymentRecordRefundPending({ client, paymentRecord, now });
+    const upgradeLockReleased = await releaseRefundedUpgradeLock({
+      client,
+      paymentRecord,
+    });
+    await markPaymentRecordRefunded({ client, paymentRecord, now });
     return {
       bookingId: booking._id,
       reopenedSlot: booking.slotReleasedAfterRefund === true,
       couponRestored: booking.couponRestoredAfterRefund === true,
       referralReversed: booking.referralReversedAfterRefund === true,
+      upgradeLockReleased,
       idempotent: true,
     };
   }
 
   const slotLockId =
     booking.slotLockId ||
-    (booking.startTimeUTC ? buildBookingSlotId(booking.startTimeUTC) : "");
+    (!booking.originalOrderId && booking.startTimeUTC
+      ? buildBookingSlotId(booking.startTimeUTC)
+      : "");
   const [slotLock, redemption] = await Promise.all([
     slotLockId
       ? client.fetch(`*[_type == "bookingSlot" && _id == $id][0]{...}`, {
@@ -156,12 +236,29 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
       patch.dec({ successfulReferrals: 1 })
     );
   }
+  if (paymentRecord?._id) {
+    patchRevision(transaction, paymentRecord, (patch) =>
+      patch.set({
+        status: "refunded",
+        refundState: "full",
+        refundRequiresBookingSync: true,
+        recoveryReason: "refund_requires_booking_sync",
+        updatedAt: now,
+      })
+    );
+  }
   await transaction.commit();
+  const upgradeLockReleased = await releaseRefundedUpgradeLock({
+    client,
+    paymentRecord,
+  });
+  await markPaymentRecordRefunded({ client, paymentRecord, now });
   return {
     bookingId: booking._id,
     reopenedSlot: ownsSlot,
     couponRestored: canRestoreCoupon,
     referralReversed: willReverseReferral,
+    upgradeLockReleased,
     idempotent: false,
   };
 };
@@ -187,23 +284,63 @@ export const applyBookingStatusTransition = async ({
     throw Object.assign(new Error("Booking not found"), { status: 404 });
   }
   if (canonicalStatus === "refunded") {
+    const paymentRecord = booking.paymentRecordId
+      ? await client.fetch(
+          `*[_type == "paymentRecord" && _id == $id][0]{_id,_rev,status,bookingId,startClaimId}`,
+          { id: booking.paymentRecordId }
+        )
+      : null;
     return applyBookingRefund({
       client,
-      paymentRecord: { bookingId: booking._id },
+      paymentRecord: {
+        ...(paymentRecord || {}),
+        bookingId: booking._id,
+      },
       refund: { full: true, type: "full", id: `${source}:${booking._id}` },
     });
+  }
+  if (normalizeBookingStatus(booking.status) === "refunded") {
+    throw Object.assign(
+      new Error("A refunded booking cannot be reactivated or changed."),
+      { status: 409, code: "refunded_booking_terminal" }
+    );
   }
 
   const now = new Date().toISOString();
   const slotLockId =
     booking.slotLockId ||
-    (booking.startTimeUTC ? buildBookingSlotId(booking.startTimeUTC) : "");
-  const slotLock = slotLockId
-    ? await client.fetch(`*[_type == "bookingSlot" && _id == $id][0]{...}`, {
-        id: slotLockId,
-      })
-    : null;
+    (!booking.originalOrderId && booking.startTimeUTC
+      ? buildBookingSlotId(booking.startTimeUTC)
+      : "");
   const becomesBlocking = isBookingBlockingStatus(canonicalStatus);
+  const holdId = !booking.originalOrderId && booking.startTimeUTC
+    ? buildSlotHoldId(booking.startTimeUTC)
+    : "";
+  const [slotLock, activeHold] = await Promise.all([
+    slotLockId
+      ? client.fetch(`*[_type == "bookingSlot" && _id == $id][0]{...}`, {
+          id: slotLockId,
+        })
+      : null,
+    becomesBlocking && holdId
+      ? client.fetch(`*[_type == "slotHold" && _id == $id][0]{...}`, {
+          id: holdId,
+        })
+      : null,
+  ]);
+  const holdExpiry = new Date(activeHold?.expiresAt || "").getTime();
+  const holdBlocks =
+    activeHold?._id &&
+    !["released", "consumed"].includes(
+      String(activeHold.phase || "active").trim().toLowerCase()
+    ) &&
+    Number.isFinite(holdExpiry) &&
+    holdExpiry > Date.now();
+  if (becomesBlocking && holdBlocks) {
+    throw Object.assign(new Error("This booking slot has an active checkout hold."), {
+      status: 409,
+    });
+  }
   if (
     becomesBlocking &&
     slotLock?._id &&
@@ -246,6 +383,25 @@ export const applyBookingStatusTransition = async ({
       status: "active",
       lockedAt: now,
     });
+  }
+  if (becomesBlocking && holdId) {
+    const holdBarrier = {
+      phase: "consumed",
+      expiresAt: now,
+      consumedAt: now,
+      bookingId: booking._id,
+      paymentRecordId: "",
+      startTimeUTC: booking.startTimeUTC,
+    };
+    if (activeHold?._id) {
+      patchRevision(transaction, activeHold, (patch) => patch.set(holdBarrier));
+    } else {
+      transaction.create({
+        _id: holdId,
+        _type: "slotHold",
+        ...holdBarrier,
+      });
+    }
   }
   await transaction.commit();
   return {

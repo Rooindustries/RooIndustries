@@ -491,6 +491,7 @@ export default function BookingForm({ isMobile }) {
             packageTitle: parsed.packageTitle,
             packagePrice: parsed.packagePrice,
             packageTag: parsed.packageTag,
+            phase: parsed.phase || "",
           };
           const utcDate = getUtcDateFromHold(normalizedHold);
           if (!utcDate) {
@@ -1104,6 +1105,7 @@ export default function BookingForm({ isMobile }) {
 
   // ---------- HELPERS ----------
   const handleChange = (e) => {
+    if (isPaymentPendingHold) return;
     const { name, value } = e.target;
     const nextForm = { ...form, [name]: value };
     setForm(nextForm);
@@ -1141,6 +1143,7 @@ export default function BookingForm({ isMobile }) {
   ]);
 
   const handleDayClick = (day) => {
+    if (isPaymentPendingHold) return;
     const date = new Date(month.getFullYear(), month.getMonth(), day);
     date.setHours(0, 0, 0, 0);
 
@@ -1163,6 +1166,8 @@ export default function BookingForm({ isMobile }) {
   }, [myHold, userTimeZone]);
   const hasActiveHold =
     !!myHold && holdCountdownMs !== null && holdCountdownMs > 0;
+  const isPaymentPendingHold =
+    String(myHold?.phase || "").trim().toLowerCase() === "payment_pending";
 
   const clearHoldState = (resetStep = true, clearStorage = true) => {
     setMyHold(null);
@@ -1176,7 +1181,7 @@ export default function BookingForm({ isMobile }) {
   };
 
   const updateHoldPackage = (pkg) => {
-    if (!myHold) return;
+    if (!myHold || isPaymentPendingHold) return;
     const updated = {
       ...myHold,
       packageTitle: pkg?.title || myHold.packageTitle,
@@ -1195,6 +1200,10 @@ export default function BookingForm({ isMobile }) {
   // ---------- RELEASE HOLD (Optimistic Update) ----------
   const releaseHold = async (resetStep = true) => {
     if (!myHold) return;
+    if (isPaymentPendingHold) {
+      setErrorStep1("Your payment session is already in progress. Return to payment to finish it.");
+      return;
+    }
 
     const holdIdToDelete = myHold.holdId;
     const holdTokenToDelete = myHold.holdToken;
@@ -1217,6 +1226,10 @@ export default function BookingForm({ isMobile }) {
 
   // ---------- LOCK SLOT + GO TO STEP 2 ----------
   const handleLockAndGoNext = async () => {
+    if (isPaymentPendingHold) {
+      setErrorStep1("Your payment session is already in progress. Return to payment to finish it.");
+      return;
+    }
     if (!selectedDate || !selectedSlot) {
       setErrorStep1("Please select a date and time before continuing.");
       return;
@@ -1282,6 +1295,7 @@ export default function BookingForm({ isMobile }) {
         packageTitle: selectedPackage.title,
         packagePrice: selectedPackage.price,
         packageTag: selectedPackage.tag,
+        phase: "active",
       };
 
       setMyHold(newHold);
@@ -1516,13 +1530,15 @@ export default function BookingForm({ isMobile }) {
                             Expires in {formatCountdown(holdCountdownMs)}.
                           </span>
                         </p>
-                        <button
-                          type="button"
-                          onClick={() => releaseHold(true)}
-                          className="inline-flex items-center justify-center rounded-lg border border-purple-300/40 bg-purple-900/40 px-3 py-1.5 text-xs font-semibold text-purple-100 hover:bg-purple-800/60 transition"
-                        >
-                          Release Slot
-                        </button>
+                        {!isPaymentPendingHold && (
+                          <button
+                            type="button"
+                            onClick={() => releaseHold(true)}
+                            className="inline-flex items-center justify-center rounded-lg border border-purple-300/40 bg-purple-900/40 px-3 py-1.5 text-xs font-semibold text-purple-100 hover:bg-purple-800/60 transition"
+                          >
+                            Release Slot
+                          </button>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1793,16 +1809,18 @@ export default function BookingForm({ isMobile }) {
                           Expires in {formatCountdown(holdCountdownMs)}.
                         </span>
                       </p>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          releaseHold(true);
-                          setStep(1);
-                        }}
-                        className="inline-flex items-center justify-center rounded-lg border border-purple-300/40 bg-purple-900/40 px-3 py-1.5 text-xs font-semibold text-purple-100 hover:bg-purple-800/60 transition"
-                      >
-                        Release Slot
-                      </button>
+                      {!isPaymentPendingHold && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            releaseHold(true);
+                            setStep(1);
+                          }}
+                          className="inline-flex items-center justify-center rounded-lg border border-purple-300/40 bg-purple-900/40 px-3 py-1.5 text-xs font-semibold text-purple-100 hover:bg-purple-800/60 transition"
+                        >
+                          Release Slot
+                        </button>
+                      )}
                     </div>
                   )}
 
@@ -1852,16 +1870,24 @@ export default function BookingForm({ isMobile }) {
                   <div className="flex justify-between gap-4">
                     <button
                       onClick={() => {
+                        if (isPaymentPendingHold) {
+                          navigate("/payment");
+                          return;
+                        }
                         releaseHold(true);
                         setStep(1);
                       }}
                       className="w-1/2 bg-surface-input hover:bg-surface-hover py-3 rounded-lg font-semibold transition"
                     >
-                      Back
+                      {isPaymentPendingHold ? "Return to payment" : "Back"}
                     </button>
 
                     <button
                       onClick={async () => {
+                        if (isPaymentPendingHold) {
+                          navigate("/payment");
+                          return;
+                        }
                         if (loading) return;
 
                         const validationError = getStep2Error();
@@ -1881,7 +1907,11 @@ export default function BookingForm({ isMobile }) {
                           : ""
                       }`}
                     >
-                      {loading ? "Submitting..." : "Submit & Pay"}
+                      {isPaymentPendingHold
+                        ? "Return to payment"
+                        : loading
+                          ? "Submitting..."
+                          : "Submit & Pay"}
                       <span className="glow-line glow-line-top" />
                       <span className="glow-line glow-line-right" />
                       <span className="glow-line glow-line-bottom" />

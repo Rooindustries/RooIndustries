@@ -1,4 +1,5 @@
 let startPaymentSession;
+let quotePaymentSession;
 let finalizePaymentSession;
 let getPaymentStatus;
 let reconcilePaymentSessions;
@@ -18,11 +19,13 @@ const mockCreatePayPalOrder = jest.fn();
 const mockCreateRazorpayOrder = jest.fn();
 const mockInspectPayPalOrder = jest.fn();
 const mockInspectRazorpayOrder = jest.fn();
+const mockInspectRazorpayPayment = jest.fn();
 const mockVerifyPayPalOrder = jest.fn();
 const mockVerifyPayPalWebhookSignature = jest.fn();
 const mockVerifyRazorpayPayment = jest.fn();
 const mockVerifyRazorpaySignature = jest.fn();
 const mockVerifyRazorpayWebhookSignature = jest.fn();
+const mockDispatchRescheduleNotifications = jest.fn();
 
 jest.mock("../server/api/ref/createBooking", () => ({
   __esModule: true,
@@ -47,6 +50,9 @@ jest.mock("../server/booking/slotPolicy", () => ({
 
 jest.mock("../server/api/payment/providerConfig", () => ({
   __esModule: true,
+  resolvePaymentProviders: (...args) => mockResolvePaymentProviders(...args),
+  resolveServerPaymentSessionsEnabled: (...args) =>
+    mockResolveServerPaymentSessionsEnabled(...args),
   default: {
     resolvePaymentProviders: (...args) => mockResolvePaymentProviders(...args),
     resolveServerPaymentSessionsEnabled: (...args) =>
@@ -64,6 +70,7 @@ jest.mock("../server/api/payment/providerClients", () => ({
   createRazorpayOrder: (...args) => mockCreateRazorpayOrder(...args),
   inspectPayPalOrder: (...args) => mockInspectPayPalOrder(...args),
   inspectRazorpayOrder: (...args) => mockInspectRazorpayOrder(...args),
+  inspectRazorpayPayment: (...args) => mockInspectRazorpayPayment(...args),
   verifyPayPalOrder: (...args) => mockVerifyPayPalOrder(...args),
   verifyPayPalWebhookSignature: (...args) =>
     mockVerifyPayPalWebhookSignature(...args),
@@ -71,6 +78,12 @@ jest.mock("../server/api/payment/providerClients", () => ({
   verifyRazorpaySignature: (...args) => mockVerifyRazorpaySignature(...args),
   verifyRazorpayWebhookSignature: (...args) =>
     mockVerifyRazorpayWebhookSignature(...args),
+}));
+
+jest.mock("../server/api/ref/bookingEmails", () => ({
+  __esModule: true,
+  dispatchRescheduleNotifications: (...args) =>
+    mockDispatchRescheduleNotifications(...args),
 }));
 
 const createConflictError = () => {
@@ -83,6 +96,8 @@ const createConflictError = () => {
 let store;
 let bookingCounter = 1;
 let revisionCounter = 1;
+let clonePaymentReads = false;
+let refundPatchBarrier = null;
 
 const resetStore = () => {
   store = {
@@ -97,7 +112,14 @@ const resetStore = () => {
   };
   bookingCounter = 1;
   revisionCounter = 1;
+  clonePaymentReads = false;
+  refundPatchBarrier = null;
 };
+
+const maybeClonePayment = (document) =>
+  document && clonePaymentReads
+    ? JSON.parse(JSON.stringify(document))
+    : document;
 
 const collectionForType = (type) =>
   ({
@@ -107,6 +129,7 @@ const collectionForType = (type) =>
     paymentProofClaim: store.paymentProofClaims,
     paymentWebhookReceipt: store.paymentWebhookReceipts,
     paymentRecoveryCase: store.paymentRecoveryCases,
+    bookingRecoveryCase: store.paymentRecoveryCases,
     slotHold: store.slotHolds,
     booking: store.bookings,
   }[type] || null);
@@ -195,17 +218,19 @@ const mockClient = {
     }
 
     if (q.includes("_type == $type && _id == $id")) {
-      return (
+      const document =
         collectionForType(params.type)?.find((entry) => entry._id === params.id) ||
-        null
-      );
+        null;
+      return params.type === "paymentRecord"
+        ? maybeClonePayment(document)
+        : document;
     }
 
     if (
       q.includes("provider == $provider") &&
       q.includes("providerPaymentId == $providerPaymentId")
     ) {
-      return (
+      return maybeClonePayment(
         store.paymentRecords.find(
           (entry) =>
             entry.provider === params.provider &&
@@ -218,7 +243,7 @@ const mockClient = {
       q.includes("provider == $provider") &&
       q.includes("providerOrderId == $providerOrderId")
     ) {
-      return (
+      return maybeClonePayment(
         store.paymentRecords.find(
           (entry) =>
             entry.provider === params.provider &&
@@ -254,11 +279,23 @@ const mockClient = {
 
     if (q.includes("lower(status) in $statuses")) {
       return [...store.paymentRecords]
-        .filter((entry) =>
-          Array.isArray(params.statuses)
-            ? params.statuses.includes(String(entry.status || "").trim().toLowerCase())
-            : false
-        )
+        .filter((entry) => {
+          const status = String(entry.status || "").trim().toLowerCase();
+          return (
+            (Array.isArray(params.statuses) && params.statuses.includes(status)) ||
+            (status === params.refundedStatus &&
+              entry.refundRequiresBookingSync === true) ||
+            (status === params.bookedStatus &&
+              entry.emailDispatchRequired === true) ||
+            (status === params.abandonedStatus &&
+              (entry.resourceReleasePending === true ||
+                !!String(entry.lateCaptureWatchUntil || "")))
+          );
+        })
+        .filter((entry) => {
+          if (!entry.nextRecoveryAt) return true;
+          return String(entry.nextRecoveryAt) <= String(params.now || "");
+        })
         .sort((left, right) =>
           String(left.updatedAt || "").localeCompare(String(right.updatedAt || ""))
         )
@@ -304,6 +341,9 @@ const mockClient = {
         return api;
       },
       async commit() {
+        if (refundPatchBarrier && Array.isArray(ops.set?.refunds)) {
+          await refundPatchBarrier();
+        }
         const doc = findDocById(id);
         if (!doc) return null;
         if (ops.revisionId && doc._rev !== ops.revisionId) {
@@ -334,8 +374,9 @@ const mockClient = {
     return api;
   },
   delete: async (id) => {
-    removeDocById(id);
-    return { _id: id };
+    const resolvedId = typeof id === "object" ? id?.params?.id : id;
+    removeDocById(resolvedId);
+    return { _id: resolvedId };
   },
   transaction: () => {
     const operations = [];
@@ -472,12 +513,31 @@ const createReq = (body = {}, headers = {}) => ({
   headers,
 });
 
+const invokeQuote = async (body = {}) => {
+  const state = { status: 200, body: null };
+  const res = {
+    setHeader: jest.fn(),
+    status(status) {
+      state.status = status;
+      return res;
+    },
+    json(payload) {
+      state.body = payload;
+      return payload;
+    },
+  };
+  await quotePaymentSession({ method: "POST", body }, res);
+  return state;
+};
+
 beforeAll(() => {
   process.env.PAYMENT_SESSION_SECRET = "payment-session-test-secret";
   process.env.CRON_SECRET = "cron-secret";
 
   const flow = require("../server/api/payment/flow");
+  const quoteModule = require("../server/api/payment/quote");
   startPaymentSession = flow.startPaymentSession;
+  quotePaymentSession = quoteModule.default || quoteModule;
   finalizePaymentSession = flow.finalizePaymentSession;
   getPaymentStatus = flow.getPaymentStatus;
   reconcilePaymentSessions = flow.reconcilePaymentSessions;
@@ -526,6 +586,16 @@ beforeEach(() => {
   });
   mockInspectPayPalOrder.mockResolvedValue({ state: "unpaid" });
   mockInspectRazorpayOrder.mockResolvedValue({ state: "unpaid" });
+  mockInspectRazorpayPayment.mockResolvedValue({
+    state: "found",
+    providerOrderId: "razorpay_order_1",
+    providerPaymentId: "razorpay_payment_1",
+  });
+  mockDispatchRescheduleNotifications.mockResolvedValue({
+    ok: true,
+    notificationRequired: false,
+    status: "sent",
+  });
   mockVerifyPayPalOrder.mockResolvedValue({
     ok: true,
     payerEmail: "payer@example.com",
@@ -701,6 +771,51 @@ describe("payment session flow", () => {
         currency: "USD",
         key: "rzp_test_key",
       },
+    });
+  });
+
+  test("a provider-order creation outage releases an unexposed session after expiry", async () => {
+    const hold = createHold();
+    mockCreatePayPalOrder.mockRejectedValue(
+      Object.assign(new Error("provider unavailable"), {
+        code: "paypal_order_create_failed",
+      })
+    );
+    const result = await startPaymentSession({
+      body: {
+        provider: "paypal",
+        bookingPayload: baseBookingPayload({
+          slotHoldToken: issueTokenForHold(hold),
+        }),
+      },
+      client: mockClient,
+    });
+
+    expect(result).toMatchObject({
+      httpStatus: 503,
+      body: { ok: false, code: "paypal_order_create_failed" },
+    });
+    const record = getOnlyPaymentRecord();
+    expect(record).toMatchObject({
+      status: paymentRecordConstants.PAYMENT_STATUS_NEEDS_RECOVERY,
+      orderState: "creation_ambiguous",
+    });
+    record.createdAt = "2000-01-01T00:00:00.000Z";
+    record.updatedAt = "2000-01-01T00:00:00.000Z";
+    record.nextRecoveryAt = "2000-01-01T00:00:00.000Z";
+
+    const reconciled = await reconcilePaymentSessions({
+      req: createReq({}, { authorization: "Bearer cron-secret" }),
+      client: mockClient,
+    });
+
+    expect(reconciled.body.summary.abandoned).toBe(1);
+    expect(getOnlyPaymentRecord().status).toBe(
+      paymentRecordConstants.PAYMENT_STATUS_ABANDONED
+    );
+    expect(store.slotHolds[0]).toMatchObject({
+      phase: "released",
+      paymentRecordId: "",
     });
   });
 
@@ -1019,6 +1134,34 @@ describe("payment session flow", () => {
     });
   });
 
+  test("legacy finalize failures never persist the payment access token", async () => {
+    const hold = createHold();
+    const bookingPayload = baseBookingPayload({
+      slotHoldToken: issueTokenForHold(hold),
+    });
+    const started = await startPaymentSession({
+      body: { provider: "paypal", bookingPayload },
+      client: mockClient,
+    });
+    mockVerifyPayPalOrder.mockResolvedValue({
+      ok: false,
+      reason: "paypal_lookup_exception",
+    });
+
+    const result = await finalizePaymentSession({
+      body: {
+        paymentAccessToken: started.body.paymentAccessToken,
+        paypalOrderId: "paypal_order_1",
+      },
+      client: mockClient,
+    });
+
+    expect(result.httpStatus).toBe(202);
+    const serializedEvents = JSON.stringify(getOnlyPaymentRecord().events || []);
+    expect(serializedEvents).not.toContain(started.body.paymentAccessToken);
+    expect(serializedEvents).not.toContain("paymentAccessToken");
+  });
+
   test("finalize returns the existing result for already-completed sessions", async () => {
     const hold = createHold();
     const bookingPayload = baseBookingPayload();
@@ -1092,6 +1235,55 @@ describe("payment session flow", () => {
       ok: true,
       status: paymentRecordConstants.PAYMENT_STATUS_STARTED,
       recoveryReason: "",
+    });
+  });
+
+  test("expired tokens can read terminal status within 24 hours but cannot mutate it", async () => {
+    const hold = createHold();
+    const started = await startPaymentSession({
+      body: {
+        provider: "paypal",
+        bookingPayload: baseBookingPayload({
+          slotHoldToken: issueTokenForHold(hold),
+        }),
+      },
+      client: mockClient,
+    });
+    const decoded = verifyPaymentAccessToken({
+      token: started.body.paymentAccessToken,
+    });
+    const record = getPaymentRecord(decoded.payload.paymentRecordId);
+    record.status = paymentRecordConstants.PAYMENT_STATUS_BOOKED;
+    record.bookingId = "booking_terminal_status";
+    const { createPaymentAccessToken } = require("../server/api/payment/accessToken");
+    const expiredToken = createPaymentAccessToken({
+      paymentRecordId: record._id,
+      provider: record.provider,
+      pricingFingerprint: record.pricingFingerprint,
+      issuedAtMs: Date.now() - 36 * 60 * 1000,
+      expirySeconds: 60,
+    });
+
+    const status = await getPaymentStatus({
+      query: {},
+      paymentAccessToken: expiredToken,
+      allowLegacyTokenFallback: false,
+      client: mockClient,
+    });
+    const finalize = await finalizePaymentSession({
+      body: { providerData: { paypalOrderId: "paypal_order_1" } },
+      paymentAccessToken: expiredToken,
+      allowLegacyTokenFallback: false,
+      client: mockClient,
+    });
+
+    expect(status).toMatchObject({
+      httpStatus: 200,
+      body: { status: paymentRecordConstants.PAYMENT_STATUS_BOOKED },
+    });
+    expect(finalize).toMatchObject({
+      httpStatus: 401,
+      body: { code: "payment_access_token_expired" },
     });
   });
 
@@ -1320,6 +1512,59 @@ describe("payment session flow", () => {
     });
   });
 
+  test("reconcile repairs a post-commit email crash on a booked payment", async () => {
+    const hold = createHold();
+    const started = await startPaymentSession({
+      body: {
+        provider: "paypal",
+        bookingPayload: baseBookingPayload({
+          slotHoldToken: issueTokenForHold(hold),
+        }),
+      },
+      client: mockClient,
+    });
+    const decoded = verifyPaymentAccessToken({
+      token: started.body.paymentAccessToken,
+    });
+    const record = getPaymentRecord(decoded.payload.paymentRecordId);
+    record.status = paymentRecordConstants.PAYMENT_STATUS_BOOKED;
+    record.bookingId = "booking_email_crash";
+    record.emailDispatchRequired = true;
+    record.emailDispatch = {};
+    record.updatedAt = "2000-01-01T00:00:00.000Z";
+    store.bookings.push({
+      _id: "booking_email_crash",
+      _type: "booking",
+      paymentProvider: "paypal",
+      paypalOrderId: "paypal_order_1",
+    });
+    mockCreateBooking.mockImplementationOnce(async (_req, res) =>
+      res.status(200).json({
+        bookingId: "booking_email_crash",
+        emailDispatchToken: "",
+        emailDispatch: {
+          deliveryEnabled: true,
+          client: { attempted: true, sent: true, skippedReason: "" },
+          owner: { attempted: true, sent: true, skippedReason: "" },
+          allSent: true,
+        },
+      })
+    );
+
+    const reconciled = await reconcilePaymentSessions({
+      req: createReq({}, { authorization: "Bearer cron-secret" }),
+      client: mockClient,
+    });
+
+    expect(reconciled.body.summary.finalized).toBe(1);
+    expect(store.bookings).toHaveLength(1);
+    expect(getOnlyPaymentRecord()).toMatchObject({
+      status: paymentRecordConstants.PAYMENT_STATUS_BOOKED,
+      emailDispatchRequired: false,
+      emailDispatch: { allSent: true },
+    });
+  });
+
   test("reconcile moves retryable verification failures into needs_recovery", async () => {
     const hold = createHold();
     const bookingPayload = baseBookingPayload();
@@ -1389,7 +1634,262 @@ describe("payment session flow", () => {
     );
   });
 
-  test("reconcile keeps captured sessions recoverable when the slot is gone", async () => {
+  test("a verified capture after abandonment creates one reschedule booking", async () => {
+    const hold = createHold();
+    const started = await startPaymentSession({
+      body: {
+        provider: "paypal",
+        bookingPayload: baseBookingPayload({
+          slotHoldToken: issueTokenForHold(hold),
+        }),
+      },
+      client: mockClient,
+    });
+    const decoded = verifyPaymentAccessToken({
+      token: started.body.paymentAccessToken,
+    });
+    const record = getPaymentRecord(decoded.payload.paymentRecordId);
+    record.createdAt = "2000-01-01T00:00:00.000Z";
+    record.updatedAt = "2000-01-01T00:00:00.000Z";
+
+    await reconcilePaymentSessions({
+      req: createReq({}, { authorization: "Bearer cron-secret" }),
+      client: mockClient,
+    });
+    expect(record).toMatchObject({
+      status: paymentRecordConstants.PAYMENT_STATUS_ABANDONED,
+      resourceReleasePending: false,
+      lateCaptureWatchUntil: expect.any(String),
+    });
+    expect(store.slotHolds[0].phase).toBe("released");
+
+    mockVerifyPayPalOrder.mockResolvedValue({
+      ok: true,
+      payerEmail: "payer@example.com",
+      providerPaymentId: "paypal_capture_after_abandon",
+    });
+    const buildEvent = (id) => ({
+      id,
+      event_type: "PAYMENT.CAPTURE.COMPLETED",
+      resource: {
+        id: "paypal_capture_after_abandon",
+        supplementary_data: {
+          related_ids: { order_id: "paypal_order_1" },
+        },
+      },
+    });
+    const deliver = (id) => {
+      const event = buildEvent(id);
+      return handlePayPalWebhook({
+        req: {
+          body: event,
+          rawBody: JSON.stringify(event),
+          headers: { "paypal-transmission-id": id },
+        },
+        client: mockClient,
+      });
+    };
+
+    const captured = await deliver("late-capture-event-1");
+    const replay = await deliver("late-capture-event-2");
+
+    expect(captured.httpStatus).toBe(200);
+    expect(replay.httpStatus).toBe(200);
+    expect(getOnlyPaymentRecord()).toMatchObject({
+      status: paymentRecordConstants.PAYMENT_STATUS_BOOKED,
+      requiresReschedule: true,
+      recoveryReason: "requires_reschedule",
+      bookingId: expect.stringMatching(/^booking\./),
+    });
+    expect(store.bookings).toHaveLength(1);
+    expect(store.bookings[0]).toMatchObject({
+      requiresReschedule: true,
+      recoveryReason: "captured_after_abandonment",
+    });
+    expect(store.paymentRecoveryCases).toHaveLength(1);
+    expect(store.paymentProofClaims).toHaveLength(1);
+    expect(store.paymentProofClaims[0].bookingId).toBe(store.bookings[0]._id);
+    expect(mockDispatchRescheduleNotifications).toHaveBeenCalledTimes(1);
+    expect(mockCreateBooking).not.toHaveBeenCalled();
+  });
+
+  test("reconcile finds a late capture even when its webhook was missed", async () => {
+    const hold = createHold();
+    const started = await startPaymentSession({
+      body: {
+        provider: "paypal",
+        bookingPayload: baseBookingPayload({
+          slotHoldToken: issueTokenForHold(hold),
+        }),
+      },
+      client: mockClient,
+    });
+    const record = getPaymentRecord(
+      verifyPaymentAccessToken({
+        token: started.body.paymentAccessToken,
+      }).payload.paymentRecordId
+    );
+    record.createdAt = "2000-01-01T00:00:00.000Z";
+    record.updatedAt = "2000-01-01T00:00:00.000Z";
+    await reconcilePaymentSessions({
+      req: createReq({}, { authorization: "Bearer cron-secret" }),
+      client: mockClient,
+    });
+    record.nextRecoveryAt = "2000-01-01T00:00:00.000Z";
+    mockInspectPayPalOrder.mockResolvedValue({
+      state: "captured",
+      providerOrderId: "paypal_order_1",
+      providerPaymentId: "paypal_capture_missed_webhook",
+      payerEmail: "payer@example.com",
+    });
+    mockVerifyPayPalOrder.mockResolvedValue({
+      ok: true,
+      providerPaymentId: "paypal_capture_missed_webhook",
+      payerEmail: "payer@example.com",
+    });
+
+    const recovered = await reconcilePaymentSessions({
+      req: createReq({}, { authorization: "Bearer cron-secret" }),
+      client: mockClient,
+    });
+
+    expect(recovered.body.summary.finalized).toBe(1);
+    expect(record).toMatchObject({
+      status: paymentRecordConstants.PAYMENT_STATUS_BOOKED,
+      requiresReschedule: true,
+      bookingId: expect.stringMatching(/^booking\./),
+    });
+    expect(store.bookings).toHaveLength(1);
+    expect(mockDispatchRescheduleNotifications).toHaveBeenCalledTimes(1);
+  });
+
+  test("an expired late-capture watch survives a transient provider outage", async () => {
+    store.paymentRecords.push({
+      _id: "paymentRecord.paypal.expired-watch",
+      _rev: nextRevision(),
+      _type: "paymentRecord",
+      provider: "paypal",
+      providerOrderId: "paypal_order_expired_watch",
+      status: paymentRecordConstants.PAYMENT_STATUS_ABANDONED,
+      bookingPayload: baseBookingPayload(),
+      pricingSnapshot: { netAmount: 84.99 },
+      providerPublicData: { currency: "USD" },
+      lateCaptureWatchUntil: "2000-01-01T00:00:00.000Z",
+      nextRecoveryAt: "2000-01-01T00:00:00.000Z",
+      createdAt: "2000-01-01T00:00:00.000Z",
+      updatedAt: "2000-01-01T00:00:00.000Z",
+      events: [],
+    });
+    mockInspectPayPalOrder.mockResolvedValueOnce({
+      state: "unavailable",
+      reason: "paypal_lookup_failed_503",
+    });
+
+    const unavailable = await reconcilePaymentSessions({
+      req: createReq({}, { authorization: "Bearer cron-secret" }),
+      client: mockClient,
+    });
+
+    expect(unavailable.body.summary.providerUnavailable).toBe(1);
+    expect(getOnlyPaymentRecord()).toMatchObject({
+      status: paymentRecordConstants.PAYMENT_STATUS_ABANDONED,
+      lateCaptureWatchUntil: "2000-01-01T00:00:00.000Z",
+      recoveryReason: "paypal_lookup_failed_503",
+      nextRecoveryAt: expect.any(String),
+    });
+    expect(getOnlyPaymentRecord().nextRecoveryAt).not.toBe(
+      "2000-01-01T00:00:00.000Z"
+    );
+  });
+
+  test("reconcile backs off unpaid sessions without starving the next batch", async () => {
+    const hold = createHold();
+    const bookingPayload = baseBookingPayload({
+      slotHoldToken: issueTokenForHold(hold),
+    });
+    const started = await startPaymentSession({
+      body: { provider: "paypal", bookingPayload },
+      client: mockClient,
+    });
+
+    const decoded = verifyPaymentAccessToken({
+      token: started.body.paymentAccessToken,
+    });
+    const record = getPaymentRecord(decoded.payload.paymentRecordId);
+    record.createdAt = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    record.updatedAt = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+
+    const first = await reconcilePaymentSessions({
+      req: createReq({}, { authorization: "Bearer cron-secret" }),
+      client: mockClient,
+    });
+    const second = await reconcilePaymentSessions({
+      req: createReq({}, { authorization: "Bearer cron-secret" }),
+      client: mockClient,
+    });
+
+    expect(first.body.summary).toMatchObject({ scanned: 1, pending: 1 });
+    expect(second.body.summary.scanned).toBe(0);
+    expect(getOnlyPaymentRecord()).toMatchObject({
+      status: paymentRecordConstants.PAYMENT_STATUS_STARTED,
+      recoveryReason: "provider_confirmed_unpaid_before_expiry",
+      recoveryAttemptCount: 1,
+      nextRecoveryAt: expect.any(String),
+    });
+  });
+
+  test("resource release failures stay recoverable until cleanup succeeds", async () => {
+    const hold = createHold();
+    const started = await startPaymentSession({
+      body: {
+        provider: "paypal",
+        bookingPayload: baseBookingPayload({
+          slotHoldToken: issueTokenForHold(hold),
+        }),
+      },
+      client: mockClient,
+    });
+    const decoded = verifyPaymentAccessToken({
+      token: started.body.paymentAccessToken,
+    });
+    const record = getPaymentRecord(decoded.payload.paymentRecordId);
+    record.couponReservationId = "couponRedemption.release_retry";
+    record.createdAt = "2000-01-01T00:00:00.000Z";
+    record.updatedAt = "2000-01-01T00:00:00.000Z";
+    const releaseCouponReservation = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("temporary coupon release failure"))
+      .mockResolvedValueOnce({ released: true });
+
+    const first = await reconcilePaymentSessions({
+      req: createReq({}, { authorization: "Bearer cron-secret" }),
+      client: mockClient,
+      releaseCouponReservation,
+    });
+    expect(first.body.summary.recovery).toBe(1);
+    expect(getOnlyPaymentRecord()).toMatchObject({
+      status: paymentRecordConstants.PAYMENT_STATUS_ABANDONED,
+      resourceReleasePending: true,
+      resourceReleaseTargetStatus:
+        paymentRecordConstants.PAYMENT_STATUS_ABANDONED,
+    });
+
+    getOnlyPaymentRecord().nextRecoveryAt = "2000-01-01T00:00:00.000Z";
+    const second = await reconcilePaymentSessions({
+      req: createReq({}, { authorization: "Bearer cron-secret" }),
+      client: mockClient,
+      releaseCouponReservation,
+    });
+
+    expect(second.body.summary.abandoned).toBe(1);
+    expect(getOnlyPaymentRecord()).toMatchObject({
+      status: paymentRecordConstants.PAYMENT_STATUS_ABANDONED,
+      resourceReleasePending: false,
+    });
+    expect(releaseCouponReservation).toHaveBeenCalledTimes(2);
+  });
+
+  test("reconcile turns a captured payment with a lost slot into a reschedule booking", async () => {
     const hold = createHold();
     const bookingPayload = baseBookingPayload();
     bookingPayload.slotHoldToken = issueTokenForHold(hold);
@@ -1419,11 +1919,14 @@ describe("payment session flow", () => {
     });
 
     expect(reconciled.httpStatus).toBe(200);
-    expect(reconciled.body.summary.finalized).toBe(0);
+    expect(reconciled.body.summary.finalized).toBe(1);
     expect(getOnlyPaymentRecord()).toMatchObject({
-      status: paymentRecordConstants.PAYMENT_STATUS_NEEDS_RECOVERY,
-      recoveryReason: "This slot is already booked.",
+      status: paymentRecordConstants.PAYMENT_STATUS_BOOKED,
+      requiresReschedule: true,
+      recoveryReason: "requires_reschedule",
     });
+    expect(store.bookings).toHaveLength(1);
+    expect(store.bookings[0].requiresReschedule).toBe(true);
   });
 
   test("repeated webhook delivery is idempotent and does not duplicate bookings", async () => {
@@ -1487,6 +1990,70 @@ describe("payment session flow", () => {
     expect(second.httpStatus).toBe(200);
     expect(second.body).toMatchObject({ ok: true, duplicate: true });
     expect(store.bookings).toHaveLength(1);
+  });
+
+  test("an in-progress webhook receipt returns 503 so the provider retries", async () => {
+    const hold = createHold();
+    await startPaymentSession({
+      body: {
+        provider: "paypal",
+        bookingPayload: baseBookingPayload({
+          slotHoldToken: issueTokenForHold(hold),
+        }),
+      },
+      client: mockClient,
+    });
+    let finishVerification;
+    let markVerificationStarted;
+    const verificationStarted = new Promise((resolve) => {
+      markVerificationStarted = resolve;
+    });
+    mockVerifyPayPalOrder.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishVerification = resolve;
+          markVerificationStarted();
+        })
+    );
+    const event = {
+      id: "paypal-event-active-receipt",
+      event_type: "PAYMENT.CAPTURE.COMPLETED",
+      resource: {
+        id: "paypal_capture_active_receipt",
+        supplementary_data: { related_ids: { order_id: "paypal_order_1" } },
+      },
+    };
+    const request = {
+      body: event,
+      rawBody: JSON.stringify(event),
+      headers: { "paypal-transmission-id": event.id },
+    };
+
+    const firstDelivery = handlePayPalWebhook({ req: request, client: mockClient });
+    await verificationStarted;
+    const concurrentDelivery = await handlePayPalWebhook({
+      req: request,
+      client: mockClient,
+    });
+    expect(concurrentDelivery).toMatchObject({
+      httpStatus: 503,
+      body: { ok: false, duplicate: true, processing: true },
+    });
+
+    finishVerification({
+      ok: true,
+      providerPaymentId: "paypal_capture_active_receipt",
+      payerEmail: "payer@example.com",
+    });
+    expect((await firstDelivery).httpStatus).toBe(200);
+    const completedReplay = await handlePayPalWebhook({
+      req: request,
+      client: mockClient,
+    });
+    expect(completedReplay).toMatchObject({
+      httpStatus: 200,
+      body: { ok: true, duplicate: true },
+    });
   });
 
   test("Razorpay webhooks finalize the started order record before payment id is stored", async () => {
@@ -1661,6 +2228,150 @@ describe("payment session flow", () => {
     expect(mockCreatePayPalOrder).toHaveBeenCalledTimes(1);
   });
 
+  test("upgrade quote and start require the same signed intent", async () => {
+    const originalOrderId = "booking_original_upgrade";
+    const upgradePayload = baseBookingPayload({
+      originalOrderId,
+      startTimeUTC: "",
+      slotHoldId: "",
+      slotHoldToken: "",
+    });
+
+    const rejectedQuote = await invokeQuote(upgradePayload);
+    const rejectedStart = await startPaymentSession({
+      body: { provider: "paypal", bookingPayload: upgradePayload },
+      client: mockClient,
+    });
+
+    expect(rejectedQuote).toMatchObject({
+      status: 403,
+      body: { ok: false, code: "upgrade_intent_invalid" },
+    });
+    expect(rejectedStart).toMatchObject({
+      httpStatus: 403,
+      body: { ok: false, code: "upgrade_intent_invalid" },
+    });
+    expect(mockResolvePaymentQuote).not.toHaveBeenCalled();
+    expect(mockCreatePayPalOrder).not.toHaveBeenCalled();
+
+    const { issueUpgradeIntentToken } = require("../server/api/ref/upgradeIntentToken");
+    const authorizedPayload = {
+      ...upgradePayload,
+      upgradeIntentToken: issueUpgradeIntentToken({
+        bookingId: originalOrderId,
+        email: upgradePayload.email,
+        targetPackageTitle: upgradePayload.packageTitle,
+      }),
+    };
+    const blankEmailQuote = await invokeQuote({
+      ...authorizedPayload,
+      email: "",
+    });
+    const blankEmailStart = await startPaymentSession({
+      body: {
+        provider: "paypal",
+        bookingPayload: { ...authorizedPayload, email: "" },
+      },
+      client: mockClient,
+    });
+    expect(blankEmailQuote).toMatchObject({
+      status: 400,
+      body: { code: "upgrade_email_required" },
+    });
+    expect(blankEmailStart).toMatchObject({
+      httpStatus: 400,
+      body: { code: "upgrade_email_required" },
+    });
+    expect(mockResolvePaymentQuote).not.toHaveBeenCalled();
+    expect(mockCreatePayPalOrder).not.toHaveBeenCalled();
+
+    const acceptedQuote = await invokeQuote(authorizedPayload);
+    const acceptedStart = await startPaymentSession({
+      body: { provider: "paypal", bookingPayload: authorizedPayload },
+      client: mockClient,
+    });
+
+    expect(acceptedQuote.status).toBe(200);
+    expect(acceptedQuote.body.quoteFingerprint).toHaveLength(64);
+    expect(acceptedStart.httpStatus).toBe(200);
+    expect(mockCreatePayPalOrder).toHaveBeenCalledTimes(1);
+  });
+
+  test("concurrent upgrade starts claim one provider session", async () => {
+    const originalOrderId = "booking_upgrade_race";
+    const { issueUpgradeIntentToken } = require("../server/api/ref/upgradeIntentToken");
+    const bookingPayload = baseBookingPayload({
+      originalOrderId,
+      startTimeUTC: "",
+      slotHoldId: "",
+      slotHoldToken: "",
+      upgradeIntentToken: issueUpgradeIntentToken({
+        bookingId: originalOrderId,
+        email: "client@example.com",
+        targetPackageTitle: "Performance Vertex Overhaul",
+      }),
+    });
+
+    const results = await Promise.all([
+      startPaymentSession({
+        body: { provider: "paypal", bookingPayload },
+        client: mockClient,
+      }),
+      startPaymentSession({
+        body: { provider: "razorpay", bookingPayload },
+        client: mockClient,
+      }),
+    ]);
+
+    expect(results.map((entry) => entry.httpStatus).sort()).toEqual([200, 409]);
+    expect(store.paymentUpgradeLocks).toHaveLength(1);
+    expect(store.paymentRecords).toHaveLength(1);
+    expect(
+      mockCreatePayPalOrder.mock.calls.length +
+        mockCreateRazorpayOrder.mock.calls.length
+    ).toBe(1);
+  });
+
+  test("a completed upgrade replay returns the booking instead of the old order", async () => {
+    const originalOrderId = "booking_upgrade_replay";
+    const { issueUpgradeIntentToken } = require("../server/api/ref/upgradeIntentToken");
+    const bookingPayload = baseBookingPayload({
+      originalOrderId,
+      startTimeUTC: "",
+      slotHoldId: "",
+      slotHoldToken: "",
+      upgradeIntentToken: issueUpgradeIntentToken({
+        bookingId: originalOrderId,
+        email: "client@example.com",
+        targetPackageTitle: "Performance Vertex Overhaul",
+      }),
+    });
+    const first = await startPaymentSession({
+      body: { provider: "paypal", bookingPayload },
+      client: mockClient,
+    });
+    expect(first.httpStatus).toBe(200);
+    Object.assign(getOnlyPaymentRecord(), {
+      status: paymentRecordConstants.PAYMENT_STATUS_BOOKED,
+      bookingId: "booking_upgrade_complete",
+    });
+
+    const replay = await startPaymentSession({
+      body: { provider: "paypal", bookingPayload },
+      client: mockClient,
+    });
+
+    expect(replay).toMatchObject({
+      httpStatus: 200,
+      body: {
+        status: paymentRecordConstants.PAYMENT_STATUS_BOOKED,
+        bookingId: "booking_upgrade_complete",
+        providerPayload: {},
+      },
+    });
+    expect(mockCreatePayPalOrder).toHaveBeenCalledTimes(1);
+  });
+
   test("start refreshes both the hold document and signed hold token to one expiry", async () => {
     const hold = createHold();
     const originalToken = issueTokenForHold(hold);
@@ -1678,6 +2389,7 @@ describe("payment session flow", () => {
       slotHoldId: refreshedHold._id,
       slotHoldToken: expect.any(String),
       slotHoldExpiresAt: refreshedHold.expiresAt,
+      phase: "payment_pending",
     });
     expect(result.body.sessionExpiresAt).toBe(refreshedHold.expiresAt);
     expect(result.body.refreshedHold.slotHoldToken).not.toBe(originalToken);
@@ -1885,6 +2597,151 @@ describe("payment session flow", () => {
     expect(store.paymentProofClaims).toHaveLength(1);
   });
 
+  test("a full refund wins safely against in-flight finalization", async () => {
+    const hold = createHold();
+    const started = await startPaymentSession({
+      body: {
+        provider: "paypal",
+        bookingPayload: baseBookingPayload({
+          slotHoldToken: issueTokenForHold(hold),
+        }),
+      },
+      client: mockClient,
+    });
+    let releaseBookingAttempt;
+    let markBookingAttemptEntered;
+    const bookingAttemptEntered = new Promise((resolve) => {
+      markBookingAttemptEntered = resolve;
+    });
+    const continueBookingAttempt = new Promise((resolve) => {
+      releaseBookingAttempt = resolve;
+    });
+    mockCreateBooking.mockImplementationOnce(async (_req, res) => {
+      markBookingAttemptEntered();
+      await continueBookingAttempt;
+      if (
+        String(getOnlyPaymentRecord().status || "").toLowerCase() ===
+        paymentRecordConstants.PAYMENT_STATUS_REFUNDED
+      ) {
+        return res.status(409).json({ error: "Payment was refunded." });
+      }
+      return res.status(500).json({ error: "Unexpected race state." });
+    });
+
+    const finalizing = finalizePaymentSession({
+      body: {
+        paymentAccessToken: started.body.paymentAccessToken,
+        providerData: { paypalOrderId: "paypal_order_1" },
+      },
+      client: mockClient,
+    });
+    await bookingAttemptEntered;
+    const refundEvent = {
+      id: "paypal-refund-during-finalize",
+      event_type: "PAYMENT.CAPTURE.REFUNDED",
+      resource: {
+        id: "paypal_refund_during_finalize",
+        status: "COMPLETED",
+        amount: { value: "84.99", currency_code: "USD" },
+        supplementary_data: {
+          related_ids: {
+            order_id: "paypal_order_1",
+            capture_id: "paypal_capture_1",
+          },
+        },
+      },
+    };
+    const refunded = await handlePayPalWebhook({
+      req: {
+        body: refundEvent,
+        rawBody: JSON.stringify(refundEvent),
+        headers: { "paypal-transmission-id": "refund-during-finalize" },
+      },
+      client: mockClient,
+      applyBookingRefund: jest.fn(),
+    });
+    releaseBookingAttempt();
+    const finalized = await finalizing;
+
+    expect(refunded.httpStatus).toBe(200);
+    expect(finalized).toMatchObject({
+      httpStatus: 200,
+      body: { status: paymentRecordConstants.PAYMENT_STATUS_REFUNDED },
+    });
+    expect(getOnlyPaymentRecord()).toMatchObject({
+      status: paymentRecordConstants.PAYMENT_STATUS_REFUNDED,
+      refundRequiresBookingSync: false,
+    });
+    expect(store.bookings).toHaveLength(0);
+  });
+
+  test("an invalid finalize result cannot overwrite a concurrent full refund", async () => {
+    const hold = createHold();
+    const started = await startPaymentSession({
+      body: {
+        provider: "paypal",
+        bookingPayload: baseBookingPayload({
+          slotHoldToken: issueTokenForHold(hold),
+        }),
+      },
+      client: mockClient,
+    });
+    let finishVerification;
+    const verificationStarted = new Promise((resolve) => {
+      mockVerifyPayPalOrder.mockImplementationOnce(
+        () =>
+          new Promise((finish) => {
+            finishVerification = finish;
+            resolve();
+          })
+      );
+    });
+    const finalizing = finalizePaymentSession({
+      body: {
+        paymentAccessToken: started.body.paymentAccessToken,
+        providerData: { paypalOrderId: "paypal_order_1" },
+      },
+      client: mockClient,
+    });
+    await verificationStarted;
+
+    const refundEvent = {
+      id: "refund-during-invalid-verification",
+      event_type: "PAYMENT.CAPTURE.REFUNDED",
+      resource: {
+        id: "paypal_refund_invalid_race",
+        status: "COMPLETED",
+        amount: { value: "84.99", currency_code: "USD" },
+        supplementary_data: {
+          related_ids: {
+            order_id: "paypal_order_1",
+            capture_id: "paypal_capture_invalid_race",
+          },
+        },
+      },
+    };
+    const refunded = await handlePayPalWebhook({
+      req: {
+        body: refundEvent,
+        rawBody: JSON.stringify(refundEvent),
+        headers: {
+          "paypal-transmission-id": "refund-during-invalid-verification",
+        },
+      },
+      client: mockClient,
+    });
+    finishVerification({ ok: false, reason: "paypal_status_created" });
+    const finalized = await finalizing;
+
+    expect(refunded.httpStatus).toBe(200);
+    expect(finalized.httpStatus).toBe(200);
+    expect(getOnlyPaymentRecord()).toMatchObject({
+      status: paymentRecordConstants.PAYMENT_STATUS_REFUNDED,
+      refundState: "full",
+    });
+    expect(store.bookings).toHaveLength(0);
+  });
+
   test("full refund webhooks are deduped and invoke booking rollback once", async () => {
     const hold = createHold();
     const started = await startPaymentSession({
@@ -2014,6 +2871,179 @@ describe("payment session flow", () => {
     });
     await deliver("refund.processed", "refund_2", 7499);
     await deliver("refund.failed", "refund_2", 7499);
+
+    expect(getOnlyPaymentRecord()).toMatchObject({
+      status: paymentRecordConstants.PAYMENT_STATUS_REFUNDED,
+      refundState: "full",
+      refundProcessedAmountInSubunits: 8499,
+      refundRequiresBookingSync: false,
+    });
+    expect(getOnlyPaymentRecord().refunds).toHaveLength(2);
+    expect(applyBookingRefund).toHaveBeenCalledTimes(1);
+  });
+
+  test("a Razorpay refund before capture resolves the canonical order and blocks booking", async () => {
+    const hold = createHold();
+    await startPaymentSession({
+      body: {
+        provider: "razorpay",
+        bookingPayload: baseBookingPayload({
+          slotHoldToken: issueTokenForHold(hold),
+        }),
+      },
+      client: mockClient,
+    });
+    expect(getOnlyPaymentRecord().providerPaymentId).toBe("");
+
+    mockInspectRazorpayPayment
+      .mockResolvedValueOnce({
+        state: "unavailable",
+        reason: "razorpay_payment_lookup_failed_503",
+      })
+      .mockResolvedValue({
+        state: "found",
+        providerOrderId: "razorpay_order_1",
+        providerPaymentId: "razorpay_payment_refunded_first",
+        amountInSubunits: 8499,
+        currency: "USD",
+      });
+    const refundEvent = {
+      id: "refund-before-capture-event",
+      event: "refund.processed",
+      payload: {
+        refund: {
+          entity: {
+            id: "refund_before_capture",
+            payment_id: "razorpay_payment_refunded_first",
+            status: "processed",
+            amount: 8499,
+            currency: "USD",
+          },
+        },
+      },
+    };
+    const refundRequest = {
+      body: refundEvent,
+      rawBody: JSON.stringify(refundEvent),
+      headers: { "x-razorpay-signature": "signature" },
+    };
+
+    const unavailable = await handleRazorpayWebhook({
+      req: refundRequest,
+      client: mockClient,
+    });
+    expect(unavailable.httpStatus).toBe(503);
+    expect(store.paymentWebhookReceipts[0].status).toBe("retryable");
+
+    const refunded = await handleRazorpayWebhook({
+      req: refundRequest,
+      client: mockClient,
+    });
+    expect(refunded.httpStatus).toBe(200);
+    expect(getOnlyPaymentRecord()).toMatchObject({
+      status: paymentRecordConstants.PAYMENT_STATUS_REFUNDED,
+      refundState: "full",
+      providerOrderId: "razorpay_order_1",
+    });
+    expect(store.slotHolds[0].phase).toBe("released");
+
+    const captureEvent = {
+      id: "capture-after-refund-event",
+      event: "payment.captured",
+      payload: {
+        payment: {
+          entity: {
+            id: "razorpay_payment_refunded_first",
+            order_id: "razorpay_order_1",
+            email: "payer@example.com",
+          },
+        },
+      },
+    };
+    const capture = await handleRazorpayWebhook({
+      req: {
+        body: captureEvent,
+        rawBody: JSON.stringify(captureEvent),
+        headers: { "x-razorpay-signature": "signature" },
+      },
+      client: mockClient,
+    });
+
+    expect(capture.httpStatus).toBe(200);
+    expect(getOnlyPaymentRecord().status).toBe(
+      paymentRecordConstants.PAYMENT_STATUS_REFUNDED
+    );
+    expect(store.bookings).toHaveLength(0);
+    expect(store.paymentProofClaims).toHaveLength(0);
+  });
+
+  test("concurrent distinct partial refunds are CAS-merged into one full refund", async () => {
+    const hold = createHold();
+    const started = await startPaymentSession({
+      body: {
+        provider: "razorpay",
+        bookingPayload: baseBookingPayload({
+          slotHoldToken: issueTokenForHold(hold),
+        }),
+      },
+      client: mockClient,
+    });
+    await finalizePaymentSession({
+      body: {
+        paymentAccessToken: started.body.paymentAccessToken,
+        providerData: {
+          razorpayOrderId: "razorpay_order_1",
+          razorpayPaymentId: "razorpay_payment_1",
+          razorpaySignature: "signature",
+        },
+      },
+      client: mockClient,
+    });
+    clonePaymentReads = true;
+    const waiters = [];
+    refundPatchBarrier = () =>
+      new Promise((resolve) => {
+        waiters.push(resolve);
+        if (waiters.length === 2) {
+          refundPatchBarrier = null;
+          waiters.splice(0).forEach((release) => release());
+        }
+      });
+    const applyBookingRefund = jest.fn().mockResolvedValue({
+      bookingId: store.bookings[0]._id,
+      reopenedSlot: true,
+    });
+    const deliver = (refundId, amount) => {
+      const event = {
+        id: `event-${refundId}`,
+        event: "refund.processed",
+        payload: {
+          refund: {
+            entity: {
+              id: refundId,
+              payment_id: "razorpay_payment_1",
+              status: "processed",
+              amount,
+              currency: "USD",
+            },
+          },
+        },
+      };
+      return handleRazorpayWebhook({
+        req: {
+          body: event,
+          rawBody: JSON.stringify(event),
+          headers: { "x-razorpay-signature": "signature" },
+        },
+        client: mockClient,
+        applyBookingRefund,
+      });
+    };
+
+    await Promise.all([
+      deliver("refund_half_1", 4250),
+      deliver("refund_half_2", 4249),
+    ]);
 
     expect(getOnlyPaymentRecord()).toMatchObject({
       status: paymentRecordConstants.PAYMENT_STATUS_REFUNDED,
@@ -2241,5 +3271,91 @@ describe("payment session flow", () => {
     );
     expect(createRequiresRescheduleBooking).toHaveBeenCalledTimes(1);
     expect(dispatchRescheduleNotifications).toHaveBeenCalledTimes(2);
+  });
+
+  test("a reschedule notification retry cannot resurrect a fully refunded payment", async () => {
+    store.paymentRecords.push({
+      _id: "paymentRecord.paypal.reschedule-refund-race",
+      _rev: nextRevision(),
+      _type: "paymentRecord",
+      provider: "paypal",
+      providerOrderId: "paypal_order_reschedule_refund",
+      providerPaymentId: "paypal_capture_reschedule_refund",
+      status: paymentRecordConstants.PAYMENT_STATUS_EMAIL_PARTIAL,
+      requiresReschedule: true,
+      bookingId: "booking_reschedule_refund",
+      bookingPayload: { packageTitle: "Payment recovery" },
+      pricingSnapshot: { netAmount: 84.99 },
+      providerPublicData: { currency: "USD" },
+      nextRecoveryAt: "2000-01-01T00:00:00.000Z",
+      createdAt: "2000-01-01T00:00:00.000Z",
+      updatedAt: "2000-01-01T00:00:00.000Z",
+      events: [],
+    });
+    store.bookings.push({
+      _id: "booking_reschedule_refund",
+      _rev: nextRevision(),
+      _type: "booking",
+      status: "captured",
+      requiresReschedule: true,
+    });
+    let finishNotification;
+    let markNotificationStarted;
+    const notificationStarted = new Promise((resolve) => {
+      markNotificationStarted = resolve;
+    });
+    const dispatchRescheduleNotifications = jest.fn(
+      () =>
+        new Promise((resolve) => {
+          finishNotification = resolve;
+          markNotificationStarted();
+        })
+    );
+    const reconciling = reconcilePaymentSessions({
+      req: createReq({}, { authorization: "Bearer cron-secret" }),
+      client: mockClient,
+      dispatchRescheduleNotifications,
+    });
+    await notificationStarted;
+
+    const refundEvent = {
+      id: "reschedule-refund-race-event",
+      event_type: "PAYMENT.CAPTURE.REFUNDED",
+      resource: {
+        id: "paypal_refund_reschedule_race",
+        status: "COMPLETED",
+        amount: { value: "84.99", currency_code: "USD" },
+        supplementary_data: {
+          related_ids: {
+            order_id: "paypal_order_reschedule_refund",
+            capture_id: "paypal_capture_reschedule_refund",
+          },
+        },
+      },
+    };
+    const refunded = await handlePayPalWebhook({
+      req: {
+        body: refundEvent,
+        rawBody: JSON.stringify(refundEvent),
+        headers: { "paypal-transmission-id": "reschedule-refund-race-event" },
+      },
+      client: mockClient,
+      applyBookingRefund: jest.fn().mockResolvedValue({
+        bookingId: "booking_reschedule_refund",
+        reopenedSlot: false,
+      }),
+    });
+    finishNotification({
+      ok: true,
+      notificationRequired: false,
+      status: "sent",
+    });
+    await reconciling;
+
+    expect(refunded.httpStatus).toBe(200);
+    expect(getOnlyPaymentRecord()).toMatchObject({
+      status: paymentRecordConstants.PAYMENT_STATUS_REFUNDED,
+      refundState: "full",
+    });
   });
 });

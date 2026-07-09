@@ -16,6 +16,7 @@ const valueAfter = (flag) => {
 const apply = args.has("--apply");
 const inspectProviders = args.has("--inspect-providers");
 const snapshotPath = valueAfter("--snapshot");
+const confirmedSnapshotPath = valueAfter("--confirmed-snapshot");
 const reconcileUrl = valueAfter("--reconcile-url");
 const explicitEnvPath = valueAfter("--env");
 
@@ -49,6 +50,18 @@ if (!projectId || !token) {
 if (apply && !readEnv("SANITY_PRIVATE_WRITE_TOKEN", "SANITY_WRITE_TOKEN")) {
   throw new Error("A Sanity write token is required with --apply.");
 }
+if (apply && !explicitEnvPath) {
+  throw new Error("--apply requires an explicit --env file.");
+}
+if (apply && !inspectProviders) {
+  throw new Error("--apply requires --inspect-providers.");
+}
+if (apply && !reconcileUrl) {
+  throw new Error("--apply requires --reconcile-url.");
+}
+if (apply && !confirmedSnapshotPath) {
+  throw new Error("--apply requires --confirmed-snapshot from the production dry run.");
+}
 
 const client = createClient({
   projectId,
@@ -63,6 +76,11 @@ const now = new Date();
 const nowIso = now.toISOString();
 const hash = (value, length) =>
   crypto.createHash("sha256").update(String(value || "")).digest("hex").slice(0, length);
+const digestDocuments = (documents) =>
+  crypto
+    .createHash("sha256")
+    .update(JSON.stringify(Array.isArray(documents) ? documents : []))
+    .digest("hex");
 const normalize = (value) => String(value || "").trim();
 const normalizeLower = (value) => normalize(value).toLowerCase();
 const normalizeIso = (value) => {
@@ -121,12 +139,44 @@ const writeSnapshot = (documents) => {
     projectId,
     dataset,
     documentCount: documents.length,
+    documentDigest: digestDocuments(documents),
     documents,
   };
   fs.writeFileSync(destination, `${JSON.stringify(payload, null, 2)}\n`, {
     mode: 0o600,
     flag: "wx",
   });
+  return true;
+};
+
+const verifyConfirmedSnapshot = () => {
+  if (!confirmedSnapshotPath) return false;
+  const source = path.resolve(confirmedSnapshotPath);
+  if (!fs.existsSync(source)) {
+    throw new Error("The confirmed migration snapshot does not exist.");
+  }
+  const snapshot = JSON.parse(fs.readFileSync(source, "utf8"));
+  if (snapshot.projectId !== projectId || snapshot.dataset !== dataset) {
+    throw new Error("The confirmed snapshot targets a different Sanity dataset.");
+  }
+  if (!Array.isArray(snapshot.documents) || !snapshot.generatedAt) {
+    throw new Error("The confirmed migration snapshot is invalid.");
+  }
+  if (
+    snapshot.documentCount !== snapshot.documents.length ||
+    snapshot.documentDigest !== digestDocuments(snapshot.documents)
+  ) {
+    throw new Error("The confirmed migration snapshot failed its integrity check.");
+  }
+  const generatedAt = new Date(snapshot.generatedAt).getTime();
+  const ageMs = Date.now() - generatedAt;
+  if (
+    !Number.isFinite(generatedAt) ||
+    ageMs < -5 * 60 * 1000 ||
+    ageMs > 6 * 60 * 60 * 1000
+  ) {
+    throw new Error("The confirmed migration snapshot is stale; run a new dry run.");
+  }
   return true;
 };
 
@@ -238,12 +288,31 @@ const buildPlan = ({ bookings, payments, holds, coupons, existingLocks, existing
     const startTimeUTC = normalizeIso(booking.startTimeUTC);
     if (startTimeUTC && startTimeUTC !== booking.startTimeUTC) values.startTimeUTC = startTimeUTC;
     const isFuture = !!startTimeUTC && new Date(startTimeUTC).getTime() > now.getTime();
-    if (isFuture && blocksSlot(status)) {
+    const isUpgrade = !!normalize(booking.originalOrderId);
+    if (isUpgrade) {
+      if (booking.slotLockId) values.slotLockId = "";
+      const legacyLockId = normalize(booking.slotLockId) || bookingSlotId(startTimeUTC);
+      const legacyLock = locksById.get(legacyLockId);
+      if (
+        legacyLock?._id &&
+        legacyLock.bookingId === booking._id &&
+        legacyLock.status !== "released"
+      ) {
+        lockPatches.push({
+          document: legacyLock,
+          values: {
+            status: "released",
+            releasedAt: nowIso,
+            releaseReason: "upgrade_booking_has_no_slot_lock",
+          },
+        });
+      }
+    } else if (isFuture && blocksSlot(status)) {
       const lockId = bookingSlotId(startTimeUTC);
       if (booking.slotLockId !== lockId) values.slotLockId = lockId;
       const existing = locksById.get(lockId);
       if (!existing) {
-        locksToCreate.push({
+        const plannedLock = {
           _id: lockId,
           _type: "bookingSlot",
           bookingId: booking._id,
@@ -251,12 +320,31 @@ const buildPlan = ({ bookings, payments, holds, coupons, existingLocks, existing
           status: "active",
           lockedAt: nowIso,
           migrationVersion: 1,
-        });
-      } else if (existing.bookingId === booking._id && existing.status === "released") {
+        };
+        locksToCreate.push(plannedLock);
+        locksById.set(lockId, plannedLock);
+      } else if (existing.status === "released") {
+        const reactivated = {
+          ...existing,
+          bookingId: booking._id,
+          startTimeUTC,
+          status: "active",
+          releasedAt: "",
+          releaseReason: "",
+          lockedAt: nowIso,
+        };
         lockPatches.push({
           document: existing,
-          values: { status: "active", releasedAt: "", releaseReason: "", lockedAt: nowIso },
+          values: {
+            bookingId: booking._id,
+            startTimeUTC,
+            status: "active",
+            releasedAt: "",
+            releaseReason: "",
+            lockedAt: nowIso,
+          },
         });
+        locksById.set(lockId, reactivated);
       } else if (existing.bookingId !== booking._id && existing.status !== "released") {
         slotConflicts.push(lockId);
       }
@@ -287,6 +375,7 @@ const buildPlan = ({ bookings, payments, holds, coupons, existingLocks, existing
       values.status = "booked";
       values.recoveryReason = "";
       values.nextRecoveryAt = "";
+      values.emailDispatchRequired = false;
     } else if (
       !record.nextRecoveryAt &&
       ["started", "captured_client", "captured_webhook", "finalizing", "needs_recovery"].includes(status)
@@ -295,6 +384,7 @@ const buildPlan = ({ bookings, payments, holds, coupons, existingLocks, existing
     } else if (status === "email_partial" && !emailsSent && !record.nextRecoveryAt) {
       values.nextRecoveryAt = nowIso;
       values.recoveryReason = "email_dispatch_pending";
+      values.emailDispatchRequired = true;
     }
     if (Object.keys(values).length) {
       values.migrationVersion = 1;
@@ -490,15 +580,47 @@ const runReconcile = async () => {
   if (!reconcileUrl) return null;
   const secret = readEnv("CRON_SECRET");
   if (!secret) throw new Error("CRON_SECRET is required with --reconcile-url.");
-  const response = await fetch(reconcileUrl, {
-    method: "GET",
-    headers: { Authorization: `Bearer ${secret}` },
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok || body.ok !== true) {
-    throw new Error(`Payment reconciliation failed (${response.status}).`);
+  const totals = {
+    scanned: 0,
+    finalized: 0,
+    abandoned: 0,
+    recovery: 0,
+    pending: 0,
+    providerUnavailable: 0,
+    refundsSynced: 0,
+  };
+  const runs = [];
+  let drained = false;
+
+  for (let attempt = 1; attempt <= 100; attempt += 1) {
+    const response = await fetch(reconcileUrl, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${secret}` },
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body.ok !== true) {
+      throw new Error(`Payment reconciliation failed (${response.status}).`);
+    }
+    const summary = body.summary || {};
+    runs.push(summary);
+    for (const key of Object.keys(totals)) {
+      totals[key] += Number(summary[key] || 0);
+    }
+    if (Number(summary.scanned || 0) === 0) {
+      drained = true;
+      break;
+    }
+    const handled =
+      Number(summary.finalized || 0) +
+      Number(summary.abandoned || 0) +
+      Number(summary.recovery || 0) +
+      Number(summary.pending || 0) +
+      Number(summary.providerUnavailable || 0) +
+      Number(summary.refundsSynced || 0);
+    if (handled === 0) break;
   }
-  return body.summary || {};
+
+  return { drained, runCount: runs.length, totals, runs };
 };
 
 const summarizePlan = (plan) => ({
@@ -516,6 +638,7 @@ const summarizePlan = (plan) => ({
 const main = async () => {
   const documents = await client.fetch(`*[_type in $types]`, { types: TYPES });
   const snapshotCreated = writeSnapshot(documents);
+  const snapshotConfirmed = verifyConfirmedSnapshot();
   const byType = (type) => documents.filter((document) => document._type === type);
   const input = {
     bookings: byType("booking"),
@@ -531,22 +654,39 @@ const main = async () => {
     ? await inspectStalePayments(input.payments)
     : null;
 
+  if (apply && plan.slotConflicts.length) {
+    throw new Error("Migration found conflicting future booking slots.");
+  }
   if (apply) await applyPlan(plan);
   const reconciliation = apply ? await runReconcile() : null;
+  if (reconciliation && reconciliation.drained !== true) {
+    throw new Error("Payment reconciliation did not drain completely.");
+  }
 
   let after = null;
   if (apply) {
     const refreshed = await client.fetch(`*[_type in $types]`, { types: TYPES });
-    after = summarizePlan(
-      buildPlan({
-        bookings: refreshed.filter((doc) => doc._type === "booking"),
-        payments: refreshed.filter((doc) => doc._type === "paymentRecord"),
-        holds: refreshed.filter((doc) => doc._type === "slotHold"),
-        coupons: refreshed.filter((doc) => doc._type === "coupon"),
-        existingLocks: refreshed.filter((doc) => doc._type === "bookingSlot"),
-        existingClaims: refreshed.filter((doc) => doc._type === "paymentProofClaim"),
-      })
-    );
+    const followUpPlan = buildPlan({
+      bookings: refreshed.filter((doc) => doc._type === "booking"),
+      payments: refreshed.filter((doc) => doc._type === "paymentRecord"),
+      holds: refreshed.filter((doc) => doc._type === "slotHold"),
+      coupons: refreshed.filter((doc) => doc._type === "coupon"),
+      existingLocks: refreshed.filter((doc) => doc._type === "bookingSlot"),
+      existingClaims: refreshed.filter((doc) => doc._type === "paymentProofClaim"),
+    });
+    if (followUpPlan.slotConflicts.length) {
+      throw new Error("Migration produced conflicting future booking slots.");
+    }
+    await applyPlan(followUpPlan);
+    const finalDocuments = await client.fetch(`*[_type in $types]`, { types: TYPES });
+    after = summarizePlan(buildPlan({
+      bookings: finalDocuments.filter((doc) => doc._type === "booking"),
+      payments: finalDocuments.filter((doc) => doc._type === "paymentRecord"),
+      holds: finalDocuments.filter((doc) => doc._type === "slotHold"),
+      coupons: finalDocuments.filter((doc) => doc._type === "coupon"),
+      existingLocks: finalDocuments.filter((doc) => doc._type === "bookingSlot"),
+      existingClaims: finalDocuments.filter((doc) => doc._type === "paymentProofClaim"),
+    }));
   }
 
   console.log(
@@ -556,6 +696,7 @@ const main = async () => {
         mode: apply ? "apply" : "dry-run",
         dataset,
         snapshotCreated,
+        snapshotConfirmed,
         documentsScanned: documents.length,
         before,
         after,
@@ -566,6 +707,9 @@ const main = async () => {
       2
     )
   );
+  if (after && Object.values(after).some((count) => Number(count) !== 0)) {
+    process.exitCode = 3;
+  }
   if (plan.slotConflicts.length) process.exitCode = 2;
 };
 

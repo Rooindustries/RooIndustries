@@ -55,6 +55,7 @@ const resetStore = () => {
   store = {
     bookings: [],
     paymentRecords: [],
+    paymentUpgradeLocks: [],
     slotHolds: [],
     bookingSlots: [],
     couponRedemptions: [],
@@ -161,6 +162,7 @@ const findById = (id) => {
   const collections = [
     store.bookings,
     store.paymentRecords,
+    store.paymentUpgradeLocks,
     store.slotHolds,
     store.bookingSlots,
     store.couponRedemptions,
@@ -310,6 +312,12 @@ const mockSanityClient = {
         null
       );
     }
+    if (q.includes('_type == "paymentRecord"') && q.includes("_id == $id")) {
+      return store.paymentRecords.find((entry) => entry._id === params.id) || null;
+    }
+    if (q.includes('_type == "paymentUpgradeLock"') && q.includes("_id == $id")) {
+      return store.paymentUpgradeLocks.find((entry) => entry._id === params.id) || null;
+    }
     if (q.includes('_type == "booking"') && q.includes("razorpayPaymentId")) {
       return (
         store.bookings.find(
@@ -392,6 +400,9 @@ const mockSanityClient = {
     if (next._type === "paymentRecord") {
       store.paymentRecords.push(next);
     }
+    if (next._type === "paymentUpgradeLock") {
+      store.paymentUpgradeLocks.push(next);
+    }
     if (next._type === "booking") {
       store.bookings.push(next);
     }
@@ -407,8 +418,9 @@ const mockSanityClient = {
     return next;
   },
   delete: async (id) => {
+    const resolvedId = typeof id === "object" ? id?.params?.id : id;
     const removeFrom = (list) => {
-      const index = list.findIndex((doc) => doc._id === id);
+      const index = list.findIndex((doc) => doc._id === resolvedId);
       if (index >= 0) list.splice(index, 1);
     };
     removeFrom(store.slotHolds);
@@ -417,11 +429,12 @@ const mockSanityClient = {
     removeFrom(store.paymentProofClaims);
     removeFrom(store.recoveryCases);
     removeFrom(store.paymentRecords);
+    removeFrom(store.paymentUpgradeLocks);
     removeFrom(store.bookings);
     removeFrom(store.coupons);
     removeFrom(store.referrals);
     removeFrom(store.packages);
-    return { _id: id };
+    return { _id: resolvedId };
   },
   patch: (id) => {
     const ops = { setIfMissing: null, set: null, inc: null, dec: null, revision: "" };
@@ -697,6 +710,53 @@ describe("booking reservation API", () => {
     const second = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
     expect(second.res.statusCode).toBe(409);
     expect(second.body.message).toMatch(/reserved/i);
+  });
+
+  test("payment-pending holds cannot be refreshed, moved, or publicly released", async () => {
+    const startTimeUTC = "2025-01-15T08:00:00.000Z";
+    const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
+    Object.assign(store.slotHolds[0], {
+      phase: "payment_pending",
+      paymentRecordId: "paymentRecord.session.pending",
+    });
+
+    const refreshRes = createRes();
+    await holdSlot(
+      createReq({
+        startTimeUTC,
+        packageTitle: "Performance Vertex Overhaul",
+        previousHoldId: hold.body.holdId,
+        previousHoldToken: hold.body.holdToken,
+      }),
+      refreshRes
+    );
+    const moveRes = createRes();
+    await holdSlot(
+      createReq({
+        startTimeUTC: "2025-01-15T08:15:00.000Z",
+        packageTitle: "Performance Vertex Overhaul",
+        previousHoldId: hold.body.holdId,
+        previousHoldToken: hold.body.holdToken,
+      }),
+      moveRes
+    );
+    const releaseRes = createRes();
+    await releaseHold(
+      createReq({
+        holdId: hold.body.holdId,
+        holdToken: hold.body.holdToken,
+      }),
+      releaseRes
+    );
+
+    expect(refreshRes.statusCode).toBe(409);
+    expect(moveRes.statusCode).toBe(409);
+    expect(releaseRes.statusCode).toBe(409);
+    expect(store.slotHolds).toHaveLength(1);
+    expect(store.slotHolds[0]).toMatchObject({
+      phase: "payment_pending",
+      paymentRecordId: "paymentRecord.session.pending",
+    });
   });
 
   test("reservation expiry releases slot and avoids emails", async () => {
@@ -1449,6 +1509,125 @@ describe("booking reservation API", () => {
     expect(replacement.res.statusCode).toBe(200);
   });
 
+  test("an active upgrade does not keep its refunded original slot blocked", async () => {
+    const startTimeUTC = "2025-01-15T08:25:00.000Z";
+    const { buildBookingSlotId } = require("../../src/server/booking/slotIdentity");
+    const slotLockId = buildBookingSlotId(startTimeUTC);
+    store.bookings.push(
+      {
+        _id: "booking_original_refunded",
+        _rev: "booking_original_refunded_rev",
+        _type: "booking",
+        status: "refunded",
+        startTimeUTC,
+        slotLockId,
+      },
+      {
+        _id: "booking_active_upgrade",
+        _rev: "booking_active_upgrade_rev",
+        _type: "booking",
+        status: "captured",
+        startTimeUTC,
+        originalOrderId: "booking_original_refunded",
+      }
+    );
+    store.bookingSlots.push({
+      _id: slotLockId,
+      _rev: "slot_lock_stale_rev",
+      _type: "bookingSlot",
+      bookingId: "booking_original_refunded",
+      startTimeUTC,
+      status: "active",
+    });
+
+    const replacement = await reserveSlot(
+      startTimeUTC,
+      "Performance Vertex Overhaul"
+    );
+
+    expect(replacement.res.statusCode).toBe(200);
+    expect(store.bookingSlots[0]).toMatchObject({
+      status: "released",
+      releaseReason: "booking_status_repair",
+    });
+  });
+
+  test("a cancelled booking cannot be reactivated over a new checkout hold", async () => {
+    const startTimeUTC = "2025-01-15T08:24:00.000Z";
+    store.bookings.push({
+      _id: "booking_cancelled_with_replacement_hold",
+      _rev: "booking_cancelled_with_replacement_hold_rev",
+      _type: "booking",
+      status: "cancelled",
+      startTimeUTC,
+    });
+    const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
+    expect(hold.res.statusCode).toBe(200);
+
+    await expect(
+      applyBookingStatusTransition({
+        client: mockSanityClient,
+        bookingId: "booking_cancelled_with_replacement_hold",
+        status: "captured",
+        source: "admin-test",
+      })
+    ).rejects.toMatchObject({ status: 409 });
+    expect(store.bookings[0].status).toBe("cancelled");
+  });
+
+  test("checkout cannot overwrite a hold barrier created by concurrent reactivation", async () => {
+    const startTimeUTC = "2025-01-15T08:26:00.000Z";
+    const bookingId = "booking_cancelled_during_hold";
+    store.bookings.push({
+      _id: bookingId,
+      _rev: "booking_cancelled_during_hold_rev",
+      _type: "booking",
+      status: "cancelled",
+      startTimeUTC,
+    });
+
+    const originalFetch = mockSanityClient.fetch;
+    let reactivated = false;
+    mockSanityClient.fetch = async (query, params = {}) => {
+      const q = String(query || "");
+      if (
+        !reactivated &&
+        q.includes('_type == "slotHold"') &&
+        q.includes("_id == $id")
+      ) {
+        reactivated = true;
+        await applyBookingStatusTransition({
+          client: mockSanityClient,
+          bookingId,
+          status: "captured",
+          source: "admin-test",
+        });
+      }
+      return originalFetch(query, params);
+    };
+
+    let checkout;
+    try {
+      checkout = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
+    } finally {
+      mockSanityClient.fetch = originalFetch;
+    }
+
+    expect(reactivated).toBe(true);
+    expect(checkout.res.statusCode).toBe(409);
+    expect(store.bookings[0].status).toBe("captured");
+    expect(store.bookingSlots).toHaveLength(1);
+    expect(store.bookingSlots[0]).toMatchObject({
+      bookingId,
+      status: "active",
+    });
+    expect(store.slotHolds).toHaveLength(1);
+    expect(store.slotHolds[0]).toMatchObject({
+      bookingId,
+      phase: "consumed",
+    });
+  });
+
   test("full refunds reopen the slot and reverse coupon and referral accounting once", async () => {
     store.referrals.push({
       _id: "ref_refund",
@@ -1524,6 +1703,144 @@ describe("booking reservation API", () => {
     expect(store.coupons[0].timesUsed).toBe(0);
     expect(store.coupons[0].isActive).toBe(true);
     expect(store.referrals[0].successfulReferrals).toBe(0);
+  });
+
+  test("admin refund releases an upgrade lock and upgrade status changes never claim a slot", async () => {
+    const bookingId = "booking_upgrade_admin_refund";
+    const paymentRecordId = "paymentRecord.session.upgrade_admin_refund";
+    const startClaimId = "paymentUpgradeLock.upgrade_admin_refund";
+    store.bookings.push({
+      _id: bookingId,
+      _rev: "booking_upgrade_admin_refund_rev",
+      _type: "booking",
+      status: "captured",
+      originalOrderId: "booking_original",
+      startTimeUTC: "2025-01-15T08:26:00.000Z",
+      paymentRecordId,
+    });
+    store.paymentRecords.push({
+      _id: paymentRecordId,
+      _rev: "payment_upgrade_admin_refund_rev",
+      _type: "paymentRecord",
+      bookingId,
+      startClaimId,
+    });
+    store.paymentUpgradeLocks.push({
+      _id: startClaimId,
+      _rev: "upgrade_lock_admin_refund_rev",
+      _type: "paymentUpgradeLock",
+      paymentRecordId,
+    });
+
+    const refunded = await applyBookingStatusTransition({
+      client: mockSanityClient,
+      bookingId,
+      status: "refunded",
+      source: "admin-test",
+    });
+    expect(refunded.upgradeLockReleased).toBe(true);
+    expect(store.paymentUpgradeLocks).toHaveLength(0);
+    expect(store.paymentRecords[0].status).toBe("refunded");
+    expect(store.bookingSlots).toHaveLength(0);
+  });
+
+  test("a refunded booking cannot be reactivated without restoring its accounting", async () => {
+    store.bookings.push({
+      _id: "booking_refunded_terminal",
+      _rev: "booking_refunded_terminal_rev",
+      _type: "booking",
+      status: "refunded",
+      startTimeUTC: "2025-01-15T08:26:00.000Z",
+      couponRestoredAfterRefund: true,
+      referralReversedAfterRefund: true,
+    });
+
+    await expect(
+      applyBookingStatusTransition({
+        client: mockSanityClient,
+        bookingId: "booking_refunded_terminal",
+        status: "captured",
+        source: "admin-test",
+      })
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "refunded_booking_terminal",
+    });
+    expect(store.bookings[0].status).toBe("refunded");
+    expect(store.bookingSlots).toHaveLength(0);
+  });
+
+  test("a cancelled upgrade can be restored without claiming its original slot", async () => {
+    const bookingId = "booking_cancelled_upgrade";
+    store.bookings.push({
+      _id: bookingId,
+      _rev: "booking_cancelled_upgrade_rev",
+      _type: "booking",
+      status: "cancelled",
+      originalOrderId: "booking_original",
+      startTimeUTC: "2025-01-15T08:26:00.000Z",
+    });
+
+    const restored = await applyBookingStatusTransition({
+      client: mockSanityClient,
+      bookingId,
+      status: "captured",
+      source: "admin-test",
+    });
+
+    expect(restored.status).toBe("captured");
+    expect(store.bookingSlots).toHaveLength(0);
+  });
+
+  test("refund restores coupon capacity without undoing a later manual disable", async () => {
+    store.coupons.push({
+      _id: "coupon_manual_disable",
+      _rev: "coupon_manual_disable_rev",
+      _type: "coupon",
+      code: "MANUALOFF",
+      discountType: "percent",
+      discountPercent: 100,
+      canCombineWithReferral: false,
+      isActive: true,
+      timesUsed: 0,
+      activeReservations: 0,
+      maxUses: 1,
+    });
+    const startTimeUTC = "2025-01-15T08:28:00.000Z";
+    const hold = await reserveSlot(startTimeUTC, "Test Package");
+    const utcDate = new Date(startTimeUTC);
+    const res = createRes();
+    await createBooking(
+      createReq({
+        email: CLIENT_EMAIL,
+        packageTitle: "Test Package",
+        status: "captured",
+        paymentProvider: "free",
+        couponCode: "MANUALOFF",
+        bookingRequestId: "manual-disable-refund",
+        startTimeUTC,
+        localTimeZone: "America/Los_Angeles",
+        displayDate: formatClientDate(utcDate, "America/Los_Angeles"),
+        displayTime: formatClientTime(utcDate, "America/Los_Angeles"),
+        slotHoldId: hold.body.holdId,
+        slotHoldToken: hold.body.holdToken,
+      }),
+      res
+    );
+    const coupon = store.coupons[0];
+    coupon.isActive = false;
+    coupon._updatedAt = new Date(
+      new Date(coupon.autoDeactivatedAt).getTime() + 60 * 1000
+    ).toISOString();
+
+    await applyBookingRefund({
+      client: mockSanityClient,
+      paymentRecord: { bookingId: res.body.bookingId },
+      refund: { id: "refund_manual_disable", full: true },
+    });
+
+    expect(coupon.timesUsed).toBe(0);
+    expect(coupon.isActive).toBe(false);
   });
 
   test("concurrent email dispatch uses one lease and stable Resend keys", async () => {
@@ -1630,6 +1947,191 @@ describe("booking reservation API", () => {
     });
     expect(store.recoveryCases).toHaveLength(1);
     expect(mockSendEmail).toHaveBeenCalledTimes(2);
+  });
+
+  test("reschedule recovery atomically settles coupon, referral, hold, and refund accounting", async () => {
+    const paymentRecord = {
+      _id: "paymentRecord.paypal.recovery-accounting",
+      _rev: "payment_recovery_accounting_rev",
+      _type: "paymentRecord",
+      provider: "paypal",
+      providerOrderId: "paypal_recovery_accounting",
+      providerPaymentId: "capture_recovery_accounting",
+      status: "finalizing",
+      couponReservationId: "couponRedemption.recovery-accounting",
+      bookingPayload: {
+        email: CLIENT_EMAIL,
+        packageTitle: "Performance Vertex Overhaul",
+        startTimeUTC: "2025-01-15T08:00:00.000Z",
+        couponCode: "RECOVER",
+      },
+      pricingSnapshot: {
+        grossAmount: 84.99,
+        netAmount: 42.5,
+        couponDiscountAmount: 42.49,
+        couponDiscountType: "fixed",
+        couponDiscountValue: 42.49,
+        effectiveReferralId: "ref_recovery_accounting",
+        effectiveReferralCode: "recoveryref",
+      },
+    };
+    const coupon = {
+      _id: "coupon_recovery_accounting",
+      _rev: "coupon_recovery_accounting_rev",
+      _type: "coupon",
+      code: "RECOVER",
+      isActive: true,
+      timesUsed: 0,
+      activeReservations: 1,
+      maxUses: 1,
+    };
+    const redemption = {
+      _id: "couponRedemption.recovery-accounting",
+      _rev: "redemption_recovery_accounting_rev",
+      _type: "couponRedemption",
+      coupon: { _type: "reference", _ref: coupon._id },
+      paymentRecordId: paymentRecord._id,
+      status: "reserved",
+    };
+    const referral = {
+      _id: "ref_recovery_accounting",
+      _rev: "ref_recovery_accounting_rev",
+      _type: "referral",
+      successfulReferrals: 0,
+    };
+    const hold = {
+      _id: "slotHold.recovery-accounting",
+      _rev: "hold_recovery_accounting_rev",
+      _type: "slotHold",
+      phase: "payment_pending",
+      paymentRecordId: paymentRecord._id,
+    };
+    const proof = {
+      _id: "paymentProofClaim.paypal.recovery-accounting",
+      _rev: "proof_recovery_accounting_rev",
+      _type: "paymentProofClaim",
+      paymentRecordId: paymentRecord._id,
+      provider: "paypal",
+      providerOrderId: paymentRecord.providerOrderId,
+    };
+    store.paymentRecords.push(paymentRecord);
+    store.coupons.push(coupon);
+    store.couponRedemptions.push(redemption);
+    store.referrals.push(referral);
+    store.slotHolds.push(hold);
+    store.paymentProofClaims.push(proof);
+
+    const recovered = await createRequiresRescheduleBooking({
+      client: mockSanityClient,
+      paymentRecord,
+      reason: "slot_occupied",
+      notify: false,
+      paymentProofClaim: proof,
+      paymentRecordMutation: {
+        id: paymentRecord._id,
+        revision: paymentRecord._rev,
+        set: { status: "email_partial", requiresReschedule: true },
+      },
+      couponReservation: { coupon, redemption },
+      referralId: referral._id,
+      paymentHold: hold,
+    });
+
+    expect(recovered.bookingId).toMatch(/^booking\./);
+    expect(store.bookings[0]).toMatchObject({
+      couponRedemptionId: redemption._id,
+      referral: { _ref: referral._id },
+      referralAccountingApplied: true,
+    });
+    expect(redemption).toMatchObject({
+      status: "consumed",
+      bookingId: recovered.bookingId,
+    });
+    expect(coupon).toMatchObject({
+      timesUsed: 1,
+      activeReservations: 0,
+      isActive: false,
+    });
+    expect(referral.successfulReferrals).toBe(1);
+    expect(hold).toMatchObject({
+      phase: "consumed",
+      bookingId: recovered.bookingId,
+    });
+    expect(paymentRecord.bookingId).toBe(recovered.bookingId);
+    expect(proof.bookingId).toBe(recovered.bookingId);
+
+    await applyBookingRefund({
+      client: mockSanityClient,
+      paymentRecord,
+      refund: { id: "refund_recovery_accounting", full: true, amount: 42.5 },
+    });
+
+    expect(store.bookings[0].status).toBe("refunded");
+    expect(redemption.status).toBe("refunded");
+    expect(coupon.timesUsed).toBe(0);
+    expect(referral.successfulReferrals).toBe(0);
+    expect(paymentRecord.status).toBe("refunded");
+  });
+
+  test("late capture consumes a coupon reservation that abandonment released", async () => {
+    const paymentRecord = {
+      _id: "paymentRecord.paypal.late-coupon",
+      _rev: "payment_late_coupon_rev",
+      _type: "paymentRecord",
+      provider: "paypal",
+      providerOrderId: "paypal_late_coupon",
+      status: "finalizing",
+      bookingPayload: {
+        email: CLIENT_EMAIL,
+        packageTitle: "Performance Vertex Overhaul",
+        couponCode: "LASTUSE",
+      },
+      pricingSnapshot: { grossAmount: 84.99, netAmount: 42.5 },
+    };
+    const coupon = {
+      _id: "coupon_late_capture",
+      _rev: "coupon_late_capture_rev",
+      _type: "coupon",
+      code: "LASTUSE",
+      isActive: false,
+      timesUsed: 1,
+      activeReservations: 0,
+      maxUses: 1,
+    };
+    const redemption = {
+      _id: "couponRedemption.late-capture",
+      _rev: "redemption_late_capture_rev",
+      _type: "couponRedemption",
+      coupon: { _type: "reference", _ref: coupon._id },
+      paymentRecordId: paymentRecord._id,
+      status: "released",
+      releasedAt: "2025-01-15T08:20:00.000Z",
+    };
+    store.paymentRecords.push(paymentRecord);
+    store.coupons.push(coupon);
+    store.couponRedemptions.push(redemption);
+
+    const recovered = await createRequiresRescheduleBooking({
+      client: mockSanityClient,
+      paymentRecord,
+      reason: "captured_after_abandonment",
+      notify: false,
+      paymentRecordMutation: {
+        id: paymentRecord._id,
+        revision: paymentRecord._rev,
+        set: { status: "email_partial", requiresReschedule: true },
+      },
+      couponReservation: { coupon, redemption },
+    });
+
+    expect(store.bookings[0].couponRedemptionId).toBe(redemption._id);
+    expect(redemption).toMatchObject({
+      status: "consumed",
+      bookingId: recovered.bookingId,
+      recoveredAfterRelease: true,
+      capacityExceededAtRecovery: true,
+    });
+    expect(coupon).toMatchObject({ timesUsed: 2, activeReservations: 0 });
   });
 
   test("payment-confirmed-without-reservation is rejected", async () => {
@@ -1961,6 +2463,33 @@ describe("booking reservation API", () => {
     store.slotHolds = [];
     nowSpy.mockReturnValue(baseTime + 21 * 60 * 1000);
 
+    const paymentRecordId =
+      "paymentRecord.razorpay.order.razorpay_order_webhook";
+    const claimId = "paymentProofClaim.razorpay.razorpay_payment_webhook";
+    const leaseId = "lease_razorpay_webhook";
+    store.paymentRecords.push({
+      _id: paymentRecordId,
+      _rev: "payment_record_webhook_rev",
+      _type: "paymentRecord",
+      provider: "razorpay",
+      providerOrderId: "razorpay_order_webhook",
+      providerPaymentId: "razorpay_payment_webhook",
+      status: "finalizing",
+      paymentProofClaimId: claimId,
+      finalizationLeaseId: leaseId,
+      finalizationLeaseExpiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      pricingSnapshot: { grossAmount: 84.99, netAmount: 84.99 },
+    });
+    store.paymentProofClaims.push({
+      _id: claimId,
+      _rev: "payment_claim_webhook_rev",
+      _type: "paymentProofClaim",
+      paymentRecordId,
+      provider: "razorpay",
+      providerOrderId: "razorpay_order_webhook",
+      providerPaymentId: "razorpay_payment_webhook",
+    });
+
     global.fetch = jest.fn(async () => ({
       ok: true,
       json: async () => ({
@@ -1984,7 +2513,7 @@ describe("booking reservation API", () => {
           packagePrice: "$84.99",
           status: "captured",
           paymentProvider: "razorpay",
-          paymentRecordId: "paymentRecord.razorpay.order.razorpay_order_webhook",
+          paymentRecordId,
           razorpayOrderId: "razorpay_order_webhook",
           razorpayPaymentId: "razorpay_payment_webhook",
           localTimeZone: "America/Los_Angeles",
@@ -1996,7 +2525,11 @@ describe("booking reservation API", () => {
           slotHoldExpiresAt: hold.body.expiresAt,
           deferEmailsUntilConfirmation: true,
         }),
-        internalContext: { paymentFinalizeSource: "webhook" },
+        internalContext: {
+          paymentFinalizeSource: "webhook",
+          paymentProofClaimId: claimId,
+          paymentFinalizationLeaseId: leaseId,
+        },
       },
       res
     );
@@ -2029,6 +2562,7 @@ describe("booking reservation API", () => {
       paymentProofClaimId: claimId,
       finalizationLeaseId: leaseId,
       finalizationLeaseExpiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      pricingSnapshot: { grossAmount: 84.99, netAmount: 84.99 },
     });
     store.paymentProofClaims.push({
       _id: claimId,
@@ -2039,6 +2573,9 @@ describe("booking reservation API", () => {
       providerOrderId: "internal_order",
       providerPaymentId: "",
     });
+    store.packages.find(
+      (entry) => entry.title === "Performance Vertex Overhaul"
+    ).price = "$999.00";
     const utcDate = new Date(startTimeUTC);
     const res = createRes();
     await createBooking(
@@ -2075,6 +2612,11 @@ describe("booking reservation API", () => {
       finalizationLeaseId: "",
     });
     expect(store.bookings).toHaveLength(1);
+    expect(store.bookings[0]).toMatchObject({
+      packagePrice: "$84.99",
+      grossAmount: 84.99,
+      netAmount: 84.99,
+    });
   });
 
   test("free internal finalization requires a valid lease but no payment proof claim", async () => {
@@ -2103,6 +2645,16 @@ describe("booking reservation API", () => {
       status: "finalizing",
       finalizationLeaseId: leaseId,
       finalizationLeaseExpiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      pricingSnapshot: {
+        grossAmount: 49.95,
+        netAmount: 0,
+        discountAmount: 49.95,
+        discountPercent: 100,
+        couponDiscountAmount: 49.95,
+        couponDiscountPercent: 100,
+        couponDiscountType: "percent",
+        couponDiscountValue: 100,
+      },
     });
     const utcDate = new Date(startTimeUTC);
     const res = createRes();
