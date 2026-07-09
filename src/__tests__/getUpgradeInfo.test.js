@@ -140,6 +140,29 @@ describe("getUpgradeInfo API", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  test("fails closed when a legacy booking has no stored email identity", async () => {
+    mockGetDocument.mockResolvedValue({
+      _id: "booking_without_email",
+      _type: "booking",
+      status: "completed",
+      email: "",
+      payerEmail: "",
+    });
+    const req = createReq({
+      id: "booking_without_email",
+      email: "submitted@example.com",
+    });
+    const res = createRes();
+
+    await getUpgradeInfo(req, res);
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toEqual({
+      ok: false,
+      error: "No booking found with that Order ID.",
+    });
+  });
+
   test("returns upgrade pricing without leaking booking PII", async () => {
     const booking = paidBooking({
       discord: "servi",
@@ -218,6 +241,64 @@ describe("getUpgradeInfo API", () => {
         targetPackageTitle: "Performance Vertex Max",
       })
     ).toBeNull();
+    expect(
+      verifyUpgradeIntentToken({
+        token: res.body.upgradeIntentToken,
+        bookingId: "",
+        email: "",
+        targetPackageTitle: "",
+      })
+    ).toBeNull();
+  });
+
+  test("a verified upgrade snapshot stays bound after the browser token expires", () => {
+    const {
+      freezeUpgradeIntent,
+      issueUpgradeIntentToken,
+      verifyFrozenUpgradeIntent,
+      verifyUpgradeIntentToken,
+    } = require("../../src/server/api/ref/upgradeIntentToken");
+    const now = Date.now();
+    const token = issueUpgradeIntentToken({
+      bookingId: "booking_frozen_upgrade",
+      email: "client@example.com",
+      targetPackageTitle: "Performance Vertex Max",
+      expiresAt: new Date(now + 1000).toISOString(),
+    });
+    const payload = verifyUpgradeIntentToken({
+      token,
+      bookingId: "booking_frozen_upgrade",
+      email: "client@example.com",
+      targetPackageTitle: "Performance Vertex Max",
+    });
+    const snapshot = freezeUpgradeIntent({ payload });
+    const nowSpy = jest.spyOn(Date, "now").mockReturnValue(now + 2000);
+
+    expect(
+      verifyUpgradeIntentToken({
+        token,
+        bookingId: "booking_frozen_upgrade",
+        email: "client@example.com",
+        targetPackageTitle: "Performance Vertex Max",
+      })
+    ).toBeNull();
+    expect(
+      verifyFrozenUpgradeIntent({
+        snapshot,
+        bookingId: "booking_frozen_upgrade",
+        email: "client@example.com",
+        targetPackageTitle: "Performance Vertex Max",
+      })
+    ).toBe(true);
+    expect(
+      verifyFrozenUpgradeIntent({
+        snapshot,
+        bookingId: "booking_frozen_upgrade",
+        email: "changed@example.com",
+        targetPackageTitle: "Performance Vertex Max",
+      })
+    ).toBe(false);
+    nowSpy.mockRestore();
   });
 
   test("looks up upgrades by booking orderId", async () => {

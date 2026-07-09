@@ -15,10 +15,17 @@ export default async function handler(req, res) {
     String(process.env.PAYMENT_LEGACY_STATUS_GET_UNTIL || "")
   ).getTime();
   const legacyOpen = Number.isFinite(legacyDeadline) && legacyDeadline > Date.now();
-  const legacyToken =
-    req.method === "GET"
-      ? String(req?.query?.paymentAccessToken || req?.query?.payment || "").trim()
-      : String(req?.body?.paymentAccessToken || "").trim();
+  if (req.method === "GET" && !legacyOpen) {
+    res.setHeader("Allow", ["POST"]);
+    return res.status(410).json({
+      ok: false,
+      code: "legacy_payment_status_expired",
+      error: "This legacy payment-status link expired.",
+    });
+  }
+  const legacyToken = req.method === "GET"
+    ? String(req?.query?.paymentAccessToken || req?.query?.payment || "").trim()
+    : "";
   const result = await getPaymentStatus({
     query: req.query,
     paymentAccessToken: bearerToken || (legacyOpen ? legacyToken : ""),

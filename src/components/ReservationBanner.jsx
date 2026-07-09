@@ -93,6 +93,7 @@ export default function ReservationBanner() {
             packageTitle: parsed.packageTitle,
             packagePrice: parsed.packagePrice,
             packageTag: parsed.packageTag,
+            phase: parsed.phase || "",
           };
           const utcDate = getUtcDateFromHold(normalizedHold);
           if (!utcDate) {
@@ -124,6 +125,7 @@ export default function ReservationBanner() {
           packageTitle: detail.packageTitle,
           packagePrice: detail.packagePrice,
           packageTag: detail.packageTag,
+          phase: detail.phase || "",
         };
         const utcDate = getUtcDateFromHold(normalizedHold);
         if (!utcDate) {
@@ -363,13 +365,15 @@ export default function ReservationBanner() {
         <div className={`flex items-center ${buttonWrapClass} z-10 lg:flex-none ${buttonGapClass} ${buttonJustifyClass}`}>
 
           {/* Release Button */}
-          <button
-            type="button"
-            onClick={() => releaseHold(false, true)}
-            className={`rounded-lg border border-danger-border bg-danger-soft px-2.5 py-1.5 sm:px-3 sm:py-2 ${buttonTextSizeClass} font-semibold text-danger-text hover:bg-danger-soft transition shadow-sm`}
-          >
-            Release
-          </button>
+          {hold?.phase !== "payment_pending" && (
+            <button
+              type="button"
+              onClick={() => releaseHold(false, true)}
+              className={`rounded-lg border border-danger-border bg-danger-soft px-2.5 py-1.5 sm:px-3 sm:py-2 ${buttonTextSizeClass} font-semibold text-danger-text hover:bg-danger-soft transition shadow-sm`}
+            >
+              Release
+            </button>
+          )}
 
           {/* Continue button (Hidden on payment screen) */}
           {!isPaymentScreen && (

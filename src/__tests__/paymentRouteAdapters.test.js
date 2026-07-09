@@ -466,4 +466,59 @@ describe("payment bearer-token handlers", () => {
     });
     expect(state.headers["cache-control"]).toBe("private, no-store");
   });
+
+  test("legacy GET status expires completely after its compatibility deadline", async () => {
+    jest.dontMock("../server/api/payment/status.js");
+    const getPaymentStatus = jest.fn();
+    jest.doMock("../server/api/payment/flow.js", () => ({
+      __esModule: true,
+      getPaymentStatus,
+    }));
+    process.env.PAYMENT_LEGACY_STATUS_GET_UNTIL = "2000-01-01T00:00:00.000Z";
+    const handler = require("../server/api/payment/status.js").default;
+    const { response, state } = createLegacyResponse();
+
+    await handler(
+      {
+        method: "GET",
+        headers: { authorization: "Bearer old_payment_token" },
+        query: { paymentAccessToken: "old_payment_token" },
+      },
+      response
+    );
+
+    expect(state.status).toBe(410);
+    expect(state.body.code).toBe("legacy_payment_status_expired");
+    expect(getPaymentStatus).not.toHaveBeenCalled();
+  });
+
+  test("legacy GET status accepts a query token only before its deadline", async () => {
+    jest.dontMock("../server/api/payment/status.js");
+    const getPaymentStatus = jest.fn().mockResolvedValue({
+      httpStatus: 200,
+      body: { ok: true },
+    });
+    jest.doMock("../server/api/payment/flow.js", () => ({
+      __esModule: true,
+      getPaymentStatus,
+    }));
+    process.env.PAYMENT_LEGACY_STATUS_GET_UNTIL = "2099-01-01T00:00:00.000Z";
+    const handler = require("../server/api/payment/status.js").default;
+    const { response } = createLegacyResponse();
+
+    await handler(
+      {
+        method: "GET",
+        headers: {},
+        query: { paymentAccessToken: "legacy_payment_token" },
+      },
+      response
+    );
+
+    expect(getPaymentStatus).toHaveBeenCalledWith({
+      query: { paymentAccessToken: "legacy_payment_token" },
+      paymentAccessToken: "legacy_payment_token",
+      allowLegacyTokenFallback: false,
+    });
+  });
 });

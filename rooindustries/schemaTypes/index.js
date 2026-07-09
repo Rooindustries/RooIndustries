@@ -16,6 +16,15 @@ import bookingSettings from './bookingSettings'
 import referral from './referral'
 import coupon from './coupon'
 import slotHold from './slotHold'
+import bookingSlot from './bookingSlot'
+import couponRedemption from './couponRedemption'
+import bookingRecoveryCase from './bookingRecoveryCase'
+import paymentRecord from './paymentRecord'
+import paymentStartClaim from './paymentStartClaim'
+import paymentUpgradeLock from './paymentUpgradeLock'
+import paymentProofClaim from './paymentProofClaim'
+import paymentWebhookReceipt from './paymentWebhookReceipt'
+import paymentRecoveryCase from './paymentRecoveryCase'
 import tool from './tool'
 import referralBox from './referralBox'
 import faqSettings from './faqSettings'
@@ -45,6 +54,15 @@ export const schemaTypes = [
   referral,
   coupon,
   slotHold,
+  bookingSlot,
+  couponRedemption,
+  bookingRecoveryCase,
+  paymentRecord,
+  paymentStartClaim,
+  paymentUpgradeLock,
+  paymentProofClaim,
+  paymentWebhookReceipt,
+  paymentRecoveryCase,
   tool,
   referralBox,
   faqSettings,

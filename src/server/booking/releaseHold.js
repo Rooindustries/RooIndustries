@@ -48,6 +48,12 @@ export default async function handler(req, res) {
     if (!validToken) {
       return res.status(403).json({ ok: false, message: "Invalid hold token" });
     }
+    if (String(hold.phase || "").trim().toLowerCase() === "payment_pending") {
+      return res.status(409).json({
+        ok: false,
+        message: "This hold belongs to an active payment session.",
+      });
+    }
 
     const releasedAt = new Date().toISOString();
     let patch = client.patch(holdId);
