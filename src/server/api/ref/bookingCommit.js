@@ -262,6 +262,9 @@ export const createRequiresRescheduleBooking = async ({
       recoveryCreatedAt: new Date().toISOString(),
       recoveryNotificationStatus: "pending",
       originalRequestedStartTimeUTC: payload.startTimeUTC || "",
+      localTimeZone: payload.localTimeZone || "",
+      displayDate: payload.displayDate || "",
+      displayTime: payload.displayTime || "",
     },
   });
   const recoveryCase = {
