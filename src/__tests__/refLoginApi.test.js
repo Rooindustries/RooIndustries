@@ -8,7 +8,11 @@ const mockPatchCommit = jest.fn();
 const mockPatchSet = jest.fn(() => ({
   commit: mockPatchCommit,
 }));
+const mockPatchIfRevisionId = jest.fn(() => ({
+  set: mockPatchSet,
+}));
 const mockPatch = jest.fn(() => ({
+  ifRevisionId: mockPatchIfRevisionId,
   set: mockPatchSet,
 }));
 const mockCreateClient = jest.fn(() => ({
@@ -51,6 +55,7 @@ const createRes = () => ({
 
 const makeReferral = async () => ({
   _id: "ref_creator_1",
+  _rev: "referral-revision-1",
   name: "Creator",
   slug: { current: "creator-code" },
   creatorEmail: "creator@example.com",
@@ -205,7 +210,7 @@ describe("referral login API", () => {
     expect(res.body).toMatchObject({ ok: false });
   });
 
-  test("requires the reset flow after security credential invalidation", async () => {
+  test("honors an explicitly requested password reset", async () => {
     const referral = {
       ...(await makeReferral()),
       passwordResetRequired: true,
@@ -225,7 +230,7 @@ describe("referral login API", () => {
     expect(res.headers["Set-Cookie"]).toBeUndefined();
   });
 
-  test("never accepts a legacy plaintext password", async () => {
+  test("preserves a legacy password and upgrades its storage after login", async () => {
     const referral = {
       ...(await makeReferral()),
       creatorPassword: "correct-password",
@@ -241,7 +246,19 @@ describe("referral login API", () => {
       res
     );
 
-    expect(res.statusCode).toBe(401);
-    expect(res.body).toMatchObject({ ok: false });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, code: "creator-code" });
+    expect(mockPatch).toHaveBeenCalledWith("ref_creator_1");
+    expect(mockPatchIfRevisionId).toHaveBeenCalledWith("referral-revision-1");
+    const storedUpgrade = mockPatchSet.mock.calls[0][0];
+    expect(storedUpgrade).toMatchObject({
+      credentialVersion: 2,
+      passwordResetRequired: false,
+    });
+    expect(storedUpgrade.passwordStorageUpgradedAt).toEqual(expect.any(String));
+    await expect(
+      bcrypt.compare("correct-password", storedUpgrade.creatorPassword)
+    ).resolves.toBe(true);
+    expect(mockPatchCommit).toHaveBeenCalledWith({ visibility: "sync" });
   });
 });
