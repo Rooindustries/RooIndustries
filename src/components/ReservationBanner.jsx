@@ -2,6 +2,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useLocation } from "react-router-dom";
 import { persistBookingPackageSelection } from "../lib/checkoutStorage";
+import packagePricing from "../lib/packagePricing";
+
+const { getPublicPackageTitle } = packagePricing;
 
 const HOLD_STORAGE_KEY = "my_slot_hold";
 const BOOKING_DRAFT_KEY = "booking_draft";
