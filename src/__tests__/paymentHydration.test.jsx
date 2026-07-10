@@ -35,6 +35,9 @@ const tree = (
 
 describe("payment reload hydration", () => {
   test("restores tab-scoped checkout state after hydration without changing the first render", async () => {
+    const timeZoneSpy = jest
+      .spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions")
+      .mockReturnValue({ timeZone: "UTC" });
     window.sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
     global.fetch = jest.fn(async (url) => ({
       ok: true,
@@ -59,6 +62,7 @@ describe("payment reload hydration", () => {
     }));
 
     const markup = renderToString(tree);
+    timeZoneSpy.mockReturnValue({ timeZone: "Asia/Calcutta" });
     const container = document.createElement("div");
     container.innerHTML = markup;
     document.body.appendChild(container);
@@ -78,6 +82,7 @@ describe("payment reload hydration", () => {
 
     await act(async () => root.unmount());
     errorSpy.mockRestore();
+    timeZoneSpy.mockRestore();
     container.remove();
   });
 });

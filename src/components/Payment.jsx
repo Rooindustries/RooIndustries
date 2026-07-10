@@ -70,9 +70,17 @@ export default function Payment({ hideFooter = false }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [hydrated, setHydrated] = useState(false);
+  const [browserTimeZone, setBrowserTimeZone] = useState("UTC");
 
   useEffect(() => {
     setHydrated(true);
+    try {
+      setBrowserTimeZone(
+        Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+      );
+    } catch {
+      setBrowserTimeZone("UTC");
+    }
   }, []);
 
   const REFERRAL_STORAGE_KEY = "referral_session";
@@ -354,15 +362,7 @@ export default function Payment({ hideFooter = false }) {
   const utcStart =
     parsedUtc && !isNaN(parsedUtc.getTime()) ? parsedUtc : null;
 
-  const userTimeZone =
-    bookingData.localTimeZone ||
-    (() => {
-      try {
-        return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-      } catch {
-        return "UTC";
-      }
-    })();
+  const userTimeZone = bookingData.localTimeZone || browserTimeZone;
 
   const date =
     bookingData.displayDate ||

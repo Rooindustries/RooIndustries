@@ -64,6 +64,7 @@ describe("public content privacy boundary", () => {
     delete process.env.SANITY_READ_TOKEN;
     delete process.env.SANITY_PRIVATE_READ_TOKEN;
     delete process.env.SANITY_WRITE_TOKEN;
+    mockFetch.mockRejectedValueOnce(new Error("Sanity unavailable"));
     const route = require("../../app/api/content/[resource]/route");
     const response = await route.GET(
       new Request("https://example.com/api/content/hero"),
@@ -104,7 +105,7 @@ describe("public content privacy boundary", () => {
     });
   });
 
-  test("browser connections cannot bypass the fixed content API to query Sanity", async () => {
+  test("browser content connections stay same-origin", async () => {
     const configModule = await import("../../next.config.mjs");
     const headerRules = await configModule.default.headers();
     const globalRule = headerRules.find((rule) => rule.source === "/:path*");
@@ -117,8 +118,8 @@ describe("public content privacy boundary", () => {
       .find((directive) => directive.startsWith("connect-src "));
 
     expect(connectPolicy).toBeTruthy();
-    expect(connectPolicy).not.toMatch(/sanity\.io/i);
     expect(connectPolicy).not.toContain("*");
+    expect(connectPolicy).not.toMatch(/sanity\.io/i);
     expect(connectPolicy).toContain("https://www.paypal.com");
     expect(connectPolicy).toContain("https://lumberjack.razorpay.com");
 
@@ -129,5 +130,27 @@ describe("public content privacy boundary", () => {
     expect(framePolicy).toBeTruthy();
     expect(framePolicy).not.toContain("*");
     expect(framePolicy).toContain("https://checkout.razorpay.com");
+  });
+
+  test("public marketing content does not require a paid Sanity read token", async () => {
+    delete process.env.SANITY_READ_TOKEN;
+    delete process.env.SANITY_PRIVATE_READ_TOKEN;
+    delete process.env.SANITY_WRITE_TOKEN;
+    mockFetch.mockResolvedValueOnce({ headingLine1: "More FPS." });
+
+    const { fetchPublicContent } = require("../server/content/publicContent");
+    const result = await fetchPublicContent({
+      resource: "hero",
+      searchParams: new URLSearchParams(),
+    });
+
+    expect(result).toEqual({ headingLine1: "More FPS." });
+    expect(mockCreateClient).toHaveBeenLastCalledWith({
+      projectId: "project-test",
+      dataset: "production",
+      apiVersion: "2026-06-09",
+      useCdn: true,
+      perspective: "published",
+    });
   });
 });
