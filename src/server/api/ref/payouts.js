@@ -1,5 +1,6 @@
 import {createClient} from '@sanity/client';
 import {requireReferralSession} from './auth.js';
+import {getSafeErrorCode, logSafeError} from '../../safeErrorLog.js';
 import {
   buildBalance,
   computeEarningsFromBookings,
@@ -10,6 +11,7 @@ const readClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
   dataset: process.env.SANITY_DATASET || 'production',
   apiVersion: process.env.SANITY_API_VERSION || '2023-10-01',
+  token: process.env.SANITY_READ_TOKEN || process.env.SANITY_WRITE_TOKEN,
   useCdn: false,
   perspective: 'published',
 });
@@ -135,8 +137,8 @@ export default async function handler(req, res) {
           .commit({autoGenerateArrayKeys: true});
         syncStatus.success = true;
       } catch (err) {
-        console.error('PAYOUTS auto-sync failed:', err);
-        syncStatus.error = err?.message || 'sync failed';
+        logSafeError('Referral payout auto-sync failed', err);
+        syncStatus.error = getSafeErrorCode(err, 'sync_failed');
       }
     }
 
@@ -164,7 +166,7 @@ export default async function handler(req, res) {
       sync: syncStatus,
     });
   } catch (err) {
-    console.error('PAYOUTS API ERROR:', err);
+    logSafeError('Referral payout read failed', err);
     return res.status(500).json({ok: false, error: 'Server error'});
   }
 }

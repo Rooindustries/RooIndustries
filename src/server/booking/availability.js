@@ -88,7 +88,7 @@ export default async function bookingAvailability(req, res) {
   } catch (error) {
     return res.status(503).json({
       ok: false,
-      error: error?.message || "Booking availability unavailable.",
+      error: "Booking availability unavailable.",
     });
   }
 }

@@ -8,15 +8,11 @@ const normalizeValue = (value) => String(value || "").trim();
 const getSecret = (env = process.env) => {
   const secret =
     normalizeValue(env.DOWNLOAD_TOKEN_SECRET) ||
-    normalizeValue(env.PAYMENT_SESSION_SECRET) ||
-    normalizeValue(env.REF_SESSION_SECRET) ||
-    normalizeValue(env.SESSION_SECRET) ||
-    normalizeValue(env.JWT_SECRET) ||
     (env.NODE_ENV === "production" ? "" : "dev_download_token_secret");
 
   if (!secret) {
     const error = new Error(
-      "DOWNLOAD_TOKEN_SECRET (or PAYMENT_SESSION_SECRET/REF_SESSION_SECRET/SESSION_SECRET/JWT_SECRET) is required."
+      "DOWNLOAD_TOKEN_SECRET is required."
     );
     error.code = "download_token_secret_missing";
     throw error;
@@ -75,7 +71,11 @@ export const verifyDownloadToken = ({
   const normalizedToken = normalizeValue(token);
   if (!normalizedToken) return { ok: false, reason: "download_token_missing" };
 
-  const [encodedPayload, providedSignature] = normalizedToken.split(".");
+  const parts = normalizedToken.split(".");
+  if (parts.length !== 2) {
+    return { ok: false, reason: "download_token_malformed" };
+  }
+  const [encodedPayload, providedSignature] = parts;
   if (!encodedPayload || !providedSignature) {
     return { ok: false, reason: "download_token_malformed" };
   }
@@ -110,7 +110,7 @@ export const verifyDownloadToken = ({
   }
 
   const nowSeconds = Math.floor(Number(nowMs || Date.now()) / 1000);
-  if (nowSeconds > Number(payload.exp || 0)) {
+  if (nowSeconds >= Number(payload.exp || 0)) {
     return {
       ok: false,
       reason: "download_token_expired",

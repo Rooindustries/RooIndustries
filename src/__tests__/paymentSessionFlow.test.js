@@ -1,6 +1,7 @@
 let startPaymentSession;
 let quotePaymentSession;
 let finalizePaymentSession;
+let cancelPaymentSession;
 let getPaymentStatus;
 let reconcilePaymentSessions;
 let handlePayPalWebhook;
@@ -401,6 +402,10 @@ const mockClient = {
         operations.push({ type: "patch", id, ...patchOps });
         return transaction;
       },
+      delete(id) {
+        operations.push({ type: "delete", id });
+        return transaction;
+      },
       async commit() {
         operations.forEach((operation) => {
           if (operation.type === "create" && findDocById(operation.doc._id)) {
@@ -416,9 +421,11 @@ const mockClient = {
         for (const operation of operations) {
           if (operation.type === "create") {
             await mockClient.create(operation.doc);
-          } else {
+          } else if (operation.type === "patch") {
             const doc = findDocById(operation.id);
             Object.assign(doc, operation.set, { _rev: nextRevision() });
+          } else {
+            removeDocById(operation.id);
           }
         }
         return { transactionId: `tx-${Date.now()}` };
@@ -539,6 +546,7 @@ beforeAll(() => {
   startPaymentSession = flow.startPaymentSession;
   quotePaymentSession = quoteModule.default || quoteModule;
   finalizePaymentSession = flow.finalizePaymentSession;
+  cancelPaymentSession = flow.cancelPaymentSession;
   getPaymentStatus = flow.getPaymentStatus;
   reconcilePaymentSessions = flow.reconcilePaymentSessions;
   handlePayPalWebhook = flow.handlePayPalWebhook;
@@ -667,6 +675,37 @@ beforeEach(() => {
 });
 
 describe("payment session flow", () => {
+  test("fails closed before writing when atomic payment storage is unavailable", async () => {
+    const hold = createHold();
+    const bookingPayload = baseBookingPayload();
+    bookingPayload.slotHoldToken = issueTokenForHold(hold);
+    const create = jest.fn();
+    const nonTransactionalClient = {
+      ...mockClient,
+      create,
+      transaction: undefined,
+    };
+
+    const result = await startPaymentSession({
+      body: {
+        provider: "paypal",
+        bookingPayload,
+      },
+      client: nonTransactionalClient,
+    });
+
+    expect(result).toMatchObject({
+      httpStatus: 503,
+      body: {
+        ok: false,
+        error: "Failed to start payment.",
+      },
+    });
+    expect(create).not.toHaveBeenCalled();
+    expect(store.paymentRecords).toHaveLength(0);
+    expect(store.paymentStartClaims).toHaveLength(0);
+  });
+
   test("start finalizes free sessions immediately and persists a booked record", async () => {
     const hold = createHold();
     const bookingPayload = baseBookingPayload();
@@ -772,6 +811,184 @@ describe("payment session flow", () => {
         key: "rzp_test_key",
       },
     });
+  });
+
+  test("an unpaid provider session can be released without losing the slot", async () => {
+    const hold = createHold();
+    const started = await startPaymentSession({
+      body: {
+        provider: "paypal",
+        bookingPayload: baseBookingPayload({
+          slotHoldToken: issueTokenForHold(hold),
+        }),
+      },
+      client: mockClient,
+    });
+    const paymentRecordId = getOnlyPaymentRecord()._id;
+    const oldNonce = store.slotHolds[0].holdNonce;
+
+    const cancelled = await cancelPaymentSession({
+      paymentAccessToken: started.body.paymentAccessToken,
+      client: mockClient,
+    });
+
+    expect(cancelled).toMatchObject({
+      httpStatus: 200,
+      body: {
+        ok: true,
+        cancelled: true,
+        status: paymentRecordConstants.PAYMENT_STATUS_ABANDONED,
+        refreshedHold: {
+          slotHoldId: hold._id,
+          phase: paymentRecordConstants.HOLD_PHASE_HOLDING,
+        },
+      },
+    });
+    expect(getPaymentRecord(paymentRecordId)).toMatchObject({
+      status: paymentRecordConstants.PAYMENT_STATUS_ABANDONED,
+      recoveryReason: "customer_changed_payment_method",
+    });
+    expect(store.slotHolds[0]).toMatchObject({
+      phase: paymentRecordConstants.HOLD_PHASE_HOLDING,
+      paymentRecordId: "",
+      paymentProvider: "",
+    });
+    expect(store.slotHolds[0].holdNonce).not.toBe(oldNonce);
+    expect(store.paymentStartClaims).toHaveLength(0);
+
+    const replay = await cancelPaymentSession({
+      paymentAccessToken: started.body.paymentAccessToken,
+      client: mockClient,
+    });
+    expect(replay).toMatchObject({
+      httpStatus: 200,
+      body: { ok: true, cancelled: true },
+    });
+  });
+
+  test("release refuses pending or unavailable provider states without unlocking the hold", async () => {
+    const hold = createHold();
+    const started = await startPaymentSession({
+      body: {
+        provider: "paypal",
+        bookingPayload: baseBookingPayload({
+          slotHoldToken: issueTokenForHold(hold),
+        }),
+      },
+      client: mockClient,
+    });
+
+    mockInspectPayPalOrder.mockResolvedValueOnce({ state: "pending" });
+    const pending = await cancelPaymentSession({
+      paymentAccessToken: started.body.paymentAccessToken,
+      client: mockClient,
+    });
+    expect(pending).toMatchObject({
+      httpStatus: 409,
+      body: { ok: false, code: "provider_pending" },
+    });
+    expect(store.slotHolds[0].phase).toBe(
+      paymentRecordConstants.HOLD_PHASE_PAYMENT_PENDING
+    );
+
+    mockInspectPayPalOrder.mockResolvedValueOnce({ state: "unavailable" });
+    const unavailable = await cancelPaymentSession({
+      paymentAccessToken: started.body.paymentAccessToken,
+      client: mockClient,
+    });
+    expect(unavailable).toMatchObject({
+      httpStatus: 503,
+      body: { ok: false, code: "provider_unavailable" },
+    });
+    expect(getOnlyPaymentRecord().status).toBe(
+      paymentRecordConstants.PAYMENT_STATUS_STARTED
+    );
+  });
+
+  test("release cannot overwrite finalization or release its coupon during a race", async () => {
+    const hold = createHold();
+    const started = await startPaymentSession({
+      body: {
+        provider: "paypal",
+        bookingPayload: baseBookingPayload({
+          slotHoldToken: issueTokenForHold(hold),
+        }),
+      },
+      client: mockClient,
+    });
+    const storedRecord = getOnlyPaymentRecord();
+    storedRecord.couponReservationId = "couponRedemption.cancel-race";
+    clonePaymentReads = true;
+    const releaseCouponReservation = jest.fn();
+    const appendCouponRelease = jest.fn(({ transaction }) => transaction);
+    const prepareCouponRelease = jest.fn(async () => {
+      storedRecord.status = paymentRecordConstants.PAYMENT_STATUS_FINALIZING;
+      storedRecord._rev = nextRevision();
+      return {
+        redemption: {
+          _id: "couponRedemption.cancel-race",
+          _rev: "coupon-redemption-rev",
+          status: "reserved",
+        },
+        coupon: null,
+        idempotent: false,
+      };
+    });
+
+    const result = await cancelPaymentSession({
+      paymentAccessToken: started.body.paymentAccessToken,
+      client: mockClient,
+      releaseCouponReservation,
+      prepareCouponRelease,
+      appendCouponRelease,
+    });
+
+    expect(result).toMatchObject({
+      httpStatus: 409,
+      body: { ok: false, cancelled: false },
+    });
+    expect(storedRecord.status).toBe(
+      paymentRecordConstants.PAYMENT_STATUS_FINALIZING
+    );
+    expect(releaseCouponReservation).not.toHaveBeenCalled();
+    expect(appendCouponRelease).toHaveBeenCalledTimes(1);
+    expect(store.slotHolds[0].phase).toBe(
+      paymentRecordConstants.HOLD_PHASE_PAYMENT_PENDING
+    );
+  });
+
+  test("release finalizes a capture instead of abandoning paid money", async () => {
+    const hold = createHold();
+    const started = await startPaymentSession({
+      body: {
+        provider: "paypal",
+        bookingPayload: baseBookingPayload({
+          slotHoldToken: issueTokenForHold(hold),
+        }),
+      },
+      client: mockClient,
+    });
+    mockInspectPayPalOrder.mockResolvedValueOnce({
+      state: "captured",
+      providerData: { paypalOrderId: "paypal_order_1" },
+    });
+
+    const result = await cancelPaymentSession({
+      paymentAccessToken: started.body.paymentAccessToken,
+      client: mockClient,
+    });
+
+    expect(result.httpStatus).toBe(200);
+    expect(result.body).toMatchObject({
+      ok: true,
+      captured: true,
+      cancelled: false,
+      status: paymentRecordConstants.PAYMENT_STATUS_BOOKED,
+    });
+    expect(store.bookings).toHaveLength(1);
+    expect(getOnlyPaymentRecord().status).toBe(
+      paymentRecordConstants.PAYMENT_STATUS_BOOKED
+    );
   });
 
   test("a provider-order creation outage releases an unexposed session after expiry", async () => {
@@ -1012,7 +1229,6 @@ describe("payment session flow", () => {
       bookingId: store.bookings[0]._id,
       emailDispatchToken: `dispatch_${store.bookings[0]._id}`,
       emailDispatch: {
-        deferred: true,
         allSent: false,
       },
     });
@@ -1130,7 +1346,7 @@ describe("payment session flow", () => {
     expect(finalized.body).toMatchObject({
       ok: true,
       status: paymentRecordConstants.PAYMENT_STATUS_NEEDS_RECOVERY,
-      recoveryReason: "paypal_currency_mismatch",
+      recoveryReason: expect.stringMatching(/taking longer than expected/i),
     });
   });
 
@@ -1318,7 +1534,7 @@ describe("payment session flow", () => {
       ok: true,
       status: paymentRecordConstants.PAYMENT_STATUS_NEEDS_RECOVERY,
       provider: "paypal",
-      recoveryReason: "payment_record_missing_booking_payload",
+      recoveryReason: expect.stringMatching(/taking longer than expected/i),
     });
 
     const record = getOnlyPaymentRecord();
@@ -1396,6 +1612,30 @@ describe("payment session flow", () => {
     expect(store.bookings).toHaveLength(1);
   });
 
+  test("reconcile accepts CRON_SECRET only as an exact Bearer credential", async () => {
+    const legacyHeader = await reconcilePaymentSessions({
+      req: createReq({}, { "x-cron-secret": "cron-secret" }),
+      client: mockClient,
+    });
+    const bodyCredential = await reconcilePaymentSessions({
+      req: createReq({ cronSecret: "cron-secret" }),
+      client: mockClient,
+    });
+    const malformedBearer = await reconcilePaymentSessions({
+      req: createReq({}, { authorization: "Bearer cron-secret extra" }),
+      client: mockClient,
+    });
+    const authorized = await reconcilePaymentSessions({
+      req: createReq({}, { authorization: "Bearer cron-secret" }),
+      client: mockClient,
+    });
+
+    expect(legacyHeader.httpStatus).toBe(403);
+    expect(bodyCredential.httpStatus).toBe(403);
+    expect(malformedBearer.httpStatus).toBe(403);
+    expect(authorized.httpStatus).toBe(200);
+  });
+
   test("reconcile finalizes stale captured sessions into bookings", async () => {
     const hold = createHold();
     const bookingPayload = baseBookingPayload();
@@ -1424,7 +1664,7 @@ describe("payment session flow", () => {
     record.updatedAt = "2000-01-01T00:00:00.000Z";
 
     const reconciled = await reconcilePaymentSessions({
-      req: createReq({}, { "x-cron-secret": "cron-secret" }),
+      req: createReq({}, { authorization: "Bearer cron-secret" }),
       client: mockClient,
     });
 
@@ -1504,7 +1744,7 @@ describe("payment session flow", () => {
     );
 
     const reconciled = await reconcilePaymentSessions({
-      req: createReq({}, { "x-cron-secret": "cron-secret" }),
+      req: createReq({}, { authorization: "Bearer cron-secret" }),
       client: mockClient,
     });
 
@@ -1608,7 +1848,7 @@ describe("payment session flow", () => {
     hold.expiresAt = "2000-01-01T00:00:00.000Z";
 
     const reconciled = await reconcilePaymentSessions({
-      req: createReq({}, { "x-cron-secret": "cron-secret" }),
+      req: createReq({}, { authorization: "Bearer cron-secret" }),
       client: mockClient,
     });
 
@@ -1647,7 +1887,7 @@ describe("payment session flow", () => {
     record.updatedAt = "2000-01-01T00:00:00.000Z";
 
     const reconciled = await reconcilePaymentSessions({
-      req: createReq({}, { "x-cron-secret": "cron-secret" }),
+      req: createReq({}, { authorization: "Bearer cron-secret" }),
       client: mockClient,
     });
 
@@ -1975,7 +2215,7 @@ describe("payment session flow", () => {
     );
 
     const reconciled = await reconcilePaymentSessions({
-      req: createReq({}, { "x-cron-secret": "cron-secret" }),
+      req: createReq({}, { authorization: "Bearer cron-secret" }),
       client: mockClient,
     });
 
@@ -2287,6 +2527,26 @@ describe("payment session flow", () => {
     expect(accepted.httpStatus).toBe(200);
     expect(accepted.body.quoteFingerprint).toHaveLength(64);
     expect(mockCreatePayPalOrder).toHaveBeenCalledTimes(1);
+  });
+
+  test("quote failures do not expose internal storage errors", async () => {
+    mockResolvePaymentQuote.mockRejectedValueOnce(
+      Object.assign(
+        new Error("private-dataset-token customer@example.com"),
+        { status: 500, code: "sanity_internal_error" }
+      )
+    );
+
+    const result = await invokeQuote({
+      packageTitle: "Performance Vertex Overhaul",
+    });
+
+    expect(result.status).toBe(500);
+    expect(result.body).toEqual({
+      ok: false,
+      error: "Failed to quote payment.",
+    });
+    expect(JSON.stringify(result.body)).not.toMatch(/private|customer|sanity/i);
   });
 
   test("upgrade quote and start require the same signed intent", async () => {
@@ -2609,8 +2869,13 @@ describe("payment session flow", () => {
     expect(secondFinalized.httpStatus).toBe(202);
     expect(secondFinalized.body).toMatchObject({
       status: paymentRecordConstants.PAYMENT_STATUS_NEEDS_RECOVERY,
-      recoveryReason: "payment_proof_already_claimed",
+      recoveryReason: expect.stringMatching(/taking longer than expected/i),
     });
+    expect(
+      store.paymentRecords.find(
+        (entry) => entry.status === paymentRecordConstants.PAYMENT_STATUS_NEEDS_RECOVERY
+      )
+    ).toMatchObject({ recoveryReason: "payment_proof_already_claimed" });
     expect(store.bookings).toHaveLength(1);
     expect(store.paymentProofClaims).toHaveLength(1);
   });
@@ -2941,6 +3206,66 @@ describe("payment session flow", () => {
     });
     expect(getOnlyPaymentRecord().refunds).toHaveLength(2);
     expect(applyBookingRefund).toHaveBeenCalledTimes(1);
+  });
+
+  test("a signed refund in the wrong currency cannot reopen the booking", async () => {
+    const hold = createHold();
+    const started = await startPaymentSession({
+      body: {
+        provider: "razorpay",
+        bookingPayload: baseBookingPayload({
+          slotHoldToken: issueTokenForHold(hold),
+        }),
+      },
+      client: mockClient,
+    });
+    await finalizePaymentSession({
+      body: {
+        paymentAccessToken: started.body.paymentAccessToken,
+        providerData: {
+          razorpayOrderId: "razorpay_order_1",
+          razorpayPaymentId: "razorpay_payment_1",
+          razorpaySignature: "signature",
+        },
+      },
+      client: mockClient,
+    });
+    const applyBookingRefund = jest.fn();
+    const event = {
+      id: "refund-wrong-currency",
+      event: "refund.processed",
+      payload: {
+        refund: {
+          entity: {
+            id: "refund_wrong_currency",
+            payment_id: "razorpay_payment_1",
+            status: "processed",
+            amount: 8499,
+            currency: "EUR",
+          },
+        },
+      },
+    };
+
+    const result = await handleRazorpayWebhook({
+      req: {
+        body: event,
+        rawBody: JSON.stringify(event),
+        headers: { "x-razorpay-signature": "signature" },
+      },
+      client: mockClient,
+      applyBookingRefund,
+    });
+
+    expect(result).toMatchObject({
+      httpStatus: 409,
+      body: { ok: false, code: "refund_currency_mismatch" },
+    });
+    expect(applyBookingRefund).not.toHaveBeenCalled();
+    expect(getOnlyPaymentRecord().status).not.toBe(
+      paymentRecordConstants.PAYMENT_STATUS_REFUNDED
+    );
+    expect(getOnlyPaymentRecord().refunds || []).toHaveLength(0);
   });
 
   test("a Razorpay refund before capture resolves the canonical order and blocks booking", async () => {

@@ -12,6 +12,7 @@ import homeCopy from "../lib/homeCopy";
 import packageContent from "../lib/packageContent";
 import packagePricing from "../lib/packagePricing";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
+import { persistBookingPackageSelection } from "../lib/checkoutStorage";
 
 const REFERRAL_STORAGE_KEY = "referral_session";
 const { applyPackagesContentOverrides } = packageContent;
@@ -143,7 +144,6 @@ export default function Packages({
     if (ref) {
       try {
         sessionStorage.setItem(REFERRAL_STORAGE_KEY, ref);
-        localStorage.setItem("referral", ref);
       } catch (e) {
         console.error("Failed to store referral from link:", e);
       }
@@ -367,14 +367,16 @@ export default function Packages({
                     </button>
 
                     <Link
-                      to={`/booking?title=${encodeURIComponent(
-                        p.title
-                      )}&price=${encodeURIComponent(
-                        p.price
-                      )}&tag=${encodeURIComponent(p.tag || "")}&xoc=${
-                        isXoc ? "1" : "0"
-                      }`}
-                      state={bookingState}
+                      to="/booking"
+                      state={{
+                        ...bookingState,
+                        bookingPackage: {
+                          title: p.title,
+                          price: p.price,
+                          tag: p.tag || "",
+                        },
+                      }}
+                      onClick={() => persistBookingPackageSelection(p)}
                       className="ri-package-book-button glow-button w-full sm:w-1/2 text-white text-lg py-3 rounded-md font-semibold shadow-[var(--shadow-button-accent)] transition-all duration-300 text-center inline-flex items-center justify-center gap-2"
                     >
                       {p.buttonText || "Book Now"}

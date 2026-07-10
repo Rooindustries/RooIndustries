@@ -281,10 +281,24 @@ export default {
     },
 
     {
-      name: 'creatorPassword',
-      title: 'Password (plain or hashed)',
+      name: 'resetTokenHash',
+      title: 'Password Reset Token Hash',
       type: 'string',
-      description: 'You can type a normal password here. It will be auto-hashed on first login.',
+      readOnly: true,
+      hidden: true,
     },
+
+    {
+      name: 'creatorPassword',
+      title: 'Password Hash',
+      type: 'string',
+      readOnly: true,
+      hidden: true,
+      description: 'Bcrypt hash managed by the referral authentication API.',
+    },
+    {name: 'passwordResetRequired', title: 'Password Reset Required', type: 'boolean', readOnly: true},
+    {name: 'credentialVersion', title: 'Credential Version', type: 'number', readOnly: true, hidden: true},
+    {name: 'passwordChangedAt', title: 'Password Changed At', type: 'datetime', readOnly: true, hidden: true},
+    {name: 'securityClosureCredentialInvalidatedAt', title: 'Security Closure Credential Invalidated At', type: 'datetime', readOnly: true, hidden: true},
   ],
 }

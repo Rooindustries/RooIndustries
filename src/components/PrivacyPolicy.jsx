@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { PortableText } from "@portabletext/react";
-import { client } from "../sanityClient";
+import { getPublicContent } from "../lib/publicContentClient";
 
 export default function PrivacyPolicy() {
   const [data, setData] = useState(null);
@@ -38,14 +38,7 @@ export default function PrivacyPolicy() {
 
   // Fetch from Sanity
   useEffect(() => {
-    client
-      .fetch(
-        `*[_type == "privacyPolicy"][0]{
-          title,
-          sections[]{heading, content},
-          lastUpdated
-        }`
-      )
+    getPublicContent("privacy-policy")
       .then(setData)
       .catch(console.error);
   }, []);

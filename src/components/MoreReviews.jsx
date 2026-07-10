@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { client, urlFor } from "../sanityClient";
+import { urlFor } from "../sanityClient";
+import { getPublicContent } from "../lib/publicContentClient";
 import ImageZoomModal from "./ImageZoomModal";
 
 const localDiscordReviews = [];
@@ -10,16 +11,7 @@ export default function Reviews() {
   const [reviews, setReviews] = useState(null);
 
   useEffect(() => {
-    client
-      .fetch(
-        `*[_type == "review"] | order(_createdAt desc){
-          image{
-            ...,
-            "dimensions": asset->metadata.dimensions
-          },
-          alt
-        }`
-      )
+    getPublicContent("reviews-gallery")
       .then((data) => setReviews(Array.isArray(data) ? data : []))
       .catch((error) => {
         console.error(error);

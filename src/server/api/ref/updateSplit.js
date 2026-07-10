@@ -1,5 +1,6 @@
 import { createClient } from "@sanity/client";
 import { requireReferralSession } from "./auth.js";
+import { logSafeError } from "../../safeErrorLog.js";
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -48,7 +49,10 @@ export default async function handler(req, res) {
       return res.status(404).json({ ok: false, error: "Creator not found" });
     }
 
-    const max = creator.maxCommissionPercent;
+    const configuredMax = Number(creator.maxCommissionPercent);
+    const max = Number.isFinite(configuredMax) && configuredMax >= 0
+      ? Math.min(configuredMax, 100)
+      : 15;
     const successfulReferrals = creator.successfulReferrals ?? 0;
     const bypassUnlock = creator.bypassUnlock === true;
 
@@ -76,7 +80,7 @@ export default async function handler(req, res) {
 
     return res.json({ ok: true });
   } catch (err) {
-    console.error("UPDATESPLIT ERROR:", err);
+    logSafeError("Referral split update failed", err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
 }

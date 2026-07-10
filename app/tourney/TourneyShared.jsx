@@ -169,7 +169,7 @@ const HostCard = ({ host }) => (
       <a
         className="tourney-host-twitch"
         href={host.twitchUrl}
-        rel="noreferrer"
+        rel="noopener noreferrer"
         target="_blank"
       >
         <TourneyTwitchIcon />
@@ -287,7 +287,7 @@ export const TourneyRosterHosts = ({ hosts = tourneyHosts }) => (
             className="tourney-roster-cta"
           >
             {host.twitchUrl ? (
-              <a href={host.twitchUrl} rel="noreferrer" target="_blank">
+              <a href={host.twitchUrl} rel="noopener noreferrer" target="_blank">
                 <TourneyTwitchIcon />
                 <span>{host.twitchLabel}</span>
               </a>

@@ -3,7 +3,18 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const JSON_CONTENT_TYPE = "application/json; charset=utf-8";
+const MAX_REQUEST_BODY_BYTES = 128 * 1024;
+const MAX_JSON_DEPTH = 20;
+const MAX_JSON_NODES = 2000;
 let legacyServerEnvInitialized = false;
+
+class RequestInputError extends Error {
+  constructor(message, status = 400, code = "invalid_request") {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+}
 
 const parseDotenvFile = (filePath) => {
   try {
@@ -100,13 +111,10 @@ const ensureLegacyServerEnv = () => {
   setEnvFallback(
     "SANITY_WRITE_TOKEN",
     firstDefined(
-      process.env.REACT_APP_SANITY_WRITE_TOKEN,
       process.env.SANITY_API_TOKEN,
       envLocal.SANITY_WRITE_TOKEN,
-      envLocal.REACT_APP_SANITY_WRITE_TOKEN,
       envLocal.SANITY_API_TOKEN,
       envFile.SANITY_WRITE_TOKEN,
-      envFile.REACT_APP_SANITY_WRITE_TOKEN,
       envFile.SANITY_API_TOKEN
     )
   );
@@ -152,6 +160,73 @@ const buildQueryObject = (searchParams) => {
   return query;
 };
 
+const hasDuplicateQueryKeys = (searchParams) => {
+  const seen = new Set();
+  for (const key of searchParams.keys()) {
+    if (seen.has(key)) return true;
+    seen.add(key);
+  }
+  return false;
+};
+
+const hasDuplicateJsonKeys = (rawBody) => {
+  const stack = [];
+  for (let index = 0; index < rawBody.length; index += 1) {
+    const char = rawBody[index];
+    if (char === '"') {
+      const start = index;
+      index += 1;
+      while (index < rawBody.length) {
+        if (rawBody[index] === "\\") {
+          index += 2;
+          continue;
+        }
+        if (rawBody[index] === '"') break;
+        index += 1;
+      }
+      let next = index + 1;
+      while (/\s/.test(rawBody[next] || "")) next += 1;
+      if (rawBody[next] === ":" && stack.at(-1)?.type === "object") {
+        const key = JSON.parse(rawBody.slice(start, index + 1));
+        if (stack.at(-1).keys.has(key)) return true;
+        stack.at(-1).keys.add(key);
+      }
+      continue;
+    }
+    if (char === "{") stack.push({ type: "object", keys: new Set() });
+    if (char === "[") stack.push({ type: "array" });
+    if (char === "}" || char === "]") stack.pop();
+  }
+  return false;
+};
+
+const validateJsonShape = (root) => {
+  if (!root || typeof root !== "object" || Array.isArray(root)) {
+    throw new RequestInputError("JSON body must be an object.");
+  }
+  const pending = [{ value: root, depth: 1 }];
+  let nodes = 0;
+  while (pending.length > 0) {
+    const { value, depth } = pending.pop();
+    nodes += 1;
+    if (depth > MAX_JSON_DEPTH || nodes > MAX_JSON_NODES) {
+      throw new RequestInputError("JSON body is too complex.", 413, "payload_too_complex");
+    }
+    if (!value || typeof value !== "object") continue;
+    if (Array.isArray(value) && value.length > 500) {
+      throw new RequestInputError("JSON array is too large.", 413, "payload_too_complex");
+    }
+    for (const [key, child] of Object.entries(value)) {
+      if (["__proto__", "prototype", "constructor"].includes(key)) {
+        throw new RequestInputError("JSON body contains an unsafe property.");
+      }
+      if (child && typeof child === "object") {
+        pending.push({ value: child, depth: depth + 1 });
+      }
+    }
+  }
+};
+
 const buildHeadersObject = (headers) => {
   const output = {};
   headers.forEach((value, key) => {
@@ -170,71 +245,37 @@ const readRequestBody = async (request) => {
   }
 
   const contentType = String(request.headers.get("content-type") || "").toLowerCase();
+  const declaredLength = Number(request.headers.get("content-length") || 0);
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_REQUEST_BODY_BYTES) {
+    throw new RequestInputError("Request body is too large.", 413, "payload_too_large");
+  }
 
   if (contentType.includes("application/json")) {
-    try {
-      const rawBody = await request.text();
-      return {
-        body: rawBody ? JSON.parse(rawBody) : {},
-        rawBody,
-      };
-    } catch {
-      return {
-        body: {},
-        rawBody: "",
-      };
+    const rawBody = await request.text();
+    if (Buffer.byteLength(rawBody, "utf8") > MAX_REQUEST_BODY_BYTES) {
+      throw new RequestInputError("Request body is too large.", 413, "payload_too_large");
     }
-  }
-
-  if (
-    contentType.includes("application/x-www-form-urlencoded") ||
-    contentType.includes("multipart/form-data")
-  ) {
+    if (!rawBody) return { body: {}, rawBody: "" };
+    let body;
     try {
-      const formData = await request.formData();
-      const body = {};
-
-      for (const [key, value] of formData.entries()) {
-        const normalized =
-          typeof value === "string" ? value : value?.name || "";
-
-        if (!(key in body)) {
-          body[key] = normalized;
-          continue;
-        }
-
-        if (Array.isArray(body[key])) {
-          body[key].push(normalized);
-          continue;
-        }
-
-        body[key] = [body[key], normalized];
-      }
-
-      return {
-        body,
-        rawBody: "",
-      };
+      body = JSON.parse(rawBody);
     } catch {
-      return {
-        body: {},
-        rawBody: "",
-      };
+      throw new RequestInputError("Malformed JSON body.", 400, "malformed_json");
     }
+    if (hasDuplicateJsonKeys(rawBody)) {
+      throw new RequestInputError("Duplicate JSON properties are not allowed.");
+    }
+    validateJsonShape(body);
+    return { body, rawBody };
   }
 
-  try {
-    const text = await request.text();
-    return {
-      body: text ? { rawBody: text } : {},
-      rawBody: text || "",
-    };
-  } catch {
-    return {
-      body: {},
-      rawBody: "",
-    };
-  }
+  const text = await request.text();
+  if (!text) return { body: {}, rawBody: "" };
+  throw new RequestInputError(
+    "Content-Type must be application/json.",
+    415,
+    "unsupported_media_type"
+  );
 };
 
 const buildResponseHeaders = (headerStore) => {
@@ -259,6 +300,12 @@ const createMutableResponse = () => {
 
   const finalize = (body, { status = statusCode, contentType = null } = {}) => {
     const headers = buildResponseHeaders(headerStore);
+    if (!headers.has("cache-control")) {
+      headers.set("cache-control", "no-store, max-age=0");
+    }
+    if (!headers.has("x-content-type-options")) {
+      headers.set("x-content-type-options", "nosniff");
+    }
     if (contentType && !headers.has("content-type")) {
       headers.set("content-type", contentType);
     }
@@ -343,9 +390,41 @@ export const runLegacyApiHandler = async ({
   methodOverride = "",
 }) => {
   const url = new URL(request.url);
-  const { body, rawBody } = await readRequestBody(request);
+  const method = String(methodOverride || request.method || "GET").toUpperCase();
+  const origin = String(request.headers.get("origin") || "").trim();
+  let originMatches = true;
+  if (origin) {
+    try {
+      originMatches = new URL(origin).origin === url.origin;
+    } catch {
+      originMatches = false;
+    }
+  }
+  if (!originMatches) {
+    return Response.json(
+      { ok: false, error: "Cross-origin request rejected.", code: "cross_origin_rejected" },
+      { status: 403, headers: { "Cache-Control": "no-store" } }
+    );
+  }
+  if (hasDuplicateQueryKeys(url.searchParams)) {
+    return Response.json(
+      { ok: false, error: "Duplicate query parameters are not allowed.", code: "duplicate_query" },
+      { status: 400, headers: { "Cache-Control": "no-store" } }
+    );
+  }
+  let body;
+  let rawBody;
+  try {
+    ({ body, rawBody } = await readRequestBody(request));
+  } catch (error) {
+    if (!(error instanceof RequestInputError)) throw error;
+    return Response.json(
+      { ok: false, error: error.message, code: error.code },
+      { status: error.status, headers: { "Cache-Control": "no-store" } }
+    );
+  }
   const req = {
-    method: String(methodOverride || request.method || "GET").toUpperCase(),
+    method,
     url: request.url,
     query: {
       ...buildQueryObject(url.searchParams),

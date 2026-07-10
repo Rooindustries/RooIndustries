@@ -1,9 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useLocation } from "react-router-dom";
-import packagePricing from "../lib/packagePricing";
-
-const { getPublicPackageTitle, isTopPackageTitle } = packagePricing;
+import { persistBookingPackageSelection } from "../lib/checkoutStorage";
 
 const HOLD_STORAGE_KEY = "my_slot_hold";
 const BOOKING_DRAFT_KEY = "booking_draft";
@@ -64,8 +62,8 @@ const formatCountdown = (ms) => {
 const broadcastHold = (payload) => {
   try {
     window.dispatchEvent(new CustomEvent("hold-state", { detail: payload }));
-  } catch (e) {
-    console.error("Failed to broadcast hold state", e);
+  } catch {
+    console.error("Failed to broadcast hold state");
   }
 };
 
@@ -81,7 +79,7 @@ export default function ReservationBanner() {
 
   useEffect(() => {
     try {
-      const stored = localStorage.getItem(HOLD_STORAGE_KEY);
+      const stored = sessionStorage.getItem(HOLD_STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
         if (new Date(parsed.expiresAt) > new Date()) {
@@ -97,19 +95,19 @@ export default function ReservationBanner() {
           };
           const utcDate = getUtcDateFromHold(normalizedHold);
           if (!utcDate) {
-            localStorage.removeItem(HOLD_STORAGE_KEY);
+            sessionStorage.removeItem(HOLD_STORAGE_KEY);
             return;
           }
           normalizedHold.startTimeUTC = utcDate.toISOString();
-          localStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
+          sessionStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
           setHold(normalizedHold);
           broadcastHold(normalizedHold);
         } else {
-          localStorage.removeItem(HOLD_STORAGE_KEY);
+          sessionStorage.removeItem(HOLD_STORAGE_KEY);
         }
       }
-    } catch (e) {
-      console.error(e);
+    } catch {
+      console.error("Failed to restore reservation banner");
     }
   }, []);
 
@@ -129,16 +127,16 @@ export default function ReservationBanner() {
         };
         const utcDate = getUtcDateFromHold(normalizedHold);
         if (!utcDate) {
-          localStorage.removeItem(HOLD_STORAGE_KEY);
+          sessionStorage.removeItem(HOLD_STORAGE_KEY);
           setHold(null);
           return;
         }
         normalizedHold.startTimeUTC = utcDate.toISOString();
-        localStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
+        sessionStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
         setHold(normalizedHold);
         return;
       }
-      localStorage.removeItem(HOLD_STORAGE_KEY);
+      sessionStorage.removeItem(HOLD_STORAGE_KEY);
       setHold(null);
     };
     window.addEventListener("hold-state", handler);
@@ -186,8 +184,8 @@ export default function ReservationBanner() {
     const holdIdToDelete = hold.holdId;
     const holdTokenToDelete = hold.holdToken;
     setHold(null);
-    localStorage.removeItem(HOLD_STORAGE_KEY);
-    localStorage.removeItem(BOOKING_DRAFT_KEY);
+    sessionStorage.removeItem(HOLD_STORAGE_KEY);
+    sessionStorage.removeItem(BOOKING_DRAFT_KEY);
     broadcastHold(null);
     if (redirect) {
       const pathName = location.pathname || "";
@@ -207,23 +205,30 @@ export default function ReservationBanner() {
           holdId: holdIdToDelete,
           holdToken: holdTokenToDelete,
         }),
-      }).catch((err) =>
-        console.error("Failed to release hold on server:", err)
+      }).catch(() =>
+        console.error("Failed to release hold on server")
       );
-    } catch (err) {
-      console.error("Failed to release hold on server:", err);
+    } catch {
+      console.error("Failed to release hold on server");
     }
   };
 
   const shouldRender = hold && countdown !== null && countdown > 0 && !path.startsWith("/booking");
 
   const continueBooking = () => {
-    let pathName = "/booking";
+    if (String(hold?.phase || "").trim().toLowerCase() === "payment_pending") {
+      nav("/payment", {
+        state: {
+          backgroundLocation: location.state?.backgroundLocation || location,
+        },
+      });
+      return;
+    }
     const bookingState = {
       backgroundLocation: location.state?.backgroundLocation || location,
     };
     try {
-      const draftRaw = localStorage.getItem(BOOKING_DRAFT_KEY);
+      const draftRaw = sessionStorage.getItem(BOOKING_DRAFT_KEY);
       let draftPkg = null;
       if (draftRaw) {
         const draft = JSON.parse(draftRaw);
@@ -249,20 +254,13 @@ export default function ReservationBanner() {
       }
 
       if (pkg?.title) {
-        const params = new URLSearchParams();
-        params.set("title", getPublicPackageTitle(pkg.title));
-        if (pkg.price) params.set("price", pkg.price);
-        if (pkg.tag) params.set("tag", pkg.tag);
-        const isXoc = isTopPackageTitle(pkg.title);
-        params.set("xoc", isXoc ? "1" : "0");
-        if (pkg.price) params.set("price", pkg.price);
-        if (pkg.tag) params.set("tag", pkg.tag);
-        pathName = `/booking?${params.toString()}`;
+        const selectedPackage = persistBookingPackageSelection(pkg);
+        if (selectedPackage) bookingState.bookingPackage = selectedPackage;
       }
-    } catch (e) {
-      console.error("Failed to build resume path:", e);
+    } catch {
+      console.error("Failed to restore reservation package");
     }
-    nav(pathName, { state: bookingState });
+    nav("/booking", { state: bookingState });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -382,7 +380,9 @@ export default function ReservationBanner() {
                 onClick={continueBooking}
                 className={`rounded-lg border border-info-border bg-info-soft px-2.5 py-1.5 sm:px-3 sm:py-2 ${buttonTextSizeClass} font-semibold text-info-text hover:bg-info-soft transition whitespace-nowrap shadow-sm`}
               >
-                Continue booking
+                {String(hold?.phase || "").trim().toLowerCase() === "payment_pending"
+                  ? "Return to payment"
+                  : "Continue booking"}
               </button>
           )}
         </div>

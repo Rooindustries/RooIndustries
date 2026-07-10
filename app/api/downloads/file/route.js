@@ -5,6 +5,7 @@ import {
 } from "@/src/server/downloads/downloadAccess";
 import { streamDownload } from "@/src/server/downloads/downloadStorage";
 import { verifyDownloadToken } from "@/src/server/downloads/downloadToken";
+import { logSafeError } from "@/src/server/safeErrorLog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,9 +34,34 @@ const textResponse = (message, status = 400) =>
     },
   });
 
+const readCookie = (request, name) => {
+  const prefix = `${name}=`;
+  const match = String(request.headers.get("cookie") || "")
+    .split(";")
+    .map((entry) => entry.trim())
+    .find((entry) => entry.startsWith(prefix));
+  if (!match) return "";
+  try {
+    return decodeURIComponent(match.slice(prefix.length));
+  } catch {
+    return "";
+  }
+};
+
+const readLegacyToken = (url) => {
+  const deadline = new Date(
+    String(process.env.PAYMENT_LEGACY_COMPLETION_UNTIL || "")
+  ).getTime();
+  if (!Number.isFinite(deadline) || deadline <= Date.now()) return "";
+  return url.searchParams.get("token") || "";
+};
+
 export async function GET(request) {
   const url = new URL(request.url);
-  const token = url.searchParams.get("token") || "";
+  const token = readCookie(request, "download_access") || readLegacyToken(url);
+  if (url.searchParams.has("token") && !token) {
+    return textResponse("This legacy download link expired.", 410);
+  }
   const verified = verifyDownloadToken({ token });
 
   if (!verified.ok) {
@@ -63,10 +89,10 @@ export async function GET(request) {
   try {
     downloadStream = await streamDownload(download);
   } catch (error) {
-    return textResponse(
-      error?.message || "Download file is not available.",
-      Number(error?.status) || 404
-    );
+    logSafeError("Download stream failed", error);
+    const suppliedStatus = Number(error?.status || 0);
+    const status = suppliedStatus >= 400 && suppliedStatus < 500 ? suppliedStatus : 503;
+    return textResponse("Download file is not available.", status);
   }
 
   const headers = {
@@ -74,6 +100,16 @@ export async function GET(request) {
     "Content-Type": downloadStream.contentType || "application/zip",
     "Content-Disposition": contentDisposition(download.fileName),
     "X-Content-Type-Options": "nosniff",
+    "Set-Cookie": [
+      "download_access=",
+      "Path=/api/downloads/file",
+      "HttpOnly",
+      "SameSite=Strict",
+      process.env.NODE_ENV === "production" ? "Secure" : "",
+      "Max-Age=0",
+    ]
+      .filter(Boolean)
+      .join("; "),
   };
 
   if (downloadStream.contentLength) {

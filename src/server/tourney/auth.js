@@ -6,6 +6,7 @@ import {
   verifyTourneyPlayerCredentials,
 } from "./playerStore";
 import { getClientAddressFromFetchHeaders } from "../request/clientAddress";
+import { requireRateLimit } from "../api/ref/rateLimit";
 
 export const TOURNEY_SESSION_COOKIE = "tourney_session";
 export const TOURNEY_ADMIN_ROLES = Object.freeze(["viewer", "caster", "owner"]);
@@ -17,10 +18,8 @@ export const TOURNEY_REMEMBERED_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 const SESSION_MAX_AGE_SECONDS = TOURNEY_SESSION_MAX_AGE_SECONDS;
 const PASSWORD_RESET_MAX_AGE_SECONDS = 60 * 60;
 const DUMMY_PASSWORD_HASH =
+  // nosemgrep: generic.secrets.security.detected-bcrypt-hash.detected-bcrypt-hash
   "$2b$10$t6/bHTKT3hABxzcK8HIMauYsrY88CioIiiq0Cwci4RPXbOq30kAWy";
-const RATE_LIMIT_BUCKETS =
-  globalThis.__rooTourneyRateLimitBuckets ||
-  (globalThis.__rooTourneyRateLimitBuckets = new Map());
 
 const base64UrlEncode = (value) =>
   Buffer.from(value).toString("base64url");
@@ -83,14 +82,6 @@ const normalizeAccount = (account) => {
     active: account?.active !== false,
     version,
   };
-};
-
-const pruneExpiredBuckets = (now) => {
-  for (const [key, value] of RATE_LIMIT_BUCKETS.entries()) {
-    if (!value || value.resetAt <= now) {
-      RATE_LIMIT_BUCKETS.delete(key);
-    }
-  }
 };
 
 export const parseTourneyAccounts = (raw = "") => {
@@ -253,31 +244,41 @@ export const findActiveTourneyApprover = async ({
   return account || null;
 };
 
-export const checkTourneyRateLimit = ({
+export const checkTourneyRateLimit = async ({
   key,
   max = 10,
   windowMs = 15 * 60 * 1000,
+  now = Date.now(),
 } = {}) => {
-  const now = Date.now();
-  const bucketKey = String(key || "unknown");
-  pruneExpiredBuckets(now);
-
-  const current = RATE_LIMIT_BUCKETS.get(bucketKey);
-  if (!current || current.resetAt <= now) {
-    RATE_LIMIT_BUCKETS.set(bucketKey, { count: 1, resetAt: now + windowMs });
-    return { ok: true, retryAfterSeconds: 0 };
-  }
-
-  if (current.count >= max) {
-    return {
-      ok: false,
-      retryAfterSeconds: Math.ceil((current.resetAt - now) / 1000),
-    };
-  }
-
-  current.count += 1;
-  RATE_LIMIT_BUCKETS.set(bucketKey, current);
-  return { ok: true, retryAfterSeconds: 0 };
+  const responseState = { status: 200, body: null, headers: new Map() };
+  const res = {
+    setHeader(name, value) {
+      responseState.headers.set(String(name || "").toLowerCase(), String(value));
+      return this;
+    },
+    status(status) {
+      responseState.status = Number(status) || 500;
+      return this;
+    },
+    json(body) {
+      responseState.body = body;
+      return this;
+    },
+  };
+  const ok = await requireRateLimit(res, {
+    key: `tourney:${String(key || "unknown")}`,
+    max,
+    windowMs,
+    now,
+    failClosed: true,
+  });
+  if (ok) return { ok: true, status: 200, retryAfterSeconds: 0 };
+  return {
+    ok: false,
+    status: responseState.status,
+    error: responseState.body?.error || "Request protection is temporarily unavailable.",
+    retryAfterSeconds: Number(responseState.headers.get("retry-after") || 30),
+  };
 };
 
 export const isTourneyAuthConfigured = (env = process.env) =>
@@ -488,7 +489,9 @@ export const readTourneySessionPayload = ({
     const secret = getSessionSecret(env);
     if (!secret || !token || typeof token !== "string") return null;
 
-    const [encodedPayload, signature] = token.split(".");
+    const parts = token.split(".");
+    if (parts.length !== 2) return null;
+    const [encodedPayload, signature] = parts;
     if (!encodedPayload || !signature) return null;
 
     const expected = sign(encodedPayload, secret);

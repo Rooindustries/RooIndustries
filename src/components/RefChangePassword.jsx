@@ -19,8 +19,8 @@ export default function RefChangePassword() {
           nav("/referrals/login");
           return;
         }
-      } catch (err) {
-        console.error("Failed to validate referral session:", err);
+      } catch {
+        console.error("Referral session validation failed");
         nav("/referrals/login");
         return;
       } finally {
@@ -64,8 +64,8 @@ export default function RefChangePassword() {
       setPass1("");
       setPass2("");
       setTimeout(() => nav("/referrals/dashboard"), 1200);
-    } catch (err) {
-      console.error(err);
+    } catch {
+      console.error("Referral password change failed");
       showToast("error", "Server error");
     }
 

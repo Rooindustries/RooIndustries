@@ -42,8 +42,8 @@ export default function RefDashboard() {
         }
 
         setPayout(data);
-      } catch (err) {
-        console.error(err);
+      } catch {
+        console.error("Referral payout loading failed");
         setPayout(null);
         setPayoutError("Could not load payout data.");
       } finally {
@@ -58,9 +58,9 @@ export default function RefDashboard() {
 
         if (!data.ok) {
           try {
-            localStorage.removeItem("creatorId");
-          } catch (err) {
-            console.error("Failed to clear creatorId after invalid data:", err);
+            sessionStorage.removeItem("creatorId");
+          } catch {
+            console.error("Failed to clear obsolete referral state");
           }
           return nav("/referrals/login");
         }
@@ -88,12 +88,12 @@ export default function RefDashboard() {
           setCommission(normalized.currentCommissionPercent ?? 10);
           setDiscount(normalized.currentDiscountPercent ?? 0);
         }
-      } catch (e) {
-        console.error(e);
+      } catch {
+        console.error("Referral dashboard loading failed");
         try {
-          localStorage.removeItem("creatorId");
-        } catch (err) {
-          console.error("Failed to clear creatorId after error:", err);
+          sessionStorage.removeItem("creatorId");
+        } catch {
+          console.error("Failed to clear obsolete referral state");
         }
         nav("/referrals/login");
       } finally {
@@ -262,8 +262,8 @@ export default function RefDashboard() {
       const result = await res.json();
       if (!result.ok) showToast("error", result.error || "Failed to save");
       else showToast("success", "Saved successfully!");
-    } catch (err) {
-      console.error(err);
+    } catch {
+      console.error("Referral settings save failed");
       showToast("error", "Server error");
     }
     setSaving(false);
@@ -346,8 +346,8 @@ export default function RefDashboard() {
     try {
       await navigator.clipboard.writeText(referralLink);
       showToast("success", "Referral link copied!");
-    } catch (err) {
-      console.error(err);
+    } catch {
+      console.error("Referral link copy failed");
       showToast("error", "Failed to copy link");
     }
   }
@@ -408,7 +408,7 @@ export default function RefDashboard() {
               <p className="text-success-text font-semibold">
                 Perks unlocked 🎉
                 <br />
-                You can now adjust commission & discount.
+                You can now adjust commission &amp; discount.
               </p>
             ) : (
               <p>
@@ -498,7 +498,7 @@ export default function RefDashboard() {
               Payouts
             </p>
             <h3 className="text-lg sm:text-xl font-bold text-ink">
-              Earnings & Payments
+              Earnings &amp; Payments
             </h3>
             <p className="text-xs text-ink-muted">
               Calculated from your referral sales.
@@ -618,10 +618,10 @@ export default function RefDashboard() {
         onClick={async () => {
           try {
             await fetch("/api/ref/logout", { method: "POST" });
-          } catch (err) {
-            console.error("Failed to clear referral session cookie:", err);
+          } catch {
+            console.error("Referral logout failed");
           } finally {
-            localStorage.removeItem("creatorId");
+            sessionStorage.removeItem("creatorId");
             nav("/referrals/login");
           }
         }}

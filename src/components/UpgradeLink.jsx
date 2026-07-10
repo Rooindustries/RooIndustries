@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { client } from "../sanityClient";
+import { getPublicContent } from "../lib/publicContentClient";
 import packageContent from "../lib/packageContent";
 import packagePricing from "../lib/packagePricing";
 
@@ -32,12 +32,6 @@ const formatLocalTime = (utcDate, timeZone) => {
     return "";
   }
 };
-
-const UPGRADE_LINK_QUERY = `*[_type == "upgradeLink" && lower(slug.current) == $slug][0]{
-  title,
-  intro,
-  targetPackage->{title, price}
-}`;
 
 export default function UpgradeLink() {
   const { slug } = useParams();
@@ -74,8 +68,7 @@ export default function UpgradeLink() {
       };
     }
 
-    client
-      .fetch(UPGRADE_LINK_QUERY, { slug: normalizedSlug })
+    getPublicContent("upgrade-link", { slug: normalizedSlug })
       .then((data) => {
         if (!active) return;
         if (!data) {
@@ -89,8 +82,8 @@ export default function UpgradeLink() {
           targetPackage: applyPackagePricing(data.targetPackage),
         });
       })
-      .catch((err) => {
-        console.error("Upgrade link load error:", err);
+      .catch(() => {
+        console.error("Upgrade link load failed");
         if (!active) return;
         setLinkError("Could not load this upgrade link. Please try again.");
       })
@@ -165,8 +158,8 @@ export default function UpgradeLink() {
           targetPackage: data.targetPackage,
         });
       }
-    } catch (err) {
-      console.error("Upgrade check error:", err);
+    } catch {
+      console.error("Upgrade eligibility check failed");
       setError("Something went wrong while checking your order. Try again.");
     } finally {
       setLoading(false);

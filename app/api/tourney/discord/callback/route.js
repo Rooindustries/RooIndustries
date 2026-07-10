@@ -14,6 +14,10 @@ import {
   fetchDiscordCurrentUser,
   readTourneyDiscordOAuthStateToken,
 } from "../../../../../src/server/tourney/discordOAuth";
+import {
+  getSafeErrorCode,
+  logSafeError,
+} from "../../../../../src/server/safeErrorLog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,9 +70,10 @@ export async function GET(request) {
     await markTourneyPlayerDiscordRoleAssigned({ playerId: player.id });
     return redirectToTourneyStatus(request, "linked", statePayload.returnTo);
   } catch (error) {
+    logSafeError("Tournament Discord role assignment failed", error);
     await markTourneyPlayerDiscordRoleFailed({
       playerId: player.id,
-      errorMessage: error?.message || "Discord role assignment failed.",
+      errorMessage: getSafeErrorCode(error, "discord_role_assignment_failed"),
     });
     return redirectToTourneyStatus(request, "role-failed", statePayload.returnTo);
   }

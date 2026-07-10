@@ -33,10 +33,10 @@ const getFromAddress = (env = process.env) =>
   String(env.FROM_EMAIL || DEFAULT_FROM).trim();
 
 const buildDecisionUrl = ({ baseUrl, token, purpose, role }) => {
-  const url = new URL("/api/tourney/registration-decision", baseUrl);
-  url.searchParams.set("token", token);
-  url.searchParams.set("decision", purpose);
-  if (role) url.searchParams.set("role", role);
+  const url = new URL("/tourney/decision", baseUrl);
+  const fragment = new URLSearchParams({ token, decision: purpose });
+  if (role) fragment.set("role", role);
+  url.hash = fragment.toString();
   return url.toString();
 };
 
@@ -96,7 +96,9 @@ const sendTemplateEmail = async ({ to, template, env = process.env } = {}) => {
     text: template.text,
   });
   if (error) {
-    throw new Error(error.message || "Unable to send Roo Industries email.");
+    throw Object.assign(new Error("Unable to send Roo Industries email."), {
+      code: "tourney_email_send_failed",
+    });
   }
   return data;
 };
@@ -116,7 +118,7 @@ const resolveDiscordLink = ({ player, baseUrl, env = process.env } = {}) => {
   if (!discordUrl) warnMissingDiscordInvite({ env });
   return {
     url: discordUrl,
-    usesOAuth: config.enabled && discordUrl.includes("/api/tourney/discord/start"),
+    usesOAuth: config.enabled && discordUrl.includes("/tourney/discord"),
   };
 };
 
@@ -333,7 +335,9 @@ export async function sendTourneyRegistrationApprovalEmails({
     });
 
     if (error) {
-      throw new Error(error.message || "Unable to send approval email.");
+      throw Object.assign(new Error("Unable to send approval email."), {
+        code: "tourney_approval_email_failed",
+      });
     }
 
     results.push(data);
@@ -405,7 +409,9 @@ export async function sendTourneyPlayerApprovedEmail({
   });
 
   if (error) {
-    throw new Error(error.message || "Unable to send player approval email.");
+    throw Object.assign(new Error("Unable to send player approval email."), {
+      code: "tourney_player_email_failed",
+    });
   }
 
   return data;
@@ -439,7 +445,7 @@ export async function sendTourneyResetEmail({
   const resend = getResend(env);
   const from = getFromAddress(env);
   const resetUrl = new URL("/tourney/reset", baseUrl);
-  resetUrl.searchParams.set("token", token);
+  resetUrl.hash = `token=${encodeURIComponent(token)}`;
 
   const { data, error } = await resend.emails.send({
     from,
@@ -458,7 +464,9 @@ export async function sendTourneyResetEmail({
   });
 
   if (error) {
-    throw new Error(error.message || "Unable to send reset email.");
+    throw Object.assign(new Error("Unable to send reset email."), {
+      code: "tourney_reset_email_failed",
+    });
   }
 
   return data;

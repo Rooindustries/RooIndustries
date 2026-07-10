@@ -1,8 +1,11 @@
 // ./api/ref/register.js
 import { createClient } from "@sanity/client";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import { setReferralSessionCookie } from "./auth.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
+import { logSafeError } from "../../safeErrorLog.js";
+import { buildReferralIdentityClaim } from "./referralIdentity.js";
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -29,11 +32,11 @@ export default async function handler(req, res) {
 
     const clientAddress = getClientAddress(req);
     if (
-      !requireRateLimit(res, {
+      !(await requireRateLimit(res, {
         key: `ref-register:${clientAddress}`,
         max: 10,
         windowMs: 30 * 60 * 1000,
-      })
+      }))
     ) {
       return;
     }
@@ -56,8 +59,19 @@ export default async function handler(req, res) {
     const trimmedEmail = String(email).trim().toLowerCase();
     const trimmedPaypalEmail = String(paypalEmail).trim().toLowerCase();
     const trimmedSlug = String(slug).trim().toLowerCase();
+    const normalizedPassword = String(password || "");
 
     const emailRegex = /\S+@\S+\.\S+/;
+
+    if (
+      trimmedDiscordUsername.length < 2 ||
+      trimmedDiscordUsername.length > 80 ||
+      trimmedEmail.length > 254 ||
+      trimmedPaypalEmail.length > 254 ||
+      !/^[a-z0-9](?:[a-z0-9-]{1,48}[a-z0-9])$/.test(trimmedSlug)
+    ) {
+      return res.status(400).json({ ok: false, error: "Invalid registration details" });
+    }
 
     if (!emailRegex.test(trimmedEmail)) {
       return res
@@ -70,10 +84,16 @@ export default async function handler(req, res) {
         .status(400)
         .json({ ok: false, error: "Invalid PayPal email address" });
     }
+    if (normalizedPassword.length < 10 || normalizedPassword.length > 128) {
+      return res.status(400).json({
+        ok: false,
+        error: "Use a password between 10 and 128 characters.",
+      });
+    }
 
     // Check email uniqueness (login email)
     const existingByEmail = await client.fetch(
-      `*[_type == "referral" && creatorEmail == $email][0]`,
+      `*[_type == "referral" && lower(creatorEmail) == $email][0]`,
       { email: trimmedEmail }
     );
     if (existingByEmail)
@@ -83,7 +103,7 @@ export default async function handler(req, res) {
 
     // Check slug uniqueness
     const existingBySlug = await client.fetch(
-      `*[_type == "referral" && slug.current == $slug][0]`,
+      `*[_type == "referral" && lower(slug.current) == $slug][0]`,
       { slug: trimmedSlug }
     );
     if (existingBySlug)
@@ -92,10 +112,13 @@ export default async function handler(req, res) {
         .json({ ok: false, error: "Referral code already taken" });
 
     // Hash password
-    const hash = await bcrypt.hash(password, 10);
+    const hash = await bcrypt.hash(normalizedPassword, 12);
 
-    // Create referral document
-    const referral = await client.create({
+    // Create the referral and both unique identity claims atomically.
+    const referralId = `referral.${crypto.randomUUID()}`;
+    const createdAt = new Date().toISOString();
+    const referral = {
+      _id: referralId,
       _type: "referral",
       name: trimmedDiscordUsername,
       slug: { _type: "slug", current: trimmedSlug },
@@ -106,7 +129,28 @@ export default async function handler(req, res) {
       currentCommissionPercent: 10,
       successfulReferrals: 0,
       isFirstTime: true,
+      passwordResetRequired: false,
+      credentialVersion: 2,
+      passwordChangedAt: createdAt,
+    };
+    const emailClaim = buildReferralIdentityClaim({
+      kind: "email",
+      value: trimmedEmail,
+      referralId,
+      createdAt,
     });
+    const slugClaim = buildReferralIdentityClaim({
+      kind: "slug",
+      value: trimmedSlug,
+      referralId,
+      createdAt,
+    });
+    await client
+      .transaction()
+      .create(emailClaim)
+      .create(slugClaim)
+      .create(referral)
+      .commit();
 
     setReferralSessionCookie(
       res,
@@ -116,7 +160,13 @@ export default async function handler(req, res) {
 
     return res.status(201).json({ ok: true, referralId: referral._id });
   } catch (err) {
-    console.error("💥 REGISTER ERROR:", err);
+    if (Number(err?.statusCode || err?.status || 0) === 409) {
+      return res.status(409).json({
+        ok: false,
+        error: "That email or referral code is already registered.",
+      });
+    }
+    logSafeError("Referral registration failed", err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
 }

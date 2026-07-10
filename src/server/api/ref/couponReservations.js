@@ -266,25 +266,43 @@ export const consumeCouponReservation = async ({
   return { redemption: { ...redemption, status: "consumed", bookingId }, idempotent: false };
 };
 
-export const releaseCouponReservation = async ({
-  client,
-  redemptionId,
-  reason = "abandoned",
-}) => {
+export const prepareCouponRelease = async ({ client, redemptionId }) => {
+  const normalizedRedemptionId = normalize(redemptionId);
+  if (!normalizedRedemptionId) return null;
   const redemption = await client.fetch(
     `*[_type == $type && _id == $id][0]{...}`,
-    { type: COUPON_REDEMPTION_TYPE, id: redemptionId }
+    { type: COUPON_REDEMPTION_TYPE, id: normalizedRedemptionId }
   );
-  if (!redemption?._id || redemption.status !== COUPON_REDEMPTION_STATUS.RESERVED) {
-    return { released: false, idempotent: true };
+  if (!redemption?._id) {
+    return { redemption: null, coupon: null, idempotent: true };
   }
-  const coupon = await client.fetch(`*[_type == "coupon" && _id == $id][0]{...}`, {
-    id: redemption.coupon?._ref,
-  });
-  const releasedAt = new Date().toISOString();
-  const transaction = client.transaction();
+  const coupon = redemption.coupon?._ref
+    ? await client.fetch(`*[_type == "coupon" && _id == $id][0]{...}`, {
+        id: redemption.coupon._ref,
+      })
+    : null;
+  return {
+    redemption,
+    coupon,
+    idempotent: redemption.status !== COUPON_REDEMPTION_STATUS.RESERVED,
+  };
+};
+
+export const appendCouponRelease = ({
+  transaction,
+  prepared,
+  reason = "abandoned",
+  releasedAt = new Date().toISOString(),
+}) => {
+  const redemption = prepared?.redemption;
+  const coupon = prepared?.coupon;
+  if (!transaction || !redemption?._id || prepared.idempotent) return transaction;
   patchRevision(transaction, redemption, (patch) =>
-    patch.set({ status: "released", releasedAt, releaseReason: normalize(reason) })
+    patch.set({
+      status: COUPON_REDEMPTION_STATUS.RELEASED,
+      releasedAt,
+      releaseReason: normalize(reason),
+    })
   );
   if (coupon?._id) {
     patchRevision(transaction, coupon, (patch) => {
@@ -294,6 +312,20 @@ export const releaseCouponReservation = async ({
         : patch.setIfMissing({ activeReservations: 0 });
     });
   }
+  return transaction;
+};
+
+export const releaseCouponReservation = async ({
+  client,
+  redemptionId,
+  reason = "abandoned",
+}) => {
+  const prepared = await prepareCouponRelease({ client, redemptionId });
+  if (!prepared?.redemption?._id || prepared.idempotent) {
+    return { released: false, idempotent: true };
+  }
+  const transaction = client.transaction();
+  appendCouponRelease({ transaction, prepared, reason });
   await transaction.commit();
   return { released: true, idempotent: false };
 };

@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { createClient } from "@sanity/client";
 import { requireReferralSession } from "./auth.js";
+import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -18,25 +19,33 @@ export default async function handler(req, res) {
     if (!session) return;
     const creatorId = session.referralId;
     const { password } = req.body || {};
+    const normalizedPassword = String(password || "");
 
-    if (!password) {
+    if (normalizedPassword.length < 10 || normalizedPassword.length > 128) {
       return res
         .status(400)
-        .json({ ok: false, error: "Missing password" });
+        .json({ ok: false, error: "Use a password between 10 and 128 characters." });
+    }
+    if (
+      !(await requireRateLimit(res, {
+        key: `ref-change-password:${getClientAddress(req)}`,
+        max: 5,
+        windowMs: 30 * 60 * 1000,
+      }))
+    ) {
+      return;
     }
 
-    if (String(password).length < 8) {
-      return res
-        .status(400)
-        .json({ ok: false, error: "Password must be at least 8 characters" });
-    }
-
-    const hash = await bcrypt.hash(password, 10);
+    const passwordChangedAt = new Date().toISOString();
+    const hash = await bcrypt.hash(normalizedPassword, 12);
 
     await client
       .patch(creatorId)
       .set({
         creatorPassword: hash,
+        passwordResetRequired: false,
+        credentialVersion: 2,
+        passwordChangedAt,
       })
       .commit();
 

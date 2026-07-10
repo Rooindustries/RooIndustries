@@ -1,6 +1,7 @@
 import { createClient } from "@sanity/client";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import packagePricing from "../../../lib/packagePricing.js";
+import { logSafeError } from "../../safeErrorLog.js";
 
 const { normalizePackageTitleForMatch } = packagePricing;
 
@@ -41,11 +42,11 @@ export default async function handler(req, res) {
   const packageTitle = String(req.query.packageTitle || "").trim();
   const clientAddress = getClientAddress(req);
   if (
-    !requireRateLimit(res, {
-      key: `validate-coupon:${clientAddress}:${rawCode.toLowerCase()}`,
+    !(await requireRateLimit(res, {
+      key: `validate-coupon:${clientAddress}`,
       max: 25,
       message: "Too many coupon validation requests. Please try again later.",
-    })
+    }))
   ) {
     return;
   }
@@ -147,7 +148,7 @@ export default async function handler(req, res) {
       },
     });
   } catch (err) {
-    console.error("❌ validateCoupon error:", err);
+    logSafeError("Coupon validation failed", err);
     return res.status(500).json({
       ok: false,
       error: "Server error while validating coupon.",

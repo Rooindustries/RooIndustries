@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const { resolvePaymentProviders } = require("../payment/providerConfig.js");
+const { logSafeError } = require("../../safeErrorLog.js");
 
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
@@ -41,12 +42,17 @@ module.exports = async function handler(req, res) {
 
     const body = razorpay_order_id + "|" + razorpay_payment_id;
 
+    const keySecret = String(process.env.RAZORPAY_KEY_SECRET || "").trim();
     const expectedSignature = crypto
-      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .createHmac("sha256", keySecret)
       .update(body.toString())
       .digest("hex");
-
-    const isAuthentic = expectedSignature === razorpay_signature;
+    const suppliedSignature = String(razorpay_signature || "").trim();
+    const expectedBuffer = Buffer.from(expectedSignature);
+    const suppliedBuffer = Buffer.from(suppliedSignature);
+    const isAuthentic =
+      expectedBuffer.length === suppliedBuffer.length &&
+      crypto.timingSafeEqual(expectedBuffer, suppliedBuffer);
 
     if (!isAuthentic) {
       return res.status(400).json({ ok: false, message: "Invalid signature" });
@@ -54,7 +60,7 @@ module.exports = async function handler(req, res) {
 
     return res.status(200).json({ ok: true });
   } catch (err) {
-    console.error("Razorpay verify error:", err);
+    logSafeError("Razorpay verification failed", err);
     return res.status(500).json({
       ok: false,
       message: "Server error verifying payment",

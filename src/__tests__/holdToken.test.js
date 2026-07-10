@@ -1,4 +1,4 @@
-describe("hold token secret fallback", () => {
+describe("hold token secret isolation", () => {
   const originalEnv = { ...process.env };
 
   afterEach(() => {
@@ -6,12 +6,29 @@ describe("hold token secret fallback", () => {
     jest.resetModules();
   });
 
-  test("uses JWT_SECRET fallback in production", () => {
+  test("does not reuse JWT_SECRET in production", () => {
     process.env.NODE_ENV = "production";
     delete process.env.HOLD_TOKEN_SECRET;
     delete process.env.REF_SESSION_SECRET;
     delete process.env.SESSION_SECRET;
     process.env.JWT_SECRET = "jwt_fallback_secret_for_test";
+
+    const { issueHoldToken } = require("../../src/server/booking/holdToken");
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+
+    expect(() =>
+      issueHoldToken({
+        holdId: "hold_1",
+        startTimeUTC: "2099-01-10T10:00:00.000Z",
+        expiresAt,
+      })
+    ).toThrow("HOLD_TOKEN_SECRET is required");
+  });
+
+  test("uses the dedicated hold token secret", () => {
+    process.env.NODE_ENV = "production";
+    process.env.HOLD_TOKEN_SECRET = "dedicated_hold_secret_for_test";
+    process.env.JWT_SECRET = "unrelated_jwt_secret_for_test";
 
     const { issueHoldToken, verifyHoldToken } = require("../../src/server/booking/holdToken");
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();

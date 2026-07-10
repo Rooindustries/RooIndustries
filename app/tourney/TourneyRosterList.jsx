@@ -169,7 +169,7 @@ export default function TourneyRosterList({ players = [] }) {
             </span>
             <span className="tourney-roster-cta">
               {streamUrl ? (
-                <a href={streamUrl} rel="noreferrer" target="_blank">
+                <a href={streamUrl} rel="noopener noreferrer" target="_blank">
                   <TwitchIcon />
                   <span>{twitchLabel}</span>
                 </a>

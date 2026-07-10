@@ -13,6 +13,7 @@ import {
 } from "../../booking/slotPolicy.js";
 import { normalizeBookingStatus } from "../../booking/bookingStatus.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
+import { logSafeError } from "../../safeErrorLog.js";
 import {
   buildDeferredEmailDispatch,
   getBookingForEmailDispatch,
@@ -75,7 +76,7 @@ const formatInTimeZone = (utcDate, timeZone, options = {}) => {
       ...(timeZone ? { timeZone } : {}),
     }).format(utcDate);
   } catch (err) {
-    console.error("Failed to format date in zone", err);
+    logSafeError("Booking date formatting failed", err);
     return "";
   }
 };
@@ -102,7 +103,7 @@ const formatOwnerDateLabel = (utcDate, timeZone = OWNER_TZ_NAME) => {
 
     return `${weekday} ${month} ${day} ${year}`.trim();
   } catch (err) {
-    console.error("Failed to format owner date label", err);
+    logSafeError("Booking owner date formatting failed", err);
     return "";
   }
 };
@@ -323,11 +324,11 @@ export default async function handler(req, res) {
     const clientAddress = getClientAddress(req);
     if (
       !isInternalPaymentFinalization &&
-      !requireRateLimit(res, {
+      !(await requireRateLimit(res, {
         key: `create-booking:${clientAddress}`,
         max: 30,
         message: "Too many booking attempts. Please try again later.",
-      })
+      }))
     ) {
       return;
     }
@@ -1179,10 +1180,10 @@ export default async function handler(req, res) {
         });
 
         if (!paymentVerification.ok) {
-          console.warn("Razorpay verification rejected", {
-            orderId: razorpayOrderId,
-            paymentId: razorpayPaymentId,
-            reason: paymentVerification.reason || "unknown",
+          logSafeError("Razorpay verification rejected", {
+            name: "PaymentVerificationError",
+            code: paymentVerification.reason || "razorpay_verification_rejected",
+            status: 400,
           });
           return res.status(400).json({
             error: "Payment verification failed.",
@@ -1214,9 +1215,10 @@ export default async function handler(req, res) {
           expectedCurrency: DEFAULT_PAYPAL_CURRENCY,
         });
         if (!paypalVerification.ok) {
-          console.warn("PayPal verification rejected", {
-            orderId: paypalOrderId,
-            reason: paypalVerification.reason || "unknown",
+          logSafeError("PayPal verification rejected", {
+            name: "PaymentVerificationError",
+            code: paypalVerification.reason || "paypal_verification_rejected",
+            status: 400,
           });
           return res.status(400).json({
             error: "Payment verification failed.",
@@ -1456,9 +1458,10 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     const message = err?.message || "Server error";
-    const code = err?.code;
     const status = Number(err?.status) || 500;
-    console.error("Booking API error:", { message, code });
-    return res.status(status).json({ error: message });
+    logSafeError("Booking creation failed", err);
+    return res
+      .status(status)
+      .json({ error: status < 500 ? message : "Booking could not be completed." });
   }
 }

@@ -262,7 +262,7 @@ const testRazorpay = async () => {
 const testPayPal = async () => {
   try {
     const clientId = process.env.REACT_APP_PAYPAL_CLIENT_ID;
-    const clientSecret = process.env.REACT_APP_PAYPAL_CLIENT_SECRET;
+    const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
     if (!clientId || !clientSecret) {
       record("paypal_credentials", false, "missing PAYPAL client id/secret");
       return;

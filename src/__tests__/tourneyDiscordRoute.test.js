@@ -65,12 +65,19 @@ const player = {
   discord: "PlayerOne#1234",
 };
 
-const makeRequest = ({ url, cookie = "player-session" } = {}) => ({
+const makeRequest = ({ url, cookie = "player-session", payload = {} } = {}) => ({
   url,
+  headers: {
+    get: (name) =>
+      String(name || "").toLowerCase() === "origin"
+        ? "https://www.rooindustries.com"
+        : "",
+  },
   cookies: {
     get: (name) =>
       name === "tourney_session" && cookie ? { value: cookie } : undefined,
   },
+  json: async () => payload,
 });
 
 const jsonResponse = (body, status = 200) => ({
@@ -191,6 +198,28 @@ describe("tourney Discord OAuth routes", () => {
     expect(response.url).toContain("https://discord.com/oauth2/authorize");
   });
 
+  test("returns the Discord authorization URL from a same-origin POST body", async () => {
+    const token = discordOAuth.createTourneyDiscordEmailToken({
+      player,
+      env: process.env,
+    });
+    mockReadTourneySessionFromStore.mockResolvedValue(null);
+    mockGetApprovedTourneyPlayerById.mockResolvedValue(player);
+
+    const response = await startRoute.POST(
+      makeRequest({
+        url: "https://www.rooindustries.com/api/tourney/discord/start",
+        cookie: "",
+        payload: { token },
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.authorizeUrl).toContain("https://discord.com/oauth2/authorize");
+  });
+
   test("keeps Discord OAuth state tokens time-limited", () => {
     jest.useFakeTimers();
     try {
@@ -298,7 +327,7 @@ describe("tourney Discord OAuth routes", () => {
 
     expect(mockMarkTourneyPlayerDiscordRoleFailed).toHaveBeenCalledWith({
       playerId: "player_1",
-      errorMessage: "Missing Permissions",
+      errorMessage: "discord_role_assignment_failed",
     });
     expect(response.url).toContain("discord=role-failed");
   });

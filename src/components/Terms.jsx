@@ -1,19 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { PortableText } from "@portabletext/react";
-import { client } from "../sanityClient";
+import { getPublicContent } from "../lib/publicContentClient";
 
 export default function Terms() {
   const [data, setData] = useState(null);
 
   useEffect(() => {
-    client
-      .fetch(
-        `*[_type == "terms"][0]{
-          title,
-          lastUpdated,
-          sections[]{heading, content}
-        }`
-      )
+    getPublicContent("terms")
       .then(setData)
       .catch(console.error);
   }, []);

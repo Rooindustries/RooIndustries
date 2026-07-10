@@ -111,6 +111,8 @@ describe("tourney emails", () => {
     expect(html).toContain("Secondary Role: Damage");
     expect(html).toContain("Accept as Support");
     expect(html).toContain("Accept as Damage");
+    expect(html).toContain("/tourney/decision#token=");
+    expect(html).not.toContain("/api/tourney/registration-decision?token=");
     expect(html).toContain("decision=approve&amp;role=Support");
     expect(html).toContain("decision=approve&amp;role=Damage");
     expect(html).toContain("Deny");
@@ -178,7 +180,8 @@ describe("tourney emails", () => {
     });
 
     const html = mockSendEmail.mock.calls[0][0].html;
-    expect(html).toContain("/api/tourney/discord/start?token=");
+    expect(html).toContain("/tourney/discord#token=");
+    expect(html).not.toContain("/api/tourney/discord/start?token=");
     expect(mockSendEmail.mock.calls[0][0].text).toContain(
       "Join or verify Discord for the Participant role"
     );

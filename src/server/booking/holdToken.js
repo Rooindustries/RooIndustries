@@ -1,10 +1,7 @@
 import crypto from "crypto";
 
 const HOLD_TOKEN_SECRET =
-  process.env.HOLD_TOKEN_SECRET ||
-  process.env.REF_SESSION_SECRET ||
-  process.env.SESSION_SECRET ||
-  process.env.JWT_SECRET ||
+  String(process.env.HOLD_TOKEN_SECRET || "").trim() ||
   (process.env.NODE_ENV === "production" ? "" : "dev_hold_token_secret");
 
 const base64UrlEncode = (value) =>
@@ -19,7 +16,7 @@ const sign = (input) =>
 const assertSecret = () => {
   if (!HOLD_TOKEN_SECRET) {
     throw new Error(
-      "HOLD_TOKEN_SECRET (or REF_SESSION_SECRET/SESSION_SECRET/JWT_SECRET) is required"
+      "HOLD_TOKEN_SECRET is required"
     );
   }
 };
@@ -48,7 +45,9 @@ export const verifyHoldToken = ({
   try {
     assertSecret();
     if (!token || typeof token !== "string" || !token.includes(".")) return null;
-    const [encoded, signature] = token.split(".");
+    const parts = token.split(".");
+    if (parts.length !== 2) return null;
+    const [encoded, signature] = parts;
     if (!encoded || !signature) return null;
 
     const expected = sign(encoded);
