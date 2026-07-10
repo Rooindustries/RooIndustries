@@ -7,12 +7,11 @@ dotenv.config();
 
 const token =
   process.env.SANITY_AUTH_TOKEN ||
-  process.env.REACT_APP_SANITY_WRITE_TOKEN ||
   process.env.SANITY_WRITE_TOKEN;
 
 if (!token) {
   console.error(
-    "Missing Sanity write token. Set SANITY_AUTH_TOKEN or REACT_APP_SANITY_WRITE_TOKEN."
+    "Missing Sanity write token. Set SANITY_AUTH_TOKEN or SANITY_WRITE_TOKEN."
   );
   process.exit(1);
 }

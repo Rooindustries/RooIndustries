@@ -264,7 +264,7 @@ const DashboardPage = ({ hosts, session }) => (
               }
               href={recipient.href}
               key={recipient.title}
-              rel="noreferrer"
+              rel="noopener noreferrer"
               target="_blank"
             >
               {recipient.logo ? (

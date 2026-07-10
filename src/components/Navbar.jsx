@@ -705,7 +705,7 @@ export default function Navbar({ routeShell = "browser" }) {
                   } inline-flex items-center gap-1`}
                   aria-haspopup="menu"
                   aria-expanded={referralsOpen}
-                  aria-controls="desktop-referrals-menu"
+                  aria-controls={referralsOpen ? "desktop-referrals-menu" : undefined}
                 >
                   Referrals
                   <svg
@@ -1043,7 +1043,7 @@ export default function Navbar({ routeShell = "browser" }) {
               <a
                 href="https://discord.com/invite/qs5HKNyazD"
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener noreferrer"
                 className={`${mobileLinkBase} ${mobileLinkIdle} inline-flex items-center gap-2`}
               >
                 Discord

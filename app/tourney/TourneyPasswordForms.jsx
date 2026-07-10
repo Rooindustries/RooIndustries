@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export function TourneyForgotForm() {
   const [login, setLogin] = useState("");
@@ -54,11 +54,21 @@ export function TourneyForgotForm() {
   );
 }
 
-export function TourneyResetForm({ token = "" }) {
+export function TourneyResetForm() {
+  const [token, setToken] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [isSuccess, setIsSuccess] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+
+  useEffect(() => {
+    const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const resetToken = String(fragment.get("token") || "").trim();
+    setToken(resetToken);
+    if (window.location.hash) {
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+    }
+  }, []);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -88,6 +98,11 @@ export function TourneyResetForm({ token = "" }) {
 
   return (
     <form className="tourney-form tourney-form-narrow" onSubmit={handleSubmit}>
+      {!token ? (
+        <p className="tourney-form-message" role="status">
+          Reset token missing. Request a new password reset link.
+        </p>
+      ) : null}
       <label>
         New password
         <input

@@ -35,9 +35,6 @@ const paidBooking = (overrides = {}) => ({
   ...overrides,
 });
 
-const getTokenFromUrl = (downloadUrl) =>
-  new URL(`https://www.rooindustries.com${downloadUrl}`).searchParams.get("token");
-
 describe("download access", () => {
   test("returns a short-lived download URL for a paid matching booking", async () => {
     const booking = paidBooking();
@@ -59,9 +56,11 @@ describe("download access", () => {
       packageTitle: "Performance Vertex Overhaul",
     });
     expect(result.body.booking.email).toBeUndefined();
+    expect(result.body.downloadUrl).toBe("/api/downloads/file");
+    expect(result.body.downloadUrl).not.toContain("token");
 
     const verified = verifyDownloadToken({
-      token: getTokenFromUrl(result.body.downloadUrl),
+      token: result.downloadToken,
       nowMs: 1_700_000_000_000,
       env,
     });

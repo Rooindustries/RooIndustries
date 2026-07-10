@@ -17,6 +17,8 @@ import {
   seedTourneyBracketTeams,
   upsertTourneyBracketTeam,
 } from "../../../../src/server/tourney/bracketStore";
+import { buildTourneyPublicError } from "../../../../src/server/tourney/publicError";
+import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -58,22 +60,23 @@ export async function GET() {
 }
 
 export async function POST(request) {
+  if (!isSameOriginMutation(request)) return jsonError("Cross-origin request rejected.", 403);
   const session = await getSession(request);
   if (!session || !["owner", "caster"].includes(session.role)) {
     return jsonError("Not found.", 404);
   }
 
   const clientAddress = getClientAddressFromHeaders(request.headers);
-  const rateLimit = checkTourneyRateLimit({
+  const rateLimit = await checkTourneyRateLimit({
     key: `tourney-bracket:${clientAddress}:${session.username}`,
     max: 60,
     windowMs: 15 * 60 * 1000,
   });
   if (!rateLimit.ok) {
     return NextResponse.json(
-      { ok: false, error: "Too many bracket changes. Please try again later." },
+      { ok: false, error: rateLimit.error || "Too many bracket changes. Please try again later." },
       {
-        status: 429,
+        status: rateLimit.status || 429,
         headers: { "Retry-After": String(rateLimit.retryAfterSeconds) },
       }
     );
@@ -188,6 +191,7 @@ export async function POST(request) {
 
     return jsonError("Unsupported bracket action.");
   } catch (error) {
-    return jsonError(error?.message || "Unable to update bracket.", error?.status || 500);
+    const failure = buildTourneyPublicError(error, "Unable to update bracket.");
+    return jsonError(failure.message, failure.status);
   }
 }

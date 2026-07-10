@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { publicClient } from "../sanityClient";
+import { getPublicContent } from "../lib/publicContentClient";
 import homeCopy from "../lib/homeCopy";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 
@@ -99,20 +99,7 @@ export default function Hero() {
   useEffect(() => {
     if (!enableLiveHeroContent) return;
 
-    publicClient
-      .fetch(
-        `*[_type == "hero"][0]{
-          tagline,
-          headingLine1,
-          headingLine2,
-          description,
-          subtext,
-          ctaPrimaryText,
-          ctaSecondaryText,
-          ctaNote,
-          bullets
-        }`
-      )
+    getPublicContent("hero")
       .then((data) => {
         if (!data || typeof data !== "object") return;
         setHeroData((prev) => applyHeroCopyOverride({ ...prev, ...data }));

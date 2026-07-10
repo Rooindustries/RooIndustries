@@ -2,6 +2,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import { Readable } from "node:stream";
 import { resolveDownloadFilePath } from "./downloadCatalog.js";
+import { logSafeError } from "../safeErrorLog.js";
 
 export const DOWNLOAD_STORAGE_BLOB = "blob";
 export const DOWNLOAD_STORAGE_LOCAL = "local";
@@ -43,7 +44,7 @@ export const isBlobDownloadAvailable = async (download) => {
     return !!metadata?.pathname;
   } catch (error) {
     if (process.env.NODE_ENV !== "test") {
-      console.warn("[downloads] blob availability check failed:", error.message);
+      logSafeError("Download blob availability check failed", error);
     }
     return false;
   }

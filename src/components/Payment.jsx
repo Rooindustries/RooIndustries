@@ -68,8 +68,12 @@ const formatCouponValue = (coupon) => {
 
 export default function Payment({ hideFooter = false }) {
   const location = useLocation();
-  const q = new URLSearchParams(location.search);
   const navigate = useNavigate();
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
 
   const REFERRAL_STORAGE_KEY = "referral_session";
   const FLOW_BACKGROUND_KEY = "flow_background_location";
@@ -200,7 +204,7 @@ export default function Payment({ hideFooter = false }) {
 
     writeStoredCheckout(null);
     try {
-      localStorage.removeItem("my_slot_hold");
+      sessionStorage.removeItem("my_slot_hold");
       window.dispatchEvent(new CustomEvent("hold-state", { detail: null }));
     } catch {}
 
@@ -222,7 +226,9 @@ export default function Payment({ hideFooter = false }) {
   };
 
   const historyUsrState =
-    typeof window !== "undefined" ? window.history?.state?.usr : null;
+    hydrated && typeof window !== "undefined"
+      ? window.history?.state?.usr
+      : null;
   const navState = useMemo(
     () => location.state || historyUsrState || {},
     [historyUsrState, location.state]
@@ -230,11 +236,10 @@ export default function Payment({ hideFooter = false }) {
 
   const bookingData = useMemo(() => {
     try {
-      const legacyQueryData = q.get("data");
       const parsed =
         navState.bookingData ||
-        readStoredCheckout() ||
-        (legacyQueryData ? JSON.parse(legacyQueryData) : {});
+        (hydrated ? readStoredCheckout() : null) ||
+        {};
       const pricedPackage = applyPackagePricing({
         title: parsed.packageTitle,
         price: parsed.packagePrice,
@@ -249,7 +254,7 @@ export default function Payment({ hideFooter = false }) {
     }
     // sessionStorage is intentionally a reload fallback, not a reactive source.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.search, navState.bookingData]);
+  }, [hydrated, location.search, navState.bookingData]);
   useEffect(() => {
     if (navState.bookingData) {
       writeStoredCheckout(navState.bookingData);
@@ -273,7 +278,7 @@ export default function Payment({ hideFooter = false }) {
 
   const isUpgrade = !!bookingData.originalOrderId;
   const [sessionHold, setSessionHold] = useState(null);
-  const storedBackground = readStoredBackground();
+  const storedBackground = hydrated ? readStoredBackground() : null;
   const modalBackground =
     navState.backgroundLocation || storedBackground || null;
 
@@ -491,12 +496,13 @@ export default function Payment({ hideFooter = false }) {
   const [rzpReady, setRzpReady] = useState(false);
   const [payingRzp, setPayingRzp] = useState(false);
   const [providerConfig, setProviderConfig] = useState({
-    razorpay: { enabled: true, mode: "unknown" },
+    razorpay: { enabled: false, mode: "unknown" },
     paypal: { enabled: false, mode: "unknown", clientId: "" },
   });
   const [showInternalPayments, setShowInternalPayments] = useState(false);
   const [paymentSession, setPaymentSession] = useState(null);
   const [paymentStatusBusy, setPaymentStatusBusy] = useState(false);
+  const [cancellingPayment, setCancellingPayment] = useState(false);
   const sessionStartRef = useRef(null);
   const lockedProvider = String(paymentSession?.provider || "").trim();
   const providerIsAvailableForSession = (provider) =>
@@ -649,6 +655,10 @@ export default function Payment({ hideFooter = false }) {
   }, [location.search]);
 
   useEffect(() => {
+    if (!canUseRazorpay) {
+      setRzpReady(false);
+      return undefined;
+    }
     const script = document.createElement("script");
     script.src = "https://checkout.razorpay.com/v1/checkout.js";
     script.async = true;
@@ -666,8 +676,7 @@ export default function Payment({ hideFooter = false }) {
     return () => {
       document.body.removeChild(script);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [canUseRazorpay]);
 
   useEffect(() => {
     let active = true;
@@ -776,6 +785,67 @@ export default function Payment({ hideFooter = false }) {
     sessionStartRef.current = null;
     setPaymentSession(null);
     clearStoredPaymentSession();
+  };
+
+  const handleChangePaymentMethod = async () => {
+    const activeSession = paymentSession || readStoredPaymentSession();
+    const paymentAccessToken = String(activeSession?.paymentAccessToken || "").trim();
+    if (!paymentAccessToken || cancellingPayment) return;
+
+    setCancellingPayment(true);
+    try {
+      const { response, data } = await fetchJson("/api/payment/cancel", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${paymentAccessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      });
+      if (data?.captured) {
+        if (["booked", "email_partial"].includes(String(data.status || "").toLowerCase())) {
+          navigate("/payment-success", {
+            state: buildFinalizeNavigation(data),
+            replace: true,
+          });
+          return;
+        }
+        showBanner("info", "Your payment was received and is being finalized.");
+        return;
+      }
+      if (!response.ok || data?.cancelled !== true) {
+        throw new Error(data?.error || "The payment method could not be changed.");
+      }
+
+      const refreshedHold = data.refreshedHold || null;
+      if (refreshedHold?.slotHoldId && refreshedHold?.slotHoldToken) {
+        setSessionHold(refreshedHold);
+        const nextCheckout = {
+          ...bookingData,
+          slotHoldId: refreshedHold.slotHoldId,
+          slotHoldToken: refreshedHold.slotHoldToken,
+          slotHoldExpiresAt: refreshedHold.slotHoldExpiresAt,
+        };
+        writeStoredCheckout(nextCheckout);
+        const holdState = {
+          holdId: refreshedHold.slotHoldId,
+          holdToken: refreshedHold.slotHoldToken,
+          expiresAt: refreshedHold.slotHoldExpiresAt,
+          startTimeUTC: bookingData.startTimeUTC || "",
+          packageTitle,
+          packagePrice,
+          phase: "holding",
+        };
+        sessionStorage.setItem("my_slot_hold", JSON.stringify(holdState));
+        window.dispatchEvent(new CustomEvent("hold-state", { detail: holdState }));
+      }
+      clearPaymentSession();
+      showBanner("success", "Payment method released. Choose PayPal or Razorpay below.");
+    } catch (error) {
+      showBanner("error", error.message || "The payment method could not be changed.");
+    } finally {
+      setCancellingPayment(false);
+    }
   };
 
   const buildFinalizeNavigation = (responseBody = {}) => {
@@ -930,7 +1000,7 @@ export default function Payment({ hideFooter = false }) {
             packageTitle,
             phase: refreshedHold.phase || "payment_pending",
           };
-          localStorage.setItem("my_slot_hold", JSON.stringify(holdState));
+          sessionStorage.setItem("my_slot_hold", JSON.stringify(holdState));
           window.dispatchEvent(new CustomEvent("hold-state", { detail: holdState }));
         } catch {}
       }
@@ -1063,8 +1133,8 @@ export default function Payment({ hideFooter = false }) {
         writeStoredReferral("");
         showBanner("error", "Invalid or inactive referral code.");
       }
-    } catch (e) {
-      console.error(e);
+    } catch {
+      console.error("Referral validation failed");
       setReferral(null);
       writeStoredReferral("");
       showBanner(
@@ -1108,8 +1178,8 @@ export default function Payment({ hideFooter = false }) {
         setCoupon(null);
         showBanner("error", data.error || "Invalid coupon code.");
       }
-    } catch (e) {
-      console.error(e);
+    } catch {
+      console.error("Coupon validation failed");
       setCoupon(null);
       showBanner(
         "error",
@@ -1139,7 +1209,7 @@ export default function Payment({ hideFooter = false }) {
         replace: true,
       });
     } catch (err) {
-      console.error("Free booking error:", err);
+      console.error("Free booking failed");
       showBanner(
         "error",
         err?.message ||
@@ -1200,7 +1270,7 @@ export default function Payment({ hideFooter = false }) {
         };
 
       if (!orderData.ok) {
-        console.error("Razorpay order error:", orderData);
+        console.error("Razorpay order creation failed");
         showBanner(
           "error",
           orderData.message || "Couldn't start the payment. Please try again."
@@ -1239,8 +1309,8 @@ export default function Payment({ hideFooter = false }) {
                 razorpaySignature: response.razorpay_signature,
               },
             });
-          } catch (err) {
-            console.error("Razorpay post-payment error:", err);
+          } catch {
+            console.error("Razorpay booking finalization failed");
             showBanner(
               "error",
               "Payment succeeded but something went wrong saving your booking. Please contact support."
@@ -1261,7 +1331,7 @@ export default function Payment({ hideFooter = false }) {
       const rzp = new window.Razorpay(options);
       rzp.open();
     } catch (err) {
-      console.error("Razorpay error:", err);
+      console.error("Razorpay checkout failed");
       showBanner(
         "error",
         err?.message || "Payment could not be processed. Please try again."
@@ -1507,9 +1577,19 @@ export default function Payment({ hideFooter = false }) {
                 )}
             </div>
             {!!lockedProvider && (
-              <p className="mt-3 text-xs text-info-text">
-                This checkout is reserved with {lockedProvider === "paypal" ? "PayPal" : "Razorpay"}. Pricing and provider selection are locked for this session.
-              </p>
+              <div className="mt-4 flex flex-col items-start justify-between gap-3 rounded-lg border border-info-border bg-info-soft px-4 py-3 sm:flex-row sm:items-center">
+                <p className="text-xs text-info-text">
+                  This checkout is reserved with {lockedProvider === "paypal" ? "PayPal" : "Razorpay"}. Pricing and provider selection are locked for this session. Finish it or safely release this payment method before choosing another.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleChangePaymentMethod}
+                  disabled={cancellingPayment || paymentStatusBusy}
+                  className="shrink-0 rounded-md border border-line-input bg-surface-input px-3 py-2 text-xs font-semibold text-ink hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info-border disabled:cursor-wait disabled:opacity-60"
+                >
+                  {cancellingPayment ? "Checking payment..." : "Change payment method"}
+                </button>
+              </div>
             )}
           </>
         </div>
@@ -1616,7 +1696,7 @@ export default function Payment({ hideFooter = false }) {
                     </p>
                   </div>
 
-                  <div className="w-full sm:w-48 relative z-0">
+                  <div className="paypal-checkout-shell relative z-0 w-full overflow-hidden rounded-lg bg-transparent sm:w-48 [&_iframe]:!border-0 [&_iframe]:!bg-transparent [&_iframe]:!outline-none [&_iframe]:!shadow-none">
                     {canDisplayPaypalMethod ? (
                       <PayPalScriptProvider
                         options={{
@@ -1672,16 +1752,16 @@ export default function Payment({ hideFooter = false }) {
                                     details?.payer?.email_address || "",
                                 },
                               });
-                            } catch (err) {
-                              console.error("Booking creation error:", err);
+                            } catch {
+                              console.error("PayPal booking finalization failed");
                               showBanner(
                                 "error",
                                 "Payment succeeded but something went wrong saving your booking. Please contact support."
                               );
                             }
                           }}
-                          onError={(err) => {
-                            console.error(err);
+                          onError={() => {
+                            console.error("PayPal checkout failed");
                             showBanner(
                               "error",
                               "This payment method could not process your payment. Please try again."
@@ -1717,7 +1797,7 @@ export default function Payment({ hideFooter = false }) {
       {(isModalMode || !hideFooter) && (
         <motion.div
           variants={itemVariants}
-          className="mt-10 flex justify-center pb-8"
+          className="mt-10 flex justify-center pb-36 sm:pb-40"
         >
           <Link
             to="/booking"

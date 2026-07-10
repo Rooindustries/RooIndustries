@@ -80,7 +80,6 @@ const sanityClient = createClient({
     "2023-10-01",
   token:
     process.env.SANITY_WRITE_TOKEN ||
-    process.env.REACT_APP_SANITY_WRITE_TOKEN ||
     process.env.SANITY_API_TOKEN,
   useCdn: false,
 });

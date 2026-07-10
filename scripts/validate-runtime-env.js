@@ -27,7 +27,6 @@ const isReleaseBuild = isProdBuild || isPreviewBuild;
 const shouldFailClosed =
   missing => missing.length > 0 && isReleaseBuild && (isCi || isVercelBuild || isNextProductionBuild || forceStrict);
 
-const hasAny = (keys = []) => keys.some((key) => !!process.env[key]);
 const getFirstValue = (keys = []) => {
   for (const key of keys) {
     const value = String(process.env[key] || "").trim();
@@ -35,11 +34,11 @@ const getFirstValue = (keys = []) => {
   }
   return "";
 };
+const hasAny = (keys = []) => Boolean(getFirstValue(keys));
 
-const sessionSecretKeys = ["REF_SESSION_SECRET", "SESSION_SECRET", "JWT_SECRET"];
-const holdTokenSecretKeys = ["HOLD_TOKEN_SECRET", ...sessionSecretKeys];
-const adminKeyKeys = ["REF_ADMIN_KEY", "REFERRAL_ADMIN_KEY", "CRON_SECRET"];
-const webhookSecretKeys = ["SANITY_WEBHOOK_SECRET", "CRON_SECRET"];
+const sessionSecretKeys = ["REF_SESSION_SECRET"];
+const adminKeyKeys = ["REF_ADMIN_KEY"];
+const webhookSecretKeys = ["SANITY_WEBHOOK_SECRET"];
 const paypalClientIdKeys = [
   "PAYPAL_CLIENT_ID",
   "REACT_APP_PAYPAL_CLIENT_ID",
@@ -47,7 +46,6 @@ const paypalClientIdKeys = [
 ];
 const paypalClientSecretKeys = [
   "PAYPAL_CLIENT_SECRET",
-  "REACT_APP_PAYPAL_CLIENT_SECRET",
 ];
 
 const requiredChecks = [
@@ -64,16 +62,36 @@ const requiredChecks = [
     label: "SANITY_WRITE_TOKEN",
   },
   {
-    keys: sessionSecretKeys,
-    label: "REF_SESSION_SECRET (or SESSION_SECRET/JWT_SECRET fallback)",
+    keys: ["SANITY_READ_TOKEN", "SANITY_PRIVATE_READ_TOKEN"],
+    label: "SANITY_READ_TOKEN",
   },
   {
-    keys: holdTokenSecretKeys,
-    label: "HOLD_TOKEN_SECRET (or REF_SESSION_SECRET/SESSION_SECRET/JWT_SECRET fallback)",
+    keys: sessionSecretKeys,
+    label: "REF_SESSION_SECRET",
+  },
+  {
+    keys: ["PAYMENT_SESSION_SECRET"],
+    label: "PAYMENT_SESSION_SECRET",
+  },
+  {
+    keys: ["HOLD_TOKEN_SECRET"],
+    label: "HOLD_TOKEN_SECRET",
+  },
+  {
+    keys: ["BOOKING_EMAIL_TOKEN_SECRET"],
+    label: "BOOKING_EMAIL_TOKEN_SECRET",
+  },
+  {
+    keys: ["UPGRADE_INTENT_SECRET"],
+    label: "UPGRADE_INTENT_SECRET",
+  },
+  {
+    keys: ["DOWNLOAD_TOKEN_SECRET"],
+    label: "DOWNLOAD_TOKEN_SECRET",
   },
   {
     keys: adminKeyKeys,
-    label: "REF_ADMIN_KEY / REFERRAL_ADMIN_KEY (or CRON_SECRET fallback)",
+    label: "REF_ADMIN_KEY",
   },
   {
     keys: ["CRON_SECRET"],
@@ -81,7 +99,15 @@ const requiredChecks = [
   },
   {
     keys: webhookSecretKeys,
-    label: "SANITY_WEBHOOK_SECRET (or CRON_SECRET fallback)",
+    label: "SANITY_WEBHOOK_SECRET",
+  },
+  {
+    keys: ["RAZORPAY_WEBHOOK_SECRET"],
+    label: "RAZORPAY_WEBHOOK_SECRET",
+  },
+  {
+    keys: ["RATE_LIMIT_HASH_SECRET"],
+    label: "RATE_LIMIT_HASH_SECRET",
   },
   {
     keys: ["TOURNEY_SESSION_SECRET"],
@@ -99,6 +125,22 @@ const requiredChecks = [
     keys: ["FROM_EMAIL"],
     label: "FROM_EMAIL",
   },
+  {
+    keys: ["PAYMENT_LEGACY_COMPLETION_UNTIL"],
+    label: "PAYMENT_LEGACY_COMPLETION_UNTIL",
+  },
+  {
+    keys: ["PAYMENT_LEGACY_CHECKOUT_UNTIL"],
+    label: "PAYMENT_LEGACY_CHECKOUT_UNTIL",
+  },
+  {
+    keys: ["PAYMENT_LEGACY_STATUS_GET_UNTIL"],
+    label: "PAYMENT_LEGACY_STATUS_GET_UNTIL",
+  },
+  {
+    keys: ["LEGACY_UPGRADE_GET_UNTIL"],
+    label: "LEGACY_UPGRADE_GET_UNTIL",
+  },
 ];
 
 const missing = requiredChecks
@@ -107,6 +149,7 @@ const missing = requiredChecks
 
 const razorpayKeyId = getFirstValue(["RAZORPAY_KEY_ID"]);
 const razorpayKeySecret = getFirstValue(["RAZORPAY_KEY_SECRET"]);
+const razorpayWebhookSecret = getFirstValue(["RAZORPAY_WEBHOOK_SECRET"]);
 const paypalClientId = getFirstValue(paypalClientIdKeys);
 const paypalClientSecret = getFirstValue(paypalClientSecretKeys);
 const explicitPayPalEnv = String(
@@ -117,10 +160,37 @@ const explicitPayPalEnv = String(
 
 const providerConsistencyFailures = [];
 const providerConsistencyWarnings = [];
+const compatibilityDeadlines = [
+  ["PAYMENT_LEGACY_COMPLETION_UNTIL", 60 * 60 * 1000],
+  ["PAYMENT_LEGACY_CHECKOUT_UNTIL", 60 * 60 * 1000],
+  ["LEGACY_UPGRADE_GET_UNTIL", 60 * 60 * 1000],
+  ["PAYMENT_LEGACY_STATUS_GET_UNTIL", 25 * 60 * 60 * 1000],
+];
+
+for (const [key, maximumFutureMs] of compatibilityDeadlines) {
+  const raw = String(process.env[key] || "").trim();
+  if (!raw) continue;
+  const deadline = new Date(raw).getTime();
+  if (!Number.isFinite(deadline)) {
+    providerConsistencyFailures.push(`${key} must be a valid ISO timestamp.`);
+    continue;
+  }
+  if (deadline - Date.now() > maximumFutureMs) {
+    providerConsistencyFailures.push(
+      `${key} exceeds its allowed compatibility window.`
+    );
+  }
+}
 
 if (!!razorpayKeyId !== !!razorpayKeySecret) {
   providerConsistencyFailures.push(
     "Razorpay must be fully configured with both RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET."
+  );
+}
+
+if ((razorpayKeyId || razorpayKeySecret) && razorpayWebhookSecret.length < 32) {
+  providerConsistencyFailures.push(
+    "Razorpay requires a nonempty webhook secret of at least 32 characters."
   );
 }
 

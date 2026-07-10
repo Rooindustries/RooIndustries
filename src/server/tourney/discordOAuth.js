@@ -60,7 +60,9 @@ const readSignedToken = ({
   try {
     const secret = getStateSecret(env);
     if (!secret || !token || !purpose) return null;
-    const [encodedPayload, signature] = String(token).split(".");
+    const parts = String(token).split(".");
+    if (parts.length !== 2) return null;
+    const [encodedPayload, signature] = parts;
     if (!encodedPayload || !signature) return null;
 
     const expected = sign(encodedPayload, secret);
@@ -158,8 +160,8 @@ export const buildTourneyDiscordStartUrl = ({
   const token = createTourneyDiscordEmailToken({ player, env });
   if (!token) return getTourneyDiscordInviteUrl(env);
 
-  const url = new URL("/api/tourney/discord/start", baseUrl);
-  url.searchParams.set("token", token);
+  const url = new URL("/tourney/discord", baseUrl);
+  url.hash = new URLSearchParams({ token }).toString();
   return url.toString();
 };
 

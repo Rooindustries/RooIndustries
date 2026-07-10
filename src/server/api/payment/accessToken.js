@@ -75,7 +75,11 @@ export const verifyPaymentAccessToken = ({
     return { ok: false, reason: "payment_access_token_missing" };
   }
 
-  const [encodedPayload, providedSignature] = normalizedToken.split(".");
+  const parts = normalizedToken.split(".");
+  if (parts.length !== 2) {
+    return { ok: false, reason: "payment_access_token_malformed" };
+  }
+  const [encodedPayload, providedSignature] = parts;
   if (!encodedPayload || !providedSignature) {
     return { ok: false, reason: "payment_access_token_malformed" };
   }
@@ -108,7 +112,7 @@ export const verifyPaymentAccessToken = ({
   }
 
   const nowSeconds = Math.floor(Number(nowMs || Date.now()) / 1000);
-  if (nowSeconds > Number(payload.exp || 0)) {
+  if (nowSeconds >= Number(payload.exp || 0)) {
     return {
       ok: false,
       reason: "payment_access_token_expired",

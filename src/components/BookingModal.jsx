@@ -226,6 +226,7 @@ export default function BookingModal({ open, onClose, children }) {
               <motion.div
                 role="dialog"
                 aria-modal="true"
+                aria-label="Schedule your session"
                 className="shadow-none outline-none overflow-visible absolute top-0 left-0 origin-top-left cursor-default"
                 
                 initial={
@@ -264,7 +265,7 @@ export default function BookingModal({ open, onClose, children }) {
                       onClose();
                     }}
                   >
-                    ×
+                    <span aria-hidden="true">×</span>
                   </button>
 
                   {/* CHILDREN */}

@@ -2,6 +2,8 @@ import { createClient } from "@sanity/client";
 import { Resend } from "resend";
 import crypto from "crypto";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
+import { buildResetEmail } from "../../email/referralResetEmail.js";
+import { logSafeError } from "../../safeErrorLog.js";
 
 const createResendClient = () => {
   const apiKey = String(process.env.RESEND_API_KEY || "").trim();
@@ -31,14 +33,20 @@ export default async function handler(req, res) {
     }
 
     const normalizedEmail = String(email || "").trim().toLowerCase();
+    if (
+      normalizedEmail.length > 254 ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)
+    ) {
+      return res.status(200).json({ ok: true, message: "If email exists, link sent." });
+    }
     const clientAddress = getClientAddress(req);
 
     if (
-      !requireRateLimit(res, {
-        key: `ref-forgot:${clientAddress}:${normalizedEmail || "unknown"}`,
+      !(await requireRateLimit(res, {
+        key: `ref-forgot:${clientAddress}`,
         max: 5,
         windowMs: 30 * 60 * 1000,
-      })
+      }))
     ) {
       return;
     }
@@ -78,7 +86,7 @@ export default async function handler(req, res) {
     // 6. Send Email via Resend
     const baseUrl =
       process.env.NEXT_PUBLIC_BASE_URL || "https://www.rooindustries.com";
-    const resetLink = `${baseUrl}/referrals/reset?token=${resetToken}`;
+    const resetLink = `${baseUrl}/referrals/reset#token=${resetToken}`;
 
     const fromAddress = process.env.FROM_EMAIL || "onboarding@resend.dev";
 
@@ -87,27 +95,24 @@ export default async function handler(req, res) {
       return res.status(500).json({ ok: false, error: "Failed to send email" });
     }
 
-    const { error } = await resend.emails.send({
-      from: fromAddress,
-      to: [normalizedEmail],
-      subject: "Reset your Password",
-      html: `
-        <p>Hi ${referral.name || "there"},</p>
-        <p>You requested a password reset. Click the link below to set a new password:</p>
-        <p><a href="${resetLink}"><strong>Reset Password</strong></a></p>
-        <p>Or copy this link: ${resetLink}</p>
-        <p>This link expires in 1 hour.</p>
-      `,
-    });
+    const { error } = await resend.emails.send(
+      {
+        from: fromAddress,
+        to: [normalizedEmail],
+        subject: "Reset your Roo Industries password",
+        react: buildResetEmail({ name: referral.name, resetLink }),
+      },
+      { idempotencyKey: `ref-reset-${resetTokenHash.slice(0, 32)}` }
+    );
 
     if (error) {
-      console.error("Resend Error:", error);
+      logSafeError("Referral reset email failed", error);
       return res.status(500).json({ ok: false, error: "Failed to send email" });
     }
 
     return res.status(200).json({ ok: true, message: "Reset link sent" });
   } catch (err) {
-    console.error("FORGOT API ERROR:", err);
+    logSafeError("Referral forgot-password failed", err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
 }

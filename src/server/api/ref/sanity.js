@@ -40,14 +40,17 @@ export const resolveSanityEnv = () => ({
 
 export const createRefReadClient = ({ perspective = "published" } = {}) => {
   const { projectId, dataset, apiVersion } = resolveSanityEnv();
-  const token = readFirstEnv(["SANITY_PRIVATE_READ_TOKEN", "SANITY_READ_TOKEN"]);
+  const token = requireAnyEnvValue(
+    ["SANITY_PRIVATE_READ_TOKEN", "SANITY_READ_TOKEN", "SANITY_WRITE_TOKEN"],
+    "SANITY_READ_TOKEN is required for private dataset reads."
+  );
   return createClient({
     projectId,
     dataset,
     apiVersion,
     useCdn: false,
     perspective,
-    token: token || undefined,
+    token,
   });
 };
 

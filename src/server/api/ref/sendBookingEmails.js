@@ -23,11 +23,11 @@ export default async function handler(req, res) {
 
   const clientAddress = getClientAddress(req);
   if (
-    !requireRateLimit(res, {
-      key: `send-booking-emails:${clientAddress}:${bookingId.toLowerCase()}`,
+    !(await requireRateLimit(res, {
+      key: `send-booking-emails:${clientAddress}`,
       max: 20,
       message: "Too many booking email requests. Please try again later.",
-    })
+    }))
   ) {
     return;
   }

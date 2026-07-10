@@ -2,6 +2,7 @@ import { createClient } from "@sanity/client";
 import crypto from "crypto";
 import { verifyHoldToken } from "./holdToken.js";
 import { getClientAddress, requireRateLimit } from "../api/ref/rateLimit.js";
+import { logSafeError } from "../safeErrorLog.js";
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -19,11 +20,11 @@ export default async function handler(req, res) {
   const { holdId, holdToken } = req.body || {};
   const clientAddress = getClientAddress(req);
   if (
-    !requireRateLimit(res, {
+    !(await requireRateLimit(res, {
       key: `release-hold:${clientAddress}`,
       max: 25,
       message: "Too many hold release requests. Please try again later.",
-    })
+    }))
   ) {
     return;
   }
@@ -76,7 +77,7 @@ export default async function handler(req, res) {
         message: "Hold changed before it could be released",
       });
     }
-    console.error("Error releasing hold:", error);
+    logSafeError("Slot hold release failed", error);
     return res.status(500).json({ ok: false, message: "Failed to release hold" });
   }
 }

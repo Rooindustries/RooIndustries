@@ -1,4 +1,4 @@
-import { publicClient } from "../sanityClient";
+import { getPublicContent } from "./publicContentClient";
 import homeCopy from "./homeCopy";
 import packageContent from "./packageContent";
 import packagePricing from "./packagePricing";
@@ -81,119 +81,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 const memoryCache = new Map();
 const inflightCache = new Map();
 
-const homeSectionQueries = {
-  [HOME_SECTION_DATA_KEYS.reviews]: {
-    query: `*[_type == "proReviewsCarousel"][0]{
-      _id,
-      title,
-      subtitle,
-      reviews[]{
-        name,
-        profession,
-        game,
-        optimizationResult,
-        text,
-        rating,
-        pfp,
-        isVip
-      }
-    }`,
-  },
-  [HOME_SECTION_DATA_KEYS.about]: {
-    query: `*[_type == "about"][0]{
-      recordTitle,
-      recordBadgeText,
-      recordSubtitle,
-      recordButtonText,
-      recordNote,
-      recordDetails,
-      recordLink
-    }`,
-  },
-  [HOME_SECTION_DATA_KEYS.services]: {
-    query: `*[_type == "services"][0]{
-      heading,
-      subheading,
-      cards[]{title, description, iconType, customIcon},
-      benchEnabled,
-      benchMetricLabel,
-      benchBeforeLabel,
-      benchAfterLabel,
-      benchBadgeSuffix,
-      benchPagePrefix,
-      benchPages[]{
-        games[]{gameTitle, gameLogo, beforeFps, afterFps, gpu, cpu, ram, metricLabel}
-      }
-    }`,
-  },
-  [HOME_SECTION_DATA_KEYS.packagesList]: {
-    query: `*[_type == "package"] | order(coalesce(order, 999) asc, _createdAt asc) {
-      _id,
-      title,
-      price,
-      tag,
-      tagGoldGlow,
-      description,
-      checkedBullets,
-      uncheckedBullets,
-      features,
-      buttonText,
-      detailsButtonText,
-      isHighlighted,
-      order
-    }`,
-  },
-  [HOME_SECTION_DATA_KEYS.packagesSettings]: {
-    query: `*[_type == "packagesSettings"][0]{
-      heading,
-      badgeText,
-      subheading,
-      dividerText
-    }`,
-  },
-  [HOME_SECTION_DATA_KEYS.howItWorks]: {
-    query: `*[_type == "howItWorks"][0]{
-      title,
-      subtitle,
-      steps[]{badge, title, text, iconType}
-    }`,
-  },
-  [HOME_SECTION_DATA_KEYS.supportedGames]: {
-    query: `*[_type == "supportedGames"][0]{
-      title,
-      subtitle,
-      showAllLabel,
-      showLessLabel,
-      featuredGames[]{
-        _key,
-        title,
-        coverImage{
-          ...,
-          "dimensions": asset->metadata.dimensions
-        }
-      },
-      moreGames[]{
-        _key,
-        title,
-        coverImage{
-          ...,
-          "dimensions": asset->metadata.dimensions
-        }
-      }
-    }`,
-  },
-  [HOME_SECTION_DATA_KEYS.faqSettings]: {
-    query: `*[_type == "faqSettings"][0]{ eyebrow, title, subtitle }`,
-    options: { cache: "no-store" },
-  },
-  [HOME_SECTION_DATA_KEYS.faqQuestions]: {
-    query: `coalesce(
-      *[_type == "faqSection" && _id == "faq"][0].questions,
-      *[_type == "faqSection"] | order(_createdAt asc) .questions[]
-    )`,
-    options: { cache: "no-store" },
-  },
-};
+const homeSectionResources = new Set(Object.values(HOME_SECTION_DATA_KEYS));
 
 const getStorageKey = (key) => `${STORAGE_PREFIX}${key}`;
 
@@ -255,8 +143,7 @@ const writeHomeSectionData = (key, value) => {
 };
 
 export const fetchHomeSectionData = (key) => {
-  const config = homeSectionQueries[key];
-  if (!config) {
+  if (!homeSectionResources.has(key)) {
     return Promise.reject(new Error(`Unknown home section key: ${key}`));
   }
 
@@ -269,8 +156,7 @@ export const fetchHomeSectionData = (key) => {
     return inflightCache.get(key);
   }
 
-  const request = publicClient
-    .fetch(config.query, {}, config.options || undefined)
+  const request = getPublicContent(key)
     .then((data) => {
       const normalizedData = normalizeHomeSectionData(key, data);
       writeHomeSectionData(key, normalizedData);

@@ -4,13 +4,14 @@ import React from "react";
 import { MemoryRouter } from "react-router-dom";
 import { AppContent } from "../App";
 import { buildQueryString } from "./routeQuery";
+import { sanitizeBrowserSearch } from "../lib/browserSearch";
 
 export default function LegacyRoutePage({
   pathname = "/",
   searchParams,
   initialHomeData = null,
 }) {
-  const query = buildQueryString(searchParams);
+  const query = sanitizeBrowserSearch(pathname, buildQueryString(searchParams));
   // Keep initial server/client entry deterministic; hash intent is handled post-mount.
   const initialEntry = `${pathname}${query}`;
 

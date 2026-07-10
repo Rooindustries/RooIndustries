@@ -15,11 +15,11 @@
     "sanity"
   ],
   "dependencies": {
-    "@sanity/vision": "^5.3.1",
-    "react": "^19.2",
-    "react-dom": "^19.2",
-    "sanity": "^5.3.1",
-    "styled-components": "^6.1.18"
+    "@sanity/vision": "6.4.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "sanity": "6.4.0",
+    "styled-components": "6.4.3"
   },
   "devDependencies": {
     "@sanity/eslint-config-studio": "^6.0.0",
@@ -27,6 +27,12 @@
     "eslint": "^9.28",
     "prettier": "^3.5",
     "typescript": "^5.8"
+  },
+  "overrides": {
+    "js-yaml": "3.15.0",
+    "json-2-csv": "5.5.11",
+    "smol-toml": "1.6.1",
+    "uuid": "11.1.1"
   },
   "prettier": {
     "semi": false,

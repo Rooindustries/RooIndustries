@@ -9,6 +9,7 @@ import {
   getTourneyCookieOptions,
   verifyTourneyCredentials,
 } from "../../../../src/server/tourney/auth";
+import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -85,10 +86,13 @@ const invalidResponse = (request, payload, status = 401, reason = "") => {
 };
 
 export async function POST(request) {
+  if (!isSameOriginMutation(request)) {
+    return NextResponse.json({ ok: false, error: "Cross-origin request rejected." }, { status: 403 });
+  }
   const payload = await readLoginPayload(request);
   const username = String(payload?.username || "").trim().toLowerCase();
   const clientAddress = getClientAddressFromHeaders(request.headers);
-  const rateLimit = checkTourneyRateLimit({
+  const rateLimit = await checkTourneyRateLimit({
     key: `tourney-login:${clientAddress}:${username || "unknown"}`,
     max: 8,
     windowMs: 15 * 60 * 1000,
@@ -97,11 +101,17 @@ export async function POST(request) {
   if (!rateLimit.ok) {
     if (wantsJson(request)) {
       return NextResponse.json(
-        { ok: false, error: "Too many attempts. Please try again later." },
+        { ok: false, error: rateLimit.error || "Too many attempts. Please try again later." },
         {
-          status: 429,
+          status: rateLimit.status || 429,
           headers: { "Retry-After": String(rateLimit.retryAfterSeconds) },
         }
+      );
+    }
+    if (rateLimit.status === 503) {
+      return NextResponse.json(
+        { ok: false, error: rateLimit.error },
+        { status: 503, headers: { "Retry-After": String(rateLimit.retryAfterSeconds) } }
       );
     }
     return redirectToLogin(request, "rate", payload?.redirectTo);

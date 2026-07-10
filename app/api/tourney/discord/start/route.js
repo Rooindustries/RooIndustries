@@ -14,6 +14,7 @@ import {
   createTourneyDiscordOAuthStateToken,
   readTourneyDiscordEmailToken,
 } from "../../../../../src/server/tourney/discordOAuth";
+import { isSameOriginMutation } from "../../../../../src/server/request/sameOrigin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,18 +32,19 @@ const getPlayerFromSession = async (request) => {
   return getApprovedTourneyPlayerById({ playerId: session.playerId });
 };
 
-const getPlayerFromEmailToken = async (request) => {
-  const url = new URL(request.url);
+const getPlayerFromEmailToken = async (token) => {
   const tokenPayload = readTourneyDiscordEmailToken({
-    token: url.searchParams.get("token") || "",
+    token: String(token || "").trim(),
   });
   if (!tokenPayload) return null;
   return getApprovedTourneyPlayerById(tokenPayload);
 };
 
 export async function GET(request) {
+  const url = new URL(request.url);
   const player =
-    (await getPlayerFromSession(request)) || (await getPlayerFromEmailToken(request));
+    (await getPlayerFromSession(request)) ||
+    (await getPlayerFromEmailToken(url.searchParams.get("token")));
   if (!player) {
     const url = new URL("/tourney/login", request.url);
     url.searchParams.set("error", "discord-auth");
@@ -67,4 +69,46 @@ export async function GET(request) {
     buildDiscordAuthorizationUrl({ state, config }),
     { status: 303 }
   );
+}
+
+export async function POST(request) {
+  if (!isSameOriginMutation(request)) {
+    return NextResponse.json(
+      { ok: false, error: "Cross-origin request rejected." },
+      { status: 403 }
+    );
+  }
+  const payload = await request.json().catch(() => ({}));
+  const player =
+    (await getPlayerFromSession(request)) ||
+    (await getPlayerFromEmailToken(payload.token));
+  if (!player) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "This Discord verification link is invalid or expired.",
+        signInUrl: "/tourney/login?next=/tourney/discord",
+      },
+      { status: 401 }
+    );
+  }
+
+  const config = getTourneyDiscordOAuthConfig({ baseUrl: request.url });
+  if (!config.enabled) {
+    return NextResponse.json(
+      { ok: false, error: "Discord verification is not configured." },
+      { status: 503 }
+    );
+  }
+  const state = createTourneyDiscordOAuthStateToken({ player, returnTo: "/tourney" });
+  if (!state) {
+    return NextResponse.json(
+      { ok: false, error: "Discord verification could not be started." },
+      { status: 503 }
+    );
+  }
+  return NextResponse.json({
+    ok: true,
+    authorizeUrl: buildDiscordAuthorizationUrl({ state, config }),
+  });
 }

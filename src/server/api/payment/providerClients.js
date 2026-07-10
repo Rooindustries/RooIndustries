@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import providerConfig from "./providerConfig.js";
+import { logSafeError } from "../../safeErrorLog.js";
 
 const {
   allowProviderModeInRuntime,
@@ -20,9 +21,7 @@ export const getPayPalCredentials = () => ({
       process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID ||
       ""
   ).trim(),
-  clientSecret: String(
-    process.env.PAYPAL_CLIENT_SECRET || process.env.REACT_APP_PAYPAL_CLIENT_SECRET || ""
-  ).trim(),
+  clientSecret: String(process.env.PAYPAL_CLIENT_SECRET || "").trim(),
 });
 
 export const DEFAULT_RAZORPAY_CURRENCY = String(
@@ -406,7 +405,7 @@ export const verifyRazorpayPayment = async ({
 
     return { ok: true };
   } catch (error) {
-    console.error("Razorpay payment verification failed:", error);
+    logSafeError("Razorpay payment verification failed", error);
     return { ok: false, reason: "razorpay_lookup_exception" };
   }
 };
@@ -476,7 +475,7 @@ export const getPayPalToken = async () => {
 
     return { ok: true, reason: "", token };
   } catch (error) {
-    console.error("PayPal token fetch failed:", error);
+    logSafeError("PayPal token fetch failed", error);
     return { ok: false, reason: "paypal_token_exception", token: "" };
   }
 };
@@ -642,7 +641,7 @@ export const verifyPayPalOrder = async ({
       providerPaymentId: String(capture?.id || "").trim(),
     };
   } catch (error) {
-    console.error("PayPal order verification failed:", error);
+    logSafeError("PayPal order verification failed", error);
     return { ok: false, reason: "paypal_lookup_exception" };
   }
 };

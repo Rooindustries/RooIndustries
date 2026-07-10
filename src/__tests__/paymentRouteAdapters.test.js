@@ -47,6 +47,7 @@ const loadPaymentActionRoute = async (handlerOverrides = {}) => {
   jest.resetModules();
 
   const handlers = {
+    cancel: handlerOverrides.cancel || buildEchoHandler("cancel"),
     finalize: handlerOverrides.finalize || buildEchoHandler("finalize"),
     providers: handlerOverrides.providers || buildEchoHandler("providers"),
     quote: handlerOverrides.quote || buildEchoHandler("quote"),
@@ -54,6 +55,11 @@ const loadPaymentActionRoute = async (handlerOverrides = {}) => {
     start: handlerOverrides.start || buildEchoHandler("start"),
     status: handlerOverrides.status || buildEchoHandler("status"),
   };
+
+  jest.doMock("../server/api/payment/cancel.js", () => ({
+    __esModule: true,
+    default: handlers.cancel,
+  }));
 
   jest.doMock("../server/api/payment/finalize.js", () => ({
     __esModule: true,
@@ -291,6 +297,106 @@ describe("payment app route adapters", () => {
       ok: false,
       error: "Not found",
     });
+  });
+
+  test.each([
+    {
+      name: "malformed JSON",
+      request: () =>
+        new Request("https://example.com/api/payment/start", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: '{"provider":',
+        }),
+      status: 400,
+      code: "malformed_json",
+    },
+    {
+      name: "duplicate JSON properties",
+      request: () =>
+        new Request("https://example.com/api/payment/start", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: '{"provider":"paypal","provider":"razorpay"}',
+        }),
+      status: 400,
+      code: "invalid_request",
+    },
+    {
+      name: "unsupported content types",
+      request: () =>
+        new Request("https://example.com/api/payment/start", {
+          method: "POST",
+          headers: { "content-type": "text/plain" },
+          body: '{"provider":"paypal"}',
+        }),
+      status: 415,
+      code: "unsupported_media_type",
+    },
+    {
+      name: "cross-origin mutation requests",
+      request: () =>
+        new Request("https://example.com/api/payment/start", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            origin: "https://attacker.example",
+          },
+          body: "{}",
+        }),
+      status: 403,
+      code: "cross_origin_rejected",
+    },
+    {
+      name: "oversized payloads",
+      request: () =>
+        new Request("https://example.com/api/payment/start", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ value: "x".repeat(130 * 1024) }),
+        }),
+      status: 413,
+      code: "payload_too_large",
+    },
+  ])("rejects $name before invoking payment code", async ({ request, status, code }) => {
+    const { route, handlers } = await loadPaymentActionRoute();
+    const response = await route.POST(request(), {
+      params: Promise.resolve({ action: "start" }),
+    });
+    expect(response.status).toBe(status);
+    await expect(response.json()).resolves.toMatchObject({ ok: false, code });
+    expect(handlers.start).not.toHaveBeenCalled();
+  });
+
+  test("rejects duplicate query parameters before invoking payment code", async () => {
+    const { route, handlers } = await loadPaymentActionRoute();
+    const response = await route.GET(
+      new Request("https://example.com/api/payment/status?payment=a&payment=b"),
+      { params: Promise.resolve({ action: "status" }) }
+    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "duplicate_query",
+    });
+    expect(handlers.status).not.toHaveBeenCalled();
+  });
+
+  test("rejects deeply nested JSON before invoking payment code", async () => {
+    const { route, handlers } = await loadPaymentActionRoute();
+    let body = { value: true };
+    for (let depth = 0; depth < 24; depth += 1) body = { child: body };
+    const response = await route.POST(
+      buildJsonRequest("https://example.com/api/payment/start", {
+        method: "POST",
+        body,
+      }),
+      { params: Promise.resolve({ action: "start" }) }
+    );
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "payload_too_complex",
+    });
+    expect(handlers.start).not.toHaveBeenCalled();
   });
 });
 

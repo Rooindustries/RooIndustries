@@ -171,6 +171,7 @@ export default function PackageDetailsModal({
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
+            aria-labelledby="package-details-modal-title"
           >
             <motion.button
               aria-label="Close"
@@ -178,7 +179,7 @@ export default function PackageDetailsModal({
               className="absolute right-3 top-3 text-info-text hover:text-white transition text-2xl z-10"
               onClick={handleClose}
             >
-              &times;
+              <span aria-hidden="true">&times;</span>
             </motion.button>
 
             <motion.div variants={itemVariants}>
@@ -188,6 +189,7 @@ export default function PackageDetailsModal({
             </motion.div>
 
             <motion.h3
+              id="package-details-modal-title"
               variants={itemVariants}
               className="text-2xl font-bold text-info-text"
             >

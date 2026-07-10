@@ -19,7 +19,6 @@ const getSanityConfig = (env = process.env) => ({
     "2023-10-01",
   token:
     env.SANITY_WRITE_TOKEN ||
-    env.REACT_APP_SANITY_WRITE_TOKEN ||
     env.SANITY_API_TOKEN ||
     "",
 });

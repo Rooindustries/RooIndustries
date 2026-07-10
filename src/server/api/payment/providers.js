@@ -11,11 +11,11 @@ export default async function handler(req, res) {
 
   const clientAddress = getClientAddress(req);
   if (
-    !requireRateLimit(res, {
+    !(await requireRateLimit(res, {
       key: `payment-providers:${clientAddress}`,
       max: 60,
       message: "Too many payment provider requests. Please try again later.",
-    })
+    }))
   ) {
     return;
   }

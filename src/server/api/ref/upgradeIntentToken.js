@@ -3,9 +3,6 @@ import crypto from "crypto";
 const secret = () =>
   String(
     process.env.UPGRADE_INTENT_SECRET ||
-      process.env.PAYMENT_SESSION_SECRET ||
-      process.env.HOLD_TOKEN_SECRET ||
-      process.env.REF_SESSION_SECRET ||
       (process.env.NODE_ENV === "production" ? "" : "dev_upgrade_intent_secret")
   ).trim();
 
@@ -68,7 +65,9 @@ export const verifyUpgradeIntentToken = ({
     ) {
       return null;
     }
-    const [encoded, signature] = token.split(".");
+    const parts = token.split(".");
+    if (parts.length !== 2) return null;
+    const [encoded, signature] = parts;
     if (!encoded || !signature) return null;
     const expected = sign(encoded, key);
     if (

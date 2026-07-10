@@ -2,6 +2,7 @@ const { resolvePaymentQuote } = require("../ref/pricing.js");
 const { resolvePaymentProviders } = require("./providerConfig.js");
 const { buildQuoteFingerprint } = require("./paymentRecord.js");
 const { verifyUpgradeIntentToken } = require("../ref/upgradeIntentToken.js");
+const { getClientAddress, requireRateLimit } = require("../ref/rateLimit.js");
 
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
@@ -24,6 +25,14 @@ module.exports = async function handler(req, res) {
       email = "",
       upgradeIntentToken = "",
     } = bookingPayload;
+
+    const allowed = await requireRateLimit(res, {
+      key: `payment-quote:${getClientAddress(req)}`,
+      max: 30,
+      windowMs: 15 * 60 * 1000,
+      message: "Too many payment quote requests. Please try again later.",
+    });
+    if (!allowed) return;
 
     if (!String(packageTitle || "").trim()) {
       return res.status(400).json({
@@ -104,10 +113,16 @@ module.exports = async function handler(req, res) {
     });
   } catch (error) {
     const status = Number(error?.status) || 500;
+    const clientError = status >= 400 && status < 500;
     return res.status(status).json({
       ok: false,
-      error: error?.message || "Failed to quote payment.",
-      code: error?.code || "",
+      error:
+        clientError && String(error?.message || "").trim()
+          ? error.message
+          : "Failed to quote payment.",
+      ...(clientError && String(error?.code || "").trim()
+        ? { code: error.code }
+        : {}),
     });
   }
 };

@@ -12,7 +12,9 @@ import {
   renderTourneyAccountsJson,
   summarizeTourneyAccounts,
 } from "../../../../src/server/tourney/auth";
+import { buildTourneyPublicError } from "../../../../src/server/tourney/publicError";
 import { writePersistedTourneyAccountsJson } from "../../../../src/server/tourney/accountStore";
+import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -55,13 +57,14 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
+  if (!isSameOriginMutation(request)) return jsonError("Cross-origin request rejected.", 403);
   const session = await getOwnerSession(request);
   if (!session) {
     return jsonError("Not found.", 404);
   }
 
   const clientAddress = getClientAddressFromHeaders(request.headers);
-  const rateLimit = checkTourneyRateLimit({
+  const rateLimit = await checkTourneyRateLimit({
     key: `tourney-owner:${clientAddress}:${session.username}`,
     max: 20,
     windowMs: 15 * 60 * 1000,
@@ -69,9 +72,9 @@ export async function POST(request) {
 
   if (!rateLimit.ok) {
     return NextResponse.json(
-      { ok: false, error: "Too many changes. Please try again later." },
+      { ok: false, error: rateLimit.error || "Too many changes. Please try again later." },
       {
-        status: 429,
+        status: rateLimit.status || 429,
         headers: { "Retry-After": String(rateLimit.retryAfterSeconds) },
       }
     );
@@ -119,6 +122,7 @@ export async function POST(request) {
 
     return response;
   } catch (error) {
-    return jsonError(error?.message || "Unable to update account.");
+    const failure = buildTourneyPublicError(error, "Unable to update account.");
+    return jsonError(failure.message, failure.status);
   }
 }

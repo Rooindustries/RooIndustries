@@ -160,7 +160,7 @@ export default function TourneyAppealsPanel({
                   {appeal.captainName ? ` - Captain: ${appeal.captainName}` : ""}
                 </small>
                 {appeal.evidenceUrl ? (
-                  <a href={appeal.evidenceUrl} rel="noreferrer" target="_blank">
+                  <a href={appeal.evidenceUrl} rel="noopener noreferrer" target="_blank">
                     Evidence
                   </a>
                 ) : null}

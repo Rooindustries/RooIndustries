@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useForm, ValidationError } from "@formspree/react";
-import { client } from "../sanityClient";
+import { getPublicContent } from "../lib/publicContentClient";
 
 export default function Contact() {
   const [contactData, setContactData] = useState(null);
@@ -9,15 +9,7 @@ export default function Contact() {
   const [state, handleSubmit] = useForm("mpwybpen");
 
   useEffect(() => {
-    client
-      .fetch(
-        `*[_type == "contact"][0]{
-          title,
-          subtitle,
-          email,
-          formId
-        }`
-      )
+    getPublicContent("contact")
       .then(setContactData)
       .catch(console.error);
   }, []);

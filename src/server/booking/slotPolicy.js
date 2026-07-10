@@ -4,6 +4,7 @@ import {
   isBookingBlockingStatus,
 } from "./bookingStatus.js";
 import { isExactWholeMinute } from "./slotIdentity.js";
+import { logSafeError } from "../safeErrorLog.js";
 
 const { getPackageTitleAliases, isTopPackageTitle } = packagePricing;
 
@@ -52,7 +53,7 @@ export const formatOwnerDateLabel = (utcDate, timeZone = OWNER_TZ_NAME) => {
       }, {});
     return `${parts.weekday || ""} ${parts.month || ""} ${parts.day || ""} ${parts.year || ""}`.trim();
   } catch (err) {
-    console.error("Failed to format owner date label", err);
+    logSafeError("Owner date formatting failed", err);
     return "";
   }
 };
@@ -65,7 +66,7 @@ export const formatOwnerTimeLabel = (utcDate, timeZone = OWNER_TZ_NAME) => {
       minute: "2-digit",
     }).format(utcDate);
   } catch (err) {
-    console.error("Failed to format owner time label", err);
+    logSafeError("Owner time formatting failed", err);
     return "";
   }
 };

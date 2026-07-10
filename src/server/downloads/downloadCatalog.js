@@ -1,5 +1,6 @@
 import path from "node:path";
 import posixPath from "node:path/posix";
+import { logSafeError } from "../safeErrorLog.js";
 
 export const DEFAULT_DOWNLOAD_ROOT = "downloads";
 export const DEFAULT_DOWNLOAD_CONTENT_TYPE = "application/zip";
@@ -113,7 +114,7 @@ export const parseDownloadCatalog = (env = process.env) => {
 
     return entries.map(normalizeCatalogEntry).filter(Boolean);
   } catch (error) {
-    console.warn("[downloads] DOWNLOAD_CATALOG_JSON is invalid:", error.message);
+    logSafeError("Download catalog configuration is invalid", error);
     return [];
   }
 };

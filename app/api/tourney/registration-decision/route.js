@@ -6,6 +6,8 @@ import {
 } from "../../../../src/server/tourney/auth";
 import { isMatchingTourneyApproverSession } from "../../../../src/server/tourney/access";
 import { sendTourneyPlayerApprovedEmail } from "../../../../src/server/tourney/email";
+import { logSafeError } from "../../../../src/server/safeErrorLog";
+import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
 import {
   applyRegistrationDecision,
   getRegistrationDecisionToken,
@@ -79,17 +81,36 @@ const renderDecisionPage = ({
   );
 };
 
-export async function GET(request) {
+const renderDecisionJson = ({ title, body, ok = false, status = 400, linkHref = "" }) =>
+  Response.json(
+    {
+      ok,
+      title,
+      message: String(body || "")
+        .replace(/<[^>]+>/g, "")
+        .replace(/&amp;/g, "&")
+        .replace(/&#39;/g, "'")
+        .replace(/&quot;/g, '"'),
+      ...(linkHref ? { signInUrl: linkHref } : {}),
+    },
+    { status }
+  );
+
+const handleDecision = async ({
+  request,
+  token,
+  decision,
+  approvedRolePlay,
+  respond,
+}) => {
   const url = new URL(request.url);
-  const token = url.searchParams.get("token");
-  const decision = String(url.searchParams.get("decision") || "").toLowerCase();
-  const approvedRolePlay = String(url.searchParams.get("role") || "").trim();
 
   if (!token || !["approve", "deny"].includes(decision)) {
-    return renderDecisionPage({
+    return respond({
       title: "Invalid link",
       body: "This approval link is missing required details.",
       tone: "danger",
+      status: 400,
     });
   }
 
@@ -99,10 +120,11 @@ export async function GET(request) {
       purpose: decision,
     });
     if (!tokenRow) {
-      return renderDecisionPage({
+      return respond({
         title: "Link unavailable",
         body: "This approval link was already used, revoked, or is invalid.",
         tone: "danger",
+        status: 410,
       });
     }
 
@@ -112,10 +134,11 @@ export async function GET(request) {
       version: tokenRow.recipient_version,
     });
     if (!approver) {
-      return renderDecisionPage({
+      return respond({
         title: "Access revoked",
         body: "This approval link is no longer valid for that caster or owner account.",
         tone: "danger",
+        status: 403,
       });
     }
 
@@ -123,7 +146,7 @@ export async function GET(request) {
     const session = await readTourneySessionFromStore({ token: sessionToken });
     if (!isMatchingTourneyApproverSession({ session, approver })) {
       const accountLabel = `${approver.role} ${approver.username}`;
-      return renderDecisionPage({
+      return respond({
         title: session ? "Wrong account" : "Sign in required",
         body: session
           ? `This approval link is assigned to <strong>${escapeHtml(
@@ -133,8 +156,9 @@ export async function GET(request) {
               accountLabel
             )}</strong> before using this approval link.`,
         tone: "danger",
-        linkHref: "/tourney/login?next=/tourney/manage",
+        linkHref: "/tourney/login?next=/tourney/decision",
         linkLabel: "Sign in",
+        status: 401,
       });
     }
 
@@ -156,25 +180,58 @@ export async function GET(request) {
         });
         emailNotice = " An approval email was sent to the player.";
       } catch (emailError) {
-        console.error("TOURNEY_PLAYER_APPROVED_EMAIL_ERROR:", emailError);
+        logSafeError("Tournament approval email failed", emailError);
         tone = "danger";
         emailNotice =
           " The player was approved, but the approval email could not be sent.";
       }
     }
 
-    return renderDecisionPage({
+    return respond({
       title: decision === "approve" ? "Approved" : "Denied",
       body: `<strong>${escapeHtml(player.displayName || player.discord)}</strong> has been ${
         decision === "approve" ? "approved" : "denied"
       }.${emailNotice}`,
       tone,
+      ok: true,
+      status: 200,
     });
   } catch (error) {
-    return renderDecisionPage({
+    logSafeError("Tournament registration decision failed", error);
+    return respond({
       title: "Decision failed",
-      body: escapeHtml(error?.message || "Unable to update this registration."),
+      body: "Unable to update this registration.",
       tone: "danger",
+      status: 500,
     });
   }
+};
+
+export async function GET(request) {
+  const url = new URL(request.url);
+  return handleDecision({
+    request,
+    token: url.searchParams.get("token"),
+    decision: String(url.searchParams.get("decision") || "").toLowerCase(),
+    approvedRolePlay: String(url.searchParams.get("role") || "").trim(),
+    respond: (options) => renderDecisionPage(options),
+  });
+}
+
+export async function POST(request) {
+  if (!isSameOriginMutation(request)) {
+    return renderDecisionJson({
+      title: "Request rejected",
+      body: "Cross-origin request rejected.",
+      status: 403,
+    });
+  }
+  const payload = await request.json().catch(() => ({}));
+  return handleDecision({
+    request,
+    token: String(payload.token || "").trim(),
+    decision: String(payload.decision || "").trim().toLowerCase(),
+    approvedRolePlay: String(payload.role || "").trim(),
+    respond: renderDecisionJson,
+  });
 }

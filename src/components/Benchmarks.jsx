@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { client, urlFor } from "../sanityClient";
+import { urlFor } from "../sanityClient";
+import { getPublicContent } from "../lib/publicContentClient";
 import ImageZoomModal from "../components/ImageZoomModal";
 
 export default function Benchmarks({ setIsModalOpen = () => {} }) {
@@ -24,26 +25,7 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
       : "";
 
   useEffect(() => {
-    client
-      .fetch(
-        `*[_type == "benchmark"] 
-          | order(coalesce(sortOrder, 9999) asc, _createdAt asc) {
-            title,
-            subtitle,
-            beforeImage{
-              ...,
-              "dimensions": asset->metadata.dimensions
-            },
-            afterImage{
-              ...,
-              "dimensions": asset->metadata.dimensions
-            },
-            reviewImage{
-              ...,
-              "dimensions": asset->metadata.dimensions
-            }
-          }`
-      )
+    getPublicContent("benchmarks")
       .then(setBenchmarks)
       .catch(console.error);
   }, []);

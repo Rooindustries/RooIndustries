@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { client } from "../sanityClient";
+import { getPublicContent } from "../lib/publicContentClient";
 
 const normalizeReferralLoginPath = (path) =>
   !path || path === "/login" ? "/referrals/login" : path;
@@ -25,17 +25,7 @@ export default function ReferralBox() {
 
     async function fetchContent() {
       try {
-        const data = await client.fetch(
-          `*[_type == "referralBox"][0]{
-            heading,
-            description,
-            emailPlaceholder,
-            startButtonText,
-            loginButtonText,
-            loginPath,
-            registerPath
-          }`
-        );
+        const data = await getPublicContent("referral-box");
 
         if (!cancelled && data) {
           setContent((prev) => ({
@@ -61,7 +51,7 @@ export default function ReferralBox() {
   function handleStart() {
     if (!email || !email.includes("@")) return;
 
-    localStorage.setItem("referral_prefill_email", email);
+    sessionStorage.setItem("referral_prefill_email", email);
     nav(content.registerPath || "/referrals/register");
   }
 

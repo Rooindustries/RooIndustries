@@ -541,13 +541,13 @@ describe("tourney auth", () => {
     ).toBeNull();
   });
 
-  test("rate limits repeated login attempts by key", () => {
+  test("rate limits repeated login attempts by key", async () => {
     const auth = loadAuth();
     const key = `test-key-${Date.now()}`;
 
-    expect(auth.checkTourneyRateLimit({ key, max: 2 }).ok).toBe(true);
-    expect(auth.checkTourneyRateLimit({ key, max: 2 }).ok).toBe(true);
-    expect(auth.checkTourneyRateLimit({ key, max: 2 }).ok).toBe(false);
+    expect((await auth.checkTourneyRateLimit({ key, max: 2 })).ok).toBe(true);
+    expect((await auth.checkTourneyRateLimit({ key, max: 2 })).ok).toBe(true);
+    expect((await auth.checkTourneyRateLimit({ key, max: 2 })).ok).toBe(false);
   });
 
   test("keeps production cookies secure unless local verification overrides it", () => {

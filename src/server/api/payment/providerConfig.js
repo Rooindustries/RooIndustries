@@ -152,9 +152,7 @@ const resolvePaymentProviders = () => {
       process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID ||
       ""
   ).trim();
-  const paypalClientSecret = String(
-    process.env.PAYPAL_CLIENT_SECRET || process.env.REACT_APP_PAYPAL_CLIENT_SECRET || ""
-  ).trim();
+  const paypalClientSecret = String(process.env.PAYPAL_CLIENT_SECRET || "").trim();
   const paypalMode = resolvePayPalMode(runtimePolicy);
   const paypalEnabled =
     !!paypalClientId &&

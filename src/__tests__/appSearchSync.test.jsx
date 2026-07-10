@@ -72,7 +72,7 @@ describe("AppContent search sync", () => {
 
   beforeEach(() => {
     mockSanitizeBrowserSearch.mockReset();
-    mockSanitizeBrowserSearch.mockReturnValue("?token=abc123");
+    mockSanitizeBrowserSearch.mockReturnValue("");
     mockNavigate.mockReset();
     window.scrollTo = jest.fn();
     window.history.replaceState({}, "", "/referrals/reset?token=abc123");
@@ -85,7 +85,7 @@ describe("AppContent search sync", () => {
     cleanup();
   });
 
-  test("keeps reset tokens on non-home routes instead of stripping them", async () => {
+  test("strips reset tokens on non-home routes", async () => {
     render(<AppContent initialHomeData={null} routeShell="memory" />);
 
     await waitFor(() => {
@@ -96,7 +96,7 @@ describe("AppContent search sync", () => {
     });
 
     expect(window.location.pathname).toBe("/referrals/reset");
-    expect(window.location.search).toBe("?token=abc123");
-    expect(replaceStateSpy).not.toHaveBeenCalled();
+    expect(window.location.search).toBe("");
+    expect(replaceStateSpy).toHaveBeenCalled();
   });
 });

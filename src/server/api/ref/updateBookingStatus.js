@@ -1,6 +1,7 @@
 import { createClient } from "@sanity/client";
 import { requireAdminKey } from "./auth.js";
 import { applyBookingStatusTransition } from "./bookingRefunds.js";
+import { logSafeError } from "../../safeErrorLog.js";
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -33,7 +34,7 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, ...result });
   } catch (error) {
     const status = Number(error?.status) || 500;
-    console.error("Error updating booking:", error);
+    logSafeError("Booking status update failed", error);
     return res.status(status).json({
       ok: false,
       error: status < 500 ? error.message : "Failed to update booking status",

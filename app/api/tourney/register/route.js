@@ -5,11 +5,14 @@ import {
   getTourneyApprovalRecipients,
 } from "../../../../src/server/tourney/auth";
 import { sendTourneyRegistrationApprovalEmails } from "../../../../src/server/tourney/email";
+import { logSafeError } from "../../../../src/server/safeErrorLog";
 import {
   createPendingTourneyPlayer,
   getTourneyRegistrationCloseIso,
   isTourneyRegistrationClosed,
 } from "../../../../src/server/tourney/playerStore";
+import { buildTourneyPublicError } from "../../../../src/server/tourney/publicError";
+import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,6 +50,7 @@ const readPayload = async (request) => {
 };
 
 export async function POST(request) {
+  if (!isSameOriginMutation(request)) return jsonError("Cross-origin request rejected.", 403);
   if (isTourneyRegistrationClosed()) {
     return jsonError("Registration is closed.", 403, {
       code: "REGISTRATION_CLOSED",
@@ -55,7 +59,7 @@ export async function POST(request) {
   }
 
   const clientAddress = getClientAddressFromHeaders(request.headers);
-  const rateLimit = checkTourneyRateLimit({
+  const rateLimit = await checkTourneyRateLimit({
     key: `tourney-register:${clientAddress}`,
     max: 8,
     windowMs: 30 * 60 * 1000,
@@ -63,9 +67,9 @@ export async function POST(request) {
 
   if (!rateLimit.ok) {
     return NextResponse.json(
-      { ok: false, error: "Too many registrations. Please try again later." },
+      { ok: false, error: rateLimit.error || "Too many registrations. Please try again later." },
       {
-        status: 429,
+        status: rateLimit.status || 429,
         headers: { "Retry-After": String(rateLimit.retryAfterSeconds) },
       }
     );
@@ -87,7 +91,7 @@ export async function POST(request) {
         baseUrl,
       });
     } catch (emailError) {
-      console.error("TOURNEY_REGISTRATION_EMAIL_ERROR:", emailError);
+      logSafeError("Tournament registration email failed", emailError);
     }
 
     return NextResponse.json({
@@ -95,11 +99,12 @@ export async function POST(request) {
       message: "Registration submitted. Wait for approval before logging in.",
     });
   } catch (error) {
-    return jsonError(error?.message || "Unable to submit registration.", error?.status || 500, {
-      code: error?.code || undefined,
-      capacity: error?.capacity || undefined,
-      capacitySnapshot: error?.capacitySnapshot || undefined,
-      errors: error?.errors || undefined,
+    const failure = buildTourneyPublicError(error, "Unable to submit registration.");
+    return jsonError(failure.message, failure.status, {
+      code: failure.code,
+      capacity: failure.status < 500 ? error?.capacity : undefined,
+      capacitySnapshot: failure.status < 500 ? error?.capacitySnapshot : undefined,
+      errors: failure.errors,
     });
   }
 }
