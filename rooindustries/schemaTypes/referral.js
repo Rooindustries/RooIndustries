@@ -299,6 +299,6 @@ export default {
     {name: 'passwordResetRequired', title: 'Password Reset Required', type: 'boolean', readOnly: true},
     {name: 'credentialVersion', title: 'Credential Version', type: 'number', readOnly: true, hidden: true},
     {name: 'passwordChangedAt', title: 'Password Changed At', type: 'datetime', readOnly: true, hidden: true},
-    {name: 'securityClosureCredentialInvalidatedAt', title: 'Security Closure Credential Invalidated At', type: 'datetime', readOnly: true, hidden: true},
+    {name: 'passwordStorageUpgradedAt', title: 'Password Storage Upgraded At', type: 'datetime', readOnly: true, hidden: true},
   ],
 }
