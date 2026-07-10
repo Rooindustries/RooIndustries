@@ -270,13 +270,17 @@ export default function BookingForm({ isMobile }) {
   const [errorStep1, setErrorStep1] = useState("");
   const [errorStep2, setErrorStep2] = useState("");
 
-  const [userTimeZone] = useState(() => {
+  const [userTimeZone, setUserTimeZone] = useState("UTC");
+
+  useEffect(() => {
     try {
-      return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      setUserTimeZone(
+        Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+      );
     } catch {
-      return "UTC";
+      setUserTimeZone("UTC");
     }
-  });
+  }, []);
 
   const [form, setForm] = useState({
     discord: "",

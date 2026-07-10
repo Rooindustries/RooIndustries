@@ -8,9 +8,7 @@ const BOOKING_DRAFT_KEY = "booking_draft";
 const MOBILE_MAX_WIDTH = 780;
 
 const useIsMobileWidth = (maxWidth = MOBILE_MAX_WIDTH) => {
-  const getIsMobile = () =>
-    typeof window !== "undefined" ? window.innerWidth <= maxWidth : false;
-  const [isMobileWidth, setIsMobileWidth] = useState(getIsMobile);
+  const [isMobileWidth, setIsMobileWidth] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
