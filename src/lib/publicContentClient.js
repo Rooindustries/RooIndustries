@@ -1,5 +1,8 @@
 const buildPublicContentUrl = (resource, params = {}) => {
-  const url = new URL(`/api/content/${encodeURIComponent(resource)}`, window.location.origin);
+  const url = new URL(
+    `/api/content/${encodeURIComponent(resource)}`,
+    window.location.origin
+  );
   Object.entries(params).forEach(([key, value]) => {
     const values = Array.isArray(value) ? value : [value];
     values

@@ -2,7 +2,6 @@ import React from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import BookingForm from "../components/BookingForm";
-import { client } from "../sanityClient";
 
 let mockLocation = {
   pathname: "/booking",
@@ -35,12 +34,6 @@ jest.mock(
 
 const { __setMockLocation } = require("react-router-dom");
 
-jest.mock("../sanityClient", () => ({
-  client: {
-    fetch: jest.fn(),
-  },
-}));
-
 const CLIENT_EMAIL = "vihaann2.0@gmail.com";
 const OWNER_EMAIL = "serviroo@rooindustries.com";
 const OWNER_TZ = "Asia/Kolkata";
@@ -64,7 +57,6 @@ describe("booking calendar UI", () => {
   let resolvedOptionsSpy;
 
   beforeEach(() => {
-    client.fetch.mockReset();
     mockNavigate.mockReset();
     window.sessionStorage.clear();
     window.localStorage.clear();
@@ -92,14 +84,6 @@ describe("booking calendar UI", () => {
       vertexEssentialsDateSlots: [],
       packageDateSlots: [],
     };
-
-    client.fetch.mockImplementation(async (query) => {
-      const q = String(query || "");
-      if (q.includes('_type == "bookingSettings"')) return settings;
-      if (q.includes('_type == "booking"')) return [];
-      if (q.includes('_type == "slotHold"')) return [];
-      return null;
-    });
 
     let holdRequestBody = null;
     global.fetch = jest.fn(async (url, options = {}) => {
