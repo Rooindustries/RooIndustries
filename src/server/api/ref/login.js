@@ -1,5 +1,6 @@
 import { createClient } from "@sanity/client";
 import bcrypt from "bcryptjs";
+import crypto from "node:crypto";
 import { setReferralSessionCookie } from "./auth.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import { logSafeError } from "../../safeErrorLog.js";
@@ -46,21 +47,47 @@ export default async function handler(req, res) {
           (defined(slug.current) && lower(slug.current) == $identifier)
           || (defined(creatorEmail) && lower(creatorEmail) == $identifier)
         )
-      ][0]{_id,name,slug,creatorPassword,passwordResetRequired}`,
+      ][0]{_id,_rev,name,slug,creatorPassword,passwordResetRequired}`,
       { identifier: normalizedIdentifier }
     );
 
     const stored = String(referral?.creatorPassword || "");
     const looksHashed = /^\$2[aby]\$/.test(stored);
-    const valid = await bcrypt.compare(
+    const suppliedBuffer = Buffer.from(normalizedPassword);
+    const storedBuffer = Buffer.from(stored);
+    const legacyValid =
+      !looksHashed &&
+      storedBuffer.length > 0 &&
+      suppliedBuffer.length === storedBuffer.length &&
+      crypto.timingSafeEqual(suppliedBuffer, storedBuffer);
+    const hashedValid = await bcrypt.compare(
       normalizedPassword,
       looksHashed ? stored : DUMMY_PASSWORD_HASH
     );
-    if (!referral || !looksHashed || !valid || referral.passwordResetRequired === true) {
+    const valid = looksHashed ? hashedValid : legacyValid;
+    if (!referral || !valid || referral.passwordResetRequired === true) {
       return res.status(401).json({
         ok: false,
         error: "Invalid login details. Use Forgot Password if you need to reset access.",
       });
+    }
+
+    if (!looksHashed) {
+      try {
+        const hash = await bcrypt.hash(normalizedPassword, 12);
+        let patch = client.patch(referral._id);
+        if (referral._rev) patch = patch.ifRevisionId(referral._rev);
+        await patch
+          .set({
+            creatorPassword: hash,
+            credentialVersion: 2,
+            passwordResetRequired: false,
+            passwordStorageUpgradedAt: new Date().toISOString(),
+          })
+          .commit({ visibility: "sync" });
+      } catch (error) {
+        logSafeError("Referral password storage upgrade failed", error);
+      }
     }
 
     setReferralSessionCookie(
