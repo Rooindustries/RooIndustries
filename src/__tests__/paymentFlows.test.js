@@ -77,10 +77,13 @@ const renderPayment = (bookingData, search = "") => {
 };
 
 const loadRazorpay = async () => {
-  const script = document.querySelector(
-    'script[src="https://checkout.razorpay.com/v1/checkout.js"]'
-  );
-  expect(script).toBeTruthy();
+  let script = null;
+  await waitFor(() => {
+    script = document.querySelector(
+      'script[src="https://checkout.razorpay.com/v1/checkout.js"]'
+    );
+    expect(script).toBeTruthy();
+  });
   await act(async () => {
     script.onload();
   });
@@ -101,6 +104,35 @@ afterEach(() => {
 });
 
 describe("payment session UI", () => {
+  test("does not load the Razorpay SDK while the provider is disabled", async () => {
+    global.fetch = jest.fn(async (url) => {
+      if (url === "/api/payment/providers") {
+        return response({
+          ok: true,
+          providers: {
+            razorpay: { enabled: false, mode: "missing" },
+            paypal: { enabled: false, mode: "missing", clientId: "" },
+          },
+        });
+      }
+      return response({
+        ok: true,
+        quoteFingerprint: "quote_disabled",
+        quote: { grossAmount: 10, netAmount: 10, isFree: false },
+      });
+    });
+
+    renderPayment(bookingFixture());
+    await waitFor(() =>
+      expect(global.fetch).toHaveBeenCalledWith("/api/payment/providers")
+    );
+    expect(
+      document.querySelector(
+        'script[src="https://checkout.razorpay.com/v1/checkout.js"]'
+      )
+    ).toBeNull();
+  });
+
   test("Razorpay uses a server quote, bearer finalize, and refreshed hold", async () => {
     const bookingData = bookingFixture();
     const fetchCalls = [];
@@ -250,6 +282,14 @@ describe("payment session UI", () => {
 
     renderPayment(bookingFixture());
     await waitFor(() => expect(paypalButtonsProps?.disabled).toBe(false));
+    const paypalShell = screen
+      .getByRole("button", { name: "PayPal Buttons" })
+      .closest(".paypal-checkout-shell");
+    expect(paypalShell).toHaveClass("overflow-hidden", "rounded-lg");
+    expect(paypalShell.className).toContain("[&_iframe]:!border-0");
+    expect(
+      screen.getByRole("link", { name: /back to booking/i }).parentElement
+    ).toHaveClass("pb-36");
 
     const clientCreate = jest.fn();
     let orderId;
@@ -633,7 +673,10 @@ describe("payment session UI", () => {
         { replace: true, state: {} }
       )
     );
-    expect(screen.getByText("Performance Vertex Overhaul")).toBeInTheDocument();
+    expect(screen.queryByText("Performance Vertex Overhaul")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/price confirmation is unavailable/i)
+    ).toBeInTheDocument();
     expect(screen.queryByText(/legacy/i)).not.toBeInTheDocument();
   });
 });

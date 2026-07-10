@@ -66,6 +66,7 @@ const TOKEN_BYTES = 32;
 const APPROVAL_TOKEN_NO_EXPIRES_AT = "9999-12-31T23:59:59.999Z";
 const RESET_TOKEN_MAX_AGE_MS = 60 * 60 * 1000;
 const DUMMY_PLAYER_HASH =
+  // nosemgrep: generic.secrets.security.detected-bcrypt-hash.detected-bcrypt-hash
   "$2b$10$t6/bHTKT3hABxzcK8HIMauYsrY88CioIiiq0Cwci4RPXbOq30kAWy";
 
 const MEMORY_STORE =

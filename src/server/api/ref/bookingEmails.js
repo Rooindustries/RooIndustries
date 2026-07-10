@@ -1,6 +1,7 @@
 import { createClient } from "@sanity/client";
 import { Resend } from "resend";
 import crypto from "crypto";
+import { getSafeErrorCode, logSafeError } from "../../safeErrorLog.js";
 
 const writeClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -196,10 +197,7 @@ const resolveBookingOwnerEmail = async (client) => {
       owner = ownerFromSettings;
     }
   } catch (error) {
-    console.error(
-      "Failed to load booking owner email:",
-      error?.message || error
-    );
+    logSafeError("Booking owner email lookup failed", error);
   }
 
   return owner;
@@ -530,15 +528,19 @@ export const sendBookingEmailsForBooking = async ({
       );
 
       if (error) {
-        dispatch.client.skippedReason =
-          error?.message || error?.name || "resend_client_error";
+        dispatch.client.skippedReason = getSafeErrorCode(
+          error,
+          "resend_client_error"
+        );
       } else {
         dispatch.client.sent = true;
         patchValues.emailDispatchClientSentAt = now;
       }
     } catch (error) {
-      dispatch.client.skippedReason =
-        error?.message || "resend_client_exception";
+      dispatch.client.skippedReason = getSafeErrorCode(
+        error,
+        "resend_client_exception"
+      );
     }
   }
 
@@ -567,15 +569,19 @@ export const sendBookingEmailsForBooking = async ({
       );
 
       if (error) {
-        dispatch.owner.skippedReason =
-          error?.message || error?.name || "resend_owner_error";
+        dispatch.owner.skippedReason = getSafeErrorCode(
+          error,
+          "resend_owner_error"
+        );
       } else {
         dispatch.owner.sent = true;
         patchValues.emailDispatchOwnerSentAt = now;
       }
     } catch (error) {
-      dispatch.owner.skippedReason =
-        error?.message || "resend_owner_exception";
+      dispatch.owner.skippedReason = getSafeErrorCode(
+        error,
+        "resend_owner_exception"
+      );
     }
   }
 
@@ -741,10 +747,10 @@ export const dispatchRescheduleNotifications = async ({
           },
           { idempotencyKey: `booking-${recoveryBooking._id}-reschedule-client` }
         );
-        if (error) errors.push(error.message || "reschedule_client_error");
+        if (error) errors.push(getSafeErrorCode(error, "reschedule_client_error"));
         else patchValues.recoveryClientNotifiedAt = now;
       } catch (error) {
-        errors.push(error?.message || "reschedule_client_exception");
+        errors.push(getSafeErrorCode(error, "reschedule_client_exception"));
       }
     } else if (!recoveryBooking.recoveryClientNotifiedAt) {
       errors.push("missing_client_recipient");
@@ -775,10 +781,10 @@ export const dispatchRescheduleNotifications = async ({
           },
           { idempotencyKey: `booking-${recoveryBooking._id}-reschedule-owner` }
         );
-        if (error) errors.push(error.message || "reschedule_owner_error");
+        if (error) errors.push(getSafeErrorCode(error, "reschedule_owner_error"));
         else patchValues.recoveryOwnerNotifiedAt = now;
       } catch (error) {
-        errors.push(error?.message || "reschedule_owner_exception");
+        errors.push(getSafeErrorCode(error, "reschedule_owner_exception"));
       }
     } else if (!recoveryBooking.recoveryOwnerNotifiedAt) {
       errors.push("missing_owner_recipient");

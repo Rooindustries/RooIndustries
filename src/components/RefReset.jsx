@@ -1,25 +1,46 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
-function useQuery() {
-  const { search } = useLocation();
-  return new URLSearchParams(search);
-}
+const RESET_TOKEN_STORAGE_KEY = "referral_reset_token";
+
+const readResetToken = ({ hash }) => {
+  if (typeof window === "undefined") return "";
+  const fragmentToken = new URLSearchParams(
+    String(hash || "").replace(/^#/, "")
+  ).get("token");
+  const token = String(
+    fragmentToken ||
+      window.sessionStorage.getItem(RESET_TOKEN_STORAGE_KEY) ||
+      ""
+  ).trim();
+  if (token) window.sessionStorage.setItem(RESET_TOKEN_STORAGE_KEY, token);
+  return token;
+};
 
 export default function RefReset() {
   const nav = useNavigate();
-  const q = useQuery();
-  const token = q.get("token");
+  const location = useLocation();
+  const [token, setToken] = useState("");
+  const [tokenReady, setTokenReady] = useState(false);
 
   const [pass1, setPass1] = useState("");
   const [pass2, setPass2] = useState("");
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
 
+  useEffect(() => {
+    setToken(readResetToken(location));
+    setTokenReady(true);
+    if (!location.search && !location.hash) return;
+    nav(location.pathname, { replace: true });
+  }, [location.hash, location.pathname, location.search, nav]);
+
   function showToast(type, message) {
     setToast({ type, message });
     setTimeout(() => setToast(null), 3000);
   }
+
+  if (!tokenReady) return null;
 
   if (!token) {
     return (
@@ -57,11 +78,12 @@ export default function RefReset() {
       if (!data.ok) {
         showToast("error", data.error || "Reset failed");
       } else {
+        sessionStorage.removeItem(RESET_TOKEN_STORAGE_KEY);
         showToast("success", "Password updated! Redirecting...");
         setTimeout(() => nav("/referrals/login"), 1500);
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      console.error("Referral password reset failed");
       showToast("error", "Server error");
     }
 

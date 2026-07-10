@@ -1,7 +1,6 @@
 import {
   RouteTitle,
   Section,
-  StatusPanel,
   TourneyShell,
   getTourneySession,
 } from "../TourneyShared";
@@ -20,10 +19,8 @@ export const metadata = {
   },
 };
 
-export default async function TourneyResetPage({ searchParams }) {
+export default async function TourneyResetPage() {
   const session = await getTourneySession();
-  const resolvedSearchParams = await searchParams;
-  const token = String(resolvedSearchParams?.token || "");
 
   return (
     <TourneyShell session={session}>
@@ -33,13 +30,7 @@ export default async function TourneyResetPage({ searchParams }) {
 
       <div className="tourney-grid">
         <Section id="reset-password" eyebrow="Reset" title="New Password" wide>
-          {token ? (
-            <TourneyResetForm token={token} />
-          ) : (
-            <StatusPanel label="Missing" title="Reset token missing">
-              Request a new password reset link before setting a new password.
-            </StatusPanel>
-          )}
+          <TourneyResetForm />
         </Section>
       </div>
     </TourneyShell>

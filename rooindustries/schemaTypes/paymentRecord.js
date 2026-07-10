@@ -66,6 +66,18 @@ export default {
         {name: 'phase', type: 'string'},
       ],
     },
+    {
+      name: 'cancelledHoldSnapshot',
+      type: 'object',
+      fields: [
+        {name: 'holdId', type: 'string'},
+        {name: 'holdToken', type: 'string'},
+        {name: 'expiresAt', type: 'datetime'},
+        {name: 'phase', type: 'string'},
+        {name: 'packageTitle', type: 'string'},
+        {name: 'startTimeUTC', type: 'datetime'},
+      ],
+    },
     {name: 'providerPublicData', type: 'object', fields: [{name: 'currency', type: 'string'}]},
     {name: 'finalizationLeaseId', type: 'string'},
     {name: 'finalizationLeaseExpiresAt', type: 'datetime'},

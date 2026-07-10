@@ -7,6 +7,7 @@ import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import packageContent from "../../../lib/packageContent.js";
 import packagePricing from "../../../lib/packagePricing.js";
 import { issueUpgradeIntentToken } from "./upgradeIntentToken.js";
+import { logSafeError } from "../../safeErrorLog.js";
 
 const { normalizePackageText } = packageContent;
 const {
@@ -159,17 +160,12 @@ export default async function handler(req, res) {
   const input = method === "POST" ? req.body || {} : req.query || {};
 
   const clientAddress = getClientAddress(req);
-  const rateLimitKey = `get-upgrade-info:${clientAddress}:${String(
-    input.id || ""
-  ).trim().toLowerCase()}:${String(input.email || "")
-    .trim()
-    .toLowerCase()}`;
   if (
-    !requireRateLimit(res, {
-      key: rateLimitKey,
+    !(await requireRateLimit(res, {
+      key: `get-upgrade-info:${clientAddress}`,
       max: 20,
       message: "Too many upgrade lookup requests. Please try again later.",
-    })
+    }))
   ) {
     return;
   }
@@ -336,7 +332,7 @@ export default async function handler(req, res) {
       status >= 400 && status < 500
         ? err?.message || "Unable to resolve upgrade pricing."
         : "Server error while computing upgrade price.";
-    console.error("getUpgradeInfo error:", err);
+    logSafeError("Upgrade lookup failed", err);
     return res.status(status).json({
       ok: false,
       error: message,

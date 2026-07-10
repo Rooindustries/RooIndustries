@@ -11,6 +11,7 @@ import {
 import {
   getTourneyDiscordOAuthConfig,
 } from "../../../../../src/server/tourney/discordConfig";
+import { isSameOriginMutation } from "../../../../../src/server/request/sameOrigin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -94,6 +95,7 @@ const syncDiscordRole = async ({ player, config, fetchImpl = fetch } = {}) => {
 };
 
 export async function POST(request) {
+  if (!isSameOriginMutation(request)) return jsonError("Cross-origin request rejected.", 403);
   if (!(await getAdminSession(request))) {
     return jsonError("Not found.", 404);
   }

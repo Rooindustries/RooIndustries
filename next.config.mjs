@@ -13,14 +13,38 @@ const devAssetHeaders = [
   },
 ];
 const assetCacheHeaders = isProduction ? immutableAssetHeaders : devAssetHeaders;
+const contentSecurityPolicy = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "form-action 'self' https://formspree.io",
+  `script-src 'self' 'unsafe-inline'${isProduction ? "" : " 'unsafe-eval'"} https://scripts.seorce.com https://widget.intercom.io https://js.intercomcdn.com https://www.googletagmanager.com https://www.paypal.com https://www.paypalobjects.com https://checkout.razorpay.com https://cdn.razorpay.com`,
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self' data: https://js.intercomcdn.com",
+  "img-src 'self' data: blob: https://cdn.sanity.io https://razorpay.com https://*.razorpay.com https://www.paypalobjects.com https://*.paypal.com https://static.intercomassets.com https://*.intercomcdn.com https://static-cdn.jtvnw.net",
+  "media-src 'self' blob: https://cdn.sanity.io https://js.intercomcdn.com",
+  "connect-src 'self' https://scripts.seorce.com https://www.google-analytics.com https://www.paypal.com https://api.razorpay.com https://checkout.razorpay.com https://checkout-static-next.razorpay.com https://lumberjack.razorpay.com https://api-iam.intercom.io https://api-iam.eu.intercom.io wss://nexus-websocket-a.intercom.io",
+  "frame-src https://www.paypal.com https://checkout.razorpay.com https://api.razorpay.com",
+  "worker-src 'self' blob:",
+  ...(isProduction ? ["upgrade-insecure-requests"] : []),
+].join("; ");
 const globalSecurityHeaders = [
+  {
+    key: "Content-Security-Policy",
+    value: contentSecurityPolicy,
+  },
+  {
+    key: "X-Frame-Options",
+    value: "DENY",
+  },
   {
     key: "X-Content-Type-Options",
     value: "nosniff",
   },
   {
     key: "Referrer-Policy",
-    value: "strict-origin-when-cross-origin",
+    value: "no-referrer",
   },
   ...(isProduction
     ? [

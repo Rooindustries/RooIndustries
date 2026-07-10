@@ -126,7 +126,7 @@ export default function About({ initialData = null }) {
               <a
                 href={leaderboardHref}
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener noreferrer"
                 className="glow-button relative inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-xs sm:text-sm font-semibold text-white hover:brightness-110 active:translate-y-px transition-all duration-300 self-center shrink-0 lg:self-start"
                 style={{
                   background: "linear-gradient(135deg, var(--rc-cta), var(--rc-cta-end))",

@@ -9,6 +9,8 @@ import {
   renderTourneyAccountsJson,
 } from "../../../../src/server/tourney/auth";
 import { resetTourneyPlayerPassword } from "../../../../src/server/tourney/playerStore";
+import { buildTourneyPublicError } from "../../../../src/server/tourney/publicError";
+import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,9 +19,10 @@ const jsonError = (message, status = 400) =>
   NextResponse.json({ ok: false, error: message }, { status });
 
 export async function POST(request) {
+  if (!isSameOriginMutation(request)) return jsonError("Cross-origin request rejected.", 403);
   const payload = await request.json().catch(() => ({}));
   const clientAddress = getClientAddressFromHeaders(request.headers);
-  const rateLimit = checkTourneyRateLimit({
+  const rateLimit = await checkTourneyRateLimit({
     key: `tourney-reset:${clientAddress}`,
     max: 10,
     windowMs: 30 * 60 * 1000,
@@ -27,9 +30,9 @@ export async function POST(request) {
 
   if (!rateLimit.ok) {
     return NextResponse.json(
-      { ok: false, error: "Too many reset attempts. Please try again later." },
+      { ok: false, error: rateLimit.error || "Too many reset attempts. Please try again later." },
       {
-        status: 429,
+        status: rateLimit.status || 429,
         headers: { "Retry-After": String(rateLimit.retryAfterSeconds) },
       }
     );
@@ -63,6 +66,7 @@ export async function POST(request) {
     });
     return NextResponse.json({ ok: true, message: "Password updated." });
   } catch (error) {
-    return jsonError(error?.message || "Unable to reset password.", error?.status || 500);
+    const failure = buildTourneyPublicError(error, "Unable to reset password.");
+    return jsonError(failure.message, failure.status);
   }
 }

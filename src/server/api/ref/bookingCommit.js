@@ -6,6 +6,7 @@ import {
 import { normalizeBookingStatus } from "../../booking/bookingStatus.js";
 import { appendCouponConsumption } from "./couponReservations.js";
 import { dispatchRescheduleNotifications } from "./bookingEmails.js";
+import { getSafeErrorCode } from "../../safeErrorLog.js";
 
 const normalize = (value) => String(value || "").trim();
 
@@ -383,7 +384,7 @@ export const createRequiresRescheduleBooking = async ({
         ok: false,
         notificationRequired: true,
         status: "pending",
-        errors: [error?.message || "notification_dispatch_failed"],
+        errors: [getSafeErrorCode(error, "notification_dispatch_failed")],
       }))
     : {
         ok: false,

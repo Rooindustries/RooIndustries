@@ -25,6 +25,8 @@ import paymentUpgradeLock from './paymentUpgradeLock'
 import paymentProofClaim from './paymentProofClaim'
 import paymentWebhookReceipt from './paymentWebhookReceipt'
 import paymentRecoveryCase from './paymentRecoveryCase'
+import rateLimitBucket from './rateLimitBucket'
+import referralIdentityClaim from './referralIdentityClaim'
 import tool from './tool'
 import referralBox from './referralBox'
 import faqSettings from './faqSettings'
@@ -63,6 +65,8 @@ export const schemaTypes = [
   paymentProofClaim,
   paymentWebhookReceipt,
   paymentRecoveryCase,
+  rateLimitBucket,
+  referralIdentityClaim,
   tool,
   referralBox,
   faqSettings,

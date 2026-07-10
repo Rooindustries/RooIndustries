@@ -1,13 +1,17 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import dotenv from "dotenv";
-import { chromium } from "playwright";
 
 dotenv.config({ path: ".env.local" });
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_PREVIEW_URL = String(
   process.env.PREVIEW_SHARE_URL || process.env.BASE_URL || ""
+).trim();
+const PREVIEW_BYPASS_SECRET = String(
+  process.env.PREVIEW_AUTOMATION_BYPASS_SECRET ||
+    process.env.VERCEL_AUTOMATION_BYPASS_SECRET ||
+    ""
 ).trim();
 const PRODUCTION_URL = "https://www.rooindustries.com";
 const REQUIRED_PROD_ENV = [
@@ -18,8 +22,16 @@ const REQUIRED_PROD_ENV = [
   "RAZORPAY_KEY_ID",
   "RAZORPAY_KEY_SECRET",
   "CRON_SECRET",
+  "REF_SESSION_SECRET",
+  "REF_ADMIN_KEY",
+  "SANITY_WEBHOOK_SECRET",
+  "RATE_LIMIT_HASH_SECRET",
   "PAYMENT_SESSION_SECRET",
   "HOLD_TOKEN_SECRET",
+  "BOOKING_EMAIL_TOKEN_SECRET",
+  "UPGRADE_INTENT_SECRET",
+  "DOWNLOAD_TOKEN_SECRET",
+  "SANITY_READ_TOKEN",
   "SANITY_WRITE_TOKEN",
   "RESEND_API_KEY",
   "PAYMENT_LEGACY_COMPLETION_UNTIL",
@@ -52,10 +64,16 @@ const run = async (cmd, args) => {
   }
 };
 
-const fetchJson = async (url, { method = "GET", body = null } = {}) => {
+const fetchJson = async (
+  url,
+  { method = "GET", body = null, headers = {} } = {}
+) => {
   const response = await fetch(url, {
     method,
-    headers: body ? { "content-type": "application/json" } : undefined,
+    headers: {
+      ...headers,
+      ...(body ? { "content-type": "application/json" } : {}),
+    },
     body: body ? JSON.stringify(body) : null,
   });
   let parsed = null;
@@ -63,7 +81,7 @@ const fetchJson = async (url, { method = "GET", body = null } = {}) => {
   try {
     parsed = await response.clone().json();
   } catch {
-    text = (await response.text()).trim();
+    text = (await response.text()).trim().slice(0, 500);
   }
   return {
     status: response.status,
@@ -72,35 +90,12 @@ const fetchJson = async (url, { method = "GET", body = null } = {}) => {
   };
 };
 
-const fetchPreviewProvidersWithBrowser = async (previewUrl) => {
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
-
-  try {
-    await page.goto(previewUrl, {
-      waitUntil: "domcontentloaded",
-      timeout: 60000,
-    });
-    return await page.evaluate(async () => {
-      const response = await fetch("/api/payment/providers", {
-        credentials: "include",
-      });
-      let body = null;
-      try {
-        body = await response.json();
-      } catch {
-        body = await response.text();
-      }
-      return {
-        status: response.status,
-        ok: response.ok,
-        body,
-      };
-    });
-  } finally {
-    await browser.close();
-  }
-};
+const fetchPreviewProviders = (previewUrl) =>
+  fetchJson(new URL("/api/payment/providers", previewUrl).toString(), {
+    headers: PREVIEW_BYPASS_SECRET
+      ? { "x-vercel-protection-bypass": PREVIEW_BYPASS_SECRET }
+      : {},
+  });
 
 const main = async () => {
   const report = {
@@ -120,7 +115,7 @@ const main = async () => {
     );
   }
 
-  report.previewProviders = await fetchPreviewProvidersWithBrowser(DEFAULT_PREVIEW_URL);
+  report.previewProviders = await fetchPreviewProviders(DEFAULT_PREVIEW_URL);
   report.productionProviders = await fetchJson(
     new URL("/api/payment/providers", PRODUCTION_URL).toString()
   );

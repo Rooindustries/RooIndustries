@@ -13,6 +13,7 @@ import {
   isSlotAllowedForPackage,
 } from "./slotPolicy.js";
 import { getClientAddress, requireRateLimit } from "../api/ref/rateLimit.js";
+import { logSafeError } from "../safeErrorLog.js";
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -120,11 +121,11 @@ export default async function handler(req, res) {
     req.body || {};
   const clientAddress = getClientAddress(req);
   if (
-    !requireRateLimit(res, {
+    !(await requireRateLimit(res, {
       key: `hold-slot:${clientAddress}`,
       max: 20,
       message: "Too many slot hold requests. Please try again later.",
-    })
+    }))
   ) {
     return;
   }
@@ -361,7 +362,7 @@ export default async function handler(req, res) {
       throw error;
     }
   } catch (error) {
-    console.error("Error in /api/holdSlot:", error);
+    logSafeError("Slot hold failed", error);
     return res.status(500).json({
       ok: false,
       message: "Failed to reserve this slot. Please try again.",

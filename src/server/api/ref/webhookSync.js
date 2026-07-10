@@ -1,6 +1,7 @@
 import {createClient} from '@sanity/client';
 import crypto from 'crypto';
 import {requireSecret} from './auth.js';
+import {logSafeError} from '../../safeErrorLog.js';
 import {
   buildBalance,
   computeEarningsFromBookings,
@@ -11,6 +12,7 @@ const readClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
   dataset: process.env.SANITY_DATASET || 'production',
   apiVersion: process.env.SANITY_API_VERSION || '2023-10-01',
+  token: process.env.SANITY_READ_TOKEN || process.env.SANITY_WRITE_TOKEN,
   useCdn: false,
   perspective: 'published',
 });
@@ -23,11 +25,13 @@ const writeClient = createClient({
   useCdn: false,
 });
 
-const WEBHOOK_SECRET = process.env.SANITY_WEBHOOK_SECRET || process.env.CRON_SECRET;
+const getWebhookSecret = () =>
+  String(process.env.SANITY_WEBHOOK_SECRET || '').trim();
 
 function isValidSignature(body, signature) {
-  if (!WEBHOOK_SECRET) return false;
-  const hmac = crypto.createHmac('sha256', WEBHOOK_SECRET);
+  const webhookSecret = getWebhookSecret();
+  if (!webhookSecret) return false;
+  const hmac = crypto.createHmac('sha256', webhookSecret);
   hmac.update(typeof body === 'string' ? body : JSON.stringify(body));
   const digest = hmac.digest('hex');
   if (!signature || signature.length !== digest.length) return false;
@@ -42,8 +46,8 @@ export default async function handler(req, res) {
   if (
     !requireSecret(
       res,
-      ['SANITY_WEBHOOK_SECRET', 'CRON_SECRET'],
-      'Webhook secret is required on this endpoint.'
+      'SANITY_WEBHOOK_SECRET',
+      'Access is temporarily unavailable.'
     )
   ) {
     return;
@@ -121,7 +125,7 @@ export default async function handler(req, res) {
       overpaid,
     });
   } catch (err) {
-    console.error('WEBHOOK SYNC ERROR:', err);
-    return res.status(500).json({ok: false, error: err?.message || 'Server error'});
+    logSafeError('Referral webhook sync failed', err);
+    return res.status(500).json({ok: false, error: 'Server error'});
   }
 }

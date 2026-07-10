@@ -28,7 +28,6 @@ export const createDownloadSanityClient = (env = process.env) =>
     token:
       env.SANITY_WRITE_TOKEN ||
       env.SANITY_READ_TOKEN ||
-      env.REACT_APP_SANITY_WRITE_TOKEN ||
       undefined,
     useCdn: false,
   });
@@ -203,6 +202,7 @@ export const validateDownloadAccess = async ({
 
   return {
     status: 200,
+    downloadToken: token,
     body: {
       ok: true,
       download: getPublicDownloadInfo(download),
@@ -210,7 +210,7 @@ export const validateDownloadAccess = async ({
         id: booking._id,
         packageTitle: booking.packageTitle || "",
       },
-      downloadUrl: `/api/downloads/file?token=${encodeURIComponent(token)}`,
+      downloadUrl: "/api/downloads/file",
       expiresAt: new Date(nowMs + DOWNLOAD_TOKEN_TTL_SECONDS * 1000).toISOString(),
     },
   };

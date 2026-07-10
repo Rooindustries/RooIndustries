@@ -24,13 +24,13 @@ export default function RefLogin() {
           nav("/referrals/dashboard");
           return;
         }
-      } catch (err) {
-        console.error("Failed to check referral session:", err);
+      } catch {
+        console.error("Referral session check failed");
       }
     };
     checkSession();
 
-    const savedCode = localStorage.getItem("refLoginCode");
+    const savedCode = sessionStorage.getItem("refLoginCode");
     if (savedCode) {
       setCode(savedCode);
       setRememberMe(true);
@@ -61,24 +61,13 @@ export default function RefLogin() {
         return;
       }
 
-      if (data?.creatorId) {
-        localStorage.setItem("creatorId", data.creatorId);
-      }
-
-      // Handle remember me
-      if (rememberMe) {
-        localStorage.setItem("refLoginCode", data.code || code);
-        localStorage.setItem("refRememberMe", "true");
-      } else {
-        localStorage.removeItem("refLoginCode");
-        localStorage.removeItem("refRememberMe");
-      }
+      sessionStorage.setItem("refLoginCode", data.code || code);
 
       showToast("success", "Logging in...");
 
       setTimeout(() => nav("/referrals/dashboard"), 500);
-    } catch (err) {
-      console.error(err);
+    } catch {
+      console.error("Referral login failed");
       showToast("error", "Server error.");
     }
 
@@ -107,10 +96,12 @@ export default function RefLogin() {
       >
         {/* Referral Code or Email */}
         <div>
-          <label className="text-accent text-sm font-semibold">
+          <label htmlFor="ref-login-identifier" className="text-accent text-sm font-semibold">
             Referral code or login email
           </label>
           <input
+            id="ref-login-identifier"
+            name="identifier"
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl
                        outline-none focus:border-info-border transition text-base"
             placeholder="Referral code or login email"
@@ -121,8 +112,10 @@ export default function RefLogin() {
 
         {/* Password */}
         <div>
-          <label className="text-accent text-sm font-semibold">Password</label>
+          <label htmlFor="ref-login-password" className="text-accent text-sm font-semibold">Password</label>
           <input
+            id="ref-login-password"
+            name="password"
             type="password"
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl
                        outline-none focus:border-info-border transition text-base"

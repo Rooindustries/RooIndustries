@@ -8,8 +8,6 @@ const DEV_BOOKING_EMAIL_DISPATCH_SECRET =
 const resolveTokenSecret = () =>
   String(
     process.env.BOOKING_EMAIL_TOKEN_SECRET ||
-      process.env.PAYMENT_SESSION_SECRET ||
-      process.env.REF_SESSION_SECRET ||
       DEV_BOOKING_EMAIL_DISPATCH_SECRET
   ).trim();
 
@@ -88,7 +86,15 @@ export const verifyBookingEmailDispatchToken = ({
     };
   }
 
-  const [encodedPayload, providedSignature] = normalizedToken.split(".");
+  const parts = normalizedToken.split(".");
+  if (parts.length !== 2) {
+    return {
+      ok: false,
+      reason: "booking_email_token_invalid",
+      payload: null,
+    };
+  }
+  const [encodedPayload, providedSignature] = parts;
   if (!encodedPayload || !providedSignature) {
     return {
       ok: false,

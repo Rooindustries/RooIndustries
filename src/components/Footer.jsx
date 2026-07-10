@@ -1,13 +1,27 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { FaDiscord } from "react-icons/fa";
+import packagePricing from "../lib/packagePricing";
+import { readBookingPackageSelection } from "../lib/checkoutStorage";
+
+const { isTopPackageTitle } = packagePricing;
 
 export default function Footer() {
   const location = useLocation();
 
-  const searchParams = new URLSearchParams(location.search);
+  const [storedPackage, setStoredPackage] = useState(null);
+  useEffect(() => {
+    setStoredPackage(readBookingPackageSelection());
+  }, [location.key, location.pathname, location.state]);
+  const navigationPackage =
+    location.state?.bookingPackage || location.state?.bookingData || null;
   const isXocBookingForm =
-    location.pathname === "/booking" && searchParams.get("xoc") === "1";
+    location.pathname === "/booking" &&
+    isTopPackageTitle(
+      navigationPackage?.title ||
+        navigationPackage?.packageTitle ||
+        storedPackage?.title
+    );
 
   const scrollToTop = () => {
     window.scrollTo({ top: 0, behavior: "smooth" });

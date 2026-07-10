@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { client, urlFor } from "../sanityClient";
+import { urlFor } from "../sanityClient";
+import { getPublicContent } from "../lib/publicContentClient";
 
 const HEX_CLIP_PATH = "circle(50% at 50% 50%)";
 
@@ -150,7 +151,7 @@ const isExternalUrl = (url) => /^https?:\/\//i.test(url || "");
 const getLinkProps = (url) => {
   if (!url) return {};
   if (isExternalUrl(url)) {
-    return { target: "_blank", rel: "noreferrer" };
+    return { target: "_blank", rel: "noopener noreferrer" };
   }
   return {};
 };
@@ -269,49 +270,7 @@ export default function MeetTheTeam({ onSeoData }) {
   const [rawData, setRawData] = useState(null);
 
   useEffect(() => {
-    client
-      .fetch(
-        `*[_type == "meetTheTeam"][0]{
-          seoTitle,
-          seoDescription,
-          heroTitle,
-          heroSubtitle,
-          showFounder,
-          founder{
-            badgeText,
-            name,
-            title,
-            bio,
-            avatar,
-            stats[]{_key, value, label},
-            tags,
-            socialLinks[]{_key, label, url, icon}
-          },
-          sections[]{
-            _key,
-            title,
-            variant,
-            cards[]{
-              _key,
-              name,
-              title,
-              bio,
-              avatar,
-              initials,
-              tags,
-              platformBadge,
-              ctaLabel,
-              ctaUrl
-            }
-          },
-          footer{
-            note,
-            buttonText,
-            buttonUrl,
-            showDiscordIcon
-          }
-        }`
-      )
+    getPublicContent("team")
       .then(setRawData)
       .catch(console.error);
   }, []);

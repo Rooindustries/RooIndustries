@@ -6,6 +6,7 @@ import {
   readTourneySessionFromStore,
 } from "../../../../src/server/tourney/auth";
 import { sendTourneyPlayerApprovedEmail } from "../../../../src/server/tourney/email";
+import { logSafeError } from "../../../../src/server/safeErrorLog";
 import {
   applyRegistrationDecision,
   createApprovedTourneyPlayer,
@@ -17,6 +18,8 @@ import {
   updateTourneyPlayerDetails,
   withdrawTourneyPlayer,
 } from "../../../../src/server/tourney/playerStore";
+import { buildTourneyPublicError } from "../../../../src/server/tourney/publicError";
+import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,7 +57,7 @@ const notifyApprovedPlayer = async ({ player, request }) => {
       baseUrl: new URL(request.url).origin,
     });
   } catch (emailError) {
-    console.error("TOURNEY_PLAYER_APPROVED_EMAIL_ERROR:", emailError);
+    logSafeError("Tournament approval email failed", emailError);
   }
 };
 
@@ -67,13 +70,14 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
+  if (!isSameOriginMutation(request)) return jsonError("Cross-origin request rejected.", 403);
   const session = await getAdminSession(request);
   if (!session) {
     return jsonError("Not found.", 404);
   }
 
   const clientAddress = getClientAddressFromHeaders(request.headers);
-  const rateLimit = checkTourneyRateLimit({
+  const rateLimit = await checkTourneyRateLimit({
     key: `tourney-player-manage:${clientAddress}:${session.username}`,
     max: 40,
     windowMs: 15 * 60 * 1000,
@@ -81,9 +85,9 @@ export async function POST(request) {
 
   if (!rateLimit.ok) {
     return NextResponse.json(
-      { ok: false, error: "Too many player changes. Please try again later." },
+      { ok: false, error: rateLimit.error || "Too many player changes. Please try again later." },
       {
-        status: 429,
+        status: rateLimit.status || 429,
         headers: { "Retry-After": String(rateLimit.retryAfterSeconds) },
       }
     );
@@ -159,8 +163,10 @@ export async function POST(request) {
 
     return jsonError("Unsupported player action.");
   } catch (error) {
-    return jsonError(error?.message || "Unable to update players.", error?.status || 500, {
-      errors: error?.errors || undefined,
+    const failure = buildTourneyPublicError(error, "Unable to update players.");
+    return jsonError(failure.message, failure.status, {
+      errors: failure.errors,
+      code: failure.code,
     });
   }
 }

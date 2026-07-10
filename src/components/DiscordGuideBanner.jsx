@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { FaDiscord } from "react-icons/fa";
-import { client } from "../sanityClient";
+import { getPublicContent } from "../lib/publicContentClient";
 
 const DEFAULT_BANNER = {
   text: "Free FPS tuning guide in Discord",
@@ -13,8 +13,7 @@ export default function DiscordGuideBanner({ hidden = false }) {
 
   useEffect(() => {
     let mounted = true;
-    client
-      .fetch(`*[_type == "discordBanner"][0]{text, mobileText, link}`)
+    getPublicContent("discord-banner")
       .then((data) => {
         if (!mounted || !data) return;
         setBanner((prev) => ({
@@ -41,7 +40,7 @@ export default function DiscordGuideBanner({ hidden = false }) {
       <a
         href={banner.link || DEFAULT_BANNER.link}
         target="_blank"
-        rel="noreferrer"
+        rel="noopener noreferrer"
         className={`group flex w-full items-center justify-center gap-2 px-4 py-2.5 sm:py-3 text-sm sm:text-base font-semibold text-info-text transition hover:bg-surface-hover-accent hover:text-[color:var(--color-link-hover)] ${
           hidden ? "pointer-events-none" : "pointer-events-auto"
         }`}

@@ -2,6 +2,39 @@ export const sanitizeBrowserSearch = (pathname, search) => {
   const params = new URLSearchParams(search || "");
   if (!params.toString()) return "";
 
+  const sensitiveKeys = new Set([
+    "data",
+    "email",
+    "holdtoken",
+    "orderid",
+    "payment",
+    "paymentaccesstoken",
+    "paymentflow",
+    "paymenttoken",
+    "token",
+  ]);
+  for (const key of [...params.keys()]) {
+    if (sensitiveKeys.has(String(key).toLowerCase())) {
+      params.delete(key);
+    }
+  }
+
+  if (pathname === "/booking") {
+    const bookingStateKeys = new Set([
+      "title",
+      "price",
+      "tag",
+      "xoc",
+      "prefillfromxoc",
+    ]);
+    for (const key of [...params.keys()]) {
+      if (bookingStateKeys.has(String(key).toLowerCase())) {
+        params.delete(key);
+      }
+    }
+  }
+  if (!params.toString()) return "";
+
   if (pathname !== "/") {
     return `?${params.toString()}`;
   }

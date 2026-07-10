@@ -24,7 +24,7 @@ jest.mock("../server/tourney/email", () => ({
     mockSendTourneyPlayerApprovedEmail(...args),
 }));
 
-const { GET } = require("../../app/api/tourney/registration-decision/route.js");
+const { GET, POST } = require("../../app/api/tourney/registration-decision/route.js");
 
 const tokenRow = {
   player_id: "player_1",
@@ -48,6 +48,21 @@ const makeRequest = ({ cookie = "", role = "" } = {}) => ({
     get: (name) =>
       name === "tourney_session" && cookie ? { value: cookie } : undefined,
   },
+});
+
+const makePostRequest = ({ cookie = "", payload = {} } = {}) => ({
+  url: "https://www.rooindustries.com/api/tourney/registration-decision",
+  headers: {
+    get: (name) =>
+      String(name || "").toLowerCase() === "origin"
+        ? "https://www.rooindustries.com"
+        : "",
+  },
+  cookies: {
+    get: (name) =>
+      name === "tourney_session" && cookie ? { value: cookie } : undefined,
+  },
+  json: async () => payload,
 });
 
 describe("tourney registration decision route", () => {
@@ -164,5 +179,35 @@ describe("tourney registration decision route", () => {
       baseUrl: "https://www.rooindustries.com",
     });
     expect(html).toContain("Approved");
+  });
+
+  test("accepts decision credentials in a same-origin POST body", async () => {
+    const approvedPlayer = {
+      id: "player_1",
+      email: "playerone@example.com",
+      discord: "PlayerOne#1234",
+    };
+    mockReadTourneySessionFromStore.mockResolvedValue({
+      username: "yukari",
+      role: "caster",
+    });
+    mockApplyRegistrationDecision.mockResolvedValue(approvedPlayer);
+
+    const response = await POST(
+      makePostRequest({
+        cookie: "caster-session",
+        payload: { token: "abc123", decision: "approve", role: "Support" },
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ ok: true, title: "Approved" });
+    expect(mockApplyRegistrationDecision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tokenHash: "hashed:abc123",
+        approvedRolePlay: "Support",
+      })
+    );
   });
 });

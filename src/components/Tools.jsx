@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { client } from "../sanityClient";
+import { getPublicContent } from "../lib/publicContentClient";
 
 // Category label is now just the text from Sanity, or "Tool" if empty
 const categoryLabel = (cat) => cat || "Tool";
@@ -23,20 +23,7 @@ export default function Tools() {
 
     async function fetchTools() {
       try {
-        const data = await client.fetch(
-          `*[_type == "tool"] | order(sortOrder asc, title asc) {
-            _id,
-            title,
-            category,
-            shortDescription,
-            downloadMode,
-            downloadUrl,
-            officialSite,
-            downloadNote,
-            "iconUrl": icon.asset->url,
-            "fileUrl": downloadFile.asset->url
-          }`
-        );
+        const data = await getPublicContent("tools");
         if (!cancelled) {
           const normalizedTools = (data || []).map((tool) => ({
             ...tool,

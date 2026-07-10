@@ -2,16 +2,12 @@ import crypto from "crypto";
 
 export const REF_SESSION_COOKIE = "ref_session";
 
+const readSecret = (key) => String(process.env[key] || "").trim();
+
 const REF_SESSION_SECRET =
-  process.env.REF_SESSION_SECRET ||
-  process.env.SESSION_SECRET ||
-  process.env.JWT_SECRET ||
+  readSecret("REF_SESSION_SECRET") ||
   (process.env.NODE_ENV === "production" ? "" : "dev_ref_session_secret");
-const ADMIN_KEY =
-  process.env.REF_ADMIN_KEY ||
-  process.env.REFERRAL_ADMIN_KEY ||
-  process.env.CRON_SECRET ||
-  "";
+const ADMIN_KEY = readSecret("REF_ADMIN_KEY");
 
 const SESSION_AGE_SECONDS = {
   short: 60 * 60 * 12,
@@ -85,14 +81,12 @@ const buildSessionToken = (payload, maxAgeSeconds) => {
 const decodeSessionToken = (token) => {
   ensureSessionSecret();
   if (!token || typeof token !== "string" || !token.includes(".")) return null;
-  const [encodedPayload, signature] = token.split(".");
+  const parts = token.split(".");
+  if (parts.length !== 2) return null;
+  const [encodedPayload, signature] = parts;
   if (!encodedPayload || !signature) return null;
   const expected = sign(encodedPayload, REF_SESSION_SECRET);
-  const isValidSignature = crypto.timingSafeEqual(
-    Buffer.from(signature),
-    Buffer.from(expected)
-  );
-  if (!isValidSignature) return null;
+  if (!timingSafeEqualString(signature, expected)) return null;
   const payload = JSON.parse(base64UrlDecode(encodedPayload));
   if (!payload?.rid || !payload?.exp) return null;
   const now = Math.floor(Date.now() / 1000);
@@ -168,9 +162,7 @@ export const requireAdminKey = (req, res) => {
   }
 
   const headerKey = req?.headers?.["x-admin-key"];
-  const bodyKey = req?.body?.adminKey;
-  const queryKey = req?.query?.adminKey;
-  const provided = headerKey || bodyKey || queryKey;
+  const provided = headerKey;
 
   if (!provided || !timingSafeEqualString(provided, ADMIN_KEY)) {
     res.status(403).json({ ok: false, error: "Unauthorized request." });
@@ -182,17 +174,12 @@ export const requireAdminKey = (req, res) => {
 
 export const requireSecret = (res, secretName, errorMessage) => {
   const keys = Array.isArray(secretName) ? secretName : [secretName];
-  const hasSecret = keys.some((key) => !!process.env[key]);
+  const hasSecret = keys.some((key) => String(process.env[key] || "").trim());
   if (hasSecret) return true;
-
-  const label = Array.isArray(secretName)
-    ? secretName.filter(Boolean).join(" or ")
-    : secretName;
 
   res.status(500).json({
     ok: false,
-    error:
-      errorMessage || `Server misconfigured: missing required secret ${label}.`,
+    error: errorMessage || "Access is temporarily unavailable.",
   });
   return false;
 };

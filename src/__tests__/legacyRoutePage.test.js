@@ -39,7 +39,7 @@ describe("LegacyRoutePage", () => {
     ).toBe("?token=abc123");
   });
 
-  test("passes the reset token through to the initial memory router entry", () => {
+  test("strips reset tokens from the initial memory router entry", () => {
     const { LegacyRoutePage, MemoryRouter, AppContent } = loadLegacyRoutePage();
 
     render(
@@ -51,7 +51,7 @@ describe("LegacyRoutePage", () => {
 
     expect(MemoryRouter).toHaveBeenCalledTimes(1);
     expect(MemoryRouter.mock.calls[0][0]).toMatchObject({
-      initialEntries: ["/referrals/reset?token=abc123"],
+      initialEntries: ["/referrals/reset"],
     });
     expect(AppContent).toHaveBeenCalledWith(
       expect.objectContaining({

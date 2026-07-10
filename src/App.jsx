@@ -22,6 +22,7 @@ import {
 } from "./lib/sectionNavigation";
 import { sanitizeBrowserSearch } from "./lib/browserSearch";
 import { prefetchHomeSectionData } from "./lib/homeSectionData";
+import { migrateCheckoutStorageToSession } from "./lib/checkoutStorage";
 
 import Reviews from "./legacyPages/Reviews";
 import Tools from "./legacyPages/Tools";
@@ -261,6 +262,7 @@ export function AppContent({
     isThankYouRoute;
 
   useEffect(() => {
+    migrateCheckoutStorageToSession();
     initializePerformanceProfile();
   }, []);
 

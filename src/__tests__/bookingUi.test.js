@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import BookingForm from "../components/BookingForm";
 import { client } from "../sanityClient";
@@ -66,6 +66,8 @@ describe("booking calendar UI", () => {
   beforeEach(() => {
     client.fetch.mockReset();
     mockNavigate.mockReset();
+    window.sessionStorage.clear();
+    window.localStorage.clear();
     resolvedOptionsSpy = jest
       .spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions")
       .mockReturnValue({ timeZone: "America/Los_Angeles" });
@@ -134,9 +136,14 @@ describe("booking calendar UI", () => {
 
     __setMockLocation({
       pathname: "/booking",
-      search:
-        "?title=Performance%20Vertex%20Overhaul&price=%2484.99&tag=Test&xoc=0",
-      state: null,
+      search: "",
+      state: {
+        bookingPackage: {
+          title: "Performance Vertex Overhaul",
+          price: "$84.99",
+          tag: "Test",
+        },
+      },
     });
 
     render(<BookingForm />);
@@ -168,5 +175,179 @@ describe("booking calendar UI", () => {
     expect(holdRequestBody.hostDate).toBeUndefined();
     expect(holdRequestBody.hostTime).toBeUndefined();
     expect(holdRequestBody.hostTimeZone).toBeUndefined();
+  });
+
+  test("payment-pending booking shows one release action and one return action", async () => {
+    const expiresAt = "2099-01-05T06:00:00.000Z";
+    window.sessionStorage.setItem(
+      "my_slot_hold",
+      JSON.stringify({
+        holdId: "hold_pending_1",
+        holdToken: "hold_token_pending_1",
+        expiresAt,
+        startTimeUTC: "2099-01-05T04:30:00.000Z",
+        packageTitle: "Performance Vertex Overhaul",
+        packagePrice: "$84.99",
+        phase: "payment_pending",
+      })
+    );
+    window.sessionStorage.setItem(
+      "payment_session_state",
+      JSON.stringify({ paymentAccessToken: "payment_access_pending_1" })
+    );
+    window.sessionStorage.setItem(
+      "booking_modal_state",
+      JSON.stringify({
+        packageTitle: "Performance Vertex Overhaul",
+        step: 2,
+        selectedSlot: {
+          slotId: "2099-01-05T04:30:00.000Z",
+          utcStart: "2099-01-05T04:30:00.000Z",
+          localLabel: "8:30 PM",
+        },
+      })
+    );
+
+    global.fetch = jest.fn(async (url, options = {}) => {
+      if (String(url).startsWith("/api/content/package")) {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            data: {
+              title: "Performance Vertex Overhaul",
+              price: "$84.99",
+            },
+          }),
+        };
+      }
+      if (url === "/api/bookingAvailability") {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            settings: { dateSlots: [] },
+            bookedSlots: [],
+          }),
+        };
+      }
+      if (url === "/api/payment/cancel") {
+        expect(options.headers.Authorization).toBe(
+          "Bearer payment_access_pending_1"
+        );
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            cancelled: true,
+            refreshedHold: {
+              slotHoldId: "hold_pending_1",
+              slotHoldToken: "hold_token_refreshed_1",
+              slotHoldExpiresAt: expiresAt,
+              phase: "holding",
+            },
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ ok: true }) };
+    });
+
+    __setMockLocation({
+      pathname: "/booking",
+      search: "",
+      state: {
+        bookingPackage: {
+          title: "Performance Vertex Overhaul",
+          price: "$84.99",
+          tag: "Test",
+        },
+      },
+    });
+    render(<BookingForm />);
+
+    const releaseButton = await screen.findByRole("button", {
+      name: /^release payment$/i,
+    });
+    expect(
+      screen.getAllByRole("button", { name: /^return to payment$/i })
+    ).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /^back$/i })).not.toBeInTheDocument();
+
+    await userEvent.click(releaseButton);
+
+    expect(
+      await screen.findByText(/payment method released/i)
+    ).toBeInTheDocument();
+    expect(window.sessionStorage.getItem("payment_session_state")).toBeNull();
+    expect(
+      JSON.parse(window.sessionStorage.getItem("my_slot_hold"))
+    ).toMatchObject({
+      holdToken: "hold_token_refreshed_1",
+      phase: "holding",
+    });
+  });
+
+  test("restores the selected package after a clean-URL refresh", async () => {
+    window.sessionStorage.setItem(
+      "booking_draft",
+      JSON.stringify({
+        lastTitle: "Vertex Essentials",
+        packages: {
+          "Vertex Essentials": {
+            selectedPackage: {
+              title: "Vertex Essentials",
+              price: "$29.95",
+              tag: "The Perfect Starting Point",
+            },
+          },
+        },
+      })
+    );
+    global.fetch = jest.fn(async (url) => {
+      if (String(url).startsWith("/api/content/package")) {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            data: {
+              title: "Vertex Essentials",
+              price: "$29.95",
+              tag: "The Perfect Starting Point",
+            },
+          }),
+        };
+      }
+      if (url === "/api/bookingAvailability") {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            settings: { dateSlots: [] },
+            bookedSlots: [],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ ok: true }) };
+    });
+    __setMockLocation({
+      pathname: "/booking",
+      search: "",
+      state: null,
+    });
+
+    render(<BookingForm />);
+
+    expect(await screen.findByText("Vertex Essentials")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /submit & pay/i })
+    ).not.toBeInTheDocument();
+    await waitFor(() => {
+      const stored = JSON.parse(
+        window.sessionStorage.getItem("booking_draft")
+      );
+      expect(
+        stored.packages["Vertex Essentials"].selectedPackage.title
+      ).toBe("Vertex Essentials");
+    });
   });
 });

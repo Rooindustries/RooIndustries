@@ -19,10 +19,10 @@ export default function RefRegister() {
     setTimeout(() => setToast(null), 2800);
   }
   useEffect(() => {
-    const savedEmail = localStorage.getItem("referral_prefill_email");
+    const savedEmail = sessionStorage.getItem("referral_prefill_email");
     if (savedEmail) {
       setEmail(savedEmail);
-      localStorage.removeItem("referral_prefill_email");
+      sessionStorage.removeItem("referral_prefill_email");
     }
   }, []);
   // Debounced slug availability check
@@ -139,12 +139,10 @@ export default function RefRegister() {
         return;
       }
 
-      // Optionally sign them in automatically: you can store creatorId or call your login endpoint
-      localStorage.setItem("creatorId", data.referralId);
       showToast("success", "Registered! Redirecting to dashboard...");
       setTimeout(() => nav("/referrals/dashboard"), 900);
-    } catch (err) {
-      console.error("REGISTER ERROR:", err);
+    } catch {
+      console.error("Referral registration failed");
       showToast("error", "Server error.");
     }
 
@@ -170,10 +168,12 @@ export default function RefRegister() {
       >
         {/* Discord Username */}
         <div>
-          <label className="text-accent text-sm font-semibold">
+          <label htmlFor="ref-register-discord" className="text-accent text-sm font-semibold">
             Discord Username
           </label>
           <input
+            id="ref-register-discord"
+            name="discordUsername"
             value={discordUsername}
             onChange={(e) => setDiscordUsername(e.target.value)}
             placeholder="e.g. @serviroo"
@@ -186,10 +186,12 @@ export default function RefRegister() {
 
         {/* Email */}
         <div>
-          <label className="text-accent text-sm font-semibold">
+          <label htmlFor="ref-register-email" className="text-accent text-sm font-semibold">
             Login Email
           </label>
           <input
+            id="ref-register-email"
+            name="email"
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -200,10 +202,12 @@ export default function RefRegister() {
 
         {/* PayPal Email */}
         <div>
-          <label className="text-accent text-sm font-semibold">
+          <label htmlFor="ref-register-paypal" className="text-accent text-sm font-semibold">
             PayPal Email (for payouts)
           </label>
           <input
+            id="ref-register-paypal"
+            name="paypalEmail"
             type="email"
             value={paypalEmail}
             onChange={(e) => setPaypalEmail(e.target.value)}
@@ -217,10 +221,12 @@ export default function RefRegister() {
 
         {/* Referral Code */}
         <div>
-          <label className="text-accent text-sm font-semibold">
+          <label htmlFor="ref-register-slug" className="text-accent text-sm font-semibold">
             Referral Code
           </label>
           <input
+            id="ref-register-slug"
+            name="slug"
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
             placeholder="Custom referral code (e.g. yourname)"
@@ -242,8 +248,10 @@ export default function RefRegister() {
 
         {/* Password */}
         <div>
-          <label className="text-accent text-sm font-semibold">Password</label>
+          <label htmlFor="ref-register-password" className="text-accent text-sm font-semibold">Password</label>
           <input
+            id="ref-register-password"
+            name="password"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -254,10 +262,12 @@ export default function RefRegister() {
 
         {/* Confirm Password */}
         <div>
-          <label className="text-accent text-sm font-semibold">
+          <label htmlFor="ref-register-confirm" className="text-accent text-sm font-semibold">
             Confirm Password
           </label>
           <input
+            id="ref-register-confirm"
+            name="confirmPassword"
             type="password"
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}

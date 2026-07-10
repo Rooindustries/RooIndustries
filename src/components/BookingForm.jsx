@@ -1,12 +1,16 @@
 import React, { useEffect, useMemo, useState, useRef } from "react";
 import { createPortal } from "react-dom";
-import { client } from "../sanityClient";
+import { getPublicContent } from "../lib/publicContentClient";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import packageContent from "../lib/packageContent";
 import packagePricing from "../lib/packagePricing";
 import PriceDisplay from "./PriceDisplay";
+import {
+  BOOKING_DRAFT_STORAGE_KEY,
+  persistBookingPackageSelection,
+} from "../lib/checkoutStorage";
 
 const { applyPackageContentOverrides } = packageContent;
 const {
@@ -24,8 +28,9 @@ const DEFAULT_VERTEX_PACKAGE = preparePackage({
 const IST_OFFSET_MINUTES = 330;
 const FORM_PREFILL_KEY = "booking_form_prefill";
 const HOLD_STORAGE_KEY = "my_slot_hold";
-const BOOKING_DRAFT_KEY = "booking_draft";
+const BOOKING_DRAFT_KEY = BOOKING_DRAFT_STORAGE_KEY;
 const CHECKOUT_BOOKING_STORAGE_KEY = "checkout_booking_state";
+const PAYMENT_SESSION_STORAGE_KEY = "payment_session_state";
 const SESSION_STATE_KEY = "booking_modal_state";
 const REFERRAL_STORAGE_KEY = "referral_session";
 const BOOKING_FETCH_TIMEOUT_MS = 8000;
@@ -170,8 +175,8 @@ const fetchJsonWithRetry = async (
 const broadcastHold = (payload) => {
   try {
     window.dispatchEvent(new CustomEvent("hold-state", { detail: payload }));
-  } catch (e) {
-    console.error("Failed to broadcast hold state", e);
+  } catch {
+    console.error("Failed to broadcast hold state");
   }
 };
 
@@ -293,17 +298,24 @@ export default function BookingForm({ isMobile }) {
   const [preventHoldAutoload, setPreventHoldAutoload] = useState(false);
   const [drafts, setDrafts] = useState({});
 
-  // Package from URL
-  const selectedPackage = useMemo(() => {
-    const queryPkg = {
-      title: q.get("title") || "",
-      price: q.get("price") || "",
-      tag: q.get("tag") || "",
+  const navigationPackage = useMemo(() => {
+    const direct = location.state?.bookingPackage;
+    if (direct?.title) return direct;
+    const bookingData = location.state?.bookingData;
+    if (!bookingData?.packageTitle) return null;
+    return {
+      title: bookingData.packageTitle,
+      price: bookingData.packagePrice || "",
+      tag: bookingData.packageTag || "",
     };
-    if (queryPkg.title) return preparePackage(queryPkg);
+  }, [location.state]);
+
+  // Package selection comes from navigation state or tab-scoped storage.
+  const selectedPackage = useMemo(() => {
+    if (navigationPackage?.title) return preparePackage(navigationPackage);
     if (persistedPackage) return preparePackage(persistedPackage);
-    return preparePackage(queryPkg);
-  }, [q, persistedPackage]);
+    return preparePackage({});
+  }, [navigationPackage, persistedPackage]);
 
   const prevPackageRef = useRef(selectedPackage.title);
   const prevPackageDataRef = useRef(selectedPackage);
@@ -311,6 +323,7 @@ export default function BookingForm({ isMobile }) {
   const [myHold, setMyHold] = useState(null);
   const [lockingSlot, setLockingSlot] = useState(false);
   const [holdCountdownMs, setHoldCountdownMs] = useState(null);
+  const [releasingPayment, setReleasingPayment] = useState(false);
   const clearedNoHoldRef = useRef(false);
   const sessionRestoredRef = useRef(false);
 
@@ -354,8 +367,8 @@ export default function BookingForm({ isMobile }) {
       } else if (q.has("ref")) {
         sessionStorage.removeItem(REFERRAL_STORAGE_KEY);
       }
-    } catch (err) {
-      console.error("Failed to persist referral session:", err);
+    } catch {
+      console.error("Failed to persist referral session");
     }
   }, [q]);
 
@@ -387,7 +400,7 @@ export default function BookingForm({ isMobile }) {
   useEffect(() => {
     if (sessionRestoredRef.current) return;
     try {
-      const raw = localStorage.getItem(SESSION_STATE_KEY);
+      const raw = sessionStorage.getItem(SESSION_STATE_KEY);
       if (raw) {
         const saved = JSON.parse(raw);
         if (saved.packageTitle === selectedPackage.title) {
@@ -418,8 +431,8 @@ export default function BookingForm({ isMobile }) {
           }
         }
       }
-    } catch (err) {
-      console.error("Failed to restore session state:", err);
+    } catch {
+      console.error("Failed to restore session state");
     } finally {
       sessionRestoredRef.current = true;
     }
@@ -441,9 +454,9 @@ export default function BookingForm({ isMobile }) {
             }
           : null,
       };
-      localStorage.setItem(SESSION_STATE_KEY, JSON.stringify(payload));
-    } catch (err) {
-      console.error("Failed to persist session state:", err);
+      sessionStorage.setItem(SESSION_STATE_KEY, JSON.stringify(payload));
+    } catch {
+      console.error("Failed to persist session state");
     }
   }, [step, month, selectedDate, selectedSlot, selectedPackage.title]);
 
@@ -469,16 +482,16 @@ export default function BookingForm({ isMobile }) {
     setStep(1);
     clearedNoHoldRef.current = true;
     try {
-      localStorage.removeItem(SESSION_STATE_KEY);
-    } catch (err) {
-      console.error("Failed to clear session state:", err);
+      sessionStorage.removeItem(SESSION_STATE_KEY);
+    } catch {
+      console.error("Failed to clear session state");
     }
   }, [draftLoading, myHold, selectedPackage]);
 
-  // Load existing hold from localStorage on mount
+  // Load the tab-scoped hold on mount.
   useEffect(() => {
     try {
-      const stored = localStorage.getItem(HOLD_STORAGE_KEY);
+      const stored = sessionStorage.getItem(HOLD_STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
         // check if expired
@@ -495,19 +508,19 @@ export default function BookingForm({ isMobile }) {
           };
           const utcDate = getUtcDateFromHold(normalizedHold);
           if (!utcDate) {
-            localStorage.removeItem(HOLD_STORAGE_KEY);
+            sessionStorage.removeItem(HOLD_STORAGE_KEY);
             return;
           }
           normalizedHold.startTimeUTC = utcDate.toISOString();
-          localStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
+          sessionStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
           setMyHold(normalizedHold);
           broadcastHold(normalizedHold);
         } else {
-          localStorage.removeItem(HOLD_STORAGE_KEY);
+          sessionStorage.removeItem(HOLD_STORAGE_KEY);
         }
       }
-    } catch (e) {
-      console.error(e);
+    } catch {
+      console.error("Failed to restore slot reservation");
     }
   }, []);
 
@@ -602,9 +615,9 @@ export default function BookingForm({ isMobile }) {
 
   const normalizedPackageTitle = normalizePackageKey(selectedPackage.title);
 
-  const isXoc =
-    q.get("xoc") === "1" ||
-    isTopPackageTitle(selectedPackage.title || selectedPackage.sourceTitle);
+  const isXoc = isTopPackageTitle(
+    selectedPackage.title || selectedPackage.sourceTitle
+  );
 
   const isVertexEssentials =
     normalizedPackageTitle.includes("vertex essential");
@@ -747,8 +760,8 @@ export default function BookingForm({ isMobile }) {
           : [];
 
         if (isActive) setSettings(s);
-      } catch (err) {
-        console.error("Error fetching booking data:", err);
+      } catch {
+        console.error("Failed to fetch booking availability");
         if (isActive) {
           setSettingsError("Booking availability took too long to load.");
         }
@@ -773,14 +786,14 @@ export default function BookingForm({ isMobile }) {
     const params = new URLSearchParams(location.search);
     if (params.get("prefillFromXoc") === "1") {
       try {
-        const stored = localStorage.getItem(FORM_PREFILL_KEY);
+        const stored = sessionStorage.getItem(FORM_PREFILL_KEY);
         if (stored) {
           const parsed = JSON.parse(stored);
           setForm((prev) => ({ ...prev, ...parsed }));
-          localStorage.removeItem(FORM_PREFILL_KEY);
+          sessionStorage.removeItem(FORM_PREFILL_KEY);
         }
-      } catch (err) {
-        console.error("Failed to prefill form from storage:", err);
+      } catch {
+        console.error("Failed to prefill booking form");
       }
     }
   }, [location.search]);
@@ -789,7 +802,7 @@ export default function BookingForm({ isMobile }) {
   // Load drafts (per-package)
   useEffect(() => {
     try {
-      const storedDraft = localStorage.getItem(BOOKING_DRAFT_KEY);
+      const storedDraft = sessionStorage.getItem(BOOKING_DRAFT_KEY);
       if (storedDraft) {
         const parsed = JSON.parse(storedDraft);
         setDrafts(parsed.packages || {});
@@ -804,19 +817,18 @@ export default function BookingForm({ isMobile }) {
             setPersistedPackage(draftForPkg.selectedPackage);
           }
           setPreventHoldAutoload(false);
-          setStep(2);
         }
       }
       setDraftLoading(false);
-    } catch (err) {
-      console.error("Failed to load booking draft:", err);
+    } catch {
+      console.error("Failed to load booking draft");
       setDraftLoading(false);
     }
   }, [selectedPackage.title]);
 
   const persistDraft = (payload) => {
     try {
-      const current = localStorage.getItem(BOOKING_DRAFT_KEY);
+      const current = sessionStorage.getItem(BOOKING_DRAFT_KEY);
       let parsed = { packages: {}, lastTitle: null };
       if (current) {
         parsed = { lastTitle: null, packages: {}, ...JSON.parse(current) };
@@ -825,25 +837,31 @@ export default function BookingForm({ isMobile }) {
       parsed.packages[key] = payload;
       parsed.lastTitle = key;
       setDrafts(parsed.packages);
-      localStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify(parsed));
-    } catch (e) {
-      console.error("Failed to persist booking draft:", e);
+      sessionStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify(parsed));
+    } catch {
+      console.error("Failed to persist booking draft");
     }
   };
 
   const clearDraftForPackage = (pkgKey) => {
     try {
-      const current = localStorage.getItem(BOOKING_DRAFT_KEY);
+      const current = sessionStorage.getItem(BOOKING_DRAFT_KEY);
       if (!current) return;
       const parsed = { lastTitle: null, packages: {}, ...JSON.parse(current) };
       if (parsed.packages && parsed.packages[pkgKey]) {
-        delete parsed.packages[pkgKey];
-        if (parsed.lastTitle === pkgKey) parsed.lastTitle = null;
+        const selectedPackage = parsed.packages[pkgKey]?.selectedPackage;
+        if (selectedPackage?.title) {
+          parsed.packages[pkgKey] = { selectedPackage };
+          parsed.lastTitle = pkgKey;
+        } else {
+          delete parsed.packages[pkgKey];
+          if (parsed.lastTitle === pkgKey) parsed.lastTitle = null;
+        }
         setDrafts(parsed.packages);
-        localStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify(parsed));
+        sessionStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify(parsed));
       }
-    } catch (e) {
-      console.error("Failed to clear draft:", e);
+    } catch {
+      console.error("Failed to clear booking draft");
     }
   };
 
@@ -891,18 +909,12 @@ export default function BookingForm({ isMobile }) {
   useEffect(() => {
     const fetchVertex = async () => {
       try {
-        const data = await client.fetch(
-          `*[_type == "package" && title match "Performance Vertex Overhaul"][0]{
-            title,
-            price,
-            tag,
-            features,
-            buttonText
-          }`
-        );
+        const data = await getPublicContent("package", {
+          title: "Performance Vertex Overhaul",
+        });
         setVertexPackage(preparePackage(data));
-      } catch (err) {
-        console.error("Error fetching Performance Vertex package:", err);
+      } catch {
+        console.error("Failed to fetch Performance Vertex package");
       }
     };
     fetchVertex();
@@ -911,18 +923,12 @@ export default function BookingForm({ isMobile }) {
   useEffect(() => {
     const fetchVertexEssentials = async () => {
       try {
-        const data = await client.fetch(
-          `*[_type == "package" && title match "Vertex Essentials"][0]{
-            title,
-            price,
-            tag,
-            features,
-            buttonText
-          }`
-        );
+        const data = await getPublicContent("package", {
+          title: "Vertex Essentials",
+        });
         setVertexEssentialsPackage(preparePackage(data));
-      } catch (err) {
-        console.error("Error fetching Vertex Essentials package:", err);
+      } catch {
+        console.error("Failed to fetch Vertex Essentials package");
       }
     };
     fetchVertexEssentials();
@@ -931,24 +937,22 @@ export default function BookingForm({ isMobile }) {
   // ---------- FETCH CURRENT PLAN PACKAGE (for view plan modal) ----------
   useEffect(() => {
     if (!selectedPackage.title) return;
+    let active = true;
+    setPlanPackage(null);
     const fetchPlan = async () => {
       try {
-        const data = await client.fetch(
-          `*[_type == "package" && title in $titles][0]{
-            title,
-            price,
-            tag,
-            features,
-            buttonText
-          }`,
-          { titles: getPackageTitleAliases(selectedPackage.title) }
-        );
-        setPlanPackage(preparePackage(data));
-      } catch (err) {
-        console.error("Error fetching current package:", err);
+        const data = await getPublicContent("package", {
+          title: getPackageTitleAliases(selectedPackage.title),
+        });
+        if (active) setPlanPackage(preparePackage(data));
+      } catch {
+        console.error("Failed to fetch current package");
       }
     };
     fetchPlan();
+    return () => {
+      active = false;
+    };
   }, [selectedPackage.title]);
 
   const times = useMemo(() => {
@@ -1172,7 +1176,7 @@ export default function BookingForm({ isMobile }) {
   const clearHoldState = (resetStep = true, clearStorage = true) => {
     setMyHold(null);
     if (clearStorage) {
-      localStorage.removeItem(HOLD_STORAGE_KEY);
+      sessionStorage.removeItem(HOLD_STORAGE_KEY);
     }
     setSelectedSlot(null);
     setHoldCountdownMs(null);
@@ -1190,9 +1194,9 @@ export default function BookingForm({ isMobile }) {
     };
     setMyHold(updated);
     try {
-      localStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.error("Failed to persist updated hold:", e);
+      sessionStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(updated));
+    } catch {
+      console.error("Failed to persist updated hold");
     }
     broadcastHold(updated);
   };
@@ -1219,8 +1223,61 @@ export default function BookingForm({ isMobile }) {
           holdToken: holdTokenToDelete,
         }),
       });
-    } catch (err) {
-      console.error("Failed to release hold on server:", err);
+    } catch {
+      console.error("Failed to release hold on server");
+    }
+  };
+
+  const releasePaymentSession = async () => {
+    if (!isPaymentPendingHold || releasingPayment) return;
+    setReleasingPayment(true);
+    setErrorStep2("");
+    try {
+      const stored = JSON.parse(
+        sessionStorage.getItem(PAYMENT_SESSION_STORAGE_KEY) || "null"
+      );
+      const paymentAccessToken = String(stored?.paymentAccessToken || "").trim();
+      if (!paymentAccessToken) {
+        throw new Error("Return to payment once so the active session can be checked.");
+      }
+      const response = await fetch("/api/payment/cancel", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${paymentAccessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      });
+      const data = await response.json().catch(() => ({}));
+      if (data?.captured) {
+        navigate("/payment");
+        return;
+      }
+      if (!response.ok || data?.cancelled !== true) {
+        throw new Error(data?.error || "The payment session could not be released.");
+      }
+      const refreshed = data.refreshedHold;
+      if (!refreshed?.slotHoldId || !refreshed?.slotHoldToken) {
+        clearHoldState(true);
+        setErrorStep1("The reservation expired. Please choose the slot again.");
+        return;
+      }
+      const nextHold = {
+        ...myHold,
+        holdId: refreshed.slotHoldId,
+        holdToken: refreshed.slotHoldToken,
+        expiresAt: refreshed.slotHoldExpiresAt,
+        phase: "holding",
+      };
+      setMyHold(nextHold);
+      sessionStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(nextHold));
+      sessionStorage.removeItem(PAYMENT_SESSION_STORAGE_KEY);
+      broadcastHold(nextHold);
+      setErrorStep2("Payment method released. You can return to checkout and choose either provider.");
+    } catch (error) {
+      setErrorStep2(error.message || "The payment session could not be released.");
+    } finally {
+      setReleasingPayment(false);
     }
   };
 
@@ -1299,7 +1356,7 @@ export default function BookingForm({ isMobile }) {
       };
 
       setMyHold(newHold);
-      localStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(newHold));
+      sessionStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(newHold));
       broadcastHold(newHold);
 
       const expiresIn =
@@ -1308,8 +1365,8 @@ export default function BookingForm({ isMobile }) {
         setHoldCountdownMs(Math.max(0, expiresIn));
       }
       setStep(2);
-    } catch (err) {
-      console.error("Error reserving slot:", err);
+    } catch {
+      console.error("Failed to reserve slot");
       setErrorStep1(
         "Could not reserve this slot. Please check your internet and try again."
       );
@@ -1384,8 +1441,8 @@ export default function BookingForm({ isMobile }) {
         form: { ...form },
         selectedPackage: { ...selectedPackage },
       });
-    } catch (e) {
-      console.error("Failed to persist booking draft:", e);
+    } catch {
+      console.error("Failed to persist booking draft");
     }
 
     // Keep hold persisted for banner
@@ -1396,8 +1453,8 @@ export default function BookingForm({ isMobile }) {
         CHECKOUT_BOOKING_STORAGE_KEY,
         JSON.stringify(payload)
       );
-    } catch (error) {
-      console.error("Failed to persist checkout state:", error);
+    } catch {
+      console.error("Failed to persist checkout state");
     }
 
     navigate("/payment", {
@@ -1826,6 +1883,7 @@ export default function BookingForm({ isMobile }) {
 
                   <input
                     name="discord"
+                    aria-label="Discord username"
                     placeholder="Discord (e.g. Servi#1234 or @Servi)"
                     onChange={handleChange}
                     value={form.discord}
@@ -1833,6 +1891,7 @@ export default function BookingForm({ isMobile }) {
                   />
                   <input
                     name="email"
+                    aria-label="Booking email"
                     type="email"
                     placeholder="Email"
                     onChange={handleChange}
@@ -1841,6 +1900,7 @@ export default function BookingForm({ isMobile }) {
                   />
                   <input
                     name="specs"
+                    aria-label="PC specifications"
                     placeholder="PC Specs"
                     onChange={handleChange}
                     value={form.specs}
@@ -1848,6 +1908,7 @@ export default function BookingForm({ isMobile }) {
                   />
                   <input
                     name="mainGame"
+                    aria-label="Main game or application"
                     placeholder="Main use case (Game/Apps)"
                     onChange={handleChange}
                     value={form.mainGame}
@@ -1856,6 +1917,7 @@ export default function BookingForm({ isMobile }) {
 
                   <textarea
                     name="notes"
+                    aria-label="Extra booking requirements"
                     placeholder="Any extra requirements?"
                     onChange={handleChange}
                     value={form.notes}
@@ -1867,27 +1929,43 @@ export default function BookingForm({ isMobile }) {
                     need to know.
                   </p>
 
-                  <div className="flex justify-between gap-4">
+                  <div className="flex flex-col gap-4 sm:flex-row">
+                    {isPaymentPendingHold ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={releasePaymentSession}
+                          disabled={releasingPayment}
+                          className="w-full rounded-lg border border-danger-border bg-danger-soft py-3 font-semibold text-danger-text transition hover:bg-surface-hover disabled:cursor-wait disabled:opacity-60 sm:w-1/2"
+                        >
+                          {releasingPayment ? "Checking payment..." : "Release payment"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => navigate("/payment")}
+                          className="glow-button inline-flex w-full items-center justify-center gap-2 rounded-lg py-3 font-semibold transition sm:w-1/2"
+                        >
+                          Return to payment
+                          <span className="glow-line glow-line-top" />
+                          <span className="glow-line glow-line-right" />
+                          <span className="glow-line glow-line-bottom" />
+                          <span className="glow-line glow-line-left" />
+                        </button>
+                      </>
+                    ) : (
+                      <>
                     <button
                       onClick={() => {
-                        if (isPaymentPendingHold) {
-                          navigate("/payment");
-                          return;
-                        }
                         releaseHold(true);
                         setStep(1);
                       }}
-                      className="w-1/2 bg-surface-input hover:bg-surface-hover py-3 rounded-lg font-semibold transition"
+                      className="w-full bg-surface-input hover:bg-surface-hover py-3 rounded-lg font-semibold transition sm:w-1/2"
                     >
-                      {isPaymentPendingHold ? "Return to payment" : "Back"}
+                      Back
                     </button>
 
                     <button
                       onClick={async () => {
-                        if (isPaymentPendingHold) {
-                          navigate("/payment");
-                          return;
-                        }
                         if (loading) return;
 
                         const validationError = getStep2Error();
@@ -1901,15 +1979,13 @@ export default function BookingForm({ isMobile }) {
                         await handleSubmit();
                         setLoading(false);
                       }}
-                      className={`glow-button w-1/2 py-3 rounded-lg font-semibold transition inline-flex items-center justify-center gap-2 ${
+                      className={`glow-button w-full py-3 rounded-lg font-semibold transition inline-flex items-center justify-center gap-2 sm:w-1/2 ${
                         loading || !isStep2Complete
                           ? "opacity-60 cursor-not-allowed"
                           : ""
                       }`}
                     >
-                      {isPaymentPendingHold
-                        ? "Return to payment"
-                        : loading
+                      {loading
                           ? "Submitting..."
                           : "Submit & Pay"}
                       <span className="glow-line glow-line-top" />
@@ -1917,9 +1993,11 @@ export default function BookingForm({ isMobile }) {
                       <span className="glow-line glow-line-bottom" />
                       <span className="glow-line glow-line-left" />
                     </button>
+                      </>
+                    )}
 
                     {errorStep2 && (
-                      <p className="text-danger-text text-sm mt-3">{errorStep2}</p>
+                      <p className="text-info-text text-sm mt-1 sm:basis-full">{errorStep2}</p>
                     )}
                   </div>
                 </motion.div>
@@ -2047,27 +2125,41 @@ export default function BookingForm({ isMobile }) {
                               form: { ...form },
                               selectedPackage: nextPackage,
                             });
-                          } catch (err) {
-                            console.error("Failed to store form draft:", err);
+                            persistBookingPackageSelection(nextPackage);
+                          } catch {
+                            console.error("Failed to store booking form draft");
                           }
                           navigate(
-                            `/booking?title=${encodeURIComponent(
-                              displayPackage?.title ||
-                                DEFAULT_VERTEX_PACKAGE.title
-                            )}&price=${encodeURIComponent(
-                              displayPackage?.price ||
-                                DEFAULT_VERTEX_PACKAGE.price
-                            )}&tag=${encodeURIComponent(
-                              displayPackage?.tag || ""
-                            )}&xoc=0`,
+                            "/booking",
                             location.state?.backgroundLocation
                               ? {
                                   state: {
                                     backgroundLocation:
                                       location.state.backgroundLocation,
+                                    bookingPackage: {
+                                      title:
+                                        displayPackage?.title ||
+                                        DEFAULT_VERTEX_PACKAGE.title,
+                                      price:
+                                        displayPackage?.price ||
+                                        DEFAULT_VERTEX_PACKAGE.price,
+                                      tag: displayPackage?.tag || "",
+                                    },
                                   },
                                 }
-                              : undefined
+                              : {
+                                  state: {
+                                    bookingPackage: {
+                                      title:
+                                        displayPackage?.title ||
+                                        DEFAULT_VERTEX_PACKAGE.title,
+                                      price:
+                                        displayPackage?.price ||
+                                        DEFAULT_VERTEX_PACKAGE.price,
+                                      tag: displayPackage?.tag || "",
+                                    },
+                                  },
+                                }
                           );
                         }}
                         className="glow-button w-full mt-6 py-3 rounded-lg font-semibold text-white shadow-[0_0_20px_rgba(56,189,248,0.4)] inline-flex items-center justify-center gap-2 opacity-90 hover:opacity-100"

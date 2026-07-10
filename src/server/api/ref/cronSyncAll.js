@@ -1,5 +1,7 @@
 import {createClient} from '@sanity/client';
+import crypto from 'crypto';
 import {requireSecret} from './auth.js';
+import {logSafeError} from '../../safeErrorLog.js';
 import {
   buildBalance,
   computeEarningsFromBookings,
@@ -10,6 +12,7 @@ const readClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
   dataset: process.env.SANITY_DATASET || 'production',
   apiVersion: process.env.SANITY_API_VERSION || '2023-10-01',
+  token: process.env.SANITY_READ_TOKEN || process.env.SANITY_WRITE_TOKEN,
   useCdn: false,
   perspective: 'published',
 });
@@ -31,14 +34,20 @@ export default async function handler(req, res) {
     !requireSecret(
       res,
       'CRON_SECRET',
-      'CRON_SECRET is required on this endpoint.'
+      'Access is temporarily unavailable.'
     )
   ) {
     return;
   }
 
-  const authHeader = req.headers.authorization;
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  const authHeader = String(req.headers.authorization || '');
+  const expected = `Bearer ${String(process.env.CRON_SECRET || '').trim()}`;
+  const providedBuffer = Buffer.from(authHeader);
+  const expectedBuffer = Buffer.from(expected);
+  const authorized =
+    providedBuffer.length === expectedBuffer.length &&
+    crypto.timingSafeEqual(providedBuffer, expectedBuffer);
+  if (!authorized) {
     return res.status(401).json({ok: false, error: 'Unauthorized'});
   }
 
@@ -111,7 +120,7 @@ export default async function handler(req, res) {
       results,
     });
   } catch (err) {
-    console.error('CRON SYNC ERROR:', err);
-    return res.status(500).json({ok: false, error: err?.message || 'Server error'});
+    logSafeError('Referral cron sync failed', err);
+    return res.status(500).json({ok: false, error: 'Server error'});
   }
 }

@@ -33,8 +33,8 @@ export default function RefForgot() {
       } else {
         showToast("error", data.error || "Failed to send link");
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      console.error("Referral reset request failed");
       showToast("error", "Server error.");
     }
 

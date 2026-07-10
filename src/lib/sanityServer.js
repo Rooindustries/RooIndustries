@@ -11,7 +11,7 @@ const sanity = createClient({
   dataset: process.env.SANITY_DATASET || "production",
   apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
   useCdn: true,
-  token: process.env.SANITY_READ_TOKEN || undefined,
+  token: process.env.SANITY_READ_TOKEN || process.env.SANITY_WRITE_TOKEN || undefined,
 });
 
 async function fetchFaqQuestions() {
@@ -31,8 +31,8 @@ async function fetchFaqQuestions() {
         answer: String(item?.answer || "").trim(),
       }))
       .filter((item) => item.question && item.answer);
-  } catch (error) {
-    console.warn("[sanity] FAQ fetch failed:", error.message);
+  } catch {
+    console.warn("[sanity] FAQ fetch failed");
     return [];
   }
 }
@@ -42,8 +42,8 @@ async function fetchHomePageData() {
     try {
       const data = await sanity.fetch(query);
       return data ?? fallback;
-    } catch (error) {
-      console.warn("[sanity] home fetch failed:", error.message);
+    } catch {
+      console.warn("[sanity] home fetch failed");
       return fallback;
     }
   };

@@ -135,9 +135,9 @@ describe("referral login API", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body.code).toBe("creator-code");
-    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(mockFetch.mock.calls[0][0]).toContain("slug.current");
-    expect(mockFetch.mock.calls[1][0]).toContain("creatorEmail");
+    expect(mockFetch.mock.calls[0][0]).toContain("creatorEmail");
 
     const session = getReferralSession({
       headers: {
@@ -165,7 +165,7 @@ describe("referral login API", () => {
     await login(req, res);
 
     expect(res.statusCode).toBe(401);
-    expect(res.body).toEqual({ ok: false });
+    expect(res.body).toMatchObject({ ok: false });
     expect(res.headers["Set-Cookie"]).toBeUndefined();
   });
 
@@ -183,8 +183,8 @@ describe("referral login API", () => {
 
     await login(req, res);
 
-    expect(res.statusCode).toBe(404);
-    expect(res.body).toEqual({ ok: false });
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toMatchObject({ ok: false });
   });
 
   test("does not allow PayPal payout email as a login identifier", async () => {
@@ -201,7 +201,47 @@ describe("referral login API", () => {
 
     await login(req, res);
 
-    expect(res.statusCode).toBe(404);
-    expect(res.body).toEqual({ ok: false });
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toMatchObject({ ok: false });
+  });
+
+  test("requires the reset flow after security credential invalidation", async () => {
+    const referral = {
+      ...(await makeReferral()),
+      passwordResetRequired: true,
+    };
+    mockFetch.mockImplementation((query, params = {}) =>
+      Promise.resolve(findReferralByIdentifier(referral, query, params.identifier))
+    );
+    const res = createRes();
+
+    await login(
+      createReq({ code: "creator-code", password: "correct-password" }),
+      res
+    );
+
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toMatchObject({ ok: false });
+    expect(res.headers["Set-Cookie"]).toBeUndefined();
+  });
+
+  test("never accepts a legacy plaintext password", async () => {
+    const referral = {
+      ...(await makeReferral()),
+      creatorPassword: "correct-password",
+      passwordResetRequired: false,
+    };
+    mockFetch.mockImplementation((query, params = {}) =>
+      Promise.resolve(findReferralByIdentifier(referral, query, params.identifier))
+    );
+    const res = createRes();
+
+    await login(
+      createReq({ code: "creator-code", password: "correct-password" }),
+      res
+    );
+
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toMatchObject({ ok: false });
   });
 });
