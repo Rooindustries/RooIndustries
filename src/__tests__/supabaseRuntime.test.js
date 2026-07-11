@@ -42,6 +42,21 @@ describe("Supabase runtime selection", () => {
     expect(selectCanaryBackend({ key, percentage: 0 })).toBe("sanity");
   });
 
+  test("treats a 100 percent content rollout as cacheable Supabase", () => {
+    expect(
+      selectContentBackend({
+        env: {
+          DATA_PRIMARY_BACKEND: "sanity",
+          SUPABASE_CONTENT_CANARY_PERCENT: "100",
+        },
+      })
+    ).toEqual({
+      backend: "supabase",
+      canaryActive: false,
+      assignmentCookie: "",
+    });
+  });
+
   test("reuses a valid assignment cookie and tolerates malformed cookies", () => {
     const value = "2f1a8c2c-6cae-4f67-8e90-12c770c0e719.supabase";
     const selected = selectContentBackend({
