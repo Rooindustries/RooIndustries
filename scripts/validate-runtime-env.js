@@ -273,6 +273,8 @@ if (
 }
 
 const primaryBackend = getFirstValue(["DATA_PRIMARY_BACKEND"]).toLowerCase() || "sanity";
+const commercePrimaryBackend =
+  getFirstValue(["COMMERCE_PRIMARY_BACKEND"]).toLowerCase() || primaryBackend;
 const tourneyDatabaseMode =
   getFirstValue(["TOURNEY_DATABASE_MODE"]).toLowerCase() || "legacy";
 const contentCanaryPercent = numericPercent("SUPABASE_CONTENT_CANARY_PERCENT");
@@ -283,12 +285,16 @@ const authCanaryConfigured = Boolean(
 const shadowWritesEnabled = isEnabled("SUPABASE_SHADOW_WRITES");
 const reverseMirrorEnabled = isEnabled("SANITY_REVERSE_MIRROR_WRITES");
 const cutoverEnabled = isEnabled("SUPABASE_CUTOVER_ENABLED");
+const commerceCutoverEnabled = isEnabled("COMMERCE_CUTOVER_ENABLED");
+const commerceFailoverGeneration =
+  getFirstValue(["COMMERCE_FAILOVER_GENERATION"]) || "0";
 const licensingEnabled = isEnabled("SUPABASE_LICENSING_ENABLED");
 const migrationEndpointEnabled = isEnabled(
   "SUPABASE_MIGRATION_ENDPOINT_ENABLED"
 );
 const anySupabaseRuntimeEnabled =
   primaryBackend === "supabase" ||
+  commercePrimaryBackend === "supabase" ||
   tourneyDatabaseMode === "supabase" ||
   contentCanaryPercent > 0 ||
   commerceCanaryPercent > 0 ||
@@ -300,6 +306,16 @@ const anySupabaseRuntimeEnabled =
 if (!["sanity", "supabase"].includes(primaryBackend)) {
   supabaseConsistencyFailures.push(
     "DATA_PRIMARY_BACKEND must be sanity or supabase."
+  );
+}
+if (!["sanity", "supabase"].includes(commercePrimaryBackend)) {
+  supabaseConsistencyFailures.push(
+    "COMMERCE_PRIMARY_BACKEND must be sanity or supabase."
+  );
+}
+if (!/^[0-9]+$/.test(commerceFailoverGeneration)) {
+  supabaseConsistencyFailures.push(
+    "COMMERCE_FAILOVER_GENERATION must be a non-negative integer."
   );
 }
 if (!["legacy", "supabase"].includes(tourneyDatabaseMode)) {
@@ -341,8 +357,18 @@ if (primaryBackend === "supabase" && !cutoverEnabled) {
     "Supabase primary mode requires SUPABASE_CUTOVER_ENABLED=1."
   );
 }
+if (commercePrimaryBackend === "supabase" && !commerceCutoverEnabled) {
+  supabaseConsistencyFailures.push(
+    "Supabase commerce primary mode requires COMMERCE_CUTOVER_ENABLED=1."
+  );
+}
+if (commercePrimaryBackend === "supabase" && primaryBackend !== "sanity") {
+  supabaseConsistencyFailures.push(
+    "Commerce-only cutover requires DATA_PRIMARY_BACKEND=sanity."
+  );
+}
 if (
-  (primaryBackend === "supabase" || commerceCanaryPercent > 0) &&
+  (commercePrimaryBackend === "supabase" || commerceCanaryPercent > 0) &&
   !reverseMirrorEnabled
 ) {
   supabaseConsistencyFailures.push(

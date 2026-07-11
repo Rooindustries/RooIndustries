@@ -18,6 +18,8 @@ import validateCoupon from "../../../../src/server/api/ref/validateCoupon.js";
 import validateReferral from "../../../../src/server/api/ref/validateReferral.js";
 import webhookSync from "../../../../src/server/api/ref/webhookSync.js";
 import { runLegacyApiHandler } from "../../../../src/lib/nextApiAdapter";
+import { after } from "next/server";
+import { recordCommerceResponseMetric } from "../../../../src/server/supabase/commerceMetrics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,14 +46,45 @@ const ACTION_HANDLERS = {
   webhookSync,
 };
 
+const COMMERCE_ACTIONS = new Set([
+  "cronSyncAll",
+  "createBooking",
+  "getData",
+  "getUpgradeInfo",
+  "payouts",
+  "sendBookingEmails",
+  "syncPayouts",
+  "updateBookingStatus",
+  "updatePayments",
+  "updateSplit",
+  "validateCoupon",
+  "validateReferral",
+  "webhookSync",
+]);
+
 async function handle(request, context, methodOverride) {
+  const startedAt = performance.now();
   const { action } = await context.params;
   const handler = ACTION_HANDLERS[action];
   if (!handler) {
     return Response.json({ ok: false, error: "Not found" }, { status: 404 });
   }
 
-  return runLegacyApiHandler({ request, handler, methodOverride });
+  const response = await runLegacyApiHandler({ request, handler, methodOverride });
+  if (COMMERCE_ACTIONS.has(action)) {
+    const metricResponse = response.clone();
+    try {
+      after(() => recordCommerceResponseMetric({
+        route: `ref/${action.toLowerCase()}`,
+        durationMs: performance.now() - startedAt,
+        statusCode: response.status,
+        response: metricResponse,
+      }));
+    } catch (error) {
+      if (process.env.NODE_ENV !== "test") throw error;
+    }
+  }
+  return response;
 }
 
 export const GET = (request, context) => handle(request, context, "GET");

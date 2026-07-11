@@ -1,6 +1,7 @@
 import { evaluate, parse } from "groq-js";
 import {
   applyShadowMutations,
+  fetchRecoveryPaymentDocuments,
   fetchShadowDocuments,
 } from "./shadowStore.js";
 
@@ -19,6 +20,73 @@ const readPath = (object, path) =>
     (value, part) => (value === undefined || value === null ? undefined : value[part]),
     object
   );
+
+const MAX_COMMERCE_PAYLOAD_BYTES = 250 * 1024;
+
+const uniqueStrings = (values = []) =>
+  [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
+
+const inferLiteralTypes = (query) => {
+  const types = [];
+  for (const match of String(query || "").matchAll(/_type\s*==\s*["']([^"']+)["']/g)) {
+    types.push(match[1]);
+  }
+  for (const match of String(query || "").matchAll(/_type\s+in\s+\[([^\]]+)\]/g)) {
+    for (const quoted of match[1].matchAll(/["']([^"']+)["']/g)) {
+      types.push(quoted[1]);
+    }
+  }
+  return uniqueStrings(types);
+};
+
+const inferQueryLimit = (query) => {
+  const slice = String(query || "").match(/\[\s*0\s*\.\.\.\s*([0-9]+)\s*\]/);
+  if (slice) return Math.max(1, Math.min(1000, Number(slice[1]) || 500));
+  return /\]\s*\[\s*0\s*\]/.test(String(query || "")) ? 1 : 500;
+};
+
+const inferShadowScope = ({ query, params = {}, configuredTypes = null }) => {
+  const source = String(query || "");
+  const literalTypes = inferLiteralTypes(source);
+  const paramType = source.match(/_type\s*==\s*\$([A-Za-z_][A-Za-z0-9_]*)/);
+  const documentTypes = uniqueStrings([
+    ...(literalTypes.length > 0 ? literalTypes : configuredTypes || []),
+    ...(paramType && params[paramType[1]] ? [params[paramType[1]]] : []),
+    ...(source.includes("->") ? ["package"] : []),
+  ]);
+  const hasOr = source.includes("||");
+  const ids = [];
+  if (!hasOr && !source.includes("->")) {
+    const idEq = source.match(/_id\s*==\s*\$([A-Za-z_][A-Za-z0-9_]*)/);
+    if (idEq && params[idEq[1]]) ids.push(params[idEq[1]]);
+    const idIn = source.match(/_id\s+in\s+\$([A-Za-z_][A-Za-z0-9_]*)/);
+    if (idIn && Array.isArray(params[idIn[1]])) ids.push(...params[idIn[1]]);
+  }
+
+  const filters = [];
+  if (!hasOr && !source.includes("->")) {
+    const pattern = /(lower\()?([A-Za-z_][A-Za-z0-9_.]*)(?:\))?\s*(==|in|<=|>=|<|>)\s*\$([A-Za-z_][A-Za-z0-9_]*)/g;
+    for (const match of source.matchAll(pattern)) {
+      const [, lowerCall, path, operator, param] = match;
+      if (["_id", "_type"].includes(path) || params[param] === undefined) continue;
+      const op =
+        operator === "=="
+          ? lowerCall
+            ? "ieq"
+            : "eq"
+          : operator === "in"
+            ? "in"
+            : ({ "<": "lt", "<=": "lte", ">": "gt", ">=": "gte" })[operator];
+      filters.push({ path, op, value: params[param] });
+    }
+  }
+  return {
+    documentTypes: documentTypes.length > 0 ? documentTypes : null,
+    ids: uniqueStrings(ids),
+    filters,
+    limit: inferQueryLimit(source),
+  };
+};
 
 const writePath = (object, path, value) => {
   const parts = splitPath(path);
@@ -155,28 +223,101 @@ class TransactionBuilder {
 }
 
 export class SupabaseDocumentClient {
-  constructor({ shadowClient, documentTypes = null } = {}) {
+  constructor({
+    shadowClient,
+    documentTypes = null,
+    commerceOnly = false,
+    cutoverGeneration = 0,
+  } = {}) {
     this.shadowClient = shadowClient;
+    this.backend = "supabase";
+    this.commerceOnly = commerceOnly === true;
+    this.cutoverGeneration = Math.max(0, Number(cutoverGeneration) || 0);
     this.documentTypes =
       Array.isArray(documentTypes) && documentTypes.length > 0
         ? [...new Set(documentTypes)]
         : null;
   }
 
-  async dataset() {
-    return fetchShadowDocuments({
+  async dataset(scope = {}) {
+    const hasTargetedScope =
+      (Array.isArray(scope.documentTypes || this.documentTypes) &&
+        (scope.documentTypes || this.documentTypes).length > 0) ||
+      (Array.isArray(scope.ids) && scope.ids.length > 0) ||
+      (Array.isArray(scope.filters) && scope.filters.length > 0);
+    if (this.commerceOnly && !hasTargetedScope) {
+      const error = new Error("Commerce queries require a targeted scope.");
+      error.code = "COMMERCE_QUERY_SCOPE_REQUIRED";
+      error.status = 503;
+      error.statusCode = 503;
+      throw error;
+    }
+    const documents = await fetchShadowDocuments({
       client: this.shadowClient,
-      documentTypes: this.documentTypes,
+      documentTypes: scope.documentTypes || this.documentTypes,
+      ids: scope.ids,
+      filters: scope.filters,
+      limit: scope.limit,
+      allowLegacyFallback: !this.commerceOnly,
     });
+    if (
+      this.commerceOnly &&
+      Buffer.byteLength(JSON.stringify(documents), "utf8") >
+        MAX_COMMERCE_PAYLOAD_BYTES
+    ) {
+      const error = new Error("Commerce query exceeded its database payload budget.");
+      error.code = "COMMERCE_PAYLOAD_BUDGET_EXCEEDED";
+      error.status = 503;
+      error.statusCode = 503;
+      throw error;
+    }
+    return documents;
   }
 
   async fetch(query, params = {}) {
     const tree = parse(String(query || ""));
+    const scope = inferShadowScope({
+      query,
+      params,
+      configuredTypes: this.documentTypes,
+    });
+    const recoveryQuery =
+      this.commerceOnly &&
+      String(query || "").includes("refundRequiresBookingSync") &&
+      String(query || "").includes("nextRecoveryAt") &&
+      Array.isArray(params?.statuses);
+    const dataset = recoveryQuery
+      ? await fetchRecoveryPaymentDocuments({
+          client: this.shadowClient,
+          backend: params.backend,
+          statuses: params.statuses,
+          refundedStatus: params.refundedStatus,
+          bookedStatus: params.bookedStatus,
+          abandonedStatus: params.abandonedStatus,
+          now: params.now,
+          limit: 50,
+        })
+      : await this.dataset(scope);
+    if (
+      this.commerceOnly &&
+      Buffer.byteLength(JSON.stringify(dataset), "utf8") >
+        MAX_COMMERCE_PAYLOAD_BYTES
+    ) {
+      const error = new Error("Commerce query exceeded its database payload budget.");
+      error.code = "COMMERCE_PAYLOAD_BUDGET_EXCEEDED";
+      error.status = 503;
+      error.statusCode = 503;
+      throw error;
+    }
     const value = await evaluate(tree, {
-      dataset: await this.dataset(),
+      dataset,
       params: params || {},
     });
     return value.get();
+  }
+
+  config() {
+    return { projectId: "supabase", dataset: "commerce" };
   }
 
   patch(id) {
@@ -190,6 +331,8 @@ export class SupabaseDocumentClient {
   async create(document) {
     const [created] = await applyShadowMutations({
       client: this.shadowClient,
+      commerceMode: this.commerceOnly,
+      cutoverGeneration: this.cutoverGeneration,
       mutations: [{ operation: "create", document }],
     });
     return created;
@@ -198,6 +341,8 @@ export class SupabaseDocumentClient {
   async createIfNotExists(document) {
     const [created] = await applyShadowMutations({
       client: this.shadowClient,
+      commerceMode: this.commerceOnly,
+      cutoverGeneration: this.cutoverGeneration,
       mutations: [{ operation: "create_if_missing", document }],
     });
     return created;
@@ -207,6 +352,8 @@ export class SupabaseDocumentClient {
     const existing = await this.fetch(`*[_id == $id][0]`, { id: document?._id });
     const [created] = await applyShadowMutations({
       client: this.shadowClient,
+      commerceMode: this.commerceOnly,
+      cutoverGeneration: this.cutoverGeneration,
       mutations: [
         existing
           ? {
@@ -226,6 +373,8 @@ export class SupabaseDocumentClient {
       if (!existing) return null;
       const [deleted] = await applyShadowMutations({
         client: this.shadowClient,
+        commerceMode: this.commerceOnly,
+        cutoverGeneration: this.cutoverGeneration,
         mutations: [
           {
             operation: "delete",
@@ -245,6 +394,8 @@ export class SupabaseDocumentClient {
     if (ids.length < 1) return null;
     return applyShadowMutations({
       client: this.shadowClient,
+      commerceMode: this.commerceOnly,
+      cutoverGeneration: this.cutoverGeneration,
       mutations: ids.map((id) => ({ operation: "delete", id })),
     });
   }
@@ -258,6 +409,8 @@ export class SupabaseDocumentClient {
     }
     const [updated] = await applyShadowMutations({
       client: this.shadowClient,
+      commerceMode: this.commerceOnly,
+      cutoverGeneration: this.cutoverGeneration,
       mutations: [
         {
           operation: "replace",
@@ -270,7 +423,10 @@ export class SupabaseDocumentClient {
   }
 
   async commitTransaction(operations) {
-    const dataset = await this.dataset();
+    const operationIds = operations
+      .map((operation) => operation.patch?.id || operation.id || operation.document?._id)
+      .filter(Boolean);
+    const dataset = await this.dataset({ ids: uniqueStrings(operationIds), limit: 1000 });
     const documents = new Map(dataset.map((document) => [document._id, document]));
     const mutations = [];
 
@@ -319,6 +475,8 @@ export class SupabaseDocumentClient {
 
     const results = await applyShadowMutations({
       client: this.shadowClient,
+      commerceMode: this.commerceOnly,
+      cutoverGeneration: this.cutoverGeneration,
       mutations,
     });
     return {

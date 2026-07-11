@@ -18,6 +18,8 @@ export const issueUpgradeIntentToken = ({
   bookingId,
   email,
   targetPackageTitle,
+  backend = "sanity",
+  cutoverGeneration = 0,
   expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString(),
 }) => {
   const key = secret();
@@ -30,13 +32,15 @@ export const issueUpgradeIntentToken = ({
   }
   const issuedAt = Math.floor(Date.now() / 1000);
   const payload = {
-    v: 1,
+    v: 2,
     bid: normalizedBookingId,
     emh: digestEmail(normalizedEmail),
     pkg: normalizedPackage,
     iat: issuedAt,
     exp: Math.floor(new Date(expiresAt).getTime() / 1000),
     n: crypto.randomUUID(),
+    be: backend === "supabase" ? "supabase" : "sanity",
+    gen: Math.max(0, Number(cutoverGeneration) || 0),
   };
   if (!Number.isFinite(payload.exp) || payload.exp <= issuedAt) {
     throw new Error("Upgrade intent is incomplete.");
@@ -50,6 +54,8 @@ export const verifyUpgradeIntentToken = ({
   bookingId,
   email,
   targetPackageTitle,
+  backend = "",
+  cutoverGeneration,
 }) => {
   try {
     const key = secret();
@@ -81,6 +87,16 @@ export const verifyUpgradeIntentToken = ({
     if (payload.bid !== normalizedBookingId) return null;
     if (payload.emh !== digestEmail(normalizedEmail)) return null;
     if (payload.pkg !== normalizedPackage) return null;
+    if (backend && (payload.be === "supabase" ? "supabase" : "sanity") !== backend) {
+      return null;
+    }
+    if (
+      cutoverGeneration !== undefined &&
+      payload.gen !== undefined &&
+      Number(payload.gen) !== Math.max(0, Number(cutoverGeneration) || 0)
+    ) {
+      return null;
+    }
     return payload;
   } catch {
     return null;
@@ -95,6 +111,8 @@ export const freezeUpgradeIntent = ({ payload, verifiedAt = new Date().toISOStri
     bookingId: String(payload.bid).trim(),
     emailHash: String(payload.emh).trim(),
     targetPackage: String(payload.pkg).trim(),
+    backend: payload.be === "supabase" ? "supabase" : "sanity",
+    cutoverGeneration: Math.max(0, Number(payload.gen) || 0),
     tokenIssuedAt: Number(payload.iat || 0)
       ? new Date(Number(payload.iat) * 1000).toISOString()
       : "",

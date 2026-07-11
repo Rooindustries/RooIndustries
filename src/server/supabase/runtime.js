@@ -18,6 +18,18 @@ const parseCanaryAccounts = (value) =>
       .filter(Boolean)
   );
 
+const parseGeneration = (value) => {
+  const normalized = String(value || "0").trim();
+  if (!/^[0-9]+$/.test(normalized)) {
+    throw new Error("COMMERCE_FAILOVER_GENERATION must be a non-negative integer.");
+  }
+  const generation = Number(normalized);
+  if (!Number.isSafeInteger(generation)) {
+    throw new Error("COMMERCE_FAILOVER_GENERATION is too large.");
+  }
+  return generation;
+};
+
 export const resolveSupabaseRuntimePolicy = (env = process.env) => {
   const runtime =
     read(env, "VERCEL_ENV").toLowerCase() ||
@@ -26,12 +38,22 @@ export const resolveSupabaseRuntimePolicy = (env = process.env) => {
       : "development");
   const requestedPrimary =
     read(env, "DATA_PRIMARY_BACKEND").toLowerCase() || "sanity";
+  const requestedCommercePrimary =
+    read(env, "COMMERCE_PRIMARY_BACKEND").toLowerCase() || requestedPrimary;
 
   if (!BACKENDS.has(requestedPrimary)) {
     throw new Error("DATA_PRIMARY_BACKEND must be sanity or supabase.");
   }
+  if (!BACKENDS.has(requestedCommercePrimary)) {
+    throw new Error("COMMERCE_PRIMARY_BACKEND must be sanity or supabase.");
+  }
 
   const cutoverEnabled = readBoolean(env, "SUPABASE_CUTOVER_ENABLED");
+  const commerceCutoverEnabled = readBoolean(env, "COMMERCE_CUTOVER_ENABLED");
+  const commerceStartsPaused = readBoolean(env, "COMMERCE_STARTS_PAUSED");
+  const commerceFailoverGeneration = parseGeneration(
+    read(env, "COMMERCE_FAILOVER_GENERATION")
+  );
   const shadowWritesEnabled = readBoolean(env, "SUPABASE_SHADOW_WRITES");
   const reverseMirrorEnabled = readBoolean(
     env,
@@ -50,7 +72,16 @@ export const resolveSupabaseRuntimePolicy = (env = process.env) => {
     );
   }
   if (
-    (requestedPrimary === "supabase" || commerceCanaryPercentage > 0) &&
+    runtime === "production" &&
+    requestedCommercePrimary === "supabase" &&
+    !commerceCutoverEnabled
+  ) {
+    throw new Error(
+      "Production Supabase commerce cutover requires COMMERCE_CUTOVER_ENABLED=1."
+    );
+  }
+  if (
+    (requestedCommercePrimary === "supabase" || commerceCanaryPercentage > 0) &&
     !reverseMirrorEnabled
   ) {
     throw new Error(
@@ -66,7 +97,11 @@ export const resolveSupabaseRuntimePolicy = (env = process.env) => {
   return {
     runtime,
     primaryBackend: requestedPrimary,
+    commercePrimaryBackend: requestedCommercePrimary,
     cutoverEnabled,
+    commerceCutoverEnabled,
+    commerceStartsPaused,
+    commerceFailoverGeneration,
     shadowWritesEnabled,
     reverseMirrorEnabled,
     contentCanaryPercentage: parsePercentage(

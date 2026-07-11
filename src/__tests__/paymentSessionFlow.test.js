@@ -2582,6 +2582,8 @@ describe("payment session flow", () => {
         bookingId: originalOrderId,
         email: upgradePayload.email,
         targetPackageTitle: upgradePayload.packageTitle,
+        backend: "supabase",
+        cutoverGeneration: 4,
       }),
     };
     const blankEmailQuote = await invokeQuote({
@@ -2610,12 +2612,18 @@ describe("payment session flow", () => {
     const acceptedStart = await startPaymentSession({
       body: { provider: "paypal", bookingPayload: authorizedPayload },
       client: mockClient,
+      backend: "supabase",
+      cutoverGeneration: 9,
     });
 
     expect(acceptedQuote.status).toBe(200);
     expect(acceptedQuote.body.quoteFingerprint).toHaveLength(64);
     expect(acceptedStart.httpStatus).toBe(200);
     expect(mockCreatePayPalOrder).toHaveBeenCalledTimes(1);
+    expect(getOnlyPaymentRecord()).toMatchObject({
+      backendOwner: "supabase",
+      cutoverGeneration: 4,
+    });
   });
 
   test("concurrent upgrade starts claim one provider session", async () => {
