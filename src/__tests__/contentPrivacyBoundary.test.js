@@ -37,6 +37,8 @@ describe("public content privacy boundary", () => {
     process.env.SANITY_PROJECT_ID = "project-test";
     process.env.SANITY_DATASET = "production";
     process.env.SANITY_READ_TOKEN = "server-only-read-token";
+    delete process.env.DATA_PRIMARY_BACKEND;
+    delete process.env.SUPABASE_CONTENT_CANARY_PERCENT;
     mockFetch.mockResolvedValue({ title: "Public copy" });
     mockSupabaseFetch.mockReset();
     mockSupabaseFetch.mockResolvedValue([{ _id: "benchmark-one" }]);
@@ -105,6 +107,27 @@ describe("public content privacy boundary", () => {
     });
   });
 
+  test("caches a complete Supabase content rollout at the edge", async () => {
+    process.env.DATA_PRIMARY_BACKEND = "sanity";
+    process.env.SUPABASE_CONTENT_CANARY_PERCENT = "100";
+    const route = require("../../app/api/content/[resource]/route");
+    const response = await route.GET(
+      new Request("https://example.com/api/content/benchmarks"),
+      { params: Promise.resolve({ resource: "benchmarks" }) }
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-roo-content-backend")).toBe("supabase");
+    expect(response.headers.get("cache-control")).toBe(
+      "public, max-age=60, stale-while-revalidate=300"
+    );
+    expect(response.headers.get("vercel-cdn-cache-control")).toBe(
+      "public, max-age=300, stale-while-revalidate=600, stale-if-error=86400"
+    );
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(response.headers.get("vary")).toBeNull();
+  });
+
   test("deduplicates warm Supabase content reads", async () => {
     const { fetchPublicContent } = require("../server/content/publicContent");
     const request = () =>
@@ -121,6 +144,9 @@ describe("public content privacy boundary", () => {
     await expect(request()).resolves.toEqual([{ _id: "benchmark-one" }]);
     expect(mockSupabaseFetch).toHaveBeenCalledTimes(1);
     expect(mockEnrichSupabaseContentAssets).toHaveBeenCalledTimes(1);
+    expect(mockCreateSupabaseDocumentClient).toHaveBeenCalledWith({
+      documentTypes: ["benchmark"],
+    });
   });
 
   test("serves recent content when a Supabase refresh fails", async () => {

@@ -102,7 +102,8 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
                       alt={beforeAlt}
                       width={beforeDims?.width}
                       height={beforeDims?.height}
-                      loading="lazy"
+                      loading={i === 0 ? "eager" : "lazy"}
+                      fetchPriority={i === 0 ? "high" : "auto"}
                       decoding="async"
                       sizes="(max-width: 768px) 94vw, 46vw"
                       className="rounded w-full cursor-pointer shadow-lg border border-danger-border hover:border-danger hover:shadow-danger-soft transition duration-300"
@@ -130,7 +131,8 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
                       alt={afterAlt}
                       width={afterDims?.width}
                       height={afterDims?.height}
-                      loading="lazy"
+                      loading={i === 0 ? "eager" : "lazy"}
+                      fetchPriority={i === 0 ? "high" : "auto"}
                       decoding="async"
                       sizes="(max-width: 768px) 94vw, 46vw"
                       className="rounded w-full cursor-pointer shadow-lg border border-success-border hover:border-success hover:shadow-success-soft transition duration-300"

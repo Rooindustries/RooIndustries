@@ -5,6 +5,11 @@ import AppClientRuntime from "@/src/next/AppClientRuntime";
 
 // Keep root metadata static at layout level so core tags appear immediately.
 export const metadata = seo.getMetadataForPath("/");
+const SUPABASE_ASSET_ORIGIN =
+  "https://ntezmxzaibrrsgtujgxu.supabase.co";
+const shouldPreconnectSupabase =
+  process.env.DATA_PRIMARY_BACKEND === "supabase" ||
+  Number(process.env.SUPABASE_CONTENT_CANARY_PERCENT || 0) > 0;
 
 // Two themes only: "default" (Roo Blue) and "dark" (Blackout). Legacy
 // stored values ("light"/"system") normalize to default.
@@ -35,6 +40,16 @@ export default function RootLayout({ children }) {
       <head>
         <meta name="theme-color" content="#000040" />
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        {shouldPreconnectSupabase ? (
+          <>
+            <link
+              rel="preconnect"
+              href={SUPABASE_ASSET_ORIGIN}
+              crossOrigin="anonymous"
+            />
+            <link rel="dns-prefetch" href={SUPABASE_ASSET_ORIGIN} />
+          </>
+        ) : null}
         <link
           rel="preload"
           href="/fonts/manrope-latin-variable.woff2"

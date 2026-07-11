@@ -13,6 +13,8 @@ describe("Supabase content asset URLs", () => {
         source_url: "https://cdn.sanity.io/image-one.png",
         storage_bucket: "site-content-public",
         storage_path: "images/one.png",
+        width: 1200,
+        height: 800,
       },
       {
         legacy_sanity_asset_id: "file-one",
@@ -48,6 +50,11 @@ describe("Supabase content asset URLs", () => {
           _ref: "image-one",
           _supabaseUrl:
             "https://storage.test/site-content-public/images/one.png",
+        },
+        dimensions: {
+          width: 1200,
+          height: 800,
+          aspectRatio: 1.5,
         },
       },
       download: "https://storage.test/private/builds/one.zip?ttl=900",

@@ -40,14 +40,17 @@ const DOCUMENT_TYPES_BY_RESOURCE = Object.freeze({
   package: ["package"],
   "upgrade-link": ["upgradeLink", "package"],
 });
+const ASSET_DEREFERENCE_RESOURCES = new Set(["tools"]);
 
 const createPublicContentClient = ({ backend, resource }) => {
   if (backend === "supabase") {
+    const assetDocumentTypes = ASSET_DEREFERENCE_RESOURCES.has(resource)
+      ? ["sanity.imageAsset", "sanity.fileAsset"]
+      : [];
     return createSupabaseDocumentClient({
       documentTypes: [
         ...(DOCUMENT_TYPES_BY_RESOURCE[resource] || []),
-        "sanity.imageAsset",
-        "sanity.fileAsset",
+        ...assetDocumentTypes,
       ],
     });
   }
