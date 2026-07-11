@@ -110,6 +110,7 @@ export const commitBookingTransaction = async ({
   if (slotLockId) {
     const lockValues = {
       _type: "bookingSlot",
+      backendOwner: doc.backendOwner === "supabase" ? "supabase" : "sanity",
       startTimeUTC,
       bookingId: doc._id,
       status: "active",
@@ -220,6 +221,8 @@ export const createRequiresRescheduleBooking = async ({
   const booking = prepareDeterministicBooking({
     booking: {
       paymentRecordId: paymentRecord._id,
+      backendOwner:
+        paymentRecord.backendOwner === "supabase" ? "supabase" : "sanity",
       paymentProvider: paymentRecord.provider,
       paypalOrderId:
         paymentRecord.provider === "paypal" ? paymentRecord.providerOrderId : "",
@@ -271,6 +274,8 @@ export const createRequiresRescheduleBooking = async ({
   const recoveryCase = {
     _id: `bookingRecoveryCase.${booking._id.replace(/^booking\./, "")}`,
     _type: "bookingRecoveryCase",
+    backendOwner:
+      paymentRecord.backendOwner === "supabase" ? "supabase" : "sanity",
     paymentRecordId: paymentRecord._id,
     bookingId: booking._id,
     reason: normalize(reason),

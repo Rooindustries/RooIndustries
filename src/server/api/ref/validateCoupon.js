@@ -1,4 +1,4 @@
-import { createClient } from "@sanity/client";
+import { createDataClient as createClient } from "../../data/documentClient.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import packagePricing from "../../../lib/packagePricing.js";
 import { logSafeError } from "../../safeErrorLog.js";

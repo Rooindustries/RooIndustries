@@ -1,4 +1,4 @@
-import { createClient } from "@sanity/client";
+import { createDataClient as createClient } from "../../data/documentClient.js";
 import { requireAdminKey } from "./auth.js";
 import { applyBookingStatusTransition } from "./bookingRefunds.js";
 import { logSafeError } from "../../safeErrorLog.js";

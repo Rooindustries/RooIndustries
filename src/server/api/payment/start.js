@@ -1,5 +1,9 @@
 import { startPaymentSession } from "./flow.js";
 import { getClientAddress, requireRateLimit } from "../ref/rateLimit.js";
+import {
+  createPaymentBackendClientOverride,
+  selectPaymentStartBackend,
+} from "./backend.js";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -16,6 +20,15 @@ export default async function handler(req, res) {
   if (!allowed) return;
 
   const body = req.body || {};
-  const result = await startPaymentSession({ body });
+  const backend = selectPaymentStartBackend({
+    body,
+    clientAddress: getClientAddress(req),
+  });
+  const client = createPaymentBackendClientOverride(backend);
+  const result = await startPaymentSession({
+    body,
+    backend,
+    ...(client ? { client } : {}),
+  });
   return res.status(result.httpStatus).json(result.body);
 }

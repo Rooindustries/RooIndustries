@@ -1,4 +1,6 @@
-require("dotenv").config({ path: ".env.local" });
+if (!process.env.CI && !process.env.VERCEL) {
+  require("dotenv").config({ path: ".env.local" });
+}
 
 const {
   resolvePaymentProviders,
@@ -35,6 +37,13 @@ const getFirstValue = (keys = []) => {
   return "";
 };
 const hasAny = (keys = []) => Boolean(getFirstValue(keys));
+const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
+const isEnabled = (key) =>
+  TRUE_VALUES.has(String(process.env[key] || "").trim().toLowerCase());
+const numericPercent = (key) => {
+  const parsed = Number(String(process.env[key] || "").trim() || 0);
+  return Number.isFinite(parsed) ? Math.max(0, Math.min(100, parsed)) : 0;
+};
 
 const sessionSecretKeys = ["REF_SESSION_SECRET"];
 const adminKeyKeys = ["REF_ADMIN_KEY"];
@@ -160,6 +169,7 @@ const explicitPayPalEnv = String(
 
 const providerConsistencyFailures = [];
 const providerConsistencyWarnings = [];
+const supabaseConsistencyFailures = [];
 const compatibilityDeadlines = [
   ["PAYMENT_LEGACY_COMPLETION_UNTIL", 60 * 60 * 1000],
   ["PAYMENT_LEGACY_CHECKOUT_UNTIL", 60 * 60 * 1000],
@@ -262,6 +272,110 @@ if (
   }
 }
 
+const primaryBackend = getFirstValue(["DATA_PRIMARY_BACKEND"]).toLowerCase() || "sanity";
+const tourneyDatabaseMode =
+  getFirstValue(["TOURNEY_DATABASE_MODE"]).toLowerCase() || "legacy";
+const contentCanaryPercent = numericPercent("SUPABASE_CONTENT_CANARY_PERCENT");
+const commerceCanaryPercent = numericPercent("SUPABASE_COMMERCE_CANARY_PERCENT");
+const authCanaryConfigured = Boolean(
+  getFirstValue(["SUPABASE_AUTH_CANARY_ACCOUNTS"])
+);
+const shadowWritesEnabled = isEnabled("SUPABASE_SHADOW_WRITES");
+const reverseMirrorEnabled = isEnabled("SANITY_REVERSE_MIRROR_WRITES");
+const cutoverEnabled = isEnabled("SUPABASE_CUTOVER_ENABLED");
+const licensingEnabled = isEnabled("SUPABASE_LICENSING_ENABLED");
+const migrationEndpointEnabled = isEnabled(
+  "SUPABASE_MIGRATION_ENDPOINT_ENABLED"
+);
+const anySupabaseRuntimeEnabled =
+  primaryBackend === "supabase" ||
+  tourneyDatabaseMode === "supabase" ||
+  contentCanaryPercent > 0 ||
+  commerceCanaryPercent > 0 ||
+  authCanaryConfigured ||
+  shadowWritesEnabled ||
+  licensingEnabled ||
+  migrationEndpointEnabled;
+
+if (!["sanity", "supabase"].includes(primaryBackend)) {
+  supabaseConsistencyFailures.push(
+    "DATA_PRIMARY_BACKEND must be sanity or supabase."
+  );
+}
+if (!["legacy", "supabase"].includes(tourneyDatabaseMode)) {
+  supabaseConsistencyFailures.push(
+    "TOURNEY_DATABASE_MODE must be legacy or supabase."
+  );
+}
+
+if (anySupabaseRuntimeEnabled) {
+  const url = getFirstValue(["SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"]);
+  const secret = getFirstValue([
+    "SUPABASE_SECRET_KEY",
+    "SUPABASE_SERVICE_ROLE_KEY",
+  ]);
+  const publishable = getFirstValue([
+    "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+    "SUPABASE_PUBLISHABLE_KEY",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+  ]);
+  if (!/^https:\/\/[a-z0-9]+\.supabase\.co\/?$/i.test(url)) {
+    supabaseConsistencyFailures.push(
+      "Supabase runtime features require a valid SUPABASE_URL."
+    );
+  }
+  if (secret.length < 32) {
+    supabaseConsistencyFailures.push(
+      "Supabase runtime features require a nonempty server secret key."
+    );
+  }
+  if (publishable.length < 20) {
+    supabaseConsistencyFailures.push(
+      "Supabase runtime features require a public publishable key."
+    );
+  }
+}
+
+if (primaryBackend === "supabase" && !cutoverEnabled) {
+  supabaseConsistencyFailures.push(
+    "Supabase primary mode requires SUPABASE_CUTOVER_ENABLED=1."
+  );
+}
+if (
+  (primaryBackend === "supabase" || commerceCanaryPercent > 0) &&
+  !reverseMirrorEnabled
+) {
+  supabaseConsistencyFailures.push(
+    "Supabase commerce writes require SANITY_REVERSE_MIRROR_WRITES=1 during the rollback window."
+  );
+}
+if (commerceCanaryPercent > 0 && !shadowWritesEnabled) {
+  supabaseConsistencyFailures.push(
+    "Supabase commerce canaries require SUPABASE_SHADOW_WRITES=1."
+  );
+}
+if (
+  tourneyDatabaseMode === "supabase" &&
+  !hasAny(["SUPABASE_DATABASE_URL"])
+) {
+  supabaseConsistencyFailures.push(
+    "Supabase Tourney mode requires SUPABASE_DATABASE_URL."
+  );
+}
+if (
+  licensingEnabled &&
+  getFirstValue(["APP_DEVICE_HASH_SECRET"]).length < 32
+) {
+  supabaseConsistencyFailures.push(
+    "Supabase licensing requires APP_DEVICE_HASH_SECRET with at least 32 characters."
+  );
+}
+if (migrationEndpointEnabled && isProdBuild) {
+  supabaseConsistencyFailures.push(
+    "SUPABASE_MIGRATION_ENDPOINT_ENABLED must remain disabled in production."
+  );
+}
+
 if (missing.length === 0) {
   console.log("[env] Runtime secret validation passed.");
 } else if (shouldFailClosed(missing)) {
@@ -282,6 +396,16 @@ if (missing.length === 0) {
 if (providerConsistencyFailures.length > 0) {
   const rendered = providerConsistencyFailures.join("\n- ");
   if (shouldFailClosed(providerConsistencyFailures)) {
+    console.error(`[env] Release build blocked:\n- ${rendered}`);
+    process.exit(1);
+  }
+
+  console.warn(`[env] Local/non-release build warning:\n- ${rendered}`);
+}
+
+if (supabaseConsistencyFailures.length > 0) {
+  const rendered = supabaseConsistencyFailures.join("\n- ");
+  if (shouldFailClosed(supabaseConsistencyFailures)) {
     console.error(`[env] Release build blocked:\n- ${rendered}`);
     process.exit(1);
   }

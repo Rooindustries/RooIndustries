@@ -1,4 +1,8 @@
-import { createClient } from "@sanity/client";
+import {
+  createDocumentReadClient,
+  createDocumentWriteClient,
+  createOptionalDocumentWriteClient,
+} from "../../data/documentClient.js";
 
 const DEFAULT_API_VERSION = "2023-10-01";
 
@@ -39,46 +43,11 @@ export const resolveSanityEnv = () => ({
 });
 
 export const createRefReadClient = ({ perspective = "published" } = {}) => {
-  const { projectId, dataset, apiVersion } = resolveSanityEnv();
-  const token = requireAnyEnvValue(
-    ["SANITY_PRIVATE_READ_TOKEN", "SANITY_READ_TOKEN", "SANITY_WRITE_TOKEN"],
-    "SANITY_READ_TOKEN is required for private dataset reads."
-  );
-  return createClient({
-    projectId,
-    dataset,
-    apiVersion,
-    useCdn: false,
-    perspective,
-    token,
-  });
+  return createDocumentReadClient({ perspective });
 };
 
-export const createRefWriteClient = () => {
-  const { projectId, dataset, apiVersion } = resolveSanityEnv();
-  const token = requireAnyEnvValue(
-    ["SANITY_PRIVATE_WRITE_TOKEN", "SANITY_WRITE_TOKEN"],
-    "SANITY_PRIVATE_WRITE_TOKEN is required for write operations."
-  );
+export const createRefWriteClient = ({ backendOverride = "" } = {}) =>
+  createDocumentWriteClient({ backendOverride });
 
-  return createClient({
-    projectId,
-    dataset,
-    apiVersion,
-    token,
-    useCdn: false,
-  });
-};
-
-export const createOptionalRefWriteClient = () => {
-  const token = readFirstEnv(["SANITY_PRIVATE_WRITE_TOKEN", "SANITY_WRITE_TOKEN"]);
-  if (!token) return null;
-  const { projectId, dataset, apiVersion } = resolveSanityEnv();
-  return createClient({
-    projectId,
-    dataset,
-    apiVersion,
-    token,
-    useCdn: false,
-  });
-};
+export const createOptionalRefWriteClient = () =>
+  createOptionalDocumentWriteClient();

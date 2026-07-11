@@ -1,8 +1,10 @@
-import { createClient } from "@sanity/client";
+import { createDataClient as createClient } from "../../data/documentClient.js";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import { logSafeError } from "../../safeErrorLog.js";
+import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
+import { updateSupabaseAccountPassword } from "../../supabase/accounts.js";
 
 // Initialize Sanity with WRITE permissions
 const client = createClient({
@@ -50,7 +52,7 @@ export default async function handler(req, res) {
       .digest("hex");
 
     const referral = await client.fetch(
-      `*[_type == "referral" && resetTokenHash == $tokenHash && resetTokenExpiresAt > $now][0]{ _id, _rev }`,
+      `*[_type == "referral" && resetTokenHash == $tokenHash && resetTokenExpiresAt > $now][0]{ _id, _rev, creatorEmail, slug }`,
       { tokenHash, now }
     );
 
@@ -62,6 +64,22 @@ export default async function handler(req, res) {
 
     // 2. Hash new password
     const hash = await bcrypt.hash(normalizedPassword, 12);
+    const policy = resolveSupabaseRuntimePolicy();
+
+    if (policy.primaryBackend === "supabase") {
+      try {
+        await updateSupabaseAccountPassword({
+          identifier: referral.creatorEmail || referral.slug?.current,
+          password: normalizedPassword,
+        });
+      } catch (error) {
+        logSafeError("Supabase referral password update failed", error);
+        return res.status(503).json({
+          ok: false,
+          error: "Password update is temporarily unavailable. Please retry the link.",
+        });
+      }
+    }
 
     // 3. Update password and remove reset tokens
     let patch = client.patch(referral._id);
@@ -77,6 +95,17 @@ export default async function handler(req, res) {
       })
       .unset(["resetToken", "resetTokenHash", "resetTokenExpiresAt"])
       .commit();
+
+    if (policy.shadowWritesEnabled && policy.primaryBackend !== "supabase") {
+      try {
+        await updateSupabaseAccountPassword({
+          identifier: referral.creatorEmail || referral.slug?.current,
+          password: normalizedPassword,
+        });
+      } catch (error) {
+        logSafeError("Supabase referral password sync failed", error);
+      }
+    }
 
     return res.status(200).json({ ok: true });
   } catch (err) {

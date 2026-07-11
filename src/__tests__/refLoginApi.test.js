@@ -152,6 +152,7 @@ describe("referral login API", () => {
     expect(session).toEqual({
       referralId: "ref_creator_1",
       code: "creator-code",
+      authBackend: "sanity",
     });
   });
 
