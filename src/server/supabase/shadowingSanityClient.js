@@ -6,10 +6,10 @@ import {
   resolveMirrorFailure,
 } from "./mirrorRecovery.js";
 import {
-  applyShadowMutations,
-  fetchShadowDocuments,
   importShadowDocuments,
+  projectReferralAccountShadow,
   projectOperationalShadow,
+  tombstoneShadowDocuments,
 } from "./shadowStore.js";
 
 const normalizeId = (value) => String(value || "").trim();
@@ -32,19 +32,15 @@ const mirrorDocuments = async ({ sanityClient, ids, shadowClient }) => {
 
     const missingIds = uniqueIds.filter((id) => !found.has(id));
     if (missingIds.length > 0) {
-      const shadowDocuments = await fetchShadowDocuments({ client: shadowClient });
-      const byId = new Map(shadowDocuments.map((document) => [document._id, document]));
-      const deletes = missingIds
-        .filter((id) => byId.has(id))
-        .map((id) => ({
-          operation: "delete",
-          id,
-          expected_revision: byId.get(id)?._rev || "",
-        }));
-      await applyShadowMutations({ mutations: deletes, client: shadowClient });
-    } else {
-      await projectOperationalShadow({ client: shadowClient });
+      await tombstoneShadowDocuments({ ids: missingIds, client: shadowClient });
     }
+    const referralIds = (sourceDocuments || [])
+      .filter((document) => document?._type === "referral")
+      .map((document) => document._id);
+    if (referralIds.length > 0) {
+      await projectReferralAccountShadow({ ids: referralIds, client: shadowClient });
+    }
+    await projectOperationalShadow({ client: shadowClient });
     await resolveMirrorFailure({
       client: shadowClient,
       eventKey: event.eventKey,

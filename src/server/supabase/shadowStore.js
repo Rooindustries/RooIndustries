@@ -50,8 +50,13 @@ export const importShadowDocuments = async ({
   client = createSupabaseAdminClient(),
   batchSize = 100,
 } = {}) => {
-  const normalized = (documents || []).map(normalizeShadowDocument);
+  const normalized = (documents || [])
+    .map(normalizeShadowDocument)
+    .sort((left, right) =>
+      left.legacy_sanity_id.localeCompare(right.legacy_sanity_id)
+    );
   let imported = 0;
+  let skippedStale = 0;
 
   for (let index = 0; index < normalized.length; index += batchSize) {
     const batch = normalized.slice(index, index + batchSize);
@@ -59,11 +64,41 @@ export const importShadowDocuments = async ({
       await client.rpc("roo_import_shadow_batch", { p_documents: batch }),
       "shadow import"
     );
-    imported += Number(result?.imported || batch.length);
+    imported += Number(result?.imported ?? batch.length);
+    skippedStale += Number(result?.skipped_stale ?? 0);
   }
 
-  return { imported };
+  return { imported, skippedStale };
 };
+
+export const tombstoneShadowDocuments = async ({
+  ids,
+  deletedAt = new Date().toISOString(),
+  client = createSupabaseAdminClient(),
+} = {}) =>
+  requireRpcData(
+    await client.rpc("roo_tombstone_shadow_ids", {
+      p_ids: [
+        ...new Set(
+          (ids || []).map((id) => String(id || "").trim()).filter(Boolean)
+        ),
+      ],
+      p_deleted_at: deletedAt,
+    }),
+    "shadow tombstone"
+  );
+
+export const projectReferralAccountShadow = async ({
+  ids,
+  client = createSupabaseAdminClient(),
+} = {}) =>
+  requireRpcData(
+    await client.rpc("roo_project_referral_account_shadow", {
+      p_legacy_sanity_ids:
+        Array.isArray(ids) && ids.length > 0 ? [...new Set(ids)] : null,
+    }),
+    "referral account shadow projection"
+  );
 
 export const fetchShadowDocuments = async ({
   documentTypes = null,
