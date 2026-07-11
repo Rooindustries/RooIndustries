@@ -1,4 +1,5 @@
 export const BOOKING_DRAFT_STORAGE_KEY = "booking_draft";
+export const CHECKOUT_BOOKING_STORAGE_KEY = "checkout_booking_state";
 
 const LEGACY_CHECKOUT_KEYS = [
   "my_slot_hold",
@@ -59,6 +60,53 @@ export const readBookingPackageSelection = () => {
   } catch {
     return null;
   }
+};
+
+export const readStoredCheckoutBooking = () => {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(CHECKOUT_BOOKING_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+export const writeStoredCheckoutBooking = (bookingData) => {
+  if (typeof window === "undefined") return null;
+  if (!bookingData || typeof bookingData !== "object" || Array.isArray(bookingData)) {
+    return null;
+  }
+  try {
+    window.sessionStorage.setItem(
+      CHECKOUT_BOOKING_STORAGE_KEY,
+      JSON.stringify(bookingData)
+    );
+    return bookingData;
+  } catch {
+    return null;
+  }
+};
+
+export const updateStoredCheckoutHold = (hold = {}) => {
+  const current = readStoredCheckoutBooking();
+  const slotHoldId = String(hold.slotHoldId || "").trim();
+  const slotHoldToken = String(hold.slotHoldToken || "").trim();
+  const slotHoldExpiresAt = String(hold.slotHoldExpiresAt || "").trim();
+  if (!current || !slotHoldId || !slotHoldToken || !slotHoldExpiresAt) {
+    return null;
+  }
+
+  return writeStoredCheckoutBooking({
+    ...current,
+    slotHoldId,
+    slotHoldToken,
+    slotHoldExpiresAt,
+  });
 };
 
 export const migrateCheckoutStorageToSession = () => {

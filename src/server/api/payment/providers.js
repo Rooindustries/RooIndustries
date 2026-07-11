@@ -28,6 +28,9 @@ export default async function handler(req, res) {
       razorpay: {
         enabled: !!providers?.razorpay?.enabled,
         mode: providers?.razorpay?.mode || "unknown",
+        ...(providers?.razorpay?.disabledReason
+          ? { disabledReason: String(providers.razorpay.disabledReason).trim() }
+          : {}),
       },
       paypal: {
         enabled: !!providers?.paypal?.enabled,
