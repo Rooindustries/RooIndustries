@@ -12,7 +12,7 @@ const builder = createImageUrlBuilder({
 
 const SUPABASE_PUBLIC_IMAGE_PATH = "/storage/v1/object/public/";
 const SUPABASE_RENDER_IMAGE_PATH = "/storage/v1/render/image/public/";
-const TRANSFORMABLE_IMAGE_PATH = /\.(?:gif|jpe?g|png|webp)$/i;
+const TRANSFORMABLE_IMAGE_PATH = /\.(?:gif|jpe?g|png)$/i;
 const RESIZE_MODE_BY_FIT = Object.freeze({
   crop: "cover",
   fill: "fill",

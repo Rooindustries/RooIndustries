@@ -27,12 +27,15 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
       ? urlFor(image).width(width).format("webp").quality(60).url()
       : "";
 
-  const buildImageSrcSet = (image, widths) =>
-    image
-      ? widths
-          .map((width) => `${buildImageSrc(image, width)} ${width}w`)
-          .join(", ")
-      : undefined;
+  const buildImageSrcSet = (image, widths) => {
+    if (!image) return undefined;
+    const sources = widths.map((width) => ({
+      url: buildImageSrc(image, width),
+      width,
+    }));
+    if (new Set(sources.map(({ url }) => url)).size < 2) return undefined;
+    return sources.map(({ url, width }) => `${url} ${width}w`).join(", ");
+  };
 
   useEffect(() => {
     getPublicContent("benchmarks")
