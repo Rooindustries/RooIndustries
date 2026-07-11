@@ -33,6 +33,7 @@ export const COMMERCE_RECONCILABLE_DOCUMENT_TYPES = Object.freeze(
 );
 
 export const COMMERCE_EPHEMERAL_DOCUMENT_TYPES = Object.freeze([
+  "rateLimitBucket",
   "refRateLimitBucket",
 ]);
 
