@@ -1,0 +1,129 @@
+.shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 7rem 1.25rem 3rem;
+  color: #f7fbff;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(0, 196, 255, 0.18), transparent 35rem),
+    linear-gradient(145deg, #02030c, #06152a 58%, #001c38);
+}
+
+.card {
+  width: min(100%, 31rem);
+  padding: clamp(1.6rem, 5vw, 2.5rem);
+  border: 1px solid rgba(111, 211, 255, 0.24);
+  border-radius: 1.5rem;
+  background: rgba(4, 10, 24, 0.86);
+  box-shadow: 0 2rem 6rem rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(18px);
+}
+
+.card h1 {
+  margin: 0;
+  font-size: clamp(2.2rem, 8vw, 3.6rem);
+  line-height: 0.98;
+  letter-spacing: -0.045em;
+}
+
+.eyebrow {
+  margin: 0 0 0.8rem;
+  color: #63d9ff;
+  font-size: 0.78rem;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.intro {
+  margin: 1rem 0 1.7rem;
+  color: rgba(235, 246, 255, 0.72);
+  line-height: 1.55;
+}
+
+.actions {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.providerButton,
+.secondaryButton {
+  min-height: 3.25rem;
+  border-radius: 0.9rem;
+  font: inherit;
+  font-weight: 720;
+  cursor: pointer;
+  transition: transform 150ms ease, border-color 150ms ease, background 150ms ease;
+}
+
+.providerButton {
+  display: grid;
+  grid-template-columns: 2rem 1fr 2rem;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #f8fbff;
+  background: rgba(255, 255, 255, 0.065);
+}
+
+.providerButton::after {
+  content: "";
+}
+
+.providerButton:hover:not(:disabled),
+.secondaryButton:hover {
+  transform: translateY(-1px);
+  border-color: rgba(99, 217, 255, 0.58);
+}
+
+.providerButton:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.discord {
+  background: rgba(88, 101, 242, 0.17);
+}
+
+.providerMark {
+  display: grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  place-items: center;
+  border-radius: 999px;
+  color: #020713;
+  background: #f8fbff;
+  font-size: 0.85rem;
+  font-weight: 850;
+}
+
+.error {
+  margin: 1rem 0 0;
+  color: #ffb9c3;
+  line-height: 1.45;
+}
+
+.note {
+  margin: 1.5rem 0 0;
+  color: rgba(235, 246, 255, 0.48);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.secondaryButton {
+  padding: 0.75rem 1.2rem;
+  border: 1px solid rgba(99, 217, 255, 0.35);
+  color: #dff7ff;
+  background: transparent;
+}
+
+@media (max-width: 540px) {
+  .shell {
+    align-items: start;
+    padding-top: 5.5rem;
+  }
+
+  .card {
+    border-radius: 1.15rem;
+  }
+}

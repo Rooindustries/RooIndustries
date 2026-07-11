@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
+import { bootstrapSupabaseNativeAccount } from "@/src/server/supabase/accounts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -76,6 +77,15 @@ export async function GET(request) {
     target.search = "auth_error=exchange_failed";
     return NextResponse.redirect(target, { status: 303 });
   }
+
+  try {
+    await bootstrapSupabaseNativeAccount({ userId: result.data?.user?.id });
+  } catch {
+    const setupError = new URL("/account/login", url.origin);
+    setupError.searchParams.set("error", "account_setup_failed");
+    return NextResponse.redirect(setupError, { status: 303 });
+  }
+
   response.headers.set("Cache-Control", "private, no-store");
   return response;
 }
