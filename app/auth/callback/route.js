@@ -66,8 +66,13 @@ export async function GET(request) {
   const supabase = createServerClient(supabaseUrl, publishableKey, {
     cookies: {
       getAll: () => requestCookies(request),
-      setAll: (cookies) => {
-        for (const cookie of cookies) response.cookies.set(cookie);
+      setAll: (cookies, headers = {}) => {
+        for (const { name, value, options } of cookies) {
+          response.cookies.set(name, value, options);
+        }
+        for (const [name, value] of Object.entries(headers)) {
+          response.headers.set(name, value);
+        }
       },
     },
   });
