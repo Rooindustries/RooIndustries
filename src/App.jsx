@@ -218,6 +218,7 @@ export function AppContent({
 }) {
   const [, setIsModalOpen] = useState(false);
   const [showRouteTransition, setShowRouteTransition] = useState(false);
+  const [storedBackground, setStoredBackground] = useState(null);
 
   const location = useLocation();
   const navigate = useNavigate();
@@ -425,18 +426,23 @@ export function AppContent({
     const stateBackground = location.state?.backgroundLocation;
     if (stateBackground?.pathname) {
       writeStoredBackground(stateBackground);
+      setStoredBackground(stateBackground);
       return;
     }
     if (!isFlowRoute) {
-      writeStoredBackground({
+      const currentBackground = {
         pathname: location.pathname,
         search: location.search || "",
         hash: location.hash || "",
-      });
+      };
+      writeStoredBackground(currentBackground);
+      setStoredBackground(currentBackground);
+      return;
     }
+
+    setStoredBackground(readStoredBackground());
   }, [location.pathname, location.search, location.hash, location.state, isFlowRoute]);
 
-  const storedBackground = readStoredBackground();
   const backgroundLocation =
     location.state && location.state.backgroundLocation
       ? location.state.backgroundLocation

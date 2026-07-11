@@ -10,10 +10,12 @@
 # production
 /build
 /.next
+/.next-*
 /.lighthouseci
 /test-results
 /playwright-report
 /output
+/audit/payment-email-smoke/
 
 # misc
 .env*
