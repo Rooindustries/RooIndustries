@@ -2,6 +2,11 @@ import { createDataClient as createClient } from "../../data/documentClient.js";
 import { Resend } from "resend";
 import crypto from "crypto";
 import { getSafeErrorCode, logSafeError } from "../../safeErrorLog.js";
+import {
+  claimEmailDispatchPair,
+  completeEmailDispatch,
+  listEmailDispatchRecoveryBookingIds,
+} from "../../supabase/emailDispatchLedger.js";
 
 const writeClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -9,7 +14,7 @@ const writeClient = createClient({
   apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
   token: process.env.SANITY_WRITE_TOKEN,
   useCdn: false,
-});
+}, { domain: "commerce" });
 
 export const DISCORD_INVITE_URL = "https://discord.com/invite/qs5HKNyazD";
 export const OWNER_TZ_NAME = "Asia/Kolkata";
@@ -25,6 +30,38 @@ const createResendClient = () => {
 };
 
 const resend = createResendClient();
+
+const flushCriticalBookingMirror = async (client) => {
+  if (typeof client?.flushCommerceMirror !== "function") return null;
+  return client.flushCommerceMirror({ failClosed: true, limit: 100 });
+};
+
+const recordEmailLedgerOutcome = async ({
+  client,
+  dispatch,
+  leaseId,
+  success,
+  providerMessageId = "",
+  errorCode = "",
+  sentAt,
+  nextAttemptAt,
+}) => {
+  try {
+    return await completeEmailDispatch({
+      client,
+      dispatch,
+      leaseId,
+      success,
+      providerMessageId,
+      errorCode,
+      sentAt,
+      nextAttemptAt,
+    });
+  } catch (error) {
+    logSafeError("Email dispatch ledger update failed", error);
+    return null;
+  }
+};
 
 const escapeHtml = (value) =>
   String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -214,6 +251,8 @@ export const getBookingForEmailDispatch = async ({
     `*[_type == "booking" && _id == $id][0]{
       _id,
       _rev,
+      backendOwner,
+      cutoverGeneration,
       discord,
       email,
       payerEmail,
@@ -248,7 +287,9 @@ export const getBookingForEmailDispatch = async ({
       emailDispatchLeaseId,
       emailDispatchLeaseExpiresAt,
       emailDispatchClientSentAt,
-      emailDispatchOwnerSentAt
+      emailDispatchOwnerSentAt,
+      emailDispatchClientProviderId,
+      emailDispatchOwnerProviderId
     }`,
     { id: normalizedBookingId }
   );
@@ -451,6 +492,91 @@ export const sendBookingEmailsForBooking = async ({
     throw error;
   }
 
+  try {
+    await flushCriticalBookingMirror(client);
+  } catch (error) {
+    await client
+      .patch(resolvedBooking._id)
+      .set({
+        emailDispatchStatus: "retry",
+        emailDispatchLastError: "sanity_mirror_pending_before_email",
+        emailDispatchLeaseId: "",
+        emailDispatchLeaseExpiresAt: "",
+        emailDispatchNextAttemptAt: new Date(nowMs + 5 * 60 * 1000).toISOString(),
+      })
+      .commit()
+      .catch(() => null);
+    return {
+      httpStatus: 503,
+      body: {
+        ok: false,
+        bookingId: resolvedBooking._id,
+        retryable: true,
+        code: "sanity_mirror_pending_before_email",
+        error: "Booking confirmation is saved and will retry shortly.",
+        emailDispatch: buildDeferredEmailDispatch({ booking: resolvedBooking }),
+      },
+    };
+  }
+
+  let ledger = null;
+  try {
+    ledger = await claimEmailDispatchPair({
+      client,
+      bookingId: resolvedBooking._id,
+      dispatchKind: "booking_confirmation",
+      leaseId,
+    });
+  } catch (error) {
+    logSafeError("Booking email ledger lease failed", error);
+    await client
+      .patch(resolvedBooking._id)
+      .set({
+        emailDispatchStatus: "retry",
+        emailDispatchLastError: "email_ledger_unavailable",
+        emailDispatchLeaseId: "",
+        emailDispatchLeaseExpiresAt: "",
+        emailDispatchNextAttemptAt: new Date(
+          nowMs + 5 * 60 * 1000
+        ).toISOString(),
+      })
+      .commit()
+      .catch(() => null);
+    return {
+      httpStatus: 503,
+      body: {
+        ok: false,
+        bookingId: resolvedBooking._id,
+        retryable: true,
+        code: "email_ledger_unavailable",
+        error: "Booking confirmation is saved and will retry shortly.",
+        emailDispatch: buildDeferredEmailDispatch({ booking: resolvedBooking }),
+      },
+    };
+  }
+  if (ledger?.customer?.inProgress || ledger?.owner?.inProgress) {
+    await client
+      .patch(resolvedBooking._id)
+      .set({
+        emailDispatchLeaseId: "",
+        emailDispatchLeaseExpiresAt: "",
+      })
+      .commit()
+      .catch(() => null);
+    return {
+      httpStatus: 202,
+      body: {
+        ok: true,
+        bookingId: resolvedBooking._id,
+        retryable: true,
+        emailDispatch: {
+          ...buildDeferredEmailDispatch({ booking: resolvedBooking }),
+          skippedReason: "dispatch_in_progress",
+        },
+      },
+    };
+  }
+
   const patchValues = {
     emailDispatchLastAttemptAt: now,
     emailDispatchLastError: "",
@@ -468,8 +594,23 @@ export const sendBookingEmailsForBooking = async ({
   const clientRecipient = String(
     resolvedBooking.email || resolvedBooking.payerEmail || ""
   ).trim();
-  const clientAlreadySent = !!resolvedBooking.emailDispatchClientSentAt;
-  const ownerAlreadySent = !!resolvedBooking.emailDispatchOwnerSentAt;
+  const clientAlreadySent =
+    !!resolvedBooking.emailDispatchClientSentAt || ledger?.customer?.sent === true;
+  const ownerAlreadySent =
+    !!resolvedBooking.emailDispatchOwnerSentAt || ledger?.owner?.sent === true;
+  if (!resolvedBooking.emailDispatchClientSentAt && ledger?.customer?.sent) {
+    patchValues.emailDispatchClientSentAt = ledger.customer.sentAt || now;
+    if (ledger.customer.providerMessageId) {
+      patchValues.emailDispatchClientProviderId =
+        ledger.customer.providerMessageId;
+    }
+  }
+  if (!resolvedBooking.emailDispatchOwnerSentAt && ledger?.owner?.sent) {
+    patchValues.emailDispatchOwnerSentAt = ledger.owner.sentAt || now;
+    if (ledger.owner.providerMessageId) {
+      patchValues.emailDispatchOwnerProviderId = ledger.owner.providerMessageId;
+    }
+  }
 
   if (!dispatch.deliveryEnabled) {
     dispatch.deferred = !!resolvedBooking.emailDispatchDeferred;
@@ -490,6 +631,7 @@ export const sendBookingEmailsForBooking = async ({
       ? ""
       : new Date(nowMs + 5 * 60 * 1000).toISOString();
     await client.patch(resolvedBooking._id).set(patchValues).commit();
+    await flushCriticalBookingMirror(client).catch(() => null);
     return {
       httpStatus: dispatch.allSent ? 200 : 503,
       body: {
@@ -504,12 +646,16 @@ export const sendBookingEmailsForBooking = async ({
   if (clientAlreadySent) {
     dispatch.client.sent = true;
     dispatch.client.skippedReason = "already_sent";
+  } else if (ledger?.customer?.historicalUnknown) {
+    dispatch.client.skippedReason = "historical_delivery_unknown";
+  } else if (ledger && !ledger.customer?.claimed) {
+    dispatch.client.skippedReason = "dispatch_in_progress";
   } else if (!clientRecipient) {
     dispatch.client.skippedReason = "missing_client_recipient";
   } else {
     dispatch.client.attempted = true;
     try {
-      const { error } = await resend.emails.send(
+      const { data, error } = await resend.emails.send(
         {
           from,
           to: clientRecipient,
@@ -524,35 +670,67 @@ export const sendBookingEmailsForBooking = async ({
             discordInviteUrl: DISCORD_INVITE_URL,
           }),
         },
-        { idempotencyKey: `booking-${resolvedBooking._id}-client` }
+        {
+          idempotencyKey:
+            ledger?.customer?.idempotencyKey ||
+            `booking-${resolvedBooking._id}-client`,
+        }
       );
 
       if (error) {
-        dispatch.client.skippedReason = getSafeErrorCode(
-          error,
-          "resend_client_error"
-        );
+        const errorCode = getSafeErrorCode(error, "resend_client_error");
+        dispatch.client.skippedReason = errorCode;
+        await recordEmailLedgerOutcome({
+          client,
+          dispatch: ledger?.customer,
+          leaseId,
+          success: false,
+          errorCode,
+          nextAttemptAt: new Date(nowMs + 5 * 60 * 1000).toISOString(),
+        });
       } else {
         dispatch.client.sent = true;
         patchValues.emailDispatchClientSentAt = now;
+        if (data?.id) patchValues.emailDispatchClientProviderId = String(data.id);
+        await recordEmailLedgerOutcome({
+          client,
+          dispatch: ledger?.customer,
+          leaseId,
+          success: true,
+          providerMessageId: data?.id,
+          sentAt: now,
+        });
       }
     } catch (error) {
-      dispatch.client.skippedReason = getSafeErrorCode(
+      const errorCode = getSafeErrorCode(
         error,
         "resend_client_exception"
       );
+      dispatch.client.skippedReason = errorCode;
+      await recordEmailLedgerOutcome({
+        client,
+        dispatch: ledger?.customer,
+        leaseId,
+        success: false,
+        errorCode,
+        nextAttemptAt: new Date(nowMs + 5 * 60 * 1000).toISOString(),
+      });
     }
   }
 
   if (ownerAlreadySent) {
     dispatch.owner.sent = true;
     dispatch.owner.skippedReason = "already_sent";
+  } else if (ledger?.owner?.historicalUnknown) {
+    dispatch.owner.skippedReason = "historical_delivery_unknown";
+  } else if (ledger && !ledger.owner?.claimed) {
+    dispatch.owner.skippedReason = "dispatch_in_progress";
   } else if (!owner) {
     dispatch.owner.skippedReason = "missing_owner_recipient";
   } else {
     dispatch.owner.attempted = true;
     try {
-      const { error } = await resend.emails.send(
+      const { data, error } = await resend.emails.send(
         {
           from,
           to: owner,
@@ -565,23 +743,51 @@ export const sendBookingEmailsForBooking = async ({
             fields: ownerFields,
           }),
         },
-        { idempotencyKey: `booking-${resolvedBooking._id}-owner` }
+        {
+          idempotencyKey:
+            ledger?.owner?.idempotencyKey ||
+            `booking-${resolvedBooking._id}-owner`,
+        }
       );
 
       if (error) {
-        dispatch.owner.skippedReason = getSafeErrorCode(
-          error,
-          "resend_owner_error"
-        );
+        const errorCode = getSafeErrorCode(error, "resend_owner_error");
+        dispatch.owner.skippedReason = errorCode;
+        await recordEmailLedgerOutcome({
+          client,
+          dispatch: ledger?.owner,
+          leaseId,
+          success: false,
+          errorCode,
+          nextAttemptAt: new Date(nowMs + 5 * 60 * 1000).toISOString(),
+        });
       } else {
         dispatch.owner.sent = true;
         patchValues.emailDispatchOwnerSentAt = now;
+        if (data?.id) patchValues.emailDispatchOwnerProviderId = String(data.id);
+        await recordEmailLedgerOutcome({
+          client,
+          dispatch: ledger?.owner,
+          leaseId,
+          success: true,
+          providerMessageId: data?.id,
+          sentAt: now,
+        });
       }
     } catch (error) {
-      dispatch.owner.skippedReason = getSafeErrorCode(
+      const errorCode = getSafeErrorCode(
         error,
         "resend_owner_exception"
       );
+      dispatch.owner.skippedReason = errorCode;
+      await recordEmailLedgerOutcome({
+        client,
+        dispatch: ledger?.owner,
+        leaseId,
+        success: false,
+        errorCode,
+        nextAttemptAt: new Date(nowMs + 5 * 60 * 1000).toISOString(),
+      });
     }
   }
 
@@ -616,6 +822,22 @@ export const sendBookingEmailsForBooking = async ({
     await completionPatch.set(patchValues).commit();
   }
 
+  try {
+    await flushCriticalBookingMirror(client);
+  } catch {
+    return {
+      httpStatus: 503,
+      body: {
+        ok: false,
+        bookingId: resolvedBooking._id,
+        retryable: true,
+        code: "sanity_mirror_pending_after_email",
+        error: "Email delivery is recorded and its fallback copy will retry.",
+        emailDispatch: dispatch,
+      },
+    };
+  }
+
   return {
     httpStatus: dispatch.allSent ? 200 : 503,
     body: {
@@ -625,6 +847,56 @@ export const sendBookingEmailsForBooking = async ({
       emailDispatch: dispatch,
     },
   };
+};
+
+export const reconcileBookingEmailDispatches = async ({
+  client = writeClient,
+  now = new Date().toISOString(),
+  limit = 20,
+} = {}) => {
+  const ledgerBookingIds = await listEmailDispatchRecoveryBookingIds({
+    client,
+    dispatchKind: "booking_confirmation",
+    now,
+    limit,
+  });
+  const bookings = Array.isArray(ledgerBookingIds)
+    ? await client.fetch(
+        `*[_type == "booking" && _id in $ids]{...}`,
+        { ids: ledgerBookingIds }
+      )
+    : await client.fetch(
+        `*[_type == "booking"
+          && emailDispatchStatus in ["partial", "failed", "retry"]
+          && (!defined(emailDispatchNextAttemptAt) || emailDispatchNextAttemptAt == "" || emailDispatchNextAttemptAt <= $now)
+          && (!defined(emailDispatchClientSentAt) || !defined(emailDispatchOwnerSentAt))
+        ] | order(emailDispatchNextAttemptAt asc, _updatedAt asc)[0...20]{...}`,
+        { now }
+      );
+  const summary = { scanned: 0, sent: 0, pending: 0 };
+  const byId = new Map(
+    (Array.isArray(bookings) ? bookings : []).map((booking) => [
+      booking?._id,
+      booking,
+    ])
+  );
+  const ordered = Array.isArray(ledgerBookingIds)
+    ? ledgerBookingIds.map((id) => byId.get(id)).filter(Boolean)
+    : Array.isArray(bookings)
+      ? bookings
+      : [];
+  const selected = ordered.slice(0, Math.max(1, Math.min(20, Number(limit) || 20)));
+  for (const booking of selected) {
+    summary.scanned += 1;
+    const result = await sendBookingEmailsForBooking({
+      bookingId: booking._id,
+      booking,
+      client,
+    });
+    if (result?.body?.emailDispatch?.allSent === true) summary.sent += 1;
+    else summary.pending += 1;
+  }
+  return summary;
 };
 
 export const dispatchRescheduleNotifications = async ({
@@ -701,6 +973,77 @@ export const dispatchRescheduleNotifications = async ({
     throw error;
   }
 
+  try {
+    await flushCriticalBookingMirror(client);
+  } catch {
+    await client
+      .patch(recoveryBooking._id)
+      .set({
+        recoveryNotificationStatus: "pending",
+        recoveryNotificationLastError: "sanity_mirror_pending_before_email",
+        recoveryNotificationLeaseId: "",
+        recoveryNotificationLeaseExpiresAt: "",
+        recoveryNotificationNextAttemptAt: new Date(
+          nowMs + 5 * 60 * 1000
+        ).toISOString(),
+      })
+      .commit()
+      .catch(() => null);
+    return {
+      ok: false,
+      bookingId: recoveryBooking._id,
+      notificationRequired: true,
+      reason: "sanity_mirror_pending_before_email",
+    };
+  }
+
+  let recoveryLedger = null;
+  try {
+    recoveryLedger = await claimEmailDispatchPair({
+      client,
+      bookingId: recoveryBooking._id,
+      dispatchKind: "reschedule",
+      leaseId,
+    });
+  } catch (error) {
+    logSafeError("Reschedule email ledger lease failed", error);
+    await client
+      .patch(recoveryBooking._id)
+      .set({
+        recoveryNotificationStatus: "pending",
+        recoveryNotificationLastError: "email_ledger_unavailable",
+        recoveryNotificationLeaseId: "",
+        recoveryNotificationLeaseExpiresAt: "",
+        recoveryNotificationNextAttemptAt: new Date(
+          nowMs + 5 * 60 * 1000
+        ).toISOString(),
+      })
+      .commit()
+      .catch(() => null);
+    return {
+      ok: false,
+      bookingId: recoveryBooking._id,
+      notificationRequired: true,
+      reason: "email_ledger_unavailable",
+    };
+  }
+  if (recoveryLedger?.customer?.inProgress || recoveryLedger?.owner?.inProgress) {
+    await client
+      .patch(recoveryBooking._id)
+      .set({
+        recoveryNotificationLeaseId: "",
+        recoveryNotificationLeaseExpiresAt: "",
+      })
+      .commit()
+      .catch(() => null);
+    return {
+      ok: true,
+      notificationRequired: true,
+      inProgress: true,
+      bookingId: recoveryBooking._id,
+    };
+  }
+
   const owner = await resolveBookingOwnerEmail(client);
   const customer = String(
     recoveryBooking.email || recoveryBooking.payerEmail || ""
@@ -723,13 +1066,38 @@ export const dispatchRescheduleNotifications = async ({
     recoveryNotificationLastAttemptAt: now,
   };
   const errors = [];
+  const clientAlreadyNotified =
+    !!recoveryBooking.recoveryClientNotifiedAt ||
+    recoveryLedger?.customer?.sent === true;
+  const ownerAlreadyNotified =
+    !!recoveryBooking.recoveryOwnerNotifiedAt ||
+    recoveryLedger?.owner?.sent === true;
+  if (!recoveryBooking.recoveryClientNotifiedAt && recoveryLedger?.customer?.sent) {
+    patchValues.recoveryClientNotifiedAt = recoveryLedger.customer.sentAt || now;
+    if (recoveryLedger.customer.providerMessageId) {
+      patchValues.recoveryClientProviderId =
+        recoveryLedger.customer.providerMessageId;
+    }
+  }
+  if (!recoveryBooking.recoveryOwnerNotifiedAt && recoveryLedger?.owner?.sent) {
+    patchValues.recoveryOwnerNotifiedAt = recoveryLedger.owner.sentAt || now;
+    if (recoveryLedger.owner.providerMessageId) {
+      patchValues.recoveryOwnerProviderId = recoveryLedger.owner.providerMessageId;
+    }
+  }
 
   if (!deliveryEnabled) {
     errors.push("delivery_disabled");
   } else {
-    if (!recoveryBooking.recoveryClientNotifiedAt && customer) {
+    if (clientAlreadyNotified) {
+      // The typed ledger is the final authority when the compatibility patch lagged.
+    } else if (recoveryLedger?.customer?.historicalUnknown) {
+      errors.push("historical_delivery_unknown");
+    } else if (recoveryLedger && !recoveryLedger.customer?.claimed) {
+      errors.push("dispatch_in_progress");
+    } else if (customer) {
       try {
-        const { error } = await resend.emails.send(
+        const { data, error } = await resend.emails.send(
           {
             from,
             to: customer,
@@ -745,20 +1113,63 @@ export const dispatchRescheduleNotifications = async ({
               discordLabel: "Open the Roo Industries Discord",
             }),
           },
-          { idempotencyKey: `booking-${recoveryBooking._id}-reschedule-client` }
+          {
+            idempotencyKey:
+              recoveryLedger?.customer?.idempotencyKey ||
+              `booking-${recoveryBooking._id}-reschedule-client`,
+          }
         );
-        if (error) errors.push(getSafeErrorCode(error, "reschedule_client_error"));
-        else patchValues.recoveryClientNotifiedAt = now;
+        if (error) {
+          const errorCode = getSafeErrorCode(error, "reschedule_client_error");
+          errors.push(errorCode);
+          await recordEmailLedgerOutcome({
+            client,
+            dispatch: recoveryLedger?.customer,
+            leaseId,
+            success: false,
+            errorCode,
+            nextAttemptAt: new Date(nowMs + 5 * 60 * 1000).toISOString(),
+          });
+        } else {
+          patchValues.recoveryClientNotifiedAt = now;
+          if (data?.id) patchValues.recoveryClientProviderId = String(data.id);
+          await recordEmailLedgerOutcome({
+            client,
+            dispatch: recoveryLedger?.customer,
+            leaseId,
+            success: true,
+            providerMessageId: data?.id,
+            sentAt: now,
+          });
+        }
       } catch (error) {
-        errors.push(getSafeErrorCode(error, "reschedule_client_exception"));
+        const errorCode = getSafeErrorCode(
+          error,
+          "reschedule_client_exception"
+        );
+        errors.push(errorCode);
+        await recordEmailLedgerOutcome({
+          client,
+          dispatch: recoveryLedger?.customer,
+          leaseId,
+          success: false,
+          errorCode,
+          nextAttemptAt: new Date(nowMs + 5 * 60 * 1000).toISOString(),
+        });
       }
-    } else if (!recoveryBooking.recoveryClientNotifiedAt) {
+    } else {
       errors.push("missing_client_recipient");
     }
 
-    if (!recoveryBooking.recoveryOwnerNotifiedAt && owner) {
+    if (ownerAlreadyNotified) {
+      // Already recorded by the authoritative dispatch ledger.
+    } else if (recoveryLedger?.owner?.historicalUnknown) {
+      errors.push("historical_delivery_unknown");
+    } else if (recoveryLedger && !recoveryLedger.owner?.claimed) {
+      errors.push("dispatch_in_progress");
+    } else if (owner) {
       try {
-        const { error } = await resend.emails.send(
+        const { data, error } = await resend.emails.send(
           {
             from,
             to: owner,
@@ -779,23 +1190,60 @@ export const dispatchRescheduleNotifications = async ({
               ],
             }),
           },
-          { idempotencyKey: `booking-${recoveryBooking._id}-reschedule-owner` }
+          {
+            idempotencyKey:
+              recoveryLedger?.owner?.idempotencyKey ||
+              `booking-${recoveryBooking._id}-reschedule-owner`,
+          }
         );
-        if (error) errors.push(getSafeErrorCode(error, "reschedule_owner_error"));
-        else patchValues.recoveryOwnerNotifiedAt = now;
+        if (error) {
+          const errorCode = getSafeErrorCode(error, "reschedule_owner_error");
+          errors.push(errorCode);
+          await recordEmailLedgerOutcome({
+            client,
+            dispatch: recoveryLedger?.owner,
+            leaseId,
+            success: false,
+            errorCode,
+            nextAttemptAt: new Date(nowMs + 5 * 60 * 1000).toISOString(),
+          });
+        } else {
+          patchValues.recoveryOwnerNotifiedAt = now;
+          if (data?.id) patchValues.recoveryOwnerProviderId = String(data.id);
+          await recordEmailLedgerOutcome({
+            client,
+            dispatch: recoveryLedger?.owner,
+            leaseId,
+            success: true,
+            providerMessageId: data?.id,
+            sentAt: now,
+          });
+        }
       } catch (error) {
-        errors.push(getSafeErrorCode(error, "reschedule_owner_exception"));
+        const errorCode = getSafeErrorCode(
+          error,
+          "reschedule_owner_exception"
+        );
+        errors.push(errorCode);
+        await recordEmailLedgerOutcome({
+          client,
+          dispatch: recoveryLedger?.owner,
+          leaseId,
+          success: false,
+          errorCode,
+          nextAttemptAt: new Date(nowMs + 5 * 60 * 1000).toISOString(),
+        });
       }
-    } else if (!recoveryBooking.recoveryOwnerNotifiedAt) {
+    } else {
       errors.push("missing_owner_recipient");
     }
   }
 
   const clientSent =
-    !!recoveryBooking.recoveryClientNotifiedAt ||
+    clientAlreadyNotified ||
     !!patchValues.recoveryClientNotifiedAt;
   const ownerSent =
-    !!recoveryBooking.recoveryOwnerNotifiedAt ||
+    ownerAlreadyNotified ||
     !!patchValues.recoveryOwnerNotifiedAt;
   const allSent = clientSent && ownerSent;
   patchValues.recoveryNotificationStatus = allSent
@@ -835,6 +1283,19 @@ export const dispatchRescheduleNotifications = async ({
       })
       .commit()
       .catch(() => {});
+  }
+
+  try {
+    await flushCriticalBookingMirror(client);
+  } catch {
+    return {
+      ok: false,
+      bookingId: recoveryBooking._id,
+      notificationRequired: true,
+      status: patchValues.recoveryNotificationStatus,
+      reason: "sanity_mirror_pending_after_email",
+      errors: [...errors, "sanity_mirror_pending_after_email"],
+    };
   }
 
   return {

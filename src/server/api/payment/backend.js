@@ -1,11 +1,12 @@
 import { verifyHoldToken } from "../../booking/holdToken.js";
-import { createRefWriteClient } from "../ref/sanity.js";
+import { createCommerceWriteClient } from "../ref/sanity.js";
 import {
   resolveSupabaseRuntimePolicy,
   selectCanaryBackend,
 } from "../../supabase/runtime.js";
 import { verifyPaymentAccessToken } from "./accessToken.js";
 import { findPaymentRecordByProviderData } from "./paymentRecord.js";
+import { verifyUpgradeIntentToken } from "../ref/upgradeIntentToken.js";
 
 const normalizeBackend = (value) =>
   String(value || "").trim().toLowerCase() === "supabase"
@@ -31,8 +32,18 @@ export const selectPaymentStartBackend = ({
   });
   if (holdPayload?.hid) return normalizeBackend(holdPayload.be);
 
+  if (bookingPayload.originalOrderId) {
+    const upgradePayload = verifyUpgradeIntentToken({
+      token: bookingPayload.upgradeIntentToken,
+      bookingId: bookingPayload.originalOrderId,
+      email: bookingPayload.email,
+      targetPackageTitle: bookingPayload.packageTitle,
+    });
+    if (upgradePayload?.bid) return normalizeBackend(upgradePayload.be);
+  }
+
   const policy = resolveSupabaseRuntimePolicy(env);
-  if (policy.primaryBackend === "supabase") return "supabase";
+  if (policy.commercePrimaryBackend === "supabase") return "supabase";
   if (policy.commerceCanaryPercentage < 1) return "sanity";
   return selectCanaryBackend({
     key: [
@@ -46,13 +57,14 @@ export const selectPaymentStartBackend = ({
 };
 
 export const createPaymentBackendClient = (backend) =>
-  createRefWriteClient({ backendOverride: normalizeBackend(backend) });
+  createCommerceWriteClient({ backendOverride: normalizeBackend(backend) });
 
 export const createPaymentBackendClientOverride = (
   backend,
   env = process.env
 ) =>
-  normalizeBackend(backend) === resolveSupabaseRuntimePolicy(env).primaryBackend
+  normalizeBackend(backend) ===
+  resolveSupabaseRuntimePolicy(env).commercePrimaryBackend
     ? null
     : createPaymentBackendClient(backend);
 
@@ -95,5 +107,5 @@ export const resolveWebhookBackend = async ({
       }
     }
   }
-  return resolveSupabaseRuntimePolicy(env).primaryBackend;
+  return resolveSupabaseRuntimePolicy(env).commercePrimaryBackend;
 };

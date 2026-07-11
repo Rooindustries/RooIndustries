@@ -1,10 +1,13 @@
-import { createRefReadClient } from "../api/ref/sanity.js";
+import { createCommerceReadClient } from "../api/ref/sanity.js";
+import { resolveSupabaseRuntimePolicy } from "../supabase/runtime.js";
+import { isSupabaseAdminConfigured } from "../supabase/adminClient.js";
 import {
   filterActiveBookings,
   getBookingSettings,
 } from "./slotPolicy.js";
 
 const BOOKINGS_QUERY = `*[_type == "booking"]{
+  _id,
   startTimeUTC,
   packageTitle,
   originalOrderId,
@@ -15,6 +18,12 @@ const HOLDS_QUERY = `*[_type == "slotHold"]{
   _id,
   phase,
   expiresAt
+}`;
+const SLOT_LOCKS_QUERY = `*[_type == "bookingSlot" && status != "released"]{
+  _id,
+  bookingId,
+  startTimeUTC,
+  status
 }`;
 
 const HOLD_STATES = Object.freeze({
@@ -32,13 +41,66 @@ const isActiveHold = (hold, now) => {
 };
 
 export async function getBookingAvailability({ client } = {}) {
-  const readClient = client || createRefReadClient();
-  const [settings, bookings, holds] = await Promise.all([
-    getBookingSettings({ client: readClient }),
-    readClient.fetch(BOOKINGS_QUERY),
-    readClient.fetch(HOLDS_QUERY),
+  const policy = resolveSupabaseRuntimePolicy();
+  const primaryBackend = policy.commercePrimaryBackend;
+  const secondaryBackend = primaryBackend === "supabase" ? "sanity" : "supabase";
+  const primaryClient =
+    client || createCommerceReadClient({ backendOverride: primaryBackend });
+  const clients = client
+    ? [primaryClient]
+    : secondaryBackend === "supabase" && !isSupabaseAdminConfigured()
+      ? [primaryClient]
+      : [
+          primaryClient,
+          createCommerceReadClient({ backendOverride: secondaryBackend }),
+        ];
+  const [settings, backendResults] = await Promise.all([
+    getBookingSettings({ client: primaryClient }),
+    Promise.all(
+      clients.map(async (readClient) => {
+        const [bookings, holds, slotLocks] = await Promise.all([
+          readClient.fetch(BOOKINGS_QUERY),
+          readClient.fetch(HOLDS_QUERY),
+          readClient.fetch(SLOT_LOCKS_QUERY),
+        ]);
+        return { bookings, holds, slotLocks };
+      })
+    ),
   ]);
   const now = Date.now();
+  const bookings = backendResults.flatMap((result) => result.bookings || []);
+  const holds = backendResults.flatMap((result) => result.holds || []);
+  const slotLocks = backendResults.flatMap((result) => result.slotLocks || []);
+  const occupied = new Map();
+
+  filterActiveBookings(bookings).forEach((booking) => {
+    const startTimeUTC = String(booking?.startTimeUTC || "").trim();
+    if (startTimeUTC) {
+      occupied.set(`booking:${startTimeUTC}`, { startTimeUTC, isHold: false });
+    }
+  });
+  slotLocks.forEach((slotLock) => {
+    const startTimeUTC = String(slotLock?.startTimeUTC || "").trim();
+    if (startTimeUTC) {
+      occupied.set(`booking:${startTimeUTC}`, { startTimeUTC, isHold: false });
+    }
+  });
+  holds
+    .filter((hold) => isActiveHold(hold, now))
+    .forEach((hold) => {
+      const startTimeUTC = String(hold?.startTimeUTC || "").trim();
+      const holdId = String(hold?._id || "").trim();
+      if (!startTimeUTC || !holdId || occupied.has(`booking:${startTimeUTC}`)) return;
+      occupied.set(`hold:${startTimeUTC}:${holdId}`, {
+        startTimeUTC,
+        isHold: true,
+        holdId,
+        phase: String(hold?.phase || "").trim(),
+        expiresAt: String(hold?.expiresAt || "").trim(),
+        isExpiredHold: false,
+        holdState: HOLD_STATES.ACTIVE,
+      });
+    });
 
   return {
     settings: {
@@ -47,26 +109,7 @@ export async function getBookingAvailability({ client } = {}) {
       vertexEssentialsDateSlots: settings.vertexEssentialsDateSlots,
       packageDateSlots: settings.packageDateSlots,
     },
-    bookedSlots: [
-      ...filterActiveBookings(bookings)
-        .map((booking) => ({
-          startTimeUTC: String(booking?.startTimeUTC || "").trim(),
-          isHold: false,
-        }))
-        .filter((booking) => booking.startTimeUTC),
-      ...((Array.isArray(holds) ? holds : [])
-        .filter((hold) => isActiveHold(hold, now))
-        .map((hold) => ({
-          startTimeUTC: String(hold?.startTimeUTC || "").trim(),
-          isHold: true,
-          holdId: String(hold?._id || "").trim(),
-          phase: String(hold?.phase || "").trim(),
-          expiresAt: String(hold?.expiresAt || "").trim(),
-          isExpiredHold: false,
-          holdState: HOLD_STATES.ACTIVE,
-        }))
-        .filter((hold) => hold.startTimeUTC && hold.holdId)),
-    ],
+    bookedSlots: [...occupied.values()],
   };
 }
 

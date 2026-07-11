@@ -22,7 +22,7 @@ const client = createClient({
   apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
   token: process.env.SANITY_WRITE_TOKEN,
   useCdn: false,
-});
+}, { domain: "commerce" });
 
 const parseMoney = (value) =>
   parseFloat(String(value || "").replace(/[^0-9.]/g, "")) || 0;
@@ -309,6 +309,8 @@ export default async function handler(req, res) {
       bookingId: booking._id,
       email: normalizedEmail,
       targetPackageTitle: upgradeContext.targetPackage.title,
+      backend: booking.backendOwner || "sanity",
+      cutoverGeneration: Number(booking.cutoverGeneration || 0),
     });
 
     return res.status(200).json({

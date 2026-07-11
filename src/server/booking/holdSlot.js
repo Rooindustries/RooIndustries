@@ -18,6 +18,7 @@ import {
   resolveSupabaseRuntimePolicy,
   selectCanaryBackend,
 } from "../supabase/runtime.js";
+import { isSupabaseAdminConfigured } from "../supabase/adminClient.js";
 
 const createHoldClient = (backendOverride) =>
   createClient(
@@ -28,7 +29,7 @@ const createHoldClient = (backendOverride) =>
       token: process.env.SANITY_WRITE_TOKEN,
       useCdn: false,
     },
-    { backendOverride }
+    { backendOverride, domain: "commerce" }
   );
 
 export const HOLD_DURATION_MS = 20 * 60 * 1000;
@@ -57,6 +58,32 @@ const hasBlockingBooking = (bookings) =>
       isBookingBlockingStatus(booking?.status)
   );
 
+const fetchOtherBackendSlotState = async ({
+  backend,
+  holdId,
+  slotLockId,
+  startTimeUTC,
+}) => {
+  const otherBackend = backend === "supabase" ? "sanity" : "supabase";
+  if (otherBackend === "supabase" && !isSupabaseAdminConfigured()) {
+    return { hold: null, slotLock: null, bookings: [] };
+  }
+  const otherClient = createHoldClient(otherBackend);
+  const [hold, slotLock, bookings] = await Promise.all([
+    otherClient.fetch(`*[_type == "slotHold" && _id == $id][0]`, {
+      id: holdId,
+    }),
+    otherClient.fetch(`*[_type == "bookingSlot" && _id == $id][0]`, {
+      id: slotLockId,
+    }),
+    otherClient.fetch(
+      `*[_type == "booking" && startTimeUTC == $startTimeUTC]{_id,status,originalOrderId}`,
+      { startTimeUTC }
+    ),
+  ]);
+  return { hold, slotLock, bookings };
+};
+
 const patchAtRevision = async (client, document, values) => {
   let patch = client.patch(document._id);
   if (document?._rev && typeof patch.ifRevisionId === "function") {
@@ -73,12 +100,18 @@ const issueResponse = ({
   backend,
   res,
 }) => {
+  const cutoverGeneration = Number(
+    hold?.cutoverGeneration ??
+      resolveSupabaseRuntimePolicy().commerceFailoverGeneration ??
+      0
+  );
   const holdToken = issueHoldToken({
     holdId: hold._id,
     startTimeUTC,
     expiresAt,
     holdNonce,
     backend,
+    cutoverGeneration,
   });
   return res.status(200).json({
     ok: true,
@@ -86,6 +119,7 @@ const issueResponse = ({
     holdToken,
     expiresAt,
     backend,
+    cutoverGeneration,
   });
 };
 
@@ -105,7 +139,7 @@ const selectHoldBackend = ({
     return previous.be === "supabase" ? "supabase" : "sanity";
   }
   const policy = resolveSupabaseRuntimePolicy();
-  if (policy.primaryBackend === "supabase") return "supabase";
+  if (policy.commercePrimaryBackend === "supabase") return "supabase";
   if (policy.commerceCanaryPercentage < 1) return "sanity";
   return selectCanaryBackend({
     key: `${clientAddress}:${startTimeUTC}:${packageTitle}`,
@@ -147,6 +181,9 @@ const releasePreviousHold = async ({
       holdId: previousHoldId,
       startTimeUTC: previousHold.startTimeUTC,
       holdNonce: previousHold.holdNonce || "",
+      backend:
+        previousHold.backendOwner === "supabase" ? "supabase" : "sanity",
+      cutoverGeneration: Number(previousHold.cutoverGeneration || 0),
     });
     if (!validToken) return;
     const releasedAt = new Date().toISOString();
@@ -164,6 +201,15 @@ const releasePreviousHold = async ({
 export default async function handler(req, res) {
   if (String(req?.method || "").toUpperCase() !== "POST") {
     return res.status(405).json({ ok: false, message: "Method not allowed" });
+  }
+
+  if (resolveSupabaseRuntimePolicy().commerceStartsPaused) {
+    res.setHeader?.("Retry-After", "60");
+    return res.status(503).json({
+      ok: false,
+      code: "commerce_starts_paused",
+      message: "New booking starts are temporarily paused. Please try again shortly.",
+    });
   }
 
   const { startTimeUTC, packageTitle, previousHoldId, previousHoldToken } =
@@ -194,6 +240,8 @@ export default async function handler(req, res) {
     packageTitle,
     clientAddress,
   });
+  const cutoverGeneration =
+    resolveSupabaseRuntimePolicy().commerceFailoverGeneration;
   const client = createHoldClient(backend);
 
   try {
@@ -222,6 +270,9 @@ export default async function handler(req, res) {
         holdId: previousHoldId,
         startTimeUTC: previousHold.startTimeUTC,
         holdNonce: previousHold.holdNonce || "",
+        backend:
+          previousHold.backendOwner === "supabase" ? "supabase" : "sanity",
+        cutoverGeneration: Number(previousHold.cutoverGeneration || 0),
       });
       if (
         ownsPreviousHold &&
@@ -281,9 +332,34 @@ export default async function handler(req, res) {
 
     const now = Date.now();
     const expiresAt = new Date(now + HOLD_DURATION_MS).toISOString();
+    const otherBackendStatePromise = fetchOtherBackendSlotState({
+      backend,
+      holdId,
+      slotLockId,
+      startTimeUTC: normalizedStartTimeUTC,
+    });
     const fetchHold = () =>
       client.fetch(`*[_type == "slotHold" && _id == $id][0]`, { id: holdId });
     const existingHold = await fetchHold();
+    const otherBackendState = await otherBackendStatePromise;
+    const mirroredSameHold =
+      existingHold?._id &&
+      otherBackendState.hold?._id === existingHold._id &&
+      String(otherBackendState.hold.holdNonce || "") ===
+        String(existingHold.holdNonce || "") &&
+      String(otherBackendState.hold.expiresAt || "") ===
+        String(existingHold.expiresAt || "");
+    if (
+      (otherBackendState.slotLock &&
+        otherBackendState.slotLock.status !== "released") ||
+      hasBlockingBooking(otherBackendState.bookings) ||
+      (isHoldActive(otherBackendState.hold, now) && !mirroredSameHold)
+    ) {
+      return res.status(409).json({
+        ok: false,
+        message: "This slot is already reserved or booked.",
+      });
+    }
 
     // The booking can be reactivated after the first availability read. Recheck
     // after reading the deterministic hold barrier; from this point onward, its
@@ -324,6 +400,9 @@ export default async function handler(req, res) {
           holdId,
           startTimeUTC: existingHold.startTimeUTC || normalizedStartTimeUTC,
           holdNonce: existingHold.holdNonce || "",
+          backend:
+            existingHold.backendOwner === "supabase" ? "supabase" : "sanity",
+          cutoverGeneration: Number(existingHold.cutoverGeneration || 0),
         });
       if (!mayRefresh) {
         return res.status(409).json({
@@ -345,6 +424,8 @@ export default async function handler(req, res) {
           consumedAt: "",
           paymentRecordId: "",
           holdNonce,
+          backendOwner: backend,
+          cutoverGeneration,
         });
         return issueResponse({
           hold: refreshed || existingHold,
@@ -376,10 +457,11 @@ export default async function handler(req, res) {
       expiresAt,
       holdNonce,
       phase: "active",
+      backendOwner: backend,
+      cutoverGeneration,
       releasedAt: "",
       consumedAt: "",
       paymentRecordId: "",
-      backendOwner: backend,
     };
 
     let created;

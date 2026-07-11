@@ -35,6 +35,36 @@ describe("Supabase runtime selection", () => {
     ).toThrow("SUPABASE_SHADOW_WRITES");
   });
 
+  test("moves commerce without moving CMS, Auth, or Tourney", () => {
+    expect(
+      resolveSupabaseRuntimePolicy({
+        NODE_ENV: "production",
+        DATA_PRIMARY_BACKEND: "sanity",
+        COMMERCE_PRIMARY_BACKEND: "supabase",
+        COMMERCE_CUTOVER_ENABLED: "1",
+        SANITY_REVERSE_MIRROR_WRITES: "1",
+        COMMERCE_FAILOVER_GENERATION: "4",
+        COMMERCE_STARTS_PAUSED: "1",
+      })
+    ).toMatchObject({
+      primaryBackend: "sanity",
+      commercePrimaryBackend: "supabase",
+      commerceFailoverGeneration: 4,
+      commerceStartsPaused: true,
+    });
+  });
+
+  test("refuses a production commerce cutover without its own gate", () => {
+    expect(() =>
+      resolveSupabaseRuntimePolicy({
+        NODE_ENV: "production",
+        DATA_PRIMARY_BACKEND: "sanity",
+        COMMERCE_PRIMARY_BACKEND: "supabase",
+        SANITY_REVERSE_MIRROR_WRITES: "1",
+      })
+    ).toThrow("COMMERCE_CUTOVER_ENABLED");
+  });
+
   test("keeps a deterministic canary assignment", () => {
     const key = "visitor-a";
     expect(deterministicCanaryBucket(key)).toBe(deterministicCanaryBucket(key));

@@ -9,7 +9,7 @@ const readClient = createClient({
   token: process.env.SANITY_READ_TOKEN || process.env.SANITY_WRITE_TOKEN,
   useCdn: false,
   perspective: "published",
-});
+}, { domain: "commerce" });
 
 export default async function handler(req, res) {
   if (String(req?.method || "").toUpperCase() !== "GET") {

@@ -6,15 +6,22 @@ import {
   resolveMirrorFailure,
 } from "./mirrorRecovery.js";
 import {
+  importCommerceShadowDocuments,
   importShadowDocuments,
   projectReferralAccountShadow,
   projectOperationalShadow,
+  tombstoneCommerceShadowDocuments,
   tombstoneShadowDocuments,
 } from "./shadowStore.js";
 
 const normalizeId = (value) => String(value || "").trim();
 
-const mirrorDocuments = async ({ sanityClient, ids, shadowClient }) => {
+const mirrorDocuments = async ({
+  sanityClient,
+  ids,
+  shadowClient,
+  commerceOnly = false,
+}) => {
   const uniqueIds = [...new Set(ids.map(normalizeId).filter(Boolean))];
   if (uniqueIds.length < 1) return;
   const operation = "sanity_to_supabase_sync";
@@ -25,22 +32,30 @@ const mirrorDocuments = async ({ sanityClient, ids, shadowClient }) => {
       ids: uniqueIds,
     });
     const found = new Set((sourceDocuments || []).map((document) => document._id));
-    await importShadowDocuments({
-      documents: sourceDocuments || [],
-      client: shadowClient,
-    });
+    const importer = commerceOnly
+      ? importCommerceShadowDocuments
+      : importShadowDocuments;
+    await importer({ documents: sourceDocuments || [], client: shadowClient });
 
     const missingIds = uniqueIds.filter((id) => !found.has(id));
     if (missingIds.length > 0) {
-      await tombstoneShadowDocuments({ ids: missingIds, client: shadowClient });
+      const tombstone = commerceOnly
+        ? tombstoneCommerceShadowDocuments
+        : tombstoneShadowDocuments;
+      await tombstone({ ids: missingIds, client: shadowClient });
     }
-    const referralIds = (sourceDocuments || [])
-      .filter((document) => document?._type === "referral")
-      .map((document) => document._id);
-    if (referralIds.length > 0) {
-      await projectReferralAccountShadow({ ids: referralIds, client: shadowClient });
+    if (!commerceOnly) {
+      const referralIds = (sourceDocuments || [])
+        .filter((document) => document?._type === "referral")
+        .map((document) => document._id);
+      if (referralIds.length > 0) {
+        await projectReferralAccountShadow({
+          ids: referralIds,
+          client: shadowClient,
+        });
+      }
+      await projectOperationalShadow({ client: shadowClient });
     }
-    await projectOperationalShadow({ client: shadowClient });
     await resolveMirrorFailure({
       client: shadowClient,
       eventKey: event.eventKey,
@@ -117,9 +132,11 @@ const wrapTransaction = ({ transaction, onCommitted }) => {
 export const createShadowingSanityClient = ({
   sanityClient,
   shadowClient = createSupabaseAdminClient(),
+  commerceOnly = false,
 } = {}) => {
   if (!sanityClient) throw new Error("A Sanity client is required.");
-  const onCommitted = (ids) => mirrorDocuments({ sanityClient, ids, shadowClient });
+  const onCommitted = (ids) =>
+    mirrorDocuments({ sanityClient, ids, shadowClient, commerceOnly });
 
   return new Proxy(sanityClient, {
     get(target, property) {

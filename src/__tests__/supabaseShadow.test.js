@@ -16,6 +16,18 @@ const createRpcClient = (seed = []) => {
   return {
     documents,
     rpc: jest.fn(async (name, args = {}) => {
+      if (name === "roo_fetch_shadow_documents_targeted") {
+        const requested = args.p_document_types;
+        const requestedIds = args.p_ids;
+        return {
+          data: [...documents.values()].filter(
+            (document) =>
+              (!requested || requested.includes(document._type)) &&
+              (!requestedIds || requestedIds.includes(document._id))
+          ),
+          error: null,
+        };
+      }
       if (name === "roo_fetch_shadow_documents") {
         const requested = args.p_document_types;
         return {
@@ -25,7 +37,10 @@ const createRpcClient = (seed = []) => {
           error: null,
         };
       }
-      if (name === "roo_apply_document_mutations") {
+      if (
+        name === "roo_apply_document_mutations" ||
+        name === "roo_apply_commerce_document_mutations"
+      ) {
         const results = [];
         for (const mutation of args.p_mutations || []) {
           const id = mutation.id || mutation.document?._id;
@@ -55,7 +70,13 @@ const createRpcClient = (seed = []) => {
           documents.set(id, document);
           results.push(document);
         }
-        return { data: results, error: null };
+        return {
+          data:
+            name === "roo_apply_commerce_document_mutations"
+              ? { results, event_key: `commerce-mirror:${"a".repeat(64)}` }
+              : results,
+          error: null,
+        };
       }
       if (name === "roo_refresh_operational_shadow") {
         return {
@@ -216,5 +237,92 @@ describe("Supabase document compatibility client", () => {
     expect(mutationCalls).toHaveLength(1);
     expect(shadowClient.documents.get("hold.one").phase).toBe("payment");
     expect(shadowClient.documents.get("payment.one").status).toBe("started");
+  });
+
+  test("uses the idempotent commerce command RPC for commerce writes", async () => {
+    const shadowClient = createRpcClient([]);
+    const client = new SupabaseDocumentClient({
+      shadowClient,
+      commerceOnly: true,
+      cutoverGeneration: 7,
+    });
+
+    await client.create({
+      _id: "payment.one",
+      _type: "paymentRecord",
+      status: "started",
+    });
+
+    expect(shadowClient.rpc).toHaveBeenCalledWith(
+      "roo_apply_commerce_document_mutations",
+      expect.objectContaining({
+        p_command_id: expect.any(String),
+        p_cutover_generation: 7,
+      })
+    );
+    expect(shadowClient.rpc).not.toHaveBeenCalledWith(
+      "roo_refresh_operational_shadow",
+      expect.anything()
+    );
+  });
+
+  test("fails closed before an unscoped commerce read can download the dataset", async () => {
+    const shadowClient = createRpcClient([]);
+    const client = new SupabaseDocumentClient({
+      shadowClient,
+      commerceOnly: true,
+    });
+
+    await expect(client.fetch(`*[]`)).rejects.toMatchObject({
+      code: "COMMERCE_QUERY_SCOPE_REQUIRED",
+      statusCode: 503,
+    });
+    expect(shadowClient.rpc).not.toHaveBeenCalled();
+  });
+
+  test("does not use the broad compatibility RPC when targeted reads are unavailable", async () => {
+    const shadowClient = {
+      rpc: jest.fn(async (name) =>
+        name === "roo_fetch_shadow_documents_targeted"
+          ? { data: null, error: { code: "PGRST202" } }
+          : { data: [], error: null }
+      ),
+    };
+    const client = new SupabaseDocumentClient({
+      shadowClient,
+      commerceOnly: true,
+    });
+
+    await expect(
+      client.fetch(`*[_type == "booking"]`)
+    ).rejects.toMatchObject({
+      code: "COMMERCE_TARGETED_READ_UNAVAILABLE",
+      statusCode: 503,
+    });
+    expect(shadowClient.rpc).not.toHaveBeenCalledWith(
+      "roo_fetch_shadow_documents",
+      expect.anything()
+    );
+  });
+
+  test("enforces the 250 KB commerce database payload budget", async () => {
+    const shadowClient = createRpcClient([
+      {
+        _id: "booking.oversized",
+        _type: "booking",
+        notes: "x".repeat(260 * 1024),
+      },
+    ]);
+    const client = new SupabaseDocumentClient({
+      shadowClient,
+      commerceOnly: true,
+    });
+
+    await expect(
+      client.fetch(`*[_type == "booking"]`)
+    ).rejects.toMatchObject({
+      code: "COMMERCE_PAYLOAD_BUDGET_EXCEEDED",
+      statusCode: 503,
+    });
   });
 });

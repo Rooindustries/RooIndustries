@@ -3,13 +3,16 @@ import { requireAdminKey } from "./auth.js";
 import { applyBookingStatusTransition } from "./bookingRefunds.js";
 import { logSafeError } from "../../safeErrorLog.js";
 
-const client = createClient({
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || "production",
-  apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
-  token: process.env.SANITY_WRITE_TOKEN,
-  useCdn: false,
-});
+const client = createClient(
+  {
+    projectId: process.env.SANITY_PROJECT_ID,
+    dataset: process.env.SANITY_DATASET || "production",
+    apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
+    token: process.env.SANITY_WRITE_TOKEN,
+    useCdn: false,
+  },
+  { domain: "commerce" }
+);
 
 export default async function handler(req, res) {
   if (String(req?.method || "").toUpperCase() !== "POST") {

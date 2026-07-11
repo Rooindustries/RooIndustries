@@ -39,7 +39,18 @@ const requireRpcData = ({ data, error }, operation) => {
   if (error) {
     const failure = new Error(`Supabase ${operation} failed.`);
     failure.code = error.code || "SUPABASE_RPC_FAILED";
-    failure.status = error.status || 500;
+    const statusByCode = {
+      "22023": 400,
+      "23505": 409,
+      "40001": 409,
+      P0002: 404,
+      PGRST000: 503,
+      PGRST001: 503,
+      PGRST002: 503,
+    };
+    failure.status =
+      statusByCode[failure.code] || Number(error.status || 0) || 500;
+    failure.statusCode = failure.status;
     throw failure;
   }
   return data;
@@ -71,6 +82,52 @@ export const importShadowDocuments = async ({
   return { imported, skippedStale };
 };
 
+export const importCommerceShadowDocuments = async ({
+  documents,
+  client = createSupabaseAdminClient(),
+  batchSize = 50,
+} = {}) => {
+  const normalized = (documents || [])
+    .map(normalizeShadowDocument)
+    .sort((left, right) =>
+      left.legacy_sanity_id.localeCompare(right.legacy_sanity_id)
+    );
+  let imported = 0;
+  let skippedStale = 0;
+
+  for (let index = 0; index < normalized.length; index += batchSize) {
+    const batch = normalized.slice(index, index + batchSize);
+    const result = requireRpcData(
+      await client.rpc("roo_import_and_project_commerce_shadow_batch", {
+        p_documents: batch,
+      }),
+      "atomic commerce shadow import"
+    );
+    imported += Number(result?.import?.imported ?? batch.length);
+    skippedStale += Number(result?.import?.skipped_stale ?? 0);
+  }
+
+  return { imported, skippedStale };
+};
+
+export const reconcileCommerceShadowDocuments = async ({
+  sourceIds,
+  documentTypes,
+  snapshotStartedAt,
+  client = createSupabaseAdminClient(),
+} = {}) =>
+  requireRpcData(
+    await client.rpc(
+      "roo_reconcile_and_project_commerce_shadow_sources_since",
+      {
+        p_source_ids: [...new Set((sourceIds || []).map(String))],
+        p_document_types: [...new Set((documentTypes || []).map(String))],
+        p_snapshot_started_at: snapshotStartedAt,
+      }
+    ),
+    "atomic commerce shadow reconciliation"
+  );
+
 export const tombstoneShadowDocuments = async ({
   ids,
   deletedAt = new Date().toISOString(),
@@ -88,6 +145,23 @@ export const tombstoneShadowDocuments = async ({
     "shadow tombstone"
   );
 
+export const tombstoneCommerceShadowDocuments = async ({
+  ids,
+  deletedAt = new Date().toISOString(),
+  client = createSupabaseAdminClient(),
+} = {}) =>
+  requireRpcData(
+    await client.rpc("roo_tombstone_and_project_commerce_shadow_ids", {
+      p_ids: [
+        ...new Set(
+          (ids || []).map((id) => String(id || "").trim()).filter(Boolean)
+        ),
+      ],
+      p_deleted_at: deletedAt,
+    }),
+    "atomic commerce shadow tombstone"
+  );
+
 export const projectReferralAccountShadow = async ({
   ids,
   client = createSupabaseAdminClient(),
@@ -102,25 +176,92 @@ export const projectReferralAccountShadow = async ({
 
 export const fetchShadowDocuments = async ({
   documentTypes = null,
+  ids = null,
+  filters = [],
+  limit = 500,
+  allowLegacyFallback = true,
+  client = createSupabaseAdminClient(),
+} = {}) => {
+  const targeted = await client.rpc("roo_fetch_shadow_documents_targeted", {
+    p_document_types:
+      Array.isArray(documentTypes) && documentTypes.length > 0
+        ? documentTypes
+        : null,
+    p_ids: Array.isArray(ids) && ids.length > 0 ? ids : null,
+    p_filters: Array.isArray(filters) ? filters : [],
+    p_limit: Math.max(1, Math.min(1000, Number(limit) || 500)),
+  });
+  let data;
+  if (
+    targeted?.error &&
+    ["42883", "PGRST202"].includes(String(targeted.error.code || ""))
+  ) {
+    if (!allowLegacyFallback) {
+      const failure = new Error("Targeted commerce reads are unavailable.");
+      failure.code = "COMMERCE_TARGETED_READ_UNAVAILABLE";
+      failure.status = 503;
+      failure.statusCode = 503;
+      throw failure;
+    }
+    data = requireRpcData(
+      await client.rpc("roo_fetch_shadow_documents", {
+        p_document_types:
+          Array.isArray(documentTypes) && documentTypes.length > 0
+            ? documentTypes
+            : null,
+      }),
+      "shadow fetch"
+    );
+  } else {
+    data = requireRpcData(targeted, "targeted shadow fetch");
+  }
+  return Array.isArray(data) ? data : [];
+};
+
+export const fetchRecoveryPaymentDocuments = async ({
+  backend,
+  statuses,
+  refundedStatus,
+  bookedStatus,
+  abandonedStatus,
+  now,
+  limit = 50,
   client = createSupabaseAdminClient(),
 } = {}) => {
   const data = requireRpcData(
-    await client.rpc("roo_fetch_shadow_documents", {
-      p_document_types:
-        Array.isArray(documentTypes) && documentTypes.length > 0
-          ? documentTypes
-          : null,
+    await client.rpc("roo_fetch_recovery_payment_documents", {
+      p_backend: backend === "supabase" ? "supabase" : "sanity",
+      p_statuses: Array.isArray(statuses) ? statuses : [],
+      p_refunded_status: String(refundedStatus || "refunded"),
+      p_booked_status: String(bookedStatus || "booked"),
+      p_abandoned_status: String(abandonedStatus || "abandoned"),
+      p_now: String(now || new Date().toISOString()),
+      p_limit: Math.max(1, Math.min(100, Number(limit) || 50)),
     }),
-    "shadow fetch"
+    "recovery payment fetch"
   );
   return Array.isArray(data) ? data : [];
 };
 
 export const applyShadowMutations = async ({
   mutations,
+  commandId = crypto.randomUUID(),
+  cutoverGeneration = 0,
+  commerceMode = false,
   client = createSupabaseAdminClient(),
 } = {}) => {
   if (!Array.isArray(mutations) || mutations.length < 1) return [];
+  if (commerceMode) {
+    const data = requireRpcData(
+      await client.rpc("roo_apply_commerce_document_mutations", {
+        p_command_id: String(commandId || crypto.randomUUID()),
+        p_mutations: mutations,
+        p_cutover_generation: Math.max(0, Number(cutoverGeneration) || 0),
+      }),
+      "commerce document mutation"
+    );
+    return Array.isArray(data?.results) ? data.results : [];
+  }
   const data = requireRpcData(
     await client.rpc("roo_apply_document_mutations", {
       p_mutations: mutations,
