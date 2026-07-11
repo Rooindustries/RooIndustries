@@ -5,6 +5,7 @@ import {
 } from "../server/supabase/runtime";
 import {
   hashShadowDocument,
+  importShadowDocuments,
   normalizeShadowDocument,
 } from "../server/supabase/shadowStore";
 import { SupabaseDocumentClient } from "../server/supabase/documentClient";
@@ -115,6 +116,52 @@ describe("Supabase shadow document utilities", () => {
       document_type: "booking",
       source_revision: "one",
     });
+  });
+
+  test("reports stale batches instead of counting them as imported", async () => {
+    const client = {
+      rpc: jest.fn().mockResolvedValue({
+        data: { imported: 0, skipped_stale: 1 },
+        error: null,
+      }),
+    };
+
+    await expect(
+      importShadowDocuments({
+        documents: [
+          {
+            _id: "rateLimitBucket.one",
+            _type: "refRateLimitBucket",
+            _rev: "older",
+            _updatedAt: "2026-07-11T01:00:00.000Z",
+          },
+        ],
+        client,
+      })
+    ).resolves.toEqual({ imported: 0, skippedStale: 1 });
+  });
+
+  test("imports shadow rows in stable ID order", async () => {
+    const client = {
+      rpc: jest.fn().mockResolvedValue({
+        data: { imported: 2, skipped_stale: 0 },
+        error: null,
+      }),
+    };
+
+    await importShadowDocuments({
+      documents: [
+        { _id: "zeta", _type: "booking" },
+        { _id: "alpha", _type: "booking" },
+      ],
+      client,
+    });
+
+    const batch = client.rpc.mock.calls[0][1].p_documents;
+    expect(batch.map((document) => document.legacy_sanity_id)).toEqual([
+      "alpha",
+      "zeta",
+    ]);
   });
 });
 

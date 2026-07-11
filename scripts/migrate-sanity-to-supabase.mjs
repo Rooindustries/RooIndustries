@@ -14,6 +14,7 @@ import {
   CMS_DOCUMENT_TYPES,
   collectAssetLinks,
   compareDocumentManifests,
+  concurrentAdvancementTypes,
   expectedAccountShadowCounts,
   mapConcurrent,
   sha256,
@@ -121,24 +122,30 @@ const requireRpc = async (name, parameters = {}) => {
 };
 
 const importDocuments = async (documents, batchSize = 25) => {
-  const normalized = documents.map((document) => ({
-    legacy_sanity_id: document._id,
-    document_type: document._type,
-    source_revision: document._rev || null,
-    source_hash: sha256(document),
-    source_created_at: document._createdAt || null,
-    source_updated_at: document._updatedAt || null,
-    payload: document,
-  }));
+  const normalized = documents
+    .map((document) => ({
+      legacy_sanity_id: document._id,
+      document_type: document._type,
+      source_revision: document._rev || null,
+      source_hash: sha256(document),
+      source_created_at: document._createdAt || null,
+      source_updated_at: document._updatedAt || null,
+      payload: document,
+    }))
+    .sort((left, right) =>
+      left.legacy_sanity_id.localeCompare(right.legacy_sanity_id)
+    );
   let imported = 0;
+  let skippedStale = 0;
   for (let index = 0; index < normalized.length; index += batchSize) {
     const batch = normalized.slice(index, index + batchSize);
     const result = await requireRpc("roo_import_shadow_batch", {
       p_documents: batch,
     });
-    imported += Number(result?.imported || batch.length);
+    imported += Number(result?.imported ?? batch.length);
+    skippedStale += Number(result?.skipped_stale ?? 0);
   }
-  return { imported };
+  return { imported, skippedStale };
 };
 
 const listAllAuthUsers = async () => {
@@ -507,12 +514,33 @@ const verificationFindings = ({
   return findings;
 };
 
-const verifyParity = async ({ documents, accounts, links, runId }) => {
+const verifyParity = async ({
+  documents,
+  accounts,
+  links,
+  runId,
+  snapshotStartedAt,
+}) => {
   const sourceManifest = buildDocumentManifest(documents);
-  const targetManifest = await requireRpc("roo_shadow_manifest");
+  const targetManifestResponse = await requireRpc("roo_shadow_manifest");
+  const targetManifest = Array.isArray(targetManifestResponse)
+    ? targetManifestResponse
+    : [];
   const manifestComparison = compareDocumentManifests(
     sourceManifest,
-    Array.isArray(targetManifest) ? targetManifest : []
+    targetManifest,
+    { sourceCapturedAt: snapshotStartedAt }
+  );
+  const activeTargetDocuments = targetManifest
+    .filter((entry) => entry?.tombstoned !== true)
+    .map((entry) => ({ _id: entry.id, _type: entry.type }));
+  const concurrentTypes = concurrentAdvancementTypes({
+    source: sourceManifest,
+    target: targetManifest,
+    concurrentAdvancements: manifestComparison.concurrentAdvancements,
+  });
+  const deferAccountCounts = concurrentTypes.some((type) =>
+    ["referral", "tourneyAuthStore"].includes(type)
   );
   const sourceAssets = documents.filter((document) =>
     ["sanity.imageAsset", "sanity.fileAsset"].includes(document._type)
@@ -539,24 +567,51 @@ const verifyParity = async ({ documents, accounts, links, runId }) => {
       countFailures[name] = { actual: Number(actual), expected: Number(expected) };
     }
   };
-  compareCount("source_documents", shadowSummary?.source_documents, documents.length);
-  compareCount("cms_documents", shadowSummary?.cms_documents, expectedCmsCount(documents));
+  compareCount(
+    "source_documents",
+    shadowSummary?.source_documents,
+    activeTargetDocuments.length
+  );
+  compareCount(
+    "cms_documents",
+    shadowSummary?.cms_documents,
+    expectedCmsCount(activeTargetDocuments)
+  );
   const expectedAccountCounts = expectedAccountShadowCounts({
     accounts,
     tourneyPlayerAccounts: Number(accountSummary?.tourney_shadow_players || 0),
   });
-  compareCount("auth_users", accountSummary?.auth_users, expectedAccountCounts.authUsers);
-  compareCount("profiles", accountSummary?.profiles, expectedAccountCounts.profiles);
-  compareCount(
-    "creator_profiles",
-    accountSummary?.creator_profiles,
-    documents.filter((document) => document._type === "referral").length
-  );
-  compareCount(
-    "tourney_accounts",
-    accountSummary?.tourney_accounts,
-    expectedAccountCounts.tourneyAccounts
-  );
+  const deferredCountChecks = [];
+  if (deferAccountCounts) {
+    deferredCountChecks.push(
+      "auth_users",
+      "profiles",
+      "creator_profiles",
+      "tourney_accounts"
+    );
+  } else {
+    compareCount(
+      "auth_users",
+      accountSummary?.auth_users,
+      expectedAccountCounts.authUsers
+    );
+    compareCount(
+      "profiles",
+      accountSummary?.profiles,
+      expectedAccountCounts.profiles
+    );
+    compareCount(
+      "creator_profiles",
+      accountSummary?.creator_profiles,
+      activeTargetDocuments.filter((document) => document._type === "referral")
+        .length
+    );
+    compareCount(
+      "tourney_accounts",
+      accountSummary?.tourney_accounts,
+      expectedAccountCounts.tourneyAccounts
+    );
+  }
   compareCount(
     "tourney_player_accounts",
     accountSummary?.tourney_player_accounts,
@@ -565,32 +620,37 @@ const verifyParity = async ({ documents, accounts, links, runId }) => {
   compareCount(
     "source_operational_documents",
     operationalSummary?.source_operational_documents,
-    expectedOperationalCount(documents)
+    expectedOperationalCount(activeTargetDocuments)
   );
   compareCount(
     "operational_imported",
     operationalSummary?.operational_imported,
-    expectedOperationalCount(documents)
+    expectedOperationalCount(activeTargetDocuments)
   );
   compareCount(
     "bookings",
     operationalSummary?.bookings,
-    documents.filter((document) => document._type === "booking").length
+    activeTargetDocuments.filter((document) => document._type === "booking")
+      .length
   );
   compareCount(
     "payment_records",
     operationalSummary?.payment_records,
-    documents.filter((document) => document._type === "paymentRecord").length
+    activeTargetDocuments.filter((document) => document._type === "paymentRecord")
+      .length
   );
   compareCount(
     "payment_proof_claims",
     operationalSummary?.payment_proof_claims,
-    documents.filter((document) => document._type === "paymentProofClaim").length
+    activeTargetDocuments.filter(
+      (document) => document._type === "paymentProofClaim"
+    ).length
   );
   compareCount(
     "coupons",
     operationalSummary?.coupons,
-    documents.filter((document) => document._type === "coupon").length
+    activeTargetDocuments.filter((document) => document._type === "coupon")
+      .length
   );
   if (!skipAssets) {
     compareCount("assets", assetSummary?.assets, sourceAssets.length);
@@ -626,6 +686,12 @@ const verifyParity = async ({ documents, accounts, links, runId }) => {
       assets: sourceAssets.length,
       assetLinks: links.length,
     },
+    concurrentAdvancements: Object.fromEntries(
+      Object.entries(manifestComparison.concurrentAdvancements).map(
+        ([kind, ids]) => [kind, ids.length]
+      )
+    ),
+    deferredCountChecks,
   };
 };
 
@@ -640,6 +706,7 @@ const finishRun = async (runId, status, counters, errorSummary = null) => {
 };
 
 const main = async () => {
+  const snapshotStartedAt = new Date().toISOString();
   const documents = await sanity.fetch("*[]");
   const inventory = summarizeDocuments(documents);
   const accounts = buildMigrationAccounts(documents, process.env);
@@ -693,8 +760,11 @@ const main = async () => {
     if (apply) {
       importSummary = await importDocuments(documents, 25);
       importSummary.reconciliation = await requireRpc(
-        "roo_reconcile_shadow_sources",
-        { p_source_ids: documents.map((document) => document._id) }
+        "roo_reconcile_shadow_sources_since",
+        {
+          p_source_ids: documents.map((document) => document._id),
+          p_snapshot_started_at: snapshotStartedAt,
+        }
       );
       authSummary = await ensureAuthAccounts(accounts);
       operationalSummary = await requireRpc("roo_refresh_operational_shadow");
@@ -717,6 +787,7 @@ const main = async () => {
       accounts,
       links,
       runId,
+      snapshotStartedAt,
     });
     const counters = {
       ...dryRunSummary,

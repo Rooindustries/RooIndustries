@@ -151,7 +151,145 @@ describe("Supabase shadow migration helpers", () => {
       missingTarget: ["two"],
       missingSource: ["three"],
       mismatched: ["one"],
+      concurrentAdvancements: {
+        created: [],
+        updated: [],
+        deleted: [],
+      },
     });
+  });
+
+  test("accepts target documents that advanced after the source snapshot", () => {
+    const comparison = helpers.compareDocumentManifests(
+      [
+        {
+          id: "updated",
+          type: "paymentRecord",
+          updatedAt: "2026-07-11T01:00:00.000Z",
+          hash: "old",
+        },
+        {
+          id: "deleted",
+          type: "refRateLimitBucket",
+          updatedAt: "2026-07-11T01:00:00.000Z",
+          hash: "present",
+        },
+      ],
+      [
+        {
+          id: "updated",
+          type: "paymentRecord",
+          updatedAt: "2026-07-11T01:00:01.000Z",
+          hash: "new",
+          tombstoned: false,
+        },
+        {
+          id: "deleted",
+          type: "refRateLimitBucket",
+          updatedAt: "2026-07-11T01:00:00.000Z",
+          hash: "present",
+          tombstoned: true,
+          tombstonedAt: "2026-07-11T01:00:02.000Z",
+        },
+        {
+          id: "created",
+          type: "booking",
+          updatedAt: "2026-07-11T01:00:03.000Z",
+          hash: "created",
+          tombstoned: false,
+        },
+      ],
+      { sourceCapturedAt: "2026-07-11T01:00:00.500Z" }
+    );
+
+    expect(comparison).toEqual({
+      ok: true,
+      missingTarget: [],
+      missingSource: [],
+      mismatched: [],
+      concurrentAdvancements: {
+        created: ["created"],
+        updated: ["updated"],
+        deleted: ["deleted"],
+      },
+    });
+  });
+
+  test("still rejects target documents older than the source snapshot", () => {
+    const comparison = helpers.compareDocumentManifests(
+      [
+        {
+          id: "one",
+          type: "paymentRecord",
+          updatedAt: "2026-07-11T01:00:02.000Z",
+          hash: "source",
+        },
+      ],
+      [
+        {
+          id: "one",
+          type: "paymentRecord",
+          updatedAt: "2026-07-11T01:00:01.000Z",
+          hash: "target",
+          tombstoned: false,
+        },
+      ],
+      { sourceCapturedAt: "2026-07-11T01:00:00.000Z" }
+    );
+
+    expect(comparison).toMatchObject({
+      ok: false,
+      mismatched: ["one"],
+    });
+  });
+
+  test("rejects divergent target updates that predate the source capture", () => {
+    const comparison = helpers.compareDocumentManifests(
+      [
+        {
+          id: "one",
+          type: "paymentRecord",
+          updatedAt: "2026-07-11T01:00:00.000Z",
+          hash: "source",
+        },
+      ],
+      [
+        {
+          id: "one",
+          type: "paymentRecord",
+          updatedAt: "2026-07-11T01:00:01.000Z",
+          hash: "target",
+          tombstoned: false,
+        },
+      ],
+      { sourceCapturedAt: "2026-07-11T01:00:02.000Z" }
+    );
+
+    expect(comparison).toMatchObject({
+      ok: false,
+      mismatched: ["one"],
+      concurrentAdvancements: { updated: [] },
+    });
+  });
+
+  test("identifies document types involved in concurrent advancements", () => {
+    expect(
+      helpers.concurrentAdvancementTypes({
+        source: [
+          { id: "deleted", type: "referral" },
+          { id: "updated", type: "paymentRecord" },
+        ],
+        target: [
+          { id: "created", type: "booking" },
+          { id: "updated", type: "paymentRecord" },
+        ],
+        concurrentAdvancements: {
+          created: ["created"],
+          updated: ["updated"],
+          deleted: ["deleted"],
+        },
+      })
+    ).toEqual(["booking", "paymentRecord", "referral"]);
   });
 
   test("counts legacy Tourney players separately from Sanity identities", () => {
