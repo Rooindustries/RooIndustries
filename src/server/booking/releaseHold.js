@@ -1,16 +1,20 @@
-import { createClient } from "@sanity/client";
+import { createDataClient as createClient } from "../data/documentClient.js";
 import crypto from "crypto";
 import { verifyHoldToken } from "./holdToken.js";
 import { getClientAddress, requireRateLimit } from "../api/ref/rateLimit.js";
 import { logSafeError } from "../safeErrorLog.js";
 
-const client = createClient({
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || "production",
-  apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
-  token: process.env.SANITY_WRITE_TOKEN,
-  useCdn: false,
-});
+const createReleaseClient = (backendOverride) =>
+  createClient(
+    {
+      projectId: process.env.SANITY_PROJECT_ID,
+      dataset: process.env.SANITY_DATASET || "production",
+      apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
+      token: process.env.SANITY_WRITE_TOKEN,
+      useCdn: false,
+    },
+    { backendOverride }
+  );
 
 export default async function handler(req, res) {
   if (String(req?.method || "").toUpperCase() !== "POST") {
@@ -31,6 +35,15 @@ export default async function handler(req, res) {
   if (!holdId || !holdToken) {
     return res.status(400).json({ ok: false, message: "Missing hold credentials" });
   }
+
+  const tokenPayload = verifyHoldToken({
+    token: holdToken,
+    holdId,
+    ignoreExpiry: true,
+  });
+  const client = createReleaseClient(
+    tokenPayload?.be === "supabase" ? "supabase" : "sanity"
+  );
 
   try {
     const hold = await client.fetch(`*[_type == "slotHold" && _id == $id][0]`, {

@@ -1,4 +1,4 @@
-import { createClient } from "@sanity/client";
+import { createDataClient as createClient } from "../../data/documentClient.js";
 import { verifyHoldToken } from "../../booking/holdToken.js";
 import { resolveBookingPricing, resolveUpgradeContext } from "./pricing.js";
 import {
@@ -53,7 +53,7 @@ import {
 
 const { resolvePaymentProviders } = providerConfig;
 
-const writeClient = createClient({
+const defaultWriteClient = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
   dataset: process.env.SANITY_DATASET || "production",
   apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
@@ -228,6 +228,8 @@ export default async function handler(req, res) {
   if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
 
+  const writeClient = req.internalContext?.documentClient || defaultWriteClient;
+
   try {
     const {
       discord,
@@ -292,6 +294,8 @@ export default async function handler(req, res) {
     const preserveHistoricalAccounting =
       isInternalPaymentFinalization &&
       req.internalContext?.preserveHistoricalAccounting === true;
+    const backendOwner =
+      req.internalContext?.backendOwner === "supabase" ? "supabase" : "sanity";
     const legacyCompletionDeadline = new Date(
       process.env.PAYMENT_LEGACY_COMPLETION_UNTIL || ""
     ).getTime();
@@ -1365,6 +1369,7 @@ export default async function handler(req, res) {
     const bookingDocument = {
       _id: bookingDocId,
       _type: "booking",
+      backendOwner,
       paymentRecordId,
       paymentProofClaimId,
       paymentFinalizationLeaseId,

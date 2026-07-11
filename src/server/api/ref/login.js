@@ -1,9 +1,11 @@
-import { createClient } from "@sanity/client";
+import { createDataClient as createClient } from "../../data/documentClient.js";
 import bcrypt from "bcryptjs";
 import crypto from "node:crypto";
 import { setReferralSessionCookie } from "./auth.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import { logSafeError } from "../../safeErrorLog.js";
+import { shouldUseSupabaseForAccount } from "../../supabase/runtime.js";
+import { authenticateSupabaseAccount } from "../../supabase/accounts.js";
 
 const DUMMY_PASSWORD_HASH =
   // nosemgrep: generic.secrets.security.detected-bcrypt-hash.detected-bcrypt-hash
@@ -38,6 +40,65 @@ export default async function handler(req, res) {
       }))
     ) {
       return;
+    }
+
+    if (shouldUseSupabaseForAccount({ identifier: normalizedIdentifier })) {
+      const result = await authenticateSupabaseAccount({
+        identifier: normalizedIdentifier,
+        password: normalizedPassword,
+        requiredRoles: ["creator"],
+        verifyLegacyPassword: async ({ account }) => {
+          const legacy = await client.fetch(
+            `*[_type == "referral" && _id == $id][0]{_id,_rev,creatorPassword}`,
+            { id: account.legacy_sanity_id }
+          );
+          const stored = String(legacy?.creatorPassword || "");
+          if (!stored || /^\$2[aby]\$/.test(stored)) return false;
+          const suppliedBuffer = Buffer.from(normalizedPassword);
+          const storedBuffer = Buffer.from(stored);
+          const valid =
+            suppliedBuffer.length === storedBuffer.length &&
+            crypto.timingSafeEqual(suppliedBuffer, storedBuffer);
+          if (!valid) return false;
+          const hash = await bcrypt.hash(normalizedPassword, 12);
+          let patch = client.patch(legacy._id);
+          if (legacy._rev) patch = patch.ifRevisionId(legacy._rev);
+          await patch
+            .set({
+              creatorPassword: hash,
+              credentialVersion: 2,
+              passwordResetRequired: false,
+              passwordStorageUpgradedAt: new Date().toISOString(),
+            })
+            .commit({ visibility: "sync" });
+          return true;
+        },
+      });
+      if (!result.ok) {
+        return res.status(result.reason === "unavailable" ? 503 : 401).json({
+          ok: false,
+          error:
+            result.reason === "unavailable"
+              ? "Login is temporarily unavailable. Please try again shortly."
+              : "Invalid login details. Use Forgot Password if you need to reset access.",
+        });
+      }
+
+      setReferralSessionCookie(
+        res,
+        {
+          referralId: result.account.legacy_sanity_id,
+          code: result.account.referral_code || normalizedIdentifier,
+          authBackend: "supabase",
+        },
+        Boolean(rememberMe)
+      );
+      return res.json({
+        ok: true,
+        creatorId: result.account.legacy_sanity_id,
+        name: result.account.display_name,
+        code: result.account.referral_code,
+      });
     }
 
     const referral = await client.fetch(

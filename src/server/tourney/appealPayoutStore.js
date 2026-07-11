@@ -1,5 +1,9 @@
 import crypto from "crypto";
 import { listManageTourneyPlayers } from "./playerStore";
+import {
+  getTourneySql as getSql,
+  resolveTourneyDatabaseUrl as getDatabaseUrl,
+} from "./sqlClient.js";
 
 export const TOURNEY_APPEAL_TYPES = Object.freeze([
   "team-appeal",
@@ -31,9 +35,6 @@ const MEMORY_STORE =
     appeals: [],
     payouts: [],
   });
-const SQL_CLIENTS =
-  globalThis.__rooTourneyAppealPayoutSqlClients ||
-  (globalThis.__rooTourneyAppealPayoutSqlClients = new Map());
 let schemaReady = false;
 
 const nowIso = () => new Date().toISOString();
@@ -46,21 +47,6 @@ const isPlayerSession = (session = null) => session?.role === "player";
 const isMemoryMode = (env = process.env) =>
   env.TOURNEY_APPEAL_PAYOUT_STORE_MODE === "memory" ||
   env.TOURNEY_DATABASE_MODE === "memory";
-
-const getDatabaseUrl = (env = process.env) =>
-  normalizeText(env.TOURNEY_DATABASE_URL || env.POSTGRES_URL);
-
-const getSql = async (env = process.env) => {
-  const databaseUrl = getDatabaseUrl(env);
-  if (!databaseUrl) {
-    throw new Error("TOURNEY_DATABASE_URL is not configured.");
-  }
-  if (!SQL_CLIENTS.has(databaseUrl)) {
-    const { neon } = await import("@neondatabase/serverless");
-    SQL_CLIENTS.set(databaseUrl, neon(databaseUrl));
-  }
-  return SQL_CLIENTS.get(databaseUrl);
-};
 
 export const resetMemoryTourneyAppealPayoutStoreForTests = () => {
   MEMORY_STORE.appeals = [];

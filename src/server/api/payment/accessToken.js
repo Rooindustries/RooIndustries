@@ -46,6 +46,7 @@ export const createPaymentAccessToken = ({
   paymentRecordId = "",
   provider = "",
   pricingFingerprint = "",
+  backend = "sanity",
   issuedAtMs = Date.now(),
   expirySeconds = 0,
 }) => {
@@ -58,6 +59,7 @@ export const createPaymentAccessToken = ({
     paymentRecordId: normalizeValue(paymentRecordId),
     provider: normalizeValue(provider).toLowerCase(),
     pricingFingerprintHash: hashPaymentFingerprint(pricingFingerprint),
+    backend: normalizeValue(backend).toLowerCase() === "supabase" ? "supabase" : "sanity",
     purpose: PAYMENT_ACCESS_TOKEN_PURPOSE,
     iat,
     exp: iat + ttl,
@@ -134,7 +136,9 @@ export const isPaymentAccessTokenRecordMatch = ({
     normalizeValue(payload.provider).toLowerCase() ===
       normalizeValue(record.provider).toLowerCase() &&
     normalizeValue(payload.pricingFingerprintHash) ===
-      hashPaymentFingerprint(record.pricingFingerprint)
+      hashPaymentFingerprint(record.pricingFingerprint) &&
+    (payload.backend === "supabase" ? "supabase" : "sanity") ===
+      (record.backendOwner === "supabase" ? "supabase" : "sanity")
   );
 };
 

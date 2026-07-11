@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import { createClient } from "@sanity/client";
+import { createDataClient as createClient } from "../../data/documentClient.js";
 import { requireReferralSession } from "./auth.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 

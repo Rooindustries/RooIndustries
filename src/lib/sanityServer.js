@@ -1,4 +1,3 @@
-const { createClient } = require("@sanity/client");
 const { applyHomePageCopyOverrides } = require("./homeCopy");
 const {
   applyPackagesContentOverrides,
@@ -6,16 +5,23 @@ const {
 } = require("./packageContent");
 const { applyPackagesPricing } = require("./packagePricing");
 
-const sanity = createClient({
-  projectId: process.env.SANITY_PROJECT_ID || "9g42k3ur",
-  dataset: process.env.SANITY_DATASET || "production",
-  apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
-  useCdn: true,
-  token: process.env.SANITY_READ_TOKEN || process.env.SANITY_WRITE_TOKEN || undefined,
-});
+const createContentClient = async () => {
+  const { createDataClient } = await import("../server/data/documentClient.js");
+  return createDataClient({
+    projectId: process.env.SANITY_PROJECT_ID || "9g42k3ur",
+    dataset: process.env.SANITY_DATASET || "production",
+    apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
+    useCdn: true,
+    token:
+      process.env.SANITY_READ_TOKEN ||
+      process.env.SANITY_WRITE_TOKEN ||
+      undefined,
+  });
+};
 
 async function fetchFaqQuestions() {
   try {
+    const sanity = await createContentClient();
     const rows = await sanity.fetch(
       `coalesce(
         *[_type == "faqSection" && _id == "faq"][0].questions,
@@ -38,6 +44,7 @@ async function fetchFaqQuestions() {
 }
 
 async function fetchHomePageData() {
+  const sanity = await createContentClient();
   const safeFetch = async (query, fallback) => {
     try {
       const data = await sanity.fetch(query);

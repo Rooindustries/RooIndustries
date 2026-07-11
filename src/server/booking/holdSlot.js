@@ -1,4 +1,4 @@
-import { createClient } from "@sanity/client";
+import { createDataClient as createClient } from "../data/documentClient.js";
 import crypto from "crypto";
 import { issueHoldToken, verifyHoldToken } from "./holdToken.js";
 import {
@@ -14,14 +14,22 @@ import {
 } from "./slotPolicy.js";
 import { getClientAddress, requireRateLimit } from "../api/ref/rateLimit.js";
 import { logSafeError } from "../safeErrorLog.js";
+import {
+  resolveSupabaseRuntimePolicy,
+  selectCanaryBackend,
+} from "../supabase/runtime.js";
 
-const client = createClient({
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || "production",
-  apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
-  token: process.env.SANITY_WRITE_TOKEN,
-  useCdn: false,
-});
+const createHoldClient = (backendOverride) =>
+  createClient(
+    {
+      projectId: process.env.SANITY_PROJECT_ID,
+      dataset: process.env.SANITY_DATASET || "production",
+      apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
+      token: process.env.SANITY_WRITE_TOKEN,
+      useCdn: false,
+    },
+    { backendOverride }
+  );
 
 export const HOLD_DURATION_MS = 20 * 60 * 1000;
 
@@ -49,7 +57,7 @@ const hasBlockingBooking = (bookings) =>
       isBookingBlockingStatus(booking?.status)
   );
 
-const patchAtRevision = async (document, values) => {
+const patchAtRevision = async (client, document, values) => {
   let patch = client.patch(document._id);
   if (document?._rev && typeof patch.ifRevisionId === "function") {
     patch = patch.ifRevisionId(document._rev);
@@ -57,18 +65,51 @@ const patchAtRevision = async (document, values) => {
   return patch.set(values).commit();
 };
 
-const issueResponse = ({ hold, startTimeUTC, expiresAt, holdNonce, res }) => {
+const issueResponse = ({
+  hold,
+  startTimeUTC,
+  expiresAt,
+  holdNonce,
+  backend,
+  res,
+}) => {
   const holdToken = issueHoldToken({
     holdId: hold._id,
     startTimeUTC,
     expiresAt,
     holdNonce,
+    backend,
   });
   return res.status(200).json({
     ok: true,
     holdId: hold._id,
     holdToken,
     expiresAt,
+    backend,
+  });
+};
+
+const selectHoldBackend = ({
+  previousHoldId,
+  previousHoldToken,
+  startTimeUTC,
+  packageTitle,
+  clientAddress,
+}) => {
+  const previous = verifyHoldToken({
+    token: previousHoldToken,
+    holdId: previousHoldId,
+    ignoreExpiry: true,
+  });
+  if (previous?.hid) {
+    return previous.be === "supabase" ? "supabase" : "sanity";
+  }
+  const policy = resolveSupabaseRuntimePolicy();
+  if (policy.primaryBackend === "supabase") return "supabase";
+  if (policy.commerceCanaryPercentage < 1) return "sanity";
+  return selectCanaryBackend({
+    key: `${clientAddress}:${startTimeUTC}:${packageTitle}`,
+    percentage: policy.commerceCanaryPercentage,
   });
 };
 
@@ -82,6 +123,14 @@ const releasePreviousHold = async ({
   }
 
   try {
+    const previousTokenPayload = verifyHoldToken({
+      token: previousHoldToken,
+      holdId: previousHoldId,
+      ignoreExpiry: true,
+    });
+    const previousBackend =
+      previousTokenPayload?.be === "supabase" ? "supabase" : "sanity";
+    const client = createHoldClient(previousBackend);
     const previousHold = await client.fetch(
       `*[_type == "slotHold" && _id == $id][0]`,
       { id: previousHoldId }
@@ -101,7 +150,7 @@ const releasePreviousHold = async ({
     });
     if (!validToken) return;
     const releasedAt = new Date().toISOString();
-    await patchAtRevision(previousHold, {
+    await patchAtRevision(client, previousHold, {
       phase: "released",
       releasedAt,
       expiresAt: releasedAt,
@@ -137,6 +186,15 @@ export default async function handler(req, res) {
       message: "startTimeUTC must be an exact configured minute.",
     });
   }
+
+  const backend = selectHoldBackend({
+    previousHoldId,
+    previousHoldToken,
+    startTimeUTC: normalizedStartTimeUTC,
+    packageTitle,
+    clientAddress,
+  });
+  const client = createHoldClient(backend);
 
   try {
     const settings = await getBookingSettings({ client });
@@ -197,7 +255,7 @@ export default async function handler(req, res) {
         !isBookingBlockingStatus(lockOwner.status));
     if (staleReleasedLock) {
       try {
-        await patchAtRevision(slotLock, {
+        await patchAtRevision(client, slotLock, {
           status: "released",
           releasedAt: new Date().toISOString(),
           releaseReason: "booking_status_repair",
@@ -276,7 +334,7 @@ export default async function handler(req, res) {
 
       const holdNonce = crypto.randomUUID();
       try {
-        const refreshed = await patchAtRevision(existingHold, {
+        const refreshed = await patchAtRevision(client, existingHold, {
           packageTitle: String(packageTitle || "").trim(),
           startTimeUTC: normalizedStartTimeUTC,
           hostDate: slot.hostDate,
@@ -293,6 +351,7 @@ export default async function handler(req, res) {
           startTimeUTC: normalizedStartTimeUTC,
           expiresAt,
           holdNonce,
+          backend,
           res,
         });
       } catch (error) {
@@ -320,12 +379,13 @@ export default async function handler(req, res) {
       releasedAt: "",
       consumedAt: "",
       paymentRecordId: "",
+      backendOwner: backend,
     };
 
     let created;
     try {
       created = existingHold
-        ? await patchAtRevision(existingHold, holdValues)
+        ? await patchAtRevision(client, existingHold, holdValues)
         : await client.create(holdValues);
     } catch (error) {
       if (isConflict(error)) {
@@ -343,6 +403,7 @@ export default async function handler(req, res) {
         startTimeUTC: normalizedStartTimeUTC,
         expiresAt,
         holdNonce,
+        backend,
         res,
       });
       await releasePreviousHold({
@@ -353,7 +414,7 @@ export default async function handler(req, res) {
       return response;
     } catch (error) {
       const failedAt = new Date().toISOString();
-      await patchAtRevision(created || holdValues, {
+      await patchAtRevision(client, created || holdValues, {
         phase: "released",
         releasedAt: failedAt,
         expiresAt: failedAt,

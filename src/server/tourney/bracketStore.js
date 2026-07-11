@@ -1,5 +1,9 @@
 import crypto from "crypto";
 import { BracketsManager } from "brackets-manager";
+import {
+  getTourneySql as getSql,
+  resolveTourneyDatabaseUrl as getDatabaseUrl,
+} from "./sqlClient.js";
 
 const TOURNEY_ID = 0;
 const TOURNEY_META_ID = "legacy-series-2026";
@@ -52,9 +56,6 @@ const MEMORY_STORE =
     fixtureKey: "",
   });
 
-const SQL_CLIENTS =
-  globalThis.__rooTourneyBracketSqlClients ||
-  (globalThis.__rooTourneyBracketSqlClients = new Map());
 let schemaReady = false;
 
 const nowIso = () => new Date().toISOString();
@@ -70,23 +71,6 @@ const isMemoryMode = (env = process.env) =>
   isPreviewFixtureMode(env) ||
   env.TOURNEY_BRACKET_STORE_MODE === "memory" ||
   env.TOURNEY_DATABASE_MODE === "memory";
-
-const getDatabaseUrl = (env = process.env) =>
-  normalizeText(env.TOURNEY_DATABASE_URL || env.POSTGRES_URL);
-
-const getSql = async (env = process.env) => {
-  const databaseUrl = getDatabaseUrl(env);
-  if (!databaseUrl) {
-    throw new Error("TOURNEY_DATABASE_URL is not configured.");
-  }
-
-  if (!SQL_CLIENTS.has(databaseUrl)) {
-    const { neon } = await import("@neondatabase/serverless");
-    SQL_CLIENTS.set(databaseUrl, neon(databaseUrl));
-  }
-
-  return SQL_CLIENTS.get(databaseUrl);
-};
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 

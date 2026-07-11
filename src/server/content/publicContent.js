@@ -1,8 +1,10 @@
-import { createClient } from "@sanity/client";
+import { createClient as createSanityClient } from "@sanity/client";
 import {
   PUBLIC_CONTENT_QUERIES,
   PUBLIC_CONTENT_RESOURCES,
 } from "../../lib/publicContentQueries";
+import { createSupabaseDocumentClient } from "../supabase/documentClient.js";
+import { enrichSupabaseContentAssets } from "../supabase/assets.js";
 
 const DEFAULT_API_VERSION = "2026-06-09";
 
@@ -11,7 +13,41 @@ const readEnv = (...keys) =>
     .map((key) => String(process.env[key] || "").trim())
     .find(Boolean) || "";
 
-const createPublicContentClient = () => {
+const DOCUMENT_TYPES_BY_RESOURCE = Object.freeze({
+  reviews: ["proReviewsCarousel"],
+  about: ["about"],
+  services: ["services"],
+  "packages-list": ["package"],
+  "packages-settings": ["packagesSettings"],
+  "how-it-works": ["howItWorks"],
+  "supported-games": ["supportedGames"],
+  "faq-settings": ["faqSettings"],
+  "faq-questions": ["faqSection"],
+  hero: ["hero"],
+  team: ["meetTheTeam"],
+  contact: ["contact"],
+  tools: ["tool"],
+  benchmarks: ["benchmark"],
+  "discord-banner": ["discordBanner"],
+  terms: ["terms"],
+  "privacy-policy": ["privacyPolicy"],
+  "reviews-gallery": ["review"],
+  "referral-box": ["referralBox"],
+  package: ["package"],
+  "upgrade-link": ["upgradeLink", "package"],
+});
+
+const createPublicContentClient = ({ backend, resource }) => {
+  if (backend === "supabase") {
+    return createSupabaseDocumentClient({
+      documentTypes: [
+        ...(DOCUMENT_TYPES_BY_RESOURCE[resource] || []),
+        "sanity.imageAsset",
+        "sanity.fileAsset",
+      ],
+    });
+  }
+
   const projectId = readEnv("SANITY_PROJECT_ID", "NEXT_PUBLIC_SANITY_PROJECT_ID");
   const dataset = readEnv("SANITY_DATASET", "NEXT_PUBLIC_SANITY_DATASET") || "production";
   const token = readEnv(
@@ -22,7 +58,7 @@ const createPublicContentClient = () => {
   if (!projectId || !dataset) {
     throw new Error("Sanity public content access is not configured.");
   }
-  return createClient({
+  return createSanityClient({
     projectId,
     dataset,
     apiVersion: readEnv("SANITY_API_VERSION") || DEFAULT_API_VERSION,
@@ -77,7 +113,11 @@ const validateAllowedParameters = (resource, searchParams) => {
   }
 };
 
-export const fetchPublicContent = async ({ resource, searchParams }) => {
+export const fetchPublicContent = async ({
+  resource,
+  searchParams,
+  backend = "sanity",
+}) => {
   const query = PUBLIC_CONTENT_QUERIES[resource];
   if (!query) {
     const error = new Error("Public content resource was not found.");
@@ -92,5 +132,11 @@ export const fetchPublicContent = async ({ resource, searchParams }) => {
       : resource === "upgrade-link"
         ? { slug: parseSlug(searchParams) }
         : {};
-  return createPublicContentClient().fetch(query, params);
+  const data = await createPublicContentClient({ backend, resource }).fetch(
+    query,
+    params
+  );
+  return backend === "supabase"
+    ? enrichSupabaseContentAssets({ data })
+    : data;
 };

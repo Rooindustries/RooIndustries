@@ -1,4 +1,8 @@
 import { cancelPaymentSession } from "./flow.js";
+import {
+  createPaymentBackendClientOverride,
+  getPaymentTokenBackend,
+} from "./backend.js";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -9,6 +13,11 @@ export default async function handler(req, res) {
   const paymentAccessToken = String(req?.headers?.authorization || "")
     .replace(/^Bearer\s+/i, "")
     .trim();
-  const result = await cancelPaymentSession({ paymentAccessToken });
+  const backend = getPaymentTokenBackend(paymentAccessToken) || "sanity";
+  const client = createPaymentBackendClientOverride(backend);
+  const result = await cancelPaymentSession({
+    paymentAccessToken,
+    ...(client ? { client } : {}),
+  });
   return res.status(result.httpStatus).json(result.body);
 }
