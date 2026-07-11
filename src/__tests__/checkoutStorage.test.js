@@ -1,6 +1,9 @@
 import {
   persistBookingPackageSelection,
   readBookingPackageSelection,
+  readStoredCheckoutBooking,
+  updateStoredCheckoutHold,
+  writeStoredCheckoutBooking,
 } from "../lib/checkoutStorage";
 
 describe("tab-scoped booking package state", () => {
@@ -45,5 +48,27 @@ describe("tab-scoped booking package state", () => {
     expect(stored.packages["Performance Vertex Max"].form).toEqual({
       email: "customer@example.com",
     });
+  });
+
+  test("replaces stale checkout hold credentials after payment release", () => {
+    writeStoredCheckoutBooking({
+      packageTitle: "Performance Vertex Max",
+      slotHoldId: "slotHold.checkout",
+      slotHoldToken: "old-token",
+      slotHoldExpiresAt: "2099-01-01T00:10:00.000Z",
+    });
+
+    const updated = updateStoredCheckoutHold({
+      slotHoldId: "slotHold.checkout",
+      slotHoldToken: "refreshed-token",
+      slotHoldExpiresAt: "2099-01-01T00:20:00.000Z",
+    });
+
+    expect(updated).toMatchObject({
+      packageTitle: "Performance Vertex Max",
+      slotHoldToken: "refreshed-token",
+      slotHoldExpiresAt: "2099-01-01T00:20:00.000Z",
+    });
+    expect(readStoredCheckoutBooking()).toEqual(updated);
   });
 });

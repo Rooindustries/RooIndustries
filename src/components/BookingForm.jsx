@@ -9,7 +9,10 @@ import packagePricing from "../lib/packagePricing";
 import PriceDisplay from "./PriceDisplay";
 import {
   BOOKING_DRAFT_STORAGE_KEY,
+  CHECKOUT_BOOKING_STORAGE_KEY,
   persistBookingPackageSelection,
+  readStoredCheckoutBooking,
+  updateStoredCheckoutHold,
 } from "../lib/checkoutStorage";
 
 const { applyPackageContentOverrides } = packageContent;
@@ -29,8 +32,8 @@ const IST_OFFSET_MINUTES = 330;
 const FORM_PREFILL_KEY = "booking_form_prefill";
 const HOLD_STORAGE_KEY = "my_slot_hold";
 const BOOKING_DRAFT_KEY = BOOKING_DRAFT_STORAGE_KEY;
-const CHECKOUT_BOOKING_STORAGE_KEY = "checkout_booking_state";
 const PAYMENT_SESSION_STORAGE_KEY = "payment_session_state";
+const BOOKING_CONFIRMATION_STORAGE_KEY = "booking_confirmation_state";
 const SESSION_STATE_KEY = "booking_modal_state";
 const REFERRAL_STORAGE_KEY = "referral_session";
 const BOOKING_FETCH_TIMEOUT_MS = 8000;
@@ -1188,6 +1191,54 @@ export default function BookingForm({ isMobile }) {
     broadcastHold(null);
   };
 
+  const getPaymentNavigationState = () => {
+    const bookingData = readStoredCheckoutBooking();
+    const backgroundLocation = location.state?.backgroundLocation || null;
+    return {
+      ...(bookingData ? { bookingData } : {}),
+      ...(backgroundLocation ? { backgroundLocation } : {}),
+    };
+  };
+
+  const returnToPayment = () => {
+    navigate("/payment", { state: getPaymentNavigationState() });
+  };
+
+  const showCapturedPaymentResult = (data = {}) => {
+    const status = String(data.status || "").trim().toLowerCase();
+    const bookingId = String(data.bookingId || "").trim();
+    const emailDispatchToken = String(data.emailDispatchToken || "").trim();
+    if (
+      !["booked", "email_partial"].includes(status) ||
+      !bookingId ||
+      !emailDispatchToken
+    ) {
+      returnToPayment();
+      return;
+    }
+
+    const bookingConfirmation = { bookingId, emailDispatchToken };
+    try {
+      sessionStorage.setItem(
+        BOOKING_CONFIRMATION_STORAGE_KEY,
+        JSON.stringify(bookingConfirmation)
+      );
+      sessionStorage.removeItem(PAYMENT_SESSION_STORAGE_KEY);
+      sessionStorage.removeItem(CHECKOUT_BOOKING_STORAGE_KEY);
+    } catch {
+      console.error("Failed to persist booking confirmation");
+    }
+    clearHoldState(true);
+    const backgroundLocation = location.state?.backgroundLocation || null;
+    navigate("/payment-success", {
+      replace: true,
+      state: {
+        bookingConfirmation,
+        ...(backgroundLocation ? { backgroundLocation } : {}),
+      },
+    });
+  };
+
   const updateHoldPackage = (pkg) => {
     if (!myHold || isPaymentPendingHold) return;
     const updated = {
@@ -1254,7 +1305,7 @@ export default function BookingForm({ isMobile }) {
       });
       const data = await response.json().catch(() => ({}));
       if (data?.captured) {
-        navigate("/payment");
+        showCapturedPaymentResult(data);
         return;
       }
       if (!response.ok || data?.cancelled !== true) {
@@ -1275,9 +1326,14 @@ export default function BookingForm({ isMobile }) {
       };
       setMyHold(nextHold);
       sessionStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(nextHold));
+      const checkoutUpdated = updateStoredCheckoutHold(refreshed);
       sessionStorage.removeItem(PAYMENT_SESSION_STORAGE_KEY);
       broadcastHold(nextHold);
-      setErrorStep2("Payment method released. You can return to checkout and choose either provider.");
+      setErrorStep2(
+        checkoutUpdated
+          ? "Payment method released. You can choose another payment method."
+          : "Payment method released. Review your booking details and submit again."
+      );
     } catch (error) {
       setErrorStep2(error.message || "The payment session could not be released.");
     } finally {
@@ -1933,21 +1989,21 @@ export default function BookingForm({ isMobile }) {
                     need to know.
                   </p>
 
-                  <div className="flex flex-col gap-4 sm:flex-row">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     {isPaymentPendingHold ? (
                       <>
                         <button
                           type="button"
                           onClick={releasePaymentSession}
                           disabled={releasingPayment}
-                          className="w-full rounded-lg border border-danger-border bg-danger-soft py-3 font-semibold text-danger-text transition hover:bg-surface-hover disabled:cursor-wait disabled:opacity-60 sm:w-1/2"
+                          className="w-full min-w-0 rounded-lg border border-danger-border bg-danger-soft py-3 font-semibold text-danger-text transition hover:bg-surface-hover disabled:cursor-wait disabled:opacity-60"
                         >
                           {releasingPayment ? "Checking payment..." : "Release payment"}
                         </button>
                         <button
                           type="button"
-                          onClick={() => navigate("/payment")}
-                          className="glow-button inline-flex w-full items-center justify-center gap-2 rounded-lg py-3 font-semibold transition sm:w-1/2"
+                          onClick={returnToPayment}
+                          className="glow-button inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-lg py-3 font-semibold transition"
                         >
                           Return to payment
                           <span className="glow-line glow-line-top" />
@@ -1963,7 +2019,7 @@ export default function BookingForm({ isMobile }) {
                         releaseHold(true);
                         setStep(1);
                       }}
-                      className="w-full bg-surface-input hover:bg-surface-hover py-3 rounded-lg font-semibold transition sm:w-1/2"
+                      className="w-full min-w-0 bg-surface-input hover:bg-surface-hover py-3 rounded-lg font-semibold transition"
                     >
                       Back
                     </button>
@@ -1983,7 +2039,7 @@ export default function BookingForm({ isMobile }) {
                         await handleSubmit();
                         setLoading(false);
                       }}
-                      className={`glow-button w-full py-3 rounded-lg font-semibold transition inline-flex items-center justify-center gap-2 sm:w-1/2 ${
+                      className={`glow-button w-full min-w-0 py-3 rounded-lg font-semibold transition inline-flex items-center justify-center gap-2 ${
                         loading || !isStep2Complete
                           ? "opacity-60 cursor-not-allowed"
                           : ""
@@ -2000,10 +2056,10 @@ export default function BookingForm({ isMobile }) {
                       </>
                     )}
 
-                    {errorStep2 && (
-                      <p className="text-info-text text-sm mt-1 sm:basis-full">{errorStep2}</p>
-                    )}
                   </div>
+                  {errorStep2 && (
+                    <p className="text-info-text text-sm">{errorStep2}</p>
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>

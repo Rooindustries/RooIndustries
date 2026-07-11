@@ -106,7 +106,11 @@ describe("payment session UI", () => {
         return response({
           ok: true,
           providers: {
-            razorpay: { enabled: false, mode: "missing" },
+            razorpay: {
+              enabled: false,
+              mode: "live",
+              disabledReason: "merchant_profile_update",
+            },
             paypal: { enabled: false, mode: "missing", clientId: "" },
           },
         });
@@ -127,6 +131,12 @@ describe("payment session UI", () => {
         'script[src="https://checkout.razorpay.com/v1/checkout.js"]'
       )
     ).toBeNull();
+    expect(
+      await screen.findByText(/temporarily unavailable while we update/i)
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /temporarily unavailable/i })
+    ).toBeDisabled();
   });
 
   test("Razorpay uses a server quote, bearer finalize, and refreshed hold", async () => {
