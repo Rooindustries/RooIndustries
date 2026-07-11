@@ -14,6 +14,7 @@ import {
   CMS_DOCUMENT_TYPES,
   collectAssetLinks,
   compareDocumentManifests,
+  expectedAccountShadowCounts,
   mapConcurrent,
   sha256,
   summarizeDocuments,
@@ -540,8 +541,12 @@ const verifyParity = async ({ documents, accounts, links, runId }) => {
   };
   compareCount("source_documents", shadowSummary?.source_documents, documents.length);
   compareCount("cms_documents", shadowSummary?.cms_documents, expectedCmsCount(documents));
-  compareCount("auth_users", accountSummary?.auth_users, accounts.length);
-  compareCount("profiles", accountSummary?.profiles, accounts.length);
+  const expectedAccountCounts = expectedAccountShadowCounts({
+    accounts,
+    tourneyPlayerAccounts: Number(accountSummary?.tourney_shadow_players || 0),
+  });
+  compareCount("auth_users", accountSummary?.auth_users, expectedAccountCounts.authUsers);
+  compareCount("profiles", accountSummary?.profiles, expectedAccountCounts.profiles);
   compareCount(
     "creator_profiles",
     accountSummary?.creator_profiles,
@@ -550,7 +555,12 @@ const verifyParity = async ({ documents, accounts, links, runId }) => {
   compareCount(
     "tourney_accounts",
     accountSummary?.tourney_accounts,
-    accounts.filter((account) => account.tourneyAccount).length
+    expectedAccountCounts.tourneyAccounts
+  );
+  compareCount(
+    "tourney_player_accounts",
+    accountSummary?.tourney_player_accounts,
+    accountSummary?.tourney_shadow_players
   );
   compareCount(
     "source_operational_documents",

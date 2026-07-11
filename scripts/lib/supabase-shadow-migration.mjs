@@ -324,6 +324,24 @@ export const accountRpcPayload = (account) => ({
   ...(account.tourneyAccount ? { tourney_account: account.tourneyAccount } : {}),
 });
 
+export const expectedAccountShadowCounts = ({
+  accounts = [],
+  tourneyPlayerAccounts = 0,
+} = {}) => {
+  const playerAccounts = Number(tourneyPlayerAccounts);
+  if (!Number.isInteger(playerAccounts) || playerAccounts < 0) {
+    throw new Error("Tourney player account count must be a nonnegative integer.");
+  }
+  const importedAccounts = Array.isArray(accounts) ? accounts : [];
+  return {
+    authUsers: importedAccounts.length + playerAccounts,
+    profiles: importedAccounts.length + playerAccounts,
+    tourneyAccounts:
+      importedAccounts.filter((account) => account?.tourneyAccount).length +
+      playerAccounts,
+  };
+};
+
 const sanitizeAssetSegment = (value) =>
   normalize(value)
     .replace(/[^a-zA-Z0-9._-]+/g, "-")
