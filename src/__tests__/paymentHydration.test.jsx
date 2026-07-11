@@ -26,6 +26,25 @@ const checkout = {
   slotHoldToken: "qa.token",
   slotHoldExpiresAt: "2099-01-01T00:00:00.000Z",
 };
+const checkoutFingerprint = JSON.stringify({
+  packageTitle: checkout.packageTitle,
+  originalOrderId: "",
+  startTimeUTC: checkout.startTimeUTC,
+  email: checkout.email,
+  referralCode: "locked-referral",
+  couponCode: "LOCKED10",
+});
+const paymentSession = {
+  provider: "razorpay",
+  fingerprint: checkoutFingerprint,
+  paymentAccessToken: "payment-access-token",
+  providerPayload: {
+    orderId: "order_hydration",
+    amount: 9995,
+    currency: "USD",
+    key: "rzp_live_public_id",
+  },
+};
 
 const tree = (
   <MemoryRouter initialEntries={["/payment"]}>
@@ -34,11 +53,19 @@ const tree = (
 );
 
 describe("payment reload hydration", () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
   test("restores tab-scoped checkout state after hydration without changing the first render", async () => {
     const timeZoneSpy = jest
       .spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions")
       .mockReturnValue({ timeZone: "UTC" });
     window.sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
+    window.sessionStorage.setItem(
+      "payment_session_state",
+      JSON.stringify(paymentSession)
+    );
     global.fetch = jest.fn(async (url) => ({
       ok: true,
       json: async () =>
@@ -79,6 +106,18 @@ describe("payment reload hydration", () => {
     );
     expect(hydrationErrors).toEqual([]);
     expect(container.textContent).toContain("Performance Vertex Max");
+    expect(
+      JSON.parse(window.sessionStorage.getItem("payment_session_state"))
+    ).toMatchObject({
+      provider: "razorpay",
+      paymentAccessToken: "payment-access-token",
+    });
+    expect(container.querySelector('input[placeholder="e.g. vouch"]')).toHaveValue(
+      "locked-referral"
+    );
+    expect(container.querySelector('input[placeholder="e.g. BF10"]')).toHaveValue(
+      "LOCKED10"
+    );
 
     await act(async () => root.unmount());
     errorSpy.mockRestore();

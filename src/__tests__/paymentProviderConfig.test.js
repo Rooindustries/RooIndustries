@@ -25,6 +25,7 @@ describe("payment provider runtime policy", () => {
     delete process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID;
     delete process.env.RAZORPAY_KEY_ID;
     delete process.env.RAZORPAY_KEY_SECRET;
+    delete process.env.DISABLE_RAZORPAY_CHECKOUT;
   });
 
   afterAll(() => {
@@ -232,6 +233,22 @@ describe("payment provider runtime policy", () => {
       enabled: true,
       mode: "live",
       clientId: "paypal-live-client",
+    });
+  });
+
+  test("production can temporarily stop new Razorpay checkouts without removing credentials", () => {
+    process.env.VERCEL_ENV = "production";
+    process.env.RAZORPAY_KEY_ID = "rzp_live_prod";
+    process.env.RAZORPAY_KEY_SECRET = "secret";
+    process.env.DISABLE_RAZORPAY_CHECKOUT = "1";
+
+    const { resolvePaymentProviders } = loadProviderConfig();
+    const providers = resolvePaymentProviders();
+
+    expect(providers.razorpay).toEqual({
+      enabled: false,
+      mode: "live",
+      disabledReason: "merchant_profile_update",
     });
   });
 });

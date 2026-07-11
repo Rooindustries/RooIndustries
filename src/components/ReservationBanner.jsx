@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useLocation } from "react-router-dom";
-import { persistBookingPackageSelection } from "../lib/checkoutStorage";
+import {
+  persistBookingPackageSelection,
+  readStoredCheckoutBooking,
+} from "../lib/checkoutStorage";
 import packagePricing from "../lib/packagePricing";
 
 const { getPublicPackageTitle } = packagePricing;
@@ -218,8 +221,10 @@ export default function ReservationBanner() {
 
   const continueBooking = () => {
     if (String(hold?.phase || "").trim().toLowerCase() === "payment_pending") {
+      const bookingData = readStoredCheckoutBooking();
       nav("/payment", {
         state: {
+          ...(bookingData ? { bookingData } : {}),
           backgroundLocation: location.state?.backgroundLocation || location,
         },
       });
