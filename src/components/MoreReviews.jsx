@@ -9,10 +9,14 @@ const REVIEW_IMAGE_WIDTHS = [320, 480, 640, 800];
 const buildReviewImageUrl = (image, width) =>
   urlFor(image).width(width).format("webp").quality(85).url();
 
-const buildReviewImageSrcSet = (image) =>
-  REVIEW_IMAGE_WIDTHS.map(
-    (width) => `${buildReviewImageUrl(image, width)} ${width}w`
-  ).join(", ");
+const buildReviewImageSrcSet = (image) => {
+  const sources = REVIEW_IMAGE_WIDTHS.map((width) => ({
+    url: buildReviewImageUrl(image, width),
+    width,
+  }));
+  if (new Set(sources.map(({ url }) => url)).size < 2) return undefined;
+  return sources.map(({ url, width }) => `${url} ${width}w`).join(", ");
+};
 
 export default function Reviews() {
   const [selectedImage, setSelectedImage] = useState(null);

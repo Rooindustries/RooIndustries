@@ -33,12 +33,20 @@ describe("Supabase image URL builder", () => {
     );
   });
 
-  test("keeps the original URL for zoom views and unsupported SVG transforms", () => {
+  test("keeps original, SVG, and already-optimized WebP URLs direct", () => {
     expect(urlFor({ _supabaseUrl: SUPABASE_ORIGINAL }).url()).toBe(
       SUPABASE_ORIGINAL
     );
     const svg = SUPABASE_ORIGINAL.replace("example.png", "example.svg");
     expect(urlFor({ _supabaseUrl: svg }).width(64).url()).toBe(svg);
+    const webp = SUPABASE_ORIGINAL.replace("example.png", "example.webp");
+    expect(
+      urlFor({ _supabaseUrl: webp })
+        .width(800)
+        .format("webp")
+        .quality(60)
+        .url()
+    ).toBe(webp);
   });
 
   test("does not rewrite non-Supabase direct URLs", () => {
