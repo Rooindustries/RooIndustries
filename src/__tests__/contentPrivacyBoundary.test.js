@@ -3,18 +3,45 @@ const path = require("path");
 
 const mockFetch = jest.fn();
 const mockCreateClient = jest.fn(() => ({ fetch: mockFetch }));
+const mockSupabaseFetch = jest.fn();
+const mockCreateSupabaseDocumentClient = jest.fn(() => ({
+  fetch: mockSupabaseFetch,
+}));
+const mockEnrichSupabaseContentAssets = jest.fn(async ({ data }) => data);
 
 jest.mock("@sanity/client", () => ({
   createClient: (...args) => mockCreateClient(...args),
 }));
 
+jest.mock("../server/supabase/documentClient", () => ({
+  createSupabaseDocumentClient: (...args) =>
+    mockCreateSupabaseDocumentClient(...args),
+}));
+
+jest.mock("../server/supabase/assets", () => ({
+  enrichSupabaseContentAssets: (...args) =>
+    mockEnrichSupabaseContentAssets(...args),
+}));
+
 describe("public content privacy boundary", () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
+    const { clearSupabasePublicContentCache } = require(
+      "../server/content/publicContent"
+    );
+    clearSupabasePublicContentCache();
     process.env.SANITY_PROJECT_ID = "project-test";
     process.env.SANITY_DATASET = "production";
     process.env.SANITY_READ_TOKEN = "server-only-read-token";
     mockFetch.mockResolvedValue({ title: "Public copy" });
+    mockSupabaseFetch.mockReset();
+    mockSupabaseFetch.mockResolvedValue([{ _id: "benchmark-one" }]);
+    mockEnrichSupabaseContentAssets.mockReset();
+    mockEnrichSupabaseContentAssets.mockImplementation(async ({ data }) => data);
   });
 
   test("uses a fixed server projection and never accepts caller GROQ", async () => {
@@ -76,6 +103,42 @@ describe("public content privacy boundary", () => {
       ok: false,
       error: "Public content is temporarily unavailable.",
     });
+  });
+
+  test("deduplicates warm Supabase content reads", async () => {
+    const { fetchPublicContent } = require("../server/content/publicContent");
+    const request = () =>
+      fetchPublicContent({
+        resource: "benchmarks",
+        searchParams: new URLSearchParams(),
+        backend: "supabase",
+      });
+
+    await expect(Promise.all([request(), request()])).resolves.toEqual([
+      [{ _id: "benchmark-one" }],
+      [{ _id: "benchmark-one" }],
+    ]);
+    await expect(request()).resolves.toEqual([{ _id: "benchmark-one" }]);
+    expect(mockSupabaseFetch).toHaveBeenCalledTimes(1);
+    expect(mockEnrichSupabaseContentAssets).toHaveBeenCalledTimes(1);
+  });
+
+  test("serves recent content when a Supabase refresh fails", async () => {
+    const now = jest.spyOn(Date, "now").mockReturnValue(1_000);
+    const { fetchPublicContent } = require("../server/content/publicContent");
+    const request = () =>
+      fetchPublicContent({
+        resource: "benchmarks",
+        searchParams: new URLSearchParams(),
+        backend: "supabase",
+      });
+
+    await expect(request()).resolves.toEqual([{ _id: "benchmark-one" }]);
+    now.mockReturnValue(62_000);
+    mockSupabaseFetch.mockRejectedValueOnce(new Error("Temporary outage"));
+    await expect(request()).resolves.toEqual([{ _id: "benchmark-one" }]);
+    expect(mockSupabaseFetch).toHaveBeenCalledTimes(2);
+    now.mockRestore();
   });
 
   test("the arbitrary Sanity proxy is permanently gone", async () => {

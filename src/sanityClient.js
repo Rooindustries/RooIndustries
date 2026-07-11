@@ -10,33 +10,100 @@ const builder = createImageUrlBuilder({
   dataset: publicDataset,
 });
 
+const SUPABASE_PUBLIC_IMAGE_PATH = "/storage/v1/object/public/";
+const SUPABASE_RENDER_IMAGE_PATH = "/storage/v1/render/image/public/";
+const TRANSFORMABLE_IMAGE_PATH = /\.(?:gif|jpe?g|png|webp)$/i;
+const RESIZE_MODE_BY_FIT = Object.freeze({
+  crop: "cover",
+  fill: "fill",
+  max: "contain",
+  min: "cover",
+});
+
+const normalizedInteger = (value, minimum, maximum) => {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  return Math.min(maximum, Math.max(minimum, Math.round(number)));
+};
+
+const transformedSupabaseUrl = (directUrl, transforms, forceTransform) => {
+  try {
+    const url = new URL(directUrl);
+    if (
+      !forceTransform ||
+      !url.pathname.includes(SUPABASE_PUBLIC_IMAGE_PATH) ||
+      !TRANSFORMABLE_IMAGE_PATH.test(url.pathname)
+    ) {
+      return directUrl;
+    }
+
+    url.pathname = url.pathname.replace(
+      SUPABASE_PUBLIC_IMAGE_PATH,
+      SUPABASE_RENDER_IMAGE_PATH
+    );
+    Object.entries(transforms).forEach(([key, value]) => {
+      if (value !== null && value !== undefined && value !== "") {
+        url.searchParams.set(key, String(value));
+      }
+    });
+    return url.toString();
+  } catch {
+    return directUrl;
+  }
+};
+
 class DirectAssetUrlBuilder {
-  constructor(url) {
+  constructor(url, transforms = {}, forceTransform = false) {
     this.directUrl = url;
+    this.transforms = { ...transforms };
+    this.forceTransform = forceTransform;
   }
 
-  width() {
-    return this;
+  withTransform(key, value) {
+    if (value === null || value === undefined || value === "") return this;
+    return new DirectAssetUrlBuilder(
+      this.directUrl,
+      { ...this.transforms, [key]: value },
+      true
+    );
   }
 
-  height() {
-    return this;
+  width(value) {
+    return this.withTransform("width", normalizedInteger(value, 1, 5000));
   }
 
-  fit() {
-    return this;
+  height(value) {
+    return this.withTransform("height", normalizedInteger(value, 1, 5000));
   }
 
-  format() {
-    return this;
+  fit(value) {
+    return this.withTransform(
+      "resize",
+      RESIZE_MODE_BY_FIT[String(value || "").trim().toLowerCase()] || null
+    );
   }
 
-  quality() {
-    return this;
+  format(value) {
+    const format = String(value || "").trim().toLowerCase();
+    if (format === "origin") return this.withTransform("format", "origin");
+    if (format !== "webp") return this;
+    return new DirectAssetUrlBuilder(
+      this.directUrl,
+      this.transforms,
+      true
+    );
+  }
+
+  quality(value) {
+    return this.withTransform("quality", normalizedInteger(value, 20, 100));
   }
 
   url() {
-    return this.directUrl;
+    return transformedSupabaseUrl(
+      this.directUrl,
+      this.transforms,
+      this.forceTransform
+    );
   }
 }
 

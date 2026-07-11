@@ -7,6 +7,10 @@ import { createSupabaseDocumentClient } from "../supabase/documentClient.js";
 import { enrichSupabaseContentAssets } from "../supabase/assets.js";
 
 const DEFAULT_API_VERSION = "2026-06-09";
+const SUPABASE_CONTENT_CACHE_TTL_MS = 60 * 1000;
+const SUPABASE_CONTENT_STALE_TTL_MS = 10 * 60 * 1000;
+const SUPABASE_CONTENT_RETRY_TTL_MS = 5 * 1000;
+const supabaseContentCache = new Map();
 
 const readEnv = (...keys) =>
   keys
@@ -113,6 +117,54 @@ const validateAllowedParameters = (resource, searchParams) => {
   }
 };
 
+const loadSupabasePublicContent = async ({ resource, query, params }) => {
+  if (Object.keys(params).length > 0) {
+    const data = await createPublicContentClient({
+      backend: "supabase",
+      resource,
+    }).fetch(query, params);
+    return enrichSupabaseContentAssets({ data });
+  }
+
+  const key = `${resource}:${JSON.stringify(params)}`;
+  const now = Date.now();
+  const cached = supabaseContentCache.get(key);
+  if (cached?.hasData && cached.expiresAt > now) return cached.data;
+  if (cached?.pending) return cached.pending;
+
+  const pending = createPublicContentClient({ backend: "supabase", resource })
+    .fetch(query, params)
+    .then((data) => enrichSupabaseContentAssets({ data }))
+    .then((data) => {
+      supabaseContentCache.set(key, {
+        data,
+        hasData: true,
+        expiresAt: Date.now() + SUPABASE_CONTENT_CACHE_TTL_MS,
+        staleUntil: Date.now() + SUPABASE_CONTENT_STALE_TTL_MS,
+      });
+      return data;
+    })
+    .catch((error) => {
+      if (cached?.hasData && cached.staleUntil > Date.now()) {
+        supabaseContentCache.set(key, {
+          ...cached,
+          expiresAt: Date.now() + SUPABASE_CONTENT_RETRY_TTL_MS,
+          pending: null,
+        });
+        return cached.data;
+      }
+      supabaseContentCache.delete(key);
+      throw error;
+    });
+
+  supabaseContentCache.set(key, { ...cached, pending });
+  return pending;
+};
+
+export const clearSupabasePublicContentCache = () => {
+  supabaseContentCache.clear();
+};
+
 export const fetchPublicContent = async ({
   resource,
   searchParams,
@@ -132,11 +184,8 @@ export const fetchPublicContent = async ({
       : resource === "upgrade-link"
         ? { slug: parseSlug(searchParams) }
         : {};
-  const data = await createPublicContentClient({ backend, resource }).fetch(
-    query,
-    params
-  );
-  return backend === "supabase"
-    ? enrichSupabaseContentAssets({ data })
-    : data;
+  if (backend === "supabase") {
+    return loadSupabasePublicContent({ resource, query, params });
+  }
+  return createPublicContentClient({ backend, resource }).fetch(query, params);
 };
