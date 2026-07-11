@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { readOptionalTourneyTable } from "../server/supabase/tourneyMigration";
 
 describe("Supabase Tourney migration safeguards", () => {
@@ -29,5 +31,20 @@ describe("Supabase Tourney migration safeguards", () => {
         },
       })
     ).rejects.toThrow("connection failed");
+  });
+
+  test("uses guarded deletes when replacing the Supabase Tourney shadow", () => {
+    const migrationsDirectory = path.join(process.cwd(), "supabase", "migrations");
+    const migrationName = fs
+      .readdirSync(migrationsDirectory)
+      .find((name) => name.endsWith("_fix_tourney_shadow_safe_delete.sql"));
+    expect(migrationName).toBeTruthy();
+    const migration = fs.readFileSync(
+      path.join(migrationsDirectory, migrationName),
+      "utf8"
+    );
+    const deletes = migration.match(/delete from tourney\.[^;]+;/gi) || [];
+    expect(deletes).toHaveLength(12);
+    expect(deletes.every((statement) => /\swhere\s/i.test(statement))).toBe(true);
   });
 });
