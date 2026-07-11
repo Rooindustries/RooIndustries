@@ -59,7 +59,7 @@ const defaultWriteClient = createClient({
   apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
   token: process.env.SANITY_WRITE_TOKEN,
   useCdn: false,
-});
+}, { domain: "commerce" });
 
 const OWNER_TZ_NAME = "Asia/Kolkata";
 
@@ -317,6 +317,14 @@ export default async function handler(req, res) {
           { type: PAYMENT_RECORD_TYPE, id: paymentRecordId }
         )
       : null;
+    const cutoverGeneration = Math.max(
+      0,
+      Number(
+        req.internalContext?.cutoverGeneration ??
+          internalPaymentRecord?.cutoverGeneration ??
+          0
+      ) || 0
+    );
     if (
       isInternalPaymentFinalization &&
       (!internalPaymentRecord?._id || internalPaymentRecord.provider !== paymentProvider)
@@ -809,6 +817,8 @@ export default async function handler(req, res) {
           email: String(
             patchedBooking.email || patchedBooking.payerEmail || ""
           ).trim(),
+          backend: booking.backendOwner || "sanity",
+          cutoverGeneration: Number(booking.cutoverGeneration || 0),
         });
         await syncPaidPaymentRecordForBooking({
           bookingId: booking._id,
@@ -1240,12 +1250,16 @@ export default async function handler(req, res) {
         holdId: slotHoldId,
         startTimeUTC: holdUtcIso || normalizedStartTimeUTC,
         holdNonce: holdDoc?.holdNonce || "",
+        backend: holdDoc?.backendOwner === "supabase" ? "supabase" : "sanity",
+        cutoverGeneration: Number(holdDoc?.cutoverGeneration || 0),
       });
       const signedExpiredHoldToken = verifyHoldToken({
         token: slotHoldToken,
         holdId: slotHoldId,
         startTimeUTC: holdUtcIso || normalizedStartTimeUTC,
         holdNonce: holdDoc?.holdNonce || "",
+        backend: holdDoc?.backendOwner === "supabase" ? "supabase" : "sanity",
+        cutoverGeneration: Number(holdDoc?.cutoverGeneration || 0),
         ignoreExpiry: true,
       });
       const activeHold = fetchActiveHold ? await fetchActiveHold() : null;
@@ -1370,6 +1384,7 @@ export default async function handler(req, res) {
       _id: bookingDocId,
       _type: "booking",
       backendOwner,
+      cutoverGeneration,
       paymentRecordId,
       paymentProofClaimId,
       paymentFinalizationLeaseId,

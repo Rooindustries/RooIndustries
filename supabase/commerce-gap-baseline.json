@@ -1,0 +1,51 @@
+{
+  "version": 2,
+  "scope": "rooindustries.com commerce only",
+  "excludedFromNewDiscoveryCount": [
+    {
+      "id": "broad-shadow-commerce-reads",
+      "regressionGate": "Every commerce response fetch stays below 256000 bytes."
+    },
+    {
+      "id": "non-atomic-document-projection",
+      "regressionGate": "Compatibility document, typed projection, command record and mirror event commit together."
+    },
+    {
+      "id": "missing-email-dispatch-ledger",
+      "regressionGate": "Two deterministic dispatch rows exist per booking and historical unknowns never retry."
+    },
+    {
+      "id": "missing-referral-ledger",
+      "regressionGate": "Every owedReferral and creatorPayout source has one exact-cent ledger row."
+    },
+    {
+      "id": "missing-refund-projection",
+      "regressionGate": "Every provider refund entry has one typed refund row."
+    },
+    {
+      "id": "tombstone-recreate-semantics",
+      "regressionGate": "Delete stays auditable and create/createIfNotExists can safely recreate the ID."
+    },
+    {
+      "id": "global-backend-commerce-coupling",
+      "regressionGate": "Commerce can switch while DATA_PRIMARY_BACKEND remains Sanity."
+    }
+  ],
+  "newlyConfirmedAndClosed": [
+    {
+      "id": "missing-incremental-sanity-catch-up",
+      "reproduction": "Payment recovery fields changed in Sanity during the ten-minute parity window and produced nine document-hash drifts.",
+      "closureGate": "A leased keyset cursor atomically imports, projects, verifies and reconciles changed commerce documents every cron run."
+    },
+    {
+      "id": "targeted-read-legacy-fallback",
+      "reproduction": "A missing targeted RPC could fall back to the broad compatibility reader.",
+      "closureGate": "Commerce reads now return 503 when their scope or targeted RPC is unavailable, and enforce the 250 KB payload ceiling."
+    },
+    {
+      "id": "email-ledger-not-owning-send-lease",
+      "reproduction": "The relational email ledger was projected, but booking documents still owned the actual send lease.",
+      "closureGate": "Supabase-primary sends atomically claim and complete deterministic customer and owner ledger rows; terminal sends cannot be downgraded."
+    }
+  ]
+}

@@ -13,7 +13,7 @@ const createReleaseClient = (backendOverride) =>
       token: process.env.SANITY_WRITE_TOKEN,
       useCdn: false,
     },
-    { backendOverride }
+    { backendOverride, domain: "commerce" }
   );
 
 export default async function handler(req, res) {
@@ -58,6 +58,8 @@ export default async function handler(req, res) {
       holdId,
       startTimeUTC: hold.startTimeUTC,
       holdNonce: hold.holdNonce || "",
+      backend: hold.backendOwner === "supabase" ? "supabase" : "sanity",
+      cutoverGeneration: Number(hold.cutoverGeneration || 0),
     });
     if (!validToken) {
       return res.status(403).json({ ok: false, message: "Invalid hold token" });

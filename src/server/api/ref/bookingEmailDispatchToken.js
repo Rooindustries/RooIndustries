@@ -41,6 +41,8 @@ export const canIssueBookingEmailDispatchToken = () => !!resolveTokenSecret();
 export const issueBookingEmailDispatchToken = ({
   bookingId = "",
   email = "",
+  backend = "sanity",
+  cutoverGeneration = 0,
   expirySeconds = 60 * 30,
 }) => {
   const normalizedBookingId = String(bookingId || "").trim();
@@ -51,9 +53,11 @@ export const issueBookingEmailDispatchToken = ({
   const secret = ensureTokenSecret();
   const now = Math.floor(Date.now() / 1000);
   const payload = {
-    v: 1,
+    v: 2,
     bid: normalizedBookingId,
     email: normalizeEmail(email),
+    be: backend === "supabase" ? "supabase" : "sanity",
+    gen: Math.max(0, Number(cutoverGeneration) || 0),
     iat: now,
     exp: now + Math.max(60, Number(expirySeconds) || 0),
   };
@@ -67,6 +71,8 @@ export const verifyBookingEmailDispatchToken = ({
   token = "",
   bookingId = "",
   email = "",
+  backend = "",
+  cutoverGeneration,
 }) => {
   const secret = resolveTokenSecret();
   if (!secret) {
@@ -146,6 +152,25 @@ export const verifyBookingEmailDispatchToken = ({
     return {
       ok: false,
       reason: "booking_email_token_email_mismatch",
+      payload,
+    };
+  }
+
+  if (backend && (payload.be === "supabase" ? "supabase" : "sanity") !== backend) {
+    return {
+      ok: false,
+      reason: "booking_email_token_backend_mismatch",
+      payload,
+    };
+  }
+  if (
+    cutoverGeneration !== undefined &&
+    payload.gen !== undefined &&
+    Number(payload.gen) !== Math.max(0, Number(cutoverGeneration) || 0)
+  ) {
+    return {
+      ok: false,
+      reason: "booking_email_token_generation_mismatch",
       payload,
     };
   }

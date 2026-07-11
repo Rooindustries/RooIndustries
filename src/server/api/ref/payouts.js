@@ -14,7 +14,7 @@ const readClient = createClient({
   token: process.env.SANITY_READ_TOKEN || process.env.SANITY_WRITE_TOKEN,
   useCdn: false,
   perspective: 'published',
-});
+}, {domain: 'commerce'});
 
 const writeToken = process.env.SANITY_WRITE_TOKEN;
 const writeClient =
@@ -25,7 +25,7 @@ const writeClient =
     apiVersion: process.env.SANITY_API_VERSION || '2023-10-01',
     token: writeToken,
     useCdn: false,
-  });
+  }, {domain: 'commerce'});
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {

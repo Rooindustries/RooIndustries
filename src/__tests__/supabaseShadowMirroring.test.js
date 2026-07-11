@@ -8,6 +8,15 @@ const createShadowClient = () => ({
     if (name === "roo_import_shadow_batch") {
       return { data: { imported: 1, skipped_stale: 0 }, error: null };
     }
+    if (name === "roo_import_and_project_commerce_shadow_batch") {
+      return {
+        data: { import: { imported: 1, skipped_stale: 0 } },
+        error: null,
+      };
+    }
+    if (name === "roo_tombstone_and_project_commerce_shadow_ids") {
+      return { data: { tombstones: { tombstoned: 1 } }, error: null };
+    }
     if (name === "roo_project_referral_account_shadow") {
       return { data: { updated: 1 }, error: null };
     }
@@ -66,6 +75,39 @@ describe("Sanity to Supabase live shadow mirroring", () => {
     expect(shadowClient.rpc).toHaveBeenCalledWith(
       "roo_project_referral_account_shadow",
       { p_legacy_sanity_ids: ["referral.one"] }
+    );
+  });
+
+  test("uses the atomic commerce projector without touching creator identity", async () => {
+    const booking = {
+      _id: "booking.one",
+      _type: "booking",
+      _rev: "new",
+      _updatedAt: "2026-07-12T01:00:00.000Z",
+    };
+    const sanityClient = {
+      create: jest.fn().mockResolvedValue(booking),
+      fetch: jest.fn().mockResolvedValue([booking]),
+    };
+    const shadowClient = createShadowClient();
+    const client = createShadowingSanityClient({
+      sanityClient,
+      shadowClient,
+      commerceOnly: true,
+    });
+
+    await expect(client.create(booking)).resolves.toEqual(booking);
+    expect(shadowClient.rpc).toHaveBeenCalledWith(
+      "roo_import_and_project_commerce_shadow_batch",
+      expect.anything()
+    );
+    expect(shadowClient.rpc).not.toHaveBeenCalledWith(
+      "roo_project_referral_account_shadow",
+      expect.anything()
+    );
+    expect(shadowClient.rpc).not.toHaveBeenCalledWith(
+      "roo_refresh_operational_shadow",
+      expect.anything()
     );
   });
 });

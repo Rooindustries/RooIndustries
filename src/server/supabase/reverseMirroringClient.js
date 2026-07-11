@@ -5,6 +5,7 @@ import {
   recordMirrorFailure,
   resolveMirrorFailure,
 } from "./mirrorRecovery.js";
+import { drainCommerceMirrorOutbox } from "./commerceMirrorOutbox.js";
 
 const cleanForSanity = (document) => {
   if (!document || typeof document !== "object") return document;
@@ -187,33 +188,74 @@ export const createReverseMirroringSupabaseClient = ({
   if (!supabaseClient || !sanityClient) {
     throw new Error("Both document backends are required for reverse mirroring.");
   }
-  const onCommitted = (ids) =>
-    mirrorIds({
+  const drainOrFallback = async ({ ids, deleted = false, failClosed = false }) => {
+    if (supabaseClient.commerceOnly === true) {
+      const drained = await drainCommerceMirrorOutbox({
+        supabaseClient: recoveryClient,
+        sanityClient,
+        failClosed,
+      });
+      if (drained.supported) return drained;
+    }
+    return mirrorIds({
       supabaseClient,
       sanityClient,
       recoveryClient,
+      ids,
+      deleted,
+      failClosed,
+    });
+  };
+  const onCommitted = (ids) =>
+    drainOrFallback({
       ids,
       deleted: false,
+      failClosed: supabaseClient.commerceOnly !== true,
     });
   const onDeleted = (ids) =>
-    mirrorIds({
-      supabaseClient,
-      sanityClient,
-      recoveryClient,
+    drainOrFallback({
       ids,
       deleted: true,
+      failClosed: supabaseClient.commerceOnly !== true,
     });
 
   return new Proxy(supabaseClient, {
     get(target, property) {
       if (property === "reconcileReverseMirror") {
-        return (options = {}) =>
-          retryReverseMirrorFailures({
+        return async (options = {}) => {
+          const outbox =
+            target.commerceOnly === true
+              ? await drainCommerceMirrorOutbox({
+                  supabaseClient: recoveryClient,
+                  sanityClient,
+                  failClosed: false,
+                  ...options,
+                })
+              : { supported: false, attempted: 0, mirrored: 0, failed: 0 };
+          const legacy = await retryReverseMirrorFailures({
             supabaseClient: target,
             sanityClient,
             recoveryClient,
             ...options,
           });
+          return { outbox, legacy };
+        };
+      }
+      if (property === "flushCommerceMirror") {
+        return ({ failClosed = true, ...options } = {}) =>
+          target.commerceOnly === true
+            ? drainCommerceMirrorOutbox({
+                supabaseClient: recoveryClient,
+                sanityClient,
+                failClosed,
+                ...options,
+              })
+            : Promise.resolve({
+                supported: false,
+                attempted: 0,
+                mirrored: 0,
+                failed: 0,
+              });
       }
       if (["create", "createIfNotExists", "createOrReplace"].includes(property)) {
         return async (document, ...args) => {

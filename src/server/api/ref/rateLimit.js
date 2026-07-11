@@ -1,11 +1,27 @@
 import crypto from "crypto";
 import { getClientAddressFromRequestHeaders } from "../../request/clientAddress.js";
 import { logSafeError } from "../../safeErrorLog.js";
+import { createSupabaseAdminClient } from "../../supabase/adminClient.js";
+import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
 
 const TEST_BUCKETS =
   globalThis.__rooRateLimitBuckets ||
   (globalThis.__rooRateLimitBuckets = new Map());
 const MAX_RETRIES = 5;
+const COMMERCE_KEY_PREFIXES = [
+  "payment-start:",
+  "payment-quote:",
+  "hold-slot:",
+  "release-hold:",
+  "create-booking:",
+  "send-booking-emails:",
+  "validate-referral:",
+  "validate-coupon:",
+  "get-upgrade-info:",
+];
+
+const isCommerceKey = (key) =>
+  COMMERCE_KEY_PREFIXES.some((prefix) => String(key || "").startsWith(prefix));
 
 const loadWriteClient = async () => {
   const { createRefWriteClient } = await import("./sanity.js");
@@ -84,6 +100,34 @@ export const requireRateLimit = async (
   const retryAfter = Math.ceil((resetAtMs - now) / 1000);
 
   try {
+    const policy = resolveSupabaseRuntimePolicy();
+    if (
+      !client &&
+      isCommerceKey(key) &&
+      policy.commercePrimaryBackend === "supabase"
+    ) {
+      const bucketId = buildBucketId({ key, windowStart });
+      const bucketKeyHmac = bucketId.replace(/^rateLimitBucket\./, "");
+      const { data, error } = await createSupabaseAdminClient().rpc(
+        "roo_consume_rate_limit",
+        {
+          p_bucket_key_hmac: bucketKeyHmac,
+          p_window_started_at: new Date(windowStart).toISOString(),
+          p_reset_at: new Date(resetAtMs).toISOString(),
+          p_max: max,
+        }
+      );
+      if (error) {
+        const failure = new Error("Supabase rate limiting failed.");
+        failure.code = error.code || "SUPABASE_RATE_LIMIT_FAILED";
+        throw failure;
+      }
+      if (data?.allowed === false) {
+        return sendLimitResponse({ res, status: 429, retryAfter, message });
+      }
+      return true;
+    }
+
     const writeClient = client || (await loadWriteClient());
     const bucketId = buildBucketId({ key, windowStart });
     for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
@@ -134,6 +178,21 @@ export const cleanupExpiredRateLimitBuckets = async ({
   client = null,
   now = new Date().toISOString(),
 } = {}) => {
+  if (
+    !client &&
+    resolveSupabaseRuntimePolicy().commercePrimaryBackend === "supabase"
+  ) {
+    const { data, error } = await createSupabaseAdminClient().rpc(
+      "roo_cleanup_commerce_rate_limits",
+      { p_now: now }
+    );
+    if (error) {
+      const failure = new Error("Supabase rate-limit cleanup failed.");
+      failure.code = error.code || "SUPABASE_RATE_LIMIT_CLEANUP_FAILED";
+      throw failure;
+    }
+    return Number(data || 0);
+  }
   const writeClient = client || (await loadWriteClient());
   const ids = await writeClient.fetch(
     `*[_type == "rateLimitBucket" && resetAt < $now][0...500]._id`,

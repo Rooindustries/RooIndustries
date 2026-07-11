@@ -2,14 +2,17 @@ import { createDataClient as createClient } from "../../data/documentClient.js";
 import { requireReferralSession } from "./auth.js";
 import { logSafeError } from "../../safeErrorLog.js";
 
-const readClient = createClient({
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || "production",
-  apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
-  token: process.env.SANITY_READ_TOKEN || process.env.SANITY_WRITE_TOKEN,
-  useCdn: false,
-  perspective: "published",
-});
+const readClient = createClient(
+  {
+    projectId: process.env.SANITY_PROJECT_ID,
+    dataset: process.env.SANITY_DATASET || "production",
+    apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
+    token: process.env.SANITY_READ_TOKEN || process.env.SANITY_WRITE_TOKEN,
+    useCdn: false,
+    perspective: "published",
+  },
+  { domain: "commerce" }
+);
 
 export default async function handler(req, res) {
   if (req.method !== "GET") {

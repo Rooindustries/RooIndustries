@@ -20,6 +20,11 @@ const resolveDocumentBackend = ({ override, primary }) => {
   return backend;
 };
 
+const resolvePolicyBackend = ({ policy, domain = "global" }) =>
+  domain === "commerce"
+    ? policy.commercePrimaryBackend
+    : policy.primaryBackend;
+
 const resolveSanityEnv = (env = process.env, { requireWrite = false } = {}) => {
   const projectId = readFirst(env, ["SANITY_PRIVATE_PROJECT_ID", "SANITY_PROJECT_ID"]);
   const dataset = readFirst(env, ["SANITY_PRIVATE_DATASET", "SANITY_DATASET"]);
@@ -61,15 +66,24 @@ const createConfiguredSanityClient = ({
 
 export const createDataClient = (
   sanityConfig = {},
-  { env = process.env, supabaseClient, backendOverride = "" } = {}
+  {
+    env = process.env,
+    supabaseClient,
+    backendOverride = "",
+    domain = "global",
+  } = {}
 ) => {
   const policy = resolveSupabaseRuntimePolicy(env);
   const backend = resolveDocumentBackend({
     override: backendOverride,
-    primary: policy.primaryBackend,
+    primary: resolvePolicyBackend({ policy, domain }),
   });
   if (backend === "supabase") {
-    const client = createSupabaseDocumentClient({ shadowClient: supabaseClient });
+    const client = createSupabaseDocumentClient({
+      shadowClient: supabaseClient,
+      commerceOnly: domain === "commerce",
+      cutoverGeneration: policy.commerceFailoverGeneration,
+    });
     if (!policy.reverseMirrorEnabled) return client;
     return createReverseMirroringSupabaseClient({
       supabaseClient: client,
@@ -79,7 +93,11 @@ export const createDataClient = (
 
   const sanityClient = createSanityClient(sanityConfig);
   if (!policy.shadowWritesEnabled) return sanityClient;
-  return createShadowingSanityClient({ sanityClient, shadowClient: supabaseClient });
+  return createShadowingSanityClient({
+    sanityClient,
+    shadowClient: supabaseClient,
+    commerceOnly: domain === "commerce",
+  });
 };
 
 export const createDocumentReadClient = ({
@@ -87,14 +105,19 @@ export const createDocumentReadClient = ({
   perspective = "published",
   supabaseClient,
   backendOverride = "",
+  domain = "global",
 } = {}) => {
   const policy = resolveSupabaseRuntimePolicy(env);
   const backend = resolveDocumentBackend({
     override: backendOverride,
-    primary: policy.primaryBackend,
+    primary: resolvePolicyBackend({ policy, domain }),
   });
   if (backend === "supabase") {
-    return createSupabaseDocumentClient({ shadowClient: supabaseClient });
+    return createSupabaseDocumentClient({
+      shadowClient: supabaseClient,
+      commerceOnly: domain === "commerce",
+      cutoverGeneration: policy.commerceFailoverGeneration,
+    });
   }
   return createConfiguredSanityClient({ env, perspective });
 };
@@ -103,14 +126,19 @@ export const createDocumentWriteClient = ({
   env = process.env,
   supabaseClient,
   backendOverride = "",
+  domain = "global",
 } = {}) => {
   const policy = resolveSupabaseRuntimePolicy(env);
   const backend = resolveDocumentBackend({
     override: backendOverride,
-    primary: policy.primaryBackend,
+    primary: resolvePolicyBackend({ policy, domain }),
   });
   if (backend === "supabase") {
-    const client = createSupabaseDocumentClient({ shadowClient: supabaseClient });
+    const client = createSupabaseDocumentClient({
+      shadowClient: supabaseClient,
+      commerceOnly: domain === "commerce",
+      cutoverGeneration: policy.commerceFailoverGeneration,
+    });
     if (!policy.reverseMirrorEnabled) return client;
     return createReverseMirroringSupabaseClient({
       supabaseClient: client,
@@ -120,16 +148,26 @@ export const createDocumentWriteClient = ({
 
   const sanityClient = createConfiguredSanityClient({ env, requireWrite: true });
   if (!policy.shadowWritesEnabled) return sanityClient;
-  return createShadowingSanityClient({ sanityClient, shadowClient: supabaseClient });
+  return createShadowingSanityClient({
+    sanityClient,
+    shadowClient: supabaseClient,
+    commerceOnly: domain === "commerce",
+  });
 };
 
 export const createOptionalDocumentWriteClient = ({
   env = process.env,
   supabaseClient,
   backendOverride = "",
+  domain = "global",
 } = {}) => {
   try {
-    return createDocumentWriteClient({ env, supabaseClient, backendOverride });
+    return createDocumentWriteClient({
+      env,
+      supabaseClient,
+      backendOverride,
+      domain,
+    });
   } catch {
     return null;
   }

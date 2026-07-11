@@ -3,6 +3,8 @@ import {
   createDocumentWriteClient,
   createOptionalDocumentWriteClient,
 } from "../../data/documentClient.js";
+import { createCommerceStore } from "../../commerce/store.js";
+import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
 
 const DEFAULT_API_VERSION = "2023-10-01";
 
@@ -48,6 +50,36 @@ export const createRefReadClient = ({ perspective = "published" } = {}) => {
 
 export const createRefWriteClient = ({ backendOverride = "" } = {}) =>
   createDocumentWriteClient({ backendOverride });
+
+export const createCommerceReadClient = ({
+  perspective = "published",
+  backendOverride = "",
+} = {}) => {
+  const policy = resolveSupabaseRuntimePolicy();
+  const backend = backendOverride || policy.commercePrimaryBackend;
+  return createCommerceStore({
+    backend,
+    cutoverGeneration: policy.commerceFailoverGeneration,
+    client: createDocumentReadClient({
+      perspective,
+      backendOverride,
+      domain: "commerce",
+    }),
+  });
+};
+
+export const createCommerceWriteClient = ({ backendOverride = "" } = {}) => {
+  const policy = resolveSupabaseRuntimePolicy();
+  const backend = backendOverride || policy.commercePrimaryBackend;
+  return createCommerceStore({
+    backend,
+    cutoverGeneration: policy.commerceFailoverGeneration,
+    client: createDocumentWriteClient({
+      backendOverride,
+      domain: "commerce",
+    }),
+  });
+};
 
 export const createOptionalRefWriteClient = () =>
   createOptionalDocumentWriteClient();

@@ -58,11 +58,20 @@ const readEnv = (...keys) =>
 
 if (
   apply &&
-  String(process.env.DATA_PRIMARY_BACKEND || "sanity").trim().toLowerCase() ===
-    "supabase"
+  (
+    String(process.env.DATA_PRIMARY_BACKEND || "sanity").trim().toLowerCase() ===
+      "supabase" ||
+    String(
+      process.env.COMMERCE_PRIMARY_BACKEND ||
+        process.env.DATA_PRIMARY_BACKEND ||
+        "sanity"
+    )
+      .trim()
+      .toLowerCase() === "supabase"
+  )
 ) {
   throw new Error(
-    "Sanity-to-Supabase apply is disabled after Supabase becomes primary."
+    "Sanity-to-Supabase apply is disabled while Supabase is primary for any domain. Pause starts and switch commerce back to Sanity before importing a failover delta."
   );
 }
 
