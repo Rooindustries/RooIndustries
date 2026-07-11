@@ -141,7 +141,11 @@ const resolvePaymentProviders = () => {
   const razorpayKeyId = String(process.env.RAZORPAY_KEY_ID || "").trim();
   const razorpayKeySecret = String(process.env.RAZORPAY_KEY_SECRET || "").trim();
   const razorpayMode = resolveRazorpayMode(razorpayKeyId);
+  const razorpayCheckoutDisabled = isTruthyEnv(
+    process.env.DISABLE_RAZORPAY_CHECKOUT
+  );
   const razorpayEnabled =
+    !razorpayCheckoutDisabled &&
     !!razorpayKeyId &&
     !!razorpayKeySecret &&
     allowProviderModeInRuntime(razorpayMode, runtimePolicy);
@@ -167,6 +171,9 @@ const resolvePaymentProviders = () => {
     razorpay: {
       enabled: razorpayEnabled,
       mode: razorpayMode,
+      ...(razorpayCheckoutDisabled
+        ? { disabledReason: "merchant_profile_update" }
+        : {}),
     },
     paypal: {
       enabled: paypalEnabled,
