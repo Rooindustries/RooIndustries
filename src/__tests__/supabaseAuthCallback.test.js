@@ -3,13 +3,21 @@ const mockBootstrapSupabaseNativeAccount = jest.fn();
 const mockCreateServerClient = jest.fn((_url, _key, options) => ({
   auth: {
     exchangeCodeForSession: async (code) => {
-      options.cookies.setAll([
+      options.cookies.setAll(
+        [
+          {
+            name: "sb-session",
+            value: "encoded-session",
+            options: { httpOnly: true, path: "/", sameSite: "lax" },
+          },
+        ],
         {
-          name: "sb-session",
-          value: "encoded-session",
-          options: { httpOnly: true, sameSite: "lax" },
-        },
-      ]);
+          "Cache-Control":
+            "private, no-cache, no-store, must-revalidate, max-age=0",
+          Expires: "0",
+          Pragma: "no-cache",
+        }
+      );
       return mockExchangeCodeForSession(code);
     },
   },
@@ -32,7 +40,7 @@ jest.mock("next/server", () => ({
       return {
         status: init.status || 307,
         url: String(url),
-        cookies: { set: (cookie) => cookies.push(cookie), values: cookies },
+        cookies: { set: (...args) => cookies.push(args), values: cookies },
         headers: {
           get: (name) => headers.get(String(name).toLowerCase()) || null,
           set: (name, value) => headers.set(String(name).toLowerCase(), value),
@@ -101,7 +109,14 @@ describe("Supabase Auth callback", () => {
       "https://www.rooindustries.com/referrals/dashboard"
     );
     expect(response.cookies.values).toHaveLength(1);
+    expect(response.cookies.values[0]).toEqual([
+      "sb-session",
+      "encoded-session",
+      { httpOnly: true, path: "/", sameSite: "lax" },
+    ]);
     expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("expires")).toBe("0");
+    expect(response.headers.get("pragma")).toBe("no-cache");
     expect(mockBootstrapSupabaseNativeAccount).toHaveBeenCalledWith({
       userId: "e71a5687-daa6-4371-9700-5aef798fdd03",
     });
