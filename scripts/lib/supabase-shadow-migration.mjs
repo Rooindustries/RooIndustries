@@ -439,30 +439,81 @@ export const buildDocumentManifest = (documents) =>
       id: document._id,
       type: document._type,
       revision: document._rev || "",
+      updatedAt: document._updatedAt || "",
       hash: sha256(document),
     }))
     .sort((left, right) => left.id.localeCompare(right.id));
 
-export const compareDocumentManifests = (source, target) => {
+const timestamp = (value) => {
+  const parsed = new Date(String(value || "")).getTime();
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const happenedAfter = (candidate, baseline) => {
+  const candidateTime = timestamp(candidate);
+  const baselineTime = timestamp(baseline);
+  return (
+    candidateTime !== null &&
+    baselineTime !== null &&
+    candidateTime > baselineTime
+  );
+};
+
+export const compareDocumentManifests = (
+  source,
+  target,
+  { sourceCapturedAt = "" } = {}
+) => {
   const sourceById = new Map(source.map((entry) => [entry.id, entry]));
   const targetById = new Map(target.map((entry) => [entry.id, entry]));
   const missingTarget = [];
   const missingSource = [];
   const mismatched = [];
+  const concurrentAdvancements = {
+    created: [],
+    updated: [],
+    deleted: [],
+  };
 
   for (const [id, sourceEntry] of sourceById) {
     const targetEntry = targetById.get(id);
     if (!targetEntry) {
       missingTarget.push(id);
-    } else if (
-      sourceEntry.type !== targetEntry.type ||
-      sourceEntry.hash !== targetEntry.hash
-    ) {
+      continue;
+    }
+    if (targetEntry.tombstoned === true) {
+      if (
+        happenedAfter(targetEntry.tombstonedAt, sourceEntry.updatedAt) &&
+        happenedAfter(targetEntry.tombstonedAt, sourceCapturedAt)
+      ) {
+        concurrentAdvancements.deleted.push(id);
+      } else {
+        missingTarget.push(id);
+      }
+      continue;
+    }
+    if (sourceEntry.type !== targetEntry.type) {
       mismatched.push(id);
+      continue;
+    }
+    if (sourceEntry.hash !== targetEntry.hash) {
+      if (
+        happenedAfter(targetEntry.updatedAt, sourceEntry.updatedAt) &&
+        happenedAfter(targetEntry.updatedAt, sourceCapturedAt)
+      ) {
+        concurrentAdvancements.updated.push(id);
+      } else {
+        mismatched.push(id);
+      }
     }
   }
-  for (const id of targetById.keys()) {
-    if (!sourceById.has(id)) missingSource.push(id);
+  for (const [id, targetEntry] of targetById) {
+    if (sourceById.has(id) || targetEntry.tombstoned === true) continue;
+    if (happenedAfter(targetEntry.updatedAt, sourceCapturedAt)) {
+      concurrentAdvancements.created.push(id);
+    } else {
+      missingSource.push(id);
+    }
   }
 
   return {
@@ -473,7 +524,27 @@ export const compareDocumentManifests = (source, target) => {
     missingTarget,
     missingSource,
     mismatched,
+    concurrentAdvancements,
   };
+};
+
+export const concurrentAdvancementTypes = ({
+  source = [],
+  target = [],
+  concurrentAdvancements = {},
+} = {}) => {
+  const sourceById = new Map(source.map((entry) => [entry.id, entry]));
+  const targetById = new Map(target.map((entry) => [entry.id, entry]));
+  const ids = Object.values(concurrentAdvancements).flatMap((entries) =>
+    Array.isArray(entries) ? entries : []
+  );
+  return [
+    ...new Set(
+      ids
+        .map((id) => targetById.get(id)?.type || sourceById.get(id)?.type)
+        .filter(Boolean)
+    ),
+  ].sort();
 };
 
 export const mapConcurrent = async (values, concurrency, worker) => {
