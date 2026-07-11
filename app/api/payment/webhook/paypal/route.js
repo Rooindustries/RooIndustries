@@ -3,6 +3,7 @@ import webhookPayPal from "../../../../../src/server/api/payment/webhookPayPal.j
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "dub1";
 
 export const POST = (request) =>
   runLegacyApiHandler({ request, handler: webhookPayPal, methodOverride: "POST" });

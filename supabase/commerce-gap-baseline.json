@@ -51,6 +51,11 @@
       "id": "ephemeral-rate-bucket-parity-noise",
       "reproduction": "A newly created Sanity rate-limit bucket was reported as commerce drift even though rate-limit state is intentionally backend-local.",
       "closureGate": "Both current and legacy ephemeral bucket types are excluded symmetrically from source and target document parity while the native Supabase limiter remains covered by dedicated tests."
+    },
+    {
+      "id": "cross-region-commerce-latency",
+      "reproduction": "The first ten live Supabase-primary quotes were all correct but measured 943 ms p95 while commerce functions ran in Washington and the database ran in Ireland.",
+      "closureGate": "Commerce-only routes run in Vercel Dublin and repeat live quote checks stay below the 750 ms p95 gate without moving Tourney routes."
     }
   ]
 }

@@ -4,6 +4,7 @@ import { runLegacyApiHandler } from "../../../../src/lib/nextApiAdapter";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "dub1";
 
 const ACTION_HANDLERS = {
   createOrder,
