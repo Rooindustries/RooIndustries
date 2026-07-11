@@ -6,7 +6,6 @@ import { resolveSupabaseRuntimePolicy } from "../../../../src/server/supabase/ru
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "dub1";
 
 const noStore = { "Cache-Control": "private, no-store", Pragma: "no-cache" };
 

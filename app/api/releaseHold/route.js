@@ -5,7 +5,6 @@ import { recordCommerceResponseMetric } from "../../../src/server/supabase/comme
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const preferredRegion = "dub1";
 
 async function handle(request, methodOverride) {
   const startedAt = performance.now();
