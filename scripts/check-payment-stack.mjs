@@ -90,12 +90,34 @@ const fetchJson = async (
   };
 };
 
-const fetchPreviewProviders = (previewUrl) =>
-  fetchJson(new URL("/api/payment/providers", previewUrl).toString(), {
-    headers: PREVIEW_BYPASS_SECRET
-      ? { "x-vercel-protection-bypass": PREVIEW_BYPASS_SECRET }
-      : {},
-  });
+const fetchPreviewProviders = async (previewUrl) => {
+  if (PREVIEW_BYPASS_SECRET) {
+    return fetchJson(new URL("/api/payment/providers", previewUrl).toString(), {
+      headers: { "x-vercel-protection-bypass": PREVIEW_BYPASS_SECRET },
+    });
+  }
+
+  const hostname = new URL(previewUrl).hostname;
+  if (hostname.endsWith(".vercel.app")) {
+    const result = await run("vercel", [
+      "curl",
+      "/api/payment/providers",
+      "--deployment",
+      previewUrl,
+      "--",
+      "--silent",
+    ]);
+    if (result.ok) {
+      try {
+        return { status: 200, ok: true, body: JSON.parse(result.stdout) };
+      } catch {
+        return { status: 502, ok: false, body: "Invalid preview response." };
+      }
+    }
+  }
+
+  return fetchJson(new URL("/api/payment/providers", previewUrl).toString());
+};
 
 const main = async () => {
   const report = {
@@ -160,7 +182,9 @@ const main = async () => {
     report.productionProviders.ok &&
     report.productionProviders.body?.ok === true &&
     report.productionProviders.body?.providers?.paypal?.enabled === true &&
-    report.productionProviders.body?.providers?.razorpay?.enabled === true;
+    report.productionProviders.body?.providers?.razorpay?.enabled === false &&
+    report.productionProviders.body?.providers?.razorpay?.disabledReason ===
+      "merchant_profile_update";
   const envOk =
     report.productionEnv.ok === true &&
     report.productionEnv.missing.length === 0;
