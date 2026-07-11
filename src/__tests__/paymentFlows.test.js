@@ -12,26 +12,22 @@ let mockLocation = {
 };
 const mockNavigate = jest.fn();
 
-jest.mock(
-  "react-router-dom",
-  () => ({
-    __esModule: true,
-    __setMockLocation: (next) => {
-      mockLocation = { ...mockLocation, ...next };
-    },
-    useLocation: () => mockLocation,
-    useNavigate: () => mockNavigate,
-    Link: ({ to, children, state, ...rest }) => {
-      const href = typeof to === "string" ? to : to?.pathname || "#";
-      return (
-        <a href={href} {...rest}>
-          {children}
-        </a>
-      );
-    },
-  }),
-  { virtual: true }
-);
+jest.mock("react-router-dom", () => ({
+  __esModule: true,
+  __setMockLocation: (next) => {
+    mockLocation = { ...mockLocation, ...next };
+  },
+  useLocation: () => mockLocation,
+  useNavigate: () => mockNavigate,
+  Link: ({ to, children, state, ...rest }) => {
+    const href = typeof to === "string" ? to : to?.pathname || "#";
+    return (
+      <a href={href} {...rest}>
+        {children}
+      </a>
+    );
+  },
+}));
 
 const { __setMockLocation } = require("react-router-dom");
 

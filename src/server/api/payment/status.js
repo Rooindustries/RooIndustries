@@ -1,4 +1,8 @@
 import { getPaymentStatus } from "./flow.js";
+import {
+  createPaymentBackendClientOverride,
+  getPaymentTokenBackend,
+} from "./backend.js";
 
 export default async function handler(req, res) {
   if (req.method !== "GET" && req.method !== "POST") {
@@ -26,10 +30,14 @@ export default async function handler(req, res) {
   const legacyToken = req.method === "GET"
     ? String(req?.query?.paymentAccessToken || req?.query?.payment || "").trim()
     : "";
+  const paymentAccessToken = bearerToken || (legacyOpen ? legacyToken : "");
+  const backend = getPaymentTokenBackend(paymentAccessToken) || "sanity";
+  const client = createPaymentBackendClientOverride(backend);
   const result = await getPaymentStatus({
     query: req.query,
-    paymentAccessToken: bearerToken || (legacyOpen ? legacyToken : ""),
+    paymentAccessToken,
     allowLegacyTokenFallback: false,
+    ...(client ? { client } : {}),
   });
   return res.status(result.httpStatus).json(result.body);
 }

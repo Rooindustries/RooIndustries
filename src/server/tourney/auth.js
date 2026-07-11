@@ -7,6 +7,12 @@ import {
 } from "./playerStore";
 import { getClientAddressFromFetchHeaders } from "../request/clientAddress";
 import { requireRateLimit } from "../api/ref/rateLimit";
+import { authenticateSupabaseAccount, resolveSupabaseAccountAlias } from "../supabase/accounts";
+import {
+  resolveSupabaseRuntimePolicy,
+  shouldUseSupabaseForAccount,
+} from "../supabase/runtime";
+import { isSupabaseAdminConfigured } from "../supabase/adminClient";
 
 export const TOURNEY_SESSION_COOKIE = "tourney_session";
 export const TOURNEY_ADMIN_ROLES = Object.freeze(["viewer", "caster", "owner"]);
@@ -282,7 +288,12 @@ export const checkTourneyRateLimit = async ({
 };
 
 export const isTourneyAuthConfigured = (env = process.env) =>
-  Boolean(getSessionSecret(env) && readTourneyAccounts(env).length > 0);
+  Boolean(
+    getSessionSecret(env) &&
+      (readTourneyAccounts(env).length > 0 ||
+        (resolveSupabaseRuntimePolicy(env).primaryBackend === "supabase" &&
+          isSupabaseAdminConfigured(env)))
+  );
 
 export const verifyTourneyCredentials = async ({
   username,
@@ -290,6 +301,36 @@ export const verifyTourneyCredentials = async ({
   env = process.env,
   readPersistedAccountsJson = readPersistedTourneyAccountsJson,
 } = {}) => {
+  if (shouldUseSupabaseForAccount({ identifier: username, env })) {
+    const result = await authenticateSupabaseAccount({
+      identifier: username,
+      password,
+      env,
+      requiredRoles: [
+        "tourney_player",
+        "tourney_viewer",
+        "tourney_caster",
+        "tourney_owner",
+      ],
+      accountScope: "tourney",
+    });
+    if (!result.ok) return result;
+    const role = String(result.account.tourney_role || "").replace(/^tourney_/, "");
+    if (!TOURNEY_ROLES.includes(role) || !result.account.tourney_username) {
+      return { ok: false, account: null, reason: "invalid_credentials" };
+    }
+    return {
+      ok: true,
+      account: {
+        username: result.account.tourney_username,
+        role,
+        active: result.account.tourney_active !== false,
+        version: String(result.account.credential_version || "1"),
+        authBackend: "supabase",
+      },
+    };
+  }
+
   const accounts = await readEffectiveTourneyAccounts({
     env,
     readPersistedAccountsJson,
@@ -448,6 +489,7 @@ export const createTourneySessionToken = ({
     sub: account.username,
     role: account.role,
     av: String(account.version || "1"),
+    ab: account.authBackend === "supabase" ? "supabase" : "sanity",
     iat: now,
     exp: now + maxAgeSeconds,
   };
@@ -509,6 +551,7 @@ export const readTourneySessionPayload = ({
       username,
       role,
       accountVersion: String(payload.av || "1"),
+      authBackend: payload.ab === "supabase" ? "supabase" : "sanity",
       expiresAt: payload.exp,
     };
   } catch {
@@ -588,6 +631,33 @@ export const readTourneySessionFromStore = async ({
   const payload = readTourneySessionPayload({ token, env, nowSeconds });
   if (!payload) return null;
 
+  if (payload.authBackend === "supabase") {
+    const account = await resolveSupabaseAccountAlias({
+      identifier: payload.username,
+      accountScope: "tourney",
+    });
+    const role = String(account?.tourney_role || "").replace(/^tourney_/, "");
+    if (
+      !account ||
+      account.status !== "active" ||
+      account.tourney_active === false ||
+      account.tourney_username !== payload.username ||
+      role !== payload.role ||
+      String(account.credential_version || "1") !== payload.accountVersion
+    ) {
+      return null;
+    }
+    return {
+      username: account.tourney_username,
+      role,
+      ...(role === "player" && account.legacy_sanity_id
+        ? { playerId: account.legacy_sanity_id }
+        : {}),
+      authBackend: "supabase",
+      expiresAt: payload.expiresAt,
+    };
+  }
+
   if (payload.role === "player") {
     const player = await findTourneyPlayerForSession({
       username: payload.username,
@@ -600,6 +670,7 @@ export const readTourneySessionFromStore = async ({
       username: player.username,
       role: "player",
       playerId: player.id,
+      authBackend: "sanity",
       expiresAt: payload.expiresAt,
     };
   }
@@ -608,12 +679,13 @@ export const readTourneySessionFromStore = async ({
     env,
     readPersistedAccountsJson,
   });
-  return readTourneySession({
+  const session = readTourneySession({
     token,
     env,
     accounts,
     nowSeconds,
   });
+  return session ? { ...session, authBackend: "sanity" } : null;
 };
 
 const shouldUseSecureCookie = (env = process.env) =>

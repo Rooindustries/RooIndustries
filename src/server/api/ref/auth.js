@@ -72,6 +72,7 @@ const buildSessionToken = (payload, maxAgeSeconds) => {
     exp: now + maxAgeSeconds,
     rid: payload.referralId,
     code: payload.code || "",
+    ab: payload.authBackend === "supabase" ? "supabase" : "sanity",
   };
   const encodedPayload = base64UrlEncode(JSON.stringify(body));
   const signature = sign(encodedPayload, REF_SESSION_SECRET);
@@ -137,6 +138,7 @@ export const getReferralSession = (req) => {
     return {
       referralId: payload.rid,
       code: payload.code || "",
+      authBackend: payload.ab === "supabase" ? "supabase" : "sanity",
     };
   } catch (error) {
     return null;

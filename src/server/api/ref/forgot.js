@@ -1,4 +1,4 @@
-import { createClient } from "@sanity/client";
+import { createDataClient as createClient } from "../../data/documentClient.js";
 import { Resend } from "resend";
 import crypto from "crypto";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";

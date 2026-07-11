@@ -1,4 +1,4 @@
-import {createClient} from '@sanity/client';
+import {createDataClient as createClient} from '../../data/documentClient.js';
 import crypto from 'crypto';
 import {requireSecret} from './auth.js';
 import {logSafeError} from '../../safeErrorLog.js';

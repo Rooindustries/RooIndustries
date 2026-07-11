@@ -10,5 +10,48 @@ const builder = createImageUrlBuilder({
   dataset: publicDataset,
 });
 
-export const urlFor = (source) => builder.image(source);
+class DirectAssetUrlBuilder {
+  constructor(url) {
+    this.directUrl = url;
+  }
+
+  width() {
+    return this;
+  }
+
+  height() {
+    return this;
+  }
+
+  fit() {
+    return this;
+  }
+
+  format() {
+    return this;
+  }
+
+  quality() {
+    return this;
+  }
+
+  url() {
+    return this.directUrl;
+  }
+}
+
+const directAssetUrl = (source) =>
+  String(
+    source?._supabaseUrl ||
+      source?.asset?._supabaseUrl ||
+      source?.asset?.url ||
+      ""
+  ).trim();
+
+export const urlFor = (source) => {
+  const directUrl = directAssetUrl(source);
+  return directUrl
+    ? new DirectAssetUrlBuilder(directUrl)
+    : builder.image(source);
+};
 export const publicUrlFor = urlFor;

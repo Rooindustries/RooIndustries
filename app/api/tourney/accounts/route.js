@@ -109,7 +109,10 @@ export async function POST(request) {
     const updatedSessionAccount = findTourneyAccount(session.username, accounts);
     if (updatedSessionAccount) {
       const nextToken = createTourneySessionToken({
-        account: updatedSessionAccount,
+        account: {
+          ...updatedSessionAccount,
+          authBackend: session.authBackend || "sanity",
+        },
       });
       if (nextToken) {
         response.cookies.set({

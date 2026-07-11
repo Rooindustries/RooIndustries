@@ -483,6 +483,7 @@ const issuePaymentAccessTokenForRecord = (record = {}) =>
     paymentRecordId: record._id,
     provider: record.provider,
     pricingFingerprint: record.pricingFingerprint,
+    backend: record.backendOwner || "sanity",
     expirySeconds: resolvePaymentAccessTtlSeconds(),
   });
 
@@ -613,6 +614,7 @@ const mirrorLegacyBookingToPaymentRecord = async ({
   booking,
   source = "legacy",
   eventType = "",
+  backendOwner = "sanity",
 }) => {
   if (!booking?._id) return null;
 
@@ -681,6 +683,7 @@ const mirrorLegacyBookingToPaymentRecord = async ({
   const doc = {
     _id: paymentRecordId,
     _type: PAYMENT_RECORD_TYPE,
+    backendOwner: backendOwner === "supabase" ? "supabase" : "sanity",
     provider: normalizedProvider,
     status,
     bookingSeedKey,
@@ -1161,6 +1164,7 @@ const claimPaymentProof = async ({
   const claim = {
     _id: claimId,
     _type: PAYMENT_PROOF_CLAIM_TYPE,
+    backendOwner: record.backendOwner === "supabase" ? "supabase" : "sanity",
     paymentRecordId: record._id,
     provider: record.provider,
     providerOrderId: String(providerOrderId || "").trim(),
@@ -1365,6 +1369,7 @@ const claimWebhookReceipt = async ({
   eventId,
   eventType,
   rawBody,
+  backendOwner = "sanity",
 }) => {
   const receiptId = buildWebhookReceiptId({ provider, eventId, eventType, rawBody });
   const existing = await getWebhookReceipt({ client, id: receiptId });
@@ -1384,6 +1389,7 @@ const claimWebhookReceipt = async ({
     const receipt = {
       _id: receiptId,
       _type: PAYMENT_WEBHOOK_RECEIPT_TYPE,
+      backendOwner: backendOwner === "supabase" ? "supabase" : "sanity",
       provider,
       eventId,
       eventType,
@@ -1397,7 +1403,14 @@ const claimWebhookReceipt = async ({
       return { acquired: true, processed: false, receipt: await client.create(receipt) };
     } catch (error) {
       if (!isConflictError(error)) throw error;
-      return claimWebhookReceipt({ client, provider, eventId, eventType, rawBody });
+      return claimWebhookReceipt({
+        client,
+        provider,
+        eventId,
+        eventType,
+        rawBody,
+        backendOwner,
+      });
     }
   }
 
@@ -2146,6 +2159,8 @@ const finalizePaymentRecordInternal = async ({
     source: normalizedSource,
   });
   const result = await invokeCreateBooking(createPayload, {
+    documentClient: client,
+    backendOwner: workingRecord.backendOwner || "sanity",
     paymentFinalizeSource: normalizedSource,
     paymentProofClaimId: String(proofClaim?._id || "").trim(),
     paymentFinalizationLeaseId: lease.leaseId,
@@ -2498,6 +2513,7 @@ const createOrReusePaymentRecordForStart = async ({
   upgradeIntentSnapshot = null,
   prepareCouponReservation = null,
   appendCouponReservation = null,
+  backendOwner = "sanity",
 }) => {
   const bookingSeedKey = buildBookingSeedKey({
     provider,
@@ -2559,12 +2575,14 @@ const createOrReusePaymentRecordForStart = async ({
         startTimeUTC: holdDoc.startTimeUTC || bookingPayload.startTimeUTC,
         expiresAt,
         holdNonce: holdDoc.holdNonce || "",
+        backend: backendOwner,
       })
     : "";
   const createdAt = nowIso();
   const doc = {
     _id: paymentRecordId,
     _type: PAYMENT_RECORD_TYPE,
+    backendOwner: backendOwner === "supabase" ? "supabase" : "sanity",
     provider,
     status: PAYMENT_STATUS_STARTED,
     bookingSeedKey,
@@ -2628,6 +2646,7 @@ const createOrReusePaymentRecordForStart = async ({
   const claim = {
     _id: startClaimId,
     _type: isUpgrade ? PAYMENT_UPGRADE_LOCK_TYPE : PAYMENT_START_CLAIM_TYPE,
+    backendOwner: backendOwner === "supabase" ? "supabase" : "sanity",
     scope: sessionScope,
     paymentRecordId,
     provider,
@@ -2722,6 +2741,7 @@ const createOrReusePaymentRecordForStart = async ({
 export const startPaymentSession = async ({
   body,
   client = createRefWriteClient(),
+  backend = "sanity",
   prepareCouponReservation = null,
   appendCouponReservation = null,
 }) => {
@@ -2891,6 +2911,7 @@ export const startPaymentSession = async ({
       upgradeIntentSnapshot,
       prepareCouponReservation,
       appendCouponReservation,
+      backendOwner: backend,
     });
     const refreshed = record?._id
       ? record
@@ -3218,6 +3239,7 @@ export const cancelPaymentSession = async ({
       startTimeUTC: hold.startTimeUTC,
       expiresAt,
       holdNonce,
+      backend: record.backendOwner || "sanity",
     });
     const refreshedHold = {
       slotHoldId: holdId,
@@ -3821,6 +3843,7 @@ const authorizeCron = (req) => {
 export const reconcilePaymentSessions = async ({
   req,
   client = createRefWriteClient(),
+  backend = "sanity",
   createRequiresRescheduleBooking = null,
   applyBookingRefund = null,
   releaseCouponReservation = null,
@@ -3837,6 +3860,7 @@ export const reconcilePaymentSessions = async ({
 
   const records = await client.fetch(
     `*[_type == $type
+      && coalesce(backendOwner, "sanity") == $backend
       && (
         lower(status) in $statuses
         || (lower(status) == $refundedStatus && refundRequiresBookingSync == true)
@@ -3856,6 +3880,7 @@ export const reconcilePaymentSessions = async ({
     ] | order(updatedAt asc)[0...50]`,
     {
       type: PAYMENT_RECORD_TYPE,
+      backend: backend === "supabase" ? "supabase" : "sanity",
       statuses: [
         PAYMENT_STATUS_STARTED,
         PAYMENT_STATUS_CAPTURED_CLIENT,
@@ -4258,6 +4283,7 @@ const findOrCreateWebhookRecoveryRecord = async ({
   providerPaymentId = "",
   payerEmail = "",
   eventType = "",
+  backendOwner = "sanity",
 }) => {
   const existing = await loadPaymentRecordForFinalize({
     client,
@@ -4283,6 +4309,7 @@ const findOrCreateWebhookRecoveryRecord = async ({
       booking: existingBooking,
       source: "webhook",
       eventType,
+      backendOwner,
     });
   }
 
@@ -4297,6 +4324,7 @@ const findOrCreateWebhookRecoveryRecord = async ({
     client,
     doc: {
       _id: paymentRecordId,
+      backendOwner: backendOwner === "supabase" ? "supabase" : "sanity",
       provider,
       status: PAYMENT_STATUS_NEEDS_RECOVERY,
       bookingSeedKey: "",
@@ -4522,6 +4550,7 @@ const processPaymentRefund = async ({
   currency = "",
   reversed = false,
   applyBookingRefund = null,
+  backendOwner = "sanity",
 }) => {
   let resolvedProviderOrderId = String(providerOrderId || "").trim();
   let razorpayPaymentLookup = null;
@@ -4573,6 +4602,7 @@ const processPaymentRefund = async ({
       providerOrderId: resolvedProviderOrderId,
       providerPaymentId,
       eventType,
+      backendOwner,
     });
   }
 
@@ -4758,6 +4788,7 @@ export const handleRazorpayWebhook = async ({
   req,
   client = createRefWriteClient(),
   applyBookingRefund = null,
+  backendOwner = "sanity",
 }) => {
   const signature = String(req?.headers?.["x-razorpay-signature"] || "").trim();
   const verified = verifyRazorpayWebhookSignature({
@@ -4784,6 +4815,7 @@ export const handleRazorpayWebhook = async ({
     eventId,
     eventType,
     rawBody,
+    backendOwner,
   });
   if (!receiptClaim.acquired) {
     return {
@@ -4819,6 +4851,7 @@ export const handleRazorpayWebhook = async ({
       amountInSubunits: Number(refund.amount || 0),
       currency: String(refund.currency || "").trim(),
       applyBookingRefund: refundHandler,
+      backendOwner,
     });
   } else if (
     (eventType !== "payment.captured" && eventType !== "order.paid") ||
@@ -4836,6 +4869,7 @@ export const handleRazorpayWebhook = async ({
       providerPaymentId: String(payment.id || "").trim(),
       payerEmail: String(payment.email || "").trim(),
       eventType,
+      backendOwner,
     });
     const finalized = await finalizePaymentRecordInternal({
       client,
@@ -4866,6 +4900,7 @@ export const handlePayPalWebhook = async ({
   req,
   client = createRefWriteClient(),
   applyBookingRefund = null,
+  backendOwner = "sanity",
 }) => {
   const verified = await verifyPayPalWebhookSignature({
     rawBody: String(req?.rawBody || ""),
@@ -4892,6 +4927,7 @@ export const handlePayPalWebhook = async ({
       String(req?.headers?.["paypal-transmission-id"] || "").trim(),
     eventType,
     rawBody,
+    backendOwner,
   });
   if (!receiptClaim.acquired) {
     return {
@@ -4938,6 +4974,7 @@ export const handlePayPalWebhook = async ({
       currency: String(resource?.amount?.currency_code || "").trim(),
       reversed: eventType === "PAYMENT.CAPTURE.REVERSED",
       applyBookingRefund: refundHandler,
+      backendOwner,
     });
   } else if (eventType !== "PAYMENT.CAPTURE.COMPLETED") {
     result = {
@@ -4955,6 +4992,7 @@ export const handlePayPalWebhook = async ({
       providerPaymentId: captureId,
       payerEmail,
       eventType,
+      backendOwner,
     });
     const finalized = await finalizePaymentRecordInternal({
       client,

@@ -6,6 +6,13 @@ import {
   getTwitchProfileImageMap,
   normalizeTwitchUsername,
 } from "./twitch.js";
+import {
+  getTourneySql as getSql,
+  isSupabaseTourneyDatabase,
+  resolveTourneyDatabaseUrl as getDatabaseUrl,
+} from "./sqlClient.js";
+import { syncSupabaseTourneyPlayerAccount } from "../supabase/accounts.js";
+import { logSafeError } from "../safeErrorLog.js";
 
 export const TOURNEY_PLAYER_STATUSES = Object.freeze([
   "pending",
@@ -80,9 +87,6 @@ const MEMORY_STORE =
       updatedBy: "",
     },
   });
-const SQL_CLIENTS =
-  globalThis.__rooTourneySqlClients ||
-  (globalThis.__rooTourneySqlClients = new Map());
 let schemaReady = false;
 
 export const normalizeTourneyUsername = (value) =>
@@ -222,21 +226,23 @@ const isMemoryMode = (env = process.env) =>
   env.TOURNEY_PLAYER_STORE_MODE === "memory" ||
   env.TOURNEY_DATABASE_MODE === "memory";
 
-const getDatabaseUrl = (env = process.env) =>
-  String(env.TOURNEY_DATABASE_URL || env.POSTGRES_URL || "").trim();
+const shouldSyncSupabasePlayerAuth = (env = process.env) =>
+  isSupabaseTourneyDatabase(env) ||
+  ["1", "true", "yes", "on"].includes(
+    String(env.SUPABASE_SHADOW_WRITES || "").trim().toLowerCase()
+  );
 
-const getSql = async (env = process.env) => {
-  const databaseUrl = getDatabaseUrl(env);
-  if (!databaseUrl) {
-    throw new Error("TOURNEY_DATABASE_URL is not configured.");
+const syncTourneyPlayerAuth = async ({ playerRow, env = process.env }) => {
+  if (!shouldSyncSupabasePlayerAuth(env)) return;
+  try {
+    await syncSupabaseTourneyPlayerAccount({
+      player: playerRow,
+      passwordHash: playerRow.password_hash,
+    });
+  } catch (error) {
+    logSafeError("Supabase Tourney player Auth sync failed", error);
+    if (isSupabaseTourneyDatabase(env)) throw error;
   }
-
-  if (!SQL_CLIENTS.has(databaseUrl)) {
-    const { neon } = await import("@neondatabase/serverless");
-    SQL_CLIENTS.set(databaseUrl, neon(databaseUrl));
-  }
-
-  return SQL_CLIENTS.get(databaseUrl);
 };
 
 export const hashTourneyToken = tokenHash;
@@ -1041,7 +1047,13 @@ export async function createPendingTourneyPlayer({
         )
       `;
     }
+    await syncTourneyPlayerAuth({ playerRow, env });
   } catch (error) {
+    if (isSupabaseTourneyDatabase(env)) {
+      await sql`delete from tourney_players where id = ${playerRow.id}`.catch(
+        () => {}
+      );
+    }
     if (String(error?.message || "").includes("duplicate")) {
       throw Object.assign(new Error("Registration already exists."), { status: 409 });
     }
@@ -1131,6 +1143,16 @@ export async function createApprovedTourneyPlayer({
       ${playerRow.approved_by}
     )
   `;
+  try {
+    await syncTourneyPlayerAuth({ playerRow, env });
+  } catch (error) {
+    if (isSupabaseTourneyDatabase(env)) {
+      await sql`delete from tourney_players where id = ${playerRow.id}`.catch(
+        () => {}
+      );
+    }
+    throw error;
+  }
   return managePlayer(playerRow);
 }
 
@@ -1440,6 +1462,7 @@ export async function updateTourneyPlayerDetails({
   if (!rows?.[0]) {
     throw Object.assign(new Error("Player not found."), { status: 404 });
   }
+  await syncTourneyPlayerAuth({ playerRow: rows[0], env });
   return managePlayer(rows[0]);
 }
 
@@ -1498,6 +1521,7 @@ export async function updateTourneyPlayerApprovedRole({
       status: 400,
     });
   }
+  await syncTourneyPlayerAuth({ playerRow: rows[0], env });
   return managePlayer(rows[0]);
 }
 
@@ -1665,6 +1689,8 @@ export async function applyRegistrationDecision({
     });
   }
 
+  await syncTourneyPlayerAuth({ playerRow: player, env });
+
   await sql`
     update tourney_player_tokens
     set used_at = ${now}, used_by = ${actor}
@@ -1723,6 +1749,7 @@ export async function kickTourneyPlayer({
       status: 400,
     });
   }
+  await syncTourneyPlayerAuth({ playerRow: rows[0], env });
   return managePlayer(rows[0]);
 }
 
@@ -1767,6 +1794,7 @@ export async function withdrawTourneyPlayer({
       status: 400,
     });
   }
+  await syncTourneyPlayerAuth({ playerRow: rows[0], env });
   return managePlayer(rows[0]);
 }
 
@@ -1987,6 +2015,10 @@ export async function resetTourneyPlayerPassword({
   if (!rows?.[0]) {
     throw Object.assign(new Error("Invalid or expired reset link."), { status: 400 });
   }
+  await syncTourneyPlayerAuth({
+    playerRow: { ...rows[0], password_hash: passwordHash },
+    env,
+  });
   await sql`
     update tourney_player_tokens
     set used_at = ${now}, used_by = ${rows[0].username}

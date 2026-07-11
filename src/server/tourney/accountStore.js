@@ -1,3 +1,7 @@
+import { resolveSupabaseRuntimePolicy } from "../supabase/runtime.js";
+import { syncSupabaseTourneyAdminAccount } from "../supabase/accounts.js";
+import { logSafeError } from "../safeErrorLog.js";
+
 const STORE_DOC_ID = "tourneyAuthStore";
 const STORE_DOC_TYPE = "tourneyAuthStore";
 const MEMORY_STORE =
@@ -26,6 +30,24 @@ const getSanityConfig = (env = process.env) => ({
 const shouldUseMemoryStore = (env = process.env) =>
   env.TOURNEY_ACCOUNT_STORE_MODE === "memory";
 
+const syncSupabaseAccounts = async ({ accountsJson, env }) => {
+  const policy = resolveSupabaseRuntimePolicy(env);
+  if (!policy.shadowWritesEnabled && policy.primaryBackend !== "supabase") return;
+  const parsed = JSON.parse(accountsJson);
+  const accounts = Array.isArray(parsed) ? parsed : parsed?.accounts;
+  if (!Array.isArray(accounts)) {
+    throw new Error("Tourney account JSON is invalid.");
+  }
+  for (const account of accounts) {
+    try {
+      await syncSupabaseTourneyAdminAccount({ account });
+    } catch (error) {
+      logSafeError("Supabase Tourney administrator Auth sync failed", error);
+      if (policy.primaryBackend === "supabase") throw error;
+    }
+  }
+};
+
 const getSanityClient = async (env = process.env) => {
   if (shouldUseMemoryStore(env)) return null;
 
@@ -34,8 +56,8 @@ const getSanityClient = async (env = process.env) => {
     return null;
   }
 
-  const { createClient } = await import("@sanity/client");
-  return createClient({
+  const { createDataClient } = await import("../data/documentClient.js");
+  return createDataClient({
     projectId: config.projectId,
     dataset: config.dataset,
     apiVersion: config.apiVersion,
@@ -110,6 +132,8 @@ export const writePersistedTourneyAccountsJson = async ({
       updatedBy,
     })
     .commit({ autoGenerateArrayKeys: true });
+
+  await syncSupabaseAccounts({ accountsJson: nextAccountsJson, env });
 
   return {
     ok: true,

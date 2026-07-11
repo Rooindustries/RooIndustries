@@ -1,11 +1,14 @@
 // ./api/ref/register.js
-import { createClient } from "@sanity/client";
+import { createDataClient as createClient } from "../../data/documentClient.js";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { setReferralSessionCookie } from "./auth.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import { logSafeError } from "../../safeErrorLog.js";
 import { buildReferralIdentityClaim } from "./referralIdentity.js";
+import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
+import { createSupabaseCreatorAccount } from "../../supabase/accounts.js";
+import { hashShadowDocument } from "../../supabase/shadowStore.js";
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -152,9 +155,42 @@ export default async function handler(req, res) {
       .create(referral)
       .commit();
 
+    const policy = resolveSupabaseRuntimePolicy();
+    if (policy.shadowWritesEnabled || policy.primaryBackend === "supabase") {
+      try {
+        const persistedReferral =
+          (await client.fetch(`*[_id == $id][0]`, { id: referralId })) || referral;
+        await createSupabaseCreatorAccount({
+          referral: persistedReferral,
+          password: normalizedPassword,
+          sourceRevision: persistedReferral._rev || "",
+          sourceHash: hashShadowDocument(persistedReferral),
+        });
+      } catch (error) {
+        logSafeError("Supabase creator account projection failed", error);
+        if (policy.primaryBackend === "supabase") {
+          await client
+            .transaction()
+            .delete(referralId)
+            .delete(emailClaim._id)
+            .delete(slugClaim._id)
+            .commit()
+            .catch(() => {});
+          return res.status(503).json({
+            ok: false,
+            error: "Registration is temporarily unavailable. Please try again.",
+          });
+        }
+      }
+    }
+
     setReferralSessionCookie(
       res,
-      { referralId: referral._id, code: trimmedSlug },
+      {
+        referralId: referral._id,
+        code: trimmedSlug,
+        authBackend: policy.primaryBackend === "supabase" ? "supabase" : "sanity",
+      },
       true
     );
 
