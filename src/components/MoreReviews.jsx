@@ -4,6 +4,15 @@ import { getPublicContent } from "../lib/publicContentClient";
 import ImageZoomModal from "./ImageZoomModal";
 
 const localDiscordReviews = [];
+const REVIEW_IMAGE_WIDTHS = [320, 480, 640, 800];
+
+const buildReviewImageUrl = (image, width) =>
+  urlFor(image).width(width).format("webp").quality(85).url();
+
+const buildReviewImageSrcSet = (image) =>
+  REVIEW_IMAGE_WIDTHS.map(
+    (width) => `${buildReviewImageUrl(image, width)} ${width}w`
+  ).join(", ");
 
 export default function Reviews() {
   const [selectedImage, setSelectedImage] = useState(null);
@@ -79,8 +88,12 @@ export default function Reviews() {
           const reviewSrc = rev.src
             ? rev.src
             : rev.image
-            ? urlFor(rev.image).width(800).format("webp").quality(85).url()
+            ? buildReviewImageUrl(rev.image, 800)
             : "";
+          const reviewSrcSet =
+            !rev.src && rev.image
+              ? buildReviewImageSrcSet(rev.image)
+              : undefined;
           const reviewZoomSrc = rev.src
             ? rev.src
             : rev.image
@@ -96,13 +109,14 @@ export default function Reviews() {
               <figure className="m-0">
                 <img
                   src={reviewSrc}
+                  srcSet={reviewSrcSet}
                   alt={reviewAlt}
                   width={reviewDims?.width}
                   height={reviewDims?.height}
                   loading="lazy"
                   decoding="async"
                   fetchPriority="auto"
-                  sizes="(max-width: 640px) 90vw, (max-width: 1024px) 40vw, 24vw"
+                  sizes="(max-width: 1023px) 90vw, 46vw"
                   className="w-full h-auto rounded-xl cursor-pointer shadow-lg hover:shadow-cyan-400/30 transition duration-300 object-contain"
                   onClick={() =>
                     handleOpenZoom(reviewZoomSrc, reviewAlt)

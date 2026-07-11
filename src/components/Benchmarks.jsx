@@ -3,6 +3,9 @@ import { urlFor } from "../sanityClient";
 import { getPublicContent } from "../lib/publicContentClient";
 import ImageZoomModal from "../components/ImageZoomModal";
 
+const BENCHMARK_IMAGE_WIDTHS = [480, 768, 960, 1280];
+const REVIEW_IMAGE_WIDTHS = [480, 768, 960];
+
 export default function Benchmarks({ setIsModalOpen = () => {} }) {
   const [benchmarks, setBenchmarks] = useState([]);
   const [selectedImage, setSelectedImage] = useState(null);
@@ -23,6 +26,13 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
     image
       ? urlFor(image).width(width).format("webp").quality(60).url()
       : "";
+
+  const buildImageSrcSet = (image, widths) =>
+    image
+      ? widths
+          .map((width) => `${buildImageSrc(image, width)} ${width}w`)
+          .join(", ")
+      : undefined;
 
   useEffect(() => {
     getPublicContent("benchmarks")
@@ -82,6 +92,10 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
                   <figure className="m-0">
                     <img
                       src={buildImageSrc(b.beforeImage, 1280)}
+                      srcSet={buildImageSrcSet(
+                        b.beforeImage,
+                        BENCHMARK_IMAGE_WIDTHS
+                      )}
                       alt={beforeAlt}
                       width={beforeDims?.width}
                       height={beforeDims?.height}
@@ -106,6 +120,10 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
                   <figure className="m-0">
                     <img
                       src={buildImageSrc(b.afterImage, 1280)}
+                      srcSet={buildImageSrcSet(
+                        b.afterImage,
+                        BENCHMARK_IMAGE_WIDTHS
+                      )}
                       alt={afterAlt}
                       width={afterDims?.width}
                       height={afterDims?.height}
@@ -129,6 +147,10 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
                   <figure className="m-0">
                     <img
                       src={buildImageSrc(b.reviewImage, 960)}
+                      srcSet={buildImageSrcSet(
+                        b.reviewImage,
+                        REVIEW_IMAGE_WIDTHS
+                      )}
                       alt={reviewAlt}
                       width={reviewDims?.width}
                       height={reviewDims?.height}
