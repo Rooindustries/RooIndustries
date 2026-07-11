@@ -153,4 +153,22 @@ describe("Supabase shadow migration helpers", () => {
       mismatched: ["one"],
     });
   });
+
+  test("counts legacy Tourney players separately from Sanity identities", () => {
+    const accounts = [
+      { userId: "creator", tourneyAccount: null },
+      { userId: "owner", tourneyAccount: { role: "tourney_owner" } },
+    ];
+
+    expect(
+      helpers.expectedAccountShadowCounts({
+        accounts,
+        tourneyPlayerAccounts: 1,
+      })
+    ).toEqual({
+      authUsers: 3,
+      profiles: 3,
+      tourneyAccounts: 2,
+    });
+  });
 });
