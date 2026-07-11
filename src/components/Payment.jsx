@@ -66,6 +66,27 @@ const formatCouponValue = (coupon) => {
   return `${getCouponDiscountValue(coupon)}% off`;
 };
 
+const parseCheckoutFingerprint = (value) => {
+  try {
+    const parsed = JSON.parse(String(value || ""));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+const paymentSessionMatchesCheckout = (storedFingerprint, currentFingerprint) => {
+  if (storedFingerprint === currentFingerprint) return true;
+  const stored = parseCheckoutFingerprint(storedFingerprint);
+  const current = parseCheckoutFingerprint(currentFingerprint);
+  if (!stored || !current) return false;
+  return ["packageTitle", "originalOrderId", "startTimeUTC", "email"].every(
+    (key) => String(stored[key] || "") === String(current[key] || "")
+  );
+};
+
 export default function Payment({ hideFooter = false }) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -496,7 +517,7 @@ export default function Payment({ hideFooter = false }) {
   const [rzpReady, setRzpReady] = useState(false);
   const [payingRzp, setPayingRzp] = useState(false);
   const [providerConfig, setProviderConfig] = useState({
-    razorpay: { enabled: false, mode: "unknown" },
+    razorpay: { enabled: false, mode: "unknown", disabledReason: "" },
     paypal: { enabled: false, mode: "unknown", clientId: "" },
   });
   const [showInternalPayments, setShowInternalPayments] = useState(false);
@@ -517,6 +538,11 @@ export default function Payment({ hideFooter = false }) {
   ).trim();
   const hasPaypalClientId = !!paypalClientId;
   const canUseRazorpay = !!providerConfig?.razorpay?.enabled;
+  const razorpayTemporarilyDisabled =
+    providerConfig?.razorpay?.disabledReason === "merchant_profile_update";
+  const razorpayAvailabilityKnown =
+    razorpayTemporarilyDisabled ||
+    String(providerConfig?.razorpay?.mode || "unknown") !== "unknown";
   const canUsePaypal = hasPaypalClientId && !!providerConfig?.paypal?.enabled;
   const shouldRenderPaypalBlock =
     !!providerConfig?.paypal?.enabled || showInternalPayments;
@@ -689,6 +715,9 @@ export default function Payment({ hideFooter = false }) {
           razorpay: {
             enabled: !!data.providers?.razorpay?.enabled,
             mode: data.providers?.razorpay?.mode || "unknown",
+            disabledReason: String(
+              data.providers?.razorpay?.disabledReason || ""
+            ).trim(),
           },
           paypal: {
             enabled: !!data.providers?.paypal?.enabled,
@@ -742,8 +771,23 @@ export default function Payment({ hideFooter = false }) {
   }, [location.search]);
 
   useEffect(() => {
+    if (!hydrated || !packageTitle) return;
     const stored = readStoredPaymentSession();
-    if (stored?.fingerprint === checkoutFingerprint) {
+    if (
+      stored?.fingerprint &&
+      paymentSessionMatchesCheckout(stored.fingerprint, checkoutFingerprint)
+    ) {
+      const storedFingerprint = parseCheckoutFingerprint(stored.fingerprint);
+      const storedReferralCode = String(
+        storedFingerprint?.referralCode || ""
+      ).trim();
+      const storedCouponCode = String(storedFingerprint?.couponCode || "").trim();
+      if (storedReferralCode !== referralInput) {
+        setReferralInput(storedReferralCode);
+      }
+      if (storedCouponCode !== couponInput) {
+        setCouponInput(storedCouponCode);
+      }
       setPaymentSession(stored);
       return;
     }
@@ -753,7 +797,7 @@ export default function Payment({ hideFooter = false }) {
     }
     setPaymentSession(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [checkoutFingerprint]);
+  }, [checkoutFingerprint, couponInput, hydrated, packageTitle, referralInput]);
 
   const persistPaymentSession = (nextSession) => {
     setPaymentSession(nextSession);
@@ -764,7 +808,7 @@ export default function Payment({ hideFooter = false }) {
     const stored = readStoredPaymentSession();
     if (
       stored?.provider === provider &&
-      stored?.fingerprint === checkoutFingerprint &&
+      paymentSessionMatchesCheckout(stored?.fingerprint, checkoutFingerprint) &&
       stored?.paymentAccessToken
     ) {
       return stored;
@@ -772,7 +816,10 @@ export default function Payment({ hideFooter = false }) {
 
     if (
       paymentSession?.provider === provider &&
-      paymentSession?.fingerprint === checkoutFingerprint &&
+      paymentSessionMatchesCheckout(
+        paymentSession?.fingerprint,
+        checkoutFingerprint
+      ) &&
       paymentSession?.paymentAccessToken
     ) {
       return paymentSession;
@@ -898,7 +945,10 @@ export default function Payment({ hideFooter = false }) {
   const startSessionCheckout = async (provider) => {
     if (
       paymentSession?.provider === provider &&
-      paymentSession?.fingerprint === checkoutFingerprint &&
+      paymentSessionMatchesCheckout(
+        paymentSession?.fingerprint,
+        checkoutFingerprint
+      ) &&
       paymentSession?.paymentAccessToken &&
       paymentSession?.providerPayload
     ) {
@@ -1223,7 +1273,7 @@ export default function Payment({ hideFooter = false }) {
     if (!canUseRazorpay) {
       showBanner(
         "error",
-        "RazorPay secure checkout is currently unavailable. Please try again shortly."
+        "Razorpay secure checkout is currently unavailable. Please try again shortly."
       );
       return;
     }
@@ -1632,7 +1682,13 @@ export default function Payment({ hideFooter = false }) {
           ) : (
             <>
 
-              <div className="low-perf-surface glass-premium glass-card-surface mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-xl border border-line-input px-5 py-4">
+              <div
+                className={`low-perf-surface glass-premium glass-card-surface mt-6 flex flex-col items-center justify-between gap-4 rounded-xl border px-5 py-4 sm:flex-row ${
+                  razorpayTemporarilyDisabled
+                    ? "border-warning-border bg-warning-soft"
+                    : "border-line-input"
+                }`}
+              >
                 <div className="flex items-center gap-4">
                   <img
                     src="https://razorpay.com/assets/razorpay-logo.svg"
@@ -1644,10 +1700,14 @@ export default function Payment({ hideFooter = false }) {
                   />
                   <div>
                     <p className="text-ink-secondary text-sm font-medium">
-                      RazorPay Secure Checkout
+                      {razorpayTemporarilyDisabled
+                        ? "Razorpay temporarily unavailable"
+                        : "Razorpay Secure Checkout"}
                     </p>
                     <p className="text-ink-muted text-xs">
-                      Cards, UPI, wallets, and local methods
+                      {razorpayTemporarilyDisabled
+                        ? "Please use PayPal while we update the merchant display name."
+                        : "Cards, UPI, wallets, and local methods"}
                     </p>
                   </div>
                 </div>
@@ -1666,17 +1726,32 @@ export default function Payment({ hideFooter = false }) {
                 >
                   {payingRzp || paymentStatusBusy
                     ? "Processing..."
-                    : "Pay with RazorPay"}
+                    : razorpayTemporarilyDisabled
+                      ? "Temporarily unavailable"
+                      : !razorpayAvailabilityKnown
+                        ? "Checking availability..."
+                        : "Pay with Razorpay"}
                   <span className="glow-line glow-line-top" />
                   <span className="glow-line glow-line-right" />
                   <span className="glow-line glow-line-bottom" />
                   <span className="glow-line glow-line-left" />
                 </button>
               </div>
-              {!canUseRazorpay && (
-                <p className="mt-2 text-xs text-warning-text">
-                  RazorPay secure checkout is currently unavailable.
+              {razorpayTemporarilyDisabled ? (
+                <p
+                  role="status"
+                  className="mt-2 rounded-lg border border-warning-border bg-warning-soft px-4 py-3 text-sm font-medium text-warning-text"
+                >
+                  Razorpay is temporarily unavailable while we update the merchant
+                  display name. Please use PayPal for now.
                 </p>
+              ) : (
+                razorpayAvailabilityKnown &&
+                !canUseRazorpay && (
+                  <p className="mt-2 text-xs text-warning-text">
+                    Razorpay secure checkout is currently unavailable.
+                  </p>
+                )
               )}
 
 
