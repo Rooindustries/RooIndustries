@@ -7,7 +7,9 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const PUBLIC_CACHE = "public, s-maxage=300, stale-while-revalidate=600";
+const PUBLIC_BROWSER_CACHE = "public, max-age=60, stale-while-revalidate=300";
+const PUBLIC_VERCEL_CACHE =
+  "public, max-age=300, stale-while-revalidate=600, stale-if-error=86400";
 const ERROR_CACHE = "no-store, max-age=0";
 
 export async function GET(request, context) {
@@ -29,7 +31,10 @@ export async function GET(request, context) {
         headers: {
           "Cache-Control": selection.canaryActive
             ? "private, no-store"
-            : PUBLIC_CACHE,
+            : PUBLIC_BROWSER_CACHE,
+          ...(!selection.canaryActive
+            ? { "Vercel-CDN-Cache-Control": PUBLIC_VERCEL_CACHE }
+            : {}),
           "X-Content-Type-Options": "nosniff",
           "X-Roo-Content-Backend": selection.backend,
           ...(selection.canaryActive ? { Vary: "Cookie" } : {}),

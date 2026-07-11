@@ -99,6 +99,18 @@ const replaceUrls = (value, manifest, resolved) => {
   if (reference && resolved.has(reference)) {
     next._supabaseUrl = resolved.get(reference);
   }
+  const linkedAsset = manifest.byId.get(
+    String(value?.asset?._ref || "").trim()
+  );
+  const width = Number(linkedAsset?.width || 0);
+  const height = Number(linkedAsset?.height || 0);
+  if (width > 0 && height > 0) {
+    next.dimensions = {
+      width,
+      height,
+      aspectRatio: width / height,
+    };
+  }
   return next;
 };
 

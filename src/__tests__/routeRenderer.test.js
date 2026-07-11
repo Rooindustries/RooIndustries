@@ -65,4 +65,21 @@ describe("RouteRenderer", () => {
       initialHomeData,
     });
   });
+
+  test("does not fetch the entire homepage for a standalone route", async () => {
+    const { RouteRenderer, LegacyRoutePage, fetchHomePageData } =
+      await loadRouteRenderer();
+
+    const tree = await RouteRenderer({
+      pathname: "/benchmarks",
+      searchParams: Promise.resolve({}),
+    });
+
+    render(tree);
+    expect(fetchHomePageData).not.toHaveBeenCalled();
+    expect(LegacyRoutePage.mock.calls[0][0]).toMatchObject({
+      pathname: "/benchmarks",
+      initialHomeData: null,
+    });
+  });
 });

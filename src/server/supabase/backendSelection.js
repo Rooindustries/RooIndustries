@@ -38,6 +38,13 @@ export const selectContentBackend = ({
       assignmentCookie: "",
     };
   }
+  if (policy.contentCanaryPercentage >= 100) {
+    return {
+      backend: "supabase",
+      canaryActive: false,
+      assignmentCookie: "",
+    };
+  }
   if (policy.contentCanaryPercentage < 1) {
     return {
       backend: "sanity",

@@ -1,6 +1,5 @@
 import LegacyRoutePage from "./LegacyRoutePage";
 import SeoFallback from "./SeoFallback";
-import sanityServer from "../lib/sanityServer";
 
 export default async function RouteRenderer({
   pathname,
@@ -8,9 +7,6 @@ export default async function RouteRenderer({
   initialHomeData = null,
 }) {
   const resolvedSearchParams = await searchParams;
-  const resolvedHomeData =
-    initialHomeData ??
-    (pathname === "/" ? null : await sanityServer.fetchHomePageData());
 
   return (
     <>
@@ -18,7 +14,7 @@ export default async function RouteRenderer({
       <LegacyRoutePage
         pathname={pathname}
         searchParams={resolvedSearchParams}
-        initialHomeData={resolvedHomeData}
+        initialHomeData={initialHomeData}
       />
     </>
   );
