@@ -132,6 +132,25 @@ describe("public content privacy boundary", () => {
     expect(framePolicy).toContain("https://checkout.razorpay.com");
   });
 
+  test("permits migrated images only from the configured Supabase project", async () => {
+    const configModule = await import("../../next.config.mjs");
+    const headerRules = await configModule.default.headers();
+    const globalRule = headerRules.find((rule) => rule.source === "/:path*");
+    const csp = globalRule.headers.find(
+      (header) => header.key === "Content-Security-Policy"
+    ).value;
+    const imagePolicy = csp
+      .split(";")
+      .map((directive) => directive.trim())
+      .find((directive) => directive.startsWith("img-src "));
+
+    expect(imagePolicy).toBeTruthy();
+    expect(imagePolicy).toContain(
+      "https://ntezmxzaibrrsgtujgxu.supabase.co"
+    );
+    expect(imagePolicy).not.toContain("https://*.supabase.co");
+  });
+
   test("public marketing content does not require a paid Sanity read token", async () => {
     delete process.env.SANITY_READ_TOKEN;
     delete process.env.SANITY_PRIVATE_READ_TOKEN;
