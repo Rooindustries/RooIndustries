@@ -444,6 +444,27 @@ export const createSupabaseCreatorAccount = async ({
   return { userId: created.data?.user?.id || userId };
 };
 
+export const bootstrapSupabaseNativeAccount = async ({
+  userId,
+  adminClient = createSupabaseAdminClient(),
+} = {}) => {
+  const normalizedUserId = String(userId || "").trim();
+  const isUuid =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      normalizedUserId
+    );
+  if (!isUuid) {
+    throw new Error("A valid Supabase Auth user id is required.");
+  }
+
+  return requireRpcData(
+    await adminClient.rpc("roo_bootstrap_native_account", {
+      p_user_id: normalizedUserId,
+    }),
+    "native account bootstrap"
+  );
+};
+
 export const requireSupabaseBearerUser = async ({
   authorization,
   adminClient = createSupabaseAdminClient(),

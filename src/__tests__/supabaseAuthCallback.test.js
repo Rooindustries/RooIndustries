@@ -1,4 +1,5 @@
 const mockExchangeCodeForSession = jest.fn();
+const mockBootstrapSupabaseNativeAccount = jest.fn();
 const mockCreateServerClient = jest.fn((_url, _key, options) => ({
   auth: {
     exchangeCodeForSession: async (code) => {
@@ -16,6 +17,11 @@ const mockCreateServerClient = jest.fn((_url, _key, options) => ({
 
 jest.mock("@supabase/ssr", () => ({
   createServerClient: (...args) => mockCreateServerClient(...args),
+}));
+
+jest.mock("../server/supabase/accounts", () => ({
+  bootstrapSupabaseNativeAccount: (...args) =>
+    mockBootstrapSupabaseNativeAccount(...args),
 }));
 
 jest.mock("next/server", () => ({
@@ -56,8 +62,14 @@ describe("Supabase Auth callback", () => {
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test-key",
     };
     mockExchangeCodeForSession.mockResolvedValue({
-      data: { session: { access_token: "not-returned" } },
+      data: {
+        session: { access_token: "not-returned" },
+        user: { id: "e71a5687-daa6-4371-9700-5aef798fdd03" },
+      },
       error: null,
+    });
+    mockBootstrapSupabaseNativeAccount.mockResolvedValue({
+      user_id: "e71a5687-daa6-4371-9700-5aef798fdd03",
     });
   });
 
@@ -90,9 +102,27 @@ describe("Supabase Auth callback", () => {
     );
     expect(response.cookies.values).toHaveLength(1);
     expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(mockBootstrapSupabaseNativeAccount).toHaveBeenCalledWith({
+      userId: "e71a5687-daa6-4371-9700-5aef798fdd03",
+    });
     const cookieApi = mockCreateServerClient.mock.calls[0][2].cookies;
     expect(cookieApi.getAll()).toEqual([
       { name: "pkce", value: "value.with.encoding" },
     ]);
+  });
+
+  test("does not establish a browser session when account setup fails", async () => {
+    mockBootstrapSupabaseNativeAccount.mockRejectedValueOnce(
+      new Error("profile conflict")
+    );
+
+    const response = await GET(
+      request("https://www.rooindustries.com/auth/callback?code=one&next=%2Faccount")
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.url).toBe(
+      "https://www.rooindustries.com/account/login?error=account_setup_failed"
+    );
   });
 });
