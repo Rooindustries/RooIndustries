@@ -1,6 +1,7 @@
 import React from "react";
 import { render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import ReservationBanner from "../components/ReservationBanner";
 
 const activeHold = {
@@ -11,6 +12,11 @@ const activeHold = {
   packageTitle: "XOC / Extreme Overclocking",
   packagePrice: "$99.95",
   phase: "payment_pending",
+};
+
+const PaymentStateProbe = () => {
+  const location = useLocation();
+  return <div>{location.state?.bookingData?.slotHoldToken || "missing checkout"}</div>;
 };
 
 describe("reservation banner", () => {
@@ -37,5 +43,31 @@ describe("reservation banner", () => {
     expect(
       screen.getByRole("button", { name: "Return to payment" })
     ).toBeInTheDocument();
+  });
+
+  test("returns to payment with the stored checkout payload", async () => {
+    window.sessionStorage.setItem(
+      "checkout_booking_state",
+      JSON.stringify({
+        packageTitle: "Performance Vertex Max",
+        slotHoldId: activeHold.holdId,
+        slotHoldToken: activeHold.holdToken,
+        slotHoldExpiresAt: activeHold.expiresAt,
+      })
+    );
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <Routes>
+          <Route path="/" element={<ReservationBanner />} />
+          <Route path="/payment" element={<PaymentStateProbe />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Return to payment" })
+    );
+
+    expect(await screen.findByText(activeHold.holdToken)).toBeInTheDocument();
   });
 });

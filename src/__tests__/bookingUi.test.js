@@ -180,6 +180,17 @@ describe("booking calendar UI", () => {
       JSON.stringify({ paymentAccessToken: "payment_access_pending_1" })
     );
     window.sessionStorage.setItem(
+      "checkout_booking_state",
+      JSON.stringify({
+        packageTitle: "Performance Vertex Overhaul",
+        packagePrice: "$84.99",
+        startTimeUTC: "2099-01-05T04:30:00.000Z",
+        slotHoldId: "hold_pending_1",
+        slotHoldToken: "hold_token_pending_1",
+        slotHoldExpiresAt: expiresAt,
+      })
+    );
+    window.sessionStorage.setItem(
       "booking_modal_state",
       JSON.stringify({
         packageTitle: "Performance Vertex Overhaul",
@@ -256,6 +267,19 @@ describe("booking calendar UI", () => {
       screen.getAllByRole("button", { name: /^return to payment$/i })
     ).toHaveLength(1);
     expect(screen.queryByRole("button", { name: /^back$/i })).not.toBeInTheDocument();
+    expect(releaseButton.parentElement).toHaveClass("grid", "sm:grid-cols-2");
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /^return to payment$/i })
+    );
+    expect(mockNavigate).toHaveBeenCalledWith("/payment", {
+      state: {
+        bookingData: expect.objectContaining({
+          slotHoldToken: "hold_token_pending_1",
+        }),
+      },
+    });
+    mockNavigate.mockClear();
 
     await userEvent.click(releaseButton);
 
@@ -268,6 +292,12 @@ describe("booking calendar UI", () => {
     ).toMatchObject({
       holdToken: "hold_token_refreshed_1",
       phase: "holding",
+    });
+    expect(
+      JSON.parse(window.sessionStorage.getItem("checkout_booking_state"))
+    ).toMatchObject({
+      slotHoldToken: "hold_token_refreshed_1",
+      slotHoldExpiresAt: expiresAt,
     });
   });
 
