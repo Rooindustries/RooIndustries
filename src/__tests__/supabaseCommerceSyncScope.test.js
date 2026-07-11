@@ -32,10 +32,12 @@ describe("Supabase commerce-only shadow scope", () => {
         "tourneyAuthStore",
         "sanity.imageAsset",
         "sanity.fileAsset",
+        "rateLimitBucket",
         "refRateLimitBucket",
       ])
     );
     expect(COMMERCE_EPHEMERAL_DOCUMENT_TYPES).toEqual([
+      "rateLimitBucket",
       "refRateLimitBucket",
     ]);
   });

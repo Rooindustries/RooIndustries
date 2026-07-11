@@ -46,6 +46,11 @@
       "id": "email-ledger-not-owning-send-lease",
       "reproduction": "The relational email ledger was projected, but booking documents still owned the actual send lease.",
       "closureGate": "Supabase-primary sends atomically claim and complete deterministic customer and owner ledger rows; terminal sends cannot be downgraded."
+    },
+    {
+      "id": "ephemeral-rate-bucket-parity-noise",
+      "reproduction": "A newly created Sanity rate-limit bucket was reported as commerce drift even though rate-limit state is intentionally backend-local.",
+      "closureGate": "Both current and legacy ephemeral bucket types are excluded symmetrically from source and target document parity while the native Supabase limiter remains covered by dedicated tests."
     }
   ]
 }

@@ -6,6 +6,7 @@ import process from "node:process";
 import { createClient as createSanityClient } from "@sanity/client";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
+import { COMMERCE_EPHEMERAL_DOCUMENT_TYPES } from "../src/server/commerce/documentTypes.js";
 import { SupabaseDocumentClient } from "../src/server/supabase/documentClient.js";
 
 for (const candidate of [".env.local", ".vercel/.env.preview.local"]) {
@@ -282,21 +283,29 @@ const compareDocuments = async () => {
     sanity.fetch(`*[]`),
     requireRpc("roo_commerce_canonical_manifest"),
   ]);
+  const comparableDocuments = sourceDocuments.filter(
+    (document) => !COMMERCE_EPHEMERAL_DOCUMENT_TYPES.includes(document._type)
+  );
   const sourceHashes = new Map();
-  for (let index = 0; index < sourceDocuments.length; index += 100) {
-    const batch = sourceDocuments.slice(index, index + 100);
+  for (let index = 0; index < comparableDocuments.length; index += 100) {
+    const batch = comparableDocuments.slice(index, index + 100);
     const hashed = await requireRpc("roo_hash_canonical_documents", {
       p_documents: batch,
     });
     for (const entry of hashed || []) sourceHashes.set(entry.id, entry.hash);
   }
   const source = new Map(
-    sourceDocuments.map((document) => [
+    comparableDocuments.map((document) => [
       document._id,
       { type: document._type, hash: sourceHashes.get(document._id) },
     ])
   );
-  const target = new Map((targetManifest || []).map((entry) => [entry.id, entry]));
+  const comparableTargetManifest = (targetManifest || []).filter(
+    (entry) => !COMMERCE_EPHEMERAL_DOCUMENT_TYPES.includes(entry.type)
+  );
+  const target = new Map(
+    comparableTargetManifest.map((entry) => [entry.id, entry])
+  );
   const gaps = [];
   for (const [id, entry] of source) {
     const mirrored = target.get(id);
@@ -313,7 +322,14 @@ const compareDocuments = async () => {
       gaps.push({ category: "missing_source", id, type: entry.type });
     }
   }
-  return { sourceDocuments, compared: source.size, gaps };
+  return {
+    sourceDocuments: comparableDocuments,
+    compared: source.size,
+    excludedEphemeral: sourceDocuments.length - comparableDocuments.length,
+    excludedTargetEphemeral:
+      (targetManifest || []).length - comparableTargetManifest.length,
+    gaps,
+  };
 };
 
 const replayQueries = async (documents) => {
@@ -360,6 +376,8 @@ const runPass = async (pass) => {
   const evidence = {
     pass,
     comparedDocuments: comparison.compared,
+    excludedEphemeralDocuments: comparison.excludedEphemeral,
+    excludedTargetEphemeralDocuments: comparison.excludedTargetEphemeral,
     replayedQueries: buildReplayCases(comparison.sourceDocuments).length,
     inventoriedProductionQueries: queryInventory.count,
     failures: failures.length,
