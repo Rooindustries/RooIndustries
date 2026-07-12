@@ -1803,6 +1803,14 @@ export const TourneyStyles = () => (
       text-align: center;
     }
 
+    .tourney-connected-accounts .cs-social-preview-note,
+    .tourney-form > .cs-social .cs-social-preview-note {
+      margin: 0;
+      color: var(--tourney-text-muted);
+      font-size: 0.78rem;
+      text-align: center;
+    }
+
     #info {
       grid-column: 1 / -1;
       justify-self: center;
@@ -4836,6 +4844,14 @@ const LockStyles = () => (
       color: var(--color-warning-text);
       font-size: 0.82rem;
       line-height: 1.4;
+    }
+
+    .cs-social-preview-note {
+      margin: 0;
+      color: var(--color-text-muted);
+      font-size: 0.78rem;
+      line-height: 1.4;
+      text-align: center;
     }
 
     .cs-note,

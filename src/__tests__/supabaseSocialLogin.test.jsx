@@ -18,6 +18,7 @@ jest.mock("../lib/supabaseBrowser", () => ({
 describe("Supabase social login", () => {
   beforeEach(() => {
     process.env.NEXT_PUBLIC_SUPABASE_SOCIAL_AUTH_ENABLED = "1";
+    delete process.env.NEXT_PUBLIC_TOURNEY_PREVIEW_OAUTH_MOCK;
     jest.clearAllMocks();
     mockSignInWithOAuth.mockResolvedValue({ error: null });
     mockLinkIdentity.mockResolvedValue({ error: null });
@@ -37,6 +38,20 @@ describe("Supabase social login", () => {
       <SupabaseSocialLogin flow="referral" nextPath="/referrals/dashboard" />
     );
     expect(container).toBeEmptyDOMElement();
+  });
+
+  test("shows disabled Tourney providers in side-effect-free previews", () => {
+    process.env.NEXT_PUBLIC_SUPABASE_SOCIAL_AUTH_ENABLED = "0";
+    process.env.NEXT_PUBLIC_TOURNEY_PREVIEW_OAUTH_MOCK = "1";
+    render(
+      <SupabaseSocialLogin flow="tourney" nextPath="/tourney" variant="tourney" />
+    );
+
+    expect(screen.getByRole("button", { name: "Continue with Google" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Continue with Discord" })).toBeDisabled();
+    expect(
+      screen.getByText("Preview only. Google and Discord sign-in are disabled here.")
+    ).toBeInTheDocument();
   });
 
   test.each([
