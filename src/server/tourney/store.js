@@ -21,6 +21,7 @@ export const TOURNEY_STORE_DOMAINS = Object.freeze([
   "payouts",
   "email",
   "discord",
+  "identity",
 ]);
 
 export { TOURNEY_MIRROR_TABLES } from "./mirrorContract.js";
@@ -43,6 +44,24 @@ const stableJson = (value) => {
 const MEMORY_RECEIPTS =
   globalThis.__rooTourneyCommandReceipts ||
   (globalThis.__rooTourneyCommandReceipts = new Map());
+const NON_NATURAL_COMMAND_PREFIXES = Object.freeze([
+  "account-snapshot:seed",
+  "discord-backfill",
+  "discord-state-seed",
+  "email",
+  "fallback-bootstrap",
+  "fixture",
+  "mirror",
+  "principal-seed",
+  "schema-v4",
+]);
+const isNonNaturalCommandId = (commandId) =>
+  NON_NATURAL_COMMAND_PREFIXES.some((prefix) =>
+    commandId === prefix ||
+    commandId.startsWith(`${prefix}:`) ||
+    commandId.startsWith(`${prefix}_`) ||
+    commandId.startsWith(`${prefix}-`)
+  );
 
 const parseGeneration = (value) => {
   const normalized = normalize(value || "0");
@@ -54,6 +73,17 @@ const parseGeneration = (value) => {
     throw new Error("TOURNEY_FAILOVER_GENERATION is too large.");
   }
   return generation;
+};
+
+export const isNaturalTourneyMirrorEvent = ({ event, sourceBackend } = {}) => {
+  const commandId = normalize(event?.command_id);
+  return sourceBackend === "supabase" &&
+    Number(event?.generation) >= 1 &&
+    Boolean(commandId) &&
+    !["command_receipts", "external_operations", "email_dispatches"].includes(
+      event?.table_name
+    ) &&
+    !isNonNaturalCommandId(commandId);
 };
 
 export const resolveTourneyStorePolicy = (env = process.env) => ({
@@ -84,7 +114,14 @@ export const readTourneyCommandId = ({ request, derivedKey = "" } = {}) => {
   if (!supplied && process.env.NODE_ENV === "test") {
     return `test:${crypto.randomUUID()}`;
   }
-  return normalizeCommandId(supplied);
+  const commandId = normalizeCommandId(supplied);
+  if (request && isNonNaturalCommandId(commandId)) {
+    const error = new Error("Idempotency-Key uses a reserved prefix.");
+    error.status = 400;
+    error.code = "TOURNEY_IDEMPOTENCY_KEY_RESERVED";
+    throw error;
+  }
+  return commandId;
 };
 
 const setCommandContext = async ({ sql, policy, commandId }) => {
@@ -452,13 +489,7 @@ export const reconcileTourneyMirror = async ({ env = process.env, limit = 50 } =
         error.code = "TOURNEY_MIRROR_LEASE_MISMATCH";
         throw error;
       }
-      if (
-        sourceBackend === "supabase" &&
-        Number(event.generation) >= 1 &&
-        event.command_id &&
-        !["command_receipts", "external_operations", "email_dispatches"].includes(event.table_name) &&
-        !/^(mirror|email|discord-backfill|fixture)[:_-]/.test(event.command_id)
-      ) {
+      if (isNaturalTourneyMirrorEvent({ event, sourceBackend })) {
         await sourceSql.begin(async (sql) => {
           const updated = await sql`
             update tourney.cutover_metadata set

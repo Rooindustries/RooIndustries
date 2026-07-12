@@ -1,5 +1,7 @@
 import {
   executeTourneyCommand,
+  isNaturalTourneyMirrorEvent,
+  readTourneyCommandId,
   resetMemoryTourneyControlForTests,
   resolveTourneyStorePolicy,
 } from "../server/tourney/store";
@@ -76,6 +78,35 @@ describe("Tourney cutover store", () => {
     expect(callback).toHaveBeenCalledTimes(1);
   });
 
+  test("accepts the private identity maintenance domain", async () => {
+    await expect(
+      executeTourneyCommand({
+        commandId: "command-identity-maintenance-0001",
+        purpose: "identity:principal-seed",
+        requestPayload: {},
+        env,
+        callback: async () => ({ body: { ok: true } }),
+      })
+    ).resolves.toMatchObject({ status: 200 });
+  });
+
+  test("reserves maintenance idempotency prefixes from HTTP callers", () => {
+    let error;
+    try {
+      readTourneyCommandId({
+        request: {
+          headers: { get: () => "fallback-bootstrap:customer-command-0001" },
+        },
+      });
+    } catch (cause) {
+      error = cause;
+    }
+    expect(error).toMatchObject({
+      code: "TOURNEY_IDEMPOTENCY_KEY_RESERVED",
+      status: 400,
+    });
+  });
+
   test("parses the manual failover policy", () => {
     expect(resolveTourneyStorePolicy(env)).toEqual({
       primaryBackend: "legacy",
@@ -83,5 +114,34 @@ describe("Tourney cutover store", () => {
       writesPaused: false,
       generation: 4,
     });
+  });
+
+  test("never starts the clean clock from activation maintenance events", () => {
+    const base = {
+      generation: 1,
+      table_name: "tourney_players",
+    };
+    for (const commandId of [
+      "fallback-bootstrap:g1:schema-v4-activation",
+      "account-snapshot:seed:abc",
+      "principal-seed:player:principal",
+      "discord-backfill:player:user",
+      "discord-state-seed:principal:g1",
+      "schema-v4:activation",
+      "fixture:test",
+    ]) {
+      expect(
+        isNaturalTourneyMirrorEvent({
+          sourceBackend: "supabase",
+          event: { ...base, command_id: commandId },
+        })
+      ).toBe(false);
+    }
+    expect(
+      isNaturalTourneyMirrorEvent({
+        sourceBackend: "supabase",
+        event: { ...base, command_id: "players:update:customer-command-0001" },
+      })
+    ).toBe(true);
   });
 });
