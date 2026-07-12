@@ -451,7 +451,9 @@ export const runTourneyShadowReadSamples = async ({
   const sourceBackend = policy.primaryBackend;
   const targetBackend = sourceBackend === "supabase" ? "legacy" : "supabase";
   const sourceSql = await getTourneySqlForBackend({ backend: sourceBackend, env });
+  const targetSql = await getTourneySqlForBackend({ backend: targetBackend, env });
   const observationTable = controlRelation(sourceBackend, "shadow_observations");
+  const targetObservationTable = controlRelation(targetBackend, "shadow_observations");
   const safeRounds = Math.max(1, Math.min(30, Number(rounds) || 1));
   const observations = [];
 
@@ -466,6 +468,15 @@ export const runTourneyShadowReadSamples = async ({
       const valueMatch = stableJson(source) === stableJson(target);
       await sourceSql`
         insert into ${sourceSql(observationTable)} (
+          route, shape_match, value_match, ordering_match, error_match,
+          primary_latency_ms, shadow_latency_ms
+        ) values (
+          ${route}, ${valueMatch}, ${valueMatch}, ${valueMatch}, true,
+          ${sourceLatency}, ${targetLatency}
+        )
+      `;
+      await targetSql`
+        insert into ${targetSql(targetObservationTable)} (
           route, shape_match, value_match, ordering_match, error_match,
           primary_latency_ms, shadow_latency_ms
         ) values (
