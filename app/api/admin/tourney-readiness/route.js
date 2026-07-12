@@ -54,12 +54,19 @@ const readLegacyReadiness = async (sql) => {
     from tourney_parity_runs order by created_at desc limit 1
   `;
   const shadowReads = await sql`
+    with ranked as (
+      select *, row_number() over (
+        partition by route order by observed_at desc, id desc
+      ) as sample_rank
+      from tourney_shadow_observations
+    )
     select route, count(*)::integer as samples,
       count(*) filter (
         where not (shape_match and value_match and ordering_match and error_match)
       )::integer as mismatches,
       max(observed_at) as last_observed_at
-    from tourney_shadow_observations
+    from ranked
+    where sample_rank <= 30
     group by route order by route
   `;
   return {
