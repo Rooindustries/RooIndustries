@@ -2,6 +2,10 @@
 set lock_timeout = '5s';
 set statement_timeout = '120s';
 
+create index if not exists tourney_account_snapshots_supersedes_v4_idx
+  on tourney_account_snapshots (supersedes_snapshot_id)
+  where supersedes_snapshot_id is not null;
+
 create or replace function tourney_mirror_record_key(p_table_name text, p_row jsonb)
 returns jsonb language plpgsql stable set search_path = '' as $$
 declare v_contract public.tourney_mirror_contracts%rowtype; v_column text; v_key jsonb := '{}'::jsonb;
