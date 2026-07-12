@@ -43,6 +43,9 @@ const normalizeDiscountType = (value) =>
 export const normalizePackageTitle = (value) =>
   normalizePackageTitleForMatch(value);
 
+export const getPaymentPackageTitleAliases = (value) =>
+  getPackageTitleAliases(value);
+
 const normalizePackageId = (value) => String(value || "").trim();
 
 const getCouponEligiblePackages = (couponDoc = {}) =>
@@ -218,6 +221,7 @@ export async function resolveBookingPricing({
   allowZeroPayable = false,
   client = pricingClient,
   upgradeContext = null,
+  pricingInputs = null,
 }) {
   const isUpgrade = !!originalOrderId;
   const normalizedCouponCode = normalizeCouponCode(couponCode);
@@ -228,7 +232,11 @@ export async function resolveBookingPricing({
   let effectivePackageTitle = String(packageTitle || "").trim();
 
   if (!isUpgrade) {
-    const packageDoc = await fetchPackageByTitle(client, packageTitle);
+    const packageDoc =
+      pricingInputs &&
+      Object.prototype.hasOwnProperty.call(pricingInputs, "packageDoc")
+        ? pricingInputs.packageDoc
+        : await fetchPackageByTitle(client, packageTitle);
 
     const pricing = getPackagePricePresentation(packageTitle, packageDoc?.price);
     effectiveGrossAmount = toMoney(pricing.price);
@@ -257,8 +265,11 @@ export async function resolveBookingPricing({
     );
   }
 
-  let referralDoc = null;
-  if (referralId) {
+  const hasReferralInput =
+    pricingInputs &&
+    Object.prototype.hasOwnProperty.call(pricingInputs, "referralDoc");
+  let referralDoc = hasReferralInput ? pricingInputs.referralDoc : null;
+  if (!hasReferralInput && referralId) {
     referralDoc = await client.fetch(
       `*[_type == "referral" && registrationStatus != "pending_email" && _id == $id][0]{
         _id,
@@ -270,7 +281,7 @@ export async function resolveBookingPricing({
     );
   }
 
-  if (!referralDoc && normalizedReferralCode) {
+  if (!hasReferralInput && !referralDoc && normalizedReferralCode) {
     referralDoc = await client.fetch(
       `*[_type == "referral" && registrationStatus != "pending_email" && slug.current == $code][0]{
         _id,
@@ -292,8 +303,11 @@ export async function resolveBookingPricing({
     referralDoc?.currentCommissionPercent || 0
   );
 
-  let couponDoc = null;
-  if (normalizedCouponCode) {
+  const hasCouponInput =
+    pricingInputs &&
+    Object.prototype.hasOwnProperty.call(pricingInputs, "couponDoc");
+  let couponDoc = hasCouponInput ? pricingInputs.couponDoc : null;
+  if (!hasCouponInput && normalizedCouponCode) {
     couponDoc = await client.fetch(
       `*[_type == "coupon" && lower(code) == $code][0]{
         _id,
@@ -315,7 +329,9 @@ export async function resolveBookingPricing({
       }`,
       { code: normalizedCouponCode }
     );
+  }
 
+  if (normalizedCouponCode) {
     if (!couponDoc) {
       throw createApiError(400, "Coupon is invalid.", "coupon_invalid");
     }
@@ -477,6 +493,7 @@ export async function resolvePaymentQuote({
   referralCode = "",
   couponCode = "",
   client,
+  pricingInputs = null,
 }) {
   const quote = await resolveBookingPricing({
     packageTitle,
@@ -487,6 +504,7 @@ export async function resolvePaymentQuote({
     paymentProvider: "",
     allowZeroPayable: true,
     client,
+    pricingInputs,
   });
 
   return {
