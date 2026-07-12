@@ -108,6 +108,7 @@ export const freezeUpgradeIntent = ({ payload, verifiedAt = new Date().toISOStri
     return null;
   }
   return {
+    intentId: String(payload.n || "").trim(),
     bookingId: String(payload.bid).trim(),
     emailHash: String(payload.emh).trim(),
     targetPackage: String(payload.pkg).trim(),

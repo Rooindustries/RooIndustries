@@ -3,6 +3,7 @@ import { createSupabaseDocumentClient } from "../supabase/documentClient.js";
 import { createShadowingSanityClient } from "../supabase/shadowingSanityClient.js";
 import { resolveSupabaseRuntimePolicy } from "../supabase/runtime.js";
 import { createReverseMirroringSupabaseClient } from "../supabase/reverseMirroringClient.js";
+import { createSupabaseAdminClient } from "../supabase/adminClient.js";
 
 const DEFAULT_API_VERSION = "2023-10-01";
 const DOCUMENT_BACKENDS = new Set(["sanity", "supabase"]);
@@ -24,6 +25,9 @@ const resolvePolicyBackend = ({ policy, domain = "global" }) =>
   domain === "commerce"
     ? policy.commercePrimaryBackend
     : policy.primaryBackend;
+
+const resolveSupabaseClient = ({ env, client }) =>
+  client || createSupabaseAdminClient({ env });
 
 const resolveSanityEnv = (env = process.env, { requireWrite = false } = {}) => {
   const projectId = readFirst(env, ["SANITY_PRIVATE_PROJECT_ID", "SANITY_PROJECT_ID"]);
@@ -79,8 +83,12 @@ export const createDataClient = (
     primary: resolvePolicyBackend({ policy, domain }),
   });
   if (backend === "supabase") {
+    const resolvedSupabaseClient = resolveSupabaseClient({
+      env,
+      client: supabaseClient,
+    });
     const client = createSupabaseDocumentClient({
-      shadowClient: supabaseClient,
+      shadowClient: resolvedSupabaseClient,
       commerceOnly: domain === "commerce",
       cutoverGeneration: policy.commerceFailoverGeneration,
     });
@@ -88,6 +96,7 @@ export const createDataClient = (
     return createReverseMirroringSupabaseClient({
       supabaseClient: client,
       sanityClient: createSanityClient(sanityConfig),
+      recoveryClient: resolvedSupabaseClient,
     });
   }
 
@@ -95,7 +104,7 @@ export const createDataClient = (
   if (!policy.shadowWritesEnabled) return sanityClient;
   return createShadowingSanityClient({
     sanityClient,
-    shadowClient: supabaseClient,
+    shadowClient: resolveSupabaseClient({ env, client: supabaseClient }),
     commerceOnly: domain === "commerce",
   });
 };
@@ -113,8 +122,12 @@ export const createDocumentReadClient = ({
     primary: resolvePolicyBackend({ policy, domain }),
   });
   if (backend === "supabase") {
+    const resolvedSupabaseClient = resolveSupabaseClient({
+      env,
+      client: supabaseClient,
+    });
     return createSupabaseDocumentClient({
-      shadowClient: supabaseClient,
+      shadowClient: resolvedSupabaseClient,
       commerceOnly: domain === "commerce",
       cutoverGeneration: policy.commerceFailoverGeneration,
     });
@@ -134,8 +147,12 @@ export const createDocumentWriteClient = ({
     primary: resolvePolicyBackend({ policy, domain }),
   });
   if (backend === "supabase") {
+    const resolvedSupabaseClient = resolveSupabaseClient({
+      env,
+      client: supabaseClient,
+    });
     const client = createSupabaseDocumentClient({
-      shadowClient: supabaseClient,
+      shadowClient: resolvedSupabaseClient,
       commerceOnly: domain === "commerce",
       cutoverGeneration: policy.commerceFailoverGeneration,
     });
@@ -143,6 +160,7 @@ export const createDocumentWriteClient = ({
     return createReverseMirroringSupabaseClient({
       supabaseClient: client,
       sanityClient: createConfiguredSanityClient({ env, requireWrite: true }),
+      recoveryClient: resolvedSupabaseClient,
     });
   }
 
@@ -150,7 +168,7 @@ export const createDocumentWriteClient = ({
   if (!policy.shadowWritesEnabled) return sanityClient;
   return createShadowingSanityClient({
     sanityClient,
-    shadowClient: supabaseClient,
+    shadowClient: resolveSupabaseClient({ env, client: supabaseClient }),
     commerceOnly: domain === "commerce",
   });
 };

@@ -7,6 +7,7 @@ import {
   verifyBookingEmailDispatchToken,
 } from "../server/api/ref/bookingEmailDispatchToken";
 import {
+  freezeUpgradeIntent,
   issueUpgradeIntentToken,
   verifyUpgradeIntentToken,
 } from "../server/api/ref/upgradeIntentToken";
@@ -137,5 +138,23 @@ describe("signed commerce token canonicality", () => {
       ok: false,
       reason: "download_token_expired",
     });
+  });
+
+  test("preserves the signed upgrade intent nonce for retry idempotency", () => {
+    const token = issueUpgradeIntentToken({
+      bookingId: "booking-upgrade",
+      email: "customer@example.com",
+      targetPackageTitle: "Performance Vertex Max",
+      expiresAt,
+    });
+    const payload = verifyUpgradeIntentToken({
+      token,
+      bookingId: "booking-upgrade",
+      email: "customer@example.com",
+      targetPackageTitle: "Performance Vertex Max",
+    });
+    const snapshot = freezeUpgradeIntent({ payload });
+    expect(snapshot.intentId).toBe(payload.n);
+    expect(snapshot.intentId).toBeTruthy();
   });
 });

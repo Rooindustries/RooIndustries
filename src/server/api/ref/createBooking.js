@@ -277,6 +277,11 @@ export default async function handler(req, res) {
     const paymentProofClaimId = String(
       req.internalContext?.paymentProofClaimId || ""
     ).trim();
+    const preparedPaymentProofClaim =
+      req.internalContext?.paymentProofClaim &&
+      typeof req.internalContext.paymentProofClaim === "object"
+        ? req.internalContext.paymentProofClaim
+        : null;
     const paymentFinalizationLeaseId = String(
       req.internalContext?.paymentFinalizationLeaseId || ""
     ).trim();
@@ -1300,7 +1305,7 @@ export default async function handler(req, res) {
     let paymentProofClaim = null;
     let paymentRecordForLease = null;
     if (paymentProofClaimId || paymentFinalizationLeaseId) {
-      const requiresPaymentProofClaim = paymentProvider !== "free";
+      const requiresPaymentProofClaim = true;
       if (
         !paymentRecordId ||
         !paymentFinalizationLeaseId ||
@@ -1311,7 +1316,9 @@ export default async function handler(req, res) {
         });
       }
       [paymentProofClaim, paymentRecordForLease] = await Promise.all([
-        paymentProofClaimId
+        preparedPaymentProofClaim?._id === paymentProofClaimId
+          ? Promise.resolve(preparedPaymentProofClaim)
+          : paymentProofClaimId
           ? writeClient.fetch(
               `*[_type == "paymentProofClaim" && _id == $id][0]{...}`,
               { id: paymentProofClaimId }

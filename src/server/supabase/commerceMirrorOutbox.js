@@ -160,18 +160,34 @@ export const drainCommerceMirrorOutbox = async ({
   supabaseClient,
   sanityClient,
   failClosed = false,
+  requiredDocumentIds = [],
   limit = 25,
   maxBatches = 4,
 } = {}) => {
   if (!supabaseClient?.rpc || !sanityClient?.transaction) {
+    if (failClosed) {
+      const error = new Error("Commerce fallback mirroring is unavailable.");
+      error.code = "COMMERCE_MIRROR_UNAVAILABLE";
+      error.status = 503;
+      error.statusCode = 503;
+      throw error;
+    }
     return { supported: false, attempted: 0, mirrored: 0, failed: 0 };
   }
 
   const summary = { supported: true, attempted: 0, mirrored: 0, failed: 0 };
+  const requiredIds = normalizeIds(requiredDocumentIds);
+  const eventIsRequired = (event) =>
+    requiredIds.length < 1 ||
+    normalizeIds(event?.document_ids).some((id) => requiredIds.includes(id));
   const finish = async () => {
     if (failClosed) {
       const backlog = requireRpc(
-        await supabaseClient.rpc("roo_commerce_mirror_backlog"),
+        requiredIds.length > 0
+          ? await supabaseClient.rpc("roo_commerce_mirror_status_for_ids", {
+              p_document_ids: requiredIds,
+            })
+          : await supabaseClient.rpc("roo_commerce_mirror_backlog"),
         "commerce mirror backlog check"
       );
       if (Number(backlog?.pending || 0) > 0) {
@@ -198,6 +214,14 @@ export const drainCommerceMirrorOutbox = async ({
       );
     } catch (error) {
       if (isMissingRpc(error) || Number(error?.status) === 501) {
+        if (failClosed) {
+          const failure = new Error("Commerce fallback mirroring is unavailable.");
+          failure.code = "COMMERCE_MIRROR_UNAVAILABLE";
+          failure.status = 503;
+          failure.statusCode = 503;
+          failure.cause = error;
+          throw failure;
+        }
         return { ...summary, supported: false };
       }
       if (failClosed) throw error;
@@ -236,7 +260,7 @@ export const drainCommerceMirrorOutbox = async ({
         } catch (completionError) {
           logSafeError("Commerce mirror retry recording failed", completionError);
         }
-        if (failClosed) {
+        if (failClosed && eventIsRequired(event)) {
           const failure = new Error(
             "The commerce write is safe, but its Sanity fallback mirror is still pending."
           );
@@ -252,13 +276,6 @@ export const drainCommerceMirrorOutbox = async ({
     if (events.length < Math.max(1, Math.min(100, Number(limit) || 25))) {
       return finish();
     }
-  }
-  if (failClosed && summary.failed > 0) {
-    const error = new Error("Commerce fallback mirroring remains pending.");
-    error.code = "COMMERCE_MIRROR_PENDING";
-    error.status = 503;
-    error.statusCode = 503;
-    throw error;
   }
   return finish();
 };

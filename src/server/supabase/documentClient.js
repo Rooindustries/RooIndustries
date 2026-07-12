@@ -1,6 +1,7 @@
 import { evaluate, parse } from "groq-js";
 import {
   applyShadowMutations,
+  fetchCommerceAvailability,
   fetchRecoveryPaymentDocuments,
   fetchShadowDocuments,
 } from "./shadowStore.js";
@@ -178,8 +179,8 @@ class PatchBuilder extends PatchSpec {
     this.client = client;
   }
 
-  commit() {
-    return this.client.commitPatch(this);
+  commit(options = {}) {
+    return this.client.commitPatch(this, options);
   }
 }
 
@@ -212,13 +213,17 @@ class TransactionBuilder {
     return this;
   }
 
-  delete(id) {
-    this.operations.push({ type: "delete", id: String(id || "").trim() });
+  delete(id, options = {}) {
+    this.operations.push({
+      type: "delete",
+      id: String(id || "").trim(),
+      expectedRevision: String(options?.ifRevisionId || "").trim(),
+    });
     return this;
   }
 
-  commit() {
-    return this.client.commitTransaction(this.operations);
+  commit(options = {}) {
+    return this.client.commitTransaction(this.operations, options);
   }
 }
 
@@ -316,6 +321,20 @@ export class SupabaseDocumentClient {
     return value.get();
   }
 
+  async getDocument(id) {
+    const normalizedId = String(id || "").trim();
+    if (!normalizedId) return null;
+    const documents = await this.dataset({ ids: [normalizedId], limit: 1 });
+    return documents?.[0] || null;
+  }
+
+  fetchAvailability() {
+    if (!this.commerceOnly) {
+      throw new Error("Typed availability is only available to commerce clients.");
+    }
+    return fetchCommerceAvailability({ client: this.shadowClient });
+  }
+
   config() {
     return { projectId: "supabase", dataset: "commerce" };
   }
@@ -328,32 +347,35 @@ export class SupabaseDocumentClient {
     return new TransactionBuilder(this);
   }
 
-  async create(document) {
+  async create(document, options = {}) {
     const [created] = await applyShadowMutations({
       client: this.shadowClient,
       commerceMode: this.commerceOnly,
       cutoverGeneration: this.cutoverGeneration,
+      commandId: options?.commandId,
       mutations: [{ operation: "create", document }],
     });
     return created;
   }
 
-  async createIfNotExists(document) {
+  async createIfNotExists(document, options = {}) {
     const [created] = await applyShadowMutations({
       client: this.shadowClient,
       commerceMode: this.commerceOnly,
       cutoverGeneration: this.cutoverGeneration,
+      commandId: options?.commandId,
       mutations: [{ operation: "create_if_missing", document }],
     });
     return created;
   }
 
-  async createOrReplace(document) {
+  async createOrReplace(document, options = {}) {
     const existing = await this.fetch(`*[_id == $id][0]`, { id: document?._id });
     const [created] = await applyShadowMutations({
       client: this.shadowClient,
       commerceMode: this.commerceOnly,
       cutoverGeneration: this.cutoverGeneration,
+      commandId: options?.commandId,
       mutations: [
         existing
           ? {
@@ -367,7 +389,7 @@ export class SupabaseDocumentClient {
     return created;
   }
 
-  async delete(target) {
+  async delete(target, options = {}) {
     if (typeof target === "string") {
       const existing = await this.fetch(`*[_id == $id][0]`, { id: target });
       if (!existing) return null;
@@ -375,6 +397,7 @@ export class SupabaseDocumentClient {
         client: this.shadowClient,
         commerceMode: this.commerceOnly,
         cutoverGeneration: this.cutoverGeneration,
+        commandId: options?.commandId,
         mutations: [
           {
             operation: "delete",
@@ -396,11 +419,12 @@ export class SupabaseDocumentClient {
       client: this.shadowClient,
       commerceMode: this.commerceOnly,
       cutoverGeneration: this.cutoverGeneration,
+      commandId: options?.commandId,
       mutations: ids.map((id) => ({ operation: "delete", id })),
     });
   }
 
-  async commitPatch(patch) {
+  async commitPatch(patch, options = {}) {
     const current = await this.fetch(`*[_id == $id][0]`, { id: patch.id });
     if (!current) {
       const error = new Error("Document not found.");
@@ -411,6 +435,7 @@ export class SupabaseDocumentClient {
       client: this.shadowClient,
       commerceMode: this.commerceOnly,
       cutoverGeneration: this.cutoverGeneration,
+      commandId: options?.commandId,
       mutations: [
         {
           operation: "replace",
@@ -422,7 +447,7 @@ export class SupabaseDocumentClient {
     return updated;
   }
 
-  async commitTransaction(operations) {
+  async commitTransaction(operations, options = {}) {
     const operationIds = operations
       .map((operation) => operation.patch?.id || operation.id || operation.document?._id)
       .filter(Boolean);
@@ -449,7 +474,8 @@ export class SupabaseDocumentClient {
         mutations.push({
           operation: "delete",
           id: operation.id,
-          expected_revision: current?._rev || "",
+          expected_revision:
+            operation.expectedRevision || current?._rev || "",
         });
         documents.delete(operation.id);
         continue;
@@ -477,6 +503,7 @@ export class SupabaseDocumentClient {
       client: this.shadowClient,
       commerceMode: this.commerceOnly,
       cutoverGeneration: this.cutoverGeneration,
+      commandId: options?.commandId,
       mutations,
     });
     return {

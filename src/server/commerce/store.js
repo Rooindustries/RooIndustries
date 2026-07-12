@@ -19,6 +19,24 @@ export class CommerceStore {
     return this.client.fetch(query, params);
   }
 
+  getDocument(id) {
+    return typeof this.client.getDocument === "function"
+      ? this.client.getDocument(id)
+      : this.client.fetch(`*[_id == $id][0]`, { id });
+  }
+
+  async fetchAvailability({ bookingsQuery, holdsQuery, slotLocksQuery } = {}) {
+    if (typeof this.client.fetchAvailability === "function") {
+      return this.client.fetchAvailability();
+    }
+    const [bookings, holds, slotLocks] = await Promise.all([
+      this.client.fetch(bookingsQuery),
+      this.client.fetch(holdsQuery),
+      this.client.fetch(slotLocksQuery),
+    ]);
+    return { bookings, holds, slotLocks };
+  }
+
   create(document, ...args) {
     return this.client.create(document, ...args);
   }

@@ -1,6 +1,3 @@
--- The first version reached the hosted migration history before its fixture
--- exposed nullable imported identity timestamps. Reapply the complete function
--- so live and fresh databases share the same defensive behavior.
 create or replace function public.roo_bootstrap_native_account(
   p_user_id uuid
 )
@@ -145,7 +142,7 @@ begin
     ))), ''),
     lower(coalesce(auth_identity.identity_data->>'email_verified', 'false')) = 'true'
       or v_user.email_confirmed_at is not null,
-    coalesce(auth_identity.created_at, now()),
+    auth_identity.created_at,
     auth_identity.last_sign_in_at,
     coalesce(auth_identity.identity_data, '{}'::jsonb)
   from auth.identities auth_identity

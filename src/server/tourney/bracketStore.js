@@ -1,7 +1,10 @@
 import crypto from "crypto";
 import { BracketsManager } from "brackets-manager";
 import {
+  assertSupabaseTourneySchemaVersion,
   getTourneySql as getSql,
+  isSupabaseTourneyDatabase,
+  runSupabaseTourneyTransaction,
   resolveTourneyDatabaseUrl as getDatabaseUrl,
 } from "./sqlClient.js";
 
@@ -189,7 +192,13 @@ export const resetMemoryTourneyBracketStoreForTests = () => {
 };
 
 export async function ensureTourneyBracketSchema(env = process.env) {
-  if (isMemoryMode(env) || schemaReady) return;
+  if (isMemoryMode(env)) return;
+
+  if (isSupabaseTourneyDatabase(env)) {
+    await assertSupabaseTourneySchemaVersion(env);
+    return;
+  }
+  if (schemaReady) return;
 
   const sql = await getSql(env);
   await runSchemaStatement(() => sql`
@@ -389,8 +398,14 @@ class SqlBracketStorage {
       return rows?.[0] ? clone(rows[0].data) : null;
     }
 
-    const rows = await this.select(table);
-    return rows.filter((row) => matchesFilter(row, arg));
+    const rows = await sql`
+      select data
+      from tourney_bracket_entities
+      where entity_type = ${table}
+        and data @> ${JSON.stringify(arg)}::jsonb
+      order by entity_id asc
+    `;
+    return rows.map((row) => clone(row.data));
   }
 
   async update(table, arg, value) {
@@ -512,6 +527,13 @@ const withBracketMutation = async ({ actorUsername, env, callback }) => {
   }
 
   await ensureTourneyBracketSchema(env);
+  if (isSupabaseTourneyDatabase(env)) {
+    return runSupabaseTourneyTransaction({
+      env,
+      lockKey: "roo-tourney-bracket",
+      callback,
+    });
+  }
   const sql = await getSql(env);
   const rows = await sql`
     insert into tourney_bracket_lock (id, locked_until, locked_by)
@@ -543,7 +565,7 @@ const readMeta = async (env = process.env) => {
   await ensureTourneyBracketSchema(env);
   const sql = await getSql(env);
   const rows = await sql`
-    select *
+    select id, stage_id, status, published, generated_at, updated_at, updated_by
     from tourney_bracket_meta
     where id = ${TOURNEY_META_ID}
     limit 1
@@ -634,8 +656,15 @@ export const listTourneyBracketTeams = async ({
   await ensureTourneyBracketSchema(env);
   const sql = await getSql(env);
   const rows = includeDisqualified
-    ? await sql`select * from tourney_bracket_teams`
-    : await sql`select * from tourney_bracket_teams where status = 'active'`;
+    ? await sql`
+        select id, name, seed_order, status, created_at, updated_at, updated_by
+        from tourney_bracket_teams
+      `
+    : await sql`
+        select id, name, seed_order, status, created_at, updated_at, updated_by
+        from tourney_bracket_teams
+        where status = 'active'
+      `;
   return rows.map(mapTeamRow).sort(compareTeams);
 };
 
@@ -874,6 +903,19 @@ export const generateTourneyBracket = async ({
   });
 
 const readEngineData = async (env = process.env) => {
+  if (!isMemoryMode(env) && isSupabaseTourneyDatabase(env)) {
+    await ensureTourneyBracketSchema(env);
+    const sql = await getSql(env);
+    const rows = await sql`
+      select entity_type, data
+      from tourney_bracket_entities
+      where entity_type = any(${ENGINE_TABLES})
+      order by entity_type asc, entity_id asc
+    `;
+    const data = Object.fromEntries(ENGINE_TABLES.map((table) => [table, []]));
+    for (const row of rows) data[row.entity_type]?.push(clone(row.data));
+    return data;
+  }
   const storage = createStorage(env);
   const data = {};
   for (const table of ENGINE_TABLES) {
@@ -1390,7 +1432,7 @@ const listAudit = async ({ env = process.env } = {}) => {
   await ensureTourneyBracketSchema(env);
   const sql = await getSql(env);
   const rows = await sql`
-    select *
+    select id, action, actor_username, match_id, team_id, reason, payload, created_at
     from tourney_bracket_audit
     order by created_at desc
     limit 20

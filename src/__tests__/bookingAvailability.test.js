@@ -81,4 +81,28 @@ describe("getBookingAvailability", () => {
     const availability = await getBookingAvailability({ client });
     expect(availability.bookedSlots).toEqual([]);
   });
+
+  test("uses one typed availability read when the backend provides it", async () => {
+    const client = {
+      fetchAvailability: jest.fn().mockResolvedValue({
+        bookings: [
+          {
+            _id: "booking_typed",
+            startTimeUTC: "2099-01-05T04:30:00.000Z",
+            status: "captured",
+          },
+        ],
+        holds: [],
+        slotLocks: [],
+      }),
+      fetch: jest.fn(),
+    };
+
+    const availability = await getBookingAvailability({ client });
+    expect(client.fetchAvailability).toHaveBeenCalledTimes(1);
+    expect(client.fetch).not.toHaveBeenCalled();
+    expect(availability.bookedSlots).toEqual([
+      { startTimeUTC: "2099-01-05T04:30:00.000Z", isHold: false },
+    ]);
+  });
 });

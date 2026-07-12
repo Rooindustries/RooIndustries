@@ -624,6 +624,16 @@ beforeEach(() => {
     }
 
     const bookingId = override.bookingId || `booking_${bookingCounter++}`;
+    const preparedProof = req.internalContext?.paymentProofClaim;
+    if (preparedProof?._id) {
+      const existingProof = findDocById(preparedProof._id);
+      if (
+        existingProof &&
+        existingProof.paymentRecordId !== preparedProof.paymentRecordId
+      ) {
+        return res.status(409).json({ error: "Payment proof was already used." });
+      }
+    }
     store.bookings.push({
       _id: bookingId,
       _type: "booking",
@@ -636,6 +646,14 @@ beforeEach(() => {
       razorpayOrderId: req.body.razorpayOrderId || "",
       razorpayPaymentId: req.body.razorpayPaymentId || "",
     });
+    if (preparedProof?._id && !findDocById(preparedProof._id)) {
+      store.paymentProofClaims.push({
+        ...preparedProof,
+        bookingId,
+        status: "claimed",
+        _rev: nextRevision(),
+      });
+    }
 
     if (req.body.slotHoldId) {
       removeDocById(req.body.slotHoldId);

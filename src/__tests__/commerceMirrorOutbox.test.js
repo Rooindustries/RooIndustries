@@ -240,4 +240,65 @@ describe("commerce mirror outbox", () => {
     expect(sanity.operations[0].values).not.toHaveProperty("resetTokenHash");
     expect(sanity.operations[0].values).not.toHaveProperty("creatorEmail");
   });
+
+  test("does not let an unrelated dead letter block a required payment mirror", async () => {
+    const supabase = {
+      rpc: jest
+        .fn()
+        .mockResolvedValueOnce({
+          data: [
+            {
+              event_key: `commerce-mirror:${"1".repeat(64)}`,
+              document_ids: ["booking.unrelated"],
+              documents: [{ _id: "booking.unrelated", _type: "booking" }],
+              deleted_ids: [],
+            },
+          ],
+          error: null,
+        })
+        .mockResolvedValueOnce({ data: { mirrored: false }, error: null })
+        .mockResolvedValueOnce({ data: { pending: 0 }, error: null }),
+    };
+
+    await expect(
+      drainCommerceMirrorOutbox({
+        supabaseClient: supabase,
+        sanityClient: createSanity({ fail: true }),
+        failClosed: true,
+        requiredDocumentIds: ["payment.required"],
+      })
+    ).resolves.toMatchObject({ supported: true, failed: 1 });
+    expect(supabase.rpc).toHaveBeenLastCalledWith(
+      "roo_commerce_mirror_status_for_ids",
+      { p_document_ids: ["payment.required"] }
+    );
+  });
+
+  test("still fails closed when the failed event contains a required record", async () => {
+    const supabase = {
+      rpc: jest
+        .fn()
+        .mockResolvedValueOnce({
+          data: [
+            {
+              event_key: `commerce-mirror:${"2".repeat(64)}`,
+              document_ids: ["payment.required"],
+              documents: [{ _id: "payment.required", _type: "paymentRecord" }],
+              deleted_ids: [],
+            },
+          ],
+          error: null,
+        })
+        .mockResolvedValueOnce({ data: { mirrored: false }, error: null }),
+    };
+
+    await expect(
+      drainCommerceMirrorOutbox({
+        supabaseClient: supabase,
+        sanityClient: createSanity({ fail: true }),
+        failClosed: true,
+        requiredDocumentIds: ["payment.required"],
+      })
+    ).rejects.toMatchObject({ code: "COMMERCE_MIRROR_PENDING", status: 503 });
+  });
 });

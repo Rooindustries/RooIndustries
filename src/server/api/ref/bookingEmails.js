@@ -31,9 +31,13 @@ const createResendClient = () => {
 
 const resend = createResendClient();
 
-const flushCriticalBookingMirror = async (client) => {
+const flushCriticalBookingMirror = async (client, requiredDocumentIds = []) => {
   if (typeof client?.flushCommerceMirror !== "function") return null;
-  return client.flushCommerceMirror({ failClosed: true, limit: 100 });
+  return client.flushCommerceMirror({
+    failClosed: true,
+    requiredDocumentIds: [...new Set(requiredDocumentIds.filter(Boolean))],
+    limit: 100,
+  });
 };
 
 const recordEmailLedgerOutcome = async ({
@@ -493,7 +497,7 @@ export const sendBookingEmailsForBooking = async ({
   }
 
   try {
-    await flushCriticalBookingMirror(client);
+    await flushCriticalBookingMirror(client, [resolvedBooking._id]);
   } catch (error) {
     await client
       .patch(resolvedBooking._id)
@@ -631,7 +635,9 @@ export const sendBookingEmailsForBooking = async ({
       ? ""
       : new Date(nowMs + 5 * 60 * 1000).toISOString();
     await client.patch(resolvedBooking._id).set(patchValues).commit();
-    await flushCriticalBookingMirror(client).catch(() => null);
+    await flushCriticalBookingMirror(client, [resolvedBooking._id]).catch(
+      () => null
+    );
     return {
       httpStatus: dispatch.allSent ? 200 : 503,
       body: {
@@ -823,7 +829,7 @@ export const sendBookingEmailsForBooking = async ({
   }
 
   try {
-    await flushCriticalBookingMirror(client);
+    await flushCriticalBookingMirror(client, [resolvedBooking._id]);
   } catch {
     return {
       httpStatus: 503,
@@ -974,7 +980,7 @@ export const dispatchRescheduleNotifications = async ({
   }
 
   try {
-    await flushCriticalBookingMirror(client);
+    await flushCriticalBookingMirror(client, [recoveryBooking._id]);
   } catch {
     await client
       .patch(recoveryBooking._id)
@@ -1286,7 +1292,10 @@ export const dispatchRescheduleNotifications = async ({
   }
 
   try {
-    await flushCriticalBookingMirror(client);
+    await flushCriticalBookingMirror(client, [
+      recoveryBooking._id,
+      recoveryCase?._id,
+    ]);
   } catch {
     return {
       ok: false,

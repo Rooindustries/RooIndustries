@@ -388,6 +388,32 @@ if (
     "Supabase Tourney mode requires SUPABASE_DATABASE_URL."
   );
 }
+if (tourneyDatabaseMode === "supabase" && hasAny(["SUPABASE_DATABASE_URL"])) {
+  try {
+    const databaseUrl = new URL(getFirstValue(["SUPABASE_DATABASE_URL"]));
+    const apiUrl = new URL(
+      getFirstValue(["SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"])
+    );
+    const projectRef = apiUrl.hostname.split(".")[0];
+    const isSupabaseHost =
+      databaseUrl.hostname === `db.${projectRef}.supabase.co` ||
+      databaseUrl.hostname.endsWith(".pooler.supabase.com");
+    const identifiesProject =
+      databaseUrl.hostname === `db.${projectRef}.supabase.co` ||
+      databaseUrl.username.endsWith(`.${projectRef}`);
+    if (
+      !["postgres:", "postgresql:"].includes(databaseUrl.protocol) ||
+      !isSupabaseHost ||
+      !identifiesProject
+    ) {
+      throw new Error("wrong Supabase project database");
+    }
+  } catch {
+    supabaseConsistencyFailures.push(
+      "SUPABASE_DATABASE_URL must connect to the configured Supabase project, not the legacy Tourney database."
+    );
+  }
+}
 if (
   licensingEnabled &&
   getFirstValue(["APP_DEVICE_HASH_SECRET"]).length < 32

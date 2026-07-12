@@ -4,6 +4,7 @@ import {
   selectCanaryBackend,
 } from "../server/supabase/runtime";
 import {
+  buildCommerceCommandId,
   hashShadowDocument,
   importShadowDocuments,
   normalizeShadowDocument,
@@ -84,6 +85,16 @@ const createRpcClient = (seed = []) => {
           error: null,
         };
       }
+      if (name === "roo_fetch_commerce_availability") {
+        return {
+          data: {
+            bookings: [{ _id: "booking.typed", _type: "booking" }],
+            holds: [],
+            slotLocks: [],
+          },
+          error: null,
+        };
+      }
       return { data: null, error: { code: "UNKNOWN_RPC" } };
     }),
   };
@@ -122,6 +133,18 @@ describe("Supabase shadow document utilities", () => {
     expect(hashShadowDocument({ b: 2, a: 1 })).toBe(
       hashShadowDocument({ a: 1, b: 2 })
     );
+  });
+
+  test("commerce command IDs are stable across object key order", () => {
+    const left = buildCommerceCommandId({
+      cutoverGeneration: 3,
+      mutations: [{ operation: "create", document: { b: 2, a: 1 } }],
+    });
+    const right = buildCommerceCommandId({
+      mutations: [{ document: { a: 1, b: 2 }, operation: "create" }],
+      cutoverGeneration: 3,
+    });
+    expect(left).toBe(right);
   });
 
   test("normalization preserves Sanity identity and timestamps", () => {
@@ -264,6 +287,86 @@ describe("Supabase document compatibility client", () => {
       "roo_refresh_operational_shadow",
       expect.anything()
     );
+  });
+
+  test("forwards an explicit business command ID through a transaction", async () => {
+    const shadowClient = createRpcClient([]);
+    const client = new SupabaseDocumentClient({
+      shadowClient,
+      commerceOnly: true,
+      cutoverGeneration: 9,
+    });
+
+    await client
+      .transaction()
+      .create({ _id: "payment.stable", _type: "paymentRecord" })
+      .commit({ commandId: "payment-start:stable-scope" });
+
+    expect(shadowClient.rpc).toHaveBeenCalledWith(
+      "roo_apply_commerce_document_mutations",
+      expect.objectContaining({ p_command_id: "payment-start:stable-scope" })
+    );
+  });
+
+  test("keeps exact document reads inside the commerce payload guard", async () => {
+    const shadowClient = createRpcClient([
+      {
+        _id: "payment.oversized",
+        _type: "paymentRecord",
+        payload: "x".repeat(260 * 1024),
+      },
+    ]);
+    const client = new SupabaseDocumentClient({
+      shadowClient,
+      commerceOnly: true,
+    });
+
+    await expect(client.getDocument("payment.oversized")).rejects.toMatchObject({
+      code: "COMMERCE_PAYLOAD_BUDGET_EXCEEDED",
+      statusCode: 503,
+    });
+    expect(shadowClient.rpc).toHaveBeenCalledWith(
+      "roo_fetch_shadow_documents_targeted",
+      expect.objectContaining({ p_ids: ["payment.oversized"] })
+    );
+  });
+
+  test("loads availability from the typed bounded RPC", async () => {
+    const shadowClient = createRpcClient([]);
+    const client = new SupabaseDocumentClient({
+      shadowClient,
+      commerceOnly: true,
+    });
+    await expect(client.fetchAvailability()).resolves.toEqual({
+      bookings: [{ _id: "booking.typed", _type: "booking" }],
+      holds: [],
+      slotLocks: [],
+    });
+    expect(shadowClient.rpc).toHaveBeenCalledWith(
+      "roo_fetch_commerce_availability"
+    );
+    expect(shadowClient.rpc).not.toHaveBeenCalledWith(
+      "roo_fetch_shadow_documents_targeted",
+      expect.anything()
+    );
+  });
+
+  test("uses the caller revision when deleting a repaired hold", async () => {
+    const shadowClient = createRpcClient([
+      { _id: "hold.stale", _type: "slotHold", _rev: "current" },
+    ]);
+    const client = new SupabaseDocumentClient({
+      shadowClient,
+      commerceOnly: true,
+    });
+
+    await expect(
+      client
+        .transaction()
+        .delete("hold.stale", { ifRevisionId: "older" })
+        .commit({ commandId: "integrity-repair:stale-hold" })
+    ).rejects.toMatchObject({ status: 409 });
+    expect(shadowClient.documents.has("hold.stale")).toBe(true);
   });
 
   test("fails closed before an unscoped commerce read can download the dataset", async () => {

@@ -338,13 +338,65 @@ const replayQueries = async (documents) => {
     commerceOnly: true,
   });
   const failures = [];
-  for (const replay of buildReplayCases(documents)) {
+  const replayCases = buildReplayCases(documents);
+  const availabilityNames = new Set([
+    "availability-bookings",
+    "availability-holds",
+    "availability-locks",
+  ]);
+  for (const replay of replayCases.filter(
+    (candidate) => !availabilityNames.has(candidate.name)
+  )) {
     const [sanityValue, supabaseValue] = await Promise.all([
       sanity.fetch(replay.query, replay.params),
       client.fetch(replay.query, replay.params),
     ]);
     if (hash(canonicalResult(sanityValue)) !== hash(canonicalResult(supabaseValue))) {
       failures.push({ name: replay.name, category: "query_result_mismatch" });
+    }
+  }
+
+  const availabilityCases = new Map(
+    replayCases
+      .filter((candidate) => availabilityNames.has(candidate.name))
+      .map((candidate) => [candidate.name, candidate])
+  );
+  const [sanityBookings, sanityHolds, sanityLocks, supabaseAvailability] =
+    await Promise.all([
+      sanity.fetch(
+        availabilityCases.get("availability-bookings").query,
+        {}
+      ),
+      sanity.fetch(availabilityCases.get("availability-holds").query, {}),
+      sanity.fetch(availabilityCases.get("availability-locks").query, {}),
+      client.fetchAvailability(),
+    ]);
+  const now = Date.now();
+  const effectiveSanity = {
+    bookings: sanityBookings || [],
+    holds: (sanityHolds || []).filter((hold) => {
+      const phase = String(hold?.phase || "active").toLowerCase();
+      const expiry = new Date(hold?.expiresAt || "").getTime();
+      return (
+        !["released", "consumed"].includes(phase) &&
+        Number.isFinite(expiry) &&
+        expiry > now
+      );
+    }),
+    slotLocks: sanityLocks || [],
+  };
+  for (const key of ["bookings", "holds", "slotLocks"]) {
+    const source = [...effectiveSanity[key]].sort((left, right) =>
+      String(left?._id || "").localeCompare(String(right?._id || ""))
+    );
+    const target = [...(supabaseAvailability[key] || [])].sort((left, right) =>
+      String(left?._id || "").localeCompare(String(right?._id || ""))
+    );
+    if (hash(canonicalResult(source)) !== hash(canonicalResult(target))) {
+      failures.push({
+        name: `typed-availability-${key}`,
+        category: "query_result_mismatch",
+      });
     }
   }
   return failures;

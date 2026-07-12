@@ -2755,7 +2755,7 @@ describe("booking reservation API", () => {
     });
   });
 
-  test("free internal finalization requires a valid lease but no payment proof claim", async () => {
+  test("free internal finalization atomically commits its prepared proof claim", async () => {
     store.coupons.push({
       _id: "coupon_internal_free",
       _rev: "coupon_internal_free_rev",
@@ -2772,6 +2772,7 @@ describe("booking reservation API", () => {
     const startTimeUTC = "2025-01-15T08:28:00.000Z";
     const hold = await reserveSlot(startTimeUTC, "Test Package");
     const paymentRecordId = "paymentRecord.free.internal_free";
+    const paymentProofClaimId = "paymentProofClaim.free.internal_free";
     const leaseId = "lease_internal_free";
     store.paymentRecords.push({
       _id: paymentRecordId,
@@ -2779,6 +2780,7 @@ describe("booking reservation API", () => {
       _type: "paymentRecord",
       provider: "free",
       status: "finalizing",
+      paymentProofClaimId,
       finalizationLeaseId: leaseId,
       finalizationLeaseExpiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
       pricingSnapshot: {
@@ -2813,6 +2815,15 @@ describe("booking reservation API", () => {
         }),
         internalContext: {
           paymentFinalizeSource: "reconcile",
+          paymentProofClaimId,
+          paymentProofClaim: {
+            _id: paymentProofClaimId,
+            _type: "paymentProofClaim",
+            paymentRecordId,
+            provider: "free",
+            providerOrderId: "",
+            providerPaymentId: "",
+          },
           paymentFinalizationLeaseId: leaseId,
         },
       },
@@ -2822,6 +2833,12 @@ describe("booking reservation API", () => {
     expect(res.statusCode).toBe(200);
     expect(store.bookings).toHaveLength(1);
     expect(store.paymentRecords[0].bookingId).toBe(res.body.bookingId);
+    expect(store.paymentProofClaims).toHaveLength(1);
+    expect(store.paymentProofClaims[0]).toMatchObject({
+      paymentRecordId,
+      bookingId: res.body.bookingId,
+      status: "claimed",
+    });
     expect(store.couponRedemptions[0].status).toBe("consumed");
   });
 
