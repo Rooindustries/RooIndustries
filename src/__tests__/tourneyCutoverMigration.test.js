@@ -19,7 +19,7 @@ const activationV4 = fs.readFileSync(
     process.cwd(),
     "supabase",
     "migrations",
-    "20260712205616_activate_tourney_schema_v4.sql"
+    "20260712224034_activate_tourney_schema_v4.sql"
   ),
   "utf8"
 );
