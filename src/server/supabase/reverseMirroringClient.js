@@ -126,7 +126,7 @@ export const retryReverseMirrorFailures = async ({
   return summary;
 };
 
-const wrapPatch = ({ patch, id, onCommitted }) => {
+const wrapPatch = ({ patch, id, onCommitted, allowDeferred = false }) => {
   const wrapper = {};
   for (const method of ["set", "setIfMissing", "unset", "inc", "dec", "ifRevisionId"]) {
     wrapper[method] = (...args) => {
@@ -136,7 +136,8 @@ const wrapPatch = ({ patch, id, onCommitted }) => {
   }
   wrapper.commit = async (...args) => {
     const result = await patch.commit(...args);
-    await onCommitted([id]);
+    const deferMirror = allowDeferred && args[0]?.deferMirror === true;
+    if (!deferMirror) await onCommitted([id]);
     return result;
   };
   return wrapper;
@@ -263,13 +264,20 @@ export const createReverseMirroringSupabaseClient = ({
       if (["create", "createIfNotExists", "createOrReplace"].includes(property)) {
         return async (document, ...args) => {
           const result = await target[property](document, ...args);
-          await onCommitted([document?._id || result?._id]);
+          const deferMirror =
+            target.commerceOnly === true && args[0]?.deferMirror === true;
+          if (!deferMirror) await onCommitted([document?._id || result?._id]);
           return result;
         };
       }
       if (property === "patch") {
         return (id) =>
-          wrapPatch({ patch: target.patch(id), id, onCommitted });
+          wrapPatch({
+            patch: target.patch(id),
+            id,
+            onCommitted,
+            allowDeferred: target.commerceOnly === true,
+          });
       }
       if (property === "transaction") {
         return () =>
