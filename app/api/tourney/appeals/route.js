@@ -3,8 +3,11 @@ import {
   TOURNEY_SESSION_COOKIE,
   checkTourneyRateLimit,
   getClientAddressFromHeaders,
+  getTourneyApprovalRecipients,
   readTourneySessionFromStore,
 } from "../../../../src/server/tourney/auth";
+import { enqueueTourneyEmailDispatch } from "../../../../src/server/tourney/emailDispatch";
+import { getApprovedTourneyPlayerById } from "../../../../src/server/tourney/playerStore";
 import {
   createTourneyAppeal,
   listTourneyAppealsForSession,
@@ -77,6 +80,14 @@ export async function POST(request) {
   try {
     const payload = await readPayload(request);
     const action = String(payload.action || "create").toLowerCase();
+    const emailContext = action === "create"
+      ? await Promise.all([
+          getTourneyApprovalRecipients(),
+          session.playerId
+            ? getApprovedTourneyPlayerById({ playerId: session.playerId })
+            : Promise.resolve(null),
+        ])
+      : [[], null];
     const commandId = readTourneyCommandId({ request });
     const command = await executeTourneyCommand({
       commandId,
@@ -84,7 +95,45 @@ export async function POST(request) {
       requestPayload: payload,
       callback: async () => {
         if (action === "create") {
-          await createTourneyAppeal({ payload, session });
+          const appeal = await createTourneyAppeal({ payload, session });
+          const baseUrl = new URL(request.url).origin;
+          if (!appeal?.id) return { body: await getAppealsBody(session) };
+          const [recipients, submitter] = emailContext;
+          for (const recipient of recipients || []) {
+            await enqueueTourneyEmailDispatch({
+              commandId,
+              dispatchKind: "appeal",
+              recipient: recipient.email,
+              entityType: "appeal",
+              entityId: appeal.id,
+              entityVersion: appeal.updatedAt,
+              audience: "admin",
+              payload: {
+                appeal,
+                submitter,
+                recipients: [recipient.email],
+                audience: "admin",
+                baseUrl,
+              },
+            });
+          }
+          if (submitter?.email) {
+            await enqueueTourneyEmailDispatch({
+              commandId,
+              dispatchKind: "appeal",
+              recipient: submitter.email,
+              entityType: "appeal",
+              entityId: appeal.id,
+              entityVersion: appeal.updatedAt,
+              audience: "submitter",
+              payload: {
+                appeal,
+                to: submitter.email,
+                audience: "submitter",
+                baseUrl,
+              },
+            });
+          }
           return { body: await getAppealsBody(session) };
         }
         if (action === "update") {

@@ -59,6 +59,7 @@
     "check:supabase:gaps": "node scripts/check-supabase-commerce-gaps.mjs --passes=2",
     "check:supabase:migrations": "node scripts/check-supabase-migrations.mjs",
     "test:supabase:migration:fixtures": "psql \"$SUPABASE_TEST_DATABASE_URL\" -v ON_ERROR_STOP=1 -f supabase/tests/commerce_integrity.sql -f supabase/tests/tourney_auth_integrity.sql -f supabase/tests/social_auth_integrity.sql",
+    "test:tourney:postgres17": "node scripts/test-tourney-hardening-postgres.mjs",
     "repair:supabase:commerce:dry-run": "node scripts/repair-supabase-commerce-integrity.mjs",
     "repair:supabase:commerce:apply": "node scripts/repair-supabase-commerce-integrity.mjs --apply",
     "sync:supabase:commerce:dry-run": "node scripts/sync-sanity-commerce-to-supabase.mjs",

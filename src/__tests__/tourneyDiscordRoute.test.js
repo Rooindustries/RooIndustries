@@ -2,8 +2,7 @@ const mockReadTourneySessionFromStore = jest.fn();
 const mockGetApprovedTourneyPlayerById = jest.fn();
 const mockListManageTourneyPlayers = jest.fn();
 const mockRecordTourneyPlayerDiscordLink = jest.fn();
-const mockMarkTourneyPlayerDiscordRoleAssigned = jest.fn();
-const mockMarkTourneyPlayerDiscordRoleFailed = jest.fn();
+const mockEnqueueTourneyExternalOperation = jest.fn();
 
 jest.mock("next/server", () => ({
   NextResponse: {
@@ -38,10 +37,13 @@ jest.mock("../server/tourney/playerStore", () => ({
   listManageTourneyPlayers: (...args) => mockListManageTourneyPlayers(...args),
   recordTourneyPlayerDiscordLink: (...args) =>
     mockRecordTourneyPlayerDiscordLink(...args),
-  markTourneyPlayerDiscordRoleAssigned: (...args) =>
-    mockMarkTourneyPlayerDiscordRoleAssigned(...args),
-  markTourneyPlayerDiscordRoleFailed: (...args) =>
-    mockMarkTourneyPlayerDiscordRoleFailed(...args),
+}));
+
+jest.mock("../server/tourney/externalOperations", () => ({
+  enqueueTourneyExternalOperation: (...args) =>
+    mockEnqueueTourneyExternalOperation(...args),
+  reconcileTourneyExternalOperations: jest.fn(async () => ({ applied: 1 })),
+  hasPendingTourneyExternalOperations: jest.fn(async () => false),
 }));
 
 const startRoute = require("../../app/api/tourney/discord/start/route.js");
@@ -104,11 +106,9 @@ describe("tourney Discord OAuth routes", () => {
     mockGetApprovedTourneyPlayerById.mockReset();
     mockListManageTourneyPlayers.mockReset();
     mockRecordTourneyPlayerDiscordLink.mockReset();
-    mockMarkTourneyPlayerDiscordRoleAssigned.mockReset();
-    mockMarkTourneyPlayerDiscordRoleFailed.mockReset();
+    mockEnqueueTourneyExternalOperation.mockReset();
     mockRecordTourneyPlayerDiscordLink.mockResolvedValue(player);
-    mockMarkTourneyPlayerDiscordRoleAssigned.mockResolvedValue(player);
-    mockMarkTourneyPlayerDiscordRoleFailed.mockResolvedValue(player);
+    mockEnqueueTourneyExternalOperation.mockResolvedValue({ status: "pending" });
   });
 
   afterAll(() => {
@@ -238,7 +238,7 @@ describe("tourney Discord OAuth routes", () => {
     expect(mockGetApprovedTourneyPlayerById).not.toHaveBeenCalled();
   });
 
-  test("links Discord identity and assigns the participant role", async () => {
+  test("commits Discord identity and queues the participant role", async () => {
     const state = discordOAuth.createTourneyDiscordOAuthStateToken({
       player,
       env: process.env,
@@ -252,9 +252,7 @@ describe("tourney Discord OAuth routes", () => {
           username: "servi",
           global_name: "Serviroo",
         })
-      )
-      .mockResolvedValueOnce(jsonResponse({}, 204))
-      .mockResolvedValueOnce(jsonResponse({}, 204));
+      );
 
     const response = await callbackRoute.GET(
       makeRequest({
@@ -270,37 +268,24 @@ describe("tourney Discord OAuth routes", () => {
         global_name: "Serviroo",
       },
     });
-    expect(global.fetch.mock.calls[2][0]).toContain(
-      "/guilds/guild_1/members/discord_user_1"
+    expect(mockEnqueueTourneyExternalOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        commandId: "discord-oauth:player_1:discord_user_1",
+        operationKind: "discord_membership",
+        entityId: "player_1",
+      })
     );
-    expect(JSON.parse(global.fetch.mock.calls[2][1].body)).toEqual({
-      access_token: "user_access_token",
-    });
-    expect(global.fetch.mock.calls[3][0]).toContain(
-      "/guilds/guild_1/members/discord_user_1/roles/role_1"
-    );
-    expect(mockMarkTourneyPlayerDiscordRoleAssigned).toHaveBeenCalledWith({
-      playerId: "player_1",
-    });
+    expect(global.fetch).toHaveBeenCalledTimes(2);
     expect(response.url).toContain("discord=linked");
   });
 
-  test("records role assignment failures after Discord API errors", async () => {
+  test("fails before commit when Discord identity exchange fails", async () => {
     const state = discordOAuth.createTourneyDiscordOAuthStateToken({
       player,
       env: process.env,
     });
     mockGetApprovedTourneyPlayerById.mockResolvedValue(player);
-    global.fetch
-      .mockResolvedValueOnce(jsonResponse({ access_token: "user_access_token" }))
-      .mockResolvedValueOnce(
-        jsonResponse({
-          id: "discord_user_1",
-          username: "servi",
-          global_name: "Serviroo",
-        })
-      )
-      .mockResolvedValueOnce(jsonResponse({ message: "Missing Permissions" }, 403));
+    global.fetch.mockResolvedValueOnce(jsonResponse({ message: "Denied" }, 403));
 
     const response = await callbackRoute.GET(
       makeRequest({
@@ -308,10 +293,8 @@ describe("tourney Discord OAuth routes", () => {
       })
     );
 
-    expect(mockMarkTourneyPlayerDiscordRoleFailed).toHaveBeenCalledWith({
-      playerId: "player_1",
-      errorMessage: "discord_role_assignment_failed",
-    });
+    expect(mockRecordTourneyPlayerDiscordLink).not.toHaveBeenCalled();
+    expect(mockEnqueueTourneyExternalOperation).not.toHaveBeenCalled();
     expect(response.url).toContain("discord=role-failed");
   });
 
@@ -330,7 +313,7 @@ describe("tourney Discord OAuth routes", () => {
     expect(mockListManageTourneyPlayers).not.toHaveBeenCalled();
   });
 
-  test("backfills linked Discord members from current guild state", async () => {
+  test("dry-runs linked Discord members without mutating roles", async () => {
     mockReadTourneySessionFromStore.mockResolvedValue({
       username: "yukari",
       role: "caster",
@@ -376,10 +359,9 @@ describe("tourney Discord OAuth routes", () => {
     global.fetch
       .mockResolvedValueOnce(jsonResponse({ roles: ["role_1"] }))
       .mockResolvedValueOnce(jsonResponse({ roles: [] }))
-      .mockResolvedValueOnce(jsonResponse({}, 204))
-      .mockResolvedValueOnce(jsonResponse({ message: "Unknown Member" }, 404))
       .mockResolvedValueOnce(jsonResponse({ roles: [] }))
-      .mockResolvedValueOnce(jsonResponse({ message: "Missing Permissions" }, 403));
+      .mockResolvedValueOnce(jsonResponse({ message: "Unknown Member" }, 404))
+      .mockResolvedValueOnce(jsonResponse({ roles: [] }));
 
     const response = await backfillRoute.POST(
       makeRequest({
@@ -388,29 +370,13 @@ describe("tourney Discord OAuth routes", () => {
     );
     const body = await response.json();
 
-    expect(body).toEqual({
+    expect(body).toMatchObject({
       ok: true,
-      checked: 4,
-      alreadyHadRole: 1,
-      roleAdded: 1,
-      notInGuildNeedsReauth: 1,
-      failed: 1,
+      dryRun: true,
+      counts: { linked: 5, present: 4, blockedReauth: 1 },
     });
-    expect(mockMarkTourneyPlayerDiscordRoleAssigned).toHaveBeenCalledWith({
-      playerId: "player_1",
-    });
-    expect(mockMarkTourneyPlayerDiscordRoleAssigned).toHaveBeenCalledWith({
-      playerId: "player_2",
-    });
-    expect(mockMarkTourneyPlayerDiscordRoleFailed).toHaveBeenCalledWith({
-      playerId: "player_3",
-      errorMessage:
-        "Discord member not found after OAuth; user must re-authorize after the join fix.",
-    });
-    expect(mockMarkTourneyPlayerDiscordRoleFailed).toHaveBeenCalledWith({
-      playerId: "player_4",
-      errorMessage: "Missing Permissions",
-    });
-    expect(global.fetch).toHaveBeenCalledTimes(6);
+    expect(body.rows).toHaveLength(5);
+    expect(mockEnqueueTourneyExternalOperation).not.toHaveBeenCalled();
+    expect(global.fetch).toHaveBeenCalledTimes(5);
   });
 });

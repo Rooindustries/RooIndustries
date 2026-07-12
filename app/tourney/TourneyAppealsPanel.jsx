@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { tourneyMutationFetch } from "./tourneyMutation";
+import { tourneyMutationFetch, tourneyMutationSuccessMessage } from "./tourneyMutation";
 
 const emptyAppeal = {
   type: "team-appeal",
@@ -46,7 +46,7 @@ export default function TourneyAppealsPanel({
         throw new Error(data.error || "Unable to update appeals.");
       }
       setAppeals(data.appeals || []);
-      setMessage("Appeals updated.");
+      setMessage(tourneyMutationSuccessMessage(data, "Appeals updated."));
       return true;
     } catch (error) {
       setMessage(error?.message || "Unable to update appeals.");

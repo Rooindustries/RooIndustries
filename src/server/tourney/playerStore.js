@@ -7,14 +7,12 @@ import {
   normalizeTwitchUsername,
 } from "./twitch.js";
 import {
-  assertSupabaseTourneySchemaVersion,
+  assertTourneySchemaVersion,
   getTourneySql as getSql,
   isSupabaseTourneyDatabase,
   resolveTourneyDatabaseUrl as getDatabaseUrl,
 } from "./sqlClient.js";
-import { syncSupabaseTourneyPlayerAccount } from "../supabase/accounts.js";
-import { logSafeError } from "../safeErrorLog.js";
-import { syncTourneyDiscordRoleAssignment } from "./discordRoleSync.js";
+import { enqueueTourneyExternalOperation } from "./externalOperations.js";
 import {
   claimSupabasePasswordReset,
   claimSupabaseRegistrationDecision,
@@ -97,8 +95,6 @@ const MEMORY_STORE =
       updatedBy: "",
     },
   });
-let schemaReady = false;
-
 export const normalizeTourneyUsername = (value) =>
   String(value || "").trim().toLowerCase();
 
@@ -232,6 +228,20 @@ const buildInternalTourneyUsername = (discord) => {
 export const createPlainToken = () =>
   crypto.randomBytes(TOKEN_BYTES).toString("base64url");
 
+export const createTourneyPasswordHash = async ({
+  allowGenerated = false,
+  password = "",
+} = {}) => {
+  const material = String(password || "") ||
+    (allowGenerated ? crypto.randomBytes(32).toString("base64url") : "");
+  if (material.length < 8) {
+    throw Object.assign(new Error("Password must be at least 8 characters."), {
+      status: 400,
+    });
+  }
+  return bcrypt.hash(material, 12);
+};
+
 const isMemoryMode = (env = process.env) =>
   env.TOURNEY_PLAYER_STORE_MODE === "memory" ||
   env.TOURNEY_DATABASE_MODE === "memory";
@@ -252,24 +262,27 @@ const syncTourneyPlayerAuth = async ({
   env = process.env,
 }) => {
   if (!shouldSyncSupabasePlayerAuth(env) && !authUserId) return;
-  try {
-    const synced = await syncSupabaseTourneyPlayerAccount({
-      player: playerRow,
-      passwordHash: playerRow.password_hash,
-      authUserId,
-      env,
-      installPassword,
-    });
-    await syncTourneyDiscordRoleAssignment({
-      env,
-      userId: synced.userId,
-    }).catch((error) => {
-      logSafeError("Supabase Tourney Discord role sync failed", error);
-    });
-  } catch (error) {
-    logSafeError("Supabase Tourney player Auth sync failed", error);
-    if (authUserId || isSupabaseTourneyDatabase(env)) throw error;
+  const sql = await getSql(env);
+  const [context] = await sql`
+    select nullif(current_setting('roo.tourney_command_id', true), '') as command_id
+  `;
+  if (!context?.command_id) {
+    const error = new Error("Tourney player Auth synchronization requires a command.");
+    error.code = "TOURNEY_COMMAND_CONTEXT_REQUIRED";
+    throw error;
   }
+  await enqueueTourneyExternalOperation({
+    commandId: context.command_id,
+    operationKind: "supabase_player_auth",
+    entityType: "player",
+    entityId: playerRow.id,
+    desiredState: {
+      player: playerRow,
+      authUserId,
+      installPassword,
+    },
+    env,
+  });
 };
 
 export const hashTourneyToken = tokenHash;
@@ -286,6 +299,7 @@ export const resetMemoryTourneyPlayerStoreForTests = () => {
 
 const mapPlayer = (row = {}) => ({
   id: row.id,
+  principalId: row.principal_id || row.principalId || "",
   username: row.username,
   email: row.email,
   status: row.status,
@@ -569,185 +583,7 @@ export const validateTourneyPlayerDetailsPayload = (payload = {}) => {
 
 export async function ensureTourneyPlayerSchema(env = process.env) {
   if (isMemoryMode(env)) return;
-
-  if (isSupabaseTourneyDatabase(env)) {
-    await assertSupabaseTourneySchemaVersion(env);
-    return;
-  }
-  if (schemaReady) return;
-
-  const sql = await getSql(env);
-  await sql`
-    create table if not exists tourney_players (
-      id text primary key,
-      username text not null unique,
-      email text not null unique,
-      password_hash text not null,
-      status text not null default 'pending',
-      discord text not null,
-      display_name text,
-      discord_key text not null unique,
-      battlenet text not null,
-      rank_name text not null,
-      role_play text not null,
-      secondary_role_play text not null default '',
-      approved_role_play text not null default '',
-      registration_pool text not null default 'main',
-      time_zone text not null default '',
-      twitch_username text,
-      team_name text,
-      available_aug_1_2 boolean not null default false,
-      accepted_rules boolean not null default false,
-      accepted_roo_visibility boolean not null default false,
-      notes text,
-      version integer not null default 1,
-      created_at timestamptz not null default now(),
-      updated_at timestamptz not null default now(),
-      approved_at timestamptz,
-      approved_by text,
-      denied_at timestamptz,
-      denied_by text,
-      removed_at timestamptz,
-      removed_by text,
-      withdrawn_at timestamptz,
-      withdrawn_by text,
-      discord_invite_sent_at timestamptz,
-      discord_invite_email_id text,
-      discord_invite_last_error text,
-      discord_user_id text,
-      discord_oauth_username text,
-      discord_oauth_global_name text,
-      discord_linked_at timestamptz,
-      discord_role_assigned_at timestamptz,
-      discord_role_last_error text,
-      constraint tourney_players_status_check
-        check (status in ('pending', 'approved', 'denied', 'withdrawn', 'removed')),
-      constraint tourney_players_registration_pool_check
-        check (registration_pool in ('main', 'substitute'))
-    )
-  `;
-  await sql`
-    alter table tourney_players
-    add column if not exists registration_pool text not null default 'main'
-  `;
-  await sql`
-    alter table tourney_players
-    add column if not exists secondary_role_play text not null default ''
-  `;
-  await sql`
-    alter table tourney_players
-    add column if not exists approved_role_play text not null default ''
-  `;
-  await sql`
-    alter table tourney_players
-    add column if not exists time_zone text not null default ''
-  `;
-  await sql`
-    alter table tourney_players
-    add column if not exists display_name text
-  `;
-  await sql`
-    alter table tourney_players
-    add column if not exists team_name text
-  `;
-  await sql`
-    alter table tourney_players
-    add column if not exists accepted_rules boolean not null default false
-  `;
-  await sql`
-    alter table tourney_players
-    add column if not exists accepted_roo_visibility boolean not null default false
-  `;
-  await sql`
-    alter table tourney_players
-    add column if not exists discord_invite_sent_at timestamptz
-  `;
-  await sql`
-    alter table tourney_players
-    add column if not exists discord_invite_email_id text
-  `;
-  await sql`
-    alter table tourney_players
-    add column if not exists discord_invite_last_error text
-  `;
-  await sql`
-    alter table tourney_players
-    add column if not exists discord_user_id text
-  `;
-  await sql`
-    alter table tourney_players
-    add column if not exists discord_oauth_username text
-  `;
-  await sql`
-    alter table tourney_players
-    add column if not exists discord_oauth_global_name text
-  `;
-  await sql`
-    alter table tourney_players
-    add column if not exists discord_linked_at timestamptz
-  `;
-  await sql`
-    alter table tourney_players
-    add column if not exists discord_role_assigned_at timestamptz
-  `;
-  await sql`
-    alter table tourney_players
-    add column if not exists discord_role_last_error text
-  `;
-  await sql`
-    alter table tourney_players
-    add column if not exists withdrawn_at timestamptz
-  `;
-  await sql`
-    alter table tourney_players
-    add column if not exists withdrawn_by text
-  `;
-  await sql`
-    alter table tourney_players
-    drop constraint if exists tourney_players_status_check
-  `;
-  await sql`
-    alter table tourney_players
-    add constraint tourney_players_status_check
-      check (status in ('pending', 'approved', 'denied', 'withdrawn', 'removed'))
-  `;
-  await sql`
-    create unique index if not exists tourney_players_discord_user_id_unique
-    on tourney_players (discord_user_id)
-    where discord_user_id is not null
-  `;
-  await sql`
-    create table if not exists tourney_player_tokens (
-      id text primary key,
-      player_id text not null references tourney_players(id) on delete cascade,
-      token_hash text not null unique,
-      purpose text not null,
-      recipient_username text,
-      recipient_email text,
-      recipient_role text,
-      recipient_version text,
-      expires_at timestamptz not null,
-      used_at timestamptz,
-      used_by text,
-      created_at timestamptz not null default now(),
-      constraint tourney_player_tokens_purpose_check
-        check (purpose in ('approve', 'deny', 'reset'))
-    )
-  `;
-  await sql`
-    create table if not exists tourney_registration_config (
-      id text primary key,
-      team_count integer not null default 8,
-      updated_at timestamptz not null default now(),
-      updated_by text
-    )
-  `;
-  await sql`
-    insert into tourney_registration_config (id, team_count)
-    values (${TOURNEY_CONFIG_ID}, ${TOURNEY_DEFAULT_TEAM_COUNT})
-    on conflict (id) do nothing
-  `;
-  schemaReady = true;
+  await assertTourneySchemaVersion(env);
 }
 
 export async function getTourneyRegistrationConfig({ env = process.env } = {}) {
@@ -971,6 +807,7 @@ export async function createPendingTourneyPlayer({
   payload,
   recipients = [],
   authUserId = "",
+  preparedPasswordHash = "",
   env = process.env,
 } = {}) {
   const validation = validateTourneyPlayerPayload(payload, {
@@ -988,9 +825,10 @@ export async function createPendingTourneyPlayer({
   await assertNoDuplicatePlayer({ value, env });
 
   const id = crypto.randomUUID();
-  const passwordMaterial =
-    value.password || crypto.randomBytes(32).toString("base64url");
-  const passwordHash = await bcrypt.hash(passwordMaterial, 12);
+  const passwordHash = preparedPasswordHash || await createTourneyPasswordHash({
+    allowGenerated: true,
+    password: value.password,
+  });
   const createdAt = nowIso();
   const playerRow = {
     id,
@@ -1112,6 +950,7 @@ export async function createPendingTourneyPlayer({
 export async function createApprovedTourneyPlayer({
   payload,
   actorUsername,
+  preparedPasswordHash = "",
   env = process.env,
 } = {}) {
   const validation = validateTourneyPlayerPayload(payload);
@@ -1126,7 +965,9 @@ export async function createApprovedTourneyPlayer({
   await assertNoDuplicatePlayer({ value, env });
 
   const id = crypto.randomUUID();
-  const passwordHash = await bcrypt.hash(value.password, 12);
+  const passwordHash = preparedPasswordHash || await createTourneyPasswordHash({
+    password: value.password,
+  });
   const createdAt = nowIso();
   const playerRow = {
     id,
@@ -1322,58 +1163,6 @@ export async function listApprovedTourneyDiscordInviteRecipients({
   return filterRows(rows);
 }
 
-export async function markTourneyDiscordInviteEmailSent({
-  playerId,
-  emailId = "",
-  sentAt = nowIso(),
-  env = process.env,
-} = {}) {
-  if (isMemoryMode(env)) {
-    const player = MEMORY_STORE.players.find((entry) => entry.id === playerId);
-    if (!player) return null;
-    player.discord_invite_sent_at = sentAt;
-    player.discord_invite_email_id = String(emailId || "");
-    player.discord_invite_last_error = "";
-    return managePlayer(player);
-  }
-
-  await ensureTourneyPlayerSchema(env);
-  const sql = await getSql(env);
-  const rows = await sql`
-    update tourney_players
-    set discord_invite_sent_at = ${sentAt},
-        discord_invite_email_id = ${String(emailId || "")},
-        discord_invite_last_error = ''
-    where id = ${playerId}
-    returning *
-  `;
-  return rows?.[0] ? managePlayer(rows[0]) : null;
-}
-
-export async function markTourneyDiscordInviteEmailFailed({
-  playerId,
-  errorMessage = "",
-  env = process.env,
-} = {}) {
-  const message = normalizeText(errorMessage).slice(0, 500);
-  if (isMemoryMode(env)) {
-    const player = MEMORY_STORE.players.find((entry) => entry.id === playerId);
-    if (!player) return null;
-    player.discord_invite_last_error = message;
-    return managePlayer(player);
-  }
-
-  await ensureTourneyPlayerSchema(env);
-  const sql = await getSql(env);
-  const rows = await sql`
-    update tourney_players
-    set discord_invite_last_error = ${message}
-    where id = ${playerId}
-    returning *
-  `;
-  return rows?.[0] ? managePlayer(rows[0]) : null;
-}
-
 export async function getApprovedTourneyPlayerById({
   playerId,
   version = "",
@@ -1438,55 +1227,6 @@ export async function recordTourneyPlayerDiscordLink({
         discord_role_last_error = ''
     where id = ${playerId}
       and status = 'approved'
-    returning *
-  `;
-  return rows?.[0] ? managePlayer(rows[0]) : null;
-}
-
-export async function markTourneyPlayerDiscordRoleAssigned({
-  playerId,
-  assignedAt = nowIso(),
-  env = process.env,
-} = {}) {
-  if (isMemoryMode(env)) {
-    const player = MEMORY_STORE.players.find((entry) => entry.id === playerId);
-    if (!player) return null;
-    player.discord_role_assigned_at = assignedAt;
-    player.discord_role_last_error = "";
-    return managePlayer(player);
-  }
-
-  await ensureTourneyPlayerSchema(env);
-  const sql = await getSql(env);
-  const rows = await sql`
-    update tourney_players
-    set discord_role_assigned_at = ${assignedAt},
-        discord_role_last_error = ''
-    where id = ${playerId}
-    returning *
-  `;
-  return rows?.[0] ? managePlayer(rows[0]) : null;
-}
-
-export async function markTourneyPlayerDiscordRoleFailed({
-  playerId,
-  errorMessage = "",
-  env = process.env,
-} = {}) {
-  const message = normalizeText(errorMessage).slice(0, 500);
-  if (isMemoryMode(env)) {
-    const player = MEMORY_STORE.players.find((entry) => entry.id === playerId);
-    if (!player) return null;
-    player.discord_role_last_error = message;
-    return managePlayer(player);
-  }
-
-  await ensureTourneyPlayerSchema(env);
-  const sql = await getSql(env);
-  const rows = await sql`
-    update tourney_players
-    set discord_role_last_error = ${message}
-    where id = ${playerId}
     returning *
   `;
   return rows?.[0] ? managePlayer(rows[0]) : null;
@@ -2051,7 +1791,7 @@ export async function findTourneyPlayerForSession({
   await ensureTourneyPlayerSchema(env);
   const sql = await getSql(env);
   const rows = await sql`
-    select id, username, status, version, display_name, discord, email,
+    select id, principal_id, username, status, version, display_name, discord, email,
       role_play, secondary_role_play, approved_role_play, registration_pool,
       twitch_username, team_name
     from tourney_players
@@ -2127,6 +1867,7 @@ export async function createTourneyResetToken({
 export async function resetTourneyPlayerPassword({
   token,
   password,
+  preparedPasswordHash = "",
   env = process.env,
 } = {}) {
   if (String(password || "").length < 8) {
@@ -2136,7 +1877,7 @@ export async function resetTourneyPlayerPassword({
   }
 
   const hashedToken = tokenHash(token);
-  const passwordHash = await bcrypt.hash(String(password), 12);
+  const passwordHash = preparedPasswordHash || await createTourneyPasswordHash({ password });
   const now = nowIso();
 
   if (isMemoryMode(env)) {

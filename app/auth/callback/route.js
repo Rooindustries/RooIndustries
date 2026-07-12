@@ -23,7 +23,7 @@ import {
   createTourneySessionToken,
   getTourneyCookieOptions,
 } from "@/src/server/tourney/auth";
-import { syncTourneyDiscordRoleAssignment } from "@/src/server/tourney/discordRoleSync";
+import { queueTourneyDiscordAuthProjection } from "@/src/server/tourney/discordDesiredState";
 import {
   clearReauthCookie,
   createReauthToken,
@@ -142,6 +142,10 @@ const tourneySession = (account) => {
       role,
       username: account.tourney_username,
       version: String(account.credential_version || "1"),
+      ...(account.principal_id ? { principalId: account.principal_id } : {}),
+      ...(account.tourney_legacy_player_id || account.legacy_sanity_id
+        ? { playerId: account.tourney_legacy_player_id || account.legacy_sanity_id }
+        : {}),
     },
   });
   return value
@@ -345,7 +349,7 @@ export async function GET(request) {
     }
 
     if (finalized.provider === "discord") {
-      const sync = await syncTourneyDiscordRoleAssignment({
+      const sync = await queueTourneyDiscordAuthProjection({
         accessToken: String(result.data.session.provider_token || ""),
         userId: result.data.user.id,
       });

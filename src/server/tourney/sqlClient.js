@@ -11,6 +11,7 @@ const ACTIVE_TOURNEY_SQL =
   (globalThis.__rooActiveTourneySql = new AsyncLocalStorage());
 
 export const REQUIRED_SUPABASE_TOURNEY_SCHEMA_VERSION = 3;
+export const REQUIRED_HARDENED_TOURNEY_SCHEMA_VERSION = 4;
 
 const normalize = (value) => String(value || "").trim();
 
@@ -70,6 +71,7 @@ export const getTourneySql = async (env = process.env) => {
 export const runTourneyTransaction = async ({
   env = process.env,
   lockKey = "roo-tourney-transaction",
+  waitForLock = false,
   callback,
 } = {}) => {
   if (typeof callback !== "function") {
@@ -78,17 +80,25 @@ export const runTourneyTransaction = async ({
   const active = ACTIVE_TOURNEY_SQL.getStore();
   if (active) return callback(active);
 
-  if (isSupabaseTourneyDatabase(env)) {
-    await assertSupabaseTourneySchemaVersion(env);
-  }
+  await assertTourneySchemaVersion(env);
   const root = await getBaseTourneySql(env);
   return root.begin(async (sql) => {
-    const rows = await sql`
-      select pg_catalog.pg_try_advisory_xact_lock(
-        pg_catalog.hashtextextended(${String(lockKey)}, 0)
-      ) as locked
-    `;
-    if (rows?.[0]?.locked !== true) {
+    let locked = true;
+    if (waitForLock) {
+      await sql`
+        select pg_catalog.pg_advisory_xact_lock(
+          pg_catalog.hashtextextended(${String(lockKey)}, 0)
+        )
+      `;
+    } else {
+      const rows = await sql`
+        select pg_catalog.pg_try_advisory_xact_lock(
+          pg_catalog.hashtextextended(${String(lockKey)}, 0)
+        ) as locked
+      `;
+      locked = rows?.[0]?.locked === true;
+    }
+    if (!locked) {
       const error = new Error("Tourney data is busy. Try again.");
       error.status = 409;
       error.code = "TOURNEY_TRANSACTION_BUSY";
@@ -106,7 +116,10 @@ export const assertSupabaseTourneySchemaVersion = async (
   if (!isSupabaseTourneyDatabase(env)) return true;
 
   const databaseUrl = resolveTourneyDatabaseUrl(env);
-  const cacheKey = `supabase:${databaseUrl}`;
+  const required = String(env.TOURNEY_HARDENING_V4_ENABLED || "") === "1"
+    ? REQUIRED_HARDENED_TOURNEY_SCHEMA_VERSION
+    : REQUIRED_SUPABASE_TOURNEY_SCHEMA_VERSION;
+  const cacheKey = `supabase:v${required}:${databaseUrl}`;
   if (SCHEMA_CHECKS.has(cacheKey)) return SCHEMA_CHECKS.get(cacheKey);
 
   const check = (async () => {
@@ -119,7 +132,7 @@ export const assertSupabaseTourneySchemaVersion = async (
         limit 1
       `;
       const version = Number(rows?.[0]?.schema_version || 0);
-      if (version < REQUIRED_SUPABASE_TOURNEY_SCHEMA_VERSION) {
+      if (version < required) {
         throw new Error("Supabase Tourney schema is not ready.");
       }
       return true;
@@ -134,6 +147,43 @@ export const assertSupabaseTourneySchemaVersion = async (
     }
   })();
 
+  SCHEMA_CHECKS.set(cacheKey, check);
+  try {
+    return await check;
+  } catch (error) {
+    SCHEMA_CHECKS.delete(cacheKey);
+    throw error;
+  }
+};
+
+export const assertTourneySchemaVersion = async (env = process.env) => {
+  if (isSupabaseTourneyDatabase(env)) return assertSupabaseTourneySchemaVersion(env);
+  if (env.TOURNEY_DATABASE_MODE === "memory" || env.NODE_ENV === "test") return true;
+  const databaseUrl = resolveTourneyDatabaseUrl(env);
+  const required = String(env.TOURNEY_HARDENING_V4_ENABLED || "") === "1"
+    ? REQUIRED_HARDENED_TOURNEY_SCHEMA_VERSION
+    : REQUIRED_SUPABASE_TOURNEY_SCHEMA_VERSION;
+  const cacheKey = `legacy:v${required}:${databaseUrl}`;
+  if (SCHEMA_CHECKS.has(cacheKey)) return SCHEMA_CHECKS.get(cacheKey);
+  const check = (async () => {
+    try {
+      const sql = await getTourneySql(env);
+      const rows = await sql`
+        select schema_version from tourney_schema_metadata
+        where schema_name = 'tourney' limit 1
+      `;
+      if (Number(rows[0]?.schema_version || 0) < required) {
+        throw new Error("Legacy Tourney schema is not ready.");
+      }
+      return true;
+    } catch (cause) {
+      const error = new Error("The legacy Tourney database migration is required.");
+      error.status = 503;
+      error.code = "TOURNEY_SCHEMA_MIGRATION_REQUIRED";
+      error.cause = cause;
+      throw error;
+    }
+  })();
   SCHEMA_CHECKS.set(cacheKey, check);
   try {
     return await check;

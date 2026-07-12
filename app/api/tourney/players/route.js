@@ -9,6 +9,7 @@ import { enqueueTourneyEmailDispatch } from "../../../../src/server/tourney/emai
 import {
   applyRegistrationDecision,
   createApprovedTourneyPlayer,
+  createTourneyPasswordHash,
   getTourneyRoleCapacitySnapshot,
   kickTourneyPlayer,
   listManageTourneyPlayers,
@@ -96,6 +97,9 @@ export async function POST(request) {
   try {
     const payload = await readPayload(request);
     const action = String(payload.action || "").toLowerCase();
+    const preparedPasswordHash = action === "add"
+      ? await createTourneyPasswordHash({ password: payload.password })
+      : "";
 
     const commandId = readTourneyCommandId({ request });
     const command = await executeTourneyCommand({
@@ -137,6 +141,7 @@ export async function POST(request) {
       await createApprovedTourneyPlayer({
         payload,
         actorUsername: session.username,
+        preparedPasswordHash,
       });
         return { body: await getPlayersBody() };
     }

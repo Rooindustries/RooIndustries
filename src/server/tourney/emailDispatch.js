@@ -39,6 +39,10 @@ export const enqueueTourneyEmailDispatch = async ({
   recipient,
   payload,
   idempotencyKey = "",
+  entityType = "",
+  entityId = "",
+  entityVersion = "",
+  audience = "",
   historical = false,
   env = process.env,
 } = {}) => {
@@ -46,8 +50,25 @@ export const enqueueTourneyEmailDispatch = async ({
   if (!normalizedRecipient) throw new Error("A Tourney email recipient is required.");
   const policy = resolveTourneyStorePolicy(env);
   const table = dispatchTable(policy.primaryBackend);
+  const inferredEntityId = normalize(
+    entityId || payload?.player?.id || payload?.appeal?.id || payload?.payout?.id ||
+    payload?.tokenHash || "global"
+  );
+  const inferredVersion = normalize(
+    entityVersion || payload?.player?.version || payload?.appeal?.updatedAt ||
+    payload?.payout?.updatedAt || payload?.transition || "1"
+  );
+  const inferredAudience = normalize(audience || payload?.audience || "recipient");
   const key = normalize(idempotencyKey) ||
-    `${normalize(commandId)}:${normalize(dispatchKind)}:${recipientHash(normalizedRecipient).slice(0, 24)}`;
+    [
+      normalize(commandId),
+      normalize(dispatchKind),
+      normalize(entityType || dispatchKind),
+      inferredEntityId,
+      inferredVersion,
+      inferredAudience,
+      recipientHash(normalizedRecipient),
+    ].join(":");
   if (env.NODE_ENV === "test" || env.TOURNEY_DATABASE_MODE === "memory") {
     const dispatch = MEMORY_DISPATCHES.get(key) || {
       id: crypto.randomUUID(),
@@ -97,7 +118,7 @@ const sendDispatch = ({ dispatch, env }) => {
   }
 };
 
-const claimDispatches = async ({ env, limit }) => {
+const claimDispatches = async ({ env, limit, commandId = "" }) => {
   const policy = resolveTourneyStorePolicy(env);
   const table = dispatchTable(policy.primaryBackend);
   const leaseId = crypto.randomUUID();
@@ -110,18 +131,24 @@ const claimDispatches = async ({ env, limit }) => {
         policy,
         commandId: `email-claim:${leaseId}`,
       });
-      const rows = await sql`
-        select * from ${sql(table)}
-        where (
-          status in ('pending', 'retry')
-          and coalesce(next_attempt_at, '-infinity'::timestamptz) <= now()
-        ) or (
-          status = 'sending' and lease_expires_at <= now()
-        )
-        order by created_at
-        for update skip locked
-        limit ${Math.max(1, Math.min(50, Number(limit) || 10))}
-      `;
+      const safeLimit = Math.max(1, Math.min(50, Number(limit) || 10));
+      const rows = commandId
+        ? await sql`
+            select * from ${sql(table)}
+            where command_id = ${commandId} and (
+              (status in ('pending', 'retry')
+                and coalesce(next_attempt_at, '-infinity'::timestamptz) <= now())
+              or (status = 'sending' and lease_expires_at <= now())
+            )
+            order by created_at for update skip locked limit ${safeLimit}
+          `
+        : await sql`
+            select * from ${sql(table)}
+            where (status in ('pending', 'retry')
+                and coalesce(next_attempt_at, '-infinity'::timestamptz) <= now())
+              or (status = 'sending' and lease_expires_at <= now())
+            order by created_at for update skip locked limit ${safeLimit}
+          `;
       if (rows.length === 0) return [];
       const ids = rows.map((row) => row.id);
       await sql`
@@ -131,7 +158,11 @@ const claimDispatches = async ({ env, limit }) => {
             attempt_count = attempt_count + 1, updated_at = now()
         where id in ${sql(ids)}
       `;
-      return rows.map((row) => ({ ...row, lease_id: leaseId }));
+      return rows.map((row) => ({
+        ...row,
+        lease_id: leaseId,
+        attempt_count: Number(row.attempt_count || 0) + 1,
+      }));
     },
   });
 };
@@ -139,10 +170,11 @@ const claimDispatches = async ({ env, limit }) => {
 export const reconcileTourneyEmailDispatches = async ({
   env = process.env,
   limit = 10,
+  commandId = "",
 } = {}) => {
   const policy = resolveTourneyStorePolicy(env);
   const table = dispatchTable(policy.primaryBackend);
-  const dispatches = await claimDispatches({ env, limit });
+  const dispatches = await claimDispatches({ env, limit, commandId });
   let sent = 0;
   let retried = 0;
   for (const dispatch of dispatches) {
@@ -160,18 +192,24 @@ export const reconcileTourneyEmailDispatches = async ({
             policy,
             commandId: `email-complete:${dispatch.id}:${dispatch.attempt_count + 1}`,
           });
-          await sql`
+          const rows = await sql`
             update ${sql(table)}
             set status = 'sent', provider_message_id = ${providerMessageId || null},
                 sent_at = now(), lease_id = null, lease_expires_at = null,
                 last_error_code = null, updated_at = now()
             where id = ${dispatch.id} and lease_id = ${dispatch.lease_id}
+            returning id
           `;
+          if (rows.length !== 1) {
+            throw Object.assign(new Error("Tourney email lease changed."), {
+              code: "TOURNEY_EMAIL_LEASE_MISMATCH",
+            });
+          }
         },
       });
       sent += 1;
     } catch (error) {
-      const terminal = Number(dispatch.attempt_count || 0) + 1 >= 12;
+      const terminal = Number(dispatch.attempt_count || 0) >= 12;
       await runTourneyTransaction({
         env,
         lockKey: `roo-tourney-email-retry:${dispatch.id}`,
@@ -183,7 +221,7 @@ export const reconcileTourneyEmailDispatches = async ({
           });
           await sql`
             update ${sql(table)}
-            set status = ${terminal ? "failed" : "retry"},
+            set status = ${terminal ? "dead_letter" : "retry"},
                 next_attempt_at = now() + make_interval(
                   secs => least(3600, 2 ^ least(attempt_count, 11))
                 ),
@@ -198,4 +236,22 @@ export const reconcileTourneyEmailDispatches = async ({
     }
   }
   return { claimed: dispatches.length, sent, retried };
+};
+
+export const hasPendingTourneyEmailDispatches = async ({
+  commandId,
+  env = process.env,
+} = {}) => {
+  if (env.NODE_ENV === "test" || env.TOURNEY_DATABASE_MODE === "memory") return false;
+  const policy = resolveTourneyStorePolicy(env);
+  const table = dispatchTable(policy.primaryBackend);
+  const sql = await getTourneySql(env);
+  const [row] = await sql`
+    select exists(
+      select 1 from ${sql(table)}
+      where command_id = ${commandId}
+        and status in ('pending', 'sending', 'retry', 'failed', 'dead_letter')
+    ) as pending
+  `;
+  return row?.pending === true;
 };

@@ -48,18 +48,18 @@ export async function POST(request) {
 
   try {
     const commandId = readTourneyCommandId({ request });
+    const accounts = await readEffectiveTourneyAccounts();
+    const adminAccount =
+      findTourneyAccount(login, accounts) || findTourneyAccountByEmail(login, accounts);
+    const adminEmail =
+      adminAccount?.active && ["owner", "caster"].includes(adminAccount.role)
+        ? getTourneyAdminEmail(adminAccount)
+        : "";
     await executeTourneyCommand({
       commandId,
       purpose: "tokens:reset-request",
       requestPayload: { login: login.toLowerCase() },
       callback: async () => {
-        const accounts = await readEffectiveTourneyAccounts();
-        const adminAccount =
-          findTourneyAccount(login, accounts) || findTourneyAccountByEmail(login, accounts);
-        const adminEmail =
-          adminAccount?.active && ["owner", "caster"].includes(adminAccount.role)
-            ? getTourneyAdminEmail(adminAccount)
-            : "";
         if (adminAccount && adminEmail) {
           const token = createTourneyPasswordResetToken({ account: adminAccount });
           await enqueueTourneyEmailDispatch({

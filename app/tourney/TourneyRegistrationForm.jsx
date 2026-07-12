@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import SupabaseSocialLogin from "../../src/components/SupabaseSocialLogin";
-import { tourneyMutationFetch } from "./tourneyMutation";
+import { tourneyMutationFetch, tourneyMutationSuccessMessage } from "./tourneyMutation";
 
 const TOURNEY_SIGNUP_DRAFT = "tourney_signup_draft";
 
@@ -190,7 +190,10 @@ export default function TourneyRegistrationForm({
 
       setForm(initialForm);
       sessionStorage.removeItem(TOURNEY_SIGNUP_DRAFT);
-      setMessage(data.message || "Registration submitted.");
+      setMessage(tourneyMutationSuccessMessage(
+        data,
+        data.message || "Registration submitted."
+      ));
       setIsSuccess(true);
     } catch (error) {
       setMessage(error?.message || "Unable to submit registration.");

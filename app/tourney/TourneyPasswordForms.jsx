@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { tourneyMutationFetch } from "./tourneyMutation";
+import { tourneyMutationFetch, tourneyMutationSuccessMessage } from "./tourneyMutation";
 
 export function TourneyForgotForm() {
   const [login, setLogin] = useState("");
@@ -89,7 +89,10 @@ export function TourneyResetForm() {
       }
       setPassword("");
       setIsSuccess(true);
-      setMessage("Password updated. You can log in now.");
+      setMessage(tourneyMutationSuccessMessage(
+        data,
+        "Password updated. You can log in now."
+      ));
     } catch (error) {
       setMessage(error?.message || "Unable to reset password.");
     } finally {

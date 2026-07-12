@@ -33,9 +33,14 @@ let tourneyModulesPromise = null;
 const loadTourneyModules = async () => {
   if (!tourneyModulesPromise) {
     tourneyModulesPromise = Promise.all([
-      import("../src/server/tourney/email.js"),
+      import("../src/server/tourney/emailDispatch.js"),
       import("../src/server/tourney/playerStore.js"),
-    ]).then(([email, playerStore]) => ({ email, playerStore }));
+      import("../src/server/tourney/store.js"),
+    ]).then(([emailDispatch, playerStore, store]) => ({
+      emailDispatch,
+      playerStore,
+      store,
+    }));
   }
   return tourneyModulesPromise;
 };
@@ -77,9 +82,6 @@ const sleep = (ms) =>
     setTimeout(resolve, ms);
   });
 
-const emailIdFromResult = (result) =>
-  String(result?.id || result?.data?.id || "").trim();
-
 const printSummary = (summary) => {
   console.log(JSON.stringify(summary, null, 2));
 };
@@ -94,25 +96,34 @@ const validateSampleRecipient = (value) => {
 
 const sendSample = async ({ sampleTo, baseUrl }) => {
   const recipient = validateSampleRecipient(sampleTo);
-  const { email } = await loadTourneyModules();
-  const result = await email.sendTourneyDiscordInviteEmail({
-    to: recipient,
-    baseUrl,
-    sampleMode: true,
-    player: {
-      id: "sample-player",
-      version: "1",
-      email: recipient,
-      discord: "SampleParticipant#0000",
-      displayName: "Sample Participant",
-    },
+  const { emailDispatch, store } = await loadTourneyModules();
+  const player = {
+    id: "sample-player",
+    version: "1",
+    email: recipient,
+    discord: "SampleParticipant#0000",
+    displayName: "Sample Participant",
+  };
+  await store.executeTourneyCommand({
+    commandId: "discord-invite:sample:sample-player:v1",
+    purpose: "email:discord-invite",
+    requestPayload: { playerId: player.id, sample: true },
+    attemptExternalWork: false,
+    callback: () => emailDispatch.enqueueTourneyEmailDispatch({
+      commandId: "discord-invite:sample:sample-player:v1",
+      dispatchKind: "discord_invite",
+      recipient,
+      entityType: "player",
+      entityId: player.id,
+      entityVersion: player.version,
+      payload: { to: recipient, baseUrl, sampleMode: true, player },
+    }).then(() => ({ body: { ok: true } })),
   });
 
   printSummary({
     mode: "sample",
     sampleRecipient: recipient,
-    sent: 1,
-    emailId: emailIdFromResult(result) || null,
+    queued: 1,
     participantRowsUpdated: 0,
   });
 };
@@ -148,7 +159,7 @@ const sendBatch = async ({
   limit,
   throttleMs,
 }) => {
-  const { email, playerStore } = await loadTourneyModules();
+  const { emailDispatch, playerStore, store } = await loadTourneyModules();
   const players = await playerStore.listApprovedTourneyDiscordInviteRecipients({
     includeAlreadySent: force,
     onlyEmail,
@@ -163,7 +174,7 @@ const sendBatch = async ({
     targetRecipients: targets.length,
     skippedInvalidEmail,
     skippedDuplicateEmail,
-    sent: 0,
+    queued: 0,
     failed: 0,
     participantRowsUpdated: 0,
   };
@@ -175,23 +186,25 @@ const sendBatch = async ({
 
   for (const player of targets) {
     try {
-      const result = await email.sendTourneyDiscordInviteEmail({
-        player,
-        baseUrl,
+      const commandId = `discord-invite:${player.id}:v${player.version || 1}`;
+      await store.executeTourneyCommand({
+        commandId,
+        purpose: "email:discord-invite",
+        requestPayload: { playerId: player.id, version: player.version || 1 },
+        attemptExternalWork: false,
+        callback: () => emailDispatch.enqueueTourneyEmailDispatch({
+          commandId,
+          dispatchKind: "discord_invite",
+          recipient: player.email,
+          entityType: "player",
+          entityId: player.id,
+          entityVersion: player.version || 1,
+          payload: { player, to: player.email, baseUrl },
+        }).then(() => ({ body: { ok: true } })),
       });
-      await playerStore.markTourneyDiscordInviteEmailSent({
-        playerId: player.id,
-        emailId: emailIdFromResult(result),
-      });
-      summary.sent += 1;
-      summary.participantRowsUpdated += 1;
+      summary.queued += 1;
     } catch (error) {
-      await playerStore.markTourneyDiscordInviteEmailFailed({
-        playerId: player.id,
-        errorMessage: error?.message || "Unable to send Discord invite email.",
-      });
       summary.failed += 1;
-      summary.participantRowsUpdated += 1;
     }
 
     if (throttleMs > 0) {

@@ -9,6 +9,7 @@ import {
   listTourneyPayoutsForSession,
   upsertTourneyPayout,
 } from "../../../../src/server/tourney/appealPayoutStore";
+import { enqueueTourneyEmailDispatch } from "../../../../src/server/tourney/emailDispatch";
 import { buildTourneyPublicError } from "../../../../src/server/tourney/publicError";
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
 import {
@@ -81,7 +82,31 @@ export async function POST(request) {
       purpose: "payouts:upsert",
       requestPayload: payload,
       callback: async () => {
-        await upsertTourneyPayout({ payload, session });
+        const existing = payload.payoutId
+          ? (await listTourneyPayoutsForSession({ session })).find(
+              (payout) => payout.id === payload.payoutId
+            )
+          : null;
+        const payout = await upsertTourneyPayout({ payload, session });
+        const transitioned = ["ready", "paid", "void"].includes(payout?.status) &&
+          existing?.status !== payout.status;
+        if (transitioned && payout?.payoutEmail) {
+          await enqueueTourneyEmailDispatch({
+            commandId,
+            dispatchKind: "payout",
+            recipient: payout.payoutEmail,
+            entityType: "payout",
+            entityId: payout.id,
+            entityVersion: payout.updatedAt,
+            audience: payout.status,
+            payload: {
+              payout,
+              to: payout.payoutEmail,
+              transition: payout.status,
+              baseUrl: new URL(request.url).origin,
+            },
+          });
+        }
         return { body: await getPayoutsBody(session) };
       },
     });
