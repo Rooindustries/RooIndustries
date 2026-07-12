@@ -3938,7 +3938,7 @@ export const getPaymentStatus = async ({
   };
 };
 
-const authorizeCron = (req) => {
+export const authorizeCronRequest = (req) => {
   const configured = String(process.env.CRON_SECRET || "").trim();
   if (!configured) {
     const error = new Error("CRON_SECRET is required.");
@@ -3971,7 +3971,7 @@ export const reconcilePaymentSessions = async ({
   dispatchRescheduleNotifications = null,
 }) => {
   try {
-    authorizeCron(req);
+    authorizeCronRequest(req);
   } catch (error) {
     return buildPublicFailure({
       error,

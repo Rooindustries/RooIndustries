@@ -1,4 +1,7 @@
-import { reconcilePaymentSessions } from "./flow.js";
+import {
+  authorizeCronRequest,
+  reconcilePaymentSessions,
+} from "./flow.js";
 import { cleanupExpiredRateLimitBuckets } from "../ref/rateLimit.js";
 import { logSafeError } from "../../safeErrorLog.js";
 import { createPaymentBackendClient } from "./backend.js";
@@ -10,6 +13,53 @@ export default async function handler(req, res) {
   if (req.method !== "GET" && req.method !== "POST") {
     res.setHeader("Allow", ["GET", "POST"]);
     return res.status(405).json({ ok: false, error: "Method not allowed" });
+  }
+
+  try {
+    authorizeCronRequest(req);
+  } catch (error) {
+    return res.status(Number(error?.status || 403)).json({
+      ok: false,
+      error: "Payment reconciliation is temporarily unavailable.",
+    });
+  }
+
+  const scope = String(
+    req?.headers?.["x-reconcile-scope"] || req?.headers?.["X-Reconcile-Scope"] || ""
+  )
+    .trim()
+    .toLowerCase();
+  if (scope && !["full", "mirror-only"].includes(scope)) {
+    return res.status(400).json({ ok: false, error: "Invalid reconciliation scope." });
+  }
+
+  if (scope === "mirror-only") {
+    if (!isSupabaseAdminConfigured()) {
+      return res.status(503).json({
+        ok: false,
+        error: "Commerce mirror reconciliation is unavailable.",
+      });
+    }
+    const client = createPaymentBackendClient("supabase");
+    if (typeof client?.reconcileReverseMirror !== "function") {
+      return res.status(503).json({
+        ok: false,
+        error: "Commerce mirror reconciliation is unavailable.",
+      });
+    }
+    try {
+      const reverseMirror = await client.reconcileReverseMirror({
+        limit: 100,
+        maxBatches: 10,
+      });
+      return res.status(200).json({ ok: true, summary: { reverseMirror } });
+    } catch (error) {
+      logSafeError("Reverse-mirror reconciliation failed", error);
+      return res.status(503).json({
+        ok: false,
+        error: "Commerce mirror reconciliation is temporarily unavailable.",
+      });
+    }
   }
 
   let incrementalShadowSync = null;
