@@ -13,6 +13,12 @@ export const getSupabaseBrowserClient = () => {
   if (!url || !publishableKey) {
     throw new Error("Supabase browser Auth is not configured.");
   }
-  browserClient = createBrowserClient(url, publishableKey);
+  browserClient = createBrowserClient(url, publishableKey, {
+    auth: {
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      persistSession: true,
+    },
+  });
   return browserClient;
 };
