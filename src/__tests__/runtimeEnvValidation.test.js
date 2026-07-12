@@ -134,9 +134,12 @@ describe("release runtime environment validation", () => {
     expect(result.output).not.toContain("ep-example.neon.tech");
   });
 
-  test("accepts the configured Supabase pooler URL for dormant Tourney mode", () => {
+  test("accepts configured Supabase primary with its required legacy mirror", () => {
     const result = validate({
       TOURNEY_DATABASE_MODE: "supabase",
+      TOURNEY_MIRROR_ENABLED: "1",
+      TOURNEY_DATABASE_URL:
+        "postgresql://owner:placeholder@ep-example.neon.tech/neondb?sslmode=require",
       SUPABASE_URL: "https://ntezmxzaibrrsgtujgxu.supabase.co",
       SUPABASE_SECRET_KEY: "s".repeat(40),
       SUPABASE_PUBLISHABLE_KEY: "p".repeat(24),

@@ -3,7 +3,7 @@ const mockReadTourneySessionFromStore = jest.fn();
 const mockApplyRegistrationDecision = jest.fn();
 const mockGetRegistrationDecisionToken = jest.fn();
 const mockHashTourneyToken = jest.fn((token) => `hashed:${token}`);
-const mockSendTourneyPlayerApprovedEmail = jest.fn();
+const mockEnqueueTourneyEmailDispatch = jest.fn();
 
 jest.mock("../server/tourney/auth", () => ({
   TOURNEY_SESSION_COOKIE: "tourney_session",
@@ -19,12 +19,13 @@ jest.mock("../server/tourney/playerStore", () => ({
   hashTourneyToken: (...args) => mockHashTourneyToken(...args),
 }));
 
-jest.mock("../server/tourney/email", () => ({
-  sendTourneyPlayerApprovedEmail: (...args) =>
-    mockSendTourneyPlayerApprovedEmail(...args),
+jest.mock("../server/tourney/emailDispatch", () => ({
+  enqueueTourneyEmailDispatch: (...args) =>
+    mockEnqueueTourneyEmailDispatch(...args),
 }));
 
 const { GET, POST } = require("../../app/api/tourney/registration-decision/route.js");
+const { resetMemoryTourneyControlForTests } = require("../server/tourney/store.js");
 
 const tokenRow = {
   player_id: "player_1",
@@ -73,11 +74,12 @@ describe("tourney registration decision route", () => {
     mockGetRegistrationDecisionToken.mockReset();
     mockHashTourneyToken.mockClear();
     mockHashTourneyToken.mockImplementation((token) => `hashed:${token}`);
-    mockSendTourneyPlayerApprovedEmail.mockReset();
+    mockEnqueueTourneyEmailDispatch.mockReset();
+    resetMemoryTourneyControlForTests();
 
     mockGetRegistrationDecisionToken.mockResolvedValue(tokenRow);
     mockFindActiveTourneyApprover.mockResolvedValue(approver);
-    mockSendTourneyPlayerApprovedEmail.mockResolvedValue({ id: "email_1" });
+    mockEnqueueTourneyEmailDispatch.mockResolvedValue({ id: "dispatch_1" });
   });
 
   test("does not approve from a valid token without a matching login session", async () => {
@@ -89,7 +91,7 @@ describe("tourney registration decision route", () => {
     expect(html).toContain("Sign in required");
     expect(mockReadTourneySessionFromStore).toHaveBeenCalledWith({ token: "" });
     expect(mockApplyRegistrationDecision).not.toHaveBeenCalled();
-    expect(mockSendTourneyPlayerApprovedEmail).not.toHaveBeenCalled();
+    expect(mockEnqueueTourneyEmailDispatch).not.toHaveBeenCalled();
   });
 
   test("does not approve from the wrong admin account", async () => {
@@ -103,7 +105,7 @@ describe("tourney registration decision route", () => {
 
     expect(html).toContain("Wrong account");
     expect(mockApplyRegistrationDecision).not.toHaveBeenCalled();
-    expect(mockSendTourneyPlayerApprovedEmail).not.toHaveBeenCalled();
+    expect(mockEnqueueTourneyEmailDispatch).not.toHaveBeenCalled();
   });
 
   test("does not call invalid decision tokens expired", async () => {
@@ -116,7 +118,7 @@ describe("tourney registration decision route", () => {
     expect(html).not.toContain("Link expired");
     expect(html).not.toContain("expired, or revoked");
     expect(mockApplyRegistrationDecision).not.toHaveBeenCalled();
-    expect(mockSendTourneyPlayerApprovedEmail).not.toHaveBeenCalled();
+    expect(mockEnqueueTourneyEmailDispatch).not.toHaveBeenCalled();
   });
 
   test("approves and emails the player from the assigned approver session", async () => {
@@ -141,12 +143,17 @@ describe("tourney registration decision route", () => {
       actorUsername: "yukari",
       approvedRolePlay: "",
     });
-    expect(mockSendTourneyPlayerApprovedEmail).toHaveBeenCalledWith({
+    expect(mockEnqueueTourneyEmailDispatch).toHaveBeenCalledWith({
+      commandId: "token:hashed:abc123:approve",
+      dispatchKind: "approval",
+      recipient: "playerone@example.com",
+      payload: {
       player: approvedPlayer,
       baseUrl: "https://www.rooindustries.com",
+      },
     });
     expect(html).toContain("Approved");
-    expect(html).toContain("approval email was sent");
+    expect(html).toContain("approval email was queued");
   });
 
   test("passes the selected approval role from role-specific accept links", async () => {
@@ -174,10 +181,12 @@ describe("tourney registration decision route", () => {
       actorUsername: "yukari",
       approvedRolePlay: "Damage",
     });
-    expect(mockSendTourneyPlayerApprovedEmail).toHaveBeenCalledWith({
-      player: approvedPlayer,
-      baseUrl: "https://www.rooindustries.com",
-    });
+    expect(mockEnqueueTourneyEmailDispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dispatchKind: "approval",
+        recipient: "playerone@example.com",
+      })
+    );
     expect(html).toContain("Approved");
   });
 

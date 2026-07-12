@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { Resend } from "resend";
 import tourneyEmailTemplates from "./emailTemplates.cjs";
 import {
@@ -31,6 +32,11 @@ const getResend = (env = process.env) => {
 
 const getFromAddress = (env = process.env) =>
   String(env.FROM_EMAIL || DEFAULT_FROM).trim();
+
+const sendWithIdempotency = (resend, message, idempotencyKey = "") =>
+  idempotencyKey
+    ? resend.emails.send(message, { idempotencyKey })
+    : resend.emails.send(message);
 
 const buildDecisionUrl = ({ baseUrl, token, purpose, role }) => {
   const url = new URL("/tourney/decision", baseUrl);
@@ -81,20 +87,36 @@ const normalizeRecipients = (to) =>
     .map((recipient) => String(recipient || "").trim())
     .filter(Boolean);
 
-const sendTemplateEmail = async ({ to, template, env = process.env } = {}) => {
+const cryptoSafeRecipientKey = (recipient) =>
+  crypto
+    .createHash("sha256")
+    .update(String(recipient || "").trim().toLowerCase())
+    .digest("hex")
+    .slice(0, 24);
+
+const sendTemplateEmail = async ({
+  to,
+  template,
+  idempotencyKey = "",
+  env = process.env,
+} = {}) => {
   const recipients = normalizeRecipients(to);
   if (recipients.length === 0) {
     throw new Error("At least one email recipient is required.");
   }
   const resend = getResend(env);
   const from = getFromAddress(env);
-  const { data, error } = await resend.emails.send({
-    from,
-    to: recipients,
-    subject: template.subject,
-    html: template.html,
-    text: template.text,
-  });
+  const { data, error } = await sendWithIdempotency(
+    resend,
+    {
+      from,
+      to: recipients,
+      subject: template.subject,
+      html: template.html,
+      text: template.text,
+    },
+    idempotencyKey
+  );
   if (error) {
     throw Object.assign(new Error("Unable to send Roo Industries email."), {
       code: "tourney_email_send_failed",
@@ -198,10 +220,12 @@ export async function sendTourneyAppealAdminEmail({
   recipients = [],
   baseUrl,
   sampleMode = false,
+  idempotencyKey = "",
   env = process.env,
 } = {}) {
   return sendTemplateEmail({
     to: recipients,
+    idempotencyKey,
     env,
     template: buildTourneyAppealAdminEmail({
       appeal,
@@ -217,10 +241,12 @@ export async function sendTourneyAppealConfirmationEmail({
   to,
   baseUrl,
   sampleMode = false,
+  idempotencyKey = "",
   env = process.env,
 } = {}) {
   return sendTemplateEmail({
     to,
+    idempotencyKey,
     env,
     template: buildTourneyAppealConfirmationEmail({
       appeal,
@@ -235,10 +261,12 @@ export async function sendTourneyPayoutNotificationEmail({
   to,
   baseUrl,
   sampleMode = false,
+  idempotencyKey = "",
   env = process.env,
 } = {}) {
   return sendTemplateEmail({
     to,
+    idempotencyKey,
     env,
     template: buildTourneyPayoutNotificationEmail({
       payout,
@@ -252,6 +280,7 @@ export async function sendTourneyRegistrationApprovalEmails({
   player,
   tokens = [],
   baseUrl,
+  idempotencyKey = "",
   env = process.env,
 } = {}) {
   const resend = getResend(env);
@@ -327,12 +356,17 @@ export async function sendTourneyRegistrationApprovalEmails({
       </div>
     `;
 
-    const { data, error } = await resend.emails.send({
-      from,
-      to: [recipientEmail],
-      subject: `Roo Industries registration: ${player.displayName || player.discord}`,
-      html,
-    });
+    const recipientKey = cryptoSafeRecipientKey(recipientEmail);
+    const { data, error } = await sendWithIdempotency(
+      resend,
+      {
+        from,
+        to: [recipientEmail],
+        subject: `Roo Industries registration: ${player.displayName || player.discord}`,
+        html,
+      },
+      idempotencyKey ? `${idempotencyKey}:${recipientKey}`.slice(0, 256) : ""
+    );
 
     if (error) {
       throw Object.assign(new Error("Unable to send approval email."), {
@@ -349,6 +383,7 @@ export async function sendTourneyRegistrationApprovalEmails({
 export async function sendTourneyPlayerApprovedEmail({
   player,
   baseUrl,
+  idempotencyKey = "",
   env = process.env,
 } = {}) {
   const resend = getResend(env);
@@ -376,7 +411,7 @@ export async function sendTourneyPlayerApprovedEmail({
     : `<p>You can sign in with your Discord username or email to view tournament details.</p>
        <p>${ctaLink({ href: loginUrl.toString(), label: "Sign in" })}</p>`;
 
-  const { data, error } = await resend.emails.send({
+  const { data, error } = await sendWithIdempotency(resend, {
     from,
     to: [player.email],
     subject: `You're approved as ${approvedRole} for Roo Industries`,
@@ -406,7 +441,7 @@ export async function sendTourneyPlayerApprovedEmail({
     ]
       .filter(Boolean)
       .join("\n"),
-  });
+  }, idempotencyKey);
 
   if (error) {
     throw Object.assign(new Error("Unable to send player approval email."), {
@@ -422,10 +457,12 @@ export async function sendTourneyDiscordInviteEmail({
   to,
   baseUrl,
   sampleMode = false,
+  idempotencyKey = "",
   env = process.env,
 } = {}) {
   return sendTemplateEmail({
     to: to || player?.email,
+    idempotencyKey,
     env,
     template: buildTourneyDiscordInviteEmailTemplate({
       player,
@@ -440,6 +477,7 @@ export async function sendTourneyResetEmail({
   player,
   token,
   baseUrl,
+  idempotencyKey = "",
   env = process.env,
 } = {}) {
   const resend = getResend(env);
@@ -447,7 +485,7 @@ export async function sendTourneyResetEmail({
   const resetUrl = new URL("/tourney/reset", baseUrl);
   resetUrl.hash = `token=${encodeURIComponent(token)}`;
 
-  const { data, error } = await resend.emails.send({
+  const { data, error } = await sendWithIdempotency(resend, {
     from,
     to: [player.email],
     subject: "Reset your Roo Industries password",
@@ -461,7 +499,7 @@ export async function sendTourneyResetEmail({
         <p style="font-size:13px;color:#475569">This link expires in 1 hour.</p>
       </div>
     `,
-  });
+  }, idempotencyKey);
 
   if (error) {
     throw Object.assign(new Error("Unable to send reset email."), {

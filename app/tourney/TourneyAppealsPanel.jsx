@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { tourneyMutationFetch } from "./tourneyMutation";
 
 const emptyAppeal = {
   type: "team-appeal",
@@ -35,7 +36,7 @@ export default function TourneyAppealsPanel({
     setIsBusy(true);
     setMessage("");
     try {
-      const response = await fetch("/api/tourney/appeals", {
+      const response = await tourneyMutationFetch("/api/tourney/appeals", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
