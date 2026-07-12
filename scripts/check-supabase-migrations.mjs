@@ -130,6 +130,26 @@ if (fs.existsSync(hardeningFile)) {
   }
 }
 
+const readinessMirrorFile = path.join(
+  migrationsDirectory,
+  "20260712121529_fix_commerce_readiness_mirror_states.sql"
+);
+if (!fs.existsSync(readinessMirrorFile)) {
+  failures.push("Commerce readiness mirror-state repair is missing.");
+} else {
+  const sql = fs.readFileSync(readinessMirrorFile, "utf8");
+  if (sql.includes("status <> 'mirrored'")) {
+    failures.push("Commerce readiness still counts superseded mirror events.");
+  }
+  if (
+    !sql.includes(
+      "status in ('pending', 'retry', 'processing', 'dead_letter')"
+    )
+  ) {
+    failures.push("Commerce readiness lacks the actionable mirror-state filter.");
+  }
+}
+
 if (failures.length > 0) {
   console.error(JSON.stringify({ ok: false, failures }, null, 2));
   process.exit(1);
