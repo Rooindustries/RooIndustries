@@ -217,6 +217,54 @@ export async function POST(request) {
         { headers: { "Cache-Control": "private, no-store" } }
       );
     }
+    if (String(payload.action || "").toLowerCase() === "drain-mirror") {
+      const drainEnv = {
+        ...process.env,
+        TOURNEY_DATABASE_MODE: String(payload.primaryBackend || "legacy"),
+        TOURNEY_MIRROR_ENABLED: "1",
+        TOURNEY_WRITES_PAUSED: "0",
+        TOURNEY_FAILOVER_GENERATION: String(payload.generation ?? 0),
+      };
+      const mirror = await reconcileTourneyMirror({ env: drainEnv, limit: 250 });
+      const parity = await runTourneyParity({ env: drainEnv });
+      return NextResponse.json(
+        { ok: mirror.failed === 0 && parity.status === "clean", mirror, parity },
+        { headers: { "Cache-Control": "private, no-store" } }
+      );
+    }
+    if (String(payload.action || "").toLowerCase() === "cutover-control") {
+      const primaryBackend = String(payload.primaryBackend || "").toLowerCase();
+      const generation = Number(payload.generation);
+      const writesPaused = payload.writesPaused === true;
+      if (
+        !["legacy", "supabase"].includes(primaryBackend) ||
+        !Number.isSafeInteger(generation) ||
+        generation < 0 ||
+        generation > 100
+      ) {
+        return NextResponse.json(
+          { ok: false, error: "Invalid cutover control state." },
+          { status: 400, headers: { "Cache-Control": "private, no-store" } }
+        );
+      }
+      for (const backend of ["legacy", "supabase"]) {
+        const sql = await getTourneySqlForBackend({ backend });
+        const relation = backend === "supabase"
+          ? "tourney.cutover_metadata"
+          : "tourney_cutover_metadata";
+        await sql`
+          update ${sql(relation)}
+          set primary_backend = ${primaryBackend}, generation = ${generation},
+              writes_paused = ${writesPaused}, updated_at = now(),
+              updated_by = 'manual-cutover'
+          where id = 'tourney'
+        `;
+      }
+      return NextResponse.json(
+        { ok: true, primaryBackend, generation, writesPaused },
+        { headers: { "Cache-Control": "private, no-store" } }
+      );
+    }
     const result = await migrateTourneyShadow();
     return NextResponse.json(
       { ok: true, ...result },
