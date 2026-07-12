@@ -174,6 +174,75 @@ export const requireRateLimit = async (
   }
 };
 
+export const consumeQuoteRateLimitWithPricing = async (
+  res,
+  {
+    key,
+    packageTitles = [],
+    referralId = "",
+    referralCode = "",
+    couponCode = "",
+    windowMs = 15 * 60 * 1000,
+    max = 30,
+    message,
+    client = null,
+    now = Date.now(),
+  } = {}
+) => {
+  if (process.env.NODE_ENV === "test" && !client) {
+    return { handled: false };
+  }
+
+  const policy = resolveSupabaseRuntimePolicy();
+  if (policy.commercePrimaryBackend !== "supabase") {
+    return { handled: false };
+  }
+
+  const windowStart = Math.floor(now / windowMs) * windowMs;
+  const resetAtMs = windowStart + windowMs;
+  const retryAfter = Math.ceil((resetAtMs - now) / 1000);
+
+  try {
+    const bucketId = buildBucketId({ key, windowStart });
+    const target = client || createSupabaseAdminClient();
+    const { data, error } = await target.rpc(
+      "roo_consume_quote_rate_limit_and_get_pricing",
+      {
+        p_bucket_key_hmac: bucketId.replace(/^rateLimitBucket\./, ""),
+        p_window_started_at: new Date(windowStart).toISOString(),
+        p_reset_at: new Date(resetAtMs).toISOString(),
+        p_max: max,
+        p_package_titles: packageTitles,
+        p_referral_id: String(referralId || "").trim(),
+        p_referral_code: String(referralCode || "").trim().toLowerCase(),
+        p_coupon_code: String(couponCode || "").trim().toLowerCase(),
+      }
+    );
+    if (error || !data?.rateLimit) {
+      const failure = new Error("Supabase quote protection failed.");
+      failure.code = error?.code || "SUPABASE_QUOTE_GUARD_FAILED";
+      throw failure;
+    }
+    if (data.rateLimit.allowed === false) {
+      sendLimitResponse({ res, status: 429, retryAfter, message });
+      return { handled: true, allowed: false };
+    }
+    return {
+      handled: true,
+      allowed: true,
+      pricingInputs: {
+        packageDoc: data.package || null,
+        referralDoc: data.referral || null,
+        couponDoc: data.coupon || null,
+      },
+    };
+  } catch (error) {
+    logSafeError("Atomic quote protection unavailable", error);
+    sendLimitResponse({ res, status: 503, retryAfter: 30 });
+    return { handled: true, allowed: false };
+  }
+};
+
 export const cleanupExpiredRateLimitBuckets = async ({
   client = null,
   now = new Date().toISOString(),
