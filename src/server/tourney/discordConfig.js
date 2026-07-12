@@ -6,6 +6,7 @@ const REQUIRED_OAUTH_KEYS = Object.freeze([
   "DISCORD_BOT_TOKEN",
   "DISCORD_GUILD_ID",
   "DISCORD_PARTICIPANT_ROLE_ID",
+  "DISCORD_HOST_ROLE_ID",
 ]);
 
 const trim = (value) => String(value || "").trim();
@@ -56,6 +57,7 @@ export const getTourneyDiscordOAuthConfig = ({
     botToken: trim(env.DISCORD_BOT_TOKEN),
     guildId: trim(env.DISCORD_GUILD_ID),
     participantRoleId: trim(env.DISCORD_PARTICIPANT_ROLE_ID),
+    hostRoleId: trim(env.DISCORD_HOST_ROLE_ID),
     redirectUri: buildRedirectUri({ baseUrl, env }),
     inviteUrl: getTourneyDiscordInviteUrl(env),
     apiBaseUrl: trim(env.DISCORD_API_BASE_URL) || DISCORD_API_BASE_URL,
@@ -70,4 +72,23 @@ export const getTourneyDiscordOAuthConfig = ({
     explicitlyDisabled,
     missing,
   };
+};
+
+export const getTourneyDiscordRoleConfig = (env = process.env) => {
+  const config = {
+    apiBaseUrl: trim(env.DISCORD_API_BASE_URL) || DISCORD_API_BASE_URL,
+    botToken: trim(env.DISCORD_BOT_TOKEN),
+    guildId: trim(env.DISCORD_GUILD_ID),
+    hostRoleId: trim(env.DISCORD_HOST_ROLE_ID),
+    participantRoleId: trim(env.DISCORD_PARTICIPANT_ROLE_ID),
+  };
+  const snowflake = /^[0-9]{5,30}$/;
+  const enabled = Boolean(
+    config.botToken &&
+      snowflake.test(config.guildId) &&
+      snowflake.test(config.hostRoleId) &&
+      snowflake.test(config.participantRoleId) &&
+      config.hostRoleId !== config.participantRoleId
+  );
+  return { ...config, enabled };
 };

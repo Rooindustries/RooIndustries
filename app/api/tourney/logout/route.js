@@ -4,6 +4,7 @@ import {
   getClearTourneyCookieOptions,
 } from "../../../../src/server/tourney/auth";
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
+import { clearNextSupabaseSession } from "../../../../src/server/supabase/serverSession";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,5 +21,7 @@ export async function POST(request) {
     value: "",
     ...getClearTourneyCookieOptions(),
   });
+  await clearNextSupabaseSession({ request, response }).catch(() => {});
+  response.headers.set("Cache-Control", "private, no-store");
   return response;
 }

@@ -8,6 +8,7 @@ import {
 import JsonLd from "../../src/next/JsonLd";
 import seo from "../../src/lib/seo";
 import { canAccessTourneyRegistration } from "../../src/server/tourney/access";
+import ConnectedAccounts from "../../src/components/ConnectedAccounts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -190,6 +191,14 @@ const DashboardPage = ({ hosts, session }) => (
         ) : null}
       </div>
     </section>
+
+    {session ? (
+      <ConnectedAccounts
+        flow="tourney"
+        nextPath="/tourney"
+        variant="tourney"
+      />
+    ) : null}
 
     <TourneyHosts hosts={hosts} />
 

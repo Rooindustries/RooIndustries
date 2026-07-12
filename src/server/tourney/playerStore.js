@@ -14,6 +14,7 @@ import {
 } from "./sqlClient.js";
 import { syncSupabaseTourneyPlayerAccount } from "../supabase/accounts.js";
 import { logSafeError } from "../safeErrorLog.js";
+import { syncTourneyDiscordRoleAssignment } from "./discordRoleSync.js";
 import {
   claimSupabasePasswordReset,
   claimSupabaseRegistrationDecision,
@@ -238,19 +239,36 @@ const isMemoryMode = (env = process.env) =>
 const shouldSyncSupabasePlayerAuth = (env = process.env) =>
   isSupabaseTourneyDatabase(env) ||
   ["1", "true", "yes", "on"].includes(
+    String(env.SUPABASE_SOCIAL_AUTH_ENABLED || "").trim().toLowerCase()
+  ) ||
+  ["1", "true", "yes", "on"].includes(
     String(env.SUPABASE_SHADOW_WRITES || "").trim().toLowerCase()
   );
 
-const syncTourneyPlayerAuth = async ({ playerRow, env = process.env }) => {
-  if (!shouldSyncSupabasePlayerAuth(env)) return;
+const syncTourneyPlayerAuth = async ({
+  installPassword = true,
+  playerRow,
+  authUserId = "",
+  env = process.env,
+}) => {
+  if (!shouldSyncSupabasePlayerAuth(env) && !authUserId) return;
   try {
-    await syncSupabaseTourneyPlayerAccount({
+    const synced = await syncSupabaseTourneyPlayerAccount({
       player: playerRow,
       passwordHash: playerRow.password_hash,
+      authUserId,
+      env,
+      installPassword,
+    });
+    await syncTourneyDiscordRoleAssignment({
+      env,
+      userId: synced.userId,
+    }).catch((error) => {
+      logSafeError("Supabase Tourney Discord role sync failed", error);
     });
   } catch (error) {
     logSafeError("Supabase Tourney player Auth sync failed", error);
-    if (isSupabaseTourneyDatabase(env)) throw error;
+    if (authUserId || isSupabaseTourneyDatabase(env)) throw error;
   }
 };
 
@@ -409,7 +427,7 @@ const managePlayer = (row) => {
 
 export const validateTourneyPlayerPayload = (
   payload = {},
-  { requireAgreements = false } = {}
+  { allowPasswordless = false, requireAgreements = false } = {}
 ) => {
   const email = normalizeTourneyEmail(payload.email);
   const password = String(payload.password || "");
@@ -461,10 +479,10 @@ export const validateTourneyPlayerPayload = (
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     errors.push("Enter a valid email.");
   }
-  if (password.length < 8) {
+  if ((!allowPasswordless || password.length > 0) && password.length < 8) {
     errors.push("Password must be at least 8 characters.");
   }
-  if (password !== passwordConfirm) {
+  if ((!allowPasswordless || password || passwordConfirm) && password !== passwordConfirm) {
     errors.push("Passwords must match.");
   }
   if (!discord) errors.push("Discord Username is required.");
@@ -952,9 +970,11 @@ const assertNoDuplicatePlayer = async ({ value, env }) => {
 export async function createPendingTourneyPlayer({
   payload,
   recipients = [],
+  authUserId = "",
   env = process.env,
 } = {}) {
   const validation = validateTourneyPlayerPayload(payload, {
+    allowPasswordless: Boolean(authUserId),
     requireAgreements: true,
   });
   if (!validation.ok) {
@@ -968,7 +988,9 @@ export async function createPendingTourneyPlayer({
   await assertNoDuplicatePlayer({ value, env });
 
   const id = crypto.randomUUID();
-  const passwordHash = await bcrypt.hash(value.password, 12);
+  const passwordMaterial =
+    value.password || crypto.randomBytes(32).toString("base64url");
+  const passwordHash = await bcrypt.hash(passwordMaterial, 12);
   const createdAt = nowIso();
   const playerRow = {
     id,
@@ -1063,9 +1085,14 @@ export async function createPendingTourneyPlayer({
         )
       `;
     }
-    await syncTourneyPlayerAuth({ playerRow, env });
+    await syncTourneyPlayerAuth({
+      installPassword: Boolean(value.password),
+      playerRow,
+      authUserId,
+      env,
+    });
   } catch (error) {
-    if (isSupabaseTourneyDatabase(env)) {
+    if (authUserId || isSupabaseTourneyDatabase(env)) {
       await sql`delete from tourney_players where id = ${playerRow.id}`.catch(
         () => {}
       );

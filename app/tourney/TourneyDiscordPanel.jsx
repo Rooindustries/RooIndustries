@@ -1,55 +1,54 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import SupabaseSocialLogin from "../../src/components/SupabaseSocialLogin";
 
-const STORAGE_KEY = "tourney_discord_verification";
+const LEGACY_STORAGE_KEY = "tourney_discord_verification";
 
-const readToken = () => {
-  const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-  const token = String(fragment.get("token") || "").trim();
-  if (token) sessionStorage.setItem(STORAGE_KEY, token);
-  if (window.location.hash) {
-    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
-  }
-  return token || sessionStorage.getItem(STORAGE_KEY) || "";
-};
-
-export default function TourneyDiscordPanel() {
-  const started = useRef(false);
-  const [message, setMessage] = useState("Preparing Discord verification.");
-  const [signInUrl, setSignInUrl] = useState("");
+export default function TourneyDiscordPanel({ signedIn = false }) {
+  const [linked, setLinked] = useState(false);
 
   useEffect(() => {
-    if (started.current) return;
-    started.current = true;
-    const token = readToken();
-    fetch("/api/tourney/discord/start", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token }),
-    })
-      .then(async (response) => ({
-        response,
-        data: await response.json().catch(() => ({})),
-      }))
-      .then(({ response, data }) => {
-        if (response.ok && data.ok === true && data.authorizeUrl) {
-          sessionStorage.removeItem(STORAGE_KEY);
-          window.location.assign(data.authorizeUrl);
-          return;
-        }
-        setMessage(data.error || "Discord verification could not be started.");
-        setSignInUrl(data.signInUrl || "");
-      })
-      .catch(() => setMessage("Discord verification could not be started."));
-  }, []);
+    sessionStorage.removeItem(LEGACY_STORAGE_KEY);
+    if (window.location.hash) {
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+    }
+    if (!signedIn) return;
+    fetch("/api/auth/identities?flow=tourney", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data) => setLinked(Boolean(data?.providers?.includes("discord"))))
+      .catch(() => {});
+  }, [signedIn]);
+
+  if (!signedIn) {
+    return (
+      <div className="tourney-form tourney-form-narrow">
+        <p className="tourney-form-message" role="status">
+          Sign in to your approved Tourney account before connecting Discord.
+        </p>
+        <Link className="tourney-owner-button" href="/tourney/login?next=/tourney/discord">
+          Sign in
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className="tourney-form tourney-form-narrow">
-      <p className="tourney-form-message" role="status">{message}</p>
-      {signInUrl ? (
-        <Link className="tourney-owner-button" href={signInUrl}>Sign in</Link>
+      <p className={linked ? "tourney-form-message is-success" : "tourney-form-message"}>
+        {linked
+          ? "Discord is linked to this Tourney account."
+          : "Connect the Discord account you will use for the tournament."}
+      </p>
+      {!linked ? (
+        <SupabaseSocialLogin
+          action="link"
+          flow="tourney"
+          nextPath="/tourney"
+          providerIds={["discord"]}
+          variant="tourney"
+        />
       ) : null}
     </div>
   );

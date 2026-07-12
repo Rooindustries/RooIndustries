@@ -6,8 +6,8 @@ import { FcGoogle } from "react-icons/fc";
 import { getSupabaseBrowserClient } from "../lib/supabaseBrowser";
 
 const providers = [
-  { id: "google", label: "Google", ariaLabel: "Continue with Google", Icon: FcGoogle },
-  { id: "discord", label: "Discord", ariaLabel: "Continue with Discord", Icon: FaDiscord },
+  { id: "google", label: "Google", Icon: FcGoogle },
+  { id: "discord", label: "Discord", Icon: FaDiscord },
 ];
 
 const referralStyles = {
@@ -37,55 +37,97 @@ const tourneyStyles = {
 };
 
 export default function SupabaseSocialLogin({
+  action = "signin",
   flow,
   nextPath,
+  onBeforeRedirect,
+  providerIds = ["google", "discord"],
   variant = "referral",
 }) {
   const [busyProvider, setBusyProvider] = useState("");
   const [message, setMessage] = useState("");
   const styles = variant === "tourney" ? tourneyStyles : referralStyles;
+  const visibleProviders = providers.filter(({ id }) => providerIds.includes(id));
+  const socialAuthEnabled = ["1", "true", "yes", "on"].includes(
+    String(process.env.NEXT_PUBLIC_SUPABASE_SOCIAL_AUTH_ENABLED || "")
+      .trim()
+      .toLowerCase()
+  );
 
-  const signIn = async (provider) => {
+  const actionCopy = {
+    link: { button: "Link", divider: "or link an account", error: "Account linking" },
+    signup: { button: "Sign up with", divider: "or sign up with", error: "Sign-up" },
+    signin: { button: "Continue with", divider: "or continue with", error: "Sign-in" },
+  }[action] || { button: "Continue with", divider: "or continue with", error: "Sign-in" };
+
+  const start = async (provider) => {
     setBusyProvider(provider);
     setMessage("");
 
     try {
-      const callback = new URL("/auth/callback", window.location.origin);
-      callback.searchParams.set("flow", flow);
-      callback.searchParams.set("next", nextPath);
-      const { error } = await getSupabaseBrowserClient().auth.signInWithOAuth({
+      onBeforeRedirect?.();
+      const client = getSupabaseBrowserClient();
+      if (action !== "link") {
+        await client.auth.signOut({ scope: "local" }).catch(() => {});
+      }
+      const intentResponse = await fetch("/api/auth/intent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          flow,
+          provider,
+          returnPath: nextPath,
+        }),
+      });
+      const intent = await intentResponse.json().catch(() => ({}));
+      if (!intentResponse.ok || intent.ok !== true || !intent.callbackUrl) {
+        throw new Error(intent.error || "OAuth intent failed");
+      }
+      const options = {
+        redirectTo: intent.callbackUrl,
+        ...(provider === "discord"
+          ? { scopes: flow === "tourney" ? "identify email guilds.join" : "identify email" }
+          : {}),
+      };
+      const method = action === "link" ? "linkIdentity" : "signInWithOAuth";
+      const { error } = await client.auth[method]({
         provider,
-        options: { redirectTo: callback.toString() },
+        options,
       });
       if (error) throw error;
     } catch {
-      setMessage("Sign-in could not be started. Please try again.");
+      setMessage(`${actionCopy.error} could not be started. Please try again.`);
       setBusyProvider("");
     }
   };
+
+  if (!socialAuthEnabled || visibleProviders.length === 0) return null;
 
   return (
     <div className={styles.container}>
       <div className={styles.divider} aria-hidden="true">
         <span className={styles.dividerLine} />
-        <span className={styles.dividerLabel}>or continue with</span>
+        <span className={styles.dividerLabel}>{actionCopy.divider}</span>
         <span className={styles.dividerLine} />
       </div>
       <div className={styles.buttonGroup}>
-        {providers.map(({ id, label, ariaLabel, Icon }) => (
+        {visibleProviders.map(({ id, label, Icon }) => (
           <button
-            aria-label={ariaLabel}
+            aria-label={`${actionCopy.button} ${label}`}
             className={styles.button}
             disabled={Boolean(busyProvider)}
             key={id}
-            onClick={() => signIn(id)}
+            onClick={() => start(id)}
             type="button"
           >
             <Icon
               aria-hidden="true"
               className={`${styles.icon} ${id === "discord" ? styles.discordIcon : ""}`}
             />
-            <span>{busyProvider === id ? "Opening…" : label}</span>
+            <span>
+              {busyProvider === id ? "Opening…" : `${actionCopy.button} ${label}`}
+            </span>
           </button>
         ))}
       </div>

@@ -52,7 +52,7 @@ export default async function handler(req, res) {
       .digest("hex");
 
     const referral = await client.fetch(
-      `*[_type == "referral" && resetTokenHash == $tokenHash && resetTokenExpiresAt > $now][0]{ _id, _rev, creatorEmail, slug }`,
+      `*[_type == "referral" && registrationStatus != "pending_email" && resetTokenHash == $tokenHash && resetTokenExpiresAt > $now][0]{ _id, _rev, creatorEmail, slug }`,
       { tokenHash, now }
     );
 
@@ -92,6 +92,7 @@ export default async function handler(req, res) {
         passwordResetRequired: false,
         credentialVersion: 2,
         passwordChangedAt: now,
+        passwordLoginEnabled: true,
       })
       .unset(["resetToken", "resetTokenHash", "resetTokenExpiresAt"])
       .commit();

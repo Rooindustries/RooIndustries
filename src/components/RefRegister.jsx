@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import SupabaseSocialLogin from "./SupabaseSocialLogin";
+
+const REFERRAL_SIGNUP_DRAFT = "referral_signup_draft";
 
 export default function RefRegister() {
   const nav = useNavigate();
@@ -13,18 +16,42 @@ export default function RefRegister() {
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
+  const [socialIdentity, setSocialIdentity] = useState(null);
+  const [verificationPending, setVerificationPending] = useState(false);
 
   function showToast(type, message) {
     setToast({ type, message });
     setTimeout(() => setToast(null), 2800);
   }
   useEffect(() => {
-    const savedEmail = sessionStorage.getItem("referral_prefill_email");
-    if (savedEmail) {
-      setEmail(savedEmail);
-      sessionStorage.removeItem("referral_prefill_email");
+    try {
+      const draft = JSON.parse(sessionStorage.getItem(REFERRAL_SIGNUP_DRAFT) || "null");
+      if (draft) {
+        setDiscordUsername(String(draft.discordUsername || ""));
+        setEmail(String(draft.email || ""));
+        setPaypalEmail(String(draft.paypalEmail || ""));
+        setSlug(String(draft.slug || ""));
+      }
+    } catch {
+      sessionStorage.removeItem(REFERRAL_SIGNUP_DRAFT);
     }
+    fetch("/api/auth/identities?flow=referral", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data) => {
+        if (data?.authenticated && data?.emailVerified && data.email) {
+          setEmail(data.email);
+          setSocialIdentity(data);
+        }
+      })
+      .catch(() => {});
   }, []);
+
+  const saveDraft = () => {
+    sessionStorage.setItem(
+      REFERRAL_SIGNUP_DRAFT,
+      JSON.stringify({ discordUsername, email, paypalEmail, slug })
+    );
+  };
   // Debounced slug availability check
   useEffect(() => {
     if (!slug) {
@@ -40,8 +67,10 @@ export default function RefRegister() {
           )}`
         );
         const data = await res.json();
-        // if API returns not found → available, if ok true → taken
-        setSlugAvailable(!data.ok);
+        // A real match means taken. Only an explicit 404 means available.
+        if (res.ok && data.ok) setSlugAvailable(false);
+        else if (res.status === 404) setSlugAvailable(true);
+        else setSlugAvailable(null);
       } catch (err) {
         // network or server error: we don't assume taken
         setSlugAvailable(null);
@@ -67,8 +96,8 @@ export default function RefRegister() {
       !trimmedEmail ||
       !trimmedPaypalEmail ||
       !trimmedSlug ||
-      !trimmedPassword ||
-      !trimmedConfirm
+      (!socialIdentity && !trimmedPassword) ||
+      (!socialIdentity && !trimmedConfirm)
     ) {
       showToast("error", "Please fill in all fields.");
       return;
@@ -86,7 +115,7 @@ export default function RefRegister() {
       return;
     }
 
-    if (trimmedPassword !== trimmedConfirm) {
+    if (!socialIdentity && trimmedPassword !== trimmedConfirm) {
       showToast("error", "Passwords do not match.");
       return;
     }
@@ -102,12 +131,15 @@ export default function RefRegister() {
           `/api/ref/validateReferral?code=${encodeURIComponent(trimmedSlug)}`
         );
         const dataCheck = await resCheck.json();
-        if (!dataCheck.ok) {
+        if (dataCheck.ok) {
           setSlugAvailable(false);
           showToast("error", "Referral code is already taken.");
           return;
-        } else {
+        } else if (resCheck.status === 404) {
           setSlugAvailable(true); // available
+        } else {
+          showToast("error", "Could not validate referral code. Try again.");
+          return;
         }
       } catch (err) {
         showToast("error", "Could not validate referral code. Try again.");
@@ -139,7 +171,18 @@ export default function RefRegister() {
         return;
       }
 
+      if (data.pendingVerification) {
+        sessionStorage.removeItem(REFERRAL_SIGNUP_DRAFT);
+        setPassword("");
+        setConfirm("");
+        setVerificationPending(true);
+        showToast("success", "Check your email to finish creating the account.");
+        setLoading(false);
+        return;
+      }
+
       showToast("success", "Registered! Redirecting to dashboard...");
+      sessionStorage.removeItem(REFERRAL_SIGNUP_DRAFT);
       setTimeout(() => nav("/referrals/dashboard"), 900);
     } catch {
       console.error("Referral registration failed");
@@ -158,6 +201,12 @@ export default function RefRegister() {
         Create your referral account and start earning commissions.
       </p>
 
+      {verificationPending ? (
+        <div className="mt-8 w-full max-w-md rounded-2xl border border-success-border bg-success-soft p-5 text-center text-success-text">
+          Check your email and use the confirmation link to finish creating your account.
+        </div>
+      ) : null}
+
       <form
         onSubmit={handleRegister}
         className="mt-12 w-full max-w-md
@@ -166,6 +215,14 @@ export default function RefRegister() {
                   shadow-[var(--shadow-card-glow)]
                   rounded-2xl p-8 space-y-7"
       >
+        <SupabaseSocialLogin
+          action="signup"
+          flow="referral"
+          nextPath="/referrals/register"
+          onBeforeRedirect={saveDraft}
+          variant="referral"
+        />
+
         {/* Discord Username */}
         <div>
           <label htmlFor="ref-register-discord" className="text-accent text-sm font-semibold">
@@ -195,10 +252,17 @@ export default function RefRegister() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            readOnly={Boolean(socialIdentity)}
             placeholder="Email you sign in with"
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl outline-none focus:border-info-border transition text-base"
           />
         </div>
+
+        {socialIdentity ? (
+          <p className="rounded-xl border border-success-border bg-success-soft px-4 py-3 text-sm text-success-text">
+            Verified as {socialIdentity.email}. You can use Google or Discord to sign in.
+          </p>
+        ) : null}
 
         {/* PayPal Email */}
         <div>
@@ -247,21 +311,22 @@ export default function RefRegister() {
         </div>
 
         {/* Password */}
-        <div>
+        {!socialIdentity ? <div>
           <label htmlFor="ref-register-password" className="text-accent text-sm font-semibold">Password</label>
           <input
             id="ref-register-password"
             name="password"
             type="password"
+            minLength={10}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Enter password"
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl outline-none focus:border-info-border transition text-base"
           />
-        </div>
+        </div> : null}
 
         {/* Confirm Password */}
-        <div>
+        {!socialIdentity ? <div>
           <label htmlFor="ref-register-confirm" className="text-accent text-sm font-semibold">
             Confirm Password
           </label>
@@ -274,7 +339,7 @@ export default function RefRegister() {
             placeholder="Confirm password"
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl outline-none focus:border-info-border transition text-base"
           />
-        </div>
+        </div> : null}
 
         {/* Submit */}
         <button

@@ -1,11 +1,17 @@
 const documents = new Map();
+const mockSendVerification = jest.fn();
 const mockClient = {
   fetch: jest.fn(async () => null),
   transaction() {
     const creates = [];
+    const deletes = [];
     const transaction = {
       create(document) {
         creates.push({ ...document });
+        return transaction;
+      },
+      delete(id) {
+        deletes.push(id);
         return transaction;
       },
       async commit() {
@@ -16,6 +22,7 @@ const mockClient = {
             statusCode: 409,
           });
         }
+        deletes.forEach((id) => documents.delete(id));
         creates.forEach((document) => documents.set(document._id, document));
         return { transactionId: `tx-${documents.size}` };
       },
@@ -26,6 +33,18 @@ const mockClient = {
 
 jest.mock("@sanity/client", () => ({
   createClient: () => mockClient,
+}));
+
+jest.mock("resend", () => ({
+  Resend: class {
+    constructor() {
+      this.emails = { send: (...args) => mockSendVerification(...args) };
+    }
+  },
+}));
+
+jest.mock("../server/supabase/serverSession", () => ({
+  getLegacySupabaseUser: jest.fn(async () => null),
 }));
 
 const createRes = () => ({
@@ -54,6 +73,7 @@ describe("referral registration identity claims", () => {
 
   beforeAll(() => {
     process.env.REF_SESSION_SECRET = "registration-test-session-secret";
+    process.env.RESEND_API_KEY = "re_test";
     const module = require("../server/api/ref/register");
     register = module.default || module;
   });
@@ -61,6 +81,8 @@ describe("referral registration identity claims", () => {
   beforeEach(() => {
     documents.clear();
     mockClient.fetch.mockClear();
+    mockSendVerification.mockReset();
+    mockSendVerification.mockResolvedValue({ data: { id: "email_fixture" }, error: null });
     globalThis.__rooRateLimitBuckets?.clear?.();
   });
 
@@ -84,7 +106,7 @@ describe("referral registration identity claims", () => {
       register(requestFor("creator-two"), second),
     ]);
 
-    expect([first.statusCode, second.statusCode].sort()).toEqual([201, 409]);
+    expect([first.statusCode, second.statusCode].sort()).toEqual([202, 409]);
     expect(
       [...documents.values()].filter((document) => document._type === "referral")
     ).toHaveLength(1);
@@ -94,5 +116,32 @@ describe("referral registration identity claims", () => {
           document._type === "referralIdentityClaim" && document.kind === "email"
       )
     ).toHaveLength(1);
+    expect(mockSendVerification).toHaveBeenCalledTimes(1);
+  });
+
+  test("removes the pending account and both claims when email delivery fails", async () => {
+    mockSendVerification.mockResolvedValue({
+      data: null,
+      error: new Error("provider unavailable"),
+    });
+    const response = createRes();
+
+    await register(
+      {
+        method: "POST",
+        headers: { "x-forwarded-for": "203.0.113.91" },
+        body: {
+          discordUsername: "Creator Failure",
+          email: "failure@example.com",
+          paypalEmail: "failure@example.com",
+          slug: "creator-failure",
+          password: "correct-horse-battery-staple",
+        },
+      },
+      response
+    );
+
+    expect(response.statusCode).toBe(503);
+    expect([...documents.values()]).toHaveLength(0);
   });
 });

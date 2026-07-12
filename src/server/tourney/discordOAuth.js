@@ -150,19 +150,12 @@ export const readTourneyDiscordOAuthStateToken = ({
 };
 
 export const buildTourneyDiscordStartUrl = ({
-  player,
   baseUrl,
   env = process.env,
 } = {}) => {
   const oauthConfig = getTourneyDiscordOAuthConfig({ baseUrl, env });
   if (!oauthConfig.enabled) return getTourneyDiscordInviteUrl(env);
-
-  const token = createTourneyDiscordEmailToken({ player, env });
-  if (!token) return getTourneyDiscordInviteUrl(env);
-
-  const url = new URL("/tourney/discord", baseUrl);
-  url.hash = new URLSearchParams({ token }).toString();
-  return url.toString();
+  return new URL("/tourney/discord", baseUrl).toString();
 };
 
 export const buildDiscordAuthorizationUrl = ({

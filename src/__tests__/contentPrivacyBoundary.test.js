@@ -209,6 +209,10 @@ describe("public content privacy boundary", () => {
     expect(connectPolicy).toBeTruthy();
     expect(connectPolicy).not.toContain("*");
     expect(connectPolicy).not.toMatch(/sanity\.io/i);
+    expect(connectPolicy).toContain(
+      "https://ntezmxzaibrrsgtujgxu.supabase.co"
+    );
+    expect(connectPolicy).not.toContain("https://*.supabase.co");
     expect(connectPolicy).toContain("https://www.paypal.com");
     expect(connectPolicy).toContain("https://lumberjack.razorpay.com");
 

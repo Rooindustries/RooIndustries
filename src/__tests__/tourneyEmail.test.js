@@ -174,13 +174,15 @@ describe("tourney emails", () => {
         DISCORD_CLIENT_ID: "client_1",
         DISCORD_CLIENT_SECRET: "secret_1",
         DISCORD_BOT_TOKEN: "bot_1",
-        DISCORD_GUILD_ID: "guild_1",
-        DISCORD_PARTICIPANT_ROLE_ID: "role_1",
+        DISCORD_GUILD_ID: "111111111111111111",
+        DISCORD_PARTICIPANT_ROLE_ID: "222222222222222222",
+        DISCORD_HOST_ROLE_ID: "333333333333333333",
       },
     });
 
     const html = mockSendEmail.mock.calls[0][0].html;
-    expect(html).toContain("/tourney/discord#token=");
+    expect(html).toContain("/tourney/discord");
+    expect(html).not.toContain("#token=");
     expect(html).not.toContain("/api/tourney/discord/start?token=");
     expect(mockSendEmail.mock.calls[0][0].text).toContain(
       "Join or verify Discord for the Participant role"

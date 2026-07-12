@@ -47,6 +47,7 @@ const RefChangePassword = lazy(() => import("./legacyPages/RefChangePassword"));
 const RefForgot = lazy(() => import("./legacyPages/RefForgot"));
 const RefReset = lazy(() => import("./legacyPages/RefReset"));
 const RefRegister = lazy(() => import("./legacyPages/RefRegister"));
+const RefVerifyRegistration = lazy(() => import("./legacyPages/RefVerifyRegistration"));
 const MeetTheTeam = lazy(() => import("./legacyPages/MeetTheTeam"));
 const NotFound = lazy(() => import("./legacyPages/NotFound"));
 
@@ -200,6 +201,10 @@ function AnimatedRoutes({
           <Route
             path="/referrals/register"
             element={withRouteSuspense(<RefRegister />)}
+          />
+          <Route
+            path="/referrals/verify"
+            element={withRouteSuspense(<RefVerifyRegistration />)}
           />
           <Route
             path="/referrals/Register"

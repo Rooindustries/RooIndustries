@@ -6,6 +6,10 @@ import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import { logSafeError } from "../../safeErrorLog.js";
 import { shouldUseSupabaseForAccount } from "../../supabase/runtime.js";
 import { authenticateSupabaseAccount } from "../../supabase/accounts.js";
+import {
+  clearLegacySupabaseSession,
+  installLegacySupabaseSession,
+} from "../../supabase/serverSession.js";
 
 const DUMMY_PASSWORD_HASH =
   // nosemgrep: generic.secrets.security.detected-bcrypt-hash.detected-bcrypt-hash
@@ -84,6 +88,13 @@ export default async function handler(req, res) {
         });
       }
 
+      await clearLegacySupabaseSession({ req, res }).catch(() => {});
+      await installLegacySupabaseSession({
+        req,
+        res,
+        session: result.session,
+      });
+
       setReferralSessionCookie(
         res,
         {
@@ -104,6 +115,7 @@ export default async function handler(req, res) {
     const referral = await client.fetch(
       `*[
         _type == "referral"
+        && registrationStatus != "pending_email"
         && (
           (defined(slug.current) && lower(slug.current) == $identifier)
           || (defined(creatorEmail) && lower(creatorEmail) == $identifier)
@@ -149,6 +161,24 @@ export default async function handler(req, res) {
       } catch (error) {
         logSafeError("Referral password storage upgrade failed", error);
       }
+    }
+
+    await clearLegacySupabaseSession({ req, res }).catch(() => {});
+    try {
+      const bridge = await authenticateSupabaseAccount({
+        identifier: normalizedIdentifier,
+        password: normalizedPassword,
+        requiredRoles: ["creator"],
+      });
+      if (bridge.ok) {
+        await installLegacySupabaseSession({
+          req,
+          res,
+          session: bridge.session,
+        });
+      }
+    } catch {
+      // Sanity remains the compatibility authority until this account is projected.
     }
 
     setReferralSessionCookie(
