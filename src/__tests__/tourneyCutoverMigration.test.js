@@ -14,6 +14,15 @@ const cutoverCli = fs.readFileSync(
   path.join(process.cwd(), "scripts", "tourney-cutover.mjs"),
   "utf8"
 );
+const activationV4 = fs.readFileSync(
+  path.join(
+    process.cwd(),
+    "supabase",
+    "migrations",
+    "20260712205616_activate_tourney_schema_v4.sql"
+  ),
+  "utf8"
+);
 
 describe("Tourney cutover migration", () => {
   test("keeps the control-plane private and service-only", () => {
@@ -36,11 +45,22 @@ describe("Tourney cutover migration", () => {
     expect(cutoverCli).toContain("roo_capture_tourney_hardening_snapshot");
     expect(cutoverCli).toContain("roo_capture_tourney_pre_cutover_snapshot");
     expect(cutoverCli).toContain('hardened.error.code === "PGRST202"');
+    expect(cutoverCli).toContain("POSTGRES_URL_NON_POOLING");
+    expect(cutoverCli).toContain('PGCONNECT_TIMEOUT: "15"');
   });
 
   test("records ordered outbox events and guarded target checkpoints", () => {
     expect(migration).toContain("sequence bigint generated always as identity");
     expect(migration).toContain("tourney.mirror_checkpoints");
     expect(migration).toContain("tourney.mirror_tombstones");
+  });
+
+  test("bootstraps a missing fallback only under paused Supabase-primary controls", () => {
+    expect(activationV4).toContain("roo_enqueue_tourney_fallback_bootstrap");
+    expect(activationV4).toContain("v_meta.primary_backend <> 'supabase'");
+    expect(activationV4).toContain("not v_meta.writes_paused");
+    expect(activationV4).toContain("v_meta.fallback_read_only");
+    expect(activationV4).toContain("existing.record_hash = v_hash");
+    expect(activationV4).toContain("grant execute on function public.roo_enqueue_tourney_fallback_bootstrap(text)");
   });
 });
