@@ -12,6 +12,12 @@ import {
 import { reconcileBookingEmailDispatches } from "../ref/bookingEmails.js";
 import { syncSanityCommerceChanges } from "../../supabase/incrementalCommerceSync.js";
 import { reconcileTourneyDiscordRoleAssignments } from "../../tourney/discordRoleSync.js";
+import { reconcileTourneyEmailDispatches } from "../../tourney/emailDispatch.js";
+import {
+  reconcileTourneyMirror,
+  resolveTourneyStorePolicy,
+  runTourneyParity,
+} from "../../tourney/store.js";
 import { reconcileCredentialOperations } from "../../supabase/credentialRecovery.js";
 
 export default async function handler(req, res) {
@@ -154,6 +160,19 @@ export default async function handler(req, res) {
         logSafeError("Credential recovery reconciliation failed", error);
         result.body.summary.credentialRecovery = { pending: true };
       }
+    }
+    try {
+      const tourneyPolicy = resolveTourneyStorePolicy();
+      result.body.summary.tourneyEmails =
+        await reconcileTourneyEmailDispatches({ limit: 10 });
+      result.body.summary.tourneyMirror =
+        await reconcileTourneyMirror({ limit: 100 });
+      if (tourneyPolicy.mirrorEnabled && result.body.summary.tourneyMirror.failed === 0) {
+        result.body.summary.tourneyParity = await runTourneyParity();
+      }
+    } catch (error) {
+      logSafeError("Tourney reconciliation failed", error);
+      result.body.summary.tourneyReconciliation = { pending: true };
     }
     try {
       result.body.summary.rateLimitBucketsCleaned =

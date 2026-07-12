@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { tourneyMutationFetch } from "./tourneyMutation";
 
 const managedRoles = ["caster", "viewer"];
 
@@ -26,7 +27,7 @@ export default function OwnerAccountManager({
     setMessage("");
 
     try {
-      const response = await fetch("/api/tourney/accounts", {
+      const response = await tourneyMutationFetch("/api/tourney/accounts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

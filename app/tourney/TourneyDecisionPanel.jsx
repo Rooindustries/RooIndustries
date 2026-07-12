@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { tourneyMutationFetch } from "./tourneyMutation";
 
 const STORAGE_KEY = "tourney_registration_decision";
 
@@ -49,7 +50,7 @@ export default function TourneyDecisionPanel() {
       return;
     }
 
-    fetch("/api/tourney/registration-decision", {
+    tourneyMutationFetch("/api/tourney/registration-decision", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(intent),

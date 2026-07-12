@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import TourneyBracketView from "./TourneyBracketView";
+import { tourneyMutationFetch } from "./tourneyMutation";
 
 const emptyTeamForm = {
   teamId: "",
@@ -50,7 +51,7 @@ export default function TourneyBracketManager({
     setIsBusy(true);
     setMessage("");
     try {
-      const response = await fetch("/api/tourney/bracket", {
+      const response = await tourneyMutationFetch("/api/tourney/bracket", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

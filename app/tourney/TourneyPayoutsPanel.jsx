@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { tourneyMutationFetch } from "./tourneyMutation";
 
 const emptyPayout = {
   playerId: "",
@@ -40,7 +41,7 @@ export default function TourneyPayoutsPanel({
     setIsBusy(true);
     setMessage("");
     try {
-      const response = await fetch("/api/tourney/payouts", {
+      const response = await tourneyMutationFetch("/api/tourney/payouts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),

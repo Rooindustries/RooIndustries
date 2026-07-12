@@ -29,6 +29,11 @@ count drift.
   primary.
 - `SANITY_REVERSE_MIRROR_WRITES`: preserves Sanity as the rollback copy.
 - `TOURNEY_DATABASE_MODE`: `legacy` or `supabase`.
+- `TOURNEY_MIRROR_ENABLED`: writes ordered mutation events to the opposite
+  Tourney backend; required while Supabase is primary and legacy is retained.
+- `TOURNEY_WRITES_PAUSED`: pauses registrations and domain mutations with a
+  retryable `503` while login, logout, sessions, and public reads remain live.
+- `TOURNEY_FAILOVER_GENERATION`: non-negative manual cutover generation.
 - `SUPABASE_LICENSING_ENABLED`: exposes the authenticated app entitlement API.
 - `SUPABASE_MIGRATION_ENDPOINT_ENABLED`: preview-only Tourney import endpoint;
   production builds reject this flag.

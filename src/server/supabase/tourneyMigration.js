@@ -59,9 +59,16 @@ export const readOptionalTourneyTable = async ({ table, load }) => {
 export const readTourneySnapshot = async ({ env = process.env } = {}) => {
   const databaseUrl = normalize(env.TOURNEY_DATABASE_URL || env.POSTGRES_URL);
   if (!databaseUrl) throw new Error("The legacy Tourney database is not configured.");
-  const { neon } = await import("@neondatabase/serverless");
-  const sql = neon(databaseUrl);
-  const tables = await Promise.all([
+  const { default: postgres } = await import("postgres");
+  const root = postgres(databaseUrl, {
+    max: 1,
+    prepare: false,
+    idle_timeout: 20,
+    connect_timeout: 10,
+  });
+  let tables;
+  try {
+    tables = await root.begin("isolation level repeatable read read only", (sql) => Promise.all([
     readOptionalTourneyTable({
       table: "tourney_players",
       load: () => sql`select * from tourney_players order by id`,
@@ -110,7 +117,10 @@ export const readTourneySnapshot = async ({ env = process.env } = {}) => {
       table: "tourney_payouts",
       load: () => sql`select * from tourney_payouts order by id`,
     }),
-  ]);
+    ]));
+  } finally {
+    await root.end({ timeout: 5 });
+  }
 
   const snapshot = jsonSafe(
     Object.fromEntries(tables.map(({ table, rows }) => [table, rows]))
@@ -139,7 +149,20 @@ const importPlayerAuth = async ({ player, client }) => {
   }
   const username = normalize(player.username).toLowerCase();
   const authEmail = playerAuthEmail(username);
-  const userId = deterministicUuid(authEmail);
+  const principal = requireRpcData(
+    await client.rpc("roo_resolve_tourney_import_principal", {
+      p_legacy_player_id: player.id,
+      p_username: username,
+      p_login_email: normalize(player.email).toLowerCase(),
+    }),
+    "Tourney principal resolution"
+  );
+  if (principal?.conflict) {
+    const conflict = new Error("Tourney identity collision requires resolution.");
+    conflict.code = "TOURNEY_IDENTITY_CONFLICT";
+    throw conflict;
+  }
+  const userId = normalize(principal?.principal_id) || deterministicUuid(authEmail);
   const authAttributes = {
     email: authEmail,
     email_confirm: true,
@@ -208,7 +231,7 @@ export const migrateTourneyShadow = async ({
 } = {}) => {
   const { snapshot, sourceHash, missingTables } = await readTourneySnapshot({ env });
   const imported = requireRpcData(
-    await client.rpc("roo_import_tourney_snapshot", {
+    await client.rpc("roo_import_tourney_snapshot_incremental", {
       p_snapshot: snapshot,
       p_source_hash: sourceHash,
     }),

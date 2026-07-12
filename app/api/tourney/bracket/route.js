@@ -19,6 +19,10 @@ import {
 } from "../../../../src/server/tourney/bracketStore";
 import { buildTourneyPublicError } from "../../../../src/server/tourney/publicError";
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
+import {
+  executeTourneyCommand,
+  readTourneyCommandId,
+} from "../../../../src/server/tourney/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -91,107 +95,90 @@ export async function POST(request) {
     if (OWNER_ACTIONS.has(action) && session.role !== "owner") {
       return jsonError("Owner access required.", 403);
     }
-
-    if (action === "upsert-team") {
-      await upsertTourneyBracketTeam({
-        teamId: payload.teamId,
-        name: payload.name,
-        seed: payload.seed,
-        actorUsername: session.username,
-      });
-      return NextResponse.json(
-        await getTourneyBracketSnapshot({ includeAudit: true })
-      );
-    }
-
-    if (action === "delete-team") {
-      await deleteTourneyBracketTeam({
-        teamId: payload.teamId,
-        actorUsername: session.username,
-      });
-      return NextResponse.json(
-        await getTourneyBracketSnapshot({ includeAudit: true })
-      );
-    }
-
-    if (action === "seed-teams") {
-      const teamIds = Array.isArray(payload.teamIds)
-        ? payload.teamIds
-        : String(payload.teamIds || "")
-            .split(",")
-            .map((value) => value.trim())
-            .filter(Boolean);
-      await seedTourneyBracketTeams({
-        teamIds,
-        actorUsername: session.username,
-      });
-      return NextResponse.json(
-        await getTourneyBracketSnapshot({ includeAudit: true })
-      );
-    }
-
-    if (action === "generate") {
-      return NextResponse.json(
-        await generateTourneyBracket({ actorUsername: session.username })
-      );
-    }
-
-    if (action === "reset-bracket") {
-      return NextResponse.json(
-        await resetTourneyBracket({ actorUsername: session.username })
-      );
-    }
-
-    if (action === "score-match") {
-      return NextResponse.json(
-        await scoreTourneyBracketMatch({
-          matchId: payload.matchId,
-          opponent1Score: payload.opponent1Score,
-          opponent2Score: payload.opponent2Score,
-          actorUsername: session.username,
-        })
-      );
-    }
-
-    if (action === "forfeit-match") {
-      return NextResponse.json(
-        await forfeitTourneyBracketMatch({
-          matchId: payload.matchId,
-          losingSide: payload.losingSide,
-          reason: payload.reason,
-          actorUsername: session.username,
-        })
-      );
-    }
-
-    if (action === "disqualify-team") {
-      return NextResponse.json(
-        await disqualifyTourneyBracketTeam({
-          teamId: payload.teamId,
-          matchId: payload.matchId,
-          reason: payload.reason,
-          actorUsername: session.username,
-        })
-      );
-    }
-
-    if (action === "reopen-match") {
-      const force = payload.force === true || payload.force === "true";
-      if (force && session.role !== "owner") {
-        return jsonError("Owner access required.", 403);
-      }
-      return NextResponse.json(
-        await reopenTourneyBracketMatch({
-          matchId: payload.matchId,
-          force,
-          actorUsername: session.username,
-        })
-      );
-    }
-
-    return jsonError("Unsupported bracket action.");
+    const commandId = readTourneyCommandId({ request });
+    const command = await executeTourneyCommand({
+      commandId,
+      purpose: `brackets:${action}`,
+      requestPayload: payload,
+      callback: async () => {
+        if (action === "upsert-team") {
+          await upsertTourneyBracketTeam({
+            teamId: payload.teamId,
+            name: payload.name,
+            seed: payload.seed,
+            actorUsername: session.username,
+          });
+          return { body: await getTourneyBracketSnapshot({ includeAudit: true }) };
+        }
+        if (action === "delete-team") {
+          await deleteTourneyBracketTeam({
+            teamId: payload.teamId,
+            actorUsername: session.username,
+          });
+          return { body: await getTourneyBracketSnapshot({ includeAudit: true }) };
+        }
+        if (action === "seed-teams") {
+          const teamIds = Array.isArray(payload.teamIds)
+            ? payload.teamIds
+            : String(payload.teamIds || "")
+                .split(",")
+                .map((value) => value.trim())
+                .filter(Boolean);
+          await seedTourneyBracketTeams({
+            teamIds,
+            actorUsername: session.username,
+          });
+          return { body: await getTourneyBracketSnapshot({ includeAudit: true }) };
+        }
+        if (action === "generate") {
+          return { body: await generateTourneyBracket({ actorUsername: session.username }) };
+        }
+        if (action === "reset-bracket") {
+          return { body: await resetTourneyBracket({ actorUsername: session.username }) };
+        }
+        if (action === "score-match") {
+          return { body: await scoreTourneyBracketMatch({
+            matchId: payload.matchId,
+            opponent1Score: payload.opponent1Score,
+            opponent2Score: payload.opponent2Score,
+            actorUsername: session.username,
+          }) };
+        }
+        if (action === "forfeit-match") {
+          return { body: await forfeitTourneyBracketMatch({
+            matchId: payload.matchId,
+            losingSide: payload.losingSide,
+            reason: payload.reason,
+            actorUsername: session.username,
+          }) };
+        }
+        if (action === "disqualify-team") {
+          return { body: await disqualifyTourneyBracketTeam({
+            teamId: payload.teamId,
+            matchId: payload.matchId,
+            reason: payload.reason,
+            actorUsername: session.username,
+          }) };
+        }
+        if (action === "reopen-match") {
+          const force = payload.force === true || payload.force === "true";
+          if (force && session.role !== "owner") {
+            throw Object.assign(new Error("Owner access required."), { status: 403 });
+          }
+          return { body: await reopenTourneyBracketMatch({
+            matchId: payload.matchId,
+            force,
+            actorUsername: session.username,
+          }) };
+        }
+        throw Object.assign(new Error("Unsupported bracket action."), { status: 400 });
+      },
+    });
+    return NextResponse.json(command.body, { status: command.status });
   } catch (error) {
     const failure = buildTourneyPublicError(error, "Unable to update bracket.");
-    return jsonError(failure.message, failure.status);
+    const response = jsonError(failure.message, failure.status, { code: failure.code });
+    if (error?.retryAfter) response.headers.set("Retry-After", String(error.retryAfter));
+    return response;
   }
 }
