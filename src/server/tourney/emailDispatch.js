@@ -23,6 +23,16 @@ const MEMORY_DISPATCHES =
   globalThis.__rooTourneyEmailDispatches ||
   (globalThis.__rooTourneyEmailDispatches = new Map());
 
+const setEmailMirrorContext = async ({ sql, policy, commandId }) => {
+  await sql`
+    select
+      set_config('roo.tourney_backend', ${policy.primaryBackend}, true),
+      set_config('roo.tourney_mirror_enabled', ${policy.mirrorEnabled ? "1" : "0"}, true),
+      set_config('roo.tourney_generation', ${String(policy.generation)}, true),
+      set_config('roo.tourney_command_id', ${commandId}, true)
+  `;
+};
+
 export const enqueueTourneyEmailDispatch = async ({
   commandId,
   dispatchKind,
@@ -95,6 +105,11 @@ const claimDispatches = async ({ env, limit }) => {
     env,
     lockKey: "roo-tourney-email-dispatch",
     callback: async (sql) => {
+      await setEmailMirrorContext({
+        sql,
+        policy,
+        commandId: `email-claim:${leaseId}`,
+      });
       const rows = await sql`
         select * from ${sql(table)}
         where (
@@ -128,7 +143,6 @@ export const reconcileTourneyEmailDispatches = async ({
   const policy = resolveTourneyStorePolicy(env);
   const table = dispatchTable(policy.primaryBackend);
   const dispatches = await claimDispatches({ env, limit });
-  const sql = await getTourneySql(env);
   let sent = 0;
   let retried = 0;
   for (const dispatch of dispatches) {
@@ -137,27 +151,49 @@ export const reconcileTourneyEmailDispatches = async ({
       const providerMessageId = Array.isArray(response)
         ? normalize(response[0]?.id)
         : normalize(response?.id);
-      await sql`
-        update ${sql(table)}
-        set status = 'sent', provider_message_id = ${providerMessageId || null},
-            sent_at = now(), lease_id = null, lease_expires_at = null,
-            last_error_code = null, updated_at = now()
-        where id = ${dispatch.id} and lease_id = ${dispatch.lease_id}
-      `;
+      await runTourneyTransaction({
+        env,
+        lockKey: `roo-tourney-email-complete:${dispatch.id}`,
+        callback: async (sql) => {
+          await setEmailMirrorContext({
+            sql,
+            policy,
+            commandId: `email-complete:${dispatch.id}:${dispatch.attempt_count + 1}`,
+          });
+          await sql`
+            update ${sql(table)}
+            set status = 'sent', provider_message_id = ${providerMessageId || null},
+                sent_at = now(), lease_id = null, lease_expires_at = null,
+                last_error_code = null, updated_at = now()
+            where id = ${dispatch.id} and lease_id = ${dispatch.lease_id}
+          `;
+        },
+      });
       sent += 1;
     } catch (error) {
       const terminal = Number(dispatch.attempt_count || 0) + 1 >= 12;
-      await sql`
-        update ${sql(table)}
-        set status = ${terminal ? "failed" : "retry"},
-            next_attempt_at = now() + make_interval(
-              secs => least(3600, 2 ^ least(attempt_count, 11))
-            ),
-            lease_id = null, lease_expires_at = null,
-            last_error_code = ${normalize(error?.code || "TOURNEY_EMAIL_FAILED").slice(0, 128)},
-            updated_at = now()
-        where id = ${dispatch.id} and lease_id = ${dispatch.lease_id}
-      `;
+      await runTourneyTransaction({
+        env,
+        lockKey: `roo-tourney-email-retry:${dispatch.id}`,
+        callback: async (sql) => {
+          await setEmailMirrorContext({
+            sql,
+            policy,
+            commandId: `email-retry:${dispatch.id}:${dispatch.attempt_count + 1}`,
+          });
+          await sql`
+            update ${sql(table)}
+            set status = ${terminal ? "failed" : "retry"},
+                next_attempt_at = now() + make_interval(
+                  secs => least(3600, 2 ^ least(attempt_count, 11))
+                ),
+                lease_id = null, lease_expires_at = null,
+                last_error_code = ${normalize(error?.code || "TOURNEY_EMAIL_FAILED").slice(0, 128)},
+                updated_at = now()
+            where id = ${dispatch.id} and lease_id = ${dispatch.lease_id}
+          `;
+        },
+      });
       retried += 1;
     }
   }
