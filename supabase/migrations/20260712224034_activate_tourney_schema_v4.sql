@@ -4,6 +4,10 @@
 set lock_timeout = '5s';
 set statement_timeout = '120s';
 
+create index if not exists tourney_account_snapshots_supersedes_v4_idx
+  on tourney.account_snapshots (supersedes_snapshot_id)
+  where supersedes_snapshot_id is not null;
+
 create or replace function tourney.mirror_record_key(
   p_table_name text,
   p_row jsonb
