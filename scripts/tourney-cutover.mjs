@@ -336,6 +336,7 @@ const seedPlayerPrincipalsV4 = async () => {
     join accounts.tourney_accounts account
       on account.legacy_sanity_id = player.id
     where account.principal_id is not null
+      and player.principal_id is distinct from account.principal_id
     order by player.id
   `;
   for (const mapping of mappings) {
