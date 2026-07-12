@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import SupabaseSocialLogin from "./SupabaseSocialLogin";
 
 export default function RefLogin() {
   const nav = useNavigate();
@@ -17,6 +18,24 @@ export default function RefLogin() {
 
   // Load saved referral code
   useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    const oauthError = query.get("oauth");
+    if (oauthError) {
+      showToast(
+        "error",
+        oauthError === "unlinked"
+          ? "That Google or Discord email is not linked to a creator account."
+          : "Social sign-in is temporarily unavailable. Use your email or referral code."
+      );
+      query.delete("oauth");
+      const cleanSearch = query.toString();
+      window.history.replaceState(
+        null,
+        "",
+        `${window.location.pathname}${cleanSearch ? `?${cleanSearch}` : ""}`
+      );
+    }
+
     const checkSession = async () => {
       try {
         const sessionRes = await fetch("/api/ref/getData");
@@ -172,6 +191,12 @@ export default function RefLogin() {
         >
           {loading ? "Logging in..." : "Login"}
         </button>
+
+        <SupabaseSocialLogin
+          flow="referral"
+          nextPath="/referrals/dashboard"
+          variant="referral"
+        />
       </form>
 
       {/* Register Button */}

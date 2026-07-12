@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { LockScreen, getTourneySession } from "../TourneyShared";
+import SupabaseSocialLogin from "../../../src/components/SupabaseSocialLogin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,6 +44,13 @@ export default async function TourneyLoginPage({ searchParams }) {
       note="Wait for approval before trying to log in."
       buttonLabel="Sign in"
       redirectTo={normalizeNextPath(resolvedSearchParams?.next)}
+      socialLogin={
+        <SupabaseSocialLogin
+          flow="tourney"
+          nextPath={normalizeNextPath(resolvedSearchParams?.next)}
+          variant="tourney"
+        />
+      }
     />
   );
 }
