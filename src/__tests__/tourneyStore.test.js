@@ -61,6 +61,21 @@ describe("Tourney cutover store", () => {
     });
   });
 
+  test("allows an explicit private maintenance command during the pause", async () => {
+    const callback = jest.fn(async () => ({ body: { ok: true } }));
+    await expect(
+      executeTourneyCommand({
+        commandId: "command-paused-maintenance-0001",
+        purpose: "accounts:seed",
+        requestPayload: {},
+        env: { ...env, TOURNEY_WRITES_PAUSED: "1" },
+        maintenanceWhilePaused: true,
+        callback,
+      })
+    ).resolves.toMatchObject({ status: 200, replayed: false });
+    expect(callback).toHaveBeenCalledTimes(1);
+  });
+
   test("parses the manual failover policy", () => {
     expect(resolveTourneyStorePolicy(env)).toEqual({
       primaryBackend: "legacy",

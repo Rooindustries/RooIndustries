@@ -313,6 +313,7 @@ const seedAccountSnapshotV4 = async () => {
     commandId,
     purpose: "accounts:seed",
     requestPayload: { canonicalHash: commandId.split(":").at(-1) },
+    maintenanceWhilePaused: true,
     callback: async () => ({
       body: await writePersistedTourneyAccountsJson({
         accountsJson,
@@ -346,6 +347,7 @@ const seedPlayerPrincipalsV4 = async () => {
         playerId: mapping.player_id,
         principalId: mapping.principal_id,
       },
+      maintenanceWhilePaused: true,
       callback: async () => {
         const transactionSql = await getTourneySql();
         await transactionSql`
@@ -381,6 +383,7 @@ const backfillDiscordV4 = async () => {
       purpose: "discord:backfill",
       requestPayload: { playerId: player.id, discordUserId: player.discordUserId },
       attemptExternalWork: false,
+      maintenanceWhilePaused: true,
       callback: async () => {
         const assignment = await desired.recordTourneyDiscordDesiredState({
           player,
@@ -419,6 +422,7 @@ const backfillDiscordV4 = async () => {
         generation: Number(assignment.generation),
       },
       attemptExternalWork: false,
+      maintenanceWhilePaused: true,
       callback: async () => {
         const transactionSql = await getTourneySql();
         await transactionSql`
