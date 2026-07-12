@@ -188,6 +188,35 @@ export async function POST(request) {
         { headers: { "Cache-Control": "private, no-store" } }
       );
     }
+    if (String(payload.action || "").toLowerCase() === "email-state-backfill") {
+      const backfillEnv = {
+        ...process.env,
+        TOURNEY_DATABASE_MODE: "legacy",
+        TOURNEY_MIRROR_ENABLED: "1",
+        TOURNEY_WRITES_PAUSED: "0",
+        TOURNEY_FAILOVER_GENERATION: "0",
+      };
+      await executeTourneyCommand({
+        commandId: `cutover:email-state:${crypto.randomUUID()}`,
+        purpose: "email:state-backfill",
+        requestPayload: { noDelivery: true },
+        env: backfillEnv,
+        callback: async () => {
+          const sql = await getTourneySql(backfillEnv);
+          await sql`
+            update tourney_email_dispatches
+            set updated_at = updated_at
+          `;
+          return { body: { ok: true } };
+        },
+      });
+      const mirror = await reconcileTourneyMirror({ env: backfillEnv, limit: 50 });
+      const parity = await runTourneyParity({ env: backfillEnv });
+      return NextResponse.json(
+        { ok: mirror.failed === 0 && parity.status === "clean", mirror, parity },
+        { headers: { "Cache-Control": "private, no-store" } }
+      );
+    }
     const result = await migrateTourneyShadow();
     return NextResponse.json(
       { ok: true, ...result },
