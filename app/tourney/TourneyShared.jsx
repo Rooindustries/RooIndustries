@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import TourneyFooter from "./TourneyFooter";
+import TourneyLoginForm from "./TourneyLoginForm";
 import TourneyTelemetry from "./TourneyTelemetry";
 import TourneyThemeToggle from "./TourneyThemeToggle";
 import {
@@ -4820,53 +4821,13 @@ export const LockScreen = ({
             {heading}
           </h1>
           <p className="cs-subtitle cs-r4">{subtitle}</p>
-          <form className="cs-login cs-r5" action="/api/tourney/login" method="post">
-            <input type="hidden" name="redirectTo" value={redirectTo} />
-            <input
-              className="cs-field"
-              name="username"
-              type="text"
-              autoComplete="username"
-              placeholder="Discord username or email"
-              aria-label="Discord username or email"
-              required
-            />
-            <input
-              className="cs-field"
-              name="password"
-              type="password"
-              autoComplete="current-password"
-              placeholder="Password"
-              aria-label="Password"
-              required
-            />
-            <label className="cs-remember">
-              <input name="rememberMe" type="checkbox" value="on" />
-              <span>Remember me</span>
-            </label>
-            <button className="cs-button" type="submit">
-              {buttonLabel}
-            </button>
-          </form>
-          {socialLogin}
-          {error ? (
-            <p className="cs-error cs-r5" role="alert">
-              {error === "rate"
-                ? "Too many attempts. Please try again later."
-                : error === "suspended"
-                  ? "You have been suspended from the tourney. Please contact serviroo through Discord or at serviroo@rooindustries.com for further queries."
-                  : error === "unlinked"
-                    ? "That Google or Discord email is not linked to an approved Tourney account. Use your username or email and password."
-                    : ["unavailable", "exchange_failed", "missing_code"].includes(error)
-                      ? "Social sign-in is temporarily unavailable. Use your username or email and password."
-                  : "Invalid Discord username, email, or password. Wait for approval before trying to log in."}
-            </p>
-          ) : (
-            <p className="cs-note cs-r5">{note}</p>
-          )}
-          <p className="cs-note cs-r5">
-            <a href="/tourney/forgot">Forgot password?</a>
-          </p>
+          <TourneyLoginForm
+            buttonLabel={buttonLabel}
+            initialError={error}
+            note={note}
+            redirectTo={redirectTo}
+            socialLogin={socialLogin}
+          />
         </section>
       </div>
     </main>
