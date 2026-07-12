@@ -64,6 +64,12 @@ const readLegacyReadiness = async (sql) => {
       count(*) filter (
         where not (shape_match and value_match and ordering_match and error_match)
       )::integer as mismatches,
+      percentile_cont(0.95) within group (
+        order by primary_latency_ms
+      )::integer as primary_p95_ms,
+      percentile_cont(0.95) within group (
+        order by shadow_latency_ms
+      )::integer as shadow_p95_ms,
       max(observed_at) as last_observed_at
     from ranked
     where sample_rank <= 30
@@ -84,6 +90,8 @@ const readLegacyReadiness = async (sql) => {
       shadowReads.map((row) => [row.route, {
         samples: Number(row.samples),
         mismatches: Number(row.mismatches),
+        primary_p95_ms: Number(row.primary_p95_ms || 0),
+        shadow_p95_ms: Number(row.shadow_p95_ms || 0),
         last_observed_at: row.last_observed_at,
       }])
     ),
