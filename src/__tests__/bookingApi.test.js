@@ -1,4 +1,5 @@
 let holdSlot;
+let isSameSupabaseOwnedHold;
 let createBooking;
 let releaseHold;
 let sendBookingEmails;
@@ -659,6 +660,9 @@ beforeAll(() => {
     return mod && mod.default ? mod.default : mod;
   };
   holdSlot = load("../../src/server/booking/holdSlot");
+  ({ isSameSupabaseOwnedHold } = require(
+    "../../src/server/booking/holdSlot"
+  ));
   createBooking = load("../../src/server/api/ref/createBooking");
   releaseHold = load("../../src/server/booking/releaseHold");
   sendBookingEmails = load("../../src/server/api/ref/sendBookingEmails");
@@ -695,6 +699,29 @@ afterEach(() => {
 });
 
 describe("booking reservation API", () => {
+  test("recognizes a stale Sanity mirror of the same Supabase hold", () => {
+    const current = {
+      _id: "slothold-shared",
+      backendOwner: "supabase",
+      cutoverGeneration: 4,
+      startTimeUTC: "2026-07-13T14:30:00.000Z",
+      holdNonce: "new",
+    };
+
+    expect(
+      isSameSupabaseOwnedHold({
+        current,
+        mirror: { ...current, holdNonce: "old" },
+      })
+    ).toBe(true);
+    expect(
+      isSameSupabaseOwnedHold({
+        current,
+        mirror: { ...current, backendOwner: "sanity", holdNonce: "other" },
+      })
+    ).toBe(false);
+  });
+
   test("reservation creation locks slot for other users", async () => {
     expect(CLIENT_EMAIL).toBe("vihaann2.0@gmail.com");
     expect(OWNER_EMAIL).toBe("serviroo@rooindustries.com");
