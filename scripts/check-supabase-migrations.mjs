@@ -56,7 +56,7 @@ for (const stale of [
 
 const hardeningFile = path.join(
   migrationsDirectory,
-  "20260712015615_harden_commerce_integrity_and_recovery.sql"
+  "20260712031331_harden_commerce_integrity_and_recovery.sql"
 );
 if (fs.existsSync(hardeningFile)) {
   const sql = fs.readFileSync(hardeningFile, "utf8");
