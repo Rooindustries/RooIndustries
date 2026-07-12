@@ -1,8 +1,10 @@
 import {
   authenticateSupabaseAccount,
+  completeSupabaseCredentialMirror,
   createSupabaseCreatorAccount,
   requireSupabaseBearerUser,
   syncSupabaseTourneyAdminAccount,
+  syncSupabaseTourneyPlayerAccount,
 } from "../server/supabase/accounts";
 
 const creatorAccount = {
@@ -66,6 +68,10 @@ describe("Supabase account compatibility", () => {
 
   test("requires a verified bearer identity", async () => {
     const adminClient = {
+      rpc: jest.fn().mockResolvedValue({
+        data: { ...creatorAccount, verified_real_email: null },
+        error: null,
+      }),
       auth: {
         getUser: jest.fn().mockResolvedValue({
           data: {
@@ -188,5 +194,127 @@ describe("Supabase account compatibility", () => {
       })
     ).rejects.toThrow("already linked");
     expect(adminClient.auth.admin.updateUserById).not.toHaveBeenCalled();
+  });
+
+  test("completes credential mirroring and session revocation atomically", async () => {
+    const adminClient = {
+      rpc: jest.fn().mockResolvedValue({
+        data: { status: "mirrored", session_version: 7 },
+        error: null,
+      }),
+    };
+    await expect(
+      completeSupabaseCredentialMirror({
+        operationKey: "credential:test",
+        adminClient,
+      })
+    ).resolves.toEqual({ sessionVersion: 7 });
+    expect(adminClient.rpc).toHaveBeenCalledTimes(1);
+    expect(adminClient.rpc).toHaveBeenCalledWith(
+      "roo_complete_credential_operation",
+      { p_operation_key: "credential:test" }
+    );
+  });
+
+  test("adds Tourney access to a creator principal without replacing its password", async () => {
+    const user = {
+      id: creatorAccount.user_id,
+      app_metadata: { roles: ["creator"] },
+    };
+    const dualAccount = {
+      ...creatorAccount,
+      roles: ["creator", "tourney_player"],
+      tourney_username: "player-one",
+    };
+    const adminClient = {
+      rpc: jest
+        .fn()
+        .mockResolvedValueOnce({ data: null, error: null })
+        .mockResolvedValueOnce({
+          data: { ...creatorAccount, verified_real_email: "creator@example.com" },
+          error: null,
+        })
+        .mockResolvedValueOnce({ data: { imported: true }, error: null })
+        .mockResolvedValueOnce({ data: dualAccount, error: null }),
+      auth: {
+        admin: {
+          getUserById: jest.fn().mockResolvedValue({ data: { user }, error: null }),
+          updateUserById: jest.fn().mockResolvedValue({ data: { user }, error: null }),
+        },
+      },
+    };
+    await expect(
+      syncSupabaseTourneyPlayerAccount({
+        adminClient,
+        authUserId: user.id,
+        env: {},
+        installPassword: false,
+        passwordHash: "$2b$12$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        player: {
+          id: "player.one",
+          username: "player-one",
+          email: "creator@example.com",
+          status: "approved",
+        },
+      })
+    ).resolves.toMatchObject({ userId: user.id, account: dualAccount });
+    const update = adminClient.auth.admin.updateUserById.mock.calls[0][1];
+    expect(update).not.toHaveProperty("password");
+    expect(update).not.toHaveProperty("password_hash");
+    expect(update.app_metadata.roles).toEqual(
+      expect.arrayContaining(["creator", "tourney_player"])
+    );
+  });
+
+  test("adds creator access to a Tourney principal without creating a second Auth user", async () => {
+    const tourneyAccount = {
+      ...creatorAccount,
+      roles: ["tourney_player"],
+      verified_real_email: "creator@example.com",
+    };
+    const dualAccount = {
+      ...tourneyAccount,
+      roles: ["creator", "tourney_player"],
+    };
+    const user = {
+      id: creatorAccount.user_id,
+      app_metadata: { roles: ["tourney_player"] },
+      user_metadata: {},
+    };
+    const adminClient = {
+      rpc: jest
+        .fn()
+        .mockResolvedValueOnce({ data: null, error: null })
+        .mockResolvedValueOnce({ data: tourneyAccount, error: null })
+        .mockResolvedValueOnce({ data: { imported: true }, error: null })
+        .mockResolvedValueOnce({ data: {}, error: null })
+        .mockResolvedValueOnce({ data: dualAccount, error: null }),
+      auth: {
+        admin: {
+          getUserById: jest.fn().mockResolvedValue({ data: { user }, error: null }),
+          updateUserById: jest.fn().mockResolvedValue({ data: { user }, error: null }),
+          createUser: jest.fn(),
+          deleteUser: jest.fn(),
+        },
+      },
+    };
+    await expect(
+      createSupabaseCreatorAccount({
+        adminClient,
+        authUserId: user.id,
+        referral: {
+          _id: "referral.creator",
+          creatorEmail: "creator@example.com",
+          slug: { current: "creator" },
+          name: "Creator",
+        },
+      })
+    ).resolves.toMatchObject({ userId: user.id, account: dualAccount });
+    expect(adminClient.auth.admin.createUser).not.toHaveBeenCalled();
+    const update = adminClient.auth.admin.updateUserById.mock.calls[0][1];
+    expect(update).not.toHaveProperty("password");
+    expect(update.app_metadata.roles).toEqual(
+      expect.arrayContaining(["creator", "tourney_player"])
+    );
   });
 });

@@ -85,6 +85,7 @@ const verifyChangedDocuments = async ({ documents, client }) => {
 const importChangedDocuments = async ({ sanityClient, supabaseClient, cursor }) => {
   const summary = { batches: 0, changed: 0, imported: 0, skippedStale: 0 };
   let nextCursor = cursor;
+  let exhausted = false;
   const changedDocuments = [];
 
   while (summary.batches < MAX_BATCHES) {
@@ -92,7 +93,10 @@ const importChangedDocuments = async ({ sanityClient, supabaseClient, cursor }) 
       client: sanityClient,
       cursor: nextCursor,
     });
-    if (!Array.isArray(documents) || documents.length < 1) break;
+    if (!Array.isArray(documents) || documents.length < 1) {
+      exhausted = true;
+      break;
+    }
     const imported = await importCommerceShadowDocuments({
       documents,
       client: supabaseClient,
@@ -104,13 +108,23 @@ const importChangedDocuments = async ({ sanityClient, supabaseClient, cursor }) 
     summary.skippedStale += imported.skippedStale;
     changedDocuments.push(...documents);
     nextCursor = cursorFromDocument(documents.at(-1));
-    if (documents.length < BATCH_SIZE) break;
+    if (documents.length < BATCH_SIZE) {
+      exhausted = true;
+      break;
+    }
   }
 
-  if (summary.batches === MAX_BATCHES) {
-    const error = new Error("Incremental commerce sync exceeded its batch limit.");
-    error.code = "COMMERCE_SYNC_BATCH_LIMIT";
-    throw error;
+  if (summary.batches === MAX_BATCHES && !exhausted) {
+    const remaining = await fetchChangedBatch({
+      client: sanityClient,
+      cursor: nextCursor,
+    });
+    if (Array.isArray(remaining) && remaining.length > 0) {
+      const error = new Error("Incremental commerce sync exceeded its batch limit.");
+      error.code = "COMMERCE_SYNC_BATCH_LIMIT";
+      throw error;
+    }
+    exhausted = true;
   }
   summary.verified = await verifyChangedDocuments({
     documents: changedDocuments,

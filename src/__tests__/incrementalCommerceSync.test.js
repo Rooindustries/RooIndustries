@@ -51,6 +51,71 @@ const createSupabaseClient = ({ targetHash = "same-hash" } = {}) => ({
   }),
 });
 
+const createLargeSyncFixture = (count) => {
+  const documents = Array.from({ length: count }, (_, index) => ({
+    ...payment,
+    _id: `payment.${String(index).padStart(4, "0")}`,
+    _rev: `revision-${index}`,
+  }));
+  const sanityClient = {
+    fetch: jest.fn(async (query, params = {}) => {
+      if (query.includes("]._id")) return documents.map((document) => document._id);
+      const start = params.id
+        ? documents.findIndex((document) => document._id > params.id)
+        : 0;
+      return start < 0 ? [] : documents.slice(start, start + 50);
+    }),
+  };
+  const supabaseClient = {
+    rpc: jest.fn(async (name, params = {}) => {
+      if (name === "roo_claim_commerce_sync_cursor") {
+        return { data: { claimed: true, cursor_value: null }, error: null };
+      }
+      if (name === "roo_start_sync_run") {
+        return { data: "00000000-0000-4000-8000-000000000001", error: null };
+      }
+      if (name === "roo_import_and_project_commerce_shadow_batch") {
+        return {
+          data: {
+            import: {
+              imported: params.p_documents.length,
+              skipped_stale: 0,
+            },
+          },
+          error: null,
+        };
+      }
+      if (name === "roo_hash_canonical_documents") {
+        return {
+          data: params.p_documents.map((document) => ({
+            id: document._id,
+            hash: `hash:${document._id}`,
+          })),
+          error: null,
+        };
+      }
+      if (name === "roo_commerce_canonical_manifest_for_ids") {
+        return {
+          data: params.p_ids.map((id) => ({
+            id,
+            hash: `hash:${id}`,
+            tombstoned: false,
+          })),
+          error: null,
+        };
+      }
+      if (name === "roo_reconcile_and_project_commerce_shadow_sources_since") {
+        return {
+          data: { reconciliation: { tombstoned: 0, preserved_concurrent: 0 } },
+          error: null,
+        };
+      }
+      return { data: null, error: null };
+    }),
+  };
+  return { sanityClient, supabaseClient };
+};
+
 describe("incremental Sanity commerce sync", () => {
   test("imports, projects, verifies, and advances one leased cursor", async () => {
     const sanityClient = createSanityClient();
@@ -121,5 +186,21 @@ describe("incremental Sanity commerce sync", () => {
         p_error_code: "COMMERCE_INCREMENTAL_DRIFT",
       })
     );
+  });
+
+  test("accepts an exactly-full 50th batch only when a probe proves the stream is drained", async () => {
+    const exact = createLargeSyncFixture(2500);
+    await expect(
+      syncSanityCommerceChanges({ env, ...exact })
+    ).resolves.toMatchObject({
+      batches: 50,
+      changed: 2500,
+      verified: 2500,
+    });
+
+    const overflow = createLargeSyncFixture(2501);
+    await expect(
+      syncSanityCommerceChanges({ env, ...overflow })
+    ).rejects.toMatchObject({ code: "COMMERCE_SYNC_BATCH_LIMIT" });
   });
 });

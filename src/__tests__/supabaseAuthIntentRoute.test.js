@@ -1,6 +1,8 @@
 const mockResolveExactDomainIdentity = jest.fn();
 const mockCreateOAuthIntent = jest.fn();
 const mockClearNextSupabaseSession = jest.fn();
+const mockConsumeAuthRateLimit = jest.fn();
+const mockReadReauthToken = jest.fn();
 
 jest.mock("../server/supabase/domainIdentity", () => ({
   resolveExactDomainIdentity: (...args) => mockResolveExactDomainIdentity(...args),
@@ -18,6 +20,14 @@ jest.mock("../server/supabase/oauthIntents", () => ({
 
 jest.mock("../server/supabase/serverSession", () => ({
   clearNextSupabaseSession: (...args) => mockClearNextSupabaseSession(...args),
+}));
+
+jest.mock("../server/supabase/authRateLimit", () => ({
+  consumeAuthRateLimit: (...args) => mockConsumeAuthRateLimit(...args),
+}));
+
+jest.mock("../server/supabase/reauth", () => ({
+  readReauthToken: (...args) => mockReadReauthToken(...args),
 }));
 
 const createResponse = (payload, init = {}) => {
@@ -66,6 +76,8 @@ describe("Supabase OAuth intent route", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockClearNextSupabaseSession.mockResolvedValue(undefined);
+    mockConsumeAuthRateLimit.mockResolvedValue({ allowed: true, retryAfter: 60 });
+    mockReadReauthToken.mockReturnValue("recent-auth-token");
     mockCreateOAuthIntent.mockResolvedValue({
       id: "11111111-1111-4111-8111-111111111111",
       token: "opaque-one-time-token",
@@ -97,6 +109,7 @@ describe("Supabase OAuth intent route", () => {
 
   test("binds link intents to the exact Auth user and domain subject", async () => {
     mockResolveExactDomainIdentity.mockResolvedValue({
+      account: { principal_id: "d52be0ea-ec6b-47dd-9373-4e30c9dcc6a1" },
       domainSubject: "approved-player",
       user: { id: "e71a5687-daa6-4371-9700-5aef798fdd03" },
     });
@@ -119,6 +132,7 @@ describe("Supabase OAuth intent route", () => {
       expect.objectContaining({
         action: "link",
         domainSubject: "approved-player",
+        reauthToken: "recent-auth-token",
         targetUserId: "e71a5687-daa6-4371-9700-5aef798fdd03",
       })
     );
@@ -129,6 +143,52 @@ describe("Supabase OAuth intent route", () => {
       })
     );
     expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
+
+  test("allows reauthentication only through an already-linked provider", async () => {
+    mockResolveExactDomainIdentity.mockResolvedValue({
+      account: {
+        connected_providers: ["email", "google"],
+        principal_id: "d52be0ea-ec6b-47dd-9373-4e30c9dcc6a1",
+      },
+      domainSubject: "creator-one",
+      user: { id: "e71a5687-daa6-4371-9700-5aef798fdd03" },
+    });
+    const rejected = await POST(
+      makeRequest({
+        action: "reauth",
+        flow: "referral",
+        provider: "discord",
+        reauthPurpose: "link_identity",
+      })
+    );
+    expect(rejected.status).toBe(409);
+    expect(mockCreateOAuthIntent).not.toHaveBeenCalled();
+
+    const accepted = await POST(
+      makeRequest({
+        action: "reauth",
+        flow: "referral",
+        provider: "google",
+        reauthPurpose: "link_identity",
+      })
+    );
+    expect(accepted.status).toBe(200);
+    expect(mockCreateOAuthIntent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "reauth",
+        provider: "google",
+        reauthPurpose: "link_identity",
+      })
+    );
+  });
+
+  test("rejects the unfinished OAuth merge action", async () => {
+    const response = await POST(
+      makeRequest({ action: "merge", flow: "referral", provider: "google" })
+    );
+    expect(response.status).toBe(400);
+    expect(mockCreateOAuthIntent).not.toHaveBeenCalled();
   });
 
   test("uses separate cookies for concurrent tab intents", async () => {

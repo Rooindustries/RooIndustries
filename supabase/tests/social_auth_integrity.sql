@@ -4,9 +4,14 @@ do $$
 declare
   v_user_id constant uuid := '70000000-0000-4000-8000-000000000001';
   v_discord_identity_id constant uuid := '70000000-0000-4000-8000-000000000002';
+  v_google_identity_id constant uuid := '70000000-0000-4000-8000-000000000003';
+  v_secondary_user_id constant uuid := '70000000-0000-4000-8000-000000000004';
   v_intent jsonb;
   v_finalized jsonb;
   v_assignment jsonb;
+  v_account jsonb;
+  v_grant jsonb;
+  v_merged jsonb;
 begin
   if pg_catalog.has_function_privilege(
     'anon',
@@ -14,11 +19,27 @@ begin
     'execute'
   ) or pg_catalog.has_function_privilege(
     'authenticated',
-    'public.roo_finalize_oauth_intent(text,uuid,text,text)',
+    'public.roo_finalize_oauth_intent(text,uuid,text,text,text)',
     'execute'
   ) or pg_catalog.has_function_privilege(
     'authenticated',
     'public.roo_list_pending_discord_role_assignments(integer)',
+    'execute'
+  ) or pg_catalog.has_function_privilege(
+    'anon',
+    'public.roo_read_oauth_intent(uuid,text)',
+    'execute'
+  ) or pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.roo_create_reauth_grant(uuid,text,text,text)',
+    'execute'
+  ) or pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.roo_merge_account_principals(text,text)',
+    'execute'
+  ) or pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.roo_complete_credential_operation(text)',
     'execute'
   ) then
     raise exception 'browser roles can execute privileged OAuth intent functions';
@@ -42,6 +63,28 @@ begin
     now(),
     '{}'::jsonb,
     '{}'::jsonb,
+    now(),
+    now()
+  );
+
+  insert into auth.identities (
+    id,
+    user_id,
+    provider_id,
+    identity_data,
+    provider,
+    created_at,
+    updated_at
+  ) values (
+    v_google_identity_id,
+    v_user_id,
+    'google-social-auth-fixture',
+    jsonb_build_object(
+      'sub', 'google-social-auth-fixture',
+      'email', 'unverified-google@example.invalid',
+      'email_verified', false
+    ),
+    'google',
     now(),
     now()
   );
@@ -85,6 +128,21 @@ begin
   insert into accounts.account_roles (user_id, role)
   values (v_user_id, 'tourney_player');
 
+  insert into accounts.account_roles (user_id, role)
+  values (v_user_id, 'creator');
+
+  insert into accounts.creator_profiles (
+    user_id,
+    referral_code,
+    active,
+    legacy_sanity_id
+  ) values (
+    v_user_id,
+    'social-auth-fixture',
+    true,
+    'creator.social-auth-fixture'
+  );
+
   insert into accounts.tourney_accounts (
     user_id,
     username,
@@ -111,6 +169,25 @@ begin
       and link.email_verified
   ) then
     raise exception 'Discord Auth identity was not projected exactly';
+  end if;
+  if not exists (
+    select 1
+    from accounts.identity_links link
+    where link.user_id = v_user_id
+      and link.provider = 'google'
+      and link.provider_subject = 'google-social-auth-fixture'
+      and not link.email_verified
+  ) then
+    raise exception 'Google verification was incorrectly inherited from another provider';
+  end if;
+
+  v_account := public.roo_account_by_user_id(v_user_id);
+  if nullif(v_account->>'principal_id', '') is null
+     or v_account->>'creator_legacy_sanity_id' <> 'creator.social-auth-fixture'
+     or v_account->>'tourney_legacy_player_id' <> 'player.social-auth-fixture'
+     or v_account->>'creator_active' <> 'true'
+     or v_account->>'tourney_status' <> 'approved' then
+    raise exception 'one principal did not preserve independent creator and Tourney domains';
   end if;
 
   begin
@@ -145,7 +222,8 @@ begin
     repeat('c', 64),
     v_user_id,
     'discord',
-    '710000000000000001'
+    '710000000000000001',
+    null
   );
   if (v_finalized->>'completed')::boolean is not true then
     raise exception 'OAuth intent did not complete';
@@ -155,7 +233,8 @@ begin
     repeat('c', 64),
     v_user_id,
     'discord',
-    '710000000000000001'
+    '710000000000000001',
+    null
   );
   if (v_finalized->>'completed')::boolean is not true then
     raise exception 'OAuth intent replay was not idempotent';
@@ -197,6 +276,95 @@ begin
     where pending.user_id = v_user_id
   ) then
     raise exception 'pending Discord role assignment was not listed';
+  end if;
+
+  v_grant := public.roo_create_reauth_grant(
+    v_user_id,
+    repeat('d', 64),
+    'unlink_identity',
+    'discord'
+  );
+  if nullif(v_grant->>'id', '') is null then
+    raise exception 'reauthentication grant was not created';
+  end if;
+  perform public.roo_consume_reauth_grant(
+    repeat('d', 64),
+    v_user_id,
+    'unlink_identity',
+    'discord'
+  );
+  begin
+    perform public.roo_consume_reauth_grant(
+      repeat('d', 64),
+      v_user_id,
+      'unlink_identity',
+      'discord'
+    );
+    raise exception 'reauthentication grant was reusable';
+  exception when insufficient_privilege then null;
+  end;
+
+  insert into auth.users (
+    id,
+    aud,
+    role,
+    email,
+    email_confirmed_at,
+    raw_app_meta_data,
+    raw_user_meta_data,
+    created_at,
+    updated_at
+  ) values (
+    v_secondary_user_id,
+    'authenticated',
+    'authenticated',
+    'secondary-social-auth-fixture@example.invalid',
+    now(),
+    '{}'::jsonb,
+    '{}'::jsonb,
+    now(),
+    now()
+  );
+  insert into public.profiles (
+    user_id,
+    primary_email,
+    display_name,
+    status,
+    source_backend
+  ) values (
+    v_secondary_user_id,
+    'secondary-social-auth-fixture@example.invalid',
+    'Secondary Social Auth Fixture',
+    'active',
+    'supabase'
+  );
+  insert into accounts.account_roles (user_id, role)
+  values (v_secondary_user_id, 'customer');
+
+  perform public.roo_create_reauth_grant(
+    v_user_id,
+    repeat('e', 64),
+    'merge_account',
+    null
+  );
+  perform public.roo_create_reauth_grant(
+    v_secondary_user_id,
+    repeat('f', 64),
+    'merge_account',
+    null
+  );
+  v_merged := public.roo_merge_account_principals(
+    repeat('e', 64),
+    repeat('f', 64)
+  );
+  if v_merged->>'principal_id' <> v_user_id::text
+     or (select count(*) from accounts.principal_auth_users mapping
+         where mapping.principal_id = v_user_id) <> 2
+     or not exists (
+       select 1 from accounts.principals principal
+       where principal.id = v_secondary_user_id and principal.status = 'deleted'
+     ) then
+    raise exception 'account merge did not preserve both authenticated users on one principal';
   end if;
 end;
 $$;

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { isSameOriginMutation } from "../server/request/sameOrigin.js";
 
 const JSON_CONTENT_TYPE = "application/json; charset=utf-8";
 const MAX_REQUEST_BODY_BYTES = 128 * 1024;
@@ -391,16 +392,7 @@ export const runLegacyApiHandler = async ({
 }) => {
   const url = new URL(request.url);
   const method = String(methodOverride || request.method || "GET").toUpperCase();
-  const origin = String(request.headers.get("origin") || "").trim();
-  let originMatches = true;
-  if (origin) {
-    try {
-      originMatches = new URL(origin).origin === url.origin;
-    } catch {
-      originMatches = false;
-    }
-  }
-  if (!originMatches) {
+  if (!isSameOriginMutation(request)) {
     return Response.json(
       { ok: false, error: "Cross-origin request rejected.", code: "cross_origin_rejected" },
       { status: 403, headers: { "Cache-Control": "no-store" } }

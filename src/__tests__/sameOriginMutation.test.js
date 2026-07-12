@@ -1,12 +1,22 @@
 import { isSameOriginMutation } from "../server/request/sameOrigin";
 
-const requestFor = ({ origin = "", fetchSite = "", url } = {}) => ({
+const requestFor = ({
+  origin = "",
+  fetchSite = "",
+  forwardedHost = "",
+  forwardedProto = "",
+  host = "",
+  url,
+} = {}) => ({
   url: url || "https://www.rooindustries.com/api/tourney/login",
   headers: {
     get(name) {
       const key = String(name || "").toLowerCase();
       if (key === "origin") return origin;
       if (key === "sec-fetch-site") return fetchSite;
+      if (key === "x-forwarded-host") return forwardedHost;
+      if (key === "x-forwarded-proto") return forwardedProto;
+      if (key === "host") return host;
       return "";
     },
   },
@@ -41,6 +51,8 @@ describe("same-origin mutation guard", () => {
       isSameOriginMutation(
         requestFor({
           origin: "https://www.rooindustries.com",
+          forwardedHost: "www.rooindustries.com",
+          forwardedProto: "https",
           url: "https://rooindustries-git-main.vercel.app/api/tourney/login",
         })
       )
@@ -60,6 +72,26 @@ describe("same-origin mutation guard", () => {
     expect(
       isSameOriginMutation(
         requestFor({ origin: "http://rooindustries.com" })
+      )
+    ).toBe(false);
+    expect(
+      isSameOriginMutation(
+        requestFor({
+          origin: "https://www.rooindustries.com",
+          forwardedHost: "attacker.example",
+          forwardedProto: "https",
+          url: "https://rooindustries-git-main.vercel.app/api/tourney/login",
+        })
+      )
+    ).toBe(false);
+    expect(
+      isSameOriginMutation(
+        requestFor({
+          origin: "https://www.rooindustries.com",
+          forwardedHost: "www.rooindustries.com, attacker.example",
+          forwardedProto: "https",
+          url: "https://rooindustries-git-main.vercel.app/api/tourney/login",
+        })
       )
     ).toBe(false);
   });

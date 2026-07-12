@@ -153,6 +153,8 @@ describe("referral login API", () => {
       referralId: "ref_creator_1",
       code: "creator-code",
       authBackend: "sanity",
+      principalId: "",
+      sessionVersion: 1,
     });
   });
 

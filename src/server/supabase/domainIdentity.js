@@ -3,10 +3,7 @@ import {
   TOURNEY_SESSION_COOKIE,
   readTourneySessionFromStore,
 } from "../tourney/auth.js";
-import {
-  resolveSupabaseAccountAlias,
-  resolveSupabaseAccountByUserId,
-} from "./accounts.js";
+import { resolveSupabaseAccountByUserId } from "./accounts.js";
 import { getNextSupabaseUser } from "./serverSession.js";
 
 const cookieHeader = (request) => request.headers.get("cookie") || "";
@@ -40,14 +37,17 @@ export const resolveExactDomainIdentity = async ({
       headers: { cookie: cookieHeader(request) },
     });
     if (!session) return null;
-    const account = await resolveSupabaseAccountAlias({
-      identifier: session.code,
-    });
+    const account = await resolveSupabaseAccountByUserId({ userId: user.id });
     if (
       !account ||
-      account.user_id !== user.id ||
+      !account.principal_id ||
+      (session.principalId && account.principal_id !== session.principalId) ||
+      Number(account.session_version || 1) !== Number(session.sessionVersion || 1) ||
       account.status !== "active" ||
-      !(account.roles || []).includes("creator")
+      !(account.roles || []).includes("creator") ||
+      account.creator_active === false ||
+      account.creator_legacy_sanity_id !== session.referralId ||
+      account.referral_code !== session.code
     ) {
       return null;
     }

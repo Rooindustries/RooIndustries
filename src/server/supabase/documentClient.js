@@ -1,9 +1,13 @@
+import crypto from "node:crypto";
 import { evaluate, parse } from "groq-js";
 import {
   applyShadowMutations,
   fetchCommerceAvailability,
+  fetchCommerceDerivedCount,
+  fetchReferralEarningsSummary,
   fetchRecoveryPaymentDocuments,
   fetchShadowDocuments,
+  fetchUpgradeBookingChain,
 } from "./shadowStore.js";
 
 const clone = (value) =>
@@ -177,10 +181,14 @@ class PatchBuilder extends PatchSpec {
   constructor(client, id) {
     super(id);
     this.client = client;
+    this.commandId = `commerce:${crypto.randomUUID()}`;
   }
 
   commit(options = {}) {
-    return this.client.commitPatch(this, options);
+    return this.client.commitPatch(this, {
+      ...options,
+      commandId: options.commandId || this.commandId,
+    });
   }
 }
 
@@ -188,6 +196,7 @@ class TransactionBuilder {
   constructor(client) {
     this.client = client;
     this.operations = [];
+    this.commandId = `commerce:${crypto.randomUUID()}`;
   }
 
   create(document) {
@@ -223,7 +232,10 @@ class TransactionBuilder {
   }
 
   commit(options = {}) {
-    return this.client.commitTransaction(this.operations, options);
+    return this.client.commitTransaction(this.operations, {
+      ...options,
+      commandId: options.commandId || this.commandId,
+    });
   }
 }
 
@@ -333,6 +345,22 @@ export class SupabaseDocumentClient {
       throw new Error("Typed availability is only available to commerce clients.");
     }
     return fetchCommerceAvailability({ client: this.shadowClient });
+  }
+
+  referralEarnings({ referralId, referralCode } = {}) {
+    return fetchReferralEarningsSummary({
+      client: this.shadowClient,
+      referralId,
+      referralCode,
+    });
+  }
+
+  upgradeBookingChain({ rootId } = {}) {
+    return fetchUpgradeBookingChain({ client: this.shadowClient, rootId });
+  }
+
+  derivedCount({ kind, value } = {}) {
+    return fetchCommerceDerivedCount({ client: this.shadowClient, kind, value });
   }
 
   config() {

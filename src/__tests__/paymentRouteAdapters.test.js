@@ -178,6 +178,27 @@ describe("payment app route adapters", () => {
     expect(handlers.start).toHaveBeenCalledTimes(1);
   });
 
+  test("accepts the canonical production origin behind Vercel's internal request URL", async () => {
+    const { route, handlers } = await loadPaymentActionRoute();
+    const request = buildJsonRequest(
+      "https://rooindustries-git-main.vercel.app/api/payment/start",
+      {
+        method: "POST",
+        headers: {
+          origin: "https://www.rooindustries.com",
+          "x-forwarded-host": "www.rooindustries.com",
+          "x-forwarded-proto": "https",
+        },
+        body: { provider: "paypal" },
+      }
+    );
+    const response = await route.POST(request, {
+      params: Promise.resolve({ action: "start" }),
+    });
+    expect(response.status).toBe(200);
+    expect(handlers.start).toHaveBeenCalledTimes(1);
+  });
+
   test("finalize strips the public source field before the legacy handler runs", async () => {
     const { route, handlers } = await loadPaymentActionRoute();
     const request = buildJsonRequest("https://example.com/api/payment/finalize", {

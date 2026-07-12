@@ -15,6 +15,7 @@ import { buildTourneyPublicError } from "../../../../src/server/tourney/publicEr
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
 import { getNextSupabaseUser } from "../../../../src/server/supabase/serverSession";
 import { readBoundedJson } from "../../../../src/server/request/boundedJson";
+import { resolveSupabaseAccountByUserId } from "../../../../src/server/supabase/accounts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -98,10 +99,12 @@ export async function POST(request) {
       response: successResponse,
     }).catch(() => null);
     const submittedEmail = String(payload?.email || "").trim().toLowerCase();
+    const socialAccount = socialUser?.id
+      ? await resolveSupabaseAccountByUserId({ userId: socialUser.id })
+      : null;
     if (
       socialUser &&
-      (!socialUser.email_confirmed_at ||
-        String(socialUser.email || "").trim().toLowerCase() !== submittedEmail)
+      String(socialAccount?.verified_real_email || "").trim().toLowerCase() !== submittedEmail
     ) {
       return jsonError("Your verified sign-in email does not match this registration.", 409);
     }
