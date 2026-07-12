@@ -61,6 +61,55 @@ describe("Supabase to Sanity rollback mirroring", () => {
     ]);
   });
 
+  test("allows commerce holds to defer an already-durable outbox mirror", async () => {
+    const supabaseClient = {
+      commerceOnly: true,
+      create: jest.fn().mockResolvedValue({ _id: "slotHold.deferred" }),
+      fetch: jest.fn(),
+    };
+    const sanityClient = createSanityClient();
+    const recoveryClient = { rpc: jest.fn() };
+    const client = createReverseMirroringSupabaseClient({
+      supabaseClient,
+      sanityClient,
+      recoveryClient,
+    });
+
+    await expect(
+      client.create(
+        { _id: "slotHold.deferred", _type: "slotHold" },
+        { deferMirror: true }
+      )
+    ).resolves.toEqual({ _id: "slotHold.deferred" });
+
+    expect(recoveryClient.rpc).not.toHaveBeenCalled();
+    expect(sanityClient.transaction).not.toHaveBeenCalled();
+  });
+
+  test("does not allow non-commerce writes to defer rollback mirroring", async () => {
+    const supabaseClient = {
+      create: jest.fn().mockResolvedValue({ _id: "content.immediate" }),
+      fetch: jest.fn().mockResolvedValue([
+        { _id: "content.immediate", _type: "siteSettings" },
+      ]),
+    };
+    const sanityClient = createSanityClient();
+    const client = createReverseMirroringSupabaseClient({
+      supabaseClient,
+      sanityClient,
+    });
+
+    await client.create(
+      { _id: "content.immediate", _type: "siteSettings" },
+      { deferMirror: true }
+    );
+
+    expect(sanityClient.operations).toContainEqual({
+      operation: "createOrReplace",
+      document: { _id: "content.immediate", _type: "siteSettings" },
+    });
+  });
+
   test("mirrors Supabase deletes as Sanity deletes", async () => {
     const supabaseClient = {
       delete: jest.fn().mockResolvedValue({ deleted: true }),
