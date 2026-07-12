@@ -298,167 +298,19 @@ const applyLegacyV4Phase = async (phase) => {
   return { applied: true, schemaVersion: 4, phase };
 };
 
-const seedAccountSnapshotV4 = async () => {
-  const { readEffectiveTourneyAccounts, renderTourneyAccountsJson } =
-    await import("../src/server/tourney/auth.js");
-  const accounts = await readEffectiveTourneyAccounts();
-  if (accounts.length === 0) throw new Error("Tourney account snapshot is missing.");
-  const accountsJson = renderTourneyAccountsJson(accounts);
-  const commandId = `account-snapshot:seed:${crypto.createHash("sha256").update(accountsJson).digest("hex").slice(0, 32)}`;
-  const [{ executeTourneyCommand }, { writePersistedTourneyAccountsJson }] = await Promise.all([
-    import("../src/server/tourney/store.js"),
-    import("../src/server/tourney/accountStore.js"),
-  ]);
-  const result = await executeTourneyCommand({
-    commandId,
-    purpose: "accounts:seed",
-    requestPayload: { canonicalHash: commandId.split(":").at(-1) },
-    maintenanceWhilePaused: true,
-    callback: async () => ({
-      body: await writePersistedTourneyAccountsJson({
-        accountsJson,
-        actorUsername: "schema-v4-activation",
-      }),
-    }),
+const activationV4 = () => import("../src/server/tourney/activation.js");
+const seedAccountSnapshotV4 = async () =>
+  (await activationV4()).seedTourneyAccountSnapshotV4();
+const seedPlayerPrincipalsV4 = async () =>
+  (await activationV4()).seedTourneyPlayerPrincipalsV4();
+const backfillDiscordV4 = async () =>
+  (await activationV4()).seedTourneyDiscordDesiredStateV4();
+const inventoryActivationV4 = async () =>
+  (await activationV4()).inventoryTourneyV4Activation();
+const applyActivationV4 = async () =>
+  (await activationV4()).applyTourneyV4Activation({
+    inventoryHash: valueAfter("--inventory-hash"),
   });
-  return { seeded: true, commandId, syncPending: Boolean(result.syncPending) };
-};
-
-const seedPlayerPrincipalsV4 = async () => {
-  const [{ executeTourneyCommand }, { getTourneySql }] = await Promise.all([
-    import("../src/server/tourney/store.js"),
-    import("../src/server/tourney/sqlClient.js"),
-  ]);
-  const sql = await getTourneySql();
-  const mappings = await sql`
-    select player.id as player_id, account.principal_id
-    from tourney.tourney_players player
-    join accounts.tourney_accounts account
-      on account.legacy_sanity_id = player.id
-    where account.principal_id is not null
-      and player.principal_id is distinct from account.principal_id
-    order by player.id
-  `;
-  for (const mapping of mappings) {
-    const commandId = `principal-seed:${mapping.player_id}:${mapping.principal_id}`;
-    await executeTourneyCommand({
-      commandId,
-      purpose: "identity:principal-seed",
-      requestPayload: {
-        playerId: mapping.player_id,
-        principalId: mapping.principal_id,
-      },
-      maintenanceWhilePaused: true,
-      callback: async () => {
-        const transactionSql = await getTourneySql();
-        await transactionSql`
-          update tourney.tourney_players
-          set principal_id = ${mapping.principal_id}
-          where id = ${mapping.player_id}
-        `;
-        return { body: { ok: true } };
-      },
-    });
-  }
-  return { seeded: mappings.length };
-};
-
-const backfillDiscordV4 = async () => {
-  const config = String(process.env.DISCORD_GUILD_ID || "").trim();
-  if (!/^\d{5,30}$/.test(config)) throw new Error("Discord guild id is not configured.");
-  const [{ listManageTourneyPlayers }, desired, external, store, { getTourneySql }] = await Promise.all([
-    import("../src/server/tourney/playerStore.js"),
-    import("../src/server/tourney/discordDesiredState.js"),
-    import("../src/server/tourney/externalOperations.js"),
-    import("../src/server/tourney/store.js"),
-    import("../src/server/tourney/sqlClient.js"),
-  ]);
-  const players = (await listManageTourneyPlayers()).filter(
-    (player) => player.status === "approved" && player.discordUserId
-  );
-  let queued = 0;
-  for (const player of players) {
-    const commandId = `discord-backfill:${player.id}:${player.discordUserId}`;
-    await store.executeTourneyCommand({
-      commandId,
-      purpose: "discord:backfill",
-      requestPayload: { playerId: player.id, discordUserId: player.discordUserId },
-      attemptExternalWork: false,
-      maintenanceWhilePaused: true,
-      callback: async () => {
-        const assignment = await desired.recordTourneyDiscordDesiredState({
-          player,
-          discordUser: { id: player.discordUserId },
-          guildId: config,
-        });
-        await external.enqueueTourneyExternalOperation({
-          commandId,
-          operationKind: "discord_role_reconcile",
-          entityType: "player",
-          entityId: player.id,
-          desiredState: { assignment: {
-            principalId: assignment.principal_id,
-            discordUserId: assignment.discord_user_id,
-            previousDiscordUserId: assignment.previous_discord_user_id || "",
-            desiredRole: assignment.desired_role,
-            generation: Number(assignment.generation),
-          } },
-        });
-        return { body: { ok: true } };
-      },
-    });
-    queued += 1;
-  }
-  const sql = await getTourneySql();
-  const existingAssignments = await sql`
-    select * from accounts.discord_role_assignments order by principal_id
-  `;
-  for (const assignment of existingAssignments) {
-    const commandId = `discord-state-seed:${assignment.principal_id}:g${assignment.generation}`;
-    await store.executeTourneyCommand({
-      commandId,
-      purpose: "discord:state-seed",
-      requestPayload: {
-        principalId: assignment.principal_id,
-        generation: Number(assignment.generation),
-      },
-      attemptExternalWork: false,
-      maintenanceWhilePaused: true,
-      callback: async () => {
-        const transactionSql = await getTourneySql();
-        await transactionSql`
-          update accounts.discord_role_assignments
-          set updated_at = updated_at
-          where principal_id = ${assignment.principal_id}
-        `;
-        if (!assignment.player_id) {
-          await external.enqueueTourneyExternalOperation({
-            commandId,
-            operationKind: "discord_role_reconcile",
-            entityType: "account",
-            entityId: assignment.principal_id,
-            desiredState: {
-              assignment: {
-                principalId: assignment.principal_id,
-                discordUserId: assignment.discord_user_id,
-                previousDiscordUserId: assignment.previous_discord_user_id || "",
-                desiredRole: assignment.desired_role,
-                generation: Number(assignment.generation),
-              },
-            },
-          });
-        }
-        return { body: { ok: true } };
-      },
-    });
-  }
-  return {
-    dryRun: false,
-    queued,
-    stateRowsSeeded: existingAssignments.length,
-    contactedDiscord: false,
-  };
-};
 
 const bootstrapFallbackV4 = async () => {
   const hosted = await createSupabaseAdminClient().rpc(
@@ -481,6 +333,8 @@ else if (hasFlag("--activate-legacy-v4")) result = await applyLegacyV4Phase("act
 else if (hasFlag("--seed-account-snapshot-v4")) result = await seedAccountSnapshotV4();
 else if (hasFlag("--seed-player-principals-v4")) result = await seedPlayerPrincipalsV4();
 else if (hasFlag("--backfill-discord-v4")) result = await backfillDiscordV4();
+else if (hasFlag("--inventory-activation-v4")) result = await inventoryActivationV4();
+else if (hasFlag("--apply-activation-v4")) result = await applyActivationV4();
 else if (hasFlag("--bootstrap-fallback-v4")) result = await bootstrapFallbackV4();
 else if (hasFlag("--check-manual-failover-v4")) {
   const { checkTourneyManualFailoverReadiness } =
@@ -498,7 +352,8 @@ else if (hasFlag("--parity")) result = await runTourneyParity();
 else throw new Error(
   "Use --snapshot, --apply-legacy-schema, --expand-legacy-v4, " +
   "--activate-legacy-v4, --seed-account-snapshot-v4, --seed-player-principals-v4, " +
-  "--backfill-discord-v4, --bootstrap-fallback-v4, --check-manual-failover-v4, " +
+  "--backfill-discord-v4, --inventory-activation-v4, --apply-activation-v4, " +
+  "--bootstrap-fallback-v4, --check-manual-failover-v4, " +
   "--migrate, or --parity."
 );
 
