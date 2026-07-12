@@ -10,6 +10,10 @@ const migration = fs.readFileSync(
   ),
   "utf8"
 );
+const cutoverCli = fs.readFileSync(
+  path.join(process.cwd(), "scripts", "tourney-cutover.mjs"),
+  "utf8"
+);
 
 describe("Tourney cutover migration", () => {
   test("keeps the control-plane private and service-only", () => {
@@ -29,6 +33,9 @@ describe("Tourney cutover migration", () => {
     expect(migration).toContain("vault.create_secret");
     expect(migration).toContain("extensions.pgp_sym_encrypt");
     expect(migration).toContain("migration.tourney_pre_cutover_snapshots");
+    expect(cutoverCli).toContain("roo_capture_tourney_hardening_snapshot");
+    expect(cutoverCli).toContain("roo_capture_tourney_pre_cutover_snapshot");
+    expect(cutoverCli).toContain('hardened.error.code === "PGRST202"');
   });
 
   test("records ordered outbox events and guarded target checkpoints", () => {
