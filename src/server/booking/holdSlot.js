@@ -82,12 +82,12 @@ const fetchOtherBackendSlotState = async ({
   return { hold, slotLock, bookings };
 };
 
-const patchAtRevision = async (client, document, values) => {
+const patchAtRevision = async (client, document, values, options = {}) => {
   let patch = client.patch(document._id);
   if (document?._rev && typeof patch.ifRevisionId === "function") {
     patch = patch.ifRevisionId(document._rev);
   }
-  return patch.set(values).commit();
+  return patch.set(values).commit(options);
 };
 
 const issueResponse = ({
@@ -180,12 +180,17 @@ const releasePreviousHold = async ({
     });
     if (!validToken) return;
     const releasedAt = new Date().toISOString();
-    await patchAtRevision(client, previousHold, {
-      phase: "released",
-      releasedAt,
-      expiresAt: releasedAt,
-      holdNonce: crypto.randomUUID(),
-    });
+    await patchAtRevision(
+      client,
+      previousHold,
+      {
+        phase: "released",
+        releasedAt,
+        expiresAt: releasedAt,
+        holdNonce: crypto.randomUUID(),
+      },
+      previousBackend === "supabase" ? { deferMirror: true } : {}
+    );
   } catch {
     // Moving to a new slot must not fail because a stale previous hold changed.
   }
@@ -247,6 +252,8 @@ export default async function handler(req, res) {
   });
   const cutoverGeneration = commerceControl.generation;
   const client = createHoldClient(backend);
+  const holdMutationOptions =
+    backend === "supabase" ? { deferMirror: true } : {};
 
   try {
     const settings = await getBookingSettings({ client });
@@ -417,20 +424,25 @@ export default async function handler(req, res) {
 
       const holdNonce = crypto.randomUUID();
       try {
-        const refreshed = await patchAtRevision(client, existingHold, {
-          packageTitle: String(packageTitle || "").trim(),
-          startTimeUTC: normalizedStartTimeUTC,
-          hostDate: slot.hostDate,
-          hostTime: slot.hostTime,
-          expiresAt,
-          phase: "active",
-          releasedAt: "",
-          consumedAt: "",
-          paymentRecordId: "",
-          holdNonce,
-          backendOwner: backend,
-          cutoverGeneration,
-        });
+        const refreshed = await patchAtRevision(
+          client,
+          existingHold,
+          {
+            packageTitle: String(packageTitle || "").trim(),
+            startTimeUTC: normalizedStartTimeUTC,
+            hostDate: slot.hostDate,
+            hostTime: slot.hostTime,
+            expiresAt,
+            phase: "active",
+            releasedAt: "",
+            consumedAt: "",
+            paymentRecordId: "",
+            holdNonce,
+            backendOwner: backend,
+            cutoverGeneration,
+          },
+          holdMutationOptions
+        );
         return issueResponse({
           hold: refreshed || existingHold,
           startTimeUTC: normalizedStartTimeUTC,
@@ -471,8 +483,13 @@ export default async function handler(req, res) {
     let created;
     try {
       created = existingHold
-        ? await patchAtRevision(client, existingHold, holdValues)
-        : await client.create(holdValues);
+        ? await patchAtRevision(
+            client,
+            existingHold,
+            holdValues,
+            holdMutationOptions
+          )
+        : await client.create(holdValues, holdMutationOptions);
     } catch (error) {
       if (isConflict(error)) {
         return res.status(409).json({
@@ -500,12 +517,17 @@ export default async function handler(req, res) {
       return response;
     } catch (error) {
       const failedAt = new Date().toISOString();
-      await patchAtRevision(client, created || holdValues, {
-        phase: "released",
-        releasedAt: failedAt,
-        expiresAt: failedAt,
-        holdNonce: crypto.randomUUID(),
-      }).catch(() => {});
+      await patchAtRevision(
+        client,
+        created || holdValues,
+        {
+          phase: "released",
+          releasedAt: failedAt,
+          expiresAt: failedAt,
+          holdNonce: crypto.randomUUID(),
+        },
+        holdMutationOptions
+      ).catch(() => {});
       throw error;
     }
   } catch (error) {

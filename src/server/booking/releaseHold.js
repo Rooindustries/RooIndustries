@@ -41,9 +41,8 @@ export default async function handler(req, res) {
     holdId,
     ignoreExpiry: true,
   });
-  const client = createReleaseClient(
-    tokenPayload?.be === "supabase" ? "supabase" : "sanity"
-  );
+  const backend = tokenPayload?.be === "supabase" ? "supabase" : "sanity";
+  const client = createReleaseClient(backend);
 
   try {
     const hold = await client.fetch(`*[_type == "slotHold" && _id == $id][0]`, {
@@ -83,7 +82,7 @@ export default async function handler(req, res) {
         expiresAt: releasedAt,
         holdNonce: crypto.randomUUID(),
       })
-      .commit();
+      .commit(backend === "supabase" ? { deferMirror: true } : {});
     return res.status(200).json({ ok: true, message: "Hold released" });
   } catch (error) {
     if (Number(error?.statusCode || error?.status || 0) === 409) {

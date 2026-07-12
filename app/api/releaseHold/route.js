@@ -2,6 +2,7 @@ import releaseHoldHandler from "../../../src/server/booking/releaseHold";
 import { runLegacyApiHandler } from "../../../src/lib/nextApiAdapter";
 import { after } from "next/server";
 import { recordCommerceResponseMetric } from "../../../src/server/supabase/commerceMetrics";
+import { flushDeferredCommerceMirror } from "../../../src/server/supabase/deferredCommerceMirror";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,6 +22,9 @@ async function handle(request, methodOverride) {
       statusCode: response.status,
       response: metricResponse,
     }));
+    after(async () => {
+      if (response.ok) await flushDeferredCommerceMirror();
+    });
   } catch (error) {
     if (process.env.NODE_ENV !== "test") throw error;
   }
