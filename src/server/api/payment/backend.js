@@ -2,7 +2,6 @@ import { verifyHoldToken } from "../../booking/holdToken.js";
 import { createCommerceWriteClient } from "../ref/sanity.js";
 import {
   resolveSupabaseRuntimePolicy,
-  selectCanaryBackend,
 } from "../../supabase/runtime.js";
 import { verifyPaymentAccessToken } from "./accessToken.js";
 import { findPaymentRecordByProviderData } from "./paymentRecord.js";
@@ -43,17 +42,7 @@ export const selectPaymentStartBackend = ({
   }
 
   const policy = resolveSupabaseRuntimePolicy(env);
-  if (policy.commercePrimaryBackend === "supabase") return "supabase";
-  if (policy.commerceCanaryPercentage < 1) return "sanity";
-  return selectCanaryBackend({
-    key: [
-      clientAddress,
-      bookingPayload.slotHoldId,
-      bookingPayload.originalOrderId,
-      bookingPayload.email,
-    ].join(":"),
-    percentage: policy.commerceCanaryPercentage,
-  });
+  return normalizeBackend(policy.commercePrimaryBackend);
 };
 
 export const createPaymentBackendClient = (backend) =>

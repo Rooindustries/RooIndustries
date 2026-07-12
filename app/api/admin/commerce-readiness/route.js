@@ -35,18 +35,44 @@ export async function GET(request) {
 
   try {
     const policy = resolveSupabaseRuntimePolicy();
-    const { data, error } = await createSupabaseAdminClient().rpc(
-      "roo_commerce_readiness"
-    );
-    if (error) throw Object.assign(new Error("Readiness query failed."), error);
+    const client = createSupabaseAdminClient();
+    const [readinessResult, integrityResult] = await Promise.all([
+      client.rpc("roo_commerce_readiness"),
+      client.rpc("roo_commerce_integrity_readiness"),
+    ]);
+    if (readinessResult.error || integrityResult.error) {
+      throw Object.assign(
+        new Error("Readiness query failed."),
+        readinessResult.error || integrityResult.error
+      );
+    }
+    const readiness = readinessResult.data || {};
+    const integrity = integrityResult.data || {};
+    const databaseControl = integrity.control || {};
     return NextResponse.json(
       {
         ok: true,
+        ...readiness,
         primaryBackend: policy.commercePrimaryBackend,
         cutoverEnabled: policy.commerceCutoverEnabled,
         startsPaused: policy.commerceStartsPaused,
         failoverGeneration: policy.commerceFailoverGeneration,
-        ...data,
+        databaseControl,
+        controlMatchesDeployment:
+          String(databaseControl.primary_backend || "") ===
+            policy.commercePrimaryBackend &&
+          Number(databaseControl.generation) ===
+            policy.commerceFailoverGeneration &&
+          Boolean(databaseControl.starts_paused) === policy.commerceStartsPaused,
+        integrity: {
+          mirror: integrity.mirror || {},
+          orphanClaimedProofs: Number(integrity.orphan_claimed_proofs || 0),
+          orphanFreeProofs: Number(integrity.orphan_free_proofs || 0),
+          commandConflicts: Number(integrity.command_conflicts || 0),
+          fullProjectorCallsInCommands: Number(
+            integrity.full_projector_calls_in_commands || 0
+          ),
+        },
       },
       { headers: noStore }
     );

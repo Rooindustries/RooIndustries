@@ -59,4 +59,21 @@ describe("payment backend pinning", () => {
       })
     ).toBe("sanity");
   });
+
+  test("never canaries new payment writes onto a second backend", () => {
+    expect(
+      selectPaymentStartBackend({
+        body: { bookingPayload: { packageTitle: "Performance Vertex Max" } },
+        clientAddress: "203.0.113.10",
+        env: {
+          NODE_ENV: "test",
+          DATA_PRIMARY_BACKEND: "sanity",
+          COMMERCE_PRIMARY_BACKEND: "sanity",
+          SUPABASE_COMMERCE_CANARY_PERCENT: "100",
+          SUPABASE_SHADOW_WRITES: "1",
+          SANITY_REVERSE_MIRROR_WRITES: "1",
+        },
+      })
+    ).toBe("sanity");
+  });
 });

@@ -23,6 +23,11 @@ const patchRevision = (transaction, document, mutate) =>
     return mutate(guarded);
   });
 
+const commitCommerceTransaction = ({ client, transaction, commandId }) =>
+  client?.backend === "supabase"
+    ? transaction.commit({ commandId })
+    : transaction.commit();
+
 export const prepareDeterministicBooking = ({ booking = {}, idempotencyKey = "" }) => {
   const providerOrderId =
     normalize(booking.paypalOrderId) || normalize(booking.razorpayOrderId);
@@ -181,7 +186,11 @@ export const commitBookingTransaction = async ({
   }
 
   try {
-    await transaction.commit();
+    await commitCommerceTransaction({
+      client,
+      transaction,
+      commandId: `booking-finalize:${doc._id}`,
+    });
   } catch (error) {
     if (Number(error?.statusCode || error?.status || 0) === 409) {
       const racedBooking = await client.fetch(
@@ -354,7 +363,11 @@ export const createRequiresRescheduleBooking = async ({
       });
     }
 
-    await transaction.commit();
+    await commitCommerceTransaction({
+      client,
+      transaction,
+      commandId: `booking-reschedule:${booking._id}`,
+    });
     resolvedBooking =
       (await client.fetch(`*[_type == "booking" && _id == $id][0]{...}`, {
         id: booking._id,

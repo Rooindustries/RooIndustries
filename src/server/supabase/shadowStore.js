@@ -14,6 +14,17 @@ const sortValue = (value) => {
 
 export const stableJson = (value) => JSON.stringify(sortValue(value));
 
+export const buildCommerceCommandId = ({ mutations, cutoverGeneration = 0 } = {}) =>
+  `commerce:${crypto
+    .createHash("sha256")
+    .update(
+      stableJson({
+        mutations: Array.isArray(mutations) ? mutations : [],
+        cutoverGeneration: Math.max(0, Number(cutoverGeneration) || 0),
+      })
+    )
+    .digest("hex")}`;
+
 export const hashShadowDocument = (document) =>
   crypto.createHash("sha256").update(stableJson(document)).digest("hex");
 
@@ -43,6 +54,8 @@ const requireRpcData = ({ data, error }, operation) => {
       "22023": 400,
       "23505": 409,
       "40001": 409,
+      "55000": 503,
+      "55006": 503,
       P0002: 404,
       PGRST000: 503,
       PGRST001: 503,
@@ -243,18 +256,43 @@ export const fetchRecoveryPaymentDocuments = async ({
   return Array.isArray(data) ? data : [];
 };
 
+export const fetchCommerceAvailability = async ({
+  client = createSupabaseAdminClient(),
+} = {}) => {
+  const data = requireRpcData(
+    await client.rpc("roo_fetch_commerce_availability"),
+    "commerce availability fetch"
+  );
+  const result = {
+    bookings: Array.isArray(data?.bookings) ? data.bookings : [],
+    holds: Array.isArray(data?.holds) ? data.holds : [],
+    slotLocks: Array.isArray(data?.slotLocks) ? data.slotLocks : [],
+  };
+  if (Buffer.byteLength(JSON.stringify(result), "utf8") > 250 * 1024) {
+    const error = new Error("Supabase commerce availability exceeded its payload budget.");
+    error.code = "COMMERCE_PAYLOAD_BUDGET_EXCEEDED";
+    error.status = 503;
+    error.statusCode = 503;
+    throw error;
+  }
+  return result;
+};
+
 export const applyShadowMutations = async ({
   mutations,
-  commandId = crypto.randomUUID(),
+  commandId = "",
   cutoverGeneration = 0,
   commerceMode = false,
   client = createSupabaseAdminClient(),
 } = {}) => {
   if (!Array.isArray(mutations) || mutations.length < 1) return [];
   if (commerceMode) {
+    const resolvedCommandId =
+      String(commandId || "").trim() ||
+      buildCommerceCommandId({ mutations, cutoverGeneration });
     const data = requireRpcData(
       await client.rpc("roo_apply_commerce_document_mutations", {
-        p_command_id: String(commandId || crypto.randomUUID()),
+        p_command_id: resolvedCommandId,
         p_mutations: mutations,
         p_cutover_generation: Math.max(0, Number(cutoverGeneration) || 0),
       }),

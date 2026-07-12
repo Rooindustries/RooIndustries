@@ -118,4 +118,31 @@ describe("release runtime environment validation", () => {
       "PAYMENT_LEGACY_COMPLETION_UNTIL exceeds its allowed compatibility window"
     );
   });
+
+  test("rejects a legacy Neon URL masquerading as the Supabase database", () => {
+    const result = validate({
+      TOURNEY_DATABASE_MODE: "supabase",
+      SUPABASE_URL: "https://ntezmxzaibrrsgtujgxu.supabase.co",
+      SUPABASE_SECRET_KEY: "s".repeat(40),
+      SUPABASE_PUBLISHABLE_KEY: "p".repeat(24),
+      SUPABASE_DATABASE_URL: "postgresql://owner:secret@ep-example.neon.tech/neondb",
+    });
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(
+      "SUPABASE_DATABASE_URL must connect to the configured Supabase project"
+    );
+    expect(result.output).not.toContain("ep-example.neon.tech");
+  });
+
+  test("accepts the configured Supabase pooler URL for dormant Tourney mode", () => {
+    const result = validate({
+      TOURNEY_DATABASE_MODE: "supabase",
+      SUPABASE_URL: "https://ntezmxzaibrrsgtujgxu.supabase.co",
+      SUPABASE_SECRET_KEY: "s".repeat(40),
+      SUPABASE_PUBLISHABLE_KEY: "p".repeat(24),
+      SUPABASE_DATABASE_URL:
+        "postgresql://postgres.ntezmxzaibrrsgtujgxu:placeholder@aws-0-eu-west-1.pooler.supabase.com:6543/postgres",
+    });
+    expect(result.status).toBe(0);
+  });
 });
