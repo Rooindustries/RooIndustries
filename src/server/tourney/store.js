@@ -550,28 +550,73 @@ export const checkTourneyManualFailoverReadiness = async ({
   const blockers = [];
   if (policy.primaryBackend !== "legacy") blockers.push("legacy_mode_not_selected");
   if (!policy.writesPaused) blockers.push("deployment_writes_not_paused");
-  if (policy.generation < 1) blockers.push("failover_generation_not_advanced");
-  const sql = await getTourneySqlForBackend({ backend: "legacy", env });
-  const [state] = await sql`
+  if (policy.generation < 2) blockers.push("failover_generation_not_advanced");
+  const [legacySql, supabaseSql] = await Promise.all([
+    getTourneySqlForBackend({ backend: "legacy", env }),
+    getTourneySqlForBackend({ backend: "supabase", env }),
+  ]);
+  const [[legacyState], [supabaseState]] = await Promise.all([
+    legacySql`
     select
+      (select primary_backend from tourney_cutover_metadata where id='tourney') database_primary_backend,
+      (select generation from tourney_cutover_metadata where id='tourney') database_generation,
       (select writes_paused from tourney_cutover_metadata where id='tourney') database_writes_paused,
       (select count(*) from tourney_mirror_outbox where status in ('pending','retry','processing')) mirror_pending,
       (select count(*) from tourney_mirror_outbox where status='dead_letter') mirror_dead,
       (select count(*) from tourney_external_operations where status in ('pending','retry','processing','dead_letter')) external_pending,
       (select count(*) from tourney_email_dispatches where status in ('pending','sending','retry','failed','dead_letter')) email_pending,
+      (select count(*) from tourney_discord_role_assignments where status in ('pending','processing','retry','blocked','dead_letter')) discord_pending,
+      (select count(*) from tourney_identity_conflicts where resolved_at is null) identity_conflicts,
       (select count(*) from tourney_import_quarantine where resolved_at is null) ambiguous_imports,
-      (select max(generation) from tourney_mirror_checkpoints where target_backend='legacy') checkpoint_generation
-  `;
-  if (!state?.database_writes_paused) blockers.push("database_writes_not_paused");
-  if (Number(state?.mirror_pending || 0) > 0) blockers.push("mirror_pending");
-  if (Number(state?.mirror_dead || 0) > 0) blockers.push("mirror_dead_letter");
-  if (Number(state?.external_pending || 0) > 0) blockers.push("external_operations_pending");
-  if (Number(state?.email_pending || 0) > 0) blockers.push("email_pending");
-  if (Number(state?.ambiguous_imports || 0) > 0) blockers.push("ambiguous_imports");
-  if (Number(state?.checkpoint_generation || -1) < policy.generation) {
+      (select max(generation) from tourney_mirror_checkpoints
+        where target_backend='legacy' and source_backend='supabase') checkpoint_generation
+    `,
+    supabaseSql`
+      select
+        (select primary_backend from tourney.cutover_metadata where id='tourney') database_primary_backend,
+        (select generation from tourney.cutover_metadata where id='tourney') database_generation,
+        (select writes_paused from tourney.cutover_metadata where id='tourney') database_writes_paused,
+        (select count(*) from tourney.mirror_outbox where status in ('pending','retry','processing')) mirror_pending,
+        (select count(*) from tourney.mirror_outbox where status='dead_letter') mirror_dead,
+        (select count(*) from tourney.external_operations where status in ('pending','retry','processing','dead_letter')) external_pending,
+        (select count(*) from tourney.email_dispatches where status in ('pending','sending','retry','failed','dead_letter')) email_pending,
+        (select count(*) from tourney.tourney_player_auth_operations where operation_status in ('pending','processing','auth_applied','retry')) auth_pending,
+        (select count(*) from accounts.discord_role_assignments where status in ('pending','processing','retry','blocked','dead_letter')) discord_pending,
+        (select count(*) from tourney.identity_conflicts where resolved_at is null) identity_conflicts,
+        (select count(*) from migration.tourney_import_quarantine where resolved_at is null) ambiguous_imports
+    `,
+  ]);
+  for (const state of [legacyState, supabaseState]) {
+    if (!state?.database_writes_paused) blockers.push("database_writes_not_paused");
+    if (state?.database_primary_backend !== "legacy" ||
+        Number(state?.database_generation) !== policy.generation) {
+      blockers.push("database_control_mismatch");
+    }
+  }
+  if (Number(legacyState?.mirror_pending || 0) > 0 ||
+      Number(supabaseState?.mirror_pending || 0) > 0) blockers.push("mirror_pending");
+  if (Number(legacyState?.mirror_dead || 0) > 0 ||
+      Number(supabaseState?.mirror_dead || 0) > 0) blockers.push("mirror_dead_letter");
+  if (Number(legacyState?.external_pending || 0) > 0 ||
+      Number(supabaseState?.external_pending || 0) > 0) blockers.push("external_operations_pending");
+  if (Number(legacyState?.email_pending || 0) > 0 ||
+      Number(supabaseState?.email_pending || 0) > 0) blockers.push("email_pending");
+  if (Number(supabaseState?.auth_pending || 0) > 0) blockers.push("auth_operations_pending");
+  if (Number(legacyState?.discord_pending || 0) > 0 ||
+      Number(supabaseState?.discord_pending || 0) > 0) blockers.push("discord_operations_pending");
+  if (Number(legacyState?.identity_conflicts || 0) > 0 ||
+      Number(supabaseState?.identity_conflicts || 0) > 0) blockers.push("identity_conflicts");
+  if (Number(legacyState?.ambiguous_imports || 0) > 0 ||
+      Number(supabaseState?.ambiguous_imports || 0) > 0) blockers.push("ambiguous_imports");
+  const requiredCheckpointGeneration = policy.generation - 1;
+  if (Number(legacyState?.checkpoint_generation || -1) < requiredCheckpointGeneration) {
     blockers.push("fallback_checkpoint_stale");
   }
-  return { ready: blockers.length === 0, blockers, state };
+  return {
+    ready: blockers.length === 0,
+    blockers: [...new Set(blockers)],
+    state: { legacy: legacyState, supabase: supabaseState },
+  };
 };
 
 const normalizeRows = (rows) =>
