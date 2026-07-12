@@ -96,22 +96,34 @@ const decodeSessionToken = (token) => {
 };
 
 export const setReferralSessionCookie = (res, payload, remember = false) => {
-  const maxAge = remember
-    ? SESSION_AGE_SECONDS.remember
-    : SESSION_AGE_SECONDS.short;
-  const token = buildSessionToken(payload, maxAge);
-  const secure = process.env.NODE_ENV === "production";
+  const sessionCookie = createReferralSessionCookie(payload, remember);
   const cookie = [
-    `${REF_SESSION_COOKIE}=${encodeURIComponent(token)}`,
-    "Path=/",
-    "HttpOnly",
-    "SameSite=Lax",
-    secure ? "Secure" : "",
-    `Max-Age=${maxAge}`,
+    `${sessionCookie.name}=${encodeURIComponent(sessionCookie.value)}`,
+    `Path=${sessionCookie.path}`,
+    sessionCookie.httpOnly ? "HttpOnly" : "",
+    `SameSite=${sessionCookie.sameSite}`,
+    sessionCookie.secure ? "Secure" : "",
+    `Max-Age=${sessionCookie.maxAge}`,
   ]
     .filter(Boolean)
     .join("; ");
   appendSetCookie(res, cookie);
+};
+
+export const createReferralSessionCookie = (payload, remember = false) => {
+  const maxAge = remember
+    ? SESSION_AGE_SECONDS.remember
+    : SESSION_AGE_SECONDS.short;
+  const token = buildSessionToken(payload, maxAge);
+  return {
+    name: REF_SESSION_COOKIE,
+    value: token,
+    path: "/",
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    maxAge,
+  };
 };
 
 export const clearReferralSessionCookie = (res) => {

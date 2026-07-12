@@ -4636,6 +4636,86 @@ const LockStyles = () => (
         inset 0 1px 0 rgba(255, 255, 255, 0.5);
     }
 
+    .cs-social {
+      display: grid;
+      gap: 12px;
+      width: min(100%, 360px);
+      margin: 18px auto 0;
+    }
+
+    .cs-social-divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .cs-social-divider-line {
+      flex: 1;
+      height: 1px;
+      background: var(--color-border-input);
+    }
+
+    .cs-social-divider-label {
+      color: var(--color-text-muted);
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .cs-social-buttons {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .cs-social-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      min-height: 52px;
+      border: 1px solid var(--color-border-input);
+      border-radius: 999px;
+      padding: 0 16px;
+      color: var(--color-text-secondary);
+      background: var(--color-surface-input);
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.84rem;
+      font-weight: 720;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+      transition: border-color 180ms ease, background 180ms ease, transform 180ms ease;
+    }
+
+    .cs-social-button:hover:not(:disabled) {
+      border-color: var(--color-focus-ring);
+      background: var(--color-surface-hover);
+      transform: translateY(-1px);
+    }
+
+    .cs-social-button:disabled {
+      cursor: wait;
+      opacity: 0.52;
+    }
+
+    .cs-social-icon {
+      width: 20px;
+      height: 20px;
+      flex: 0 0 auto;
+    }
+
+    .cs-social-discord-icon {
+      color: #5865f2;
+    }
+
+    .cs-social-error {
+      margin: 0;
+      color: var(--color-warning-text);
+      font-size: 0.82rem;
+      line-height: 1.4;
+    }
+
     .cs-note,
     .cs-error {
       margin: 14px 0 0;
@@ -4691,6 +4771,10 @@ const LockStyles = () => (
       .cs-field {
         width: 100%;
       }
+
+      .cs-social-buttons {
+        grid-template-columns: 1fr;
+      }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -4714,6 +4798,7 @@ export const LockScreen = ({
   note = "Assigned accounts only.",
   buttonLabel = "Sign in",
   redirectTo = "/tourney",
+  socialLogin = null,
 }) => (
   <>
     <TourneyTelemetry />
@@ -4763,12 +4848,17 @@ export const LockScreen = ({
               {buttonLabel}
             </button>
           </form>
+          {socialLogin}
           {error ? (
             <p className="cs-error cs-r5" role="alert">
               {error === "rate"
                 ? "Too many attempts. Please try again later."
                 : error === "suspended"
                   ? "You have been suspended from the tourney. Please contact serviroo through Discord or at serviroo@rooindustries.com for further queries."
+                  : error === "unlinked"
+                    ? "That Google or Discord email is not linked to an approved Tourney account. Use your username or email and password."
+                    : ["unavailable", "exchange_failed", "missing_code"].includes(error)
+                      ? "Social sign-in is temporarily unavailable. Use your username or email and password."
                   : "Invalid Discord username, email, or password. Wait for approval before trying to log in."}
             </p>
           ) : (

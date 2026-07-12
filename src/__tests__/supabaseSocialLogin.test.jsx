@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import SocialLogin from "../../app/account/login/social-login";
+import SupabaseSocialLogin from "../components/SupabaseSocialLogin";
 
 const mockSignInWithOAuth = jest.fn();
 
@@ -18,8 +18,14 @@ describe("Supabase social login", () => {
   test.each([
     ["Continue with Google", "google"],
     ["Continue with Discord", "discord"],
-  ])("starts %s with the secure callback", async (buttonLabel, provider) => {
-    render(<SocialLogin nextPath="/account" />);
+  ])("starts %s from the existing referral login", async (buttonLabel, provider) => {
+    render(
+      <SupabaseSocialLogin
+        flow="referral"
+        nextPath="/referrals/dashboard"
+        variant="referral"
+      />
+    );
 
     fireEvent.click(screen.getByRole("button", { name: buttonLabel }));
 
@@ -27,17 +33,35 @@ describe("Supabase social login", () => {
       expect(mockSignInWithOAuth).toHaveBeenCalledWith({
         provider,
         options: {
-          redirectTo: "http://localhost/auth/callback?next=%2Faccount",
+          redirectTo:
+            "http://localhost/auth/callback?flow=referral&next=%2Freferrals%2Fdashboard",
         },
       });
     });
+  });
+
+  test("renders the official provider marks in the Tourney treatment", () => {
+    const { container } = render(
+      <SupabaseSocialLogin flow="tourney" nextPath="/tourney" variant="tourney" />
+    );
+
+    expect(container.querySelectorAll("svg")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Continue with Google" })).toHaveClass(
+      "cs-social-button"
+    );
   });
 
   test("shows a useful error when the provider cannot start", async () => {
     mockSignInWithOAuth.mockResolvedValueOnce({
       error: new Error("provider unavailable"),
     });
-    render(<SocialLogin nextPath="/account" />);
+    render(
+      <SupabaseSocialLogin
+        flow="referral"
+        nextPath="/referrals/dashboard"
+        variant="referral"
+      />
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Continue with Google" }));
 
