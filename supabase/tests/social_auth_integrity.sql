@@ -16,6 +16,10 @@ begin
     'authenticated',
     'public.roo_finalize_oauth_intent(text,uuid,text,text)',
     'execute'
+  ) or pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.roo_list_pending_discord_role_assignments(integer)',
+    'execute'
   ) then
     raise exception 'browser roles can execute privileged OAuth intent functions';
   end if;
@@ -185,6 +189,14 @@ begin
   );
   if v_assignment->>'desired_role' <> 'none' then
     raise exception 'removed account retained a managed Discord role';
+  end if;
+
+  if not exists (
+    select 1
+    from public.roo_list_pending_discord_role_assignments(25) pending
+    where pending.user_id = v_user_id
+  ) then
+    raise exception 'pending Discord role assignment was not listed';
   end if;
 end;
 $$;
