@@ -45,7 +45,7 @@ export default async function handler(req, res) {
 
     // return fields used in the frontend/payment logic
     const ref = await readClient.fetch(
-      `*[_type == "referral" && slug.current == $code][0]{
+      `*[_type == "referral" && registrationStatus != "pending_email" && slug.current == $code][0]{
         _id,
         name,
         "code": slug.current,

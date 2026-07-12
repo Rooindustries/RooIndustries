@@ -1682,6 +1682,127 @@ export const TourneyStyles = () => (
       margin: 10px 0 0;
     }
 
+    .tourney-connected-accounts {
+      display: grid;
+      gap: 14px;
+      width: min(100%, 54rem);
+      margin: 0 auto 2rem;
+      border: 1px solid rgba(14, 165, 233, 0.3);
+      border-radius: 1rem;
+      padding: 1.25rem;
+      background: rgba(11, 17, 32, 0.8);
+      box-shadow: 0 0 25px rgba(14, 165, 233, 0.12);
+    }
+
+    .tourney-connected-copy h2,
+    .tourney-connected-copy p {
+      margin: 0;
+    }
+
+    .tourney-connected-copy h2 {
+      color: #fff;
+      font-size: 1.1rem;
+    }
+
+    .tourney-connected-copy p {
+      margin-top: 4px;
+      color: var(--tourney-text-muted);
+      font-size: 0.86rem;
+    }
+
+    .tourney-connected-status {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .tourney-connected-status span {
+      border: 1px solid var(--tourney-border);
+      border-radius: 999px;
+      padding: 5px 10px;
+      color: var(--tourney-text-muted);
+      font-size: 0.76rem;
+      font-weight: 700;
+    }
+
+    .tourney-connected-status span.is-linked {
+      border-color: rgba(52, 211, 153, 0.4);
+      color: #a7f3d0;
+      background: rgba(16, 185, 129, 0.1);
+    }
+
+    .tourney-connected-accounts .cs-social,
+    .tourney-form > .cs-social {
+      display: grid;
+      gap: 10px;
+    }
+
+    .tourney-connected-accounts .cs-social-divider,
+    .tourney-form > .cs-social .cs-social-divider {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .tourney-connected-accounts .cs-social-divider-line,
+    .tourney-form > .cs-social .cs-social-divider-line {
+      flex: 1;
+      height: 1px;
+      background: var(--tourney-border);
+    }
+
+    .tourney-connected-accounts .cs-social-divider-label,
+    .tourney-form > .cs-social .cs-social-divider-label {
+      color: var(--tourney-text-muted);
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .tourney-connected-accounts .cs-social-buttons,
+    .tourney-form > .cs-social .cs-social-buttons {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .tourney-connected-accounts .cs-social-button,
+    .tourney-form > .cs-social .cs-social-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 46px;
+      border: 1px solid var(--tourney-border);
+      border-radius: 999px;
+      color: #fff;
+      background: rgba(12, 22, 42, 0.92);
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.86rem;
+      font-weight: 700;
+    }
+
+    .tourney-connected-accounts .cs-social-icon,
+    .tourney-form > .cs-social .cs-social-icon {
+      width: 20px;
+      height: 20px;
+    }
+
+    .tourney-connected-accounts .cs-social-discord-icon,
+    .tourney-form > .cs-social .cs-social-discord-icon {
+      color: #5865f2;
+    }
+
+    .tourney-connected-accounts .cs-social-error,
+    .tourney-form > .cs-social .cs-social-error {
+      margin: 0;
+      color: #fecaca;
+      font-size: 0.8rem;
+      text-align: center;
+    }
+
     #info {
       grid-column: 1 / -1;
       justify-self: center;

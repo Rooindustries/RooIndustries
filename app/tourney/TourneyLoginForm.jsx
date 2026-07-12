@@ -13,7 +13,16 @@ const errorMessage = (error) => {
   if (error === "unlinked") {
     return "That Google or Discord email is not linked to an approved Tourney account. Use your username or email and password.";
   }
-  if (["unavailable", "exchange_failed", "missing_code"].includes(error)) {
+  if (error === "awaiting_approval") {
+    return "Your Tourney registration is still waiting for approval.";
+  }
+  if ([
+    "unavailable",
+    "exchange_failed",
+    "missing_code",
+    "expired_intent",
+    "invalid_intent",
+  ].includes(error)) {
     return "Social sign-in is temporarily unavailable. Use your username or email and password.";
   }
   return "Invalid Discord username, email, or password. Wait for approval before trying to log in.";

@@ -2,11 +2,14 @@
 const isProduction = process.env.NODE_ENV === "production";
 const DEFAULT_SUPABASE_ASSET_ORIGIN =
   "https://ntezmxzaibrrsgtujgxu.supabase.co";
-const configuredSupabaseUrl =
+const configuredSupabaseAuthUrl =
   process.env.NEXT_PUBLIC_SUPABASE_URL ||
   process.env.SUPABASE_URL ||
   DEFAULT_SUPABASE_ASSET_ORIGIN;
-const supabaseAssetOrigin = new URL(configuredSupabaseUrl).origin;
+const supabaseAuthOrigin = new URL(configuredSupabaseAuthUrl).origin;
+const supabaseAssetOrigin = new URL(
+  process.env.NEXT_PUBLIC_SUPABASE_ASSET_URL || DEFAULT_SUPABASE_ASSET_ORIGIN
+).origin;
 const immutableAssetHeaders = [
   {
     key: "Cache-Control",
@@ -31,7 +34,7 @@ const contentSecurityPolicy = [
   "font-src 'self' data: https://js.intercomcdn.com",
   `img-src 'self' data: blob: https://cdn.sanity.io ${supabaseAssetOrigin} https://razorpay.com https://*.razorpay.com https://www.paypalobjects.com https://*.paypal.com https://static.intercomassets.com https://*.intercomcdn.com https://static-cdn.jtvnw.net`,
   "media-src 'self' blob: https://cdn.sanity.io https://js.intercomcdn.com",
-  "connect-src 'self' https://scripts.seorce.com https://www.google-analytics.com https://www.paypal.com https://api.razorpay.com https://checkout.razorpay.com https://checkout-static-next.razorpay.com https://lumberjack.razorpay.com https://api-iam.intercom.io https://api-iam.eu.intercom.io wss://nexus-websocket-a.intercom.io",
+  `connect-src 'self' ${supabaseAuthOrigin} https://scripts.seorce.com https://www.google-analytics.com https://www.paypal.com https://api.razorpay.com https://checkout.razorpay.com https://checkout-static-next.razorpay.com https://lumberjack.razorpay.com https://api-iam.intercom.io https://api-iam.eu.intercom.io wss://nexus-websocket-a.intercom.io`,
   "frame-src https://www.paypal.com https://checkout.razorpay.com https://api.razorpay.com",
   "worker-src 'self' blob:",
   ...(isProduction ? ["upgrade-insecure-requests"] : []),

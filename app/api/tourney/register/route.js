@@ -13,6 +13,8 @@ import {
 } from "../../../../src/server/tourney/playerStore";
 import { buildTourneyPublicError } from "../../../../src/server/tourney/publicError";
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
+import { getNextSupabaseUser } from "../../../../src/server/supabase/serverSession";
+import { readBoundedJson } from "../../../../src/server/request/boundedJson";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,7 +25,12 @@ const jsonError = (message, status = 400, extra = {}) =>
 const readPayload = async (request) => {
   const contentType = String(request.headers.get("content-type") || "").toLowerCase();
   if (contentType.includes("application/json")) {
-    return request.json().catch(() => ({}));
+    return readBoundedJson(request, { maxBytes: 32 * 1024 });
+  }
+
+  const declaredLength = Number(request.headers.get("content-length") || 0);
+  if (Number.isFinite(declaredLength) && declaredLength > 32 * 1024) {
+    throw Object.assign(new Error("Request body is too large."), { status: 413 });
   }
 
   const form = await request.formData();
@@ -82,7 +89,28 @@ export async function POST(request) {
       return jsonError("Approvers are not configured.", 503);
     }
 
-    const created = await createPendingTourneyPlayer({ payload, recipients });
+    const successResponse = NextResponse.json({
+      ok: true,
+      message: "Registration submitted. Wait for approval before logging in.",
+    });
+    const socialUser = await getNextSupabaseUser({
+      request,
+      response: successResponse,
+    }).catch(() => null);
+    const submittedEmail = String(payload?.email || "").trim().toLowerCase();
+    if (
+      socialUser &&
+      (!socialUser.email_confirmed_at ||
+        String(socialUser.email || "").trim().toLowerCase() !== submittedEmail)
+    ) {
+      return jsonError("Your verified sign-in email does not match this registration.", 409);
+    }
+
+    const created = await createPendingTourneyPlayer({
+      payload,
+      recipients,
+      authUserId: socialUser?.id || "",
+    });
     const baseUrl = new URL(request.url).origin;
     try {
       await sendTourneyRegistrationApprovalEmails({
@@ -94,10 +122,7 @@ export async function POST(request) {
       logSafeError("Tournament registration email failed", emailError);
     }
 
-    return NextResponse.json({
-      ok: true,
-      message: "Registration submitted. Wait for approval before logging in.",
-    });
+    return successResponse;
   } catch (error) {
     const failure = buildTourneyPublicError(error, "Unable to submit registration.");
     return jsonError(failure.message, failure.status, {

@@ -8,6 +8,7 @@ import { createPaymentBackendClient } from "./backend.js";
 import { isSupabaseAdminConfigured } from "../../supabase/adminClient.js";
 import { reconcileBookingEmailDispatches } from "../ref/bookingEmails.js";
 import { syncSanityCommerceChanges } from "../../supabase/incrementalCommerceSync.js";
+import { reconcileTourneyDiscordRoleAssignments } from "../../tourney/discordRoleSync.js";
 
 export default async function handler(req, res) {
   if (req.method !== "GET" && req.method !== "POST") {
@@ -148,6 +149,17 @@ export default async function handler(req, res) {
       logSafeError("Rate-limit cleanup failed", error);
       result.body.summary.rateLimitBucketsCleaned = 0;
       result.body.summary.rateLimitCleanupPending = true;
+    }
+    if (["1", "true", "yes", "on"].includes(
+      String(process.env.SUPABASE_SOCIAL_AUTH_ENABLED || "").trim().toLowerCase()
+    )) {
+      try {
+        result.body.summary.tourneyDiscordRoles =
+          await reconcileTourneyDiscordRoleAssignments();
+      } catch (error) {
+        logSafeError("Tourney Discord role reconciliation failed", error);
+        result.body.summary.tourneyDiscordRoles = { pending: true };
+      }
     }
   }
   return res.status(result.httpStatus).json(result.body);

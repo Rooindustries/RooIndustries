@@ -1,15 +1,29 @@
-import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 import {
   bootstrapSupabaseNativeAccount,
-  resolveSupabaseAccountAlias,
+  resolveSupabaseAccountByUserId,
 } from "@/src/server/supabase/accounts";
-import { createReferralSessionCookie } from "@/src/server/api/ref/auth";
+import {
+  clearOAuthIntentCookie,
+  finalizeOAuthIntent,
+  OAUTH_INTENT_COOKIE,
+  oauthIntentCookieName,
+  readOAuthIntent,
+} from "@/src/server/supabase/oauthIntents";
+import {
+  clearNextSupabaseSession,
+  createNextSupabaseSessionClient,
+} from "@/src/server/supabase/serverSession";
+import {
+  createReferralSessionCookie,
+  REF_SESSION_COOKIE,
+} from "@/src/server/api/ref/auth";
 import {
   TOURNEY_SESSION_COOKIE,
   createTourneySessionToken,
   getTourneyCookieOptions,
 } from "@/src/server/tourney/auth";
+import { syncTourneyDiscordRoleAssignment } from "@/src/server/tourney/discordRoleSync";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,8 +44,7 @@ const safeNextPath = (value, flow = "") => {
   if (
     !/^\/(?!\/)[^\\\u0000-\u001f]*$/.test(path) ||
     path.startsWith("/api/") ||
-    path.startsWith("/auth/callback") ||
-    path.startsWith("/account")
+    path.startsWith("/auth/")
   ) {
     return fallback;
   }
@@ -41,75 +54,69 @@ const safeNextPath = (value, flow = "") => {
   return path;
 };
 
-const errorRedirect = ({ url, flow, error }) => {
+const noStore = (response) => {
+  response.headers.set("Cache-Control", "private, no-store");
+  response.headers.set("Expires", "0");
+  response.headers.set("Pragma", "no-cache");
+  return response;
+};
+
+const setRedirect = (response, target) => {
+  response.headers.set("Location", String(target));
+  return noStore(response);
+};
+
+const clearDomainCookie = (response, flow) => {
+  const name = flow === "tourney" ? TOURNEY_SESSION_COOKIE : REF_SESSION_COOKIE;
+  response.cookies.set({
+    name,
+    value: "",
+    httpOnly: true,
+    maxAge: 0,
+    path: "/",
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+  });
+};
+
+const errorTarget = ({ origin, flow, error }) => {
   const pathname =
     flow === "tourney"
       ? "/tourney/login"
       : flow === "referral"
         ? "/referrals/login"
         : "/";
-  const target = new URL(pathname, url.origin);
-  target.searchParams.set(flow === "tourney" ? "error" : flow === "referral" ? "oauth" : "auth_error", error);
-  return NextResponse.redirect(target, { status: 303 });
+  const target = new URL(pathname, origin);
+  target.searchParams.set(
+    flow === "tourney" ? "error" : flow === "referral" ? "oauth" : "auth_error",
+    error
+  );
+  return target;
 };
 
-const requestCookies = (request) => {
-  const structured = request.cookies?.getAll?.();
-  if (Array.isArray(structured)) return structured;
-  return String(request.headers.get("cookie") || "")
+const getCookieValue = (request, name) => {
+  const structured = request.cookies?.get?.(name)?.value;
+  if (structured) return structured;
+  const match = String(request.headers.get("cookie") || "")
     .split(";")
     .map((entry) => entry.trim())
-    .filter(Boolean)
-    .flatMap((entry) => {
-      const separator = entry.indexOf("=");
-      if (separator < 1) return [];
-      const name = entry.slice(0, separator).trim();
-      const encodedValue = entry.slice(separator + 1);
-      try {
-        return [{ name, value: decodeURIComponent(encodedValue) }];
-      } catch {
-        return [{ name, value: encodedValue }];
-      }
-    })
-    .filter((entry) => entry.name && entry.value);
-};
-
-const createOAuthClient = ({ request, response }) => {
-  const supabaseUrl = String(process.env.NEXT_PUBLIC_SUPABASE_URL || "").trim();
-  const publishableKey = String(
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-      ""
-  ).trim();
-  if (!supabaseUrl || !publishableKey) return null;
-
-  return createServerClient(supabaseUrl, publishableKey, {
-    cookies: {
-      getAll: () => requestCookies(request),
-      setAll: (cookies, headers = {}) => {
-        for (const { name, value, options } of cookies) {
-          response.cookies.set(name, value, options);
-        }
-        for (const [name, value] of Object.entries(headers)) {
-          response.headers.set(name, value);
-        }
-      },
-    },
-  });
-};
-
-const verifiedEmail = (user) => {
-  const email = String(user?.email || "").trim().toLowerCase();
-  return email && user?.email_confirmed_at ? email : "";
+    .find((entry) => entry.startsWith(`${name}=`));
+  if (!match) return "";
+  const raw = match.slice(name.length + 1);
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
 };
 
 const referralSession = (account) => {
   if (!(account?.roles || []).includes("creator")) return null;
   if (!account.legacy_sanity_id || !account.referral_code) return null;
   return createReferralSessionCookie({
-    referralId: account.legacy_sanity_id,
-    code: account.referral_code,
     authBackend: "supabase",
+    code: account.referral_code,
+    referralId: account.legacy_sanity_id,
   });
 };
 
@@ -120,10 +127,10 @@ const tourneySession = (account) => {
   }
   const value = createTourneySessionToken({
     account: {
-      username: account.tourney_username,
-      role,
-      version: String(account.credential_version || "1"),
       authBackend: "supabase",
+      role,
+      username: account.tourney_username,
+      version: String(account.credential_version || "1"),
     },
   });
   return value
@@ -131,65 +138,204 @@ const tourneySession = (account) => {
     : null;
 };
 
-const resolveRoleSession = async ({ flow, user }) => {
-  const email = verifiedEmail(user);
-  if (!email) return { error: "unlinked" };
-  const account = await resolveSupabaseAccountAlias({
-    identifier: email,
-    accountScope: flow === "tourney" ? "tourney" : "default",
-  });
-  if (account?.status !== "active") return { error: "unlinked" };
+const resolveRoleSession = async ({ flow, userId }) => {
+  const account = await resolveSupabaseAccountByUserId({ userId });
+  if (!account || account.status !== "active") return { error: "unlinked" };
   if (flow === "tourney" && account.tourney_active === false) {
-    return { error: account.tourney_status === "removed" ? "suspended" : "unlinked" };
+    return {
+      account,
+      error: account.tourney_status === "removed" ? "suspended" : "awaiting_approval",
+    };
   }
   const cookie = flow === "tourney" ? tourneySession(account) : referralSession(account);
-  return cookie ? { account, cookie } : { error: "unlinked" };
+  return cookie ? { account, cookie } : { account, error: "unlinked" };
 };
 
-const noStore = (response) => {
-  response.headers.set("Cache-Control", "private, no-store");
-  return response;
+const setRoleCookie = (response, cookie) => {
+  if (cookie) response.cookies.set(cookie);
+};
+
+const fail = async ({
+  action = "",
+  error,
+  flow,
+  request,
+  response,
+}) => {
+  const intentId = String(
+    new URL(request.url).searchParams.get("intent") || ""
+  ).trim();
+  response.cookies.set(clearOAuthIntentCookie(intentId));
+  if (flow) clearDomainCookie(response, flow);
+  if (action !== "link") {
+    await clearNextSupabaseSession({ request, response }).catch(() => {});
+  }
+  return setRedirect(
+    response,
+    errorTarget({ origin: new URL(request.url).origin, flow, error })
+  );
+};
+
+const completeLegacySignin = async ({ request, response, result, url }) => {
+  const flow = normalizeFlow(url.searchParams.get("flow"));
+  if (!flow) {
+    return fail({ error: "invalid_intent", flow, request, response });
+  }
+  const roleSession = await resolveRoleSession({
+    flow,
+    userId: result.data.user.id,
+  });
+  if (!roleSession.cookie) {
+    return fail({
+      error: roleSession.error || "unlinked",
+      flow,
+      request,
+      response,
+    });
+  }
+  setRoleCookie(response, roleSession.cookie);
+  return setRedirect(
+    response,
+    new URL(safeNextPath(url.searchParams.get("next"), flow), url.origin)
+  );
 };
 
 export async function GET(request) {
   const url = new URL(request.url);
-  const flow = normalizeFlow(url.searchParams.get("flow"));
-  const code = url.searchParams.get("code");
-  const next = safeNextPath(url.searchParams.get("next"), flow);
-  const target = new URL(next, url.origin);
-  const response = NextResponse.redirect(target, { status: 303 });
+  const response = NextResponse.redirect(new URL("/", url.origin), { status: 303 });
+  const intentId = String(url.searchParams.get("intent") || "").trim().toLowerCase();
+  const validIntentId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(intentId)
+    ? intentId
+    : "";
+  const token = getCookieValue(
+    request,
+    validIntentId ? oauthIntentCookieName(validIntentId) : OAUTH_INTENT_COOKIE
+  );
+  let intent = null;
+  let intentBindingInvalid = false;
 
-  if (!code) {
-    return errorRedirect({ url, flow, error: "missing_code" });
+  try {
+    intent = token ? await readOAuthIntent({ token }) : null;
+    if (intent && validIntentId && intent.id !== validIntentId) {
+      intent = null;
+      intentBindingInvalid = true;
+    }
+  } catch {
+    return fail({ error: "unavailable", flow: "", request, response });
   }
 
-  const supabase = createOAuthClient({ request, response });
-  if (!supabase) return errorRedirect({ url, flow, error: "unavailable" });
+  const hintedFlow = normalizeFlow(url.searchParams.get("flow"));
+  const flow = normalizeFlow(intent?.flow) || hintedFlow;
+  if (intentBindingInvalid || (validIntentId && !intent)) {
+    return fail({ error: "invalid_intent", flow, request, response });
+  }
+  if (intent && (intent.status !== "pending" || Date.parse(intent.expires_at) <= Date.now())) {
+    return fail({
+      action: intent.action,
+      error: "expired_intent",
+      flow,
+      request,
+      response,
+    });
+  }
+
+  const code = String(url.searchParams.get("code") || "").trim();
+  if (!code) {
+    return fail({
+      action: intent?.action,
+      error: "missing_code",
+      flow,
+      request,
+      response,
+    });
+  }
+
+  const supabase = createNextSupabaseSessionClient({ request, response });
   const result = await supabase.auth.exchangeCodeForSession(code);
-  if (result.error) {
-    return errorRedirect({ url, flow, error: "exchange_failed" });
+  if (result.error || !result.data?.user?.id || !result.data?.session) {
+    return fail({
+      action: intent?.action,
+      error: "exchange_failed",
+      flow,
+      request,
+      response,
+    });
+  }
+
+  if (!intent) {
+    return completeLegacySignin({ request, response, result, url });
   }
 
   try {
-    if (!flow) {
-      await bootstrapSupabaseNativeAccount({ userId: result.data?.user?.id });
-      return noStore(response);
+    const finalized = await finalizeOAuthIntent({
+      guildId: String(process.env.DISCORD_GUILD_ID || "").trim(),
+      provider: intent.provider,
+      token,
+      userId: result.data.user.id,
+    });
+    const returnPath = safeNextPath(finalized.return_path, finalized.flow);
+    let target = new URL(returnPath, url.origin);
+
+    if (finalized.action === "signup") {
+      const existingRole = await resolveRoleSession({
+        flow: finalized.flow,
+        userId: result.data.user.id,
+      });
+      if (existingRole.cookie) {
+        setRoleCookie(response, existingRole.cookie);
+        target = new URL(flowDefaults[finalized.flow], url.origin);
+      } else if (existingRole.account) {
+        return fail({
+          action: finalized.action,
+          error: existingRole.error || "already_registered",
+          flow: finalized.flow,
+          request,
+          response,
+        });
+      } else {
+        await bootstrapSupabaseNativeAccount({ userId: result.data.user.id });
+        target.searchParams.set("oauth", "ready");
+        target.searchParams.set("provider", finalized.provider);
+      }
+    } else {
+      const roleSession = await resolveRoleSession({
+        flow: finalized.flow,
+        userId: result.data.user.id,
+      });
+      if (!roleSession.cookie) {
+        return fail({
+          action: finalized.action,
+          error: roleSession.error || "unlinked",
+          flow: finalized.flow,
+          request,
+          response,
+        });
+      }
+      setRoleCookie(response, roleSession.cookie);
+      if (finalized.action === "link") {
+        target.searchParams.set("linked", finalized.provider);
+      }
     }
 
-    const roleSession = await resolveRoleSession({ flow, user: result.data?.user });
-    if (!roleSession.cookie) {
-      return errorRedirect({ url, flow, error: roleSession.error || "unlinked" });
+    if (finalized.flow === "tourney" && finalized.provider === "discord") {
+      const sync = await syncTourneyDiscordRoleAssignment({
+        accessToken: String(result.data.session.provider_token || ""),
+        userId: result.data.user.id,
+      });
+      if (!sync.applied && !["not_linked", "not_configured"].includes(sync.reason)) {
+        target.searchParams.set("discord_role", "pending");
+      }
     }
-    const sameAccount = roleSession.account.user_id === result.data?.user?.id;
-    if (sameAccount) {
-      await bootstrapSupabaseNativeAccount({ userId: result.data.user.id });
-    }
-    const roleResponse = sameAccount
-      ? response
-      : NextResponse.redirect(target, { status: 303 });
-    roleResponse.cookies.set(roleSession.cookie);
-    return noStore(roleResponse);
+
+    response.cookies.set(clearOAuthIntentCookie(validIntentId));
+    return setRedirect(response, target);
   } catch {
-    return errorRedirect({ url, flow, error: "unavailable" });
+    return fail({
+      action: intent.action,
+      error: "unavailable",
+      flow,
+      request,
+      response,
+    });
   }
 }

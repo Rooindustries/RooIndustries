@@ -35,6 +35,26 @@ export const resolveSupabaseAccountAlias = async ({
   );
 };
 
+export const resolveSupabaseAccountByUserId = async ({
+  userId,
+  adminClient = createSupabaseAdminClient(),
+} = {}) => {
+  const normalizedUserId = String(userId || "").trim();
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      normalizedUserId
+    )
+  ) {
+    return null;
+  }
+  return requireRpcData(
+    await adminClient.rpc("roo_account_by_user_id", {
+      p_user_id: normalizedUserId,
+    }),
+    "account lookup"
+  );
+};
+
 const resolveAuthenticationFailure = (error) => {
   const status = Number(error?.status || 0);
   if (status === 400 || status === 401) return "invalid_credentials";
@@ -176,6 +196,9 @@ const sha256 = (value) =>
 export const buildTourneyPlayerAuthEmail = (username) =>
   `tourney-player+${sha256(normalizeIdentifier(username)).slice(0, 24)}@auth.rooindustries.invalid`;
 
+const buildTourneyPlayerAuthEmailById = (playerId) =>
+  `tourney-player+${sha256(String(playerId || "").trim()).slice(0, 24)}@auth.rooindustries.invalid`;
+
 const buildTourneyAdminAuthEmail = ({ username, email }) =>
   normalizeIdentifier(email) ||
   `tourney+${sha256(normalizeIdentifier(username)).slice(0, 24)}@auth.rooindustries.invalid`;
@@ -214,11 +237,12 @@ const upsertAuthUserWithHash = async ({
 export const syncSupabaseTourneyPlayerAccount = async ({
   player,
   passwordHash,
+  authUserId = "",
+  env = process.env,
+  installPassword = true,
   adminClient = createSupabaseAdminClient(),
 } = {}) => {
   const username = normalizeIdentifier(player?.username);
-  const authEmail = buildTourneyPlayerAuthEmail(username);
-  const userId = deterministicUuid(authEmail);
   const source = {
     id: player?.id,
     username,
@@ -229,18 +253,73 @@ export const syncSupabaseTourneyPlayerAccount = async ({
     registration_pool: String(player?.registration_pool || player?.registrationPool || "main"),
   };
   const sourceHash = sha256(source);
-  await upsertAuthUserWithHash({
-    userId,
-    email: authEmail,
-    passwordHash,
-    displayName: source.display_name,
-    appMetadata: {
-      imported_from: "legacy-tourney-database",
-      legacy_player_id: source.id,
-      roles: ["tourney_player"],
-    },
+  const existingAccount = await resolveSupabaseAccountAlias({
+    identifier: username,
+    accountScope: "tourney",
     adminClient,
   });
+  const requestedUserId = String(authUserId || "").trim();
+  if (
+    requestedUserId &&
+    existingAccount?.user_id &&
+    existingAccount.user_id !== requestedUserId
+  ) {
+    throw new Error("Tourney account is already linked to another Auth user.");
+  }
+  const fallbackEmail = buildTourneyPlayerAuthEmailById(source.id);
+  const userId = requestedUserId || existingAccount?.user_id || deterministicUuid(fallbackEmail);
+  const existingAuth = await adminClient.auth.admin.getUserById(userId);
+  if (existingAuth.error && Number(existingAuth.error.status || 0) !== 404) {
+    throw new Error("Supabase Auth inventory failed.");
+  }
+  const existingUser = existingAuth.data?.user || null;
+  if (existingUser) {
+    const existingLegacyId = String(
+      existingUser.app_metadata?.legacy_player_id || ""
+    ).trim();
+    if (existingLegacyId && existingLegacyId !== String(source.id || "")) {
+      throw new Error("Supabase Auth user belongs to another Tourney player.");
+    }
+    if (requestedUserId) {
+      const verifiedEmail = existingUser.email_confirmed_at
+        ? normalizeIdentifier(existingUser.email)
+        : "";
+      if (!verifiedEmail || verifiedEmail !== source.email) {
+        throw new Error("Tourney social signup email does not match Auth.");
+      }
+    }
+    const roles = new Set([
+      ...(Array.isArray(existingUser.app_metadata?.roles)
+        ? existingUser.app_metadata.roles
+        : []),
+      "tourney_player",
+    ]);
+    const updated = await adminClient.auth.admin.updateUserById(userId, {
+      ...(installPassword ? { password_hash: passwordHash } : {}),
+      app_metadata: {
+        ...existingUser.app_metadata,
+        imported_from:
+          existingUser.app_metadata?.imported_from || "legacy-tourney-database",
+        legacy_player_id: source.id,
+        roles: [...roles],
+      },
+    });
+    if (updated.error) throw new Error("Supabase Auth synchronization failed.");
+  } else {
+    await upsertAuthUserWithHash({
+      userId,
+      email: fallbackEmail,
+      passwordHash,
+      displayName: source.display_name,
+      appMetadata: {
+        imported_from: "legacy-tourney-database",
+        legacy_player_id: source.id,
+        roles: ["tourney_player"],
+      },
+      adminClient,
+    });
+  }
+  const authEmail = normalizeIdentifier(existingUser?.email) || fallbackEmail;
   requireRpcData(
     await adminClient.rpc("roo_import_tourney_player_account", {
       p_account: {
@@ -261,11 +340,37 @@ export const syncSupabaseTourneyPlayerAccount = async ({
     }),
     "Tourney player account synchronization"
   );
+  const lifecycle = await adminClient
+    .schema("accounts")
+    .from("tourney_accounts")
+    .update({ lifecycle_status: source.status })
+    .eq("user_id", userId);
+  if (lifecycle.error) {
+    throw new Error("Supabase Tourney lifecycle synchronization failed.");
+  }
+  const profile = await adminClient
+    .from("profiles")
+    .update({ status: "active" })
+    .eq("user_id", userId);
+  if (profile.error) {
+    throw new Error("Supabase Tourney profile synchronization failed.");
+  }
+  await adminClient.rpc("roo_reconcile_auth_identity_links", {
+    p_user_id: userId,
+  });
+  const guildId = String(env.DISCORD_GUILD_ID || "").trim();
+  if (/^[0-9]{5,30}$/.test(guildId)) {
+    await adminClient.rpc("roo_refresh_discord_role_assignment", {
+      p_user_id: userId,
+      p_guild_id: guildId,
+    });
+  }
   return { userId };
 };
 
 export const syncSupabaseTourneyAdminAccount = async ({
   account,
+  env = process.env,
   adminClient = createSupabaseAdminClient(),
 } = {}) => {
   const username = normalizeIdentifier(account?.username);
@@ -372,12 +477,41 @@ export const syncSupabaseTourneyAdminAccount = async ({
     }),
     "Tourney administrator metadata synchronization"
   );
+  const lifecycle = await adminClient
+    .schema("accounts")
+    .from("tourney_accounts")
+    .update({
+      lifecycle_status: account.active === false ? "disabled" : "approved",
+    })
+    .eq("user_id", userId);
+  if (lifecycle.error) {
+    throw new Error("Supabase Tourney administrator lifecycle sync failed.");
+  }
+  const profile = await adminClient
+    .from("profiles")
+    .update({ status: "active" })
+    .eq("user_id", userId);
+  if (profile.error) {
+    throw new Error("Supabase Tourney administrator profile sync failed.");
+  }
+  await adminClient.rpc("roo_reconcile_auth_identity_links", {
+    p_user_id: userId,
+  });
+  const guildId = String(env.DISCORD_GUILD_ID || "").trim();
+  if (/^[0-9]{5,30}$/.test(guildId)) {
+    await adminClient.rpc("roo_refresh_discord_role_assignment", {
+      p_user_id: userId,
+      p_guild_id: guildId,
+    });
+  }
   return { userId };
 };
 
 export const createSupabaseCreatorAccount = async ({
   referral,
   password,
+  passwordHash = "",
+  authUserId = "",
   sourceRevision = "",
   sourceHash = "",
   adminClient = createSupabaseAdminClient(),
@@ -393,27 +527,83 @@ export const createSupabaseCreatorAccount = async ({
     identifier: email,
     adminClient,
   });
+  const requestedUserId = String(authUserId || "").trim();
   if (
     existingAccount?.user_id &&
+    requestedUserId &&
+    existingAccount.user_id !== requestedUserId
+  ) {
+    throw new Error("Creator email is already linked to another account.");
+  }
+  if (
+    existingAccount?.user_id &&
+    !requestedUserId &&
     !(existingAccount.roles || []).includes("creator")
   ) {
     throw new Error("Creator email is already linked to another account.");
   }
 
-  const userId = existingAccount?.user_id || deterministicUuid(email);
-  const created = await adminClient.auth.admin.createUser({
-    id: userId,
-    email,
-    password: normalizePassword(password),
-    email_confirm: true,
-    user_metadata: {
-      display_name: String(referral.name || code).trim(),
-      migration_source: "roo-industries-website",
-    },
-  });
-  if (created.error) {
-    if (!/already|registered|exists/i.test(String(created.error.message || ""))) {
-      throw new Error("Supabase creator Auth creation failed.");
+  const userId = requestedUserId || existingAccount?.user_id || deterministicUuid(email);
+  let createdUserId = "";
+  if (requestedUserId) {
+    const existing = await adminClient.auth.admin.getUserById(requestedUserId);
+    const user = existing.data?.user;
+    const verifiedEmail = user?.email_confirmed_at
+      ? normalizeIdentifier(user.email)
+      : "";
+    if (existing.error || !user || verifiedEmail !== email) {
+      throw new Error("Creator social signup email does not match Auth.");
+    }
+    const roles = new Set([
+      ...(Array.isArray(user.app_metadata?.roles) ? user.app_metadata.roles : []),
+      "creator",
+    ]);
+    const normalizedPassword = normalizePassword(password);
+    const updated = await adminClient.auth.admin.updateUserById(requestedUserId, {
+      ...(normalizedPassword ? { password: normalizedPassword } : {}),
+      user_metadata: {
+        ...user.user_metadata,
+        display_name: String(referral.name || code).trim(),
+        migration_source: "roo-industries-website",
+      },
+      app_metadata: { ...user.app_metadata, roles: [...roles] },
+    });
+    if (updated.error) throw new Error("Supabase creator Auth update failed.");
+  } else {
+    const importedHash = String(passwordHash || "").trim();
+    if (importedHash && !/^\$2[aby]\$/.test(importedHash)) {
+      throw new Error("Creator password import requires bcrypt.");
+    }
+    const authAttributes = {
+      email,
+      email_confirm: true,
+      ...(importedHash
+        ? { password_hash: importedHash }
+        : { password: normalizePassword(password) }),
+      user_metadata: {
+        display_name: String(referral.name || code).trim(),
+        migration_source: "roo-industries-website",
+      },
+    };
+    const existingAuth = await adminClient.auth.admin.getUserById(userId);
+    if (existingAuth.error && Number(existingAuth.error.status || 0) !== 404) {
+      throw new Error("Supabase creator Auth inventory failed.");
+    }
+    if (existingAuth.data?.user) {
+      const updated = await adminClient.auth.admin.updateUserById(
+        userId,
+        authAttributes
+      );
+      if (updated.error) throw new Error("Supabase creator Auth update failed.");
+    } else {
+      const created = await adminClient.auth.admin.createUser({
+        id: userId,
+        ...authAttributes,
+      });
+      if (created.error) {
+        throw new Error("Supabase creator Auth creation failed.");
+      }
+      createdUserId = created.data?.user?.id || "";
     }
   }
 
@@ -421,7 +611,7 @@ export const createSupabaseCreatorAccount = async ({
     requireRpcData(
       await adminClient.rpc("roo_upsert_native_creator_account", {
         p_account: {
-          user_id: created.data?.user?.id || userId,
+          user_id: userId,
           primary_email: email,
           display_name: String(referral.name || code).trim(),
           referral_code: code,
@@ -434,14 +624,20 @@ export const createSupabaseCreatorAccount = async ({
       }),
       "creator account upsert"
     );
+    requireRpcData(
+      await adminClient.rpc("roo_reconcile_auth_identity_links", {
+        p_user_id: userId,
+      }),
+      "creator identity reconciliation"
+    );
   } catch (error) {
-    if (created.data?.user?.id) {
-      await adminClient.auth.admin.deleteUser(created.data.user.id).catch(() => {});
+    if (createdUserId) {
+      await adminClient.auth.admin.deleteUser(createdUserId).catch(() => {});
     }
     throw error;
   }
 
-  return { userId: created.data?.user?.id || userId };
+  return { userId };
 };
 
 export const bootstrapSupabaseNativeAccount = async ({
@@ -457,12 +653,19 @@ export const bootstrapSupabaseNativeAccount = async ({
     throw new Error("A valid Supabase Auth user id is required.");
   }
 
-  return requireRpcData(
+  const account = requireRpcData(
     await adminClient.rpc("roo_bootstrap_native_account", {
       p_user_id: normalizedUserId,
     }),
     "native account bootstrap"
   );
+  requireRpcData(
+    await adminClient.rpc("roo_reconcile_auth_identity_links", {
+      p_user_id: normalizedUserId,
+    }),
+    "identity reconciliation"
+  );
+  return account;
 };
 
 export const requireSupabaseBearerUser = async ({
@@ -480,11 +683,9 @@ export const requireSupabaseBearerUser = async ({
   if (requireVerifiedEmail && !user.email_confirmed_at) {
     return { ok: false, status: 403, reason: "email_not_verified" };
   }
-  const account = user.email
-    ? await resolveSupabaseAccountAlias({
-        identifier: user.email,
-        adminClient,
-      })
-    : null;
+  const account = await resolveSupabaseAccountByUserId({
+    userId: user.id,
+    adminClient,
+  });
   return { ok: true, user, account, accessToken: match[1] };
 };

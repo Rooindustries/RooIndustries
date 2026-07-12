@@ -321,6 +321,7 @@ export const verifyTourneyCredentials = async ({
     }
     return {
       ok: true,
+      supabaseSession: result.session,
       account: {
         username: result.account.tourney_username,
         role,
@@ -341,8 +342,29 @@ export const verifyTourneyCredentials = async ({
   const candidateHash = account?.active ? account.passwordHash : DUMMY_PASSWORD_HASH;
   const passwordMatches = await bcrypt.compare(String(password || ""), candidateHash);
 
+  const bridgeSession = async () => {
+    if (!isSupabaseAdminConfigured(env)) return null;
+    try {
+      const bridge = await authenticateSupabaseAccount({
+        identifier: login,
+        password,
+        env,
+        requiredRoles: [
+          "tourney_player",
+          "tourney_viewer",
+          "tourney_caster",
+          "tourney_owner",
+        ],
+        accountScope: "tourney",
+      });
+      return bridge.ok ? bridge.session : null;
+    } catch {
+      return null;
+    }
+  };
+
   if (getSessionSecret(env) && account?.active && passwordMatches) {
-    return { ok: true, account };
+    return { ok: true, account, supabaseSession: await bridgeSession() };
   }
 
   const playerResult = await verifyTourneyPlayerCredentials({
@@ -351,7 +373,11 @@ export const verifyTourneyCredentials = async ({
     env,
   });
   if (getSessionSecret(env) && playerResult.ok) {
-    return { ok: true, account: playerResult.account };
+    return {
+      ok: true,
+      account: playerResult.account,
+      supabaseSession: await bridgeSession(),
+    };
   }
 
   return {

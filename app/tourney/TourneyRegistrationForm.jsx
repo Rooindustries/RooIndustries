@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import SupabaseSocialLogin from "../../src/components/SupabaseSocialLogin";
+
+const TOURNEY_SIGNUP_DRAFT = "tourney_signup_draft";
 
 const rankOptions = [
   "Master",
@@ -72,13 +75,36 @@ export default function TourneyRegistrationForm({
   const [isHydrated, setIsHydrated] = useState(false);
   const [supportWarning, setSupportWarning] = useState(null);
   const [supportWarningAccepted, setSupportWarningAccepted] = useState(false);
+  const [socialIdentity, setSocialIdentity] = useState(null);
   const primaryRoleRef = useRef(null);
   const secondaryRoleRef = useRef(null);
   const supportApplyRef = useRef(null);
 
   useEffect(() => {
+    try {
+      const draft = JSON.parse(sessionStorage.getItem(TOURNEY_SIGNUP_DRAFT) || "null");
+      if (draft && typeof draft === "object") {
+        setForm((current) => ({ ...current, ...draft, password: "", passwordConfirm: "" }));
+      }
+    } catch {
+      sessionStorage.removeItem(TOURNEY_SIGNUP_DRAFT);
+    }
+    fetch("/api/auth/identities?flow=tourney", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data) => {
+        if (data?.authenticated && data?.emailVerified && data.email) {
+          setForm((current) => ({ ...current, email: data.email }));
+          setSocialIdentity(data);
+        }
+      })
+      .catch(() => {});
     setIsHydrated(true);
   }, []);
+
+  const saveDraft = () => {
+    const { password: _password, passwordConfirm: _confirm, ...safeDraft } = form;
+    sessionStorage.setItem(TOURNEY_SIGNUP_DRAFT, JSON.stringify(safeDraft));
+  };
 
   useEffect(() => {
     if (supportWarning) {
@@ -144,7 +170,7 @@ export default function TourneyRegistrationForm({
     setIsSuccess(false);
 
     try {
-      if (form.password !== form.passwordConfirm) {
+      if (!socialIdentity && form.password !== form.passwordConfirm) {
         throw new Error("Passwords must match.");
       }
       if (form.secondaryRolePlay && form.secondaryRolePlay === form.rolePlay) {
@@ -162,6 +188,7 @@ export default function TourneyRegistrationForm({
       }
 
       setForm(initialForm);
+      sessionStorage.removeItem(TOURNEY_SIGNUP_DRAFT);
       setMessage(data.message || "Registration submitted.");
       setIsSuccess(true);
     } catch (error) {
@@ -293,6 +320,18 @@ export default function TourneyRegistrationForm({
         Your Twitch username is required for eligibility review. Drafts happen
         July 25, 2026 at a TBD time.
       </p>
+      <SupabaseSocialLogin
+        action="signup"
+        flow="tourney"
+        nextPath="/tourney/register"
+        onBeforeRedirect={saveDraft}
+        variant="tourney"
+      />
+      {socialIdentity ? (
+        <p className="tourney-form-message is-success">
+          Verified as {socialIdentity.email}. You can use Google or Discord to sign in.
+        </p>
+      ) : null}
       <div className="tourney-form-grid">
         <label>
           Discord Username
@@ -327,9 +366,10 @@ export default function TourneyRegistrationForm({
             required
             value={form.email}
             onChange={(event) => updateField("email", event.target.value)}
+            readOnly={Boolean(socialIdentity)}
           />
         </label>
-        <label>
+        {!socialIdentity ? <label>
           Password
           <input
             {...hydrationSafeControlProps}
@@ -340,8 +380,8 @@ export default function TourneyRegistrationForm({
             value={form.password}
             onChange={(event) => updateField("password", event.target.value)}
           />
-        </label>
-        <label>
+        </label> : null}
+        {!socialIdentity ? <label>
           Confirm password
           <input
             {...hydrationSafeControlProps}
@@ -352,7 +392,7 @@ export default function TourneyRegistrationForm({
             value={form.passwordConfirm}
             onChange={(event) => updateField("passwordConfirm", event.target.value)}
           />
-        </label>
+        </label> : null}
         <label>
           Battle.net BattleTag
           <input

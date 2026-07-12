@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import packageContent from "../lib/packageContent";
+import ConnectedAccounts from "./ConnectedAccounts";
 
 const { normalizePackageText } = packageContent;
 
@@ -604,7 +605,11 @@ export default function RefDashboard() {
           </p>
         )}
       </div>
-
+      <ConnectedAccounts
+        flow="referral"
+        nextPath="/referrals/dashboard"
+        variant="referral"
+      />
 
       <button
         onClick={() => nav("/referrals/change-password")}
