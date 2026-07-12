@@ -231,12 +231,19 @@ export const migrateTourneyShadow = async ({
 } = {}) => {
   const { snapshot, sourceHash, missingTables } = await readTourneySnapshot({ env });
   const imported = requireRpcData(
-    await client.rpc("roo_import_tourney_snapshot_incremental", {
+    await client.rpc("roo_import_tourney_snapshot_v4", {
       p_snapshot: snapshot,
       p_source_hash: sourceHash,
+      p_allow_tombstones: false,
     }),
     "Tourney snapshot import"
   );
+  if (imported?.status === "quarantined") {
+    const error = new Error("Tourney import collisions require review.");
+    error.code = "TOURNEY_IMPORT_QUARANTINED";
+    error.collisionCount = Number(imported.collision_count || 0);
+    throw error;
+  }
 
   let authImported = 0;
   for (const player of snapshot.tourney_players) {
@@ -245,12 +252,20 @@ export const migrateTourneyShadow = async ({
   }
 
   const sourceCounts = snapshot._counts;
-  const targetCounts = imported?.counts || {};
+  const targetCounts = imported?.target_counts || {};
   const drift = Object.keys(sourceCounts).filter(
     (table) => Number(sourceCounts[table]) !== Number(targetCounts[table])
   );
   if (drift.length > 0) {
     throw new Error("Tourney shadow count verification failed.");
+  }
+  const sourceHashes = imported?.source_canonical_hashes || {};
+  const targetHashes = imported?.target_canonical_hashes || {};
+  const hashDrift = Object.keys(sourceCounts).filter(
+    (table) => sourceHashes[table] !== targetHashes[table]
+  );
+  if (hashDrift.length > 0) {
+    throw new Error("Tourney shadow canonical hash verification failed.");
   }
 
   return {
@@ -259,5 +274,8 @@ export const migrateTourneyShadow = async ({
     authImported,
     missingTables,
     driftCount: 0,
+    canonicalHashes: targetHashes,
+    statusCounts: imported?.status_counts || {},
+    relationships: imported?.relationships || {},
   };
 };

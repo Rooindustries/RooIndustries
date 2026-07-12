@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { tourneyMutationFetch } from "./tourneyMutation";
+import { tourneyMutationFetch, tourneyMutationSuccessMessage } from "./tourneyMutation";
 
 const STORAGE_KEY = "tourney_registration_decision";
 
@@ -68,7 +68,12 @@ export default function TourneyDecisionPanel() {
         setResult({
           loading: false,
           title: data.title || (response.ok ? "Updated" : "Decision failed"),
-          message: data.message || "Unable to update this registration.",
+          message: response.ok
+            ? tourneyMutationSuccessMessage(
+                data,
+                data.message || "Registration updated."
+              )
+            : data.message || "Unable to update this registration.",
           signInUrl: data.signInUrl || "",
         });
       })

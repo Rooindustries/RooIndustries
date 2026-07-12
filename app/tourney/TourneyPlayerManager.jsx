@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { tourneyMutationFetch } from "./tourneyMutation";
+import { tourneyMutationFetch, tourneyMutationSuccessMessage } from "./tourneyMutation";
 
 const rankOptions = [
   "Master",
@@ -152,7 +152,7 @@ export default function TourneyPlayerManager({
         setCapacity(data.capacity);
         setCapacityForm(String(data.capacity.teamCount || 8));
       }
-      setMessage("Player list updated.");
+      setMessage(tourneyMutationSuccessMessage(data, "Player list updated."));
       return true;
     } catch (error) {
       setMessage(error?.message || "Unable to update players.");

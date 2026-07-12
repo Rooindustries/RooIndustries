@@ -4,7 +4,7 @@ const mockBootstrapSupabaseNativeAccount = jest.fn();
 const mockResolveSupabaseAccountByUserId = jest.fn();
 const mockReadOAuthIntent = jest.fn();
 const mockFinalizeOAuthIntent = jest.fn();
-const mockSyncDiscordRole = jest.fn();
+const mockQueueDiscordProjection = jest.fn();
 const mockCreateReferralSessionCookie = jest.fn();
 const mockCreateTourneySessionToken = jest.fn();
 const mockGetTourneyCookieOptions = jest.fn();
@@ -34,8 +34,8 @@ jest.mock("../server/supabase/oauthIntents", () => ({
   finalizeOAuthIntent: (...args) => mockFinalizeOAuthIntent(...args),
 }));
 
-jest.mock("../server/tourney/discordRoleSync", () => ({
-  syncTourneyDiscordRoleAssignment: (...args) => mockSyncDiscordRole(...args),
+jest.mock("../server/tourney/discordDesiredState", () => ({
+  queueTourneyDiscordAuthProjection: (...args) => mockQueueDiscordProjection(...args),
 }));
 
 jest.mock("../server/api/ref/auth", () => ({
@@ -131,7 +131,7 @@ describe("Supabase Auth callback", () => {
       httpOnly: true,
       sameSite: "lax",
     });
-    mockSyncDiscordRole.mockResolvedValue({ applied: true, desiredRole: "participant" });
+    mockQueueDiscordProjection.mockResolvedValue({ applied: true, reason: "applied" });
   });
 
   test("keeps a short compatibility path but resolves the exact Auth user id", async () => {
@@ -245,7 +245,7 @@ describe("Supabase Auth callback", () => {
         version: "3",
       },
     });
-    expect(mockSyncDiscordRole).toHaveBeenCalledWith({
+    expect(mockQueueDiscordProjection).toHaveBeenCalledWith({
       accessToken: "transient-provider-token",
       userId: authUser.id,
     });

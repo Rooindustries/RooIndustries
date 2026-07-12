@@ -13,7 +13,10 @@ import {
   summarizeTourneyAccounts,
 } from "../../../../src/server/tourney/auth";
 import { buildTourneyPublicError } from "../../../../src/server/tourney/publicError";
-import { writePersistedTourneyAccountsJson } from "../../../../src/server/tourney/accountStore";
+import {
+  getTourneyAccountsCanonicalHash,
+  writePersistedTourneyAccountsJson,
+} from "../../../../src/server/tourney/accountStore";
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
 import {
   executeTourneyCommand,
@@ -86,26 +89,28 @@ export async function POST(request) {
 
   try {
     const payload = await readAccountPayload(request);
+    const currentAccounts = await readEffectiveTourneyAccounts();
+    const accounts = await buildUpdatedTourneyAccounts({
+      action: payload?.action,
+      username: payload?.username,
+      actorUsername: session.username,
+      role: payload?.role,
+      email: payload?.email,
+      password: payload?.password,
+      accounts: currentAccounts,
+    });
+    const accountsJson = renderTourneyAccountsJson(accounts);
+    const expectedCurrentHash = getTourneyAccountsCanonicalHash(currentAccounts);
     const commandId = readTourneyCommandId({ request });
     const command = await executeTourneyCommand({
       commandId,
       purpose: `accounts:${String(payload?.action || "update").toLowerCase()}`,
       requestPayload: payload,
       callback: async () => {
-        const currentAccounts = await readEffectiveTourneyAccounts();
-        const accounts = await buildUpdatedTourneyAccounts({
-          action: payload?.action,
-          username: payload?.username,
-          actorUsername: session.username,
-          role: payload?.role,
-          email: payload?.email,
-          password: payload?.password,
-          accounts: currentAccounts,
-        });
-        const accountsJson = renderTourneyAccountsJson(accounts);
         const persisted = await writePersistedTourneyAccountsJson({
           accountsJson,
           actorUsername: session.username,
+          expectedCurrentHash,
         });
         return { body: {
           ok: true,

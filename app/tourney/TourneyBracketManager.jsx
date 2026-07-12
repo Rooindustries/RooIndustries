@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import TourneyBracketView from "./TourneyBracketView";
-import { tourneyMutationFetch } from "./tourneyMutation";
+import { tourneyMutationFetch, tourneyMutationSuccessMessage } from "./tourneyMutation";
 
 const emptyTeamForm = {
   teamId: "",
@@ -61,7 +61,7 @@ export default function TourneyBracketManager({
         throw new Error(data.error || "Unable to update bracket.");
       }
       setSnapshot(data);
-      setMessage("Bracket updated.");
+      setMessage(tourneyMutationSuccessMessage(data, "Bracket updated."));
       return true;
     } catch (error) {
       setMessage(error?.message || "Unable to update bracket.");

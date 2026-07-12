@@ -20,3 +20,8 @@ export const tourneyMutationFetch = async (url, options = {}) => {
     return request();
   }
 };
+
+export const tourneyMutationSuccessMessage = (data, message) =>
+  data?.syncPending
+    ? `${message} Synchronization is completing in the background.`
+    : message;

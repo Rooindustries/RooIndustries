@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { BracketsManager } from "brackets-manager";
 import {
-  assertSupabaseTourneySchemaVersion,
+  assertTourneySchemaVersion,
   getTourneySql as getSql,
   isSupabaseTourneyDatabase,
   runSupabaseTourneyTransaction,
@@ -58,8 +58,6 @@ const MEMORY_STORE =
     lock: false,
     fixtureKey: "",
   });
-
-let schemaReady = false;
 
 const nowIso = () => new Date().toISOString();
 
@@ -122,33 +120,6 @@ const createDefaultMeta = () => ({
   updatedBy: "",
 });
 
-const isSchemaRaceError = (error) => {
-  const message = [
-    error?.code,
-    error?.constraint,
-    error?.message,
-    error?.detail,
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  return (
-    /pg_type_typname_nsp_index/i.test(message) ||
-    (["42P07", "42710"].includes(error?.code) &&
-      /already exists|duplicate/i.test(message))
-  );
-};
-
-const runSchemaStatement = async (statement) => {
-  try {
-    await statement();
-  } catch (error) {
-    if (!isSchemaRaceError(error)) {
-      throw error;
-    }
-  }
-};
-
 const mapTeamRow = (row = {}) => ({
   id: row.id,
   name: row.name,
@@ -193,88 +164,7 @@ export const resetMemoryTourneyBracketStoreForTests = () => {
 
 export async function ensureTourneyBracketSchema(env = process.env) {
   if (isMemoryMode(env)) return;
-
-  if (isSupabaseTourneyDatabase(env)) {
-    await assertSupabaseTourneySchemaVersion(env);
-    return;
-  }
-  if (schemaReady) return;
-
-  const sql = await getSql(env);
-  await runSchemaStatement(() => sql`
-    create table if not exists tourney_bracket_teams (
-      id text primary key,
-      name text not null unique,
-      seed_order integer,
-      status text not null default 'active',
-      created_at timestamptz not null default now(),
-      updated_at timestamptz not null default now(),
-      updated_by text,
-      constraint tourney_bracket_teams_status_check
-        check (status in ('active', 'disqualified'))
-    )
-  `);
-  await runSchemaStatement(() => sql`
-    create table if not exists tourney_bracket_team_members (
-      id text primary key,
-      team_id text not null references tourney_bracket_teams(id) on delete cascade,
-      player_id text,
-      display_name text not null,
-      role_play text,
-      created_at timestamptz not null default now()
-    )
-  `);
-  await runSchemaStatement(() => sql`
-    create table if not exists tourney_bracket_meta (
-      id text primary key,
-      stage_id integer,
-      status text not null default 'draft',
-      published boolean not null default false,
-      generated_at timestamptz,
-      updated_at timestamptz not null default now(),
-      updated_by text
-    )
-  `);
-  await runSchemaStatement(() => sql`
-    create table if not exists tourney_bracket_entities (
-      entity_type text not null,
-      entity_id integer not null,
-      data jsonb not null,
-      updated_at timestamptz not null default now(),
-      primary key (entity_type, entity_id)
-    )
-  `);
-  await runSchemaStatement(() => sql`
-    create table if not exists tourney_bracket_counters (
-      entity_type text primary key,
-      next_id integer not null default 0
-    )
-  `);
-  await runSchemaStatement(() => sql`
-    create table if not exists tourney_bracket_audit (
-      id text primary key,
-      action text not null,
-      actor_username text not null,
-      match_id integer,
-      team_id text,
-      reason text,
-      payload jsonb not null default '{}'::jsonb,
-      created_at timestamptz not null default now()
-    )
-  `);
-  await runSchemaStatement(() => sql`
-    create table if not exists tourney_bracket_lock (
-      id text primary key,
-      locked_until timestamptz not null,
-      locked_by text
-    )
-  `);
-  await sql`
-    insert into tourney_bracket_meta (id, status, published)
-    values (${TOURNEY_META_ID}, 'draft', false)
-    on conflict (id) do nothing
-  `;
-  schemaReady = true;
+  await assertTourneySchemaVersion(env);
 }
 
 class MemoryBracketStorage {

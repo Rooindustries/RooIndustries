@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { getManageTourneyPlayerById } from "./playerStore";
 import {
-  assertSupabaseTourneySchemaVersion,
+  assertTourneySchemaVersion,
   getTourneySql as getSql,
   isSupabaseTourneyDatabase,
   resolveTourneyDatabaseUrl as getDatabaseUrl,
@@ -37,8 +37,6 @@ const MEMORY_STORE =
     appeals: [],
     payouts: [],
   });
-let schemaReady = false;
-
 const nowIso = () => new Date().toISOString();
 const normalizeText = (value) => String(value || "").trim();
 const normalizeKey = (value) => normalizeText(value).toLowerCase();
@@ -57,49 +55,7 @@ export const resetMemoryTourneyAppealPayoutStoreForTests = () => {
 
 export async function ensureTourneyAppealPayoutSchema(env = process.env) {
   if (isMemoryMode(env)) return;
-  if (isSupabaseTourneyDatabase(env)) {
-    await assertSupabaseTourneySchemaVersion(env);
-    return;
-  }
-  if (schemaReady) return;
-  const sql = await getSql(env);
-  await sql`
-    create table if not exists tourney_appeals (
-      id text primary key,
-      type text not null,
-      status text not null default 'open',
-      team_name text,
-      captain_name text,
-      submitter_player_id text,
-      submitter_username text not null,
-      subject_player_id text,
-      subject_name text,
-      title text not null,
-      details text not null,
-      evidence_url text,
-      ruling text,
-      created_at timestamptz not null default now(),
-      updated_at timestamptz not null default now(),
-      updated_by text
-    )
-  `;
-  await sql`
-    create table if not exists tourney_payouts (
-      id text primary key,
-      player_id text not null,
-      display_name text not null,
-      team_name text,
-      payout_type text not null,
-      amount_usd numeric(10,2) not null default 0,
-      status text not null default 'pending',
-      payout_email text,
-      notes text,
-      created_at timestamptz not null default now(),
-      updated_at timestamptz not null default now(),
-      updated_by text
-    )
-  `;
-  schemaReady = true;
+  await assertTourneySchemaVersion(env);
 }
 
 const assertAuthed = (session) => {
