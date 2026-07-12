@@ -14,6 +14,10 @@ const cutoverCli = fs.readFileSync(
   path.join(process.cwd(), "scripts", "tourney-cutover.mjs"),
   "utf8"
 );
+const activationWorker = fs.readFileSync(
+  path.join(process.cwd(), "src", "server", "tourney", "activation.js"),
+  "utf8"
+);
 const activationV4 = fs.readFileSync(
   path.join(
     process.cwd(),
@@ -47,7 +51,7 @@ describe("Tourney cutover migration", () => {
     expect(cutoverCli).toContain('hardened.error.code === "PGRST202"');
     expect(cutoverCli).toContain("POSTGRES_URL_NON_POOLING");
     expect(cutoverCli).toContain('PGCONNECT_TIMEOUT: "15"');
-    expect(cutoverCli).toContain(
+    expect(activationWorker).toContain(
       "player.principal_id is distinct from account.principal_id"
     );
   });
