@@ -85,9 +85,13 @@ const normalizeObject = (value) =>
 
 const nowIso = () => new Date().toISOString();
 
-const flushCriticalCommerceMirror = async (client) => {
+const flushCriticalCommerceMirror = async (client, requiredDocumentIds = []) => {
   if (typeof client?.flushCommerceMirror !== "function") return null;
-  return client.flushCommerceMirror({ failClosed: true, limit: 100 });
+  return client.flushCommerceMirror({
+    failClosed: true,
+    requiredDocumentIds: [...new Set(requiredDocumentIds.filter(Boolean))],
+    limit: 100,
+  });
 };
 
 const getFutureIso = (seconds) =>
@@ -1044,7 +1048,11 @@ const createStartClaimAndRecord = async ({
         return next;
       });
     }
-    await transaction.commit();
+    if (client?.backend === "supabase") {
+      await transaction.commit({ commandId: `payment-start:${claim._id}` });
+    } else {
+      await transaction.commit();
+    }
     return getPaymentRecordById(client, record._id);
   } catch (error) {
     if (!isConflictError(error)) throw error;
@@ -1137,7 +1145,7 @@ const getPaymentProofClaimIdForRecord = ({
   );
 };
 
-const claimPaymentProof = async ({
+const preparePaymentProofClaim = async ({
   client,
   record,
   providerOrderId = "",
@@ -1180,23 +1188,7 @@ const claimPaymentProof = async ({
     providerPaymentId: String(providerPaymentId || "").trim(),
     claimedAt: nowIso(),
   };
-  try {
-    return await client.create(claim);
-  } catch (error) {
-    if (!isConflictError(error)) throw error;
-    const current = await getDocumentById({
-      client,
-      id: claimId,
-      type: PAYMENT_PROOF_CLAIM_TYPE,
-    });
-    if (String(current?.paymentRecordId || "") === String(record._id || "")) {
-      return current;
-    }
-    const conflict = new Error("This payment has already been used for another booking.");
-    conflict.status = 409;
-    conflict.code = "payment_proof_already_claimed";
-    throw conflict;
-  }
+  return claim;
 };
 
 const normalizeMarkedDuplicatePaymentRecord = async ({
@@ -2023,7 +2015,7 @@ const finalizePaymentRecordInternal = async ({
 
   let proofClaim;
   try {
-    proofClaim = await claimPaymentProof({
+    proofClaim = await preparePaymentProofClaim({
       client,
       record: workingRecord,
       providerOrderId:
@@ -2172,6 +2164,7 @@ const finalizePaymentRecordInternal = async ({
     backendOwner: workingRecord.backendOwner || "sanity",
     cutoverGeneration: Number(workingRecord.cutoverGeneration || 0),
     paymentFinalizeSource: normalizedSource,
+    paymentProofClaim: proofClaim,
     paymentProofClaimId: String(proofClaim?._id || "").trim(),
     paymentFinalizationLeaseId: lease.leaseId,
     couponReservationId: String(workingRecord.couponReservationId || "").trim(),
@@ -2262,7 +2255,7 @@ const finalizePaymentRecordInternal = async ({
     }
 
     try {
-      await flushCriticalCommerceMirror(client);
+      await flushCriticalCommerceMirror(client, [bookingId, nextRecord?._id]);
     } catch (error) {
       const recoveryAttemptCount = Number(nextRecord?.recoveryAttemptCount || 0) + 1;
       let pendingRecord = nextRecord;
@@ -2578,14 +2571,22 @@ const createOrReusePaymentRecordForStart = async ({
     quote,
   });
 
-  const sessionScope = buildPaymentSessionScope({
+  const baseSessionScope = buildPaymentSessionScope({
     bookingPayload,
     holdNonce: holdDoc?.holdNonce || "",
   });
   const isUpgrade = !!String(bookingPayload.originalOrderId || "").trim();
-  const paymentRecordId = buildPaymentSessionRecordId(
-    isUpgrade ? `${sessionScope}:${crypto.randomUUID()}` : sessionScope
-  );
+  const upgradeIntentId = String(upgradeIntentSnapshot?.intentId || "").trim();
+  if (isUpgrade && !upgradeIntentId) {
+    const error = new Error("Upgrade authorization is missing its stable intent ID.");
+    error.status = 409;
+    error.code = "upgrade_intent_id_missing";
+    throw error;
+  }
+  const sessionScope = isUpgrade
+    ? `${baseSessionScope}:${upgradeIntentId}`
+    : baseSessionScope;
+  const paymentRecordId = buildPaymentSessionRecordId(sessionScope);
   const startClaimId = isUpgrade
     ? buildPaymentUpgradeLockId(sessionScope)
     : buildPaymentStartClaimId(sessionScope);
@@ -2756,7 +2757,12 @@ const createOrReusePaymentRecordForStart = async ({
   }
 
   try {
-    await flushCriticalCommerceMirror(client);
+    await flushCriticalCommerceMirror(client, [
+      record._id,
+      startClaimId,
+      holdDoc?._id,
+      couponReservationPlan?.redemption?._id,
+    ]);
   } catch (error) {
     const recoveryAttemptCount = Number(record.recoveryAttemptCount || 0) + 1;
     await patchPaymentRecord({
@@ -2813,7 +2819,7 @@ const createOrReusePaymentRecordForStart = async ({
 
   record = await attachImmutableProviderOrder({ client, record, providerPayload });
   try {
-    await flushCriticalCommerceMirror(client);
+    await flushCriticalCommerceMirror(client, [record._id]);
   } catch (error) {
     const recoveryAttemptCount = Number(record.recoveryAttemptCount || 0) + 1;
     await patchPaymentRecord({
@@ -3591,7 +3597,7 @@ const recoverCapturedPaymentAsReschedule = async ({
   };
   const proofClaim =
     paymentProofClaim ||
-    (await claimPaymentProof({
+    (await preparePaymentProofClaim({
       client,
       record: recoveryRecord,
       providerOrderId: recoveredProviderOrderId,
@@ -4891,7 +4897,12 @@ const processPaymentRefund = async ({
   }
 
   try {
-    await flushCriticalCommerceMirror(client);
+    await flushCriticalCommerceMirror(client, [
+      nextRecord._id,
+      nextRecord.bookingId,
+      nextRecord.couponReservationId,
+      nextRecord.bookingPayload?.referralId,
+    ]);
   } catch {
     const recoveryAttemptCount = Number(nextRecord.recoveryAttemptCount || 0) + 1;
     nextRecord = await patchPaymentRecord({

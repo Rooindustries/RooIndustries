@@ -1,7 +1,9 @@
 import crypto from "crypto";
-import { listManageTourneyPlayers } from "./playerStore";
+import { getManageTourneyPlayerById } from "./playerStore";
 import {
+  assertSupabaseTourneySchemaVersion,
   getTourneySql as getSql,
+  isSupabaseTourneyDatabase,
   resolveTourneyDatabaseUrl as getDatabaseUrl,
 } from "./sqlClient.js";
 
@@ -54,7 +56,12 @@ export const resetMemoryTourneyAppealPayoutStoreForTests = () => {
 };
 
 export async function ensureTourneyAppealPayoutSchema(env = process.env) {
-  if (isMemoryMode(env) || schemaReady) return;
+  if (isMemoryMode(env)) return;
+  if (isSupabaseTourneyDatabase(env)) {
+    await assertSupabaseTourneySchemaVersion(env);
+    return;
+  }
+  if (schemaReady) return;
   const sql = await getSql(env);
   await sql`
     create table if not exists tourney_appeals (
@@ -160,7 +167,7 @@ const validatePayoutPayload = async ({ payload = {}, env = process.env }) => {
   }
 
   const player = playerId
-    ? (await listManageTourneyPlayers({ env })).find((entry) => entry.id === playerId)
+    ? await getManageTourneyPlayerById({ playerId, env })
     : null;
   if (playerId && !player) errors.push("Player not found.");
 
@@ -325,7 +332,36 @@ export async function listTourneyAppealsForSession({
     : await (async () => {
         await ensureTourneyAppealPayoutSchema(env);
         const sql = await getSql(env);
-        return sql`select * from tourney_appeals order by created_at desc`;
+        if (isSupabaseTourneyDatabase(env) && !isAdminSession(session)) {
+          return sql`
+            select id, type, status, team_name, captain_name,
+              submitter_player_id, submitter_username, subject_player_id,
+              subject_name, title, details, evidence_url, ruling, created_at,
+              updated_at, updated_by
+            from tourney_appeals
+            where submitter_player_id = ${session.playerId}
+            order by created_at desc, id desc
+            limit 100
+          `;
+        }
+        return isSupabaseTourneyDatabase(env)
+          ? sql`
+              select id, type, status, team_name, captain_name,
+                submitter_player_id, submitter_username, subject_player_id,
+                subject_name, title, details, evidence_url, ruling, created_at,
+                updated_at, updated_by
+              from tourney_appeals
+              order by created_at desc, id desc
+              limit 100
+            `
+          : sql`
+              select id, type, status, team_name, captain_name,
+                submitter_player_id, submitter_username, subject_player_id,
+                subject_name, title, details, evidence_url, ruling, created_at,
+                updated_at, updated_by
+              from tourney_appeals
+              order by created_at desc, id desc
+            `;
       })();
   return rows
     .map(mapAppeal)
@@ -419,7 +455,33 @@ export async function listTourneyPayoutsForSession({
     : await (async () => {
         await ensureTourneyAppealPayoutSchema(env);
         const sql = await getSql(env);
-        return sql`select * from tourney_payouts order by created_at desc`;
+        if (isSupabaseTourneyDatabase(env) && !isAdminSession(session)) {
+          return sql`
+            select id, player_id, display_name, team_name, payout_type,
+              amount_usd, status, payout_email, notes, created_at, updated_at,
+              updated_by
+            from tourney_payouts
+            where player_id = ${session.playerId}
+            order by created_at desc, id desc
+            limit 100
+          `;
+        }
+        return isSupabaseTourneyDatabase(env)
+          ? sql`
+              select id, player_id, display_name, team_name, payout_type,
+                amount_usd, status, payout_email, notes, created_at, updated_at,
+                updated_by
+              from tourney_payouts
+              order by created_at desc, id desc
+              limit 100
+            `
+          : sql`
+              select id, player_id, display_name, team_name, payout_type,
+                amount_usd, status, payout_email, notes, created_at, updated_at,
+                updated_by
+              from tourney_payouts
+              order by created_at desc, id desc
+            `;
       })();
   return rows
     .map(mapPayout)

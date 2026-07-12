@@ -166,9 +166,9 @@ const wrapTransaction = ({ transaction, onCommitted, onDeleted }) => {
     transaction = transaction.patch(id, patcher);
     return wrapper;
   };
-  wrapper.delete = (id) => {
+  wrapper.delete = (id, options) => {
     deletedIds.add(id);
-    transaction = transaction.delete(id);
+    transaction = transaction.delete(id, options);
     return wrapper;
   };
   wrapper.commit = async (...args) => {
@@ -194,8 +194,9 @@ export const createReverseMirroringSupabaseClient = ({
         supabaseClient: recoveryClient,
         sanityClient,
         failClosed,
+        requiredDocumentIds: failClosed ? ids : [],
       });
-      if (drained.supported) return drained;
+      return drained;
     }
     return mirrorIds({
       supabaseClient,

@@ -14,11 +14,9 @@ import {
 } from "./slotPolicy.js";
 import { getClientAddress, requireRateLimit } from "../api/ref/rateLimit.js";
 import { logSafeError } from "../safeErrorLog.js";
-import {
-  resolveSupabaseRuntimePolicy,
-  selectCanaryBackend,
-} from "../supabase/runtime.js";
+import { resolveSupabaseRuntimePolicy } from "../supabase/runtime.js";
 import { isSupabaseAdminConfigured } from "../supabase/adminClient.js";
+import { assertCommerceStartAllowed } from "../supabase/commerceControl.js";
 
 const createHoldClient = (backendOverride) =>
   createClient(
@@ -139,12 +137,7 @@ const selectHoldBackend = ({
     return previous.be === "supabase" ? "supabase" : "sanity";
   }
   const policy = resolveSupabaseRuntimePolicy();
-  if (policy.commercePrimaryBackend === "supabase") return "supabase";
-  if (policy.commerceCanaryPercentage < 1) return "sanity";
-  return selectCanaryBackend({
-    key: `${clientAddress}:${startTimeUTC}:${packageTitle}`,
-    percentage: policy.commerceCanaryPercentage,
-  });
+  return policy.commercePrimaryBackend === "supabase" ? "supabase" : "sanity";
 };
 
 const releasePreviousHold = async ({
@@ -225,6 +218,18 @@ export default async function handler(req, res) {
     return;
   }
 
+  let commerceControl;
+  try {
+    commerceControl = await assertCommerceStartAllowed();
+  } catch (error) {
+    res.setHeader?.("Retry-After", "60");
+    return res.status(503).json({
+      ok: false,
+      code: String(error?.code || "commerce_control_unavailable").toLowerCase(),
+      message: "New booking starts are temporarily unavailable. Please try again shortly.",
+    });
+  }
+
   const normalizedStartTimeUTC = normalizeStartTimeUTC(startTimeUTC);
   if (!normalizedStartTimeUTC || !isExactWholeMinute(normalizedStartTimeUTC)) {
     return res.status(400).json({
@@ -240,8 +245,7 @@ export default async function handler(req, res) {
     packageTitle,
     clientAddress,
   });
-  const cutoverGeneration =
-    resolveSupabaseRuntimePolicy().commerceFailoverGeneration;
+  const cutoverGeneration = commerceControl.generation;
   const client = createHoldClient(backend);
 
   try {

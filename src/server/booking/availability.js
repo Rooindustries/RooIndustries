@@ -58,6 +58,13 @@ export async function getBookingAvailability({ client } = {}) {
     getBookingSettings({ client: primaryClient }),
     Promise.all(
       clients.map(async (readClient) => {
+        if (typeof readClient.fetchAvailability === "function") {
+          return readClient.fetchAvailability({
+            bookingsQuery: BOOKINGS_QUERY,
+            holdsQuery: HOLDS_QUERY,
+            slotLocksQuery: SLOT_LOCKS_QUERY,
+          });
+        }
         const [bookings, holds, slotLocks] = await Promise.all([
           readClient.fetch(BOOKINGS_QUERY),
           readClient.fetch(HOLDS_QUERY),

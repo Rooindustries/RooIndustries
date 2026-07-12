@@ -7,12 +7,21 @@ import {
   normalizeTwitchUsername,
 } from "./twitch.js";
 import {
+  assertSupabaseTourneySchemaVersion,
   getTourneySql as getSql,
   isSupabaseTourneyDatabase,
   resolveTourneyDatabaseUrl as getDatabaseUrl,
 } from "./sqlClient.js";
 import { syncSupabaseTourneyPlayerAccount } from "../supabase/accounts.js";
 import { logSafeError } from "../safeErrorLog.js";
+import {
+  claimSupabasePasswordReset,
+  claimSupabaseRegistrationDecision,
+  completeSupabaseAuthOperation,
+  finalizeSupabasePasswordReset,
+  finalizeSupabaseRegistrationDecision,
+  markSupabaseAuthOperationRetry,
+} from "./supabaseAuthOperations.js";
 
 export const TOURNEY_PLAYER_STATUSES = Object.freeze([
   "pending",
@@ -541,7 +550,13 @@ export const validateTourneyPlayerDetailsPayload = (payload = {}) => {
 };
 
 export async function ensureTourneyPlayerSchema(env = process.env) {
-  if (isMemoryMode(env) || schemaReady) return;
+  if (isMemoryMode(env)) return;
+
+  if (isSupabaseTourneyDatabase(env)) {
+    await assertSupabaseTourneySchemaVersion(env);
+    return;
+  }
+  if (schemaReady) return;
 
   const sql = await getSql(env);
   await sql`
@@ -730,7 +745,7 @@ export async function getTourneyRegistrationConfig({ env = process.env } = {}) {
   await ensureTourneyPlayerSchema(env);
   const sql = await getSql(env);
   const rows = await sql`
-    select *
+    select team_count, updated_at, updated_by
     from tourney_registration_config
     where id = ${TOURNEY_CONFIG_ID}
     limit 1
@@ -794,7 +809,8 @@ const listCapacityPlayers = async ({ env = process.env } = {}) => {
   await ensureTourneyPlayerSchema(env);
   const sql = await getSql(env);
   const rows = await sql`
-    select *
+    select id, status, display_name, discord, role_play, approved_role_play,
+      registration_pool, twitch_username
     from tourney_players
     where status = 'approved'
   `;
@@ -1168,7 +1184,8 @@ export async function listApprovedTourneyPlayers({ env = process.env } = {}) {
   await ensureTourneyPlayerSchema(env);
   const sql = await getSql(env);
   const rows = await sql`
-    select *
+    select id, display_name, discord, role_play, approved_role_play,
+      registration_pool, team_name, twitch_username
     from tourney_players
     where status = 'approved'
     order by lower(coalesce(nullif(display_name, ''), discord)) asc
@@ -1186,11 +1203,50 @@ export async function listManageTourneyPlayers({ env = process.env } = {}) {
   await ensureTourneyPlayerSchema(env);
   const sql = await getSql(env);
   const rows = await sql`
-    select *
+    select id, username, email, status, discord, display_name, discord_key,
+      battlenet, rank_name, role_play, secondary_role_play, approved_role_play,
+      registration_pool, time_zone, twitch_username, team_name,
+      available_aug_1_2, accepted_rules, accepted_roo_visibility, notes,
+      version, created_at, updated_at, approved_at, approved_by, denied_at,
+      denied_by, removed_at, removed_by, withdrawn_at, withdrawn_by,
+      discord_invite_sent_at, discord_invite_email_id,
+      discord_invite_last_error, discord_user_id, discord_oauth_username,
+      discord_oauth_global_name, discord_linked_at, discord_role_assigned_at,
+      discord_role_last_error
     from tourney_players
     order by created_at desc
   `;
   return rows.map(managePlayer);
+}
+
+export async function getManageTourneyPlayerById({
+  playerId,
+  env = process.env,
+} = {}) {
+  const id = normalizeText(playerId);
+  if (!id) return null;
+  if (isMemoryMode(env)) {
+    const player = MEMORY_STORE.players.find((entry) => entry.id === id);
+    return player ? managePlayer(player) : null;
+  }
+  await ensureTourneyPlayerSchema(env);
+  const sql = await getSql(env);
+  const rows = await sql`
+    select id, username, email, status, discord, display_name, discord_key,
+      battlenet, rank_name, role_play, secondary_role_play, approved_role_play,
+      registration_pool, time_zone, twitch_username, team_name,
+      available_aug_1_2, accepted_rules, accepted_roo_visibility, notes,
+      version, created_at, updated_at, approved_at, approved_by, denied_at,
+      denied_by, removed_at, removed_by, withdrawn_at, withdrawn_by,
+      discord_invite_sent_at, discord_invite_email_id,
+      discord_invite_last_error, discord_user_id, discord_oauth_username,
+      discord_oauth_global_name, discord_linked_at, discord_role_assigned_at,
+      discord_role_last_error
+    from tourney_players
+    where id = ${id}
+    limit 1
+  `;
+  return rows?.[0] ? managePlayer(rows[0]) : null;
 }
 
 export async function listApprovedTourneyDiscordInviteRecipients({
@@ -1222,7 +1278,16 @@ export async function listApprovedTourneyDiscordInviteRecipients({
   await ensureTourneyPlayerSchema(env);
   const sql = await getSql(env);
   const rows = await sql`
-    select *
+    select id, username, email, status, discord, display_name, discord_key,
+      battlenet, rank_name, role_play, secondary_role_play, approved_role_play,
+      registration_pool, time_zone, twitch_username, team_name,
+      available_aug_1_2, accepted_rules, accepted_roo_visibility, notes,
+      version, created_at, updated_at, approved_at, approved_by, denied_at,
+      denied_by, removed_at, removed_by, withdrawn_at, withdrawn_by,
+      discord_invite_sent_at, discord_invite_email_id,
+      discord_invite_last_error, discord_user_id, discord_oauth_username,
+      discord_oauth_global_name, discord_linked_at, discord_role_assigned_at,
+      discord_role_last_error
     from tourney_players
     where status = 'approved'
     order by lower(email) asc
@@ -1301,25 +1366,12 @@ export async function getApprovedTourneyPlayerById({
   const expectedVersionNumber = expectedVersion ? Number(expectedVersion) : 0;
   if (expectedVersion && !Number.isInteger(expectedVersionNumber)) return null;
 
-  await ensureTourneyPlayerSchema(env);
-  const sql = await getSql(env);
-  const rows = expectedVersion
-    ? await sql`
-        select *
-        from tourney_players
-        where id = ${playerId}
-          and status = 'approved'
-          and version = ${expectedVersionNumber}
-        limit 1
-      `
-    : await sql`
-        select *
-        from tourney_players
-        where id = ${playerId}
-          and status = 'approved'
-        limit 1
-      `;
-  return rows?.[0] ? managePlayer(rows[0]) : null;
+  const player = await getManageTourneyPlayerById({ playerId, env });
+  if (!player || player.status !== "approved") return null;
+  if (expectedVersion && Number(player.version) !== expectedVersionNumber) {
+    return null;
+  }
+  return player;
 }
 
 export async function recordTourneyPlayerDiscordLink({
@@ -1547,7 +1599,9 @@ export async function getRegistrationDecisionToken({
   await ensureTourneyPlayerSchema(env);
   const sql = await getSql(env);
   const rows = await sql`
-    select *
+    select id, player_id, token_hash, purpose, recipient_username,
+      recipient_email, recipient_role, recipient_version, expires_at,
+      used_at, used_by, created_at
     from tourney_player_tokens
     where token_hash = ${hashed}
       and purpose = ${purpose}
@@ -1617,10 +1671,103 @@ export async function applyRegistrationDecision({
     return managePlayer(player);
   }
 
+  if (isSupabaseTourneyDatabase(env)) {
+    const claimed = await claimSupabaseRegistrationDecision({
+      playerId,
+      tokenHash,
+      purpose,
+      actorUsername: actor,
+      env,
+      resolveDecision: async ({ player, reservations }) => {
+        const selectedApprovedRole =
+          status === "approved"
+            ? resolveApprovedRolePlay(player, approvedRolePlay)
+            : "";
+        let registrationPool = player.registration_pool || "main";
+        if (
+          status === "approved" &&
+          normalizeRegistrationPool(registrationPool) === "main"
+        ) {
+          const snapshot = await getTourneyRoleCapacitySnapshot({ env });
+          const roleCapacity = getRoleCapacity(snapshot, selectedApprovedRole);
+          const reservedForRole = (reservations || []).filter((entry) => {
+            const payload = entry.operation_payload || {};
+            return (
+              payload.approvedRolePlay === selectedApprovedRole &&
+              normalizeRegistrationPool(payload.registrationPool) === "main"
+            );
+          }).length;
+          const isFull = isRoleCapacityFullForRegistration({
+            roleCapacity: roleCapacity
+              ? {
+                  ...roleCapacity,
+                  isFull: roleCapacity.mainCount + reservedForRole >= roleCapacity.cap,
+                }
+              : null,
+            value: mapPlayer({
+              ...player,
+              approved_role_play: selectedApprovedRole,
+            }),
+          });
+          if (isFull) registrationPool = "substitute";
+        }
+        return {
+          status,
+          approvedRolePlay: selectedApprovedRole,
+          registrationPool,
+        };
+      },
+    });
+
+    if (claimed.completed) return managePlayer(claimed.player);
+    if (claimed.authApplied) {
+      await syncTourneyPlayerAuth({ playerRow: claimed.player, env });
+      await completeSupabaseAuthOperation({
+        operationKey: claimed.operation.key,
+        env,
+      });
+      return managePlayer(claimed.player);
+    }
+
+    try {
+      await syncTourneyPlayerAuth({
+        playerRow: { ...claimed.player, status: "pending" },
+        env,
+      });
+    } catch (error) {
+      await markSupabaseAuthOperationRetry({
+        operationKey: claimed.operation.key,
+        errorCode: error?.code || "AUTH_PREPARE_FAILED",
+        env,
+      }).catch(() => {});
+      throw error;
+    }
+
+    const finalized = await finalizeSupabaseRegistrationDecision({
+      operation: claimed.operation,
+      env,
+    });
+    await syncTourneyPlayerAuth({ playerRow: finalized, env });
+    await completeSupabaseAuthOperation({
+      operationKey: claimed.operation.key,
+      env,
+    });
+    return managePlayer(finalized);
+  }
+
   await ensureTourneyPlayerSchema(env);
   const sql = await getSql(env);
   const pendingRows = await sql`
-    select *
+    select id, username, email, password_hash, status, discord, display_name,
+      discord_key, battlenet, rank_name, role_play, secondary_role_play,
+      approved_role_play, registration_pool, time_zone, twitch_username,
+      team_name, available_aug_1_2, accepted_rules,
+      accepted_roo_visibility, notes, version, created_at, updated_at,
+      approved_at, approved_by, denied_at, denied_by, removed_at, removed_by,
+      withdrawn_at, withdrawn_by, discord_invite_sent_at,
+      discord_invite_email_id, discord_invite_last_error, discord_user_id,
+      discord_oauth_username, discord_oauth_global_name, discord_linked_at,
+      discord_role_assigned_at, discord_role_last_error
     from tourney_players
     where id = ${playerId}
       and status = 'pending'
@@ -1821,7 +1968,7 @@ export async function verifyTourneyPlayerCredentials({
     await ensureTourneyPlayerSchema(env);
     const sql = await getSql(env);
     const rows = await sql`
-      select *
+      select id, username, status, version, password_hash
       from tourney_players
       where username = ${normalizedLogin}
          or email = ${normalizedEmail}
@@ -1876,7 +2023,9 @@ export async function findTourneyPlayerForSession({
   await ensureTourneyPlayerSchema(env);
   const sql = await getSql(env);
   const rows = await sql`
-    select *
+    select id, username, status, version, display_name, discord, email,
+      role_play, secondary_role_play, approved_role_play, registration_pool,
+      twitch_username, team_name
     from tourney_players
     where status = 'approved'
       and username = ${normalizedUsername}
@@ -1924,7 +2073,7 @@ export async function createTourneyResetToken({
   await ensureTourneyPlayerSchema(env);
   const sql = await getSql(env);
   const players = await sql`
-    select *
+    select id, username, email, status, discord, display_name, version
     from tourney_players
     where status = 'approved'
       and (
@@ -1988,10 +2137,56 @@ export async function resetTourneyPlayerPassword({
     return managePlayer(player);
   }
 
+  if (isSupabaseTourneyDatabase(env)) {
+    const claimed = await claimSupabasePasswordReset({
+      tokenHash: hashedToken,
+      password,
+      passwordHash,
+      env,
+    });
+    if (claimed.completed) return managePlayer(claimed.player);
+    if (claimed.authApplied) {
+      await syncTourneyPlayerAuth({ playerRow: claimed.player, env });
+      await completeSupabaseAuthOperation({
+        operationKey: claimed.operation.key,
+        env,
+      });
+      return managePlayer(claimed.player);
+    }
+
+    try {
+      await syncTourneyPlayerAuth({
+        playerRow: {
+          ...claimed.player,
+          password_hash: claimed.operation.passwordHash,
+        },
+        env,
+      });
+    } catch (error) {
+      await markSupabaseAuthOperationRetry({
+        operationKey: claimed.operation.key,
+        errorCode: error?.code || "AUTH_PASSWORD_UPDATE_FAILED",
+        env,
+      }).catch(() => {});
+      throw error;
+    }
+    const finalized = await finalizeSupabasePasswordReset({
+      operation: claimed.operation,
+      env,
+    });
+    await syncTourneyPlayerAuth({ playerRow: finalized, env });
+    await completeSupabaseAuthOperation({
+      operationKey: claimed.operation.key,
+      env,
+    });
+    return managePlayer(finalized);
+  }
+
   await ensureTourneyPlayerSchema(env);
   const sql = await getSql(env);
   const tokens = await sql`
-    select *
+    select id, player_id, token_hash, purpose, expires_at, used_at, used_by,
+      created_at
     from tourney_player_tokens
     where token_hash = ${hashedToken}
       and purpose = 'reset'
