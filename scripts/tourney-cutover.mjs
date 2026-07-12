@@ -129,6 +129,47 @@ const decryptSnapshot = ({ encrypted, secret }) => {
   ]).toString("utf8"));
 };
 
+const captureHostedSnapshot = async ({ legacyData, sanityAccount }) => {
+  const client = createSupabaseAdminClient();
+  const parameters = {
+    p_legacy_snapshot: legacyData,
+    p_sanity_account: sanityAccount,
+  };
+  const hardened = await client.rpc(
+    "roo_capture_tourney_hardening_snapshot",
+    parameters
+  );
+  if (!hardened.error) {
+    return {
+      data: hardened.data,
+      functionName: "public.roo_capture_tourney_hardening_snapshot",
+    };
+  }
+  const missingHardenedFunction =
+    hardened.error.code === "PGRST202" ||
+    /roo_capture_tourney_hardening_snapshot.*(not found|does not exist)/i.test(
+      String(hardened.error.message || "")
+    );
+  if (!missingHardenedFunction) {
+    const error = new Error("Supabase Tourney hardening snapshot failed.");
+    error.code = hardened.error.code || "TOURNEY_SNAPSHOT_FAILED";
+    throw error;
+  }
+  const preCutover = await client.rpc(
+    "roo_capture_tourney_pre_cutover_snapshot",
+    parameters
+  );
+  if (preCutover.error) {
+    const error = new Error("Supabase Tourney pre-cutover snapshot failed.");
+    error.code = preCutover.error.code || "TOURNEY_SNAPSHOT_FAILED";
+    throw error;
+  }
+  return {
+    data: preCutover.data,
+    functionName: "public.roo_capture_tourney_pre_cutover_snapshot",
+  };
+};
+
 const captureSnapshot = async () => {
   const legacyUrl = normalize(process.env.TOURNEY_DATABASE_URL || process.env.POSTGRES_URL);
   const encryptionSecret = normalize(
@@ -142,22 +183,14 @@ const captureSnapshot = async () => {
       readSanityAccountDocument(),
   ]);
   {
-    const hosted = await createSupabaseAdminClient().rpc(
-      "roo_capture_tourney_hardening_snapshot",
-      { p_legacy_snapshot: legacyData, p_sanity_account: sanityAccount }
-    );
-    if (hosted.error) {
-      const error = new Error("Supabase Tourney hardening snapshot failed.");
-      error.code = hosted.error.code || "TOURNEY_SNAPSHOT_FAILED";
-      throw error;
-    }
+    const hosted = await captureHostedSnapshot({ legacyData, sanityAccount });
     const snapshot = {
       version: 1,
       capturedAt: new Date().toISOString(),
       legacy: legacyData,
       supabase: {
         hostedEncryptedSnapshot: true,
-        captureFunction: "public.roo_capture_tourney_hardening_snapshot",
+        captureFunction: hosted.functionName,
         snapshotId: hosted.data?.snapshot_id || "",
         payloadSha256: hosted.data?.payload_sha256 || "",
       },
