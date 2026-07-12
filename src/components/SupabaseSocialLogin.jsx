@@ -6,8 +6,8 @@ import { FcGoogle } from "react-icons/fc";
 import { getSupabaseBrowserClient } from "../lib/supabaseBrowser";
 
 const providers = [
-  { id: "google", label: "Continue with Google", Icon: FcGoogle },
-  { id: "discord", label: "Continue with Discord", Icon: FaDiscord },
+  { id: "google", label: "Google", ariaLabel: "Continue with Google", Icon: FcGoogle },
+  { id: "discord", label: "Discord", ariaLabel: "Continue with Discord", Icon: FaDiscord },
 ];
 
 const referralStyles = {
@@ -72,8 +72,9 @@ export default function SupabaseSocialLogin({
         <span className={styles.dividerLine} />
       </div>
       <div className={styles.buttonGroup}>
-        {providers.map(({ id, label, Icon }) => (
+        {providers.map(({ id, label, ariaLabel, Icon }) => (
           <button
+            aria-label={ariaLabel}
             className={styles.button}
             disabled={Boolean(busyProvider)}
             key={id}
