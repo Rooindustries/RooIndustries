@@ -209,8 +209,8 @@ try {
   psql(
     "supabase_fixture",
     supabaseBootstrap,
-    path.join(root, "supabase/migrations/20260712205614_expand_tourney_schema_v4.sql"),
-    path.join(root, "supabase/migrations/20260712205616_activate_tourney_schema_v4.sql")
+    path.join(root, "supabase/migrations/20260712224033_expand_tourney_schema_v4.sql"),
+    path.join(root, "supabase/migrations/20260712224034_activate_tourney_schema_v4.sql")
   );
   process.stderr.write("[postgres17] Supabase schema v4 applied\n");
 
