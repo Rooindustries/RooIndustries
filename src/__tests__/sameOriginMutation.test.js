@@ -36,6 +36,17 @@ describe("same-origin mutation guard", () => {
     ).toBe(true);
   });
 
+  test("accepts a canonical browser origin when Vercel exposes an internal request URL", () => {
+    expect(
+      isSameOriginMutation(
+        requestFor({
+          origin: "https://www.rooindustries.com",
+          url: "https://rooindustries-git-main.vercel.app/api/tourney/login",
+        })
+      )
+    ).toBe(true);
+  });
+
   test("rejects cross-origin and cross-site mutations", () => {
     expect(
       isSameOriginMutation(requestFor({ origin: "https://attacker.example" }))
