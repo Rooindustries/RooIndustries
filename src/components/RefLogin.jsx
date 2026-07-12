@@ -94,7 +94,7 @@ export default function RefLogin() {
   }
 
   return (
-    <section className="pt-32 pb-8 px-6 min-h-screen text-ink flex flex-col items-center">
+    <section className="pt-32 pb-5 px-6 min-h-screen text-ink flex flex-col items-center">
       <h1 className="text-4xl font-extrabold text-center text-accent drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
         Referral Creator Login
       </h1>
