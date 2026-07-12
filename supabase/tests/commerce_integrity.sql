@@ -3,6 +3,7 @@ begin;
 do $$
 declare
   v_generation integer;
+  v_quote jsonb;
 begin
   select generation into v_generation
   from migration.commerce_control where singleton;
@@ -123,16 +124,82 @@ begin
   ) <> 0 then
     raise exception 'canonical duplicate alias was reported as a broken reciprocal link';
   end if;
+
+  insert into migration.source_documents (
+    legacy_sanity_id, document_type, source_hash, payload,
+    operational_imported, cms_imported
+  ) values (
+    'package.quote-fixture',
+    'package',
+    repeat('c', 64),
+    '{"_id":"package.quote-fixture","_type":"package","title":"Quote Fixture","price":"$42.00"}'::jsonb,
+    true,
+    true
+  );
+  v_quote := public.roo_consume_quote_rate_limit_and_get_pricing(
+    repeat('b', 64),
+    '2099-01-01T00:00:00Z'::timestamptz,
+    '2099-01-01T00:15:00Z'::timestamptz,
+    1,
+    array['Quote Fixture'],
+    '',
+    '',
+    ''
+  );
+  if coalesce((v_quote#>>'{rateLimit,allowed}')::boolean, false) is not true
+    or v_quote#>>'{package,title}' <> 'Quote Fixture'
+    or v_quote#>>'{package,price}' <> '$42.00'
+  then
+    raise exception 'atomic quote rate limit and pricing lookup failed';
+  end if;
+  v_quote := public.roo_consume_quote_rate_limit_and_get_pricing(
+    repeat('b', 64),
+    '2099-01-01T00:00:00Z'::timestamptz,
+    '2099-01-01T00:15:00Z'::timestamptz,
+    1,
+    array['Quote Fixture'],
+    '',
+    '',
+    ''
+  );
+  if coalesce((v_quote#>>'{rateLimit,allowed}')::boolean, true) is not false
+    or v_quote ? 'package'
+  then
+    raise exception 'blocked quote exposed pricing or bypassed its limit';
+  end if;
 end;
 $$;
 
 do $$
 begin
+  if migration.canonical_business_hash(
+    '{"_id":"booking.sequence-hash","_type":"booking","status":"captured"}'::jsonb
+  ) <> migration.canonical_business_hash(
+    '{"_id":"booking.sequence-hash","_type":"booking","status":"captured","_supabaseSequence":42}'::jsonb
+  ) then
+    raise exception 'Supabase mirror sequence changed the business hash';
+  end if;
+
   if has_function_privilege('anon', 'public.roo_commerce_control()', 'execute')
     or has_function_privilege('authenticated', 'public.roo_commerce_control()', 'execute')
     or not has_function_privilege('service_role', 'public.roo_commerce_control()', 'execute')
   then
     raise exception 'commerce RPC privileges are unsafe';
+  end if;
+  if has_function_privilege(
+    'anon',
+    'public.roo_consume_quote_rate_limit_and_get_pricing(text,timestamptz,timestamptz,integer,text[],text,text,text)',
+    'execute'
+  ) or has_function_privilege(
+    'authenticated',
+    'public.roo_consume_quote_rate_limit_and_get_pricing(text,timestamptz,timestamptz,integer,text[],text,text,text)',
+    'execute'
+  ) or not has_function_privilege(
+    'service_role',
+    'public.roo_consume_quote_rate_limit_and_get_pricing(text,timestamptz,timestamptz,integer,text[],text,text,text)',
+    'execute'
+  ) then
+    raise exception 'atomic quote RPC privileges are unsafe';
   end if;
   if has_table_privilege(
     'anon', 'tourney.tourney_player_auth_operations', 'select'

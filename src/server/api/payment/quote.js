@@ -1,8 +1,15 @@
-const { resolvePaymentQuote } = require("../ref/pricing.js");
+const {
+  getPaymentPackageTitleAliases,
+  resolvePaymentQuote,
+} = require("../ref/pricing.js");
 const { resolvePaymentProviders } = require("./providerConfig.js");
 const { buildQuoteFingerprint } = require("./paymentRecord.js");
 const { verifyUpgradeIntentToken } = require("../ref/upgradeIntentToken.js");
-const { getClientAddress, requireRateLimit } = require("../ref/rateLimit.js");
+const {
+  consumeQuoteRateLimitWithPricing,
+  getClientAddress,
+  requireRateLimit,
+} = require("../ref/rateLimit.js");
 
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
@@ -26,19 +33,39 @@ module.exports = async function handler(req, res) {
       upgradeIntentToken = "",
     } = bookingPayload;
 
-    const allowed = await requireRateLimit(res, {
+    const limitOptions = {
       key: `payment-quote:${getClientAddress(req)}`,
       max: 30,
       windowMs: 15 * 60 * 1000,
       message: "Too many payment quote requests. Please try again later.",
-    });
-    if (!allowed) return;
-
+    };
     if (!String(packageTitle || "").trim()) {
+      const allowed = await requireRateLimit(res, limitOptions);
+      if (!allowed) return;
       return res.status(400).json({
         ok: false,
         error: "Package details are required to quote payment.",
       });
+    }
+
+    const combined =
+      !originalOrderId &&
+      typeof consumeQuoteRateLimitWithPricing === "function"
+        ? await consumeQuoteRateLimitWithPricing(res, {
+            ...limitOptions,
+            packageTitles:
+              typeof getPaymentPackageTitleAliases === "function"
+                ? getPaymentPackageTitleAliases(packageTitle)
+                : [packageTitle],
+            referralId,
+            referralCode,
+            couponCode,
+          })
+        : { handled: false };
+    if (combined.handled && !combined.allowed) return;
+    if (!combined.handled) {
+      const allowed = await requireRateLimit(res, limitOptions);
+      if (!allowed) return;
     }
 
     if (originalOrderId && !String(email || "").trim()) {
@@ -71,6 +98,7 @@ module.exports = async function handler(req, res) {
       referralId,
       referralCode,
       couponCode,
+      pricingInputs: combined.pricingInputs,
     });
     const providers = resolvePaymentProviders();
     const isFree = resolvedQuote.paymentProvider === "free";

@@ -1,5 +1,6 @@
 const {
   cleanupExpiredRateLimitBuckets,
+  consumeQuoteRateLimitWithPricing,
   requireRateLimit,
 } = require("../server/api/ref/rateLimit");
 
@@ -87,6 +88,13 @@ describe("durable rate limiting", () => {
     process.env.RATE_LIMIT_HASH_SECRET = "rate-limit-test-secret-with-enough-entropy";
   });
 
+  afterEach(() => {
+    delete process.env.DATA_PRIMARY_BACKEND;
+    delete process.env.COMMERCE_PRIMARY_BACKEND;
+    delete process.env.COMMERCE_CUTOVER_ENABLED;
+    delete process.env.SANITY_REVERSE_MIRROR_WRITES;
+  });
+
   test("shares a HMAC-keyed bucket and returns Retry-After at the limit", async () => {
     const client = createDurableClient();
     const options = {
@@ -123,6 +131,53 @@ describe("durable rate limiting", () => {
     expect(res.statusCode).toBe(503);
     expect(res.headers["retry-after"]).toBe("30");
     errorSpy.mockRestore();
+  });
+
+  test("combines a Supabase quote limit and targeted pricing read", async () => {
+    process.env.DATA_PRIMARY_BACKEND = "sanity";
+    process.env.COMMERCE_PRIMARY_BACKEND = "supabase";
+    process.env.COMMERCE_CUTOVER_ENABLED = "1";
+    process.env.SANITY_REVERSE_MIRROR_WRITES = "1";
+    const client = {
+      rpc: jest.fn().mockResolvedValue({
+        data: {
+          rateLimit: { allowed: true, remaining: 29 },
+          package: {
+            _id: "package.vertex",
+            title: "Performance Vertex Overhaul",
+            price: "$54.95",
+          },
+          referral: null,
+          coupon: null,
+        },
+        error: null,
+      }),
+    };
+
+    await expect(
+      consumeQuoteRateLimitWithPricing(createRes(), {
+        key: "payment-quote:203.0.113.10",
+        packageTitles: ["Performance Vertex Overhaul"],
+        now: Date.parse("2026-07-10T00:00:30.000Z"),
+        client,
+      })
+    ).resolves.toMatchObject({
+      handled: true,
+      allowed: true,
+      pricingInputs: {
+        packageDoc: { _id: "package.vertex" },
+        referralDoc: null,
+        couponDoc: null,
+      },
+    });
+    expect(client.rpc).toHaveBeenCalledWith(
+      "roo_consume_quote_rate_limit_and_get_pricing",
+      expect.objectContaining({
+        p_bucket_key_hmac: expect.stringMatching(/^[a-f0-9]{64}$/),
+        p_package_titles: ["Performance Vertex Overhaul"],
+        p_max: 30,
+      })
+    );
   });
 
   test("reconciliation cleanup removes expired buckets only", async () => {
