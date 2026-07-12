@@ -145,4 +145,32 @@ describe("release runtime environment validation", () => {
     });
     expect(result.status).toBe(0);
   });
+
+  test("requires confirmed providers, manual linking, and both managed Discord roles", () => {
+    const socialEnv = {
+      SUPABASE_SOCIAL_AUTH_ENABLED: "1",
+      NEXT_PUBLIC_SUPABASE_SOCIAL_AUTH_ENABLED: "1",
+      SUPABASE_URL: "https://ntezmxzaibrrsgtujgxu.supabase.co",
+      SUPABASE_SECRET_KEY: "s".repeat(40),
+      SUPABASE_PUBLISHABLE_KEY: "p".repeat(24),
+      SUPABASE_MANUAL_LINKING_ENABLED: "0",
+      SUPABASE_GOOGLE_OAUTH_ENABLED: "1",
+      SUPABASE_DISCORD_OAUTH_ENABLED: "1",
+      DISCORD_BOT_TOKEN: "bot-token",
+      DISCORD_GUILD_ID: "111111111111111111",
+      DISCORD_PARTICIPANT_ROLE_ID: "222222222222222222",
+      DISCORD_HOST_ROLE_ID: "",
+    };
+    const result = validate(socialEnv);
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain("DISCORD_HOST_ROLE_ID");
+
+    const linkingResult = validate({
+      ...socialEnv,
+      DISCORD_HOST_ROLE_ID: "333333333333333333",
+    });
+    expect(linkingResult.status).toBe(1);
+    expect(linkingResult.output).toContain("confirmed manual identity linking");
+  });
 });

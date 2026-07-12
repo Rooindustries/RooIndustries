@@ -67,16 +67,21 @@ const basePayload = {
   notes: "",
 };
 
-const makeJsonRequest = (payload) => ({
-  url: "https://www.rooindustries.com/api/tourney/register",
-  headers: {
-    get: (name) =>
-      String(name || "").toLowerCase() === "content-type"
-        ? "application/json"
-        : "",
-  },
-  json: async () => payload,
-});
+const makeJsonRequest = (payload) => {
+  const body = JSON.stringify(payload);
+  return {
+    url: "https://www.rooindustries.com/api/tourney/register",
+    headers: {
+      get: (name) => {
+        const normalized = String(name || "").toLowerCase();
+        if (normalized === "content-type") return "application/json";
+        if (normalized === "content-length") return String(Buffer.byteLength(body));
+        return "";
+      },
+    },
+    text: async () => body,
+  };
+};
 
 describe("tourney register API route", () => {
   afterAll(() => {
@@ -124,6 +129,7 @@ describe("tourney register API route", () => {
     expect(mockCreatePendingTourneyPlayer).toHaveBeenCalledWith({
       payload: { ...basePayload, acceptSubstitutePool: true },
       recipients: expect.any(Array),
+      authUserId: "",
     });
   });
 
@@ -150,6 +156,7 @@ describe("tourney register API route", () => {
         acceptedCreatorEligibility: "on",
       }),
       recipients: expect.any(Array),
+      authUserId: "",
     });
   });
 

@@ -259,7 +259,7 @@ export async function resolveBookingPricing({
   let referralDoc = null;
   if (referralId) {
     referralDoc = await client.fetch(
-      `*[_type == "referral" && _id == $id][0]{
+      `*[_type == "referral" && registrationStatus != "pending_email" && _id == $id][0]{
         _id,
         slug,
         currentCommissionPercent,
@@ -271,7 +271,7 @@ export async function resolveBookingPricing({
 
   if (!referralDoc && normalizedReferralCode) {
     referralDoc = await client.fetch(
-      `*[_type == "referral" && slug.current == $code][0]{
+      `*[_type == "referral" && registrationStatus != "pending_email" && slug.current == $code][0]{
         _id,
         slug,
         currentCommissionPercent,

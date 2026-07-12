@@ -53,7 +53,7 @@ export default async function handler(req, res) {
 
     // 3. Find the user by Email
     const referral = await client.fetch(
-      `*[_type == "referral" && creatorEmail == $email][0]{ _id, name }`,
+      `*[_type == "referral" && registrationStatus != "pending_email" && creatorEmail == $email][0]{ _id, name }`,
       { email: normalizedEmail }
     );
 

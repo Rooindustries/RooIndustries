@@ -1,0 +1,156 @@
+const mockResolveExactDomainIdentity = jest.fn();
+const mockCreateOAuthIntent = jest.fn();
+const mockClearNextSupabaseSession = jest.fn();
+
+jest.mock("../server/supabase/domainIdentity", () => ({
+  resolveExactDomainIdentity: (...args) => mockResolveExactDomainIdentity(...args),
+}));
+
+jest.mock("../server/supabase/oauthIntents", () => ({
+  createOAuthIntent: (...args) => mockCreateOAuthIntent(...args),
+  oauthIntentCookie: (token, id) => ({
+    name: `roo_oauth_intent.${id}`,
+    value: token,
+    httpOnly: true,
+    path: "/auth/callback",
+  }),
+}));
+
+jest.mock("../server/supabase/serverSession", () => ({
+  clearNextSupabaseSession: (...args) => mockClearNextSupabaseSession(...args),
+}));
+
+const createResponse = (payload, init = {}) => {
+  const headers = new Map();
+  const cookies = [];
+  return {
+    status: init.status || 200,
+    json: async () => payload,
+    headers: {
+      get: (name) => headers.get(String(name).toLowerCase()) || null,
+      set: (name, value) =>
+        headers.set(String(name).toLowerCase(), String(value)),
+    },
+    cookies: {
+      set: (...args) => cookies.push(args.length === 1 ? args[0] : args),
+      getAll: () => [...cookies],
+      values: cookies,
+    },
+  };
+};
+
+jest.mock("next/server", () => ({
+  NextResponse: { json: (payload, init) => createResponse(payload, init) },
+}));
+
+const { POST } = require("../../app/api/auth/intent/route.js");
+
+const makeRequest = (payload, { origin = "https://www.rooindustries.com" } = {}) => {
+  const body = typeof payload === "string" ? payload : JSON.stringify(payload);
+  return {
+    url: "https://www.rooindustries.com/api/auth/intent",
+    headers: {
+      get: (name) => {
+        const normalized = String(name).toLowerCase();
+        if (normalized === "origin") return origin;
+        if (normalized === "content-type") return "application/json";
+        if (normalized === "content-length") return String(Buffer.byteLength(body));
+        return "";
+      },
+    },
+    text: async () => body,
+  };
+};
+
+describe("Supabase OAuth intent route", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockClearNextSupabaseSession.mockResolvedValue(undefined);
+    mockCreateOAuthIntent.mockResolvedValue({
+      id: "11111111-1111-4111-8111-111111111111",
+      token: "opaque-one-time-token",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+  });
+
+  test("rejects cross-origin intent creation", async () => {
+    const response = await POST(
+      makeRequest(
+        { action: "signin", flow: "tourney", provider: "google" },
+        { origin: "https://attacker.example" }
+      )
+    );
+
+    expect(response.status).toBe(403);
+    expect(mockCreateOAuthIntent).not.toHaveBeenCalled();
+  });
+
+  test("requires the exact custom and Supabase session before linking", async () => {
+    mockResolveExactDomainIdentity.mockResolvedValue(null);
+    const response = await POST(
+      makeRequest({ action: "link", flow: "tourney", provider: "discord" })
+    );
+
+    expect(response.status).toBe(409);
+    expect(mockCreateOAuthIntent).not.toHaveBeenCalled();
+  });
+
+  test("binds link intents to the exact Auth user and domain subject", async () => {
+    mockResolveExactDomainIdentity.mockResolvedValue({
+      domainSubject: "approved-player",
+      user: { id: "e71a5687-daa6-4371-9700-5aef798fdd03" },
+    });
+    const response = await POST(
+      makeRequest({
+        action: "link",
+        flow: "tourney",
+        provider: "discord",
+        returnPath: "/tourney",
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.callbackUrl).toBe(
+      "https://www.rooindustries.com/auth/callback?intent=11111111-1111-4111-8111-111111111111"
+    );
+    expect(body).not.toHaveProperty("token");
+    expect(mockCreateOAuthIntent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "link",
+        domainSubject: "approved-player",
+        targetUserId: "e71a5687-daa6-4371-9700-5aef798fdd03",
+      })
+    );
+    expect(response.cookies.values).toContainEqual(
+      expect.objectContaining({
+        name: "roo_oauth_intent.11111111-1111-4111-8111-111111111111",
+        httpOnly: true,
+      })
+    );
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
+
+  test("uses separate cookies for concurrent tab intents", async () => {
+    mockCreateOAuthIntent
+      .mockResolvedValueOnce({
+        id: "11111111-1111-4111-8111-111111111111",
+        token: "first-token",
+      })
+      .mockResolvedValueOnce({
+        id: "22222222-2222-4222-8222-222222222222",
+        token: "second-token",
+      });
+
+    const first = await POST(
+      makeRequest({ action: "signup", flow: "referral", provider: "google" })
+    );
+    const second = await POST(
+      makeRequest({ action: "signup", flow: "tourney", provider: "discord" })
+    );
+
+    expect(first.cookies.values.at(-1).name).toContain("11111111");
+    expect(second.cookies.values.at(-1).name).toContain("22222222");
+    expect(mockClearNextSupabaseSession).toHaveBeenCalledTimes(2);
+  });
+});

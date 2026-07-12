@@ -10,6 +10,11 @@ import {
   verifyTourneyCredentials,
 } from "../../../../src/server/tourney/auth";
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
+import {
+  clearNextSupabaseSession,
+  installNextSupabaseSession,
+} from "../../../../src/server/supabase/serverSession";
+import { readBoundedJson } from "../../../../src/server/request/boundedJson";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -61,7 +66,12 @@ const redirectToLogin = (request, error, redirectTo = "/tourney") => {
 const readLoginPayload = async (request) => {
   const contentType = String(request.headers.get("content-type") || "").toLowerCase();
   if (contentType.includes("application/json")) {
-    return request.json().catch(() => ({}));
+    return readBoundedJson(request, { maxBytes: 8 * 1024 });
+  }
+
+  const declaredLength = Number(request.headers.get("content-length") || 0);
+  if (Number.isFinite(declaredLength) && declaredLength > 8 * 1024) {
+    throw Object.assign(new Error("Request body is too large."), { status: 413 });
   }
 
   const form = await request.formData();
@@ -89,7 +99,19 @@ export async function POST(request) {
   if (!isSameOriginMutation(request)) {
     return NextResponse.json({ ok: false, error: "Cross-origin request rejected." }, { status: 403 });
   }
-  const payload = await readLoginPayload(request);
+  let payload;
+  try {
+    payload = await readLoginPayload(request);
+  } catch (error) {
+    const status = Number(error?.status || 400);
+    if (wantsJson(request)) {
+      return NextResponse.json(
+        { ok: false, error: error?.message || "Invalid login request." },
+        { status }
+      );
+    }
+    return redirectToLogin(request, "1");
+  }
   const username = String(payload?.username || "").trim().toLowerCase();
   const clientAddress = getClientAddressFromHeaders(request.headers);
   const rateLimit = await checkTourneyRateLimit({
@@ -151,5 +173,14 @@ export async function POST(request) {
       maxAgeSeconds: sessionMaxAgeSeconds,
     }),
   });
+  await clearNextSupabaseSession({ request, response }).catch(() => {});
+  if (result.supabaseSession) {
+    await installNextSupabaseSession({
+      request,
+      response,
+      session: result.supabaseSession,
+    }).catch(() => {});
+  }
+  response.headers.set("Cache-Control", "private, no-store");
   return response;
 }

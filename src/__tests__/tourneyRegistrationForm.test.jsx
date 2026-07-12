@@ -133,8 +133,14 @@ describe("TourneyRegistrationForm support warning", () => {
       screen.getByRole("button", { name: "Submit registration" })
     );
 
-    await waitFor(() => expect(global.fetch).toHaveBeenCalled());
-    const [, options] = global.fetch.mock.calls[0];
+    await waitFor(() =>
+      expect(
+        global.fetch.mock.calls.find(([, options]) => options?.method === "POST")
+      ).toBeTruthy()
+    );
+    const [, options] = global.fetch.mock.calls.find(
+      ([, requestOptions]) => requestOptions?.method === "POST"
+    );
     expect(JSON.parse(options.body)).toMatchObject({
       acceptedCreatorEligibility: true,
       twitchUsername: "playerone",

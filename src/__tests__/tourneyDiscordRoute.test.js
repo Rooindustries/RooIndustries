@@ -7,14 +7,22 @@ const mockMarkTourneyPlayerDiscordRoleFailed = jest.fn();
 
 jest.mock("next/server", () => ({
   NextResponse: {
-    redirect: (url, init = {}) => ({
-      status: init.status || 307,
-      url: String(url),
-    }),
-    json: (body, init = {}) => ({
-      status: init.status || 200,
-      json: async () => body,
-    }),
+    redirect: (url, init = {}) => {
+      const headers = new Map();
+      return {
+        status: init.status || 307,
+        url: String(url),
+        headers: { set: (name, value) => headers.set(name, value) },
+      };
+    },
+    json: (body, init = {}) => {
+      const headers = new Map();
+      return {
+        status: init.status || 200,
+        json: async () => body,
+        headers: { set: (name, value) => headers.set(name, value) },
+      };
+    },
   },
 }));
 
@@ -54,6 +62,7 @@ const env = {
   DISCORD_BOT_TOKEN: "bot_token_1",
   DISCORD_GUILD_ID: "guild_1",
   DISCORD_PARTICIPANT_ROLE_ID: "role_1",
+  DISCORD_HOST_ROLE_ID: "role_2",
 };
 
 const player = {
@@ -107,10 +116,7 @@ describe("tourney Discord OAuth routes", () => {
     global.fetch = originalFetch;
   });
 
-  test("rejects non-approved users before starting Discord OAuth", async () => {
-    mockReadTourneySessionFromStore.mockResolvedValue(null);
-    mockGetApprovedTourneyPlayerById.mockResolvedValue(null);
-
+  test("redirects the retired start route to the signed-in connection page", async () => {
     const response = await startRoute.GET(
       makeRequest({
         url: "https://www.rooindustries.com/api/tourney/discord/start",
@@ -119,28 +125,7 @@ describe("tourney Discord OAuth routes", () => {
     );
 
     expect(response.status).toBe(303);
-    expect(response.url).toContain("/tourney/login");
-    expect(response.url).toContain("discord-auth");
-  });
-
-  test("redirects approved player sessions to Discord OAuth", async () => {
-    mockReadTourneySessionFromStore.mockResolvedValue({
-      username: "playerone",
-      role: "player",
-      playerId: "player_1",
-    });
-    mockGetApprovedTourneyPlayerById.mockResolvedValue(player);
-
-    const response = await startRoute.GET(
-      makeRequest({
-        url: "https://www.rooindustries.com/api/tourney/discord/start",
-      })
-    );
-
-    expect(response.status).toBe(303);
-    expect(response.url).toContain("https://discord.com/oauth2/authorize");
-    expect(response.url).toContain("client_id=client_1");
-    expect(response.url).toContain("scope=identify+guilds.join");
+    expect(response.url).toBe("https://www.rooindustries.com/tourney/discord");
   });
 
   test("keeps approved-player Discord email links valid without expiry", () => {
@@ -176,7 +161,7 @@ describe("tourney Discord OAuth routes", () => {
     }
   });
 
-  test("starts Discord OAuth from permanent approved-player email links", async () => {
+  test("permanent email links cannot start a Discord link without account authentication", async () => {
     const token = discordOAuth.createTourneyDiscordEmailToken({
       player,
       env: process.env,
@@ -191,14 +176,12 @@ describe("tourney Discord OAuth routes", () => {
       })
     );
 
-    expect(mockGetApprovedTourneyPlayerById).toHaveBeenCalledWith({
-      playerId: "player_1",
-    });
+    expect(mockGetApprovedTourneyPlayerById).not.toHaveBeenCalled();
     expect(response.status).toBe(303);
-    expect(response.url).toContain("https://discord.com/oauth2/authorize");
+    expect(response.url).toBe("https://www.rooindustries.com/tourney/discord");
   });
 
-  test("returns the Discord authorization URL from a same-origin POST body", async () => {
+  test("retires token-bearing POST starts", async () => {
     const token = discordOAuth.createTourneyDiscordEmailToken({
       player,
       env: process.env,
@@ -215,9 +198,9 @@ describe("tourney Discord OAuth routes", () => {
     );
     const body = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(body.ok).toBe(true);
-    expect(body.authorizeUrl).toContain("https://discord.com/oauth2/authorize");
+    expect(response.status).toBe(410);
+    expect(body.ok).toBe(false);
+    expect(body.signInUrl).toBe("/tourney/login?next=/tourney/discord");
   });
 
   test("keeps Discord OAuth state tokens time-limited", () => {

@@ -289,6 +289,20 @@ const commerceCutoverEnabled = isEnabled("COMMERCE_CUTOVER_ENABLED");
 const commerceFailoverGeneration =
   getFirstValue(["COMMERCE_FAILOVER_GENERATION"]) || "0";
 const licensingEnabled = isEnabled("SUPABASE_LICENSING_ENABLED");
+const socialAuthEnabled = isEnabled("SUPABASE_SOCIAL_AUTH_ENABLED");
+const publicSocialAuthEnabled = isEnabled(
+  "NEXT_PUBLIC_SUPABASE_SOCIAL_AUTH_ENABLED"
+);
+if (socialAuthEnabled) {
+  for (const key of [
+    "DISCORD_BOT_TOKEN",
+    "DISCORD_GUILD_ID",
+    "DISCORD_PARTICIPANT_ROLE_ID",
+    "DISCORD_HOST_ROLE_ID",
+  ]) {
+    if (!hasAny([key])) missing.push(key);
+  }
+}
 const migrationEndpointEnabled = isEnabled(
   "SUPABASE_MIGRATION_ENDPOINT_ENABLED"
 );
@@ -300,6 +314,7 @@ const anySupabaseRuntimeEnabled =
   commerceCanaryPercent > 0 ||
   authCanaryConfigured ||
   shadowWritesEnabled ||
+  socialAuthEnabled ||
   licensingEnabled ||
   migrationEndpointEnabled;
 
@@ -335,9 +350,24 @@ if (anySupabaseRuntimeEnabled) {
     "SUPABASE_PUBLISHABLE_KEY",
     "NEXT_PUBLIC_SUPABASE_ANON_KEY",
   ]);
-  if (!/^https:\/\/[a-z0-9]+\.supabase\.co\/?$/i.test(url)) {
+  let validSupabaseUrl = false;
+  try {
+    const parsed = new URL(url);
+    validSupabaseUrl =
+      parsed.protocol === "https:" &&
+      parsed.pathname === "/" &&
+      !parsed.search &&
+      !parsed.hash &&
+      [
+        "ntezmxzaibrrsgtujgxu.supabase.co",
+        "authenticate.rooindustries.com",
+      ].includes(parsed.hostname.toLowerCase());
+  } catch {
+    validSupabaseUrl = false;
+  }
+  if (!validSupabaseUrl) {
     supabaseConsistencyFailures.push(
-      "Supabase runtime features require a valid SUPABASE_URL."
+      "Supabase runtime features require the Roo Industries Supabase or custom Auth URL."
     );
   }
   if (secret.length < 32) {
@@ -350,6 +380,29 @@ if (anySupabaseRuntimeEnabled) {
       "Supabase runtime features require a public publishable key."
     );
   }
+}
+
+const discordSnowflake = /^[0-9]{5,30}$/;
+const discordGuildId = getFirstValue(["DISCORD_GUILD_ID"]);
+const discordParticipantRoleId = getFirstValue(["DISCORD_PARTICIPANT_ROLE_ID"]);
+const discordHostRoleId = getFirstValue(["DISCORD_HOST_ROLE_ID"]);
+if (
+  [discordGuildId, discordParticipantRoleId, discordHostRoleId].some(
+    (value) => value && !discordSnowflake.test(value)
+  )
+) {
+  providerConsistencyFailures.push(
+    "Discord guild and managed role ids must be valid numeric snowflakes."
+  );
+}
+if (
+  discordParticipantRoleId &&
+  discordHostRoleId &&
+  discordParticipantRoleId === discordHostRoleId
+) {
+  providerConsistencyFailures.push(
+    "Discord Participant and Host roles must use different role ids."
+  );
 }
 
 if (primaryBackend === "supabase" && !cutoverEnabled) {
@@ -425,6 +478,28 @@ if (
 if (migrationEndpointEnabled && isProdBuild) {
   supabaseConsistencyFailures.push(
     "SUPABASE_MIGRATION_ENDPOINT_ENABLED must remain disabled in production."
+  );
+}
+if (socialAuthEnabled !== publicSocialAuthEnabled) {
+  supabaseConsistencyFailures.push(
+    "SUPABASE_SOCIAL_AUTH_ENABLED and NEXT_PUBLIC_SUPABASE_SOCIAL_AUTH_ENABLED must match."
+  );
+}
+if (
+  socialAuthEnabled &&
+  !isEnabled("SUPABASE_MANUAL_LINKING_ENABLED")
+) {
+  supabaseConsistencyFailures.push(
+    "Supabase social Auth requires confirmed manual identity linking."
+  );
+}
+if (
+  socialAuthEnabled &&
+  (!isEnabled("SUPABASE_GOOGLE_OAUTH_ENABLED") ||
+    !isEnabled("SUPABASE_DISCORD_OAUTH_ENABLED"))
+) {
+  supabaseConsistencyFailures.push(
+    "Supabase social Auth requires confirmed Google and Discord providers."
   );
 }
 

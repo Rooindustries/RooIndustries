@@ -1,6 +1,7 @@
 import { resolveSupabaseRuntimePolicy } from "../supabase/runtime.js";
 import { syncSupabaseTourneyAdminAccount } from "../supabase/accounts.js";
 import { logSafeError } from "../safeErrorLog.js";
+import { syncTourneyDiscordRoleAssignment } from "./discordRoleSync.js";
 
 const STORE_DOC_ID = "tourneyAuthStore";
 const STORE_DOC_TYPE = "tourneyAuthStore";
@@ -32,7 +33,14 @@ const shouldUseMemoryStore = (env = process.env) =>
 
 const syncSupabaseAccounts = async ({ accountsJson, env }) => {
   const policy = resolveSupabaseRuntimePolicy(env);
-  if (!policy.shadowWritesEnabled && policy.primaryBackend !== "supabase") return;
+  const socialAuthEnabled = ["1", "true", "yes", "on"].includes(
+    String(env.SUPABASE_SOCIAL_AUTH_ENABLED || "").trim().toLowerCase()
+  );
+  if (
+    !socialAuthEnabled &&
+    !policy.shadowWritesEnabled &&
+    policy.primaryBackend !== "supabase"
+  ) return;
   const parsed = JSON.parse(accountsJson);
   const accounts = Array.isArray(parsed) ? parsed : parsed?.accounts;
   if (!Array.isArray(accounts)) {
@@ -40,7 +48,11 @@ const syncSupabaseAccounts = async ({ accountsJson, env }) => {
   }
   for (const account of accounts) {
     try {
-      await syncSupabaseTourneyAdminAccount({ account });
+      const synced = await syncSupabaseTourneyAdminAccount({ account, env });
+      await syncTourneyDiscordRoleAssignment({
+        env,
+        userId: synced.userId,
+      });
     } catch (error) {
       logSafeError("Supabase Tourney administrator Auth sync failed", error);
       if (policy.primaryBackend === "supabase") throw error;

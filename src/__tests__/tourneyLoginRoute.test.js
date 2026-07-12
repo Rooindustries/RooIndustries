@@ -30,18 +30,22 @@ jest.mock("../server/tourney/auth", () => ({
 
 const { POST } = require("../../app/api/tourney/login/route.js");
 
-const makeJsonRequest = (payload) => ({
-  url: "https://www.rooindustries.com/api/tourney/login",
-  headers: {
-    get: (name) => {
-      const normalizedName = String(name || "").toLowerCase();
-      if (normalizedName === "accept") return "application/json";
-      if (normalizedName === "content-type") return "application/json";
-      return "";
+const makeJsonRequest = (payload) => {
+  const body = JSON.stringify(payload);
+  return {
+    url: "https://www.rooindustries.com/api/tourney/login",
+    headers: {
+      get: (name) => {
+        const normalizedName = String(name || "").toLowerCase();
+        if (normalizedName === "accept") return "application/json";
+        if (normalizedName === "content-type") return "application/json";
+        if (normalizedName === "content-length") return String(Buffer.byteLength(body));
+        return "";
+      },
     },
-  },
-  json: async () => payload,
-});
+    text: async () => body,
+  };
+};
 
 describe("tourney login API route", () => {
   beforeEach(() => {

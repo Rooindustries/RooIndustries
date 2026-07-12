@@ -16,6 +16,7 @@ import updatePayments from "../../../../src/server/api/ref/updatePayments.js";
 import updateSplit from "../../../../src/server/api/ref/updateSplit.js";
 import validateCoupon from "../../../../src/server/api/ref/validateCoupon.js";
 import validateReferral from "../../../../src/server/api/ref/validateReferral.js";
+import verifyRegistration from "../../../../src/server/api/ref/verifyRegistration.js";
 import webhookSync from "../../../../src/server/api/ref/webhookSync.js";
 import { runLegacyApiHandler } from "../../../../src/lib/nextApiAdapter";
 import { after } from "next/server";
@@ -43,6 +44,7 @@ const ACTION_HANDLERS = {
   updateSplit,
   validateCoupon,
   validateReferral,
+  verifyRegistration,
   webhookSync,
 };
 

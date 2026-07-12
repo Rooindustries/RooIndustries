@@ -18,7 +18,7 @@ export default async function TourneyDiscordPage() {
       </RouteTitle>
       <div className="tourney-grid">
         <Section id="discord-verification" eyebrow="Discord" title="Verification" wide>
-          <TourneyDiscordPanel />
+          <TourneyDiscordPanel signedIn={Boolean(session)} />
         </Section>
       </div>
     </TourneyShell>
