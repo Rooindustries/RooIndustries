@@ -2,6 +2,8 @@ const mockFetch = jest.fn();
 const mockCommit = jest.fn();
 const mockPatch = jest.fn();
 const mockCreateSupabaseCreatorAccount = jest.fn();
+const mockCreateVerifiedSupabaseBrowserSession = jest.fn();
+const mockInstallLegacySupabaseSession = jest.fn();
 const mockSetReferralSessionCookie = jest.fn();
 const mockRequireRateLimit = jest.fn();
 
@@ -12,6 +14,13 @@ jest.mock("../server/data/documentClient", () => ({
 jest.mock("../server/supabase/accounts", () => ({
   createSupabaseCreatorAccount: (...args) =>
     mockCreateSupabaseCreatorAccount(...args),
+  createVerifiedSupabaseBrowserSession: (...args) =>
+    mockCreateVerifiedSupabaseBrowserSession(...args),
+}));
+
+jest.mock("../server/supabase/serverSession", () => ({
+  installLegacySupabaseSession: (...args) =>
+    mockInstallLegacySupabaseSession(...args),
 }));
 
 jest.mock("../server/supabase/shadowStore", () => ({
@@ -78,6 +87,14 @@ describe("referral registration confirmation", () => {
     mockCreateSupabaseCreatorAccount.mockResolvedValue({
       userId: "e71a5687-daa6-4371-9700-5aef798fdd03",
     });
+    mockCreateVerifiedSupabaseBrowserSession.mockResolvedValue({
+      account: {
+        principal_id: "e71a5687-daa6-4371-9700-5aef798fdd03",
+        session_version: 1,
+      },
+      session: { access_token: "access", refresh_token: "refresh" },
+    });
+    mockInstallLegacySupabaseSession.mockResolvedValue(true);
   });
 
   test("rejects malformed tokens before reading account data", async () => {

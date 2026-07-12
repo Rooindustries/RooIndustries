@@ -241,6 +241,60 @@ describe("commerce mirror outbox", () => {
     expect(sanity.operations[0].values).not.toHaveProperty("creatorEmail");
   });
 
+  test("supersedes a stale retry when Sanity already has a newer Supabase sequence", async () => {
+    const supabase = {
+      rpc: jest
+        .fn()
+        .mockResolvedValueOnce({
+          data: [
+            {
+              sequence_no: 8,
+              event_key: `commerce-mirror:${"8".repeat(64)}`,
+              document_ids: ["booking.sequence"],
+              documents: [
+                {
+                  _id: "booking.sequence",
+                  _type: "booking",
+                  _supabaseSequence: 8,
+                  status: "captured",
+                },
+              ],
+              deleted_ids: [],
+            },
+          ],
+          error: null,
+        })
+        .mockResolvedValueOnce({ data: { status: "superseded" }, error: null })
+        .mockResolvedValueOnce({ data: { pending: 0 }, error: null }),
+    };
+    const sanity = createSanity({
+      documents: [
+        {
+          _id: "booking.sequence",
+          _supabaseSequence: 9,
+          status: "completed",
+        },
+      ],
+    });
+
+    await expect(
+      drainCommerceMirrorOutbox({
+        supabaseClient: supabase,
+        sanityClient: sanity,
+        failClosed: true,
+      })
+    ).resolves.toMatchObject({ mirrored: 0, failed: 0 });
+    expect(sanity.operations).toEqual([]);
+    expect(supabase.rpc).toHaveBeenNthCalledWith(
+      2,
+      "roo_complete_commerce_mirror_event",
+      expect.objectContaining({
+        p_success: true,
+        p_error_code: "SUPERSEDED_BY_NEWER_SEQUENCE",
+      })
+    );
+  });
+
   test("does not let an unrelated dead letter block a required payment mirror", async () => {
     const supabase = {
       rpc: jest

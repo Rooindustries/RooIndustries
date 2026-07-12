@@ -1,6 +1,7 @@
 import {
   buildBalance,
   computeEarningsFromBookings,
+  fetchReferralEarnings,
 } from "../server/api/ref/payoutUtils";
 
 describe("referral payout utilities", () => {
@@ -49,5 +50,30 @@ describe("referral payout utilities", () => {
     expect(earnings.xoc).toBe(15);
     expect(earnings.vertex).toBe(0);
     expect(earnings.total).toBe(15);
+  });
+
+  test("uses the typed aggregate instead of downloading referral bookings", async () => {
+    const client = {
+      fetch: jest.fn(),
+      referralEarnings: jest.fn().mockResolvedValue({
+        xoc: "12.50",
+        vertex: 5,
+        total: 17.5,
+        byPackage: { "Performance Vertex Max": 12.5 },
+      }),
+    };
+    await expect(
+      fetchReferralEarnings({
+        client,
+        referralId: "referral.creator",
+        referralCode: "creator",
+      })
+    ).resolves.toEqual({
+      xoc: 12.5,
+      vertex: 5,
+      total: 17.5,
+      byPackage: { "Performance Vertex Max": 12.5 },
+    });
+    expect(client.fetch).not.toHaveBeenCalled();
   });
 });

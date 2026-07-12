@@ -676,8 +676,8 @@ export const readTourneySessionFromStore = async ({
     return {
       username: account.tourney_username,
       role,
-      ...(role === "player" && account.legacy_sanity_id
-        ? { playerId: account.legacy_sanity_id }
+      ...(role === "player" && (account.tourney_legacy_player_id || account.legacy_sanity_id)
+        ? { playerId: account.tourney_legacy_player_id || account.legacy_sanity_id }
         : {}),
       authBackend: "supabase",
       expiresAt: payload.expiresAt,

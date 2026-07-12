@@ -5,6 +5,7 @@ import {
 } from "../server/supabase/runtime";
 import {
   buildCommerceCommandId,
+  fetchUpgradeBookingChain,
   hashShadowDocument,
   importShadowDocuments,
   normalizeShadowDocument,
@@ -162,6 +163,29 @@ describe("Supabase shadow document utilities", () => {
     });
   });
 
+  test("keyset-paginates upgrade chains beyond 500 rows without truncation", async () => {
+    const bookings = Array.from({ length: 601 }, (_, index) => ({
+      _id: `booking.${String(index).padStart(4, "0")}`,
+      status: "captured",
+    }));
+    const client = {
+      rpc: jest.fn(async (_name, params) => {
+        const start = params.p_after_id
+          ? bookings.findIndex((booking) => booking._id > params.p_after_id)
+          : 0;
+        return {
+          data: start < 0 ? [] : bookings.slice(start, start + params.p_limit),
+          error: null,
+        };
+      }),
+    };
+    await expect(
+      fetchUpgradeBookingChain({ client, rootId: "booking.0000", pageSize: 250 })
+    ).resolves.toHaveLength(601);
+    expect(client.rpc).toHaveBeenCalledTimes(3);
+    expect(client.rpc.mock.calls[1][1].p_after_id).toBe("booking.0249");
+  });
+
   test("reports stale batches instead of counting them as imported", async () => {
     const client = {
       rpc: jest.fn().mockResolvedValue({
@@ -306,6 +330,42 @@ describe("Supabase document compatibility client", () => {
       "roo_apply_commerce_document_mutations",
       expect.objectContaining({ p_command_id: "payment-start:stable-scope" })
     );
+  });
+
+  test("reuses one generated command ID when the same transaction instance is retried", async () => {
+    const shadowClient = createRpcClient([]);
+    const client = new SupabaseDocumentClient({
+      shadowClient,
+      commerceOnly: true,
+    });
+    const transaction = client
+      .transaction()
+      .create({ _id: "payment.retry", _type: "paymentRecord" });
+
+    await transaction.commit();
+    await expect(transaction.commit()).rejects.toMatchObject({ status: 409 });
+    const commandIds = shadowClient.rpc.mock.calls
+      .filter(([name]) => name === "roo_apply_commerce_document_mutations")
+      .map(([, args]) => args.p_command_id);
+    expect(commandIds).toHaveLength(2);
+    expect(commandIds[1]).toBe(commandIds[0]);
+  });
+
+  test("uses a new command ID for a separate identical create after deletion", async () => {
+    const shadowClient = createRpcClient([]);
+    const client = new SupabaseDocumentClient({
+      shadowClient,
+      commerceOnly: true,
+    });
+    const document = { _id: "hold.recreated", _type: "slotHold" };
+
+    await client.create(document);
+    await client.delete(document._id);
+    await client.create(document);
+    const commandIds = shadowClient.rpc.mock.calls
+      .filter(([name]) => name === "roo_apply_commerce_document_mutations")
+      .map(([, args]) => args.p_command_id);
+    expect(new Set(commandIds).size).toBe(3);
   });
 
   test("keeps exact document reads inside the commerce payload guard", async () => {

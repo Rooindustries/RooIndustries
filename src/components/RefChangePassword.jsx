@@ -7,6 +7,7 @@ export default function RefChangePassword() {
 
   const [pass1, setPass1] = useState("");
   const [pass2, setPass2] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
 
@@ -38,12 +39,28 @@ export default function RefChangePassword() {
   }
 
   async function update() {
-    if (!pass1 || !pass2) return showToast("error", "Fill in both fields");
+    if (!currentPassword || !pass1 || !pass2) {
+      return showToast("error", "Fill in all three fields");
+    }
     if (pass1 !== pass2) return showToast("error", "Passwords do not match");
 
     setLoading(true);
 
     try {
+      const reauthResponse = await fetch("/api/auth/reauth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          flow: "referral",
+          password: currentPassword,
+          purpose: "change_password",
+        }),
+      });
+      const reauth = await reauthResponse.json().catch(() => ({}));
+      if (!reauthResponse.ok || !reauth.ok) {
+        setLoading(false);
+        return showToast("error", reauth.error || "Current password is incorrect");
+      }
       const res = await fetch("/api/ref/hashPassword", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -57,13 +74,15 @@ export default function RefChangePassword() {
           nav("/referrals/login");
           return;
         }
+        setLoading(false);
         return showToast("error", data.error || "Failed to update password");
       }
 
       showToast("success", "Password updated!");
+      setCurrentPassword("");
       setPass1("");
       setPass2("");
-      setTimeout(() => nav("/referrals/dashboard"), 1200);
+      setTimeout(() => nav("/referrals/login"), 1200);
     } catch {
       console.error("Referral password change failed");
       showToast("error", "Server error");
@@ -85,9 +104,25 @@ export default function RefChangePassword() {
       >
         <div>
           <label className="text-accent text-sm font-semibold">
+            Current Password
+          </label>
+          <input
+            autoComplete="current-password"
+            type="password"
+            className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl
+                       outline-none focus:border-info-border transition text-base"
+            placeholder="Enter current password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+          />
+        </div>
+
+        <div>
+          <label className="text-accent text-sm font-semibold">
             New Password
           </label>
           <input
+            autoComplete="new-password"
             type="password"
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl
                        outline-none focus:border-info-border transition text-base"
@@ -102,6 +137,7 @@ export default function RefChangePassword() {
             Confirm Password
           </label>
           <input
+            autoComplete="new-password"
             type="password"
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl
                        outline-none focus:border-info-border transition text-base"

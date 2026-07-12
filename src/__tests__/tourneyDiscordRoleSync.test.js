@@ -159,6 +159,26 @@ describe("Tourney Discord desired-role synchronization", () => {
     );
   });
 
+  test("turns a bounded Discord timeout into a retryable assignment", async () => {
+    const adminClient = makeAdminClient({ assignments: [assignment()] });
+    const fetchImpl = jest.fn((_url, options) =>
+      new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => reject(new Error("aborted")));
+      })
+    );
+    const result = await syncTourneyDiscordRoleAssignment({
+      adminClient,
+      deadlineAt: Date.now() + 20,
+      env,
+      fetchImpl,
+      userId: assignment().user_id,
+    });
+    expect(result).toMatchObject({
+      applied: false,
+      reason: "discord_request_timeout",
+    });
+  });
+
   test("reads the private retry queue through its service-only RPC", async () => {
     const userId = assignment().user_id;
     const adminClient = makeAdminClient({
@@ -175,6 +195,40 @@ describe("Tourney Discord desired-role synchronization", () => {
     });
 
     expect(result).toEqual({ supported: true, checked: 1, applied: 1 });
+    expect(adminClient.rpc).toHaveBeenCalledWith(
+      "roo_list_pending_discord_role_assignments",
+      { p_limit: 10 }
+    );
+  });
+
+  test("processes at most ten assignments with no more than three active workers", async () => {
+    const userIds = Array.from(
+      { length: 12 },
+      (_, index) => `e71a5687-daa6-4371-9700-${String(index).padStart(12, "0")}`
+    );
+    const adminClient = makeAdminClient({
+      assignments: userIds.slice(0, 10).map((userId) => assignment({ user_id: userId })),
+      pendingUserIds: userIds,
+    });
+    let active = 0;
+    let maximumActive = 0;
+    const fetchImpl = jest.fn(async () => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return { ok: true, status: 204 };
+    });
+
+    const result = await reconcileTourneyDiscordRoleAssignments({
+      adminClient,
+      env,
+      fetchImpl,
+      limit: 100,
+    });
+    expect(result.checked).toBe(10);
+    expect(result.applied).toBe(10);
+    expect(maximumActive).toBeLessThanOrEqual(3);
     expect(adminClient.rpc).toHaveBeenCalledWith(
       "roo_list_pending_discord_role_assignments",
       { p_limit: 10 }

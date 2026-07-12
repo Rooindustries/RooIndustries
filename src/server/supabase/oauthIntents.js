@@ -2,34 +2,21 @@ import crypto from "node:crypto";
 import { createSupabaseAdminClient } from "./adminClient.js";
 
 export const OAUTH_INTENT_COOKIE = "roo_oauth_intent";
-export const OAUTH_INTENT_MAX_AGE_SECONDS = 10 * 60;
+export const OAUTH_INTENT_MAX_AGE_SECONDS = 15 * 60;
 
 const sha256 = (value) =>
   crypto.createHash("sha256").update(String(value || "")).digest("hex");
 
-const intentProjection = [
-  "id",
-  "action",
-  "domain_subject",
-  "expires_at",
-  "flow",
-  "provider",
-  "return_path",
-  "status",
-  "target_user_id",
-].join(",");
-
 export const readOAuthIntent = async ({
+  intentId,
   token,
   adminClient = createSupabaseAdminClient(),
 } = {}) => {
-  if (!token) return null;
-  const result = await adminClient
-    .schema("accounts")
-    .from("oauth_intents")
-    .select(intentProjection)
-    .eq("token_hash", sha256(token))
-    .maybeSingle();
+  if (!token || !intentId) return null;
+  const result = await adminClient.rpc("roo_read_oauth_intent", {
+    p_intent_id: intentId,
+    p_token_hash: sha256(token),
+  });
   if (result.error) throw new Error("OAuth intent could not be read.");
   return result.data || null;
 };
@@ -39,6 +26,8 @@ export const createOAuthIntent = async ({
   domainSubject = "",
   flow,
   provider,
+  reauthPurpose = "",
+  reauthToken = "",
   returnPath,
   targetUserId = "",
   adminClient = createSupabaseAdminClient(),
@@ -54,6 +43,8 @@ export const createOAuthIntent = async ({
       expires_at: expiresAt,
       flow,
       provider,
+      reauth_purpose: reauthPurpose || null,
+      reauth_token_hash: reauthToken ? sha256(reauthToken) : null,
       return_path: returnPath,
       target_user_id: targetUserId || null,
       token_hash: sha256(token),
@@ -70,6 +61,7 @@ export const finalizeOAuthIntent = async ({
   provider,
   token,
   userId,
+  reauthTokenHash = null,
   adminClient = createSupabaseAdminClient(),
 } = {}) => {
   const result = await adminClient.rpc("roo_finalize_oauth_intent", {
@@ -77,6 +69,7 @@ export const finalizeOAuthIntent = async ({
     p_provider: provider,
     p_token_hash: sha256(token),
     p_user_id: userId,
+    p_reauth_token_hash: reauthTokenHash,
   });
   if (result.error || !result.data) {
     const error = new Error("OAuth intent could not be finalized.");

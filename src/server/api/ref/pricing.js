@@ -153,8 +153,9 @@ export async function resolveUpgradeContext({
   }
 
   const rootOrderId = booking.originalOrderId || booking._id;
-  const paidBookings =
-    (await client.fetch(
+  const paidBookings = typeof client?.upgradeBookingChain === "function"
+    ? await client.upgradeBookingChain({ rootId: rootOrderId })
+    : (await client.fetch(
       `*[_type == "booking"
         && status in ["captured", "completed"]
         && (_id == $rootId || originalOrderId == $rootId)

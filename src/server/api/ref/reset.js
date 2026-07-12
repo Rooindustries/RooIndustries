@@ -4,7 +4,10 @@ import crypto from "crypto";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import { logSafeError } from "../../safeErrorLog.js";
 import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
-import { updateSupabaseAccountPassword } from "../../supabase/accounts.js";
+import {
+  completeSupabaseCredentialMirror,
+  updateSupabaseAccountPassword,
+} from "../../supabase/accounts.js";
 
 // Initialize Sanity with WRITE permissions
 const client = createClient({
@@ -65,13 +68,18 @@ export default async function handler(req, res) {
     // 2. Hash new password
     const hash = await bcrypt.hash(normalizedPassword, 12);
     const policy = resolveSupabaseRuntimePolicy();
+    let credentialOperation = null;
 
-    if (policy.primaryBackend === "supabase") {
+    if (policy.primaryBackend === "supabase" || policy.shadowWritesEnabled) {
       try {
-        await updateSupabaseAccountPassword({
+        credentialOperation = await updateSupabaseAccountPassword({
           identifier: referral.creatorEmail || referral.slug?.current,
-          password: normalizedPassword,
+          passwordHash: hash,
+          sourceRevision: referral._rev || "",
         });
+        if (!credentialOperation.updated) {
+          throw new Error("Supabase creator account was not found.");
+        }
       } catch (error) {
         logSafeError("Supabase referral password update failed", error);
         return res.status(503).json({
@@ -95,17 +103,12 @@ export default async function handler(req, res) {
         passwordLoginEnabled: true,
       })
       .unset(["resetToken", "resetTokenHash", "resetTokenExpiresAt"])
-      .commit();
+      .commit({ visibility: "sync" });
 
-    if (policy.shadowWritesEnabled && policy.primaryBackend !== "supabase") {
-      try {
-        await updateSupabaseAccountPassword({
-          identifier: referral.creatorEmail || referral.slug?.current,
-          password: normalizedPassword,
-        });
-      } catch (error) {
-        logSafeError("Supabase referral password sync failed", error);
-      }
+    if (credentialOperation?.updated) {
+      await completeSupabaseCredentialMirror({
+        operationKey: credentialOperation.operationKey,
+      });
     }
 
     return res.status(200).json({ ok: true });

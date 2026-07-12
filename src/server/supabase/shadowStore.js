@@ -256,6 +256,69 @@ export const fetchRecoveryPaymentDocuments = async ({
   return Array.isArray(data) ? data : [];
 };
 
+export const fetchReferralEarningsSummary = async ({
+  referralId,
+  referralCode,
+  client = createSupabaseAdminClient(),
+} = {}) =>
+  requireRpcData(
+    await client.rpc("roo_referral_earnings_summary", {
+      p_referral_legacy_id: String(referralId || ""),
+      p_referral_code: String(referralCode || ""),
+    }),
+    "referral earnings summary"
+  ) || { xoc: 0, vertex: 0, total: 0, byPackage: {} };
+
+export const fetchUpgradeBookingChain = async ({
+  rootId,
+  client = createSupabaseAdminClient(),
+  pageSize = 250,
+} = {}) => {
+  const documents = [];
+  let afterId = "";
+  const limit = Math.max(1, Math.min(500, Number(pageSize) || 250));
+  for (;;) {
+    const page = requireRpcData(
+      await client.rpc("roo_upgrade_booking_chain", {
+        p_root_legacy_id: String(rootId || ""),
+        p_after_id: afterId || null,
+        p_limit: limit,
+      }),
+      "upgrade booking chain"
+    );
+    const rows = Array.isArray(page) ? page : [];
+    if (Buffer.byteLength(JSON.stringify(rows), "utf8") > 250 * 1024) {
+      const error = new Error("Upgrade lookup exceeded its database payload budget.");
+      error.code = "COMMERCE_PAYLOAD_BUDGET_EXCEEDED";
+      error.status = 503;
+      error.statusCode = 503;
+      throw error;
+    }
+    documents.push(...rows);
+    if (rows.length < limit) return documents;
+    const nextAfter = String(rows.at(-1)?._id || "");
+    if (!nextAfter || nextAfter <= afterId) {
+      throw new Error("Upgrade lookup pagination did not advance.");
+    }
+    afterId = nextAfter;
+  }
+};
+
+export const fetchCommerceDerivedCount = async ({
+  kind,
+  value,
+  client = createSupabaseAdminClient(),
+} = {}) =>
+  Number(
+    requireRpcData(
+      await client.rpc("roo_commerce_derived_count", {
+        p_kind: kind,
+        p_value: String(value || ""),
+      }),
+      "commerce derived count"
+    ) || 0
+  );
+
 export const fetchCommerceAvailability = async ({
   client = createSupabaseAdminClient(),
 } = {}) => {
@@ -289,7 +352,7 @@ export const applyShadowMutations = async ({
   if (commerceMode) {
     const resolvedCommandId =
       String(commandId || "").trim() ||
-      buildCommerceCommandId({ mutations, cutoverGeneration });
+      `commerce:${crypto.randomUUID()}`;
     const data = requireRpcData(
       await client.rpc("roo_apply_commerce_document_mutations", {
         p_command_id: resolvedCommandId,

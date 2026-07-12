@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { readBoundedJson } from "../../../../src/server/request/boundedJson";
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
 import { resolveExactDomainIdentity } from "../../../../src/server/supabase/domainIdentity";
+import { consumeAuthRateLimit } from "../../../../src/server/supabase/authRateLimit";
+import { getClientAddressFromFetchHeaders } from "../../../../src/server/request/clientAddress";
 import {
   createOAuthIntent,
   oauthIntentCookie,
@@ -9,13 +11,20 @@ import {
 import { clearNextSupabaseSession } from "../../../../src/server/supabase/serverSession";
 import { REF_SESSION_COOKIE } from "../../../../src/server/api/ref/auth";
 import { TOURNEY_SESSION_COOKIE } from "../../../../src/server/tourney/auth";
+import { readReauthToken } from "../../../../src/server/supabase/reauth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const flows = new Set(["referral", "tourney"]);
-const actions = new Set(["signin", "signup", "link"]);
+const actions = new Set(["signin", "signup", "link", "reauth"]);
 const providers = new Set(["google", "discord"]);
+const reauthPurposes = new Set([
+  "link_identity",
+  "unlink_identity",
+  "merge_account",
+  "change_password",
+]);
 
 const defaultPath = ({ action, flow }) => {
   if (action === "signup") {
@@ -101,8 +110,21 @@ export async function POST(request) {
   const response = NextResponse.json({ ok: true });
 
   try {
+    const clientAddress = getClientAddressFromFetchHeaders(request.headers);
+    const ipLimit = await consumeAuthRateLimit({
+      identity: `oauth:${clientAddress}`,
+      max: 20,
+    });
+    if (!ipLimit.allowed) {
+      const limited = NextResponse.json(
+        { ok: false, error: "Too many authentication attempts. Try again shortly." },
+        { status: 429 }
+      );
+      limited.headers.set("Retry-After", String(ipLimit.retryAfter));
+      return noStore(limited);
+    }
     let domainIdentity = null;
-    if (action === "link") {
+    if (["link", "reauth"].includes(action)) {
       domainIdentity = await resolveExactDomainIdentity({
         flow,
         request,
@@ -119,9 +141,64 @@ export async function POST(request) {
           )
         );
       }
+      const connectedProviders = new Set(
+        (domainIdentity.account.connected_providers || []).map((value) =>
+          String(value || "").trim().toLowerCase()
+        )
+      );
+      if (action === "reauth" && !connectedProviders.has(provider)) {
+        return noStore(
+          NextResponse.json(
+            { ok: false, error: "Reauthenticate with an account that is already linked." },
+            { status: 409 }
+          )
+        );
+      }
+      if (action === "link" && connectedProviders.has(provider)) {
+        return noStore(
+          NextResponse.json(
+            { ok: false, error: "That account is already linked." },
+            { status: 409 }
+          )
+        );
+      }
+      const principalLimit = await consumeAuthRateLimit({
+        identity: `oauth:${domainIdentity.account.principal_id}:${provider}`,
+        max: 5,
+      });
+      if (!principalLimit.allowed) {
+        const limited = NextResponse.json(
+          { ok: false, error: "Too many authentication attempts. Try again shortly." },
+          { status: 429 }
+        );
+        limited.headers.set(
+          "Retry-After",
+          String(principalLimit.retryAfter)
+        );
+        return noStore(limited);
+      }
     } else {
       await clearNextSupabaseSession({ request, response }).catch(() => {});
       clearDomainSession(response, flow);
+    }
+
+    const reauthPurpose = String(payload.reauthPurpose || "").trim().toLowerCase();
+    if (action === "reauth" && !reauthPurposes.has(reauthPurpose)) {
+      return noStore(
+        NextResponse.json(
+          { ok: false, error: "Reauthentication purpose is invalid." },
+          { status: 400 }
+        )
+      );
+    }
+    const reauthToken = action === "link" ? readReauthToken(request) : "";
+    if (action === "link" && !reauthToken) {
+      return noStore(
+        NextResponse.json(
+          { ok: false, error: "Reauthenticate before linking a provider.", reauthRequired: true },
+          { status: 409 }
+        )
+      );
     }
 
     const intent = await createOAuthIntent({
@@ -129,6 +206,8 @@ export async function POST(request) {
       domainSubject: domainIdentity?.domainSubject || "",
       flow,
       provider,
+      reauthPurpose,
+      reauthToken,
       returnPath,
       targetUserId: domainIdentity?.user?.id || "",
     });

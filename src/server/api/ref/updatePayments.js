@@ -4,7 +4,7 @@ import {requireAdminKey} from './auth.js';
 import {logSafeError} from '../../safeErrorLog.js';
 import {
   buildBalance,
-  computeEarningsFromBookings,
+  fetchReferralEarnings,
   sumPayments,
 } from './payoutUtils.js';
 
@@ -114,24 +114,11 @@ export default async function handler(req, res) {
     const nextVertexPayments = packageType === 'vertex' ? payments : referral.vertexPayments || [];
 
     const code = (referral?.slug?.current || '').toLowerCase();
-    const bookings = await readClient.fetch(
-      `*[_type == "booking"
-          && status in ["captured", "completed"]
-          && (
-            referral._ref == $id
-            || (defined(referralCode) && lower(referralCode) == $code)
-          )
-        ]{
-          packageTitle,
-          commissionAmount,
-          commissionPercent,
-          netAmount,
-          grossAmount
-        }`,
-      {id: referralId, code}
-    );
-
-    const earnings = computeEarningsFromBookings(bookings || []);
+    const earnings = await fetchReferralEarnings({
+      client: readClient,
+      referralId,
+      referralCode: code,
+    });
 
     const packages = await readClient.fetch(
       `*[_type == "package"] | order(coalesce(order, 999) asc, title asc){

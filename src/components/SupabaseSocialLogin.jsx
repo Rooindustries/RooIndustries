@@ -42,6 +42,7 @@ export default function SupabaseSocialLogin({
   nextPath,
   onBeforeRedirect,
   providerIds = ["google", "discord"],
+  reauthPurpose = "",
   variant = "referral",
 }) {
   const [busyProvider, setBusyProvider] = useState("");
@@ -56,6 +57,7 @@ export default function SupabaseSocialLogin({
 
   const actionCopy = {
     link: { button: "Link", divider: "or link an account", error: "Account linking" },
+    reauth: { button: "Reauthenticate with", divider: "or reauthenticate with", error: "Reauthentication" },
     signup: { button: "Sign up with", divider: "or sign up with", error: "Sign-up" },
     signin: { button: "Continue with", divider: "or continue with", error: "Sign-in" },
   }[action] || { button: "Continue with", divider: "or continue with", error: "Sign-in" };
@@ -67,7 +69,7 @@ export default function SupabaseSocialLogin({
     try {
       onBeforeRedirect?.();
       const client = getSupabaseBrowserClient();
-      if (action !== "link") {
+      if (!["link", "reauth"].includes(action)) {
         await client.auth.signOut({ scope: "local" }).catch(() => {});
       }
       const intentResponse = await fetch("/api/auth/intent", {
@@ -77,6 +79,7 @@ export default function SupabaseSocialLogin({
           action,
           flow,
           provider,
+          ...(reauthPurpose ? { reauthPurpose } : {}),
           returnPath: nextPath,
         }),
       });

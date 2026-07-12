@@ -26,6 +26,13 @@ import { migrateCheckoutStorageToSession } from "./lib/checkoutStorage";
 
 import Reviews from "./legacyPages/Reviews";
 import Tools from "./legacyPages/Tools";
+import RefLogin from "./legacyPages/RefLogin";
+import RefDashboard from "./legacyPages/RefDashboard";
+import RefChangePassword from "./legacyPages/RefChangePassword";
+import RefForgot from "./legacyPages/RefForgot";
+import RefReset from "./legacyPages/RefReset";
+import RefRegister from "./legacyPages/RefRegister";
+import RefVerifyRegistration from "./legacyPages/RefVerifyRegistration";
 const Benchmarks = lazy(() => import("./legacyPages/Benchmarks"));
 const Terms = lazy(() => import("./legacyPages/Terms"));
 const Privacy = lazy(() => import("./legacyPages/PrivacyPolicy"));
@@ -41,13 +48,6 @@ const Upgrade = lazy(() => import("./legacyPages/Upgrade"));
 const Download = lazy(() => import("./legacyPages/Download"));
 const BookingModal = lazy(() => import("./components/BookingModal"));
 
-const RefLogin = lazy(() => import("./legacyPages/RefLogin"));
-const RefDashboard = lazy(() => import("./legacyPages/RefDashboard"));
-const RefChangePassword = lazy(() => import("./legacyPages/RefChangePassword"));
-const RefForgot = lazy(() => import("./legacyPages/RefForgot"));
-const RefReset = lazy(() => import("./legacyPages/RefReset"));
-const RefRegister = lazy(() => import("./legacyPages/RefRegister"));
-const RefVerifyRegistration = lazy(() => import("./legacyPages/RefVerifyRegistration"));
 const MeetTheTeam = lazy(() => import("./legacyPages/MeetTheTeam"));
 const NotFound = lazy(() => import("./legacyPages/NotFound"));
 
@@ -55,10 +55,23 @@ const INTERCOM_DISABLED_ROUTES = [];
 // const INTERCOM_DISABLED_ROUTES = ["/booking"]; // Disables chat on /booking and nested routes.
 
 const DeferredTelemetry = () => {
+  const location = useLocation();
   const [enabled, setEnabled] = useState(false);
 
   useEffect(() => {
+    setEnabled(false);
     if (typeof window === "undefined") return undefined;
+    const protectedPath = [
+      "/referrals",
+      "/booking",
+      "/payment",
+      "/payment-success",
+      "/thank-you",
+    ].some(
+      (prefix) =>
+        location.pathname === prefix || location.pathname.startsWith(`${prefix}/`)
+    );
+    if (protectedPath) return undefined;
     const host = String(window.location.hostname || "").toLowerCase();
     const isLocalHost = host === "localhost" || host === "127.0.0.1";
     if (isLocalHost) return undefined;
@@ -72,7 +85,7 @@ const DeferredTelemetry = () => {
 
     const timeoutId = window.setTimeout(() => setEnabled(true), 5000);
     return () => window.clearTimeout(timeoutId);
-  }, []);
+  }, [location.pathname]);
 
   if (!enabled) return null;
 

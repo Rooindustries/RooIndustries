@@ -2,7 +2,26 @@ import { createSupabaseAdminClient } from "../supabase/adminClient.js";
 import { getSafeErrorCode, logSafeError } from "../safeErrorLog.js";
 import { getTourneyDiscordRoleConfig } from "./discordConfig.js";
 
+const DISCORD_REQUEST_TIMEOUT_MS = 5_000;
+const DISCORD_RECONCILE_BUDGET_MS = 15_000;
+const DISCORD_RECONCILE_CONCURRENCY = 3;
+
 const acceptedStatus = (response) => response.ok || response.status === 204;
+
+const requestSignal = (deadlineAt = 0) => {
+  const remaining = deadlineAt ? deadlineAt - Date.now() : DISCORD_REQUEST_TIMEOUT_MS;
+  if (remaining <= 0) {
+    const failure = new Error("Discord reconciliation budget was exhausted.");
+    failure.code = "discord_retry_budget_exhausted";
+    throw failure;
+  }
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    Math.min(DISCORD_REQUEST_TIMEOUT_MS, remaining)
+  );
+  return { signal: controller.signal, stop: () => clearTimeout(timeoutId) };
+};
 
 const discordRequest = async ({
   config,
@@ -11,19 +30,34 @@ const discordRequest = async ({
   method,
   roleId = "",
   body,
+  deadlineAt = 0,
 }) => {
   const suffix = roleId ? `/roles/${roleId}` : "";
-  const response = await fetchImpl(
-    `${config.apiBaseUrl}/guilds/${config.guildId}/members/${discordUserId}${suffix}`,
-    {
-      method,
-      headers: {
-        Authorization: `Bot ${config.botToken}`,
-        ...(body ? { "Content-Type": "application/json" } : {}),
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
+  const timeout = requestSignal(deadlineAt);
+  let response;
+  try {
+    response = await fetchImpl(
+      `${config.apiBaseUrl}/guilds/${config.guildId}/members/${discordUserId}${suffix}`,
+      {
+        method,
+        signal: timeout.signal,
+        headers: {
+          Authorization: `Bot ${config.botToken}`,
+          ...(body ? { "Content-Type": "application/json" } : {}),
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      }
+    );
+  } catch (error) {
+    if (timeout.signal.aborted) {
+      const failure = new Error("Discord request timed out.");
+      failure.code = "discord_request_timeout";
+      throw failure;
     }
-  );
+    throw error;
+  } finally {
+    timeout.stop();
+  }
   if (!acceptedStatus(response) && !(method === "DELETE" && response.status === 404)) {
     const failure = new Error(`Discord operation failed with ${response.status}.`);
     failure.code = `discord_http_${response.status}`;
@@ -62,6 +96,7 @@ const ensureMember = async ({
   assignment,
   config,
   fetchImpl,
+  deadlineAt,
 }) => {
   if (!accessToken) return false;
   await discordRequest({
@@ -70,11 +105,12 @@ const ensureMember = async ({
     fetchImpl,
     method: "PUT",
     body: { access_token: accessToken },
+    deadlineAt,
   });
   return true;
 };
 
-const applyManagedRoles = async ({ assignment, config, fetchImpl }) => {
+const applyManagedRoles = async ({ assignment, config, fetchImpl, deadlineAt }) => {
   const roleIds = {
     host: config.hostRoleId,
     participant: config.participantRoleId,
@@ -87,6 +123,7 @@ const applyManagedRoles = async ({ assignment, config, fetchImpl }) => {
       fetchImpl,
       method: "PUT",
       roleId: roleIds[desired],
+      deadlineAt,
     });
   }
   for (const role of ["participant", "host"]) {
@@ -97,6 +134,7 @@ const applyManagedRoles = async ({ assignment, config, fetchImpl }) => {
       fetchImpl,
       method: "DELETE",
       roleId: roleIds[role],
+      deadlineAt,
     });
   }
   if (
@@ -110,6 +148,7 @@ const applyManagedRoles = async ({ assignment, config, fetchImpl }) => {
         fetchImpl,
         method: "DELETE",
         roleId: roleIds[role],
+        deadlineAt,
       });
     }
   }
@@ -136,6 +175,7 @@ export const syncTourneyDiscordRoleAssignment = async ({
   env = process.env,
   fetchImpl = fetch,
   repairAttempts = 1,
+  deadlineAt = 0,
   userId,
 } = {}) => {
   const config = getTourneyDiscordRoleConfig(env);
@@ -156,8 +196,9 @@ export const syncTourneyDiscordRoleAssignment = async ({
       assignment,
       config,
       fetchImpl,
+      deadlineAt,
     });
-    await applyManagedRoles({ assignment, config, fetchImpl });
+    await applyManagedRoles({ assignment, config, fetchImpl, deadlineAt });
     await completeAssignment({
       adminClient,
       appliedRole: assignment.desired_role,
@@ -180,6 +221,7 @@ export const syncTourneyDiscordRoleAssignment = async ({
         env,
         fetchImpl,
         repairAttempts: repairAttempts - 1,
+        deadlineAt,
         userId,
       });
     }
@@ -206,32 +248,49 @@ export const reconcileTourneyDiscordRoleAssignments = async ({
   adminClient = createSupabaseAdminClient(),
   env = process.env,
   fetchImpl = fetch,
-  limit = 25,
+  limit = 10,
 } = {}) => {
   const config = getTourneyDiscordRoleConfig(env);
   if (!config.enabled) return { supported: false, checked: 0, applied: 0 };
   const result = await adminClient.rpc(
     "roo_list_pending_discord_role_assignments",
-    { p_limit: Math.max(1, Math.min(Number(limit) || 25, 100)) }
+    { p_limit: Math.max(1, Math.min(Number(limit) || 10, 10)) }
   );
   if (result.error) {
     const failure = new Error("Discord role retry queue could not be read.");
     failure.code = result.error.code || "discord_retry_queue_read_failed";
     throw failure;
   }
+  const rows = (Array.isArray(result.data) ? result.data : []).slice(0, 10);
+  const deadlineAt = Date.now() + DISCORD_RECONCILE_BUDGET_MS;
   let applied = 0;
-  for (const row of result.data || []) {
-    const synced = await syncTourneyDiscordRoleAssignment({
-      adminClient,
-      env,
-      fetchImpl,
-      userId: row.user_id,
-    });
-    if (synced.applied) applied += 1;
-  }
+  let checked = 0;
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < rows.length && Date.now() < deadlineAt) {
+      const row = rows[cursor];
+      cursor += 1;
+      checked += 1;
+      const synced = await syncTourneyDiscordRoleAssignment({
+        adminClient,
+        deadlineAt,
+        env,
+        fetchImpl,
+        userId: row.user_id,
+      });
+      if (synced.applied) applied += 1;
+    }
+  };
+  await Promise.all(
+    Array.from(
+      { length: Math.min(DISCORD_RECONCILE_CONCURRENCY, rows.length) },
+      worker
+    )
+  );
   return {
     supported: true,
-    checked: (result.data || []).length,
+    checked,
     applied,
+    ...(rows.length > checked ? { deferred: rows.length - checked } : {}),
   };
 };

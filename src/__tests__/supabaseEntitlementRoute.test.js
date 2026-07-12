@@ -73,6 +73,7 @@ describe("Supabase app entitlement route", () => {
       ok: true,
       user: { id: "user-one", email: "buyer@example.com" },
       account: { roles: ["customer"] },
+      verifiedEmail: "buyer@example.com",
     });
   });
 

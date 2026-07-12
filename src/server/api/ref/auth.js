@@ -67,12 +67,14 @@ const buildSessionToken = (payload, maxAgeSeconds) => {
   ensureSessionSecret();
   const now = Math.floor(Date.now() / 1000);
   const body = {
-    v: 1,
+    v: 2,
     iat: now,
     exp: now + maxAgeSeconds,
     rid: payload.referralId,
     code: payload.code || "",
     ab: payload.authBackend === "supabase" ? "supabase" : "sanity",
+    pid: payload.principalId || "",
+    sv: Math.max(1, Number(payload.sessionVersion) || 1),
   };
   const encodedPayload = base64UrlEncode(JSON.stringify(body));
   const signature = sign(encodedPayload, REF_SESSION_SECRET);
@@ -151,15 +153,54 @@ export const getReferralSession = (req) => {
       referralId: payload.rid,
       code: payload.code || "",
       authBackend: payload.ab === "supabase" ? "supabase" : "sanity",
+      principalId: payload.pid || "",
+      sessionVersion: Math.max(1, Number(payload.sv) || 1),
     };
   } catch (error) {
     return null;
   }
 };
 
-export const requireReferralSession = (req, res) => {
+export const requireReferralSession = async (req, res) => {
   const session = getReferralSession(req);
-  if (session) return session;
+  if (session) {
+    try {
+      const { createSupabaseAdminClient } = await import("../../supabase/adminClient.js");
+      const result = await createSupabaseAdminClient().rpc(
+        "roo_validate_referral_session",
+        {
+          p_creator_legacy_id: session.referralId,
+          p_session_version: session.sessionVersion,
+        }
+      );
+      const account = result.data;
+      if (
+        !result.error &&
+        account?.creator_legacy_sanity_id === session.referralId &&
+        (!session.code || account.referral_code === session.code)
+      ) {
+        return {
+          ...session,
+          code: account.referral_code || session.code,
+          principalId: account.principal_id,
+          sessionVersion: account.session_version,
+        };
+      }
+      if (result.error) {
+        res.status(503).json({
+          ok: false,
+          error: "Account verification is temporarily unavailable.",
+        });
+        return null;
+      }
+    } catch {
+      res.status(503).json({
+        ok: false,
+        error: "Account verification is temporarily unavailable.",
+      });
+      return null;
+    }
+  }
   res
     .status(401)
     .json({ ok: false, error: "Unauthorized. Please log in again." });
