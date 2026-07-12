@@ -6,6 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import postgres from "postgres";
 import {
+  checkTourneyManualFailoverReadiness,
   executeTourneyCommand,
   reconcileTourneyMirror,
 } from "../src/server/tourney/store.js";
@@ -543,6 +544,50 @@ try {
   `;
   assert.deepEqual({ pending: queueState.pending, dead: queueState.dead }, { pending: 0, dead: 0 });
 
+  await Promise.all([
+    source`
+      update tourney.cutover_metadata set
+        primary_backend='legacy', generation=2, writes_paused=true
+      where id='tourney'
+    `,
+    target`
+      update tourney_cutover_metadata set
+        primary_backend='legacy', generation=2, writes_paused=true
+      where id='tourney'
+    `,
+  ]);
+  const failoverEnv = {
+    ...env,
+    TOURNEY_DATABASE_MODE: "legacy",
+    TOURNEY_FAILOVER_GENERATION: "2",
+    TOURNEY_WRITES_PAUSED: "1",
+  };
+  const failoverReady = await checkTourneyManualFailoverReadiness({ env: failoverEnv });
+  assert.equal(failoverReady.ready, true, `manual failover was blocked: ${failoverReady.blockers.join(",")}`);
+  await source.begin(async (sql) => {
+    await sql`select set_config('roo.tourney_mirror_apply','1',true)`;
+    await sql`
+      insert into tourney.external_operations(
+        operation_key,command_id,operation_kind,entity_type,entity_id,
+        desired_state,desired_state_hash,status
+      ) values(
+        'fixture:failover:blocker','fixture:paused-maintenance:0001',
+        'sanity_account_projection','account_snapshot','fixture','{}'::jsonb,
+        ${"7".repeat(64)},'pending'
+      )
+    `;
+  });
+  const failoverBlocked = await checkTourneyManualFailoverReadiness({ env: failoverEnv });
+  assert.equal(failoverBlocked.ready, false, "pending Supabase external work did not block failover");
+  assert.ok(
+    failoverBlocked.blockers.includes("external_operations_pending"),
+    "failover did not report the pending external-operation blocker"
+  );
+  await source.begin(async (sql) => {
+    await sql`select set_config('roo.tourney_mirror_apply','1',true)`;
+    await sql`delete from tourney.external_operations where operation_key='fixture:failover:blocker'`;
+  });
+
   summary = {
     ok: true,
     postgres: version.trim(),
@@ -562,6 +607,7 @@ try {
       "expired lease recovery and dead-letter exhaustion",
       "generation tuple ordering",
       "audited clean-clock start and critical reset",
+      "manual failover dual-control and backlog gate",
       "zero pending and dead letters",
     ],
   };
