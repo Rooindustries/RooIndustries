@@ -343,6 +343,16 @@ try {
   `;
   assert.equal(bootstrapReplay.result.queued, 0, "fallback bootstrap replay was not idempotent");
 
+  const pausedMaintenance = await executeTourneyCommand({
+    commandId: "fixture:paused-maintenance:0001",
+    purpose: "accounts:seed",
+    requestPayload: { fixture: true },
+    env: { ...env, TOURNEY_WRITES_PAUSED: "1" },
+    maintenanceWhilePaused: true,
+    callback: async () => ({ body: { ok: true } }),
+  });
+  assert.equal(pausedMaintenance.status, 200, "paused maintenance command was rejected");
+
   let commandExecutions = 0;
   const runDuplicateCommand = () => executeTourneyCommand({
     commandId: "fixture:duplicate:0001",
@@ -543,6 +553,7 @@ try {
       "collision quarantine and generation-1 tombstone guard",
       "insert mirroring",
       "idempotent Supabase-to-Neon fallback bootstrap",
+      "private maintenance saga while public writes are paused",
       "update and delete mirroring for every registered domain",
       "receipt mirroring",
       "concurrent duplicate Idempotency-Key replay",

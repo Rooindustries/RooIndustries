@@ -105,12 +105,13 @@ export const executeTourneyCommand = async ({
   callback,
   postCommitContext = {},
   attemptExternalWork = true,
+  maintenanceWhilePaused = false,
 } = {}) => {
   if (typeof callback !== "function") {
     throw new Error("A Tourney command callback is required.");
   }
   const policy = resolveTourneyStorePolicy(env);
-  if (policy.writesPaused) {
+  if (policy.writesPaused && maintenanceWhilePaused !== true) {
     const error = new Error("Tournament updates are briefly paused. Try again shortly.");
     error.status = 503;
     error.code = "TOURNEY_WRITES_PAUSED";
