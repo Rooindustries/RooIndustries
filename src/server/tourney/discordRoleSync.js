@@ -210,14 +210,15 @@ export const reconcileTourneyDiscordRoleAssignments = async ({
 } = {}) => {
   const config = getTourneyDiscordRoleConfig(env);
   if (!config.enabled) return { supported: false, checked: 0, applied: 0 };
-  const result = await adminClient
-    .schema("accounts")
-    .from("discord_role_assignments")
-    .select("user_id")
-    .in("status", ["pending", "retry"])
-    .order("updated_at", { ascending: true })
-    .limit(Math.max(1, Math.min(Number(limit) || 25, 100)));
-  if (result.error) throw new Error("Discord role retry queue could not be read.");
+  const result = await adminClient.rpc(
+    "roo_list_pending_discord_role_assignments",
+    { p_limit: Math.max(1, Math.min(Number(limit) || 25, 100)) }
+  );
+  if (result.error) {
+    const failure = new Error("Discord role retry queue could not be read.");
+    failure.code = result.error.code || "discord_retry_queue_read_failed";
+    throw failure;
+  }
   let applied = 0;
   for (const row of result.data || []) {
     const synced = await syncTourneyDiscordRoleAssignment({
