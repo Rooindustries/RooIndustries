@@ -94,7 +94,7 @@ export default function RefLogin() {
   }
 
   return (
-    <section className="pt-32 px-6 min-h-screen text-ink flex flex-col items-center">
+    <section className="pt-32 pb-8 px-6 min-h-screen text-ink flex flex-col items-center">
       <h1 className="text-4xl font-extrabold text-center text-accent drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
         Referral Creator Login
       </h1>
@@ -185,7 +185,7 @@ export default function RefLogin() {
             ${
               loading
                 ? "bg-surface-input opacity-40 cursor-not-allowed"
-                : "bg-accent-strong hover:bg-accent text-accent-contrast shadow-glow-soft"
+                : "bg-accent-strong hover:bg-accent text-white shadow-glow-soft"
             }
           `}
         >
@@ -207,7 +207,7 @@ export default function RefLogin() {
         <button
           type="button"
           onClick={() => nav("/referrals/register")}
-          className="px-5 py-2 rounded-xl text-sm font-semibold bg-accent-strong hover:bg-accent text-accent-contrast
+          className="px-5 py-2 rounded-xl text-sm font-semibold bg-accent-strong hover:bg-accent text-white
                      shadow-glow-soft transition-all"
         >
           Create an account
