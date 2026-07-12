@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { tourneyMutationFetch } from "./tourneyMutation";
+import { tourneyMutationFetch, tourneyMutationSuccessMessage } from "./tourneyMutation";
 
 const managedRoles = ["caster", "viewer"];
 
@@ -40,11 +40,11 @@ export default function OwnerAccountManager({
 
       setAccounts(data.accounts || []);
       setAccountsJson(data.persisted ? "" : data.accountsJson || "");
-      setMessage(
+      setMessage(tourneyMutationSuccessMessage(data,
         data.persisted
           ? "Saved. Account changes are live now."
           : "Updated JSON is ready for TOURNEY_ACCOUNTS_JSON."
-      );
+      ));
       return true;
     } catch (error) {
       setMessage(error?.message || "Unable to update account.");

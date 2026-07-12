@@ -22,7 +22,9 @@ const authorized = (request) =>
 const readLegacyReadiness = async (sql) => {
   const [control] = await sql`
     select primary_backend, generation, writes_paused, fallback_read_only,
-      clean_since, updated_at
+      clean_since, hardened_active, natural_mutation_verified_at,
+      first_zero_drift_at, second_zero_drift_at, clock_last_evaluated_at,
+      clock_last_reset_reason, updated_at
     from tourney_cutover_metadata where id = 'tourney'
   `;
   const playerCounts = await sql`
@@ -36,21 +38,27 @@ const readLegacyReadiness = async (sql) => {
       (select count(*)::integer from tourney_bracket_teams) as teams,
       (select count(*)::integer from tourney_bracket_team_members) as team_members,
       (select count(*)::integer from tourney_appeals) as appeals,
-      (select count(*)::integer from tourney_payouts) as payouts
+      (select count(*)::integer from tourney_payouts) as payouts,
+      (select count(*)::integer from tourney_account_snapshots) as account_snapshots,
+      (select count(*)::integer from tourney_command_receipts) as command_receipts
   `;
   const [mirror] = await sql`
-    select count(*)::integer as pending, min(occurred_at) as oldest_pending_at,
-      count(*) filter (where last_error_at is not null)::integer as failed
-    from tourney_mirror_outbox where applied_at is null
+    select jsonb_object_agg(status,count) as counts,
+      min(occurred_at) filter(where status in ('pending','retry','processing')) as oldest_pending_at
+    from (select status,count(*)::integer count,min(occurred_at) occurred_at
+      from tourney_mirror_outbox group by status) states
   `;
-  const [retries] = await sql`
-    select count(*)::integer as email_retries
-    from tourney_email_dispatches
-    where status in ('pending', 'retry', 'sending', 'failed')
+  const [external] = await sql`
+    select jsonb_object_agg(status,count) as counts,
+      min(created_at) filter(where status in ('pending','retry','processing')) as oldest_pending_at
+    from (select status,count(*)::integer count,min(created_at) created_at
+      from tourney_external_operations group by status) states
   `;
+  const emailRows = await sql`select status,count(*)::integer count from tourney_email_dispatches group by status`;
+  const discordRows = await sql`select status,count(*)::integer count from tourney_discord_role_assignments group by status`;
   const [lastParity] = await sql`
     select source_backend, target_backend, generation, status, counts, drift,
-      relationships, created_at
+      relationships, status_counts, canonical_hashes, shadow_results, created_at
     from tourney_parity_runs order by created_at desc limit 1
   `;
   const shadowReads = await sql`
@@ -82,10 +90,18 @@ const readLegacyReadiness = async (sql) => {
     ),
     table_counts: counts,
     mirror,
-    identity_conflicts: 0,
-    email_retries: Number(retries?.email_retries || 0),
-    discord_retries: null,
+    external_operations: external,
+    auth_operations: { pending: null, oldest_pending_at: null },
+    identity_conflicts: Number((await sql`
+      select count(*)::integer count from tourney_identity_conflicts
+      where resolved_at is null
+    `)[0]?.count || 0),
+    email: Object.fromEntries(emailRows.map((row) => [row.status, Number(row.count)])),
+    discord: Object.fromEntries(discordRows.map((row) => [row.status, Number(row.count)])),
     last_parity: lastParity || null,
+    clock_blockers: control?.clock_last_reset_reason
+      ? [control.clock_last_reset_reason]
+      : [],
     shadow_reads: Object.fromEntries(
       shadowReads.map((row) => [row.route, {
         samples: Number(row.samples),

@@ -11,12 +11,14 @@ import {
 } from "../../supabase/adminClient.js";
 import { reconcileBookingEmailDispatches } from "../ref/bookingEmails.js";
 import { syncSanityCommerceChanges } from "../../supabase/incrementalCommerceSync.js";
-import { reconcileTourneyDiscordRoleAssignments } from "../../tourney/discordRoleSync.js";
 import { reconcileTourneyEmailDispatches } from "../../tourney/emailDispatch.js";
+import { reconcileTourneyExternalOperations } from "../../tourney/externalOperations.js";
 import {
   reconcileTourneyMirror,
+  refreshTourneyCutoverClock,
   resolveTourneyStorePolicy,
   runTourneyParity,
+  runTourneyShadowReadSamples,
 } from "../../tourney/store.js";
 import { reconcileCredentialOperations } from "../../supabase/credentialRecovery.js";
 
@@ -163,12 +165,18 @@ export default async function handler(req, res) {
     }
     try {
       const tourneyPolicy = resolveTourneyStorePolicy();
+      result.body.summary.tourneyExternalOperations =
+        await reconcileTourneyExternalOperations({ limit: 10 });
       result.body.summary.tourneyEmails =
         await reconcileTourneyEmailDispatches({ limit: 10 });
       result.body.summary.tourneyMirror =
         await reconcileTourneyMirror({ limit: 100 });
       if (tourneyPolicy.mirrorEnabled && result.body.summary.tourneyMirror.failed === 0) {
         result.body.summary.tourneyParity = await runTourneyParity();
+        result.body.summary.tourneyShadowReads =
+          await runTourneyShadowReadSamples({ rounds: 10 });
+        result.body.summary.tourneyCutoverClock =
+          await refreshTourneyCutoverClock();
       }
     } catch (error) {
       logSafeError("Tourney reconciliation failed", error);
@@ -192,11 +200,9 @@ export default async function handler(req, res) {
         );
         if (accountSecurity.error) throw accountSecurity.error;
         result.body.summary.accountSecurity = accountSecurity.data || {};
-        result.body.summary.tourneyDiscordRoles =
-          await reconcileTourneyDiscordRoleAssignments({ limit: 10 });
       } catch (error) {
-        logSafeError("Tourney Discord role reconciliation failed", error);
-        result.body.summary.tourneyDiscordRoles = { pending: true };
+        logSafeError("Account security reconciliation failed", error);
+        result.body.summary.accountSecurity = { pending: true };
       }
     }
     if (isSupabaseAdminConfigured()) {

@@ -34,10 +34,12 @@ const loadHandler = async ({ authorized = true } = {}) => {
     events.push("credentials");
     return { checked: 0 };
   });
-  const reconcileTourneyDiscordRoleAssignments = jest.fn(async () => {
-    events.push("discord");
-    return { checked: 0 };
+  const reconcileTourneyExternalOperations = jest.fn(async () => {
+    events.push("tourney-external");
+    return { claimed: 0, applied: 0 };
   });
+  const reconcileTourneyEmailDispatches = jest.fn(async () => ({ claimed: 0, sent: 0 }));
+  const reconcileTourneyMirror = jest.fn(async () => ({ enabled: false, failed: 0 }));
   const adminRpc = jest.fn(async (name) => {
     events.push(`rpc:${name}`);
     return { data: {}, error: null };
@@ -71,8 +73,18 @@ const loadHandler = async ({ authorized = true } = {}) => {
   jest.doMock("../server/supabase/credentialRecovery.js", () => ({
     reconcileCredentialOperations,
   }));
-  jest.doMock("../server/tourney/discordRoleSync.js", () => ({
-    reconcileTourneyDiscordRoleAssignments,
+  jest.doMock("../server/tourney/externalOperations.js", () => ({
+    reconcileTourneyExternalOperations,
+  }));
+  jest.doMock("../server/tourney/emailDispatch.js", () => ({
+    reconcileTourneyEmailDispatches,
+  }));
+  jest.doMock("../server/tourney/store.js", () => ({
+    reconcileTourneyMirror,
+    refreshTourneyCutoverClock: jest.fn(),
+    resolveTourneyStorePolicy: jest.fn(() => ({ mirrorEnabled: false })),
+    runTourneyParity: jest.fn(),
+    runTourneyShadowReadSamples: jest.fn(),
   }));
   jest.doMock("../server/api/payment/backend.js", () => ({
     createPaymentBackendClient: jest.fn(() => ({
@@ -91,7 +103,7 @@ const loadHandler = async ({ authorized = true } = {}) => {
     events,
     adminRpc,
     reconcileCredentialOperations,
-    reconcileTourneyDiscordRoleAssignments,
+    reconcileTourneyExternalOperations,
     reconcileReverseMirror,
   };
 };
@@ -148,7 +160,7 @@ describe("payment reconciliation route authorization", () => {
     expect(loaded.cleanupExpiredRateLimitBuckets).not.toHaveBeenCalled();
   });
 
-  test("finishes payment recovery before the bounded Discord retry queue", async () => {
+  test("finishes payment recovery before the durable Tourney side-effect queue", async () => {
     const previous = process.env.SUPABASE_SOCIAL_AUTH_ENABLED;
     process.env.SUPABASE_SOCIAL_AUTH_ENABLED = "1";
     try {
@@ -156,13 +168,13 @@ describe("payment reconciliation route authorization", () => {
       const { response, state } = createResponse();
       await loaded.handler({ method: "GET", headers: {} }, response);
       expect(state.status).toBe(200);
-      const discordIndex = loaded.events.indexOf("discord");
+      const externalIndex = loaded.events.indexOf("tourney-external");
       const paymentIndexes = loaded.events
         .map((event, index) => (event.startsWith("payment:") ? index : -1))
         .filter((index) => index >= 0);
       expect(paymentIndexes).toHaveLength(2);
-      expect(discordIndex).toBeGreaterThan(Math.max(...paymentIndexes));
-      expect(loaded.reconcileTourneyDiscordRoleAssignments).toHaveBeenCalledWith({
+      expect(externalIndex).toBeGreaterThan(Math.max(...paymentIndexes));
+      expect(loaded.reconcileTourneyExternalOperations).toHaveBeenCalledWith({
         limit: 10,
       });
       expect(loaded.adminRpc).toHaveBeenCalledWith(

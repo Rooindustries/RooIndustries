@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { writePersistedTourneyAccountsJson } from "../../../../src/server/tourney/accountStore";
+import {
+  getTourneyAccountsCanonicalHash,
+  writePersistedTourneyAccountsJson,
+} from "../../../../src/server/tourney/accountStore";
 import {
   buildUpdatedTourneyAccounts,
   checkTourneyRateLimit,
@@ -10,6 +13,7 @@ import {
 } from "../../../../src/server/tourney/auth";
 import {
   hashTourneyToken,
+  createTourneyPasswordHash,
   resetTourneyPlayerPassword,
 } from "../../../../src/server/tourney/playerStore";
 import { buildTourneyPublicError } from "../../../../src/server/tourney/publicError";
@@ -44,32 +48,40 @@ export async function POST(request) {
 
   try {
     const tokenHash = hashTourneyToken(payload.token);
+    const accounts = await readEffectiveTourneyAccounts();
+    const adminAccount = readTourneyPasswordReset({
+      token: payload.token,
+      accounts,
+    });
+    const nextAdminAccounts = adminAccount && ["owner", "caster"].includes(adminAccount.role)
+      ? await buildUpdatedTourneyAccounts({
+          action: "change-password",
+          username: adminAccount.username,
+          actorUsername: adminAccount.username,
+          password: payload.password,
+          accounts,
+        })
+      : null;
+    const expectedCurrentHash = getTourneyAccountsCanonicalHash(accounts);
+    const preparedPlayerPasswordHash = nextAdminAccounts
+      ? ""
+      : await createTourneyPasswordHash({ password: payload.password });
     const command = await executeTourneyCommand({
       commandId: `token:${tokenHash}:reset`,
       purpose: "tokens:reset",
       requestPayload: { tokenHash, passwordHash: hashTourneyToken(payload.password) },
       callback: async () => {
-        const accounts = await readEffectiveTourneyAccounts();
-        const adminAccount = readTourneyPasswordReset({
-          token: payload.token,
-          accounts,
-        });
-        if (adminAccount && ["owner", "caster"].includes(adminAccount.role)) {
-          const nextAccounts = await buildUpdatedTourneyAccounts({
-            action: "change-password",
-            username: adminAccount.username,
-            actorUsername: adminAccount.username,
-            password: payload.password,
-            accounts,
-          });
+        if (nextAdminAccounts) {
           await writePersistedTourneyAccountsJson({
-            accountsJson: renderTourneyAccountsJson(nextAccounts),
+            accountsJson: renderTourneyAccountsJson(nextAdminAccounts),
             actorUsername: adminAccount.username,
+            expectedCurrentHash,
           });
         } else {
           await resetTourneyPlayerPassword({
             token: payload.token,
             password: payload.password,
+            preparedPasswordHash: preparedPlayerPasswordHash,
           });
         }
         return { body: { ok: true, message: "Password updated." } };

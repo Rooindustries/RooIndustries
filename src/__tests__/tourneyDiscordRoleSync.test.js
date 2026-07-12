@@ -1,10 +1,7 @@
 const assignment = (overrides = {}) => ({
-  queued: true,
-  user_id: "e71a5687-daa6-4371-9700-5aef798fdd03",
-  discord_user_id: "123456789012345678",
-  previous_discord_user_id: null,
-  desired_role: "participant",
-  applied_role: "none",
+  discordUserId: "123456789012345678",
+  previousDiscordUserId: "",
+  desiredRole: "participant",
   generation: 1,
   ...overrides,
 });
@@ -16,32 +13,6 @@ const env = {
   DISCORD_HOST_ROLE_ID: "333333333333333333",
 };
 
-const makeAdminClient = ({
-  assignments,
-  completeResults = [],
-  pendingUserIds = [],
-}) => {
-  const queue = [...assignments];
-  const completions = [...completeResults];
-  return {
-    rpc: jest.fn(async (name) => {
-      if (name === "roo_list_pending_discord_role_assignments") {
-        return {
-          data: pendingUserIds.map((userId) => ({ user_id: userId })),
-          error: null,
-        };
-      }
-      if (name === "roo_refresh_discord_role_assignment") {
-        return { data: queue.shift(), error: null };
-      }
-      if (name === "roo_complete_discord_role_assignment") {
-        return completions.shift() || { data: { status: "applied" }, error: null };
-      }
-      throw new Error(`Unexpected RPC: ${name}`);
-    }),
-  };
-};
-
 const makeFetch = (statuses = []) => {
   const queuedStatuses = [...statuses];
   return jest.fn(async () => ({
@@ -51,53 +22,42 @@ const makeFetch = (statuses = []) => {
 };
 
 const {
-  reconcileTourneyDiscordRoleAssignments,
-  syncTourneyDiscordRoleAssignment,
+  applyTourneyDiscordDesiredState,
 } = require("../server/tourney/discordRoleSync");
 
-describe("Tourney Discord desired-role synchronization", () => {
+describe("Tourney Discord durable desired-role worker", () => {
   test("adds the Host role before removing Participant", async () => {
-    const adminClient = makeAdminClient({
-      assignments: [assignment({ desired_role: "host" })],
-    });
     const fetchImpl = makeFetch();
 
-    const result = await syncTourneyDiscordRoleAssignment({
-      adminClient,
+    const result = await applyTourneyDiscordDesiredState({
+      assignment: assignment({ desiredRole: "host" }),
       env,
       fetchImpl,
-      userId: assignment().user_id,
     });
 
     expect(result).toMatchObject({ applied: true, desiredRole: "host" });
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-    expect(fetchImpl.mock.calls[0][0]).toContain("/roles/333333333333333333");
-    expect(fetchImpl.mock.calls[0][1].method).toBe("PUT");
-    expect(fetchImpl.mock.calls[1][0]).toContain("/roles/222222222222222222");
-    expect(fetchImpl.mock.calls[1][1].method).toBe("DELETE");
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(fetchImpl.mock.calls[0][1].method).toBe("GET");
+    expect(fetchImpl.mock.calls[1][0]).toContain("/roles/333333333333333333");
+    expect(fetchImpl.mock.calls[1][1].method).toBe("PUT");
+    expect(fetchImpl.mock.calls[2][0]).toContain("/roles/222222222222222222");
+    expect(fetchImpl.mock.calls[2][1].method).toBe("DELETE");
   });
 
-  test("removes managed roles from the previously linked Discord identity", async () => {
+  test("removes only managed roles from the previously linked identity", async () => {
     const previousId = "987654321098765432";
-    const adminClient = makeAdminClient({
-      assignments: [assignment({ previous_discord_user_id: previousId })],
-    });
     const fetchImpl = makeFetch();
 
-    await syncTourneyDiscordRoleAssignment({
-      adminClient,
+    await applyTourneyDiscordDesiredState({
+      assignment: assignment({ previousDiscordUserId: previousId }),
       env,
       fetchImpl,
-      userId: assignment().user_id,
     });
 
     const calls = fetchImpl.mock.calls.map(([url, options]) => ({
       method: options.method,
       url,
     }));
-    expect(calls[0]).toMatchObject({ method: "PUT" });
-    expect(calls[0].url).toContain("/roles/222222222222222222");
-    expect(calls.filter(({ url }) => url.includes(previousId))).toHaveLength(2);
     expect(calls.filter(({ url }) => url.includes(previousId))).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ method: "DELETE", url: expect.stringContaining("/roles/222222222222222222") }),
@@ -106,132 +66,55 @@ describe("Tourney Discord desired-role synchronization", () => {
     );
   });
 
-  test("re-reads desired state when a generation changes mid-flight", async () => {
-    const adminClient = makeAdminClient({
-      assignments: [
-        assignment({ desired_role: "participant", generation: 1 }),
-        assignment({ desired_role: "host", generation: 2 }),
-      ],
-      completeResults: [
-        { data: null, error: { code: "40001" } },
-        { data: { status: "applied" }, error: null },
-      ],
-    });
-    const fetchImpl = makeFetch();
+  test("joins with the ephemeral OAuth token before applying roles", async () => {
+    const fetchImpl = makeFetch([201, 204, 204]);
 
-    const result = await syncTourneyDiscordRoleAssignment({
-      adminClient,
+    await applyTourneyDiscordDesiredState({
+      accessToken: "ephemeral-oauth-token",
+      assignment: assignment(),
       env,
       fetchImpl,
-      userId: assignment().user_id,
     });
 
-    expect(result).toMatchObject({
-      applied: true,
-      desiredRole: "host",
-      generation: 2,
+    expect(fetchImpl.mock.calls[0][1]).toMatchObject({
+      method: "PUT",
+      body: JSON.stringify({ access_token: "ephemeral-oauth-token" }),
     });
-    expect(
-      adminClient.rpc.mock.calls.filter(
-        ([name]) => name === "roo_refresh_discord_role_assignment"
-      )
-    ).toHaveLength(2);
   });
 
-  test("records a retry without exposing Discord response bodies", async () => {
-    const adminClient = makeAdminClient({ assignments: [assignment()] });
+  test("classifies a user absent from the guild as blocked reauth", async () => {
+    const fetchImpl = jest.fn(async () => ({ ok: false, status: 404 }));
+
+    await expect(applyTourneyDiscordDesiredState({
+      assignment: assignment(),
+      env,
+      fetchImpl,
+    })).resolves.toEqual({ applied: false, reason: "blocked_reauth" });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  test("returns only a safe status code for provider failure", async () => {
     const fetchImpl = jest.fn(async () => ({ ok: false, status: 403 }));
 
-    const result = await syncTourneyDiscordRoleAssignment({
-      adminClient,
+    await expect(applyTourneyDiscordDesiredState({
+      assignment: assignment(),
       env,
       fetchImpl,
-      userId: assignment().user_id,
-    });
-
-    expect(result).toMatchObject({ applied: false, reason: "discord_http_403" });
-    expect(adminClient.rpc).toHaveBeenCalledWith(
-      "roo_complete_discord_role_assignment",
-      expect.objectContaining({
-        p_error: "discord_http_403",
-        p_status: "retry",
-      })
-    );
+    })).rejects.toMatchObject({ code: "discord_http_403" });
   });
 
-  test("turns a bounded Discord timeout into a retryable assignment", async () => {
-    const adminClient = makeAdminClient({ assignments: [assignment()] });
+  test("turns a bounded Discord timeout into a safe retry error", async () => {
     const fetchImpl = jest.fn((_url, options) =>
       new Promise((_resolve, reject) => {
         options.signal.addEventListener("abort", () => reject(new Error("aborted")));
       })
     );
-    const result = await syncTourneyDiscordRoleAssignment({
-      adminClient,
+
+    await expect(applyTourneyDiscordDesiredState({
+      assignment: assignment(),
       deadlineAt: Date.now() + 20,
       env,
       fetchImpl,
-      userId: assignment().user_id,
-    });
-    expect(result).toMatchObject({
-      applied: false,
-      reason: "discord_request_timeout",
-    });
-  });
-
-  test("reads the private retry queue through its service-only RPC", async () => {
-    const userId = assignment().user_id;
-    const adminClient = makeAdminClient({
-      assignments: [assignment()],
-      pendingUserIds: [userId],
-    });
-    const fetchImpl = makeFetch();
-
-    const result = await reconcileTourneyDiscordRoleAssignments({
-      adminClient,
-      env,
-      fetchImpl,
-      limit: 10,
-    });
-
-    expect(result).toEqual({ supported: true, checked: 1, applied: 1 });
-    expect(adminClient.rpc).toHaveBeenCalledWith(
-      "roo_list_pending_discord_role_assignments",
-      { p_limit: 10 }
-    );
-  });
-
-  test("processes at most ten assignments with no more than three active workers", async () => {
-    const userIds = Array.from(
-      { length: 12 },
-      (_, index) => `e71a5687-daa6-4371-9700-${String(index).padStart(12, "0")}`
-    );
-    const adminClient = makeAdminClient({
-      assignments: userIds.slice(0, 10).map((userId) => assignment({ user_id: userId })),
-      pendingUserIds: userIds,
-    });
-    let active = 0;
-    let maximumActive = 0;
-    const fetchImpl = jest.fn(async () => {
-      active += 1;
-      maximumActive = Math.max(maximumActive, active);
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      active -= 1;
-      return { ok: true, status: 204 };
-    });
-
-    const result = await reconcileTourneyDiscordRoleAssignments({
-      adminClient,
-      env,
-      fetchImpl,
-      limit: 100,
-    });
-    expect(result.checked).toBe(10);
-    expect(result.applied).toBe(10);
-    expect(maximumActive).toBeLessThanOrEqual(3);
-    expect(adminClient.rpc).toHaveBeenCalledWith(
-      "roo_list_pending_discord_role_assignments",
-      { p_limit: 10 }
-    );
+    })).rejects.toMatchObject({ code: "discord_request_timeout" });
   });
 });

@@ -2,6 +2,7 @@ const mockCheckTourneyRateLimit = jest.fn();
 const mockGetClientAddressFromHeaders = jest.fn();
 const mockGetTourneyApprovalRecipients = jest.fn();
 const mockCreatePendingTourneyPlayer = jest.fn();
+const mockCreateTourneyPasswordHash = jest.fn();
 const mockGetTourneyRegistrationCloseIso = jest.fn();
 const mockIsTourneyRegistrationClosed = jest.fn();
 const mockSendTourneyRegistrationApprovalEmails = jest.fn();
@@ -42,6 +43,7 @@ jest.mock("../server/tourney/email", () => ({
 
 jest.mock("../server/tourney/playerStore", () => ({
   createPendingTourneyPlayer: (...args) => mockCreatePendingTourneyPlayer(...args),
+  createTourneyPasswordHash: (...args) => mockCreateTourneyPasswordHash(...args),
   getTourneyRegistrationCloseIso: (...args) =>
     mockGetTourneyRegistrationCloseIso(...args),
   isTourneyRegistrationClosed: (...args) => mockIsTourneyRegistrationClosed(...args),
@@ -97,6 +99,7 @@ describe("tourney register API route", () => {
     mockGetClientAddressFromHeaders.mockReset();
     mockGetTourneyApprovalRecipients.mockReset();
     mockCreatePendingTourneyPlayer.mockReset();
+    mockCreateTourneyPasswordHash.mockReset();
     mockGetTourneyRegistrationCloseIso.mockReset();
     mockIsTourneyRegistrationClosed.mockReset();
     mockSendTourneyRegistrationApprovalEmails.mockReset();
@@ -117,6 +120,7 @@ describe("tourney register API route", () => {
       player: { id: "player_1", email: "playerone@example.com" },
       tokens: [],
     });
+    mockCreateTourneyPasswordHash.mockResolvedValue("prepared-password-hash");
     mockSendTourneyRegistrationApprovalEmails.mockResolvedValue({ id: "email_1" });
   });
 
@@ -130,6 +134,7 @@ describe("tourney register API route", () => {
       payload: { ...basePayload, acceptSubstitutePool: true },
       recipients: expect.any(Array),
       authUserId: "",
+      preparedPasswordHash: "prepared-password-hash",
     });
   });
 
@@ -157,6 +162,7 @@ describe("tourney register API route", () => {
       }),
       recipients: expect.any(Array),
       authUserId: "",
+      preparedPasswordHash: "prepared-password-hash",
     });
   });
 

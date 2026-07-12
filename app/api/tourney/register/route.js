@@ -7,6 +7,7 @@ import {
 import { enqueueTourneyEmailDispatch } from "../../../../src/server/tourney/emailDispatch";
 import {
   createPendingTourneyPlayer,
+  createTourneyPasswordHash,
   getTourneyRegistrationCloseIso,
   isTourneyRegistrationClosed,
 } from "../../../../src/server/tourney/playerStore";
@@ -113,6 +114,10 @@ export async function POST(request) {
     }
 
     const commandId = readTourneyCommandId({ request });
+    const preparedPasswordHash = await createTourneyPasswordHash({
+      allowGenerated: true,
+      password: payload?.password,
+    });
     const command = await executeTourneyCommand({
       commandId,
       purpose: "registration:create",
@@ -122,6 +127,7 @@ export async function POST(request) {
           payload,
           recipients,
           authUserId: socialUser?.id || "",
+          preparedPasswordHash,
         });
         const baseUrl = new URL(request.url).origin;
         for (const recipient of recipients) {
