@@ -11,6 +11,11 @@ const isCanonicalWebOriginPair = (left, right) =>
   !left.port &&
   !right.port;
 
+const isCanonicalWebOrigin = (url) =>
+  url.protocol === "https:" &&
+  CANONICAL_WEB_HOSTS.has(url.hostname) &&
+  !url.port;
+
 export const isSameOriginMutation = (request) => {
   try {
     const requestUrl = new URL(request.url);
@@ -20,6 +25,7 @@ export const isSameOriginMutation = (request) => {
       const originUrl = new URL(suppliedOrigin);
       return (
         originUrl.origin === requestUrl.origin ||
+        isCanonicalWebOrigin(originUrl) ||
         isCanonicalWebOriginPair(originUrl, requestUrl)
       );
     }
