@@ -24,6 +24,12 @@ import {
   getTourneyCookieOptions,
 } from "@/src/server/tourney/auth";
 import { syncTourneyDiscordRoleAssignment } from "@/src/server/tourney/discordRoleSync";
+import {
+  clearReauthCookie,
+  createReauthToken,
+  hashReauthToken,
+  reauthCookie,
+} from "@/src/server/supabase/reauth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -112,11 +118,16 @@ const getCookieValue = (request, name) => {
 
 const referralSession = (account) => {
   if (!(account?.roles || []).includes("creator")) return null;
-  if (!account.legacy_sanity_id || !account.referral_code) return null;
+  if (account.creator_active === false) return null;
+  const creatorId =
+    account.creator_legacy_sanity_id || account.legacy_sanity_id || "";
+  if (!creatorId || !account.referral_code) return null;
   return createReferralSessionCookie({
     authBackend: "supabase",
     code: account.referral_code,
-    referralId: account.legacy_sanity_id,
+    principalId: account.principal_id,
+    referralId: creatorId,
+    sessionVersion: account.session_version,
   });
 };
 
@@ -166,8 +177,8 @@ const fail = async ({
     new URL(request.url).searchParams.get("intent") || ""
   ).trim();
   response.cookies.set(clearOAuthIntentCookie(intentId));
-  if (flow) clearDomainCookie(response, flow);
-  if (action !== "link") {
+  if (!["link", "reauth", "merge"].includes(action)) {
+    if (flow) clearDomainCookie(response, flow);
     await clearNextSupabaseSession({ request, response }).catch(() => {});
   }
   return setRedirect(
@@ -215,7 +226,9 @@ export async function GET(request) {
   let intentBindingInvalid = false;
 
   try {
-    intent = token ? await readOAuthIntent({ token }) : null;
+    intent = token && validIntentId
+      ? await readOAuthIntent({ intentId: validIntentId, token })
+      : null;
     if (intent && validIntentId && intent.id !== validIntentId) {
       intent = null;
       intentBindingInvalid = true;
@@ -267,11 +280,15 @@ export async function GET(request) {
   }
 
   try {
+    const reauthToken = intent.action === "reauth" ? createReauthToken() : "";
     const finalized = await finalizeOAuthIntent({
       guildId: String(process.env.DISCORD_GUILD_ID || "").trim(),
       provider: intent.provider,
       token,
       userId: result.data.user.id,
+      ...(reauthToken
+        ? { reauthTokenHash: hashReauthToken(reauthToken) }
+        : {}),
     });
     const returnPath = safeNextPath(finalized.return_path, finalized.flow);
     let target = new URL(returnPath, url.origin);
@@ -284,19 +301,28 @@ export async function GET(request) {
       if (existingRole.cookie) {
         setRoleCookie(response, existingRole.cookie);
         target = new URL(flowDefaults[finalized.flow], url.origin);
-      } else if (existingRole.account) {
-        return fail({
-          action: finalized.action,
-          error: existingRole.error || "already_registered",
-          flow: finalized.flow,
-          request,
-          response,
-        });
       } else {
         await bootstrapSupabaseNativeAccount({ userId: result.data.user.id });
         target.searchParams.set("oauth", "ready");
         target.searchParams.set("provider", finalized.provider);
       }
+    } else if (finalized.action === "reauth") {
+      const roleSession = await resolveRoleSession({
+        flow: finalized.flow,
+        userId: result.data.user.id,
+      });
+      if (!roleSession.cookie) {
+        return fail({
+          action: finalized.action,
+          error: roleSession.error || "unlinked",
+          flow: finalized.flow,
+          request,
+          response,
+        });
+      }
+      setRoleCookie(response, roleSession.cookie);
+      response.cookies.set(reauthCookie(reauthToken));
+      target.searchParams.set("reauth", "ready");
     } else {
       const roleSession = await resolveRoleSession({
         flow: finalized.flow,
@@ -314,10 +340,11 @@ export async function GET(request) {
       setRoleCookie(response, roleSession.cookie);
       if (finalized.action === "link") {
         target.searchParams.set("linked", finalized.provider);
+        response.cookies.set(clearReauthCookie());
       }
     }
 
-    if (finalized.flow === "tourney" && finalized.provider === "discord") {
+    if (finalized.provider === "discord") {
       const sync = await syncTourneyDiscordRoleAssignment({
         accessToken: String(result.data.session.provider_token || ""),
         userId: result.data.user.id,

@@ -167,7 +167,7 @@ export async function POST(request, context) {
     return run(() =>
       claimEntitlement({
         userId: result.auth.user.id,
-        verifiedEmail: result.auth.user.email,
+        verifiedEmail: result.auth.verifiedEmail,
         purchaseReference: body.purchaseReference,
       })
     );

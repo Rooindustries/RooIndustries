@@ -19,6 +19,24 @@ export class CommerceStore {
     return this.client.fetch(query, params);
   }
 
+  referralEarnings(options) {
+    return typeof this.client.referralEarnings === "function"
+      ? this.client.referralEarnings(options)
+      : null;
+  }
+
+  upgradeBookingChain(options) {
+    return typeof this.client.upgradeBookingChain === "function"
+      ? this.client.upgradeBookingChain(options)
+      : null;
+  }
+
+  derivedCount(options) {
+    return typeof this.client.derivedCount === "function"
+      ? this.client.derivedCount(options)
+      : null;
+  }
+
   getDocument(id) {
     return typeof this.client.getDocument === "function"
       ? this.client.getDocument(id)

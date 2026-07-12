@@ -59,5 +59,17 @@ describe("Supabase content asset URLs", () => {
       },
       download: "https://storage.test/private/builds/one.zip?ttl=900",
     });
+    expect(client.rpc).toHaveBeenCalledWith("roo_asset_manifest_for_refs", {
+      p_asset_ids: ["image-one"],
+      p_source_urls: ["https://cdn.sanity.io/file-one.zip"],
+    });
+    expect(client.rpc).not.toHaveBeenCalledWith("roo_asset_manifest");
+  });
+
+  test("does not load an asset manifest for content without asset references", async () => {
+    const client = { rpc: jest.fn() };
+    const data = { title: "No image", body: [{ children: [{ text: "Plain text" }] }] };
+    await expect(enrichSupabaseContentAssets({ data, client })).resolves.toEqual(data);
+    expect(client.rpc).not.toHaveBeenCalled();
   });
 });

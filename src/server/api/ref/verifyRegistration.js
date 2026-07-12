@@ -1,6 +1,10 @@
 import crypto from "node:crypto";
 import { createDataClient as createClient } from "../../data/documentClient.js";
-import { createSupabaseCreatorAccount } from "../../supabase/accounts.js";
+import {
+  createSupabaseCreatorAccount,
+  createVerifiedSupabaseBrowserSession,
+} from "../../supabase/accounts.js";
+import { installLegacySupabaseSession } from "../../supabase/serverSession.js";
 import { hashShadowDocument } from "../../supabase/shadowStore.js";
 import { logSafeError } from "../../safeErrorLog.js";
 import { setReferralSessionCookie } from "./auth.js";
@@ -52,7 +56,7 @@ export default async function handler(req, res) {
       });
     }
 
-    await createSupabaseCreatorAccount({
+    const created = await createSupabaseCreatorAccount({
       referral,
       passwordHash: referral.creatorPassword,
       sourceRevision: referral._rev || "",
@@ -89,12 +93,23 @@ export default async function handler(req, res) {
       });
     }
 
+    const browserSession = await createVerifiedSupabaseBrowserSession({
+      userId: created.userId,
+    });
+    await installLegacySupabaseSession({
+      req,
+      res,
+      session: browserSession.session,
+    });
+
     setReferralSessionCookie(
       res,
       {
         authBackend: "supabase",
         code: referral.slug?.current || "",
         referralId: referral._id,
+        principalId: browserSession.account?.principal_id || "",
+        sessionVersion: browserSession.account?.session_version || 1,
       },
       true
     );

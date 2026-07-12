@@ -98,9 +98,12 @@ export default async function handler(req, res) {
       setReferralSessionCookie(
         res,
         {
-          referralId: result.account.legacy_sanity_id,
+          referralId:
+            result.account.creator_legacy_sanity_id || result.account.legacy_sanity_id,
           code: result.account.referral_code || normalizedIdentifier,
           authBackend: "supabase",
+          principalId: result.account.principal_id,
+          sessionVersion: result.account.session_version,
         },
         Boolean(rememberMe)
       );
@@ -164,6 +167,7 @@ export default async function handler(req, res) {
     }
 
     await clearLegacySupabaseSession({ req, res }).catch(() => {});
+    let bridgeAccount = null;
     try {
       const bridge = await authenticateSupabaseAccount({
         identifier: normalizedIdentifier,
@@ -171,6 +175,7 @@ export default async function handler(req, res) {
         requiredRoles: ["creator"],
       });
       if (bridge.ok) {
+        bridgeAccount = bridge.account;
         await installLegacySupabaseSession({
           req,
           res,
@@ -183,7 +188,13 @@ export default async function handler(req, res) {
 
     setReferralSessionCookie(
       res,
-      { referralId: referral._id, code: referral.slug?.current || code },
+      {
+        referralId: referral._id,
+        code: referral.slug?.current || code,
+        authBackend: bridgeAccount ? "supabase" : "sanity",
+        principalId: bridgeAccount?.principal_id || "",
+        sessionVersion: bridgeAccount?.session_version || 1,
+      },
       Boolean(rememberMe)
     );
 

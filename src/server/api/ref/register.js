@@ -10,7 +10,10 @@ import {
   buildReferralIdentityClaimId,
 } from "./referralIdentity.js";
 import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
-import { createSupabaseCreatorAccount } from "../../supabase/accounts.js";
+import {
+  createSupabaseCreatorAccount,
+  resolveSupabaseAccountByUserId,
+} from "../../supabase/accounts.js";
 import { hashShadowDocument } from "../../supabase/shadowStore.js";
 import { getLegacySupabaseUser } from "../../supabase/serverSession.js";
 import { Resend } from "resend";
@@ -98,10 +101,12 @@ export default async function handler(req, res) {
     const socialUser = await getLegacySupabaseUser({ req, res }).catch(
       () => null
     );
+    const socialAccount = socialUser?.id
+      ? await resolveSupabaseAccountByUserId({ userId: socialUser.id }).catch(() => null)
+      : null;
     if (
       socialUser &&
-      (!socialUser.email_confirmed_at ||
-        String(socialUser.email || "").trim().toLowerCase() !== trimmedEmail)
+      String(socialAccount?.verified_real_email || "").trim().toLowerCase() !== trimmedEmail
     ) {
       return res.status(409).json({
         ok: false,
@@ -272,6 +277,7 @@ export default async function handler(req, res) {
     }
 
     const policy = resolveSupabaseRuntimePolicy();
+    let supabaseAccount = null;
     if (
       socialUser ||
       policy.shadowWritesEnabled ||
@@ -280,13 +286,14 @@ export default async function handler(req, res) {
       try {
         const persistedReferral =
           (await client.fetch(`*[_id == $id][0]`, { id: referralId })) || referral;
-        await createSupabaseCreatorAccount({
+        const createdAccount = await createSupabaseCreatorAccount({
           referral: persistedReferral,
           password: normalizedPassword,
           authUserId: socialUser?.id || "",
           sourceRevision: persistedReferral._rev || "",
           sourceHash: hashShadowDocument(persistedReferral),
         });
+        supabaseAccount = createdAccount.account;
       } catch (error) {
         logSafeError("Supabase creator account projection failed", error);
         if (socialUser || policy.primaryBackend === "supabase") {
@@ -314,6 +321,8 @@ export default async function handler(req, res) {
           socialUser || policy.primaryBackend === "supabase"
             ? "supabase"
             : "sanity",
+        principalId: supabaseAccount?.principal_id || "",
+        sessionVersion: supabaseAccount?.session_version || 1,
       },
       true
     );

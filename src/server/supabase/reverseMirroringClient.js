@@ -233,12 +233,14 @@ export const createReverseMirroringSupabaseClient = ({
                   ...options,
                 })
               : { supported: false, attempted: 0, mirrored: 0, failed: 0 };
-          const legacy = await retryReverseMirrorFailures({
-            supabaseClient: target,
-            sanityClient,
-            recoveryClient,
-            ...options,
-          });
+          const legacy = target.commerceOnly === true
+            ? { attempted: 0, mirrored: 0, queued: 0, supersededByOutbox: true }
+            : await retryReverseMirrorFailures({
+                supabaseClient: target,
+                sanityClient,
+                recoveryClient,
+                ...options,
+              });
           return { outbox, legacy };
         };
       }

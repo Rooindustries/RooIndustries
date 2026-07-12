@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import bcrypt from "bcryptjs";
 import { createSupabaseAdminClient } from "./adminClient.js";
 import { createSupabaseAuthClient } from "./authClient.js";
 
@@ -87,6 +88,9 @@ export const authenticateSupabaseAccount = async ({
   if (!account || !hasRequiredRole) {
     return { ok: false, reason: "invalid_credentials" };
   }
+  if (requiredRoles.includes("creator") && account.creator_active === false) {
+    return { ok: false, reason: "invalid_credentials" };
+  }
   if (accountScope === "tourney" && account.tourney_active === false) {
     return {
       ok: false,
@@ -148,25 +152,69 @@ export const authenticateSupabaseAccount = async ({
 export const updateSupabaseAccountPassword = async ({
   identifier,
   password,
+  passwordHash = "",
+  sourceRevision = "",
+  operationKey = `credential:${crypto.randomUUID()}`,
   adminClient = createSupabaseAdminClient(),
 } = {}) => {
   const normalizedPassword = normalizePassword(password);
-  if (normalizedPassword.length < 10 || normalizedPassword.length > 128) {
+  const importedHash = String(passwordHash || "").trim();
+  if (
+    (!importedHash && (normalizedPassword.length < 10 || normalizedPassword.length > 128)) ||
+    (importedHash && !/^\$2[aby]\$/.test(importedHash))
+  ) {
     throw new Error("Password must be between 10 and 128 characters.");
   }
   const account = await resolveSupabaseAccountAlias({ identifier, adminClient });
   if (!account?.user_id) return { updated: false };
+  const resolvedHash = importedHash || (await bcrypt.hash(normalizedPassword, 12));
+  requireRpcData(
+    await adminClient.rpc("roo_prepare_credential_operation", {
+      p_operation_key: operationKey,
+      p_user_id: account.user_id,
+      p_password_hash: resolvedHash,
+      p_source_revision: sourceRevision || null,
+    }),
+    "credential recovery preparation"
+  );
   const result = await adminClient.auth.admin.updateUserById(account.user_id, {
-    password: normalizedPassword,
+    password_hash: resolvedHash,
   });
   if (result.error) throw new Error("Supabase password update failed.");
+  requireRpcData(
+    await adminClient.rpc("roo_mark_credential_operation", {
+      p_operation_key: operationKey,
+      p_status: "auth_applied",
+      p_error_code: null,
+    }),
+    "credential recovery checkpoint"
+  );
   requireRpcData(
     await adminClient.rpc("roo_complete_credential_migration", {
       p_user_id: account.user_id,
     }),
     "credential migration"
   );
-  return { updated: true, userId: account.user_id };
+  return {
+    updated: true,
+    userId: account.user_id,
+    principalId: account.principal_id,
+    operationKey,
+    passwordHash: resolvedHash,
+  };
+};
+
+export const completeSupabaseCredentialMirror = async ({
+  operationKey,
+  adminClient = createSupabaseAdminClient(),
+} = {}) => {
+  const completed = requireRpcData(
+    await adminClient.rpc("roo_complete_credential_operation", {
+      p_operation_key: operationKey,
+    }),
+    "credential mirror completion"
+  );
+  return { sessionVersion: Number(completed?.session_version || 0) };
 };
 
 const deterministicUuid = (value) => {
@@ -281,9 +329,11 @@ export const syncSupabaseTourneyPlayerAccount = async ({
       throw new Error("Supabase Auth user belongs to another Tourney player.");
     }
     if (requestedUserId) {
-      const verifiedEmail = existingUser.email_confirmed_at
-        ? normalizeIdentifier(existingUser.email)
-        : "";
+      const linkedAccount = await resolveSupabaseAccountByUserId({
+        userId: requestedUserId,
+        adminClient,
+      });
+      const verifiedEmail = normalizeIdentifier(linkedAccount?.verified_real_email);
       if (!verifiedEmail || verifiedEmail !== source.email) {
         throw new Error("Tourney social signup email does not match Auth.");
       }
@@ -321,7 +371,7 @@ export const syncSupabaseTourneyPlayerAccount = async ({
   }
   const authEmail = normalizeIdentifier(existingUser?.email) || fallbackEmail;
   requireRpcData(
-    await adminClient.rpc("roo_import_tourney_player_account", {
+    await adminClient.rpc("roo_import_tourney_player_account_v2", {
       p_account: {
         user_id: userId,
         auth_email: authEmail,
@@ -340,24 +390,6 @@ export const syncSupabaseTourneyPlayerAccount = async ({
     }),
     "Tourney player account synchronization"
   );
-  const lifecycle = await adminClient
-    .schema("accounts")
-    .from("tourney_accounts")
-    .update({ lifecycle_status: source.status })
-    .eq("user_id", userId);
-  if (lifecycle.error) {
-    throw new Error("Supabase Tourney lifecycle synchronization failed.");
-  }
-  const profile = await adminClient
-    .from("profiles")
-    .update({ status: "active" })
-    .eq("user_id", userId);
-  if (profile.error) {
-    throw new Error("Supabase Tourney profile synchronization failed.");
-  }
-  await adminClient.rpc("roo_reconcile_auth_identity_links", {
-    p_user_id: userId,
-  });
   const guildId = String(env.DISCORD_GUILD_ID || "").trim();
   if (/^[0-9]{5,30}$/.test(guildId)) {
     await adminClient.rpc("roo_refresh_discord_role_assignment", {
@@ -365,7 +397,10 @@ export const syncSupabaseTourneyPlayerAccount = async ({
       p_guild_id: guildId,
     });
   }
-  return { userId };
+  return {
+    userId,
+    account: await resolveSupabaseAccountByUserId({ userId, adminClient }),
+  };
 };
 
 export const syncSupabaseTourneyAdminAccount = async ({
@@ -429,7 +464,7 @@ export const syncSupabaseTourneyAdminAccount = async ({
     adminClient,
   });
   requireRpcData(
-    await adminClient.rpc("roo_import_account", {
+    await adminClient.rpc("roo_import_account_v2", {
       p_account: {
         user_id: userId,
         primary_email: primaryEmail,
@@ -477,26 +512,6 @@ export const syncSupabaseTourneyAdminAccount = async ({
     }),
     "Tourney administrator metadata synchronization"
   );
-  const lifecycle = await adminClient
-    .schema("accounts")
-    .from("tourney_accounts")
-    .update({
-      lifecycle_status: account.active === false ? "disabled" : "approved",
-    })
-    .eq("user_id", userId);
-  if (lifecycle.error) {
-    throw new Error("Supabase Tourney administrator lifecycle sync failed.");
-  }
-  const profile = await adminClient
-    .from("profiles")
-    .update({ status: "active" })
-    .eq("user_id", userId);
-  if (profile.error) {
-    throw new Error("Supabase Tourney administrator profile sync failed.");
-  }
-  await adminClient.rpc("roo_reconcile_auth_identity_links", {
-    p_user_id: userId,
-  });
   const guildId = String(env.DISCORD_GUILD_ID || "").trim();
   if (/^[0-9]{5,30}$/.test(guildId)) {
     await adminClient.rpc("roo_refresh_discord_role_assignment", {
@@ -504,7 +519,10 @@ export const syncSupabaseTourneyAdminAccount = async ({
       p_guild_id: guildId,
     });
   }
-  return { userId };
+  return {
+    userId,
+    account: await resolveSupabaseAccountByUserId({ userId, adminClient }),
+  };
 };
 
 export const createSupabaseCreatorAccount = async ({
@@ -548,9 +566,11 @@ export const createSupabaseCreatorAccount = async ({
   if (requestedUserId) {
     const existing = await adminClient.auth.admin.getUserById(requestedUserId);
     const user = existing.data?.user;
-    const verifiedEmail = user?.email_confirmed_at
-      ? normalizeIdentifier(user.email)
-      : "";
+    const linkedAccount = await resolveSupabaseAccountByUserId({
+      userId: requestedUserId,
+      adminClient,
+    });
+    const verifiedEmail = normalizeIdentifier(linkedAccount?.verified_real_email);
     if (existing.error || !user || verifiedEmail !== email) {
       throw new Error("Creator social signup email does not match Auth.");
     }
@@ -637,7 +657,10 @@ export const createSupabaseCreatorAccount = async ({
     throw error;
   }
 
-  return { userId };
+  return {
+    userId,
+    account: await resolveSupabaseAccountByUserId({ userId, adminClient }),
+  };
 };
 
 export const bootstrapSupabaseNativeAccount = async ({
@@ -668,6 +691,36 @@ export const bootstrapSupabaseNativeAccount = async ({
   return account;
 };
 
+export const createVerifiedSupabaseBrowserSession = async ({
+  userId,
+  adminClient = createSupabaseAdminClient(),
+  authClient = createSupabaseAuthClient(),
+} = {}) => {
+  const account = await resolveSupabaseAccountByUserId({ userId, adminClient });
+  const email = normalizeIdentifier(account?.verified_real_email);
+  if (!email) throw new Error("A verified real email is required for browser sign-in.");
+  const generated = await adminClient.auth.admin.generateLink({
+    type: "magiclink",
+    email,
+  });
+  const tokenHash = String(generated.data?.properties?.hashed_token || "").trim();
+  if (generated.error || !tokenHash) {
+    throw new Error("Supabase browser sign-in grant could not be created.");
+  }
+  const verified = await authClient.auth.verifyOtp({
+    token_hash: tokenHash,
+    type: "magiclink",
+  });
+  if (
+    verified.error ||
+    verified.data?.user?.id !== userId ||
+    !verified.data?.session
+  ) {
+    throw new Error("Supabase browser sign-in grant could not be verified.");
+  }
+  return { account, session: verified.data.session };
+};
+
 export const requireSupabaseBearerUser = async ({
   authorization,
   adminClient = createSupabaseAdminClient(),
@@ -680,12 +733,13 @@ export const requireSupabaseBearerUser = async ({
     return { ok: false, status: 401, reason: "invalid_token" };
   }
   const user = result.data.user;
-  if (requireVerifiedEmail && !user.email_confirmed_at) {
-    return { ok: false, status: 403, reason: "email_not_verified" };
-  }
   const account = await resolveSupabaseAccountByUserId({
     userId: user.id,
     adminClient,
   });
-  return { ok: true, user, account, accessToken: match[1] };
+  const verifiedEmail = normalizeIdentifier(account?.verified_real_email);
+  if (requireVerifiedEmail && !verifiedEmail) {
+    return { ok: false, status: 403, reason: "email_not_verified" };
+  }
+  return { ok: true, user, account, verifiedEmail, accessToken: match[1] };
 };

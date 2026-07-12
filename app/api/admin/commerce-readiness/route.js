@@ -36,14 +36,15 @@ export async function GET(request) {
   try {
     const policy = resolveSupabaseRuntimePolicy();
     const client = createSupabaseAdminClient();
-    const [readinessResult, integrityResult] = await Promise.all([
+    const [readinessResult, integrityResult, portResult] = await Promise.all([
       client.rpc("roo_commerce_readiness"),
       client.rpc("roo_commerce_integrity_readiness"),
+      client.rpc("roo_supabase_port_readiness"),
     ]);
-    if (readinessResult.error || integrityResult.error) {
+    if (readinessResult.error || integrityResult.error || portResult.error) {
       throw Object.assign(
         new Error("Readiness query failed."),
-        readinessResult.error || integrityResult.error
+        readinessResult.error || integrityResult.error || portResult.error
       );
     }
     const readiness = readinessResult.data || {};
@@ -73,6 +74,7 @@ export async function GET(request) {
             integrity.full_projector_calls_in_commands || 0
           ),
         },
+        portClosure: portResult.data || {},
       },
       { headers: noStore }
     );

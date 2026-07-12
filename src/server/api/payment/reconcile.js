@@ -5,10 +5,14 @@ import {
 import { cleanupExpiredRateLimitBuckets } from "../ref/rateLimit.js";
 import { logSafeError } from "../../safeErrorLog.js";
 import { createPaymentBackendClient } from "./backend.js";
-import { isSupabaseAdminConfigured } from "../../supabase/adminClient.js";
+import {
+  createSupabaseAdminClient,
+  isSupabaseAdminConfigured,
+} from "../../supabase/adminClient.js";
 import { reconcileBookingEmailDispatches } from "../ref/bookingEmails.js";
 import { syncSanityCommerceChanges } from "../../supabase/incrementalCommerceSync.js";
 import { reconcileTourneyDiscordRoleAssignments } from "../../tourney/discordRoleSync.js";
+import { reconcileCredentialOperations } from "../../supabase/credentialRecovery.js";
 
 export default async function handler(req, res) {
   if (req.method !== "GET" && req.method !== "POST") {
@@ -142,6 +146,15 @@ export default async function handler(req, res) {
         result.body.summary.commerceBookkeepingPending = true;
       }
     }
+    if (isSupabaseAdminConfigured()) {
+      try {
+        result.body.summary.credentialRecovery =
+          await reconcileCredentialOperations({ limit: 10 });
+      } catch (error) {
+        logSafeError("Credential recovery reconciliation failed", error);
+        result.body.summary.credentialRecovery = { pending: true };
+      }
+    }
     try {
       result.body.summary.rateLimitBucketsCleaned =
         await cleanupExpiredRateLimitBuckets();
@@ -154,11 +167,36 @@ export default async function handler(req, res) {
       String(process.env.SUPABASE_SOCIAL_AUTH_ENABLED || "").trim().toLowerCase()
     )) {
       try {
+        const accountSecurity = await createSupabaseAdminClient().rpc(
+          "roo_reconcile_account_security",
+          { p_guild_id: String(process.env.DISCORD_GUILD_ID || "").trim() || null }
+        );
+        if (accountSecurity.error) throw accountSecurity.error;
+        result.body.summary.accountSecurity = accountSecurity.data || {};
         result.body.summary.tourneyDiscordRoles =
-          await reconcileTourneyDiscordRoleAssignments();
+          await reconcileTourneyDiscordRoleAssignments({ limit: 10 });
       } catch (error) {
         logSafeError("Tourney Discord role reconciliation failed", error);
         result.body.summary.tourneyDiscordRoles = { pending: true };
+      }
+    }
+    if (isSupabaseAdminConfigured()) {
+      try {
+        const checkpoint = await createSupabaseAdminClient().rpc(
+          "roo_record_reconciliation_checkpoint",
+          {
+            p_counters: result.body.summary,
+            p_parity: {
+              incrementalShadowSync,
+              reverseMirror: result.body.summary.reverseMirror || {},
+            },
+          }
+        );
+        if (checkpoint.error) throw checkpoint.error;
+        result.body.summary.reconciliationCheckpoint = checkpoint.data || {};
+      } catch (error) {
+        logSafeError("Reconciliation checkpoint recording failed", error);
+        result.body.summary.reconciliationCheckpointPending = true;
       }
     }
   }

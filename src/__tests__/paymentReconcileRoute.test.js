@@ -19,10 +19,29 @@ const createResponse = () => {
 
 const loadHandler = async ({ authorized = true } = {}) => {
   jest.resetModules();
-  const syncSanityCommerceChanges = jest.fn();
-  const reconcilePaymentSessions = jest.fn();
-  const reconcileBookingEmailDispatches = jest.fn();
-  const cleanupExpiredRateLimitBuckets = jest.fn();
+  const events = [];
+  const syncSanityCommerceChanges = jest.fn(async () => {
+    events.push("incremental");
+    return { supported: true, changed: 0 };
+  });
+  const reconcilePaymentSessions = jest.fn(async ({ backend }) => {
+    events.push(`payment:${backend}`);
+    return { httpStatus: 200, body: { ok: true, summary: { checked: 1 } } };
+  });
+  const reconcileBookingEmailDispatches = jest.fn(async () => ({}));
+  const cleanupExpiredRateLimitBuckets = jest.fn(async () => 0);
+  const reconcileCredentialOperations = jest.fn(async () => {
+    events.push("credentials");
+    return { checked: 0 };
+  });
+  const reconcileTourneyDiscordRoleAssignments = jest.fn(async () => {
+    events.push("discord");
+    return { checked: 0 };
+  });
+  const adminRpc = jest.fn(async (name) => {
+    events.push(`rpc:${name}`);
+    return { data: {}, error: null };
+  });
   const reconcileReverseMirror = jest.fn().mockResolvedValue({
     supported: true,
     attempted: 3,
@@ -46,7 +65,14 @@ const loadHandler = async ({ authorized = true } = {}) => {
     reconcileBookingEmailDispatches,
   }));
   jest.doMock("../server/supabase/adminClient.js", () => ({
+    createSupabaseAdminClient: jest.fn(() => ({ rpc: adminRpc })),
     isSupabaseAdminConfigured: jest.fn(() => true),
+  }));
+  jest.doMock("../server/supabase/credentialRecovery.js", () => ({
+    reconcileCredentialOperations,
+  }));
+  jest.doMock("../server/tourney/discordRoleSync.js", () => ({
+    reconcileTourneyDiscordRoleAssignments,
   }));
   jest.doMock("../server/api/payment/backend.js", () => ({
     createPaymentBackendClient: jest.fn(() => ({
@@ -62,6 +88,10 @@ const loadHandler = async ({ authorized = true } = {}) => {
     reconcilePaymentSessions,
     reconcileBookingEmailDispatches,
     cleanupExpiredRateLimitBuckets,
+    events,
+    adminRpc,
+    reconcileCredentialOperations,
+    reconcileTourneyDiscordRoleAssignments,
     reconcileReverseMirror,
   };
 };
@@ -116,5 +146,32 @@ describe("payment reconciliation route authorization", () => {
     expect(loaded.reconcilePaymentSessions).not.toHaveBeenCalled();
     expect(loaded.reconcileBookingEmailDispatches).not.toHaveBeenCalled();
     expect(loaded.cleanupExpiredRateLimitBuckets).not.toHaveBeenCalled();
+  });
+
+  test("finishes payment recovery before the bounded Discord retry queue", async () => {
+    const previous = process.env.SUPABASE_SOCIAL_AUTH_ENABLED;
+    process.env.SUPABASE_SOCIAL_AUTH_ENABLED = "1";
+    try {
+      const loaded = await loadHandler();
+      const { response, state } = createResponse();
+      await loaded.handler({ method: "GET", headers: {} }, response);
+      expect(state.status).toBe(200);
+      const discordIndex = loaded.events.indexOf("discord");
+      const paymentIndexes = loaded.events
+        .map((event, index) => (event.startsWith("payment:") ? index : -1))
+        .filter((index) => index >= 0);
+      expect(paymentIndexes).toHaveLength(2);
+      expect(discordIndex).toBeGreaterThan(Math.max(...paymentIndexes));
+      expect(loaded.reconcileTourneyDiscordRoleAssignments).toHaveBeenCalledWith({
+        limit: 10,
+      });
+      expect(loaded.adminRpc).toHaveBeenCalledWith(
+        "roo_record_reconciliation_checkpoint",
+        expect.any(Object)
+      );
+    } finally {
+      if (previous === undefined) delete process.env.SUPABASE_SOCIAL_AUTH_ENABLED;
+      else process.env.SUPABASE_SOCIAL_AUTH_ENABLED = previous;
+    }
   });
 });

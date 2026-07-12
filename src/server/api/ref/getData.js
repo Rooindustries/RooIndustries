@@ -20,7 +20,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const session = requireReferralSession(req, res);
+    const session = await requireReferralSession(req, res);
     if (!session) return;
     const id = session.referralId;
 

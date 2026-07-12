@@ -14,6 +14,12 @@ export const getSuccessfulReferralCount = async ({
 }) => {
   if (!referralId) return 0;
   const resolvedClient = client || createRefReadClient();
+  if (typeof resolvedClient.derivedCount === "function") {
+    return resolvedClient.derivedCount({
+      kind: "referral_success",
+      value: referralId,
+    });
+  }
   const count = await resolvedClient.fetch(
     `count(*[
       _type == "booking"
@@ -37,6 +43,12 @@ export const getCouponUsageCount = async ({
   const normalizedCode = normalizeCouponCode(couponCode);
   if (!normalizedCode) return 0;
   const resolvedClient = client || createRefReadClient();
+  if (typeof resolvedClient.derivedCount === "function") {
+    return resolvedClient.derivedCount({
+      kind: "coupon_usage",
+      value: normalizedCode,
+    });
+  }
   const count = await resolvedClient.fetch(
     `count(*[
       _type == "booking"
@@ -96,7 +108,12 @@ export const syncCouponUsage = async ({
   if (!coupon?._id) return 0;
 
   const trackedRedemptions = Number(
-    await client.fetch(
+    typeof client.derivedCount === "function"
+      ? await client.derivedCount({
+          kind: "coupon_redemptions",
+          value: coupon._id,
+        })
+      : await client.fetch(
       `count(*[
         _type == "couponRedemption"
         && coupon._ref == $couponId

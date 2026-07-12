@@ -2,8 +2,7 @@ import { createSupabaseAdminClient } from "./adminClient.js";
 
 const MANIFEST_TTL_MS = 60 * 1000;
 const PRIVATE_URL_TTL_SECONDS = 15 * 60;
-let manifestCache = null;
-let manifestExpiresAt = 0;
+const manifestCache = new Map();
 
 const requireData = ({ data, error }, operation) => {
   if (error) {
@@ -14,14 +13,45 @@ const requireData = ({ data, error }, operation) => {
   return data;
 };
 
-const getManifest = async (client) => {
-  if (manifestCache && manifestExpiresAt > Date.now()) return manifestCache;
+const collectReferences = (value, result = { ids: new Set(), urls: new Set() }) => {
+  if (Array.isArray(value)) {
+    value.forEach((entry) => collectReferences(entry, result));
+    return result;
+  }
+  if (!value || typeof value !== "object") {
+    if (typeof value === "string" && /^https?:\/\//i.test(value)) {
+      result.urls.add(value);
+    }
+    return result;
+  }
+  const reference = String(value?._ref || "").trim();
+  if (reference) result.ids.add(reference);
+  Object.values(value).forEach((entry) => collectReferences(entry, result));
+  return result;
+};
+
+const getManifest = async (client, references) => {
+  const now = Date.now();
+  for (const [cachedKey, cachedValue] of manifestCache) {
+    if (cachedValue.expiresAt <= now) manifestCache.delete(cachedKey);
+  }
+  const assetIds = [...references.ids].sort().slice(0, 1000);
+  const sourceUrls = [...references.urls].sort().slice(0, 1000);
+  if (assetIds.length < 1 && sourceUrls.length < 1) {
+    return { byId: new Map(), bySourceUrl: new Map() };
+  }
+  const key = JSON.stringify([assetIds, sourceUrls]);
+  const cached = manifestCache.get(key);
+  if (cached?.expiresAt > now) return cached.value;
   const data = requireData(
-    await client.rpc("roo_asset_manifest"),
+    await client.rpc("roo_asset_manifest_for_refs", {
+      p_asset_ids: assetIds,
+      p_source_urls: sourceUrls,
+    }),
     "asset manifest"
   );
   const entries = Array.isArray(data) ? data : [];
-  manifestCache = {
+  const manifest = {
     byId: new Map(
       entries.map((entry) => [entry.legacy_sanity_asset_id, entry])
     ),
@@ -31,8 +61,11 @@ const getManifest = async (client) => {
         .map((entry) => [entry.source_url, entry])
     ),
   };
-  manifestExpiresAt = Date.now() + MANIFEST_TTL_MS;
-  return manifestCache;
+  if (manifestCache.size >= 100) {
+    manifestCache.delete(manifestCache.keys().next().value);
+  }
+  manifestCache.set(key, { value: manifest, expiresAt: now + MANIFEST_TTL_MS });
+  return manifest;
 };
 
 const collectEntries = (value, manifest, entries = new Map()) => {
@@ -118,7 +151,8 @@ export const enrichSupabaseContentAssets = async ({
   data,
   client = createSupabaseAdminClient(),
 } = {}) => {
-  const manifest = await getManifest(client);
+  const references = collectReferences(data);
+  const manifest = await getManifest(client, references);
   const entries = collectEntries(data, manifest);
   if (entries.size < 1) return data;
   const resolved = await resolveUrls(entries, client);
@@ -126,6 +160,5 @@ export const enrichSupabaseContentAssets = async ({
 };
 
 export const clearSupabaseAssetManifestCache = () => {
-  manifestCache = null;
-  manifestExpiresAt = 0;
+  manifestCache.clear();
 };

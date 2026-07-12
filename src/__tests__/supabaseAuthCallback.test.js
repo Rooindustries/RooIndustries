@@ -276,6 +276,31 @@ describe("Supabase Auth callback", () => {
     );
   });
 
+  test("preserves the current domain and Supabase sessions when linking is cancelled", async () => {
+    mockReadOAuthIntent.mockResolvedValue({
+      id: intentId,
+      action: "link",
+      flow: "tourney",
+      provider: "discord",
+      return_path: "/tourney",
+      status: "pending",
+      expires_at: "2099-01-01T00:00:00.000Z",
+    });
+    const response = await GET(
+      request(
+        `https://www.rooindustries.com/auth/callback?intent=${intentId}&error=access_denied`,
+        `roo_oauth_intent.${intentId}=opaque-token; tourney_session=existing-session`
+      )
+    );
+    expect(mockClearNextSupabaseSession).not.toHaveBeenCalled();
+    expect(response.cookies.values).not.toContainEqual(
+      expect.objectContaining({ name: "tourney_session", maxAge: 0 })
+    );
+    expect(response.url).toBe(
+      "https://www.rooindustries.com/tourney/login?error=missing_code"
+    );
+  });
+
   test("rejects a mismatched intent id without consuming the OAuth code", async () => {
     mockReadOAuthIntent.mockResolvedValue({
       id: "22222222-2222-4222-8222-222222222222",

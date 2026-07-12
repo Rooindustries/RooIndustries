@@ -16,6 +16,23 @@ const isCanonicalWebOrigin = (url) =>
   CANONICAL_WEB_HOSTS.has(url.hostname) &&
   !url.port;
 
+const singleHeaderValue = (value) => {
+  const normalized = String(value || "").trim();
+  return normalized && !normalized.includes(",") ? normalized : "";
+};
+
+const forwardedRequestOrigin = (request, requestUrl) => {
+  const forwardedHost = singleHeaderValue(
+    request.headers.get("x-forwarded-host") || request.headers.get("host")
+  );
+  if (!forwardedHost) return null;
+  const forwardedProtocol = singleHeaderValue(
+    request.headers.get("x-forwarded-proto") || requestUrl.protocol.slice(0, -1)
+  ).toLowerCase();
+  if (!/^(https?|wss?)$/.test(forwardedProtocol)) return null;
+  return new URL(`${forwardedProtocol}://${forwardedHost}`);
+};
+
 export const isSameOriginMutation = (request) => {
   try {
     const requestUrl = new URL(request.url);
@@ -23,10 +40,19 @@ export const isSameOriginMutation = (request) => {
     const suppliedOrigin = String(request.headers.get("origin") || "").trim();
     if (suppliedOrigin) {
       const originUrl = new URL(suppliedOrigin);
-      return (
+      if (
+        CANONICAL_WEB_HOSTS.has(originUrl.hostname) &&
+        !isCanonicalWebOrigin(originUrl)
+      ) {
+        return false;
+      }
+      const forwardedOrigin = forwardedRequestOrigin(request, requestUrl);
+      return Boolean(
         originUrl.origin === requestUrl.origin ||
-        isCanonicalWebOrigin(originUrl) ||
-        isCanonicalWebOriginPair(originUrl, requestUrl)
+        isCanonicalWebOriginPair(originUrl, requestUrl) ||
+        (isCanonicalWebOrigin(originUrl) &&
+          forwardedOrigin &&
+          isCanonicalWebOrigin(forwardedOrigin))
       );
     }
 

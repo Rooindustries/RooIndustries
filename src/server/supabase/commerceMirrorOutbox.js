@@ -48,6 +48,7 @@ const cleanForSanity = ({ document, event }) => {
     _createdAt,
     _updatedAt,
     _supabaseCanonicalHash: documentCanonicalHash,
+    _supabaseSequence: documentSequence,
     ...clean
   } = document;
   return {
@@ -61,6 +62,10 @@ const cleanForSanity = ({ document, event }) => {
       Number(event?.cutover_generation) || 0
     ),
     _supabaseMirroredAt: new Date().toISOString(),
+    _supabaseSequence: Math.max(
+      0,
+      Number(documentSequence || event?.sequence_no) || 0
+    ),
   };
 };
 
@@ -78,6 +83,7 @@ const cleanReferralAccountingForSanity = ({ document, event }) => {
       _supabaseCanonicalHash: clean._supabaseCanonicalHash,
       _commerceCutoverGeneration: clean._commerceCutoverGeneration,
       _supabaseMirroredAt: clean._supabaseMirroredAt,
+      _supabaseSequence: clean._supabaseSequence,
     }
   );
 };
@@ -96,7 +102,8 @@ const guardedDeleteIds = async ({ sanityClient, event }) => {
       _rev,
       _supabaseRevision,
       _supabaseCanonicalHash,
-      _commerceCutoverGeneration
+      _commerceCutoverGeneration,
+      _supabaseSequence
     }`,
     { ids: deletedIds }
   );
@@ -109,6 +116,9 @@ const guardedDeleteIds = async ({ sanityClient, event }) => {
   return deletedIds.filter((id) => {
     const current = currentById.get(id);
     if (!current) return false;
+    if (Number(current._supabaseSequence || 0) > Number(event?.sequence_no || 0)) {
+      return false;
+    }
     const guard = event?.delete_guards?.[id];
     const guardedRevision = String(guard?.source_revision || "");
     const currentRevision = String(
@@ -139,11 +149,30 @@ const guardedDeleteIds = async ({ sanityClient, event }) => {
 };
 
 const mirrorEventToSanity = async ({ sanityClient, event }) => {
+  const documents = normalizeDocuments(event?.documents);
+  const documentIds = documents.map((document) => String(document?._id || "")).filter(Boolean);
+  const currentDocuments = documentIds.length > 0
+    ? await sanityClient.fetch(
+        `*[_id in $ids]{_id,_supabaseSequence,_supabaseCanonicalHash}`,
+        { ids: documentIds }
+      )
+    : [];
+  const currentById = new Map(
+    (Array.isArray(currentDocuments) ? currentDocuments : [])
+      .filter((document) => document?._id)
+      .map((document) => [String(document._id), document])
+  );
+  const eligibleDocuments = documents.filter((document) => {
+    const current = currentById.get(String(document?._id || ""));
+    return Number(current?._supabaseSequence || 0) <= Number(event?.sequence_no || 0);
+  });
+  const skippedDocuments = documents.length - eligibleDocuments.length;
+  const eligibleDeletes = await guardedDeleteIds({ sanityClient, event });
   let transaction = sanityClient.transaction();
-  for (const id of await guardedDeleteIds({ sanityClient, event })) {
+  for (const id of eligibleDeletes) {
     transaction = transaction.delete(id);
   }
-  for (const document of normalizeDocuments(event?.documents)) {
+  for (const document of eligibleDocuments) {
     if (document?._type === "referral") {
       const accounting = cleanReferralAccountingForSanity({ document, event });
       transaction = transaction.patch(document._id, (patch) =>
@@ -153,7 +182,14 @@ const mirrorEventToSanity = async ({ sanityClient, event }) => {
     }
     transaction = transaction.createOrReplace(cleanForSanity({ document, event }));
   }
-  await transaction.commit();
+  const applied = eligibleDeletes.length + eligibleDocuments.length;
+  if (applied > 0) await transaction.commit();
+  return {
+    applied,
+    superseded:
+      skippedDocuments +
+      Math.max(0, normalizeIds(event?.deleted_ids).length - eligibleDeletes.length),
+  };
 };
 
 export const drainCommerceMirrorOutbox = async ({
@@ -234,17 +270,20 @@ export const drainCommerceMirrorOutbox = async ({
     for (const event of events) {
       summary.attempted += 1;
       try {
-        await mirrorEventToSanity({ sanityClient, event });
+        const mirrored = await mirrorEventToSanity({ sanityClient, event });
+        const superseded = mirrored.applied < 1 && mirrored.superseded > 0;
         requireRpc(
           await supabaseClient.rpc("roo_complete_commerce_mirror_event", {
             p_event_key: event.event_key,
             p_lease_id: leaseId,
             p_success: true,
-            p_error_code: null,
+            p_error_code: superseded
+              ? "SUPERSEDED_BY_NEWER_SEQUENCE"
+              : null,
           }),
           "commerce mirror completion"
         );
-        summary.mirrored += 1;
+        summary.mirrored += superseded ? 0 : 1;
       } catch (error) {
         summary.failed += 1;
         try {
