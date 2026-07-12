@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { tourneyMutationFetch } from "./tourneyMutation";
 
 const rankOptions = [
   "Master",
@@ -137,7 +138,7 @@ export default function TourneyPlayerManager({
     setMessage("");
 
     try {
-      const response = await fetch("/api/tourney/players", {
+      const response = await tourneyMutationFetch("/api/tourney/players", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

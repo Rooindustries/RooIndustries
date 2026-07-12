@@ -8,10 +8,14 @@ import {
   getClientAddressFromHeaders,
   readEffectiveTourneyAccounts,
 } from "../../../../src/server/tourney/auth";
-import { sendTourneyResetEmail } from "../../../../src/server/tourney/email";
+import { enqueueTourneyEmailDispatch } from "../../../../src/server/tourney/emailDispatch";
 import { createTourneyResetToken } from "../../../../src/server/tourney/playerStore";
 import { logSafeError } from "../../../../src/server/safeErrorLog";
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
+import {
+  executeTourneyCommand,
+  readTourneyCommandId,
+} from "../../../../src/server/tourney/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,36 +47,60 @@ export async function POST(request) {
   }
 
   try {
-    const accounts = await readEffectiveTourneyAccounts();
-    const adminAccount =
-      findTourneyAccount(login, accounts) || findTourneyAccountByEmail(login, accounts);
-    const adminEmail =
-      adminAccount?.active && ["owner", "caster"].includes(adminAccount.role)
-        ? getTourneyAdminEmail(adminAccount)
-        : "";
-
-    if (adminAccount && adminEmail) {
-      const token = createTourneyPasswordResetToken({ account: adminAccount });
-      await sendTourneyResetEmail({
-        player: {
-          username: adminAccount.username,
-          email: adminEmail,
-        },
-        token,
-        baseUrl: new URL(request.url).origin,
-      });
-    } else {
-      const reset = await createTourneyResetToken({ login });
-      if (reset) {
-        await sendTourneyResetEmail({
-          player: reset.player,
-          token: reset.token,
-          baseUrl: new URL(request.url).origin,
-        });
-      }
-    }
+    const commandId = readTourneyCommandId({ request });
+    await executeTourneyCommand({
+      commandId,
+      purpose: "tokens:reset-request",
+      requestPayload: { login: login.toLowerCase() },
+      callback: async () => {
+        const accounts = await readEffectiveTourneyAccounts();
+        const adminAccount =
+          findTourneyAccount(login, accounts) || findTourneyAccountByEmail(login, accounts);
+        const adminEmail =
+          adminAccount?.active && ["owner", "caster"].includes(adminAccount.role)
+            ? getTourneyAdminEmail(adminAccount)
+            : "";
+        if (adminAccount && adminEmail) {
+          const token = createTourneyPasswordResetToken({ account: adminAccount });
+          await enqueueTourneyEmailDispatch({
+            commandId,
+            dispatchKind: "reset",
+            recipient: adminEmail,
+            payload: {
+              player: { username: adminAccount.username, email: adminEmail },
+              token,
+              baseUrl: new URL(request.url).origin,
+            },
+          });
+        } else {
+          const reset = await createTourneyResetToken({ login });
+          if (reset) {
+            await enqueueTourneyEmailDispatch({
+              commandId,
+              dispatchKind: "reset",
+              recipient: reset.player.email,
+              payload: {
+                player: reset.player,
+                token: reset.token,
+                baseUrl: new URL(request.url).origin,
+              },
+            });
+          }
+        }
+        return { body: { ok: true } };
+      },
+    });
   } catch (error) {
     logSafeError("Tournament forgot-password failed", error);
+    if (error?.code === "TOURNEY_IDEMPOTENCY_KEY_REQUIRED" || error?.code === "TOURNEY_WRITES_PAUSED") {
+      return NextResponse.json(
+        { ok: false, error: error.message, code: error.code },
+        {
+          status: Number(error.status || 400),
+          headers: error.retryAfter ? { "Retry-After": String(error.retryAfter) } : undefined,
+        }
+      );
+    }
   }
 
   return NextResponse.json({

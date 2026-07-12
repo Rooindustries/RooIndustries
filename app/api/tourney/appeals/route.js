@@ -12,6 +12,10 @@ import {
 } from "../../../../src/server/tourney/appealPayoutStore";
 import { buildTourneyPublicError } from "../../../../src/server/tourney/publicError";
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
+import {
+  executeTourneyCommand,
+  readTourneyCommandId,
+} from "../../../../src/server/tourney/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,11 +37,11 @@ const readPayload = async (request) => {
   return Object.fromEntries(form.entries());
 };
 
-const getAppealsResponse = async (session) =>
-  NextResponse.json({
+const getAppealsBody = async (session) => ({
     ok: true,
     appeals: await listTourneyAppealsForSession({ session }),
   });
+const getAppealsResponse = async (session) => NextResponse.json(await getAppealsBody(session));
 
 export async function GET(request) {
   const session = await getSession(request);
@@ -73,30 +77,38 @@ export async function POST(request) {
   try {
     const payload = await readPayload(request);
     const action = String(payload.action || "create").toLowerCase();
-
-    if (action === "create") {
-      await createTourneyAppeal({ payload, session });
-      return getAppealsResponse(session);
-    }
-
-    if (action === "update") {
-      if (!["owner", "caster"].includes(session.role)) {
-        return jsonError("Not found.", 404);
-      }
-      await updateTourneyAppeal({
-        appealId: payload.appealId,
-        payload,
-        session,
-      });
-      return getAppealsResponse(session);
-    }
-
-    return jsonError("Unsupported appeal action.");
+    const commandId = readTourneyCommandId({ request });
+    const command = await executeTourneyCommand({
+      commandId,
+      purpose: `appeals:${action}`,
+      requestPayload: payload,
+      callback: async () => {
+        if (action === "create") {
+          await createTourneyAppeal({ payload, session });
+          return { body: await getAppealsBody(session) };
+        }
+        if (action === "update") {
+          if (!["owner", "caster"].includes(session.role)) {
+            throw Object.assign(new Error("Not found."), { status: 404 });
+          }
+          await updateTourneyAppeal({
+            appealId: payload.appealId,
+            payload,
+            session,
+          });
+          return { body: await getAppealsBody(session) };
+        }
+        throw Object.assign(new Error("Unsupported appeal action."), { status: 400 });
+      },
+    });
+    return NextResponse.json(command.body, { status: command.status });
   } catch (error) {
     const failure = buildTourneyPublicError(error, "Unable to update appeals.");
-    return jsonError(failure.message, failure.status, {
+    const response = jsonError(failure.message, failure.status, {
       errors: failure.errors,
       code: failure.code,
     });
+    if (error?.retryAfter) response.headers.set("Retry-After", String(error.retryAfter));
+    return response;
   }
 }

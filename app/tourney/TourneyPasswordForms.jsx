@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { tourneyMutationFetch } from "./tourneyMutation";
 
 export function TourneyForgotForm() {
   const [login, setLogin] = useState("");
@@ -13,7 +14,7 @@ export function TourneyForgotForm() {
     setMessage("");
 
     try {
-      const response = await fetch("/api/tourney/forgot", {
+      const response = await tourneyMutationFetch("/api/tourney/forgot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ login }),
@@ -77,7 +78,7 @@ export function TourneyResetForm() {
     setMessage("");
 
     try {
-      const response = await fetch("/api/tourney/reset", {
+      const response = await tourneyMutationFetch("/api/tourney/reset", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, password }),

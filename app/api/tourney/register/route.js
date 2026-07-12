@@ -4,8 +4,7 @@ import {
   getClientAddressFromHeaders,
   getTourneyApprovalRecipients,
 } from "../../../../src/server/tourney/auth";
-import { sendTourneyRegistrationApprovalEmails } from "../../../../src/server/tourney/email";
-import { logSafeError } from "../../../../src/server/safeErrorLog";
+import { enqueueTourneyEmailDispatch } from "../../../../src/server/tourney/emailDispatch";
 import {
   createPendingTourneyPlayer,
   getTourneyRegistrationCloseIso,
@@ -16,6 +15,10 @@ import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin"
 import { getNextSupabaseUser } from "../../../../src/server/supabase/serverSession";
 import { readBoundedJson } from "../../../../src/server/request/boundedJson";
 import { resolveSupabaseAccountByUserId } from "../../../../src/server/supabase/accounts";
+import {
+  executeTourneyCommand,
+  readTourneyCommandId,
+} from "../../../../src/server/tourney/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -109,30 +112,51 @@ export async function POST(request) {
       return jsonError("Your verified sign-in email does not match this registration.", 409);
     }
 
-    const created = await createPendingTourneyPlayer({
-      payload,
-      recipients,
-      authUserId: socialUser?.id || "",
+    const commandId = readTourneyCommandId({ request });
+    const command = await executeTourneyCommand({
+      commandId,
+      purpose: "registration:create",
+      requestPayload: payload,
+      callback: async () => {
+        const created = await createPendingTourneyPlayer({
+          payload,
+          recipients,
+          authUserId: socialUser?.id || "",
+        });
+        const baseUrl = new URL(request.url).origin;
+        for (const recipient of recipients) {
+          const recipientTokens = created.tokens.filter(
+            (token) => token.recipient_email === recipient.email
+          );
+          await enqueueTourneyEmailDispatch({
+            commandId,
+            dispatchKind: "registration",
+            recipient: recipient.email,
+            payload: {
+              player: created.player,
+              tokens: recipientTokens,
+              baseUrl,
+            },
+          });
+        }
+        return {
+          body: {
+            ok: true,
+            message: "Registration submitted. Wait for approval before logging in.",
+          },
+        };
+      },
     });
-    const baseUrl = new URL(request.url).origin;
-    try {
-      await sendTourneyRegistrationApprovalEmails({
-        player: created.player,
-        tokens: created.tokens,
-        baseUrl,
-      });
-    } catch (emailError) {
-      logSafeError("Tournament registration email failed", emailError);
-    }
-
-    return successResponse;
+    return NextResponse.json(command.body, { status: command.status });
   } catch (error) {
     const failure = buildTourneyPublicError(error, "Unable to submit registration.");
-    return jsonError(failure.message, failure.status, {
+    const response = jsonError(failure.message, failure.status, {
       code: failure.code,
       capacity: failure.status < 500 ? error?.capacity : undefined,
       capacitySnapshot: failure.status < 500 ? error?.capacitySnapshot : undefined,
       errors: failure.errors,
     });
+    if (error?.retryAfter) response.headers.set("Retry-After", String(error.retryAfter));
+    return response;
   }
 }

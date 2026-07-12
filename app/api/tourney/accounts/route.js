@@ -15,6 +15,10 @@ import {
 import { buildTourneyPublicError } from "../../../../src/server/tourney/publicError";
 import { writePersistedTourneyAccountsJson } from "../../../../src/server/tourney/accountStore";
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
+import {
+  executeTourneyCommand,
+  readTourneyCommandId,
+} from "../../../../src/server/tourney/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -82,31 +86,42 @@ export async function POST(request) {
 
   try {
     const payload = await readAccountPayload(request);
-    const currentAccounts = await readEffectiveTourneyAccounts();
-    const accounts = await buildUpdatedTourneyAccounts({
-      action: payload?.action,
-      username: payload?.username,
-      actorUsername: session.username,
-      role: payload?.role,
-      email: payload?.email,
-      password: payload?.password,
-      accounts: currentAccounts,
+    const commandId = readTourneyCommandId({ request });
+    const command = await executeTourneyCommand({
+      commandId,
+      purpose: `accounts:${String(payload?.action || "update").toLowerCase()}`,
+      requestPayload: payload,
+      callback: async () => {
+        const currentAccounts = await readEffectiveTourneyAccounts();
+        const accounts = await buildUpdatedTourneyAccounts({
+          action: payload?.action,
+          username: payload?.username,
+          actorUsername: session.username,
+          role: payload?.role,
+          email: payload?.email,
+          password: payload?.password,
+          accounts: currentAccounts,
+        });
+        const accountsJson = renderTourneyAccountsJson(accounts);
+        const persisted = await writePersistedTourneyAccountsJson({
+          accountsJson,
+          actorUsername: session.username,
+        });
+        return { body: {
+          ok: true,
+          accounts: summarizeTourneyAccounts(accounts),
+          accountsJson,
+          persisted: true,
+          persistedAt: persisted.updatedAt,
+        } };
+      },
     });
-    const accountsJson = renderTourneyAccountsJson(accounts);
-    const persisted = await writePersistedTourneyAccountsJson({
-      accountsJson,
-      actorUsername: session.username,
-    });
+    const response = NextResponse.json(command.body, { status: command.status });
 
-    const response = NextResponse.json({
-      ok: true,
-      accounts: summarizeTourneyAccounts(accounts),
-      accountsJson,
-      persisted: true,
-      persistedAt: persisted.updatedAt,
-    });
-
-    const updatedSessionAccount = findTourneyAccount(session.username, accounts);
+    const updatedSessionAccount = findTourneyAccount(
+      session.username,
+      JSON.parse(command.body.accountsJson || "[]")
+    );
     if (updatedSessionAccount) {
       const nextToken = createTourneySessionToken({
         account: {
@@ -126,6 +141,8 @@ export async function POST(request) {
     return response;
   } catch (error) {
     const failure = buildTourneyPublicError(error, "Unable to update account.");
-    return jsonError(failure.message, failure.status);
+    const response = jsonError(failure.message, failure.status);
+    if (error?.retryAfter) response.headers.set("Retry-After", String(error.retryAfter));
+    return response;
   }
 }

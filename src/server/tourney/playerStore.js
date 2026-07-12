@@ -1607,6 +1607,7 @@ export async function updateTourneyPlayerApprovedRole({
 export async function getRegistrationDecisionToken({
   token,
   purpose,
+  allowUsed = false,
   env = process.env,
 } = {}) {
   if (!["approve", "deny"].includes(purpose)) return null;
@@ -1618,7 +1619,7 @@ export async function getRegistrationDecisionToken({
       (entry) =>
         entry.token_hash === hashed &&
         entry.purpose === purpose &&
-        !entry.used_at
+        (allowUsed || !entry.used_at)
     );
     return row ? { ...row } : null;
   }
@@ -1632,7 +1633,7 @@ export async function getRegistrationDecisionToken({
     from tourney_player_tokens
     where token_hash = ${hashed}
       and purpose = ${purpose}
-      and used_at is null
+      and (${allowUsed} or used_at is null)
     limit 1
   `;
   return rows?.[0] || null;

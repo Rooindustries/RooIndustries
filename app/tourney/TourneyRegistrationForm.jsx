@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import SupabaseSocialLogin from "../../src/components/SupabaseSocialLogin";
+import { tourneyMutationFetch } from "./tourneyMutation";
 
 const TOURNEY_SIGNUP_DRAFT = "tourney_signup_draft";
 
@@ -177,7 +178,7 @@ export default function TourneyRegistrationForm({
         throw new Error("Secondary role must be different from primary role.");
       }
 
-      const response = await fetch("/api/tourney/register", {
+      const response = await tourneyMutationFetch("/api/tourney/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
