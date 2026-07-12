@@ -6,11 +6,11 @@ import {
   readTourneySessionFromStore,
 } from "../../../../src/server/tourney/auth";
 import {
-  listTourneyPayoutsForSession,
   upsertTourneyPayout,
 } from "../../../../src/server/tourney/appealPayoutStore";
 import { enqueueTourneyEmailDispatch } from "../../../../src/server/tourney/emailDispatch";
 import { buildTourneyPublicError } from "../../../../src/server/tourney/publicError";
+import { readTourneyPayouts } from "../../../../src/server/tourney/readService";
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
 import {
   executeTourneyCommand,
@@ -37,10 +37,7 @@ const readPayload = async (request) => {
   return Object.fromEntries(form.entries());
 };
 
-const getPayoutsBody = async (session) => ({
-    ok: true,
-    payouts: await listTourneyPayoutsForSession({ session }),
-  });
+const getPayoutsBody = (session) => readTourneyPayouts({ session });
 const getPayoutsResponse = async (session) => NextResponse.json(await getPayoutsBody(session));
 
 export async function GET(request) {
@@ -83,7 +80,7 @@ export async function POST(request) {
       requestPayload: payload,
       callback: async () => {
         const existing = payload.payoutId
-          ? (await listTourneyPayoutsForSession({ session })).find(
+          ? (await readTourneyPayouts({ session })).payouts.find(
               (payout) => payout.id === payload.payoutId
             )
           : null;

@@ -18,6 +18,7 @@ import {
   upsertTourneyBracketTeam,
 } from "../../../../src/server/tourney/bracketStore";
 import { buildTourneyPublicError } from "../../../../src/server/tourney/publicError";
+import { readPublicTourneyBracket } from "../../../../src/server/tourney/readService";
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
 import {
   executeTourneyCommand,
@@ -60,7 +61,7 @@ const readPayload = async (request) => {
 };
 
 export async function GET() {
-  return NextResponse.json(await getTourneyBracketSnapshot());
+  return NextResponse.json(await readPublicTourneyBracket());
 }
 
 export async function POST(request) {

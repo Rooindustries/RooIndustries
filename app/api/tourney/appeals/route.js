@@ -10,9 +10,9 @@ import { enqueueTourneyEmailDispatch } from "../../../../src/server/tourney/emai
 import { getApprovedTourneyPlayerById } from "../../../../src/server/tourney/playerStore";
 import {
   createTourneyAppeal,
-  listTourneyAppealsForSession,
   updateTourneyAppeal,
 } from "../../../../src/server/tourney/appealPayoutStore";
+import { readTourneyAppeals } from "../../../../src/server/tourney/readService";
 import { buildTourneyPublicError } from "../../../../src/server/tourney/publicError";
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
 import {
@@ -40,10 +40,7 @@ const readPayload = async (request) => {
   return Object.fromEntries(form.entries());
 };
 
-const getAppealsBody = async (session) => ({
-    ok: true,
-    appeals: await listTourneyAppealsForSession({ session }),
-  });
+const getAppealsBody = (session) => readTourneyAppeals({ session });
 const getAppealsResponse = async (session) => NextResponse.json(await getAppealsBody(session));
 
 export async function GET(request) {

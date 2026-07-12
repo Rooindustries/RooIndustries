@@ -10,14 +10,13 @@ import {
   applyRegistrationDecision,
   createApprovedTourneyPlayer,
   createTourneyPasswordHash,
-  getTourneyRoleCapacitySnapshot,
   kickTourneyPlayer,
-  listManageTourneyPlayers,
   updateTourneyPlayerApprovedRole,
   updateTourneyRegistrationConfig,
   updateTourneyPlayerDetails,
   withdrawTourneyPlayer,
 } from "../../../../src/server/tourney/playerStore";
+import { readAdminTourneyPlayers } from "../../../../src/server/tourney/readService";
 import { buildTourneyPublicError } from "../../../../src/server/tourney/publicError";
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
 import {
@@ -47,11 +46,7 @@ const readPayload = async (request) => {
   return Object.fromEntries(form.entries());
 };
 
-const getPlayersBody = async () => ({
-    ok: true,
-    players: await listManageTourneyPlayers(),
-    capacity: await getTourneyRoleCapacitySnapshot(),
-  });
+const getPlayersBody = () => readAdminTourneyPlayers();
 const getPlayersResponse = async () => NextResponse.json(await getPlayersBody());
 
 const queueApprovedPlayerEmail = ({ player, request, commandId }) =>
