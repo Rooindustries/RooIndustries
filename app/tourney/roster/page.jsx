@@ -8,7 +8,7 @@ import {
   getTourneySession,
 } from "../TourneyShared";
 import TourneyRosterList from "../TourneyRosterList";
-import { listApprovedTourneyPlayers } from "../../../src/server/tourney/playerStore";
+import { readPublicTourneyRoster } from "../../../src/server/tourney/readService";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,7 +27,7 @@ export default async function TourneyRosterPage() {
   const [session, hosts, players] = await Promise.all([
     getTourneySession(),
     getTourneyHostsWithLiveStatus().catch(() => undefined),
-    listApprovedTourneyPlayers().catch(() => []),
+    readPublicTourneyRoster().then((body) => body.players).catch(() => []),
   ]);
 
   return (
