@@ -109,6 +109,111 @@ begin
 end;
 $$;
 
+alter table tourney.cutover_gate_events
+  drop constraint if exists tourney_cutover_gate_events_event_kind_check;
+alter table tourney.cutover_gate_events
+  drop constraint if exists cutover_gate_events_event_kind_check;
+alter table tourney.cutover_gate_events
+  add constraint cutover_gate_events_event_kind_check
+  check (event_kind in (
+    'hardened_activated', 'natural_mirror_verified', 'zero_drift_pass',
+    'clock_started', 'clock_reset', 'legacy_read_only', 'fallback_bootstrap'
+  )) not valid;
+alter table tourney.cutover_gate_events
+  validate constraint cutover_gate_events_event_kind_check;
+
+create or replace function public.roo_enqueue_tourney_fallback_bootstrap(
+  p_actor text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_meta tourney.cutover_metadata%rowtype;
+  v_contract record;
+  v_source record;
+  v_key jsonb;
+  v_hash text;
+  v_queued integer := 0;
+  v_skipped integer := 0;
+  v_actor text := nullif(btrim(p_actor), '');
+begin
+  if v_actor is null or v_actor !~ '^[A-Za-z0-9._:@-]{3,64}$' then
+    raise exception 'Fallback bootstrap actor is required' using errcode = '22023';
+  end if;
+  select * into v_meta
+  from tourney.cutover_metadata
+  where id = 'tourney'
+  for update;
+  if not found
+     or v_meta.primary_backend <> 'supabase'
+     or not v_meta.writes_paused
+     or v_meta.generation < 1
+     or v_meta.fallback_read_only then
+    raise exception 'Fallback bootstrap safety preconditions are not satisfied'
+      using errcode = '55000';
+  end if;
+
+  for v_contract in
+    select logical_table, supabase_relation
+    from tourney.mirror_contracts
+    where enabled
+    order by logical_table
+  loop
+    for v_source in execute format(
+      'select to_jsonb(source_row) record_data from %s source_row order by to_jsonb(source_row)::text',
+      v_contract.supabase_relation::regclass
+    )
+    loop
+      v_key := tourney.mirror_record_key(
+        v_contract.logical_table,
+        v_source.record_data
+      );
+      v_hash := encode(extensions.digest(
+        convert_to(v_source.record_data::text, 'UTF8'),
+        'sha256'
+      ), 'hex');
+      if exists (
+        select 1
+        from tourney.mirror_outbox existing
+        where existing.source_backend = 'supabase'
+          and existing.generation = v_meta.generation
+          and existing.table_name = v_contract.logical_table
+          and existing.operation = 'upsert'
+          and existing.record_key = v_key
+          and existing.record_hash = v_hash
+          and existing.status <> 'dead_letter'
+      ) then
+        v_skipped := v_skipped + 1;
+      else
+        insert into tourney.mirror_outbox(
+          command_id, source_backend, generation, table_name, operation,
+          record_key, record_data, record_hash, status
+        ) values(
+          'fallback-bootstrap:g' || v_meta.generation || ':' || v_actor,
+          'supabase', v_meta.generation, v_contract.logical_table, 'upsert',
+          v_key, v_source.record_data, v_hash, 'pending'
+        );
+        v_queued := v_queued + 1;
+      end if;
+    end loop;
+  end loop;
+
+  insert into tourney.cutover_gate_events(event_kind, generation, actor, evidence)
+  values(
+    'fallback_bootstrap', v_meta.generation, v_actor,
+    jsonb_build_object('queued', v_queued, 'skipped', v_skipped)
+  );
+  return jsonb_build_object(
+    'generation', v_meta.generation,
+    'queued', v_queued,
+    'skipped', v_skipped
+  );
+end;
+$$;
+
 create or replace function tourney.history_uuid(p_value text)
 returns uuid language sql immutable strict set search_path='' as $$
   select (
@@ -619,6 +724,8 @@ revoke all on function tourney.mirror_record_key(text, jsonb)
   from public, anon, authenticated;
 revoke all on function tourney.capture_mirror_event()
   from public, anon, authenticated;
+revoke all on function public.roo_enqueue_tourney_fallback_bootstrap(text)
+  from public, anon, authenticated;
 revoke all on function tourney.history_uuid(text)
   from public, anon, authenticated;
 revoke all on function tourney.refresh_cutover_clock(text)
@@ -628,6 +735,8 @@ revoke all on function public.roo_import_tourney_snapshot_v4(jsonb, text, boolea
 revoke all on function public.roo_tourney_readiness()
   from public, anon, authenticated;
 grant execute on function tourney.refresh_cutover_clock(text) to service_role;
+grant execute on function public.roo_enqueue_tourney_fallback_bootstrap(text)
+  to service_role;
 grant execute on function public.roo_import_tourney_snapshot_v4(jsonb, text, boolean)
   to service_role;
 grant execute on function public.roo_tourney_readiness() to service_role;
