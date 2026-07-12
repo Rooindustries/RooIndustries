@@ -47,6 +47,9 @@ describe("Tourney cutover migration", () => {
     expect(cutoverCli).toContain('hardened.error.code === "PGRST202"');
     expect(cutoverCli).toContain("POSTGRES_URL_NON_POOLING");
     expect(cutoverCli).toContain('PGCONNECT_TIMEOUT: "15"');
+    expect(cutoverCli).toContain(
+      "player.principal_id is distinct from account.principal_id"
+    );
   });
 
   test("records ordered outbox events and guarded target checkpoints", () => {
