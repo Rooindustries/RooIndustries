@@ -20,10 +20,36 @@ describe("same-origin mutation guard", () => {
     expect(isSameOriginMutation(requestFor())).toBe(true);
   });
 
+  test("accepts the apex origin after Vercel redirects a form POST to www", () => {
+    expect(
+      isSameOriginMutation(
+        requestFor({ origin: "https://rooindustries.com" })
+      )
+    ).toBe(true);
+    expect(
+      isSameOriginMutation(
+        requestFor({
+          origin: "https://www.rooindustries.com",
+          url: "https://rooindustries.com/api/tourney/login",
+        })
+      )
+    ).toBe(true);
+  });
+
   test("rejects cross-origin and cross-site mutations", () => {
     expect(
       isSameOriginMutation(requestFor({ origin: "https://attacker.example" }))
     ).toBe(false);
     expect(isSameOriginMutation(requestFor({ fetchSite: "cross-site" }))).toBe(false);
+    expect(
+      isSameOriginMutation(
+        requestFor({ origin: "https://auth.rooindustries.com" })
+      )
+    ).toBe(false);
+    expect(
+      isSameOriginMutation(
+        requestFor({ origin: "http://rooindustries.com" })
+      )
+    ).toBe(false);
   });
 });
