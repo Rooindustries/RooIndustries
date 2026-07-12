@@ -316,6 +316,33 @@ try {
   await assertSql(target, "select exists(select 1 from tourney_bracket_counters where entity_type='match' and next_id=2) ok", "counter insert was not mirrored");
   await assertSql(target, "select (select count(*) from tourney_player_tokens)=1 and (select count(*) from tourney_bracket_teams)=1 and (select count(*) from tourney_bracket_team_members)=1 and (select count(*) from tourney_bracket_entities)=1 and (select count(*) from tourney_bracket_audit)=1 and (select count(*) from tourney_bracket_lock)=1 and (select count(*) from tourney_appeals)=1 and (select count(*) from tourney_payouts)=1 and (select count(*) from tourney_email_dispatches)=1 ok", "registered business tables were not mirrored");
 
+  await source.begin(async (sql) => {
+    await sql`select set_config('roo.tourney_mirror_enabled','0',true)`;
+    await sql`insert into tourney.tourney_players(
+      id,username,email,password_hash,status,discord,discord_key,battlenet,
+      rank_name,role_play
+    ) values(
+      'bootstrap-only','bootstrap-only','bootstrap@example.com',
+      '$2b$12$bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      'approved','BootstrapOnly','bootstraponly','Bootstrap#1','Master','Support'
+    )`;
+  });
+  await source`
+    update tourney.cutover_metadata set
+      primary_backend='supabase', generation=1, writes_paused=true
+    where id='tourney'
+  `;
+  const [bootstrapResult] = await source`
+    select public.roo_enqueue_tourney_fallback_bootstrap('postgres17-fixture') result
+  `;
+  assert.ok(bootstrapResult.result.queued >= 1, "fallback bootstrap did not enqueue missing state");
+  await reconcileTourneyMirror({ env, limit: 250 });
+  await assertSql(target, "select exists(select 1 from tourney_players where id='bootstrap-only') ok", "fallback bootstrap row was not mirrored");
+  const [bootstrapReplay] = await source`
+    select public.roo_enqueue_tourney_fallback_bootstrap('postgres17-fixture') result
+  `;
+  assert.equal(bootstrapReplay.result.queued, 0, "fallback bootstrap replay was not idempotent");
+
   let commandExecutions = 0;
   const runDuplicateCommand = () => executeTourneyCommand({
     commandId: "fixture:duplicate:0001",
@@ -515,6 +542,7 @@ try {
       "registry composite keys",
       "collision quarantine and generation-1 tombstone guard",
       "insert mirroring",
+      "idempotent Supabase-to-Neon fallback bootstrap",
       "update and delete mirroring for every registered domain",
       "receipt mirroring",
       "concurrent duplicate Idempotency-Key replay",

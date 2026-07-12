@@ -1,16 +1,19 @@
 #!/usr/bin/env node
 
 import crypto from "node:crypto";
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { createClient as createSanityClient } from "@sanity/client";
-import { neon } from "@neondatabase/serverless";
 import dotenv from "dotenv";
 import { migrateTourneyShadow } from "../src/server/supabase/tourneyMigration.js";
 import { createSupabaseAdminClient } from "../src/server/supabase/adminClient.js";
-import { splitPostgresStatements } from "../src/server/tourney/sqlStatements.js";
 import { runTourneyParity } from "../src/server/tourney/store.js";
+
+const execFileAsync = promisify(execFile);
 
 const envArgument = process.argv.indexOf("--env");
 const envPath = envArgument >= 0 ? process.argv[envArgument + 1] : ".env.local";
@@ -25,6 +28,30 @@ const valueAfter = (flag) => {
 };
 const normalize = (value) => String(value || "").trim();
 const jsonSafe = (value) => JSON.parse(JSON.stringify(value));
+const legacyDatabaseUrl = () => normalize(
+  process.env.TOURNEY_DATABASE_URL ||
+  process.env.POSTGRES_URL_NON_POOLING ||
+  process.env.DATABASE_URL_UNPOOLED ||
+  process.env.POSTGRES_URL
+);
+const runPsql = async (args, options = {}) => {
+  try {
+    return await execFileAsync("psql", args, {
+      env: { ...process.env, PGCONNECT_TIMEOUT: "15" },
+      maxBuffer: options.maxBuffer || 20 * 1024 * 1024,
+    });
+  } catch (cause) {
+    const detail = String(cause?.stderr || "")
+      .trim()
+      .replace(/postgres(?:ql)?:\/\/\S+/gi, "[database-url-redacted]")
+      .slice(0, 1000);
+    const error = new Error(
+      detail ? `Legacy PostgreSQL command failed: ${detail}` : "Legacy PostgreSQL command failed."
+    );
+    error.code = "TOURNEY_LEGACY_DATABASE_COMMAND_FAILED";
+    throw error;
+  }
+};
 const LEGACY_TABLES = [
   "tourney_players",
   "tourney_player_tokens",
@@ -51,24 +78,48 @@ const LEGACY_TABLES = [
   "tourney_cutover_metadata",
 ];
 const readLegacySnapshot = async (databaseUrl) => {
-  const sql = neon(databaseUrl);
-  const existingRows = await sql.query(
-    "select name from unnest($1::text[]) name where to_regclass(name) is not null",
-    [LEGACY_TABLES]
+  const tableArray = LEGACY_TABLES.map((table) => `'${table}'`).join(",");
+  const { stdout: existingOutput } = await runPsql([
+    databaseUrl,
+    "-X",
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-Atq",
+    "-c",
+    `select coalesce(jsonb_agg(name order by name), '[]'::jsonb)::text
+     from unnest(array[${tableArray}]::text[]) name
+     where to_regclass(name) is not null`,
+  ]);
+  const existingTables = new Set(JSON.parse(existingOutput.trim()));
+  const snapshotPairs = LEGACY_TABLES.flatMap((table) => [
+    `'${table}'`,
+    existingTables.has(table)
+      ? `coalesce((select jsonb_agg(to_jsonb(source_row) order by to_jsonb(source_row)::text) from "${table}" source_row), '[]'::jsonb)`
+      : `'[]'::jsonb`,
+  ]).join(",\n");
+  const query = `
+    begin isolation level repeatable read read only;
+    select jsonb_build_object(${snapshotPairs})::text;
+    commit;
+  `;
+  const { stdout } = await runPsql(
+    [databaseUrl, "-X", "-v", "ON_ERROR_STOP=1", "-Atq", "-c", query],
+    { maxBuffer: 100 * 1024 * 1024 }
   );
-  const existingTables = existingRows.map((row) => row.name);
-  const queries = existingTables.map((table) =>
-    sql.query(`select * from ${table}`)
-  );
-  const results = await sql.transaction(queries, {
-    isolationLevel: "RepeatableRead",
-    readOnly: true,
-  });
-  return Object.fromEntries(
-    LEGACY_TABLES.map((table) => {
-      const index = existingTables.indexOf(table);
-      return [table, index >= 0 ? jsonSafe(results[index] || []) : []];
-    })
+  return jsonSafe(JSON.parse(stdout.trim()));
+};
+
+const applyLegacySqlFile = async ({ databaseUrl, fileUrl }) => {
+  await runPsql(
+    [
+      databaseUrl,
+      "-X",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-1",
+      "-f",
+      fileURLToPath(fileUrl),
+    ]
   );
 };
 
@@ -171,7 +222,7 @@ const captureHostedSnapshot = async ({ legacyData, sanityAccount }) => {
 };
 
 const captureSnapshot = async () => {
-  const legacyUrl = normalize(process.env.TOURNEY_DATABASE_URL || process.env.POSTGRES_URL);
+  const legacyUrl = legacyDatabaseUrl();
   const encryptionSecret = normalize(
     process.env.TOURNEY_SNAPSHOT_KEY || process.env.REF_ADMIN_KEY || process.env.CRON_SECRET
   );
@@ -225,28 +276,25 @@ const captureSnapshot = async () => {
 };
 
 const applyLegacySchema = async () => {
-  const databaseUrl = normalize(process.env.TOURNEY_DATABASE_URL || process.env.POSTGRES_URL);
+  const databaseUrl = legacyDatabaseUrl();
   if (!databaseUrl) throw new Error("Legacy Tourney database is not configured.");
-  const sqlText = fs.readFileSync(
-    new URL("./tourney-cutover-legacy.sql", import.meta.url),
-    "utf8"
-  );
-  const sql = neon(databaseUrl);
-  const statements = splitPostgresStatements(sqlText);
-  await sql.transaction(statements.map((statement) => sql.query(statement)));
+  await applyLegacySqlFile({
+    databaseUrl,
+    fileUrl: new URL("./tourney-cutover-legacy.sql", import.meta.url),
+  });
   return { applied: true };
 };
 
 const applyLegacyV4Phase = async (phase) => {
-  const databaseUrl = normalize(process.env.TOURNEY_DATABASE_URL || process.env.POSTGRES_URL);
+  const databaseUrl = legacyDatabaseUrl();
   if (!databaseUrl) throw new Error("Legacy Tourney database is not configured.");
   const fileName = phase === "activate"
     ? "tourney-schema-v4-activate-legacy.sql"
     : "tourney-schema-v4-expand-legacy.sql";
-  const sqlText = fs.readFileSync(new URL(`./${fileName}`, import.meta.url), "utf8");
-  const sql = neon(databaseUrl);
-  const statements = splitPostgresStatements(sqlText);
-  await sql.transaction(statements.map((statement) => sql.query(statement)));
+  await applyLegacySqlFile({
+    databaseUrl,
+    fileUrl: new URL(`./${fileName}`, import.meta.url),
+  });
   return { applied: true, schemaVersion: 4, phase };
 };
 
@@ -407,6 +455,19 @@ const backfillDiscordV4 = async () => {
   };
 };
 
+const bootstrapFallbackV4 = async () => {
+  const hosted = await createSupabaseAdminClient().rpc(
+    "roo_enqueue_tourney_fallback_bootstrap",
+    { p_actor: "schema-v4-activation" }
+  );
+  if (hosted.error) {
+    const error = new Error("Tourney fallback bootstrap enqueue failed.");
+    error.code = hosted.error.code || "TOURNEY_FALLBACK_BOOTSTRAP_FAILED";
+    throw error;
+  }
+  return { enqueued: true, ...(hosted.data || {}) };
+};
+
 let result;
 if (hasFlag("--snapshot")) result = await captureSnapshot();
 else if (hasFlag("--apply-legacy-schema")) result = await applyLegacySchema();
@@ -415,6 +476,7 @@ else if (hasFlag("--activate-legacy-v4")) result = await applyLegacyV4Phase("act
 else if (hasFlag("--seed-account-snapshot-v4")) result = await seedAccountSnapshotV4();
 else if (hasFlag("--seed-player-principals-v4")) result = await seedPlayerPrincipalsV4();
 else if (hasFlag("--backfill-discord-v4")) result = await backfillDiscordV4();
+else if (hasFlag("--bootstrap-fallback-v4")) result = await bootstrapFallbackV4();
 else if (hasFlag("--check-manual-failover-v4")) {
   const { checkTourneyManualFailoverReadiness } =
     await import("../src/server/tourney/store.js");
@@ -431,7 +493,7 @@ else if (hasFlag("--parity")) result = await runTourneyParity();
 else throw new Error(
   "Use --snapshot, --apply-legacy-schema, --expand-legacy-v4, " +
   "--activate-legacy-v4, --seed-account-snapshot-v4, --seed-player-principals-v4, " +
-  "--backfill-discord-v4, --check-manual-failover-v4, " +
+  "--backfill-discord-v4, --bootstrap-fallback-v4, --check-manual-failover-v4, " +
   "--migrate, or --parity."
 );
 
