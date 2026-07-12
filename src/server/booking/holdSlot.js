@@ -56,6 +56,21 @@ const hasBlockingBooking = (bookings) =>
       isBookingBlockingStatus(booking?.status)
   );
 
+export const isSameSupabaseOwnedHold = ({ current, mirror }) => {
+  if (!current?._id || mirror?._id !== current._id) return false;
+  if (
+    String(current.backendOwner || "").trim().toLowerCase() !== "supabase" ||
+    String(mirror.backendOwner || "").trim().toLowerCase() !== "supabase"
+  ) {
+    return false;
+  }
+  return (
+    String(mirror.startTimeUTC || "") === String(current.startTimeUTC || "") &&
+    Number(mirror.cutoverGeneration || 0) ===
+      Number(current.cutoverGeneration || 0)
+  );
+};
+
 const fetchOtherBackendSlotState = async ({
   backend,
   holdId,
@@ -356,10 +371,14 @@ export default async function handler(req, res) {
     const mirroredSameHold =
       existingHold?._id &&
       otherBackendState.hold?._id === existingHold._id &&
-      String(otherBackendState.hold.holdNonce || "") ===
+      ((String(otherBackendState.hold.holdNonce || "") ===
         String(existingHold.holdNonce || "") &&
-      String(otherBackendState.hold.expiresAt || "") ===
-        String(existingHold.expiresAt || "");
+        String(otherBackendState.hold.expiresAt || "") ===
+          String(existingHold.expiresAt || "")) ||
+        isSameSupabaseOwnedHold({
+          current: existingHold,
+          mirror: otherBackendState.hold,
+        }));
     if (
       (otherBackendState.slotLock &&
         otherBackendState.slotLock.status !== "released") ||

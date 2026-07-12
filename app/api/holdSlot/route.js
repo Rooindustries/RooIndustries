@@ -15,7 +15,6 @@ async function handle(request, methodOverride) {
     methodOverride,
   });
   const metricResponse = response.clone();
-  const mirrorResponse = response.clone();
   try {
     after(() => recordCommerceResponseMetric({
       route: "booking/hold",
@@ -24,11 +23,7 @@ async function handle(request, methodOverride) {
       response: metricResponse,
     }));
     after(async () => {
-      if (!mirrorResponse.ok) return;
-      const payload = await mirrorResponse.json().catch(() => null);
-      if (payload?.backend === "supabase") {
-        await flushDeferredCommerceMirror();
-      }
+      if (response.ok) await flushDeferredCommerceMirror();
     });
   } catch (error) {
     if (process.env.NODE_ENV !== "test") throw error;
