@@ -16,11 +16,21 @@ const env = {
   DISCORD_HOST_ROLE_ID: "333333333333333333",
 };
 
-const makeAdminClient = ({ assignments, completeResults = [] }) => {
+const makeAdminClient = ({
+  assignments,
+  completeResults = [],
+  pendingUserIds = [],
+}) => {
   const queue = [...assignments];
   const completions = [...completeResults];
   return {
     rpc: jest.fn(async (name) => {
+      if (name === "roo_list_pending_discord_role_assignments") {
+        return {
+          data: pendingUserIds.map((userId) => ({ user_id: userId })),
+          error: null,
+        };
+      }
       if (name === "roo_refresh_discord_role_assignment") {
         return { data: queue.shift(), error: null };
       }
@@ -40,7 +50,10 @@ const makeFetch = (statuses = []) => {
   }));
 };
 
-const { syncTourneyDiscordRoleAssignment } = require("../server/tourney/discordRoleSync");
+const {
+  reconcileTourneyDiscordRoleAssignments,
+  syncTourneyDiscordRoleAssignment,
+} = require("../server/tourney/discordRoleSync");
 
 describe("Tourney Discord desired-role synchronization", () => {
   test("adds the Host role before removing Participant", async () => {
@@ -143,6 +156,28 @@ describe("Tourney Discord desired-role synchronization", () => {
         p_error: "discord_http_403",
         p_status: "retry",
       })
+    );
+  });
+
+  test("reads the private retry queue through its service-only RPC", async () => {
+    const userId = assignment().user_id;
+    const adminClient = makeAdminClient({
+      assignments: [assignment()],
+      pendingUserIds: [userId],
+    });
+    const fetchImpl = makeFetch();
+
+    const result = await reconcileTourneyDiscordRoleAssignments({
+      adminClient,
+      env,
+      fetchImpl,
+      limit: 10,
+    });
+
+    expect(result).toEqual({ supported: true, checked: 1, applied: 1 });
+    expect(adminClient.rpc).toHaveBeenCalledWith(
+      "roo_list_pending_discord_role_assignments",
+      { p_limit: 10 }
     );
   });
 });
