@@ -9,7 +9,20 @@ export const DOWNLOAD_STORAGE_LOCAL = "local";
 
 const normalizeValue = (value) => String(value || "").trim();
 
+const SIGNED_DOWNLOAD_TTL_SECONDS = 4 * 60 * 60;
+const MIN_SIGNED_DOWNLOAD_TTL_SECONDS = 5 * 60;
+const MAX_SIGNED_DOWNLOAD_TTL_SECONDS = 6 * 60 * 60;
+
 const loadBlobSdk = async () => import("@vercel/blob");
+
+const signedDownloadTtlSeconds = (env = process.env) => {
+  const configured = Number(env.DOWNLOAD_SIGNED_URL_TTL_SECONDS);
+  if (!Number.isFinite(configured)) return SIGNED_DOWNLOAD_TTL_SECONDS;
+  return Math.min(
+    MAX_SIGNED_DOWNLOAD_TTL_SECONDS,
+    Math.max(MIN_SIGNED_DOWNLOAD_TTL_SECONDS, Math.trunc(configured))
+  );
+};
 
 export const hasBlobCredentials = (env = process.env) =>
   !!(
@@ -94,6 +107,41 @@ export const streamBlobDownload = async (download) => {
     etag: result.blob?.etag || "",
     cacheControl: "private, no-store",
   };
+};
+
+export const createSignedBlobDownloadUrl = async (
+  download,
+  { env = process.env, nowMs = Date.now() } = {}
+) => {
+  const pathname = normalizeValue(download?.blobPath);
+  if (!pathname || pathname.startsWith("/") || pathname.includes("..")) {
+    const error = new Error("Download file is not available.");
+    error.status = 404;
+    throw error;
+  }
+
+  const validUntil = Math.trunc(nowMs) + signedDownloadTtlSeconds(env) * 1000;
+  const { issueSignedToken, presignUrl } = await loadBlobSdk();
+  const signedToken = await issueSignedToken({
+    pathname,
+    operations: ["get"],
+    validUntil,
+    token: normalizeValue(env.BLOB_READ_WRITE_TOKEN) || undefined,
+  });
+  const result = await presignUrl(signedToken, {
+    operation: "get",
+    pathname,
+    access: "private",
+    validUntil,
+  });
+  const signedUrl = new URL(String(result?.presignedUrl || ""));
+  if (
+    signedUrl.protocol !== "https:" ||
+    !signedUrl.hostname.endsWith(".blob.vercel-storage.com")
+  ) {
+    throw new Error("Blob returned an invalid signed download URL.");
+  }
+  return signedUrl.toString();
 };
 
 export const streamDownload = async (download, env = process.env) => {
