@@ -258,11 +258,18 @@ export const seedTourneyPlayerPrincipalsV4 = async ({ env = process.env } = {}) 
 export const seedTourneyDiscordDesiredStateV4 = async ({ env = process.env } = {}) => {
   const config = getTourneyDiscordRoleConfig(env);
   if (!config.enabled) throw new Error("Tourney Discord reconciliation is not configured.");
+  const policy = resolveTourneyStorePolicy(env);
   const players = (await listManageTourneyPlayers({ env })).filter(
     (player) => player.status === "approved" && player.discordUserId
   );
   for (const player of players) {
-    const commandId = `discord-backfill:${player.id}:${player.discordUserId}`;
+    const commandId = [
+      "discord-state-seed",
+      `g${policy.generation}`,
+      "v2",
+      player.id,
+      player.discordUserId,
+    ].join(":");
     await executeTourneyCommand({
       commandId,
       purpose: "discord:backfill",
@@ -271,6 +278,16 @@ export const seedTourneyDiscordDesiredStateV4 = async ({ env = process.env } = {
       maintenanceWhilePaused: true,
       env,
       callback: async () => {
+        const sql = await getTourneySql(env);
+        await sql`
+          update tourney.external_operations set
+            status='applied', completed_at=coalesce(completed_at,now()),
+            lease_id=null, lease_expires_at=null,
+            last_error_code='superseded_by_newer_desired_state', updated_at=now()
+          where operation_kind='discord_role_reconcile'
+            and entity_id=${player.id} and command_id<>${commandId}
+            and status in ('pending','processing','retry','dead_letter')
+        `;
         const assignment = await recordTourneyDiscordDesiredState({
           player,
           discordUser: { id: player.discordUserId },
