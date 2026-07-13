@@ -3,7 +3,12 @@ import { getDownloadBySlug } from "@/src/server/downloads/downloadCatalog";
 import {
   validateBookingForDownloadToken,
 } from "@/src/server/downloads/downloadAccess";
-import { streamDownload } from "@/src/server/downloads/downloadStorage";
+import {
+  createSignedBlobDownloadUrl,
+  DOWNLOAD_STORAGE_BLOB,
+  getDownloadStorageBackend,
+  streamDownload,
+} from "@/src/server/downloads/downloadStorage";
 import { verifyDownloadToken } from "@/src/server/downloads/downloadToken";
 import { logSafeError } from "@/src/server/safeErrorLog";
 
@@ -33,6 +38,18 @@ const textResponse = (message, status = 400) =>
       "Content-Type": "text/plain; charset=utf-8",
     },
   });
+
+const clearAccessCookie = () =>
+  [
+    "download_access=",
+    "Path=/api/downloads/file",
+    "HttpOnly",
+    "SameSite=Strict",
+    process.env.NODE_ENV === "production" ? "Secure" : "",
+    "Max-Age=0",
+  ]
+    .filter(Boolean)
+    .join("; ");
 
 const readCookie = (request, name) => {
   const prefix = `${name}=`;
@@ -85,6 +102,27 @@ export async function GET(request) {
     return textResponse(access.error, access.status);
   }
 
+  if (getDownloadStorageBackend(download) === DOWNLOAD_STORAGE_BLOB) {
+    try {
+      const signedUrl = await createSignedBlobDownloadUrl(download);
+      return new Response(null, {
+        status: 307,
+        headers: {
+          "Cache-Control": "private, no-store",
+          Location: signedUrl,
+          "Referrer-Policy": "no-referrer",
+          "Set-Cookie": clearAccessCookie(),
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
+    } catch (error) {
+      logSafeError("Signed download URL failed", error);
+      const suppliedStatus = Number(error?.status || 0);
+      const status = suppliedStatus >= 400 && suppliedStatus < 500 ? suppliedStatus : 503;
+      return textResponse("Download file is not available.", status);
+    }
+  }
+
   let downloadStream = null;
   try {
     downloadStream = await streamDownload(download);
@@ -100,16 +138,7 @@ export async function GET(request) {
     "Content-Type": downloadStream.contentType || "application/zip",
     "Content-Disposition": contentDisposition(download.fileName),
     "X-Content-Type-Options": "nosniff",
-    "Set-Cookie": [
-      "download_access=",
-      "Path=/api/downloads/file",
-      "HttpOnly",
-      "SameSite=Strict",
-      process.env.NODE_ENV === "production" ? "Secure" : "",
-      "Max-Age=0",
-    ]
-      .filter(Boolean)
-      .join("; "),
+    "Set-Cookie": clearAccessCookie(),
   };
 
   if (downloadStream.contentLength) {
