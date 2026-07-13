@@ -30,6 +30,8 @@ const renderDecisionPage = ({
   title,
   body,
   tone = "info",
+  status = 200,
+  retryAfter = 0,
   linkHref = "/tourney/manage",
   linkLabel = "Open Manage",
 }) => {
@@ -75,14 +77,23 @@ const renderDecisionPage = ({
       </body>
     </html>`,
     {
+      status,
       headers: {
         "Content-Type": "text/html; charset=utf-8",
+        ...(retryAfter ? { "Retry-After": String(retryAfter) } : {}),
       },
     }
   );
 };
 
-const renderDecisionJson = ({ title, body, ok = false, status = 400, linkHref = "" }) =>
+const renderDecisionJson = ({
+  title,
+  body,
+  ok = false,
+  status = 400,
+  linkHref = "",
+  retryAfter = 0,
+}) =>
   Response.json(
     {
       ok,
@@ -94,7 +105,10 @@ const renderDecisionJson = ({ title, body, ok = false, status = 400, linkHref = 
         .replace(/&quot;/g, '"'),
       ...(linkHref ? { signInUrl: linkHref } : {}),
     },
-    { status }
+    {
+      status,
+      headers: retryAfter ? { "Retry-After": String(retryAfter) } : undefined,
+    }
   );
 
 const handleDecision = async ({
@@ -205,6 +219,15 @@ const handleDecision = async ({
     });
   } catch (error) {
     logSafeError("Tournament registration decision failed", error);
+    if (error?.code === "TOURNEY_WRITES_PAUSED") {
+      return respond({
+        title: "Try again shortly",
+        body: "Tournament updates are briefly paused. Please try again shortly.",
+        tone: "danger",
+        status: 503,
+        retryAfter: error.retryAfter || 30,
+      });
+    }
     return respond({
       title: "Decision failed",
       body: "Unable to update this registration.",

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { getTourneySql } from "./sqlClient.js";
 import { enqueueTourneyExternalOperation } from "./externalOperations.js";
 import { resolveTourneyStorePolicy } from "./store.js";
+import { stableTourneyJson } from "./canonical.js";
 
 const STORE_DOC_ID = "tourneyAuthStore";
 const STORE_DOC_TYPE = "tourneyAuthStore";
@@ -31,17 +32,8 @@ const getSanityConfig = (env = process.env) => ({
 const shouldUseMemoryStore = (env = process.env) =>
   env.TOURNEY_ACCOUNT_STORE_MODE === "memory";
 
-const stableJson = (value) => {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.keys(value).sort().map(
-      (key) => `${JSON.stringify(key)}:${stableJson(value[key])}`
-    ).join(",")}}`;
-  }
-  return JSON.stringify(value);
-};
 export const getTourneyAccountsCanonicalHash = (accounts) =>
-  crypto.createHash("sha256").update(stableJson(accounts)).digest("hex");
+  crypto.createHash("sha256").update(stableTourneyJson(accounts)).digest("hex");
 const snapshotTable = (backend) => backend === "supabase"
   ? "tourney.account_snapshots"
   : "tourney_account_snapshots";
@@ -221,4 +213,69 @@ export const writePersistedTourneyAccountsJson = async ({
     updatedAt: rows[0].created_at || updatedAt,
     updatedBy,
   };
+};
+
+export const appendTourneyAccountPrincipalSnapshot = async ({
+  env = process.env,
+  principalId,
+  username,
+} = {}) => {
+  const normalizedUsername = String(username || "").trim().toLowerCase();
+  const normalizedPrincipalId = String(principalId || "").trim();
+  if (!normalizedUsername || !normalizedPrincipalId) {
+    throw new Error("A complete Tourney account principal is required.");
+  }
+  const policy = resolveTourneyStorePolicy(env);
+  const sql = await getTourneySql(env);
+  await sql`
+    select pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended('roo-tourney-account-snapshot-version', 0)
+    )
+  `;
+  const [current] = await sql`
+    select snapshot_id,version,accounts_json
+    from ${sql(snapshotTable(policy.primaryBackend))}
+    order by version desc limit 1
+  `;
+  const accounts = Array.isArray(current?.accounts_json)
+    ? current.accounts_json
+    : current?.accounts_json?.accounts;
+  if (!Array.isArray(accounts)) throw new Error("Tourney account snapshot is missing.");
+  let found = false;
+  const nextAccounts = accounts.map((account) => {
+    if (String(account?.username || "").trim().toLowerCase() !== normalizedUsername) {
+      return account;
+    }
+    found = true;
+    return { ...account, principalId: normalizedPrincipalId };
+  });
+  if (!found) throw new Error("Tourney account principal target is missing.");
+  if (getTourneyAccountsCanonicalHash(accounts) === getTourneyAccountsCanonicalHash(nextAccounts)) {
+    return { updated: false, version: Number(current.version) };
+  }
+  const accountsJson = JSON.stringify(nextAccounts, null, 2);
+  const [created] = await sql`
+    insert into ${sql(snapshotTable(policy.primaryBackend))} (
+      version,accounts_json,canonical_hash,generation,created_by,supersedes_snapshot_id
+    ) values (
+      ${Number(current.version) + 1},${sql.json(nextAccounts)},
+      ${getTourneyAccountsCanonicalHash(nextAccounts)},${policy.generation},
+      'auth-principal-projection',${current.snapshot_id}
+    ) returning snapshot_id,version,created_at
+  `;
+  const [context] = await sql`
+    select nullif(current_setting('roo.tourney_command_id',true),'') command_id
+  `;
+  await enqueueTourneyExternalOperation({
+    commandId: context?.command_id,
+    operationKind: "sanity_account_projection",
+    entityType: "account_snapshot",
+    entityId: created.snapshot_id,
+    desiredState: {
+      accountsJson,
+      actorUsername: "auth-principal-projection",
+    },
+    env,
+  });
+  return { updated: true, version: Number(created.version), updatedAt: created.created_at };
 };

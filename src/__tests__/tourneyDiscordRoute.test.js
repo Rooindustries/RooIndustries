@@ -379,4 +379,42 @@ describe("tourney Discord OAuth routes", () => {
     expect(mockEnqueueTourneyExternalOperation).not.toHaveBeenCalled();
     expect(global.fetch).toHaveBeenCalledTimes(5);
   });
+
+  test("reports unavailable Discord members without aborting inventory", async () => {
+    mockReadTourneySessionFromStore.mockResolvedValue({ username: "yukari", role: "caster" });
+    mockListManageTourneyPlayers.mockResolvedValue([
+      { id: "player_1", status: "approved", discordUserId: "discord_user_1" },
+    ]);
+    global.fetch.mockRejectedValue(new Error("network unavailable"));
+    const response = await backfillRoute.POST(makeRequest({
+      url: "https://www.rooindustries.com/api/tourney/discord/backfill",
+    }));
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      counts: { linked: 1, present: 0 },
+      rows: [{ membership: "unknown", errorCode: "discord_unavailable" }],
+    });
+  });
+
+  test("continues the desired-state batch after one player fails", async () => {
+    mockReadTourneySessionFromStore.mockResolvedValue({ username: "yukari", role: "caster" });
+    mockListManageTourneyPlayers.mockResolvedValue([
+      { id: "player_1", status: "approved", discordUserId: "discord_user_1" },
+      { id: "player_2", status: "approved", discordUserId: "discord_user_2" },
+    ]);
+    mockEnqueueTourneyExternalOperation
+      .mockRejectedValueOnce(new Error("queue failed"))
+      .mockResolvedValueOnce({ status: "pending" });
+    const response = await backfillRoute.POST(makeRequest({
+      url: "https://www.rooindustries.com/api/tourney/discord/backfill",
+      payload: { action: "apply" },
+    }));
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      dryRun: false,
+      queued: 1,
+      failed: 1,
+      contactedDiscord: false,
+    });
+  });
 });

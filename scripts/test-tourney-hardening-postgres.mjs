@@ -12,9 +12,16 @@ import {
 } from "../src/server/tourney/store.js";
 import { getTourneySql } from "../src/server/tourney/sqlClient.js";
 import { reconcileTourneyExternalOperations } from "../src/server/tourney/externalOperations.js";
+import { appendTourneyAccountPrincipalSnapshot } from "../src/server/tourney/accountStore.js";
 
 const root = path.resolve(new URL("..", import.meta.url).pathname);
-const pgBin = "/opt/homebrew/bin";
+const configuredPgBin = String(process.env.PG_BIN || "").trim();
+const pgConfig = spawnSync(process.env.PG_CONFIG || "pg_config", ["--bindir"], {
+  encoding: "utf8",
+});
+const pgBin = configuredPgBin || (pgConfig.status === 0
+  ? pgConfig.stdout.trim()
+  : "/opt/homebrew/bin");
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "roo-tourney-v4-"));
 const dataDir = path.join(tempRoot, "pgdata");
 const socketDir = path.join(tempRoot, "socket");
@@ -544,6 +551,61 @@ try {
   `;
   assert.deepEqual({ pending: queueState.pending, dead: queueState.dead }, { pending: 0, dead: 0 });
 
+  const fallbackAccounts = [{
+    username: "owner",
+    role: "owner",
+    passwordHash: "$2b$12$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    active: true,
+    version: "1",
+  }];
+  await Promise.all([
+    source.begin(async (sql) => {
+      await sql`select set_config('roo.tourney_mirror_apply','1',true)`;
+      await sql`
+        insert into tourney.account_snapshots(
+          snapshot_id,version,accounts_json,canonical_hash,generation,created_by
+        ) values(
+          '20000000-0000-4000-8000-000000000002',2,
+          ${sql.json(fallbackAccounts)},${"6".repeat(64)},1,'fixture'
+        )
+      `;
+    }),
+    target`
+      insert into tourney_account_snapshots(
+        snapshot_id,version,accounts_json,canonical_hash,generation,created_by
+      ) values(
+        '20000000-0000-4000-8000-000000000002',2,
+        ${target.json(fallbackAccounts)},${"6".repeat(64)},1,'fixture'
+      )
+    `,
+  ]);
+  const principalId = "40000000-0000-4000-8000-000000000001";
+  const principalCommand = await executeTourneyCommand({
+    commandId: `account-principal:owner:${principalId}`,
+    purpose: "identity:account-principal",
+    requestPayload: { username: "owner", principalId },
+    maintenanceWhilePaused: true,
+    env,
+    callback: async () => ({
+      body: await appendTourneyAccountPrincipalSnapshot({
+        username: "owner",
+        principalId,
+        env,
+      }),
+    }),
+  });
+  assert.equal(principalCommand.body.updated, true, "principal snapshot was not versioned");
+  const principalMirror = await reconcileTourneyMirror({ env, limit: 250 });
+  assert.equal(principalMirror.failed, 0, "principal snapshot mirroring failed");
+  await assertSql(source, "select accounts_json->0->>'principalId'='40000000-0000-4000-8000-000000000001' ok from tourney.account_snapshots order by version desc limit 1", "source principal snapshot is incomplete");
+  await assertSql(target, "select accounts_json->0->>'principalId'='40000000-0000-4000-8000-000000000001' ok from tourney_account_snapshots order by version desc limit 1", "target principal snapshot is incomplete");
+  await source.begin(async (sql) => {
+    await sql`select set_config('roo.tourney_backend','supabase',true),set_config('roo.tourney_mirror_enabled','1',true),set_config('roo.tourney_generation','1',true),set_config('roo.tourney_command_id','fixture:principal-cleanup',true)`;
+    await sql`delete from tourney.external_operations where command_id=${`account-principal:owner:${principalId}`}`;
+  });
+  const principalCleanup = await reconcileTourneyMirror({ env, limit: 250 });
+  assert.equal(principalCleanup.failed, 0, "principal operation cleanup mirroring failed");
+
   await Promise.all([
     source`
       update tourney.cutover_metadata set
@@ -603,6 +665,7 @@ try {
       "receipt mirroring",
       "concurrent duplicate Idempotency-Key replay",
       "Idempotency-Key replay after manual failover",
+      "versioned mirrored fallback account principal",
       "atomic leases with concurrent workers",
       "expired lease recovery and dead-letter exhaustion",
       "generation tuple ordering",

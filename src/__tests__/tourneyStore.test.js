@@ -123,6 +123,7 @@ describe("Tourney cutover store", () => {
     };
     for (const commandId of [
       "fallback-bootstrap:g1:schema-v4-activation",
+      "account-principal:owner:40000000-0000-4000-8000-000000000001",
       "account-snapshot:seed:abc",
       "principal-seed:player:principal",
       "discord-backfill:player:user",

@@ -219,4 +219,25 @@ describe("tourney registration decision route", () => {
       })
     );
   });
+
+  test("returns a retryable 503 while Tourney writes are paused", async () => {
+    mockReadTourneySessionFromStore.mockResolvedValue({
+      username: "yukari",
+      role: "caster",
+    });
+    mockApplyRegistrationDecision.mockRejectedValue(Object.assign(
+      new Error("Tournament updates are briefly paused. Try again shortly."),
+      { code: "TOURNEY_WRITES_PAUSED", status: 503, retryAfter: 30 }
+    ));
+    const response = await POST(makePostRequest({
+      cookie: "caster-session",
+      payload: { token: "abc123", decision: "approve" },
+    }));
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("30");
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      title: "Try again shortly",
+    });
+  });
 });
