@@ -6,6 +6,8 @@ const mockListTourneyAppealsForSession = jest.fn();
 const mockUpdateTourneyAppeal = jest.fn();
 const mockListTourneyPayoutsForSession = jest.fn();
 const mockUpsertTourneyPayout = jest.fn();
+const mockGetTourneyApprovalRecipients = jest.fn();
+const mockGetApprovedTourneyPlayerById = jest.fn();
 const originalResponseJson = Response.json;
 
 if (!Response.json) {
@@ -33,8 +35,13 @@ jest.mock("../server/tourney/auth", () => ({
   TOURNEY_SESSION_COOKIE: "tourney_session",
   checkTourneyRateLimit: (...args) => mockCheckTourneyRateLimit(...args),
   getClientAddressFromHeaders: (...args) => mockGetClientAddressFromHeaders(...args),
+  getTourneyApprovalRecipients: (...args) => mockGetTourneyApprovalRecipients(...args),
   readTourneySessionFromStore: (...args) =>
     mockReadTourneySessionFromStore(...args),
+}));
+
+jest.mock("../server/tourney/playerStore", () => ({
+  getApprovedTourneyPlayerById: (...args) => mockGetApprovedTourneyPlayerById(...args),
 }));
 
 jest.mock("../server/tourney/appealPayoutStore", () => ({
@@ -82,6 +89,8 @@ describe("hidden tourney appeals and payouts routes", () => {
     mockUpdateTourneyAppeal.mockReset();
     mockListTourneyPayoutsForSession.mockReset();
     mockUpsertTourneyPayout.mockReset();
+    mockGetTourneyApprovalRecipients.mockReset();
+    mockGetApprovedTourneyPlayerById.mockReset();
 
     mockReadTourneySessionFromStore.mockResolvedValue({
       username: "player-one",
@@ -91,6 +100,8 @@ describe("hidden tourney appeals and payouts routes", () => {
     mockCheckTourneyRateLimit.mockReturnValue({ ok: true });
     mockListTourneyAppealsForSession.mockResolvedValue([]);
     mockListTourneyPayoutsForSession.mockResolvedValue([]);
+    mockGetTourneyApprovalRecipients.mockResolvedValue([]);
+    mockGetApprovedTourneyPlayerById.mockResolvedValue(null);
   });
 
   test("hides appeals and payouts from logged-out users", async () => {

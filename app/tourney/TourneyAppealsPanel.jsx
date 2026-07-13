@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { tourneyMutationFetch, tourneyMutationSuccessMessage } from "./tourneyMutation";
 
 const emptyAppeal = {
   type: "team-appeal",
@@ -35,7 +36,7 @@ export default function TourneyAppealsPanel({
     setIsBusy(true);
     setMessage("");
     try {
-      const response = await fetch("/api/tourney/appeals", {
+      const response = await tourneyMutationFetch("/api/tourney/appeals", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -45,7 +46,7 @@ export default function TourneyAppealsPanel({
         throw new Error(data.error || "Unable to update appeals.");
       }
       setAppeals(data.appeals || []);
-      setMessage("Appeals updated.");
+      setMessage(tourneyMutationSuccessMessage(data, "Appeals updated."));
       return true;
     } catch (error) {
       setMessage(error?.message || "Unable to update appeals.");

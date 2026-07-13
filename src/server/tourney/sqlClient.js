@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { isEnabledTourneyFlag } from "./canonical.js";
 
 const SQL_CLIENTS =
   globalThis.__rooTourneySharedSqlClients ||
@@ -6,11 +7,12 @@ const SQL_CLIENTS =
 const SCHEMA_CHECKS =
   globalThis.__rooTourneySchemaChecks ||
   (globalThis.__rooTourneySchemaChecks = new Map());
-const ACTIVE_SUPABASE_SQL =
-  globalThis.__rooActiveSupabaseTourneySql ||
-  (globalThis.__rooActiveSupabaseTourneySql = new AsyncLocalStorage());
+const ACTIVE_TOURNEY_SQL =
+  globalThis.__rooActiveTourneySql ||
+  (globalThis.__rooActiveTourneySql = new AsyncLocalStorage());
 
-export const REQUIRED_SUPABASE_TOURNEY_SCHEMA_VERSION = 2;
+export const REQUIRED_SUPABASE_TOURNEY_SCHEMA_VERSION = 3;
+export const REQUIRED_HARDENED_TOURNEY_SCHEMA_VERSION = 4;
 
 const normalize = (value) => String(value || "").trim();
 
@@ -36,66 +38,78 @@ const getBaseTourneySql = async (env = process.env) => {
   const cacheKey = `${backend}:${databaseUrl}`;
   if (SQL_CLIENTS.has(cacheKey)) return SQL_CLIENTS.get(cacheKey);
 
-  if (backend === "supabase") {
-    const { default: postgres } = await import("postgres");
-    const sql = postgres(databaseUrl, {
-      max: 3,
-      idle_timeout: 20,
-      connect_timeout: 10,
-      prepare: false,
-      connection: {
-        application_name: "roo-industries-tourney",
-        search_path: "tourney,public",
-      },
-    });
-    SQL_CLIENTS.set(cacheKey, sql);
-    return sql;
-  }
-
-  const { neon } = await import("@neondatabase/serverless");
-  const sql = neon(databaseUrl);
+  const { default: postgres } = await import("postgres");
+  const sql = postgres(databaseUrl, {
+    max: backend === "supabase" ? 3 : 2,
+    idle_timeout: 20,
+    connect_timeout: 10,
+    prepare: false,
+    connection: {
+      application_name: `roo-industries-tourney-${backend}`,
+      search_path: backend === "supabase" ? "tourney,public" : "public",
+    },
+  });
   SQL_CLIENTS.set(cacheKey, sql);
   return sql;
 };
 
-export const getTourneySql = async (env = process.env) => {
-  if (isSupabaseTourneyDatabase(env)) {
-    const active = ACTIVE_SUPABASE_SQL.getStore();
-    if (active) return active;
+export const getTourneySqlForBackend = ({ backend, env = process.env } = {}) => {
+  if (!['legacy', 'supabase'].includes(backend)) {
+    throw new Error('Unsupported Tourney database backend.');
   }
+  return getBaseTourneySql({
+    ...env,
+    TOURNEY_DATABASE_MODE: backend,
+  });
+};
+
+export const getTourneySql = async (env = process.env) => {
+  const active = ACTIVE_TOURNEY_SQL.getStore();
+  if (active) return active;
   return getBaseTourneySql(env);
 };
 
-export const runSupabaseTourneyTransaction = async ({
+export const runTourneyTransaction = async ({
   env = process.env,
   lockKey = "roo-tourney-transaction",
+  waitForLock = false,
   callback,
 } = {}) => {
   if (typeof callback !== "function") {
-    throw new Error("A Supabase Tourney transaction callback is required.");
+    throw new Error("A Tourney transaction callback is required.");
   }
-  if (!isSupabaseTourneyDatabase(env)) return callback(await getTourneySql(env));
-
-  const active = ACTIVE_SUPABASE_SQL.getStore();
+  const active = ACTIVE_TOURNEY_SQL.getStore();
   if (active) return callback(active);
 
-  await assertSupabaseTourneySchemaVersion(env);
+  await assertTourneySchemaVersion(env);
   const root = await getBaseTourneySql(env);
   return root.begin(async (sql) => {
-    const rows = await sql`
-      select pg_catalog.pg_try_advisory_xact_lock(
-        pg_catalog.hashtextextended(${String(lockKey)}, 0)
-      ) as locked
-    `;
-    if (rows?.[0]?.locked !== true) {
+    let locked = true;
+    if (waitForLock) {
+      await sql`
+        select pg_catalog.pg_advisory_xact_lock(
+          pg_catalog.hashtextextended(${String(lockKey)}, 0)
+        )
+      `;
+    } else {
+      const rows = await sql`
+        select pg_catalog.pg_try_advisory_xact_lock(
+          pg_catalog.hashtextextended(${String(lockKey)}, 0)
+        ) as locked
+      `;
+      locked = rows?.[0]?.locked === true;
+    }
+    if (!locked) {
       const error = new Error("Tourney data is busy. Try again.");
       error.status = 409;
       error.code = "TOURNEY_TRANSACTION_BUSY";
       throw error;
     }
-    return ACTIVE_SUPABASE_SQL.run(sql, () => callback(sql));
+    return ACTIVE_TOURNEY_SQL.run(sql, () => callback(sql));
   });
 };
+
+export const runSupabaseTourneyTransaction = runTourneyTransaction;
 
 export const assertSupabaseTourneySchemaVersion = async (
   env = process.env
@@ -103,7 +117,10 @@ export const assertSupabaseTourneySchemaVersion = async (
   if (!isSupabaseTourneyDatabase(env)) return true;
 
   const databaseUrl = resolveTourneyDatabaseUrl(env);
-  const cacheKey = `supabase:${databaseUrl}`;
+  const required = isEnabledTourneyFlag(env.TOURNEY_HARDENING_V4_ENABLED)
+    ? REQUIRED_HARDENED_TOURNEY_SCHEMA_VERSION
+    : REQUIRED_SUPABASE_TOURNEY_SCHEMA_VERSION;
+  const cacheKey = `supabase:v${required}:${databaseUrl}`;
   if (SCHEMA_CHECKS.has(cacheKey)) return SCHEMA_CHECKS.get(cacheKey);
 
   const check = (async () => {
@@ -116,7 +133,7 @@ export const assertSupabaseTourneySchemaVersion = async (
         limit 1
       `;
       const version = Number(rows?.[0]?.schema_version || 0);
-      if (version < REQUIRED_SUPABASE_TOURNEY_SCHEMA_VERSION) {
+      if (version < required) {
         throw new Error("Supabase Tourney schema is not ready.");
       }
       return true;
@@ -131,6 +148,43 @@ export const assertSupabaseTourneySchemaVersion = async (
     }
   })();
 
+  SCHEMA_CHECKS.set(cacheKey, check);
+  try {
+    return await check;
+  } catch (error) {
+    SCHEMA_CHECKS.delete(cacheKey);
+    throw error;
+  }
+};
+
+export const assertTourneySchemaVersion = async (env = process.env) => {
+  if (isSupabaseTourneyDatabase(env)) return assertSupabaseTourneySchemaVersion(env);
+  if (env.TOURNEY_DATABASE_MODE === "memory" || env.NODE_ENV === "test") return true;
+  const databaseUrl = resolveTourneyDatabaseUrl(env);
+  const required = isEnabledTourneyFlag(env.TOURNEY_HARDENING_V4_ENABLED)
+    ? REQUIRED_HARDENED_TOURNEY_SCHEMA_VERSION
+    : REQUIRED_SUPABASE_TOURNEY_SCHEMA_VERSION;
+  const cacheKey = `legacy:v${required}:${databaseUrl}`;
+  if (SCHEMA_CHECKS.has(cacheKey)) return SCHEMA_CHECKS.get(cacheKey);
+  const check = (async () => {
+    try {
+      const sql = await getTourneySql(env);
+      const rows = await sql`
+        select schema_version from tourney_schema_metadata
+        where schema_name = 'tourney' limit 1
+      `;
+      if (Number(rows[0]?.schema_version || 0) < required) {
+        throw new Error("Legacy Tourney schema is not ready.");
+      }
+      return true;
+    } catch (cause) {
+      const error = new Error("The legacy Tourney database migration is required.");
+      error.status = 503;
+      error.code = "TOURNEY_SCHEMA_MIGRATION_REQUIRED";
+      error.cause = cause;
+      throw error;
+    }
+  })();
   SCHEMA_CHECKS.set(cacheKey, check);
   try {
     return await check;

@@ -3,15 +3,17 @@ import {
   TOURNEY_SESSION_COOKIE,
   readTourneySessionFromStore,
 } from "../../../../../src/server/tourney/auth";
+import { getTourneyDiscordOAuthConfig } from "../../../../../src/server/tourney/discordConfig";
 import {
-  listManageTourneyPlayers,
-  markTourneyPlayerDiscordRoleAssigned,
-  markTourneyPlayerDiscordRoleFailed,
-} from "../../../../../src/server/tourney/playerStore";
-import {
-  getTourneyDiscordOAuthConfig,
-} from "../../../../../src/server/tourney/discordConfig";
+  listTourneyDiscordDesiredState,
+  recordTourneyDiscordDesiredState,
+} from "../../../../../src/server/tourney/discordDesiredState";
+import { enqueueTourneyExternalOperation } from "../../../../../src/server/tourney/externalOperations";
+import { listManageTourneyPlayers } from "../../../../../src/server/tourney/playerStore";
+import { executeTourneyCommand } from "../../../../../src/server/tourney/store";
 import { isSameOriginMutation } from "../../../../../src/server/request/sameOrigin";
+import { logSafeError } from "../../../../../src/server/safeErrorLog";
+import { buildTourneyPublicError } from "../../../../../src/server/tourney/publicError";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,128 +27,189 @@ const getAdminSession = async (request) => {
   return session && ["owner", "caster"].includes(session.role) ? session : null;
 };
 
-const parseDiscordBody = async (response) => {
-  const text = await response.text().catch(() => "");
-  if (!text) return null;
+const readMember = async ({ player, config, fetchImpl = fetch }) => {
   try {
-    return JSON.parse(text);
-  } catch {
-    return { message: text };
-  }
-};
-
-const getDiscordError = async (response, fallback) => {
-  const body = await parseDiscordBody(response);
-  return (
-    body?.message ||
-    body?.error_description ||
-    body?.error ||
-    `${fallback} (${response.status})`
-  );
-};
-
-const syncDiscordRole = async ({ player, config, fetchImpl = fetch } = {}) => {
-  const headers = { Authorization: `Bot ${config.botToken}` };
-  const memberUrl = `${config.apiBaseUrl}/guilds/${config.guildId}/members/${player.discordUserId}`;
-  const memberResponse = await fetchImpl(memberUrl, { headers });
-
-  if (memberResponse.status === 404) {
-    return {
-      status: "not-in-guild",
-      errorMessage:
-        "Discord member not found after OAuth; user must re-authorize after the join fix.",
-    };
-  }
-
-  if (!memberResponse.ok) {
-    return {
-      status: "failed",
-      errorMessage: await getDiscordError(
-        memberResponse,
-        "Unable to read Discord guild member"
-      ),
-    };
-  }
-
-  const member = await memberResponse.json();
-  const roles = Array.isArray(member.roles) ? member.roles.map(String) : [];
-  if (roles.includes(config.participantRoleId)) {
-    return { status: "already-had-role" };
-  }
-
-  const roleResponse = await fetchImpl(
-    `${memberUrl}/roles/${config.participantRoleId}`,
-    {
-      method: "PUT",
-      headers,
+    const response = await fetchImpl(
+      `${config.apiBaseUrl}/guilds/${config.guildId}/members/${player.discordUserId}`,
+      {
+        headers: { Authorization: `Bot ${config.botToken}` },
+        signal: AbortSignal.timeout(5_000),
+      }
+    );
+    if (response.status === 404) return { membership: "absent", managedRoles: [] };
+    if (!response.ok) {
+      return { membership: "unknown", managedRoles: [], errorCode: `discord_http_${response.status}` };
     }
-  );
-  if (roleResponse.ok || roleResponse.status === 204) {
-    return { status: "role-added" };
+    const member = await response.json();
+    const roles = new Set(Array.isArray(member.roles) ? member.roles.map(String) : []);
+    return {
+      membership: "present",
+      managedRoles: [
+        ...(roles.has(config.participantRoleId) ? ["participant"] : []),
+        ...(roles.has(config.hostRoleId) ? ["host"] : []),
+      ],
+    };
+  } catch (error) {
+    return {
+      membership: "unknown",
+      managedRoles: [],
+      errorCode: error?.name === "TimeoutError" ? "discord_timeout" : "discord_unavailable",
+    };
   }
+};
 
+const mapInBatches = async (items, callback, batchSize = 5) => {
+  const results = [];
+  for (let offset = 0; offset < items.length; offset += batchSize) {
+    results.push(...await Promise.all(items.slice(offset, offset + batchSize).map(callback)));
+  }
+  return results;
+};
+
+const inventory = async ({ config }) => {
+  const [players, assignments] = await Promise.all([
+    listManageTourneyPlayers(),
+    listTourneyDiscordDesiredState().catch(() => []),
+  ]);
+  const assignmentByPlayer = new Map(
+    assignments.map((assignment) => [assignment.player_id, assignment])
+  );
+  const linked = players.filter(
+    (player) => player.status === "approved" && player.discordUserId
+  );
+  const rows = await mapInBatches(linked, async (player) => {
+    const current = await readMember({ player, config });
+    const desiredRole = "participant";
+    return {
+      playerId: player.id,
+      discordUserId: player.discordUserId,
+      principalMapped: Boolean(assignmentByPlayer.get(player.id)?.principal_id),
+      membership: current.membership,
+      desiredRole,
+      currentManagedRoles: current.managedRoles,
+      conflict: current.managedRoles.length > 1,
+      needsRepair:
+        current.membership === "present" &&
+        (current.managedRoles.length !== 1 || current.managedRoles[0] !== desiredRole),
+      ...(current.errorCode ? { errorCode: current.errorCode } : {}),
+    };
+  });
   return {
-    status: "failed",
-    errorMessage: await getDiscordError(
-      roleResponse,
-      "Unable to assign Discord role"
-    ),
+    rows,
+    counts: {
+      linked: rows.length,
+      present: rows.filter((row) => row.membership === "present").length,
+      blockedReauth: rows.filter((row) => row.membership === "absent").length,
+      conflicts: rows.filter((row) => row.conflict).length,
+      needsRepair: rows.filter((row) => row.needsRepair).length,
+    },
   };
 };
+
+export async function GET(request) {
+  const session = await getAdminSession(request);
+  if (!session) return jsonError("Not found.", 404);
+  const config = getTourneyDiscordOAuthConfig({ baseUrl: request.url });
+  if (!config.enabled) return jsonError("Discord OAuth is not configured.", 503);
+  try {
+    return NextResponse.json({ ok: true, dryRun: true, ...(await inventory({ config })) });
+  } catch (error) {
+    logSafeError("Tourney Discord inventory failed", error);
+    return jsonError("Discord inventory is temporarily unavailable.", 503);
+  }
+}
 
 export async function POST(request) {
   if (!isSameOriginMutation(request)) return jsonError("Cross-origin request rejected.", 403);
-  if (!(await getAdminSession(request))) {
-    return jsonError("Not found.", 404);
-  }
-
+  const session = await getAdminSession(request);
+  if (!session) return jsonError("Not found.", 404);
   const config = getTourneyDiscordOAuthConfig({ baseUrl: request.url });
-  if (!config.enabled) {
-    return jsonError("Discord OAuth is not configured.", 503);
-  }
-
-  const players = await listManageTourneyPlayers();
-  const targets = players.filter(
-    (player) =>
-      player.status === "approved" &&
-      player.discordUserId &&
-      !player.discordRoleAssignedAt
-  );
-  const summary = {
-    ok: true,
-    checked: targets.length,
-    alreadyHadRole: 0,
-    roleAdded: 0,
-    notInGuildNeedsReauth: 0,
-    failed: 0,
-  };
-
-  for (const player of targets) {
-    const result = await syncDiscordRole({ player, config });
-
-    if (result.status === "already-had-role") {
-      await markTourneyPlayerDiscordRoleAssigned({ playerId: player.id });
-      summary.alreadyHadRole += 1;
-      continue;
-    }
-
-    if (result.status === "role-added") {
-      await markTourneyPlayerDiscordRoleAssigned({ playerId: player.id });
-      summary.roleAdded += 1;
-      continue;
-    }
-
-    await markTourneyPlayerDiscordRoleFailed({
-      playerId: player.id,
-      errorMessage: result.errorMessage || "Discord role assignment failed.",
-    });
-
-    if (result.status === "not-in-guild") {
-      summary.notInGuildNeedsReauth += 1;
-    } else {
-      summary.failed += 1;
+  if (!config.enabled) return jsonError("Discord OAuth is not configured.", 503);
+  const payload = await request.json().catch(() => ({}));
+  if (String(payload.action || "dry-run").toLowerCase() !== "apply") {
+    try {
+      return NextResponse.json({ ok: true, dryRun: true, ...(await inventory({ config })) });
+    } catch (error) {
+      logSafeError("Tourney Discord inventory failed", error);
+      return jsonError("Discord inventory is temporarily unavailable.", 503);
     }
   }
 
-  return NextResponse.json(summary);
+  let players;
+  try {
+    players = (await listManageTourneyPlayers()).filter(
+      (player) => player.status === "approved" && player.discordUserId
+    );
+  } catch (error) {
+    logSafeError("Tourney Discord apply inventory failed", error);
+    return jsonError("Discord desired-state inventory is temporarily unavailable.", 503);
+  }
+  let queued = 0;
+  const failures = [];
+  for (const player of players) {
+    const commandId = `discord-backfill:${player.id}:${player.discordUserId}`;
+    try {
+      await executeTourneyCommand({
+        commandId,
+        purpose: "discord:backfill",
+        requestPayload: { playerId: player.id, discordUserId: player.discordUserId },
+        attemptExternalWork: false,
+        callback: async () => {
+          const assignment = await recordTourneyDiscordDesiredState({
+            player,
+            discordUser: { id: player.discordUserId },
+            guildId: config.guildId,
+          });
+          await enqueueTourneyExternalOperation({
+            commandId,
+            operationKind: "discord_role_reconcile",
+            entityType: "player",
+            entityId: player.id,
+            desiredState: {
+              assignment: {
+                principalId: assignment.principal_id,
+                discordUserId: assignment.discord_user_id,
+                previousDiscordUserId: assignment.previous_discord_user_id || "",
+                desiredRole: assignment.desired_role,
+                generation: Number(assignment.generation),
+              },
+            },
+          });
+          return { body: { ok: true } };
+        },
+      });
+      queued += 1;
+    } catch (error) {
+      if (error?.code === "TOURNEY_WRITES_PAUSED") {
+        const failure = buildTourneyPublicError(
+          error,
+          "Tournament updates are temporarily unavailable."
+        );
+        return NextResponse.json(
+          { ok: false, error: failure.message, code: failure.code },
+          {
+            status: failure.status,
+            headers: { "Retry-After": String(error.retryAfter || 30) },
+          }
+        );
+      }
+      const failure = buildTourneyPublicError(
+        error,
+        "Unable to queue Discord role synchronization."
+      );
+      failures.push({
+        playerId: player.id,
+        status: failure.status,
+        code: failure.code || "TOURNEY_DISCORD_ENQUEUE_FAILED",
+      });
+    }
+  }
+  return NextResponse.json({
+    ok: failures.length === 0,
+    dryRun: false,
+    queued,
+    failed: failures.length,
+    ...(failures.length > 0 ? { failures } : {}),
+    contactedDiscord: false,
+  });
 }

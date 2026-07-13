@@ -5,21 +5,24 @@ import {
   getClientAddressFromHeaders,
   readTourneySessionFromStore,
 } from "../../../../src/server/tourney/auth";
-import { sendTourneyPlayerApprovedEmail } from "../../../../src/server/tourney/email";
-import { logSafeError } from "../../../../src/server/safeErrorLog";
+import { enqueueTourneyEmailDispatch } from "../../../../src/server/tourney/emailDispatch";
 import {
   applyRegistrationDecision,
   createApprovedTourneyPlayer,
-  getTourneyRoleCapacitySnapshot,
+  createTourneyPasswordHash,
   kickTourneyPlayer,
-  listManageTourneyPlayers,
   updateTourneyPlayerApprovedRole,
   updateTourneyRegistrationConfig,
   updateTourneyPlayerDetails,
   withdrawTourneyPlayer,
 } from "../../../../src/server/tourney/playerStore";
+import { readAdminTourneyPlayers } from "../../../../src/server/tourney/readService";
 import { buildTourneyPublicError } from "../../../../src/server/tourney/publicError";
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
+import {
+  executeTourneyCommand,
+  readTourneyCommandId,
+} from "../../../../src/server/tourney/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,23 +46,16 @@ const readPayload = async (request) => {
   return Object.fromEntries(form.entries());
 };
 
-const getPlayersResponse = async () =>
-  NextResponse.json({
-    ok: true,
-    players: await listManageTourneyPlayers(),
-    capacity: await getTourneyRoleCapacitySnapshot(),
-  });
+const getPlayersBody = () => readAdminTourneyPlayers();
+const getPlayersResponse = async () => NextResponse.json(await getPlayersBody());
 
-const notifyApprovedPlayer = async ({ player, request }) => {
-  try {
-    await sendTourneyPlayerApprovedEmail({
-      player,
-      baseUrl: new URL(request.url).origin,
-    });
-  } catch (emailError) {
-    logSafeError("Tournament approval email failed", emailError);
-  }
-};
+const queueApprovedPlayerEmail = ({ player, request, commandId }) =>
+  enqueueTourneyEmailDispatch({
+    commandId,
+    dispatchKind: "approval",
+    recipient: player.email,
+    payload: { player, baseUrl: new URL(request.url).origin },
+  });
 
 export async function GET(request) {
   if (!(await getAdminSession(request))) {
@@ -96,9 +92,18 @@ export async function POST(request) {
   try {
     const payload = await readPayload(request);
     const action = String(payload.action || "").toLowerCase();
+    const preparedPasswordHash = action === "add"
+      ? await createTourneyPasswordHash({ password: payload.password })
+      : "";
 
-    if (action === "approve" || action === "deny") {
-      const player = await applyRegistrationDecision({
+    const commandId = readTourneyCommandId({ request });
+    const command = await executeTourneyCommand({
+      commandId,
+      purpose: `players:${action}`,
+      requestPayload: payload,
+      callback: async () => {
+      if (action === "approve" || action === "deny") {
+        const player = await applyRegistrationDecision({
         tokenHash: "",
         playerId: payload.playerId,
         purpose: action,
@@ -106,9 +111,9 @@ export async function POST(request) {
         approvedRolePlay: payload.approvedRolePlay || payload.role || "",
       });
       if (action === "approve") {
-        await notifyApprovedPlayer({ player, request });
+        await queueApprovedPlayerEmail({ player, request, commandId });
       }
-      return getPlayersResponse();
+        return { body: await getPlayersBody() };
     }
 
     if (action === "kick") {
@@ -116,7 +121,7 @@ export async function POST(request) {
         playerId: payload.playerId,
         actorUsername: session.username,
       });
-      return getPlayersResponse();
+        return { body: await getPlayersBody() };
     }
 
     if (action === "withdraw") {
@@ -124,15 +129,16 @@ export async function POST(request) {
         playerId: payload.playerId,
         actorUsername: session.username,
       });
-      return getPlayersResponse();
+        return { body: await getPlayersBody() };
     }
 
     if (action === "add") {
       await createApprovedTourneyPlayer({
         payload,
         actorUsername: session.username,
+        preparedPasswordHash,
       });
-      return getPlayersResponse();
+        return { body: await getPlayersBody() };
     }
 
     if (action === "update-details") {
@@ -141,7 +147,7 @@ export async function POST(request) {
         payload,
         actorUsername: session.username,
       });
-      return getPlayersResponse();
+        return { body: await getPlayersBody() };
     }
 
     if (action === "update-role") {
@@ -150,7 +156,7 @@ export async function POST(request) {
         rolePlay: payload.rolePlay || payload.approvedRolePlay || payload.role || "",
         actorUsername: session.username,
       });
-      return getPlayersResponse();
+        return { body: await getPlayersBody() };
     }
 
     if (action === "update-capacity") {
@@ -158,15 +164,20 @@ export async function POST(request) {
         teamCount: payload.teamCount,
         actorUsername: session.username,
       });
-      return getPlayersResponse();
+        return { body: await getPlayersBody() };
     }
 
-    return jsonError("Unsupported player action.");
+        throw Object.assign(new Error("Unsupported player action."), { status: 400 });
+      },
+    });
+    return NextResponse.json(command.body, { status: command.status });
   } catch (error) {
     const failure = buildTourneyPublicError(error, "Unable to update players.");
-    return jsonError(failure.message, failure.status, {
+    const response = jsonError(failure.message, failure.status, {
       errors: failure.errors,
       code: failure.code,
     });
+    if (error?.retryAfter) response.headers.set("Retry-After", String(error.retryAfter));
+    return response;
   }
 }

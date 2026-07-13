@@ -9,7 +9,7 @@ const mockListManageTourneyPlayers = jest.fn();
 const mockUpdateTourneyPlayerApprovedRole = jest.fn();
 const mockUpdateTourneyRegistrationConfig = jest.fn();
 const mockUpdateTourneyPlayerDetails = jest.fn();
-const mockSendTourneyPlayerApprovedEmail = jest.fn();
+const mockEnqueueTourneyEmailDispatch = jest.fn();
 const mockWithdrawTourneyPlayer = jest.fn();
 const originalResponseJson = Response.json;
 
@@ -42,9 +42,9 @@ jest.mock("../server/tourney/auth", () => ({
     mockReadTourneySessionFromStore(...args),
 }));
 
-jest.mock("../server/tourney/email", () => ({
-  sendTourneyPlayerApprovedEmail: (...args) =>
-    mockSendTourneyPlayerApprovedEmail(...args),
+jest.mock("../server/tourney/emailDispatch", () => ({
+  enqueueTourneyEmailDispatch: (...args) =>
+    mockEnqueueTourneyEmailDispatch(...args),
 }));
 
 jest.mock("../server/tourney/playerStore", () => ({
@@ -100,7 +100,7 @@ describe("tourney players API route", () => {
     mockUpdateTourneyPlayerApprovedRole.mockReset();
     mockUpdateTourneyRegistrationConfig.mockReset();
     mockUpdateTourneyPlayerDetails.mockReset();
-    mockSendTourneyPlayerApprovedEmail.mockReset();
+    mockEnqueueTourneyEmailDispatch.mockReset();
     mockWithdrawTourneyPlayer.mockReset();
 
     mockReadTourneySessionFromStore.mockResolvedValue({
@@ -114,7 +114,7 @@ describe("tourney players API route", () => {
       teamCount: 8,
       roles: [],
     });
-    mockSendTourneyPlayerApprovedEmail.mockResolvedValue({ id: "email_1" });
+    mockEnqueueTourneyEmailDispatch.mockResolvedValue({ id: "dispatch_1" });
   });
 
   test("emails the player when a pending registration is approved from Manage", async () => {
@@ -141,9 +141,14 @@ describe("tourney players API route", () => {
       actorUsername: "yukari",
       approvedRolePlay: "Support",
     });
-    expect(mockSendTourneyPlayerApprovedEmail).toHaveBeenCalledWith({
+    expect(mockEnqueueTourneyEmailDispatch).toHaveBeenCalledWith({
+      commandId: expect.any(String),
+      dispatchKind: "approval",
+      recipient: "playerone@example.com",
+      payload: {
       player: approvedPlayer,
       baseUrl: "https://www.rooindustries.com",
+      },
     });
   });
 

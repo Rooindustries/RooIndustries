@@ -1,23 +1,20 @@
 import { NextResponse } from "next/server";
 import {
   getApprovedTourneyPlayerById,
-  markTourneyPlayerDiscordRoleAssigned,
-  markTourneyPlayerDiscordRoleFailed,
   recordTourneyPlayerDiscordLink,
 } from "../../../../../src/server/tourney/playerStore";
+import { recordTourneyDiscordDesiredState } from "../../../../../src/server/tourney/discordDesiredState";
+import { enqueueTourneyExternalOperation } from "../../../../../src/server/tourney/externalOperations";
+import { executeTourneyCommand } from "../../../../../src/server/tourney/store";
 import {
   getTourneyDiscordOAuthConfig,
 } from "../../../../../src/server/tourney/discordConfig";
 import {
-  assignTourneyDiscordParticipantRole,
   exchangeDiscordOAuthCode,
   fetchDiscordCurrentUser,
   readTourneyDiscordOAuthStateToken,
 } from "../../../../../src/server/tourney/discordOAuth";
-import {
-  getSafeErrorCode,
-  logSafeError,
-} from "../../../../../src/server/safeErrorLog";
+import { logSafeError } from "../../../../../src/server/safeErrorLog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -58,23 +55,52 @@ export async function GET(request) {
       accessToken: token.access_token,
       config,
     });
-    await recordTourneyPlayerDiscordLink({
-      playerId: player.id,
-      discordUser,
+    const commandId = `discord-oauth:${player.id}:${discordUser.id}`;
+    const command = await executeTourneyCommand({
+      commandId,
+      purpose: "discord:link",
+      requestPayload: {
+        playerId: player.id,
+        discordUserId: discordUser.id,
+      },
+      postCommitContext: {
+        discordAccessTokens: { [player.id]: token.access_token },
+      },
+      callback: async () => {
+        const linkedPlayer = await recordTourneyPlayerDiscordLink({
+          playerId: player.id,
+          discordUser,
+        });
+        const assignment = await recordTourneyDiscordDesiredState({
+          player: linkedPlayer || player,
+          discordUser,
+          guildId: config.guildId,
+        });
+        await enqueueTourneyExternalOperation({
+          commandId,
+          operationKind: "discord_membership",
+          entityType: "player",
+          entityId: player.id,
+          desiredState: {
+            assignment: {
+              principalId: assignment.principal_id || assignment.principalId,
+              discordUserId: assignment.discord_user_id || discordUser.id,
+              previousDiscordUserId: assignment.previous_discord_user_id || "",
+              desiredRole: assignment.desired_role || assignment.desiredRole,
+              generation: Number(assignment.generation || 1),
+            },
+          },
+        });
+        return { body: { ok: true } };
+      },
     });
-    await assignTourneyDiscordParticipantRole({
-      accessToken: token.access_token,
-      userId: discordUser.id,
-      config,
-    });
-    await markTourneyPlayerDiscordRoleAssigned({ playerId: player.id });
-    return redirectToTourneyStatus(request, "linked", statePayload.returnTo);
+    return redirectToTourneyStatus(
+      request,
+      command.syncPending ? "syncing" : "linked",
+      statePayload.returnTo
+    );
   } catch (error) {
     logSafeError("Tournament Discord role assignment failed", error);
-    await markTourneyPlayerDiscordRoleFailed({
-      playerId: player.id,
-      errorMessage: getSafeErrorCode(error, "discord_role_assignment_failed"),
-    });
     return redirectToTourneyStatus(request, "role-failed", statePayload.returnTo);
   }
 }

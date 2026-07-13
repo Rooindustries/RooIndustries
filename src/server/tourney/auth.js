@@ -8,11 +8,8 @@ import {
 import { getClientAddressFromFetchHeaders } from "../request/clientAddress";
 import { requireRateLimit } from "../api/ref/rateLimit";
 import { authenticateSupabaseAccount, resolveSupabaseAccountAlias } from "../supabase/accounts";
-import {
-  resolveSupabaseRuntimePolicy,
-  shouldUseSupabaseForAccount,
-} from "../supabase/runtime";
 import { isSupabaseAdminConfigured } from "../supabase/adminClient";
+import { isSupabaseTourneyDatabase } from "./sqlClient";
 
 export const TOURNEY_SESSION_COOKIE = "tourney_session";
 export const TOURNEY_ADMIN_ROLES = Object.freeze(["viewer", "caster", "owner"]);
@@ -77,6 +74,7 @@ const normalizeAccount = (account) => {
   const email = normalizeTourneyEmail(account?.email);
   const passwordHash = String(account?.passwordHash || account?.password_hash || "").trim();
   const version = String(account?.version || "1").trim() || "1";
+  const principalId = String(account?.principalId || account?.principal_id || "").trim();
 
   if (!username || !role || !passwordHash) return null;
 
@@ -85,6 +83,7 @@ const normalizeAccount = (account) => {
     ...(email ? { email } : {}),
     role,
     passwordHash,
+    ...(principalId ? { principalId } : {}),
     active: account?.active !== false,
     version,
   };
@@ -291,7 +290,7 @@ export const isTourneyAuthConfigured = (env = process.env) =>
   Boolean(
     getSessionSecret(env) &&
       (readTourneyAccounts(env).length > 0 ||
-        (resolveSupabaseRuntimePolicy(env).primaryBackend === "supabase" &&
+        (isSupabaseTourneyDatabase(env) &&
           isSupabaseAdminConfigured(env)))
   );
 
@@ -301,7 +300,7 @@ export const verifyTourneyCredentials = async ({
   env = process.env,
   readPersistedAccountsJson = readPersistedTourneyAccountsJson,
 } = {}) => {
-  if (shouldUseSupabaseForAccount({ identifier: username, env })) {
+  if (isSupabaseTourneyDatabase(env)) {
     const result = await authenticateSupabaseAccount({
       identifier: username,
       password,
@@ -327,6 +326,8 @@ export const verifyTourneyCredentials = async ({
         role,
         active: result.account.tourney_active !== false,
         version: String(result.account.credential_version || "1"),
+        principalId: result.account.principal_id || "",
+        playerId: result.account.tourney_legacy_player_id || result.account.legacy_sanity_id || "",
         authBackend: "supabase",
       },
     };
@@ -343,7 +344,7 @@ export const verifyTourneyCredentials = async ({
   const passwordMatches = await bcrypt.compare(String(password || ""), candidateHash);
 
   const bridgeSession = async () => {
-    if (!isSupabaseAdminConfigured(env)) return null;
+    if (!isSupabaseTourneyDatabase(env) || !isSupabaseAdminConfigured(env)) return null;
     try {
       const bridge = await authenticateSupabaseAccount({
         identifier: login,
@@ -434,6 +435,7 @@ export const buildUpdatedTourneyAccounts = async ({
       passwordHash,
       active: true,
       version: nextVersion(existing?.version || "0"),
+      ...(existing?.principalId ? { principalId: existing.principalId } : {}),
     };
 
     if (existingIndex >= 0) {
@@ -516,6 +518,8 @@ export const createTourneySessionToken = ({
     role: account.role,
     av: String(account.version || "1"),
     ab: account.authBackend === "supabase" ? "supabase" : "sanity",
+    ...(account.principalId ? { pid: String(account.principalId) } : {}),
+    ...(account.playerId ? { plid: String(account.playerId) } : {}),
     iat: now,
     exp: now + maxAgeSeconds,
   };
@@ -578,6 +582,8 @@ export const readTourneySessionPayload = ({
       role,
       accountVersion: String(payload.av || "1"),
       authBackend: payload.ab === "supabase" ? "supabase" : "sanity",
+      principalId: String(payload.pid || ""),
+      playerId: String(payload.plid || ""),
       expiresAt: payload.exp,
     };
   } catch {
@@ -658,6 +664,39 @@ export const readTourneySessionFromStore = async ({
   if (!payload) return null;
 
   if (payload.authBackend === "supabase") {
+    if (!isSupabaseTourneyDatabase(env)) {
+      if (payload.role === "player") {
+        const player = await findTourneyPlayerForSession({
+          username: payload.username,
+          version: payload.accountVersion,
+          env,
+        });
+        if (!player) return null;
+        if (payload.playerId && payload.playerId !== player.id) return null;
+        if (payload.principalId && payload.principalId !== player.principalId) return null;
+        return {
+          username: player.username,
+          role: "player",
+          playerId: player.id,
+          authBackend: "supabase",
+          expiresAt: payload.expiresAt,
+        };
+      }
+      const accounts = await readEffectiveTourneyAccounts({
+        env,
+        readPersistedAccountsJson,
+      });
+      const account = findTourneyAccount(payload.username, accounts);
+      if (!account || !account.active || account.role !== payload.role ||
+          String(account.version || "1") !== payload.accountVersion ||
+          (payload.principalId && payload.principalId !== String(account.principalId || ""))) return null;
+      return {
+        username: account.username,
+        role: account.role,
+        authBackend: "supabase",
+        expiresAt: payload.expiresAt,
+      };
+    }
     const account = await resolveSupabaseAccountAlias({
       identifier: payload.username,
       accountScope: "tourney",
@@ -669,7 +708,11 @@ export const readTourneySessionFromStore = async ({
       account.tourney_active === false ||
       account.tourney_username !== payload.username ||
       role !== payload.role ||
-      String(account.credential_version || "1") !== payload.accountVersion
+      String(account.credential_version || "1") !== payload.accountVersion ||
+      (payload.principalId && payload.principalId !== String(account.principal_id || "")) ||
+      (payload.playerId && payload.playerId !== String(
+        account.tourney_legacy_player_id || account.legacy_sanity_id || ""
+      ))
     ) {
       return null;
     }
