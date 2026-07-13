@@ -145,6 +145,22 @@ describe("Tourney v4 activation", () => {
     expect(sleepImpl).toHaveBeenCalledWith(50);
   });
 
+  test("retries transient Discord server failures", async () => {
+    const fetchImpl = jest.fn()
+      .mockResolvedValueOnce({ ok: false, status: 503 })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ roles: [] }) });
+    const sleepImpl = jest.fn().mockResolvedValue(undefined);
+
+    const inventory = await inventoryTourneyV4Activation({
+      env,
+      fetchImpl,
+      sleepImpl,
+    });
+
+    expect(inventory.counts).toMatchObject({ linked: 1, present: 1, unknown: 0 });
+    expect(sleepImpl).toHaveBeenCalledWith(250);
+  });
+
   test("requires exact paused generation-one controls", async () => {
     mockResolvePolicy.mockReturnValue({
       primaryBackend: "supabase",

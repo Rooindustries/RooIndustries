@@ -30,12 +30,12 @@ const discordRetryDelay = async (response) => {
   const headerValue = String(response.headers?.get?.("retry-after") ?? "").trim();
   const headerSeconds = headerValue ? Number(headerValue) : Number.NaN;
   if (Number.isFinite(headerSeconds) && headerSeconds >= 0) {
-    return Math.min(10_000, Math.ceil(headerSeconds * 1_000) + 50);
+    return Math.min(60_000, Math.ceil(headerSeconds * 1_000) + 50);
   }
   const body = await response.json().catch(() => ({}));
   const bodySeconds = Number(body?.retry_after);
   return Number.isFinite(bodySeconds) && bodySeconds >= 0
-    ? Math.min(10_000, Math.ceil(bodySeconds * 1_000) + 50)
+    ? Math.min(60_000, Math.ceil(bodySeconds * 1_000) + 50)
     : 1_000;
 };
 
@@ -56,6 +56,10 @@ const readDiscordMember = async ({
       );
       if (response.status === 429 && attempt < 3) {
         await sleepImpl(await discordRetryDelay(response));
+        continue;
+      }
+      if (response.status >= 500 && attempt < 3) {
+        await sleepImpl(250 * (attempt + 1));
         continue;
       }
       if (response.status === 404) return { membership: "absent", managedRoles: [] };
