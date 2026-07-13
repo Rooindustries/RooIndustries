@@ -1330,17 +1330,65 @@ const listAudit = async ({ env = process.env } = {}) => {
   return rows.map(mapAuditRow);
 };
 
+const readPersistedBracketSnapshotData = async (env = process.env) => {
+  await ensureTourneyBracketSchema(env);
+  const sql = await getSql(env);
+  const rows = await sql`
+    select
+      (
+        select to_jsonb(meta_row)
+        from (
+          select id, stage_id, status, published, generated_at, updated_at, updated_by
+          from tourney_bracket_meta
+          where id = ${TOURNEY_META_ID}
+          limit 1
+        ) meta_row
+      ) as meta,
+      coalesce((
+        select jsonb_agg(to_jsonb(team_row) order by team_row.id)
+        from (
+          select id, name, seed_order, status, created_at, updated_at, updated_by
+          from tourney_bracket_teams
+        ) team_row
+      ), '[]'::jsonb) as teams,
+      coalesce((
+        select jsonb_agg(
+          jsonb_build_object('entity_type', entity_type, 'data', data)
+          order by entity_type, entity_id
+        )
+        from tourney_bracket_entities
+        where entity_type = any(${ENGINE_TABLES})
+      ), '[]'::jsonb) as entities
+  `;
+  const row = rows[0] || {};
+  const data = Object.fromEntries(ENGINE_TABLES.map((table) => [table, []]));
+  for (const entity of row.entities || []) {
+    data[entity.entity_type]?.push(clone(entity.data));
+  }
+  return {
+    meta: mapMetaRow(row.meta || createDefaultMeta()),
+    teams: (row.teams || []).map(mapTeamRow).sort(compareTeams),
+    data,
+  };
+};
+
 export const getTourneyBracketSnapshot = async ({
   includeAudit = false,
   env = process.env,
 } = {}) => {
   await ensurePreviewFixtureLoaded(env);
 
-  const [meta, teams, data] = await Promise.all([
-    readMeta(env),
-    listTourneyBracketTeams({ includeDisqualified: true, env }),
-    readEngineData(env),
-  ]);
+  const { meta, teams, data } = isMemoryMode(env)
+    ? await Promise.all([
+        readMeta(env),
+        listTourneyBracketTeams({ includeDisqualified: true, env }),
+        readEngineData(env),
+      ]).then(([memoryMeta, memoryTeams, memoryData]) => ({
+        meta: memoryMeta,
+        teams: memoryTeams,
+        data: memoryData,
+      }))
+    : await readPersistedBracketSnapshotData(env);
   const maskPreviewFixtureNames = isPreviewFixtureMode(env);
   return {
     ok: true,
