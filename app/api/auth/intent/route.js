@@ -101,6 +101,21 @@ export async function POST(request) {
       )
     );
   }
+  if (
+    flow === "tourney" &&
+    String(process.env.TOURNEY_DATABASE_MODE || "").trim().toLowerCase() === "legacy"
+  ) {
+    return noStore(
+      NextResponse.json(
+        {
+          ok: false,
+          error: "Google and Discord sign-in are temporarily unavailable. Use your Tourney password.",
+          code: "TOURNEY_OAUTH_TEMPORARILY_UNAVAILABLE",
+        },
+        { status: 503 }
+      )
+    );
+  }
 
   const returnPath = safeReturnPath({
     action,

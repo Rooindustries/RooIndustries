@@ -14,10 +14,7 @@ import {
   summarizeTourneyAccounts,
 } from "../../../src/server/tourney/auth";
 import { getTourneyBracketSnapshot } from "../../../src/server/tourney/bracketStore";
-import {
-  getTourneyRoleCapacitySnapshot,
-  listManageTourneyPlayers,
-} from "../../../src/server/tourney/playerStore";
+import { readAdminTourneyPlayers } from "../../../src/server/tourney/readService";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,14 +54,14 @@ export default async function TourneyManagePage({ searchParams }) {
     session.role === "owner"
       ? summarizeTourneyAccounts(await readEffectiveTourneyAccounts())
       : [];
-  const [players, capacitySnapshot, bracketSnapshot] = await Promise.all([
-    listManageTourneyPlayers().catch(() => []),
-    getTourneyRoleCapacitySnapshot().catch(() => ({
-      teamCount: 8,
-      roles: [],
+  const [adminPlayers, bracketSnapshot] = await Promise.all([
+    readAdminTourneyPlayers().catch(() => ({
+      ok: false,
+      players: [],
+      capacity: { teamCount: 8, roles: [] },
     })),
     getTourneyBracketSnapshot({ includeAudit: true }).catch(() => ({
-      ok: true,
+      ok: false,
       meta: {},
       teams: [],
       matches: [],
@@ -73,6 +70,8 @@ export default async function TourneyManagePage({ searchParams }) {
       audit: [],
     })),
   ]);
+  const players = adminPlayers.players;
+  const capacitySnapshot = adminPlayers.capacity;
 
   return (
     <TourneyShell session={session} activeHref="/tourney/manage">
@@ -83,6 +82,12 @@ export default async function TourneyManagePage({ searchParams }) {
 
       <div className="tourney-grid">
         <Section id="players" eyebrow="Players" title="Player Management" wide>
+          {!adminPlayers.ok ? (
+            <p className="cs-error" role="alert">
+              Player data is temporarily unavailable. Do not make roster decisions
+              until this warning clears.
+            </p>
+          ) : null}
           <TourneyPlayerManager
             initialPlayers={players}
             initialCapacity={capacitySnapshot}
@@ -99,6 +104,12 @@ export default async function TourneyManagePage({ searchParams }) {
         ) : null}
 
         <Section id="bracket" eyebrow="Bracket" title="Bracket Control" wide>
+          {!bracketSnapshot.ok ? (
+            <p className="cs-error" role="alert">
+              Bracket data is temporarily unavailable. Do not publish or edit the
+              bracket until this warning clears.
+            </p>
+          ) : null}
           <TourneyBracketManager
             initialSnapshot={bracketSnapshot}
             currentRole={session.role}

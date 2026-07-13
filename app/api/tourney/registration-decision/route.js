@@ -5,7 +5,7 @@ import {
   readTourneySessionFromStore,
 } from "../../../../src/server/tourney/auth";
 import { isMatchingTourneyApproverSession } from "../../../../src/server/tourney/access";
-import { sendTourneyPlayerApprovedEmail } from "../../../../src/server/tourney/email";
+import { enqueueTourneyEmailDispatch } from "../../../../src/server/tourney/emailDispatch";
 import { logSafeError } from "../../../../src/server/safeErrorLog";
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
 import {
@@ -13,6 +13,7 @@ import {
   getRegistrationDecisionToken,
   hashTourneyToken,
 } from "../../../../src/server/tourney/playerStore";
+import { executeTourneyCommand } from "../../../../src/server/tourney/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,6 +30,8 @@ const renderDecisionPage = ({
   title,
   body,
   tone = "info",
+  status = 200,
+  retryAfter = 0,
   linkHref = "/tourney/manage",
   linkLabel = "Open Manage",
 }) => {
@@ -74,14 +77,23 @@ const renderDecisionPage = ({
       </body>
     </html>`,
     {
+      status,
       headers: {
         "Content-Type": "text/html; charset=utf-8",
+        ...(retryAfter ? { "Retry-After": String(retryAfter) } : {}),
       },
     }
   );
 };
 
-const renderDecisionJson = ({ title, body, ok = false, status = 400, linkHref = "" }) =>
+const renderDecisionJson = ({
+  title,
+  body,
+  ok = false,
+  status = 400,
+  linkHref = "",
+  retryAfter = 0,
+}) =>
   Response.json(
     {
       ok,
@@ -93,7 +105,10 @@ const renderDecisionJson = ({ title, body, ok = false, status = 400, linkHref = 
         .replace(/&quot;/g, '"'),
       ...(linkHref ? { signInUrl: linkHref } : {}),
     },
-    { status }
+    {
+      status,
+      headers: retryAfter ? { "Retry-After": String(retryAfter) } : undefined,
+    }
   );
 
 const handleDecision = async ({
@@ -118,6 +133,7 @@ const handleDecision = async ({
     const tokenRow = await getRegistrationDecisionToken({
       token,
       purpose: decision,
+      allowUsed: true,
     });
     if (!tokenRow) {
       return respond({
@@ -162,42 +178,56 @@ const handleDecision = async ({
       });
     }
 
-    const player = await applyRegistrationDecision({
-      tokenHash: hashTourneyToken(token),
-      playerId: tokenRow.player_id,
-      purpose: decision,
-      actorUsername: approver.username,
-      approvedRolePlay,
-    });
-
-    let emailNotice = "";
-    let tone = "info";
-    if (decision === "approve") {
-      try {
-        await sendTourneyPlayerApprovedEmail({
-          player,
-          baseUrl: url.origin,
+    const tokenHash = hashTourneyToken(token);
+    const commandId = `token:${tokenHash}:${decision}`;
+    const command = await executeTourneyCommand({
+      commandId,
+      purpose: `players:${decision}`,
+      requestPayload: { tokenHash, decision, approvedRolePlay },
+      callback: async () => {
+        const player = await applyRegistrationDecision({
+          tokenHash,
+          playerId: tokenRow.player_id,
+          purpose: decision,
+          actorUsername: approver.username,
+          approvedRolePlay,
         });
-        emailNotice = " An approval email was sent to the player.";
-      } catch (emailError) {
-        logSafeError("Tournament approval email failed", emailError);
-        tone = "danger";
-        emailNotice =
-          " The player was approved, but the approval email could not be sent.";
-      }
-    }
+        if (decision === "approve") {
+          await enqueueTourneyEmailDispatch({
+            commandId,
+            dispatchKind: "approval",
+            recipient: player.email,
+            payload: { player, baseUrl: url.origin },
+          });
+        }
+        return { body: { player } };
+      },
+    });
+    const player = command.body.player;
+    const emailNotice = decision === "approve"
+      ? " An approval email was queued for the player."
+      : "";
 
     return respond({
       title: decision === "approve" ? "Approved" : "Denied",
       body: `<strong>${escapeHtml(player.displayName || player.discord)}</strong> has been ${
         decision === "approve" ? "approved" : "denied"
       }.${emailNotice}`,
-      tone,
+      tone: "info",
       ok: true,
       status: 200,
     });
   } catch (error) {
     logSafeError("Tournament registration decision failed", error);
+    if (error?.code === "TOURNEY_WRITES_PAUSED") {
+      return respond({
+        title: "Try again shortly",
+        body: "Tournament updates are briefly paused. Please try again shortly.",
+        tone: "danger",
+        status: 503,
+        retryAfter: error.retryAfter || 30,
+      });
+    }
     return respond({
       title: "Decision failed",
       body: "Unable to update this registration.",

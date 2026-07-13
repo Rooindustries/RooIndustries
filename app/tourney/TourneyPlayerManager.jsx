@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { tourneyMutationFetch, tourneyMutationSuccessMessage } from "./tourneyMutation";
 
 const rankOptions = [
   "Master",
@@ -137,7 +138,7 @@ export default function TourneyPlayerManager({
     setMessage("");
 
     try {
-      const response = await fetch("/api/tourney/players", {
+      const response = await tourneyMutationFetch("/api/tourney/players", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -151,7 +152,7 @@ export default function TourneyPlayerManager({
         setCapacity(data.capacity);
         setCapacityForm(String(data.capacity.teamCount || 8));
       }
-      setMessage("Player list updated.");
+      setMessage(tourneyMutationSuccessMessage(data, "Player list updated."));
       return true;
     } catch (error) {
       setMessage(error?.message || "Unable to update players.");

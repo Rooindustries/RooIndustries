@@ -3,7 +3,7 @@ import {
   getTourneySession,
 } from "../TourneyShared";
 import TourneyBracketView from "../TourneyBracketView";
-import { getTourneyBracketSnapshot } from "../../../src/server/tourney/bracketStore";
+import { readPublicTourneyBracket } from "../../../src/server/tourney/readService";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,7 +21,7 @@ export const metadata = {
 export default async function TourneyBracketPage() {
   const [session, snapshot] = await Promise.all([
     getTourneySession(),
-    getTourneyBracketSnapshot(),
+    readPublicTourneyBracket(),
   ]);
 
   return (

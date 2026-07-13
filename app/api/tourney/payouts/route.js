@@ -6,11 +6,16 @@ import {
   readTourneySessionFromStore,
 } from "../../../../src/server/tourney/auth";
 import {
-  listTourneyPayoutsForSession,
   upsertTourneyPayout,
 } from "../../../../src/server/tourney/appealPayoutStore";
+import { enqueueTourneyEmailDispatch } from "../../../../src/server/tourney/emailDispatch";
 import { buildTourneyPublicError } from "../../../../src/server/tourney/publicError";
+import { readTourneyPayouts } from "../../../../src/server/tourney/readService";
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
+import {
+  executeTourneyCommand,
+  readTourneyCommandId,
+} from "../../../../src/server/tourney/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,11 +37,8 @@ const readPayload = async (request) => {
   return Object.fromEntries(form.entries());
 };
 
-const getPayoutsResponse = async (session) =>
-  NextResponse.json({
-    ok: true,
-    payouts: await listTourneyPayoutsForSession({ session }),
-  });
+const getPayoutsBody = (session) => readTourneyPayouts({ session });
+const getPayoutsResponse = async (session) => NextResponse.json(await getPayoutsBody(session));
 
 export async function GET(request) {
   const session = await getSession(request);
@@ -70,16 +72,49 @@ export async function POST(request) {
   }
 
   try {
-    await upsertTourneyPayout({
-      payload: await readPayload(request),
-      session,
+    const payload = await readPayload(request);
+    const commandId = readTourneyCommandId({ request });
+    const command = await executeTourneyCommand({
+      commandId,
+      purpose: "payouts:upsert",
+      requestPayload: payload,
+      callback: async () => {
+        const existing = payload.payoutId
+          ? (await readTourneyPayouts({ session })).payouts.find(
+              (payout) => payout.id === payload.payoutId
+            )
+          : null;
+        const payout = await upsertTourneyPayout({ payload, session });
+        const transitioned = ["ready", "paid", "void"].includes(payout?.status) &&
+          existing?.status !== payout.status;
+        if (transitioned && payout?.payoutEmail) {
+          await enqueueTourneyEmailDispatch({
+            commandId,
+            dispatchKind: "payout",
+            recipient: payout.payoutEmail,
+            entityType: "payout",
+            entityId: payout.id,
+            entityVersion: payout.updatedAt,
+            audience: payout.status,
+            payload: {
+              payout,
+              to: payout.payoutEmail,
+              transition: payout.status,
+              baseUrl: new URL(request.url).origin,
+            },
+          });
+        }
+        return { body: await getPayoutsBody(session) };
+      },
     });
-    return getPayoutsResponse(session);
+    return NextResponse.json(command.body, { status: command.status });
   } catch (error) {
     const failure = buildTourneyPublicError(error, "Unable to update payouts.");
-    return jsonError(failure.message, failure.status, {
+    const response = jsonError(failure.message, failure.status, {
       errors: failure.errors,
       code: failure.code,
     });
+    if (error?.retryAfter) response.headers.set("Retry-After", String(error.retryAfter));
+    return response;
   }
 }

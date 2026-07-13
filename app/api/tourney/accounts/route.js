@@ -13,8 +13,15 @@ import {
   summarizeTourneyAccounts,
 } from "../../../../src/server/tourney/auth";
 import { buildTourneyPublicError } from "../../../../src/server/tourney/publicError";
-import { writePersistedTourneyAccountsJson } from "../../../../src/server/tourney/accountStore";
+import {
+  getTourneyAccountsCanonicalHash,
+  writePersistedTourneyAccountsJson,
+} from "../../../../src/server/tourney/accountStore";
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
+import {
+  executeTourneyCommand,
+  readTourneyCommandId,
+} from "../../../../src/server/tourney/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -93,20 +100,33 @@ export async function POST(request) {
       accounts: currentAccounts,
     });
     const accountsJson = renderTourneyAccountsJson(accounts);
-    const persisted = await writePersistedTourneyAccountsJson({
-      accountsJson,
-      actorUsername: session.username,
+    const expectedCurrentHash = getTourneyAccountsCanonicalHash(currentAccounts);
+    const commandId = readTourneyCommandId({ request });
+    const command = await executeTourneyCommand({
+      commandId,
+      purpose: `accounts:${String(payload?.action || "update").toLowerCase()}`,
+      requestPayload: payload,
+      callback: async () => {
+        const persisted = await writePersistedTourneyAccountsJson({
+          accountsJson,
+          actorUsername: session.username,
+          expectedCurrentHash,
+        });
+        return { body: {
+          ok: true,
+          accounts: summarizeTourneyAccounts(accounts),
+          accountsJson,
+          persisted: true,
+          persistedAt: persisted.updatedAt,
+        } };
+      },
     });
+    const response = NextResponse.json(command.body, { status: command.status });
 
-    const response = NextResponse.json({
-      ok: true,
-      accounts: summarizeTourneyAccounts(accounts),
-      accountsJson,
-      persisted: true,
-      persistedAt: persisted.updatedAt,
-    });
-
-    const updatedSessionAccount = findTourneyAccount(session.username, accounts);
+    const updatedSessionAccount = findTourneyAccount(
+      session.username,
+      JSON.parse(command.body.accountsJson || "[]")
+    );
     if (updatedSessionAccount) {
       const nextToken = createTourneySessionToken({
         account: {
@@ -126,6 +146,8 @@ export async function POST(request) {
     return response;
   } catch (error) {
     const failure = buildTourneyPublicError(error, "Unable to update account.");
-    return jsonError(failure.message, failure.status);
+    const response = jsonError(failure.message, failure.status);
+    if (error?.retryAfter) response.headers.set("Retry-After", String(error.retryAfter));
+    return response;
   }
 }
