@@ -3,8 +3,8 @@ const queryTexts = [];
 const sql = jest.fn(async (strings) => {
   const query = strings.join(" ").replace(/\s+/g, " ").trim();
   queryTexts.push(query);
-  if (query.includes("from tourney_bracket_meta")) {
-    return [{
+  return [{
+    meta: {
       id: "legacy-series-2026",
       stage_id: null,
       status: "draft",
@@ -12,9 +12,10 @@ const sql = jest.fn(async (strings) => {
       generated_at: null,
       updated_at: null,
       updated_by: "",
-    }];
-  }
-  return [];
+    },
+    teams: [],
+    entities: [],
+  }];
 });
 
 jest.mock("../server/tourney/sqlClient", () => ({
@@ -33,15 +34,16 @@ describe("legacy Tourney bracket reads", () => {
     sql.mockClear();
   });
 
-  test("loads all bracket engine entities in one database round trip", async () => {
+  test("loads the complete public bracket snapshot in one database round trip", async () => {
     const result = await getTourneyBracketSnapshot({
       env: { TOURNEY_DATABASE_MODE: "legacy" },
     });
 
     expect(result).toMatchObject({ ok: true, generated: false, matches: [] });
-    expect(
-      queryTexts.filter((query) => query.includes("from tourney_bracket_entities"))
-    ).toHaveLength(1);
-    expect(queryTexts.filter((query) => query.includes("entity_type = any"))).toHaveLength(1);
+    expect(sql).toHaveBeenCalledTimes(1);
+    expect(queryTexts[0]).toContain("from tourney_bracket_meta");
+    expect(queryTexts[0]).toContain("from tourney_bracket_teams");
+    expect(queryTexts[0]).toContain("from tourney_bracket_entities");
+    expect(queryTexts[0]).toContain("entity_type = any");
   });
 });
