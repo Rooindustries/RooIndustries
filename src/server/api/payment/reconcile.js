@@ -21,6 +21,7 @@ import {
   runTourneyShadowReadSamples,
 } from "../../tourney/store.js";
 import { reconcileCredentialOperations } from "../../supabase/credentialRecovery.js";
+import { isEnabledTourneyFlag } from "../../tourney/canonical.js";
 
 export default async function handler(req, res) {
   if (req.method !== "GET" && req.method !== "POST") {
@@ -196,7 +197,11 @@ export default async function handler(req, res) {
       try {
         const accountSecurity = await createSupabaseAdminClient().rpc(
           "roo_reconcile_account_security",
-          { p_guild_id: String(process.env.DISCORD_GUILD_ID || "").trim() || null }
+          {
+            p_guild_id: isEnabledTourneyFlag(process.env.TOURNEY_HARDENING_V4_ENABLED)
+              ? null
+              : String(process.env.DISCORD_GUILD_ID || "").trim() || null,
+          }
         );
         if (accountSecurity.error) throw accountSecurity.error;
         result.body.summary.accountSecurity = accountSecurity.data || {};
