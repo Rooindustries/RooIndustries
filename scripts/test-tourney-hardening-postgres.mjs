@@ -13,6 +13,7 @@ import {
 import { getTourneySql } from "../src/server/tourney/sqlClient.js";
 import { reconcileTourneyExternalOperations } from "../src/server/tourney/externalOperations.js";
 import { appendTourneyAccountPrincipalSnapshot } from "../src/server/tourney/accountStore.js";
+import { recordTourneyDiscordDesiredState } from "../src/server/tourney/discordDesiredState.js";
 
 const root = path.resolve(new URL("..", import.meta.url).pathname);
 const configuredPgBin = String(process.env.PG_BIN || "").trim();
@@ -441,6 +442,26 @@ try {
       'participant','pending'
     )`;
   });
+  const typedDiscordCommand = await executeTourneyCommand({
+    commandId: "fixture:discord-typed-inputs",
+    purpose: "discord:backfill",
+    requestPayload: { playerId: "player-1" },
+    attemptExternalWork: false,
+    env,
+    callback: async () => ({
+      body: await recordTourneyDiscordDesiredState({
+        player: { id: "player-1" },
+        discordUser: { id: "500000000000000002" },
+        guildId: "600000000000000001",
+        env,
+      }),
+    }),
+  });
+  assert.equal(
+    typedDiscordCommand.body.discord_user_id,
+    "500000000000000002",
+    "nullable Discord identity inputs were not typed"
+  );
   const externalFailure = await reconcileTourneyExternalOperations({ env, limit: 10 });
   assert.equal(externalFailure.deadLettered, 1, "expired external operation did not exhaust safely");
   await assertSql(source, "select status='dead_letter' ok from tourney.external_operations where operation_key='fixture:external:expired'", "external operation was not dead-lettered");
@@ -666,6 +687,7 @@ try {
       "concurrent duplicate Idempotency-Key replay",
       "Idempotency-Key replay after manual failover",
       "versioned mirrored fallback account principal",
+      "typed nullable Discord desired-state lookup",
       "atomic leases with concurrent workers",
       "expired lease recovery and dead-letter exhaustion",
       "generation tuple ordering",
