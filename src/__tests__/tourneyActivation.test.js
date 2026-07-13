@@ -113,6 +113,38 @@ describe("Tourney v4 activation", () => {
     expect(JSON.stringify(inventory)).not.toContain("1234567890");
   });
 
+  test("serializes Discord inventory and retries rate-limited members", async () => {
+    mockListPlayers.mockResolvedValue(Array.from({ length: 6 }, (_, index) => ({
+      id: `private-player-${index}`,
+      status: "approved",
+      discordUserId: String(1234567890 + index),
+    })));
+    const fetchImpl = jest.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ roles: [] }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ roles: [] }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ roles: [] }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ roles: [] }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ roles: [] }) })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        headers: { get: () => "0" },
+        json: async () => ({ retry_after: 0 }),
+      })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ roles: [] }) });
+    const sleepImpl = jest.fn().mockResolvedValue(undefined);
+
+    const inventory = await inventoryTourneyV4Activation({
+      env,
+      fetchImpl,
+      sleepImpl,
+    });
+
+    expect(inventory.counts).toMatchObject({ linked: 6, present: 6, unknown: 0 });
+    expect(fetchImpl).toHaveBeenCalledTimes(7);
+    expect(sleepImpl).toHaveBeenCalledWith(50);
+  });
+
   test("requires exact paused generation-one controls", async () => {
     mockResolvePolicy.mockReturnValue({
       primaryBackend: "supabase",
