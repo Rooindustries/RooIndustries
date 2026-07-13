@@ -43,21 +43,25 @@ export const recordTourneyDiscordDesiredState = async ({
   }
   const sql = await getTourneySql(env);
   const accounts = await sql`
+    with input as (
+      select ${playerId || null}::text player_id,
+        ${normalizedAccountUserId || null}::uuid account_user_id
+    )
     select user_id, principal_id, role
-    from accounts.tourney_accounts
+    from accounts.tourney_accounts, input
     where (
-      ${playerId || null} is not null
-      and ${normalizedAccountUserId || null} is not null
-      and legacy_sanity_id = ${playerId || null}
-      and user_id = ${normalizedAccountUserId || null}
+      input.player_id is not null
+      and input.account_user_id is not null
+      and legacy_sanity_id = input.player_id
+      and user_id = input.account_user_id
     ) or (
-      ${playerId || null} is not null
-      and ${normalizedAccountUserId || null} is null
-      and legacy_sanity_id = ${playerId || null}
+      input.player_id is not null
+      and input.account_user_id is null
+      and legacy_sanity_id = input.player_id
     ) or (
-      ${playerId || null} is null
-      and ${normalizedAccountUserId || null} is not null
-      and user_id = ${normalizedAccountUserId || null}
+      input.player_id is null
+      and input.account_user_id is not null
+      and user_id = input.account_user_id
     )
     limit 1 for update
   `;
