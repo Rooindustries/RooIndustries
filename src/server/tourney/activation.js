@@ -10,6 +10,7 @@ import { executeTourneyCommand, resolveTourneyStorePolicy } from "./store.js";
 import { isEnabledTourneyFlag, stableTourneyJson } from "./canonical.js";
 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
+const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 const requireActivationPolicy = (env) => {
   const policy = resolveTourneyStorePolicy(env);
@@ -25,29 +26,57 @@ const requireActivationPolicy = (env) => {
   return policy;
 };
 
-const readDiscordMember = async ({ config, discordUserId, fetchImpl }) => {
-  try {
-    const response = await fetchImpl(
-      `${config.apiBaseUrl}/guilds/${config.guildId}/members/${discordUserId}`,
-      {
-        headers: { Authorization: `Bot ${config.botToken}` },
-        signal: AbortSignal.timeout(5_000),
-      }
-    );
-    if (response.status === 404) return { membership: "absent", managedRoles: [] };
-    if (!response.ok) return { membership: "unknown", managedRoles: [] };
-    const member = await response.json();
-    const roles = new Set(Array.isArray(member.roles) ? member.roles.map(String) : []);
-    return {
-      membership: "present",
-      managedRoles: [
-        ...(roles.has(config.participantRoleId) ? ["participant"] : []),
-        ...(roles.has(config.hostRoleId) ? ["host"] : []),
-      ],
-    };
-  } catch {
-    return { membership: "unknown", managedRoles: [] };
+const discordRetryDelay = async (response) => {
+  const headerValue = String(response.headers?.get?.("retry-after") ?? "").trim();
+  const headerSeconds = headerValue ? Number(headerValue) : Number.NaN;
+  if (Number.isFinite(headerSeconds) && headerSeconds >= 0) {
+    return Math.min(10_000, Math.ceil(headerSeconds * 1_000) + 50);
   }
+  const body = await response.json().catch(() => ({}));
+  const bodySeconds = Number(body?.retry_after);
+  return Number.isFinite(bodySeconds) && bodySeconds >= 0
+    ? Math.min(10_000, Math.ceil(bodySeconds * 1_000) + 50)
+    : 1_000;
+};
+
+const readDiscordMember = async ({
+  config,
+  discordUserId,
+  fetchImpl,
+  sleepImpl,
+}) => {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      const response = await fetchImpl(
+        `${config.apiBaseUrl}/guilds/${config.guildId}/members/${discordUserId}`,
+        {
+          headers: { Authorization: `Bot ${config.botToken}` },
+          signal: AbortSignal.timeout(5_000),
+        }
+      );
+      if (response.status === 429 && attempt < 3) {
+        await sleepImpl(await discordRetryDelay(response));
+        continue;
+      }
+      if (response.status === 404) return { membership: "absent", managedRoles: [] };
+      if (!response.ok) return { membership: "unknown", managedRoles: [] };
+      const member = await response.json();
+      const roles = new Set(Array.isArray(member.roles) ? member.roles.map(String) : []);
+      return {
+        membership: "present",
+        managedRoles: [
+          ...(roles.has(config.participantRoleId) ? ["participant"] : []),
+          ...(roles.has(config.hostRoleId) ? ["host"] : []),
+        ],
+      };
+    } catch {
+      if (attempt < 3) {
+        await sleepImpl(250 * (attempt + 1));
+        continue;
+      }
+    }
+  }
+  return { membership: "unknown", managedRoles: [] };
 };
 
 const readActivationRows = async ({ env }) => {
@@ -116,6 +145,7 @@ const summarizeInventory = ({ accounts, databaseState, rows }) => ({
 export const inventoryTourneyV4Activation = async ({
   env = process.env,
   fetchImpl = fetch,
+  sleepImpl = sleep,
 } = {}) => {
   requireActivationPolicy(env);
   const local = await readActivationRows({ env });
@@ -126,16 +156,20 @@ export const inventoryTourneyV4Activation = async ({
     error.status = 503;
     throw error;
   }
-  const rows = await Promise.all(local.players.map(async (player) => ({
-    playerId: player.id,
-    discordUserId: player.discordUserId,
-    desiredRole: "participant",
-    ...(await readDiscordMember({
-      config,
+  const rows = [];
+  for (const player of local.players) {
+    rows.push({
+      playerId: player.id,
       discordUserId: player.discordUserId,
-      fetchImpl,
-    })),
-  })));
+      desiredRole: "participant",
+      ...(await readDiscordMember({
+        config,
+        discordUserId: player.discordUserId,
+        fetchImpl,
+        sleepImpl,
+      })),
+    });
+  }
   rows.sort((left, right) => left.playerId.localeCompare(right.playerId));
   const evidence = {
     accountsHash: sha256(renderTourneyAccountsJson(local.accounts)),
