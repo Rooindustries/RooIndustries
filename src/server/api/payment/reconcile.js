@@ -23,6 +23,21 @@ import {
 import { reconcileCredentialOperations } from "../../supabase/credentialRecovery.js";
 import { isEnabledTourneyFlag } from "../../tourney/canonical.js";
 
+const reconcileTourneyQueues = async () => {
+  const policy = resolveTourneyStorePolicy();
+  const summary = {
+    tourneyExternalOperations: await reconcileTourneyExternalOperations({ limit: 10 }),
+    tourneyEmails: await reconcileTourneyEmailDispatches({ limit: 10 }),
+    tourneyMirror: await reconcileTourneyMirror({ limit: 100 }),
+  };
+  if (policy.mirrorEnabled && summary.tourneyMirror.failed === 0) {
+    summary.tourneyParity = await runTourneyParity();
+    summary.tourneyShadowReads = await runTourneyShadowReadSamples({ rounds: 10 });
+    summary.tourneyCutoverClock = await refreshTourneyCutoverClock();
+  }
+  return summary;
+};
+
 export default async function handler(req, res) {
   if (req.method !== "GET" && req.method !== "POST") {
     res.setHeader("Allow", ["GET", "POST"]);
@@ -43,7 +58,7 @@ export default async function handler(req, res) {
   )
     .trim()
     .toLowerCase();
-  if (scope && !["full", "mirror-only"].includes(scope)) {
+  if (scope && !["full", "mirror-only", "tourney-only"].includes(scope)) {
     return res.status(400).json({ ok: false, error: "Invalid reconciliation scope." });
   }
 
@@ -72,6 +87,21 @@ export default async function handler(req, res) {
       return res.status(503).json({
         ok: false,
         error: "Commerce mirror reconciliation is temporarily unavailable.",
+      });
+    }
+  }
+
+  if (scope === "tourney-only") {
+    try {
+      return res.status(200).json({
+        ok: true,
+        summary: await reconcileTourneyQueues(),
+      });
+    } catch (error) {
+      logSafeError("Tourney-only reconciliation failed", error);
+      return res.status(503).json({
+        ok: false,
+        error: "Tournament reconciliation is temporarily unavailable.",
       });
     }
   }
@@ -165,20 +195,7 @@ export default async function handler(req, res) {
       }
     }
     try {
-      const tourneyPolicy = resolveTourneyStorePolicy();
-      result.body.summary.tourneyExternalOperations =
-        await reconcileTourneyExternalOperations({ limit: 10 });
-      result.body.summary.tourneyEmails =
-        await reconcileTourneyEmailDispatches({ limit: 10 });
-      result.body.summary.tourneyMirror =
-        await reconcileTourneyMirror({ limit: 100 });
-      if (tourneyPolicy.mirrorEnabled && result.body.summary.tourneyMirror.failed === 0) {
-        result.body.summary.tourneyParity = await runTourneyParity();
-        result.body.summary.tourneyShadowReads =
-          await runTourneyShadowReadSamples({ rounds: 10 });
-        result.body.summary.tourneyCutoverClock =
-          await refreshTourneyCutoverClock();
-      }
+      Object.assign(result.body.summary, await reconcileTourneyQueues());
     } catch (error) {
       logSafeError("Tourney reconciliation failed", error);
       result.body.summary.tourneyReconciliation = { pending: true };
