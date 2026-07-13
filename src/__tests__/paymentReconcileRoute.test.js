@@ -162,7 +162,11 @@ describe("payment reconciliation route authorization", () => {
 
   test("finishes payment recovery before the durable Tourney side-effect queue", async () => {
     const previous = process.env.SUPABASE_SOCIAL_AUTH_ENABLED;
+    const previousHardening = process.env.TOURNEY_HARDENING_V4_ENABLED;
+    const previousGuild = process.env.DISCORD_GUILD_ID;
     process.env.SUPABASE_SOCIAL_AUTH_ENABLED = "1";
+    process.env.TOURNEY_HARDENING_V4_ENABLED = "1";
+    process.env.DISCORD_GUILD_ID = "111111111111111111";
     try {
       const loaded = await loadHandler();
       const { response, state } = createResponse();
@@ -178,12 +182,20 @@ describe("payment reconciliation route authorization", () => {
         limit: 10,
       });
       expect(loaded.adminRpc).toHaveBeenCalledWith(
+        "roo_reconcile_account_security",
+        { p_guild_id: null }
+      );
+      expect(loaded.adminRpc).toHaveBeenCalledWith(
         "roo_record_reconciliation_checkpoint",
         expect.any(Object)
       );
     } finally {
       if (previous === undefined) delete process.env.SUPABASE_SOCIAL_AUTH_ENABLED;
       else process.env.SUPABASE_SOCIAL_AUTH_ENABLED = previous;
+      if (previousHardening === undefined) delete process.env.TOURNEY_HARDENING_V4_ENABLED;
+      else process.env.TOURNEY_HARDENING_V4_ENABLED = previousHardening;
+      if (previousGuild === undefined) delete process.env.DISCORD_GUILD_ID;
+      else process.env.DISCORD_GUILD_ID = previousGuild;
     }
   });
 });

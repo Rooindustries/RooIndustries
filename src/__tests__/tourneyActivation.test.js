@@ -5,6 +5,10 @@ const mockListPlayers = jest.fn();
 const mockGetSql = jest.fn();
 const mockGetBackendSql = jest.fn();
 const mockResolvePolicy = jest.fn();
+const mockExecuteCommand = jest.fn();
+const mockRecordDesiredState = jest.fn();
+const mockEnqueueExternalOperation = jest.fn();
+const mockSql = jest.fn();
 
 jest.mock("../server/tourney/auth", () => ({
   readEffectiveTourneyAccounts: (...args) => mockReadAccounts(...args),
@@ -17,10 +21,10 @@ jest.mock("../server/tourney/discordConfig", () => ({
   getTourneyDiscordRoleConfig: (...args) => mockRoleConfig(...args),
 }));
 jest.mock("../server/tourney/discordDesiredState", () => ({
-  recordTourneyDiscordDesiredState: jest.fn(),
+  recordTourneyDiscordDesiredState: (...args) => mockRecordDesiredState(...args),
 }));
 jest.mock("../server/tourney/externalOperations", () => ({
-  enqueueTourneyExternalOperation: jest.fn(),
+  enqueueTourneyExternalOperation: (...args) => mockEnqueueExternalOperation(...args),
 }));
 jest.mock("../server/tourney/playerStore", () => ({
   listManageTourneyPlayers: (...args) => mockListPlayers(...args),
@@ -30,13 +34,14 @@ jest.mock("../server/tourney/sqlClient", () => ({
   getTourneySqlForBackend: (...args) => mockGetBackendSql(...args),
 }));
 jest.mock("../server/tourney/store", () => ({
-  executeTourneyCommand: jest.fn(),
+  executeTourneyCommand: (...args) => mockExecuteCommand(...args),
   resolveTourneyStorePolicy: (...args) => mockResolvePolicy(...args),
 }));
 
 const {
   applyTourneyV4Activation,
   inventoryTourneyV4Activation,
+  seedTourneyDiscordDesiredStateV4,
 } = require("../server/tourney/activation.js");
 
 const env = {
@@ -69,7 +74,7 @@ describe("Tourney v4 activation", () => {
       participantRoleId: "222222",
       hostRoleId: "333333",
     });
-    mockGetSql.mockResolvedValue(jest.fn().mockResolvedValue([{
+    mockSql.mockResolvedValue([{
       primary_backend: "supabase",
       generation: 1,
       writes_paused: true,
@@ -79,13 +84,26 @@ describe("Tourney v4 activation", () => {
       principal_mismatches: 0,
       missing_principals: 0,
       duplicate_discord_users: 0,
-    }]));
+    }]);
+    mockGetSql.mockResolvedValue(mockSql);
     mockGetBackendSql.mockResolvedValue(jest.fn().mockResolvedValue([{
       primary_backend: "supabase",
       generation: 1,
       writes_paused: true,
       hardened_active: true,
     }]));
+    mockRecordDesiredState.mockResolvedValue({
+      principal_id: "principal-1",
+      discord_user_id: "1234567890",
+      previous_discord_user_id: "",
+      desired_role: "participant",
+      generation: 3,
+    });
+    mockEnqueueExternalOperation.mockResolvedValue({ operationKey: "operation-1" });
+    mockExecuteCommand.mockImplementation(async ({ callback }) => ({
+      body: (await callback()).body,
+      syncPending: false,
+    }));
   });
 
   test("returns only aggregate inventory evidence", async () => {
@@ -159,6 +177,25 @@ describe("Tourney v4 activation", () => {
 
     expect(inventory.counts).toMatchObject({ linked: 1, present: 1, unknown: 0 });
     expect(sleepImpl).toHaveBeenCalledWith(250);
+  });
+
+  test("versions Discord repair commands and supersedes stale operations", async () => {
+    const result = await seedTourneyDiscordDesiredStateV4({ env });
+
+    expect(result).toEqual({ queued: 1, contactedDiscord: false });
+    expect(mockExecuteCommand).toHaveBeenCalledWith(expect.objectContaining({
+      commandId: "discord-state-seed:g1:v2:private-player:1234567890",
+      maintenanceWhilePaused: true,
+      attemptExternalWork: false,
+    }));
+    expect(mockEnqueueExternalOperation).toHaveBeenCalledWith(expect.objectContaining({
+      commandId: "discord-state-seed:g1:v2:private-player:1234567890",
+      operationKind: "discord_role_reconcile",
+      entityId: "private-player",
+    }));
+    expect(mockSql.mock.calls.some(([strings]) =>
+      strings.join(" ").includes("superseded_by_newer_desired_state")
+    )).toBe(true);
   });
 
   test("requires exact paused generation-one controls", async () => {
