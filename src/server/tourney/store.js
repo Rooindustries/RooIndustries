@@ -9,6 +9,7 @@ import {
   filterTourneyMirrorRow,
   getTourneyMirrorContract,
 } from "./mirrorContract.js";
+import { isEnabledTourneyFlag, stableTourneyJson } from "./canonical.js";
 
 export const TOURNEY_STORE_DOMAINS = Object.freeze([
   "accounts",
@@ -26,25 +27,14 @@ export const TOURNEY_STORE_DOMAINS = Object.freeze([
 
 export { TOURNEY_MIRROR_TABLES } from "./mirrorContract.js";
 
-const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
 const normalize = (value) => String(value || "").trim();
-const enabled = (value) => TRUE_VALUES.has(normalize(value).toLowerCase());
 const sha256 = (value) =>
   crypto.createHash("sha256").update(String(value || "")).digest("hex");
-const stableJson = (value) => {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.keys(value)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-};
 const MEMORY_RECEIPTS =
   globalThis.__rooTourneyCommandReceipts ||
   (globalThis.__rooTourneyCommandReceipts = new Map());
 const NON_NATURAL_COMMAND_PREFIXES = Object.freeze([
+  "account-principal",
   "account-snapshot:seed",
   "discord-backfill",
   "discord-state-seed",
@@ -88,8 +78,8 @@ export const isNaturalTourneyMirrorEvent = ({ event, sourceBackend } = {}) => {
 
 export const resolveTourneyStorePolicy = (env = process.env) => ({
   primaryBackend: isSupabaseTourneyDatabase(env) ? "supabase" : "legacy",
-  mirrorEnabled: enabled(env.TOURNEY_MIRROR_ENABLED),
-  writesPaused: enabled(env.TOURNEY_WRITES_PAUSED),
+  mirrorEnabled: isEnabledTourneyFlag(env.TOURNEY_MIRROR_ENABLED),
+  writesPaused: isEnabledTourneyFlag(env.TOURNEY_WRITES_PAUSED),
   generation: parseGeneration(env.TOURNEY_FAILOVER_GENERATION),
 });
 
@@ -161,7 +151,7 @@ export const executeTourneyCommand = async ({
   if (!TOURNEY_STORE_DOMAINS.includes(normalizedPurpose.split(":")[0])) {
     throw new Error("Unsupported Tourney command domain.");
   }
-  const requestHash = sha256(stableJson({ purpose: normalizedPurpose, requestPayload }));
+  const requestHash = sha256(stableTourneyJson({ purpose: normalizedPurpose, requestPayload }));
   if (env.NODE_ENV === "test" || env.TOURNEY_DATABASE_MODE === "memory") {
     const existing = MEMORY_RECEIPTS.get(id);
     if (existing) {
@@ -298,7 +288,7 @@ export const executeTourneyCommand = async ({
   return { ...transactionResult, body, syncPending };
 };
 
-const keyHash = (recordKey) => sha256(stableJson(recordKey));
+const keyHash = (recordKey) => sha256(stableTourneyJson(recordKey));
 const targetWhere = (sql, keys, recordKey) => {
   const clauses = keys.map((key) => sql`${sql(key)} = ${recordKey[key]}`);
   return clauses.reduce((combined, clause) =>
@@ -406,7 +396,7 @@ const applyMirrorEvent = async ({ event, targetBackend, targetSql }) => {
           `;
       const hashMatches = event.record_hash
         ? targetHashRow?.record_hash === event.record_hash
-        : sha256(stableJson(targetRow)) === sha256(stableJson(row));
+        : sha256(stableTourneyJson(targetRow)) === sha256(stableTourneyJson(row));
       if (!hashMatches) {
         const error = new Error("Tourney mirror target hash verification failed.");
         error.code = "TOURNEY_MIRROR_HASH_MISMATCH";
@@ -476,21 +466,21 @@ export const reconcileTourneyMirror = async ({ env = process.env, limit = 50 } =
   for (const event of events) {
     try {
       await applyMirrorEvent({ event, targetBackend, targetSql });
-      const completedRows = await sourceSql`
-        update ${sourceSql(outboxTable)}
-        set status = 'applied', applied_at = now(), lease_id = null,
-            lease_expires_at = null, last_error_code = null, last_error_at = null
-        where sequence = ${event.sequence} and status = 'processing'
-          and lease_id = ${event.lease_id}
-        returning sequence
-      `;
-      if (completedRows.length !== 1) {
-        const error = new Error("Tourney mirror event lease changed.");
-        error.code = "TOURNEY_MIRROR_LEASE_MISMATCH";
-        throw error;
-      }
-      if (isNaturalTourneyMirrorEvent({ event, sourceBackend })) {
-        await sourceSql.begin(async (sql) => {
+      await sourceSql.begin(async (sql) => {
+        const completedRows = await sql`
+          update ${sql(outboxTable)}
+          set status = 'applied', applied_at = now(), lease_id = null,
+              lease_expires_at = null, last_error_code = null, last_error_at = null
+          where sequence = ${event.sequence} and status = 'processing'
+            and lease_id = ${event.lease_id}
+          returning sequence
+        `;
+        if (completedRows.length !== 1) {
+          const error = new Error("Tourney mirror event lease changed.");
+          error.code = "TOURNEY_MIRROR_LEASE_MISMATCH";
+          throw error;
+        }
+        if (isNaturalTourneyMirrorEvent({ event, sourceBackend })) {
           const updated = await sql`
             update tourney.cutover_metadata set
               natural_mutation_verified_at = coalesce(natural_mutation_verified_at, now()),
@@ -506,8 +496,8 @@ export const reconcileTourneyMirror = async ({ env = process.env, limit = 50 } =
                 ${sql.json({ table: event.table_name, eventId: event.event_id })})
             `;
           }
-        });
-      }
+        }
+      });
       applied += 1;
     } catch (error) {
       const terminal = Number(event.attempt_count) >= Number(event.max_attempts || 12);
@@ -568,6 +558,21 @@ export const checkTourneyManualFailoverReadiness = async ({
       (select count(*) from tourney_discord_role_assignments where status in ('pending','processing','retry','blocked','dead_letter')) discord_pending,
       (select count(*) from tourney_identity_conflicts where resolved_at is null) identity_conflicts,
       (select count(*) from tourney_import_quarantine where resolved_at is null) ambiguous_imports,
+      (select count(*) from tourney_account_snapshots) account_snapshot_count,
+      (select count(*) from jsonb_array_elements(coalesce((
+        select case
+          when jsonb_typeof(accounts_json)='array' then accounts_json
+          when jsonb_typeof(accounts_json)='object' then coalesce(accounts_json->'accounts','[]'::jsonb)
+          else '[]'::jsonb end
+        from tourney_account_snapshots order by version desc limit 1
+      ),'[]'::jsonb))) account_entry_count,
+      (select count(*) from jsonb_array_elements(coalesce((
+        select case
+          when jsonb_typeof(accounts_json)='array' then accounts_json
+          when jsonb_typeof(accounts_json)='object' then coalesce(accounts_json->'accounts','[]'::jsonb)
+          else '[]'::jsonb end
+        from tourney_account_snapshots order by version desc limit 1
+      ),'[]'::jsonb)) account where coalesce(account->>'principalId','') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') account_principal_gaps,
       (select max(generation) from tourney_mirror_checkpoints
         where target_backend='legacy' and source_backend='supabase') checkpoint_generation
     `,
@@ -583,7 +588,22 @@ export const checkTourneyManualFailoverReadiness = async ({
         (select count(*) from tourney.tourney_player_auth_operations where operation_status in ('pending','processing','auth_applied','retry')) auth_pending,
         (select count(*) from accounts.discord_role_assignments where status in ('pending','processing','retry','blocked','dead_letter')) discord_pending,
         (select count(*) from tourney.identity_conflicts where resolved_at is null) identity_conflicts,
-        (select count(*) from migration.tourney_import_quarantine where resolved_at is null) ambiguous_imports
+        (select count(*) from migration.tourney_import_quarantine where resolved_at is null) ambiguous_imports,
+        (select count(*) from tourney.account_snapshots) account_snapshot_count,
+        (select count(*) from jsonb_array_elements(coalesce((
+          select case
+            when jsonb_typeof(accounts_json)='array' then accounts_json
+            when jsonb_typeof(accounts_json)='object' then coalesce(accounts_json->'accounts','[]'::jsonb)
+            else '[]'::jsonb end
+          from tourney.account_snapshots order by version desc limit 1
+        ),'[]'::jsonb))) account_entry_count,
+        (select count(*) from jsonb_array_elements(coalesce((
+          select case
+            when jsonb_typeof(accounts_json)='array' then accounts_json
+            when jsonb_typeof(accounts_json)='object' then coalesce(accounts_json->'accounts','[]'::jsonb)
+            else '[]'::jsonb end
+          from tourney.account_snapshots order by version desc limit 1
+        ),'[]'::jsonb)) account where coalesce(account->>'principalId','') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') account_principal_gaps
     `,
   ]);
   for (const state of [legacyState, supabaseState]) {
@@ -608,6 +628,12 @@ export const checkTourneyManualFailoverReadiness = async ({
       Number(supabaseState?.identity_conflicts || 0) > 0) blockers.push("identity_conflicts");
   if (Number(legacyState?.ambiguous_imports || 0) > 0 ||
       Number(supabaseState?.ambiguous_imports || 0) > 0) blockers.push("ambiguous_imports");
+  if (Number(legacyState?.account_snapshot_count || 0) < 1 ||
+      Number(supabaseState?.account_snapshot_count || 0) < 1) blockers.push("account_snapshot_missing");
+  if (Number(legacyState?.account_entry_count || 0) < 1 ||
+      Number(supabaseState?.account_entry_count || 0) < 1) blockers.push("account_snapshot_empty");
+  if (Number(legacyState?.account_principal_gaps || 0) > 0 ||
+      Number(supabaseState?.account_principal_gaps || 0) > 0) blockers.push("account_principal_gaps");
   const requiredCheckpointGeneration = policy.generation - 1;
   if (Number(legacyState?.checkpoint_generation || -1) < requiredCheckpointGeneration) {
     blockers.push("fallback_checkpoint_stale");
@@ -621,7 +647,7 @@ export const checkTourneyManualFailoverReadiness = async ({
 
 const normalizeRows = (rows) =>
   rows.map((row) => JSON.parse(JSON.stringify(row))).sort((left, right) =>
-    stableJson(left).localeCompare(stableJson(right))
+    stableTourneyJson(left).localeCompare(stableTourneyJson(right))
   );
 
 export const runTourneyParity = async ({ env = process.env } = {}) => {
@@ -636,8 +662,8 @@ export const runTourneyParity = async ({ env = process.env } = {}) => {
   for (const table of Object.keys(TOURNEY_MIRROR_TABLES)) {
     const sourceRows = normalizeRows(await sourceSql`select * from ${sourceSql(businessRelation(sourceBackend, table))}`);
     const targetRows = normalizeRows(await targetSql`select * from ${targetSql(businessRelation(targetBackend, table))}`);
-    const sourceHash = sha256(stableJson(sourceRows));
-    const targetHash = sha256(stableJson(targetRows));
+    const sourceHash = sha256(stableTourneyJson(sourceRows));
+    const targetHash = sha256(stableTourneyJson(targetRows));
     counts[table] = { source: sourceRows.length, target: targetRows.length };
     canonicalHashes[table] = { source: sourceHash, target: targetHash };
     if (sourceHash !== targetHash) drift[table] = { sourceHash, targetHash };
@@ -658,7 +684,7 @@ export const runTourneyParity = async ({ env = process.env } = {}) => {
   const targetPlayerStatuses = Object.fromEntries(
     targetPlayerStatusRows.map((row) => [row.status, Number(row.count)])
   );
-  if (stableJson(counts.player_statuses) !== stableJson(targetPlayerStatuses)) {
+  if (stableTourneyJson(counts.player_statuses) !== stableTourneyJson(targetPlayerStatuses)) {
     drift.player_statuses = {
       source: counts.player_statuses,
       target: targetPlayerStatuses,
@@ -692,7 +718,7 @@ export const runTourneyParity = async ({ env = process.env } = {}) => {
     target: await readRelationships(targetSql, targetBackend),
   };
   if (
-    stableJson(relationships.source) !== stableJson(relationships.target) ||
+    stableTourneyJson(relationships.source) !== stableTourneyJson(relationships.target) ||
     Object.values(relationships.source).some((count) => count > 0) ||
     Object.values(relationships.target).some((count) => count > 0)
   ) {
@@ -734,7 +760,7 @@ export const runTourneyParity = async ({ env = process.env } = {}) => {
 
 const shapeOf = (value) => {
   if (Array.isArray(value)) {
-    const itemShapes = [...new Set(value.map((entry) => stableJson(shapeOf(entry))))].sort();
+    const itemShapes = [...new Set(value.map((entry) => stableTourneyJson(shapeOf(entry))))].sort();
     return { type: "array", items: itemShapes };
   }
   if (value && typeof value === "object") {
@@ -745,7 +771,8 @@ const shapeOf = (value) => {
   return value === null ? "null" : typeof value;
 };
 const unordered = (value) => Array.isArray(value)
-  ? value.map(unordered).sort((left, right) => stableJson(left).localeCompare(stableJson(right)))
+  ? value.map(unordered).sort((left, right) =>
+      stableTourneyJson(left).localeCompare(stableTourneyJson(right)))
   : value && typeof value === "object"
     ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, unordered(value[key])]))
     : value;
@@ -777,12 +804,12 @@ export const runTourneyShadowReadSamples = async ({
           env: { ...env, TOURNEY_DATABASE_MODE: targetBackend },
         }),
       ]);
-      const shapeMatch = stableJson(shapeOf(source.body)) === stableJson(shapeOf(target.body));
-      const valueMatch = stableJson(unordered(source.body)) === stableJson(unordered(target.body));
-      const orderingMatch = stableJson(source.body) === stableJson(target.body);
+      const shapeMatch = stableTourneyJson(shapeOf(source.body)) === stableTourneyJson(shapeOf(target.body));
+      const valueMatch = stableTourneyJson(unordered(source.body)) === stableTourneyJson(unordered(target.body));
+      const orderingMatch = stableTourneyJson(source.body) === stableTourneyJson(target.body);
       const errorMatch = source.status === target.status && source.errorCode === target.errorCode;
-      const sourceHash = source.body === null ? null : sha256(stableJson(source.body));
-      const targetHash = target.body === null ? null : sha256(stableJson(target.body));
+      const sourceHash = source.body === null ? null : sha256(stableTourneyJson(source.body));
+      const targetHash = target.body === null ? null : sha256(stableTourneyJson(target.body));
       await sourceSql`
         insert into ${sourceSql(observationTable)} (
           route, shape_match, value_match, ordering_match, error_match,

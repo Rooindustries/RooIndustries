@@ -23,7 +23,10 @@ export function TourneyForgotForm() {
       if (!response.ok || data.ok !== true) {
         throw new Error(data.error || "Unable to send reset link.");
       }
-      setMessage(data.message || "If the account exists, a reset link was sent.");
+      setMessage(tourneyMutationSuccessMessage(
+        data,
+        "If the account exists, a reset link was sent."
+      ));
     } catch (error) {
       setMessage(error?.message || "Unable to send reset link.");
     } finally {

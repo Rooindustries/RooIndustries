@@ -75,6 +75,9 @@ returns uuid language sql immutable strict set search_path='' as $$
   select (substr(md5(p_value),1,8)||'-'||substr(md5(p_value),9,4)||'-4'||substr(md5(p_value),14,3)||'-8'||substr(md5(p_value),18,3)||'-'||substr(md5(p_value),21,12))::uuid
 $$;
 
+create index if not exists tourney_email_dispatches_history_v4_idx
+  on tourney_email_dispatches (dispatch_kind, recipient_hash);
+
 insert into tourney_email_dispatches(
   id,idempotency_key,command_id,dispatch_kind,recipient,recipient_hash,payload,
   status,provider_message_id,sent_at,created_at,updated_at

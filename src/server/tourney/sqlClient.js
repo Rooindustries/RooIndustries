@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { isEnabledTourneyFlag } from "./canonical.js";
 
 const SQL_CLIENTS =
   globalThis.__rooTourneySharedSqlClients ||
@@ -75,7 +76,7 @@ export const runTourneyTransaction = async ({
   callback,
 } = {}) => {
   if (typeof callback !== "function") {
-    throw new Error("A Supabase Tourney transaction callback is required.");
+    throw new Error("A Tourney transaction callback is required.");
   }
   const active = ACTIVE_TOURNEY_SQL.getStore();
   if (active) return callback(active);
@@ -116,7 +117,7 @@ export const assertSupabaseTourneySchemaVersion = async (
   if (!isSupabaseTourneyDatabase(env)) return true;
 
   const databaseUrl = resolveTourneyDatabaseUrl(env);
-  const required = String(env.TOURNEY_HARDENING_V4_ENABLED || "") === "1"
+  const required = isEnabledTourneyFlag(env.TOURNEY_HARDENING_V4_ENABLED)
     ? REQUIRED_HARDENED_TOURNEY_SCHEMA_VERSION
     : REQUIRED_SUPABASE_TOURNEY_SCHEMA_VERSION;
   const cacheKey = `supabase:v${required}:${databaseUrl}`;
@@ -160,7 +161,7 @@ export const assertTourneySchemaVersion = async (env = process.env) => {
   if (isSupabaseTourneyDatabase(env)) return assertSupabaseTourneySchemaVersion(env);
   if (env.TOURNEY_DATABASE_MODE === "memory" || env.NODE_ENV === "test") return true;
   const databaseUrl = resolveTourneyDatabaseUrl(env);
-  const required = String(env.TOURNEY_HARDENING_V4_ENABLED || "") === "1"
+  const required = isEnabledTourneyFlag(env.TOURNEY_HARDENING_V4_ENABLED)
     ? REQUIRED_HARDENED_TOURNEY_SCHEMA_VERSION
     : REQUIRED_SUPABASE_TOURNEY_SCHEMA_VERSION;
   const cacheKey = `legacy:v${required}:${databaseUrl}`;

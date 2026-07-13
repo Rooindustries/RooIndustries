@@ -163,6 +163,9 @@ begin
     when 'tourney_bracket_entities' then jsonb_build_object(
       'entity_type', v_row->>'entity_type', 'entity_id', v_row->>'entity_id'
     )
+    when 'tourney_bracket_counters' then jsonb_build_object(
+      'entity_type', v_row->>'entity_type'
+    )
     else jsonb_build_object('id', v_row->>'id')
   end;
   insert into tourney_mirror_outbox (

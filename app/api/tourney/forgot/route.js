@@ -46,6 +46,7 @@ export async function POST(request) {
     );
   }
 
+  let syncPending = false;
   try {
     const commandId = readTourneyCommandId({ request });
     const accounts = await readEffectiveTourneyAccounts();
@@ -55,7 +56,7 @@ export async function POST(request) {
       adminAccount?.active && ["owner", "caster"].includes(adminAccount.role)
         ? getTourneyAdminEmail(adminAccount)
         : "";
-    await executeTourneyCommand({
+    const command = await executeTourneyCommand({
       commandId,
       purpose: "tokens:reset-request",
       requestPayload: { login: login.toLowerCase() },
@@ -90,9 +91,14 @@ export async function POST(request) {
         return { body: { ok: true } };
       },
     });
+    syncPending = Boolean(command.syncPending);
   } catch (error) {
     logSafeError("Tournament forgot-password failed", error);
-    if (error?.code === "TOURNEY_IDEMPOTENCY_KEY_REQUIRED" || error?.code === "TOURNEY_WRITES_PAUSED") {
+    if ([
+      "TOURNEY_IDEMPOTENCY_KEY_REQUIRED",
+      "TOURNEY_IDEMPOTENCY_KEY_RESERVED",
+      "TOURNEY_WRITES_PAUSED",
+    ].includes(error?.code)) {
       return NextResponse.json(
         { ok: false, error: error.message, code: error.code },
         {
@@ -106,5 +112,6 @@ export async function POST(request) {
   return NextResponse.json({
     ok: true,
     message: "If that account exists, a reset link was sent.",
+    ...(syncPending ? { syncPending: true } : {}),
   });
 }
