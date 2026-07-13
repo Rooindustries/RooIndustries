@@ -2,17 +2,9 @@ import crypto from "node:crypto";
 import { getSafeErrorCode, logSafeError } from "../safeErrorLog.js";
 import { getTourneySql, runTourneyTransaction } from "./sqlClient.js";
 import { resolveTourneyStorePolicy } from "./store.js";
+import { stableTourneyJson } from "./canonical.js";
 
 const normalize = (value) => String(value || "").trim();
-const stableJson = (value) => {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.keys(value).sort().map(
-      (key) => `${JSON.stringify(key)}:${stableJson(value[key])}`
-    ).join(",")}}`;
-  }
-  return JSON.stringify(value);
-};
 const sha256 = (value) => crypto.createHash("sha256").update(String(value)).digest("hex");
 const relation = (backend) => backend === "supabase"
   ? "tourney.external_operations"
@@ -37,7 +29,7 @@ export const enqueueTourneyExternalOperation = async ({
   if (!normalizedCommandId || !normalizedKind || !normalizedEntityType || !normalizedEntityId) {
     throw new Error("A complete Tourney external operation is required.");
   }
-  const desiredStateHash = sha256(stableJson(desiredState));
+  const desiredStateHash = sha256(stableTourneyJson(desiredState));
   const operationKey = [
     normalizedCommandId,
     normalizedKind,
@@ -165,7 +157,33 @@ const executeOperation = async ({ operation, env, context = {} }) => {
     }
     case "supabase_admin_auth": {
       const { syncSupabaseTourneyAdminAccount } = await import("../supabase/accounts.js");
-      return syncSupabaseTourneyAdminAccount({ account: state.account, env });
+      const synced = await syncSupabaseTourneyAdminAccount({ account: state.account, env });
+      const principalId = synced.account?.principal_id || "";
+      if (principalId) {
+        const [{ executeTourneyCommand }, { appendTourneyAccountPrincipalSnapshot }] =
+          await Promise.all([import("./store.js"), import("./accountStore.js")]);
+        const username = String(state.account?.username || "").trim().toLowerCase();
+        const principalCommand = await executeTourneyCommand({
+          commandId: `account-principal:${username}:${principalId}`,
+          purpose: "identity:account-principal",
+          requestPayload: { username, principalId },
+          maintenanceWhilePaused: true,
+          env,
+          callback: async () => ({
+            body: await appendTourneyAccountPrincipalSnapshot({
+              username,
+              principalId,
+              env,
+            }),
+          }),
+        });
+        if (principalCommand.syncPending) {
+          throw Object.assign(new Error("Tourney account principal synchronization is pending."), {
+            code: "TOURNEY_ACCOUNT_PRINCIPAL_SYNC_PENDING",
+          });
+        }
+      }
+      return synced;
     }
     case "sanity_account_projection": {
       const { projectTourneyAccountSnapshotToSanity } = await import("./accountStore.js");

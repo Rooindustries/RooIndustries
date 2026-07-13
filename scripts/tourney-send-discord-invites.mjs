@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import dotenv from "dotenv";
 
@@ -104,13 +105,14 @@ const sendSample = async ({ sampleTo, baseUrl }) => {
     discord: "SampleParticipant#0000",
     displayName: "Sample Participant",
   };
+  const commandId = `discord-invite:sample:${crypto.randomUUID()}`;
   await store.executeTourneyCommand({
-    commandId: "discord-invite:sample:sample-player:v1",
+    commandId,
     purpose: "email:discord-invite",
     requestPayload: { playerId: player.id, sample: true },
     attemptExternalWork: false,
     callback: () => emailDispatch.enqueueTourneyEmailDispatch({
-      commandId: "discord-invite:sample:sample-player:v1",
+      commandId,
       dispatchKind: "discord_invite",
       recipient,
       entityType: "player",
@@ -184,13 +186,21 @@ const sendBatch = async ({
     return;
   }
 
+  const forceRunId = force ? crypto.randomUUID() : "";
   for (const player of targets) {
     try {
-      const commandId = `discord-invite:${player.id}:v${player.version || 1}`;
+      const commandId = [
+        `discord-invite:${player.id}:v${player.version || 1}`,
+        ...(forceRunId ? [`force:${forceRunId}`] : []),
+      ].join(":");
       await store.executeTourneyCommand({
         commandId,
         purpose: "email:discord-invite",
-        requestPayload: { playerId: player.id, version: player.version || 1 },
+        requestPayload: {
+          playerId: player.id,
+          version: player.version || 1,
+          ...(forceRunId ? { force: true, forceRunId } : {}),
+        },
         attemptExternalWork: false,
         callback: () => emailDispatch.enqueueTourneyEmailDispatch({
           commandId,
@@ -204,6 +214,10 @@ const sendBatch = async ({
       });
       summary.queued += 1;
     } catch (error) {
+      console.error("Tourney Discord invite queue failed", {
+        playerId: player.id,
+        code: String(error?.code || error?.name || "unknown").slice(0, 128),
+      });
       summary.failed += 1;
     }
 

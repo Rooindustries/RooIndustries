@@ -227,6 +227,9 @@ returns uuid language sql immutable strict set search_path='' as $$
   )::uuid
 $$;
 
+create index if not exists tourney_email_dispatches_history_v4_idx
+  on tourney.email_dispatches (dispatch_kind, recipient_hash);
+
 insert into tourney.email_dispatches(
   id,idempotency_key,command_id,dispatch_kind,recipient,recipient_hash,
   payload,status,provider_message_id,sent_at,created_at,updated_at
@@ -668,7 +671,7 @@ as $$
       case when exists(select 1 from tourney.identity_conflicts where resolved_at is null) then 'identity_conflict' end,
       case when exists(select 1 from tourney.shadow_observations where observed_at >= now()-interval '24 hours' and not (shape_match and value_match and ordering_match and error_match)) then 'shadow_mismatch' end,
       (select clock_last_reset_reason from tourney.cutover_metadata where id='tourney')
-    ], null) values
+    ], null) blocker_values
   )
   select jsonb_build_object(
     'control', (select to_jsonb(metadata)-'updated_by' from tourney.cutover_metadata metadata where id='tourney'),
@@ -700,7 +703,7 @@ as $$
     'identity_conflicts',(select count(*) from tourney.identity_conflicts where resolved_at is null),
     'last_parity',(select to_jsonb(run) from tourney.parity_runs run order by created_at desc limit 1),
     'shadow_reads',coalesce((select jsonb_object_agg(route,to_jsonb(shadow)-'route') from shadow),'{}'::jsonb),
-    'clock_blockers',(select to_jsonb(values) from blockers)
+    'clock_blockers',(select to_jsonb(blocker_values) from blockers)
   )
 $$;
 

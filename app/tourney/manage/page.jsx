@@ -56,12 +56,12 @@ export default async function TourneyManagePage({ searchParams }) {
       : [];
   const [adminPlayers, bracketSnapshot] = await Promise.all([
     readAdminTourneyPlayers().catch(() => ({
-      ok: true,
+      ok: false,
       players: [],
       capacity: { teamCount: 8, roles: [] },
     })),
     getTourneyBracketSnapshot({ includeAudit: true }).catch(() => ({
-      ok: true,
+      ok: false,
       meta: {},
       teams: [],
       matches: [],
@@ -82,6 +82,12 @@ export default async function TourneyManagePage({ searchParams }) {
 
       <div className="tourney-grid">
         <Section id="players" eyebrow="Players" title="Player Management" wide>
+          {!adminPlayers.ok ? (
+            <p className="cs-error" role="alert">
+              Player data is temporarily unavailable. Do not make roster decisions
+              until this warning clears.
+            </p>
+          ) : null}
           <TourneyPlayerManager
             initialPlayers={players}
             initialCapacity={capacitySnapshot}
@@ -98,6 +104,12 @@ export default async function TourneyManagePage({ searchParams }) {
         ) : null}
 
         <Section id="bracket" eyebrow="Bracket" title="Bracket Control" wide>
+          {!bracketSnapshot.ok ? (
+            <p className="cs-error" role="alert">
+              Bracket data is temporarily unavailable. Do not publish or edit the
+              bracket until this warning clears.
+            </p>
+          ) : null}
           <TourneyBracketManager
             initialSnapshot={bracketSnapshot}
             currentRole={session.role}

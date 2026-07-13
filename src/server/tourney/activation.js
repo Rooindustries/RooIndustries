@@ -7,26 +7,15 @@ import { enqueueTourneyExternalOperation } from "./externalOperations.js";
 import { listManageTourneyPlayers } from "./playerStore.js";
 import { getTourneySql, getTourneySqlForBackend } from "./sqlClient.js";
 import { executeTourneyCommand, resolveTourneyStorePolicy } from "./store.js";
+import { isEnabledTourneyFlag, stableTourneyJson } from "./canonical.js";
 
-const enabled = (value) => ["1", "true", "yes", "on"].includes(
-  String(value || "").trim().toLowerCase()
-);
-const stableJson = (value) => {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.keys(value).sort().map(
-      (key) => `${JSON.stringify(key)}:${stableJson(value[key])}`
-    ).join(",")}}`;
-  }
-  return JSON.stringify(value);
-};
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 
 const requireActivationPolicy = (env) => {
   const policy = resolveTourneyStorePolicy(env);
   const valid = policy.primaryBackend === "supabase" && policy.mirrorEnabled &&
     policy.writesPaused && policy.generation === 1 &&
-    enabled(env.TOURNEY_HARDENING_V4_ENABLED);
+    isEnabledTourneyFlag(env.TOURNEY_HARDENING_V4_ENABLED);
   if (!valid) {
     const error = new Error("Tourney activation controls are not ready.");
     error.code = "TOURNEY_ACTIVATION_CONTROL_MISMATCH";
@@ -156,7 +145,7 @@ export const inventoryTourneyV4Activation = async ({
   return {
     dryRun: true,
     contactedDiscord: true,
-    inventoryHash: sha256(stableJson(evidence)),
+    inventoryHash: sha256(stableTourneyJson(evidence)),
     counts: summarizeInventory({ ...local, rows }),
   };
 };
@@ -164,7 +153,21 @@ export const inventoryTourneyV4Activation = async ({
 export const seedTourneyAccountSnapshotV4 = async ({ env = process.env } = {}) => {
   const accounts = await readEffectiveTourneyAccounts({ env });
   if (accounts.length === 0) throw new Error("Tourney account snapshot is missing.");
-  const accountsJson = renderTourneyAccountsJson(accounts);
+  const sql = await getTourneySql(env);
+  const mappings = await sql`
+    select username,principal_id from accounts.tourney_accounts
+    where principal_id is not null
+  `;
+  const principalByUsername = new Map(
+    mappings.map((mapping) => [String(mapping.username).toLowerCase(), mapping.principal_id])
+  );
+  const enrichedAccounts = accounts.map((account) => ({
+    ...account,
+    ...(principalByUsername.get(String(account.username || "").toLowerCase())
+      ? { principalId: principalByUsername.get(String(account.username || "").toLowerCase()) }
+      : {}),
+  }));
+  const accountsJson = renderTourneyAccountsJson(enrichedAccounts);
   const commandId = `account-snapshot:seed:${sha256(accountsJson).slice(0, 32)}`;
   const result = await executeTourneyCommand({
     commandId,

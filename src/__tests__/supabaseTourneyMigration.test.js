@@ -33,6 +33,19 @@ describe("Supabase Tourney migration safeguards", () => {
     ).rejects.toThrow("connection failed");
   });
 
+  test("isolates optional-table failures behind a transaction savepoint", async () => {
+    const savepoint = jest.fn(async (callback) => callback({}));
+    const result = await readOptionalTourneyTable({
+      table: "tourney_payouts",
+      sql: { savepoint },
+      load: async () => {
+        throw Object.assign(new Error("relation does not exist"), { code: "42P01" });
+      },
+    });
+    expect(savepoint).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ table: "tourney_payouts", missing: true, rows: [] });
+  });
+
   test("uses guarded deletes when replacing the Supabase Tourney shadow", () => {
     const migrationsDirectory = path.join(process.cwd(), "supabase", "migrations");
     const migrationName = fs

@@ -223,9 +223,7 @@ const captureHostedSnapshot = async ({ legacyData, sanityAccount }) => {
 
 const captureSnapshot = async () => {
   const legacyUrl = legacyDatabaseUrl();
-  const encryptionSecret = normalize(
-    process.env.TOURNEY_SNAPSHOT_KEY || process.env.REF_ADMIN_KEY || process.env.CRON_SECRET
-  );
+  const encryptionSecret = normalize(process.env.TOURNEY_SNAPSHOT_KEY);
   if (!legacyUrl || !encryptionSecret) {
     throw new Error("Legacy and snapshot encryption credentials are required.");
   }

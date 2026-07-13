@@ -74,6 +74,7 @@ const normalizeAccount = (account) => {
   const email = normalizeTourneyEmail(account?.email);
   const passwordHash = String(account?.passwordHash || account?.password_hash || "").trim();
   const version = String(account?.version || "1").trim() || "1";
+  const principalId = String(account?.principalId || account?.principal_id || "").trim();
 
   if (!username || !role || !passwordHash) return null;
 
@@ -82,6 +83,7 @@ const normalizeAccount = (account) => {
     ...(email ? { email } : {}),
     role,
     passwordHash,
+    ...(principalId ? { principalId } : {}),
     active: account?.active !== false,
     version,
   };
@@ -433,6 +435,7 @@ export const buildUpdatedTourneyAccounts = async ({
       passwordHash,
       active: true,
       version: nextVersion(existing?.version || "0"),
+      ...(existing?.principalId ? { principalId: existing.principalId } : {}),
     };
 
     if (existingIndex >= 0) {

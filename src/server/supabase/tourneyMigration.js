@@ -45,9 +45,12 @@ const requireRpcData = ({ data, error }, operation) => {
   return data;
 };
 
-export const readOptionalTourneyTable = async ({ table, load }) => {
+export const readOptionalTourneyTable = async ({ table, load, sql }) => {
   try {
-    return { table, rows: await load(), missing: false };
+    const rows = sql
+      ? await sql.savepoint((savepointSql) => load(savepointSql))
+      : await load();
+    return { table, rows, missing: false };
   } catch (error) {
     if (String(error?.code || "") === "42P01") {
       return { table, rows: [], missing: true };
@@ -68,56 +71,38 @@ export const readTourneySnapshot = async ({ env = process.env } = {}) => {
   });
   let tables;
   try {
-    tables = await root.begin("isolation level repeatable read read only", (sql) => Promise.all([
-    readOptionalTourneyTable({
-      table: "tourney_players",
-      load: () => sql`select * from tourney_players order by id`,
-    }),
-    readOptionalTourneyTable({
-      table: "tourney_player_tokens",
-      load: () => sql`select * from tourney_player_tokens order by id`,
-    }),
-    readOptionalTourneyTable({
-      table: "tourney_registration_config",
-      load: () => sql`select * from tourney_registration_config order by id`,
-    }),
-    readOptionalTourneyTable({
-      table: "tourney_bracket_teams",
-      load: () => sql`select * from tourney_bracket_teams order by id`,
-    }),
-    readOptionalTourneyTable({
-      table: "tourney_bracket_team_members",
-      load: () => sql`select * from tourney_bracket_team_members order by id`,
-    }),
-    readOptionalTourneyTable({
-      table: "tourney_bracket_meta",
-      load: () => sql`select * from tourney_bracket_meta order by id`,
-    }),
-    readOptionalTourneyTable({
-      table: "tourney_bracket_entities",
-      load: () => sql`select * from tourney_bracket_entities order by entity_type, entity_id`,
-    }),
-    readOptionalTourneyTable({
-      table: "tourney_bracket_counters",
-      load: () => sql`select * from tourney_bracket_counters order by entity_type`,
-    }),
-    readOptionalTourneyTable({
-      table: "tourney_bracket_audit",
-      load: () => sql`select * from tourney_bracket_audit order by created_at, id`,
-    }),
-    readOptionalTourneyTable({
-      table: "tourney_bracket_lock",
-      load: () => sql`select * from tourney_bracket_lock order by id`,
-    }),
-    readOptionalTourneyTable({
-      table: "tourney_appeals",
-      load: () => sql`select * from tourney_appeals order by id`,
-    }),
-    readOptionalTourneyTable({
-      table: "tourney_payouts",
-      load: () => sql`select * from tourney_payouts order by id`,
-    }),
-    ]));
+    tables = await root.begin("isolation level repeatable read read only", async (sql) => {
+      const existingRows = await sql`
+        select name from unnest(array[
+          'tourney_players','tourney_player_tokens','tourney_registration_config',
+          'tourney_bracket_teams','tourney_bracket_team_members','tourney_bracket_meta',
+          'tourney_bracket_entities','tourney_bracket_counters','tourney_bracket_audit',
+          'tourney_bracket_lock','tourney_appeals','tourney_payouts'
+        ]::text[]) name where to_regclass(name) is not null
+      `;
+      const existing = new Set(existingRows.map((row) => row.name));
+      const definitions = [
+        ["tourney_players", (querySql) => querySql`select * from tourney_players order by id`],
+        ["tourney_player_tokens", (querySql) => querySql`select * from tourney_player_tokens order by id`],
+        ["tourney_registration_config", (querySql) => querySql`select * from tourney_registration_config order by id`],
+        ["tourney_bracket_teams", (querySql) => querySql`select * from tourney_bracket_teams order by id`],
+        ["tourney_bracket_team_members", (querySql) => querySql`select * from tourney_bracket_team_members order by id`],
+        ["tourney_bracket_meta", (querySql) => querySql`select * from tourney_bracket_meta order by id`],
+        ["tourney_bracket_entities", (querySql) => querySql`select * from tourney_bracket_entities order by entity_type, entity_id`],
+        ["tourney_bracket_counters", (querySql) => querySql`select * from tourney_bracket_counters order by entity_type`],
+        ["tourney_bracket_audit", (querySql) => querySql`select * from tourney_bracket_audit order by created_at, id`],
+        ["tourney_bracket_lock", (querySql) => querySql`select * from tourney_bracket_lock order by id`],
+        ["tourney_appeals", (querySql) => querySql`select * from tourney_appeals order by id`],
+        ["tourney_payouts", (querySql) => querySql`select * from tourney_payouts order by id`],
+      ];
+      const results = [];
+      for (const [table, load] of definitions) {
+        results.push(existing.has(table)
+          ? await readOptionalTourneyTable({ table, load, sql })
+          : { table, rows: [], missing: true });
+      }
+      return results;
+    });
   } finally {
     await root.end({ timeout: 5 });
   }

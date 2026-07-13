@@ -18,6 +18,10 @@ const activationWorker = fs.readFileSync(
   path.join(process.cwd(), "src", "server", "tourney", "activation.js"),
   "utf8"
 );
+const inviteScript = fs.readFileSync(
+  path.join(process.cwd(), "scripts", "tourney-send-discord-invites.mjs"),
+  "utf8"
+);
 const activationV4 = fs.readFileSync(
   path.join(
     process.cwd(),
@@ -51,9 +55,23 @@ describe("Tourney cutover migration", () => {
     expect(cutoverCli).toContain('hardened.error.code === "PGRST202"');
     expect(cutoverCli).toContain("POSTGRES_URL_NON_POOLING");
     expect(cutoverCli).toContain('PGCONNECT_TIMEOUT: "15"');
+    expect(cutoverCli).toContain("normalize(process.env.TOURNEY_SNAPSHOT_KEY)");
+    expect(cutoverCli).not.toMatch(/TOURNEY_SNAPSHOT_KEY\s*\|\|/);
     expect(activationWorker).toContain(
       "player.principal_id is distinct from account.principal_id"
     );
+  });
+
+  test("uses complete legacy keys and unique intentional invite replays", () => {
+    expect(cutoverCli).toContain("--inventory-activation-v4");
+    const legacySchema = fs.readFileSync(
+      path.join(process.cwd(), "scripts", "tourney-cutover-legacy.sql"),
+      "utf8"
+    );
+    expect(legacySchema).toContain("when 'tourney_bracket_counters'");
+    expect(legacySchema).toContain("'entity_type', v_row->>'entity_type'");
+    expect(inviteScript).toContain("discord-invite:sample:${crypto.randomUUID()}");
+    expect(inviteScript).toContain("const forceRunId = force ? crypto.randomUUID() : \"\"");
   });
 
   test("records ordered outbox events and guarded target checkpoints", () => {
