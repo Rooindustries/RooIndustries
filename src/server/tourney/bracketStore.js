@@ -793,7 +793,7 @@ export const generateTourneyBracket = async ({
   });
 
 const readEngineData = async (env = process.env) => {
-  if (!isMemoryMode(env) && isSupabaseTourneyDatabase(env)) {
+  if (!isMemoryMode(env)) {
     await ensureTourneyBracketSchema(env);
     const sql = await getSql(env);
     const rows = await sql`
