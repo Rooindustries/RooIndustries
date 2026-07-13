@@ -40,6 +40,10 @@ const loadHandler = async ({ authorized = true } = {}) => {
   });
   const reconcileTourneyEmailDispatches = jest.fn(async () => ({ claimed: 0, sent: 0 }));
   const reconcileTourneyMirror = jest.fn(async () => ({ enabled: false, failed: 0 }));
+  const refreshTourneyCutoverClock = jest.fn(async () => ({ clean_since: null }));
+  const resolveTourneyStorePolicy = jest.fn(() => ({ mirrorEnabled: false }));
+  const runTourneyParity = jest.fn(async () => ({ status: "clean" }));
+  const runTourneyShadowReadSamples = jest.fn(async () => ({ sampled: 10 }));
   const adminRpc = jest.fn(async (name) => {
     events.push(`rpc:${name}`);
     return { data: {}, error: null };
@@ -81,10 +85,10 @@ const loadHandler = async ({ authorized = true } = {}) => {
   }));
   jest.doMock("../server/tourney/store.js", () => ({
     reconcileTourneyMirror,
-    refreshTourneyCutoverClock: jest.fn(),
-    resolveTourneyStorePolicy: jest.fn(() => ({ mirrorEnabled: false })),
-    runTourneyParity: jest.fn(),
-    runTourneyShadowReadSamples: jest.fn(),
+    refreshTourneyCutoverClock,
+    resolveTourneyStorePolicy,
+    runTourneyParity,
+    runTourneyShadowReadSamples,
   }));
   jest.doMock("../server/api/payment/backend.js", () => ({
     createPaymentBackendClient: jest.fn(() => ({
@@ -104,6 +108,12 @@ const loadHandler = async ({ authorized = true } = {}) => {
     adminRpc,
     reconcileCredentialOperations,
     reconcileTourneyExternalOperations,
+    reconcileTourneyEmailDispatches,
+    reconcileTourneyMirror,
+    refreshTourneyCutoverClock,
+    resolveTourneyStorePolicy,
+    runTourneyParity,
+    runTourneyShadowReadSamples,
     reconcileReverseMirror,
   };
 };
@@ -158,6 +168,33 @@ describe("payment reconciliation route authorization", () => {
     expect(loaded.reconcilePaymentSessions).not.toHaveBeenCalled();
     expect(loaded.reconcileBookingEmailDispatches).not.toHaveBeenCalled();
     expect(loaded.cleanupExpiredRateLimitBuckets).not.toHaveBeenCalled();
+  });
+
+  test("tourney-only scope bypasses commerce and completes parity work", async () => {
+    const loaded = await loadHandler();
+    loaded.resolveTourneyStorePolicy.mockReturnValue({ mirrorEnabled: true });
+    loaded.reconcileTourneyMirror.mockResolvedValue({ enabled: true, failed: 0 });
+    const { response, state } = createResponse();
+
+    await loaded.handler(
+      {
+        method: "POST",
+        headers: { "x-reconcile-scope": "tourney-only" },
+      },
+      response
+    );
+
+    expect(state.status).toBe(200);
+    expect(state.body.ok).toBe(true);
+    expect(state.body.summary.tourneyParity).toEqual({ status: "clean" });
+    expect(loaded.reconcileTourneyExternalOperations).toHaveBeenCalledWith({ limit: 10 });
+    expect(loaded.reconcileTourneyEmailDispatches).toHaveBeenCalledWith({ limit: 10 });
+    expect(loaded.reconcileTourneyMirror).toHaveBeenCalledWith({ limit: 100 });
+    expect(loaded.runTourneyShadowReadSamples).toHaveBeenCalledWith({ rounds: 10 });
+    expect(loaded.refreshTourneyCutoverClock).toHaveBeenCalledTimes(1);
+    expect(loaded.syncSanityCommerceChanges).not.toHaveBeenCalled();
+    expect(loaded.reconcilePaymentSessions).not.toHaveBeenCalled();
+    expect(loaded.reconcileReverseMirror).not.toHaveBeenCalled();
   });
 
   test("finishes payment recovery before the durable Tourney side-effect queue", async () => {
