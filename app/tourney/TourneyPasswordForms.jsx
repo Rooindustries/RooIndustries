@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { tourneyMutationFetch, tourneyMutationSuccessMessage } from "./tourneyMutation";
 
 export function TourneyForgotForm() {
   const [login, setLogin] = useState("");
@@ -13,7 +14,7 @@ export function TourneyForgotForm() {
     setMessage("");
 
     try {
-      const response = await fetch("/api/tourney/forgot", {
+      const response = await tourneyMutationFetch("/api/tourney/forgot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ login }),
@@ -22,7 +23,10 @@ export function TourneyForgotForm() {
       if (!response.ok || data.ok !== true) {
         throw new Error(data.error || "Unable to send reset link.");
       }
-      setMessage(data.message || "If the account exists, a reset link was sent.");
+      setMessage(tourneyMutationSuccessMessage(
+        data,
+        "If the account exists, a reset link was sent."
+      ));
     } catch (error) {
       setMessage(error?.message || "Unable to send reset link.");
     } finally {
@@ -77,7 +81,7 @@ export function TourneyResetForm() {
     setMessage("");
 
     try {
-      const response = await fetch("/api/tourney/reset", {
+      const response = await tourneyMutationFetch("/api/tourney/reset", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, password }),
@@ -88,7 +92,10 @@ export function TourneyResetForm() {
       }
       setPassword("");
       setIsSuccess(true);
-      setMessage("Password updated. You can log in now.");
+      setMessage(tourneyMutationSuccessMessage(
+        data,
+        "Password updated. You can log in now."
+      ));
     } catch (error) {
       setMessage(error?.message || "Unable to reset password.");
     } finally {

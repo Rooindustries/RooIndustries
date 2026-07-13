@@ -277,6 +277,9 @@ const commercePrimaryBackend =
   getFirstValue(["COMMERCE_PRIMARY_BACKEND"]).toLowerCase() || primaryBackend;
 const tourneyDatabaseMode =
   getFirstValue(["TOURNEY_DATABASE_MODE"]).toLowerCase() || "legacy";
+const tourneyMirrorEnabled = isEnabled("TOURNEY_MIRROR_ENABLED");
+const tourneyFailoverGeneration =
+  getFirstValue(["TOURNEY_FAILOVER_GENERATION"]) || "0";
 const contentCanaryPercent = numericPercent("SUPABASE_CONTENT_CANARY_PERCENT");
 const commerceCanaryPercent = numericPercent("SUPABASE_COMMERCE_CANARY_PERCENT");
 const authCanaryConfigured = Boolean(
@@ -316,7 +319,9 @@ const anySupabaseRuntimeEnabled =
   shadowWritesEnabled ||
   socialAuthEnabled ||
   licensingEnabled ||
-  migrationEndpointEnabled;
+  migrationEndpointEnabled ||
+  tourneyMirrorEnabled;
+const tourneyNeedsSupabase = tourneyDatabaseMode === "supabase" || tourneyMirrorEnabled;
 
 if (!["sanity", "supabase"].includes(primaryBackend)) {
   supabaseConsistencyFailures.push(
@@ -337,6 +342,22 @@ if (!["legacy", "supabase"].includes(tourneyDatabaseMode)) {
   supabaseConsistencyFailures.push(
     "TOURNEY_DATABASE_MODE must be legacy or supabase."
   );
+}
+if (!/^[0-9]+$/.test(tourneyFailoverGeneration)) {
+  supabaseConsistencyFailures.push(
+    "TOURNEY_FAILOVER_GENERATION must be a non-negative integer."
+  );
+}
+if (tourneyDatabaseMode === "supabase" && !tourneyMirrorEnabled) {
+  supabaseConsistencyFailures.push(
+    "Supabase Tourney primary requires TOURNEY_MIRROR_ENABLED=1 while legacy fallback is retained."
+  );
+}
+if (tourneyNeedsSupabase && !hasAny(["SUPABASE_DATABASE_URL"])) {
+  missing.push("SUPABASE_DATABASE_URL");
+}
+if (tourneyMirrorEnabled && !hasAny(["TOURNEY_DATABASE_URL", "POSTGRES_URL"])) {
+  missing.push("TOURNEY_DATABASE_URL");
 }
 
 if (anySupabaseRuntimeEnabled) {

@@ -22,6 +22,7 @@ const referralStyles = {
   icon: "h-5 w-5 shrink-0",
   discordIcon: "text-[#5865f2]",
   error: "text-center text-xs leading-5 text-danger-text",
+  previewNote: "text-center text-xs leading-5 text-ink-muted",
 };
 
 const tourneyStyles = {
@@ -34,6 +35,7 @@ const tourneyStyles = {
   icon: "cs-social-icon",
   discordIcon: "cs-social-discord-icon",
   error: "cs-social-error",
+  previewNote: "cs-social-preview-note",
 };
 
 export default function SupabaseSocialLogin({
@@ -54,6 +56,14 @@ export default function SupabaseSocialLogin({
       .trim()
       .toLowerCase()
   );
+  const previewOnly =
+    flow === "tourney" &&
+    !socialAuthEnabled &&
+    ["1", "true", "yes", "on"].includes(
+      String(process.env.NEXT_PUBLIC_TOURNEY_PREVIEW_OAUTH_MOCK || "")
+        .trim()
+        .toLowerCase()
+    );
 
   const actionCopy = {
     link: { button: "Link", divider: "or link an account", error: "Account linking" },
@@ -105,7 +115,7 @@ export default function SupabaseSocialLogin({
     }
   };
 
-  if (!socialAuthEnabled || visibleProviders.length === 0) return null;
+  if ((!socialAuthEnabled && !previewOnly) || visibleProviders.length === 0) return null;
 
   return (
     <div className={styles.container}>
@@ -119,7 +129,7 @@ export default function SupabaseSocialLogin({
           <button
             aria-label={`${actionCopy.button} ${label}`}
             className={styles.button}
-            disabled={Boolean(busyProvider)}
+            disabled={previewOnly || Boolean(busyProvider)}
             key={id}
             onClick={() => start(id)}
             type="button"
@@ -134,6 +144,11 @@ export default function SupabaseSocialLogin({
           </button>
         ))}
       </div>
+      {previewOnly ? (
+        <p className={styles.previewNote}>
+          Preview only. Google and Discord sign-in are disabled here.
+        </p>
+      ) : null}
       {message ? (
         <p className={styles.error} role="alert">
           {message}

@@ -19,6 +19,37 @@ describe("tourney emails", () => {
     jest.resetModules();
   });
 
+  test("reuses the provider idempotency key after an accepted response times out", async () => {
+    const deliveries = new Map();
+    let firstAttempt = true;
+    mockSendEmail.mockImplementation(async (_message, options = {}) => {
+      const key = options.idempotencyKey;
+      if (!deliveries.has(key)) deliveries.set(key, `email_${deliveries.size + 1}`);
+      if (firstAttempt) {
+        firstAttempt = false;
+        throw Object.assign(new Error("response timed out"), { code: "ETIMEDOUT" });
+      }
+      return { data: { id: deliveries.get(key) }, error: null };
+    });
+    const email = loadEmail();
+    const input = {
+      to: "playerone@example.com",
+      baseUrl: "https://www.rooindustries.com",
+      idempotencyKey: "command:discord_invite:player_1:v2:recipient:hash",
+      env: { RESEND_API_KEY: "re_test", FROM_EMAIL: "Tourney <tourney@rooindustries.com>" },
+      player: { id: "player_1", email: "playerone@example.com", displayName: "Player One" },
+    };
+
+    await expect(email.sendTourneyDiscordInviteEmail(input)).rejects.toMatchObject({
+      code: "ETIMEDOUT",
+    });
+    await expect(email.sendTourneyDiscordInviteEmail(input)).resolves.toEqual({
+      id: "email_1",
+    });
+    expect(deliveries.size).toBe(1);
+    expect(mockSendEmail.mock.calls[0][1]).toEqual(mockSendEmail.mock.calls[1][1]);
+  });
+
   test("sends approval notifications to the approved player", async () => {
     mockSendEmail.mockResolvedValue({
       data: { id: "email_player_approved" },

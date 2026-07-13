@@ -6,7 +6,7 @@ import {
   getTourneySession,
 } from "../TourneyShared";
 import TourneyAppealsPanel from "../TourneyAppealsPanel";
-import { listTourneyAppealsForSession } from "../../../src/server/tourney/appealPayoutStore";
+import { readTourneyAppeals } from "../../../src/server/tourney/readService";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,7 +38,9 @@ export default async function TourneyAppealsPage({ searchParams }) {
     );
   }
 
-  const appeals = await listTourneyAppealsForSession({ session }).catch(() => []);
+  const appeals = await readTourneyAppeals({ session })
+    .then((body) => body.appeals)
+    .catch(() => []);
 
   return (
     <TourneyShell session={session}>

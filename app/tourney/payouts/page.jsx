@@ -6,8 +6,8 @@ import {
   getTourneySession,
 } from "../TourneyShared";
 import TourneyPayoutsPanel from "../TourneyPayoutsPanel";
-import { listTourneyPayoutsForSession } from "../../../src/server/tourney/appealPayoutStore";
 import { listManageTourneyPlayers } from "../../../src/server/tourney/playerStore";
+import { readTourneyPayouts } from "../../../src/server/tourney/readService";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,7 +41,7 @@ export default async function TourneyPayoutsPage({ searchParams }) {
 
   const isAdmin = session.role === "owner" || session.role === "caster";
   const [payouts, players] = await Promise.all([
-    listTourneyPayoutsForSession({ session }).catch(() => []),
+    readTourneyPayouts({ session }).then((body) => body.payouts).catch(() => []),
     isAdmin ? listManageTourneyPlayers().catch(() => []) : [],
   ]);
 
