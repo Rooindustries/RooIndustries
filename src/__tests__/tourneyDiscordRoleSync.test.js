@@ -13,12 +13,16 @@ const env = {
   DISCORD_HOST_ROLE_ID: "333333333333333333",
 };
 
-const makeFetch = (statuses = []) => {
-  const queuedStatuses = [...statuses];
-  return jest.fn(async () => ({
-    ok: true,
-    status: queuedStatuses.shift() || 204,
-  }));
+const makeFetch = (responses = []) => {
+  const queue = [...responses];
+  return jest.fn(async () => {
+    const next = queue.shift() || { status: 204 };
+    return {
+      ok: next.status >= 200 && next.status < 300,
+      status: next.status,
+      json: async () => next.body || {},
+    };
+  });
 };
 
 const {
@@ -27,7 +31,9 @@ const {
 
 describe("Tourney Discord durable desired-role worker", () => {
   test("adds the Host role before removing Participant", async () => {
-    const fetchImpl = makeFetch();
+    const fetchImpl = makeFetch([
+      { status: 200, body: { roles: [env.DISCORD_PARTICIPANT_ROLE_ID] } },
+    ]);
 
     const result = await applyTourneyDiscordDesiredState({
       assignment: assignment({ desiredRole: "host" }),
@@ -46,7 +52,13 @@ describe("Tourney Discord durable desired-role worker", () => {
 
   test("removes only managed roles from the previously linked identity", async () => {
     const previousId = "987654321098765432";
-    const fetchImpl = makeFetch();
+    const fetchImpl = makeFetch([
+      { status: 200, body: { roles: [env.DISCORD_PARTICIPANT_ROLE_ID] } },
+      {
+        status: 200,
+        body: { roles: [env.DISCORD_PARTICIPANT_ROLE_ID, env.DISCORD_HOST_ROLE_ID] },
+      },
+    ]);
 
     await applyTourneyDiscordDesiredState({
       assignment: assignment({ previousDiscordUserId: previousId }),
@@ -67,7 +79,11 @@ describe("Tourney Discord durable desired-role worker", () => {
   });
 
   test("joins with the ephemeral OAuth token before applying roles", async () => {
-    const fetchImpl = makeFetch([201, 204, 204]);
+    const fetchImpl = makeFetch([
+      { status: 201 },
+      { status: 200, body: { roles: [] } },
+      { status: 204 },
+    ]);
 
     await applyTourneyDiscordDesiredState({
       accessToken: "ephemeral-oauth-token",
@@ -80,6 +96,21 @@ describe("Tourney Discord durable desired-role worker", () => {
       method: "PUT",
       body: JSON.stringify({ access_token: "ephemeral-oauth-token" }),
     });
+  });
+
+  test("marks an already-correct assignment applied without role mutations", async () => {
+    const fetchImpl = makeFetch([
+      { status: 200, body: { roles: [env.DISCORD_PARTICIPANT_ROLE_ID, "unmanaged"] } },
+    ]);
+
+    await expect(applyTourneyDiscordDesiredState({
+      assignment: assignment(),
+      env,
+      fetchImpl,
+    })).resolves.toMatchObject({ applied: true, desiredRole: "participant" });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl.mock.calls[0][1].method).toBe("GET");
   });
 
   test("classifies a user absent from the guild as blocked reauth", async () => {

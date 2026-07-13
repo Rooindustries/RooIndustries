@@ -81,13 +81,70 @@ const ensureMember = async ({
   return true;
 };
 
-const applyManagedRoles = async ({ assignment, config, fetchImpl, deadlineAt }) => {
+const readMemberRoles = async ({
+  config,
+  discordUserId,
+  fetchImpl,
+  deadlineAt,
+}) => {
+  const response = await discordRequest({
+    config,
+    discordUserId,
+    fetchImpl,
+    method: "GET",
+    deadlineAt,
+  });
+  const member = await response.json().catch(() => ({}));
+  return new Set(Array.isArray(member.roles) ? member.roles.map(String) : []);
+};
+
+const removePreviousManagedRoles = async ({
+  assignment,
+  config,
+  fetchImpl,
+  roleIds,
+  deadlineAt,
+}) => {
+  if (!assignment.previous_discord_user_id ||
+      assignment.previous_discord_user_id === assignment.discord_user_id) return;
+  let previousRoles;
+  try {
+    previousRoles = await readMemberRoles({
+      config,
+      discordUserId: assignment.previous_discord_user_id,
+      fetchImpl,
+      deadlineAt,
+    });
+  } catch (error) {
+    if (error?.code === "discord_http_404") return;
+    throw error;
+  }
+  for (const roleId of Object.values(roleIds)) {
+    if (!previousRoles.has(roleId)) continue;
+    await discordRequest({
+      config,
+      discordUserId: assignment.previous_discord_user_id,
+      fetchImpl,
+      method: "DELETE",
+      roleId,
+      deadlineAt,
+    });
+  }
+};
+
+const applyManagedRoles = async ({
+  assignment,
+  config,
+  currentRoles,
+  fetchImpl,
+  deadlineAt,
+}) => {
   const roleIds = {
     host: config.hostRoleId,
     participant: config.participantRoleId,
   };
   const desired = assignment.desired_role;
-  if (desired !== "none") {
+  if (desired !== "none" && !currentRoles.has(roleIds[desired])) {
     await discordRequest({
       config,
       discordUserId: assignment.discord_user_id,
@@ -98,7 +155,7 @@ const applyManagedRoles = async ({ assignment, config, fetchImpl, deadlineAt }) 
     });
   }
   for (const role of ["participant", "host"]) {
-    if (role === desired) continue;
+    if (role === desired || !currentRoles.has(roleIds[role])) continue;
     await discordRequest({
       config,
       discordUserId: assignment.discord_user_id,
@@ -108,21 +165,13 @@ const applyManagedRoles = async ({ assignment, config, fetchImpl, deadlineAt }) 
       deadlineAt,
     });
   }
-  if (
-    assignment.previous_discord_user_id &&
-    assignment.previous_discord_user_id !== assignment.discord_user_id
-  ) {
-    for (const role of ["participant", "host"]) {
-      await discordRequest({
-        config,
-        discordUserId: assignment.previous_discord_user_id,
-        fetchImpl,
-        method: "DELETE",
-        roleId: roleIds[role],
-        deadlineAt,
-      });
-    }
-  }
+  await removePreviousManagedRoles({
+    assignment,
+    config,
+    fetchImpl,
+    roleIds,
+    deadlineAt,
+  });
 };
 
 export const applyTourneyDiscordDesiredState = async ({
@@ -147,22 +196,27 @@ export const applyTourneyDiscordDesiredState = async ({
       fetchImpl,
       deadlineAt,
     });
-  } else {
-    try {
-      await discordRequest({
-        config,
-        discordUserId: normalized.discord_user_id,
-        fetchImpl,
-        method: "GET",
-        deadlineAt,
-      });
-    } catch (error) {
-      if (error?.code === "discord_http_404") {
-        return { applied: false, reason: "blocked_reauth" };
-      }
-      throw error;
-    }
   }
-  await applyManagedRoles({ assignment: normalized, config, fetchImpl, deadlineAt });
+  let currentRoles;
+  try {
+    currentRoles = await readMemberRoles({
+      config,
+      discordUserId: normalized.discord_user_id,
+      fetchImpl,
+      deadlineAt,
+    });
+  } catch (error) {
+    if (error?.code === "discord_http_404") {
+      return { applied: false, reason: "blocked_reauth" };
+    }
+    throw error;
+  }
+  await applyManagedRoles({
+    assignment: normalized,
+    config,
+    currentRoles,
+    fetchImpl,
+    deadlineAt,
+  });
   return { applied: true, desiredRole: normalized.desired_role };
 };
