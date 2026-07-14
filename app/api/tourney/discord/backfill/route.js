@@ -111,12 +111,15 @@ const resolveAuthoritativeDiscordPlayers = async ({
       player,
       playerId: player.id,
       principalId: String(mapping?.principal_id || ""),
+      playerPrincipalId: String(mapping?.player_principal_id || ""),
       legacyDiscordUserId,
       authoritativeDiscordUserId,
       conflictCode,
       verified: Boolean(
         candidates.length === 1 && mapping?.principal_id &&
-        mapping.account_active === true && authoritativeDiscordUserId
+        mapping.account_active === true && authoritativeDiscordUserId &&
+        mapping.player_status === "approved" &&
+        String(mapping.player_principal_id || "") === String(mapping.principal_id)
       ),
     }];
   });
@@ -141,16 +144,121 @@ const readApplyScope = (payload = {}) => {
   };
 };
 
-const scopedCommandId = ({ config, entry, repairKey }) => {
-  const signature = JSON.stringify({
-    repairKey,
-    principalId: entry.principalId,
-    playerId: entry.playerId,
-    discordUserId: entry.authoritativeDiscordUserId,
-    guildId: config.guildId,
-    desiredRole: "participant",
+const scopedCommandId = (repairKey) =>
+  `discord-backfill:scoped:${crypto.createHash("sha256").update(repairKey).digest("hex")}`;
+
+const targetError = (message, code, status) => Object.assign(new Error(message), {
+  code,
+  status,
+});
+
+const resolveScopedRepairTarget = async (scope) => {
+  const players = (await listManageTourneyPlayers()).filter(
+    (player) => player.status === "approved"
+  );
+  const selectedPlayers = scope.playerId
+    ? players.filter((player) => player.id === scope.playerId)
+    : players;
+  if (scope.playerId && selectedPlayers.length !== 1) {
+    throw targetError(
+      "The Discord repair target was not found.",
+      "TOURNEY_DISCORD_REPAIR_TARGET_NOT_FOUND",
+      404
+    );
+  }
+  const resolved = await resolveAuthoritativeDiscordPlayers({
+    players: selectedPlayers,
+    playerIds: scope.playerId ? [scope.playerId] : [],
+    principalIds: scope.principalId ? [scope.principalId] : [],
   });
-  return `discord-backfill:scoped:${crypto.createHash("sha256").update(signature).digest("hex")}`;
+  const selected = scope.principalId
+    ? resolved.filter((entry) => entry.principalId.toLowerCase() === scope.principalId)
+    : resolved.filter((entry) => entry.playerId === scope.playerId);
+  if (selected.length === 0) {
+    throw targetError(
+      "The Discord repair target was not found.",
+      "TOURNEY_DISCORD_REPAIR_TARGET_NOT_FOUND",
+      404
+    );
+  }
+  const [entry] = selected;
+  const playerPrincipalId = entry.playerPrincipalId.trim().toLowerCase();
+  const mismatched =
+    selected.length !== 1 ||
+    !entry.verified ||
+    Boolean(entry.conflictCode) ||
+    (scope.principalId && entry.principalId.toLowerCase() !== scope.principalId) ||
+    (scope.playerId && entry.playerId !== scope.playerId) ||
+    playerPrincipalId !== entry.principalId.toLowerCase();
+  if (mismatched) {
+    throw targetError(
+      "The Discord repair target does not match authoritative identity state.",
+      "TOURNEY_DISCORD_REPAIR_TARGET_CONFLICT",
+      409
+    );
+  }
+  return entry;
+};
+
+const enqueueResolvedRepair = async ({ commandId, config, entry }) => {
+  const player = { ...entry.player, discordUserId: entry.authoritativeDiscordUserId };
+  const assignment = await recordTourneyDiscordDesiredState({
+    player,
+    discordUser: { id: player.discordUserId },
+    guildId: config.guildId,
+    expectedPrincipalId: entry.principalId,
+    forceRepair: true,
+  });
+  await enqueueTourneyExternalOperation({
+    commandId,
+    operationKind: "discord_role_reconcile",
+    entityType: "player",
+    entityId: player.id,
+    desiredState: {
+      assignment: {
+        principalId: assignment.principal_id || assignment.principalId,
+        discordUserId: assignment.discord_user_id || assignment.discordUserId,
+        previousDiscordUserId:
+          assignment.previous_discord_user_id || assignment.previousDiscordUserId || "",
+        staleDiscordUserIds:
+          assignment.stale_discord_user_ids || assignment.staleDiscordUserIds || [],
+        desiredRole: assignment.desired_role || assignment.desiredRole,
+        generation: Number(assignment.generation || 1),
+      },
+    },
+  });
+  return { player, assignment };
+};
+
+const commandHttpResult = (command = {}) => {
+  const suppliedStatus = Number(command.status || 200);
+  const status = Number.isInteger(suppliedStatus) &&
+    suppliedStatus >= 100 && suppliedStatus <= 599 ? suppliedStatus : 200;
+  if (command.receiptStatus !== "failed") {
+    const suppliedBody = command.body ?? {};
+    const body = suppliedBody && typeof suppliedBody === "object" &&
+      !Array.isArray(suppliedBody) ? {
+        ...suppliedBody,
+        ...(command.replayed === true ? { replayed: true } : {}),
+        ...(command.syncPending === true ? { syncPending: true } : {}),
+      } : suppliedBody;
+    return { status, body };
+  }
+  const body = command.body && typeof command.body === "object" &&
+    !Array.isArray(command.body) ? command.body : {};
+  return {
+    status: status >= 400 ? status : 503,
+    body: {
+      ...body,
+      ok: false,
+      queued: 0,
+      failed: Math.max(1, Number(body.failed || 0)),
+      error: body.error || "Discord role synchronization reached a terminal failure.",
+      code: body.code || "TOURNEY_COMMAND_TERMINAL_FAILURE",
+      replayed: command.replayed === true || body.replayed === true,
+      syncPending: true,
+    },
+  };
 };
 
 const mapInBatches = async (items, callback, batchSize = 5) => {
@@ -272,6 +380,69 @@ export async function POST(request) {
         Number(error?.status || 400)
       );
     }
+    const commandId = scopedCommandId(scopedRepairKey);
+    try {
+      const command = await executeTourneyCommand({
+        commandId,
+        purpose: "discord:backfill",
+        requestPayload: {
+          repairKey: scopedRepairKey,
+          scope: {
+            ...(scope.principalId ? { principalId: scope.principalId } : {}),
+            ...(scope.playerId ? { playerId: scope.playerId } : {}),
+          },
+          forceRepair: true,
+        },
+        attemptExternalWork: false,
+        callback: async () => {
+          const entry = await resolveScopedRepairTarget(scope);
+          await enqueueResolvedRepair({ commandId, config, entry });
+          return {
+            status: 200,
+            body: {
+              ok: true,
+              dryRun: false,
+              queued: 1,
+              failed: 0,
+              skippedConflicts: 0,
+              identityMismatchesQueued: 0,
+              contactedDiscord: false,
+              scope: {
+                principalId: entry.principalId,
+                playerId: entry.playerId,
+              },
+            },
+          };
+        },
+      });
+      const result = commandHttpResult(command);
+      return NextResponse.json(result.body, { status: result.status });
+    } catch (error) {
+      if (error?.code === "TOURNEY_WRITES_PAUSED") {
+        const failure = buildTourneyPublicError(
+          error,
+          "Tournament updates are temporarily unavailable."
+        );
+        return NextResponse.json(
+          { ok: false, error: failure.message, code: failure.code },
+          {
+            status: failure.status,
+            headers: { "Retry-After": String(error.retryAfter || 30) },
+          }
+        );
+      }
+      if (String(error?.code || "").startsWith("TOURNEY_DISCORD_REPAIR_TARGET_")) {
+        return jsonTargetError(error.message, error.code, Number(error.status || 409));
+      }
+      const failure = buildTourneyPublicError(
+        error,
+        "Unable to queue Discord role synchronization."
+      );
+      return NextResponse.json(
+        { ok: false, error: failure.message, code: failure.code },
+        { status: failure.status }
+      );
+    }
   }
 
   let resolved;
@@ -279,55 +450,16 @@ export async function POST(request) {
     const players = (await listManageTourneyPlayers()).filter(
       (player) => player.status === "approved"
     );
-    const selectedPlayers = scope.playerId
-      ? players.filter((player) => player.id === scope.playerId)
-      : players;
-    if (scope.playerId && selectedPlayers.length !== 1) {
-      return jsonTargetError(
-        "The Discord repair target was not found.",
-        "TOURNEY_DISCORD_REPAIR_TARGET_NOT_FOUND",
-        404
-      );
-    }
     resolved = await resolveAuthoritativeDiscordPlayers({
-      players: selectedPlayers,
-      playerIds: scope.playerId ? [scope.playerId] : [],
-      principalIds: scope.principalId ? [scope.principalId] : [],
+      players,
     });
   } catch (error) {
     logSafeError("Tourney Discord apply inventory failed", error);
     return jsonError("Discord desired-state inventory is temporarily unavailable.", 503);
   }
-  if (scope.scoped) {
-    const selected = scope.principalId
-      ? resolved.filter((entry) => entry.principalId.toLowerCase() === scope.principalId)
-      : resolved.filter((entry) => entry.playerId === scope.playerId);
-    if (selected.length === 0) {
-      return jsonTargetError(
-        "The Discord repair target was not found.",
-        "TOURNEY_DISCORD_REPAIR_TARGET_NOT_FOUND",
-        404
-      );
-    }
-    const [entry] = selected;
-    const playerPrincipalId = String(entry.player?.principalId || "").trim().toLowerCase();
-    const mismatched =
-      selected.length !== 1 ||
-      !entry.verified ||
-      Boolean(entry.conflictCode) ||
-      (scope.principalId && entry.principalId.toLowerCase() !== scope.principalId) ||
-      (scope.playerId && entry.playerId !== scope.playerId) ||
-      (playerPrincipalId && playerPrincipalId !== entry.principalId.toLowerCase());
-    if (mismatched) {
-      return jsonTargetError(
-        "The Discord repair target does not match authoritative identity state.",
-        "TOURNEY_DISCORD_REPAIR_TARGET_CONFLICT",
-        409
-      );
-    }
-    resolved = [entry];
-  }
   let queued = 0;
+  let replayed = false;
+  let syncPending = false;
   const failures = [];
   const repairId = crypto.randomUUID();
   const conflicts = resolved.filter((entry) => !entry.verified).map((entry) => ({
@@ -339,50 +471,38 @@ export async function POST(request) {
   );
   for (const entry of resolved.filter((candidate) => candidate.verified)) {
     const player = { ...entry.player, discordUserId: entry.authoritativeDiscordUserId };
-    const commandId = scope.scoped
-      ? scopedCommandId({ config, entry, repairKey: scopedRepairKey })
-      : `discord-backfill:${repairId}:${player.id}`;
+    const commandId = `discord-backfill:${repairId}:${player.id}`;
     try {
-      await executeTourneyCommand({
+      const command = await executeTourneyCommand({
         commandId,
         purpose: "discord:backfill",
         requestPayload: {
-          repairId: scope.scoped ? "scoped" : repairId,
-          ...(scope.scoped ? { repairKey: scopedRepairKey } : {}),
+          repairId,
           playerId: player.id,
           discordUserId: entry.authoritativeDiscordUserId,
           forceRepair: true,
         },
         attemptExternalWork: false,
         callback: async () => {
-          const assignment = await recordTourneyDiscordDesiredState({
-            player,
-            discordUser: { id: player.discordUserId },
-            guildId: config.guildId,
-            forceRepair: true,
-          });
-          await enqueueTourneyExternalOperation({
-            commandId,
-            operationKind: "discord_role_reconcile",
-            entityType: "player",
-            entityId: player.id,
-            desiredState: {
-              assignment: {
-                principalId: assignment.principal_id || assignment.principalId,
-                discordUserId: assignment.discord_user_id || assignment.discordUserId,
-                previousDiscordUserId:
-                  assignment.previous_discord_user_id || assignment.previousDiscordUserId || "",
-                staleDiscordUserIds:
-                  assignment.stale_discord_user_ids || assignment.staleDiscordUserIds || [],
-                desiredRole: assignment.desired_role || assignment.desiredRole,
-                generation: Number(assignment.generation || 1),
-              },
-            },
-          });
+          await enqueueResolvedRepair({ commandId, config, entry });
           return { body: { ok: true } };
         },
       });
-      queued += 1;
+      const commandResult = commandHttpResult(command);
+      const commandStatus = commandResult.status;
+      const commandFailed =
+        commandStatus >= 400 || commandResult.body?.ok === false;
+      replayed = replayed || command?.replayed === true || commandResult.body?.replayed === true;
+      syncPending = syncPending || command?.syncPending === true || commandResult.body?.syncPending === true;
+      if (commandFailed) {
+        failures.push({
+          playerId: player.id,
+          status: commandStatus,
+          code: commandResult.body?.code || "TOURNEY_DISCORD_ENQUEUE_FAILED",
+        });
+      } else {
+        queued += 1;
+      }
     } catch (error) {
       if (error?.code === "TOURNEY_WRITES_PAUSED") {
         const failure = buildTourneyPublicError(
@@ -418,11 +538,7 @@ export async function POST(request) {
     ...(conflicts.length > 0 ? { conflicts } : {}),
     ...(failures.length > 0 ? { failures } : {}),
     contactedDiscord: false,
-    ...(scope.scoped ? {
-      scope: {
-        principalId: resolved[0]?.principalId,
-        playerId: resolved[0]?.playerId,
-      },
-    } : {}),
+    ...(replayed ? { replayed: true } : {}),
+    ...(syncPending ? { syncPending: true } : {}),
   });
 }

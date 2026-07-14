@@ -1771,6 +1771,11 @@ insert into accounts.discord_role_assignments(
       '30000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001',
       'player-one','tourney_player','player-1'
     )`;
+    await sql`
+      update tourney.tourney_players
+      set principal_id='40000000-0000-4000-8000-000000000001'
+      where id='player-1'
+    `;
     await sql`insert into accounts.identity_links(
       principal_id,provider,provider_subject,metadata,last_seen_at
     ) values(
@@ -1845,6 +1850,271 @@ insert into accounts.discord_role_assignments(
     "500000000000000002",
     "nullable Discord identity inputs were not typed"
   );
+  const delay = (milliseconds) => new Promise((resolve) =>
+    setTimeout(resolve, milliseconds)
+  );
+  const deferred = () => {
+    let resolve;
+    const promise = new Promise((settle) => { resolve = settle; });
+    return { promise, resolve };
+  };
+  const readDiscordAssignment = async () => {
+    const [row] = await source`
+      select discord_user_id,previous_discord_user_id,stale_discord_user_ids,
+        generation,status,updated_at
+      from accounts.discord_role_assignments
+      where principal_id='40000000-0000-4000-8000-000000000001'
+    `;
+    return row;
+  };
+  const runScopedDiscordRepair = ({ commandId, beforeEnqueue } = {}) =>
+    executeTourneyCommand({
+      commandId,
+      purpose: "discord:backfill",
+      requestPayload: { playerId: "player-1", discordUserId: "500000000000000002" },
+      attemptExternalWork: false,
+      env,
+      callback: async () => {
+        const assignment = await recordTourneyDiscordDesiredState({
+          player: { id: "player-1" },
+          discordUser: { id: "500000000000000002" },
+          guildId: "600000000000000001",
+          expectedPrincipalId: "40000000-0000-4000-8000-000000000001",
+          forceRepair: true,
+          env,
+        });
+        await beforeEnqueue?.(assignment);
+        await enqueueTourneyExternalOperation({
+          commandId,
+          operationKind: "discord_role_reconcile",
+          entityType: "player",
+          entityId: "player-1",
+          desiredState: { assignment: {
+            principalId: assignment.principal_id,
+            discordUserId: assignment.discord_user_id,
+            desiredRole: assignment.desired_role,
+            generation: Number(assignment.generation),
+          } },
+          env,
+        });
+        return { body: { ok: true, assignment } };
+      },
+    });
+  const assertRejectedRepair = async ({ commandId, result, assignmentBefore }) => {
+    assert.ok(
+      ["TOURNEY_DISCORD_IDENTITY_CHANGED", "TOURNEY_IDENTITY_SYNC_PENDING"]
+        .includes(result?.error?.code),
+      `${commandId} accepted a stale Discord authority snapshot`
+    );
+    await assertSql(
+      source,
+      `select not exists(select 1 from tourney.command_receipts where command_id='${commandId}') and not exists(select 1 from tourney.external_operations where command_id='${commandId}') ok`,
+      `${commandId} left a receipt or external operation after authority rejection`
+    );
+    assert.deepEqual(
+      await readDiscordAssignment(),
+      assignmentBefore,
+      `${commandId} mutated desired state after authority rejection`
+    );
+  };
+  const runIdentityFirstRace = async ({ commandId, mutateIdentity, restoreIdentity }) => {
+    const assignmentBefore = await readDiscordAssignment();
+    const mutationReady = deferred();
+    const releaseMutation = deferred();
+    const mutation = source.begin(async (sql) => {
+      await mutateIdentity(sql);
+      mutationReady.resolve();
+      await releaseMutation.promise;
+    });
+    await mutationReady.promise;
+    let repairSettled = false;
+    const repair = runScopedDiscordRepair({ commandId })
+      .then((value) => ({ value }), (error) => ({ error }))
+      .finally(() => { repairSettled = true; });
+    await delay(150);
+    assert.equal(repairSettled, false, `${commandId} bypassed the identity row lock`);
+    releaseMutation.resolve();
+    await mutation;
+    const result = await repair;
+    await assertRejectedRepair({ commandId, result, assignmentBefore });
+    await restoreIdentity();
+  };
+  await runIdentityFirstRace({
+    commandId: "fixture:discord-concurrent-relink-first",
+    mutateIdentity: (sql) => sql`
+      update accounts.identity_links set provider_subject='500000000000000003'
+      where principal_id='40000000-0000-4000-8000-000000000001'
+        and provider='discord'
+    `,
+    restoreIdentity: () => source`
+      update accounts.identity_links set provider_subject='500000000000000002'
+      where principal_id='40000000-0000-4000-8000-000000000001'
+        and provider='discord'
+    `,
+  });
+  await runIdentityFirstRace({
+    commandId: "fixture:discord-concurrent-unlink-first",
+    mutateIdentity: (sql) => sql`
+      delete from accounts.identity_links
+      where principal_id='40000000-0000-4000-8000-000000000001'
+        and provider='discord'
+    `,
+    restoreIdentity: () => source`
+      insert into accounts.identity_links(
+        principal_id,provider,provider_subject,metadata,last_seen_at
+      ) values(
+        '40000000-0000-4000-8000-000000000001','discord','500000000000000002',
+        '{"username":"fixture"}'::jsonb,now()
+      )
+    `,
+  });
+
+  const principalMismatchBefore = await readDiscordAssignment();
+  await source.begin(async (sql) => {
+    await sql`select set_config('roo.tourney_mirror_apply','1',true)`;
+    await sql`update tourney.tourney_players set principal_id=null where id='player-1'`;
+  });
+  const mismatchCommandId = "fixture:discord-player-principal-mismatch";
+  const mismatchResult = await runScopedDiscordRepair({ commandId: mismatchCommandId })
+    .then((value) => ({ value }), (error) => ({ error }));
+  await assertRejectedRepair({
+    commandId: mismatchCommandId,
+    result: mismatchResult,
+    assignmentBefore: principalMismatchBefore,
+  });
+  await source.begin(async (sql) => {
+    await sql`select set_config('roo.tourney_mirror_apply','1',true)`;
+    await sql`
+      update tourney.tourney_players
+      set principal_id='40000000-0000-4000-8000-000000000001'
+      where id='player-1'
+    `;
+  });
+
+  const repairFirstBaseline = await readDiscordAssignment();
+  const repairLocked = deferred();
+  const releaseRepair = deferred();
+  let lockedAssignment;
+  const repairFirstCommandId = "fixture:discord-concurrent-repair-first";
+  const repairFirst = runScopedDiscordRepair({
+    commandId: repairFirstCommandId,
+    beforeEnqueue: async (assignment) => {
+      lockedAssignment = assignment;
+      repairLocked.resolve();
+      await releaseRepair.promise;
+    },
+  });
+  await repairLocked.promise;
+  let relinkSettled = false;
+  const relinkAfterRepair = source.begin(async (sql) => {
+    await sql`
+      select set_config('roo.tourney_backend','supabase',true),
+        set_config('roo.tourney_mirror_enabled','1',true),
+        set_config('roo.tourney_generation','1',true),
+        set_config('roo.tourney_command_id','fixture:discord-relink-after-repair',true)
+    `;
+    await sql`
+      update accounts.identity_links set provider_subject='500000000000000004'
+      where principal_id='40000000-0000-4000-8000-000000000001'
+        and provider='discord'
+    `;
+    const [refreshed] = await sql`
+      select public.roo_refresh_discord_role_assignment(
+        '30000000-0000-4000-8000-000000000001',
+        '600000000000000001'
+      ) assignment
+    `;
+    return refreshed.assignment;
+  }).finally(() => { relinkSettled = true; });
+  await delay(150);
+  assert.equal(relinkSettled, false, "Discord relink bypassed the repair identity lock");
+  releaseRepair.resolve();
+  await repairFirst;
+  const relinkedAssignment = await relinkAfterRepair;
+  assert.equal(relinkedAssignment.discord_user_id, "500000000000000004");
+  assert.ok(
+    Number(relinkedAssignment.generation) > Number(lockedAssignment.generation),
+    "post-repair relink did not supersede the locked repair generation"
+  );
+
+  const staleRepairMethods = [];
+  const staleRepairServer = createServer((request, response) => {
+    staleRepairMethods.push(request.method);
+    if (request.method === "GET") {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ roles: [] }));
+      return;
+    }
+    response.writeHead(204);
+    response.end();
+  });
+  await new Promise((resolve, reject) => {
+    staleRepairServer.once("error", reject);
+    staleRepairServer.listen(0, "127.0.0.1", resolve);
+  });
+  const staleRepairAddress = staleRepairServer.address();
+  try {
+    const reconciled = await reconcileTourneyExternalOperations({
+      env: {
+        ...env,
+        DISCORD_API_BASE_URL: `http://127.0.0.1:${staleRepairAddress.port}`,
+        DISCORD_PARTICIPANT_ROLE_ID: "700000000000000001",
+        DISCORD_HOST_ROLE_ID: "700000000000000002",
+      },
+      commandId: repairFirstCommandId,
+      limit: 10,
+    });
+    assert.equal(reconciled.applied, 1, "superseded repair operation was not retired");
+  } finally {
+    await new Promise((resolve) => staleRepairServer.close(resolve));
+  }
+  assert.ok(
+    staleRepairMethods.every((method) => method === "GET"),
+    "superseded repair generation reached a Discord mutation"
+  );
+  await source.begin(async (sql) => {
+    await sql`
+      select set_config('roo.tourney_backend','supabase',true),
+        set_config('roo.tourney_mirror_enabled','1',true),
+        set_config('roo.tourney_generation','1',true),
+        set_config('roo.tourney_command_id','fixture:discord-relink-reset',true)
+    `;
+    await sql`
+      update accounts.identity_links set provider_subject='500000000000000002'
+      where principal_id='40000000-0000-4000-8000-000000000001'
+        and provider='discord'
+    `;
+    await sql`
+      select public.roo_refresh_discord_role_assignment(
+        '30000000-0000-4000-8000-000000000001',
+        '600000000000000001'
+      )
+    `;
+    await sql`select set_config('roo.tourney_mirror_apply','1',true)`;
+    await sql`
+      update accounts.discord_role_assignments set
+        previous_discord_user_id=${repairFirstBaseline.previous_discord_user_id || null},
+        stale_discord_user_ids=${repairFirstBaseline.stale_discord_user_ids}::text[]
+      where principal_id='40000000-0000-4000-8000-000000000001'
+    `;
+  });
+  await source.begin(async (sql) => {
+    await sql`
+      select set_config('roo.tourney_backend','supabase',true),
+        set_config('roo.tourney_mirror_enabled','1',true),
+        set_config('roo.tourney_generation','1',true),
+        set_config('roo.tourney_command_id','fixture:discord-race-cleanup',true)
+    `;
+    await sql`
+      delete from tourney.external_operations
+      where command_id=${repairFirstCommandId}
+    `;
+    await sql`
+      delete from tourney.command_receipts
+      where command_id=${repairFirstCommandId}
+    `;
+  });
+  process.stderr.write("[postgres17] Discord identity transaction fencing verified\n");
   await source.begin(async (sql) => {
     await sql`select set_config('roo.tourney_mirror_apply','1',true)`;
     await sql`
@@ -3545,6 +3815,7 @@ insert into accounts.discord_role_assignments(
       "Idempotency-Key replay after manual failover",
       "versioned mirrored fallback account principal",
       "typed nullable Discord desired-state lookup",
+      "transaction-fenced Discord relink and unlink rejection",
       "monotonic player account import",
       "recoverable pre-provider OAuth scheduling",
       "failed OAuth finalization queue resolution",

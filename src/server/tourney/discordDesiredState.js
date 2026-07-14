@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import {
   getTourneySql,
   getTourneySqlForBackend,
+  isSupabaseTourneyDatabase,
   runTourneyTransaction,
 } from "./sqlClient.js";
 import { getTourneyDiscordRoleConfig } from "./discordConfig.js";
@@ -67,6 +68,7 @@ export const recordTourneyDiscordDesiredState = async ({
   player,
   discordUser,
   guildId,
+  expectedPrincipalId = "",
   freshCredentials = false,
   forceRepair = false,
   env = process.env,
@@ -75,6 +77,7 @@ export const recordTourneyDiscordDesiredState = async ({
   const normalizedAccountUserId = normalize(accountUserId);
   const discordUserId = normalize(discordUser?.id);
   const normalizedGuildId = normalize(guildId);
+  const normalizedExpectedPrincipalId = normalize(expectedPrincipalId).toLowerCase();
   const shouldRearm = freshCredentials === true || forceRepair === true;
   if (env.NODE_ENV === "test" || env.TOURNEY_DATABASE_MODE === "memory") {
     if ((!playerId && !normalizedAccountUserId) || !discordUserId) {
@@ -108,34 +111,57 @@ export const recordTourneyDiscordDesiredState = async ({
     lockKey: `roo-tourney-discord-record:${playerId || normalizedAccountUserId}`,
     waitForLock: true,
     callback: async (sql) => {
-      const accounts = await sql`
-        with input as (
-          select ${playerId || null}::text player_id,
-            ${normalizedAccountUserId || null}::uuid account_user_id
-        )
-        select user_id, principal_id, role, active, lifecycle_status
-        from accounts.tourney_accounts, input
-        where (
-          input.player_id is not null
-          and input.account_user_id is not null
-          and legacy_sanity_id = input.player_id
-          and user_id = input.account_user_id
-        ) or (
-          input.player_id is not null
-          and input.account_user_id is null
-          and legacy_sanity_id = input.player_id
-        ) or (
-          input.player_id is null
-          and input.account_user_id is not null
-          and user_id = input.account_user_id
-        )
-        limit 1 for update
+      const accounts = playerId ? await sql`
+        select account.user_id, account.principal_id, account.role,
+          account.active, account.lifecycle_status,
+          player.principal_id as player_principal_id,
+          identity.provider_subject as discord_user_id
+        from accounts.tourney_accounts account
+        join tourney.tourney_players player
+          on player.id = account.legacy_sanity_id
+        join accounts.principal_auth_users auth_mapping
+          on auth_mapping.user_id = account.user_id
+         and auth_mapping.principal_id = account.principal_id
+        join accounts.identity_links identity
+          on identity.principal_id = account.principal_id
+         and identity.provider = 'discord'
+        where account.legacy_sanity_id = ${playerId}
+          and account.role = 'tourney_player'
+          and account.active = true
+          and account.lifecycle_status = 'approved'
+          and player.status = 'approved'
+          and (${normalizedAccountUserId || null}::uuid is null
+            or account.user_id = ${normalizedAccountUserId || null}::uuid)
+        limit 1
+        for update of account, player, auth_mapping, identity
+      ` : await sql`
+        select account.user_id, account.principal_id, account.role,
+          account.active, account.lifecycle_status,
+          identity.provider_subject as discord_user_id
+        from accounts.tourney_accounts account
+        join accounts.identity_links identity
+          on identity.principal_id = account.principal_id
+         and identity.provider = 'discord'
+        where account.user_id = ${normalizedAccountUserId}::uuid
+        limit 1
+        for update of account, identity
       `;
       const account = accounts[0];
       if (!account?.principal_id || !account?.user_id) {
         const error = new Error("The Tourney identity projection is still completing.");
         error.status = 409;
         error.code = "TOURNEY_IDENTITY_SYNC_PENDING";
+        throw error;
+      }
+      if (
+        (normalizedExpectedPrincipalId &&
+          normalize(account.principal_id).toLowerCase() !== normalizedExpectedPrincipalId) ||
+        (playerId && normalize(account.player_principal_id) !== normalize(account.principal_id)) ||
+        normalize(account.discord_user_id) !== discordUserId
+      ) {
+        const error = new Error("The authoritative Discord identity changed during repair.");
+        error.status = 409;
+        error.code = "TOURNEY_DISCORD_IDENTITY_CHANGED";
         throw error;
       }
       const desiredRole = desiredTourneyDiscordRoleForAccount(account);
@@ -234,15 +260,21 @@ export const listAuthoritativeTourneyDiscordMappings = async ({
   if (normalizedPlayerIds.length > 0 && normalizedPrincipalIds.length > 0) {
     throw new Error("Discord authority lookup accepts one target type.");
   }
-  const sql = await getTourneySqlForBackend({ backend: "supabase", env });
+  const sql = isSupabaseTourneyDatabase(env)
+    ? await getTourneySql(env)
+    : await getTourneySqlForBackend({ backend: "supabase", env });
   const playerFilter = normalizedPlayerIds.length > 0 ? normalizedPlayerIds : [""];
   const principalFilter = normalizedPrincipalIds.length > 0 ? normalizedPrincipalIds : [""];
   return sql`
     select account.legacy_sanity_id as player_id,
       account.principal_id,
       account.active as account_active,
+      player.principal_id as player_principal_id,
+      player.status as player_status,
       identity.provider_subject as discord_user_id
     from accounts.tourney_accounts account
+    left join tourney.tourney_players player
+      on player.id = account.legacy_sanity_id
     left join accounts.identity_links identity
       on identity.principal_id = account.principal_id
      and identity.provider = 'discord'
