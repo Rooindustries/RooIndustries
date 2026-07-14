@@ -131,6 +131,60 @@ describe("deterministic Tourney live-drift repair", () => {
     ]);
   });
 
+  test("accepts one in-memory Supabase target flag for every repair phase", () => {
+    const result = runModule(`
+      const parsed=['--preflight','--apply','--finalize'].map((action)=>{
+        const args=[action,'--env','/tmp/private-env','--supabase-database-url-stdin'];
+        if (action!=='--preflight') args.push('--authorization-hash','a');
+        if (action==='--apply') args.push('--verified-snapshot','/tmp/snapshot.enc');
+        return repair.parseLiveDriftArguments(args).useSupabaseDatabaseUrlStdin;
+      });
+      let duplicate='';
+      try {
+        repair.parseLiveDriftArguments([
+          '--preflight','--env','/tmp/private-env',
+          '--supabase-database-url-stdin','--supabase-database-url-stdin'
+        ]);
+      } catch (error) { duplicate=error.code; }
+      process.stdout.write(JSON.stringify({parsed,duplicate}));
+    `);
+    expect(result).toEqual({
+      parsed: [true, true, true],
+      duplicate: "LIVE_DRIFT_ARGUMENT_DUPLICATE",
+    });
+  });
+
+  test("matches a pooler session current_user without weakening the pinned identity", () => {
+    const result = runModule(`
+      const projectRef='ntezmxzaibrrsgtujgxu';
+      const identity={
+        database:'postgres',
+        hostname:'aws-0-eu-west-1.pooler.supabase.com',
+        username:'roo_cutover.'+projectRef,
+        projectRef
+      };
+      const accepted=await repair.assertConnectedDatabaseIdentity(
+        async()=>[{database:'postgres',username:'roo_cutover'}],
+        identity,
+        'LIVE_DRIFT_SOURCE_CONNECTION_IDENTITY_INVALID'
+      );
+      let rejected='';
+      try {
+        await repair.assertConnectedDatabaseIdentity(
+          async()=>[{database:'postgres',username:'roo_cutover_other'}],
+          identity,
+          'LIVE_DRIFT_SOURCE_CONNECTION_IDENTITY_INVALID'
+        );
+      } catch (error) { rejected=error.code; }
+      process.stdout.write(JSON.stringify({accepted,rejected,identity}));
+    `);
+    expect(result.accepted).toEqual({ database: "postgres", username: "roo_cutover" });
+    expect(result.rejected).toBe("LIVE_DRIFT_SOURCE_CONNECTION_IDENTITY_INVALID");
+    expect(result.identity.username).toBe(
+      "roo_cutover.ntezmxzaibrrsgtujgxu"
+    );
+  });
+
   test("accepts only real regular snapshot files inside the approved root", () => {
     const result = runModule(`
       const fs=(await import('node:fs')).default;

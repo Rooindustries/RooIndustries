@@ -14,6 +14,10 @@ import {
   buildPostgresConnectionEnv,
   buildPostgresSessionArgs,
 } from "./lib/postgres-connection-env.mjs";
+import {
+  expectedConnectedDatabaseUsername,
+  loadSupabaseDatabaseTargetFromStdin,
+} from "./lib/supabase-database-target-stdin.mjs";
 import { createSupabaseAdminClient } from "../src/server/supabase/adminClient.js";
 import migrationTargetSafety from "../src/server/supabase/migrationTargetSafety.cjs";
 import { migrateTourneyShadow } from "../src/server/supabase/tourneyMigration.js";
@@ -121,6 +125,21 @@ const assertStagedActivationEnvironment = () => {
     throw error;
   }
 };
+const assertSnapshotEnvironment = (env = process.env) => {
+  const hardenedActive = isEnabled(env.TOURNEY_HARDENING_V4_ENABLED);
+  const stagedActivation = isEnabled(env.TOURNEY_V4_ACTIVATION_ENABLED) && !hardenedActive;
+  if (
+    normalize(env.TOURNEY_DATABASE_MODE).toLowerCase() !== "supabase" ||
+    !isEnabled(env.TOURNEY_MIRROR_ENABLED) ||
+    !isEnabled(env.TOURNEY_WRITES_PAUSED) ||
+    normalize(env.TOURNEY_FAILOVER_GENERATION) !== "1" ||
+    (!stagedActivation && !hardenedActive)
+  ) {
+    const error = new Error("The Tourney snapshot environment is not safely paused.");
+    error.code = "TOURNEY_SNAPSHOT_ENVIRONMENT_MISMATCH";
+    throw error;
+  }
+};
 const assertHostedExecutionEnvironment = () => {
   const databaseMode = normalize(process.env.TOURNEY_DATABASE_MODE).toLowerCase();
   if (
@@ -224,9 +243,18 @@ const assertSupabaseDatabaseConnectionTarget = async () => {
   const { stdout } = await runPsql(databaseUrl, [
     "-Atq",
     "-c",
-    "select pg_catalog.current_database()",
+    "select pg_catalog.jsonb_build_object('database',pg_catalog.current_database(),'username',current_user)::text",
   ]);
-  if (stdout.trim() !== identity.database) {
+  let connected;
+  try {
+    connected = JSON.parse(stdout.trim());
+  } catch {
+    connected = null;
+  }
+  if (
+    connected?.database !== identity.database ||
+    connected?.username !== expectedConnectedDatabaseUsername(identity)
+  ) {
     const error = new Error("The Supabase PostgreSQL connection identity is invalid.");
     error.code = "TOURNEY_SUPABASE_DATABASE_CONNECTION_IDENTITY_INVALID";
     throw error;
@@ -647,7 +675,7 @@ const captureSnapshot = async () => {
       error.code = "TOURNEY_SANITY_SNAPSHOT_MISSING";
       throw error;
     }
-    assertStagedActivationEnvironment();
+    assertSnapshotEnvironment();
     const hosted = await captureHostedSnapshot({
       legacyPayloadText: legacyCapture.payloadText,
       sanityAccount,
@@ -956,7 +984,7 @@ const checkManualFailoverV4 = async () => {
 
 const actions = [
   { flag: "--print-target-fingerprints", requiresEnvironment: true, touchesLegacy: false, touchesSupabase: false, execute: printTargetFingerprints },
-  { flag: "--snapshot", touchesLegacy: true, touchesSupabase: true, touchesSupabaseDatabase: true, touchesSanity: true, options: ["--output"], execute: captureSnapshot },
+  { flag: "--snapshot", touchesLegacy: true, touchesSupabase: true, touchesSupabaseDatabase: true, touchesSanity: true, options: ["--output", "--supabase-database-url-stdin"], execute: captureSnapshot },
   { flag: "--verify-snapshot", touchesLegacy: false, touchesSupabase: false, execute: verifySnapshot },
   { flag: "--apply-legacy-schema", touchesLegacy: true, touchesSupabase: false, execute: applyLegacySchema },
   { flag: "--expand-legacy-v4", touchesLegacy: true, touchesSupabase: false, execute: () => applyLegacyV4Phase("expand") },
@@ -986,6 +1014,7 @@ const knownFlags = new Set([
   "--expected-legacy-hash",
   "--inventory-hash",
   "--output",
+  "--supabase-database-url-stdin",
 ]);
 
 const parseCliAction = () => {
@@ -1053,6 +1082,9 @@ const main = async () => {
     throw error;
   }
   loadEnvironment();
+  if (hasFlag("--supabase-database-url-stdin")) {
+    await loadSupabaseDatabaseTargetFromStdin();
+  }
   if (contactsHostedTarget) assertHostedExecutionEnvironment();
   if (selected.touchesSanity) assertSanityConnectionTarget();
   if (selected.touchesDiscord) assertDiscordConnectionTarget();
@@ -1075,6 +1107,7 @@ export {
   assertSupabaseConnectionTarget,
   assertSupabaseDatabaseConnectionTarget,
   assertHostedExecutionEnvironment,
+  assertSnapshotEnvironment,
   decryptSnapshot,
   encryptSnapshot,
   loadEnvironment,
