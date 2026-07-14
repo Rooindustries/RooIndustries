@@ -647,6 +647,9 @@ const createPaidBooking = async ({
 };
 
 beforeAll(() => {
+  process.env.SANITY_PROJECT_ID = "test-project";
+  process.env.SANITY_DATASET = "test-dataset";
+  process.env.SANITY_WRITE_TOKEN = "test-write-token";
   process.env.RESEND_API_KEY = "test-key";
   process.env.FROM_EMAIL = "booking@roo.test";
   process.env.OWNER_EMAIL = OWNER_EMAIL;

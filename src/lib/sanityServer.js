@@ -5,29 +5,25 @@ const {
 } = require("./packageContent");
 const { applyPackagesPricing } = require("./packagePricing");
 
-const createContentClient = async () => {
-  const { createDataClient } = await import("../server/data/documentClient.js");
-  return createDataClient({
-    projectId: process.env.SANITY_PROJECT_ID || "9g42k3ur",
-    dataset: process.env.SANITY_DATASET || "production",
-    apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
-    useCdn: true,
-    token:
-      process.env.SANITY_READ_TOKEN ||
-      process.env.SANITY_WRITE_TOKEN ||
-      undefined,
-  });
+const createPublicContentFetcher = async () => {
+  const [{ fetchPublicContent }, { resolveSupabaseRuntimePolicy }] =
+    await Promise.all([
+      import("../server/content/publicContent.js"),
+      import("../server/supabase/runtime.js"),
+    ]);
+  const backend = resolveSupabaseRuntimePolicy().primaryBackend;
+  return (resource) =>
+    fetchPublicContent({
+      resource,
+      backend,
+      searchParams: new URLSearchParams(),
+    });
 };
 
 async function fetchFaqQuestions() {
   try {
-    const sanity = await createContentClient();
-    const rows = await sanity.fetch(
-      `coalesce(
-        *[_type == "faqSection" && _id == "faq"][0].questions,
-        *[_type == "faqSection"] | order(_createdAt asc) .questions[]
-      )`
-    );
+    const fetchContent = await createPublicContentFetcher();
+    const rows = await fetchContent("faq-questions");
 
     if (!Array.isArray(rows)) return [];
 
@@ -38,19 +34,19 @@ async function fetchFaqQuestions() {
       }))
       .filter((item) => item.question && item.answer);
   } catch {
-    console.warn("[sanity] FAQ fetch failed");
+    console.warn("[content] FAQ fetch failed");
     return [];
   }
 }
 
 async function fetchHomePageData() {
-  const sanity = await createContentClient();
-  const safeFetch = async (query, fallback) => {
+  const fetchContent = await createPublicContentFetcher();
+  const safeFetch = async (resource, fallback) => {
     try {
-      const data = await sanity.fetch(query);
+      const data = await fetchContent(resource);
       return data ?? fallback;
     } catch {
-      console.warn("[sanity] home fetch failed");
+      console.warn("[content] home fetch failed");
       return fallback;
     }
   };
@@ -66,124 +62,15 @@ async function fetchHomePageData() {
     faqSettings,
     faqQuestions,
   ] = await Promise.all([
-    safeFetch(
-      `*[_type == "proReviewsCarousel"][0]{
-        _id,
-        title,
-        subtitle,
-        reviews[]{
-          name,
-          profession,
-          game,
-          optimizationResult,
-          text,
-          rating,
-          pfp,
-          isVip
-        }
-      }`,
-      null
-    ),
-    safeFetch(
-      `*[_type == "about"][0]{
-        recordTitle,
-        recordBadgeText,
-        recordSubtitle,
-        recordButtonText,
-        recordNote,
-        recordDetails,
-        recordLink
-      }`,
-      null
-    ),
-    safeFetch(
-      `*[_type == "services"][0]{
-        heading,
-        subheading,
-        cards[]{title, description, iconType, customIcon},
-        benchEnabled,
-        benchMetricLabel,
-        benchBeforeLabel,
-        benchAfterLabel,
-        benchBadgeSuffix,
-        benchPagePrefix,
-        benchPages[]{
-          games[]{gameTitle, gameLogo, beforeFps, afterFps, gpu, cpu, ram, metricLabel}
-        }
-      }`,
-      null
-    ),
-    safeFetch(
-      `*[_type == "package"] | order(coalesce(order, 999) asc, _createdAt asc) {
-        _id,
-        title,
-        price,
-        tag,
-        tagGoldGlow,
-        description,
-        checkedBullets,
-        uncheckedBullets,
-        features,
-        buttonText,
-        detailsButtonText,
-        isHighlighted,
-        order
-      }`,
-      []
-    ),
-    safeFetch(
-      `*[_type == "packagesSettings"][0]{
-        heading,
-        badgeText,
-        subheading,
-        dividerText
-      }`,
-      null
-    ),
-    safeFetch(
-      `*[_type == "howItWorks"][0]{
-        title,
-        subtitle,
-        steps[]{badge, title, text, iconType}
-      }`,
-      null
-    ),
-    safeFetch(
-      `*[_type == "supportedGames"][0]{
-        title,
-        subtitle,
-        showAllLabel,
-        showLessLabel,
-        featuredGames[]{
-          _key,
-          title,
-          coverImage{
-            ...,
-            "dimensions": asset->metadata.dimensions
-          }
-        },
-        moreGames[]{
-          _key,
-          title,
-          coverImage{
-            ...,
-            "dimensions": asset->metadata.dimensions
-          }
-        }
-      }`,
-      null
-    ),
-    safeFetch(
-      `*[_type == "faqSettings"][0]{ eyebrow, title, subtitle }`,
-      null
-    ),
-    safeFetch(
-      `coalesce(
-        *[_type == "faqSection" && _id == "faq"][0].questions,
-        *[_type == "faqSection"] | order(_createdAt asc) .questions[]
-      )`,
-      []
-    ),
+    safeFetch("reviews", null),
+    safeFetch("about", null),
+    safeFetch("services", null),
+    safeFetch("packages-list", []),
+    safeFetch("packages-settings", null),
+    safeFetch("how-it-works", null),
+    safeFetch("supported-games", null),
+    safeFetch("faq-settings", null),
+    safeFetch("faq-questions", []),
   ]);
 
   return applyHomePageCopyOverrides({
@@ -197,7 +84,9 @@ async function fetchHomePageData() {
     howItWorks,
     supportedGames,
     faqSettings,
-    faqQuestions: normalizeFaqQuestions(Array.isArray(faqQuestions) ? faqQuestions : []),
+    faqQuestions: normalizeFaqQuestions(
+      Array.isArray(faqQuestions) ? faqQuestions : []
+    ),
   });
 }
 
