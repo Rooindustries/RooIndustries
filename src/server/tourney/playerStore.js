@@ -670,39 +670,41 @@ export async function updateTourneyRegistrationConfig({
     return getTourneyRegistrationConfig({ env });
   }
 
-  await ensureTourneyPlayerSchema(env);
-  await lockTourneyRegistrationCapacity({ env });
-  const capacityPlayers = await listCapacityPlayers({ env });
-  const nextSnapshot = buildTourneyRoleCapacitySnapshot({
-    config: { teamCount: nextTeamCount },
-    players: capacityPlayers,
+  return runTourneyRegistrationCapacityTransaction({
+    env,
+    callback: async (sql) => {
+      const capacityPlayers = await listCapacityPlayers({ env });
+      const nextSnapshot = buildTourneyRoleCapacitySnapshot({
+        config: { teamCount: nextTeamCount },
+        players: capacityPlayers,
+      });
+      const overCapacity = nextSnapshot.roles.find((role) =>
+        role.mainCount > role.cap || role.reservedCount > role.reservedCap
+      );
+      if (overCapacity) {
+        throw roleCapacityError({ role: overCapacity.role, snapshot: nextSnapshot });
+      }
+      const rows = await sql`
+        insert into tourney_registration_config (
+          id, team_count, updated_at, updated_by
+        )
+        values (
+          ${TOURNEY_CONFIG_ID}, ${nextTeamCount}, ${updatedAt}, ${actor}
+        )
+        on conflict (id) do update set
+          team_count = excluded.team_count,
+          updated_at = excluded.updated_at,
+          updated_by = excluded.updated_by
+        returning *
+      `;
+      const row = rows?.[0] || {};
+      return {
+        teamCount: normalizeTeamCount(row.team_count || nextTeamCount),
+        updatedAt: row.updated_at || updatedAt,
+        updatedBy: row.updated_by || actor,
+      };
+    },
   });
-  const overCapacity = nextSnapshot.roles.find((role) =>
-    role.mainCount > role.cap || role.reservedCount > role.reservedCap
-  );
-  if (overCapacity) {
-    throw roleCapacityError({ role: overCapacity.role, snapshot: nextSnapshot });
-  }
-  const sql = await getSql(env);
-  const rows = await sql`
-    insert into tourney_registration_config (
-      id, team_count, updated_at, updated_by
-    )
-    values (
-      ${TOURNEY_CONFIG_ID}, ${nextTeamCount}, ${updatedAt}, ${actor}
-    )
-    on conflict (id) do update set
-      team_count = excluded.team_count,
-      updated_at = excluded.updated_at,
-      updated_by = excluded.updated_by
-    returning *
-  `;
-  const row = rows?.[0] || {};
-  return {
-    teamCount: normalizeTeamCount(row.team_count || nextTeamCount),
-    updatedAt: row.updated_at || updatedAt,
-    updatedBy: row.updated_by || actor,
-  };
 }
 
 const listCapacityPlayers = async ({ env = process.env } = {}) => {
@@ -799,15 +801,31 @@ export async function getTourneyRoleCapacitySnapshot({
 const getRoleCapacity = (snapshot, rolePlay) =>
   snapshot.roles.find((role) => role.role === rolePlay) || null;
 
-const lockTourneyRegistrationCapacity = async ({ env = process.env } = {}) => {
-  if (isMemoryMode(env)) return;
-  const sql = await getSql(env);
+const TOURNEY_REGISTRATION_CAPACITY_LOCK_KEY =
+  "roo-tourney-registration-decisions";
+
+const lockTourneyRegistrationCapacity = async ({ sql }) => {
   await sql`
     select pg_catalog.pg_advisory_xact_lock(
-      pg_catalog.hashtextextended('roo-tourney-registration-decisions', 0)
+      pg_catalog.hashtextextended(${TOURNEY_REGISTRATION_CAPACITY_LOCK_KEY}, 0)
     )
   `;
 };
+
+const runTourneyRegistrationCapacityTransaction = ({
+  env = process.env,
+  callback,
+} = {}) => runTourneyTransaction({
+  env,
+  lockKey: TOURNEY_REGISTRATION_CAPACITY_LOCK_KEY,
+  waitForLock: true,
+  callback: async (sql) => {
+    // runTourneyTransaction reuses an enclosing command transaction. Acquire
+    // the capacity lock here as well so the nested path is serialized too.
+    await lockTourneyRegistrationCapacity({ sql });
+    return callback(sql);
+  },
+});
 
 const roleCapacityError = ({ role, snapshot }) => Object.assign(
   new Error(`${role || "The selected role"} has no open main-player slots.`),
@@ -1034,24 +1052,12 @@ export async function createApprovedTourneyPlayer({
   }
 
   const value = validation.value;
-  await lockTourneyRegistrationCapacity({ env });
-  await assertNoDuplicatePlayer({ value, env });
-
-  let registrationPool = value.registrationPool;
-  if (normalizeRegistrationPool(registrationPool) === "main") {
-    const capacitySnapshot = await getTourneyRoleCapacitySnapshot({ env });
-    const roleCapacity = getRoleCapacity(capacitySnapshot, value.rolePlay);
-    if (isRoleCapacityFullForRegistration({ roleCapacity, value })) {
-      registrationPool = "substitute";
-    }
-  }
-
   const id = crypto.randomUUID();
   const passwordHash = preparedPasswordHash || await createTourneyPasswordHash({
     password: value.password,
   });
   const createdAt = nowIso();
-  const playerRow = {
+  const buildPlayerRow = (registrationPool) => ({
     id,
     username: value.username,
     email: value.email,
@@ -1078,48 +1084,58 @@ export async function createApprovedTourneyPlayer({
     updated_at: createdAt,
     approved_at: createdAt,
     approved_by: normalizeTourneyUsername(actorUsername),
+  });
+
+  const resolveRegistrationPool = async () => {
+    let registrationPool = value.registrationPool;
+    if (normalizeRegistrationPool(registrationPool) === "main") {
+      const capacitySnapshot = await getTourneyRoleCapacitySnapshot({ env });
+      const roleCapacity = getRoleCapacity(capacitySnapshot, value.rolePlay);
+      if (isRoleCapacityFullForRegistration({ roleCapacity, value })) {
+        registrationPool = "substitute";
+      }
+    }
+    return registrationPool;
   };
 
   if (isMemoryMode(env)) {
+    await assertNoDuplicatePlayer({ value, env });
+    const playerRow = buildPlayerRow(await resolveRegistrationPool());
     MEMORY_STORE.players.push(playerRow);
     return managePlayer(playerRow);
   }
 
-  await ensureTourneyPlayerSchema(env);
-  const sql = await getSql(env);
-  await sql`
-    insert into tourney_players (
-      id, username, email, password_hash, status, discord, display_name,
-      discord_key, battlenet, rank_name, role_play, secondary_role_play,
-      approved_role_play, registration_pool,
-      time_zone, twitch_username, team_name, available_aug_1_2,
-      accepted_rules, accepted_roo_visibility, notes,
-      version, created_at, updated_at, approved_at, approved_by
-    )
-    values (
-      ${playerRow.id}, ${playerRow.username}, ${playerRow.email},
-      ${playerRow.password_hash}, ${playerRow.status}, ${playerRow.discord},
-      ${playerRow.display_name}, ${playerRow.discord_key}, ${playerRow.battlenet}, ${playerRow.rank_name},
-      ${playerRow.role_play}, ${playerRow.secondary_role_play}, ${playerRow.approved_role_play},
-      ${playerRow.registration_pool}, ${playerRow.time_zone}, ${playerRow.twitch_username},
-      ${playerRow.team_name}, ${playerRow.available_aug_1_2},
-      ${playerRow.accepted_rules}, ${playerRow.accepted_roo_visibility},
-      ${playerRow.notes}, ${playerRow.version},
-      ${playerRow.created_at}, ${playerRow.updated_at}, ${playerRow.approved_at},
-      ${playerRow.approved_by}
-    )
-  `;
-  try {
-    await syncTourneyPlayerAuth({ playerRow, env });
-  } catch (error) {
-    if (isSupabaseTourneyDatabase(env)) {
-      await sql`delete from tourney_players where id = ${playerRow.id}`.catch(
-        () => {}
-      );
-    }
-    throw error;
-  }
-  return managePlayer(playerRow);
+  return runTourneyRegistrationCapacityTransaction({
+    env,
+    callback: async (sql) => {
+      await assertNoDuplicatePlayer({ value, env });
+      const playerRow = buildPlayerRow(await resolveRegistrationPool());
+      await sql`
+        insert into tourney_players (
+          id, username, email, password_hash, status, discord, display_name,
+          discord_key, battlenet, rank_name, role_play, secondary_role_play,
+          approved_role_play, registration_pool,
+          time_zone, twitch_username, team_name, available_aug_1_2,
+          accepted_rules, accepted_roo_visibility, notes,
+          version, created_at, updated_at, approved_at, approved_by
+        )
+        values (
+          ${playerRow.id}, ${playerRow.username}, ${playerRow.email},
+          ${playerRow.password_hash}, ${playerRow.status}, ${playerRow.discord},
+          ${playerRow.display_name}, ${playerRow.discord_key}, ${playerRow.battlenet}, ${playerRow.rank_name},
+          ${playerRow.role_play}, ${playerRow.secondary_role_play}, ${playerRow.approved_role_play},
+          ${playerRow.registration_pool}, ${playerRow.time_zone}, ${playerRow.twitch_username},
+          ${playerRow.team_name}, ${playerRow.available_aug_1_2},
+          ${playerRow.accepted_rules}, ${playerRow.accepted_roo_visibility},
+          ${playerRow.notes}, ${playerRow.version},
+          ${playerRow.created_at}, ${playerRow.updated_at}, ${playerRow.approved_at},
+          ${playerRow.approved_by}
+        )
+      `;
+      await syncTourneyPlayerAuth({ playerRow, env });
+      return managePlayer(playerRow);
+    },
+  });
 }
 
 export async function listApprovedTourneyPlayers({ env = process.env } = {}) {
@@ -1331,7 +1347,6 @@ export async function updateTourneyPlayerDetails({
   const value = validation.value;
   const actor = normalizeTourneyUsername(actorUsername);
   const now = nowIso();
-  await lockTourneyRegistrationCapacity({ env });
 
   if (isMemoryMode(env)) {
     const player = MEMORY_STORE.players.find((entry) => entry.id === playerId);
@@ -1360,43 +1375,51 @@ export async function updateTourneyPlayerDetails({
     return managePlayer(player);
   }
 
-  await ensureTourneyPlayerSchema(env);
-  const sql = await getSql(env);
-  const currentRows = await sql`
-    select * from tourney_players where id = ${playerId} for update
-  `;
-  const current = currentRows[0];
-  if (!current) {
-    throw Object.assign(new Error("Player not found."), { status: 404 });
-  }
-  if (
-    current.status === "approved" &&
-    normalizeRegistrationPool(current.registration_pool) !== "main" &&
-    value.registrationPool === "main"
-  ) {
-    const snapshot = await getTourneyRoleCapacitySnapshot({ env });
-    const role = getEffectiveRolePlay(current);
-    const roleCapacity = getRoleCapacity(snapshot, role);
-    if (isRoleCapacityFullForRegistration({ roleCapacity, value: mapPlayer(current) })) {
-      throw roleCapacityError({ role, snapshot });
-    }
-  }
-  const rows = await sql`
-    update tourney_players
-    set display_name = ${value.displayName},
-        twitch_username = ${value.twitchUsername},
-        team_name = ${value.teamName},
-        registration_pool = ${value.registrationPool},
-        updated_at = ${now},
-        version = version + 1
-    where id = ${playerId}
-    returning *
-  `;
-  if (!rows?.[0]) {
-    throw Object.assign(new Error("Player not found."), { status: 404 });
-  }
-  await syncTourneyPlayerAuth({ playerRow: rows[0], env });
-  return managePlayer(rows[0]);
+  return runTourneyRegistrationCapacityTransaction({
+    env,
+    callback: async (sql) => {
+      const currentRows = await sql`
+        select * from tourney_players where id = ${playerId} for update
+      `;
+      const current = currentRows[0];
+      if (!current) {
+        throw Object.assign(new Error("Player not found."), { status: 404 });
+      }
+      if (
+        current.status === "approved" &&
+        normalizeRegistrationPool(current.registration_pool) !== "main" &&
+        value.registrationPool === "main"
+      ) {
+        const snapshot = await getTourneyRoleCapacitySnapshot({ env });
+        const role = getEffectiveRolePlay(current);
+        const roleCapacity = getRoleCapacity(snapshot, role);
+        if (
+          isRoleCapacityFullForRegistration({
+            roleCapacity,
+            value: mapPlayer(current),
+          })
+        ) {
+          throw roleCapacityError({ role, snapshot });
+        }
+      }
+      const rows = await sql`
+        update tourney_players
+        set display_name = ${value.displayName},
+            twitch_username = ${value.twitchUsername},
+            team_name = ${value.teamName},
+            registration_pool = ${value.registrationPool},
+            updated_at = ${now},
+            version = version + 1
+        where id = ${playerId}
+        returning *
+      `;
+      if (!rows?.[0]) {
+        throw Object.assign(new Error("Player not found."), { status: 404 });
+      }
+      await syncTourneyPlayerAuth({ playerRow: rows[0], env });
+      return managePlayer(rows[0]);
+    },
+  });
 }
 
 export async function updateTourneyPlayerApprovedRole({
@@ -1412,7 +1435,6 @@ export async function updateTourneyPlayerApprovedRole({
 
   const actor = normalizeTourneyUsername(actorUsername);
   const now = nowIso();
-  await lockTourneyRegistrationCapacity({ env });
 
   if (isMemoryMode(env)) {
     const player = MEMORY_STORE.players.find((entry) => entry.id === playerId);
@@ -1448,54 +1470,59 @@ export async function updateTourneyPlayerApprovedRole({
     return managePlayer(player);
   }
 
-  await ensureTourneyPlayerSchema(env);
-  const sql = await getSql(env);
-  const currentRows = await sql`
-    select * from tourney_players
-    where id = ${playerId} and status = 'approved'
-    for update
-  `;
-  const current = currentRows[0];
-  if (!current) {
-    throw Object.assign(new Error("Only approved players can have roles changed."), {
-      status: 400,
-    });
-  }
-  if (
-    normalizeRegistrationPool(current.registration_pool) === "main" &&
-    getEffectiveRolePlay(current) !== selectedRole
-  ) {
-    const snapshot = await getTourneyRoleCapacitySnapshot({ env });
-    const roleCapacity = getRoleCapacity(snapshot, selectedRole);
-    const projected = mapPlayer({
-      ...current,
-      approved_role_play: selectedRole,
-    });
-    if (isRoleCapacityFullForRegistration({ roleCapacity, value: projected })) {
-      throw roleCapacityError({ role: selectedRole, snapshot });
-    }
-  }
-  const rows = await sql`
-    update tourney_players
-    set approved_role_play = ${selectedRole},
-        role_play = case
-          when role_play = ${selectedRole} or secondary_role_play = ${selectedRole}
-            then role_play
-          else ${selectedRole}
-        end,
-        updated_at = ${now},
-        version = version + 1
-    where id = ${playerId}
-      and status = 'approved'
-    returning *
-  `;
-  if (!rows?.[0]) {
-    throw Object.assign(new Error("Only approved players can have roles changed."), {
-      status: 400,
-    });
-  }
-  await syncTourneyPlayerAuth({ playerRow: rows[0], env });
-  return managePlayer(rows[0]);
+  return runTourneyRegistrationCapacityTransaction({
+    env,
+    callback: async (sql) => {
+      const currentRows = await sql`
+        select * from tourney_players
+        where id = ${playerId} and status = 'approved'
+        for update
+      `;
+      const current = currentRows[0];
+      if (!current) {
+        throw Object.assign(
+          new Error("Only approved players can have roles changed."),
+          { status: 400 }
+        );
+      }
+      if (
+        normalizeRegistrationPool(current.registration_pool) === "main" &&
+        getEffectiveRolePlay(current) !== selectedRole
+      ) {
+        const snapshot = await getTourneyRoleCapacitySnapshot({ env });
+        const roleCapacity = getRoleCapacity(snapshot, selectedRole);
+        const projected = mapPlayer({
+          ...current,
+          approved_role_play: selectedRole,
+        });
+        if (isRoleCapacityFullForRegistration({ roleCapacity, value: projected })) {
+          throw roleCapacityError({ role: selectedRole, snapshot });
+        }
+      }
+      const rows = await sql`
+        update tourney_players
+        set approved_role_play = ${selectedRole},
+            role_play = case
+              when role_play = ${selectedRole} or secondary_role_play = ${selectedRole}
+                then role_play
+              else ${selectedRole}
+            end,
+            updated_at = ${now},
+            version = version + 1
+        where id = ${playerId}
+          and status = 'approved'
+        returning *
+      `;
+      if (!rows?.[0]) {
+        throw Object.assign(
+          new Error("Only approved players can have roles changed."),
+          { status: 400 }
+        );
+      }
+      await syncTourneyPlayerAuth({ playerRow: rows[0], env });
+      return managePlayer(rows[0]);
+    },
+  });
 }
 
 export async function getRegistrationDecisionToken({
@@ -1665,110 +1692,107 @@ export async function applyRegistrationDecision({
     return { ...managePlayer(finalized), decisionTransitioned: true };
   }
 
-  await ensureTourneyPlayerSchema(env);
-  const sql = await getSql(env);
-  await sql`
-    select pg_catalog.pg_advisory_xact_lock(
-      pg_catalog.hashtextextended('roo-tourney-registration-decisions', 0)
-    )
-  `;
-  const pendingRows = await sql`
-    select id, username, email, password_hash, status, discord, display_name,
-      discord_key, battlenet, rank_name, role_play, secondary_role_play,
-      approved_role_play, registration_pool, time_zone, twitch_username,
-      team_name, available_aug_1_2, accepted_rules,
-      accepted_roo_visibility, notes, version, created_at, updated_at,
-      approved_at, approved_by, denied_at, denied_by, removed_at, removed_by,
-      withdrawn_at, withdrawn_by, discord_invite_sent_at,
-      discord_invite_email_id, discord_invite_last_error, discord_user_id,
-      discord_oauth_username, discord_oauth_global_name, discord_linked_at,
-      discord_role_assigned_at, discord_role_last_error
-    from tourney_players
-    where id = ${playerId}
-      and status = 'pending'
-    limit 1
-    for update
-  `;
-  const pendingPlayer = pendingRows?.[0];
-  if (!pendingPlayer) {
-    throw Object.assign(new Error("Registration is no longer pending."), {
-      status: 409,
-    });
-  }
+  return runTourneyRegistrationCapacityTransaction({
+    env,
+    callback: async (sql) => {
+      const pendingRows = await sql`
+        select id, username, email, password_hash, status, discord, display_name,
+          discord_key, battlenet, rank_name, role_play, secondary_role_play,
+          approved_role_play, registration_pool, time_zone, twitch_username,
+          team_name, available_aug_1_2, accepted_rules,
+          accepted_roo_visibility, notes, version, created_at, updated_at,
+          approved_at, approved_by, denied_at, denied_by, removed_at, removed_by,
+          withdrawn_at, withdrawn_by, discord_invite_sent_at,
+          discord_invite_email_id, discord_invite_last_error, discord_user_id,
+          discord_oauth_username, discord_oauth_global_name, discord_linked_at,
+          discord_role_assigned_at, discord_role_last_error
+        from tourney_players
+        where id = ${playerId}
+          and status = 'pending'
+        limit 1
+        for update
+      `;
+      const pendingPlayer = pendingRows?.[0];
+      if (!pendingPlayer) {
+        throw Object.assign(new Error("Registration is no longer pending."), {
+          status: 409,
+        });
+      }
 
-  const selectedApprovedRole =
-    status === "approved"
-      ? resolveApprovedRolePlay(pendingPlayer, approvedRolePlay)
-      : "";
-  let nextRegistrationPool = pendingPlayer.registration_pool || "main";
-  if (
-    status === "approved" &&
-    normalizeRegistrationPool(nextRegistrationPool) === "main"
-  ) {
-    const capacitySnapshot = await getTourneyRoleCapacitySnapshot({ env });
-    const roleCapacity = getRoleCapacity(capacitySnapshot, selectedApprovedRole);
-    const isFull = isRoleCapacityFullForRegistration({
-      roleCapacity,
-      value: mapPlayer({
-        ...pendingPlayer,
-        approved_role_play: selectedApprovedRole,
-      }),
-    });
-    if (isFull) {
-      nextRegistrationPool = "substitute";
-    }
-  }
+      const selectedApprovedRole =
+        status === "approved"
+          ? resolveApprovedRolePlay(pendingPlayer, approvedRolePlay)
+          : "";
+      let nextRegistrationPool = pendingPlayer.registration_pool || "main";
+      if (
+        status === "approved" &&
+        normalizeRegistrationPool(nextRegistrationPool) === "main"
+      ) {
+        const capacitySnapshot = await getTourneyRoleCapacitySnapshot({ env });
+        const roleCapacity = getRoleCapacity(capacitySnapshot, selectedApprovedRole);
+        const isFull = isRoleCapacityFullForRegistration({
+          roleCapacity,
+          value: mapPlayer({
+            ...pendingPlayer,
+            approved_role_play: selectedApprovedRole,
+          }),
+        });
+        if (isFull) {
+          nextRegistrationPool = "substitute";
+        }
+      }
 
-  const rows =
-    status === "approved"
-      ? await sql`
-          update tourney_players
-          set status = 'approved',
-              approved_role_play = ${selectedApprovedRole},
-              registration_pool = ${nextRegistrationPool},
-              approved_at = ${now},
-              approved_by = ${actor},
-              updated_at = ${now},
-              version = version + 1
-          where id = ${playerId}
-            and status = 'pending'
-          returning *
-        `
-      : await sql`
-          update tourney_players
-          set status = 'denied',
-              denied_at = ${now},
-              denied_by = ${actor},
-              updated_at = ${now},
-              version = version + 1
-          where id = ${playerId}
-            and status = 'pending'
-          returning *
-        `;
-  const player = rows?.[0];
-  if (!player) {
-    throw Object.assign(new Error("Registration is no longer pending."), {
-      status: 409,
-    });
-  }
+      const rows =
+        status === "approved"
+          ? await sql`
+              update tourney_players
+              set status = 'approved',
+                  approved_role_play = ${selectedApprovedRole},
+                  registration_pool = ${nextRegistrationPool},
+                  approved_at = ${now},
+                  approved_by = ${actor},
+                  updated_at = ${now},
+                  version = version + 1
+              where id = ${playerId}
+                and status = 'pending'
+              returning *
+            `
+          : await sql`
+              update tourney_players
+              set status = 'denied',
+                  denied_at = ${now},
+                  denied_by = ${actor},
+                  updated_at = ${now},
+                  version = version + 1
+              where id = ${playerId}
+                and status = 'pending'
+              returning *
+            `;
+      const player = rows?.[0];
+      if (!player) {
+        throw Object.assign(new Error("Registration is no longer pending."), {
+          status: 409,
+        });
+      }
 
-  await syncTourneyPlayerAuth({ playerRow: player, env });
+      await syncTourneyPlayerAuth({ playerRow: player, env });
+      await sql`
+        update tourney_player_tokens
+        set used_at = ${now}, used_by = ${actor}
+        where player_id = ${playerId}
+          and purpose in ('approve', 'deny')
+          and used_at is null
+      `;
+      await sql`
+        update tourney_player_tokens
+        set used_at = ${now}, used_by = ${actor}
+        where token_hash = ${tokenHash}
+          and used_at is null
+      `;
 
-  await sql`
-    update tourney_player_tokens
-    set used_at = ${now}, used_by = ${actor}
-    where player_id = ${playerId}
-      and purpose in ('approve', 'deny')
-      and used_at is null
-  `;
-  await sql`
-    update tourney_player_tokens
-    set used_at = ${now}, used_by = ${actor}
-    where token_hash = ${tokenHash}
-      and used_at is null
-  `;
-
-  return managePlayer(player);
+      return managePlayer(player);
+    },
+  });
 }
 
 export async function kickTourneyPlayer({
@@ -1778,7 +1802,6 @@ export async function kickTourneyPlayer({
 } = {}) {
   const actor = normalizeTourneyUsername(actorUsername);
   const now = nowIso();
-  await lockTourneyRegistrationCapacity({ env });
 
   if (isMemoryMode(env)) {
     const player = MEMORY_STORE.players.find((entry) => entry.id === playerId);
@@ -1795,26 +1818,29 @@ export async function kickTourneyPlayer({
     return managePlayer(player);
   }
 
-  await ensureTourneyPlayerSchema(env);
-  const sql = await getSql(env);
-  const rows = await sql`
-    update tourney_players
-    set status = 'removed',
-        removed_at = ${now},
-        removed_by = ${actor},
-        updated_at = ${now},
-        version = version + 1
-    where id = ${playerId}
-      and status = 'approved'
-    returning *
-  `;
-  if (!rows?.[0]) {
-    throw Object.assign(new Error("Only approved players can be kicked."), {
-      status: 400,
-    });
-  }
-  await syncTourneyPlayerAuth({ playerRow: rows[0], env });
-  return managePlayer(rows[0]);
+  return runTourneyRegistrationCapacityTransaction({
+    env,
+    callback: async (sql) => {
+      const rows = await sql`
+        update tourney_players
+        set status = 'removed',
+            removed_at = ${now},
+            removed_by = ${actor},
+            updated_at = ${now},
+            version = version + 1
+        where id = ${playerId}
+          and status = 'approved'
+        returning *
+      `;
+      if (!rows?.[0]) {
+        throw Object.assign(new Error("Only approved players can be kicked."), {
+          status: 400,
+        });
+      }
+      await syncTourneyPlayerAuth({ playerRow: rows[0], env });
+      return managePlayer(rows[0]);
+    },
+  });
 }
 
 export async function withdrawTourneyPlayer({
@@ -1824,7 +1850,6 @@ export async function withdrawTourneyPlayer({
 } = {}) {
   const actor = normalizeTourneyUsername(actorUsername);
   const now = nowIso();
-  await lockTourneyRegistrationCapacity({ env });
 
   if (isMemoryMode(env)) {
     const player = MEMORY_STORE.players.find((entry) => entry.id === playerId);
@@ -1841,26 +1866,29 @@ export async function withdrawTourneyPlayer({
     return managePlayer(player);
   }
 
-  await ensureTourneyPlayerSchema(env);
-  const sql = await getSql(env);
-  const rows = await sql`
-    update tourney_players
-    set status = 'withdrawn',
-        withdrawn_at = ${now},
-        withdrawn_by = ${actor},
-        updated_at = ${now},
-        version = version + 1
-    where id = ${playerId}
-      and status = 'approved'
-    returning *
-  `;
-  if (!rows?.[0]) {
-    throw Object.assign(new Error("Only approved players can opt out."), {
-      status: 400,
-    });
-  }
-  await syncTourneyPlayerAuth({ playerRow: rows[0], env });
-  return managePlayer(rows[0]);
+  return runTourneyRegistrationCapacityTransaction({
+    env,
+    callback: async (sql) => {
+      const rows = await sql`
+        update tourney_players
+        set status = 'withdrawn',
+            withdrawn_at = ${now},
+            withdrawn_by = ${actor},
+            updated_at = ${now},
+            version = version + 1
+        where id = ${playerId}
+          and status = 'approved'
+        returning *
+      `;
+      if (!rows?.[0]) {
+        throw Object.assign(new Error("Only approved players can opt out."), {
+          status: 400,
+        });
+      }
+      await syncTourneyPlayerAuth({ playerRow: rows[0], env });
+      return managePlayer(rows[0]);
+    },
+  });
 }
 
 export async function verifyTourneyPlayerCredentials({
@@ -1916,7 +1944,7 @@ export async function verifyTourneyPlayerCredentials({
       version: player.version,
       principalId: player.principalId,
       playerId: player.id,
-      authBackend: "supabase",
+      authBackend: isSupabaseTourneyDatabase(env) ? "supabase" : "legacy",
     },
   };
 }

@@ -417,7 +417,22 @@ describe("tourney player store", () => {
       })
     ).resolves.toMatchObject({
       ok: true,
-      account: { username: approved.username, role: "player" },
+      account: {
+        username: approved.username,
+        role: "player",
+        authBackend: "legacy",
+      },
+    });
+
+    await expect(
+      store.verifyTourneyPlayerCredentials({
+        login: "playerone@example.com",
+        password: "player-password",
+        env: { ...env, TOURNEY_DATABASE_MODE: "supabase" },
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      account: { authBackend: "supabase" },
     });
 
     const auth = loadAuth();
