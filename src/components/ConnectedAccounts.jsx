@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import SupabaseSocialLogin from "./SupabaseSocialLogin";
 
 const allProviders = ["google", "discord"];
@@ -8,39 +8,84 @@ const allProviders = ["google", "discord"];
 export default function ConnectedAccounts({
   flow,
   nextPath,
+  providerIds = allProviders,
   variant = "referral",
 }) {
   const [state, setState] = useState({ loading: true });
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [syncingProvider, setSyncingProvider] = useState("");
+  const unlinkPollTimer = useRef(null);
+  const mounted = useRef(false);
 
-  const load = useCallback(() => {
-    let active = true;
-    fetch(`/api/auth/identities?flow=${encodeURIComponent(flow)}`, {
-      cache: "no-store",
-    })
-      .then(async (response) => ({
-        ok: response.ok,
-        data: await response.json().catch(() => ({})),
-      }))
-      .then(({ ok, data }) => {
-        if (!active) return;
-        setState(ok && data.ok ? { ...data, loading: false } : { loading: false });
-      })
-      .catch(() => active && setState({ loading: false }));
-    return () => {
-      active = false;
-    };
+  const load = useCallback(async () => {
+    setState((current) => ({ ...current, loading: true, error: "" }));
+    try {
+      const response = await fetch(
+        `/api/auth/identities?flow=${encodeURIComponent(flow)}`,
+        { cache: "no-store" }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!mounted.current) return;
+      setState(
+        response.ok && data.ok
+          ? { ...data, loading: false, error: "" }
+          : {
+              loading: false,
+              error: data.error || "Account connections are temporarily unavailable.",
+            }
+      );
+    } catch {
+      if (mounted.current) {
+        setState({
+          loading: false,
+          error: "Account connections are temporarily unavailable.",
+        });
+      }
+    }
   }, [flow]);
 
-  useEffect(() => load(), [load]);
+  useEffect(() => {
+    mounted.current = true;
+    load();
+    return () => {
+      mounted.current = false;
+      if (unlinkPollTimer.current) clearTimeout(unlinkPollTimer.current);
+    };
+  }, [load]);
 
-  if (state.loading || !state.domainAccount) return null;
-  const linked = new Set(state.providers || []);
-  const missing = allProviders.filter((provider) => !linked.has(provider));
+  const managedProviders = allProviders.filter((provider) => providerIds.includes(provider));
   const isTourney = variant === "tourney";
-  const connectedSocial = allProviders.filter((provider) => linked.has(provider));
+  if (state.loading) return null;
+  if (state.error) {
+    return (
+      <section
+        aria-labelledby={`${flow}-connections-title`}
+        className={
+          isTourney
+            ? "tourney-connected-accounts"
+            : "mt-6 w-full rounded-xl border border-line-input bg-surface-card p-5 shadow-glow-soft"
+        }
+      >
+        <h2 id={`${flow}-connections-title`}>Connected accounts</h2>
+        <p className={isTourney ? "tourney-form-message" : "mt-3 text-xs text-danger-text"} role="alert">
+          {state.error}
+        </p>
+        <button
+          className={isTourney ? "tourney-owner-button" : "mt-3 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white"}
+          onClick={load}
+          type="button"
+        >
+          Retry
+        </button>
+      </section>
+    );
+  }
+  if (!state.domainAccount) return null;
+  const linked = new Set(state.providers || []);
+  const missing = managedProviders.filter((provider) => !linked.has(provider));
+  const connectedSocial = managedProviders.filter((provider) => linked.has(provider));
   const canUnlink = (state.unlinkableProviders || []).length > 1;
   const unlinkable = new Set(state.unlinkableProviders || []);
 
@@ -72,6 +117,9 @@ export default function ConnectedAccounts({
     setBusy(true);
     setMessage("");
     try {
+      if (linked.has("email") && !password) {
+        throw new Error("Enter your current password, then select Unlink.");
+      }
       if (password) {
         const reauthResponse = await fetch("/api/auth/reauth", {
           method: "POST",
@@ -91,16 +139,55 @@ export default function ConnectedAccounts({
       const response = await fetch("/api/auth/identities", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider }),
+        body: JSON.stringify({ flow, provider }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.ok) throw new Error(data.error || "Unable to unlink this account.");
-      setState((current) => ({
-        ...current,
-        providers: (current.providers || []).filter((value) => value !== provider),
-      }));
       setPassword("");
-      setMessage(`${provider[0].toUpperCase() + provider.slice(1)} was unlinked.`);
+      if (data.syncPending) {
+        setSyncingProvider(provider);
+        setMessage(`${provider[0].toUpperCase() + provider.slice(1)} unlinking is completing.`);
+        const resume = async (attempt = 0) => {
+          if (!mounted.current) return;
+          try {
+            const retry = await fetch(
+              `/api/auth/identities?flow=${encodeURIComponent(flow)}`,
+              {
+                cache: "no-store",
+              }
+            );
+            const retryData = await retry.json().catch(() => ({}));
+            if (!mounted.current) return;
+            const retryProviders = new Set(retryData.unlinkableProviders || []);
+            if (retry.ok && retryData.ok && !retryProviders.has(provider)) {
+              setState({ ...retryData, loading: false });
+              setSyncingProvider("");
+              setMessage(`${provider[0].toUpperCase() + provider.slice(1)} was unlinked.`);
+              return;
+            }
+          } catch {
+            // The durable worker remains authoritative; the next read retries safely.
+          }
+          if (!mounted.current) return;
+          if (attempt < 71) {
+            unlinkPollTimer.current = setTimeout(() => resume(attempt + 1), 5_000);
+          } else {
+            setSyncingProvider("");
+            setMessage(
+              `${provider[0].toUpperCase() + provider.slice(1)} is still linked. Confirm your identity again to retry.`
+            );
+          }
+        };
+        unlinkPollTimer.current = setTimeout(() => resume(), 5_000);
+      } else {
+        setState((current) => ({
+          ...current,
+          providers: (current.providers || []).filter((value) => value !== provider),
+          unlinkableProviders: (current.unlinkableProviders || [])
+            .filter((value) => value !== provider),
+        }));
+        setMessage(`${provider[0].toUpperCase() + provider.slice(1)} was unlinked.`);
+      }
     } catch (error) {
       setMessage(error.message || "Unable to unlink this account.");
     } finally {
@@ -129,7 +216,7 @@ export default function ConnectedAccounts({
         </p>
       </div>
       <div className={isTourney ? "tourney-connected-status" : "mt-3 flex flex-wrap gap-2"}>
-        {allProviders.map((provider) => (
+        {managedProviders.map((provider) => (
           <span
             className={
               isTourney
@@ -146,7 +233,8 @@ export default function ConnectedAccounts({
             {linked.has(provider) && canUnlink && unlinkable.has(provider) ? (
               <button
                 className={isTourney ? "tourney-owner-link" : "ml-2 underline underline-offset-2"}
-                disabled={busy}
+                aria-label={`Unlink ${provider}`}
+                disabled={busy || Boolean(syncingProvider)}
                 onClick={() => unlink(provider)}
                 type="button"
               >
@@ -161,14 +249,14 @@ export default function ConnectedAccounts({
           <input
             aria-label="Current password"
             autoComplete="current-password"
-            className={isTourney ? undefined : "min-h-[44px] flex-1 rounded-xl border border-line-input bg-surface-input px-3 text-sm text-ink"}
+            className={isTourney ? "tourney-connected-input" : "min-h-[44px] flex-1 rounded-xl border border-line-input bg-surface-input px-3 text-sm text-ink"}
             onChange={(event) => setPassword(event.target.value)}
             placeholder="Current password"
             type="password"
             value={password}
           />
           <button
-            className={isTourney ? "tourney-owner-button" : "rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white"}
+            className={isTourney ? "tourney-owner-button tourney-connected-confirm" : "rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white"}
             disabled={busy || !password}
             onClick={confirmPassword}
             type="button"

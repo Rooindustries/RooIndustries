@@ -14,7 +14,11 @@ import {
   clearNextSupabaseSession,
   installNextSupabaseSession,
 } from "../../../../src/server/supabase/serverSession";
-import { readBoundedJson } from "../../../../src/server/request/boundedJson";
+import {
+  readBoundedFormData,
+  readBoundedJson,
+} from "../../../../src/server/request/boundedJson";
+import { logSafeError } from "../../../../src/server/safeErrorLog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,6 +27,8 @@ const INVALID_LOGIN_MESSAGE =
   "Invalid Discord username, email, or password. Wait for approval before trying to log in.";
 const SUSPENDED_LOGIN_MESSAGE =
   "You have been suspended from the tourney. Please contact serviroo through Discord or at serviroo@rooindustries.com for further queries.";
+const UNAVAILABLE_LOGIN_MESSAGE =
+  "Tournament sign-in is temporarily unavailable. Please try again shortly.";
 
 const wantsJson = (request) =>
   String(request.headers.get("accept") || "").includes("application/json");
@@ -69,12 +75,10 @@ const readLoginPayload = async (request) => {
     return readBoundedJson(request, { maxBytes: 8 * 1024 });
   }
 
-  const declaredLength = Number(request.headers.get("content-length") || 0);
-  if (Number.isFinite(declaredLength) && declaredLength > 8 * 1024) {
-    throw Object.assign(new Error("Request body is too large."), { status: 413 });
-  }
-
-  const form = await request.formData();
+  const form = await readBoundedFormData(request, {
+    maxBytes: 8 * 1024,
+    maxFields: 4,
+  });
   return {
     username: form.get("username"),
     password: form.get("password"),
@@ -84,6 +88,15 @@ const readLoginPayload = async (request) => {
 };
 
 const invalidResponse = (request, payload, status = 401, reason = "") => {
+  if (reason === "unavailable") {
+    if (wantsJson(request)) {
+      return NextResponse.json(
+        { ok: false, error: UNAVAILABLE_LOGIN_MESSAGE },
+        { status: 503, headers: { "Retry-After": "30" } }
+      );
+    }
+    return redirectToLogin(request, "unavailable", payload?.redirectTo);
+  }
   const isSuspended = reason === "suspended";
   const message = isSuspended ? SUSPENDED_LOGIN_MESSAGE : INVALID_LOGIN_MESSAGE;
   if (wantsJson(request)) {
@@ -139,13 +152,24 @@ export async function POST(request) {
     return redirectToLogin(request, "rate", payload?.redirectTo);
   }
 
-  const result = await verifyTourneyCredentials({
-    username,
-    password: payload?.password,
-  });
+  let result;
+  try {
+    result = await verifyTourneyCredentials({
+      username,
+      password: payload?.password,
+    });
+  } catch (error) {
+    logSafeError("Tournament login credential verification failed", error);
+    return invalidResponse(request, payload, 503, "unavailable");
+  }
 
   if (!result.ok) {
-    return invalidResponse(request, payload, 401, result.reason);
+    return invalidResponse(
+      request,
+      payload,
+      result.reason === "unavailable" ? 503 : 401,
+      result.reason
+    );
   }
 
   const sessionMaxAgeSeconds = isRememberMeEnabled(payload?.rememberMe)

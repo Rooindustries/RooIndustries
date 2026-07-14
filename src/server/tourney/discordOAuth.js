@@ -146,6 +146,7 @@ export const readTourneyDiscordOAuthStateToken = ({
     playerId: String(payload.playerId),
     version: String(payload.version),
     returnTo: normalizeReturnTo(payload.returnTo),
+    nonce: String(payload.nonce || ""),
   };
 };
 

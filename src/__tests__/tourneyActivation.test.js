@@ -1,7 +1,6 @@
 const mockReadAccounts = jest.fn();
 const mockRenderAccounts = jest.fn();
 const mockRoleConfig = jest.fn();
-const mockListPlayers = jest.fn();
 const mockGetSql = jest.fn();
 const mockGetBackendSql = jest.fn();
 const mockResolvePolicy = jest.fn();
@@ -26,9 +25,6 @@ jest.mock("../server/tourney/discordDesiredState", () => ({
 jest.mock("../server/tourney/externalOperations", () => ({
   enqueueTourneyExternalOperation: (...args) => mockEnqueueExternalOperation(...args),
 }));
-jest.mock("../server/tourney/playerStore", () => ({
-  listManageTourneyPlayers: (...args) => mockListPlayers(...args),
-}));
 jest.mock("../server/tourney/sqlClient", () => ({
   getTourneySql: (...args) => mockGetSql(...args),
   getTourneySqlForBackend: (...args) => mockGetBackendSql(...args),
@@ -49,10 +45,14 @@ const env = {
   TOURNEY_MIRROR_ENABLED: "1",
   TOURNEY_WRITES_PAUSED: "1",
   TOURNEY_FAILOVER_GENERATION: "1",
-  TOURNEY_HARDENING_V4_ENABLED: "1",
+  TOURNEY_HARDENING_V4_ENABLED: "0",
+  TOURNEY_V4_ACTIVATION_ENABLED: "1",
 };
 
 describe("Tourney v4 activation", () => {
+  let authorityRows;
+  let databaseState;
+
   beforeEach(() => {
     jest.clearAllMocks();
     mockResolvePolicy.mockReturnValue({
@@ -63,9 +63,14 @@ describe("Tourney v4 activation", () => {
     });
     mockReadAccounts.mockResolvedValue([{ username: "owner", passwordHash: "hash" }]);
     mockRenderAccounts.mockReturnValue('[{"username":"owner"}]');
-    mockListPlayers.mockResolvedValue([
-      { id: "private-player", status: "approved", discordUserId: "1234567890" },
-    ]);
+    authorityRows = [{
+      player_id: "private-player",
+      player_principal_id: null,
+      legacy_discord_user_id: "1234567890",
+      account_principal_id: "principal-1",
+      account_active: true,
+      authoritative_discord_user_id: "1234567890",
+    }];
     mockRoleConfig.mockReturnValue({
       enabled: true,
       apiBaseUrl: "https://discord.test",
@@ -74,7 +79,7 @@ describe("Tourney v4 activation", () => {
       participantRoleId: "222222",
       hostRoleId: "333333",
     });
-    mockSql.mockResolvedValue([{
+    databaseState = {
       primary_backend: "supabase",
       generation: 1,
       writes_paused: true,
@@ -84,7 +89,17 @@ describe("Tourney v4 activation", () => {
       principal_mismatches: 0,
       missing_principals: 0,
       duplicate_discord_users: 0,
-    }]);
+      latency_baselines: 5,
+    };
+    mockSql.mockImplementation(async (strings) => {
+      const query = strings.join(" ");
+      if (query.includes("select player.id as player_id")) return authorityRows;
+      if (query.includes("update accounts.discord_role_assignments")) {
+        return [{ principal_id: "principal-1" }];
+      }
+      if (query.includes("update tourney.external_operations")) return [];
+      return [databaseState];
+    });
     mockGetSql.mockResolvedValue(mockSql);
     mockGetBackendSql.mockResolvedValue(jest.fn().mockResolvedValue([{
       primary_backend: "supabase",
@@ -124,6 +139,7 @@ describe("Tourney v4 activation", () => {
         unknown: 0,
         needsRepair: 0,
         databaseControlsReady: true,
+        latencyBaselines: 5,
       },
     });
     expect(inventory.inventoryHash).toMatch(/^[0-9a-f]{64}$/);
@@ -132,11 +148,14 @@ describe("Tourney v4 activation", () => {
   });
 
   test("serializes Discord inventory and retries rate-limited members", async () => {
-    mockListPlayers.mockResolvedValue(Array.from({ length: 6 }, (_, index) => ({
-      id: `private-player-${index}`,
-      status: "approved",
-      discordUserId: String(1234567890 + index),
-    })));
+    authorityRows = Array.from({ length: 6 }, (_, index) => ({
+      player_id: `private-player-${index}`,
+      player_principal_id: null,
+      legacy_discord_user_id: String(1234567890 + index),
+      account_principal_id: `principal-${index}`,
+      account_active: true,
+      authoritative_discord_user_id: String(1234567890 + index),
+    }));
     const fetchImpl = jest.fn()
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ roles: [] }) })
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ roles: [] }) })
@@ -182,20 +201,89 @@ describe("Tourney v4 activation", () => {
   test("versions Discord repair commands and supersedes stale operations", async () => {
     const result = await seedTourneyDiscordDesiredStateV4({ env });
 
-    expect(result).toEqual({ queued: 1, contactedDiscord: false });
+    expect(result).toEqual({ queued: 1, normalized: 1, contactedDiscord: false });
     expect(mockExecuteCommand).toHaveBeenCalledWith(expect.objectContaining({
-      commandId: "discord-state-seed:g1:v2:private-player:1234567890",
+      commandId: "discord-state-seed:g1:v3:private-player:1234567890",
       maintenanceWhilePaused: true,
       attemptExternalWork: false,
     }));
     expect(mockEnqueueExternalOperation).toHaveBeenCalledWith(expect.objectContaining({
-      commandId: "discord-state-seed:g1:v2:private-player:1234567890",
+      commandId: "discord-state-seed:g1:v3:private-player:1234567890",
       operationKind: "discord_role_reconcile",
       entityId: "private-player",
     }));
     expect(mockSql.mock.calls.some(([strings]) =>
       strings.join(" ").includes("superseded_by_newer_desired_state")
     )).toBe(true);
+  });
+
+  test.each([
+    {
+      name: "missing authoritative identity",
+      authoritativeDiscordUserId: null,
+      expectedCounts: { missingDiscordIdentities: 1, mismatchedDiscordIdentities: 0 },
+    },
+    {
+      name: "mismatched legacy identity",
+      accountActive: true,
+      authoritativeDiscordUserId: "9988776655",
+      expectedCounts: { missingDiscordIdentities: 0, mismatchedDiscordIdentities: 1 },
+    },
+    {
+      name: "inactive Tourney account",
+      accountActive: false,
+      authoritativeDiscordUserId: "1234567890",
+      expectedCounts: { inactiveTourneyAccounts: 1 },
+      expectedEvidence: { inactiveTourneyAccounts: 1 },
+    },
+  ])("blocks activation and seeding for $name", async ({
+    accountActive = true,
+    authoritativeDiscordUserId,
+    expectedCounts,
+    expectedEvidence,
+  }) => {
+    authorityRows = [{
+      player_id: "private-player",
+      player_principal_id: null,
+      legacy_discord_user_id: "1234567890",
+      account_principal_id: "principal-1",
+      account_active: accountActive,
+      authoritative_discord_user_id: authoritativeDiscordUserId,
+    }];
+    const fetchImpl = jest.fn();
+    const inventory = await inventoryTourneyV4Activation({ env, fetchImpl });
+
+    expect(inventory.counts).toMatchObject(expectedCounts);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    await expect(applyTourneyV4Activation({
+      env,
+      inventoryHash: inventory.inventoryHash,
+      fetchImpl,
+    })).rejects.toMatchObject({
+      code: "TOURNEY_ACTIVATION_INVENTORY_BLOCKED",
+      status: 409,
+    });
+
+    jest.clearAllMocks();
+    mockGetSql.mockResolvedValue(mockSql);
+    mockResolvePolicy.mockReturnValue({
+      primaryBackend: "supabase",
+      mirrorEnabled: true,
+      writesPaused: true,
+      generation: 1,
+    });
+    mockRoleConfig.mockReturnValue({
+      enabled: true,
+      guildId: "111111",
+    });
+    await expect(seedTourneyDiscordDesiredStateV4({ env })).rejects.toMatchObject({
+      code: "TOURNEY_DISCORD_IDENTITY_AUTHORITY_CONFLICT",
+      status: 409,
+      ...(expectedEvidence ? { evidence: expectedEvidence } : {}),
+    });
+    expect(mockExecuteCommand).not.toHaveBeenCalled();
+    expect(mockRecordDesiredState).not.toHaveBeenCalled();
+    expect(mockEnqueueExternalOperation).not.toHaveBeenCalled();
   });
 
   test("requires exact paused generation-one controls", async () => {

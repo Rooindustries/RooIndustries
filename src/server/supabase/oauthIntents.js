@@ -57,15 +57,13 @@ export const createOAuthIntent = async ({
 };
 
 export const finalizeOAuthIntent = async ({
-  guildId = "",
   provider,
   token,
   userId,
   reauthTokenHash = null,
   adminClient = createSupabaseAdminClient(),
 } = {}) => {
-  const result = await adminClient.rpc("roo_finalize_oauth_intent", {
-    p_guild_id: guildId || null,
+  const result = await adminClient.rpc("roo_finalize_oauth_intent_v2", {
     p_provider: provider,
     p_token_hash: sha256(token),
     p_user_id: userId,

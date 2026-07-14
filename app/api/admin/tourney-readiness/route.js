@@ -70,7 +70,11 @@ const readLegacyReadiness = async (sql) => {
     )
     select route, count(*)::integer as samples,
       count(*) filter (
-        where not (shape_match and value_match and ordering_match and error_match)
+        where not (
+          shape_match and value_match and ordering_match and error_match
+          and coalesce(primary_status between 200 and 299, false)
+          and coalesce(shadow_status between 200 and 299, false)
+        )
       )::integer as mismatches,
       percentile_cont(0.95) within group (
         order by primary_latency_ms
@@ -83,6 +87,29 @@ const readLegacyReadiness = async (sql) => {
     where sample_rank <= 30
     group by route order by route
   `;
+  const discord = Object.fromEntries(
+    discordRows.map((row) => [row.status, Number(row.count)])
+  );
+  const shadow = Object.fromEntries(
+    shadowReads.map((row) => [row.route, {
+      samples: Number(row.samples),
+      mismatches: Number(row.mismatches),
+      primary_p95_ms: Number(row.primary_p95_ms || 0),
+      shadow_p95_ms: Number(row.shadow_p95_ms || 0),
+      last_observed_at: row.last_observed_at,
+    }])
+  );
+  const clockBlockers = new Set(
+    control?.clock_last_reset_reason ? [control.clock_last_reset_reason] : []
+  );
+  if (["blocked", "blocked_reauth", "dead_letter"].some(
+    (status) => Number(discord[status] || 0) > 0
+  )) {
+    clockBlockers.add("discord_blocker");
+  }
+  if (Object.values(shadow).some((route) => route.mismatches > 0)) {
+    clockBlockers.add("shadow_mismatch");
+  }
   return {
     control,
     player_counts: Object.fromEntries(
@@ -91,26 +118,22 @@ const readLegacyReadiness = async (sql) => {
     table_counts: counts,
     mirror,
     external_operations: external,
-    auth_operations: { pending: null, oldest_pending_at: null },
+    auth_operations: {
+      counts: {},
+      pending: 0,
+      oldest_pending_at: null,
+      overdue: 0,
+      unavailable_on_legacy: true,
+    },
     identity_conflicts: Number((await sql`
       select count(*)::integer count from tourney_identity_conflicts
       where resolved_at is null
     `)[0]?.count || 0),
     email: Object.fromEntries(emailRows.map((row) => [row.status, Number(row.count)])),
-    discord: Object.fromEntries(discordRows.map((row) => [row.status, Number(row.count)])),
+    discord,
     last_parity: lastParity || null,
-    clock_blockers: control?.clock_last_reset_reason
-      ? [control.clock_last_reset_reason]
-      : [],
-    shadow_reads: Object.fromEntries(
-      shadowReads.map((row) => [row.route, {
-        samples: Number(row.samples),
-        mismatches: Number(row.mismatches),
-        primary_p95_ms: Number(row.primary_p95_ms || 0),
-        shadow_p95_ms: Number(row.shadow_p95_ms || 0),
-        last_observed_at: row.last_observed_at,
-      }])
-    ),
+    clock_blockers: [...clockBlockers],
+    shadow_reads: shadow,
   };
 };
 

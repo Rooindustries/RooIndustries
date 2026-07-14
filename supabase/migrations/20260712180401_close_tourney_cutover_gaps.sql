@@ -458,6 +458,7 @@ as $$
 declare
   v_principals uuid[];
   v_principal uuid;
+  v_auth_user uuid;
   v_conflict_id uuid;
 begin
   select array_agg(distinct candidate.principal_id)
@@ -487,9 +488,17 @@ begin
   end if;
 
   v_principal := v_principals[1];
+  if v_principal is not null then
+    select mapping.user_id into v_auth_user
+    from accounts.principal_auth_users mapping
+    where mapping.principal_id = v_principal
+    order by mapping.is_primary desc, mapping.linked_at, mapping.user_id
+    limit 1;
+  end if;
   return jsonb_build_object(
     'conflict', false,
     'principal_id', v_principal,
+    'auth_user_id', v_auth_user,
     'matched', v_principal is not null
   );
 end;

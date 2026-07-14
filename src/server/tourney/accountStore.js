@@ -1,8 +1,8 @@
 import crypto from "node:crypto";
-import { getTourneySql } from "./sqlClient.js";
+import { assertTourneySchemaVersion, getTourneySql } from "./sqlClient.js";
 import { enqueueTourneyExternalOperation } from "./externalOperations.js";
 import { resolveTourneyStorePolicy } from "./store.js";
-import { stableTourneyJson } from "./canonical.js";
+import { isEnabledTourneyFlag, stableTourneyJson } from "./canonical.js";
 
 const STORE_DOC_ID = "tourneyAuthStore";
 const STORE_DOC_TYPE = "tourneyAuthStore";
@@ -34,9 +34,31 @@ const shouldUseMemoryStore = (env = process.env) =>
 
 export const getTourneyAccountsCanonicalHash = (accounts) =>
   crypto.createHash("sha256").update(stableTourneyJson(accounts)).digest("hex");
+export const getTourneyAdminAuthCanonicalHash = (account = {}) =>
+  crypto.createHash("sha256").update(stableTourneyJson({
+    username: String(account.username || "").trim().toLowerCase(),
+    email: String(account.email || "").trim().toLowerCase(),
+    role: String(account.role || "").trim().toLowerCase(),
+    active: account.active !== false,
+    version: String(account.version || "1"),
+    passwordHash: String(account.passwordHash || account.password_hash || ""),
+  })).digest("hex");
 const snapshotTable = (backend) => backend === "supabase"
   ? "tourney.account_snapshots"
   : "tourney_account_snapshots";
+
+export const readLatestTourneyAccountSnapshot = async ({
+  env = process.env,
+} = {}) => {
+  const policy = resolveTourneyStorePolicy(env);
+  const sql = await getTourneySql(env);
+  const rows = await sql`
+    select snapshot_id,version,accounts_json,canonical_hash,created_at
+    from ${sql(snapshotTable(policy.primaryBackend))}
+    order by version desc limit 1
+  `;
+  return rows[0] || null;
+};
 
 const getSanityClient = async (env = process.env) => {
   if (shouldUseMemoryStore(env)) return null;
@@ -67,11 +89,13 @@ export const readPersistedTourneyAccountsJson = async (env = process.env) => {
     return MEMORY_STORE.accountsJson || "";
   }
 
+  const hardened = isEnabledTourneyFlag(env.TOURNEY_HARDENING_V4_ENABLED);
   try {
     if (!env.SUPABASE_DATABASE_URL && !env.TOURNEY_DATABASE_URL && !env.POSTGRES_URL) {
       throw Object.assign(new Error("Tourney database is not configured."), { code: "42P01" });
     }
     if (env.NODE_ENV === "test") throw Object.assign(new Error("Use the configured test account store."), { code: "42P01" });
+    if (hardened) await assertTourneySchemaVersion(env);
     const policy = resolveTourneyStorePolicy(env);
     const sql = await getTourneySql(env);
     const rows = await sql`
@@ -79,8 +103,16 @@ export const readPersistedTourneyAccountsJson = async (env = process.env) => {
       order by version desc limit 1
     `;
     if (rows[0]?.accounts_json) return JSON.stringify(rows[0].accounts_json);
+    if (hardened) {
+      const error = new Error("The authoritative Tourney account snapshot is missing.");
+      error.code = "TOURNEY_ACCOUNT_SNAPSHOT_REQUIRED";
+      error.status = 503;
+      throw error;
+    }
   } catch (error) {
-    if (!['42P01', '42703'].includes(String(error?.code || ""))) throw error;
+    if (hardened || !['42P01', '42703'].includes(String(error?.code || ""))) {
+      throw error;
+    }
   }
 
   const client = await getSanityClient(env);
@@ -98,6 +130,7 @@ export const readPersistedTourneyAccountsJson = async (env = process.env) => {
 export const projectTourneyAccountSnapshotToSanity = async ({
   accountsJson,
   actorUsername,
+  signal,
   env = process.env,
 } = {}) => {
   const client = await getSanityClient(env);
@@ -110,12 +143,12 @@ export const projectTourneyAccountSnapshotToSanity = async ({
     accountsJson: "[]",
     updatedAt,
     updatedBy,
-  });
+  }, { signal });
   await client.patch(STORE_DOC_ID).set({
     accountsJson,
     updatedAt,
     updatedBy,
-  }).commit({ autoGenerateArrayKeys: true });
+  }).commit({ autoGenerateArrayKeys: true, signal });
   return { ok: true, provider: "sanity", updatedAt, updatedBy };
 };
 
@@ -165,7 +198,8 @@ export const writePersistedTourneyAccountsJson = async ({
     )
   `;
   const currentRows = await sql`
-    select canonical_hash from ${sql(snapshotTable(policy.primaryBackend))}
+    select snapshot_id,version,accounts_json,canonical_hash
+    from ${sql(snapshotTable(policy.primaryBackend))}
     order by version desc limit 1
   `;
   if (
@@ -188,13 +222,33 @@ export const writePersistedTourneyAccountsJson = async ({
     from ${sql(snapshotTable(policy.primaryBackend))}
     returning snapshot_id, version, created_at
   `;
-  for (const account of accounts) {
+  const previousAccounts = Array.isArray(currentRows[0]?.accounts_json)
+    ? currentRows[0].accounts_json
+    : currentRows[0]?.accounts_json?.accounts;
+  const nextUsernames = new Set(accounts.map((account) =>
+    String(account?.username || "").trim().toLowerCase()
+  ));
+  const authAccounts = [
+    ...accounts,
+    ...(Array.isArray(previousAccounts) ? previousAccounts : [])
+      .filter((account) => !nextUsernames.has(
+        String(account?.username || "").trim().toLowerCase()
+      ))
+      .map((account) => ({ ...account, active: false })),
+  ];
+  for (const account of authAccounts) {
     await enqueueTourneyExternalOperation({
       commandId: context.command_id,
       operationKind: "supabase_admin_auth",
       entityType: "account",
       entityId: account.username,
-      desiredState: { account },
+      desiredState: {
+        account,
+        accountHash: getTourneyAdminAuthCanonicalHash(account),
+        snapshotId: rows[0].snapshot_id,
+        snapshotVersion: Number(rows[0].version),
+        snapshotHash: canonicalHash,
+      },
       env,
     });
   }
@@ -203,7 +257,13 @@ export const writePersistedTourneyAccountsJson = async ({
     operationKind: "sanity_account_projection",
     entityType: "account_snapshot",
     entityId: rows[0].snapshot_id,
-    desiredState: { accountsJson: nextAccountsJson, actorUsername: updatedBy },
+    desiredState: {
+      accountsJson: nextAccountsJson,
+      actorUsername: updatedBy,
+      snapshotId: rows[0].snapshot_id,
+      snapshotVersion: Number(rows[0].version),
+      snapshotHash: canonicalHash,
+    },
     env,
   });
 
@@ -274,6 +334,9 @@ export const appendTourneyAccountPrincipalSnapshot = async ({
     desiredState: {
       accountsJson,
       actorUsername: "auth-principal-projection",
+      snapshotId: created.snapshot_id,
+      snapshotVersion: Number(created.version),
+      snapshotHash: getTourneyAccountsCanonicalHash(nextAccounts),
     },
     env,
   });

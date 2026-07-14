@@ -11,32 +11,11 @@ import {
 } from "../../supabase/adminClient.js";
 import { reconcileBookingEmailDispatches } from "../ref/bookingEmails.js";
 import { syncSanityCommerceChanges } from "../../supabase/incrementalCommerceSync.js";
-import { reconcileTourneyEmailDispatches } from "../../tourney/emailDispatch.js";
-import { reconcileTourneyExternalOperations } from "../../tourney/externalOperations.js";
 import {
-  reconcileTourneyMirror,
-  refreshTourneyCutoverClock,
-  resolveTourneyStorePolicy,
-  runTourneyParity,
-  runTourneyShadowReadSamples,
-} from "../../tourney/store.js";
+  runTourneyReconciliation,
+} from "../../tourney/reconcile.js";
 import { reconcileCredentialOperations } from "../../supabase/credentialRecovery.js";
 import { isEnabledTourneyFlag } from "../../tourney/canonical.js";
-
-const reconcileTourneyQueues = async () => {
-  const policy = resolveTourneyStorePolicy();
-  const summary = {
-    tourneyExternalOperations: await reconcileTourneyExternalOperations({ limit: 10 }),
-    tourneyEmails: await reconcileTourneyEmailDispatches({ limit: 10 }),
-    tourneyMirror: await reconcileTourneyMirror({ limit: 100 }),
-  };
-  if (policy.mirrorEnabled && summary.tourneyMirror.failed === 0) {
-    summary.tourneyParity = await runTourneyParity();
-    summary.tourneyShadowReads = await runTourneyShadowReadSamples({ rounds: 10 });
-    summary.tourneyCutoverClock = await refreshTourneyCutoverClock();
-  }
-  return summary;
-};
 
 export default async function handler(req, res) {
   if (req.method !== "GET" && req.method !== "POST") {
@@ -95,16 +74,25 @@ export default async function handler(req, res) {
     try {
       return res.status(200).json({
         ok: true,
-        summary: await reconcileTourneyQueues(),
+        ...(await runTourneyReconciliation()),
       });
     } catch (error) {
       logSafeError("Tourney-only reconciliation failed", error);
-      return res.status(503).json({
+      return res.status(Number(error?.status || 503)).json({
         ok: false,
         error: "Tournament reconciliation is temporarily unavailable.",
+        failedStage: String(error?.failedStage || "tourneyUnknown").slice(0, 64),
+        summary: error?.partialSummary || {},
       });
     }
   }
+
+  const tourneyReconciliationPromise = runTourneyReconciliation({
+    budgetMs: 90_000,
+  }).then(
+    (value) => ({ value, error: null }),
+    (error) => ({ value: null, error })
+  );
 
   let incrementalShadowSync = null;
   try {
@@ -125,16 +113,26 @@ export default async function handler(req, res) {
   const backendClients = [];
   let supabaseClient = null;
   for (const backend of backends) {
-    const client = createPaymentBackendClient(backend);
-    if (backend === "supabase") supabaseClient = client;
-    backendClients.push({ backend, client });
-    results.push(
-      await reconcilePaymentSessions({
+    try {
+      const client = createPaymentBackendClient(backend);
+      if (backend === "supabase") supabaseClient = client;
+      backendClients.push({ backend, client });
+      results.push(await reconcilePaymentSessions({
         req,
         backend,
         client,
-      })
-    );
+      }));
+    } catch (error) {
+      logSafeError(`${backend} payment reconciliation failed`, error);
+      results.push({
+        httpStatus: 503,
+        body: {
+          ok: false,
+          error: "Payment reconciliation is temporarily unavailable.",
+          summary: {},
+        },
+      });
+    }
   }
   const failed = results.find((entry) => entry.httpStatus !== 200);
   const result = failed || {
@@ -195,12 +193,6 @@ export default async function handler(req, res) {
       }
     }
     try {
-      Object.assign(result.body.summary, await reconcileTourneyQueues());
-    } catch (error) {
-      logSafeError("Tourney reconciliation failed", error);
-      result.body.summary.tourneyReconciliation = { pending: true };
-    }
-    try {
       result.body.summary.rateLimitBucketsCleaned =
         await cleanupExpiredRateLimitBuckets();
     } catch (error) {
@@ -227,7 +219,7 @@ export default async function handler(req, res) {
         result.body.summary.accountSecurity = { pending: true };
       }
     }
-    if (isSupabaseAdminConfigured()) {
+    if (result.httpStatus === 200 && isSupabaseAdminConfigured()) {
       try {
         const checkpoint = await createSupabaseAdminClient().rpc(
           "roo_record_reconciliation_checkpoint",
@@ -246,6 +238,24 @@ export default async function handler(req, res) {
         result.body.summary.reconciliationCheckpointPending = true;
       }
     }
+  }
+  result.body.summary ||= {};
+  const tourneyReconciliation = await tourneyReconciliationPromise;
+  if (tourneyReconciliation.error) {
+    const error = tourneyReconciliation.error;
+    logSafeError("Tourney reconciliation failed", error);
+    result.body.summary.tourneyReconciliation = {
+      pending: true,
+      failedStage: String(error?.failedStage || "tourneyUnknown").slice(0, 64),
+      partialSummary: error?.partialSummary || {},
+    };
+  } else if (tourneyReconciliation.value.skipped) {
+    result.body.summary.tourneyReconciliation = {
+      skipped: true,
+      reason: tourneyReconciliation.value.reason,
+    };
+  } else {
+    Object.assign(result.body.summary, tourneyReconciliation.value.summary);
   }
   return res.status(result.httpStatus).json(result.body);
 }
