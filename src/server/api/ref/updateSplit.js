@@ -13,6 +13,15 @@ const client = createClient(
   { domain: "commerce" }
 );
 
+const parsePercent = (value) => {
+  const text = String(value ?? "").trim();
+  if (!/^(?:\d{1,2}(?:\.\d{1,2})?|100(?:\.0{1,2})?)$/.test(text)) {
+    return null;
+  }
+  const basisPoints = Math.round(Number(text) * 100);
+  return basisPoints >= 0 && basisPoints <= 10000 ? basisPoints : null;
+};
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
@@ -23,21 +32,21 @@ export default async function handler(req, res) {
     if (!session) return;
     const id = session.referralId;
     const { commissionPercent, discountPercent } = req.body || {};
-    const nextCommission = Number(commissionPercent);
-    const nextDiscount = Number(discountPercent);
+    const nextCommissionBasisPoints = parsePercent(commissionPercent);
+    const nextDiscountBasisPoints = parsePercent(discountPercent);
 
     if (
-      !Number.isFinite(nextCommission) ||
-      !Number.isFinite(nextDiscount) ||
-      nextCommission < 0 ||
-      nextDiscount < 0
+      nextCommissionBasisPoints === null ||
+      nextDiscountBasisPoints === null
     ) {
       return res
         .status(400)
-        .json({ ok: false, error: "Invalid commission/discount values" });
+        .json({
+          ok: false,
+          error: "Percentages must be between 0 and 100 with at most two decimal places",
+        });
     }
 
-    // Fetch current data for this creator
     const creator = await client.fetch(
       `*[_type == "referral" && _id == $id][0]{
         maxCommissionPercent,
@@ -56,20 +65,28 @@ export default async function handler(req, res) {
     const max = Number.isFinite(configuredMax) && configuredMax >= 0
       ? Math.min(configuredMax, 100)
       : 15;
+    const maxBasisPoints = Math.round(max * 100);
     const successfulReferrals = creator.successfulReferrals ?? 0;
     const bypassUnlock = creator.bypassUnlock === true;
+    const unlocked = successfulReferrals >= 5 || bypassUnlock;
 
-    // Same validation as before
-    if (nextCommission + nextDiscount > max) {
+    if (!unlocked) {
+      return res.status(403).json({
+        ok: false,
+        error: "Five successful referrals are required before changing this split",
+      });
+    }
+
+    if (nextCommissionBasisPoints + nextDiscountBasisPoints > maxBasisPoints) {
       return res.status(400).json({
         ok: false,
         error: `Total % cannot exceed ${max}`,
       });
     }
 
-    const unlocked = successfulReferrals >= 5 || bypassUnlock;
+    const nextCommission = nextCommissionBasisPoints / 100;
+    const nextDiscount = nextDiscountBasisPoints / 100;
 
-    // Build patch
     let patch = client.patch(id).set({
       currentCommissionPercent: nextCommission,
       currentDiscountPercent: nextDiscount,
