@@ -374,6 +374,10 @@ try {
     root,
     "supabase/migrations/20260715030000_allow_paused_tourney_baseline_recovery.sql"
   );
+  const supabaseBaselineClockReset = path.join(
+    root,
+    "supabase/migrations/20260715040000_reset_tourney_hardening_clock_for_baseline_recovery.sql"
+  );
   const legacyActivation = path.join(root, "scripts/tourney-schema-v4-activate-legacy.sql");
   const legacyRepair = path.join(root, "scripts/tourney-schema-v4-repair-legacy.sql");
   const activateSupabaseV4 = writeTemp(
@@ -561,7 +565,62 @@ insert into tourney_external_operations(
       error.message === "Legacy Tourney snapshot is incomplete or malformed",
     "Supabase snapshot RPC iterated a non-object legacy snapshot"
   );
-  await unsafeSupabase`truncate table tourney.shadow_latency_baselines`;
+  await unsafeSupabase.begin(async (sql) => {
+    await sql`
+      update tourney.cutover_metadata set
+        natural_mutation_verified_at=now()-interval '2 minutes',
+        first_zero_drift_at=now()-interval '1 minute'
+      where id='tourney'
+    `;
+    await sql`
+      insert into tourney.cutover_gate_events(
+        event_kind,generation,actor,evidence,created_at
+      ) values(
+        'natural_mirror_verified',1,'postgres17-existing-window',
+        '{"table":"tourney_players"}'::jsonb,now()-interval '2 minutes'
+      ),(
+        'clock_reset',1,'postgres17-existing-window',
+        '{"reason":"discord_overdue"}'::jsonb,now()-interval '1 minute'
+      )
+    `;
+    await sql`truncate table tourney.shadow_latency_baselines`;
+  });
+  const unsafeClockReset = psqlFails(
+    "supabase_unsafe",
+    supabaseBaselineClockReset
+  );
+  assert.notEqual(
+    unsafeClockReset.status,
+    0,
+    "unsafe Supabase baseline clock reset succeeded"
+  );
+  await unsafeSupabase`
+    update tourney.cutover_metadata set first_zero_drift_at=null
+    where id='tourney'
+  `;
+  await assert.rejects(
+    unsafeSupabase`
+      select public.roo_capture_tourney_shadow_latency_baseline(
+        'postgres17-pre-reset-recovery'
+      )
+    `,
+    (error) => error.code === "55000",
+    "Supabase baseline recovery accepted the stale mutation window"
+  );
+  psql("supabase_unsafe", supabaseBaselineClockReset);
+  await assertSql(
+    unsafeSupabase,
+    `select natural_mutation_verified_at is null
+       and clean_since is null
+       and first_zero_drift_at is null
+       and second_zero_drift_at is null
+       and clock_last_reset_reason='fresh_hardening_window'
+       and (select count(*)=1 from tourney.cutover_gate_events
+         where event_kind='clock_reset'
+           and evidence @> '{"baseline_recovery_clock_reset":true}'::jsonb) ok
+     from tourney.cutover_metadata where id='tourney'`,
+    "Supabase baseline clock recovery was not reset and audited"
+  );
   psql("supabase_unsafe", captureLatencyBaseline);
   await assertSql(
     unsafeSupabase,
@@ -709,7 +768,8 @@ insert into accounts.discord_role_assignments(
     supabaseRepair,
     supabaseCutoverOperationMarkers,
     supabaseSnapshotRpcRepair,
-    supabaseBaselineRecovery
+    supabaseBaselineRecovery,
+    supabaseBaselineClockReset
   );
   process.stderr.write("[postgres17] Supabase schema-v4 install remained inactive\n");
   psql("supabase_fixture", supabaseControls, captureLatencyBaseline);
