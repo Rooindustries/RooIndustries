@@ -25,6 +25,7 @@ create index if not exists tourney_email_active_age_v4_idx
   where status in ('pending','sending','retry');
 create index if not exists tourney_gate_event_generation_v4_idx
   on tourney.cutover_gate_events(event_kind,generation,created_at desc);
+
 alter table tourney.shadow_latency_baselines
   add column if not exists source_window_started_at timestamptz,
   add column if not exists source_window_ended_at timestamptz;
