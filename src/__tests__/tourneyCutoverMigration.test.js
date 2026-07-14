@@ -55,6 +55,15 @@ const repairV4 = fs.readFileSync(
   ),
   "utf8"
 );
+const baselineRestoreV4 = fs.readFileSync(
+  path.join(
+    process.cwd(),
+    "supabase",
+    "migrations",
+    "20260714005000_restore_tourney_shadow_latency_baselines.sql"
+  ),
+  "utf8"
+);
 const legacyActivationV4 = fs.readFileSync(
   path.join(process.cwd(), "scripts", "tourney-schema-v4-activate-legacy.sql"),
   "utf8"
@@ -225,14 +234,17 @@ describe("Tourney cutover migration", () => {
   });
 
   test("repairs a recorded schema-v4 install missing the latency baseline table", () => {
-    expect(repairV4).toContain(
+    expect(baselineRestoreV4).toContain(
       "create table if not exists tourney.shadow_latency_baselines"
     );
-    expect(repairV4).toContain(
+    expect(baselineRestoreV4).toContain(
       "alter table tourney.shadow_latency_baselines enable row level security"
     );
-    expect(repairV4).toContain(
+    expect(baselineRestoreV4).toContain(
       "revoke all on table tourney.shadow_latency_baselines"
+    );
+    expect(repairV4).not.toContain(
+      "create table if not exists tourney.shadow_latency_baselines"
     );
   });
 
