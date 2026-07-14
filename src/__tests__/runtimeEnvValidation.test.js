@@ -131,6 +131,12 @@ const supabaseTourneyEnv = {
   DISCORD_HOST_ROLE_ID: "333333333333333333",
 };
 
+const supabaseDocumentEnv = {
+  SUPABASE_URL: "https://ntezmxzaibrrsgtujgxu.supabase.co",
+  SUPABASE_SECRET_KEY: "s".repeat(40),
+  SUPABASE_PUBLISHABLE_KEY: "p".repeat(24),
+};
+
 const previewMigrationEnv = (overrides = {}) => {
   const selected = {
     SUPABASE_MIGRATION_ENDPOINT_ENABLED: "1",
@@ -159,6 +165,151 @@ describe("release runtime environment validation", () => {
     const result = validate();
     expect(result.status).toBe(0);
     expect(result.output).toContain("Runtime secret validation passed");
+  });
+
+  test.each([
+    [
+      "Sanity globally and for commerce",
+      {
+        DATA_PRIMARY_BACKEND: "sanity",
+        COMMERCE_PRIMARY_BACKEND: "sanity",
+      },
+    ],
+    [
+      "Sanity globally with Supabase commerce",
+      {
+        ...supabaseDocumentEnv,
+        DATA_PRIMARY_BACKEND: "sanity",
+        COMMERCE_PRIMARY_BACKEND: "supabase",
+        COMMERCE_CUTOVER_ENABLED: "1",
+        SANITY_REVERSE_MIRROR_WRITES: "1",
+      },
+    ],
+    [
+      "Supabase globally with Sanity commerce",
+      {
+        ...supabaseDocumentEnv,
+        DATA_PRIMARY_BACKEND: "supabase",
+        COMMERCE_PRIMARY_BACKEND: "sanity",
+        SUPABASE_CUTOVER_ENABLED: "1",
+      },
+    ],
+    [
+      "Supabase globally and for commerce",
+      {
+        ...supabaseDocumentEnv,
+        DATA_PRIMARY_BACKEND: "supabase",
+        COMMERCE_PRIMARY_BACKEND: "supabase",
+        SUPABASE_CUTOVER_ENABLED: "1",
+        COMMERCE_CUTOVER_ENABLED: "1",
+        SANITY_REVERSE_MIRROR_WRITES: "1",
+      },
+    ],
+  ])("accepts the %s backend matrix", (_label, backendEnv) => {
+    const result = validate({
+      VERCEL_ENV: "production",
+      DOWNLOAD_STORAGE_BACKEND: "local",
+      ...backendEnv,
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.output).not.toContain("Commerce-only cutover");
+  });
+
+  test("does not require Sanity read or webhook credentials for full Supabase", () => {
+    const result = validate({
+      ...supabaseDocumentEnv,
+      VERCEL_ENV: "production",
+      DOWNLOAD_STORAGE_BACKEND: "local",
+      DATA_PRIMARY_BACKEND: "supabase",
+      COMMERCE_PRIMARY_BACKEND: "supabase",
+      SUPABASE_CUTOVER_ENABLED: "1",
+      COMMERCE_CUTOVER_ENABLED: "1",
+      SANITY_REVERSE_MIRROR_WRITES: "1",
+      SANITY_READ_TOKEN: "",
+      SANITY_PRIVATE_READ_TOKEN: "",
+      SANITY_WEBHOOK_SECRET: "",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.output).not.toContain("SANITY_READ_TOKEN");
+    expect(result.output).not.toContain("SANITY_WEBHOOK_SECRET");
+  });
+
+  test("accepts the private Sanity rollback target for full Supabase", () => {
+    const result = validate({
+      ...supabaseDocumentEnv,
+      DATA_PRIMARY_BACKEND: "supabase",
+      COMMERCE_PRIMARY_BACKEND: "supabase",
+      SUPABASE_CUTOVER_ENABLED: "1",
+      COMMERCE_CUTOVER_ENABLED: "1",
+      SANITY_REVERSE_MIRROR_WRITES: "1",
+      SANITY_PROJECT_ID: "",
+      SANITY_DATASET: "",
+      SANITY_WRITE_TOKEN: "",
+      SANITY_READ_TOKEN: "",
+      SANITY_WEBHOOK_SECRET: "",
+      SANITY_PRIVATE_PROJECT_ID: "private-project",
+      SANITY_PRIVATE_DATASET: "private-dataset",
+      SANITY_PRIVATE_WRITE_TOKEN: "private-write-token",
+    });
+
+    expect(result.status).toBe(0);
+  });
+
+  test.each([
+    ["SANITY_PROJECT_ID", { SANITY_PROJECT_ID: "", SANITY_PRIVATE_PROJECT_ID: "" }],
+    ["SANITY_DATASET", { SANITY_DATASET: "", SANITY_PRIVATE_DATASET: "" }],
+    ["SANITY_WRITE_TOKEN", { SANITY_WRITE_TOKEN: "", SANITY_PRIVATE_WRITE_TOKEN: "" }],
+  ])("requires the %s rollback target for full Supabase", (label, missingTarget) => {
+    const result = validate({
+      ...supabaseDocumentEnv,
+      DATA_PRIMARY_BACKEND: "supabase",
+      COMMERCE_PRIMARY_BACKEND: "supabase",
+      SUPABASE_CUTOVER_ENABLED: "1",
+      COMMERCE_CUTOVER_ENABLED: "1",
+      SANITY_REVERSE_MIRROR_WRITES: "1",
+      SANITY_READ_TOKEN: "",
+      SANITY_WEBHOOK_SECRET: "",
+      ...missingTarget,
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(label);
+  });
+
+  test("requires Sanity read and webhook credentials while commerce uses Sanity", () => {
+    const result = validate({
+      ...supabaseDocumentEnv,
+      DATA_PRIMARY_BACKEND: "supabase",
+      COMMERCE_PRIMARY_BACKEND: "sanity",
+      SUPABASE_CUTOVER_ENABLED: "1",
+      SANITY_READ_TOKEN: "",
+      SANITY_WEBHOOK_SECRET: "",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain("SANITY_READ_TOKEN");
+    expect(result.output).toContain("SANITY_WEBHOOK_SECRET");
+  });
+
+  test.each([
+    ["SUPABASE_CUTOVER_ENABLED", { SUPABASE_CUTOVER_ENABLED: "" }],
+    ["COMMERCE_CUTOVER_ENABLED", { COMMERCE_CUTOVER_ENABLED: "" }],
+    ["SANITY_REVERSE_MIRROR_WRITES", { SANITY_REVERSE_MIRROR_WRITES: "" }],
+  ])("rejects full Supabase without %s", (gate, disabledGate) => {
+    const result = validate({
+      ...supabaseDocumentEnv,
+      DATA_PRIMARY_BACKEND: "supabase",
+      COMMERCE_PRIMARY_BACKEND: "supabase",
+      SUPABASE_CUTOVER_ENABLED: "1",
+      COMMERCE_CUTOVER_ENABLED: "1",
+      SANITY_REVERSE_MIRROR_WRITES: "1",
+      ...disabledGate,
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(gate);
   });
 
   test("accepts a production Blob download with a fully pinned utilities catalog", () => {

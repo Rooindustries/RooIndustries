@@ -4,7 +4,7 @@ const mockValidateDownloadAccess = jest.fn(async () => ({
 }));
 
 jest.mock("@/src/server/downloads/downloadAccess", () => ({
-  createDownloadSanityClient: () => ({}),
+  createDownloadDataClient: () => ({}),
   validateDownloadAccess: (...args) => mockValidateDownloadAccess(...args),
 }));
 
