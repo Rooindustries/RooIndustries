@@ -105,6 +105,12 @@ describe("deterministic Tourney live-drift repair", () => {
     expect(scriptSource).not.toMatch(/update\s+tourney_(?:players|player_tokens|discord_role_assignments)/i);
   });
 
+  test("allows apply to resume after the deterministic fallback audit was committed", () => {
+    expect(scriptSource).toContain("allowConflictId: expectedConflictId");
+    expect(scriptSource).toContain("assertLiveDriftLegacyDatabaseGate(legacy, { allowConflictId })");
+    expect(scriptSource).not.toContain("assertLiveDriftLegacyDatabaseGate(legacy);\n  const legacyRows");
+  });
+
   test("rejects duplicate action and value flags", () => {
     const result = runModule(`
       const cases=[
