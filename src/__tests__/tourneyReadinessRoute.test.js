@@ -24,6 +24,8 @@ jest.mock("../server/tourney/store", () => ({
 
 const { GET } = require("../../app/api/admin/tourney-readiness/route.js");
 const originalAdminKey = process.env.REF_ADMIN_KEY;
+const originalHardening = process.env.TOURNEY_HARDENING_V4_ENABLED;
+const originalActivation = process.env.TOURNEY_V4_ACTIVATION_ENABLED;
 
 const request = (key = "readiness-secret") => ({
   headers: { get: (name) => name === "x-admin-key" ? key : "" },
@@ -31,12 +33,16 @@ const request = (key = "readiness-secret") => ({
 
 const createLegacySql = () => jest.fn(async (strings) => {
   const query = strings.join(" ");
+  if (query.includes("tourney_mirror_trigger_binding_status_v4")) {
+    return [{ readiness: { ready: true, correctly_bound: 17 } }];
+  }
   if (query.includes("from tourney_cutover_metadata")) {
     return [{
       primary_backend: "legacy",
       generation: 2,
       writes_paused: true,
       fallback_read_only: false,
+      hardened_active: true,
       clock_last_reset_reason: null,
     }];
   }
@@ -76,11 +82,17 @@ describe("Tourney legacy readiness route", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     process.env.REF_ADMIN_KEY = "readiness-secret";
+    process.env.TOURNEY_HARDENING_V4_ENABLED = "1";
+    process.env.TOURNEY_V4_ACTIVATION_ENABLED = "0";
   });
 
   afterAll(() => {
     if (originalAdminKey === undefined) delete process.env.REF_ADMIN_KEY;
     else process.env.REF_ADMIN_KEY = originalAdminKey;
+    if (originalHardening === undefined) delete process.env.TOURNEY_HARDENING_V4_ENABLED;
+    else process.env.TOURNEY_HARDENING_V4_ENABLED = originalHardening;
+    if (originalActivation === undefined) delete process.env.TOURNEY_V4_ACTIVATION_ENABLED;
+    else process.env.TOURNEY_V4_ACTIVATION_ENABLED = originalActivation;
   });
 
   test("reports blocked reauthentication and non-2xx shadow samples", async () => {
@@ -96,10 +108,26 @@ describe("Tourney legacy readiness route", () => {
       expect.arrayContaining(["discord_blocker", "shadow_mismatch"])
     );
     expect(body.readiness.shadow_reads.public_roster.mismatches).toBe(1);
+    expect(body.controlMatchesDeployment).toBe(true);
+    expect(body.finalReadiness).toBe(false);
     const shadowQuery = sql.mock.calls
       .map(([strings]) => strings.join(" "))
       .find((query) => query.includes("sample_rank <= 30"));
     expect(shadowQuery).toContain("primary_status between 200 and 299");
     expect(shadowQuery).toContain("shadow_status between 200 and 299");
+  });
+
+  test("requires hardened control agreement and a disabled activation flag", async () => {
+    const sql = createLegacySql();
+    mockGetBackendSql.mockResolvedValue(sql);
+
+    process.env.TOURNEY_HARDENING_V4_ENABLED = "0";
+    process.env.TOURNEY_V4_ACTIVATION_ENABLED = "1";
+    const response = await GET(request());
+    const body = await response.json();
+
+    expect(body.controlMatchesDeployment).toBe(false);
+    expect(body.activationEnabled).toBe(true);
+    expect(body.finalReadiness).toBe(false);
   });
 });
