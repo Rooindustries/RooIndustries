@@ -1,6 +1,3 @@
--- Forward repair for the already-activated Vercel-managed fallback PostgreSQL
--- schema-v4 database.
--- Apply while both Tourney databases remain paused at Supabase generation 1.
 set lock_timeout = '5s';
 set statement_timeout = '120s';
 
