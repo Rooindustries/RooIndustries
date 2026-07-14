@@ -112,6 +112,23 @@ const legacyRepairV4 = fs.readFileSync(
   path.join(process.cwd(), "scripts", "tourney-schema-v4-repair-legacy.sql"),
   "utf8"
 );
+const triggerBindingRepairV4 = fs.readFileSync(
+  path.join(
+    process.cwd(),
+    "supabase",
+    "migrations",
+    "20260715060000_repair_tourney_mirror_trigger_bindings.sql"
+  ),
+  "utf8"
+);
+const legacyTriggerBindingRepairV4 = fs.readFileSync(
+  path.join(
+    process.cwd(),
+    "scripts",
+    "tourney-schema-v4-trigger-binding-repair-legacy.sql"
+  ),
+  "utf8"
+);
 
 describe("Tourney cutover migration", () => {
   test("keeps the control-plane private and service-only", () => {
@@ -458,6 +475,7 @@ describe("Tourney cutover migration", () => {
             "--activate-legacy-v4": [],
             "--activate-supabase-v4": [],
             "--repair-legacy-v4": [],
+            "--repair-legacy-trigger-bindings-v4": [],
             "--inventory-activation-v4": [],
             "--capture-latency-baseline-v4": [],
             "--apply-activation-v4": ["--inventory-hash", "a".repeat(64)],
@@ -607,6 +625,7 @@ describe("Tourney cutover migration", () => {
         "--activate-legacy-v4": [true, true, false, false, false],
         "--activate-supabase-v4": [true, true, true, false, false],
         "--repair-legacy-v4": [true, false, false, false, false],
+        "--repair-legacy-trigger-bindings-v4": [true, true, false, false, false],
         "--inventory-activation-v4": [true, true, true, true, true],
         "--capture-latency-baseline-v4": [false, true, true, false, false],
         "--apply-activation-v4": [true, true, true, true, true],
@@ -830,6 +849,30 @@ describe("Tourney cutover migration", () => {
       expect(sql).toContain("pg_catalog.convert_to");
     }
     expect(cutoverCli).toContain("--repair-legacy-v4");
+  });
+
+  test("verifies actual fail-closed mirror trigger bodies and OID bindings", () => {
+    for (const sql of [triggerBindingRepairV4, legacyTriggerBindingRepairV4]) {
+      expect(sql).toContain("mirror_trigger_binding_status_v4");
+      expect(sql).toContain("pg_catalog.md5(function.prosrc)");
+      expect(sql).toContain("trigger.tgfoid");
+      expect(sql).toContain("binding.tgtype = 29");
+      expect(sql).toContain("binding.tgenabled = 'O'");
+      expect(sql).toContain("summary.enabled_contracts = 17");
+      expect(sql).toContain("summary.correctly_bound = summary.enabled_contracts");
+      expect(sql).toContain("clock_last_reset_reason = 'mirror_trigger_binding_repaired'");
+      expect(sql).toContain("insert into");
+      expect(sql).toContain("cutover_gate_events");
+      expect(sql).toContain("'clock_reset'");
+    }
+    expect(triggerBindingRepairV4).toContain("mirror_trigger_binding_drift");
+    expect(triggerBindingRepairV4).toContain("shadow_reads_since_natural_mutation");
+    expect(triggerBindingRepairV4).toContain("Supabase Tourney activation mirror trigger verification failed");
+    expect(legacyTriggerBindingRepairV4).toContain(
+      "Legacy Tourney mirror trigger repair verification failed"
+    );
+    expect(cutoverCli).toContain("--repair-legacy-trigger-bindings-v4");
+    expect(activationWorker).toContain("TOURNEY_MIRROR_TRIGGER_BINDING_DRIFT");
   });
 
   test("normalizes import hashes and prunes only under tombstone controls", () => {
