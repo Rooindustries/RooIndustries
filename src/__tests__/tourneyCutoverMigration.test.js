@@ -82,6 +82,15 @@ const baselineRecoveryV4 = fs.readFileSync(
   ),
   "utf8"
 );
+const baselineClockResetV4 = fs.readFileSync(
+  path.join(
+    process.cwd(),
+    "supabase",
+    "migrations",
+    "20260715040000_reset_tourney_hardening_clock_for_baseline_recovery.sql"
+  ),
+  "utf8"
+);
 const legacyActivationV4 = fs.readFileSync(
   path.join(process.cwd(), "scripts", "tourney-schema-v4-activate-legacy.sql"),
   "utf8"
@@ -296,6 +305,20 @@ describe("Tourney cutover migration", () => {
     expect(baselineRecoveryV4).toContain("v_meta.fallback_read_only");
     expect(baselineRecoveryV4).toContain(
       "grant execute on function public.roo_capture_tourney_shadow_latency_baseline(text)"
+    );
+  });
+
+  test("audits and clears only an invalidated pre-recovery clock window", () => {
+    expect(baselineClockResetV4).toContain("not v_meta.hardened_active");
+    expect(baselineClockResetV4).toContain("v_baselines <> 0");
+    expect(baselineClockResetV4).toContain("not v_meta.writes_paused");
+    expect(baselineClockResetV4).toContain("v_meta.clean_since is not null");
+    expect(baselineClockResetV4).toContain("natural_mutation_verified_at=null");
+    expect(baselineClockResetV4).toContain(
+      "'baseline_recovery_clock_reset',true"
+    );
+    expect(baselineClockResetV4).toContain(
+      "raise exception 'Tourney baseline recovery clock reset is not safe'"
     );
   });
 
