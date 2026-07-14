@@ -53,8 +53,11 @@ begin
     raise exception 'Tourney snapshot controls are not in the paused schema-v4 pre-cutover state'
       using errcode='55000';
   end if;
-  if coalesce(jsonb_typeof(p_legacy_snapshot),'') <> 'object'
-     or not (p_legacy_snapshot ?& array[
+  if coalesce(jsonb_typeof(p_legacy_snapshot),'') <> 'object' then
+    raise exception 'Legacy Tourney snapshot is incomplete or malformed'
+      using errcode='22023';
+  end if;
+  if not (p_legacy_snapshot ?& array[
        'tourney_players','tourney_player_tokens','tourney_registration_config',
        'tourney_bracket_teams','tourney_bracket_team_members','tourney_bracket_meta',
        'tourney_bracket_entities','tourney_bracket_counters','tourney_bracket_audit',
@@ -67,8 +70,7 @@ begin
        'tourney_mirror_contracts','tourney_cutover_gate_events',
        'tourney_import_quarantine','tourney_shadow_observations',
        'tourney_shadow_latency_baselines'
-     ])
-     or exists(
+     ]) or exists(
        select 1 from jsonb_each(p_legacy_snapshot) entry
        where jsonb_typeof(entry.value) <> 'array'
      ) then
