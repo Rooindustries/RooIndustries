@@ -221,6 +221,24 @@ describe("Tourney Discord durable desired-role worker", () => {
     });
   });
 
+  test("uses a safe delay when Discord omits every 429 retry hint", async () => {
+    const fetchImpl = makeFetch([{
+      status: 429,
+      body: { retry_after: null },
+      headers: { "retry-after": " " },
+    }]);
+
+    await expect(applyTourneyDiscordDesiredState({
+      assignment: assignment(),
+      env,
+      fetchImpl,
+    })).rejects.toMatchObject({
+      code: "discord_rate_limited",
+      retryAfterMs: 1000,
+      discordGlobalRateLimit: false,
+    });
+  });
+
   test("fences every Discord role mutation", async () => {
     const fetchImpl = makeFetch([
       { status: 200, body: { roles: [env.DISCORD_PARTICIPANT_ROLE_ID] } },
