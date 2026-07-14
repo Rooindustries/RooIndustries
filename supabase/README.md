@@ -104,11 +104,39 @@ rows, active queue blockers, incomplete database controls, or a missing
 five-route latency baseline.
 
 Use this exact order. Keep the permission-restricted environment file outside
-the worktree and keep writes paused throughout these steps:
+the worktree and keep writes paused throughout these steps. Every local command
+that contacts a hosted target requires `--env /absolute/path/to/restricted.env`.
+The file must be mode `0600`. After adding the target credentials and IDs, print
+the credential-free pins without contacting any provider:
+
+```bash
+node scripts/tourney-cutover.mjs --env /absolute/path/to/restricted.env \
+  --print-target-fingerprints
+```
+
+Copy the applicable values back into the same restricted file:
+
+```text
+TOURNEY_CUTOVER_EXPECTED_LEGACY_FINGERPRINT=<legacy PostgreSQL v2 fingerprint>
+TOURNEY_CUTOVER_EXPECTED_SUPABASE_API_FINGERPRINT=<Supabase API v2 fingerprint>
+TOURNEY_CUTOVER_EXPECTED_SANITY_FINGERPRINT=<Sanity project and dataset v2 fingerprint>
+TOURNEY_CUTOVER_EXPECTED_SUPABASE_DATABASE_FINGERPRINT=<direct Supabase PostgreSQL v2 fingerprint>
+TOURNEY_CUTOVER_EXPECTED_DISCORD_FINGERPRINT=<Discord API, guild, and managed roles v2 fingerprint>
+```
+
+The legacy pin includes host, port, database, and user; the Supabase API pin
+includes origin and path; the direct-database pin also proves the database
+project matches the API project; the Sanity pin includes project and dataset;
+and the Discord pin includes the official API endpoint, guild, participant
+role, and host role. The snapshot command validates the first three pins before
+capture. Direct-database and Discord pins are required only by commands that
+contact those targets. Production Supabase database work still uses the
+deployed activation endpoint because that credential is not exportable.
 
 1. Apply the Supabase additive expand/forward-repair migrations, then run only
-   `node scripts/tourney-cutover.mjs --expand-legacy-v4`. Do not repair or
-   activate the legacy schema yet, and do not activate Supabase.
+   `node scripts/tourney-cutover.mjs --env /absolute/path/to/restricted.env --expand-legacy-v4`.
+   Do not repair or activate the legacy schema yet, and do not activate
+   Supabase.
 2. Deploy this release from `main` with hardening and schema-v4 activation
    disabled.
 3. While the deployment still has `TOURNEY_WRITES_PAUSED=0`, pause both
@@ -185,9 +213,11 @@ the worktree and keep writes paused throughout these steps:
 
    ```bash
    node scripts/tourney-cutover.mjs --env /absolute/path/to/restricted.env \
-     --snapshot --output /absolute/path/to/unique-pre-cutover.enc
+     --snapshot \
+     --output "$HOME/Documents/Codex/Tourney Cutover/unique-pre-cutover.enc"
    node scripts/tourney-cutover.mjs --env /absolute/path/to/restricted.env \
-     --verify-snapshot /absolute/path/to/unique-pre-cutover.enc
+     --verify-snapshot \
+     "$HOME/Documents/Codex/Tourney Cutover/unique-pre-cutover.enc"
    ```
 
 6. After every shadow route has at least 30 real pre-activation samples,
@@ -204,10 +234,10 @@ the worktree and keep writes paused throughout these steps:
      https://www.rooindustries.com/api/admin/tourney-activation
    ```
 
-7. Run `node scripts/tourney-cutover.mjs --activate-legacy-v4`. It re-reads the
-   paused controls before mutation.
-8. Run `node scripts/tourney-cutover.mjs --repair-legacy-v4` only after legacy
-   activation succeeds.
+7. Run `node scripts/tourney-cutover.mjs --env /absolute/path/to/restricted.env --activate-legacy-v4`.
+   It re-reads the paused controls before mutation.
+8. Run `node scripts/tourney-cutover.mjs --env /absolute/path/to/restricted.env --repair-legacy-v4`
+   only after legacy activation succeeds.
 9. Call the deployed `activate-schema` action below to activate Supabase. It
    also re-reads the paused controls before mutation.
 10. Call `inventory`, preserve its exact hash, then call `apply` with that hash.
@@ -217,8 +247,10 @@ the worktree and keep writes paused throughout these steps:
    Vercel-managed PostgreSQL snapshot:
 
    ```bash
-   node scripts/tourney-cutover.mjs --inventory-fallback-v4
-   node scripts/tourney-cutover.mjs --bootstrap-fallback-v4 \
+   node scripts/tourney-cutover.mjs --env /absolute/path/to/restricted.env \
+     --inventory-fallback-v4
+   node scripts/tourney-cutover.mjs --env /absolute/path/to/restricted.env \
+     --bootstrap-fallback-v4 \
      --expected-legacy-hash "$LEGACY_SNAPSHOT_HASH"
    ```
 
