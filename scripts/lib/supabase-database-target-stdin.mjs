@@ -58,6 +58,16 @@ export const readSupabaseDatabaseTargetFromStdin = async ({
       throw inputError("TOURNEY_SUPABASE_DATABASE_STDIN_TOO_LARGE");
     }
     chunks.push(chunk);
+    const buffered = Buffer.concat(chunks);
+    const newlineIndex = buffered.indexOf(0x0a);
+    if (newlineIndex >= 0) {
+      if (buffered.subarray(newlineIndex + 1).toString("utf8").trim()) {
+        throw inputError("TOURNEY_SUPABASE_DATABASE_STDIN_INVALID");
+      }
+      return parseSupabaseDatabaseTargetPayload(
+        buffered.subarray(0, newlineIndex).toString("utf8")
+      );
+    }
   }
   if (bytes === 0) {
     throw inputError("TOURNEY_SUPABASE_DATABASE_STDIN_REQUIRED");

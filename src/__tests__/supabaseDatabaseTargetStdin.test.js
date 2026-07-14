@@ -1,4 +1,4 @@
-import { Readable } from "node:stream";
+import { PassThrough, Readable } from "node:stream";
 import {
   expectedConnectedDatabaseUsername,
   loadSupabaseDatabaseTargetFromStdin,
@@ -70,6 +70,16 @@ describe("in-memory Supabase database target", () => {
       input: Readable.from([payload()]),
       maxBytes: 8,
     })).rejects.toMatchObject({ code: "TOURNEY_SUPABASE_DATABASE_STDIN_TOO_LARGE" });
+  });
+
+  test("consumes one line without waiting for the input stream to close", async () => {
+    const input = new PassThrough();
+    const result = readSupabaseDatabaseTargetFromStdin({ input });
+    input.write(`${payload()}\n`);
+    await expect(result).resolves.toEqual({
+      supabaseDatabaseUrl: databaseUrl,
+      expectedFingerprint: fingerprint,
+    });
   });
 
   test("normalizes only the exact project suffix on Supabase pooler usernames", () => {
