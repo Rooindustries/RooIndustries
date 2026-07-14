@@ -225,19 +225,29 @@ describe("Tourney v4 activation", () => {
     },
     {
       name: "mismatched legacy identity",
+      accountActive: true,
       authoritativeDiscordUserId: "9988776655",
       expectedCounts: { missingDiscordIdentities: 0, mismatchedDiscordIdentities: 1 },
     },
+    {
+      name: "inactive Tourney account",
+      accountActive: false,
+      authoritativeDiscordUserId: "1234567890",
+      expectedCounts: { inactiveTourneyAccounts: 1 },
+      expectedEvidence: { inactiveTourneyAccounts: 1 },
+    },
   ])("blocks activation and seeding for $name", async ({
+    accountActive = true,
     authoritativeDiscordUserId,
     expectedCounts,
+    expectedEvidence,
   }) => {
     authorityRows = [{
       player_id: "private-player",
       player_principal_id: null,
       legacy_discord_user_id: "1234567890",
       account_principal_id: "principal-1",
-      account_active: true,
+      account_active: accountActive,
       authoritative_discord_user_id: authoritativeDiscordUserId,
     }];
     const fetchImpl = jest.fn();
@@ -269,6 +279,7 @@ describe("Tourney v4 activation", () => {
     await expect(seedTourneyDiscordDesiredStateV4({ env })).rejects.toMatchObject({
       code: "TOURNEY_DISCORD_IDENTITY_AUTHORITY_CONFLICT",
       status: 409,
+      ...(expectedEvidence ? { evidence: expectedEvidence } : {}),
     });
     expect(mockExecuteCommand).not.toHaveBeenCalled();
     expect(mockRecordDesiredState).not.toHaveBeenCalled();

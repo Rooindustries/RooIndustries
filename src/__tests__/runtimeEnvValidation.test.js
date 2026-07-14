@@ -273,6 +273,21 @@ describe("release runtime environment validation", () => {
     );
   });
 
+  test("rejects an activation-staged tuple when its explicit marker is missing", () => {
+    const result = validate({
+      ...supabaseTourneyEnv,
+      TOURNEY_V4_ACTIVATION_ENABLED: "",
+      TOURNEY_WRITES_PAUSED: "1",
+      TOURNEY_FAILOVER_GENERATION: "1",
+      TOURNEY_HARDENING_V4_ENABLED: "0",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(
+      "The activation-ready v4 control tuple requires TOURNEY_V4_ACTIVATION_ENABLED=1"
+    );
+  });
+
   test("does not classify legacy generation-zero maintenance as activation", () => {
     const result = validate({
       ...supabaseTourneyEnv,

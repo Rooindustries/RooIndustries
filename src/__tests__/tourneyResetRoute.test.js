@@ -1,4 +1,5 @@
 const mockExecuteTourneyCommand = jest.fn();
+const mockCheckTourneyRateLimit = jest.fn();
 
 const createResponse = (body, init = {}) => {
   const headers = new Map();
@@ -27,7 +28,7 @@ jest.mock("../server/tourney/accountStore", () => ({
 
 jest.mock("../server/tourney/auth", () => ({
   buildUpdatedTourneyAccounts: jest.fn(),
-  checkTourneyRateLimit: jest.fn(async () => ({ ok: true })),
+  checkTourneyRateLimit: (...args) => mockCheckTourneyRateLimit(...args),
   getClientAddressFromHeaders: jest.fn(() => "127.0.0.1"),
   readEffectiveTourneyAccounts: jest.fn(async () => []),
   readTourneyPasswordReset: jest.fn(() => null),
@@ -59,6 +60,7 @@ const makeRequest = ({ contentLength = "" } = {}) => ({
 describe("Tourney reset route", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockCheckTourneyRateLimit.mockResolvedValue({ ok: true });
   });
 
   test("preserves the writes-paused code", async () => {
@@ -80,6 +82,20 @@ describe("Tourney reset route", () => {
   test("rejects an oversized reset body", async () => {
     const response = await POST(makeRequest({ contentLength: "8193" }));
     expect(response.status).toBe(413);
+    expect(mockExecuteTourneyCommand).not.toHaveBeenCalled();
+  });
+
+  test("consumes the reset rate limit before parsing a malformed body", async () => {
+    const request = makeRequest();
+    request.text = jest.fn(async () => "{");
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(400);
+    expect(mockCheckTourneyRateLimit).toHaveBeenCalledTimes(1);
+    expect(mockCheckTourneyRateLimit.mock.invocationCallOrder[0]).toBeLessThan(
+      request.text.mock.invocationCallOrder[0]
+    );
     expect(mockExecuteTourneyCommand).not.toHaveBeenCalled();
   });
 });

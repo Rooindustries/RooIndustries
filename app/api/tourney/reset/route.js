@@ -29,12 +29,6 @@ const jsonError = (message, status = 400, extra = {}) =>
 
 export async function POST(request) {
   if (!isSameOriginMutation(request)) return jsonError("Cross-origin request rejected.", 403);
-  let payload;
-  try {
-    payload = await readBoundedJson(request, { maxBytes: 8 * 1024 });
-  } catch (error) {
-    return jsonError(error?.message || "Invalid reset request.", Number(error?.status || 400));
-  }
   const clientAddress = getClientAddressFromHeaders(request.headers);
   const rateLimit = await checkTourneyRateLimit({
     key: `tourney-reset:${clientAddress}`,
@@ -50,6 +44,12 @@ export async function POST(request) {
         headers: { "Retry-After": String(rateLimit.retryAfterSeconds) },
       }
     );
+  }
+  let payload;
+  try {
+    payload = await readBoundedJson(request, { maxBytes: 8 * 1024 });
+  } catch (error) {
+    return jsonError(error?.message || "Invalid reset request.", Number(error?.status || 400));
   }
 
   try {

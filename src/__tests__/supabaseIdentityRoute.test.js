@@ -277,6 +277,32 @@ describe("Supabase connected identity route", () => {
     });
   });
 
+  test("consumes creator-only reauthentication on an already-unlinked replay", async () => {
+    mockResolveExactDomainIdentity.mockResolvedValue({
+      account: {
+        creator_active: true,
+        principal_id: "22222222-2222-4222-8222-222222222222",
+        roles: ["creator"],
+        status: "active",
+      },
+      user: { ...user, identities: [user.identities[0]] },
+    });
+
+    const response = await route.POST(postRequest("discord", "referral"));
+
+    expect(response.status).toBe(200);
+    expect(mockRpc).toHaveBeenNthCalledWith(1, "roo_consume_reauth_grant", {
+      p_token_hash: "hash:reauth-token",
+      p_user_id: user.id,
+      p_purpose: "unlink_identity",
+      p_provider: "discord",
+    });
+    expect(mockUnlinkIdentity).not.toHaveBeenCalled();
+    expect(response.cookies.getAll()).toContainEqual(
+      expect.objectContaining({ name: "roo_reauth_grant", maxAge: 0 })
+    );
+  });
+
   test("rejects a forged flow without an exact domain identity", async () => {
     mockResolveExactDomainIdentity.mockResolvedValue(null);
 
