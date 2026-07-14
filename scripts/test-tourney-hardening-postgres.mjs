@@ -7,7 +7,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import postgres from "postgres";
-import { assertLegacyConnectionTarget } from "./tourney-cutover.mjs";
+import { assertLegacyConnectionTarget, LEGACY_TABLES } from "./tourney-cutover.mjs";
 import {
   buildPostgresConnectionEnv,
   buildPostgresSessionArgs,
@@ -143,9 +143,45 @@ create schema if not exists auth;
 create schema if not exists accounts;
 create schema if not exists migration;
 create schema if not exists extensions;
+create schema if not exists vault;
 create extension if not exists pgcrypto with schema extensions;
+create table vault.secrets(
+  id uuid primary key,
+  secret text not null,
+  name text,
+  description text
+);
+create or replace function vault.create_secret(
+  new_secret text,
+  new_name text default null,
+  new_description text default null
+)
+returns uuid
+language plpgsql
+security definer
+set search_path=''
+as $$
+declare v_id uuid:=extensions.gen_random_uuid();
+begin
+  insert into vault.secrets(id,secret,name,description)
+  values(v_id,new_secret,new_name,new_description);
+  return v_id;
+end
+$$;
+create view vault.decrypted_secrets as
+select id,secret as decrypted_secret from vault.secrets;
 create table auth.users(id uuid primary key, email text);
+create table auth.identities(
+  id uuid primary key,
+  user_id uuid not null references auth.users(id)
+);
 create table accounts.principals(id uuid primary key default gen_random_uuid(), status text not null default 'active');
+create table accounts.login_aliases(
+  id uuid primary key default gen_random_uuid(),
+  principal_id uuid not null references accounts.principals(id),
+  alias_type text not null,
+  normalized_value text not null
+);
 create table accounts.principal_auth_users(
   user_id uuid primary key references auth.users(id),
   principal_id uuid not null references accounts.principals(id),
@@ -178,6 +214,7 @@ create table accounts.tourney_accounts(
   updated_at timestamptz not null default now()
 );
 create table accounts.identity_links(
+  id uuid not null unique default gen_random_uuid(),
   principal_id uuid not null references accounts.principals(id),
   provider text not null,
   provider_subject text not null,
@@ -443,6 +480,10 @@ try {
     root,
     "supabase/migrations/20260715050000_set_tourney_snapshot_rpc_timeout.sql"
   );
+  const supabaseCompactSnapshotPayload = path.join(
+    root,
+    "supabase/migrations/20260715070000_return_compact_tourney_snapshot_payload.sql"
+  );
   const supabaseBaselineRecovery = path.join(
     root,
     "supabase/migrations/20260715030000_allow_paused_tourney_baseline_recovery.sql"
@@ -530,6 +571,7 @@ insert into tourney_external_operations(
     supabaseCutoverOperationMarkers,
     supabaseSnapshotRpcRepair,
     supabaseSnapshotRpcTimeout,
+    supabaseCompactSnapshotPayload,
     supabaseBaselineRecovery
   );
   psql("supabase_unsafe", supabasePostInstallOldWriter);
@@ -552,6 +594,9 @@ insert into tourney_external_operations(
        and to_regprocedure(
          'public.roo_capture_tourney_hardening_snapshot(jsonb,jsonb,text)'
        ) is not null
+       and to_regprocedure(
+         'tourney.capture_tourney_hardening_snapshot_payload_v4(jsonb,jsonb,text)'
+       ) is not null
        and (
          select 'statement_timeout=120s'=any(coalesce(proconfig,array[]::text[]))
          from pg_catalog.pg_proc
@@ -570,6 +615,11 @@ insert into tourney_external_operations(
        and has_function_privilege(
          'service_role',
          'public.roo_capture_tourney_hardening_snapshot(jsonb,jsonb,text)',
+         'execute'
+       )
+       and not has_function_privilege(
+         'service_role',
+         'tourney.capture_tourney_hardening_snapshot_payload_v4(jsonb,jsonb,text)',
          'execute'
        ) ok`,
     "Supabase cutover operation ledger was unavailable before activation"
@@ -644,6 +694,40 @@ insert into tourney_external_operations(
       error.message === "Legacy Tourney snapshot is incomplete or malformed",
     "Supabase snapshot RPC iterated a non-object legacy snapshot"
   );
+  const legacySnapshot = Object.fromEntries(
+    LEGACY_TABLES.map((relation) => [relation, []])
+  );
+  legacySnapshot.tourney_cutover_metadata = [{
+    id: "tourney",
+    primary_backend: "supabase",
+    generation: 1,
+    writes_paused: true,
+    fallback_read_only: false,
+  }];
+  const legacySnapshotText = JSON.stringify(legacySnapshot);
+  const sanitySnapshot = { _id: "tourneyAuthStore", version: 1 };
+  const [snapshotRow] = await unsafeSupabase`
+    select public.roo_capture_tourney_hardening_snapshot(
+      ${unsafeSupabase.json(legacySnapshot)},
+      ${unsafeSupabase.json(sanitySnapshot)},
+      ${legacySnapshotText}::text
+    ) proof
+  `;
+  const snapshotProof = snapshotRow.proof;
+  assert.equal("payload" in snapshotProof, false, "snapshot RPC returned duplicate payload JSON");
+  assert.equal(snapshotProof.hosted_roundtrip_verified, true);
+  assert.equal(
+    crypto.createHash("sha256").update(snapshotProof.payload_text).digest("hex"),
+    snapshotProof.payload_sha256,
+    "snapshot RPC payload text hash did not match"
+  );
+  const parsedSnapshotPayload = JSON.parse(snapshotProof.payload_text);
+  assert.deepEqual(parsedSnapshotPayload.legacy, legacySnapshot);
+  assert.deepEqual(parsedSnapshotPayload.sanity_account, sanitySnapshot);
+  for (const [relation, count] of Object.entries(snapshotProof.table_counts)) {
+    assert.equal(Array.isArray(parsedSnapshotPayload[relation]), true);
+    assert.equal(parsedSnapshotPayload[relation].length, Number(count));
+  }
   await unsafeSupabase.begin(async (sql) => {
     await sql`
       update tourney.cutover_metadata set
@@ -848,6 +932,7 @@ insert into accounts.discord_role_assignments(
     supabaseCutoverOperationMarkers,
     supabaseSnapshotRpcRepair,
     supabaseSnapshotRpcTimeout,
+    supabaseCompactSnapshotPayload,
     supabaseBaselineRecovery,
     supabaseBaselineClockReset
   );
