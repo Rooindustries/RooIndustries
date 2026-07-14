@@ -1,6 +1,9 @@
 const mockGetSql = jest.fn();
 const mockAssertSchema = jest.fn();
 const mockSanityFetch = jest.fn();
+const mockCreateDataClient = jest.fn(() => ({
+  fetch: (...args) => mockSanityFetch(...args),
+}));
 
 jest.mock("../server/tourney/sqlClient.js", () => ({
   assertTourneySchemaVersion: (...args) => mockAssertSchema(...args),
@@ -16,7 +19,7 @@ jest.mock("../server/tourney/externalOperations.js", () => ({
 }));
 
 jest.mock("../server/data/documentClient.js", () => ({
-  createDataClient: () => ({ fetch: (...args) => mockSanityFetch(...args) }),
+  createDataClient: (...args) => mockCreateDataClient(...args),
 }));
 
 const { readPersistedTourneyAccountsJson } = require("../server/tourney/accountStore.js");
@@ -55,5 +58,28 @@ describe("hardened Tourney account authority", () => {
 
     await expect(readPersistedTourneyAccountsJson(env)).rejects.toBe(missing);
     expect(mockSanityFetch).not.toHaveBeenCalled();
+  });
+
+  test("uses the same private-first Sanity target as cutover pinning", async () => {
+    mockGetSql.mockRejectedValue(Object.assign(new Error("missing relation"), {
+      code: "42P01",
+    }));
+    await expect(readPersistedTourneyAccountsJson({
+      ...env,
+      TOURNEY_HARDENING_V4_ENABLED: "0",
+      SANITY_PRIVATE_PROJECT_ID: "private-project",
+      SANITY_PROJECT_ID: "standard-project",
+      NEXT_PUBLIC_SANITY_PROJECT_ID: "public-project",
+      SANITY_PRIVATE_DATASET: "private_dataset",
+      SANITY_DATASET: "standard_dataset",
+      NEXT_PUBLIC_SANITY_DATASET: "public_dataset",
+      SANITY_PRIVATE_WRITE_TOKEN: "private-token",
+      SANITY_WRITE_TOKEN: "standard-token",
+    })).resolves.toBe("[]");
+    expect(mockCreateDataClient).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: "private-project",
+      dataset: "private_dataset",
+      token: "private-token",
+    }));
   });
 });
