@@ -4,6 +4,7 @@ const mockListManageTourneyPlayers = jest.fn();
 const mockRecordTourneyPlayerDiscordLink = jest.fn();
 const mockRecordTourneyDiscordDesiredState = jest.fn();
 const mockListTourneyDiscordDesiredState = jest.fn();
+const mockListAuthoritativeTourneyDiscordMappings = jest.fn();
 const mockGetTourneyDiscordStatusForPlayer = jest.fn();
 const mockEnqueueTourneyExternalOperation = jest.fn();
 const mockSaveTourneyDiscordOperationAccessToken = jest.fn();
@@ -50,6 +51,8 @@ jest.mock("../server/tourney/discordDesiredState", () => ({
     mockGetTourneyDiscordStatusForPlayer(...args),
   listTourneyDiscordDesiredState: (...args) =>
     mockListTourneyDiscordDesiredState(...args),
+  listAuthoritativeTourneyDiscordMappings: (...args) =>
+    mockListAuthoritativeTourneyDiscordMappings(...args),
   recordTourneyDiscordDesiredState: (...args) =>
     mockRecordTourneyDiscordDesiredState(...args),
 }));
@@ -104,6 +107,7 @@ const makeRequest = ({
   cookie = "player-session",
   payload = {},
   contentLength = "",
+  idempotencyKey = "",
 } = {}) => ({
   url,
   headers: {
@@ -112,6 +116,7 @@ const makeRequest = ({
       if (key === "origin") return "https://www.rooindustries.com";
       if (key === "content-type") return "application/json";
       if (key === "content-length") return contentLength;
+      if (key === "idempotency-key") return idempotencyKey;
       return "";
     },
   },
@@ -139,6 +144,7 @@ describe("tourney Discord OAuth routes", () => {
     mockRecordTourneyPlayerDiscordLink.mockReset();
     mockRecordTourneyDiscordDesiredState.mockReset();
     mockListTourneyDiscordDesiredState.mockReset();
+    mockListAuthoritativeTourneyDiscordMappings.mockReset();
     mockGetTourneyDiscordStatusForPlayer.mockReset();
     mockEnqueueTourneyExternalOperation.mockReset();
     mockSaveTourneyDiscordOperationAccessToken.mockReset();
@@ -165,6 +171,9 @@ describe("tourney Discord OAuth routes", () => {
       account_active: true,
       discord_user_id: `discord_user_${index + 1}`,
     })));
+    mockListAuthoritativeTourneyDiscordMappings.mockImplementation(
+      (...args) => mockIdentitySql(...args)
+    );
     mockGetTourneySqlForBackend.mockResolvedValue(mockIdentitySql);
   });
 
@@ -536,6 +545,166 @@ describe("tourney Discord OAuth routes", () => {
     expect(mockRecordTourneyDiscordDesiredState).toHaveBeenCalledWith(
       expect.objectContaining({ forceRepair: true })
     );
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test("replays one authoritative principal-scoped repair for the same idempotency key", async () => {
+    const principalId = "11111111-1111-4111-8111-111111111111";
+    mockReadTourneySessionFromStore.mockResolvedValue({ username: "yukari", role: "caster" });
+    mockListManageTourneyPlayers.mockResolvedValue([{
+      id: "player_1",
+      principalId,
+      status: "approved",
+      discordUserId: "discord_user_1",
+    }]);
+    mockIdentitySql.mockResolvedValue([{
+      player_id: "player_1",
+      principal_id: principalId,
+      account_active: true,
+      discord_user_id: "discord_user_1",
+    }]);
+
+    const request = () => makeRequest({
+      url: "https://www.rooindustries.com/api/tourney/discord/backfill",
+      payload: { action: "apply", principalId },
+      idempotencyKey: "admin-repair-20260714-same",
+    });
+    const first = await backfillRoute.POST(request());
+    const second = await backfillRoute.POST(request());
+
+    await expect(first.json()).resolves.toMatchObject({
+      ok: true,
+      queued: 1,
+      contactedDiscord: false,
+      scope: { principalId, playerId: "player_1" },
+    });
+    await expect(second.json()).resolves.toMatchObject({ ok: true, queued: 1 });
+    expect(mockListAuthoritativeTourneyDiscordMappings).toHaveBeenCalledWith(
+      expect.objectContaining({ principalIds: [principalId], playerIds: [] })
+    );
+    expect(mockRecordTourneyDiscordDesiredState).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueTourneyExternalOperation).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueTourneyExternalOperation.mock.calls[0][0].commandId)
+      .toMatch(/^discord-backfill:scoped:[0-9a-f]{64}$/);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test("requires a valid idempotency key before resolving a scoped repair", async () => {
+    const principalId = "33333333-3333-4333-8333-333333333333";
+    mockReadTourneySessionFromStore.mockResolvedValue({ username: "yukari", role: "caster" });
+
+    const missing = await backfillRoute.POST(makeRequest({
+      url: "https://www.rooindustries.com/api/tourney/discord/backfill",
+      payload: { action: "apply", principalId },
+    }));
+    const invalid = await backfillRoute.POST(makeRequest({
+      url: "https://www.rooindustries.com/api/tourney/discord/backfill",
+      payload: { action: "apply", principalId },
+      idempotencyKey: "short",
+    }));
+
+    expect(missing.status).toBe(400);
+    expect(invalid.status).toBe(400);
+    await expect(missing.json()).resolves.toMatchObject({
+      ok: false,
+      code: "TOURNEY_IDEMPOTENCY_KEY_REQUIRED",
+    });
+    await expect(invalid.json()).resolves.toMatchObject({
+      ok: false,
+      code: "TOURNEY_IDEMPOTENCY_KEY_REQUIRED",
+    });
+    expect(mockListManageTourneyPlayers).not.toHaveBeenCalled();
+    expect(mockListAuthoritativeTourneyDiscordMappings).not.toHaveBeenCalled();
+    expect(mockEnqueueTourneyExternalOperation).not.toHaveBeenCalled();
+  });
+
+  test("queues a fresh scoped repair when the admin supplies a new idempotency key", async () => {
+    const principalId = "44444444-4444-4444-8444-444444444444";
+    mockReadTourneySessionFromStore.mockResolvedValue({ username: "yukari", role: "caster" });
+    mockListManageTourneyPlayers.mockResolvedValue([{
+      id: "player_4",
+      principalId,
+      status: "approved",
+      discordUserId: "discord_user_4",
+    }]);
+    mockIdentitySql.mockResolvedValue([{
+      player_id: "player_4",
+      principal_id: principalId,
+      account_active: true,
+      discord_user_id: "discord_user_4",
+    }]);
+
+    const call = (idempotencyKey) => backfillRoute.POST(makeRequest({
+      url: "https://www.rooindustries.com/api/tourney/discord/backfill",
+      payload: { action: "apply", principalId },
+      idempotencyKey,
+    }));
+    await call("admin-repair-20260714-first");
+    await call("admin-repair-20260714-second");
+
+    expect(mockRecordTourneyDiscordDesiredState).toHaveBeenCalledTimes(2);
+    expect(mockEnqueueTourneyExternalOperation).toHaveBeenCalledTimes(2);
+    const commandIds = mockEnqueueTourneyExternalOperation.mock.calls.map(
+      ([operation]) => operation.commandId
+    );
+    expect(commandIds[0]).not.toBe(commandIds[1]);
+    expect(commandIds.every((commandId) =>
+      /^discord-backfill:scoped:[0-9a-f]{64}$/.test(commandId)
+    )).toBe(true);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test("rejects an unknown scoped Discord repair target without enqueueing", async () => {
+    mockReadTourneySessionFromStore.mockResolvedValue({ username: "yukari", role: "caster" });
+    mockListManageTourneyPlayers.mockResolvedValue([]);
+    mockIdentitySql.mockResolvedValue([]);
+
+    const response = await backfillRoute.POST(makeRequest({
+      url: "https://www.rooindustries.com/api/tourney/discord/backfill",
+      payload: { action: "apply", playerId: "missing_player" },
+      idempotencyKey: "admin-repair-20260714-unknown",
+    }));
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      code: "TOURNEY_DISCORD_REPAIR_TARGET_NOT_FOUND",
+    });
+    expect(mockRecordTourneyDiscordDesiredState).not.toHaveBeenCalled();
+    expect(mockEnqueueTourneyExternalOperation).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test("rejects a scoped legacy identity mismatch without enqueueing", async () => {
+    const principalId = "22222222-2222-4222-8222-222222222222";
+    mockReadTourneySessionFromStore.mockResolvedValue({ username: "yukari", role: "caster" });
+    mockListManageTourneyPlayers.mockResolvedValue([{
+      id: "player_1",
+      principalId,
+      status: "approved",
+      discordUserId: "stale_discord_user",
+    }]);
+    mockIdentitySql.mockResolvedValue([{
+      player_id: "player_1",
+      principal_id: principalId,
+      account_active: true,
+      discord_user_id: "authoritative_discord_user",
+    }]);
+
+    const response = await backfillRoute.POST(makeRequest({
+      url: "https://www.rooindustries.com/api/tourney/discord/backfill",
+      payload: { action: "apply", principalId },
+      idempotencyKey: "admin-repair-20260714-mismatch",
+    }));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      code: "TOURNEY_DISCORD_REPAIR_TARGET_CONFLICT",
+    });
+    expect(mockRecordTourneyDiscordDesiredState).not.toHaveBeenCalled();
+    expect(mockEnqueueTourneyExternalOperation).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   test("queues the memory-store desired-state shape during repair", async () => {
