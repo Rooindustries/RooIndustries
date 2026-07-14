@@ -1,4 +1,4 @@
-import { createDataClient as createClient } from "../data/documentClient.js";
+import { createDocumentReadClient } from "../data/documentClient.js";
 import {
   resolveBookingFromSubmittedOrderId,
   isBookingDocument,
@@ -18,19 +18,8 @@ const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 const normalizeText = (value) =>
   String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
 
-export const createDownloadSanityClient = (env = process.env) =>
-  createClient({
-    projectId:
-      env.SANITY_PROJECT_ID || env.NEXT_PUBLIC_SANITY_PROJECT_ID || "9g42k3ur",
-    dataset: env.SANITY_DATASET || env.NEXT_PUBLIC_SANITY_DATASET || "production",
-    apiVersion:
-      env.SANITY_API_VERSION || env.NEXT_PUBLIC_SANITY_API_VERSION || "2023-10-01",
-    token:
-      env.SANITY_WRITE_TOKEN ||
-      env.SANITY_READ_TOKEN ||
-      undefined,
-    useCdn: false,
-  });
+export const createDownloadDataClient = (env = process.env) =>
+  createDocumentReadClient({ env, domain: "commerce" });
 
 export const isPaidBookingStatus = (status = "") => {
   const normalized = String(status || "").trim().toLowerCase();
@@ -128,7 +117,7 @@ export const validateDownloadAccess = async ({
   slug = "",
   orderId = "",
   email = "",
-  client = createDownloadSanityClient(),
+  client = createDownloadDataClient(),
   env = process.env,
   nowMs = Date.now(),
   availabilityCheck = isDownloadAvailable,

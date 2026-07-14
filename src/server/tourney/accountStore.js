@@ -10,28 +10,18 @@ const MEMORY_STORE =
   globalThis.__rooTourneyAccountStore ||
   (globalThis.__rooTourneyAccountStore = { accountsJson: "" });
 
-const getSanityConfig = (env = process.env) => ({
-  projectId:
-    env.SANITY_PRIVATE_PROJECT_ID ||
-    env.SANITY_PROJECT_ID ||
-    "",
-  dataset:
-    env.SANITY_PRIVATE_DATASET ||
-    env.SANITY_DATASET ||
-    "production",
-  apiVersion:
-    env.SANITY_PRIVATE_API_VERSION ||
-    env.SANITY_API_VERSION ||
-    "2023-10-01",
-  token:
-    env.SANITY_PRIVATE_WRITE_TOKEN ||
-    env.SANITY_WRITE_TOKEN ||
-    env.SANITY_API_TOKEN ||
-    "",
-});
-
 const shouldUseMemoryStore = (env = process.env) =>
   env.TOURNEY_ACCOUNT_STORE_MODE === "memory";
+const hasSanityReadConfig = (env = process.env) => Boolean(
+  (env.SANITY_PRIVATE_PROJECT_ID || env.SANITY_PROJECT_ID) &&
+  (env.SANITY_PRIVATE_DATASET || env.SANITY_DATASET) &&
+  (
+    env.SANITY_PRIVATE_READ_TOKEN ||
+    env.SANITY_READ_TOKEN ||
+    env.SANITY_PRIVATE_WRITE_TOKEN ||
+    env.SANITY_WRITE_TOKEN
+  )
+);
 
 export const getTourneyAccountsCanonicalHash = (accounts) =>
   crypto.createHash("sha256").update(stableTourneyJson(accounts)).digest("hex");
@@ -61,28 +51,31 @@ export const readLatestTourneyAccountSnapshot = async ({
   return rows[0] || null;
 };
 
-const getSanityClient = async (env = process.env) => {
-  if (shouldUseMemoryStore(env)) return null;
+const getOptionalSanityReadClient = async (env = process.env) => {
+  if (shouldUseMemoryStore(env) || !hasSanityReadConfig(env)) return null;
+  const { createDocumentReadClient } = await import("../data/documentClient.js");
+  return createDocumentReadClient({
+    env,
+    backendOverride: "sanity",
+    perspective: "published",
+  });
+};
 
-  const config = getSanityConfig(env);
-  if (!config.projectId || !config.dataset || !config.token) {
-    return null;
+const getSanityWriteClient = async (env = process.env) => {
+  if (shouldUseMemoryStore(env)) {
+    throw new Error("Persistent Tourney Sanity projection is not configured.");
   }
-
-  const { createDataClient } = await import("../data/documentClient.js");
-  return createDataClient({
-    projectId: config.projectId,
-    dataset: config.dataset,
-    apiVersion: config.apiVersion,
-    token: config.token,
-    useCdn: false,
+  const { createDocumentWriteClient } = await import("../data/documentClient.js");
+  return createDocumentWriteClient({
+    env,
+    backendOverride: "sanity",
   });
 };
 
 export const isPersistentTourneyAccountStoreConfigured = async (env = process.env) =>
   shouldUseMemoryStore(env) || Boolean(
     env.SUPABASE_DATABASE_URL || env.TOURNEY_DATABASE_URL || env.POSTGRES_URL ||
-    await getSanityClient(env)
+    await getOptionalSanityReadClient(env)
   );
 
 export const readPersistedTourneyAccountsJson = async (env = process.env) => {
@@ -116,7 +109,7 @@ export const readPersistedTourneyAccountsJson = async (env = process.env) => {
     }
   }
 
-  const client = await getSanityClient(env);
+  const client = await getOptionalSanityReadClient(env);
   if (!client) return "";
 
   const doc = await client.fetch(
@@ -134,8 +127,7 @@ export const projectTourneyAccountSnapshotToSanity = async ({
   signal,
   env = process.env,
 } = {}) => {
-  const client = await getSanityClient(env);
-  if (!client) throw new Error("Persistent Tourney Sanity projection is not configured.");
+  const client = await getSanityWriteClient(env);
   const updatedAt = new Date().toISOString();
   const updatedBy = String(actorUsername || "").trim().toLowerCase();
   await client.createIfNotExists({

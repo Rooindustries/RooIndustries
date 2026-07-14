@@ -141,7 +141,6 @@ const validateUtilitiesDownloadCatalog = (rawValue) => {
 
 const sessionSecretKeys = ["REF_SESSION_SECRET"];
 const adminKeyKeys = ["REF_ADMIN_KEY"];
-const webhookSecretKeys = ["SANITY_WEBHOOK_SECRET"];
 const paypalClientIdKeys = [
   "PAYPAL_CLIENT_ID",
   "REACT_APP_PAYPAL_CLIENT_ID",
@@ -152,22 +151,6 @@ const paypalClientSecretKeys = [
 ];
 
 const requiredChecks = [
-  {
-    keys: ["SANITY_PROJECT_ID"],
-    label: "SANITY_PROJECT_ID",
-  },
-  {
-    keys: ["SANITY_DATASET"],
-    label: "SANITY_DATASET",
-  },
-  {
-    keys: ["SANITY_WRITE_TOKEN"],
-    label: "SANITY_WRITE_TOKEN",
-  },
-  {
-    keys: ["SANITY_READ_TOKEN", "SANITY_PRIVATE_READ_TOKEN"],
-    label: "SANITY_READ_TOKEN",
-  },
   {
     keys: sessionSecretKeys,
     label: "REF_SESSION_SECRET",
@@ -199,10 +182,6 @@ const requiredChecks = [
   {
     keys: ["CRON_SECRET"],
     label: "CRON_SECRET",
-  },
-  {
-    keys: webhookSecretKeys,
-    label: "SANITY_WEBHOOK_SECRET",
   },
   {
     keys: ["RAZORPAY_WEBHOOK_SECRET"],
@@ -245,10 +224,6 @@ const requiredChecks = [
     label: "LEGACY_UPGRADE_GET_UNTIL",
   },
 ];
-
-const missing = requiredChecks
-  .filter((check) => !hasAny(check.keys))
-  .map((check) => check.label);
 
 const razorpayKeyId = getFirstValue(["RAZORPAY_KEY_ID"]);
 const razorpayKeySecret = getFirstValue(["RAZORPAY_KEY_SECRET"]);
@@ -419,6 +394,55 @@ const hasBlobCredentials = hasAny([
 const blobDownloadsEnabled =
   downloadStorageBackend === "blob" ||
   (downloadStorageBackend !== "local" && hasBlobCredentials);
+const sanityReadRequired =
+  primaryBackend === "sanity" ||
+  commercePrimaryBackend === "sanity";
+const sanityWriteRequired =
+  primaryBackend === "sanity" ||
+  commercePrimaryBackend === "sanity" ||
+  reverseMirrorEnabled;
+const sanityTargetRequired = sanityReadRequired || sanityWriteRequired;
+const sanityRequiredChecks = [
+  ...(sanityTargetRequired
+    ? [
+        {
+          keys: ["SANITY_PRIVATE_PROJECT_ID", "SANITY_PROJECT_ID"],
+          label: "SANITY_PROJECT_ID",
+        },
+        {
+          keys: ["SANITY_PRIVATE_DATASET", "SANITY_DATASET"],
+          label: "SANITY_DATASET",
+        },
+      ]
+    : []),
+  ...(sanityWriteRequired
+    ? [
+        {
+          keys: ["SANITY_PRIVATE_WRITE_TOKEN", "SANITY_WRITE_TOKEN"],
+          label: "SANITY_WRITE_TOKEN",
+        },
+      ]
+    : []),
+  ...(sanityReadRequired
+    ? [
+        {
+          keys: ["SANITY_PRIVATE_READ_TOKEN", "SANITY_READ_TOKEN"],
+          label: "SANITY_READ_TOKEN",
+        },
+      ]
+    : []),
+  ...(commercePrimaryBackend === "sanity"
+    ? [
+        {
+          keys: ["SANITY_WEBHOOK_SECRET"],
+          label: "SANITY_WEBHOOK_SECRET",
+        },
+      ]
+    : []),
+];
+const missing = [...requiredChecks, ...sanityRequiredChecks]
+  .filter((check) => !hasAny(check.keys))
+  .map((check) => check.label);
 
 if (isProdBuild && blobDownloadsEnabled) {
   const catalogFailure = validateUtilitiesDownloadCatalog(
@@ -593,11 +617,6 @@ if (primaryBackend === "supabase" && !cutoverEnabled) {
 if (commercePrimaryBackend === "supabase" && !commerceCutoverEnabled) {
   supabaseConsistencyFailures.push(
     "Supabase commerce primary mode requires COMMERCE_CUTOVER_ENABLED=1."
-  );
-}
-if (commercePrimaryBackend === "supabase" && primaryBackend !== "sanity") {
-  supabaseConsistencyFailures.push(
-    "Commerce-only cutover requires DATA_PRIMARY_BACKEND=sanity."
   );
 }
 if (

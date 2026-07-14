@@ -1,4 +1,4 @@
-import { createDownloadSanityClient } from "@/src/server/downloads/downloadAccess";
+import { createDownloadDataClient } from "@/src/server/downloads/downloadAccess";
 import { getDownloadBySlug } from "@/src/server/downloads/downloadCatalog";
 import {
   validateBookingForDownloadToken,
@@ -97,7 +97,7 @@ export async function GET(request) {
     return textResponse("Download not found.", 404);
   }
 
-  const client = createDownloadSanityClient();
+  const client = createDownloadDataClient();
   const booking = await client.getDocument(verified.payload.bookingId);
   const access = validateBookingForDownloadToken({
     booking,
