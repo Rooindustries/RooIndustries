@@ -2,6 +2,7 @@ if (!process.env.CI && !process.env.VERCEL) {
   require("dotenv").config({ path: ".env.local" });
 }
 
+const posixPath = require("node:path/posix");
 const {
   resolvePaymentProviders,
   resolvePaymentRuntimePolicy,
@@ -47,6 +48,95 @@ const isEnabled = (key) =>
 const numericPercent = (key) => {
   const parsed = Number(String(process.env[key] || "").trim() || 0);
   return Number.isFinite(parsed) ? Math.max(0, Math.min(100, parsed)) : 0;
+};
+
+const normalizeDownloadSlug = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+
+const validateUtilitiesDownloadCatalog = (rawValue) => {
+  const raw = String(rawValue || "").trim();
+  if (!raw) {
+    return "Blob-backed production downloads require DOWNLOAD_CATALOG_JSON with a pinned utilities entry.";
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return "DOWNLOAD_CATALOG_JSON must contain valid JSON for Blob-backed production downloads.";
+  }
+
+  const entries = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === "object"
+      ? Object.entries(parsed).map(([slug, value]) => ({
+          slug,
+          ...(value && typeof value === "object" && !Array.isArray(value)
+            ? value
+            : {}),
+        }))
+      : null;
+  if (
+    !entries ||
+    entries.some(
+      (entry) => !entry || typeof entry !== "object" || Array.isArray(entry)
+    )
+  ) {
+    return "DOWNLOAD_CATALOG_JSON must be an array or object of download entries.";
+  }
+
+  const utilitiesEntries = entries.filter(
+    (entry) => normalizeDownloadSlug(entry.slug) === "utilities"
+  );
+  if (utilitiesEntries.length !== 1) {
+    return "DOWNLOAD_CATALOG_JSON must contain exactly one utilities entry for Blob-backed production downloads.";
+  }
+
+  const utilities = utilitiesEntries[0];
+  const fileName = String(
+    utilities.fileName || utilities.filename || "utilities.zip"
+  ).trim();
+  const rawBlobPath = String(
+    utilities.blobPath || `downloads/${fileName}`
+  )
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "");
+  const normalizedBlobPath = posixPath.normalize(rawBlobPath);
+  const hasInvalidMapping =
+    !fileName ||
+    fileName !== posixPath.basename(fileName) ||
+    !fileName.toLowerCase().endsWith(".zip") ||
+    /[\x00-\x1f\x7f]/.test(fileName) ||
+    !rawBlobPath ||
+    normalizedBlobPath === "." ||
+    rawBlobPath.split("/").some((part) => part === "..") ||
+    normalizedBlobPath.split("/").some((part) => part === "..") ||
+    posixPath.basename(normalizedBlobPath) !== fileName;
+  if (hasInvalidMapping) {
+    return "The utilities DOWNLOAD_CATALOG_JSON entry has an invalid fileName or blobPath.";
+  }
+
+  const size = Number(utilities.sizeBytes ?? utilities.size);
+  const sha256 = String(utilities.sha256 || "").trim().toLowerCase();
+  const blobEtag = String(utilities.blobEtag ?? utilities.etag ?? "").trim();
+  const missingPins = [];
+  if (!Number.isSafeInteger(size) || size <= 0) missingPins.push("sizeBytes");
+  if (!/^[a-f0-9]{64}$/.test(sha256)) missingPins.push("sha256");
+  if (!blobEtag || blobEtag.length > 256 || /[\x00-\x1f\x7f]/.test(blobEtag)) {
+    missingPins.push("blobEtag");
+  }
+
+  return missingPins.length > 0
+    ? `The utilities DOWNLOAD_CATALOG_JSON entry requires valid ${missingPins.join(
+        ", "
+      )} integrity pins.`
+    : "";
 };
 
 const sessionSecretKeys = ["REF_SESSION_SECRET"];
@@ -174,6 +264,7 @@ const explicitPayPalEnv = String(
 const providerConsistencyFailures = [];
 const providerConsistencyWarnings = [];
 const supabaseConsistencyFailures = [];
+const downloadConsistencyFailures = [];
 const compatibilityDeadlines = [
   ["PAYMENT_LEGACY_COMPLETION_UNTIL", 60 * 60 * 1000],
   ["PAYMENT_LEGACY_CHECKOUT_UNTIL", 60 * 60 * 1000],
@@ -317,6 +408,24 @@ const socialAuthEnabled = isEnabled("SUPABASE_SOCIAL_AUTH_ENABLED");
 const publicSocialAuthEnabled = isEnabled(
   "NEXT_PUBLIC_SUPABASE_SOCIAL_AUTH_ENABLED"
 );
+const downloadStorageBackend = getFirstValue([
+  "DOWNLOAD_STORAGE_BACKEND",
+]).toLowerCase();
+const hasBlobCredentials = hasAny([
+  "BLOB_READ_WRITE_TOKEN",
+  "BLOB_STORE_ID",
+  "VERCEL_OIDC_TOKEN",
+]);
+const blobDownloadsEnabled =
+  downloadStorageBackend === "blob" ||
+  (downloadStorageBackend !== "local" && hasBlobCredentials);
+
+if (isProdBuild && blobDownloadsEnabled) {
+  const catalogFailure = validateUtilitiesDownloadCatalog(
+    process.env.DOWNLOAD_CATALOG_JSON
+  );
+  if (catalogFailure) downloadConsistencyFailures.push(catalogFailure);
+}
 const requireRuntimeKey = (key) => {
   if (!hasAny([key]) && !missing.includes(key)) missing.push(key);
 };
@@ -618,6 +727,16 @@ if (providerConsistencyFailures.length > 0) {
 if (supabaseConsistencyFailures.length > 0) {
   const rendered = supabaseConsistencyFailures.join("\n- ");
   if (shouldFailClosed(supabaseConsistencyFailures)) {
+    console.error(`[env] Release build blocked:\n- ${rendered}`);
+    process.exit(1);
+  }
+
+  console.warn(`[env] Local/non-release build warning:\n- ${rendered}`);
+}
+
+if (downloadConsistencyFailures.length > 0) {
+  const rendered = downloadConsistencyFailures.join("\n- ");
+  if (shouldFailClosed(downloadConsistencyFailures)) {
     console.error(`[env] Release build blocked:\n- ${rendered}`);
     process.exit(1);
   }
