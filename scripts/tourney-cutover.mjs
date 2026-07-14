@@ -482,31 +482,33 @@ const validateHostedSnapshot = ({ data, legacyData, sanityAccount }) => {
     /^[0-9a-f]{64}$/.test(String(data?.payload_sha256 || "")) &&
     data?.hosted_roundtrip_verified === true &&
     data?.table_counts && typeof data.table_counts === "object" &&
-    data?.payload && typeof data.payload === "object" &&
     parsedPayload && sha256(payloadText) === data.payload_sha256 &&
-    stableJson(parsedPayload) === stableJson(data.payload);
+    (data?.payload === undefined || (
+      data.payload && typeof data.payload === "object" &&
+      stableJson(parsedPayload) === stableJson(data.payload)
+    ));
   if (!validMetadata) {
     const error = new Error("Supabase Tourney snapshot proof is missing or invalid.");
     error.code = "TOURNEY_HOSTED_SNAPSHOT_PROOF_INVALID";
     throw error;
   }
   const missingRelations = HOSTED_SNAPSHOT_RELATIONS.filter(
-    (relation) => !Array.isArray(data.payload[relation])
+    (relation) => !Array.isArray(parsedPayload[relation])
   );
   const wrongCounts = HOSTED_SNAPSHOT_RELATIONS.filter(
-    (relation) => Number(data.table_counts[relation]) !== data.payload[relation]?.length
+    (relation) => Number(data.table_counts[relation]) !== parsedPayload[relation]?.length
   );
   if (
     missingRelations.length > 0 ||
     wrongCounts.length > 0 ||
-    stableJson(data.payload.legacy) !== stableJson(legacyData) ||
-    stableJson(data.payload.sanity_account) !== stableJson(sanityAccount)
+    stableJson(parsedPayload.legacy) !== stableJson(legacyData) ||
+    stableJson(parsedPayload.sanity_account) !== stableJson(sanityAccount)
   ) {
     const error = new Error("Supabase Tourney snapshot payload is incomplete or inconsistent.");
     error.code = "TOURNEY_HOSTED_SNAPSHOT_INCOMPLETE";
     throw error;
   }
-  return { payload: data.payload, payloadTextSha256: sha256(payloadText) };
+  return { payload: parsedPayload, payloadTextSha256: sha256(payloadText) };
 };
 
 const captureHostedSnapshot = async ({ legacyData, legacyPayloadText, sanityAccount }) => {
@@ -1016,6 +1018,8 @@ const main = async () => {
 };
 
 export {
+  HOSTED_SNAPSHOT_RELATIONS,
+  LEGACY_TABLES,
   assertDiscordConnectionTarget,
   assertLegacyConnectionTarget,
   assertSanityConnectionTarget,
@@ -1032,6 +1036,7 @@ export {
   resolveSnapshotInput,
   runPsql,
   stableJson,
+  validateHostedSnapshot,
   valueAfter,
 };
 
