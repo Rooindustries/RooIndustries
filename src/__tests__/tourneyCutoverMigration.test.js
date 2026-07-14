@@ -867,6 +867,24 @@ describe("Tourney cutover migration", () => {
     }
     expect(triggerBindingRepairV4).toContain("mirror_trigger_binding_drift");
     expect(triggerBindingRepairV4).toContain("shadow_reads_since_natural_mutation");
+    expect(triggerBindingRepairV4).toContain(
+      "assert_tourney_schema_v4_activation_ready"
+    );
+    expect(triggerBindingRepairV4).toContain(
+      "pg_catalog.to_regprocedure("
+    );
+    expect(triggerBindingRepairV4).toContain(
+      "'validation_only', true"
+    );
+    expect(triggerBindingRepairV4).toContain(
+      "pg_catalog.length(p_actor) > 120"
+    );
+    expect(triggerBindingRepairV4).toContain(
+      "'compatibility_mode', 'trigger-binding-live-schema-compat-v1'"
+    );
+    expect(triggerBindingRepairV4).toContain(
+      "not v_meta.hardened_active"
+    );
     expect(triggerBindingRepairV4).toContain("Supabase Tourney activation mirror trigger verification failed");
     expect(legacyTriggerBindingRepairV4).toContain(
       "Legacy Tourney mirror trigger repair verification failed"
