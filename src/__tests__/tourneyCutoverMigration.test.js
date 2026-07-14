@@ -60,7 +60,7 @@ const baselineRestoreV4 = fs.readFileSync(
     process.cwd(),
     "supabase",
     "migrations",
-    "20260714005000_restore_tourney_shadow_latency_baselines.sql"
+    "20260715010000_restore_tourney_shadow_latency_baselines.sql"
   ),
   "utf8"
 );
