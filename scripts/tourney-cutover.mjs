@@ -511,26 +511,46 @@ const validateHostedSnapshot = ({ data, legacyData, sanityAccount }) => {
   return { payload: parsedPayload, payloadTextSha256: sha256(payloadText) };
 };
 
-const captureHostedSnapshot = async ({ legacyData, legacyPayloadText, sanityAccount }) => {
-  const client = createSupabaseAdminClient();
-  const parameters = {
-    p_legacy_snapshot: legacyData,
-    p_legacy_snapshot_text: legacyPayloadText,
-    p_sanity_account: sanityAccount,
-  };
-  const hardened = await client.rpc(
-    "roo_capture_tourney_hardening_snapshot",
-    parameters
-  );
-  if (hardened.error) {
+const captureHostedSnapshot = async ({ legacyPayloadText, sanityAccount }) => {
+  const databaseUrl = normalize(process.env.SUPABASE_DATABASE_URL);
+  if (!databaseUrl) {
+    const error = new Error("The Supabase snapshot database connection is not configured.");
+    error.code = "TOURNEY_SUPABASE_DATABASE_CONNECTION_REQUIRED";
+    throw error;
+  }
+  const { default: postgres } = await import("postgres");
+  const sql = postgres(databaseUrl, {
+    max: 1,
+    prepare: false,
+    idle_timeout: 20,
+    connect_timeout: 15,
+    connection: {
+      application_name: "roo-industries-tourney-snapshot",
+      statement_timeout: 120000,
+      lock_timeout: 5000,
+    },
+  });
+  let data;
+  try {
+    const [row] = await sql`
+      select public.roo_capture_tourney_hardening_snapshot(
+        null::jsonb,
+        ${sql.json(sanityAccount)}::jsonb,
+        ${legacyPayloadText}::text
+      ) data
+    `;
+    data = row?.data;
+  } catch (cause) {
     const error = new Error(
       "Supabase Tourney hardening snapshot failed; no incomplete fallback is permitted."
     );
-    error.code = hardened.error.code || "TOURNEY_SNAPSHOT_FAILED";
+    error.code = cause?.code || "TOURNEY_SNAPSHOT_FAILED";
     throw error;
+  } finally {
+    await sql.end({ timeout: 5 });
   }
   return {
-    data: hardened.data,
+    data,
     functionName: "public.roo_capture_tourney_hardening_snapshot",
   };
 };
@@ -629,7 +649,6 @@ const captureSnapshot = async () => {
     }
     assertStagedActivationEnvironment();
     const hosted = await captureHostedSnapshot({
-      legacyData,
       legacyPayloadText: legacyCapture.payloadText,
       sanityAccount,
     });
@@ -937,7 +956,7 @@ const checkManualFailoverV4 = async () => {
 
 const actions = [
   { flag: "--print-target-fingerprints", requiresEnvironment: true, touchesLegacy: false, touchesSupabase: false, execute: printTargetFingerprints },
-  { flag: "--snapshot", touchesLegacy: true, touchesSupabase: true, touchesSanity: true, options: ["--output"], execute: captureSnapshot },
+  { flag: "--snapshot", touchesLegacy: true, touchesSupabase: true, touchesSupabaseDatabase: true, touchesSanity: true, options: ["--output"], execute: captureSnapshot },
   { flag: "--verify-snapshot", touchesLegacy: false, touchesSupabase: false, execute: verifySnapshot },
   { flag: "--apply-legacy-schema", touchesLegacy: true, touchesSupabase: false, execute: applyLegacySchema },
   { flag: "--expand-legacy-v4", touchesLegacy: true, touchesSupabase: false, execute: () => applyLegacyV4Phase("expand") },
