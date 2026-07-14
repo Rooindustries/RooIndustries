@@ -431,12 +431,36 @@ insert into tourney_external_operations(
     supabaseCutoverOperationMarkers
   );
   psql("supabase_unsafe", supabasePostInstallOldWriter);
-  const unsafeSupabaseActivation = psqlFails("supabase_unsafe", activateSupabaseV4);
-  assert.notEqual(unsafeSupabaseActivation.status, 0, "unsafe Supabase activation succeeded");
   const unsafeSupabase = postgres(
     `postgres://127.0.0.1:${port}/supabase_unsafe`,
     { max: 1, prepare: false }
   );
+  await assertSql(
+    unsafeSupabase,
+    `select to_regclass('tourney.cutover_control_operations') is not null
+       and (select count(*) = 2 from information_schema.columns
+         where table_schema = 'tourney' and table_name = 'cutover_metadata'
+           and column_name in (
+             'last_pause_operation_id','last_resume_operation_id'
+           )) ok`,
+    "Supabase cutover operation ledger was unavailable before activation"
+  );
+  await unsafeSupabase.begin(async (sql) => {
+    await sql`
+      update tourney.cutover_metadata set writes_paused = true where id = 'tourney'
+    `;
+    await sql`
+      insert into tourney.cutover_control_operations(
+        operation_kind,operation_id,primary_backend,generation,
+        target_writes_paused,actor
+      ) values(
+        'pause','preactivation:pause-0001','legacy',0,true,
+        'schema-v4-pause:preactivation:pause-0001'
+      )
+    `;
+  });
+  const unsafeSupabaseActivation = psqlFails("supabase_unsafe", activateSupabaseV4);
+  assert.notEqual(unsafeSupabaseActivation.status, 0, "unsafe Supabase activation succeeded");
   await assertSql(
     unsafeSupabase,
     `select
@@ -472,12 +496,37 @@ insert into tourney_external_operations(
     path.join(root, "scripts/tourney-schema-v4-expand-legacy.sql")
   );
   psql("legacy_unsafe", legacyOldWriter);
-  const unsafeLegacyActivation = psqlFails("legacy_unsafe", legacyActivation);
-  assert.notEqual(unsafeLegacyActivation.status, 0, "unsafe legacy activation succeeded");
   const unsafeLegacy = postgres(
     `postgres://127.0.0.1:${port}/legacy_unsafe`,
     { max: 1, prepare: false }
   );
+  await assertSql(
+    unsafeLegacy,
+    `select to_regclass('public.tourney_cutover_control_operations') is not null
+       and (select count(*) = 2 from information_schema.columns
+         where table_schema = 'public'
+           and table_name = 'tourney_cutover_metadata'
+           and column_name in (
+             'last_pause_operation_id','last_resume_operation_id'
+           )) ok`,
+    "fallback cutover operation ledger was unavailable before activation"
+  );
+  await unsafeLegacy.begin(async (sql) => {
+    await sql`
+      update tourney_cutover_metadata set writes_paused = true where id = 'tourney'
+    `;
+    await sql`
+      insert into tourney_cutover_control_operations(
+        operation_kind,operation_id,primary_backend,generation,
+        target_writes_paused,actor
+      ) values(
+        'pause','preactivation:pause-0001','legacy',0,true,
+        'schema-v4-pause:preactivation:pause-0001'
+      )
+    `;
+  });
+  const unsafeLegacyActivation = psqlFails("legacy_unsafe", legacyActivation);
+  assert.notEqual(unsafeLegacyActivation.status, 0, "unsafe legacy activation succeeded");
   await assertSql(
     unsafeLegacy,
     "select serialization_key='supabase_player_auth:player:old-writer-player' ok from tourney_external_operations where operation_key='old-writer-legacy:auth'",
@@ -589,6 +638,89 @@ insert into accounts.discord_role_assignments(
     DISCORD_PARTICIPANT_ROLE_ID: "710000000000000001",
     DISCORD_HOST_ROLE_ID: "710000000000000002",
   };
+
+  const cutoverOperationFixtures = [
+    ["pause", "fixture:pause-0001", true],
+    ["resume", "fixture:resume-0001", false],
+    ["pause", "fixture:pause-0002", true],
+    ["resume", "fixture:resume-0002", false],
+  ];
+  for (const [sql, relation] of [
+    [source, "tourney.cutover_control_operations"],
+    [target, "tourney_cutover_control_operations"],
+  ]) {
+    for (const [operationKind, operationId, targetWritesPaused] of
+      cutoverOperationFixtures) {
+      await sql`
+        insert into ${sql(relation)}(
+          operation_kind,operation_id,primary_backend,generation,
+          target_writes_paused,actor
+        ) values(
+          ${operationKind},${operationId},'supabase',1,
+          ${targetWritesPaused},${`schema-v4-${operationKind}:${operationId}`}
+        )
+      `;
+    }
+    await assertSql(
+      sql,
+      `select count(*) = 4
+         and count(*) filter (where operation_kind = 'pause') = 2
+         and count(*) filter (where operation_kind = 'resume') = 2 ok
+       from ${relation}`,
+      `${relation} did not retain independent pause and resume operations`
+    );
+    await assert.rejects(
+      sql`
+        insert into ${sql(relation)}(
+          operation_kind,operation_id,primary_backend,generation,
+          target_writes_paused,actor
+        ) values(
+          'pause','fixture:pause-0001','supabase',1,true,
+          'schema-v4-pause:fixture:pause-0001'
+        )
+      `,
+      (error) => error.code === "23505",
+      `${relation} accepted a duplicate operation`
+    );
+    await assert.rejects(
+      sql`update ${sql(relation)} set actor = 'changed'`,
+      (error) => error.code === "55000",
+      `${relation} allowed an operation to be updated`
+    );
+    await assert.rejects(
+      sql`delete from ${sql(relation)} where operation_kind = 'pause'`,
+      (error) => error.code === "55000",
+      `${relation} allowed an operation to be deleted`
+    );
+    await sql`
+      insert into ${sql(relation)}(
+        operation_kind,operation_id,primary_backend,generation,
+        target_writes_paused,actor
+      ) values(
+        'pause','fixture:compensate-0001','supabase',1,true,
+        'schema-v4-pause:fixture:compensate-0001'
+      )
+    `;
+    await sql.begin(async (transaction) => {
+      await transaction`
+        select set_config('roo.tourney_cutover_compensation','1',true)
+      `;
+      await transaction`
+        delete from ${transaction(relation)}
+        where operation_kind = 'pause'
+          and operation_id = 'fixture:compensate-0001'
+      `;
+    });
+    await assertSql(
+      sql,
+      `select not exists(
+         select 1 from ${relation}
+         where operation_kind = 'pause'
+           and operation_id = 'fixture:compensate-0001'
+       ) ok`,
+      `${relation} blocked a transaction-gated compensation delete`
+    );
+  }
 
   await assertSql(
     source,
@@ -4065,6 +4197,17 @@ insert into accounts.discord_role_assignments(
     await sql`delete from tourney.external_operations where operation_key='fixture:failover:blocker'`;
   });
 
+  await assertSql(
+    source,
+    "select count(*) = 4 ok from tourney.cutover_control_operations",
+    "Supabase cutover operation history was not retained"
+  );
+  await assertSql(
+    target,
+    "select count(*) = 4 ok from tourney_cutover_control_operations",
+    "fallback cutover operation history was not retained"
+  );
+
   summary = {
     ok: true,
     postgres: version.trim(),
@@ -4078,6 +4221,7 @@ insert into accounts.discord_role_assignments(
       "semantic timestamp and numeric canonical hashes",
       "target-only snapshot pruning",
       "independent constrained pause and resume operation markers",
+      "append-only pre-activation cutover operation history",
       "insert mirroring",
       "idempotent fallback upserts and target-only deletes",
       "database-authoritative write pause with maintenance bypass",
