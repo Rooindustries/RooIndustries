@@ -29,6 +29,7 @@ export default {
       title: 'Max Total % Allowed',
       type: 'number',
       initialValue: 15,
+      validation: (Rule) => Rule.required().min(0).max(100),
     },
 
     {
@@ -36,6 +37,7 @@ export default {
       title: 'Creator Commission %',
       type: 'number',
       initialValue: 10,
+      validation: (Rule) => Rule.required().min(0).max(100),
     },
 
     {
@@ -43,6 +45,14 @@ export default {
       title: 'Viewer Discount %',
       type: 'number',
       initialValue: 0,
+      validation: (Rule) =>
+        Rule.required().min(0).max(100).custom((discount, context) => {
+          const commission = Number(context.document?.currentCommissionPercent || 0);
+          const total = Number(context.document?.maxCommissionPercent || 0);
+          return commission + Number(discount || 0) <= total
+            ? true
+            : 'Creator commission and viewer discount cannot exceed the max total.';
+        }),
     },
     {
       name: 'paypalEmail',

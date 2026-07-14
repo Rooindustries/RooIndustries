@@ -12,6 +12,7 @@ const SEORCE_BLOCKED_PREFIXES = [
   "/payment-success",
   "/thank-you",
   "/referrals",
+  "/admin",
 ];
 
 const getPathname = () =>
