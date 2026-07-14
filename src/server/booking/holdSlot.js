@@ -1,4 +1,4 @@
-import { createDataClient as createClient } from "../data/documentClient.js";
+import { createCommerceWriteClient } from "../api/ref/sanity.js";
 import crypto from "crypto";
 import { issueHoldToken, verifyHoldToken } from "./holdToken.js";
 import {
@@ -19,16 +19,7 @@ import { isSupabaseAdminConfigured } from "../supabase/adminClient.js";
 import { assertCommerceStartAllowed } from "../supabase/commerceControl.js";
 
 const createHoldClient = (backendOverride) =>
-  createClient(
-    {
-      projectId: process.env.SANITY_PROJECT_ID,
-      dataset: process.env.SANITY_DATASET || "production",
-      apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
-      token: process.env.SANITY_WRITE_TOKEN,
-      useCdn: false,
-    },
-    { backendOverride, domain: "commerce" }
-  );
+  createCommerceWriteClient({ backendOverride });
 
 export const HOLD_DURATION_MS = 20 * 60 * 1000;
 
@@ -71,12 +62,20 @@ export const isSameSupabaseOwnedHold = ({ current, mirror }) => {
   );
 };
 
-const fetchOtherBackendSlotState = async ({
+export const fetchOtherBackendSlotState = async ({
   backend,
   holdId,
   slotLockId,
   startTimeUTC,
 }) => {
+  const policy = resolveSupabaseRuntimePolicy();
+  if (
+    backend === "supabase" &&
+    policy.commercePrimaryBackend === "supabase" &&
+    policy.commerceFailoverGeneration >= 1
+  ) {
+    return { hold: null, slotLock: null, bookings: [] };
+  }
   const otherBackend = backend === "supabase" ? "sanity" : "supabase";
   if (otherBackend === "supabase" && !isSupabaseAdminConfigured()) {
     return { hold: null, slotLock: null, bookings: [] };

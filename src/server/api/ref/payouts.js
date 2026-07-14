@@ -1,4 +1,7 @@
-import {createDataClient as createClient} from '../../data/documentClient.js';
+import {
+  createCommerceReadClient,
+  createCommerceWriteClient,
+} from './sanity.js';
 import {requireReferralSession} from './auth.js';
 import {getSafeErrorCode, logSafeError} from '../../safeErrorLog.js';
 import {
@@ -6,26 +9,6 @@ import {
   fetchReferralEarnings,
   sumPayments,
 } from './payoutUtils.js';
-
-const readClient = createClient({
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || 'production',
-  apiVersion: process.env.SANITY_API_VERSION || '2023-10-01',
-  token: process.env.SANITY_READ_TOKEN || process.env.SANITY_WRITE_TOKEN,
-  useCdn: false,
-  perspective: 'published',
-}, {domain: 'commerce'});
-
-const writeToken = process.env.SANITY_WRITE_TOKEN;
-const writeClient =
-  writeToken &&
-  createClient({
-    projectId: process.env.SANITY_PROJECT_ID,
-    dataset: process.env.SANITY_DATASET || 'production',
-    apiVersion: process.env.SANITY_API_VERSION || '2023-10-01',
-    token: writeToken,
-    useCdn: false,
-  }, {domain: 'commerce'});
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -36,6 +19,7 @@ export default async function handler(req, res) {
     const session = await requireReferralSession(req, res);
     if (!session) return;
     const id = session.referralId;
+    const readClient = createCommerceReadClient();
 
     const referral = await readClient.fetch(
       `*[_type == "referral" && _id == $id][0]{
@@ -105,9 +89,10 @@ export default async function handler(req, res) {
 
     let syncStatus = {attempted: false, success: false, error: ''};
 
-    if (writeClient && referral._id) {
+    if (referral._id) {
       syncStatus.attempted = true;
       try {
+        const writeClient = createCommerceWriteClient();
         await writeClient
           .patch(referral._id)
           .set({
