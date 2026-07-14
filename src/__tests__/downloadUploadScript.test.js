@@ -1,10 +1,17 @@
 const path = require("node:path");
+const fs = require("node:fs");
 const { spawnSync } = require("node:child_process");
 
 const projectRoot = path.resolve(__dirname, "../..");
 const uploadScript = path.join(projectRoot, "scripts/upload-download-blob.mjs");
 
 describe("download Blob upload catalog validation", () => {
+  test("reports post-upload metadata lookup failures cleanly", () => {
+    const source = fs.readFileSync(uploadScript, "utf8");
+    expect(source).toContain("Post-upload metadata lookup failed");
+    expect(source).toMatch(/try\s*\{\s*remoteMetadata = await head\(blobPath\)/);
+  });
+
   test("fails before upload when fileName and blobPath basenames differ", () => {
     const result = spawnSync(process.execPath, [uploadScript, "utilities"], {
       cwd: projectRoot,

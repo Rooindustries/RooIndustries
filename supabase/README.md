@@ -98,8 +98,10 @@ variable. Use
 the deployed, cron-secret-protected activation endpoint so the credential never
 leaves the runtime. Inventory contacts Discord read-only and returns aggregate
 counts plus a non-PII hash. Apply recomputes and requires that exact hash; it
-aborts on changed or unknown Discord state, missing principals, duplicate
-Discord users, identity conflicts, or import quarantine rows.
+aborts on changed or unknown Discord state, missing or inactive Tourney
+principals, duplicate Discord users, identity conflicts, import quarantine
+rows, active queue blockers, incomplete database controls, or a missing
+five-route latency baseline.
 
 Use this exact order. Keep the permission-restricted environment file outside
 the worktree and keep writes paused throughout these steps:
@@ -110,10 +112,11 @@ the worktree and keep writes paused throughout these steps:
 2. Deploy the staged runtime tuple above with writes paused. Confirm both
    control rows are Supabase-primary, generation 1, paused, and writable as a
    fallback (`fallback_read_only=false`).
-3. Capture the full Supabase/Auth, Neon, Sanity, email, Discord, receipt, and
-   queue snapshot. This command refuses an incomplete legacy schema, a missing
-   Sanity account document, incomplete hosted payloads, and use of a generic
-   `POSTGRES_URL`. It never falls back to the older partial snapshot function:
+3. Capture the full Supabase/Auth, Vercel-managed fallback PostgreSQL, Sanity,
+   email, Discord, receipt, and queue snapshot. This command refuses an
+   incomplete legacy schema, a missing Sanity account document, incomplete
+   hosted payloads, and use of a generic `POSTGRES_URL`. It never falls back to
+   the older partial snapshot function:
 
    ```bash
    node scripts/tourney-cutover.mjs --env /absolute/path/to/restricted.env \
@@ -131,8 +134,8 @@ the worktree and keep writes paused throughout these steps:
 6. Call `inventory`, preserve its exact hash, then call `apply` with that hash.
    Apply is rejected if the inventory changes while the reconciliation lease is
    acquired.
-7. Dry-run fallback bootstrapping and bind apply to that exact read-only Neon
-   snapshot:
+7. Dry-run fallback bootstrapping and bind apply to that exact read-only
+   Vercel-managed PostgreSQL snapshot:
 
    ```bash
    node scripts/tourney-cutover.mjs --inventory-fallback-v4
@@ -140,7 +143,10 @@ the worktree and keep writes paused throughout these steps:
      --expected-legacy-hash "$LEGACY_SNAPSHOT_HASH"
    ```
 
-8. Drain and verify all queues and parity while paused. Deploy
+8. Drain and verify all queues and parity while paused. Activation readiness
+   must report zero active queue blockers, every Discord authority bucket
+   (including inactive Tourney accounts), both database controls ready, and all
+   five latency baselines present. Deploy
    `TOURNEY_HARDENING_V4_ENABLED=1` and
    `TOURNEY_V4_ACTIVATION_ENABLED=0`, verify readiness again, and only then
    resume writes. Never run activation with both flags enabled.

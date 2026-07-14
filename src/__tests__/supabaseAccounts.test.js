@@ -1,5 +1,6 @@
 import {
   authenticateSupabaseAccount,
+  buildTourneyPlayerAuthEmail,
   completeSupabaseCredentialMirror,
   createSupabaseCreatorAccount,
   requireSupabaseBearerUser,
@@ -19,6 +20,12 @@ const creatorAccount = {
 };
 
 describe("Supabase account compatibility", () => {
+  test("derives one normalized synthetic Auth email for Tourney players", () => {
+    expect(buildTourneyPlayerAuthEmail("  Player-One  ")).toBe(
+      buildTourneyPlayerAuthEmail("player-one")
+    );
+  });
+
   test("authenticates an imported bcrypt creator through an alias", async () => {
     const adminClient = {
       rpc: jest.fn().mockResolvedValue({ data: creatorAccount, error: null }),
@@ -266,7 +273,7 @@ describe("Supabase account compatibility", () => {
     );
   });
 
-  test("returns a durable Discord role removal after player withdrawal", async () => {
+  test("does not perform inline Discord role refresh during player auth sync", async () => {
     const user = {
       id: creatorAccount.user_id,
       email: "player-auth@example.invalid",
@@ -278,20 +285,11 @@ describe("Supabase account compatibility", () => {
       roles: ["tourney_player"],
       tourney_username: "player-one",
     };
-    const assignment = {
-      queued: true,
-      principal_id: account.principal_id,
-      discord_user_id: "123456789012345678",
-      desired_role: "none",
-      generation: 4,
-      status: "pending",
-    };
     const adminClient = {
       rpc: jest
         .fn()
         .mockResolvedValueOnce({ data: account, error: null })
         .mockResolvedValueOnce({ data: { imported: true }, error: null })
-        .mockResolvedValueOnce({ data: assignment, error: null })
         .mockResolvedValueOnce({ data: account, error: null }),
       auth: {
         admin: {

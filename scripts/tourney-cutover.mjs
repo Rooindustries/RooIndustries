@@ -384,8 +384,13 @@ const captureSnapshot = async () => {
       throw new Error("Local Tourney snapshot decrypt verification failed.");
     }
     const timestamp = snapshot.capturedAt.replace(/[-:.]/g, "");
-    const output = valueAfter("--output") || path.join(
-      process.env.HOME,
+    const requestedOutput = valueAfter("--output");
+    const snapshotHome = normalize(process.env.HOME);
+    if (!requestedOutput && !snapshotHome) {
+      throw new Error("--output <path> is required when HOME is unavailable.");
+    }
+    const output = requestedOutput || path.join(
+      snapshotHome,
       "Documents",
       "Codex",
       "Tourney Cutover",
