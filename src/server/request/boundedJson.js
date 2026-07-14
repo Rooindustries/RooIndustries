@@ -3,7 +3,30 @@ const unsafeKeys = new Set(["__proto__", "prototype", "constructor"]);
 const bodyError = (message, status) =>
   Object.assign(new Error(message), { status });
 
-const readBoundedBody = async (request, maxBytes) => {
+const readBeforeDeadline = async ({ promise, deadlineAt, onTimeout }) => {
+  const remainingMs = Math.max(0, deadlineAt - Date.now());
+  if (remainingMs === 0) {
+    Promise.resolve().then(() => onTimeout?.()).catch(() => {});
+    throw bodyError("Request body timed out.", 408);
+  }
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          Promise.resolve().then(() => onTimeout?.()).catch(() => {});
+          reject(bodyError("Request body timed out.", 408));
+        }, remainingMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const readBoundedBody = async (request, maxBytes, maxReadMs) => {
+  const deadlineAt = Date.now() + Math.max(1, Number(maxReadMs) || 5_000);
   const declaredLength = Number(
     request?.headers?.get?.("content-length") || 0
   );
@@ -13,7 +36,10 @@ const readBoundedBody = async (request, maxBytes) => {
 
   const reader = request?.body?.getReader?.();
   if (!reader) {
-    const raw = await request.text();
+    const raw = await readBeforeDeadline({
+      promise: request.text(),
+      deadlineAt,
+    });
     const body = Buffer.from(raw, "utf8");
     if (body.byteLength > maxBytes) {
       throw bodyError("Request body is too large.", 413);
@@ -25,7 +51,11 @@ const readBoundedBody = async (request, maxBytes) => {
   let totalBytes = 0;
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      const { done, value } = await readBeforeDeadline({
+        promise: reader.read(),
+        deadlineAt,
+        onTimeout: () => Promise.resolve(reader.cancel()).catch(() => {}),
+      });
       if (done) break;
       const chunk = Buffer.from(value);
       totalBytes += chunk.byteLength;
@@ -103,7 +133,12 @@ const assertSafeShape = (root, { maxDepth, maxNodes }) => {
 
 export const readBoundedJson = async (
   request,
-  { maxBytes = 16 * 1024, maxDepth = 10, maxNodes = 500 } = {}
+  {
+    maxBytes = 16 * 1024,
+    maxDepth = 10,
+    maxNodes = 500,
+    maxReadMs = 5_000,
+  } = {}
 ) => {
   const contentType = String(
     request?.headers?.get?.("content-type") || ""
@@ -112,7 +147,7 @@ export const readBoundedJson = async (
   if (mediaType !== "application/json") {
     throw bodyError("Content-Type must be application/json.", 415);
   }
-  const raw = (await readBoundedBody(request, maxBytes)).toString("utf8");
+  const raw = (await readBoundedBody(request, maxBytes, maxReadMs)).toString("utf8");
   let payload;
   try {
     payload = JSON.parse(raw || "{}");
@@ -130,7 +165,12 @@ export const readBoundedJson = async (
 
 export const readBoundedFormData = async (
   request,
-  { maxBytes = 16 * 1024, maxFields = 64, allowFiles = false } = {}
+  {
+    maxBytes = 16 * 1024,
+    maxFields = 64,
+    allowFiles = false,
+    maxReadMs = 5_000,
+  } = {}
 ) => {
   const rawContentType = String(
     request?.headers?.get?.("content-type") || ""
@@ -144,7 +184,7 @@ export const readBoundedFormData = async (
     throw bodyError("Unsupported form Content-Type.", 415);
   }
 
-  const body = await readBoundedBody(request, maxBytes);
+  const body = await readBoundedBody(request, maxBytes, maxReadMs);
   let form;
   try {
     const parsedRequest = new Request(request?.url || "http://localhost/", {

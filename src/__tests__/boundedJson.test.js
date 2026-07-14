@@ -60,6 +60,30 @@ describe("bounded JSON parser", () => {
     await expect(readBoundedJson(streamed, { maxBytes: 64 }))
       .rejects.toMatchObject({ status: 413 });
   });
+
+  test("cancels a streamed body that exceeds the total read deadline", async () => {
+    const cancel = jest.fn().mockResolvedValue(undefined);
+    const releaseLock = jest.fn();
+    const streamed = {
+      headers: {
+        get: (name) => String(name).toLowerCase() === "content-type"
+          ? "application/json"
+          : "",
+      },
+      body: {
+        getReader: () => ({
+          cancel,
+          read: () => new Promise(() => {}),
+          releaseLock,
+        }),
+      },
+    };
+
+    await expect(readBoundedJson(streamed, { maxReadMs: 5 }))
+      .rejects.toMatchObject({ status: 408 });
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(releaseLock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("bounded form parser", () => {

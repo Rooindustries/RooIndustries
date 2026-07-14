@@ -105,6 +105,9 @@ describe("Tourney cutover migration", () => {
     expect(cutoverCli).toContain('fs.openSync(output, "wx", 0o600)');
     expect(cutoverCli).toContain("fs.fsyncSync(descriptor)");
     expect(cutoverCli).toContain('--verify-snapshot <path>');
+    expect(cutoverCli).toContain(
+      '"--output <path> is required when HOME is unavailable."'
+    );
     expect(cutoverCli).toContain("TOURNEY_LEGACY_SNAPSHOT_INCOMPLETE");
     expect(cutoverCli).toContain("TOURNEY_ACTIVATION_ENVIRONMENT_MISMATCH");
     expect(cutoverCli).toContain("payloadText: hosted.data?.payload_text");

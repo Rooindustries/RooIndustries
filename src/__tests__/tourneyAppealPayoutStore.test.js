@@ -313,17 +313,24 @@ describe("tourney appeal and payout store", () => {
       env,
     });
 
-    for (const amountUsd of [1.001, 100_000_000]) {
+    for (const [amountUsd, expectedError] of [
+      [1.001, "Amount can have at most two decimal places."],
+      [100_000_000, "Amount is too large."],
+    ]) {
       await expect(records.upsertTourneyPayout({
         payload: {
           playerId: player.id,
           payoutType: "mvp",
           amountUsd,
           status: "pending",
+          payoutEmail: player.email,
         },
         session: adminSession,
         env,
-      })).rejects.toMatchObject({ status: 400 });
+      })).rejects.toMatchObject({
+        status: 400,
+        errors: expect.arrayContaining([expectedError]),
+      });
     }
   });
 
