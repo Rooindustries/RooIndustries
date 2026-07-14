@@ -1,5 +1,3 @@
--- Additive forward repairs for Tourney schema-v4 cutover safety. Runtime
--- activation remains gated by public.roo_activate_tourney_schema_v4(text).
 set lock_timeout = '5s';
 set statement_timeout = '120s';
 
@@ -191,8 +189,6 @@ revoke all on function public.roo_resolve_tourney_import_principal(text, text, t
 grant execute on function public.roo_resolve_tourney_import_principal(text, text, text)
   to service_role;
 
--- Keep OAuth finalization identity-only. Discord desired state is written by
--- the durable Tourney command after this transaction commits.
 do $$
 begin
   if pg_catalog.to_regprocedure(
@@ -209,8 +205,6 @@ begin
 end;
 $$;
 
--- Preserve the old signature during rolling deployment, but ignore its guild
--- argument so old application instances cannot write mirrored Discord state.
 create or replace function public.roo_finalize_oauth_intent(
   p_token_hash text,
   p_user_id uuid,
@@ -336,8 +330,6 @@ revoke all on function tourney.capture_mirror_event_v4()
   from public, anon, authenticated;
 grant execute on function tourney.capture_mirror_event_v4() to service_role;
 
--- Retire unsafe pre-v4 service entry points while retaining the v1 account
--- function as a private implementation detail used by the monotonic v2 RPC.
 do $$
 declare
   v_signature text;

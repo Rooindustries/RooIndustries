@@ -366,6 +366,14 @@ try {
     root,
     "supabase/migrations/20260715000000_add_tourney_cutover_operation_markers.sql"
   );
+  const supabaseSnapshotRpcRepair = path.join(
+    root,
+    "supabase/migrations/20260715020000_repair_tourney_hardening_snapshot_rpc.sql"
+  );
+  const supabaseBaselineRecovery = path.join(
+    root,
+    "supabase/migrations/20260715030000_allow_paused_tourney_baseline_recovery.sql"
+  );
   const legacyActivation = path.join(root, "scripts/tourney-schema-v4-activate-legacy.sql");
   const legacyRepair = path.join(root, "scripts/tourney-schema-v4-repair-legacy.sql");
   const activateSupabaseV4 = writeTemp(
@@ -442,7 +450,9 @@ insert into tourney_external_operations(
     supabaseMissingBaselineDrift,
     supabaseBaselineRestore,
     supabaseRepair,
-    supabaseCutoverOperationMarkers
+    supabaseCutoverOperationMarkers,
+    supabaseSnapshotRpcRepair,
+    supabaseBaselineRecovery
   );
   psql("supabase_unsafe", supabasePostInstallOldWriter);
   const unsafeSupabase = postgres(
@@ -457,8 +467,47 @@ insert into tourney_external_operations(
          where table_schema = 'tourney' and table_name = 'cutover_metadata'
            and column_name in (
              'last_pause_operation_id','last_resume_operation_id'
-           )) ok`,
+           ))
+       and to_regprocedure(
+         'public.roo_capture_tourney_hardening_snapshot(jsonb,jsonb)'
+       ) is null
+       and to_regprocedure(
+         'public.roo_capture_tourney_hardening_snapshot(jsonb,jsonb,text)'
+       ) is not null
+       and not has_function_privilege(
+         'anon',
+         'public.roo_capture_tourney_hardening_snapshot(jsonb,jsonb,text)',
+         'execute'
+       )
+       and not has_function_privilege(
+         'authenticated',
+         'public.roo_capture_tourney_hardening_snapshot(jsonb,jsonb,text)',
+         'execute'
+       )
+       and has_function_privilege(
+         'service_role',
+         'public.roo_capture_tourney_hardening_snapshot(jsonb,jsonb,text)',
+         'execute'
+       ) ok`,
     "Supabase cutover operation ledger was unavailable before activation"
+  );
+  await assert.rejects(
+    unsafeSupabase`
+      select public.roo_capture_tourney_hardening_snapshot(
+        '{}'::jsonb,'{"_id":"tourneyAuthStore"}'::jsonb,null::text
+      )
+    `,
+    (error) => error.code === "22023",
+    "Supabase snapshot RPC accepted missing exact legacy text"
+  );
+  await assert.rejects(
+    unsafeSupabase`
+      select public.roo_capture_tourney_hardening_snapshot(
+        '{}'::jsonb,'{"_id":"tourneyAuthStore"}'::jsonb,'{}'::text
+      )
+    `,
+    (error) => error.code === "55000",
+    "Supabase snapshot RPC accepted unpaused controls"
   );
   await unsafeSupabase.begin(async (sql) => {
     await sql`
@@ -501,6 +550,42 @@ insert into tourney_external_operations(
       (select schema_version from tourney.schema_metadata where schema_name='tourney')=4
       and (select hardened_active from tourney.cutover_metadata where id='tourney') ok`,
     "explicit Supabase activation did not activate schema v4"
+  );
+  await assert.rejects(
+    unsafeSupabase`
+      select public.roo_capture_tourney_hardening_snapshot(
+        null::jsonb,'{"_id":"tourneyAuthStore"}'::jsonb,'[]'::text
+      )
+    `,
+    (error) => error.code === "22023" &&
+      error.message === "Legacy Tourney snapshot is incomplete or malformed",
+    "Supabase snapshot RPC iterated a non-object legacy snapshot"
+  );
+  await unsafeSupabase`truncate table tourney.shadow_latency_baselines`;
+  psql("supabase_unsafe", captureLatencyBaseline);
+  await assertSql(
+    unsafeSupabase,
+    `select count(*)=5
+       and (select hardened_active from tourney.cutover_metadata where id='tourney') ok
+     from tourney.shadow_latency_baselines`,
+    "paused active Supabase baseline recovery failed"
+  );
+  await assertSql(
+    unsafeSupabase,
+    `select count(*)=1 ok from tourney.cutover_gate_events
+     where event_kind='hardened_activated'
+       and evidence @> '{"baseline_recovery":true}'::jsonb`,
+    "Supabase baseline recovery marker was not retained"
+  );
+  await unsafeSupabase`truncate table tourney.shadow_latency_baselines`;
+  await assert.rejects(
+    unsafeSupabase`
+      select public.roo_capture_tourney_shadow_latency_baseline(
+        'postgres17-recovery-repeat'
+      )
+    `,
+    (error) => error.code === "55000",
+    "Supabase baseline recovery overwrote an existing active baseline set"
   );
   await unsafeSupabase.end({ timeout: 5 });
 
@@ -622,7 +707,9 @@ insert into accounts.discord_role_assignments(
     supabaseHardening,
     supabaseBaselineRestore,
     supabaseRepair,
-    supabaseCutoverOperationMarkers
+    supabaseCutoverOperationMarkers,
+    supabaseSnapshotRpcRepair,
+    supabaseBaselineRecovery
   );
   process.stderr.write("[postgres17] Supabase schema-v4 install remained inactive\n");
   psql("supabase_fixture", supabaseControls, captureLatencyBaseline);

@@ -1,6 +1,3 @@
--- Keep Tourney account imports monotonic and preserve Discord retry state when
--- canonical account synchronization refreshes an unchanged assignment.
-
 alter table accounts.discord_role_assignments
   add column if not exists stale_discord_user_ids text[] not null default '{}'::text[];
 
