@@ -74,6 +74,18 @@ const isMemoryMode = (env = process.env) =>
   env.TOURNEY_DATABASE_MODE === "memory";
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
+const parseJsonRecord = (value) => {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value !== "string") return value;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : value;
+  } catch {
+    return value;
+  }
+};
 
 const matchesFilter = (row, filter = {}) =>
   Object.entries(filter).every(([key, value]) => row?.[key] === value);
@@ -258,7 +270,7 @@ class SqlBracketStorage {
     const row = { ...clone(values), id };
     await sql`
       insert into tourney_bracket_entities (entity_type, entity_id, data, updated_at)
-      values (${table}, ${Number(id)}, ${JSON.stringify(row)}::jsonb, now())
+      values (${table}, ${Number(id)}, ${sql.json(row)}, now())
       on conflict (entity_type, entity_id) do update
         set data = excluded.data,
             updated_at = now()
@@ -275,7 +287,7 @@ class SqlBracketStorage {
         where entity_type = ${table}
         order by entity_id asc
       `;
-      return rows.map((row) => clone(row.data));
+      return rows.map((row) => clone(parseJsonRecord(row.data)));
     }
     if (typeof arg !== "object" || arg === null) {
       const rows = await sql`
@@ -285,17 +297,17 @@ class SqlBracketStorage {
           and entity_id = ${Number(arg)}
         limit 1
       `;
-      return rows?.[0] ? clone(rows[0].data) : null;
+      return rows?.[0] ? clone(parseJsonRecord(rows[0].data)) : null;
     }
 
     const rows = await sql`
       select data
       from tourney_bracket_entities
       where entity_type = ${table}
-        and data @> ${JSON.stringify(arg)}::jsonb
+        and data @> ${sql.json(arg)}
       order by entity_id asc
     `;
-    return rows.map((row) => clone(row.data));
+    return rows.map((row) => clone(parseJsonRecord(row.data)));
   }
 
   async update(table, arg, value) {
@@ -308,7 +320,7 @@ class SqlBracketStorage {
       const nextRow = { ...row, ...clone(value) };
       await sql`
         update tourney_bracket_entities
-        set data = ${JSON.stringify(nextRow)}::jsonb,
+        set data = ${sql.json(nextRow)},
             updated_at = now()
         where entity_type = ${table}
           and entity_id = ${Number(nextRow.id)}
@@ -421,7 +433,14 @@ const withBracketMutation = async ({ actorUsername, env, callback }) => {
     return runSupabaseTourneyTransaction({
       env,
       lockKey: "roo-tourney-bracket",
-      callback,
+      callback: async (sql) => {
+        await sql`
+          select pg_catalog.pg_advisory_xact_lock(
+            pg_catalog.hashtextextended('roo-tourney-bracket', 0)
+          )
+        `;
+        return callback(sql);
+      },
     });
   }
   const sql = await getSql(env);
@@ -525,7 +544,7 @@ const recordAudit = async ({
     )
     values (
       ${audit.id}, ${audit.action}, ${audit.actorUsername}, ${audit.matchId},
-      ${audit.teamId || null}, ${audit.reason}, ${JSON.stringify(payload)}::jsonb,
+      ${audit.teamId || null}, ${audit.reason}, ${sql.json(payload)},
       ${audit.createdAt}
     )
   `;

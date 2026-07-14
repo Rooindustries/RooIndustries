@@ -5,9 +5,11 @@ const mockResolveSupabaseAccountByUserId = jest.fn();
 const mockReadOAuthIntent = jest.fn();
 const mockFinalizeOAuthIntent = jest.fn();
 const mockQueueDiscordProjection = jest.fn();
+const mockResolveQueuedDiscordProjection = jest.fn();
 const mockCreateReferralSessionCookie = jest.fn();
 const mockCreateTourneySessionToken = jest.fn();
 const mockGetTourneyCookieOptions = jest.fn();
+const originalTourneyDatabaseMode = process.env.TOURNEY_DATABASE_MODE;
 
 jest.mock("../server/supabase/serverSession", () => ({
   clearNextSupabaseSession: (...args) => mockClearNextSupabaseSession(...args),
@@ -36,6 +38,8 @@ jest.mock("../server/supabase/oauthIntents", () => ({
 
 jest.mock("../server/tourney/discordDesiredState", () => ({
   queueTourneyDiscordAuthProjection: (...args) => mockQueueDiscordProjection(...args),
+  resolveQueuedTourneyDiscordAuthProjectionAfterFinalizeFailure: (...args) =>
+    mockResolveQueuedDiscordProjection(...args),
 }));
 
 jest.mock("../server/api/ref/auth", () => ({
@@ -108,6 +112,7 @@ const creatorAccount = {
 
 describe("Supabase Auth callback", () => {
   beforeEach(() => {
+    process.env.TOURNEY_DATABASE_MODE = "supabase";
     jest.clearAllMocks();
     mockExchangeCodeForSession.mockResolvedValue({
       data: {
@@ -132,6 +137,18 @@ describe("Supabase Auth callback", () => {
       sameSite: "lax",
     });
     mockQueueDiscordProjection.mockResolvedValue({ applied: true, reason: "applied" });
+    mockResolveQueuedDiscordProjection.mockResolvedValue({
+      finalized: false,
+      resolved: true,
+    });
+  });
+
+  afterAll(() => {
+    if (originalTourneyDatabaseMode === undefined) {
+      delete process.env.TOURNEY_DATABASE_MODE;
+    } else {
+      process.env.TOURNEY_DATABASE_MODE = originalTourneyDatabaseMode;
+    }
   });
 
   test("keeps a short compatibility path but resolves the exact Auth user id", async () => {
@@ -190,7 +207,6 @@ describe("Supabase Auth callback", () => {
       )
     );
     expect(mockFinalizeOAuthIntent).toHaveBeenCalledWith({
-      guildId: "",
       provider: "google",
       token: "opaque-token",
       userId: authUser.id,
@@ -220,6 +236,7 @@ describe("Supabase Auth callback", () => {
       flow: "tourney",
       provider: "discord",
       return_path: "/tourney",
+      target_user_id: authUser.id,
       status: "pending",
       expires_at: "2099-01-01T00:00:00.000Z",
     });
@@ -245,12 +262,325 @@ describe("Supabase Auth callback", () => {
         version: "3",
       },
     });
-    expect(mockQueueDiscordProjection).toHaveBeenCalledWith({
+    const projectionCommandId = `discord-oauth:${intentId}:${authUser.id}`;
+    expect(mockQueueDiscordProjection).toHaveBeenNthCalledWith(1, {
+      accountUserId: authUser.id,
       accessToken: "transient-provider-token",
+      attemptExternalWork: false,
+      claimedUserId: authUser.id,
+      commandId: projectionCommandId,
+      deferUntil: "2099-01-01T00:00:00.000Z",
+      intentId,
       userId: authUser.id,
     });
+    expect(mockQueueDiscordProjection).toHaveBeenNthCalledWith(2, {
+      accountUserId: authUser.id,
+      accessToken: "transient-provider-token",
+      attemptExternalWork: true,
+      claimedUserId: authUser.id,
+      commandId: projectionCommandId,
+      deferUntil: "2099-01-01T00:00:00.000Z",
+      intentId,
+      userId: authUser.id,
+    });
+    expect(mockQueueDiscordProjection.mock.invocationCallOrder[0]).toBeGreaterThan(
+      mockExchangeCodeForSession.mock.invocationCallOrder[0]
+    );
     expect(response.url).toBe(
       "https://www.rooindustries.com/tourney?linked=discord"
+    );
+  });
+
+  test("allows Discord reauthentication through another Auth user on the same principal", async () => {
+    const claimedUser = {
+      ...authUser,
+      id: "f82a6798-ebb7-4482-a811-6bff809fee14",
+    };
+    const tourneyAccount = {
+      user_id: authUser.id,
+      status: "active",
+      roles: ["tourney_player"],
+      tourney_username: "player-one",
+      tourney_role: "tourney_player",
+      tourney_active: true,
+      credential_version: "3",
+    };
+    mockReadOAuthIntent.mockResolvedValue({
+      id: intentId,
+      action: "reauth",
+      flow: "tourney",
+      provider: "discord",
+      return_path: "/tourney",
+      target_user_id: authUser.id,
+      status: "pending",
+      expires_at: "2099-01-01T00:00:00.000Z",
+    });
+    mockExchangeCodeForSession.mockResolvedValue({
+      data: {
+        session: { provider_token: "transient-provider-token" },
+        user: claimedUser,
+      },
+      error: null,
+    });
+    mockFinalizeOAuthIntent.mockResolvedValue({
+      action: "reauth",
+      flow: "tourney",
+      provider: "discord",
+      return_path: "/tourney",
+    });
+    mockResolveSupabaseAccountByUserId.mockResolvedValue(tourneyAccount);
+
+    const response = await GET(
+      request(
+        `https://www.rooindustries.com/auth/callback?intent=${intentId}&code=one`,
+        `roo_oauth_intent.${intentId}=opaque-token`
+      )
+    );
+
+    expect(mockFinalizeOAuthIntent).toHaveBeenCalledWith(expect.objectContaining({
+      userId: claimedUser.id,
+    }));
+    expect(mockQueueDiscordProjection).toHaveBeenLastCalledWith(expect.objectContaining({
+      accessToken: "transient-provider-token",
+      intentId,
+      userId: authUser.id,
+    }));
+    expect(response.url).toBe("https://www.rooindustries.com/tourney?reauth=ready");
+  });
+
+  test("durably queues a targetless Tourney Discord sign-in for the exchanged user", async () => {
+    mockReadOAuthIntent.mockResolvedValue({
+      id: intentId,
+      action: "signin",
+      flow: "tourney",
+      provider: "discord",
+      return_path: "/tourney",
+      target_user_id: null,
+      status: "pending",
+      expires_at: "2099-01-01T00:00:00.000Z",
+    });
+    mockFinalizeOAuthIntent.mockResolvedValue({
+      action: "signin",
+      flow: "tourney",
+      provider: "discord",
+      return_path: "/tourney",
+    });
+    mockResolveSupabaseAccountByUserId.mockResolvedValue({
+      user_id: authUser.id,
+      status: "active",
+      roles: ["tourney_player"],
+      tourney_username: "player-one",
+      tourney_role: "tourney_player",
+      tourney_active: true,
+      credential_version: "3",
+    });
+
+    await GET(request(
+      `https://www.rooindustries.com/auth/callback?intent=${intentId}&code=one`,
+      `roo_oauth_intent.${intentId}=opaque-token`
+    ));
+
+    expect(mockQueueDiscordProjection).toHaveBeenCalledTimes(2);
+    expect(mockQueueDiscordProjection).toHaveBeenNthCalledWith(1,
+      expect.objectContaining({
+        accountUserId: authUser.id,
+        claimedUserId: authUser.id,
+        userId: authUser.id,
+        attemptExternalWork: false,
+      })
+    );
+    expect(mockQueueDiscordProjection.mock.invocationCallOrder[0]).toBeLessThan(
+      mockFinalizeOAuthIntent.mock.invocationCallOrder[0]
+    );
+  });
+
+  test("keeps a Tourney Discord signup deferred until its Auth projection exists", async () => {
+    mockReadOAuthIntent.mockResolvedValue({
+      id: intentId,
+      action: "signup",
+      flow: "tourney",
+      provider: "discord",
+      return_path: "/tourney/register",
+      target_user_id: null,
+      status: "pending",
+      expires_at: "2099-01-01T00:00:00.000Z",
+    });
+    mockFinalizeOAuthIntent.mockResolvedValue({
+      action: "signup",
+      flow: "tourney",
+      provider: "discord",
+      return_path: "/tourney/register",
+    });
+    mockResolveSupabaseAccountByUserId.mockResolvedValue(null);
+
+    const response = await GET(request(
+      `https://www.rooindustries.com/auth/callback?intent=${intentId}&code=one`,
+      `roo_oauth_intent.${intentId}=opaque-token`
+    ));
+
+    expect(mockQueueDiscordProjection).toHaveBeenCalledTimes(1);
+    expect(mockQueueDiscordProjection).toHaveBeenCalledWith(expect.objectContaining({
+      accountUserId: authUser.id,
+      claimedUserId: authUser.id,
+      attemptExternalWork: false,
+      deferUntil: "2099-01-01T00:00:00.000Z",
+    }));
+    expect(response.url).toBe(
+      "https://www.rooindustries.com/tourney/register?oauth=ready&provider=discord&discord_role=pending"
+    );
+  });
+
+  test("queues Discord from referral flows so dual-role principals reconcile", async () => {
+    mockReadOAuthIntent.mockResolvedValue({
+      id: intentId,
+      action: "signin",
+      flow: "referral",
+      provider: "discord",
+      return_path: "/referrals/dashboard",
+      target_user_id: null,
+      status: "pending",
+      expires_at: "2099-01-01T00:00:00.000Z",
+    });
+    mockFinalizeOAuthIntent.mockResolvedValue({
+      action: "signin",
+      flow: "referral",
+      provider: "discord",
+      return_path: "/referrals/dashboard",
+    });
+    mockResolveSupabaseAccountByUserId.mockResolvedValue({
+      ...creatorAccount,
+      roles: ["creator", "tourney_player"],
+    });
+
+    await GET(request(
+      `https://www.rooindustries.com/auth/callback?intent=${intentId}&code=one`,
+      `roo_oauth_intent.${intentId}=opaque-token`
+    ));
+
+    expect(mockQueueDiscordProjection).toHaveBeenCalledTimes(2);
+    expect(mockQueueDiscordProjection).toHaveBeenLastCalledWith(
+      expect.objectContaining({ accountUserId: authUser.id, claimedUserId: authUser.id })
+    );
+  });
+
+  test("does not consume Discord OAuth until the Tourney projection is durable", async () => {
+    mockReadOAuthIntent.mockResolvedValue({
+      id: intentId,
+      action: "link",
+      flow: "tourney",
+      provider: "discord",
+      return_path: "/tourney",
+      target_user_id: authUser.id,
+      status: "pending",
+      expires_at: "2099-01-01T00:00:00.000Z",
+    });
+    mockQueueDiscordProjection.mockRejectedValueOnce(new Error("queue unavailable"));
+
+    const response = await GET(
+      request(
+        `https://www.rooindustries.com/auth/callback?intent=${intentId}&code=one`,
+        `roo_oauth_intent.${intentId}=opaque-token`
+      )
+    );
+
+    expect(mockExchangeCodeForSession).toHaveBeenCalledTimes(1);
+    expect(mockFinalizeOAuthIntent).not.toHaveBeenCalled();
+    expect(response.url).toBe(
+      "https://www.rooindustries.com/tourney/login?error=unavailable"
+    );
+  });
+
+  test("does not consume Discord OAuth when projection cannot be queued", async () => {
+    mockReadOAuthIntent.mockResolvedValue({
+      id: intentId,
+      action: "link",
+      flow: "tourney",
+      provider: "discord",
+      return_path: "/tourney",
+      target_user_id: authUser.id,
+      status: "pending",
+      expires_at: "2099-01-01T00:00:00.000Z",
+    });
+    mockQueueDiscordProjection.mockResolvedValueOnce({
+      applied: false,
+      reason: "oauth_temporarily_unavailable",
+    });
+
+    const response = await GET(
+      request(
+        `https://www.rooindustries.com/auth/callback?intent=${intentId}&code=one`,
+        `roo_oauth_intent.${intentId}=opaque-token`
+      )
+    );
+
+    expect(mockExchangeCodeForSession).toHaveBeenCalledTimes(1);
+    expect(response.url).toBe(
+      "https://www.rooindustries.com/tourney/login?error=unavailable"
+    );
+  });
+
+  test("resolves the durable Discord projection when finalization fails", async () => {
+    mockReadOAuthIntent.mockResolvedValue({
+      id: intentId,
+      action: "link",
+      flow: "tourney",
+      provider: "discord",
+      return_path: "/tourney",
+      target_user_id: authUser.id,
+      status: "pending",
+      expires_at: "2099-01-01T00:00:00.000Z",
+    });
+    mockFinalizeOAuthIntent.mockRejectedValue(new Error("finalize unavailable"));
+
+    const response = await GET(
+      request(
+        `https://www.rooindustries.com/auth/callback?intent=${intentId}&code=one`,
+        `roo_oauth_intent.${intentId}=opaque-token`
+      )
+    );
+
+    expect(mockResolveQueuedDiscordProjection).toHaveBeenCalledWith({
+      claimedUserId: authUser.id,
+      commandId: `discord-oauth:${intentId}:${authUser.id}`,
+      intentId,
+      userId: authUser.id,
+    });
+    expect(mockQueueDiscordProjection).toHaveBeenCalledTimes(1);
+    expect(response.url).toBe(
+      "https://www.rooindustries.com/tourney/login?error=unavailable"
+    );
+  });
+
+  test("clears the newly exchanged Supabase session on a Discord link mismatch", async () => {
+    const wrongUser = { ...authUser, id: "22222222-2222-4222-8222-222222222222" };
+    mockReadOAuthIntent.mockResolvedValue({
+      id: intentId,
+      action: "link",
+      flow: "tourney",
+      provider: "discord",
+      return_path: "/tourney",
+      target_user_id: authUser.id,
+      status: "pending",
+      expires_at: "2099-01-01T00:00:00.000Z",
+    });
+    mockExchangeCodeForSession.mockResolvedValue({
+      data: { session: { provider_token: "transient" }, user: wrongUser },
+      error: null,
+    });
+
+    const response = await GET(
+      request(
+        `https://www.rooindustries.com/auth/callback?intent=${intentId}&code=one`,
+        `roo_oauth_intent.${intentId}=opaque-token; tourney_session=existing-session`
+      )
+    );
+
+    expect(mockClearNextSupabaseSession).toHaveBeenCalledTimes(1);
+    expect(response.cookies.values).not.toContainEqual(
+      expect.objectContaining({ name: "tourney_session", maxAge: 0 })
+    );
+    expect(response.url).toBe(
+      "https://www.rooindustries.com/tourney/login?error=unlinked"
     );
   });
 
@@ -283,6 +613,7 @@ describe("Supabase Auth callback", () => {
       flow: "tourney",
       provider: "discord",
       return_path: "/tourney",
+      target_user_id: authUser.id,
       status: "pending",
       expires_at: "2099-01-01T00:00:00.000Z",
     });

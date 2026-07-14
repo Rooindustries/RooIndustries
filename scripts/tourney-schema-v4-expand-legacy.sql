@@ -39,6 +39,10 @@ alter table tourney_command_receipts drop constraint if exists tourney_command_r
 alter table tourney_command_receipts
   add column if not exists committed_at timestamptz,
   add column if not exists failed_at timestamptz,
+  add column if not exists failure_code text,
+  add column if not exists failure_evidence jsonb not null default '{}'::jsonb,
+  add column if not exists recovered_at timestamptz,
+  add column if not exists recovery_evidence jsonb not null default '{}'::jsonb,
   add constraint tourney_command_receipts_status_check
     check (status in ('processing', 'committed', 'completed', 'failed')) not valid;
 alter table tourney_command_receipts validate constraint tourney_command_receipts_status_check;
@@ -94,10 +98,11 @@ create table if not exists tourney_external_operations (
   command_id text references tourney_command_receipts(command_id) on delete restrict,
   operation_kind text not null check (operation_kind in (
     'supabase_player_auth', 'supabase_admin_auth', 'sanity_account_projection',
-    'discord_membership', 'discord_role_reconcile'
+    'discord_membership', 'discord_role_reconcile', 'supabase_identity_unlink'
   )),
   entity_type text not null,
   entity_id text not null,
+  serialization_key text not null,
   desired_state jsonb not null,
   desired_state_hash text not null check (desired_state_hash ~ '^[0-9a-f]{64}$'),
   status text not null default 'pending'
@@ -114,8 +119,56 @@ create table if not exists tourney_external_operations (
   check ((status = 'processing' and lease_id is not null and lease_expires_at is not null) or status <> 'processing'),
   check ((status = 'applied' and completed_at is not null) or status <> 'applied')
 );
+alter table tourney_external_operations
+  drop constraint if exists tourney_external_operations_operation_kind_check;
+alter table tourney_external_operations
+  add constraint tourney_external_operations_operation_kind_check check (
+    operation_kind in (
+      'supabase_player_auth', 'supabase_admin_auth', 'sanity_account_projection',
+      'discord_membership', 'discord_role_reconcile', 'supabase_identity_unlink'
+    )
+  ) not valid;
+alter table tourney_external_operations
+  validate constraint tourney_external_operations_operation_kind_check;
+create or replace function set_tourney_external_operation_serialization_key()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if nullif(pg_catalog.btrim(new.serialization_key), '') is null then
+    new.serialization_key := case
+      when new.operation_kind in ('discord_membership','discord_role_reconcile') then
+        'discord:' || coalesce(
+          new.desired_state#>>'{assignment,principalId}',
+          new.desired_state#>>'{oauthProjection,principalId}',
+          new.desired_state#>>'{oauthProjection,userId}',
+          new.entity_id
+        )
+      when new.operation_kind = 'sanity_account_projection' then
+        'sanity:account-snapshot'
+      else new.operation_kind || ':' || new.entity_type || ':' || new.entity_id
+    end;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists set_tourney_external_operation_serialization_key
+  on tourney_external_operations;
+create trigger set_tourney_external_operation_serialization_key
+before insert or update of operation_kind, entity_type, entity_id,
+  desired_state, serialization_key
+on tourney_external_operations
+for each row execute function set_tourney_external_operation_serialization_key();
+revoke all on function set_tourney_external_operation_serialization_key()
+  from public;
 create index if not exists tourney_external_operations_claim_v4_idx
   on tourney_external_operations (next_attempt_at, created_at, operation_key)
+  where status in ('pending', 'retry', 'processing');
+create index if not exists tourney_external_operations_serial_v4_idx
+  on tourney_external_operations (
+    serialization_key, status, next_attempt_at, created_at, operation_key
+  )
   where status in ('pending', 'retry', 'processing');
 create index if not exists tourney_external_operations_command_v4_idx
   on tourney_external_operations (command_id, status, created_at);
@@ -129,6 +182,7 @@ create table if not exists tourney_discord_role_assignments (
   player_id text,
   discord_user_id text not null unique,
   previous_discord_user_id text,
+  stale_discord_user_ids text[] not null default '{}'::text[],
   guild_id text not null,
   tourney_role text,
   desired_role text not null default 'none' check (desired_role in ('none','participant','host')),
@@ -147,11 +201,47 @@ create table if not exists tourney_discord_role_assignments (
   joined_at timestamptz,
   applied_at timestamptz,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  pending_since timestamptz
 );
+alter table tourney_discord_role_assignments
+  add column if not exists pending_since timestamptz;
+update tourney_discord_role_assignments
+set pending_since=coalesce(pending_since,updated_at,created_at,now())
+where status in ('pending','processing','retry');
 create index if not exists tourney_discord_assignments_claim_v4_idx
   on tourney_discord_role_assignments (status, updated_at, principal_id)
   where status in ('pending','retry','processing');
+create index if not exists tourney_discord_assignments_pending_age_v4_idx
+  on tourney_discord_role_assignments (pending_since,principal_id)
+  where status in ('pending','retry','processing');
+
+create or replace function set_tourney_discord_assignment_pending_since()
+returns trigger language plpgsql set search_path='' as $$
+begin
+  if current_setting('roo.tourney_mirror_apply',true)='1' then return new; end if;
+  if new.status in ('pending','processing','retry') then
+    if tg_op='INSERT'
+       or old.status not in ('pending','processing','retry')
+       or old.generation is distinct from new.generation
+       or old.discord_user_id is distinct from new.discord_user_id
+       or old.guild_id is distinct from new.guild_id
+       or old.desired_role is distinct from new.desired_role then
+      new.pending_since:=now();
+    else
+      new.pending_since:=coalesce(old.pending_since,old.updated_at,old.created_at,now());
+    end if;
+  else new.pending_since:=null;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists set_tourney_discord_assignment_pending_since
+  on tourney_discord_role_assignments;
+create trigger set_tourney_discord_assignment_pending_since
+before insert or update on tourney_discord_role_assignments
+for each row execute function set_tourney_discord_assignment_pending_since();
+revoke all on function set_tourney_discord_assignment_pending_since() from public;
 
 create table if not exists tourney_import_quarantine (
   id uuid primary key default gen_random_uuid(),
@@ -174,6 +264,9 @@ create table if not exists tourney_cutover_gate_events (
 );
 alter table tourney_cutover_metadata
   add column if not exists hardened_active boolean not null default false,
+  add column if not exists reconciliation_lease_id uuid,
+  add column if not exists reconciliation_lease_expires_at timestamptz,
+  add column if not exists reconciliation_heartbeat_at timestamptz,
   add column if not exists natural_mutation_verified_at timestamptz,
   add column if not exists first_zero_drift_at timestamptz,
   add column if not exists second_zero_drift_at timestamptz,
@@ -190,6 +283,18 @@ alter table tourney_shadow_observations
   add column if not exists shadow_error_code text,
   add column if not exists primary_hash text,
   add column if not exists shadow_hash text;
+create table if not exists tourney_shadow_latency_baselines (
+  route text primary key check (route in (
+    'public_roster','public_bracket','admin_players','appeals','payouts'
+  )),
+  primary_p95_ms integer not null check (primary_p95_ms >= 0),
+  sample_count integer not null check (sample_count >= 30),
+  source_window_started_at timestamptz,
+  source_window_ended_at timestamptz,
+  captured_at timestamptz not null default now(),
+  captured_by text not null
+);
+revoke all on table tourney_shadow_latency_baselines from public;
 
 alter table tourney_email_dispatches drop constraint if exists tourney_email_dispatches_status_check;
 alter table tourney_email_dispatches
@@ -197,7 +302,7 @@ alter table tourney_email_dispatches
   add column if not exists audited_override_by text,
   add column if not exists audited_override_reason text,
   add constraint tourney_email_dispatches_status_check check (status in (
-    'pending','sending','retry','sent','failed','dead_letter','historical_unknown'
+    'pending','sending','retry','sent','failed','dead_letter','historical_unknown','expired'
   )) not valid;
 alter table tourney_email_dispatches validate constraint tourney_email_dispatches_status_check;
 create index if not exists tourney_email_dispatches_expired_lease_v4_idx
@@ -209,6 +314,9 @@ returns trigger language plpgsql set search_path = '' as $$
 begin
   if old.status = 'sent' and new.status <> 'sent' then
     raise exception 'A sent Tourney email dispatch cannot regress' using errcode = '23514';
+  end if;
+  if old.status = 'expired' and new.status <> 'expired' then
+    raise exception 'An expired Tourney email dispatch cannot become sendable' using errcode = '23514';
   end if;
   if old.status = 'historical_unknown' and new.status in ('pending','sending','retry')
      and (new.audited_override_at is null

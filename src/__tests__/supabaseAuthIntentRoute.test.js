@@ -3,6 +3,7 @@ const mockCreateOAuthIntent = jest.fn();
 const mockClearNextSupabaseSession = jest.fn();
 const mockConsumeAuthRateLimit = jest.fn();
 const mockReadReauthToken = jest.fn();
+const originalTourneyDatabaseMode = process.env.TOURNEY_DATABASE_MODE;
 
 jest.mock("../server/supabase/domainIdentity", () => ({
   resolveExactDomainIdentity: (...args) => mockResolveExactDomainIdentity(...args),
@@ -73,8 +74,17 @@ const makeRequest = (payload, { origin = "https://www.rooindustries.com" } = {})
 };
 
 describe("Supabase OAuth intent route", () => {
+  afterAll(() => {
+    if (originalTourneyDatabaseMode === undefined) {
+      delete process.env.TOURNEY_DATABASE_MODE;
+    } else {
+      process.env.TOURNEY_DATABASE_MODE = originalTourneyDatabaseMode;
+    }
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
+    process.env.TOURNEY_DATABASE_MODE = "supabase";
     mockClearNextSupabaseSession.mockResolvedValue(undefined);
     mockConsumeAuthRateLimit.mockResolvedValue({ allowed: true, retryAfter: 60 });
     mockReadReauthToken.mockReturnValue("recent-auth-token");
@@ -96,6 +106,26 @@ describe("Supabase OAuth intent route", () => {
     expect(response.status).toBe(403);
     expect(mockCreateOAuthIntent).not.toHaveBeenCalled();
   });
+
+  test.each([undefined, "   "])(
+    "treats an unset or blank Tourney database mode as legacy",
+    async (mode) => {
+      if (mode === undefined) {
+        delete process.env.TOURNEY_DATABASE_MODE;
+      } else {
+        process.env.TOURNEY_DATABASE_MODE = mode;
+      }
+
+      const response = await POST(
+        makeRequest({ action: "signin", flow: "tourney", provider: "google" })
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(503);
+      expect(body.code).toBe("TOURNEY_OAUTH_TEMPORARILY_UNAVAILABLE");
+      expect(mockCreateOAuthIntent).not.toHaveBeenCalled();
+    }
+  );
 
   test("requires the exact custom and Supabase session before linking", async () => {
     mockResolveExactDomainIdentity.mockResolvedValue(null);

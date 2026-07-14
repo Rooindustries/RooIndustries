@@ -95,7 +95,7 @@ export default function DownloadGate() {
             value={email}
             onChange={(event) => setEmail(event.target.value)}
             placeholder="Email used on the booking"
-            className="w-full bg-surface-input border border-line-input rounded-md px-3 py-2 outline-none text-sm"
+            className="w-full bg-surface-input border border-line-input rounded-md px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info-text focus-visible:ring-offset-2 focus-visible:ring-offset-surface-card"
             type="email"
             autoComplete="email"
           />
@@ -110,19 +110,19 @@ export default function DownloadGate() {
             value={orderId}
             onChange={(event) => setOrderId(event.target.value)}
             placeholder="Paste the Order ID from your confirmation email"
-            className="w-full bg-surface-input border border-line-input rounded-md px-3 py-2 outline-none text-sm"
+            className="w-full bg-surface-input border border-line-input rounded-md px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info-text focus-visible:ring-offset-2 focus-visible:ring-offset-surface-card"
             autoComplete="off"
           />
         </div>
 
         {error && (
-          <p className="mb-4 text-sm text-danger-text bg-danger-soft border border-danger-border rounded-md px-3 py-2">
+          <p role="alert" className="mb-4 text-sm text-danger-text bg-danger-soft border border-danger-border rounded-md px-3 py-2">
             {error}
           </p>
         )}
 
         {success && (
-          <p className="mb-4 text-sm text-success-text bg-success-soft border border-success-border rounded-md px-3 py-2">
+          <p role="status" aria-live="polite" className="mb-4 text-sm text-success-text bg-success-soft border border-success-border rounded-md px-3 py-2">
             {success}
           </p>
         )}

@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { getSafeErrorCode } from "../../safeErrorLog.js";
+import { authorizeCronRequest } from "../cronAuth.js";
 import createBookingHandler from "../ref/createBooking.js";
 import { createCommerceWriteClient } from "../ref/sanity.js";
 import { resolvePaymentQuote } from "../ref/pricing.js";
@@ -72,6 +73,8 @@ import {
   PAYMENT_STATUS_REFUNDED,
   PAYMENT_STATUS_STARTED,
 } from "./paymentRecord.js";
+
+export { authorizeCronRequest };
 
 const { resolvePaymentProviders, resolveServerPaymentSessionsEnabled } =
   providerConfig;
@@ -3936,29 +3939,6 @@ export const getPaymentStatus = async ({
     httpStatus: 200,
     body: buildPublicStatusBody(resolved.record),
   };
-};
-
-export const authorizeCronRequest = (req) => {
-  const configured = String(process.env.CRON_SECRET || "").trim();
-  if (!configured) {
-    const error = new Error("CRON_SECRET is required.");
-    error.status = 500;
-    throw error;
-  }
-
-  const authorization = String(req?.headers?.authorization || "").trim();
-  const match = authorization.match(/^Bearer\s+([^\s]+)$/i);
-  const provided = String(match?.[1] || "").trim();
-  const providedBuffer = Buffer.from(provided);
-  const configuredBuffer = Buffer.from(configured);
-  const authorized =
-    providedBuffer.length === configuredBuffer.length &&
-    crypto.timingSafeEqual(providedBuffer, configuredBuffer);
-  if (!authorized) {
-    const error = new Error("Unauthorized request.");
-    error.status = 403;
-    throw error;
-  }
 };
 
 export const reconcilePaymentSessions = async ({

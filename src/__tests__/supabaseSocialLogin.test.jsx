@@ -84,7 +84,7 @@ describe("Supabase social login", () => {
         options: {
           redirectTo:
             "http://localhost/auth/callback?intent=11111111-1111-4111-8111-111111111111",
-          ...(provider === "discord" ? { scopes: "identify email" } : {}),
+          ...(provider === "discord" ? { scopes: "identify email guilds.join" } : {}),
         },
       });
     });
