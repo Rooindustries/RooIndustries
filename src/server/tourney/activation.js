@@ -421,6 +421,7 @@ export const seedTourneyAccountSnapshotV4 = async ({ env = process.env } = {}) =
     commandId,
     purpose: "accounts:seed",
     requestPayload: { canonicalHash: commandId.split(":").at(-1) },
+    attemptExternalWork: false,
     maintenanceWhilePaused: true,
     env,
     callback: async () => ({
@@ -450,6 +451,7 @@ export const seedTourneyPlayerPrincipalsV4 = async ({ env = process.env } = {}) 
       commandId,
       purpose: "identity:principal-seed",
       requestPayload: { playerId: mapping.player_id, principalId: mapping.principal_id },
+      attemptExternalWork: false,
       maintenanceWhilePaused: true,
       env,
       callback: async () => {
@@ -471,6 +473,7 @@ export const backfillTourneyEmailHistoryV4 = async ({ env = process.env } = {}) 
     commandId,
     purpose: "email:history-backfill",
     requestPayload: { generation: 1, schemaVersion: 4, send: false },
+    attemptExternalWork: false,
     maintenanceWhilePaused: true,
     env,
     callback: async () => {
@@ -502,6 +505,7 @@ export const seedTourneyDiscordDesiredStateV4 = async ({ env = process.env } = {
     commandId: normalizationCommandId,
     purpose: "discord:backfill",
     requestPayload: { generation: policy.generation, schemaVersion: 4 },
+    attemptExternalWork: false,
     maintenanceWhilePaused: true,
     env,
     callback: async () => {

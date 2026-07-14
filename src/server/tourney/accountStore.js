@@ -12,18 +12,19 @@ const MEMORY_STORE =
 
 const getSanityConfig = (env = process.env) => ({
   projectId:
+    env.SANITY_PRIVATE_PROJECT_ID ||
     env.SANITY_PROJECT_ID ||
-    env.NEXT_PUBLIC_SANITY_PROJECT_ID ||
-    "9g42k3ur",
+    "",
   dataset:
+    env.SANITY_PRIVATE_DATASET ||
     env.SANITY_DATASET ||
-    env.NEXT_PUBLIC_SANITY_DATASET ||
     "production",
   apiVersion:
+    env.SANITY_PRIVATE_API_VERSION ||
     env.SANITY_API_VERSION ||
-    env.NEXT_PUBLIC_SANITY_API_VERSION ||
     "2023-10-01",
   token:
+    env.SANITY_PRIVATE_WRITE_TOKEN ||
     env.SANITY_WRITE_TOKEN ||
     env.SANITY_API_TOKEN ||
     "",

@@ -8,13 +8,14 @@ const mockExecuteCommand = jest.fn();
 const mockRecordDesiredState = jest.fn();
 const mockEnqueueExternalOperation = jest.fn();
 const mockSql = jest.fn();
+const mockWriteAccounts = jest.fn();
 
 jest.mock("../server/tourney/auth", () => ({
   readEffectiveTourneyAccounts: (...args) => mockReadAccounts(...args),
   renderTourneyAccountsJson: (...args) => mockRenderAccounts(...args),
 }));
 jest.mock("../server/tourney/accountStore", () => ({
-  writePersistedTourneyAccountsJson: jest.fn(),
+  writePersistedTourneyAccountsJson: (...args) => mockWriteAccounts(...args),
 }));
 jest.mock("../server/tourney/discordConfig", () => ({
   getTourneyDiscordRoleConfig: (...args) => mockRoleConfig(...args),
@@ -32,6 +33,12 @@ jest.mock("../server/tourney/sqlClient", () => ({
 jest.mock("../server/tourney/store", () => ({
   executeTourneyCommand: (...args) => mockExecuteCommand(...args),
   resolveTourneyStorePolicy: (...args) => mockResolvePolicy(...args),
+}));
+jest.mock("../server/tourney/reconcile.js", () => ({
+  withTourneyReconciliationLease: async ({ callback }) => ({
+    acquired: true,
+    value: await callback(),
+  }),
 }));
 
 const {
@@ -115,6 +122,7 @@ describe("Tourney v4 activation", () => {
       generation: 3,
     });
     mockEnqueueExternalOperation.mockResolvedValue({ operationKey: "operation-1" });
+    mockWriteAccounts.mockResolvedValue({ ok: true });
     mockExecuteCommand.mockImplementation(async ({ callback }) => ({
       body: (await callback()).body,
       syncPending: false,
@@ -207,6 +215,9 @@ describe("Tourney v4 activation", () => {
       maintenanceWhilePaused: true,
       attemptExternalWork: false,
     }));
+    expect(mockExecuteCommand.mock.calls.every(
+      ([command]) => command.attemptExternalWork === false
+    )).toBe(true);
     expect(mockEnqueueExternalOperation).toHaveBeenCalledWith(expect.objectContaining({
       commandId: "discord-state-seed:g1:v3:private-player:1234567890",
       operationKind: "discord_role_reconcile",
@@ -214,6 +225,47 @@ describe("Tourney v4 activation", () => {
     }));
     expect(mockSql.mock.calls.some(([strings]) =>
       strings.join(" ").includes("superseded_by_newer_desired_state")
+    )).toBe(true);
+  });
+
+  test("successful activation defers every backfill command", async () => {
+    mockSql.mockImplementation(async (strings) => {
+      const query = strings.join(" ");
+      if (query.includes("select username,principal_id")) {
+        return [{ username: "owner", principal_id: "principal-1" }];
+      }
+      if (
+        query.includes("player.principal_id is distinct") &&
+        query.includes("order by player.id")
+      ) {
+        return [{ player_id: "private-player", principal_id: "principal-1" }];
+      }
+      if (query.includes("roo_backfill_tourney_email_history_v4")) {
+        return [{ result: { inserted: 1 } }];
+      }
+      if (query.includes("select player.id as player_id")) return authorityRows;
+      if (query.includes("update accounts.discord_role_assignments")) {
+        return [{ principal_id: "principal-1" }];
+      }
+      if (query.includes("update tourney.external_operations")) return [];
+      return [databaseState];
+    });
+    const fetchImpl = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ roles: ["222222"] }),
+    });
+    const inventory = await inventoryTourneyV4Activation({ env, fetchImpl });
+    const result = await applyTourneyV4Activation({
+      env,
+      fetchImpl,
+      inventoryHash: inventory.inventoryHash,
+    });
+
+    expect(result.applied).toBe(true);
+    expect(mockExecuteCommand).toHaveBeenCalledTimes(5);
+    expect(mockExecuteCommand.mock.calls.every(
+      ([command]) => command.attemptExternalWork === false
     )).toBe(true);
   });
 

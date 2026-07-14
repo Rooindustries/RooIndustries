@@ -16,6 +16,10 @@ const cutoverCli = fs.readFileSync(
   path.join(process.cwd(), "scripts", "tourney-cutover.mjs"),
   "utf8"
 );
+const postgresConnectionEnv = fs.readFileSync(
+  path.join(process.cwd(), "scripts", "lib", "postgres-connection-env.mjs"),
+  "utf8"
+);
 const activationWorker = fs.readFileSync(
   path.join(process.cwd(), "src", "server", "tourney", "activation.js"),
   "utf8"
@@ -133,19 +137,28 @@ describe("Tourney cutover migration", () => {
     expect(cutoverCli).not.toContain("roo_capture_tourney_pre_cutover_snapshot");
     expect(cutoverCli).not.toContain("POSTGRES_URL_NON_POOLING");
     expect(cutoverCli).toContain("process.env.TOURNEY_DATABASE_URL");
-    expect(cutoverCli).toContain('psqlEnv.PGCONNECT_TIMEOUT = "15"');
-    expect(cutoverCli).toContain("psqlEnv.PGDATABASE = databaseUrl");
-    expect(cutoverCli).toContain('execFileAsync("psql", args');
+    expect(cutoverCli).toContain("const env = buildPostgresConnectionEnv(databaseUrl)");
+    expect(postgresConnectionEnv).toContain('env.PGCONNECT_TIMEOUT = "15"');
+    expect(postgresConnectionEnv).toContain("env.PGHOST");
+    expect(postgresConnectionEnv).toContain("env.PGPORT");
+    expect(postgresConnectionEnv).toContain("env.PGUSER");
+    expect(postgresConnectionEnv).toContain("env.PGPASSWORD");
+    expect(postgresConnectionEnv).toContain("env.PGDATABASE");
+    expect(postgresConnectionEnv).toContain("buildPostgresSessionArgs");
+    expect(cutoverCli).toContain('execFileAsync("psql", buildPostgresSessionArgs(args)');
+    expect(postgresConnectionEnv).toContain("set search_path=pg_catalog,public");
+    expect(postgresConnectionEnv).toContain("set statement_timeout='120s'");
+    expect(postgresConnectionEnv).toContain("set lock_timeout='5s'");
     expect(cutoverCli).not.toContain('[databaseUrl, ...args]');
     expect(cutoverCli).toContain("normalize(process.env.TOURNEY_SNAPSHOT_KEY)");
     expect(cutoverCli).not.toMatch(/TOURNEY_SNAPSHOT_KEY\s*\|\|/);
     expect(cutoverCli).toContain("plaintextSha256");
-    expect(cutoverCli).toContain('fs.openSync(output, "wx", 0o600)');
-    expect(cutoverCli).toContain("fs.fsyncSync(descriptor)");
+    expect(cutoverCli).toContain('fs.openSync(canonicalOutput, "wx", 0o600)');
+    expect(cutoverCli).toContain("TOURNEY_CUTOVER_EXPECTED_SANITY_FINGERPRINT");
+    expect(cutoverCli).toContain("fs.fsyncSync(reservation.descriptor)");
     expect(cutoverCli).toContain('--verify-snapshot <path>');
-    expect(cutoverCli).toContain(
-      '"--output <path> is required when HOME is unavailable."'
-    );
+    expect(cutoverCli).toContain('"Tourney Cutover"');
+    expect(cutoverCli).toContain("approved snapshot directory");
     expect(cutoverCli).toContain("TOURNEY_LEGACY_SNAPSHOT_INCOMPLETE");
     expect(cutoverCli).toContain("TOURNEY_ACTIVATION_ENVIRONMENT_MISMATCH");
     expect(cutoverCli).toContain("payloadText: hosted.data?.payload_text");
@@ -186,6 +199,376 @@ describe("Tourney cutover migration", () => {
     expect(JSON.parse(output)).toEqual({ roundTrip: true, tamperRejected: true });
   });
 
+  test("converts PostgreSQL URLs into isolated libpq environment fields", () => {
+    const moduleUrl = pathToFileURL(
+      path.join(process.cwd(), "scripts", "lib", "postgres-connection-env.mjs")
+    ).href;
+    const output = execFileSync(process.execPath, [
+      "--input-type=module",
+      "--eval",
+      `
+        import { buildPostgresConnectionEnv } from ${JSON.stringify(moduleUrl)};
+        const env = buildPostgresConnectionEnv(
+          "postgresql://user%40tenant:p%3A%40ss@[2001:db8::1]:6543/tourney%20fallback?sslmode=require&channel_binding=require&target_session_attrs=read-write",
+          { PATH: "/bin", PGHOST: "stale", PGPASSWORD: "stale", pgservice: "stale" }
+        );
+        const defaults = buildPostgresConnectionEnv(
+          "postgres://user:secret@database.example/roo?sslmode=require",
+          { PATH: "/bin" }
+        );
+        const rejected = [];
+        for (const value of [
+          "https://database.example/roo",
+          "postgres:///roo",
+          "postgres://database.example/roo",
+          "postgres://user@database.example/roo",
+          "postgres://user@database.example/",
+          "postgres://bad%ZZ@database.example/roo",
+          "postgres://user:secret@database.example/roo?options=-c%20search_path%3Dpublic",
+          "postgres://user:secret@database.example/roo?sslmode=require&sslmode=prefer",
+          "postgres://user:secret@database.example/roo?sslmode=invalid",
+          "postgres://user:secret@database.example/roo?channel_binding=invalid",
+          "postgres://user:secret@database.example/roo?target_session_attrs=invalid",
+          "postgres://user:secret@database.example/roo?host=other.example",
+          "postgresql://user:secret@%2Fvar%2Frun%2Fpostgresql/roo",
+          "postgres://user:secret@database.example/roo#fragment",
+          "postgres://user:secret@database.example/roo",
+          "postgres://user:secret@database.example/roo?sslmode=disable",
+          "postgres://user:secret@database.example/roo?sslmode=allow",
+          "postgres://user:secret@database.example/roo?sslmode=prefer",
+        ]) {
+          try {
+            buildPostgresConnectionEnv(value, {});
+          } catch (error) {
+            rejected.push(error.message);
+          }
+        }
+        process.stdout.write(JSON.stringify({ env, defaults, rejected }));
+      `,
+    ], { encoding: "utf8" });
+    const result = JSON.parse(output);
+    expect(result.env).toEqual({
+      PATH: "/bin",
+      PGHOST: "2001:db8::1",
+      PGPORT: "6543",
+      PGUSER: "user@tenant",
+      PGDATABASE: "tourney fallback",
+      PGCONNECT_TIMEOUT: "15",
+      PGPASSWORD: "p:@ss",
+      PGCHANNELBINDING: "require",
+      PGSSLMODE: "require",
+      PGTARGETSESSIONATTRS: "read-write",
+    });
+    expect(result.defaults).toEqual({
+      PATH: "/bin",
+      PGHOST: "database.example",
+      PGPORT: "5432",
+      PGUSER: "user",
+      PGPASSWORD: "secret",
+      PGDATABASE: "roo",
+      PGCONNECT_TIMEOUT: "15",
+      PGSSLMODE: "require",
+    });
+    expect(result.rejected).toHaveLength(18);
+    expect(result.rejected.join(" ")).not.toContain("bad%ZZ");
+  });
+
+  test("fails closed on unsafe CLI arguments, paths, environments, and timeouts", () => {
+    const moduleUrl = pathToFileURL(
+      path.join(process.cwd(), "scripts", "tourney-cutover.mjs")
+    ).href;
+    const output = execFileSync(process.execPath, [
+      "--input-type=module",
+      "--eval",
+      `
+        import fs from "node:fs";
+        import os from "node:os";
+        import path from "node:path";
+        import {
+          loadEnvironment,
+          main,
+          parseCliAction,
+          printTargetFingerprints,
+          reserveSnapshotOutput,
+          resolveSnapshotInput,
+          runPsql,
+        } from ${JSON.stringify(moduleUrl)};
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "tourney-cli-test-"));
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), "tourney-cli-outside-"));
+        const capture = async (operation) => {
+          try {
+            await operation();
+            return "accepted";
+          } catch (error) {
+            return { code: error.code || "", message: error.message };
+          }
+        };
+        try {
+          const validEnv = path.join(root, "valid.env");
+          const insecureEnv = path.join(root, "insecure.env");
+          const memoryDatabaseEnv = path.join(root, "memory-database.env");
+          const memoryAccountEnv = path.join(root, "memory-account.env");
+          const missingDatabaseModeEnv = path.join(root, "missing-database-mode.env");
+          const typoDatabaseModeEnv = path.join(root, "typo-database-mode.env");
+          fs.writeFileSync(validEnv, "CUTOVER_TEST_MARKER=loaded\\nTOURNEY_DATABASE_MODE=supabase\\n", { mode: 0o600 });
+          fs.writeFileSync(insecureEnv, "CUTOVER_TEST_MARKER=insecure\\n", { mode: 0o600 });
+          fs.writeFileSync(memoryDatabaseEnv, "NODE_ENV=production\\nTOURNEY_DATABASE_MODE=memory\\n", { mode: 0o600 });
+          fs.writeFileSync(memoryAccountEnv, "NODE_ENV=production\\nTOURNEY_DATABASE_MODE=supabase\\nTOURNEY_ACCOUNT_STORE_MODE=memory\\n", { mode: 0o600 });
+          fs.writeFileSync(missingDatabaseModeEnv, "NODE_ENV=production\\n", { mode: 0o600 });
+          fs.writeFileSync(typoDatabaseModeEnv, "NODE_ENV=production\\nTOURNEY_DATABASE_MODE=legcay\\n", { mode: 0o600 });
+          fs.chmodSync(insecureEnv, 0o644);
+          process.argv = ["node", "test", "--env", "--snapshot"];
+          const missingEnvValue = await capture(() => loadEnvironment());
+          process.argv = ["node", "test", "--env", path.join(root, "missing.env")];
+          const missingEnv = await capture(() => loadEnvironment());
+          process.argv = ["node", "test", "--env", insecureEnv];
+          const insecure = await capture(() => loadEnvironment());
+          process.env.CUTOVER_TEST_MARKER = "ambient";
+          process.env.SUPABASE_URL = "https://ambient.invalid";
+          process.env.SANITY_PROJECT_ID = "ambient-project";
+          process.env.NEXT_PUBLIC_SANITY_PROJECT_ID = "ambient-public-project";
+          process.env.TOURNEY_CUTOVER_EXPECTED_SANITY_FINGERPRINT = "a".repeat(64);
+          process.argv = ["node", "test", "--env", validEnv];
+          loadEnvironment();
+          const environmentLoaded = process.env.CUTOVER_TEST_MARKER;
+          const ambientSupabaseCleared = process.env.SUPABASE_URL === undefined;
+          const ambientSanityCleared = process.env.SANITY_PROJECT_ID === undefined &&
+            process.env.NEXT_PUBLIC_SANITY_PROJECT_ID === undefined &&
+            process.env.TOURNEY_CUTOVER_EXPECTED_SANITY_FINGERPRINT === undefined;
+
+          process.argv = ["node", "test", "--output", "relative.enc"];
+          const relativeOutput = await capture(() => reserveSnapshotOutput("2026-07-15T00:00:00.000Z", { allowedRoot: root }));
+          process.argv = ["node", "test", "--output", path.join(process.cwd(), "blocked.enc")];
+          const repositoryOutput = await capture(() => reserveSnapshotOutput("2026-07-15T00:00:00.000Z", { allowedRoot: root }));
+          const linkedParent = path.join(root, "linked-parent");
+          fs.symlinkSync(process.cwd(), linkedParent, "dir");
+          process.argv = ["node", "test", "--output", path.join(linkedParent, "blocked.enc")];
+          const linkedOutput = await capture(() => reserveSnapshotOutput("2026-07-15T00:00:00.000Z", { allowedRoot: root }));
+          const nestedLink = path.join(root, "nested-link");
+          fs.symlinkSync(outside, nestedLink, "dir");
+          process.argv = ["node", "test", "--output", path.join(nestedLink, "new", "blocked.enc")];
+          const linkedNestedOutput = await capture(() => reserveSnapshotOutput("2026-07-15T00:00:00.000Z", { allowedRoot: root }));
+          const linkedNestedCreatedOutside = fs.existsSync(path.join(outside, "new"));
+          const rootAlias = path.join(outside, "root-alias");
+          fs.symlinkSync(root, rootAlias, "dir");
+          process.argv = ["node", "test", "--output", path.join(rootAlias, "blocked.enc")];
+          const linkedRootOutput = await capture(() => reserveSnapshotOutput("2026-07-15T00:00:00.000Z", { allowedRoot: rootAlias }));
+          const externalOutput = path.join(root, "snapshot.enc");
+          process.argv = ["node", "test", "--output", externalOutput];
+          const reservation = reserveSnapshotOutput("2026-07-15T00:00:00.000Z", { allowedRoot: root });
+          const outputMode = (fs.fstatSync(reservation.descriptor).mode & 0o777).toString(8);
+          fs.closeSync(reservation.descriptor);
+
+          process.argv = ["node", "test", "--verify-snapshot", externalOutput];
+          const resolvedInput = resolveSnapshotInput({ allowedRoot: root }) === fs.realpathSync(externalOutput);
+          process.argv = ["node", "test", "--verify-snapshot", "relative.enc"];
+          const relativeInput = await capture(() => resolveSnapshotInput({ allowedRoot: root }));
+          process.argv = ["node", "test", "--snapshot", "--parity"];
+          const ambiguousAction = await capture(() => main());
+          process.argv = ["node", "test", "--snapshot"];
+          const snapshotTouchesSanity = parseCliAction().touchesSanity === true;
+          process.argv = ["node", "test", "--parity"];
+          const parityAction = parseCliAction();
+          const parityTouchesSanity = parityAction.touchesSanity === true;
+          const parityTouchesSupabaseDatabase = parityAction.touchesSupabaseDatabase === true;
+          process.argv = ["node", "test", "--migrate"];
+          const migrateTouchesSupabaseDatabase =
+            parseCliAction().touchesSupabaseDatabase === true;
+          process.argv = ["node", "test", "--inventory-activation-v4"];
+          const activationInventoryTargets = parseCliAction();
+          const inventoryTouchesSanity = activationInventoryTargets.touchesSanity === true;
+          const inventoryTouchesDiscord = activationInventoryTargets.touchesDiscord === true;
+          const actionArguments = {
+            "--print-target-fingerprints": [],
+            "--snapshot": [],
+            "--verify-snapshot": [externalOutput],
+            "--apply-legacy-schema": [],
+            "--expand-legacy-v4": [],
+            "--activate-legacy-v4": [],
+            "--activate-supabase-v4": [],
+            "--repair-legacy-v4": [],
+            "--inventory-activation-v4": [],
+            "--capture-latency-baseline-v4": [],
+            "--apply-activation-v4": ["--inventory-hash", "a".repeat(64)],
+            "--inventory-fallback-v4": [],
+            "--bootstrap-fallback-v4": ["--expected-legacy-hash", "b".repeat(64)],
+            "--check-manual-failover-v4": [],
+            "--migrate": [],
+            "--parity": [],
+          };
+          const actionTargets = {};
+          for (const [flag, values] of Object.entries(actionArguments)) {
+            process.argv = ["node", "test", flag, ...values];
+            const action = parseCliAction();
+            actionTargets[flag] = [
+              action.touchesLegacy,
+              action.touchesSupabase,
+              action.touchesSupabaseDatabase,
+              action.touchesSanity,
+              action.touchesDiscord,
+            ].map(Boolean);
+          }
+          process.argv = ["node", "test", "--apply-legacy-schema"];
+          const explicitEnvironmentRequired = await capture(() => main());
+          process.argv = ["node", "test", "--print-target-fingerprints"];
+          const fingerprintEnvironmentRequired = await capture(() => main());
+          process.env.NODE_ENV = "test";
+          process.argv = ["node", "test", "--apply-legacy-schema", "--env", validEnv];
+          const testRuntimeRejected = await capture(() => main());
+          process.argv = ["node", "test", "--apply-legacy-schema", "--env", memoryDatabaseEnv];
+          const memoryDatabaseRejected = await capture(() => main());
+          process.argv = ["node", "test", "--apply-legacy-schema", "--env", memoryAccountEnv];
+          const memoryAccountRejected = await capture(() => main());
+          process.argv = ["node", "test", "--apply-legacy-schema", "--env", missingDatabaseModeEnv];
+          const missingDatabaseModeRejected = await capture(() => main());
+          process.argv = ["node", "test", "--apply-legacy-schema", "--env", typoDatabaseModeEnv];
+          const typoDatabaseModeRejected = await capture(() => main());
+          process.argv = ["node", "test", "--apply-legacy-schema", "accidental"];
+          const positionalArgument = await capture(() => parseCliAction());
+          process.argv = ["node", "test", "--apply-legacy-schema", "--expected-legacy-hash", "abc"];
+          const irrelevantOption = await capture(() => parseCliAction());
+          process.argv = ["node", "test", "--apply-legacy-schema", "--env", validEnv, "--env", validEnv];
+          const duplicateOption = await capture(() => parseCliAction());
+          process.argv = ["node", "test", "--apply-activation-v4"];
+          const missingRequiredOption = await capture(() => parseCliAction());
+
+          Object.assign(process.env, {
+            TOURNEY_DATABASE_URL: "postgresql://legacy:placeholder@legacy.example.com/tourney",
+            SUPABASE_URL: "https://projectref.supabase.co",
+            SUPABASE_DATABASE_URL: "postgresql://postgres:placeholder@db.projectref.supabase.co/postgres",
+            SANITY_PROJECT_ID: "roo-project",
+            SANITY_DATASET: "production",
+            DISCORD_GUILD_ID: "111111111111111111",
+            DISCORD_PARTICIPANT_ROLE_ID: "222222222222222222",
+            DISCORD_HOST_ROLE_ID: "333333333333333333",
+          });
+          const generatedFingerprints = printTargetFingerprints();
+          const generatedFingerprintKeys = Object.keys(generatedFingerprints).sort();
+          const generatedFingerprintsValid = Object.values(generatedFingerprints).every(
+            (value) => /^[0-9a-f]{64}$/.test(value)
+          );
+
+          const bin = path.join(root, "bin");
+          fs.mkdirSync(bin);
+          const fakePsql = path.join(bin, "psql");
+          fs.writeFileSync(fakePsql, "#!/usr/bin/env node\\nsetTimeout(() => {}, 10000);\\n", { mode: 0o700 });
+          process.env.PATH = bin + path.delimiter + process.env.PATH;
+          const timeout = await capture(() => runPsql(
+            "postgresql://user:password@database.example/roo?sslmode=require&channel_binding=require",
+            [],
+            { timeout: 20 }
+          ));
+          process.stdout.write(JSON.stringify({
+            missingEnvValue,
+            missingEnv,
+            insecure,
+            environmentLoaded,
+            ambientSupabaseCleared,
+            ambientSanityCleared,
+            relativeOutput,
+            repositoryOutput,
+            linkedOutput,
+            linkedNestedOutput,
+            linkedNestedCreatedOutside,
+            linkedRootOutput,
+            outputMode,
+            resolvedInput,
+            relativeInput,
+            ambiguousAction,
+            snapshotTouchesSanity,
+            parityTouchesSanity,
+            parityTouchesSupabaseDatabase,
+            migrateTouchesSupabaseDatabase,
+            inventoryTouchesSanity,
+            inventoryTouchesDiscord,
+            actionTargets,
+            explicitEnvironmentRequired,
+            fingerprintEnvironmentRequired,
+            testRuntimeRejected,
+            memoryDatabaseRejected,
+            memoryAccountRejected,
+            missingDatabaseModeRejected,
+            typoDatabaseModeRejected,
+            positionalArgument,
+            irrelevantOption,
+            duplicateOption,
+            missingRequiredOption,
+            generatedFingerprintKeys,
+            generatedFingerprintsValid,
+            timeout,
+          }));
+        } finally {
+          fs.rmSync(root, { recursive: true, force: true });
+          fs.rmSync(outside, { recursive: true, force: true });
+        }
+      `,
+    ], { encoding: "utf8" });
+    const result = JSON.parse(output);
+    expect(result).toMatchObject({
+      missingEnvValue: { code: "TOURNEY_CLI_ARGUMENT_INVALID" },
+      missingEnv: { code: "TOURNEY_ENV_FILE_INVALID" },
+      insecure: { code: "TOURNEY_ENV_FILE_INVALID" },
+      environmentLoaded: "loaded",
+      ambientSupabaseCleared: true,
+      ambientSanityCleared: true,
+      relativeOutput: { message: "--output <path> must be absolute." },
+      repositoryOutput: { message: "The Tourney snapshot must be stored in the approved snapshot directory." },
+      linkedOutput: { message: "The Tourney snapshot must be stored in the approved snapshot directory." },
+      linkedNestedOutput: { message: "The Tourney snapshot must be stored in the approved snapshot directory." },
+      linkedNestedCreatedOutside: false,
+      linkedRootOutput: { message: "The approved Tourney snapshot directory is invalid." },
+      outputMode: "600",
+      resolvedInput: true,
+      relativeInput: { message: "--verify-snapshot <path> must be absolute." },
+      ambiguousAction: { code: "TOURNEY_CLI_ACTION_INVALID" },
+      snapshotTouchesSanity: true,
+      parityTouchesSanity: false,
+      parityTouchesSupabaseDatabase: true,
+      migrateTouchesSupabaseDatabase: true,
+      inventoryTouchesSanity: true,
+      inventoryTouchesDiscord: true,
+      actionTargets: {
+        "--print-target-fingerprints": [false, false, false, false, false],
+        "--snapshot": [true, true, false, true, false],
+        "--verify-snapshot": [false, false, false, false, false],
+        "--apply-legacy-schema": [true, false, false, false, false],
+        "--expand-legacy-v4": [true, false, false, false, false],
+        "--activate-legacy-v4": [true, true, false, false, false],
+        "--activate-supabase-v4": [true, true, true, false, false],
+        "--repair-legacy-v4": [true, false, false, false, false],
+        "--inventory-activation-v4": [true, true, true, true, true],
+        "--capture-latency-baseline-v4": [false, true, true, false, false],
+        "--apply-activation-v4": [true, true, true, true, true],
+        "--inventory-fallback-v4": [true, true, false, false, false],
+        "--bootstrap-fallback-v4": [true, true, false, false, false],
+        "--check-manual-failover-v4": [true, true, true, false, false],
+        "--migrate": [true, true, true, false, false],
+        "--parity": [true, true, true, false, false],
+      },
+      explicitEnvironmentRequired: { code: "TOURNEY_ENV_FILE_REQUIRED" },
+      fingerprintEnvironmentRequired: { code: "TOURNEY_ENV_FILE_REQUIRED" },
+      testRuntimeRejected: { code: "TOURNEY_HOSTED_EXECUTION_ENVIRONMENT_INVALID" },
+      memoryDatabaseRejected: { code: "TOURNEY_HOSTED_EXECUTION_ENVIRONMENT_INVALID" },
+      memoryAccountRejected: { code: "TOURNEY_HOSTED_EXECUTION_ENVIRONMENT_INVALID" },
+      missingDatabaseModeRejected: { code: "TOURNEY_HOSTED_EXECUTION_ENVIRONMENT_INVALID" },
+      typoDatabaseModeRejected: { code: "TOURNEY_HOSTED_EXECUTION_ENVIRONMENT_INVALID" },
+      positionalArgument: { code: "TOURNEY_CLI_ARGUMENT_INVALID" },
+      irrelevantOption: { code: "TOURNEY_CLI_ARGUMENT_INVALID" },
+      duplicateOption: { code: "TOURNEY_CLI_ARGUMENT_INVALID" },
+      missingRequiredOption: { code: "TOURNEY_CLI_ARGUMENT_INVALID" },
+      generatedFingerprintKeys: [
+        "TOURNEY_CUTOVER_EXPECTED_DISCORD_FINGERPRINT",
+        "TOURNEY_CUTOVER_EXPECTED_LEGACY_FINGERPRINT",
+        "TOURNEY_CUTOVER_EXPECTED_SANITY_FINGERPRINT",
+        "TOURNEY_CUTOVER_EXPECTED_SUPABASE_API_FINGERPRINT",
+        "TOURNEY_CUTOVER_EXPECTED_SUPABASE_DATABASE_FINGERPRINT",
+      ],
+      generatedFingerprintsValid: true,
+      timeout: { code: "TOURNEY_LEGACY_DATABASE_COMMAND_TIMEOUT" },
+    });
+    expect(JSON.stringify(result)).not.toContain("password");
+  });
+
   test("uses complete legacy keys and unique intentional invite replays", () => {
     expect(cutoverCli).toContain("--inventory-activation-v4");
     const legacySchema = fs.readFileSync(
@@ -196,6 +579,39 @@ describe("Tourney cutover migration", () => {
     expect(legacySchema).toContain("'entity_type', v_row->>'entity_type'");
     expect(inviteScript).toContain("discord-invite:sample:${crypto.randomUUID()}");
     expect(inviteScript).toContain("const forceRunId = force ? crypto.randomUUID() : \"\"");
+  });
+
+  test("defers every activation backfill side effect to the durable worker", () => {
+    for (const marker of [
+      "account-snapshot:seed:",
+      "principal-seed:",
+      "email-history-backfill:g1:v4",
+      "discord-state-normalize:g",
+      "discord-state-seed",
+    ]) {
+      const start = activationWorker.indexOf(marker);
+      expect(start).toBeGreaterThan(-1);
+      expect(activationWorker.slice(start, start + 900)).toContain(
+        "attemptExternalWork: false"
+      );
+    }
+  });
+
+  test("runs every hosted target gate before action execution", () => {
+    const mainSource = cutoverCli.slice(cutoverCli.indexOf("const main = async () =>"));
+    const ordered = [
+      "loadEnvironment();",
+      "assertHostedExecutionEnvironment();",
+      "assertSanityConnectionTarget();",
+      "assertDiscordConnectionTarget();",
+      "checks.push(assertLegacyConnectionTarget())",
+      "checks.push(assertSupabaseConnectionTarget())",
+      "checks.push(assertSupabaseDatabaseConnectionTarget())",
+      "await Promise.all(checks);",
+      "return selected.execute();",
+    ].map((value) => mainSource.indexOf(value));
+    expect(ordered.every((index) => index >= 0)).toBe(true);
+    expect(ordered).toEqual([...ordered].sort((left, right) => left - right));
   });
 
   test("records ordered outbox events and guarded target checkpoints", () => {

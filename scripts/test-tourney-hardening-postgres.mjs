@@ -7,6 +7,12 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import postgres from "postgres";
+import { assertLegacyConnectionTarget } from "./tourney-cutover.mjs";
+import {
+  buildPostgresConnectionEnv,
+  buildPostgresSessionArgs,
+} from "./lib/postgres-connection-env.mjs";
+import migrationTargetSafety from "../src/server/supabase/migrationTargetSafety.cjs";
 import {
   checkTourneyManualFailoverReadiness,
   completeRecoveredTourneyCommandReceipts,
@@ -334,6 +340,69 @@ try {
       "-h", "127.0.0.1", "-p", String(port), database,
     ]);
   }
+
+  const databaseUser = os.userInfo().username;
+  const quotedDatabaseUser = databaseUser.replaceAll('"', '""');
+  run(path.join(pgBin, "psql"), [
+    "-h", "127.0.0.1", "-p", String(port), "-d", "postgres",
+    "-v", "ON_ERROR_STOP=1", "-c",
+    `alter role "${quotedDatabaseUser}" in database legacy_fixture set search_path=attacker`,
+  ]);
+  const connectionProbeEnv = buildPostgresConnectionEnv(
+    `postgresql://${encodeURIComponent(databaseUser)}:fixture@127.0.0.1:${port}/legacy_fixture?sslmode=disable&channel_binding=disable`,
+    {
+      PATH: process.env.PATH,
+      PGOPTIONS: "-csearch_path=attacker -cstatement_timeout=0 -clock_timeout=0",
+      TOURNEY_DATABASE_URL: "must-not-propagate",
+    }
+  );
+  const connectionProbeArgs = buildPostgresSessionArgs([
+    "-Atq", "-v", "ON_ERROR_STOP=1", "-c",
+    "select current_database()='legacy_fixture' and current_user=current_setting('session_authorization') and current_schemas(false)=array['pg_catalog','public']::name[] and current_setting('statement_timeout')='2min' and current_setting('lock_timeout')='5s'",
+  ]);
+  const connectionProbe = spawnSync(path.join(pgBin, "psql"), connectionProbeArgs, {
+    cwd: root,
+    encoding: "utf8",
+    env: connectionProbeEnv,
+  });
+  assert.equal(connectionProbe.status, 0, connectionProbe.stderr);
+  assert.equal(connectionProbe.stdout.trim(), "t", "libpq session controls were not pinned");
+  assert.equal(connectionProbeArgs.includes("legacy_fixture"), false);
+  assert.equal("TOURNEY_DATABASE_URL" in connectionProbeEnv, false);
+  const legacyProbeUrl = `postgresql://${encodeURIComponent(databaseUser)}:fixture@127.0.0.1:${port}/legacy_fixture?sslmode=disable&channel_binding=disable`;
+  const previousLegacyUrl = process.env.TOURNEY_DATABASE_URL;
+  const previousLegacyFingerprint = process.env.TOURNEY_CUTOVER_EXPECTED_LEGACY_FINGERPRINT;
+  const previousPath = process.env.PATH;
+  try {
+    process.env.TOURNEY_DATABASE_URL = legacyProbeUrl;
+    process.env.TOURNEY_CUTOVER_EXPECTED_LEGACY_FINGERPRINT =
+      migrationTargetSafety.computeTourneyCutoverLegacyTargetFingerprint(legacyProbeUrl);
+    process.env.PATH = `${pgBin}${path.delimiter}${previousPath}`;
+    assert.equal(
+      await assertLegacyConnectionTarget(),
+      process.env.TOURNEY_CUTOVER_EXPECTED_LEGACY_FINGERPRINT,
+      "central legacy connection target gate rejected the pinned database"
+    );
+    process.env.TOURNEY_CUTOVER_EXPECTED_LEGACY_FINGERPRINT = "0".repeat(64);
+    await assert.rejects(
+      assertLegacyConnectionTarget(),
+      { code: "TOURNEY_CUTOVER_LEGACY_TARGET_MISMATCH" }
+    );
+  } finally {
+    if (previousLegacyUrl === undefined) delete process.env.TOURNEY_DATABASE_URL;
+    else process.env.TOURNEY_DATABASE_URL = previousLegacyUrl;
+    if (previousLegacyFingerprint === undefined) {
+      delete process.env.TOURNEY_CUTOVER_EXPECTED_LEGACY_FINGERPRINT;
+    } else {
+      process.env.TOURNEY_CUTOVER_EXPECTED_LEGACY_FINGERPRINT = previousLegacyFingerprint;
+    }
+    process.env.PATH = previousPath;
+  }
+  run(path.join(pgBin, "psql"), [
+    "-h", "127.0.0.1", "-p", String(port), "-d", "postgres",
+    "-v", "ON_ERROR_STOP=1", "-c",
+    `alter role "${quotedDatabaseUser}" in database legacy_fixture reset search_path`,
+  ]);
 
   const supabaseBootstrap = writeTemp(
     "supabase-bootstrap.sql",
@@ -4383,6 +4452,7 @@ insert into accounts.discord_role_assignments(
     databases: 4,
     mirrorApplied: firstMirror.applied,
     verified: [
+      "URI-derived isolated libpq environment connection",
       "pre-DDL activation safety on both databases",
       "legacy empty-search-path trigger repair",
       "registry composite keys",
