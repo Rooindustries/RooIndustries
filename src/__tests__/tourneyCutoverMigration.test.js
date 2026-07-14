@@ -224,6 +224,18 @@ describe("Tourney cutover migration", () => {
     expect(legacyRepairV4).toContain("for share;");
   });
 
+  test("repairs a recorded schema-v4 install missing the latency baseline table", () => {
+    expect(repairV4).toContain(
+      "create table if not exists tourney.shadow_latency_baselines"
+    );
+    expect(repairV4).toContain(
+      "alter table tourney.shadow_latency_baselines enable row level security"
+    );
+    expect(repairV4).toContain(
+      "revoke all on table tourney.shadow_latency_baselines"
+    );
+  });
+
   test("repairs legacy empty-search-path mirror calls in a forward script", () => {
     for (const sql of [legacyActivationV4, legacyRepairV4]) {
       expect(sql).toContain("public.tourney_mirror_record_key");

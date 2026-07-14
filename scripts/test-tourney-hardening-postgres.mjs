@@ -416,6 +416,10 @@ insert into tourney_external_operations(
        '{}'::jsonb,repeat('d',64)
      );`
   );
+  const supabaseMissingBaselineDrift = writeTemp(
+    "supabase-missing-baseline-drift.sql",
+    "drop table tourney.shadow_latency_baselines;\n"
+  );
 
   psql(
     "supabase_unsafe",
@@ -427,6 +431,7 @@ insert into tourney_external_operations(
     "supabase_unsafe",
     supabaseActivation,
     supabaseHardening,
+    supabaseMissingBaselineDrift,
     supabaseRepair,
     supabaseCutoverOperationMarkers
   );
@@ -438,6 +443,7 @@ insert into tourney_external_operations(
   await assertSql(
     unsafeSupabase,
     `select to_regclass('tourney.cutover_control_operations') is not null
+       and to_regclass('tourney.shadow_latency_baselines') is not null
        and (select count(*) = 2 from information_schema.columns
          where table_schema = 'tourney' and table_name = 'cutover_metadata'
            and column_name in (

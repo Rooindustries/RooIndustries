@@ -11,10 +11,6 @@ module.exports = {
       fontFamily: {
         sans: ["Roboto Flex Variable", ...defaultTheme.fontFamily.sans],
       },
-      // Semantic theme tokens — values defined per-theme in src/index.css
-      // (ROO INDUSTRIES THEME TOKENS). Note: these are CSS variables, so
-      // Tailwind opacity modifiers (e.g. bg-accent/50) do NOT apply; use a
-      // dedicated token instead.
       colors: {
         canvas: "var(--color-canvas)",
         "canvas-deep": "var(--color-canvas-deep)",

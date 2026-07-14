@@ -495,8 +495,6 @@ export function AppContent({
       <DeferredTelemetry />
       <IntercomRuntime disabledRoutes={INTERCOM_DISABLED_ROUTES} />
 
-      {/* Theme surfaces (gradients, grid, radial, veil) live in src/index.css
-          behind semantic tokens — see ROO INDUSTRIES THEME TOKENS. */}
       <div
         id="app-shell"
         className="relative min-h-screen flex flex-col overflow-hidden bg-scroll md:bg-fixed"
