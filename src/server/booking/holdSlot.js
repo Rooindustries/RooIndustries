@@ -1,6 +1,7 @@
 import { createCommerceWriteClient } from "../api/ref/sanity.js";
 import crypto from "crypto";
 import { issueHoldToken, verifyHoldToken } from "./holdToken.js";
+import { selectHoldAuthority } from "./holdAuthority.js";
 import {
   buildBookingSlotId,
   buildSlotHoldId,
@@ -135,23 +136,21 @@ const issueResponse = ({
   });
 };
 
-const selectHoldBackend = ({
+export const selectHoldBackend = ({
   previousHoldId,
   previousHoldToken,
-  startTimeUTC,
-  packageTitle,
-  clientAddress,
 }) => {
   const previous = verifyHoldToken({
     token: previousHoldToken,
     holdId: previousHoldId,
     ignoreExpiry: true,
   });
-  if (previous?.hid) {
-    return previous.be === "supabase" ? "supabase" : "sanity";
-  }
   const policy = resolveSupabaseRuntimePolicy();
-  return policy.commercePrimaryBackend === "supabase" ? "supabase" : "sanity";
+  return selectHoldAuthority({
+    tokenPayload: previous,
+    fallbackBackend: policy.commercePrimaryBackend,
+    policy,
+  });
 };
 
 const releasePreviousHold = async ({
@@ -169,8 +168,12 @@ const releasePreviousHold = async ({
       holdId: previousHoldId,
       ignoreExpiry: true,
     });
-    const previousBackend =
-      previousTokenPayload?.be === "supabase" ? "supabase" : "sanity";
+    const policy = resolveSupabaseRuntimePolicy();
+    const previousBackend = selectHoldAuthority({
+      tokenPayload: previousTokenPayload,
+      fallbackBackend: policy.commercePrimaryBackend,
+      policy,
+    });
     const client = createHoldClient(previousBackend);
     const previousHold = await client.fetch(
       `*[_type == "slotHold" && _id == $id][0]`,
@@ -260,9 +263,6 @@ export default async function handler(req, res) {
   const backend = selectHoldBackend({
     previousHoldId,
     previousHoldToken,
-    startTimeUTC: normalizedStartTimeUTC,
-    packageTitle,
-    clientAddress,
   });
   const cutoverGeneration = commerceControl.generation;
   const client = createHoldClient(backend);
