@@ -502,9 +502,14 @@ const inspectCollision = async (source) => {
   return result;
 };
 
-export const inspectLiveDrift = async ({ source, legacy, expected = EXPECTED_LIVE_DRIFT }) => {
+export const inspectLiveDrift = async ({
+  source,
+  legacy,
+  expected = EXPECTED_LIVE_DRIFT,
+  allowConflictId = "",
+}) => {
   await assertLiveDriftDatabaseGate(source);
-  await assertLiveDriftLegacyDatabaseGate(legacy);
+  await assertLiveDriftLegacyDatabaseGate(legacy, { allowConflictId });
   const legacyRows = await readLegacyRows(legacy);
   const [tokens, discord, collision, sourceTokens, sourceAssignments, sourcePlayers, identities] =
     await Promise.all([
@@ -993,7 +998,12 @@ export const main = async (argv = process.argv.slice(2)) => {
       return safePreflightOutput(state, authorizationHash);
     }
     if (args.action === "apply") {
-      const state = await inspectLiveDrift({ source, legacy });
+      const expectedConflictId = buildLiveDriftConflictId(EXPECTED_LIVE_DRIFT.collision.sourceHash);
+      const state = await inspectLiveDrift({
+        source,
+        legacy,
+        allowConflictId: expectedConflictId,
+      });
       const snapshot = verifySnapshotProof({ snapshotPath: args.snapshotPath, state });
       const conflictId = buildLiveDriftConflictId(state.collision.source_hash);
       const details = conflictDetails(state, authorizationHash);
