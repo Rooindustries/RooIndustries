@@ -28,6 +28,21 @@ export async function POST(request) {
   if (!isSameOriginMutation(request)) {
     return NextResponse.json({ ok: false, error: "Cross-origin request rejected." }, { status: 403 });
   }
+  const clientAddress = getClientAddressFromHeaders(request.headers);
+  const requestRateLimit = await checkTourneyRateLimit({
+    key: `tourney-forgot-request:${clientAddress}`,
+    max: 20,
+    windowMs: 30 * 60 * 1000,
+  });
+  if (!requestRateLimit.ok) {
+    return NextResponse.json(
+      { ok: false, error: requestRateLimit.error || "Too many reset requests. Please try again later." },
+      {
+        status: requestRateLimit.status || 429,
+        headers: { "Retry-After": String(requestRateLimit.retryAfterSeconds) },
+      }
+    );
+  }
   const contentType = String(request.headers.get("content-type") || "").toLowerCase();
   let payload;
   try {
@@ -44,7 +59,6 @@ export async function POST(request) {
     );
   }
   const login = String(payload.login || payload.email || payload.username || "").trim();
-  const clientAddress = getClientAddressFromHeaders(request.headers);
   const rateLimit = await checkTourneyRateLimit({
     key: `tourney-forgot:${clientAddress}:${login.toLowerCase() || "unknown"}`,
     max: 5,

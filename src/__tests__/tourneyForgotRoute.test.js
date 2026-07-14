@@ -5,12 +5,13 @@ const mockFindTourneyAccount = jest.fn();
 const mockGetTourneyAdminEmail = jest.fn();
 const mockReadEffectiveTourneyAccounts = jest.fn();
 const mockEnqueueTourneyEmailDispatch = jest.fn();
+const mockCheckTourneyRateLimit = jest.fn();
 
 jest.mock("next/server", () => ({
   NextResponse: { json: (body, init = {}) => Response.json(body, init) },
 }));
 jest.mock("../server/tourney/auth", () => ({
-  checkTourneyRateLimit: jest.fn(async () => ({ ok: true })),
+  checkTourneyRateLimit: (...args) => mockCheckTourneyRateLimit(...args),
   createTourneyPasswordReset: (...args) => mockCreateTourneyPasswordReset(...args),
   findTourneyAccount: (...args) => mockFindTourneyAccount(...args),
   findTourneyAccountByEmail: jest.fn(() => null),
@@ -49,6 +50,7 @@ const makeRequest = () => ({
 describe("Tourney forgot-password route", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockCheckTourneyRateLimit.mockResolvedValue({ ok: true });
     mockReadCommandId.mockReturnValue("forgot-command-00000001");
     mockExecuteCommand.mockResolvedValue({ status: 200, body: { ok: true } });
     mockReadEffectiveTourneyAccounts.mockResolvedValue([]);
@@ -80,6 +82,25 @@ describe("Tourney forgot-password route", () => {
       String(name).toLowerCase() === "content-length" ? "8193" : originalGet(name);
     const response = await POST(oversized);
     expect(response.status).toBe(413);
+    expect(mockExecuteCommand).not.toHaveBeenCalled();
+  });
+
+  test("consumes the request rate limit before parsing a malformed body", async () => {
+    const request = makeRequest();
+    request.text = jest.fn(async () => "{");
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(400);
+    expect(mockCheckTourneyRateLimit).toHaveBeenCalledTimes(1);
+    expect(mockCheckTourneyRateLimit).toHaveBeenCalledWith({
+      key: "tourney-forgot-request:127.0.0.1",
+      max: 20,
+      windowMs: 30 * 60 * 1000,
+    });
+    expect(mockCheckTourneyRateLimit.mock.invocationCallOrder[0]).toBeLessThan(
+      request.text.mock.invocationCallOrder[0]
+    );
     expect(mockExecuteCommand).not.toHaveBeenCalled();
   });
 

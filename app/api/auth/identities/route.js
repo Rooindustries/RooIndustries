@@ -150,18 +150,21 @@ export async function POST(request) {
         error: "Connected-account changes are temporarily unavailable during Tournament fallback.",
       }, 503);
     }
-    if (identity && referralOnly) {
+    if (referralOnly) {
       const consumed = await admin.rpc("roo_consume_reauth_grant", {
         p_token_hash: tokenHash,
         p_user_id: user.id,
         p_purpose: "unlink_identity",
         p_provider: provider,
       });
+      response.cookies.set(clearReauthCookie());
       if (consumed.error) {
         return jsonFrom(response, { ok: false, error: "Reauthentication expired. Confirm your identity again.", reauthRequired: true }, 409);
       }
-      const unlinked = await client.auth.unlinkIdentity(identity);
-      if (unlinked.error) throw unlinked.error;
+      if (identity) {
+        const unlinked = await client.auth.unlinkIdentity(identity);
+        if (unlinked.error) throw unlinked.error;
+      }
     }
     if (referralOnly) {
       const reconciled = await admin.rpc("roo_reconcile_auth_identity_links", {
