@@ -263,6 +263,45 @@ export const assertTourneyMirrorCatalogParityV4 = async ({ env = process.env } =
   return { tables: Object.keys(TOURNEY_MIRROR_CONTRACT).length };
 };
 
+export const inspectTourneyMirrorTriggerBindingsV4 = async ({ env = process.env } = {}) => {
+  const [supabaseSql, legacySql] = await Promise.all([
+    getTourneySqlForBackend({ backend: "supabase", env }),
+    getTourneySqlForBackend({ backend: "legacy", env }),
+  ]);
+  const [[supabase], [legacy]] = await Promise.all([
+    supabaseSql`select tourney.mirror_trigger_binding_status_v4() status`,
+    legacySql`select public.tourney_mirror_trigger_binding_status_v4() status`,
+  ]);
+  return {
+    supabase: supabase?.status || { ready: false },
+    legacy: legacy?.status || { ready: false },
+  };
+};
+
+export const assertTourneyMirrorTriggerBindingsV4 = async ({
+  env = process.env,
+  requireSupabase = true,
+  requireLegacy = true,
+} = {}) => {
+  const bindings = await inspectTourneyMirrorTriggerBindingsV4({ env });
+  const failed = [
+    ...(requireSupabase && bindings.supabase.ready !== true ? ["supabase"] : []),
+    ...(requireLegacy && bindings.legacy.ready !== true ? ["legacy"] : []),
+  ];
+  if (failed.length > 0) {
+    const error = new Error("Tourney mirror trigger bindings are not fail-closed.");
+    error.code = "TOURNEY_MIRROR_TRIGGER_BINDING_DRIFT";
+    error.status = 409;
+    error.evidence = {
+      failed,
+      supabaseCorrect: Number(bindings.supabase.correctly_bound || 0),
+      legacyCorrect: Number(bindings.legacy.correctly_bound || 0),
+    };
+    throw error;
+  }
+  return bindings;
+};
+
 const summarizeInventory = ({ accounts, databaseState, rows }) => ({
   accounts: accounts.length,
   linked: rows.length,
@@ -309,6 +348,11 @@ const summarizeInventory = ({ accounts, databaseState, rows }) => ({
 export const activateTourneySchemaV4 = async ({ env = process.env } = {}) => {
   requireActivationPolicy(env);
   await assertTourneyMirrorCatalogParityV4({ env });
+  await assertTourneyMirrorTriggerBindingsV4({
+    env,
+    requireSupabase: false,
+    requireLegacy: true,
+  });
   const [sql, legacySql] = await Promise.all([
     getTourneySql(env),
     getTourneySqlForBackend({ backend: "legacy", env }),
@@ -337,7 +381,9 @@ export const activateTourneySchemaV4 = async ({ env = process.env } = {}) => {
   const [row] = await sql`
     select public.roo_activate_tourney_schema_v4('schema-v4-activation') result
   `;
-  return row?.result || { activated: false };
+  const result = row?.result || { activated: false };
+  await assertTourneyMirrorTriggerBindingsV4({ env });
+  return result;
 };
 
 export const captureTourneyLatencyBaselineV4 = async ({

@@ -43,6 +43,7 @@ jest.mock("../server/tourney/reconcile.js", () => ({
 
 const {
   applyTourneyV4Activation,
+  assertTourneyMirrorTriggerBindingsV4,
   inventoryTourneyV4Activation,
   seedTourneyDiscordDesiredStateV4,
 } = require("../server/tourney/activation.js");
@@ -153,6 +154,27 @@ describe("Tourney v4 activation", () => {
     expect(inventory.inventoryHash).toMatch(/^[0-9a-f]{64}$/);
     expect(JSON.stringify(inventory)).not.toContain("private-player");
     expect(JSON.stringify(inventory)).not.toContain("1234567890");
+  });
+
+  test("rejects catalog trigger or function drift on either database", async () => {
+    const supabaseSql = jest.fn().mockResolvedValue([{
+      status: { ready: true, correctly_bound: 17 },
+    }]);
+    const legacySql = jest.fn().mockResolvedValue([{
+      status: { ready: false, correctly_bound: 16 },
+    }]);
+    mockGetBackendSql.mockImplementation(({ backend }) => Promise.resolve(
+      backend === "supabase" ? supabaseSql : legacySql
+    ));
+
+    await expect(assertTourneyMirrorTriggerBindingsV4({ env })).rejects.toMatchObject({
+      code: "TOURNEY_MIRROR_TRIGGER_BINDING_DRIFT",
+      evidence: {
+        failed: ["legacy"],
+        supabaseCorrect: 17,
+        legacyCorrect: 16,
+      },
+    });
   });
 
   test("serializes Discord inventory and retries rate-limited members", async () => {
