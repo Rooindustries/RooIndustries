@@ -1,7 +1,7 @@
 import { runLegacyApiHandler } from "@/src/lib/nextApiAdapter";
 import { getClientAddress, requireRateLimit } from "@/src/server/api/ref/rateLimit";
 import {
-  createDownloadSanityClient,
+  createDownloadDataClient,
   validateDownloadAccess,
 } from "@/src/server/downloads/downloadAccess";
 import { DOWNLOAD_TOKEN_TTL_SECONDS } from "@/src/server/downloads/downloadToken";
@@ -35,7 +35,7 @@ const handler = async (req, res) => {
       slug: body.slug,
       orderId: body.orderId,
       email: body.email,
-      client: createDownloadSanityClient(),
+      client: createDownloadDataClient(),
     });
     if (result.status === 200 && result.downloadToken) {
       res.setHeader(
