@@ -18,8 +18,14 @@ const safeEqual = (left, right) => {
 
 const authorized = (request) =>
   safeEqual(process.env.REF_ADMIN_KEY, request.headers.get("x-admin-key"));
+const enabled = (value) => ["1", "true", "yes", "on"].includes(
+  String(value || "").trim().toLowerCase()
+);
 
 const readLegacyReadiness = async (sql) => {
+  const [mirrorTriggerBindings] = await sql`
+    select public.tourney_mirror_trigger_binding_status_v4() readiness
+  `;
   const [control] = await sql`
     select primary_backend, generation, writes_paused, fallback_read_only,
       clean_since, hardened_active, natural_mutation_verified_at,
@@ -110,6 +116,9 @@ const readLegacyReadiness = async (sql) => {
   if (Object.values(shadow).some((route) => route.mismatches > 0)) {
     clockBlockers.add("shadow_mismatch");
   }
+  if (mirrorTriggerBindings?.readiness?.ready !== true) {
+    clockBlockers.add("mirror_trigger_binding_drift");
+  }
   return {
     control,
     player_counts: Object.fromEntries(
@@ -132,6 +141,7 @@ const readLegacyReadiness = async (sql) => {
     email: Object.fromEntries(emailRows.map((row) => [row.status, Number(row.count)])),
     discord,
     last_parity: lastParity || null,
+    mirror_trigger_bindings: mirrorTriggerBindings?.readiness || { ready: false },
     clock_blockers: [...clockBlockers],
     shadow_reads: shadow,
   };
@@ -153,6 +163,16 @@ export async function GET(request) {
       ? (await sql`select public.roo_tourney_readiness() as readiness`)[0]?.readiness
       : await readLegacyReadiness(sql);
     const databaseControl = readiness?.control || {};
+    const hardenedEnabled = enabled(process.env.TOURNEY_HARDENING_V4_ENABLED);
+    const activationEnabled = enabled(process.env.TOURNEY_V4_ACTIVATION_ENABLED);
+    const controlMatchesDeployment =
+      databaseControl.primary_backend === policy.primaryBackend &&
+      Number(databaseControl.generation || 0) === policy.generation &&
+      Boolean(databaseControl.writes_paused) === policy.writesPaused &&
+      Boolean(databaseControl.hardened_active) === hardenedEnabled;
+    const clockBlockers = Array.isArray(readiness?.clock_blockers)
+      ? readiness.clock_blockers
+      : ["readiness_blockers_unavailable"];
     return NextResponse.json(
       {
         ok: true,
@@ -160,10 +180,14 @@ export async function GET(request) {
         generation: policy.generation,
         mirrorEnabled: policy.mirrorEnabled,
         writesPaused: policy.writesPaused,
-        controlMatchesDeployment:
-          databaseControl.primary_backend === policy.primaryBackend &&
-          Number(databaseControl.generation || 0) === policy.generation &&
-          Boolean(databaseControl.writes_paused) === policy.writesPaused,
+        hardenedEnabled,
+        activationEnabled,
+        controlMatchesDeployment,
+        finalReadiness:
+          controlMatchesDeployment &&
+          !activationEnabled &&
+          readiness?.mirror_trigger_bindings?.ready === true &&
+          clockBlockers.length === 0,
         readiness,
       },
       { headers: noStore }

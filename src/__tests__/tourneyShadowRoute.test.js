@@ -137,6 +137,7 @@ const makeSql = (
         player_principals: 0,
         account_snapshots: 1,
         account_principals: 0,
+        mirror_bindings_ready: true,
         ...readiness,
       }]);
     }
@@ -587,6 +588,7 @@ describe("Tourney shadow route target safety", () => {
   test.each([
     ["a Discord blocker", { supabaseReadiness: { discord: 1 } }, "supabase_discord"],
     ["an inactive legacy schema", { legacyReadiness: { hardened_active: false } }, "legacy_schema_v4"],
+    ["legacy trigger drift", { legacyReadiness: { mirror_bindings_ready: false } }, "legacy_mirror_trigger_bindings"],
     ["a missing account snapshot", { legacyReadiness: { account_snapshots: 0 } }, "legacy_account_snapshot"],
     ["stale parity", { supabaseParity: { fresh: false } }, "parity"],
   ])("keeps Supabase writes paused for %s", async (_label, options, blocker) => {
