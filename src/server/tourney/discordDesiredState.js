@@ -1,5 +1,9 @@
 import crypto from "node:crypto";
-import { getTourneySql, runTourneyTransaction } from "./sqlClient.js";
+import {
+  getTourneySql,
+  getTourneySqlForBackend,
+  runTourneyTransaction,
+} from "./sqlClient.js";
 import { getTourneyDiscordRoleConfig } from "./discordConfig.js";
 import {
   enqueueTourneyExternalOperation,
@@ -216,6 +220,40 @@ export const listTourneyDiscordDesiredState = async ({ env = process.env } = {})
   const sql = await getTourneySql(env);
   const relation = assignmentRelation(policy.primaryBackend);
   return sql`select * from ${sql(relation)} order by created_at, principal_id`;
+};
+
+export const listAuthoritativeTourneyDiscordMappings = async ({
+  playerIds = [],
+  principalIds = [],
+  env = process.env,
+} = {}) => {
+  const normalizedPlayerIds = [...new Set(playerIds.map(normalize).filter(Boolean))];
+  const normalizedPrincipalIds = [...new Set(
+    principalIds.map((value) => normalize(value).toLowerCase()).filter(Boolean)
+  )];
+  if (normalizedPlayerIds.length > 0 && normalizedPrincipalIds.length > 0) {
+    throw new Error("Discord authority lookup accepts one target type.");
+  }
+  const sql = await getTourneySqlForBackend({ backend: "supabase", env });
+  const playerFilter = normalizedPlayerIds.length > 0 ? normalizedPlayerIds : [""];
+  const principalFilter = normalizedPrincipalIds.length > 0 ? normalizedPrincipalIds : [""];
+  return sql`
+    select account.legacy_sanity_id as player_id,
+      account.principal_id,
+      account.active as account_active,
+      identity.provider_subject as discord_user_id
+    from accounts.tourney_accounts account
+    left join accounts.identity_links identity
+      on identity.principal_id = account.principal_id
+     and identity.provider = 'discord'
+    where account.role = 'tourney_player'
+      and account.legacy_sanity_id is not null
+      and (${normalizedPlayerIds.length === 0}
+        or account.legacy_sanity_id in ${sql(playerFilter)})
+      and (${normalizedPrincipalIds.length === 0}
+        or account.principal_id::text in ${sql(principalFilter)})
+    order by account.legacy_sanity_id, account.principal_id, identity.provider_subject
+  `;
 };
 
 export const queueTourneyDiscordStateForPlayerMutation = async ({

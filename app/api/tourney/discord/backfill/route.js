@@ -6,13 +6,16 @@ import {
 } from "../../../../../src/server/tourney/auth";
 import { getTourneyDiscordOAuthConfig } from "../../../../../src/server/tourney/discordConfig";
 import {
+  listAuthoritativeTourneyDiscordMappings,
   listTourneyDiscordDesiredState,
   recordTourneyDiscordDesiredState,
 } from "../../../../../src/server/tourney/discordDesiredState";
 import { enqueueTourneyExternalOperation } from "../../../../../src/server/tourney/externalOperations";
 import { listManageTourneyPlayers } from "../../../../../src/server/tourney/playerStore";
-import { executeTourneyCommand } from "../../../../../src/server/tourney/store";
-import { getTourneySqlForBackend } from "../../../../../src/server/tourney/sqlClient";
+import {
+  executeTourneyCommand,
+  readTourneyCommandId,
+} from "../../../../../src/server/tourney/store";
 import { isSameOriginMutation } from "../../../../../src/server/request/sameOrigin";
 import { logSafeError } from "../../../../../src/server/safeErrorLog";
 import { buildTourneyPublicError } from "../../../../../src/server/tourney/publicError";
@@ -23,6 +26,13 @@ export const dynamic = "force-dynamic";
 
 const jsonError = (message, status = 400) =>
   NextResponse.json({ ok: false, error: message }, { status });
+
+const jsonTargetError = (message, code, status) =>
+  NextResponse.json({ ok: false, error: message, code }, { status });
+
+const PRINCIPAL_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const PLAYER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 const getAdminSession = async (request) => {
   const token = request.cookies.get(TOURNEY_SESSION_COOKIE)?.value || "";
@@ -61,21 +71,17 @@ const readMember = async ({ discordUserId, config, fetchImpl = fetch }) => {
   }
 };
 
-const resolveAuthoritativeDiscordPlayers = async ({ players, env = process.env }) => {
-  const sql = await getTourneySqlForBackend({ backend: "supabase", env });
-  const mappings = await sql`
-    select account.legacy_sanity_id as player_id,
-      account.principal_id,
-      account.active as account_active,
-      identity.provider_subject as discord_user_id
-    from accounts.tourney_accounts account
-    left join accounts.identity_links identity
-      on identity.principal_id = account.principal_id
-     and identity.provider = 'discord'
-    where account.role = 'tourney_player'
-      and account.legacy_sanity_id is not null
-    order by account.legacy_sanity_id
-  `;
+const resolveAuthoritativeDiscordPlayers = async ({
+  players,
+  playerIds = [],
+  principalIds = [],
+  env = process.env,
+}) => {
+  const mappings = await listAuthoritativeTourneyDiscordMappings({
+    playerIds,
+    principalIds,
+    env,
+  });
   const mappingsByPlayer = new Map();
   for (const mapping of mappings) {
     const playerId = String(mapping.player_id || "").trim();
@@ -114,6 +120,37 @@ const resolveAuthoritativeDiscordPlayers = async ({ players, env = process.env }
       ),
     }];
   });
+};
+
+const readApplyScope = (payload = {}) => {
+  const hasPrincipalId = Object.hasOwn(payload, "principalId");
+  const hasPlayerId = Object.hasOwn(payload, "playerId");
+  if (!hasPrincipalId && !hasPlayerId) return { scoped: false };
+  const principalId = String(payload.principalId || "").trim().toLowerCase();
+  const playerId = String(payload.playerId || "").trim();
+  if (
+    hasPrincipalId === hasPlayerId ||
+    (hasPrincipalId && !PRINCIPAL_ID_PATTERN.test(principalId)) ||
+    (hasPlayerId && !PLAYER_ID_PATTERN.test(playerId))
+  ) {
+    return { error: true };
+  }
+  return {
+    scoped: true,
+    ...(principalId ? { principalId } : { playerId }),
+  };
+};
+
+const scopedCommandId = ({ config, entry, repairKey }) => {
+  const signature = JSON.stringify({
+    repairKey,
+    principalId: entry.principalId,
+    playerId: entry.playerId,
+    discordUserId: entry.authoritativeDiscordUserId,
+    guildId: config.guildId,
+    desiredRole: "participant",
+  });
+  return `discord-backfill:scoped:${crypto.createHash("sha256").update(signature).digest("hex")}`;
 };
 
 const mapInBatches = async (items, callback, batchSize = 5) => {
@@ -210,15 +247,85 @@ export async function POST(request) {
     }
   }
 
+  const scope = readApplyScope(payload);
+  if (scope.error) {
+    return jsonTargetError(
+      "Supply exactly one valid principalId or playerId.",
+      "TOURNEY_DISCORD_REPAIR_SCOPE_INVALID",
+      400
+    );
+  }
+  let scopedRepairKey = "";
+  if (scope.scoped) {
+    try {
+      if (!String(request.headers.get("idempotency-key") || "").trim()) {
+        throw Object.assign(new Error("A valid Idempotency-Key is required."), {
+          code: "TOURNEY_IDEMPOTENCY_KEY_REQUIRED",
+          status: 400,
+        });
+      }
+      scopedRepairKey = readTourneyCommandId({ request });
+    } catch (error) {
+      return jsonTargetError(
+        error?.message || "A valid Idempotency-Key is required.",
+        error?.code || "TOURNEY_IDEMPOTENCY_KEY_REQUIRED",
+        Number(error?.status || 400)
+      );
+    }
+  }
+
   let resolved;
   try {
     const players = (await listManageTourneyPlayers()).filter(
       (player) => player.status === "approved"
     );
-    resolved = await resolveAuthoritativeDiscordPlayers({ players });
+    const selectedPlayers = scope.playerId
+      ? players.filter((player) => player.id === scope.playerId)
+      : players;
+    if (scope.playerId && selectedPlayers.length !== 1) {
+      return jsonTargetError(
+        "The Discord repair target was not found.",
+        "TOURNEY_DISCORD_REPAIR_TARGET_NOT_FOUND",
+        404
+      );
+    }
+    resolved = await resolveAuthoritativeDiscordPlayers({
+      players: selectedPlayers,
+      playerIds: scope.playerId ? [scope.playerId] : [],
+      principalIds: scope.principalId ? [scope.principalId] : [],
+    });
   } catch (error) {
     logSafeError("Tourney Discord apply inventory failed", error);
     return jsonError("Discord desired-state inventory is temporarily unavailable.", 503);
+  }
+  if (scope.scoped) {
+    const selected = scope.principalId
+      ? resolved.filter((entry) => entry.principalId.toLowerCase() === scope.principalId)
+      : resolved.filter((entry) => entry.playerId === scope.playerId);
+    if (selected.length === 0) {
+      return jsonTargetError(
+        "The Discord repair target was not found.",
+        "TOURNEY_DISCORD_REPAIR_TARGET_NOT_FOUND",
+        404
+      );
+    }
+    const [entry] = selected;
+    const playerPrincipalId = String(entry.player?.principalId || "").trim().toLowerCase();
+    const mismatched =
+      selected.length !== 1 ||
+      !entry.verified ||
+      Boolean(entry.conflictCode) ||
+      (scope.principalId && entry.principalId.toLowerCase() !== scope.principalId) ||
+      (scope.playerId && entry.playerId !== scope.playerId) ||
+      (playerPrincipalId && playerPrincipalId !== entry.principalId.toLowerCase());
+    if (mismatched) {
+      return jsonTargetError(
+        "The Discord repair target does not match authoritative identity state.",
+        "TOURNEY_DISCORD_REPAIR_TARGET_CONFLICT",
+        409
+      );
+    }
+    resolved = [entry];
   }
   let queued = 0;
   const failures = [];
@@ -232,13 +339,16 @@ export async function POST(request) {
   );
   for (const entry of resolved.filter((candidate) => candidate.verified)) {
     const player = { ...entry.player, discordUserId: entry.authoritativeDiscordUserId };
-    const commandId = `discord-backfill:${repairId}:${player.id}`;
+    const commandId = scope.scoped
+      ? scopedCommandId({ config, entry, repairKey: scopedRepairKey })
+      : `discord-backfill:${repairId}:${player.id}`;
     try {
       await executeTourneyCommand({
         commandId,
         purpose: "discord:backfill",
         requestPayload: {
-          repairId,
+          repairId: scope.scoped ? "scoped" : repairId,
+          ...(scope.scoped ? { repairKey: scopedRepairKey } : {}),
           playerId: player.id,
           discordUserId: entry.authoritativeDiscordUserId,
           forceRepair: true,
@@ -308,5 +418,11 @@ export async function POST(request) {
     ...(conflicts.length > 0 ? { conflicts } : {}),
     ...(failures.length > 0 ? { failures } : {}),
     contactedDiscord: false,
+    ...(scope.scoped ? {
+      scope: {
+        principalId: resolved[0]?.principalId,
+        playerId: resolved[0]?.playerId,
+      },
+    } : {}),
   });
 }
