@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { buildTourneyPlayerAuthEmail } from "./accounts.js";
 import { createSupabaseAdminClient } from "./adminClient.js";
 import { stableJson } from "./shadowStore.js";
 import { enqueueTourneyExternalOperation } from "../tourney/externalOperations.js";
@@ -23,13 +24,6 @@ const deterministicUuid = (value) => {
     hex.slice(20),
   ].join("-");
 };
-
-const playerAuthEmail = (username) =>
-  `tourney-player+${crypto
-    .createHash("sha256")
-    .update(normalize(username).toLowerCase())
-    .digest("hex")
-    .slice(0, 24)}@auth.rooindustries.invalid`;
 
 export const selectTourneyImportAuthUserId = ({ principal, authEmail } = {}) =>
   normalize(principal?.auth_user_id) || deterministicUuid(authEmail);
@@ -146,7 +140,7 @@ const preflightPlayerAuth = async ({ player, client, claimedUserIds }) => {
     throw new Error("A Tourney player credential is not bcrypt.");
   }
   const username = normalize(player.username).toLowerCase();
-  const authEmail = playerAuthEmail(username);
+  const authEmail = buildTourneyPlayerAuthEmail(username);
   const principal = requireRpcData(
     await client.rpc("roo_resolve_tourney_import_principal", {
       p_legacy_player_id: player.id,

@@ -121,6 +121,8 @@ const supabaseIdentity = (values) => {
   };
 };
 
+// v1 fingerprints intentionally preserve this serializer and field order.
+// Any canonicalization change requires a version bump and rotated acknowledgements.
 const fingerprint = (kind, identity) =>
   sha256(`roo-migration-target:v1:${kind}:${JSON.stringify(identity)}`);
 

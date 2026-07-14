@@ -205,7 +205,17 @@ const blob = await put(blobPath, fs.createReadStream(localPath), {
   multipart: true,
 });
 
-const remoteMetadata = await head(blobPath);
+let remoteMetadata;
+try {
+  remoteMetadata = await head(blobPath);
+} catch (error) {
+  console.error(
+    `[downloads] Post-upload metadata lookup failed: ${
+      error instanceof Error ? error.message : "unknown failure"
+    }`
+  );
+  process.exit(1);
+}
 try {
   assertRemoteBlobMetadata({
     pathname: blobPath,
