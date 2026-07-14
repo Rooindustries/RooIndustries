@@ -310,10 +310,69 @@ begin
 end;
 $$;
 
-alter function public.roo_activate_tourney_schema_v4(text)
-  rename to roo_activate_tourney_schema_v4_before_trigger_binding_v4;
+create or replace function tourney.assert_tourney_schema_v4_activation_ready()
+returns jsonb
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_meta tourney.cutover_metadata%rowtype;
+  v_schema_version integer;
+  v_binding jsonb;
+begin
+  select * into v_meta
+  from tourney.cutover_metadata
+  where id = 'tourney';
+  select schema_version into v_schema_version
+  from tourney.schema_metadata
+  where schema_name = 'tourney';
+  if v_meta.id is null
+     or v_meta.primary_backend <> 'supabase'
+     or v_meta.generation <> 1
+     or not v_meta.writes_paused
+     or v_meta.fallback_read_only
+     or not v_meta.hardened_active
+     or coalesce(v_schema_version, 0) < 4 then
+    raise exception 'Supabase Tourney schema-v4 activation validation requires hardened paused controls'
+      using errcode = '55000';
+  end if;
+  v_binding := tourney.mirror_trigger_binding_status_v4();
+  if not coalesce((v_binding->>'ready')::boolean, false) then
+    raise exception 'Supabase Tourney activation mirror trigger verification failed'
+      using errcode = '55000';
+  end if;
+  return v_binding;
+end;
+$$;
 
-create function public.roo_activate_tourney_schema_v4(p_actor text)
+do $$
+declare
+  v_current pg_catalog.oid;
+  v_backup pg_catalog.oid;
+  v_source text;
+begin
+  v_current := pg_catalog.to_regprocedure(
+    'public.roo_activate_tourney_schema_v4(text)'
+  );
+  v_backup := pg_catalog.to_regprocedure(
+    'public.roo_activate_tourney_schema_v4_before_trigger_binding_v4(text)'
+  );
+  if v_current is not null and v_backup is null then
+    select function.prosrc into v_source
+    from pg_catalog.pg_proc function
+    where function.oid = v_current;
+    if pg_catalog.strpos(
+      coalesce(v_source, ''),
+      'trigger-binding-live-schema-compat-v1'
+    ) = 0 then
+      alter function public.roo_activate_tourney_schema_v4(text)
+        rename to roo_activate_tourney_schema_v4_before_trigger_binding_v4;
+    end if;
+  end if;
+end;
+$$;
+
+create or replace function public.roo_activate_tourney_schema_v4(p_actor text)
 returns jsonb
 language plpgsql
 security definer
@@ -323,15 +382,29 @@ declare
   v_result jsonb;
   v_binding jsonb;
 begin
-  v_result := public.roo_activate_tourney_schema_v4_before_trigger_binding_v4(p_actor);
-  v_binding := tourney.mirror_trigger_binding_status_v4();
-  if not coalesce((v_binding->>'ready')::boolean, false) then
-    raise exception 'Supabase Tourney activation mirror trigger verification failed'
-      using errcode = '55000';
+  if nullif(pg_catalog.btrim(p_actor), '') is null
+     or pg_catalog.length(p_actor) > 120
+     or p_actor ~ '[[:cntrl:]]' then
+    raise exception 'Tourney activation actor is invalid'
+      using errcode = '22023';
   end if;
-  return v_result || pg_catalog.jsonb_build_object(
+  if pg_catalog.to_regprocedure(
+    'public.roo_activate_tourney_schema_v4_before_trigger_binding_v4(text)'
+  ) is not null then
+    execute 'select public.roo_activate_tourney_schema_v4_before_trigger_binding_v4($1)'
+      into v_result using p_actor;
+  else
+    v_result := pg_catalog.jsonb_build_object(
+      'activated', true,
+      'already_active', true,
+      'validation_only', true
+    );
+  end if;
+  v_binding := tourney.assert_tourney_schema_v4_activation_ready();
+  return coalesce(v_result, '{}'::jsonb) || pg_catalog.jsonb_build_object(
     'mirror_trigger_bindings_verified', true,
-    'mirror_trigger_contract_version', v_binding->>'contract_version'
+    'mirror_trigger_contract_version', v_binding->>'contract_version',
+    'compatibility_mode', 'trigger-binding-live-schema-compat-v1'
   );
 end;
 $$;
@@ -340,10 +413,20 @@ revoke all on function tourney.capture_mirror_event_v4()
   from public, anon, authenticated, service_role;
 revoke all on function tourney.mirror_trigger_binding_status_v4()
   from public, anon, authenticated, service_role;
+revoke all on function tourney.assert_tourney_schema_v4_activation_ready()
+  from public, anon, authenticated, service_role;
 revoke all on function public.roo_tourney_readiness_before_trigger_binding_v4()
   from public, anon, authenticated, service_role;
-revoke all on function public.roo_activate_tourney_schema_v4_before_trigger_binding_v4(text)
-  from public, anon, authenticated, service_role;
+do $$
+begin
+  if pg_catalog.to_regprocedure(
+    'public.roo_activate_tourney_schema_v4_before_trigger_binding_v4(text)'
+  ) is not null then
+    revoke all on function public.roo_activate_tourney_schema_v4_before_trigger_binding_v4(text)
+      from public, anon, authenticated, service_role;
+  end if;
+end;
+$$;
 revoke all on function public.roo_tourney_readiness()
   from public, anon, authenticated;
 revoke all on function public.roo_activate_tourney_schema_v4(text)

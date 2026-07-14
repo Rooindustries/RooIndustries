@@ -506,6 +506,10 @@ try {
     "activate-supabase-v4.sql",
     "select public.roo_activate_tourney_schema_v4('postgres17-fixture');\n"
   );
+  const removeSupabaseActivationRpc = writeTemp(
+    "remove-supabase-activation-rpc.sql",
+    "drop function public.roo_activate_tourney_schema_v4(text);\n"
+  );
   const captureLatencyBaseline = writeTemp(
     "capture-latency-baseline.sql",
     `insert into tourney.shadow_observations(
@@ -754,7 +758,13 @@ insert into tourney_external_operations(
       (select schema_version from tourney.schema_metadata where schema_name='tourney')=4
       and (select hardened_active from tourney.cutover_metadata where id='tourney')
       and (tourney.mirror_trigger_binding_status_v4()->>'ready')::boolean
-      and (tourney.mirror_trigger_binding_status_v4()->>'correctly_bound')::integer=17 ok`,
+      and (tourney.mirror_trigger_binding_status_v4()->>'correctly_bound')::integer=17
+      and to_regprocedure(
+        'public.roo_activate_tourney_schema_v4_before_trigger_binding_v4(text)'
+      ) is not null
+      and public.roo_activate_tourney_schema_v4(
+        'postgres17-present-rpc-validation'
+      )->>'compatibility_mode'='trigger-binding-live-schema-compat-v1' ok`,
     "explicit Supabase activation did not activate schema v4"
   );
   const [supabaseTriggerBeforeUnsafeRepair] = await unsafeSupabase`
@@ -1064,7 +1074,11 @@ insert into accounts.discord_role_assignments(
   );
   process.stderr.write("[postgres17] legacy schema v4 and forward repair applied\n");
 
-  psql("supabase_fixture", activateSupabaseV4);
+  psql(
+    "supabase_fixture",
+    activateSupabaseV4,
+    removeSupabaseActivationRpc
+  );
   psql(
     "supabase_fixture",
     supabaseTriggerBindingDrift,
@@ -1091,6 +1105,37 @@ insert into accounts.discord_role_assignments(
     DISCORD_PARTICIPANT_ROLE_ID: "710000000000000001",
     DISCORD_HOST_ROLE_ID: "710000000000000002",
   };
+
+  await assertSql(
+    source,
+    `select
+      to_regprocedure(
+        'public.roo_activate_tourney_schema_v4_before_trigger_binding_v4(text)'
+      ) is null
+      and to_regprocedure('public.roo_activate_tourney_schema_v4(text)') is not null
+      and public.roo_activate_tourney_schema_v4(
+        'postgres17-absent-rpc-validation'
+      ) @> '{"activated":true,"already_active":true,"validation_only":true,"mirror_trigger_bindings_verified":true,"compatibility_mode":"trigger-binding-live-schema-compat-v1"}'::jsonb ok`,
+    "missing live activation RPC was not replaced with validation-only compatibility"
+  );
+  await source`
+    update tourney.cutover_metadata set hardened_active=false where id='tourney'
+  `;
+  await assert.rejects(
+    source`select public.roo_activate_tourney_schema_v4(
+      'postgres17-absent-rpc-inactive-rejection'
+    )`,
+    (error) => error.code === "55000",
+    "validation-only activation RPC activated an inactive schema"
+  );
+  await assertSql(
+    source,
+    "select not hardened_active ok from tourney.cutover_metadata where id='tourney'",
+    "validation-only activation RPC changed hardened controls"
+  );
+  await source`
+    update tourney.cutover_metadata set hardened_active=true where id='tourney'
+  `;
 
   await assertSql(
     source,
@@ -4822,6 +4867,7 @@ insert into accounts.discord_role_assignments(
       "pre-DDL activation safety on both databases",
       "legacy empty-search-path trigger repair",
       "fail-closed mirror trigger bodies and 17-table OID bindings",
+      "present and absent activation RPC compatibility",
       "trigger-drift readiness and activation rejection",
       "latest shadow-read summaries before the natural mutation window",
       "registry composite keys",
