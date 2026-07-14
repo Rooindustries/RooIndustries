@@ -1,9 +1,19 @@
 const mockGetSql = jest.fn();
 const mockAssertSchema = jest.fn();
 const mockSanityFetch = jest.fn();
-const mockCreateDataClient = jest.fn(() => ({
+const mockSanityCreateIfNotExists = jest.fn();
+const mockSanityPatchCommit = jest.fn();
+const mockSanityPatchSet = jest.fn(() => ({ commit: mockSanityPatchCommit }));
+const mockSanityPatch = jest.fn(() => ({ set: mockSanityPatchSet }));
+const sanityReadClient = {
   fetch: (...args) => mockSanityFetch(...args),
-}));
+};
+const sanityWriteClient = {
+  createIfNotExists: (...args) => mockSanityCreateIfNotExists(...args),
+  patch: (...args) => mockSanityPatch(...args),
+};
+const mockCreateDocumentReadClient = jest.fn(() => sanityReadClient);
+const mockCreateDocumentWriteClient = jest.fn(() => sanityWriteClient);
 
 jest.mock("../server/tourney/sqlClient.js", () => ({
   assertTourneySchemaVersion: (...args) => mockAssertSchema(...args),
@@ -19,10 +29,14 @@ jest.mock("../server/tourney/externalOperations.js", () => ({
 }));
 
 jest.mock("../server/data/documentClient.js", () => ({
-  createDataClient: (...args) => mockCreateDataClient(...args),
+  createDocumentReadClient: (...args) => mockCreateDocumentReadClient(...args),
+  createDocumentWriteClient: (...args) => mockCreateDocumentWriteClient(...args),
 }));
 
-const { readPersistedTourneyAccountsJson } = require("../server/tourney/accountStore.js");
+const {
+  projectTourneyAccountSnapshotToSanity,
+  readPersistedTourneyAccountsJson,
+} = require("../server/tourney/accountStore.js");
 
 const env = {
   NODE_ENV: "production",
@@ -37,6 +51,12 @@ describe("hardened Tourney account authority", () => {
     jest.clearAllMocks();
     mockAssertSchema.mockResolvedValue(true);
     mockSanityFetch.mockResolvedValue({ accountsJson: "[]" });
+    mockSanityCreateIfNotExists.mockResolvedValue({ _id: "tourneyAuthStore" });
+    mockSanityPatchCommit.mockResolvedValue({ _id: "tourneyAuthStore" });
+    mockSanityPatchSet.mockReturnValue({ commit: mockSanityPatchCommit });
+    mockSanityPatch.mockReturnValue({ set: mockSanityPatchSet });
+    mockCreateDocumentReadClient.mockReturnValue(sanityReadClient);
+    mockCreateDocumentWriteClient.mockReturnValue(sanityWriteClient);
   });
 
   test("fails closed when the authoritative database snapshot is empty", async () => {
@@ -60,7 +80,7 @@ describe("hardened Tourney account authority", () => {
     expect(mockSanityFetch).not.toHaveBeenCalled();
   });
 
-  test("uses the same private-first Sanity target as cutover pinning", async () => {
+  test("requests an explicit Sanity read target for the compatibility fallback", async () => {
     mockGetSql.mockRejectedValue(Object.assign(new Error("missing relation"), {
       code: "42P01",
     }));
@@ -76,10 +96,74 @@ describe("hardened Tourney account authority", () => {
       SANITY_PRIVATE_WRITE_TOKEN: "private-token",
       SANITY_WRITE_TOKEN: "standard-token",
     })).resolves.toBe("[]");
-    expect(mockCreateDataClient).toHaveBeenCalledWith(expect.objectContaining({
-      projectId: "private-project",
-      dataset: "private_dataset",
-      token: "private-token",
-    }));
+    expect(mockCreateDocumentReadClient).toHaveBeenCalledWith({
+      env: expect.objectContaining({
+        SANITY_PRIVATE_PROJECT_ID: "private-project",
+        SANITY_PRIVATE_DATASET: "private_dataset",
+        SANITY_PRIVATE_WRITE_TOKEN: "private-token",
+      }),
+      backendOverride: "sanity",
+      perspective: "published",
+    });
+    expect(mockCreateDocumentWriteClient).not.toHaveBeenCalled();
+  });
+
+  test("projects through an explicit Sanity writer under global Supabase", async () => {
+    const projectionEnv = {
+      ...env,
+      DATA_PRIMARY_BACKEND: "supabase",
+      COMMERCE_PRIMARY_BACKEND: "supabase",
+      SUPABASE_CUTOVER_ENABLED: "1",
+      COMMERCE_CUTOVER_ENABLED: "1",
+      SANITY_REVERSE_MIRROR_WRITES: "1",
+      SANITY_PROJECT_ID: "sanity-project",
+      SANITY_DATASET: "production",
+    };
+
+    await expect(projectTourneyAccountSnapshotToSanity({
+      accountsJson: "[]",
+      actorUsername: "owner",
+      env: projectionEnv,
+    })).resolves.toMatchObject({ ok: true, provider: "sanity" });
+    expect(mockCreateDocumentWriteClient).toHaveBeenCalledWith({
+      env: projectionEnv,
+      backendOverride: "sanity",
+    });
+    expect(mockCreateDocumentReadClient).not.toHaveBeenCalled();
+    expect(mockSanityCreateIfNotExists).toHaveBeenCalledTimes(1);
+    expect(mockSanityPatchCommit).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not report success when the Sanity provider fails", async () => {
+    const providerError = Object.assign(new Error("Sanity unavailable"), {
+      code: "SANITY_UNAVAILABLE",
+    });
+    mockSanityPatchCommit.mockRejectedValueOnce(providerError);
+
+    await expect(projectTourneyAccountSnapshotToSanity({
+      accountsJson: "[]",
+      actorUsername: "owner",
+      env: {
+        ...env,
+        SANITY_PROJECT_ID: "sanity-project",
+        SANITY_DATASET: "production",
+      },
+    })).rejects.toBe(providerError);
+    expect(mockSanityPatchCommit).toHaveBeenCalledTimes(1);
+  });
+
+  test("fails before provider work when an explicit Sanity writer is unavailable", async () => {
+    const configurationError = new Error("Sanity write access is not configured.");
+    mockCreateDocumentWriteClient.mockImplementationOnce(() => {
+      throw configurationError;
+    });
+
+    await expect(projectTourneyAccountSnapshotToSanity({
+      accountsJson: "[]",
+      actorUsername: "owner",
+      env,
+    })).rejects.toBe(configurationError);
+    expect(mockSanityCreateIfNotExists).not.toHaveBeenCalled();
+    expect(mockSanityPatch).not.toHaveBeenCalled();
   });
 });

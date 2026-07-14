@@ -8,7 +8,7 @@ const mockValidateBooking = jest.fn();
 const mockVerifyDownloadToken = jest.fn();
 
 jest.mock("../server/downloads/downloadAccess", () => ({
-  createDownloadSanityClient: jest.fn(() => ({ getDocument: mockGetDocument })),
+  createDownloadDataClient: jest.fn(() => ({ getDocument: mockGetDocument })),
   validateBookingForDownloadToken: (...args) => mockValidateBooking(...args),
 }));
 jest.mock("../server/downloads/downloadCatalog", () => ({
