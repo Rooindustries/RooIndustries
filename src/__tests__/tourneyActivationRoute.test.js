@@ -2,6 +2,7 @@ const mockInventory = jest.fn();
 const mockApply = jest.fn();
 const mockActivateSchema = jest.fn();
 const mockCaptureLatencyBaseline = jest.fn();
+const mockSetWritesPaused = jest.fn();
 
 jest.mock("next/server", () => ({
   NextResponse: {
@@ -18,6 +19,9 @@ jest.mock("../server/tourney/activation", () => ({
   captureTourneyLatencyBaselineV4: (...args) => mockCaptureLatencyBaseline(...args),
   inventoryTourneyV4Activation: (...args) => mockInventory(...args),
   applyTourneyV4Activation: (...args) => mockApply(...args),
+}));
+jest.mock("../server/tourney/cutoverControl", () => ({
+  setTourneyDualDatabaseWritesPausedV4: (...args) => mockSetWritesPaused(...args),
 }));
 
 const { POST } = require("../../app/api/admin/tourney-activation/route.js");
@@ -47,6 +51,7 @@ describe("Tourney activation route", () => {
     mockApply.mockResolvedValue({ applied: true });
     mockActivateSchema.mockResolvedValue({ activated: true, schemaVersion: 4 });
     mockCaptureLatencyBaseline.mockResolvedValue({ captured: 5 });
+    mockSetWritesPaused.mockResolvedValue({ changed: true, replayed: false });
   });
 
   afterAll(() => {
@@ -107,5 +112,33 @@ describe("Tourney activation route", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, captured: 5 });
     expect(mockCaptureLatencyBaseline).toHaveBeenCalledWith();
+  });
+
+  test.each([
+    ["pause-writes", false, true],
+    ["resume-writes", true, false],
+  ])("passes an exact expected state to %s", async (
+    action,
+    expectedWritesPaused,
+    writesPaused
+  ) => {
+    const response = await POST(request({
+      payload: {
+        action,
+        operationId: `${action}-20260715t000000z`,
+        expectedPrimaryBackend: "supabase",
+        expectedGeneration: 1,
+        expectedWritesPaused,
+      },
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mockSetWritesPaused).toHaveBeenCalledWith({
+      operationId: `${action}-20260715t000000z`,
+      expectedPrimaryBackend: "supabase",
+      expectedGeneration: 1,
+      expectedWritesPaused,
+      writesPaused,
+    });
   });
 });

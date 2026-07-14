@@ -109,10 +109,27 @@ the worktree and keep writes paused throughout these steps:
 1. Apply the Supabase expand and forward-repair migrations and run
    `node scripts/tourney-cutover.mjs --expand-legacy-v4`, followed by
    `--repair-legacy-v4`. Do not activate either database yet.
-2. Deploy the staged runtime tuple above with writes paused. Confirm both
-   control rows are Supabase-primary, generation 1, paused, and writable as a
-   fallback (`fallback_read_only=false`).
-3. Capture the full Supabase/Auth, Vercel-managed fallback PostgreSQL, Sanity,
+2. Deploy this release from `main` with hardening and schema-v4 activation
+   disabled. While the deployment still has `TOURNEY_WRITES_PAUSED=0`, pause
+   both database controls through the production endpoint. Supply the exact
+   state you observed. Generate a new operation ID for a new operation; reuse
+   the same ID only when retrying an ambiguous response:
+
+   ```bash
+   PAUSE_OPERATION_ID="pause-$(date -u +%Y%m%dt%H%M%Sz)"
+   curl --fail-with-body --silent \
+     -H "Authorization: Bearer $CRON_SECRET" \
+     -H "Content-Type: application/json" \
+     --data "{\"action\":\"pause-writes\",\"operationId\":\"$PAUSE_OPERATION_ID\",\"expectedPrimaryBackend\":\"supabase\",\"expectedGeneration\":1,\"expectedWritesPaused\":false}" \
+     https://www.rooindustries.com/api/admin/tourney-activation
+   ```
+
+   A successful response means only that both database controls are paused.
+   It does not change the deployment environment.
+3. Deploy the staged runtime tuple above with `TOURNEY_WRITES_PAUSED=1`.
+   Confirm both control rows are Supabase-primary, generation 1, paused, and
+   writable as a fallback (`fallback_read_only=false`).
+4. Capture the full Supabase/Auth, Vercel-managed fallback PostgreSQL, Sanity,
    email, Discord, receipt, and queue snapshot. This command refuses an
    incomplete legacy schema, a missing Sanity account document, incomplete
    hosted payloads, and use of a generic `POSTGRES_URL`. It never falls back to
@@ -125,16 +142,27 @@ the worktree and keep writes paused throughout these steps:
      --verify-snapshot /absolute/path/to/unique-pre-cutover.enc
    ```
 
-4. After every shadow route has at least 30 real pre-activation samples, run
-   `node scripts/tourney-cutover.mjs --capture-latency-baseline-v4`. Exactly
-   five route baselines are required by activation inventory.
-5. Run `node scripts/tourney-cutover.mjs --activate-legacy-v4`, then call the
+5. After every shadow route has at least 30 real pre-activation samples,
+   capture the baseline inside the deployed runtime. Do not run the local
+   command for production: `SUPABASE_DATABASE_URL` is intentionally not
+   exportable from Vercel. Exactly five route baselines are required by
+   activation inventory.
+
+   ```bash
+   curl --fail-with-body --silent \
+     -H "Authorization: Bearer $CRON_SECRET" \
+     -H "Content-Type: application/json" \
+     --data '{"action":"capture-latency-baseline"}' \
+     https://www.rooindustries.com/api/admin/tourney-activation
+   ```
+
+6. Run `node scripts/tourney-cutover.mjs --activate-legacy-v4`, then call the
    deployed `activate-schema` action below. Both actions re-read paused control
    state before mutation.
-6. Call `inventory`, preserve its exact hash, then call `apply` with that hash.
+7. Call `inventory`, preserve its exact hash, then call `apply` with that hash.
    Apply is rejected if the inventory changes while the reconciliation lease is
    acquired.
-7. Dry-run fallback bootstrapping and bind apply to that exact read-only
+8. Dry-run fallback bootstrapping and bind apply to that exact read-only
    Vercel-managed PostgreSQL snapshot:
 
    ```bash
@@ -143,13 +171,28 @@ the worktree and keep writes paused throughout these steps:
      --expected-legacy-hash "$LEGACY_SNAPSHOT_HASH"
    ```
 
-8. Drain and verify all queues and parity while paused. Activation readiness
+9. Drain and verify all queues and parity while paused. Activation readiness
    must report zero active queue blockers, every Discord authority bucket
    (including inactive Tourney accounts), both database controls ready, and all
    five latency baselines present. Deploy
    `TOURNEY_HARDENING_V4_ENABLED=1` and
-   `TOURNEY_V4_ACTIVATION_ENABLED=0`, verify readiness again, and only then
-   resume writes. Never run activation with both flags enabled.
+   `TOURNEY_V4_ACTIVATION_ENABLED=0` while keeping
+   `TOURNEY_WRITES_PAUSED=1`, verify readiness again, and only then resume the
+   database controls with an exact expected state:
+
+   ```bash
+   RESUME_OPERATION_ID="resume-$(date -u +%Y%m%dt%H%M%Sz)"
+   curl --fail-with-body --silent \
+     -H "Authorization: Bearer $CRON_SECRET" \
+     -H "Content-Type: application/json" \
+     --data "{\"action\":\"resume-writes\",\"operationId\":\"$RESUME_OPERATION_ID\",\"expectedPrimaryBackend\":\"supabase\",\"expectedGeneration\":1,\"expectedWritesPaused\":true}" \
+     https://www.rooindustries.com/api/admin/tourney-activation
+   ```
+
+   This resumes only the two database controls. Keep the deployment environment
+   paused until that response and the control readback are verified. Then set
+   `TOURNEY_WRITES_PAUSED=0`, deploy that environment change, and verify normal
+   writes. Never run activation with both hardening flags enabled.
 
 ```bash
 curl --fail-with-body --silent \
