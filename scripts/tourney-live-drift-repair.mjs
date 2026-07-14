@@ -10,6 +10,10 @@ import dotenv from "dotenv";
 import postgres from "postgres";
 import migrationTargetSafety from "../src/server/supabase/migrationTargetSafety.cjs";
 import {
+  expectedConnectedDatabaseUsername,
+  loadSupabaseDatabaseTargetFromStdin,
+} from "./lib/supabase-database-target-stdin.mjs";
+import {
   decryptSnapshot,
   stableJson,
   validateHostedSnapshot,
@@ -90,7 +94,8 @@ export const buildLiveDriftConflictId = (collisionHash) => {
 export const parseLiveDriftArguments = (argv = process.argv.slice(2)) => {
   const actionFlags = new Set(["--preflight", "--apply", "--finalize"]);
   const valueFlags = new Set(["--env", "--authorization-hash", "--verified-snapshot"]);
-  const allowed = new Set([...actionFlags, ...valueFlags]);
+  const booleanFlags = new Set(["--supabase-database-url-stdin"]);
+  const allowed = new Set([...actionFlags, ...valueFlags, ...booleanFlags]);
   const seen = new Set();
   const actions = [];
   for (let index = 0; index < argv.length; index += 1) {
@@ -102,6 +107,7 @@ export const parseLiveDriftArguments = (argv = process.argv.slice(2)) => {
       actions.push(token);
       continue;
     }
+    if (booleanFlags.has(token)) continue;
     const value = String(argv[index + 1] || "").trim();
     requireCondition(value && !value.startsWith("--"),
       `A value is required after ${token}.`, "LIVE_DRIFT_ARGUMENT_INVALID");
@@ -122,6 +128,7 @@ export const parseLiveDriftArguments = (argv = process.argv.slice(2)) => {
     envPath: readValue("--env", true),
     authorizationHash: readValue("--authorization-hash", action !== "preflight"),
     snapshotPath: readValue("--verified-snapshot", action === "apply"),
+    useSupabaseDatabaseUrlStdin: seen.has("--supabase-database-url-stdin"),
   };
 };
 
@@ -183,7 +190,7 @@ export const assertConnectedDatabaseIdentity = async (sql, identity, code) => {
     select pg_catalog.current_database() database, current_user username
   `;
   requireCondition(connected?.database === identity?.database &&
-    connected?.username === identity?.username,
+    connected?.username === expectedConnectedDatabaseUsername(identity),
   "Connected PostgreSQL identity does not match the pinned target.", code);
   return connected;
 };
@@ -974,6 +981,9 @@ const safePreflightOutput = (state, authorizationHash) => ({
 export const main = async (argv = process.argv.slice(2)) => {
   const args = parseLiveDriftArguments(argv);
   loadPrivateEnvironment(args.envPath);
+  if (args.useSupabaseDatabaseUrlStdin) {
+    await loadSupabaseDatabaseTargetFromStdin();
+  }
   const identities = assertRuntimeEnvironment(process.env);
   const authorizationHash = buildLiveDriftAuthorizationHash();
   if (args.action !== "preflight") {
