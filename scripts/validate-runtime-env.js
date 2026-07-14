@@ -293,7 +293,14 @@ const tourneyFailoverGeneration =
 const numericTourneyGeneration = /^\d+$/.test(tourneyFailoverGeneration)
   ? Number(tourneyFailoverGeneration)
   : Number.NaN;
-const tourneyV4ActivationStaged = tourneyV4ActivationEnabled;
+const tourneyV4ActivationTupleStaged =
+  tourneyDatabaseMode === "supabase" &&
+  tourneyMirrorEnabled &&
+  tourneyWritesPaused &&
+  tourneyFailoverGeneration === "1" &&
+  !tourneyHardeningV4Enabled;
+const tourneyV4ActivationStaged =
+  tourneyV4ActivationEnabled || tourneyV4ActivationTupleStaged;
 const contentCanaryPercent = numericPercent("SUPABASE_CONTENT_CANARY_PERCENT");
 const commerceCanaryPercent = numericPercent("SUPABASE_COMMERCE_CANARY_PERCENT");
 const authCanaryConfigured = Boolean(

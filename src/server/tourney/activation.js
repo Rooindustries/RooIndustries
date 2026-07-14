@@ -157,6 +157,9 @@ const assertAuthoritativeDiscordPlayers = (players) => {
     mismatched: conflicts.filter((player) =>
       ["principal_mismatch", "legacy_identity_mismatch"].includes(player.conflictCode)
     ).length,
+    inactiveTourneyAccounts: conflicts.filter((player) =>
+      player.conflictCode === "inactive_tourney_account"
+    ).length,
   };
   throw error;
 };
@@ -276,6 +279,9 @@ const summarizeInventory = ({ accounts, databaseState, rows }) => ({
   ).length,
   duplicateDiscordMappings: rows.filter((row) =>
     row.conflictCode === "duplicate_principal_mapping"
+  ).length,
+  inactiveTourneyAccounts: rows.filter((row) =>
+    row.conflictCode === "inactive_tourney_account"
   ).length,
   conflicts: rows.filter((row) => row.managedRoles.length > 1).length,
   needsRepair: rows.filter((row) =>

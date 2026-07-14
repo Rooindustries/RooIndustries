@@ -18,6 +18,7 @@ import {
   readBoundedFormData,
   readBoundedJson,
 } from "../../../../src/server/request/boundedJson";
+import { logSafeError } from "../../../../src/server/safeErrorLog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -157,7 +158,8 @@ export async function POST(request) {
       username,
       password: payload?.password,
     });
-  } catch {
+  } catch (error) {
+    logSafeError("Tournament login credential verification failed", error);
     return invalidResponse(request, payload, 503, "unavailable");
   }
 

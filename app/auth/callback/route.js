@@ -341,7 +341,10 @@ export async function GET(request) {
         accessToken: String(result.data.session.provider_token || ""),
         attemptExternalWork: false,
       });
-      if (!queued.applied && queued.reason !== "pending") {
+      if (
+        !queued.applied &&
+        !["pending", "not_linked", "not_configured"].includes(queued.reason)
+      ) {
         throw new Error("Discord OAuth projection was not durably queued.");
       }
     } catch {

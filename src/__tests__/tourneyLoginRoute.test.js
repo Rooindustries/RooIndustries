@@ -3,6 +3,7 @@ const mockCreateTourneySessionToken = jest.fn();
 const mockGetClientAddressFromHeaders = jest.fn();
 const mockGetTourneyCookieOptions = jest.fn();
 const mockVerifyTourneyCredentials = jest.fn();
+const mockLogSafeError = jest.fn();
 
 jest.mock("next/server", () => ({
   NextResponse: {
@@ -26,6 +27,9 @@ jest.mock("../server/tourney/auth", () => ({
   getClientAddressFromHeaders: (...args) => mockGetClientAddressFromHeaders(...args),
   getTourneyCookieOptions: (...args) => mockGetTourneyCookieOptions(...args),
   verifyTourneyCredentials: (...args) => mockVerifyTourneyCredentials(...args),
+}));
+jest.mock("../server/safeErrorLog", () => ({
+  logSafeError: (...args) => mockLogSafeError(...args),
 }));
 
 const { POST } = require("../../app/api/tourney/login/route.js");
@@ -54,6 +58,7 @@ describe("tourney login API route", () => {
     mockGetClientAddressFromHeaders.mockReset();
     mockGetTourneyCookieOptions.mockReset();
     mockVerifyTourneyCredentials.mockReset();
+    mockLogSafeError.mockReset();
 
     mockCheckTourneyRateLimit.mockReturnValue({ ok: true });
     mockGetClientAddressFromHeaders.mockReturnValue("127.0.0.1");
@@ -80,5 +85,22 @@ describe("tourney login API route", () => {
       error:
         "You have been suspended from the tourney. Please contact serviroo through Discord or at serviroo@rooindustries.com for further queries.",
     });
+  });
+
+  test("safely logs credential verification exceptions", async () => {
+    const failure = Object.assign(new Error("database unavailable"), {
+      code: "TERRAIN_UNAVAILABLE",
+    });
+    mockVerifyTourneyCredentials.mockRejectedValue(failure);
+
+    const response = await POST(
+      makeJsonRequest({ username: "player-one", password: "private-password" })
+    );
+
+    expect(response.status).toBe(503);
+    expect(mockLogSafeError).toHaveBeenCalledWith(
+      "Tournament login credential verification failed",
+      failure
+    );
   });
 });
