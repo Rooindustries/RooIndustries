@@ -95,6 +95,15 @@ const baselineClockResetV4 = fs.readFileSync(
   ),
   "utf8"
 );
+const compactSnapshotPayloadV4 = fs.readFileSync(
+  path.join(
+    process.cwd(),
+    "supabase",
+    "migrations",
+    "20260715070000_return_compact_tourney_snapshot_payload.sql"
+  ),
+  "utf8"
+);
 const legacyActivationV4 = fs.readFileSync(
   path.join(process.cwd(), "scripts", "tourney-schema-v4-activate-legacy.sql"),
   "utf8"
@@ -197,6 +206,68 @@ describe("Tourney cutover migration", () => {
       `,
     ], { encoding: "utf8" });
     expect(JSON.parse(output)).toEqual({ roundTrip: true, tamperRejected: true });
+  });
+
+  test("validates a hosted snapshot from exact payload text without a duplicate payload", () => {
+    const moduleUrl = pathToFileURL(
+      path.join(process.cwd(), "scripts", "tourney-cutover.mjs")
+    ).href;
+    const output = execFileSync(process.execPath, [
+      "--input-type=module",
+      "--eval",
+      `
+        import crypto from "node:crypto";
+        import {
+          HOSTED_SNAPSHOT_RELATIONS,
+          stableJson,
+          validateHostedSnapshot,
+        } from ${JSON.stringify(moduleUrl)};
+        const legacyData = { tourney_players: [] };
+        const sanityAccount = { _id: "tourneyAuthStore" };
+        const payload = Object.fromEntries(
+          HOSTED_SNAPSHOT_RELATIONS.map((relation) => [relation, []])
+        );
+        payload.legacy = legacyData;
+        payload.sanity_account = sanityAccount;
+        const payloadText = JSON.stringify(payload);
+        const payloadSha256 = crypto.createHash("sha256").update(payloadText).digest("hex");
+        const tableCounts = Object.fromEntries(
+          HOSTED_SNAPSHOT_RELATIONS.map((relation) => [relation, 0])
+        );
+        const proof = validateHostedSnapshot({
+          data: {
+            snapshot_id: "10000000-0000-4000-8000-000000000001",
+            payload_sha256: payloadSha256,
+            table_counts: tableCounts,
+            payload_text: payloadText,
+            hosted_roundtrip_verified: true,
+          },
+          legacyData,
+          sanityAccount,
+        });
+        if (stableJson(proof.payload) !== stableJson(payload)) process.exit(1);
+        if (proof.payloadTextSha256 !== payloadSha256) process.exit(2);
+        try {
+          validateHostedSnapshot({
+            data: {
+              snapshot_id: "10000000-0000-4000-8000-000000000001",
+              payload_sha256: payloadSha256,
+              table_counts: tableCounts,
+              payload: { incorrect: true },
+              payload_text: payloadText,
+              hosted_roundtrip_verified: true,
+            },
+            legacyData,
+            sanityAccount,
+          });
+          process.exit(3);
+        } catch (error) {
+          if (error.code !== "TOURNEY_HOSTED_SNAPSHOT_PROOF_INVALID") process.exit(4);
+        }
+        process.stdout.write("ok");
+      `,
+    ], { encoding: "utf8" });
+    expect(output).toBe("ok");
   });
 
   test("converts PostgreSQL URLs into isolated libpq environment fields", () => {
@@ -705,6 +776,20 @@ describe("Tourney cutover migration", () => {
     expect(snapshotRpcRepairV4).not.toContain("metadata.expanded_version");
     expect(snapshotRpcRepairV4).toContain("'hosted_roundtrip_verified',true");
     expect(snapshotRpcRepairV4).toContain(
+      "grant execute on function public.roo_capture_tourney_hardening_snapshot(jsonb,jsonb,text)"
+    );
+  });
+
+  test("returns hosted snapshot metadata and exact text without duplicating the payload", () => {
+    expect(compactSnapshotPayloadV4).toContain(
+      "select proof.result - 'payload'"
+    );
+    expect(compactSnapshotPayloadV4).toContain("set search_path = ''");
+    expect(compactSnapshotPayloadV4).toContain("set statement_timeout = '120s'");
+    expect(compactSnapshotPayloadV4).toContain(
+      "revoke all on function tourney.capture_tourney_hardening_snapshot_payload_v4"
+    );
+    expect(compactSnapshotPayloadV4).toContain(
       "grant execute on function public.roo_capture_tourney_hardening_snapshot(jsonb,jsonb,text)"
     );
   });
