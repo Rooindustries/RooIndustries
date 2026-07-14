@@ -273,6 +273,9 @@ describe("Tourney cutover migration", () => {
     );
     expect(snapshotRpcRepairV4).toContain("p_legacy_snapshot_text text default null");
     expect(snapshotRpcRepairV4).toContain("p_legacy_snapshot_text::jsonb");
+    expect(snapshotRpcRepairV4).toMatch(
+      /jsonb_typeof\(p_legacy_snapshot\)[\s\S]*?end if;[\s\S]*?jsonb_each\(p_legacy_snapshot\)/
+    );
     expect(snapshotRpcRepairV4).toContain("metadata.schema_version");
     expect(snapshotRpcRepairV4).not.toContain("metadata.expanded_version");
     expect(snapshotRpcRepairV4).toContain("'hosted_roundtrip_verified',true");
