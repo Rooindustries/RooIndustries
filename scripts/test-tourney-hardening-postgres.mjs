@@ -439,6 +439,10 @@ try {
     root,
     "supabase/migrations/20260715020000_repair_tourney_hardening_snapshot_rpc.sql"
   );
+  const supabaseSnapshotRpcTimeout = path.join(
+    root,
+    "supabase/migrations/20260715050000_set_tourney_snapshot_rpc_timeout.sql"
+  );
   const supabaseBaselineRecovery = path.join(
     root,
     "supabase/migrations/20260715030000_allow_paused_tourney_baseline_recovery.sql"
@@ -525,6 +529,7 @@ insert into tourney_external_operations(
     supabaseRepair,
     supabaseCutoverOperationMarkers,
     supabaseSnapshotRpcRepair,
+    supabaseSnapshotRpcTimeout,
     supabaseBaselineRecovery
   );
   psql("supabase_unsafe", supabasePostInstallOldWriter);
@@ -547,6 +552,11 @@ insert into tourney_external_operations(
        and to_regprocedure(
          'public.roo_capture_tourney_hardening_snapshot(jsonb,jsonb,text)'
        ) is not null
+       and (
+         select 'statement_timeout=120s'=any(coalesce(proconfig,array[]::text[]))
+         from pg_catalog.pg_proc
+         where oid='public.roo_capture_tourney_hardening_snapshot(jsonb,jsonb,text)'::regprocedure
+       )
        and not has_function_privilege(
          'anon',
          'public.roo_capture_tourney_hardening_snapshot(jsonb,jsonb,text)',
@@ -837,6 +847,7 @@ insert into accounts.discord_role_assignments(
     supabaseRepair,
     supabaseCutoverOperationMarkers,
     supabaseSnapshotRpcRepair,
+    supabaseSnapshotRpcTimeout,
     supabaseBaselineRecovery,
     supabaseBaselineClockReset
   );
