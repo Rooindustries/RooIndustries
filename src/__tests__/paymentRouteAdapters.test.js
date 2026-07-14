@@ -144,6 +144,11 @@ describe("payment app route adapters", () => {
     jest.clearAllMocks();
   });
 
+  test("allows the shared reconciliation scheduler its full bounded runtime", async () => {
+    const { route } = await loadPaymentActionRoute();
+    expect(route.maxDuration).toBe(300);
+  });
+
   test("start forwards the canonical payment body through the App Router adapter", async () => {
     const { route, handlers } = await loadPaymentActionRoute();
     const request = buildJsonRequest("https://example.com/api/payment/start", {

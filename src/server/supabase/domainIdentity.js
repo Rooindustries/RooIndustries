@@ -28,8 +28,11 @@ export const resolveExactDomainIdentity = async ({
   flow,
   request,
   response,
+  user: verifiedUser,
 } = {}) => {
-  const user = await getNextSupabaseUser({ request, response });
+  const user = verifiedUser?.id
+    ? verifiedUser
+    : await getNextSupabaseUser({ request, response });
   if (!user?.id) return null;
 
   if (flow === "referral") {

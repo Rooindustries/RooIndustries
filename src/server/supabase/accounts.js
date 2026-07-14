@@ -244,9 +244,6 @@ const sha256 = (value) =>
 export const buildTourneyPlayerAuthEmail = (username) =>
   `tourney-player+${sha256(normalizeIdentifier(username)).slice(0, 24)}@auth.rooindustries.invalid`;
 
-const buildTourneyPlayerAuthEmailById = (playerId) =>
-  `tourney-player+${sha256(String(playerId || "").trim()).slice(0, 24)}@auth.rooindustries.invalid`;
-
 const buildTourneyAdminAuthEmail = ({ username, email }) =>
   normalizeIdentifier(email) ||
   `tourney+${sha256(normalizeIdentifier(username)).slice(0, 24)}@auth.rooindustries.invalid`;
@@ -274,7 +271,29 @@ const upsertAuthUserWithHash = async ({
     throw new Error("Supabase Auth inventory failed.");
   }
   if (existing.data?.user) {
-    const updated = await adminClient.auth.admin.updateUserById(userId, attributes);
+    const currentUser = existing.data.user;
+    const existingRoles = Array.isArray(currentUser.app_metadata?.roles)
+      ? currentUser.app_metadata.roles
+      : [];
+    const desiredRoles = Array.isArray(appMetadata?.roles) ? appMetadata.roles : [];
+    const roles = [...new Set([
+      ...existingRoles.filter((role) => !String(role).startsWith("tourney_")),
+      ...desiredRoles,
+    ])];
+    const updated = await adminClient.auth.admin.updateUserById(userId, {
+      ...attributes,
+      user_metadata: {
+        ...(currentUser.user_metadata || {}),
+        ...attributes.user_metadata,
+      },
+      app_metadata: {
+        ...(currentUser.app_metadata || {}),
+        ...appMetadata,
+        imported_from:
+          currentUser.app_metadata?.imported_from || appMetadata?.imported_from,
+        roles,
+      },
+    });
     if (updated.error) throw new Error("Supabase Auth synchronization failed.");
     return;
   }
@@ -314,7 +333,7 @@ export const syncSupabaseTourneyPlayerAccount = async ({
   ) {
     throw new Error("Tourney account is already linked to another Auth user.");
   }
-  const fallbackEmail = buildTourneyPlayerAuthEmailById(source.id);
+  const fallbackEmail = buildTourneyPlayerAuthEmail(username);
   const userId = requestedUserId || existingAccount?.user_id || deterministicUuid(fallbackEmail);
   const existingAuth = await adminClient.auth.admin.getUserById(userId);
   if (existingAuth.error && Number(existingAuth.error.status || 0) !== 404) {
@@ -370,7 +389,7 @@ export const syncSupabaseTourneyPlayerAccount = async ({
     });
   }
   const authEmail = normalizeIdentifier(existingUser?.email) || fallbackEmail;
-  requireRpcData(
+  const imported = requireRpcData(
     await adminClient.rpc("roo_import_tourney_player_account_v2", {
       p_account: {
         user_id: userId,
@@ -390,16 +409,13 @@ export const syncSupabaseTourneyPlayerAccount = async ({
     }),
     "Tourney player account synchronization"
   );
-  const guildId = String(env.DISCORD_GUILD_ID || "").trim();
-  if (/^[0-9]{5,30}$/.test(guildId)) {
-    await adminClient.rpc("roo_refresh_discord_role_assignment", {
-      p_user_id: userId,
-      p_guild_id: guildId,
-    });
-  }
+  const resolvedAccount = await resolveSupabaseAccountByUserId({ userId, adminClient });
   return {
     userId,
-    account: await resolveSupabaseAccountByUserId({ userId, adminClient }),
+    principalId: resolvedAccount?.principal_id || "",
+    account: resolvedAccount,
+    imported,
+    discordRoleAssignment: null,
   };
 };
 
@@ -512,16 +528,10 @@ export const syncSupabaseTourneyAdminAccount = async ({
     }),
     "Tourney administrator metadata synchronization"
   );
-  const guildId = String(env.DISCORD_GUILD_ID || "").trim();
-  if (/^[0-9]{5,30}$/.test(guildId)) {
-    await adminClient.rpc("roo_refresh_discord_role_assignment", {
-      p_user_id: userId,
-      p_guild_id: guildId,
-    });
-  }
   return {
     userId,
     account: await resolveSupabaseAccountByUserId({ userId, adminClient }),
+    discordRoleAssignment: null,
   };
 };
 

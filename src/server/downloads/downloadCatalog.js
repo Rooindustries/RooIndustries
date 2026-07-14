@@ -37,8 +37,16 @@ export const normalizeDownloadSlug = (value) => {
 };
 
 const sanitizeFileName = (value, fallback) => {
-  const fileName = path.basename(String(value || fallback || "").trim());
-  if (!fileName || fileName.includes("/") || fileName.includes("\\")) return "";
+  const fileName = String(value || fallback || "").trim();
+  if (
+    !fileName ||
+    fileName !== path.basename(fileName) ||
+    fileName.includes("/") ||
+    fileName.includes("\\") ||
+    /[\x00-\x1f\x7f]/.test(fileName)
+  ) {
+    return "";
+  }
   if (!fileName.toLowerCase().endsWith(".zip")) return "";
   return fileName;
 };
@@ -52,11 +60,13 @@ export const sanitizeBlobPath = (value, fallback) => {
   if (!raw) return "";
 
   const normalized = posixPath.normalize(raw);
+  const rawParts = raw.split("/");
   const parts = normalized.split("/");
   if (
     normalized === "." ||
     normalized.startsWith("../") ||
     normalized.includes("/../") ||
+    rawParts.some((part) => part === "..") ||
     parts.some((part) => part === "..")
   ) {
     return "";
@@ -65,7 +75,42 @@ export const sanitizeBlobPath = (value, fallback) => {
   return normalized;
 };
 
-const normalizeCatalogEntry = (entry = {}) => {
+export const hasMatchingDownloadBasename = (download = {}) => {
+  const rawFileName = String(download.fileName || "");
+  const rawBlobPath = String(download.blobPath || "");
+  const fileName = rawFileName.trim();
+  const blobPath = sanitizeBlobPath(rawBlobPath);
+  return (
+    !!fileName &&
+    !!blobPath &&
+    rawFileName === fileName &&
+    rawBlobPath === blobPath &&
+    posixPath.basename(blobPath) === fileName
+  );
+};
+
+const normalizeExpectedSize = (entry = {}) => {
+  const raw = entry.sizeBytes ?? entry.size;
+  if (raw === undefined || raw === null || raw === "") return 0;
+  const size = Number(raw);
+  return Number.isSafeInteger(size) && size > 0 ? size : -1;
+};
+
+const normalizeSha256 = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "";
+  return /^[a-f0-9]{64}$/.test(normalized) ? normalized : null;
+};
+
+const normalizeEtag = (value) => {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "";
+  return normalized.length <= 256 && !/[\x00-\x1f\x7f]/.test(normalized)
+    ? normalized
+    : null;
+};
+
+const normalizeCatalogEntry = (entry = {}, { requireIntegrity = true } = {}) => {
   const slug = normalizeDownloadSlug(entry.slug);
   if (!slug) return null;
 
@@ -75,7 +120,12 @@ const normalizeCatalogEntry = (entry = {}) => {
   );
   if (!fileName) return null;
   const blobPath = sanitizeBlobPath(entry.blobPath, `downloads/${fileName}`);
-  if (!blobPath) return null;
+  if (!blobPath || !hasMatchingDownloadBasename({ fileName, blobPath })) return null;
+  const sizeBytes = normalizeExpectedSize(entry);
+  const sha256 = normalizeSha256(entry.sha256);
+  const blobEtag = normalizeEtag(entry.blobEtag ?? entry.etag);
+  if (sizeBytes < 0 || sha256 === null || blobEtag === null) return null;
+  if (requireIntegrity && (sizeBytes <= 0 || !sha256 || !blobEtag)) return null;
 
   const title = String(entry.title || "").trim() || `${titleFromSlug(slug)} Download`;
   const description =
@@ -93,42 +143,69 @@ const normalizeCatalogEntry = (entry = {}) => {
     ),
     contentType:
       String(entry.contentType || "").trim() || DEFAULT_DOWNLOAD_CONTENT_TYPE,
+    sizeBytes,
+    sha256,
+    blobEtag,
     allowedPackageTitles: asArray(entry.allowedPackageTitles || entry.packages)
       .map((item) => String(item || "").trim())
       .filter(Boolean),
   };
 };
 
-export const parseDownloadCatalog = (env = process.env) => {
+const readDownloadCatalog = (env = process.env) => {
   const raw = String(env.DOWNLOAD_CATALOG_JSON || "").trim();
-  if (!raw) return [];
+  if (!raw) return { entries: [], invalidSlugs: new Set(), malformed: false };
 
   try {
     const parsed = JSON.parse(raw);
-    const entries = Array.isArray(parsed)
+    const sourceEntries = Array.isArray(parsed)
       ? parsed
       : Object.entries(parsed || {}).map(([slug, value]) => ({
           slug,
           ...(value && typeof value === "object" ? value : {}),
         }));
+    const entries = [];
+    const invalidSlugs = new Set();
 
-    return entries.map(normalizeCatalogEntry).filter(Boolean);
+    for (const sourceEntry of sourceEntries) {
+      const normalized = normalizeCatalogEntry(sourceEntry);
+      if (normalized) {
+        entries.push(normalized);
+        continue;
+      }
+
+      const configuredSlug = normalizeDownloadSlug(sourceEntry?.slug);
+      if (configuredSlug) invalidSlugs.add(configuredSlug);
+      const error = new Error("Download catalog entry is invalid.");
+      error.code = "download_catalog_entry_invalid";
+      logSafeError("Download catalog entry is invalid", error);
+    }
+
+    return { entries, invalidSlugs, malformed: false };
   } catch (error) {
     logSafeError("Download catalog configuration is invalid", error);
-    return [];
+    return { entries: [], invalidSlugs: new Set(), malformed: true };
   }
 };
+
+export const parseDownloadCatalog = (env = process.env) =>
+  readDownloadCatalog(env).entries;
 
 export const getDownloadBySlug = (slug, env = process.env) => {
   const normalizedSlug = normalizeDownloadSlug(slug);
   if (!normalizedSlug) return null;
 
-  const configured = parseDownloadCatalog(env).find(
+  const catalog = readDownloadCatalog(env);
+  const configured = catalog.entries.find(
     (entry) => entry.slug === normalizedSlug
   );
   if (configured) return configured;
+  if (catalog.malformed || catalog.invalidSlugs.has(normalizedSlug)) return null;
 
-  return normalizeCatalogEntry({ slug: normalizedSlug });
+  return normalizeCatalogEntry(
+    { slug: normalizedSlug },
+    { requireIntegrity: false }
+  );
 };
 
 export const getDownloadRootDir = (env = process.env) =>

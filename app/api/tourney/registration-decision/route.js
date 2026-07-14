@@ -8,6 +8,7 @@ import { isMatchingTourneyApproverSession } from "../../../../src/server/tourney
 import { enqueueTourneyEmailDispatch } from "../../../../src/server/tourney/emailDispatch";
 import { logSafeError } from "../../../../src/server/safeErrorLog";
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
+import { readBoundedJson } from "../../../../src/server/request/boundedJson";
 import {
   applyRegistrationDecision,
   getRegistrationDecisionToken,
@@ -17,6 +18,12 @@ import { executeTourneyCommand } from "../../../../src/server/tourney/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const RETRYABLE_DECISION_CONFLICTS = new Set([
+  "TOURNEY_AUTH_OPERATION_IN_PROGRESS",
+  "TOURNEY_AUTH_LEASE_CHANGED",
+  "TOURNEY_TRANSACTION_BUSY",
+]);
 
 const escapeHtml = (value) =>
   String(value || "")
@@ -93,6 +100,8 @@ const renderDecisionJson = ({
   status = 400,
   linkHref = "",
   retryAfter = 0,
+  code = "",
+  syncPending = false,
 }) =>
   Response.json(
     {
@@ -104,6 +113,8 @@ const renderDecisionJson = ({
         .replace(/&#39;/g, "'")
         .replace(/&quot;/g, '"'),
       ...(linkHref ? { signInUrl: linkHref } : {}),
+      ...(code ? { code } : {}),
+      ...(syncPending ? { syncPending: true } : {}),
     },
     {
       status,
@@ -216,8 +227,29 @@ const handleDecision = async ({
       tone: "info",
       ok: true,
       status: 200,
+      syncPending: Boolean(command.syncPending || command.body?.syncPending),
     });
   } catch (error) {
+    if (Number(error?.status) === 409) {
+      const code = String(error?.code || "TOURNEY_DECISION_CONFLICT");
+      if (RETRYABLE_DECISION_CONFLICTS.has(code)) {
+        return respond({
+          title: "Still processing",
+          body: "This registration decision is still being processed. Please retry in a few seconds.",
+          tone: "info",
+          status: 409,
+          retryAfter: 5,
+          code,
+        });
+      }
+      return respond({
+        title: "Decision conflict",
+        body: "This registration was already approved or denied.",
+        tone: "danger",
+        status: 409,
+        code,
+      });
+    }
     logSafeError("Tournament registration decision failed", error);
     if (error?.code === "TOURNEY_WRITES_PAUSED") {
       return respond({
@@ -226,6 +258,7 @@ const handleDecision = async ({
         tone: "danger",
         status: 503,
         retryAfter: error.retryAfter || 30,
+        code: "TOURNEY_WRITES_PAUSED",
       });
     }
     return respond({
@@ -256,7 +289,16 @@ export async function POST(request) {
       status: 403,
     });
   }
-  const payload = await request.json().catch(() => ({}));
+  let payload;
+  try {
+    payload = await readBoundedJson(request, { maxBytes: 8 * 1024 });
+  } catch (error) {
+    return renderDecisionJson({
+      title: "Invalid request",
+      body: error?.message || "Invalid registration decision request.",
+      status: Number(error?.status || 400),
+    });
+  }
   return handleDecision({
     request,
     token: String(payload.token || "").trim(),
