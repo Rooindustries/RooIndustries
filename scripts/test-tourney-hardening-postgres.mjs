@@ -354,6 +354,10 @@ try {
     root,
     "supabase/migrations/20260714000000_harden_tourney_external_authority.sql"
   );
+  const supabaseBaselineRestore = path.join(
+    root,
+    "supabase/migrations/20260715010000_restore_tourney_shadow_latency_baselines.sql"
+  );
   const supabaseRepair = path.join(
     root,
     "supabase/migrations/20260714010000_repair_tourney_cutover_safety.sql"
@@ -416,6 +420,14 @@ insert into tourney_external_operations(
        '{}'::jsonb,repeat('d',64)
      );`
   );
+  const supabaseMissingBaselineDrift = writeTemp(
+    "supabase-missing-baseline-drift.sql",
+    "drop table tourney.shadow_latency_baselines;\n"
+  );
+  const legacyMissingSerializationDrift = writeTemp(
+    "legacy-missing-serialization-drift.sql",
+    "alter table if exists tourney_external_operations drop column if exists serialization_key cascade;\n"
+  );
 
   psql(
     "supabase_unsafe",
@@ -427,6 +439,8 @@ insert into tourney_external_operations(
     "supabase_unsafe",
     supabaseActivation,
     supabaseHardening,
+    supabaseMissingBaselineDrift,
+    supabaseBaselineRestore,
     supabaseRepair,
     supabaseCutoverOperationMarkers
   );
@@ -438,6 +452,7 @@ insert into tourney_external_operations(
   await assertSql(
     unsafeSupabase,
     `select to_regclass('tourney.cutover_control_operations') is not null
+       and to_regclass('tourney.shadow_latency_baselines') is not null
        and (select count(*) = 2 from information_schema.columns
          where table_schema = 'tourney' and table_name = 'cutover_metadata'
            and column_name in (
@@ -493,6 +508,8 @@ insert into tourney_external_operations(
     "legacy_unsafe",
     legacyBootstrap,
     path.join(root, "scripts/tourney-cutover-legacy.sql"),
+    path.join(root, "scripts/tourney-schema-v4-expand-legacy.sql"),
+    legacyMissingSerializationDrift,
     path.join(root, "scripts/tourney-schema-v4-expand-legacy.sql")
   );
   psql("legacy_unsafe", legacyOldWriter);
@@ -503,6 +520,10 @@ insert into tourney_external_operations(
   await assertSql(
     unsafeLegacy,
     `select to_regclass('public.tourney_cutover_control_operations') is not null
+       and (select is_nullable = 'NO' from information_schema.columns
+         where table_schema = 'public'
+           and table_name = 'tourney_external_operations'
+           and column_name = 'serialization_key')
        and (select count(*) = 2 from information_schema.columns
          where table_schema = 'public'
            and table_name = 'tourney_cutover_metadata'
@@ -599,6 +620,7 @@ insert into accounts.discord_role_assignments(
     "supabase_fixture",
     migrationFixture,
     supabaseHardening,
+    supabaseBaselineRestore,
     supabaseRepair,
     supabaseCutoverOperationMarkers
   );

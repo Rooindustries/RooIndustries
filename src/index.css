@@ -16,29 +16,6 @@
   }
 }
 
-/* ════════════════════════════════════════════════════════════════════════
-   ROO INDUSTRIES THEME TOKENS
-
-   Two designed themes share one semantic token contract. There is NO light
-   mode — both themes are dark; they differ in depth and color temperature.
-
-   • "Roo Blue" (default, canonical) — the brand identity: abyssal #000040 →
-     energized teal #00b7c0 field, slate-navy glass lit by a cyan top-light,
-     electric #03e9f4 energy lines. The default must never drift.
-
-   • "Blackout" (dark) — Obsidian & Gold. Premium minimal black: graphite
-     and smoked-glass surfaces, crisp silver ink, warm benchmark gold as
-     the only accent. NO blue or cyan anywhere in this theme. Real media
-     must always stay visible — never cover it with opaque overlays.
-
-   Rules:
-   - Components consume tokens (or the Tailwind names mapped to them in
-     tailwind.config.js) — never raw hex/rgba for themed surfaces.
-   - Low-performance fallbacks must use --color-surface-solid so degraded
-     rendering follows the active theme.
-   - The theme runtime sets data-theme="default|dark" on <html> before
-     paint. With no attribute, :root resolves to Roo Blue.
-   ════════════════════════════════════════════════════════════════════════ */
 :root,
 html[data-theme="default"] {
   color-scheme: dark;

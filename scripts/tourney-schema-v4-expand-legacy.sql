@@ -121,6 +121,8 @@ create table if not exists tourney_external_operations (
   check ((status = 'applied' and completed_at is not null) or status <> 'applied')
 );
 alter table tourney_external_operations
+  add column if not exists serialization_key text;
+alter table tourney_external_operations
   drop constraint if exists tourney_external_operations_operation_kind_check;
 alter table tourney_external_operations
   add constraint tourney_external_operations_operation_kind_check check (
@@ -163,6 +165,21 @@ on tourney_external_operations
 for each row execute function set_tourney_external_operation_serialization_key();
 revoke all on function set_tourney_external_operation_serialization_key()
   from public;
+update tourney_external_operations set serialization_key = case
+  when operation_kind in ('discord_membership','discord_role_reconcile') then
+    'discord:' || coalesce(
+      desired_state#>>'{assignment,principalId}',
+      desired_state#>>'{oauthProjection,principalId}',
+      desired_state#>>'{oauthProjection,userId}',
+      entity_id
+    )
+  when operation_kind = 'sanity_account_projection' then
+    'sanity:account-snapshot'
+  else operation_kind || ':' || entity_type || ':' || entity_id
+end
+where serialization_key is null or btrim(serialization_key) = '';
+alter table tourney_external_operations
+  alter column serialization_key set not null;
 create index if not exists tourney_external_operations_claim_v4_idx
   on tourney_external_operations (next_attempt_at, created_at, operation_key)
   where status in ('pending', 'retry', 'processing');

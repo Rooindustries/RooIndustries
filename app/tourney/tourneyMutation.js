@@ -34,9 +34,7 @@ const readPendingCommand = (key) => {
   try {
     const stored = globalThis.sessionStorage?.getItem(key);
     if (stored) record = JSON.parse(stored);
-  } catch {
-    // In-memory persistence still protects retries in restricted browsers.
-  }
+  } catch {}
   if (
     !record?.commandId ||
     !Number.isFinite(Number(record.createdAt)) ||
@@ -45,9 +43,7 @@ const readPendingCommand = (key) => {
     MEMORY_PENDING_COMMANDS.delete(key);
     try {
       globalThis.sessionStorage?.removeItem(key);
-    } catch {
-      // Ignore unavailable browser storage.
-    }
+    } catch {}
     return null;
   }
   MEMORY_PENDING_COMMANDS.set(key, record);
@@ -59,9 +55,7 @@ const persistPendingCommand = (key, commandId) => {
   MEMORY_PENDING_COMMANDS.set(key, record);
   try {
     globalThis.sessionStorage?.setItem(key, JSON.stringify(record));
-  } catch {
-    // In-memory persistence still protects retries in restricted browsers.
-  }
+  } catch {}
 };
 
 const clearPendingCommand = (key, commandId) => {
@@ -71,9 +65,7 @@ const clearPendingCommand = (key, commandId) => {
   try {
     const stored = JSON.parse(globalThis.sessionStorage?.getItem(key) || "null");
     if (stored?.commandId === commandId) globalThis.sessionStorage.removeItem(key);
-  } catch {
-    // Ignore unavailable or invalid browser storage.
-  }
+  } catch {}
 };
 
 const isDefinitiveMutationResponse = (response) =>

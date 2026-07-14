@@ -165,9 +165,7 @@ export default function ConnectedAccounts({
               setMessage(`${provider[0].toUpperCase() + provider.slice(1)} was unlinked.`);
               return;
             }
-          } catch {
-            // The durable worker remains authoritative; the next read retries safely.
-          }
+          } catch {}
           if (!mounted.current) return;
           if (attempt < 71) {
             unlinkPollTimer.current = setTimeout(() => resume(attempt + 1), 5_000);
