@@ -356,7 +356,7 @@ try {
   );
   const supabaseBaselineRestore = path.join(
     root,
-    "supabase/migrations/20260714005000_restore_tourney_shadow_latency_baselines.sql"
+    "supabase/migrations/20260715010000_restore_tourney_shadow_latency_baselines.sql"
   );
   const supabaseRepair = path.join(
     root,
