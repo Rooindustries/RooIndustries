@@ -1,5 +1,6 @@
 import {
   authenticateSupabaseAccount,
+  buildTourneyPlayerAuthEmail,
   completeSupabaseCredentialMirror,
   createSupabaseCreatorAccount,
   requireSupabaseBearerUser,
@@ -19,6 +20,12 @@ const creatorAccount = {
 };
 
 describe("Supabase account compatibility", () => {
+  test("derives one normalized synthetic Auth email for Tourney players", () => {
+    expect(buildTourneyPlayerAuthEmail("  Player-One  ")).toBe(
+      buildTourneyPlayerAuthEmail("player-one")
+    );
+  });
+
   test("authenticates an imported bcrypt creator through an alias", async () => {
     const adminClient = {
       rpc: jest.fn().mockResolvedValue({ data: creatorAccount, error: null }),
@@ -264,6 +271,53 @@ describe("Supabase account compatibility", () => {
     expect(update.app_metadata.roles).toEqual(
       expect.arrayContaining(["creator", "tourney_player"])
     );
+  });
+
+  test("does not perform inline Discord role refresh during player auth sync", async () => {
+    const user = {
+      id: creatorAccount.user_id,
+      email: "player-auth@example.invalid",
+      app_metadata: { roles: ["tourney_player"], legacy_player_id: "player.one" },
+    };
+    const account = {
+      ...creatorAccount,
+      principal_id: "31ccb7e7-69e4-49d1-a30c-43e37e8412c7",
+      roles: ["tourney_player"],
+      tourney_username: "player-one",
+    };
+    const adminClient = {
+      rpc: jest
+        .fn()
+        .mockResolvedValueOnce({ data: account, error: null })
+        .mockResolvedValueOnce({ data: { imported: true }, error: null })
+        .mockResolvedValueOnce({ data: account, error: null }),
+      auth: {
+        admin: {
+          getUserById: jest.fn().mockResolvedValue({ data: { user }, error: null }),
+          updateUserById: jest.fn().mockResolvedValue({ data: { user }, error: null }),
+        },
+      },
+    };
+
+    await expect(syncSupabaseTourneyPlayerAccount({
+      adminClient,
+      env: { DISCORD_GUILD_ID: "111111111111111111" },
+      installPassword: false,
+      passwordHash: "$2b$12$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      player: {
+        id: "player.one",
+        username: "player-one",
+        email: "player@example.com",
+        status: "withdrawn",
+        version: 4,
+      },
+    })).resolves.toMatchObject({
+      principalId: account.principal_id,
+      discordRoleAssignment: null,
+    });
+    expect(adminClient.rpc.mock.calls.some(
+      ([name]) => name === "roo_refresh_discord_role_assignment"
+    )).toBe(false);
   });
 
   test("adds creator access to a Tourney principal without creating a second Auth user", async () => {

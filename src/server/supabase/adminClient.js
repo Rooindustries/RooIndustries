@@ -36,11 +36,20 @@ export const isSupabaseAdminConfigured = (env = process.env) => {
 let cachedClient = null;
 let cachedUrl = "";
 
-export const createSupabaseAdminClient = ({ env = process.env } = {}) => {
+export const createSupabaseAdminClient = ({ env = process.env, signal } = {}) => {
   const { url, secretKey } = resolveSupabaseAdminEnv(env);
-  if (env === process.env && cachedClient && cachedUrl === url) {
+  if (!signal && env === process.env && cachedClient && cachedUrl === url) {
     return cachedClient;
   }
+
+  const abortableFetch = signal
+    ? (input, init = {}) => fetch(input, {
+        ...init,
+        signal: init.signal
+          ? AbortSignal.any([init.signal, signal])
+          : signal,
+      })
+    : undefined;
 
   const client = createClient(url, secretKey, {
     auth: {
@@ -51,10 +60,11 @@ export const createSupabaseAdminClient = ({ env = process.env } = {}) => {
     db: { schema: "public" },
     global: {
       headers: { "X-Client-Info": "roo-industries-server" },
+      ...(abortableFetch ? { fetch: abortableFetch } : {}),
     },
   });
 
-  if (env === process.env) {
+  if (!signal && env === process.env) {
     cachedClient = client;
     cachedUrl = url;
   }

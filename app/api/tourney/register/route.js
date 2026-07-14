@@ -14,7 +14,10 @@ import {
 import { buildTourneyPublicError } from "../../../../src/server/tourney/publicError";
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
 import { getNextSupabaseUser } from "../../../../src/server/supabase/serverSession";
-import { readBoundedJson } from "../../../../src/server/request/boundedJson";
+import {
+  readBoundedFormData,
+  readBoundedJson,
+} from "../../../../src/server/request/boundedJson";
 import { resolveSupabaseAccountByUserId } from "../../../../src/server/supabase/accounts";
 import {
   executeTourneyCommand,
@@ -27,18 +30,23 @@ export const dynamic = "force-dynamic";
 const jsonError = (message, status = 400, extra = {}) =>
   NextResponse.json({ ok: false, error: message, ...extra }, { status });
 
+const forwardSupabaseCookies = (source, target) => {
+  for (const cookie of source?.cookies?.getAll?.() || []) {
+    target.cookies.set(cookie);
+  }
+  return target;
+};
+
 const readPayload = async (request) => {
   const contentType = String(request.headers.get("content-type") || "").toLowerCase();
   if (contentType.includes("application/json")) {
     return readBoundedJson(request, { maxBytes: 32 * 1024 });
   }
 
-  const declaredLength = Number(request.headers.get("content-length") || 0);
-  if (Number.isFinite(declaredLength) && declaredLength > 32 * 1024) {
-    throw Object.assign(new Error("Request body is too large."), { status: 413 });
-  }
-
-  const form = await request.formData();
+  const form = await readBoundedFormData(request, {
+    maxBytes: 32 * 1024,
+    maxFields: 20,
+  });
   return {
     username: form.get("username"),
     email: form.get("email"),
@@ -87,6 +95,7 @@ export async function POST(request) {
     );
   }
 
+  let authResponse = null;
   try {
     const payload = await readPayload(request);
     const recipients = await getTourneyApprovalRecipients();
@@ -94,13 +103,10 @@ export async function POST(request) {
       return jsonError("Approvers are not configured.", 503);
     }
 
-    const successResponse = NextResponse.json({
-      ok: true,
-      message: "Registration submitted. Wait for approval before logging in.",
-    });
+    authResponse = NextResponse.json({ ok: true });
     const socialUser = await getNextSupabaseUser({
       request,
-      response: successResponse,
+      response: authResponse,
     }).catch(() => null);
     const submittedEmail = String(payload?.email || "").trim().toLowerCase();
     const socialAccount = socialUser?.id
@@ -110,7 +116,10 @@ export async function POST(request) {
       socialUser &&
       String(socialAccount?.verified_real_email || "").trim().toLowerCase() !== submittedEmail
     ) {
-      return jsonError("Your verified sign-in email does not match this registration.", 409);
+      return forwardSupabaseCookies(
+        authResponse,
+        jsonError("Your verified sign-in email does not match this registration.", 409)
+      );
     }
 
     const commandId = readTourneyCommandId({ request });
@@ -153,7 +162,10 @@ export async function POST(request) {
         };
       },
     });
-    return NextResponse.json(command.body, { status: command.status });
+    return forwardSupabaseCookies(
+      authResponse,
+      NextResponse.json(command.body, { status: command.status })
+    );
   } catch (error) {
     const failure = buildTourneyPublicError(error, "Unable to submit registration.");
     const response = jsonError(failure.message, failure.status, {
@@ -163,6 +175,6 @@ export async function POST(request) {
       errors: failure.errors,
     });
     if (error?.retryAfter) response.headers.set("Retry-After", String(error.retryAfter));
-    return response;
+    return forwardSupabaseCookies(authResponse, response);
   }
 }

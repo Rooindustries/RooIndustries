@@ -11,6 +11,7 @@ import { recordCommerceResponseMetric } from "../../../../src/server/supabase/co
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 const ACTION_HANDLERS = {
   cancel,

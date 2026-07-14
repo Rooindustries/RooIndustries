@@ -84,14 +84,15 @@ export default async function TourneyManagePage({ searchParams }) {
         <Section id="players" eyebrow="Players" title="Player Management" wide>
           {!adminPlayers.ok ? (
             <p className="cs-error" role="alert">
-              Player data is temporarily unavailable. Do not make roster decisions
+              Player data is temporarily unavailable. Roster controls are disabled
               until this warning clears.
             </p>
-          ) : null}
-          <TourneyPlayerManager
-            initialPlayers={players}
-            initialCapacity={capacitySnapshot}
-          />
+          ) : (
+            <TourneyPlayerManager
+              initialPlayers={players}
+              initialCapacity={capacitySnapshot}
+            />
+          )}
         </Section>
 
         {session.role === "owner" ? (
@@ -106,14 +107,15 @@ export default async function TourneyManagePage({ searchParams }) {
         <Section id="bracket" eyebrow="Bracket" title="Bracket Control" wide>
           {!bracketSnapshot.ok ? (
             <p className="cs-error" role="alert">
-              Bracket data is temporarily unavailable. Do not publish or edit the
-              bracket until this warning clears.
+              Bracket data is temporarily unavailable. Bracket controls are disabled
+              until this warning clears.
             </p>
-          ) : null}
-          <TourneyBracketManager
-            initialSnapshot={bracketSnapshot}
-            currentRole={session.role}
-          />
+          ) : (
+            <TourneyBracketManager
+              initialSnapshot={bracketSnapshot}
+              currentRole={session.role}
+            />
+          )}
         </Section>
       </div>
     </TourneyShell>

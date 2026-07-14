@@ -23,7 +23,11 @@ import {
   createTourneySessionToken,
   getTourneyCookieOptions,
 } from "@/src/server/tourney/auth";
-import { queueTourneyDiscordAuthProjection } from "@/src/server/tourney/discordDesiredState";
+import { isSupabaseTourneyDatabase } from "@/src/server/tourney/sqlClient";
+import {
+  queueTourneyDiscordAuthProjection,
+  resolveQueuedTourneyDiscordAuthProjectionAfterFinalizeFailure,
+} from "@/src/server/tourney/discordDesiredState";
 import {
   clearReauthCookie,
   createReauthToken,
@@ -172,8 +176,10 @@ const setRoleCookie = (response, cookie) => {
 
 const fail = async ({
   action = "",
+  clearSupabaseSession = false,
   error,
   flow,
+  preserveExistingSession = false,
   request,
   response,
 }) => {
@@ -181,8 +187,13 @@ const fail = async ({
     new URL(request.url).searchParams.get("intent") || ""
   ).trim();
   response.cookies.set(clearOAuthIntentCookie(intentId));
-  if (!["link", "reauth", "merge"].includes(action)) {
-    if (flow) clearDomainCookie(response, flow);
+  if (
+    !preserveExistingSession &&
+    (clearSupabaseSession || !["link", "reauth", "merge"].includes(action))
+  ) {
+    if (flow && !["link", "reauth", "merge"].includes(action)) {
+      clearDomainCookie(response, flow);
+    }
     await clearNextSupabaseSession({ request, response }).catch(() => {});
   }
   return setRedirect(
@@ -218,6 +229,16 @@ const completeLegacySignin = async ({ request, response, result, url }) => {
 export async function GET(request) {
   const url = new URL(request.url);
   const response = NextResponse.redirect(new URL("/", url.origin), { status: 303 });
+  const hintedFlow = normalizeFlow(url.searchParams.get("flow"));
+  if (hintedFlow === "tourney" && !isSupabaseTourneyDatabase(process.env)) {
+    return fail({
+      error: "oauth_temporarily_unavailable",
+      flow: hintedFlow,
+      preserveExistingSession: true,
+      request,
+      response,
+    });
+  }
   const intentId = String(url.searchParams.get("intent") || "").trim().toLowerCase();
   const validIntentId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(intentId)
     ? intentId
@@ -241,7 +262,6 @@ export async function GET(request) {
     return fail({ error: "unavailable", flow: "", request, response });
   }
 
-  const hintedFlow = normalizeFlow(url.searchParams.get("flow"));
   const flow = normalizeFlow(intent?.flow) || hintedFlow;
   if (intentBindingInvalid || (validIntentId && !intent)) {
     return fail({ error: "invalid_intent", flow, request, response });
@@ -251,6 +271,17 @@ export async function GET(request) {
       action: intent.action,
       error: "expired_intent",
       flow,
+      request,
+      response,
+    });
+  }
+
+  if (flow === "tourney" && !isSupabaseTourneyDatabase(process.env)) {
+    return fail({
+      action: intent?.action,
+      error: "oauth_temporarily_unavailable",
+      flow,
+      preserveExistingSession: true,
       request,
       response,
     });
@@ -278,22 +309,88 @@ export async function GET(request) {
       response,
     });
   }
+  const claimedUserId = String(result.data.user.id || "").trim();
+  const accountUserId = String(intent?.target_user_id || claimedUserId).trim();
+  if (
+    intent?.target_user_id && claimedUserId !== accountUserId &&
+    intent.action !== "reauth"
+  ) {
+    return fail({
+      action: intent.action,
+      clearSupabaseSession: true,
+      error: "unlinked",
+      flow,
+      request,
+      response,
+    });
+  }
+  const discordProjection = intent?.provider === "discord" && validIntentId
+    ? {
+        accountUserId,
+        claimedUserId,
+        commandId: `discord-oauth:${validIntentId}:${accountUserId}`,
+        deferUntil: intent.expires_at,
+        intentId: validIntentId,
+        userId: accountUserId,
+      }
+    : null;
+  if (discordProjection) {
+    try {
+      const queued = await queueTourneyDiscordAuthProjection({
+        ...discordProjection,
+        accessToken: String(result.data.session.provider_token || ""),
+        attemptExternalWork: false,
+      });
+      if (
+        !queued.applied &&
+        !["pending", "not_linked", "not_configured"].includes(queued.reason)
+      ) {
+        throw new Error("Discord OAuth projection was not durably queued.");
+      }
+    } catch {
+      return fail({
+        action: intent.action,
+        clearSupabaseSession: true,
+        error: "unavailable",
+        flow,
+        request,
+        response,
+      });
+    }
+  }
 
   if (!intent) {
     return completeLegacySignin({ request, response, result, url });
   }
 
+  let finalized;
   try {
     const reauthToken = intent.action === "reauth" ? createReauthToken() : "";
-    const finalized = await finalizeOAuthIntent({
-      guildId: String(process.env.DISCORD_GUILD_ID || "").trim(),
-      provider: intent.provider,
-      token,
-      userId: result.data.user.id,
-      ...(reauthToken
-        ? { reauthTokenHash: hashReauthToken(reauthToken) }
-        : {}),
-    });
+    try {
+      finalized = await finalizeOAuthIntent({
+        provider: intent.provider,
+        token,
+        userId: result.data.user.id,
+        ...(reauthToken
+          ? { reauthTokenHash: hashReauthToken(reauthToken) }
+          : {}),
+      });
+    } catch (error) {
+      if (!discordProjection) throw error;
+      const resolution = await resolveQueuedTourneyDiscordAuthProjectionAfterFinalizeFailure({
+        claimedUserId: discordProjection.claimedUserId,
+        commandId: discordProjection.commandId,
+        intentId: discordProjection.intentId,
+        userId: discordProjection.userId,
+      });
+      if (!resolution.finalized) throw error;
+      finalized = {
+        action: intent.action,
+        flow: intent.flow,
+        provider: intent.provider,
+        return_path: intent.return_path,
+      };
+    }
     const returnPath = safeNextPath(finalized.return_path, finalized.flow);
     let target = new URL(returnPath, url.origin);
 
@@ -318,6 +415,7 @@ export async function GET(request) {
       if (!roleSession.cookie) {
         return fail({
           action: finalized.action,
+          clearSupabaseSession: true,
           error: roleSession.error || "unlinked",
           flow: finalized.flow,
           request,
@@ -335,6 +433,7 @@ export async function GET(request) {
       if (!roleSession.cookie) {
         return fail({
           action: finalized.action,
+          clearSupabaseSession: true,
           error: roleSession.error || "unlinked",
           flow: finalized.flow,
           request,
@@ -348,12 +447,21 @@ export async function GET(request) {
       }
     }
 
-    if (finalized.provider === "discord") {
-      const sync = await queueTourneyDiscordAuthProjection({
-        accessToken: String(result.data.session.provider_token || ""),
-        userId: result.data.user.id,
-      });
-      if (!sync.applied && !["not_linked", "not_configured"].includes(sync.reason)) {
+    if (finalized.provider === "discord" && discordProjection) {
+      try {
+        const deferTourneySignup = finalized.flow === "tourney" &&
+          finalized.action === "signup";
+        const sync = deferTourneySignup
+          ? { applied: false, reason: "pending" }
+          : await queueTourneyDiscordAuthProjection({
+              ...discordProjection,
+              accessToken: String(result.data.session.provider_token || ""),
+              attemptExternalWork: true,
+            });
+        if (!sync.applied && !["not_linked", "not_configured"].includes(sync.reason)) {
+          target.searchParams.set("discord_role", "pending");
+        }
+      } catch {
         target.searchParams.set("discord_role", "pending");
       }
     }
@@ -363,6 +471,7 @@ export async function GET(request) {
   } catch {
     return fail({
       action: intent.action,
+      clearSupabaseSession: true,
       error: "unavailable",
       flow,
       request,

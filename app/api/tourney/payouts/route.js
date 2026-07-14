@@ -6,12 +6,16 @@ import {
   readTourneySessionFromStore,
 } from "../../../../src/server/tourney/auth";
 import {
-  upsertTourneyPayout,
+  upsertTourneyPayoutWithTransition,
 } from "../../../../src/server/tourney/appealPayoutStore";
 import { enqueueTourneyEmailDispatch } from "../../../../src/server/tourney/emailDispatch";
 import { buildTourneyPublicError } from "../../../../src/server/tourney/publicError";
 import { readTourneyPayouts } from "../../../../src/server/tourney/readService";
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
+import {
+  readBoundedFormData,
+  readBoundedJson,
+} from "../../../../src/server/request/boundedJson";
 import {
   executeTourneyCommand,
   readTourneyCommandId,
@@ -30,10 +34,13 @@ const getSession = async (request) => {
 
 const readPayload = async (request) => {
   const contentType = String(request.headers.get("content-type") || "").toLowerCase();
-  if (contentType.includes("application/json")) {
-    return request.json().catch(() => ({}));
+  if (contentType.startsWith("application/json")) {
+    return readBoundedJson(request, { maxBytes: 16 * 1024 });
   }
-  const form = await request.formData();
+  const form = await readBoundedFormData(request, {
+    maxBytes: 16 * 1024,
+    maxFields: 20,
+  });
   return Object.fromEntries(form.entries());
 };
 
@@ -79,22 +86,27 @@ export async function POST(request) {
       purpose: "payouts:upsert",
       requestPayload: payload,
       callback: async () => {
-        const existing = payload.payoutId
-          ? (await readTourneyPayouts({ session })).payouts.find(
-              (payout) => payout.id === payload.payoutId
-            )
-          : null;
-        const payout = await upsertTourneyPayout({ payload, session });
+        const { payout, previousStatus } = await upsertTourneyPayoutWithTransition({
+          payload,
+          session,
+        });
         const transitioned = ["ready", "paid", "void"].includes(payout?.status) &&
-          existing?.status !== payout.status;
-        if (transitioned && payout?.payoutEmail) {
+          previousStatus !== payout.status;
+        if (transitioned) {
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(payout?.payoutEmail || ""))) {
+            throw Object.assign(
+              new Error("A valid payout email is required for this status."),
+              { status: 400, code: "TOURNEY_PAYOUT_EMAIL_REQUIRED" }
+            );
+          }
           await enqueueTourneyEmailDispatch({
             commandId,
             dispatchKind: "payout",
             recipient: payout.payoutEmail,
+            idempotencyKey: `payout-transition:${payout.id}:${payout.status}`,
             entityType: "payout",
             entityId: payout.id,
-            entityVersion: payout.updatedAt,
+            entityVersion: payout.status,
             audience: payout.status,
             payload: {
               payout,

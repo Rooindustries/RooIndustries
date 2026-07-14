@@ -4,6 +4,7 @@ import {
   validateBookingForDownloadToken,
 } from "@/src/server/downloads/downloadAccess";
 import {
+  canRedirectToSignedBlobDownload,
   createSignedBlobDownloadUrl,
   DOWNLOAD_STORAGE_BLOB,
   getDownloadStorageBackend,
@@ -23,10 +24,16 @@ const textHeaders = {
 const safeHeaderFileName = (value) =>
   String(value || "download.zip").replace(/[^\w.\- ]+/g, "_");
 
-const contentDisposition = (fileName) => {
+const encodeDispositionFileName = (value) =>
+  encodeURIComponent(value).replace(/[!'()*]/g, (character) =>
+    `%${character.charCodeAt(0).toString(16).toUpperCase()}`
+  );
+
+const contentDisposition = (value) => {
+  const fileName = String(value || "download.zip");
   const safeName = safeHeaderFileName(fileName);
-  return `attachment; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(
-    safeName
+  return `attachment; filename="${safeName}"; filename*=UTF-8''${encodeDispositionFileName(
+    fileName
   )}`;
 };
 
@@ -102,7 +109,10 @@ export async function GET(request) {
     return textResponse(access.error, access.status);
   }
 
-  if (getDownloadStorageBackend(download) === DOWNLOAD_STORAGE_BLOB) {
+  if (
+    getDownloadStorageBackend(download) === DOWNLOAD_STORAGE_BLOB &&
+    canRedirectToSignedBlobDownload(download)
+  ) {
     try {
       const signedUrl = await createSignedBlobDownloadUrl(download);
       return new Response(null, {
