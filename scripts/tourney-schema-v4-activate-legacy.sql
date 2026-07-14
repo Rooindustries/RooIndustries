@@ -1,9 +1,6 @@
--- Schema-v4 activation phase for legacy Neon. Apply only while writes are paused.
 set lock_timeout = '5s';
 set statement_timeout = '120s';
 
--- This database cannot inspect Supabase. The activation orchestrator must
--- verify the Supabase control row separately before applying this file.
 do $$
 declare
   v_primary_backend text;

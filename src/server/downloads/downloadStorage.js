@@ -12,8 +12,6 @@ export const DOWNLOAD_STORAGE_LOCAL = "local";
 
 const normalizeValue = (value) => String(value || "").trim();
 
-// The 24-hour floor is intentional: multi-GB downloads must remain resumable
-// through slow or interrupted client transfers without regenerating the URL.
 const SIGNED_DOWNLOAD_TTL_SECONDS = 24 * 60 * 60;
 const MIN_SIGNED_DOWNLOAD_TTL_SECONDS = SIGNED_DOWNLOAD_TTL_SECONDS;
 const MAX_SIGNED_DOWNLOAD_TTL_SECONDS = 7 * 24 * 60 * 60;

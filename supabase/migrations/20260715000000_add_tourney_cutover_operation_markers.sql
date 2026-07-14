@@ -1,5 +1,3 @@
--- Add durable, independent idempotency markers for write-pause and write-resume
--- operations. The containing control table is private and RLS-protected.
 alter table tourney.cutover_metadata
   add column if not exists last_pause_operation_id text,
   add column if not exists last_resume_operation_id text;

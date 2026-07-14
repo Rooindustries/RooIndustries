@@ -820,8 +820,6 @@ const runTourneyRegistrationCapacityTransaction = ({
   lockKey: TOURNEY_REGISTRATION_CAPACITY_LOCK_KEY,
   waitForLock: true,
   callback: async (sql) => {
-    // runTourneyTransaction reuses an enclosing command transaction. Acquire
-    // the capacity lock here as well so the nested path is serialized too.
     await lockTourneyRegistrationCapacity({ sql });
     return callback(sql);
   },
