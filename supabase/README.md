@@ -111,21 +111,38 @@ the worktree and keep writes paused throughout these steps:
    `--repair-legacy-v4`. Do not activate either database yet.
 2. Deploy this release from `main` with hardening and schema-v4 activation
    disabled. While the deployment still has `TOURNEY_WRITES_PAUSED=0`, pause
-   both database controls through the production endpoint. Supply the exact
-   state you observed. Generate a new operation ID for a new operation; reuse
-   the same ID only when retrying an ambiguous response:
+   both database controls through the production endpoint. Read the normalized
+   controls and credential-free target fingerprints first, then bind the
+   mutation to that exact state and those exact targets. Generate a new
+   operation ID for a new operation; reuse the same ID only when retrying an
+   ambiguous response:
 
    ```bash
+   CUTOVER_STATE="$(curl --fail-with-body --silent \
+     -H "Authorization: Bearer $CRON_SECRET" \
+     -H "Content-Type: application/json" \
+     --data '{"action":"cutover-state"}' \
+     https://www.rooindustries.com/api/admin/tourney-activation)"
+   LEGACY_TARGET_FINGERPRINT="$(printf '%s' "$CUTOVER_STATE" | jq -er '.fingerprints.legacy')"
+   SUPABASE_TARGET_FINGERPRINT="$(printf '%s' "$CUTOVER_STATE" | jq -er '.fingerprints.supabase')"
    PAUSE_OPERATION_ID="pause-$(date -u +%Y%m%dt%H%M%Sz)"
    curl --fail-with-body --silent \
      -H "Authorization: Bearer $CRON_SECRET" \
      -H "Content-Type: application/json" \
-     --data "{\"action\":\"pause-writes\",\"operationId\":\"$PAUSE_OPERATION_ID\",\"expectedPrimaryBackend\":\"supabase\",\"expectedGeneration\":1,\"expectedWritesPaused\":false}" \
+     --data "{\"action\":\"pause-writes\",\"operationId\":\"$PAUSE_OPERATION_ID\",\"expectedPrimaryBackend\":\"supabase\",\"expectedGeneration\":1,\"expectedWritesPaused\":false,\"legacyTargetFingerprint\":\"$LEGACY_TARGET_FINGERPRINT\",\"supabaseTargetFingerprint\":\"$SUPABASE_TARGET_FINGERPRINT\"}" \
+     https://www.rooindustries.com/api/admin/tourney-activation
+   curl --fail-with-body --silent \
+     -H "Authorization: Bearer $CRON_SECRET" \
+     -H "Content-Type: application/json" \
+     --data '{"action":"cutover-state"}' \
      https://www.rooindustries.com/api/admin/tourney-activation
    ```
 
    A successful response means only that both database controls are paused.
-   It does not change the deployment environment.
+   It does not change the deployment environment. The readback must show both
+   controls paused and `lastPauseOperationId` equal to
+   `$PAUSE_OPERATION_ID`. A replay after a later resume returns
+   `superseded:true` and never pauses writes again.
 3. Deploy the staged runtime tuple above with `TOURNEY_WRITES_PAUSED=1`.
    Confirm both control rows are Supabase-primary, generation 1, paused, and
    writable as a fallback (`fallback_read_only=false`).
@@ -181,16 +198,29 @@ the worktree and keep writes paused throughout these steps:
    database controls with an exact expected state:
 
    ```bash
+   CUTOVER_STATE="$(curl --fail-with-body --silent \
+     -H "Authorization: Bearer $CRON_SECRET" \
+     -H "Content-Type: application/json" \
+     --data '{"action":"cutover-state"}' \
+     https://www.rooindustries.com/api/admin/tourney-activation)"
+   LEGACY_TARGET_FINGERPRINT="$(printf '%s' "$CUTOVER_STATE" | jq -er '.fingerprints.legacy')"
+   SUPABASE_TARGET_FINGERPRINT="$(printf '%s' "$CUTOVER_STATE" | jq -er '.fingerprints.supabase')"
    RESUME_OPERATION_ID="resume-$(date -u +%Y%m%dt%H%M%Sz)"
    curl --fail-with-body --silent \
      -H "Authorization: Bearer $CRON_SECRET" \
      -H "Content-Type: application/json" \
-     --data "{\"action\":\"resume-writes\",\"operationId\":\"$RESUME_OPERATION_ID\",\"expectedPrimaryBackend\":\"supabase\",\"expectedGeneration\":1,\"expectedWritesPaused\":true}" \
+     --data "{\"action\":\"resume-writes\",\"operationId\":\"$RESUME_OPERATION_ID\",\"expectedPrimaryBackend\":\"supabase\",\"expectedGeneration\":1,\"expectedWritesPaused\":true,\"legacyTargetFingerprint\":\"$LEGACY_TARGET_FINGERPRINT\",\"supabaseTargetFingerprint\":\"$SUPABASE_TARGET_FINGERPRINT\"}" \
+     https://www.rooindustries.com/api/admin/tourney-activation
+   curl --fail-with-body --silent \
+     -H "Authorization: Bearer $CRON_SECRET" \
+     -H "Content-Type: application/json" \
+     --data '{"action":"cutover-state"}' \
      https://www.rooindustries.com/api/admin/tourney-activation
    ```
 
    This resumes only the two database controls. Keep the deployment environment
-   paused until that response and the control readback are verified. Then set
+   paused until that response and the control readback show both controls
+   unpaused and `lastResumeOperationId` equal to `$RESUME_OPERATION_ID`. Then set
    `TOURNEY_WRITES_PAUSED=0`, deploy that environment change, and verify normal
    writes. Never run activation with both hardening flags enabled.
 

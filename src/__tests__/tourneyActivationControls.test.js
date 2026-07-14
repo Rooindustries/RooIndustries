@@ -1,8 +1,14 @@
 const mockGetBackendSql = jest.fn();
 const mockResolvePolicy = jest.fn();
 const mockCheckManualFailoverReadiness = jest.fn();
+const mockComputeFingerprints = jest.fn();
+const legacyFingerprint = "a".repeat(64);
+const supabaseFingerprint = "b".repeat(64);
 
 jest.mock("../server/safeErrorLog", () => ({ logSafeError: jest.fn() }));
+jest.mock("../server/supabase/migrationTargetSafety.cjs", () => ({
+  computeMigrationTargetFingerprints: (...args) => mockComputeFingerprints(...args),
+}));
 jest.mock("../server/tourney/sqlClient", () => ({
   getTourneySqlForBackend: (...args) => mockGetBackendSql(...args),
 }));
@@ -13,6 +19,7 @@ jest.mock("../server/tourney/store", () => ({
 }));
 
 const {
+  readTourneyDualDatabaseCutoverState,
   setTourneyDualDatabaseWritesPausedV4,
 } = require("../server/tourney/cutoverControl.js");
 
@@ -21,14 +28,24 @@ const env = {
   TOURNEY_MIRROR_ENABLED: "1",
   TOURNEY_WRITES_PAUSED: "0",
   TOURNEY_FAILOVER_GENERATION: "1",
+  SUPABASE_MIGRATION_EXPECTED_LEGACY_FINGERPRINT: legacyFingerprint,
+  SUPABASE_MIGRATION_EXPECTED_SUPABASE_FINGERPRINT: supabaseFingerprint,
 };
 const operationId = "pause-20260715t000000z";
 const actor = `schema-v4-pause:${operationId}`;
-const row = ({ paused, updatedBy = "previous", version }) => ({
+const row = ({
+  lastPauseOperationId = null,
+  lastResumeOperationId = null,
+  paused,
+  updatedBy = "previous",
+  version,
+}) => ({
   primary_backend: "supabase",
   generation: 1,
   writes_paused: paused,
   updated_by: updatedBy,
+  last_pause_operation_id: lastPauseOperationId,
+  last_resume_operation_id: lastResumeOperationId,
   row_version: version,
 });
 const sqlMock = (...results) => {
@@ -47,7 +64,9 @@ const request = (overrides = {}) => ({
   expectedPrimaryBackend: "supabase",
   expectedGeneration: 1,
   expectedWritesPaused: false,
+  legacyTargetFingerprint: legacyFingerprint,
   operationId,
+  supabaseTargetFingerprint: supabaseFingerprint,
   writesPaused: true,
   ...overrides,
 });
@@ -55,6 +74,10 @@ const request = (overrides = {}) => ({
 describe("Tourney dual-database activation controls", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockComputeFingerprints.mockReturnValue({
+      legacy: legacyFingerprint,
+      supabase: supabaseFingerprint,
+    });
     mockResolvePolicy.mockReturnValue({
       primaryBackend: "supabase",
       mirrorEnabled: true,
@@ -67,13 +90,33 @@ describe("Tourney dual-database activation controls", () => {
   test("updates and verifies both controls with compare-and-set", async () => {
     const legacySql = sqlMock(
       [row({ paused: false, version: "10" })],
-      [row({ paused: true, updatedBy: actor, version: "11" })],
-      [row({ paused: true, updatedBy: actor, version: "11" })]
+      [row({
+        paused: true,
+        updatedBy: actor,
+        lastPauseOperationId: operationId,
+        version: "11",
+      })],
+      [row({
+        paused: true,
+        updatedBy: actor,
+        lastPauseOperationId: operationId,
+        version: "11",
+      })]
     );
     const supabaseSql = sqlMock(
       [row({ paused: false, version: "20" })],
-      [row({ paused: true, updatedBy: actor, version: "21" })],
-      [row({ paused: true, updatedBy: actor, version: "21" })]
+      [row({
+        paused: true,
+        updatedBy: actor,
+        lastPauseOperationId: operationId,
+        version: "21",
+      })],
+      [row({
+        paused: true,
+        updatedBy: actor,
+        lastPauseOperationId: operationId,
+        version: "21",
+      })]
     );
     mockGetBackendSql.mockImplementation(({ backend }) =>
       Promise.resolve(backend === "legacy" ? legacySql : supabaseSql)
@@ -82,17 +125,36 @@ describe("Tourney dual-database activation controls", () => {
     await expect(setTourneyDualDatabaseWritesPausedV4(request())).resolves.toEqual({
       changed: true,
       replayed: false,
+      superseded: false,
       controls: {
-        legacy: { primaryBackend: "supabase", generation: 1, writesPaused: true },
-        supabase: { primaryBackend: "supabase", generation: 1, writesPaused: true },
+        legacy: {
+          primaryBackend: "supabase",
+          generation: 1,
+          writesPaused: true,
+          lastPauseOperationId: operationId,
+          lastResumeOperationId: null,
+        },
+        supabase: {
+          primaryBackend: "supabase",
+          generation: 1,
+          writesPaused: true,
+          lastPauseOperationId: operationId,
+          lastResumeOperationId: null,
+        },
       },
+      fingerprints: { legacy: legacyFingerprint, supabase: supabaseFingerprint },
     });
     expect(templateCalls(legacySql)[1][0].join(" ")).toContain("xmin =");
     expect(templateCalls(supabaseSql)[1][0].join(" ")).toContain("xmin =");
   });
 
   test("accepts only an operation-bound idempotent replay", async () => {
-    const applied = row({ paused: true, updatedBy: actor, version: "11" });
+    const applied = row({
+      paused: true,
+      updatedBy: actor,
+      lastPauseOperationId: operationId,
+      version: "11",
+    });
     const legacySql = sqlMock([applied]);
     const supabaseSql = sqlMock([applied]);
     mockGetBackendSql.mockImplementation(({ backend }) =>
@@ -102,6 +164,36 @@ describe("Tourney dual-database activation controls", () => {
     await expect(setTourneyDualDatabaseWritesPausedV4(request())).resolves.toMatchObject({
       changed: false,
       replayed: true,
+    });
+    expect(templateCalls(legacySql)).toHaveLength(1);
+    expect(templateCalls(supabaseSql)).toHaveLength(1);
+  });
+
+  test("does not re-pause when pause A arrives after resume B", async () => {
+    const resumed = row({
+      paused: false,
+      lastPauseOperationId: operationId,
+      lastResumeOperationId: "resume-20260715t010000z",
+      updatedBy: "schema-v4-resume:resume-20260715t010000z",
+      version: "12",
+    });
+    const legacySql = sqlMock([resumed]);
+    const supabaseSql = sqlMock([resumed]);
+    mockGetBackendSql.mockImplementation(({ backend }) =>
+      Promise.resolve(backend === "legacy" ? legacySql : supabaseSql)
+    );
+
+    await expect(setTourneyDualDatabaseWritesPausedV4(request())).resolves.toMatchObject({
+      changed: false,
+      replayed: true,
+      superseded: true,
+      controls: {
+        legacy: {
+          writesPaused: false,
+          lastPauseOperationId: operationId,
+          lastResumeOperationId: "resume-20260715t010000z",
+        },
+      },
     });
     expect(templateCalls(legacySql)).toHaveLength(1);
     expect(templateCalls(supabaseSql)).toHaveLength(1);
@@ -126,7 +218,12 @@ describe("Tourney dual-database activation controls", () => {
   test("compensates a verified second-target failure", async () => {
     const expectedLegacy = row({ paused: false, version: "10" });
     const expectedSupabase = row({ paused: false, version: "20" });
-    const changedLegacy = row({ paused: true, updatedBy: actor, version: "11" });
+    const changedLegacy = row({
+      paused: true,
+      updatedBy: actor,
+      lastPauseOperationId: operationId,
+      version: "11",
+    });
     const restoredLegacy = row({ paused: false, updatedBy: `${actor}:compensated`, version: "12" });
     const legacySql = sqlMock(
       [expectedLegacy],
@@ -153,7 +250,12 @@ describe("Tourney dual-database activation controls", () => {
 
   test("requires recovery when a partial outcome cannot be observed", async () => {
     const expected = row({ paused: false, version: "10" });
-    const changed = row({ paused: true, updatedBy: actor, version: "11" });
+    const changed = row({
+      paused: true,
+      updatedBy: actor,
+      lastPauseOperationId: operationId,
+      version: "11",
+    });
     const legacySql = sqlMock(
       [expected],
       [changed],
@@ -200,5 +302,58 @@ describe("Tourney dual-database activation controls", () => {
       status: 400,
     });
     expect(mockGetBackendSql).not.toHaveBeenCalled();
+  });
+
+  test("rejects unpinned or unacknowledged runtime targets before database access", async () => {
+    mockComputeFingerprints.mockReturnValueOnce({
+      legacy: "c".repeat(64),
+      supabase: supabaseFingerprint,
+    });
+    await expect(setTourneyDualDatabaseWritesPausedV4(request())).rejects.toMatchObject({
+      code: "TOURNEY_CUTOVER_TARGET_FINGERPRINT_MISMATCH",
+      status: 409,
+    });
+    expect(mockGetBackendSql).not.toHaveBeenCalled();
+
+    await expect(setTourneyDualDatabaseWritesPausedV4(request({
+      legacyTargetFingerprint: undefined,
+    }))).rejects.toMatchObject({
+      code: "TOURNEY_CUTOVER_TARGET_FINGERPRINT_REQUIRED",
+      status: 400,
+    });
+    expect(mockGetBackendSql).not.toHaveBeenCalled();
+  });
+
+  test("returns normalized cutover state and credential-free fingerprints", async () => {
+    const control = row({
+      paused: true,
+      lastPauseOperationId: operationId,
+      version: "11",
+    });
+    const legacySql = sqlMock([control]);
+    const supabaseSql = sqlMock([control]);
+    mockGetBackendSql.mockImplementation(({ backend }) =>
+      Promise.resolve(backend === "legacy" ? legacySql : supabaseSql)
+    );
+
+    await expect(readTourneyDualDatabaseCutoverState({ env })).resolves.toEqual({
+      controls: {
+        legacy: {
+          primaryBackend: "supabase",
+          generation: 1,
+          writesPaused: true,
+          lastPauseOperationId: operationId,
+          lastResumeOperationId: null,
+        },
+        supabase: {
+          primaryBackend: "supabase",
+          generation: 1,
+          writesPaused: true,
+          lastPauseOperationId: operationId,
+          lastResumeOperationId: null,
+        },
+      },
+      fingerprints: { legacy: legacyFingerprint, supabase: supabaseFingerprint },
+    });
   });
 });

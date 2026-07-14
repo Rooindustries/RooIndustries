@@ -2,6 +2,7 @@ const mockInventory = jest.fn();
 const mockApply = jest.fn();
 const mockActivateSchema = jest.fn();
 const mockCaptureLatencyBaseline = jest.fn();
+const mockReadCutoverState = jest.fn();
 const mockSetWritesPaused = jest.fn();
 
 jest.mock("next/server", () => ({
@@ -21,6 +22,7 @@ jest.mock("../server/tourney/activation", () => ({
   applyTourneyV4Activation: (...args) => mockApply(...args),
 }));
 jest.mock("../server/tourney/cutoverControl", () => ({
+  readTourneyDualDatabaseCutoverState: (...args) => mockReadCutoverState(...args),
   setTourneyDualDatabaseWritesPausedV4: (...args) => mockSetWritesPaused(...args),
 }));
 
@@ -51,6 +53,13 @@ describe("Tourney activation route", () => {
     mockApply.mockResolvedValue({ applied: true });
     mockActivateSchema.mockResolvedValue({ activated: true, schemaVersion: 4 });
     mockCaptureLatencyBaseline.mockResolvedValue({ captured: 5 });
+    mockReadCutoverState.mockResolvedValue({
+      controls: {
+        legacy: { primaryBackend: "supabase", generation: 1, writesPaused: false },
+        supabase: { primaryBackend: "supabase", generation: 1, writesPaused: false },
+      },
+      fingerprints: { legacy: "a".repeat(64), supabase: "b".repeat(64) },
+    });
     mockSetWritesPaused.mockResolvedValue({ changed: true, replayed: false });
   });
 
@@ -114,6 +123,21 @@ describe("Tourney activation route", () => {
     expect(mockCaptureLatencyBaseline).toHaveBeenCalledWith();
   });
 
+  test("returns read-only dual cutover state for fingerprinted operator calls", async () => {
+    const response = await POST(request({ payload: { action: "cutover-state" } }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      controls: {
+        legacy: { primaryBackend: "supabase", writesPaused: false },
+        supabase: { primaryBackend: "supabase", writesPaused: false },
+      },
+      fingerprints: { legacy: "a".repeat(64), supabase: "b".repeat(64) },
+    });
+    expect(mockReadCutoverState).toHaveBeenCalledWith();
+    expect(mockSetWritesPaused).not.toHaveBeenCalled();
+  });
+
   test.each([
     ["pause-writes", false, true],
     ["resume-writes", true, false],
@@ -129,6 +153,8 @@ describe("Tourney activation route", () => {
         expectedPrimaryBackend: "supabase",
         expectedGeneration: 1,
         expectedWritesPaused,
+        legacyTargetFingerprint: "a".repeat(64),
+        supabaseTargetFingerprint: "b".repeat(64),
       },
     }));
 
@@ -138,7 +164,9 @@ describe("Tourney activation route", () => {
       expectedPrimaryBackend: "supabase",
       expectedGeneration: 1,
       expectedWritesPaused,
+      legacyTargetFingerprint: "a".repeat(64),
       writesPaused,
+      supabaseTargetFingerprint: "b".repeat(64),
     });
   });
 });
