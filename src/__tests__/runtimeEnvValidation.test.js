@@ -3,7 +3,27 @@
 import { spawnSync } from "node:child_process";
 import migrationTargetSafety from "../server/supabase/migrationTargetSafety.cjs";
 
-const { computeMigrationTargetFingerprints } = migrationTargetSafety;
+const testPostgresUrl = ({ host, password = "placeholder" }) => {
+  const url = new URL(`postgresql://${host}/postgres`);
+  url.username = "postgres";
+  url.password = password;
+  return url.toString();
+};
+
+const {
+  assertTourneyCutoverDiscordTarget,
+  assertTourneyCutoverLegacyTarget,
+  assertTourneyCutoverSanityTarget,
+  assertTourneyCutoverSupabaseApiTarget,
+  assertTourneyCutoverSupabaseDatabaseTarget,
+  computeTourneyCutoverDiscordTargetFingerprint,
+  computeLegacyMigrationTargetFingerprint,
+  computeMigrationTargetFingerprints,
+  computeTourneyCutoverLegacyTargetFingerprint,
+  computeTourneyCutoverSanityTargetFingerprint,
+  computeTourneyCutoverSupabaseApiTargetFingerprint,
+  computeTourneyCutoverSupabaseDatabaseTargetFingerprint,
+} = migrationTargetSafety;
 
 const validReleaseEnv = () => ({
   ...process.env,
@@ -409,6 +429,137 @@ describe("release runtime environment validation", () => {
     });
 
     expect(first.supabase).not.toBe(second.supabase);
+  });
+
+  test("computes stable credential-free legacy target fingerprints", () => {
+    const first = computeLegacyMigrationTargetFingerprint(
+      "postgresql://first:secret@legacy.example.com:5432/tourney"
+    );
+    const sameTarget = computeLegacyMigrationTargetFingerprint(
+      "postgresql://first:different@legacy.example.com/tourney"
+    );
+    const differentUser = computeLegacyMigrationTargetFingerprint(
+      "postgresql://second:secret@legacy.example.com/tourney"
+    );
+    const differentTarget = computeLegacyMigrationTargetFingerprint(
+      "postgresql://first:secret@legacy.example.com:5432/tourney_other"
+    );
+    expect(first).toMatch(/^[0-9a-f]{64}$/);
+    expect(sameTarget).toBe(first);
+    expect(differentUser).toBe(first);
+    expect(differentTarget).not.toBe(first);
+    const cutoverFingerprint = computeTourneyCutoverLegacyTargetFingerprint(
+      "postgresql://first:secret@legacy.example.com/tourney"
+    );
+    expect(computeTourneyCutoverLegacyTargetFingerprint(
+      "postgresql://second:secret@legacy.example.com/tourney"
+    )).not.toBe(cutoverFingerprint);
+    expect(assertTourneyCutoverLegacyTarget({
+      databaseUrl: "postgresql://first:new@legacy.example.com/tourney",
+      expectedFingerprint: cutoverFingerprint,
+    })).toEqual({
+      fingerprint: cutoverFingerprint,
+      database: "tourney",
+      username: "first",
+    });
+    expect(() => assertTourneyCutoverLegacyTarget({
+      databaseUrl: "postgresql://first:secret@legacy.example.com/tourney_other",
+      expectedFingerprint: cutoverFingerprint,
+    })).toThrow("Migration target configuration is invalid.");
+    expect(() => assertTourneyCutoverLegacyTarget({
+      databaseUrl: "postgresql://postgres:secret@db.project.supabase.co/postgres",
+      expectedFingerprint: computeTourneyCutoverLegacyTargetFingerprint(
+        "postgresql://postgres:secret@db.project.supabase.co/postgres"
+      ),
+    })).toThrow("Migration target configuration is invalid.");
+    expect(() => assertTourneyCutoverLegacyTarget({
+      databaseUrl: "postgresql://postgres:secret@db.project.supabase.co./postgres",
+      expectedFingerprint: computeTourneyCutoverLegacyTargetFingerprint(
+        "postgresql://postgres:secret@db.project.supabase.co./postgres"
+      ),
+    })).toThrow("Migration target configuration is invalid.");
+    const apiUrl = "https://ntezmxzaibrrsgtujgxu.supabase.co";
+    const apiFingerprint = computeTourneyCutoverSupabaseApiTargetFingerprint(apiUrl);
+    expect(assertTourneyCutoverSupabaseApiTarget({
+      supabaseUrl: apiUrl,
+      expectedFingerprint: apiFingerprint,
+    })).toEqual({
+      fingerprint: apiFingerprint,
+      hostname: "ntezmxzaibrrsgtujgxu.supabase.co",
+      port: "443",
+      pathname: "/",
+    });
+    expect(() => assertTourneyCutoverSupabaseApiTarget({
+      supabaseUrl: "https://wrong.supabase.co",
+      expectedFingerprint: apiFingerprint,
+    })).toThrow("Migration target configuration is invalid.");
+    const sanityTarget = { projectId: "roo-project", dataset: "production" };
+    const sanityFingerprint = computeTourneyCutoverSanityTargetFingerprint(sanityTarget);
+    expect(assertTourneyCutoverSanityTarget({
+      projectId: "ROO-PROJECT",
+      dataset: "production",
+      expectedFingerprint: sanityFingerprint,
+    })).toEqual({ fingerprint: sanityFingerprint, ...sanityTarget });
+    expect(() => assertTourneyCutoverSanityTarget({
+      ...sanityTarget,
+      expectedFingerprint: "",
+    })).toThrow("Migration target configuration is invalid.");
+    expect(() => assertTourneyCutoverSanityTarget({
+      projectId: "another-project",
+      dataset: "production",
+      expectedFingerprint: sanityFingerprint,
+    })).toThrow("Migration target configuration is invalid.");
+    expect(() => assertTourneyCutoverSanityTarget({
+      projectId: "roo-project",
+      dataset: "staging",
+      expectedFingerprint: sanityFingerprint,
+    })).toThrow("Migration target configuration is invalid.");
+    const databaseApiUrl = "https://projectref.supabase.co";
+    const databaseTarget = {
+      databaseUrl: testPostgresUrl({ host: "db.projectref.supabase.co" }),
+      supabaseUrl: databaseApiUrl,
+    };
+    const databaseFingerprint =
+      computeTourneyCutoverSupabaseDatabaseTargetFingerprint(databaseTarget);
+    expect(assertTourneyCutoverSupabaseDatabaseTarget({
+      ...databaseTarget,
+      databaseUrl: testPostgresUrl({
+        host: "db.projectref.supabase.co",
+        password: "replacement",
+      }),
+      expectedFingerprint: databaseFingerprint,
+    })).toMatchObject({
+      fingerprint: databaseFingerprint,
+      projectRef: "projectref",
+      database: "postgres",
+      username: "postgres",
+    });
+    expect(() => assertTourneyCutoverSupabaseDatabaseTarget({
+      databaseUrl: testPostgresUrl({ host: "db.wrongproject.supabase.co" }),
+      supabaseUrl: databaseApiUrl,
+      expectedFingerprint: databaseFingerprint,
+    })).toThrow("Migration target configuration is invalid.");
+    const discordTarget = {
+      apiBaseUrl: "https://discord.com/api/v10",
+      guildId: "111111111111111111",
+      participantRoleId: "222222222222222222",
+      hostRoleId: "333333333333333333",
+    };
+    const discordFingerprint = computeTourneyCutoverDiscordTargetFingerprint(discordTarget);
+    expect(assertTourneyCutoverDiscordTarget({
+      ...discordTarget,
+      expectedFingerprint: discordFingerprint,
+    })).toEqual({ fingerprint: discordFingerprint, ...discordTarget });
+    for (const apiBaseUrl of [
+      "https://wrong.example/api/v10",
+      "https://discord.com:444/api/v10",
+    ]) {
+      expect(() => assertTourneyCutoverDiscordTarget({
+        ...discordTarget,
+        apiBaseUrl,
+        expectedFingerprint: discordFingerprint,
+      })).toThrow("Migration target configuration is invalid.");
+    }
   });
 
   test("requires explicit fingerprints for preview migration targets", () => {

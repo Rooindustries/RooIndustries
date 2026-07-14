@@ -1,6 +1,3 @@
--- Durable Tourney cutover control-plane. The tourney schema remains private;
--- only service_role can use these tables and functions.
-
 create table if not exists tourney.command_receipts (
   command_id text primary key,
   purpose text not null,

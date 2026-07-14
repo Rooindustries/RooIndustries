@@ -3,32 +3,97 @@
 import crypto from "node:crypto";
 import { execFile } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { createClient as createSanityClient } from "@sanity/client";
 import dotenv from "dotenv";
+import {
+  buildPostgresConnectionEnv,
+  buildPostgresSessionArgs,
+} from "./lib/postgres-connection-env.mjs";
 import { createSupabaseAdminClient } from "../src/server/supabase/adminClient.js";
+import migrationTargetSafety from "../src/server/supabase/migrationTargetSafety.cjs";
 import { migrateTourneyShadow } from "../src/server/supabase/tourneyMigration.js";
 import { TOURNEY_MIRROR_CONTRACT } from "../src/server/tourney/mirrorContract.js";
 import { runTourneyParity } from "../src/server/tourney/store.js";
 
 const execFileAsync = promisify(execFile);
-
-const loadEnvironment = () => {
-  const envArgument = process.argv.indexOf("--env");
-  const envPath = envArgument >= 0 ? process.argv[envArgument + 1] : ".env.local";
-  if (envPath && fs.existsSync(envPath)) {
-    dotenv.config({ path: envPath, override: envArgument >= 0, quiet: true });
-  }
-};
+const {
+  assertTourneyCutoverDiscordTarget,
+  assertTourneyCutoverLegacyTarget,
+  assertTourneyCutoverSanityTarget,
+  assertTourneyCutoverSupabaseApiTarget,
+  assertTourneyCutoverSupabaseDatabaseTarget,
+  computeTourneyCutoverDiscordTargetFingerprint,
+  computeTourneyCutoverLegacyTargetFingerprint,
+  computeTourneyCutoverSanityTargetFingerprint,
+  computeTourneyCutoverSupabaseApiTargetFingerprint,
+  computeTourneyCutoverSupabaseDatabaseTargetFingerprint,
+} = migrationTargetSafety;
+const snapshotDirectory = path.join(
+  os.homedir(),
+  "Documents",
+  "Codex",
+  "Tourney Cutover"
+);
+const isolatedEnvironmentPrefixes = [
+  "DISCORD_",
+  "NEXT_PUBLIC_SANITY_",
+  "NEXT_PUBLIC_SUPABASE_",
+  "POSTGRES_",
+  "RESEND_",
+  "SANITY_",
+  "SUPABASE_",
+  "TOURNEY_",
+];
 
 const hasFlag = (flag) => process.argv.includes(flag);
 const valueAfter = (flag) => {
   const index = process.argv.indexOf(flag);
-  return index >= 0 ? String(process.argv[index + 1] || "").trim() : "";
+  if (index < 0) return "";
+  const value = String(process.argv[index + 1] || "").trim();
+  if (!value || value.startsWith("--")) {
+    const error = new Error(`A value is required after ${flag}.`);
+    error.code = "TOURNEY_CLI_ARGUMENT_INVALID";
+    throw error;
+  }
+  return value;
 };
+
+const loadEnvironment = () => {
+  if (!hasFlag("--env")) {
+    if (fs.existsSync(".env.local")) {
+      dotenv.config({ path: ".env.local", quiet: true });
+    }
+    return;
+  }
+  const envPath = path.resolve(valueAfter("--env"));
+  let stats;
+  try {
+    stats = fs.statSync(envPath);
+  } catch {
+    stats = null;
+  }
+  if (!stats?.isFile() || (stats.mode & 0o077) !== 0) {
+    const error = new Error("The explicit environment file is missing, invalid, or not private.");
+    error.code = "TOURNEY_ENV_FILE_INVALID";
+    throw error;
+  }
+  for (const key of Object.keys(process.env)) {
+    if (
+      isolatedEnvironmentPrefixes.some((prefix) => key.startsWith(prefix)) ||
+      ["DATABASE_URL", "FROM_EMAIL"].includes(key)
+    ) {
+      delete process.env[key];
+    }
+  }
+  const loaded = dotenv.config({ path: envPath, override: true, quiet: true });
+  if (loaded.error) throw loaded.error;
+};
+
 const normalize = (value) => String(value || "").trim();
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const canonicalizeJson = (value) => {
@@ -56,19 +121,37 @@ const assertStagedActivationEnvironment = () => {
     throw error;
   }
 };
-const legacyDatabaseUrl = () => normalize(process.env.TOURNEY_DATABASE_URL);
+const assertHostedExecutionEnvironment = () => {
+  const databaseMode = normalize(process.env.TOURNEY_DATABASE_MODE).toLowerCase();
+  if (
+    normalize(process.env.NODE_ENV).toLowerCase() === "test" ||
+    !["legacy", "supabase"].includes(databaseMode) ||
+    normalize(process.env.TOURNEY_ACCOUNT_STORE_MODE).toLowerCase() === "memory"
+  ) {
+    const error = new Error("The hosted Tourney cutover environment is invalid.");
+    error.code = "TOURNEY_HOSTED_EXECUTION_ENVIRONMENT_INVALID";
+    throw error;
+  }
+};
+const legacyDatabaseUrl = () => {
+  const databaseUrl = normalize(process.env.TOURNEY_DATABASE_URL);
+  return databaseUrl;
+};
 const runPsql = async (databaseUrl, args, options = {}) => {
-  const psqlEnv = Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => !key.startsWith("PG"))
-  );
-  psqlEnv.PGCONNECT_TIMEOUT = "15";
-  psqlEnv.PGDATABASE = databaseUrl;
+  const env = buildPostgresConnectionEnv(databaseUrl);
   try {
-    return await execFileAsync("psql", args, {
-      env: psqlEnv,
+    return await execFileAsync("psql", buildPostgresSessionArgs(args), {
+      env,
       maxBuffer: options.maxBuffer || 20 * 1024 * 1024,
+      timeout: options.timeout || 150000,
+      killSignal: "SIGTERM",
     });
   } catch (cause) {
+    if (cause?.killed || cause?.signal === "SIGTERM") {
+      const error = new Error("Legacy PostgreSQL command timed out.");
+      error.code = "TOURNEY_LEGACY_DATABASE_COMMAND_TIMEOUT";
+      throw error;
+    }
     const detail = String(cause?.stderr || "")
       .trim()
       .replace(/postgres(?:ql)?:\/\/\S+/gi, "[database-url-redacted]")
@@ -79,6 +162,127 @@ const runPsql = async (databaseUrl, args, options = {}) => {
     error.code = "TOURNEY_LEGACY_DATABASE_COMMAND_FAILED";
     throw error;
   }
+};
+const assertLegacyConnectionTarget = async () => {
+  const databaseUrl = legacyDatabaseUrl();
+  if (!databaseUrl) throw new Error("Legacy Tourney database is not configured.");
+  const identity = assertTourneyCutoverLegacyTarget({
+    databaseUrl,
+    expectedFingerprint: process.env.TOURNEY_CUTOVER_EXPECTED_LEGACY_FINGERPRINT,
+  });
+  const { stdout } = await runPsql(databaseUrl, [
+    "-X",
+    "-Atq",
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-c",
+    "select pg_catalog.jsonb_build_object('database',pg_catalog.current_database(),'username',current_user)::text",
+  ]);
+  let connected;
+  try {
+    connected = JSON.parse(stdout.trim());
+  } catch {
+    connected = null;
+  }
+  if (
+    connected?.database !== identity.database ||
+    connected?.username !== identity.username
+  ) {
+    const error = new Error("The legacy PostgreSQL connection identity is invalid.");
+    error.code = "TOURNEY_LEGACY_CONNECTION_IDENTITY_INVALID";
+    throw error;
+  }
+  return identity.fingerprint;
+};
+const assertSupabaseConnectionTarget = async () => {
+  const supabaseUrl = normalize(
+    process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
+  );
+  const identity = assertTourneyCutoverSupabaseApiTarget({
+    supabaseUrl,
+    expectedFingerprint: process.env.TOURNEY_CUTOVER_EXPECTED_SUPABASE_API_FINGERPRINT,
+  });
+  const readiness = await createSupabaseAdminClient().rpc("roo_tourney_readiness");
+  if (readiness.error || !readiness.data?.control) {
+    const error = new Error("The Supabase Tourney connection identity is invalid.");
+    error.code = "TOURNEY_SUPABASE_CONNECTION_IDENTITY_INVALID";
+    throw error;
+  }
+  return identity.fingerprint;
+};
+const supabaseApiUrl = () => normalize(
+  process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
+);
+const assertSupabaseDatabaseConnectionTarget = async () => {
+  const databaseUrl = normalize(process.env.SUPABASE_DATABASE_URL);
+  const identity = assertTourneyCutoverSupabaseDatabaseTarget({
+    databaseUrl,
+    supabaseUrl: supabaseApiUrl(),
+    expectedFingerprint:
+      process.env.TOURNEY_CUTOVER_EXPECTED_SUPABASE_DATABASE_FINGERPRINT,
+  });
+  const { stdout } = await runPsql(databaseUrl, [
+    "-Atq",
+    "-c",
+    "select pg_catalog.current_database()",
+  ]);
+  if (stdout.trim() !== identity.database) {
+    const error = new Error("The Supabase PostgreSQL connection identity is invalid.");
+    error.code = "TOURNEY_SUPABASE_DATABASE_CONNECTION_IDENTITY_INVALID";
+    throw error;
+  }
+  return identity.fingerprint;
+};
+const sanitySnapshotTarget = () => ({
+  projectId: normalize(
+    process.env.SANITY_PRIVATE_PROJECT_ID || process.env.SANITY_PROJECT_ID
+  ),
+  dataset: normalize(
+    process.env.SANITY_PRIVATE_DATASET || process.env.SANITY_DATASET
+  ) || "production",
+});
+const assertSanityConnectionTarget = () => {
+  const identity = assertTourneyCutoverSanityTarget({
+    ...sanitySnapshotTarget(),
+    expectedFingerprint: process.env.TOURNEY_CUTOVER_EXPECTED_SANITY_FINGERPRINT,
+  });
+  return identity.fingerprint;
+};
+const discordTarget = () => ({
+  apiBaseUrl: normalize(process.env.DISCORD_API_BASE_URL) || "https://discord.com/api/v10",
+  guildId: process.env.DISCORD_GUILD_ID,
+  participantRoleId: process.env.DISCORD_PARTICIPANT_ROLE_ID,
+  hostRoleId: process.env.DISCORD_HOST_ROLE_ID,
+});
+const assertDiscordConnectionTarget = () => {
+  const identity = assertTourneyCutoverDiscordTarget({
+    ...discordTarget(),
+    expectedFingerprint: process.env.TOURNEY_CUTOVER_EXPECTED_DISCORD_FINGERPRINT,
+  });
+  return identity.fingerprint;
+};
+
+const printTargetFingerprints = () => {
+  const result = {
+    TOURNEY_CUTOVER_EXPECTED_LEGACY_FINGERPRINT:
+      computeTourneyCutoverLegacyTargetFingerprint(legacyDatabaseUrl()),
+    TOURNEY_CUTOVER_EXPECTED_SUPABASE_API_FINGERPRINT:
+      computeTourneyCutoverSupabaseApiTargetFingerprint(supabaseApiUrl()),
+    TOURNEY_CUTOVER_EXPECTED_SANITY_FINGERPRINT:
+      computeTourneyCutoverSanityTargetFingerprint(sanitySnapshotTarget()),
+  };
+  if (normalize(process.env.SUPABASE_DATABASE_URL)) {
+    result.TOURNEY_CUTOVER_EXPECTED_SUPABASE_DATABASE_FINGERPRINT =
+      computeTourneyCutoverSupabaseDatabaseTargetFingerprint({
+        databaseUrl: process.env.SUPABASE_DATABASE_URL,
+        supabaseUrl: supabaseApiUrl(),
+      });
+  }
+  if (normalize(process.env.DISCORD_GUILD_ID)) {
+    result.TOURNEY_CUTOVER_EXPECTED_DISCORD_FINGERPRINT =
+      computeTourneyCutoverDiscordTargetFingerprint(discordTarget());
+  }
+  return result;
 };
 const LEGACY_TABLES = [
   "tourney_players",
@@ -164,8 +368,7 @@ const applyLegacySqlFile = async ({ databaseUrl, fileUrl }) => {
 };
 
 const readSanityAccountDocument = async () => {
-  const projectId = normalize(process.env.SANITY_PRIVATE_PROJECT_ID || process.env.SANITY_PROJECT_ID);
-  const dataset = normalize(process.env.SANITY_PRIVATE_DATASET || process.env.SANITY_DATASET) || "production";
+  const { projectId, dataset } = sanitySnapshotTarget();
   const token = normalize(
     process.env.SANITY_PRIVATE_READ_TOKEN ||
     process.env.SANITY_READ_TOKEN ||
@@ -330,6 +533,72 @@ const captureHostedSnapshot = async ({ legacyData, legacyPayloadText, sanityAcco
   };
 };
 
+const isInsideDirectory = (candidate, directory) =>
+  candidate === directory || candidate.startsWith(`${directory}${path.sep}`);
+
+const resolveSnapshotRoot = (allowedRoot, { create = false } = {}) => {
+  const configuredRoot = path.resolve(allowedRoot);
+  let stats;
+  try {
+    stats = fs.lstatSync(configuredRoot);
+  } catch {
+    stats = null;
+  }
+  if (!stats && create) {
+    const parent = fs.realpathSync(path.dirname(configuredRoot));
+    fs.mkdirSync(path.join(parent, path.basename(configuredRoot)), { mode: 0o700 });
+    stats = fs.lstatSync(configuredRoot);
+  }
+  if (!stats?.isDirectory() || stats.isSymbolicLink()) {
+    throw new Error("The approved Tourney snapshot directory is invalid.");
+  }
+  return { configuredRoot, realRoot: fs.realpathSync(configuredRoot) };
+};
+
+const reserveSnapshotOutput = (capturedAt, { allowedRoot = snapshotDirectory } = {}) => {
+  const requestedOutput = valueAfter("--output");
+  if (requestedOutput && !path.isAbsolute(requestedOutput)) {
+    throw new Error("--output <path> must be absolute.");
+  }
+  const timestamp = capturedAt.replace(/[-:.]/g, "");
+  const { configuredRoot, realRoot } = resolveSnapshotRoot(allowedRoot, { create: true });
+  const output = path.resolve(requestedOutput || path.join(
+    configuredRoot,
+    `pre-cutover-${timestamp}.enc`
+  ));
+  if (path.dirname(output) !== configuredRoot) {
+    throw new Error("The Tourney snapshot must be stored in the approved snapshot directory.");
+  }
+  const canonicalOutput = path.join(realRoot, path.basename(output));
+  return { output: canonicalOutput, descriptor: fs.openSync(canonicalOutput, "wx", 0o600) };
+};
+
+const resolveSnapshotInput = ({ allowedRoot = snapshotDirectory } = {}) => {
+  const value = valueAfter("--verify-snapshot");
+  if (!path.isAbsolute(value)) {
+    throw new Error("--verify-snapshot <path> must be absolute.");
+  }
+  let input;
+  let stats;
+  try {
+    input = fs.realpathSync(value);
+    stats = fs.statSync(input);
+  } catch {
+    input = "";
+    stats = null;
+  }
+  let root;
+  try {
+    root = resolveSnapshotRoot(allowedRoot);
+  } catch {
+    root = null;
+  }
+  if (!input || !stats?.isFile() || !root || !isInsideDirectory(input, root.realRoot)) {
+    throw new Error("The Tourney snapshot input is invalid.");
+  }
+  return input;
+};
+
 const captureSnapshot = async () => {
   const legacyUrl = legacyDatabaseUrl();
   const encryptionSecret = normalize(process.env.TOURNEY_SNAPSHOT_KEY);
@@ -338,11 +607,14 @@ const captureSnapshot = async () => {
       "TOURNEY_DATABASE_URL and a TOURNEY_SNAPSHOT_KEY of at least 32 bytes are required."
     );
   }
-  const [legacyCapture, sanityAccount] = await Promise.all([
+  const capturedAt = new Date().toISOString();
+  const reservation = reserveSnapshotOutput(capturedAt);
+  let completed = false;
+  try {
+    const [legacyCapture, sanityAccount] = await Promise.all([
       readLegacySnapshot(legacyUrl),
       readSanityAccountDocument(),
-  ]);
-  {
+    ]);
     const legacyData = legacyCapture.data;
     if (
       !sanityAccount ||
@@ -366,7 +638,7 @@ const captureSnapshot = async () => {
     });
     const snapshot = {
       version: 2,
-      capturedAt: new Date().toISOString(),
+      capturedAt,
       legacy: legacyData,
       legacyPayloadText: legacyCapture.payloadText,
       legacyPayloadSha256: sha256(legacyCapture.payloadText),
@@ -388,29 +660,11 @@ const captureSnapshot = async () => {
     if (stableJson(decrypted) !== stableJson(snapshot)) {
       throw new Error("Local Tourney snapshot decrypt verification failed.");
     }
-    const timestamp = snapshot.capturedAt.replace(/[-:.]/g, "");
-    const requestedOutput = valueAfter("--output");
-    const snapshotHome = normalize(process.env.HOME);
-    if (!requestedOutput && !snapshotHome) {
-      throw new Error("--output <path> is required when HOME is unavailable.");
-    }
-    const output = requestedOutput || path.join(
-      snapshotHome,
-      "Documents",
-      "Codex",
-      "Tourney Cutover",
-      `pre-cutover-${timestamp}.enc`
-    );
-    fs.mkdirSync(path.dirname(output), { recursive: true, mode: 0o700 });
-    const descriptor = fs.openSync(output, "wx", 0o600);
-    try {
-      fs.writeFileSync(descriptor, encrypted);
-      fs.fsyncSync(descriptor);
-    } finally {
-      fs.closeSync(descriptor);
-    }
+    fs.writeFileSync(reservation.descriptor, encrypted);
+    fs.fsyncSync(reservation.descriptor);
+    completed = true;
     return {
-      output,
+      output: reservation.output,
       sha256: crypto.createHash("sha256").update(encrypted).digest("hex"),
       legacyCounts: Object.fromEntries(
         Object.entries(legacyData).map(([table, rows]) => [table, rows.length])
@@ -420,18 +674,25 @@ const captureSnapshot = async () => {
       localDecryptVerified: true,
       hostedPayloadHashVerified: true,
     };
+  } finally {
+    fs.closeSync(reservation.descriptor);
+    if (!completed) {
+      try {
+        fs.unlinkSync(reservation.output);
+      } catch {}
+    }
   }
 };
 
 const verifySnapshot = async () => {
-  const input = valueAfter("--verify-snapshot");
+  const input = resolveSnapshotInput();
   const secret = normalize(process.env.TOURNEY_SNAPSHOT_KEY);
-  if (!input || Buffer.byteLength(secret) < 32) {
+  if (Buffer.byteLength(secret) < 32) {
     throw new Error(
       "--verify-snapshot <path> and a TOURNEY_SNAPSHOT_KEY of at least 32 bytes are required."
     );
   }
-  const encrypted = fs.readFileSync(path.resolve(input));
+  const encrypted = fs.readFileSync(input);
   const snapshot = decryptSnapshot({ encrypted, secret });
   validateHostedSnapshot({
     data: {
@@ -630,46 +891,149 @@ const bootstrapFallbackV4 = async () => {
   return { enqueued: true, legacySnapshotHash: actualHash, ...(hosted.data || {}) };
 };
 
-const main = async () => {
-  loadEnvironment();
-  let result;
-  if (hasFlag("--snapshot")) result = await captureSnapshot();
-  else if (hasFlag("--verify-snapshot")) result = await verifySnapshot();
-  else if (hasFlag("--apply-legacy-schema")) result = await applyLegacySchema();
-  else if (hasFlag("--expand-legacy-v4")) result = await applyLegacyV4Phase("expand");
-  else if (hasFlag("--activate-legacy-v4")) result = await applyLegacyV4Phase("activate");
-  else if (hasFlag("--activate-supabase-v4")) result = await activateSupabaseSchemaV4();
-  else if (hasFlag("--repair-legacy-v4")) result = await applyLegacyV4Phase("repair");
-  else if (hasFlag("--inventory-activation-v4")) result = await inventoryActivationV4();
-  else if (hasFlag("--capture-latency-baseline-v4")) result = await captureLatencyBaselineV4();
-  else if (hasFlag("--apply-activation-v4")) result = await applyActivationV4();
-  else if (hasFlag("--inventory-fallback-v4")) result = await inventoryFallbackV4();
-  else if (hasFlag("--bootstrap-fallback-v4")) result = await bootstrapFallbackV4();
-  else if (hasFlag("--check-manual-failover-v4")) {
-    const { checkTourneyManualFailoverReadiness } =
-      await import("../src/server/tourney/store.js");
-    result = await checkTourneyManualFailoverReadiness();
-    if (!result.ready) {
-      const error = new Error("Manual Tourney failover readiness failed.");
-      error.code = "TOURNEY_MANUAL_FAILOVER_BLOCKED";
-      error.blockers = result.blockers;
-      throw error;
-    }
+const checkManualFailoverV4 = async () => {
+  const { checkTourneyManualFailoverReadiness } =
+    await import("../src/server/tourney/store.js");
+  const result = await checkTourneyManualFailoverReadiness();
+  if (!result.ready) {
+    const error = new Error("Manual Tourney failover readiness failed.");
+    error.code = "TOURNEY_MANUAL_FAILOVER_BLOCKED";
+    error.blockers = result.blockers;
+    throw error;
   }
-  else if (hasFlag("--migrate")) result = await migrateTourneyShadow();
-  else if (hasFlag("--parity")) result = await runTourneyParity();
-  else throw new Error(
-    "Use --snapshot, --verify-snapshot <path>, --apply-legacy-schema, --expand-legacy-v4, " +
-    "--activate-legacy-v4, --activate-supabase-v4, --repair-legacy-v4, " +
-    "--inventory-activation-v4, --apply-activation-v4, " +
-    "--capture-latency-baseline-v4, " +
-    "--inventory-fallback-v4, --bootstrap-fallback-v4 --expected-legacy-hash <sha256>, " +
-    "--migrate, or --parity."
-  );
   return result;
 };
 
-export { decryptSnapshot, encryptSnapshot, stableJson };
+const actions = [
+  { flag: "--print-target-fingerprints", requiresEnvironment: true, touchesLegacy: false, touchesSupabase: false, execute: printTargetFingerprints },
+  { flag: "--snapshot", touchesLegacy: true, touchesSupabase: true, touchesSanity: true, options: ["--output"], execute: captureSnapshot },
+  { flag: "--verify-snapshot", touchesLegacy: false, touchesSupabase: false, execute: verifySnapshot },
+  { flag: "--apply-legacy-schema", touchesLegacy: true, touchesSupabase: false, execute: applyLegacySchema },
+  { flag: "--expand-legacy-v4", touchesLegacy: true, touchesSupabase: false, execute: () => applyLegacyV4Phase("expand") },
+  { flag: "--activate-legacy-v4", touchesLegacy: true, touchesSupabase: true, execute: () => applyLegacyV4Phase("activate") },
+  { flag: "--activate-supabase-v4", touchesLegacy: true, touchesSupabase: true, touchesSupabaseDatabase: true, execute: activateSupabaseSchemaV4 },
+  { flag: "--repair-legacy-v4", touchesLegacy: true, touchesSupabase: false, execute: () => applyLegacyV4Phase("repair") },
+  { flag: "--inventory-activation-v4", touchesLegacy: true, touchesSupabase: true, touchesSupabaseDatabase: true, touchesSanity: true, touchesDiscord: true, execute: inventoryActivationV4 },
+  { flag: "--capture-latency-baseline-v4", touchesLegacy: false, touchesSupabase: true, touchesSupabaseDatabase: true, execute: captureLatencyBaselineV4 },
+  { flag: "--apply-activation-v4", touchesLegacy: true, touchesSupabase: true, touchesSupabaseDatabase: true, touchesSanity: true, touchesDiscord: true, options: ["--inventory-hash"], required: ["--inventory-hash"], execute: applyActivationV4 },
+  { flag: "--inventory-fallback-v4", touchesLegacy: true, touchesSupabase: true, execute: inventoryFallbackV4 },
+  { flag: "--bootstrap-fallback-v4", touchesLegacy: true, touchesSupabase: true, options: ["--expected-legacy-hash"], required: ["--expected-legacy-hash"], execute: bootstrapFallbackV4 },
+  { flag: "--check-manual-failover-v4", touchesLegacy: true, touchesSupabase: true, touchesSupabaseDatabase: true, execute: checkManualFailoverV4 },
+  { flag: "--migrate", touchesLegacy: true, touchesSupabase: true, touchesSupabaseDatabase: true, execute: migrateTourneyShadow },
+  { flag: "--parity", touchesLegacy: true, touchesSupabase: true, touchesSupabaseDatabase: true, execute: runTourneyParity },
+];
+const valueFlags = new Set([
+  "--env",
+  "--expected-legacy-hash",
+  "--inventory-hash",
+  "--output",
+  "--verify-snapshot",
+]);
+const knownFlags = new Set([
+  ...actions.map((action) => action.flag),
+  "--env",
+  "--expected-legacy-hash",
+  "--inventory-hash",
+  "--output",
+]);
+
+const parseCliAction = () => {
+  const counts = new Map();
+  const tokens = process.argv.slice(2);
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (!token.startsWith("--") || !knownFlags.has(token)) {
+      const error = new Error("The Tourney cutover command contains an invalid argument.");
+      error.code = "TOURNEY_CLI_ARGUMENT_INVALID";
+      throw error;
+    }
+    const count = (counts.get(token) || 0) + 1;
+    if (count > 1) {
+      const error = new Error("The Tourney cutover command contains a duplicate argument.");
+      error.code = "TOURNEY_CLI_ARGUMENT_INVALID";
+      throw error;
+    }
+    counts.set(token, count);
+    if (valueFlags.has(token)) {
+      const value = String(tokens[index + 1] || "").trim();
+      if (!value || value.startsWith("--")) {
+        const error = new Error(`A value is required after ${token}.`);
+        error.code = "TOURNEY_CLI_ARGUMENT_INVALID";
+        throw error;
+      }
+      index += 1;
+    }
+  }
+  const selected = actions.filter((action) => counts.has(action.flag));
+  if (selected.length !== 1) {
+    const error = new Error("Exactly one valid Tourney cutover action is required.");
+    error.code = "TOURNEY_CLI_ACTION_INVALID";
+    throw error;
+  }
+  const allowed = new Set([selected[0].flag, "--env", ...(selected[0].options || [])]);
+  if ([...counts.keys()].some((flag) => !allowed.has(flag))) {
+    const error = new Error("The Tourney cutover command contains an invalid action option.");
+    error.code = "TOURNEY_CLI_ARGUMENT_INVALID";
+    throw error;
+  }
+  if ((selected[0].required || []).some((flag) => !counts.has(flag))) {
+    const error = new Error("The Tourney cutover command is missing a required action option.");
+    error.code = "TOURNEY_CLI_ARGUMENT_INVALID";
+    throw error;
+  }
+  return selected[0];
+};
+
+const main = async () => {
+  const selected = parseCliAction();
+  const contactsHostedTarget = Boolean(
+    selected.touchesLegacy || selected.touchesSupabase ||
+    selected.touchesSupabaseDatabase || selected.touchesSanity ||
+    selected.touchesDiscord
+  );
+  if (
+    (
+      selected.requiresEnvironment || contactsHostedTarget
+    ) &&
+    !hasFlag("--env")
+  ) {
+    const error = new Error("An explicit private --env file is required for this action.");
+    error.code = "TOURNEY_ENV_FILE_REQUIRED";
+    throw error;
+  }
+  loadEnvironment();
+  if (contactsHostedTarget) assertHostedExecutionEnvironment();
+  if (selected.touchesSanity) assertSanityConnectionTarget();
+  if (selected.touchesDiscord) assertDiscordConnectionTarget();
+  const checks = [];
+  if (selected.touchesLegacy) checks.push(assertLegacyConnectionTarget());
+  if (selected.touchesSupabase) checks.push(assertSupabaseConnectionTarget());
+  if (selected.touchesSupabaseDatabase) {
+    checks.push(assertSupabaseDatabaseConnectionTarget());
+  }
+  await Promise.all(checks);
+  return selected.execute();
+};
+
+export {
+  assertDiscordConnectionTarget,
+  assertLegacyConnectionTarget,
+  assertSanityConnectionTarget,
+  assertSupabaseConnectionTarget,
+  assertSupabaseDatabaseConnectionTarget,
+  assertHostedExecutionEnvironment,
+  decryptSnapshot,
+  encryptSnapshot,
+  loadEnvironment,
+  main,
+  parseCliAction,
+  printTargetFingerprints,
+  reserveSnapshotOutput,
+  resolveSnapshotInput,
+  runPsql,
+  stableJson,
+  valueAfter,
+};
 
 if (path.resolve(process.argv[1] || "") === fileURLToPath(import.meta.url)) {
   const result = await main();

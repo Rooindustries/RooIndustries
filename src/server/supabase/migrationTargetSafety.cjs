@@ -30,8 +30,14 @@ const databaseIdentity = (value, code) => {
   } catch {
     throw targetError(code);
   }
-  const database = decodeURIComponent(parsed.pathname.replace(/^\/+/, ""));
-  const username = decodeURIComponent(parsed.username);
+  let database;
+  let username;
+  try {
+    database = decodeURIComponent(parsed.pathname.replace(/^\/+/, ""));
+    username = decodeURIComponent(parsed.username);
+  } catch {
+    throw targetError(code);
+  }
   if (
     !["postgres:", "postgresql:"].includes(parsed.protocol) ||
     !parsed.hostname ||
@@ -41,7 +47,7 @@ const databaseIdentity = (value, code) => {
     throw targetError(code);
   }
   return {
-    hostname: parsed.hostname.toLowerCase(),
+    hostname: parsed.hostname.toLowerCase().replace(/\.$/, ""),
     port: parsed.port || "5432",
     database,
     username,
@@ -123,6 +129,8 @@ const supabaseIdentity = (values) => {
 
 const fingerprint = (kind, identity) =>
   sha256(`roo-migration-target:v1:${kind}:${JSON.stringify(identity)}`);
+const cutoverFingerprint = (kind, identity) =>
+  sha256(`roo-tourney-cutover-target:v2:${kind}:${JSON.stringify(identity)}`);
 
 const selectedTargetValues = (env = process.env) => {
   const environment = normalize(
@@ -174,6 +182,131 @@ const computeFingerprints = (values) => ({
   legacy: legacyFingerprint(values),
   supabase: supabaseFingerprint(values),
 });
+
+const assertTourneyCutoverLegacyTarget = ({ databaseUrl, expectedFingerprint }) => {
+  const identity = databaseIdentity(databaseUrl, "LEGACY_DATABASE_TARGET_INVALID");
+  const actual = cutoverFingerprint("legacy-postgres", identity);
+  const hostname = identity.hostname.toLowerCase();
+  const isSupabase = hostname.endsWith(".supabase.co") ||
+    hostname.endsWith(".pooler.supabase.com");
+  if (
+    isSupabase ||
+    !FINGERPRINT_PATTERN.test(normalize(expectedFingerprint).toLowerCase()) ||
+    !safeEqual(actual, expectedFingerprint)
+  ) {
+    throw targetError("TOURNEY_CUTOVER_LEGACY_TARGET_MISMATCH");
+  }
+  return {
+    fingerprint: actual,
+    database: identity.database,
+    username: identity.username,
+  };
+};
+
+const assertTourneyCutoverSupabaseApiTarget = ({ supabaseUrl, expectedFingerprint }) => {
+  const identity = apiIdentity(supabaseUrl);
+  const actual = cutoverFingerprint("supabase-api", identity);
+  if (
+    !FINGERPRINT_PATTERN.test(normalize(expectedFingerprint).toLowerCase()) ||
+    !safeEqual(actual, expectedFingerprint)
+  ) {
+    throw targetError("TOURNEY_CUTOVER_SUPABASE_API_TARGET_MISMATCH");
+  }
+  return { fingerprint: actual, ...identity };
+};
+
+const cutoverSupabaseDatabaseIdentity = ({ databaseUrl, supabaseUrl }) => {
+  const database = databaseIdentity(
+    databaseUrl,
+    "SUPABASE_DATABASE_TARGET_INVALID"
+  );
+  const projectRef = databaseProjectReference(database);
+  const apiProjectRef = apiProjectReference(apiIdentity(supabaseUrl));
+  if (!projectRef || !apiProjectRef || projectRef !== apiProjectRef) {
+    throw targetError("SUPABASE_PROJECT_TARGET_MISMATCH");
+  }
+  return { ...database, projectRef };
+};
+
+const assertTourneyCutoverSupabaseDatabaseTarget = ({
+  databaseUrl,
+  supabaseUrl,
+  expectedFingerprint,
+}) => {
+  const identity = cutoverSupabaseDatabaseIdentity({ databaseUrl, supabaseUrl });
+  const actual = cutoverFingerprint("supabase-postgres", identity);
+  if (
+    !FINGERPRINT_PATTERN.test(normalize(expectedFingerprint).toLowerCase()) ||
+    !safeEqual(actual, expectedFingerprint)
+  ) {
+    throw targetError("TOURNEY_CUTOVER_SUPABASE_DATABASE_TARGET_MISMATCH");
+  }
+  return { fingerprint: actual, ...identity };
+};
+
+const sanityIdentity = ({ projectId, dataset }) => {
+  const normalizedProjectId = normalize(projectId).toLowerCase();
+  const normalizedDataset = normalize(dataset);
+  if (
+    !/^[a-z0-9-]+$/.test(normalizedProjectId) ||
+    !/^[a-z0-9_-]+$/.test(normalizedDataset)
+  ) {
+    throw targetError("SANITY_TARGET_INVALID");
+  }
+  return { projectId: normalizedProjectId, dataset: normalizedDataset };
+};
+
+const assertTourneyCutoverSanityTarget = ({
+  projectId,
+  dataset,
+  expectedFingerprint,
+}) => {
+  const identity = sanityIdentity({ projectId, dataset });
+  const actual = cutoverFingerprint("sanity", identity);
+  if (
+    !FINGERPRINT_PATTERN.test(normalize(expectedFingerprint).toLowerCase()) ||
+    !safeEqual(actual, expectedFingerprint)
+  ) {
+    throw targetError("TOURNEY_CUTOVER_SANITY_TARGET_MISMATCH");
+  }
+  return { fingerprint: actual, ...identity };
+};
+
+const discordIdentity = ({ apiBaseUrl, guildId, participantRoleId, hostRoleId }) => {
+  const api = apiIdentity(apiBaseUrl || "https://discord.com/api/v10");
+  const canonicalApi = `https://${api.hostname}${
+    api.port === "443" ? "" : `:${api.port}`
+  }${api.pathname}`;
+  const snowflake = /^[0-9]{5,30}$/;
+  const identity = {
+    apiBaseUrl: canonicalApi,
+    guildId: normalize(guildId),
+    participantRoleId: normalize(participantRoleId),
+    hostRoleId: normalize(hostRoleId),
+  };
+  if (
+    canonicalApi !== "https://discord.com/api/v10" ||
+    !snowflake.test(identity.guildId) ||
+    !snowflake.test(identity.participantRoleId) ||
+    !snowflake.test(identity.hostRoleId) ||
+    identity.participantRoleId === identity.hostRoleId
+  ) {
+    throw targetError("DISCORD_TARGET_INVALID");
+  }
+  return identity;
+};
+
+const assertTourneyCutoverDiscordTarget = ({ expectedFingerprint, ...target }) => {
+  const identity = discordIdentity(target);
+  const actual = cutoverFingerprint("discord", identity);
+  if (
+    !FINGERPRINT_PATTERN.test(normalize(expectedFingerprint).toLowerCase()) ||
+    !safeEqual(actual, expectedFingerprint)
+  ) {
+    throw targetError("TOURNEY_CUTOVER_DISCORD_TARGET_MISMATCH");
+  }
+  return { fingerprint: actual, ...identity };
+};
 
 const failure = (code, message) => ({ code, message });
 
@@ -373,8 +506,31 @@ const buildMigrationRouteEnv = ({ env = process.env, inspection } = {}) => {
 };
 
 module.exports = {
+  assertTourneyCutoverDiscordTarget,
+  assertTourneyCutoverLegacyTarget,
+  assertTourneyCutoverSanityTarget,
+  assertTourneyCutoverSupabaseApiTarget,
+  assertTourneyCutoverSupabaseDatabaseTarget,
   authorizeMigrationTargetRequest,
   buildMigrationRouteEnv,
+  computeLegacyMigrationTargetFingerprint: (databaseUrl) =>
+    legacyFingerprint({ legacyDatabaseUrl: normalize(databaseUrl) }),
+  computeTourneyCutoverLegacyTargetFingerprint: (databaseUrl) =>
+    cutoverFingerprint(
+      "legacy-postgres",
+      databaseIdentity(databaseUrl, "LEGACY_DATABASE_TARGET_INVALID")
+    ),
+  computeTourneyCutoverSanityTargetFingerprint: ({ projectId, dataset }) =>
+    cutoverFingerprint("sanity", sanityIdentity({ projectId, dataset })),
+  computeTourneyCutoverSupabaseApiTargetFingerprint: (supabaseUrl) =>
+    cutoverFingerprint("supabase-api", apiIdentity(supabaseUrl)),
+  computeTourneyCutoverSupabaseDatabaseTargetFingerprint: ({ databaseUrl, supabaseUrl }) =>
+    cutoverFingerprint(
+      "supabase-postgres",
+      cutoverSupabaseDatabaseIdentity({ databaseUrl, supabaseUrl })
+    ),
+  computeTourneyCutoverDiscordTargetFingerprint: (target) =>
+    cutoverFingerprint("discord", discordIdentity(target)),
   computeMigrationTargetFingerprints: (env = process.env) =>
     computeFingerprints(selectedTargetValues(env)),
   inspectMigrationTargets,

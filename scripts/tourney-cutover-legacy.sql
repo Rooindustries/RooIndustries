@@ -1,6 +1,3 @@
--- Additive legacy Neon control-plane for the Supabase Tourney cutover.
--- This file is applied by scripts/tourney-cutover.mjs in a single transaction.
-
 create table if not exists tourney_command_receipts (
   command_id text primary key,
   purpose text not null,
