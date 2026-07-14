@@ -147,6 +147,41 @@ const readApplyScope = (payload = {}) => {
 const scopedCommandId = (repairKey) =>
   `discord-backfill:scoped:${crypto.createHash("sha256").update(repairKey).digest("hex")}`;
 
+const sha256 = (value) =>
+  crypto.createHash("sha256").update(String(value || "")).digest("hex");
+
+const buildUnscopedRepairBatch = ({ config, repairKey = "", resolved }) => {
+  const targets = resolved
+    .map((entry) => ({
+      authoritativeDiscordUserId: entry.authoritativeDiscordUserId,
+      conflictCode: entry.conflictCode,
+      legacyDiscordUserId: entry.legacyDiscordUserId,
+      playerId: entry.playerId,
+      playerPrincipalId: entry.playerPrincipalId,
+      principalId: entry.principalId,
+      verified: entry.verified,
+    }))
+    .sort((left, right) => {
+      const leftKey = JSON.stringify(left);
+      const rightKey = JSON.stringify(right);
+      return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+    });
+  const batchHash = sha256(JSON.stringify({
+    desiredRole: "participant",
+    forceRepair: true,
+    guildId: config.guildId,
+    repairKey,
+    targets,
+  }));
+  return {
+    batchHash,
+    repairId: `discord-repair:${batchHash}`,
+  };
+};
+
+const unscopedCommandId = ({ batchHash, playerId }) =>
+  `discord-backfill:batch:${batchHash.slice(0, 48)}:${sha256(playerId).slice(0, 24)}`;
+
 const targetError = (message, code, status) => Object.assign(new Error(message), {
   code,
   status,
@@ -461,7 +496,23 @@ export async function POST(request) {
   let replayed = false;
   let syncPending = false;
   const failures = [];
-  const repairId = crypto.randomUUID();
+  let repairKey = "";
+  if (String(request.headers.get("idempotency-key") || "").trim()) {
+    try {
+      repairKey = readTourneyCommandId({ request });
+    } catch (error) {
+      return jsonTargetError(
+        error?.message || "A valid Idempotency-Key is required.",
+        error?.code || "TOURNEY_IDEMPOTENCY_KEY_REQUIRED",
+        Number(error?.status || 400)
+      );
+    }
+  }
+  const { batchHash, repairId } = buildUnscopedRepairBatch({
+    config,
+    repairKey,
+    resolved,
+  });
   const conflicts = resolved.filter((entry) => !entry.verified).map((entry) => ({
     playerId: entry.playerId,
     code: entry.conflictCode,
@@ -471,13 +522,15 @@ export async function POST(request) {
   );
   for (const entry of resolved.filter((candidate) => candidate.verified)) {
     const player = { ...entry.player, discordUserId: entry.authoritativeDiscordUserId };
-    const commandId = `discord-backfill:${repairId}:${player.id}`;
+    const commandId = unscopedCommandId({ batchHash, playerId: player.id });
     try {
       const command = await executeTourneyCommand({
         commandId,
         purpose: "discord:backfill",
         requestPayload: {
+          batchHash,
           repairId,
+          ...(repairKey ? { repairKey } : {}),
           playerId: player.id,
           discordUserId: entry.authoritativeDiscordUserId,
           forceRepair: true,

@@ -4,11 +4,16 @@ const DISCORD_REQUEST_TIMEOUT_MS = 5_000;
 
 const acceptedStatus = (response) => response.ok || response.status === 204;
 
+const parseRetrySeconds = (value) => {
+  const normalized = String(value ?? "").trim();
+  return normalized ? Number(normalized) : Number.NaN;
+};
+
 const parseRetryAfterMs = ({ body = {}, response } = {}) => {
   const header = response?.headers?.get?.("retry-after") ||
     response?.headers?.get?.("x-ratelimit-reset-after") || "";
-  const bodySeconds = Number(body?.retry_after);
-  const headerSeconds = Number(header);
+  const bodySeconds = parseRetrySeconds(body?.retry_after);
+  const headerSeconds = parseRetrySeconds(header);
   if (Number.isFinite(bodySeconds) && bodySeconds >= 0) {
     return Math.max(1, Math.ceil(bodySeconds * 1000));
   }
