@@ -49,6 +49,12 @@ import {
   updateTourneyPlayerDetails,
   updateTourneyRegistrationConfig,
 } from "../src/server/tourney/playerStore.js";
+import {
+  applyLiveDriftSourceRepair,
+  assertConnectedDatabaseIdentity,
+  assertLiveDriftLegacyDatabaseGate,
+  EXPECTED_LIVE_DRIFT,
+} from "./tourney-live-drift-repair.mjs";
 
 const root = path.resolve(new URL("..", import.meta.url).pathname);
 const configuredPgBin = String(process.env.PG_BIN || "").trim();
@@ -4846,6 +4852,276 @@ insert into accounts.discord_role_assignments(
     await sql`delete from tourney.external_operations where operation_key='fixture:failover:blocker'`;
   });
 
+  const [sourceConnectionIdentity] = await source`
+    select current_database() database,current_user username
+  `;
+  const [targetConnectionIdentity] = await target`
+    select current_database() database,current_user username
+  `;
+  await assertConnectedDatabaseIdentity(
+    source,
+    sourceConnectionIdentity,
+    "LIVE_DRIFT_SOURCE_CONNECTION_IDENTITY_INVALID"
+  );
+  await assertConnectedDatabaseIdentity(
+    target,
+    targetConnectionIdentity,
+    "LIVE_DRIFT_LEGACY_CONNECTION_IDENTITY_INVALID"
+  );
+  await assert.rejects(
+    assertConnectedDatabaseIdentity(
+      target,
+      { ...targetConnectionIdentity, username: "wrong-live-repair-user" },
+      "LIVE_DRIFT_LEGACY_CONNECTION_IDENTITY_INVALID"
+    ),
+    (error) => error.code === "LIVE_DRIFT_LEGACY_CONNECTION_IDENTITY_INVALID",
+    "live repair accepted a connected database user that did not match its pinned URL identity"
+  );
+
+  await target`
+    update tourney_cutover_metadata set
+      primary_backend='supabase',generation=1,writes_paused=true,
+      fallback_read_only=false,hardened_active=true
+    where id='tourney'
+  `;
+  await assertLiveDriftLegacyDatabaseGate(target);
+  await target`update tourney_cutover_metadata set writes_paused=false where id='tourney'`;
+  await assert.rejects(
+    assertLiveDriftLegacyDatabaseGate(target),
+    (error) => error.code === "LIVE_DRIFT_LEGACY_GATE_INVALID",
+    "live repair accepted unpaused fallback controls"
+  );
+  await target`update tourney_cutover_metadata set writes_paused=true where id='tourney'`;
+  await target`
+    alter table tourney_players disable trigger capture_tourney_mirror_event
+  `;
+  await assert.rejects(
+    assertLiveDriftLegacyDatabaseGate(target),
+    (error) => error.code === "LIVE_DRIFT_LEGACY_TRIGGER_INVALID",
+    "live repair accepted a drifted fallback mirror trigger"
+  );
+  await target`
+    alter table tourney_players enable trigger capture_tourney_mirror_event
+  `;
+  await target`
+    insert into tourney_mirror_outbox(
+      command_id,source_backend,generation,table_name,operation,record_key,status
+    ) values(
+      'fixture:live-repair-legacy-backlog','legacy',1,'tourney_players','upsert',
+      '{"id":"fixture:live-repair-legacy-backlog"}'::jsonb,'pending'
+    )
+  `;
+  await assert.rejects(
+    assertLiveDriftLegacyDatabaseGate(target),
+    (error) => error.code === "LIVE_DRIFT_LEGACY_BACKLOG",
+    "live repair accepted a fallback mirror backlog"
+  );
+  await target`
+    delete from tourney_mirror_outbox where command_id='fixture:live-repair-legacy-backlog'
+  `;
+  await assertLiveDriftLegacyDatabaseGate(target);
+
+  const liveRepairPlayerId = "live-repair-player";
+  const liveRepairDiscordId = "910000000000000001";
+  const liveRepairIdentityId = "85000000-0000-4000-8000-000000000001";
+  const liveRepairCanonicalPrincipal = "84000000-0000-4000-8000-000000000001";
+  const liveRepairPrincipals = Array.from({ length: 25 }, (_, index) =>
+    `82000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`
+  );
+  const liveRepairUsers = Array.from({ length: 25 }, (_, index) =>
+    `81000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`
+  );
+  await source`
+    update tourney.cutover_metadata set
+      primary_backend='supabase',generation=1,writes_paused=true,hardened_active=true
+    where id='tourney'
+  `;
+  await source.begin(async (sql) => {
+    await sql`select set_config('roo.tourney_mirror_apply','1',true)`;
+    for (let index = 0; index < liveRepairPrincipals.length; index += 1) {
+      await sql`insert into auth.users(id,email) values(
+        ${liveRepairUsers[index]}::uuid,${`live-repair-${index + 1}@example.invalid`}
+      )`;
+      await sql`insert into accounts.principals(id) values(${liveRepairPrincipals[index]}::uuid)`;
+      await sql`insert into accounts.discord_role_assignments(
+        user_id,principal_id,player_id,discord_user_id,guild_id,tourney_role,
+        desired_role,status
+      ) values(
+        ${liveRepairUsers[index]}::uuid,${liveRepairPrincipals[index]}::uuid,
+        ${index === 0 ? liveRepairPlayerId : null},
+        ${`9100000000000000${String(index + 1).padStart(2, "0")}`},
+        '610000000000000001','tourney_player','participant','pending'
+      )`;
+    }
+    await sql`insert into accounts.principals(id) values(${liveRepairCanonicalPrincipal}::uuid)`;
+    await sql`insert into accounts.identity_links(
+      id,principal_id,provider,provider_subject,metadata,last_seen_at
+    ) values(
+      ${liveRepairIdentityId}::uuid,${liveRepairCanonicalPrincipal}::uuid,
+      'discord',${liveRepairDiscordId},'{}'::jsonb,now()
+    )`;
+    await sql`insert into tourney.tourney_players(
+      id,username,email,password_hash,status,discord,discord_key,battlenet,
+      rank_name,role_play,version,discord_user_id,discord_linked_at,principal_id
+    ) values(
+      ${liveRepairPlayerId},'live-repair-player','live-repair-player@example.invalid',
+      '$2b$12$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','approved',
+      'live-repair-player','live-repair-player','live-repair-player','Master',
+      'Tank',3,${liveRepairDiscordId},now(),${liveRepairPrincipals[0]}::uuid
+    )`;
+    for (let index = 0; index < 3; index += 1) {
+      await sql`insert into tourney.tourney_player_tokens(
+        id,player_id,token_hash,purpose,recipient_version,expires_at
+      ) values(
+        ${`live-repair-token-${index + 1}`},${liveRepairPlayerId},
+        ${crypto.createHash("sha256").update(`live-repair-token-${index + 1}`).digest("hex")},
+        'approve','3',now()+interval '1 day'
+      )`;
+    }
+  });
+  await target.begin(async (sql) => {
+    await sql`select set_config('roo.tourney_mirror_apply','1',true)`;
+    await sql`insert into tourney_players(
+      id,username,email,password_hash,status,discord,discord_key,battlenet,
+      rank_name,role_play,version,discord_user_id,discord_linked_at,principal_id
+    ) values(
+      ${liveRepairPlayerId},'live-repair-player','live-repair-player@example.invalid',
+      '$2b$12$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','approved',
+      'live-repair-player','live-repair-player','live-repair-player','Master',
+      'Tank',3,${liveRepairDiscordId},now(),${liveRepairPrincipals[0]}::uuid
+    )`;
+    for (let index = 0; index < 3; index += 1) {
+      await sql`insert into tourney_player_tokens(
+        id,player_id,token_hash,purpose,recipient_version,expires_at
+      ) values(
+        ${`live-repair-token-${index + 1}`},${liveRepairPlayerId},
+        ${crypto.createHash("sha256").update(`live-repair-token-${index + 1}`).digest("hex")},
+        'approve',null,now()+interval '1 day'
+      )`;
+    }
+    for (let index = 0; index < 24; index += 1) {
+      await sql`insert into tourney_discord_role_assignments(
+        user_id,principal_id,player_id,discord_user_id,guild_id,tourney_role,
+        desired_role,status
+      ) values(
+        ${liveRepairUsers[index]}::uuid,${liveRepairPrincipals[index]}::uuid,
+        ${index === 0 ? liveRepairPlayerId : null},
+        ${`9100000000000000${String(index + 1).padStart(2, "0")}`},
+        '610000000000000001','tourney_player','none','applied'
+      )`;
+    }
+  });
+  const [repairTokenRows, repairAssignmentRows, repairPlayerRows, repairIdentityRows] =
+    await Promise.all([
+      source`select to_jsonb(row_value) row from tourney.tourney_player_tokens row_value
+        where id like 'live-repair-token-%' order by id`,
+      source`select to_jsonb(row_value) row from accounts.discord_role_assignments row_value
+        where principal_id::text in ${source(liveRepairPrincipals)} order by principal_id`,
+      source`select to_jsonb(row_value) row from tourney.tourney_players row_value
+        where id=${liveRepairPlayerId}`,
+      source`select to_jsonb(row_value) row from accounts.identity_links row_value
+        where id=${liveRepairIdentityId}::uuid`,
+    ]);
+  const liveRepairAuthorization = "a".repeat(64);
+  const liveRepairState = {
+    tokens: {
+      diffs: Array.from({ length: 3 }, (_, index) => ({
+        id: `live-repair-token-${index + 1}`,
+      })),
+    },
+    discord: { source_principal_ids: liveRepairPrincipals },
+    collision: {
+      source_hash: "b".repeat(64),
+      player_id: liveRepairPlayerId,
+      linked_principal_id: liveRepairPrincipals[0],
+      canonical_principal_id: liveRepairCanonicalPrincipal,
+      discord_user_id: liveRepairDiscordId,
+      identity_link_id: liveRepairIdentityId,
+    },
+    sourceRows: {
+      tokens: repairTokenRows.map(({ row }) => row),
+      assignments: repairAssignmentRows.map(({ row }) => row),
+      players: repairPlayerRows.map(({ row }) => row),
+      identities: repairIdentityRows.map(({ row }) => row),
+    },
+  };
+  const liveRepair = await applyLiveDriftSourceRepair({
+    source,
+    state: liveRepairState,
+    authorizationHash: liveRepairAuthorization,
+    expected: { events: EXPECTED_LIVE_DRIFT.events },
+  });
+  const [liveRepairEventCounts] = await source`
+    select count(*)::integer total,
+      count(*) filter(where table_name='tourney_player_tokens')::integer tokens,
+      count(*) filter(where table_name='discord_role_assignments')::integer assignments,
+      count(*) filter(where table_name='tourney_players')::integer players,
+      bool_and(status='pending' and generation=1)::boolean valid
+    from tourney.mirror_outbox where command_id=${liveRepair.commandId}
+  `;
+  assert.deepEqual(liveRepairEventCounts, {
+    total: 29,
+    tokens: 3,
+    assignments: 25,
+    players: 1,
+    valid: true,
+  });
+  assert.equal(
+    await source`select count(*)::integer count from tourney.external_operations
+      where command_id=${liveRepair.commandId}`.then(([row]) => row.count),
+    0,
+    "live drift repair queued external Discord work"
+  );
+  await reconcileTourneyMirror({ env, limit: 100 });
+  await assertSql(
+    target,
+    `select count(*)=3 and bool_and(recipient_version='3') ok
+      from tourney_player_tokens where id like 'live-repair-token-%'`,
+    "live drift token repair did not mirror"
+  );
+  await assertSql(
+    target,
+    `select count(*)=25
+      and count(*) filter(where status='blocked_reauth'
+        and desired_role='none' and last_error='identity_principal_collision')=1 ok
+      from tourney_discord_role_assignments
+      where principal_id::text like '82000000-0000-4000-8000-%'`,
+    "live drift Discord repair did not mirror"
+  );
+  await assertSql(
+    target,
+    `select discord_user_id is null
+      and discord_linked_at is null
+      and discord_role_last_error='identity_principal_collision' ok
+      from tourney_players where id='live-repair-player'`,
+    "live drift stale player link was not cleared"
+  );
+  await assertSql(
+    source,
+    `select principal_id='84000000-0000-4000-8000-000000000001'::uuid ok
+      from accounts.identity_links where id='85000000-0000-4000-8000-000000000001'::uuid`,
+    "live drift repair changed the canonical Discord principal"
+  );
+  await source.begin(async (sql) => {
+    await sql`select set_config('roo.tourney_mirror_apply','1',true)`;
+    await sql`delete from tourney.identity_conflicts where id=${liveRepair.conflictId}::uuid`;
+    await sql`delete from accounts.identity_links where id=${liveRepairIdentityId}::uuid`;
+    await sql`delete from accounts.discord_role_assignments
+      where principal_id::text in ${sql(liveRepairPrincipals)}`;
+    await sql`delete from tourney.tourney_player_tokens where id like 'live-repair-token-%'`;
+    await sql`delete from tourney.tourney_players where id=${liveRepairPlayerId}`;
+    await sql`delete from accounts.principals
+      where id::text in ${sql([...liveRepairPrincipals,liveRepairCanonicalPrincipal])}`;
+    await sql`delete from auth.users where id::text in ${sql(liveRepairUsers)}`;
+  });
+  await target.begin(async (sql) => {
+    await sql`select set_config('roo.tourney_mirror_apply','1',true)`;
+    await sql`delete from tourney_discord_role_assignments
+      where principal_id::text in ${sql(liveRepairPrincipals)}`;
+    await sql`delete from tourney_player_tokens where id like 'live-repair-token-%'`;
+    await sql`delete from tourney_players where id=${liveRepairPlayerId}`;
+  });
+
   await assertSql(
     source,
     "select count(*) = 4 ok from tourney.cutover_control_operations",
@@ -4910,6 +5186,8 @@ insert into accounts.discord_role_assignments(
       "non-2xx and blocked-reauth clock/readiness blockers",
       "fresh clean failover parity and per-record checkpoint coverage",
       "manual failover backlog and blocked-reauth gates",
+      "connected database identity and independent legacy live-repair gates",
+      "audited deterministic live-drift repair and canonical identity preservation",
       "zero pending and dead letters",
     ],
   };
