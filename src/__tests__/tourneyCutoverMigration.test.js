@@ -159,7 +159,13 @@ describe("Tourney cutover migration", () => {
     expect(expandV4).toContain("Exact legacy Tourney snapshot text is required");
     expect(expandV4).toContain("p_legacy_snapshot_text::jsonb");
     expect(cutoverCli).toContain("roo_capture_tourney_hardening_snapshot");
-    expect(cutoverCli).toContain("p_legacy_snapshot_text: legacyPayloadText");
+    expect(cutoverCli).toContain("normalize(process.env.SUPABASE_DATABASE_URL)");
+    expect(cutoverCli).toContain('const { default: postgres } = await import("postgres")');
+    expect(cutoverCli).toContain("${legacyPayloadText}::text");
+    expect(cutoverCli).toContain("touchesSupabaseDatabase: true");
+    expect(cutoverCli).toContain('application_name: "roo-industries-tourney-snapshot"');
+    expect(cutoverCli).toContain("TOURNEY_SUPABASE_DATABASE_CONNECTION_REQUIRED");
+    expect(cutoverCli).not.toContain("p_legacy_snapshot_text: legacyPayloadText");
     expect(cutoverCli).not.toContain("roo_capture_tourney_pre_cutover_snapshot");
     expect(cutoverCli).not.toContain("POSTGRES_URL_NON_POOLING");
     expect(cutoverCli).toContain("process.env.TOURNEY_DATABASE_URL");
@@ -618,7 +624,7 @@ describe("Tourney cutover migration", () => {
       inventoryTouchesDiscord: true,
       actionTargets: {
         "--print-target-fingerprints": [false, false, false, false, false],
-        "--snapshot": [true, true, false, true, false],
+        "--snapshot": [true, true, true, true, false],
         "--verify-snapshot": [false, false, false, false, false],
         "--apply-legacy-schema": [true, false, false, false, false],
         "--expand-legacy-v4": [true, false, false, false, false],
