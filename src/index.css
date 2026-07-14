@@ -20,7 +20,6 @@
 html[data-theme="default"] {
   color-scheme: dark;
 
-  /* Canvas + background layers */
   --color-canvas: #020617;
   --color-canvas-deep: #000040;
   --gradient-app-bg: linear-gradient(
@@ -39,7 +38,6 @@ html[data-theme="default"] {
   --app-grid-opacity: 0.5;
   --navbar-grid-line: rgba(255, 255, 255, 0.07);
 
-  /* Surfaces */
   --color-surface: #07162d;
   --color-surface-elevated: #061226;
   --color-surface-solid: rgba(6, 18, 38, 0.95);
@@ -97,7 +95,6 @@ html[data-theme="default"] {
   --shadow-surface-deep: 0 14px 34px rgba(2, 6, 23, 0.3);
   --shadow-navbar-scrolled: 0 10px 30px rgba(0, 0, 0, 0.25);
 
-  /* Text */
   --color-text-primary: #ffffff;
   --color-text-secondary: rgba(255, 255, 255, 0.85);
   --color-text-muted: rgba(255, 255, 255, 0.55);
@@ -106,14 +103,12 @@ html[data-theme="default"] {
   --color-link-hover: #a5f3fc;
   --gradient-display-text: linear-gradient(to right, #38bdf8, #3b82f6);
 
-  /* Borders */
   --color-border-soft: rgba(255, 255, 255, 0.1);
   --color-border-strong: rgba(148, 163, 184, 0.45);
   --color-border-accent: rgba(103, 232, 249, 0.3);
   --navbar-border-rest: rgba(255, 255, 255, 0.05);
   --navbar-border-scrolled: rgba(103, 232, 249, 0.1);
 
-  /* Accent — electric cyan energy */
   --color-accent: #22d3ee;
   --color-accent-strong: #0284c7;
   --color-accent-contrast: #000000;
@@ -121,7 +116,6 @@ html[data-theme="default"] {
   --color-accent-soft: rgba(103, 232, 249, 0.5);
   --color-focus-ring: rgba(103, 232, 249, 0.7);
 
-  /* Status */
   --color-success: #34d399;
   --color-warning: #fbbf24;
   --color-danger: #f87171;
@@ -139,7 +133,6 @@ html[data-theme="default"] {
   --color-danger-text: #fecaca;
   --color-info-text: #bae6fd;
 
-  /* Glow */
   --shadow-glow-soft: 0 0 15px rgba(3, 233, 244, 0.25),
     0 0 30px rgba(3, 233, 244, 0.15);
   --shadow-glow-strong: 0 0 24px rgba(56, 189, 248, 0.5),
@@ -159,7 +152,6 @@ html[data-theme="default"] {
     #0f172a 100%
   );
 
-  /* Primary action gradients */
   --gradient-button-primary: linear-gradient(
     90deg,
     rgba(56, 189, 248, 1) 0%,
@@ -174,8 +166,6 @@ html[data-theme="default"] {
   );
   --gradient-platform-twitch: linear-gradient(135deg, #9146ff, #6633cc);
 
-  /* Effect layer — buttons, traces, flair. Values are the legacy Roo Blue
-     look, verbatim, so the default theme stays pixel-identical. */
   --shadow-button: 0 0 15px rgba(3, 233, 244, 0.25),
     0 0 30px rgba(3, 233, 244, 0.15);
   --shadow-button-accent: 0 0 20px rgba(56, 189, 248, 0.4);
@@ -242,9 +232,6 @@ html[data-theme="default"] {
 html[data-theme="dark"] {
   color-scheme: dark;
 
-  /* BLACKOUT — Obsidian & Gold. Monochrome graphite/gunmetal canvas, soft
-     silver ink, warm benchmark gold as the only accent. NO blue or cyan
-     anywhere in this theme. */
   --color-canvas: #030303;
   --color-canvas-deep: #070707;
   --gradient-app-bg: linear-gradient(
@@ -263,7 +250,6 @@ html[data-theme="dark"] {
   --app-grid-opacity: 0.35;
   --navbar-grid-line: rgba(255, 255, 255, 0.045);
 
-  /* Surfaces — true black stack; depth from layering and white light */
   --color-surface: #0d0d0d;
   --color-surface-elevated: #090909;
   --color-surface-solid: rgba(9, 9, 9, 0.97);
@@ -321,8 +307,6 @@ html[data-theme="dark"] {
   --shadow-surface-deep: 0 16px 38px rgba(0, 0, 0, 0.55);
   --shadow-navbar-scrolled: 0 10px 30px rgba(0, 0, 0, 0.55);
 
-  /* Text — black + white hierarchy: white headings, off-white body,
-     light silver secondary. Gray is reserved for true muted/disabled. */
   --color-text-primary: #ffffff;
   --color-text-secondary: #deded7;
   --color-text-muted: #8f8f86;
@@ -338,25 +322,21 @@ html[data-theme="dark"] {
     #ffe9a8 100%
   );
 
-  /* Borders — fine white rims on black-on-black depth, gold reserved */
   --color-border-soft: rgba(255, 255, 255, 0.16);
   --color-border-strong: rgba(255, 255, 255, 0.26);
   --color-border-accent: rgba(240, 195, 90, 0.32);
   --navbar-border-rest: rgba(255, 255, 255, 0.05);
   --navbar-border-scrolled: rgba(240, 195, 90, 0.18);
 
-  /* Accent — benchmark gold + dark copper */
   --color-accent: #e8b94a;
   --color-accent-strong: #c9962e;
   --color-accent-contrast: #161208;
   --color-accent-glow: #ffd76e;
   --color-accent-soft: rgba(240, 195, 90, 0.4);
   --color-focus-ring: rgba(240, 195, 90, 0.55);
-  /* Micro voltage accent — use rarely (heat/limit moments only) */
+
   --color-voltage: #ff5a2f;
 
-  /* Status — success/warning/danger stay semantic; info goes neutral
-     steel (no blue in Blackout) */
   --color-success: #34d399;
   --color-warning: #fbbf24;
   --color-danger: #f87171;
@@ -374,7 +354,6 @@ html[data-theme="dark"] {
   --color-danger-text: #fecaca;
   --color-info-text: #f6e6bd;
 
-  /* Glow — thin warm-silver halos, no wash */
   --shadow-glow-soft: 0 0 10px rgba(240, 234, 220, 0.13),
     0 0 22px rgba(244, 206, 116, 0.06);
   --shadow-glow-strong: 0 0 16px rgba(255, 215, 110, 0.3),
@@ -394,10 +373,6 @@ html[data-theme="dark"] {
     #0f0f0f 100%
   );
 
-  /* Primary action surfaces — machined gunmetal keys. Four layers, top to
-     bottom: brushed hairline micro-texture, top bevel light, warm base
-     glow, and the graphite body (oversized so the slow gradientA sweep
-     reads as a sheen moving across dark metal). */
   --gradient-button-primary: repeating-linear-gradient(
       90deg,
       rgba(255, 255, 255, 0.022) 0 1px,
@@ -437,10 +412,6 @@ html[data-theme="dark"] {
     );
   --gradient-platform-twitch: linear-gradient(135deg, #7a3df0, #4c22a8);
 
-  /* Effect layer — embedded, machined. Buttons seat into the dark via an
-     inset rim light + bottom shadow instead of a halo wash; traces and
-     flair drop to thin precise halos; gold becomes burnished brass; the
-     beam trades neon pink/purple for gunmetal and brass. */
   --shadow-button: 0 2px 6px rgba(0, 0, 0, 0.5),
     0 1px 0 rgba(0, 0, 0, 0.6),
     inset 0 0 0 1px rgba(240, 195, 90, 0.34),
@@ -486,8 +457,7 @@ html[data-theme="dark"] {
   --shadow-gold-pill: 0 0 9px rgba(233, 181, 62, 0.4),
     0 0 18px rgba(180, 122, 30, 0.24);
   --color-gold-border: rgba(196, 150, 60, 0.5);
-  /* Glint becomes chrome on graphite — silver sweep with a warm gold
-     whisper at the tail. */
+
   --gradient-glint-text: linear-gradient(
     90deg,
     #dfe2e4 0%,
@@ -508,8 +478,6 @@ html[data-theme="dark"] {
   --shadow-back-button-hover: 0 0 14px rgba(255, 215, 110, 0.28);
 }
 
-/* Defer layout/paint cost of below-the-fold sections.
-   Content stays in DOM for SEO — browser skips rendering until near viewport. */
 .deferred-section-content {
   content-visibility: auto;
   contain-intrinsic-size: auto 500px;
@@ -583,8 +551,6 @@ body {
   color: var(--color-text-primary);
 }
 
-/* App shell + decorative background layers (markup in src/App.jsx).
-   The radial layer is the dominant visible field; the grid sits under it. */
 #app-shell {
   background-image: var(--gradient-app-bg);
   color: var(--color-text-primary);
@@ -1069,9 +1035,6 @@ html.animations-ready .gold-flair-pill {
   }
 }
 
-/* ── Blackout motion integration ──────────────────────────────────────────
-   Lights-off lab: same keyframes, slower pace, thinner traces. Effects
-   should feel like instruments idling, not an arcade attract loop. */
 html[data-theme="dark"].animations-ready .glow-button {
   animation-duration: 10s;
 }
@@ -1112,13 +1075,6 @@ html[data-theme="dark"] .glow-button:hover .glow-line {
   animation-duration: 6s;
 }
 
-/* ── Blackout material treatment ─────────────────────────────────────────
-   Buttons are dark metal at rest — gunmetal body, thin warm rim, top
-   light. Hover brings the energy forward. Filled CTAs become smoked
-   glass with a brass rim and warm-silver label. Roo Blue is untouched. */
-/* Keep micro-texture and bevel layers at natural scale; only the body
-   layer is oversized so the sweep animation moves a sheen, not the
-   texture. Button labels read off-white, not pure white. */
 html[data-theme="dark"] .glow-button {
   background-size: auto, auto, auto, 400% 400%;
   color: var(--color-text-primary);
@@ -1138,8 +1094,6 @@ html[data-theme="dark"]
     inset 0 -2px 6px rgba(0, 0, 0, 0.45);
 }
 
-/* Secondary CTA: smoked glass slab — top light, quiet steel edge, warm
-   rim only on hover. */
 html[data-theme="dark"] .glow-button.fps-boosts-button {
   background: linear-gradient(
       180deg,
@@ -1158,9 +1112,6 @@ html[data-theme="dark"] .glow-button.fps-boosts-button:hover {
     inset 0 -1px 0 rgba(0, 0, 0, 0.45), 0 0 12px rgba(255, 215, 110, 0.12);
 }
 
-/* Hero headline, line 1 — machined silver lit from the top, not a flat
-   white slab. Applies to nested .text-ink spans too (the heading split
-   renderer wraps segments in them). No-op in Roo Blue. */
 html[data-theme="dark"] .text-metal-display,
 html[data-theme="dark"] .text-metal-display .text-ink {
   background-image: linear-gradient(
@@ -1204,9 +1155,6 @@ html[data-theme="dark"] button.bg-accent-strong:hover {
     inset 0 1px 0 rgba(244, 244, 240, 0.18), 0 0 16px rgba(255, 215, 110, 0.18);
 }
 
-/* Referral "Get Started" (the one glow-button carrying from-accent
-   classes): a polished gold key with dark ink — matches the gold heading
-   and the gold-rimmed Login beside it. */
 html[data-theme="dark"] .glow-button[class*="from-accent"] {
   background-image: linear-gradient(
     135deg,
@@ -1222,8 +1170,6 @@ html[data-theme="dark"] .glow-button[class*="from-accent"] {
     inset 0 -2px 5px rgba(110, 75, 20, 0.4);
 }
 
-/* Accent gradient-clipped headings (e.g. "Join the Referral Program"):
-   keep the whole sweep bright — champagne to gold, never dark brass. */
 html[data-theme="dark"] .bg-clip-text.from-accent {
   background-image: linear-gradient(
     92deg,
@@ -1234,8 +1180,6 @@ html[data-theme="dark"] .bg-clip-text.from-accent {
   );
 }
 
-/* Disabled: never a dimmed gold fill (reads muddy on black). Smoked
-   graphite with a quiet gold rim until the form is valid. */
 html[data-theme="dark"] .glow-button[class*="from-accent"]:disabled,
 html[data-theme="dark"] .glow-button[class*="from-accent"][aria-disabled="true"] {
   background-image: linear-gradient(
@@ -1265,8 +1209,6 @@ html[data-theme="dark"]
     inset 0 -2px 5px rgba(110, 75, 20, 0.35);
 }
 
-/* Package divider: a precise energy line — thin bright core centered in
-   the 6px track, not a neon bar. */
 html[data-theme="dark"] .glow-button.packages-divider-line {
   background-color: transparent;
   background-image: linear-gradient(
@@ -1281,10 +1223,6 @@ html[data-theme="dark"] .glow-button.packages-divider-line {
   );
 }
 
-/* ── Theme switch ────────────────────────────────────────────────────────
-   Two-state Roo Blue ⇄ Blackout control. CRT icon = Roo Blue side, moon =
-   Blackout side. The thumb carries each theme's identity: cyan-blue
-   gradient in default, polished champagne-to-brass gold in dark. */
 .theme-switch {
   align-items: center;
   border-radius: 9999px;
@@ -1297,8 +1235,7 @@ html[data-theme="dark"] .glow-button.packages-divider-line {
   justify-content: space-between;
   width: 3.6rem;
   height: 1.9rem;
-  /* Icon cells are thumb-sized and sit exactly on the thumb's two landing
-     positions, so each icon is dead-center under the thumb. */
+
   padding: 0 3px;
   border-radius: 9999px;
   background-color: var(--color-surface-veil);
@@ -1355,7 +1292,6 @@ html[data-theme="dark"] .theme-switch-thumb {
   height: 0.85rem;
 }
 
-/* The icon the thumb covers is the ACTIVE side — ink it for contrast. */
 html:not([data-theme="dark"]) .theme-switch-icon-default {
   color: #ffffff;
 }
@@ -1364,7 +1300,6 @@ html[data-theme="dark"] .theme-switch-icon-dark {
   color: #161208;
 }
 
-/* Compact switch on narrow screens so the nav row never overflows. */
 @media (max-width: 639px) {
   .theme-switch-track {
     width: 3rem;
@@ -1387,7 +1322,6 @@ html[data-theme="dark"] .theme-switch-icon-dark {
   }
 }
 
-/* Navbar CTA: smoked metal pill with a brass rim in Blackout. */
 .nav-cta {
   background-image: var(--gradient-nav-cta);
 }
@@ -1409,12 +1343,6 @@ html[data-theme="dark"] .nav-cta:hover {
     inset 0 -2px 4px rgba(0, 0, 0, 0.45), 0 0 12px rgba(255, 215, 110, 0.12);
 }
 
-/* ── Blackout typography ──────────────────────────────────────────────────
-   Silver text on graphite; warm brass is precision light, not prose.
-   Static text set in the accent color (headings, prices, labels, stat
-   values) demotes to soft silver. Interactive elements (links, buttons)
-   keep the warm accent: active states are exactly where it belongs. Roo
-   Blue is untouched. */
 html[data-theme="dark"] .text-accent,
 html[data-theme="dark"] .text-cyan-300 {
   color: var(--color-text-display);
@@ -1431,8 +1359,6 @@ html[data-theme="dark"] svg.text-accent {
   color: var(--color-accent);
 }
 
-/* Gradient-clipped display text (hero line 2). Roo Blue keeps the brand
-   sweep. Blackout uses polished silver with a warm whisper at the tail. */
 .text-gradient-display {
   background-image: var(--gradient-display-text);
   -webkit-background-clip: text;
@@ -1440,10 +1366,6 @@ html[data-theme="dark"] svg.text-accent {
   color: transparent;
 }
 
-/* Line 2: polished chrome — silver sweep with a warm whisper at the
-   tail. No blue. */
-/* Hero emphasis line: polished metallic gold — champagne specular at the
-   start, bright gold core, brass depth, champagne flash at the tail. */
 html[data-theme="dark"] .text-gradient-display {
   background-image: linear-gradient(
     92deg,
@@ -1455,8 +1377,6 @@ html[data-theme="dark"] .text-gradient-display {
   );
 }
 
-/* Background-clipped text needs a little paint room for Manrope descenders
-   in WebKit. Cancel the layout impact so font and sizing stay unchanged. */
 .gold-flair-text,
 .blue-glint-text,
 .text-gradient-display,
@@ -1470,11 +1390,6 @@ html[data-theme="dark"] .text-gradient-display {
   margin-bottom: -0.12em;
 }
 
-/* ── Roo Blue legacy visual compatibility ────────────────────────────────
-   Default mode is the pre-Blackout site. Tokenized components may keep
-   their semantic classes for Blackout, but these marker classes restore
-   the original Roo Blue surfaces, rings, and glows where broad tokens
-   changed the visual weight. */
 html:not([data-theme="dark"]) .ri-services-skeleton {
   border-color: rgba(3, 105, 161, 0.2);
   background-image: linear-gradient(
@@ -2177,25 +2092,15 @@ html:not([data-theme="dark"]) .ri-hiw-trust-link:hover {
   filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.8));
 }
 
-/* ── Blackout de-blue compat layer ──────────────────────────────────────
-   Neutralizes literal sky/cyan/indigo Tailwind utilities that survive in
-   components. Gradient-clipped TEXT goes silver; gradient FILLS go
-   graphite; legacy sky borders/text go steel; legacy cyan-filled buttons
-   become black metal. Roo Blue is untouched. */
 html[data-theme="dark"] .bg-clip-text[class*="from-sky-"] {
   background-image: linear-gradient(90deg, #f4f4f0, #b9bdc0);
 }
 
-/* Gradient FILLS go graphite ONLY on interactive elements. Generic divs
-   are excluded on purpose: translucent gradient overlays sit on top of
-   real media (How It Works videos) and must never become opaque. */
 html[data-theme="dark"] a[class*="from-sky-"]:not(.bg-clip-text),
 html[data-theme="dark"] button[class*="from-sky-"]:not(.bg-clip-text) {
   background-image: linear-gradient(90deg, #2e2e33, #17171a);
 }
 
-/* Media tint overlays (video cards): keep them translucent — faint
-   silver-to-gold instead of sky/cyan. The video stays visible. */
 html[data-theme="dark"] [class*="from-sky-500/12"] {
   background-image: linear-gradient(
     135deg,
@@ -2205,7 +2110,6 @@ html[data-theme="dark"] [class*="from-sky-500/12"] {
   );
 }
 
-/* Decorative sky accent hairlines become gold energy lines. */
 html[data-theme="dark"] .h-1[class*="from-sky-"] {
   background-image: linear-gradient(
     90deg,
@@ -2248,7 +2152,6 @@ html[data-theme="dark"] [class*="border-indigo-"] {
   border-color: rgba(160, 160, 158, 0.3);
 }
 
-/* CSS containment: prevent animation repaints from invalidating parent/sibling elements. */
 .glow-button {
   contain: layout paint style;
 }
@@ -2258,7 +2161,6 @@ html[data-theme="dark"] [class*="border-indigo-"] {
   contain: paint;
 }
 
-/* Promote decorative blur blobs to GPU compositor layers (rasterized once, not per-frame). */
 .blur-2xl,
 .blur-3xl {
   contain: paint;
@@ -2276,7 +2178,6 @@ html.animations-ready .blur-3xl {
   -webkit-touch-callout: none !important;
 }
 
-/* Hides native webkit controls aggressively */
 .roo-logo-video::-webkit-media-controls,
 .roo-logo-video::-webkit-media-controls-enclosure,
 .roo-logo-video::-webkit-media-controls-panel,
@@ -2343,7 +2244,6 @@ html[data-theme="dark"] [class*="drop-shadow-[0_0"][class*="211,238"] {
   text-shadow: var(--text-shadow-heading-soft);
 }
 
-/* Lightweight rendering path for browsers likely running software compositing. */
 html.low-performance-mode {
   scroll-behavior: auto;
 }
@@ -2401,26 +2301,15 @@ html.low-performance-mode .low-perf-glow {
   text-shadow: none !important;
 }
 
-/* ── Software-compositing fast path (GPU OFF) ───────────────────────────
-   Goal: smooth scroll without GPU acceleration. Kill per-frame costs
-   (animations, blur layers, will-change, fixed pseudo-elements) while
-   preserving visual identity at rest. Filters are only dropped during
-   active scroll via is-scrolling — painted once at rest, zero cost. */
-
-/* Collapse the pseudo-element; restore gradient directly on body. */
 html.low-performance-mode body::before {
   content: none !important;
 }
 
-/* Force fixed attachment on the app wrapper so the 4-stop gradient rasters
-   once (cached layer) instead of re-rasterizing every scroll frame.
-   Body already has the same gradient — kill the duplicate on app-shell. */
 html.low-performance-mode #app-shell {
   background-attachment: fixed !important;
   background-image: none !important;
 }
 
-/* Freeze animations on specific glow/sparkle elements. */
 html.low-performance-mode .glow-button,
 html.low-performance-mode .sparkle-icon,
 html.low-performance-mode .glow-beam,
@@ -2430,26 +2319,20 @@ html.low-performance-mode .blue-glint-text {
   animation: none !important;
 }
 
-/* Strip sparkle filter entirely (drop-shadow = compositing cost). */
 html.low-performance-mode .sparkle-icon {
   filter: none !important;
 }
 
-/* Dim glow-beam without animation. */
 html.low-performance-mode .glow-beam {
   opacity: 0.6 !important;
 }
 
-/* Revert will-change — GPU layer promotion hurts in software mode. */
 html.low-performance-mode .site-navbar-glass,
 html.low-performance-mode .blur-2xl,
 html.low-performance-mode .blur-3xl {
   will-change: auto !important;
 }
 
-/* Hide ALL decorative blur elements — gaussian blur is the #1 CPU raster
-   cost in software compositing. Hiding is better than filter:none because
-   filter:none reveals ugly hard-edged colored shapes underneath. */
 html.low-performance-mode .blur-sm,
 html.low-performance-mode .blur-lg,
 html.low-performance-mode .blur-xl,
@@ -2459,7 +2342,6 @@ html.low-performance-mode [class*="blur-["] {
   display: none !important;
 }
 
-/* Strip multi-layer box-shadows and gradients on all glass/card surfaces. */
 html.low-performance-mode .glass-card-surface,
 html.low-performance-mode .glass-lite,
 html.low-performance-mode .glass-menu-surface {
@@ -2468,46 +2350,31 @@ html.low-performance-mode .glass-menu-surface {
   background-color: var(--color-surface-solid) !important;
 }
 
-
-/* No backdrop-filter = no need for stacking context isolation. */
 html.low-performance-mode .glass-premium,
 html.low-performance-mode .glass-lite,
 html.low-performance-mode .site-navbar-glass {
   isolation: auto !important;
 }
 
-/* Remove forced CPU layer on reservation banner. */
 html.low-performance-mode .reservation-banner-surface {
   transform: none !important;
   contain: none !important;
 }
 
-/* Kill backdrop-filter on fps-boosts-button (missed by glass-premium catch). */
 html.low-performance-mode .fps-boosts-button {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
   background: var(--color-surface-veil) !important;
 }
 
-/* Contain each major section to prevent cross-section paint invalidation.
-   Exclude the hero section (#top section) — paint containment clips the
-   tagline pill's box-shadow glow at the section boundary. */
 html.low-performance-mode section:not(#top > section) {
   contain: layout style;
 }
 
-/* content-visibility: auto can skip child layout when off-screen, which
-   may prevent IntersectionObserver from detecting VideoBadge cards.
-   Override to visible so video loading triggers correctly. */
 html.low-performance-mode #how-it-works .deferred-section-content {
   content-visibility: visible;
 }
 
-
-/* ── Raster cost reduction ────────────────────────────────────────────────
-   Kill looping animations, expensive filters, and unnecessary transitions.
-   Only opacity + transform transitions are preserved — they're cheap even in
-   software compositing and needed for fluid navbar fade/slide. */
 html.low-performance-mode *:not(.glow-line) {
   animation: none !important;
   filter: none !important;
@@ -2515,25 +2382,15 @@ html.low-performance-mode *:not(.glow-line) {
   transition-property: opacity, transform !important;
 }
 
-/* ── Decorative layer elimination ───────────────────────────────────────
-   Grid pattern (45deg repeating gradient over 1440x4613 @ 2x DPR) and
-   radial glow layer are pure decoration with huge raster cost. */
 html.low-performance-mode .app-bg-grid-layer,
 html.low-performance-mode .app-bg-radial-layer {
   display: none !important;
 }
 
-/* Contain the fixed navbar to prevent its repaint from invalidating the
-   entire document tree. Disable it while menus are open because dropdowns
-   intentionally overflow the header bounds. */
 html.low-performance-mode .site-nav:not(.nav-menu-open) {
   contain: layout style !important;
 }
 
-
-/* Route transition overlay: a 1440x900 fixed gradient that paints every frame.
-   When invisible (opacity-0), skip painting entirely. Always contain it so its
-   repaint never invalidates the document tree. */
 html.low-performance-mode .pointer-events-none[aria-hidden="true"] {
   contain: strict !important;
 }
@@ -2541,25 +2398,14 @@ html.low-performance-mode .pointer-events-none.opacity-0[aria-hidden="true"] {
   visibility: hidden !important;
 }
 
-/* Contain the fixed fps-boost aside to prevent full-document repaint. */
 html.low-performance-mode .fixed[class*="bottom-3"],
 html.low-performance-mode .fixed[class*="bottom-4"] {
   contain: layout style !important;
 }
 
-/* Cheap text-shadow replacement for the drop-shadow glow on headings.
-   text-shadow renders inline during text paint (no bitmap rasterization). */
 html.low-performance-mode [class*="drop-shadow-[0_0"][class*="189,248"] {
   text-shadow: var(--text-shadow-heading);
 }
-
-/* Navbar/banner layer promotion moved to low-perf mode only —
-   global will-change + isolation creates a compositing layer that
-   clips the hero pill's upward box-shadow glow. */
-
-/* glass-scroll-lite scroll kill removed — on GPU-accelerated devices,
-   backdrop-filter is hardware-composited and the frosty→translucent
-   flicker during scroll was more jarring than the compositing cost. */
 
 html.is-scrolling .scroll-blur-lite,
 html.low-performance-mode .scroll-blur-lite {
@@ -2567,7 +2413,6 @@ html.low-performance-mode .scroll-blur-lite {
   backdrop-filter: none !important;
 }
 
-/* Pause expensive CSS animations during active scroll to eliminate continuous repaints. */
 html.is-scrolling .glow-button,
 html.is-scrolling .sparkle-icon,
 html.is-scrolling .glow-beam,

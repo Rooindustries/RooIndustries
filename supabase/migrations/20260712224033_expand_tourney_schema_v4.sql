@@ -1,6 +1,3 @@
--- Schema-v4 expand phase. This migration is additive and rolling-deploy safe.
--- Activation and trigger replacement happen in the separate activation migration.
-
 set lock_timeout = '5s';
 set statement_timeout = '120s';
 
