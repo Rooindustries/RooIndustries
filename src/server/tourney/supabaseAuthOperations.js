@@ -12,6 +12,19 @@ const conflict = (message, code) => {
   return error;
 };
 
+const parseOperationPayload = (value) => {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value !== "string") return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  } catch {
+    return {};
+  }
+};
+
 const operationProjection = (row = {}) => ({
   id: row.id,
   key: row.operation_key,
@@ -21,7 +34,7 @@ const operationProjection = (row = {}) => ({
   desiredStatus: row.desired_status || "",
   desiredCredentialVersion: row.desired_credential_version || "",
   passwordHash: row.password_hash || "",
-  payload: row.operation_payload || {},
+  payload: parseOperationPayload(row.operation_payload),
   status: row.operation_status,
   leaseId: row.lease_id || "",
   leaseExpiresAt: row.lease_expires_at || "",
@@ -39,6 +52,28 @@ const playerColumns = `
   discord_oauth_global_name, discord_linked_at, discord_role_assigned_at,
   discord_role_last_error
 `;
+
+export const isSupabaseDecisionStateApplied = ({ operation, player } = {}) => {
+  if (!operation || !player) return false;
+  const desiredVersion = Number(operation.desired_credential_version);
+  if (!Number.isInteger(desiredVersion) || Number(player.version) < desiredVersion) {
+    return false;
+  }
+  if (player.status !== operation.desired_status) return false;
+  if (operation.desired_status !== "approved") return true;
+  const payload = parseOperationPayload(operation.operation_payload);
+  return String(player.approved_role_play || "") === String(payload.approvedRolePlay || "") &&
+    String(player.registration_pool || "main") === String(payload.registrationPool || "main");
+};
+
+export const isSupabasePasswordStateApplied = ({ operation, player } = {}) => {
+  if (!operation || !player) return false;
+  const desiredVersion = Number(operation.desired_credential_version);
+  return Number.isInteger(desiredVersion) &&
+    Number(player.version) >= desiredVersion &&
+    player.status === "approved" &&
+    String(player.password_hash || "") === String(operation.password_hash || "");
+};
 
 const selectOperation = async ({ sql, operationKey }) => {
   const rows = await sql`
@@ -92,8 +127,20 @@ export const claimSupabaseRegistrationDecision = async ({
     env,
     lockKey: "roo-tourney-registration-decisions",
     callback: async (sql) => {
+      await sql`
+        select pg_catalog.pg_advisory_xact_lock(
+          pg_catalog.hashtextextended('roo-tourney-registration-decisions', 0)
+        )
+      `;
       const operationKey = `decision:${playerId}`;
+      const desiredStatus = purpose === "approve" ? "approved" : "denied";
       let operation = await selectOperation({ sql, operationKey });
+      if (operation && operation.desired_status !== desiredStatus) {
+        throw conflict(
+          "The registration already has the opposite decision.",
+          "TOURNEY_DECISION_CHANGED"
+        );
+      }
       if (operation?.operation_status === "completed") {
         return {
           operation: operationProjection(operation),
@@ -146,7 +193,13 @@ export const claimSupabaseRegistrationDecision = async ({
           and operation_status in ('pending', 'processing', 'auth_applied', 'retry')
           and player_id <> ${playerId}
       `;
-      const decision = await resolveDecision({ player, reservations });
+      const decision = await resolveDecision({
+        player,
+        reservations: reservations.map((entry) => ({
+          ...entry,
+          operation_payload: parseOperationPayload(entry.operation_payload),
+        })),
+      });
       const leaseId = crypto.randomUUID();
       const leaseExpiresAt = new Date(Date.now() + LEASE_MS).toISOString();
       const payload = {
@@ -158,7 +211,8 @@ export const claimSupabaseRegistrationDecision = async ({
       if (operation) {
         if (
           operation.desired_status !== decision.status ||
-          operation.operation_payload?.approvedRolePlay !== payload.approvedRolePlay
+          parseOperationPayload(operation.operation_payload).approvedRolePlay !==
+            payload.approvedRolePlay
         ) {
           throw conflict(
             "The registration decision changed after it was claimed.",
@@ -185,7 +239,7 @@ export const claimSupabaseRegistrationDecision = async ({
           ) values (
             ${operationKey}, ${playerId}, ${token?.id || null}, 'decision',
             ${decision.status}, 'player', ${String(Number(player.version || 1) + 1)},
-            ${JSON.stringify(payload)}::jsonb, 'processing', ${leaseId},
+            ${sql.json(payload)}, 'processing', ${leaseId},
             ${leaseExpiresAt}, 1
           )
           returning id, operation_key, player_id, token_id, operation_kind,
@@ -217,7 +271,12 @@ export const finalizeSupabaseRegistrationDecision = async ({
       ) {
         throw conflict("Decision operation lease changed.", "TOURNEY_AUTH_LEASE_CHANGED");
       }
-      const payload = current.operation_payload || {};
+      const payload = parseOperationPayload(current.operation_payload);
+      const desiredVersion = Number(current.desired_credential_version);
+      const previousVersion = desiredVersion - 1;
+      if (!Number.isInteger(desiredVersion) || previousVersion < 1) {
+        throw conflict("Decision operation version is invalid.", "TOURNEY_AUTH_VERSION_INVALID");
+      }
       const now = nowIso();
       const rows = current.desired_status === "approved"
         ? await sql`
@@ -226,20 +285,42 @@ export const finalizeSupabaseRegistrationDecision = async ({
                 approved_role_play = ${payload.approvedRolePlay || ""},
                 registration_pool = ${payload.registrationPool || "main"},
                 approved_at = ${now}, approved_by = ${payload.actorUsername || ""},
-                updated_at = ${now}, version = version + 1
+                updated_at = ${now}, version = ${desiredVersion}
             where id = ${current.player_id} and status = 'pending'
+              and version = ${previousVersion}
             returning ${sql(playerColumns.split(",").map((value) => value.trim()))}
           `
         : await sql`
             update tourney.tourney_players
             set status = 'denied', denied_at = ${now},
                 denied_by = ${payload.actorUsername || ""}, updated_at = ${now},
-                version = version + 1
+                version = ${desiredVersion}
             where id = ${current.player_id} and status = 'pending'
+              and version = ${previousVersion}
             returning ${sql(playerColumns.split(",").map((value) => value.trim()))}
           `;
       if (!rows?.[0]) {
-        throw conflict("Registration is no longer pending.", "TOURNEY_DECISION_NOT_PENDING");
+        const latest = await selectPlayer({ sql, playerId: current.player_id, forUpdate: true });
+        if (isSupabaseDecisionStateApplied({ operation: current, player: latest })) {
+          await sql`
+            update tourney.tourney_player_tokens
+            set used_at = ${now}, used_by = ${payload.actorUsername || ""}
+            where player_id = ${current.player_id}
+              and purpose in ('approve', 'deny') and used_at is null
+          `;
+          await sql`
+            update tourney.tourney_player_auth_operations
+            set operation_status = 'auth_applied', lease_id = null,
+                lease_expires_at = null, next_attempt_at = now(),
+                last_error = null, updated_at = now()
+            where id = ${current.id}
+          `;
+          return latest;
+        }
+        throw conflict(
+          "Registration state changed before this decision was applied.",
+          "TOURNEY_DECISION_STATE_DIVERGED"
+        );
       }
       await sql`
         update tourney.tourney_player_tokens
@@ -268,7 +349,7 @@ export const claimSupabasePasswordReset = async ({
     lockKey: `roo-tourney-password-reset:${tokenHash}`,
     callback: async (sql) => {
       const tokens = await sql`
-        select id, player_id, used_at, expires_at
+        select id, player_id, recipient_version, used_at, expires_at
         from tourney.tourney_player_tokens
         where token_hash = ${tokenHash} and purpose = 'reset'
         limit 1
@@ -307,6 +388,9 @@ export const claimSupabasePasswordReset = async ({
       }
       const player = await selectPlayer({ sql, playerId: token.player_id, forUpdate: true });
       if (!player || player.status !== "approved") {
+        throw conflict("Invalid or expired reset link.", "TOURNEY_RESET_INVALID");
+      }
+      if (String(token.recipient_version || "") !== String(player.version || "1")) {
         throw conflict("Invalid or expired reset link.", "TOURNEY_RESET_INVALID");
       }
       const leaseId = crypto.randomUUID();
@@ -363,19 +447,48 @@ export const finalizeSupabasePasswordReset = async ({
       ) {
         throw conflict("Reset operation lease changed.", "TOURNEY_AUTH_LEASE_CHANGED");
       }
+      const desiredVersion = Number(current.desired_credential_version);
+      const previousVersion = desiredVersion - 1;
+      if (!Number.isInteger(desiredVersion) || previousVersion < 1) {
+        throw conflict("Reset operation version is invalid.", "TOURNEY_AUTH_VERSION_INVALID");
+      }
       const now = nowIso();
       const rows = await sql`
         update tourney.tourney_players
         set password_hash = ${current.password_hash}, updated_at = ${now},
-            version = version + 1
+            version = ${desiredVersion}
         where id = ${current.player_id} and status = 'approved'
+          and version = ${previousVersion}
         returning ${sql(playerColumns.split(",").map((value) => value.trim()))}
       `;
-      if (!rows?.[0]) throw conflict("Invalid reset account.", "TOURNEY_RESET_INVALID");
+      if (!rows?.[0]) {
+        const latest = await selectPlayer({ sql, playerId: current.player_id, forUpdate: true });
+        if (isSupabasePasswordStateApplied({ operation: current, player: latest })) {
+          await sql`
+            update tourney.tourney_player_tokens
+            set used_at = ${now}, used_by = ${latest.username}
+            where player_id = ${current.player_id}
+              and purpose = 'reset' and used_at is null
+          `;
+          await sql`
+            update tourney.tourney_player_auth_operations
+            set operation_status = 'auth_applied', lease_id = null,
+                lease_expires_at = null, next_attempt_at = now(),
+                last_error = null, updated_at = now()
+            where id = ${current.id}
+          `;
+          return latest;
+        }
+        throw conflict(
+          "The password state changed before this reset was applied.",
+          "TOURNEY_RESET_STATE_DIVERGED"
+        );
+      }
       await sql`
         update tourney.tourney_player_tokens
         set used_at = ${now}, used_by = ${rows[0].username}
-        where id = ${current.token_id} and used_at is null
+        where player_id = ${current.player_id}
+          and purpose = 'reset' and used_at is null
       `;
       await sql`
         update tourney.tourney_player_auth_operations

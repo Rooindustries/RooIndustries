@@ -33,10 +33,15 @@ const getResend = (env = process.env) => {
 const getFromAddress = (env = process.env) =>
   String(env.FROM_EMAIL || DEFAULT_FROM).trim();
 
-const sendWithIdempotency = (resend, message, idempotencyKey = "") =>
-  idempotencyKey
-    ? resend.emails.send(message, { idempotencyKey })
+const sendWithIdempotency = (resend, message, idempotencyKey = "", signal) => {
+  const options = {
+    ...(idempotencyKey ? { idempotencyKey } : {}),
+    ...(signal ? { signal } : {}),
+  };
+  return Object.keys(options).length > 0
+    ? resend.emails.send(message, options)
     : resend.emails.send(message);
+};
 
 const buildDecisionUrl = ({ baseUrl, token, purpose, role }) => {
   const url = new URL("/tourney/decision", baseUrl);
@@ -98,6 +103,7 @@ const sendTemplateEmail = async ({
   to,
   template,
   idempotencyKey = "",
+  signal,
   env = process.env,
 } = {}) => {
   const recipients = normalizeRecipients(to);
@@ -115,7 +121,8 @@ const sendTemplateEmail = async ({
       html: template.html,
       text: template.text,
     },
-    idempotencyKey
+    idempotencyKey,
+    signal
   );
   if (error) {
     throw Object.assign(new Error("Unable to send Roo Industries email."), {
@@ -221,11 +228,13 @@ export async function sendTourneyAppealAdminEmail({
   baseUrl,
   sampleMode = false,
   idempotencyKey = "",
+  signal,
   env = process.env,
 } = {}) {
   return sendTemplateEmail({
     to: recipients,
     idempotencyKey,
+    signal,
     env,
     template: buildTourneyAppealAdminEmail({
       appeal,
@@ -242,11 +251,13 @@ export async function sendTourneyAppealConfirmationEmail({
   baseUrl,
   sampleMode = false,
   idempotencyKey = "",
+  signal,
   env = process.env,
 } = {}) {
   return sendTemplateEmail({
     to,
     idempotencyKey,
+    signal,
     env,
     template: buildTourneyAppealConfirmationEmail({
       appeal,
@@ -262,11 +273,13 @@ export async function sendTourneyPayoutNotificationEmail({
   baseUrl,
   sampleMode = false,
   idempotencyKey = "",
+  signal,
   env = process.env,
 } = {}) {
   return sendTemplateEmail({
     to,
     idempotencyKey,
+    signal,
     env,
     template: buildTourneyPayoutNotificationEmail({
       payout,
@@ -281,6 +294,7 @@ export async function sendTourneyRegistrationApprovalEmails({
   tokens = [],
   baseUrl,
   idempotencyKey = "",
+  signal,
   env = process.env,
 } = {}) {
   const resend = getResend(env);
@@ -365,7 +379,8 @@ export async function sendTourneyRegistrationApprovalEmails({
         subject: `Roo Industries registration: ${player.displayName || player.discord}`,
         html,
       },
-      idempotencyKey ? `${idempotencyKey}:${recipientKey}`.slice(0, 256) : ""
+      idempotencyKey ? `${idempotencyKey}:${recipientKey}`.slice(0, 256) : "",
+      signal
     );
 
     if (error) {
@@ -384,6 +399,7 @@ export async function sendTourneyPlayerApprovedEmail({
   player,
   baseUrl,
   idempotencyKey = "",
+  signal,
   env = process.env,
 } = {}) {
   const resend = getResend(env);
@@ -441,7 +457,7 @@ export async function sendTourneyPlayerApprovedEmail({
     ]
       .filter(Boolean)
       .join("\n"),
-  }, idempotencyKey);
+  }, idempotencyKey, signal);
 
   if (error) {
     throw Object.assign(new Error("Unable to send player approval email."), {
@@ -458,11 +474,13 @@ export async function sendTourneyDiscordInviteEmail({
   baseUrl,
   sampleMode = false,
   idempotencyKey = "",
+  signal,
   env = process.env,
 } = {}) {
   return sendTemplateEmail({
     to: to || player?.email,
     idempotencyKey,
+    signal,
     env,
     template: buildTourneyDiscordInviteEmailTemplate({
       player,
@@ -478,6 +496,7 @@ export async function sendTourneyResetEmail({
   token,
   baseUrl,
   idempotencyKey = "",
+  signal,
   env = process.env,
 } = {}) {
   const resend = getResend(env);
@@ -499,7 +518,7 @@ export async function sendTourneyResetEmail({
         <p style="font-size:13px;color:#475569">This link expires in 1 hour.</p>
       </div>
     `,
-  }, idempotencyKey);
+  }, idempotencyKey, signal);
 
   if (error) {
     throw Object.assign(new Error("Unable to send reset email."), {

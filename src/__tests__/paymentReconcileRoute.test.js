@@ -34,16 +34,14 @@ const loadHandler = async ({ authorized = true } = {}) => {
     events.push("credentials");
     return { checked: 0 };
   });
-  const reconcileTourneyExternalOperations = jest.fn(async () => {
-    events.push("tourney-external");
-    return { claimed: 0, applied: 0 };
+  const runTourneyReconciliation = jest.fn(async () => {
+    events.push("tourney-full");
+    return {
+      skipped: false,
+      durationMs: 25,
+      summary: { tourneyParity: { status: "clean" } },
+    };
   });
-  const reconcileTourneyEmailDispatches = jest.fn(async () => ({ claimed: 0, sent: 0 }));
-  const reconcileTourneyMirror = jest.fn(async () => ({ enabled: false, failed: 0 }));
-  const refreshTourneyCutoverClock = jest.fn(async () => ({ clean_since: null }));
-  const resolveTourneyStorePolicy = jest.fn(() => ({ mirrorEnabled: false }));
-  const runTourneyParity = jest.fn(async () => ({ status: "clean" }));
-  const runTourneyShadowReadSamples = jest.fn(async () => ({ sampled: 10 }));
   const adminRpc = jest.fn(async (name) => {
     events.push(`rpc:${name}`);
     return { data: {}, error: null };
@@ -55,6 +53,9 @@ const loadHandler = async ({ authorized = true } = {}) => {
     failed: 0,
   });
 
+  jest.doMock("../server/safeErrorLog.js", () => ({
+    logSafeError: jest.fn(),
+  }));
   jest.doMock("../server/api/payment/flow.js", () => ({
     authorizeCronRequest: jest.fn(() => {
       if (!authorized) throw Object.assign(new Error("Unauthorized"), { status: 403 });
@@ -77,18 +78,8 @@ const loadHandler = async ({ authorized = true } = {}) => {
   jest.doMock("../server/supabase/credentialRecovery.js", () => ({
     reconcileCredentialOperations,
   }));
-  jest.doMock("../server/tourney/externalOperations.js", () => ({
-    reconcileTourneyExternalOperations,
-  }));
-  jest.doMock("../server/tourney/emailDispatch.js", () => ({
-    reconcileTourneyEmailDispatches,
-  }));
-  jest.doMock("../server/tourney/store.js", () => ({
-    reconcileTourneyMirror,
-    refreshTourneyCutoverClock,
-    resolveTourneyStorePolicy,
-    runTourneyParity,
-    runTourneyShadowReadSamples,
+  jest.doMock("../server/tourney/reconcile.js", () => ({
+    runTourneyReconciliation,
   }));
   jest.doMock("../server/api/payment/backend.js", () => ({
     createPaymentBackendClient: jest.fn(() => ({
@@ -107,13 +98,7 @@ const loadHandler = async ({ authorized = true } = {}) => {
     events,
     adminRpc,
     reconcileCredentialOperations,
-    reconcileTourneyExternalOperations,
-    reconcileTourneyEmailDispatches,
-    reconcileTourneyMirror,
-    refreshTourneyCutoverClock,
-    resolveTourneyStorePolicy,
-    runTourneyParity,
-    runTourneyShadowReadSamples,
+    runTourneyReconciliation,
     reconcileReverseMirror,
   };
 };
@@ -170,10 +155,8 @@ describe("payment reconciliation route authorization", () => {
     expect(loaded.cleanupExpiredRateLimitBuckets).not.toHaveBeenCalled();
   });
 
-  test("tourney-only scope bypasses commerce and completes parity work", async () => {
+  test("keeps the manual Tourney scope while the shared scheduler uses a bounded budget", async () => {
     const loaded = await loadHandler();
-    loaded.resolveTourneyStorePolicy.mockReturnValue({ mirrorEnabled: true });
-    loaded.reconcileTourneyMirror.mockResolvedValue({ enabled: true, failed: 0 });
     const { response, state } = createResponse();
 
     await loaded.handler(
@@ -185,19 +168,74 @@ describe("payment reconciliation route authorization", () => {
     );
 
     expect(state.status).toBe(200);
-    expect(state.body.ok).toBe(true);
-    expect(state.body.summary.tourneyParity).toEqual({ status: "clean" });
-    expect(loaded.reconcileTourneyExternalOperations).toHaveBeenCalledWith({ limit: 10 });
-    expect(loaded.reconcileTourneyEmailDispatches).toHaveBeenCalledWith({ limit: 10 });
-    expect(loaded.reconcileTourneyMirror).toHaveBeenCalledWith({ limit: 100 });
-    expect(loaded.runTourneyShadowReadSamples).toHaveBeenCalledWith({ rounds: 10 });
-    expect(loaded.refreshTourneyCutoverClock).toHaveBeenCalledTimes(1);
+    expect(state.body).toEqual({
+      ok: true,
+      skipped: false,
+      durationMs: 25,
+      summary: { tourneyParity: { status: "clean" } },
+    });
+    expect(loaded.runTourneyReconciliation).toHaveBeenCalledWith();
     expect(loaded.syncSanityCommerceChanges).not.toHaveBeenCalled();
     expect(loaded.reconcilePaymentSessions).not.toHaveBeenCalled();
-    expect(loaded.reconcileReverseMirror).not.toHaveBeenCalled();
   });
 
-  test("finishes payment recovery before the durable Tourney side-effect queue", async () => {
+  test("safely skips Tourney reconciliation while another worker holds the lease", async () => {
+    const loaded = await loadHandler();
+    loaded.runTourneyReconciliation.mockResolvedValue({
+      skipped: true,
+      reason: "already_running",
+      summary: {},
+    });
+    const { response, state } = createResponse();
+
+    await loaded.handler({ method: "GET", headers: {} }, response);
+
+    expect(state.status).toBe(200);
+    expect(state.body.summary.tourneyReconciliation).toEqual({
+      skipped: true,
+      reason: "already_running",
+    });
+    expect(loaded.adminRpc).toHaveBeenCalledWith(
+      "roo_record_reconciliation_checkpoint",
+      expect.any(Object)
+    );
+  });
+
+  test("keeps payment recovery successful when Tourney reconciliation is pending", async () => {
+    const loaded = await loadHandler();
+    loaded.runTourneyReconciliation.mockRejectedValue(Object.assign(
+      new Error("mirror unavailable"),
+      {
+        failedStage: "tourneyMirror",
+        partialSummary: {
+          tourneyExternalOperations: { claimed: 1, applied: 1 },
+        },
+      }
+    ));
+    const { response, state } = createResponse();
+
+    await loaded.handler({ method: "GET", headers: {} }, response);
+
+    expect(state.status).toBe(200);
+    expect(state.body).toMatchObject({
+      ok: true,
+      summary: {
+        tourneyReconciliation: {
+          pending: true,
+          failedStage: "tourneyMirror",
+          partialSummary: {
+            tourneyExternalOperations: { claimed: 1, applied: 1 },
+          },
+        },
+      },
+    });
+    expect(loaded.adminRpc).toHaveBeenCalledWith(
+      "roo_record_reconciliation_checkpoint",
+      expect.any(Object)
+    );
+  });
+
+  test("runs the Tourney worker independently on the shared payment schedule", async () => {
     const previous = process.env.SUPABASE_SOCIAL_AUTH_ENABLED;
     const previousHardening = process.env.TOURNEY_HARDENING_V4_ENABLED;
     const previousGuild = process.env.DISCORD_GUILD_ID;
@@ -209,14 +247,10 @@ describe("payment reconciliation route authorization", () => {
       const { response, state } = createResponse();
       await loaded.handler({ method: "GET", headers: {} }, response);
       expect(state.status).toBe(200);
-      const externalIndex = loaded.events.indexOf("tourney-external");
-      const paymentIndexes = loaded.events
-        .map((event, index) => (event.startsWith("payment:") ? index : -1))
-        .filter((index) => index >= 0);
-      expect(paymentIndexes).toHaveLength(2);
-      expect(externalIndex).toBeGreaterThan(Math.max(...paymentIndexes));
-      expect(loaded.reconcileTourneyExternalOperations).toHaveBeenCalledWith({
-        limit: 10,
+      expect(loaded.events).toContain("tourney-full");
+      expect(loaded.events.filter((event) => event.startsWith("payment:"))).toHaveLength(2);
+      expect(loaded.runTourneyReconciliation).toHaveBeenCalledWith({
+        budgetMs: 90_000,
       });
       expect(loaded.adminRpc).toHaveBeenCalledWith(
         "roo_reconcile_account_security",

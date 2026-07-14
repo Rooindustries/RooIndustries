@@ -428,6 +428,34 @@ describe("tourney auth", () => {
     ).resolves.toBe(true);
   });
 
+  test("uses only the mirrored account snapshot after hardening", async () => {
+    const auth = loadAuth();
+    const persistedHash = await bcrypt.hash("persisted-password", 4);
+    const env = buildEnv(
+      [{ username: "env-owner", role: "owner", passwordHash: "env-hash" }],
+      {
+        TOURNEY_HARDENING_V4_ENABLED: "1",
+        TOURNEY_BOOTSTRAP_ACCOUNTS_JSON: JSON.stringify([
+          { username: "bootstrap", role: "caster", passwordHash: "bootstrap-hash" },
+        ]),
+      }
+    );
+    const accounts = await auth.readEffectiveTourneyAccounts({
+      env,
+      readPersistedAccountsJson: async () => JSON.stringify([
+        {
+          username: "persisted-owner",
+          role: "owner",
+          passwordHash: persistedHash,
+          active: true,
+          version: "9",
+        },
+      ]),
+    });
+
+    expect(accounts.map((account) => account.username)).toEqual(["persisted-owner"]);
+  });
+
   test("allows an owner to rotate only their own owner password", async () => {
     const auth = loadAuth();
     const originalHash = await bcrypt.hash("old-owner-password", 4);

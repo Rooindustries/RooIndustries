@@ -6,11 +6,13 @@ import { tourneyMutationFetch, tourneyMutationSuccessMessage } from "./tourneyMu
 export function TourneyForgotForm() {
   const [login, setLogin] = useState("");
   const [message, setMessage] = useState("");
+  const [isSuccess, setIsSuccess] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     setIsBusy(true);
+    setIsSuccess(false);
     setMessage("");
 
     try {
@@ -23,11 +25,13 @@ export function TourneyForgotForm() {
       if (!response.ok || data.ok !== true) {
         throw new Error(data.error || "Unable to send reset link.");
       }
+      setIsSuccess(true);
       setMessage(tourneyMutationSuccessMessage(
         data,
         "If the account exists, a reset link was sent."
       ));
     } catch (error) {
+      setIsSuccess(false);
       setMessage(error?.message || "Unable to send reset link.");
     } finally {
       setIsBusy(false);
@@ -50,7 +54,10 @@ export function TourneyForgotForm() {
         {isBusy ? "Sending..." : "Send reset link"}
       </button>
       {message ? (
-        <p className="tourney-form-message is-success" role="status">
+        <p
+          className={isSuccess ? "tourney-form-message is-success" : "tourney-form-message"}
+          role={isSuccess ? "status" : "alert"}
+        >
           {message}
         </p>
       ) : null}
@@ -97,6 +104,7 @@ export function TourneyResetForm() {
         "Password updated. You can log in now."
       ));
     } catch (error) {
+      setIsSuccess(false);
       setMessage(error?.message || "Unable to reset password.");
     } finally {
       setIsBusy(false);
@@ -127,7 +135,7 @@ export function TourneyResetForm() {
       {message ? (
         <p
           className={isSuccess ? "tourney-form-message is-success" : "tourney-form-message"}
-          role="status"
+          role={isSuccess ? "status" : "alert"}
         >
           {message}
         </p>

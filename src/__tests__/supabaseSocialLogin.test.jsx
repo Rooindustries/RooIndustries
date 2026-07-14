@@ -116,6 +116,29 @@ describe("Supabase social login", () => {
     expect(mockSignInWithOAuth).not.toHaveBeenCalled();
   });
 
+  test("requests guild joining only for Tourney Discord OAuth", async () => {
+    render(
+      <SupabaseSocialLogin
+        flow="tourney"
+        nextPath="/tourney"
+        providerIds={["discord"]}
+        variant="tourney"
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Continue with Discord" }));
+
+    await waitFor(() => {
+      expect(mockSignInWithOAuth).toHaveBeenCalledWith({
+        provider: "discord",
+        options: {
+          redirectTo:
+            "http://localhost/auth/callback?intent=11111111-1111-4111-8111-111111111111",
+          scopes: "identify email guilds.join",
+        },
+      });
+    });
+  });
+
   test("runs the draft saver before a social signup redirect", async () => {
     const saveDraft = jest.fn();
     render(

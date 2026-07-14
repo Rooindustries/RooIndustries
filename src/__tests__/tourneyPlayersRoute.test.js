@@ -64,19 +64,21 @@ jest.mock("../server/tourney/playerStore", () => ({
 
 const { POST } = require("../../app/api/tourney/players/route.js");
 
-const makeJsonRequest = (payload, cookie = "caster-session") => ({
+const makeJsonRequest = (payload, cookie = "caster-session", contentLength = "") => ({
   url: "https://www.rooindustries.com/api/tourney/players",
   headers: {
-    get: (name) =>
-      String(name || "").toLowerCase() === "content-type"
-        ? "application/json"
-        : "",
+    get: (name) => {
+      const key = String(name || "").toLowerCase();
+      if (key === "content-type") return "application/json";
+      if (key === "content-length") return contentLength;
+      return "";
+    },
   },
   cookies: {
     get: (name) =>
       name === "tourney_session" && cookie ? { value: cookie } : undefined,
   },
-  json: async () => payload,
+  text: async () => JSON.stringify(payload),
 });
 
 describe("tourney players API route", () => {
@@ -150,6 +152,30 @@ describe("tourney players API route", () => {
       baseUrl: "https://www.rooindustries.com",
       },
     });
+  });
+
+  test("does not queue another approval email for an already-completed decision", async () => {
+    mockApplyRegistrationDecision.mockResolvedValue({
+      id: "player_1",
+      email: "playerone@example.com",
+      discord: "PlayerOne#1234",
+      decisionTransitioned: false,
+    });
+
+    const response = await POST(makeJsonRequest({
+      action: "approve",
+      playerId: "player_1",
+      approvedRolePlay: "Support",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mockEnqueueTourneyEmailDispatch).not.toHaveBeenCalled();
+  });
+
+  test("rejects an oversized player mutation", async () => {
+    const response = await POST(makeJsonRequest({ action: "approve" }, "caster-session", "32769"));
+    expect(response.status).toBe(413);
+    expect(mockApplyRegistrationDecision).not.toHaveBeenCalled();
   });
 
   test("allows admins and casters to update public player details", async () => {

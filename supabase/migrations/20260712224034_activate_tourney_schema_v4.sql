@@ -1,5 +1,5 @@
--- Schema-v4 activation phase. Apply only while Tourney writes are paused and
--- after the expand migration exists on both Supabase and Neon.
+-- Schema-v4 install phase. This migration is additive and safe to install
+-- before the final pause. Runtime activation is a separate audited RPC below.
 
 set lock_timeout = '5s';
 set statement_timeout = '120s';
@@ -50,7 +50,7 @@ begin
 end;
 $$;
 
-create or replace function tourney.capture_mirror_event()
+create or replace function tourney.capture_mirror_event_v4()
 returns trigger
 language plpgsql
 security definer
@@ -58,18 +58,28 @@ set search_path = ''
 as $$
 declare
   v_row jsonb := case when tg_op = 'DELETE' then to_jsonb(old) else to_jsonb(new) end;
-  v_enabled boolean := coalesce(nullif(current_setting('roo.tourney_mirror_enabled', true), ''), '0') in ('1', 'true', 'on');
-  v_origin text := coalesce(nullif(current_setting('roo.tourney_backend', true), ''), 'supabase');
-  v_generation integer := coalesce(nullif(current_setting('roo.tourney_generation', true), ''), '0')::integer;
   v_command_id text := nullif(current_setting('roo.tourney_command_id', true), '');
+  v_meta tourney.cutover_metadata%rowtype;
   v_logical_table text;
   v_key jsonb;
   v_data jsonb := case when tg_op = 'DELETE' then null else v_row end;
   v_hash text;
 begin
-  if not v_enabled or current_setting('roo.tourney_mirror_apply', true) = '1' then
+  if current_setting('roo.tourney_mirror_apply', true) = '1' then
     if tg_op = 'DELETE' then return old; end if;
     return new;
+  end if;
+  select * into v_meta from tourney.cutover_metadata
+  where id = 'tourney' for share;
+  if v_meta.id is null or not v_meta.hardened_active
+     or v_meta.primary_backend <> 'supabase' or v_meta.generation < 1 then
+    raise exception 'Tourney mirror source authority is invalid'
+      using errcode = '55000';
+  end if;
+  if v_command_id is null or pg_catalog.length(v_command_id) not between 3 and 512
+     or v_command_id ~ '[[:cntrl:]]' then
+    raise exception 'Tourney mirror command context is required'
+      using errcode = '22023';
   end if;
   select logical_table into v_logical_table
   from tourney.mirror_contracts
@@ -85,31 +95,12 @@ begin
     command_id, source_backend, generation, table_name, operation,
     record_key, record_data, record_hash, status
   ) values (
-    v_command_id, v_origin, v_generation, v_logical_table,
+    v_command_id, 'supabase', v_meta.generation, v_logical_table,
     case when tg_op = 'DELETE' then 'delete' else 'upsert' end,
     v_key, v_data, v_hash, 'pending'
   );
   if tg_op = 'DELETE' then return old; end if;
   return new;
-end;
-$$;
-
-do $$
-declare v_contract record;
-begin
-  for v_contract in
-    select logical_table, supabase_relation
-    from tourney.mirror_contracts where enabled order by logical_table
-  loop
-    execute format(
-      'drop trigger if exists capture_tourney_mirror_event on %s',
-      v_contract.supabase_relation::regclass
-    );
-    execute format(
-      'create trigger capture_tourney_mirror_event after insert or update or delete on %s for each row execute function tourney.capture_mirror_event()',
-      v_contract.supabase_relation::regclass
-    );
-  end loop;
 end;
 $$;
 
@@ -151,7 +142,7 @@ begin
   from tourney.cutover_metadata
   where id = 'tourney'
   for update;
-  if not found
+  if v_meta.id is null
      or v_meta.primary_backend <> 'supabase'
      or not v_meta.writes_paused
      or v_meta.generation < 1
@@ -230,25 +221,51 @@ $$;
 create index if not exists tourney_email_dispatches_history_v4_idx
   on tourney.email_dispatches (dispatch_kind, recipient_hash);
 
+create or replace function public.roo_backfill_tourney_email_history_v4(
+  p_actor text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_meta tourney.cutover_metadata%rowtype;
+  v_count integer := 0;
+begin
+  if btrim(coalesce(p_actor, '')) = '' or length(p_actor) > 120 then
+    raise exception 'Tourney email history actor is invalid' using errcode = '22023';
+  end if;
+  select * into v_meta from tourney.cutover_metadata
+  where id = 'tourney' for update;
+  if v_meta.id is null
+     or v_meta.primary_backend <> 'supabase'
+     or v_meta.generation <> 1
+     or not v_meta.writes_paused
+     or not v_meta.hardened_active then
+    raise exception 'Tourney email history backfill controls are not ready'
+      using errcode = '55000';
+  end if;
 insert into tourney.email_dispatches(
   id,idempotency_key,command_id,dispatch_kind,recipient,recipient_hash,
   payload,status,provider_message_id,sent_at,created_at,updated_at
 )
-select tourney.history_uuid(candidate.key),candidate.key,candidate.command_id,
+select tourney.history_uuid(candidate.key),candidate.key,null::text,
   candidate.kind,candidate.recipient,
   encode(extensions.digest(convert_to(candidate.recipient,'UTF8'),'sha256'),'hex'),
   candidate.payload,candidate.status,candidate.provider_message_id,candidate.sent_at,
   candidate.occurred_at,candidate.occurred_at
 from (
-  select distinct
+  select
     'history:registration:'||token.player_id||':'||lower(token.recipient_email) key,
     'history:registration:'||token.player_id command_id,'registration' kind,
     lower(token.recipient_email) recipient,
     jsonb_build_object('historical',true,'entityId',token.player_id,'audience','admin') payload,
     'historical_unknown' status,null::text provider_message_id,null::timestamptz sent_at,
-    token.created_at occurred_at
+    min(token.created_at) occurred_at
   from tourney.tourney_player_tokens token
   where token.recipient_email is not null and token.purpose in ('approve','deny')
+  group by token.player_id, lower(token.recipient_email)
   union all
   select 'history:approval:'||player.id||':'||lower(player.email),
     'history:approval:'||player.id,'approval',lower(player.email),
@@ -259,10 +276,10 @@ from (
   select 'history:reset:'||token.id||':'||lower(player.email),
     'history:reset:'||token.id,'reset',lower(player.email),
     jsonb_build_object('historical',true,'entityId',token.id,'audience','player'),
-    'historical_unknown',null,null,token.used_at
+    'historical_unknown',null,null,token.created_at
   from tourney.tourney_player_tokens token
   join tourney.tourney_players player on player.id=token.player_id
-  where token.purpose='reset' and token.used_at is not null
+  where token.purpose='reset'
   union all
   select 'history:discord_invite:'||player.id||':'||lower(player.email),
     'history:discord_invite:'||player.id,'discord_invite',lower(player.email),
@@ -298,6 +315,10 @@ where candidate.recipient <> ''
       and coalesce(existing.payload->>'audience','')=coalesce(candidate.payload->>'audience','')
   )
 on conflict(idempotency_key) do nothing;
+  get diagnostics v_count = row_count;
+  return jsonb_build_object('inserted', v_count, 'actor', btrim(p_actor));
+end;
+$$;
 
 create or replace function tourney.refresh_cutover_clock(p_actor text)
 returns jsonb
@@ -707,29 +728,155 @@ as $$
   )
 $$;
 
-update tourney.cutover_metadata set
-  hardened_active = true,
-  clean_since = null,
-  first_zero_drift_at = null,
-  second_zero_drift_at = null,
-  clock_last_reset_reason = 'fresh_hardening_window',
-  updated_at = now()
-where id = 'tourney';
+create or replace function public.roo_activate_tourney_schema_v4(p_actor text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_meta tourney.cutover_metadata%rowtype;
+  v_schema_version integer;
+  v_actor text := btrim(coalesce(p_actor, ''));
+  v_contract record;
+begin
+  if v_actor = '' or length(v_actor) > 120 then
+    raise exception 'Tourney activation actor is invalid' using errcode = '22023';
+  end if;
+  select * into v_meta from tourney.cutover_metadata
+  where id = 'tourney' for update;
+  select schema_version into v_schema_version from tourney.schema_metadata
+  where schema_name = 'tourney' for update;
+  if v_meta.hardened_active and coalesce(v_schema_version, 0) >= 4 then
+    return jsonb_build_object(
+      'activated', true,
+      'already_active', true,
+      'generation', v_meta.generation,
+      'schema_version', v_schema_version
+    );
+  end if;
+  if v_meta.id is null
+     or v_meta.primary_backend <> 'supabase'
+     or v_meta.generation <> 1
+     or not v_meta.writes_paused
+     or v_meta.fallback_read_only
+     or to_regclass('tourney.mirror_contracts') is null
+     or to_regclass('tourney.account_snapshots') is null
+     or to_regclass('tourney.external_operations') is null
+     or to_regclass('accounts.discord_role_assignments') is null
+     or to_regclass('tourney.shadow_latency_baselines') is null
+     or (select count(*) from tourney.shadow_latency_baselines) <> 5 then
+    raise exception 'Supabase Tourney activation safety preconditions are not satisfied'
+      using errcode = '55000';
+  end if;
+  if exists (
+    with expected(logical_table, supabase_relation, legacy_relation, key_columns) as (
+      values
+        ('tourney_players','tourney.tourney_players','tourney_players',array['id']::text[]),
+        ('tourney_player_tokens','tourney.tourney_player_tokens','tourney_player_tokens',array['id']::text[]),
+        ('tourney_registration_config','tourney.tourney_registration_config','tourney_registration_config',array['id']::text[]),
+        ('tourney_bracket_teams','tourney.tourney_bracket_teams','tourney_bracket_teams',array['id']::text[]),
+        ('tourney_bracket_team_members','tourney.tourney_bracket_team_members','tourney_bracket_team_members',array['id']::text[]),
+        ('tourney_bracket_meta','tourney.tourney_bracket_meta','tourney_bracket_meta',array['id']::text[]),
+        ('tourney_bracket_entities','tourney.tourney_bracket_entities','tourney_bracket_entities',array['entity_type','entity_id']::text[]),
+        ('tourney_bracket_counters','tourney.tourney_bracket_counters','tourney_bracket_counters',array['entity_type']::text[]),
+        ('tourney_bracket_audit','tourney.tourney_bracket_audit','tourney_bracket_audit',array['id']::text[]),
+        ('tourney_bracket_lock','tourney.tourney_bracket_lock','tourney_bracket_lock',array['id']::text[]),
+        ('tourney_appeals','tourney.tourney_appeals','tourney_appeals',array['id']::text[]),
+        ('tourney_payouts','tourney.tourney_payouts','tourney_payouts',array['id']::text[]),
+        ('email_dispatches','tourney.email_dispatches','tourney_email_dispatches',array['id']::text[]),
+        ('command_receipts','tourney.command_receipts','tourney_command_receipts',array['command_id']::text[]),
+        ('account_snapshots','tourney.account_snapshots','tourney_account_snapshots',array['snapshot_id']::text[]),
+        ('external_operations','tourney.external_operations','tourney_external_operations',array['operation_key']::text[]),
+        ('discord_role_assignments','accounts.discord_role_assignments','tourney_discord_role_assignments',array['principal_id']::text[])
+    )
+    select 1
+    from expected
+    full join tourney.mirror_contracts contract using(logical_table)
+    where expected.logical_table is null or contract.logical_table is null
+       or not contract.enabled
+       or contract.supabase_relation is distinct from expected.supabase_relation
+       or contract.legacy_relation is distinct from expected.legacy_relation
+       or contract.key_columns is distinct from expected.key_columns
+       or contract.allowed_columns is distinct from (
+         select pg_catalog.array_agg(attribute.attname::text order by attribute.attnum)
+         from pg_catalog.pg_attribute attribute
+         where attribute.attrelid = expected.supabase_relation::regclass
+           and attribute.attnum > 0 and not attribute.attisdropped
+       )
+  ) then
+    raise exception 'Supabase Tourney mirror registry is incomplete or stale'
+      using errcode = '55000';
+  end if;
 
-insert into tourney.cutover_gate_events (event_kind, generation, actor, evidence)
-select 'hardened_activated', generation, 'schema-v4-activation',
-  jsonb_build_object('schema_version', 4)
-from tourney.cutover_metadata where id = 'tourney';
+  for v_contract in
+    select logical_table, supabase_relation
+    from tourney.mirror_contracts where enabled order by logical_table
+  loop
+    execute format(
+      'drop trigger if exists capture_tourney_mirror_event on %s',
+      v_contract.supabase_relation::regclass
+    );
+    execute format(
+      'create trigger capture_tourney_mirror_event after insert or update or delete on %s for each row execute function tourney.capture_mirror_event_v4()',
+      v_contract.supabase_relation::regclass
+    );
+  end loop;
 
-insert into tourney.schema_metadata (schema_name, schema_version, updated_at)
-values ('tourney', 4, now())
-on conflict (schema_name) do update
-set schema_version = greatest(tourney.schema_metadata.schema_version, excluded.schema_version),
-    updated_at = now();
+  update tourney.cutover_metadata set
+    hardened_active = true,
+    clean_since = null,
+    natural_mutation_verified_at = null,
+    first_zero_drift_at = null,
+    second_zero_drift_at = null,
+    clock_last_reset_reason = 'fresh_hardening_window',
+    updated_at = now(),
+    updated_by = v_actor
+  where id = 'tourney';
+  -- Rows created by the expanded application before activation were not yet
+  -- covered by v4 triggers. Queue an authoritative generation-1 bootstrap for
+  -- every registered row while writes are paused; normal mirror checkpoints
+  -- make any duplicate event harmless.
+  for v_contract in
+    select logical_table, supabase_relation
+    from tourney.mirror_contracts where enabled order by logical_table
+  loop
+    execute pg_catalog.format(
+      'insert into tourney.mirror_outbox(
+         command_id,source_backend,generation,table_name,operation,
+         record_key,record_data,record_hash,status
+       )
+       select $1 || '':'' || $2,''supabase'',1,$2,''upsert'',
+         tourney.mirror_record_key($2,to_jsonb(source_row)),
+         to_jsonb(source_row),
+         pg_catalog.encode(extensions.digest(
+           pg_catalog.convert_to(to_jsonb(source_row)::text,''UTF8''),''sha256''
+         ),''hex''),
+         ''pending''
+       from %s source_row',
+      v_contract.supabase_relation::regclass
+    ) using 'schema-v4-bootstrap:' || v_actor, v_contract.logical_table;
+  end loop;
+  insert into tourney.cutover_gate_events (event_kind, generation, actor, evidence)
+  values ('hardened_activated', v_meta.generation, v_actor,
+    jsonb_build_object('schema_version', 4));
+  insert into tourney.schema_metadata (schema_name, schema_version, updated_at)
+  values ('tourney', 4, now())
+  on conflict (schema_name) do update
+  set schema_version = greatest(tourney.schema_metadata.schema_version, excluded.schema_version),
+      updated_at = now();
+  return jsonb_build_object(
+    'activated', true,
+    'already_active', false,
+    'generation', v_meta.generation,
+    'schema_version', 4
+  );
+end;
+$$;
 
 revoke all on function tourney.mirror_record_key(text, jsonb)
   from public, anon, authenticated;
-revoke all on function tourney.capture_mirror_event()
+revoke all on function tourney.capture_mirror_event_v4()
   from public, anon, authenticated;
 revoke all on function public.roo_enqueue_tourney_fallback_bootstrap(text)
   from public, anon, authenticated;
@@ -741,9 +888,17 @@ revoke all on function public.roo_import_tourney_snapshot_v4(jsonb, text, boolea
   from public, anon, authenticated;
 revoke all on function public.roo_tourney_readiness()
   from public, anon, authenticated;
+revoke all on function public.roo_activate_tourney_schema_v4(text)
+  from public, anon, authenticated;
+revoke all on function public.roo_backfill_tourney_email_history_v4(text)
+  from public, anon, authenticated;
 grant execute on function tourney.refresh_cutover_clock(text) to service_role;
 grant execute on function public.roo_enqueue_tourney_fallback_bootstrap(text)
   to service_role;
 grant execute on function public.roo_import_tourney_snapshot_v4(jsonb, text, boolean)
   to service_role;
 grant execute on function public.roo_tourney_readiness() to service_role;
+grant execute on function public.roo_activate_tourney_schema_v4(text)
+  to service_role;
+grant execute on function public.roo_backfill_tourney_email_history_v4(text)
+  to service_role;
