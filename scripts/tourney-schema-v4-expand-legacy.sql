@@ -262,16 +262,99 @@ create table if not exists tourney_cutover_gate_events (
   evidence jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
+
+create table if not exists tourney_cutover_control_operations (
+  operation_kind text not null
+    check (operation_kind in ('pause', 'resume')),
+  operation_id text not null
+    check (operation_id ~ '^[a-z0-9][a-z0-9:_-]{7,127}$'),
+  primary_backend text not null
+    check (primary_backend in ('legacy', 'supabase')),
+  generation integer not null check (generation between 0 and 100),
+  target_writes_paused boolean not null,
+  actor text not null check (
+    actor = pg_catalog.btrim(actor)
+    and pg_catalog.char_length(actor) between 3 and 200
+    and actor !~ '[[:cntrl:]]'
+  ),
+  applied_at timestamptz not null default pg_catalog.now(),
+  primary key (operation_kind, operation_id),
+  check (target_writes_paused = (operation_kind = 'pause'))
+);
+
+create or replace function guard_tourney_cutover_control_operation_append_only()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if tg_op = 'DELETE'
+     and current_setting('roo.tourney_cutover_compensation', true) = '1' then
+    return old;
+  end if;
+  raise exception 'Tourney cutover control operations are append-only'
+    using errcode = '55000';
+end;
+$$;
+
+drop trigger if exists guard_tourney_cutover_control_operation_append_only
+  on tourney_cutover_control_operations;
+create trigger guard_tourney_cutover_control_operation_append_only
+before update or delete on tourney_cutover_control_operations
+for each row execute function guard_tourney_cutover_control_operation_append_only();
+revoke all on table tourney_cutover_control_operations from public;
+revoke all on function guard_tourney_cutover_control_operation_append_only()
+  from public;
+
 alter table tourney_cutover_metadata
   add column if not exists hardened_active boolean not null default false,
   add column if not exists reconciliation_lease_id uuid,
   add column if not exists reconciliation_lease_expires_at timestamptz,
   add column if not exists reconciliation_heartbeat_at timestamptz,
+  add column if not exists last_pause_operation_id text,
+  add column if not exists last_resume_operation_id text,
   add column if not exists natural_mutation_verified_at timestamptz,
   add column if not exists first_zero_drift_at timestamptz,
   add column if not exists second_zero_drift_at timestamptz,
   add column if not exists clock_last_evaluated_at timestamptz,
   add column if not exists clock_last_reset_reason text;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_catalog.pg_constraint
+    where conrelid = 'public.tourney_cutover_metadata'::pg_catalog.regclass
+      and conname = 'tourney_cutover_metadata_last_pause_operation_id_check'
+  ) then
+    alter table public.tourney_cutover_metadata
+      add constraint tourney_cutover_metadata_last_pause_operation_id_check check (
+        last_pause_operation_id is null or (
+          last_pause_operation_id = pg_catalog.btrim(last_pause_operation_id)
+          and pg_catalog.char_length(last_pause_operation_id) between 8 and 128
+          and last_pause_operation_id ~ '^[a-z0-9][a-z0-9:_-]{7,127}$'
+        )
+      ) not valid;
+  end if;
+  if not exists (
+    select 1 from pg_catalog.pg_constraint
+    where conrelid = 'public.tourney_cutover_metadata'::pg_catalog.regclass
+      and conname = 'tourney_cutover_metadata_last_resume_operation_id_check'
+  ) then
+    alter table public.tourney_cutover_metadata
+      add constraint tourney_cutover_metadata_last_resume_operation_id_check check (
+        last_resume_operation_id is null or (
+          last_resume_operation_id = pg_catalog.btrim(last_resume_operation_id)
+          and pg_catalog.char_length(last_resume_operation_id) between 8 and 128
+          and last_resume_operation_id ~ '^[a-z0-9][a-z0-9:_-]{7,127}$'
+        )
+      ) not valid;
+  end if;
+end;
+$$;
+alter table public.tourney_cutover_metadata
+  validate constraint tourney_cutover_metadata_last_pause_operation_id_check;
+alter table public.tourney_cutover_metadata
+  validate constraint tourney_cutover_metadata_last_resume_operation_id_check;
 alter table tourney_parity_runs
   add column if not exists status_counts jsonb not null default '{}'::jsonb,
   add column if not exists canonical_hashes jsonb not null default '{}'::jsonb,
