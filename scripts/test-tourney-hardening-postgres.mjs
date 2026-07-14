@@ -358,6 +358,10 @@ try {
     root,
     "supabase/migrations/20260714010000_repair_tourney_cutover_safety.sql"
   );
+  const supabaseCutoverOperationMarkers = path.join(
+    root,
+    "supabase/migrations/20260715000000_add_tourney_cutover_operation_markers.sql"
+  );
   const legacyActivation = path.join(root, "scripts/tourney-schema-v4-activate-legacy.sql");
   const legacyRepair = path.join(root, "scripts/tourney-schema-v4-repair-legacy.sql");
   const activateSupabaseV4 = writeTemp(
@@ -423,7 +427,8 @@ insert into tourney_external_operations(
     "supabase_unsafe",
     supabaseActivation,
     supabaseHardening,
-    supabaseRepair
+    supabaseRepair,
+    supabaseCutoverOperationMarkers
   );
   psql("supabase_unsafe", supabasePostInstallOldWriter);
   const unsafeSupabaseActivation = psqlFails("supabase_unsafe", activateSupabaseV4);
@@ -545,7 +550,8 @@ insert into accounts.discord_role_assignments(
     "supabase_fixture",
     migrationFixture,
     supabaseHardening,
-    supabaseRepair
+    supabaseRepair,
+    supabaseCutoverOperationMarkers
   );
   process.stderr.write("[postgres17] Supabase schema-v4 install remained inactive\n");
   psql("supabase_fixture", supabaseControls, captureLatencyBaseline);
@@ -583,6 +589,92 @@ insert into accounts.discord_role_assignments(
     DISCORD_PARTICIPANT_ROLE_ID: "710000000000000001",
     DISCORD_HOST_ROLE_ID: "710000000000000002",
   };
+
+  await assertSql(
+    source,
+    `select count(*) = 2 ok
+     from information_schema.columns
+     where table_schema = 'tourney'
+       and table_name = 'cutover_metadata'
+       and column_name in (
+         'last_pause_operation_id', 'last_resume_operation_id'
+       )`,
+    "Supabase cutover operation marker columns are missing"
+  );
+  await assertSql(
+    target,
+    `select count(*) = 2 ok
+     from information_schema.columns
+     where table_schema = 'public'
+       and table_name = 'tourney_cutover_metadata'
+       and column_name in (
+         'last_pause_operation_id', 'last_resume_operation_id'
+       )`,
+    "fallback cutover operation marker columns are missing"
+  );
+  await Promise.all([
+    source`update tourney.cutover_metadata set writes_paused = false where id = 'tourney'`,
+    target`update tourney_cutover_metadata set writes_paused = false where id = 'tourney'`,
+  ]);
+  await Promise.all([
+    source`update tourney.cutover_metadata set
+      writes_paused = true,
+      last_pause_operation_id = 'fixture:pause-0001'
+      where id = 'tourney'`,
+    target`update tourney_cutover_metadata set
+      writes_paused = true,
+      last_pause_operation_id = 'fixture:pause-0001'
+      where id = 'tourney'`,
+  ]);
+  await Promise.all([
+    source`update tourney.cutover_metadata set
+      writes_paused = false,
+      last_resume_operation_id = 'fixture:resume-0001'
+      where id = 'tourney'`,
+    target`update tourney_cutover_metadata set
+      writes_paused = false,
+      last_resume_operation_id = 'fixture:resume-0001'
+      where id = 'tourney'`,
+  ]);
+  await assertSql(
+    source,
+    `select not writes_paused
+       and last_pause_operation_id = 'fixture:pause-0001'
+       and last_resume_operation_id = 'fixture:resume-0001' ok
+     from tourney.cutover_metadata where id = 'tourney'`,
+    "Supabase pause and resume operation markers did not remain independent"
+  );
+  await assertSql(
+    target,
+    `select not writes_paused
+       and last_pause_operation_id = 'fixture:pause-0001'
+       and last_resume_operation_id = 'fixture:resume-0001' ok
+     from tourney_cutover_metadata where id = 'tourney'`,
+    "fallback pause and resume operation markers did not remain independent"
+  );
+  for (const [sql, relation] of [
+    [source, "tourney.cutover_metadata"],
+    [target, "tourney_cutover_metadata"],
+  ]) {
+    await assert.rejects(
+      sql.unsafe(`update ${relation}
+        set last_pause_operation_id = 'Fixture:pause-0002'
+        where id = 'tourney'`),
+      (error) => error.code === "23514",
+      `${relation} accepted an uppercase pause operation ID`
+    );
+    await assert.rejects(
+      sql.unsafe(`update ${relation}
+        set last_resume_operation_id = 'fixture.resume-0002'
+        where id = 'tourney'`),
+      (error) => error.code === "23514",
+      `${relation} accepted a dotted resume operation ID`
+    );
+  }
+  await Promise.all([
+    source`update tourney.cutover_metadata set writes_paused = true where id = 'tourney'`,
+    target`update tourney_cutover_metadata set writes_paused = true where id = 'tourney'`,
+  ]);
 
   await assertSql(
     source,
@@ -3985,6 +4077,7 @@ insert into accounts.discord_role_assignments(
       "collision quarantine and guarded destructive import",
       "semantic timestamp and numeric canonical hashes",
       "target-only snapshot pruning",
+      "independent constrained pause and resume operation markers",
       "insert mirroring",
       "idempotent fallback upserts and target-only deletes",
       "database-authoritative write pause with maintenance bypass",
