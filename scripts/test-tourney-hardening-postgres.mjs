@@ -551,6 +551,16 @@ insert into tourney_external_operations(
       and (select hardened_active from tourney.cutover_metadata where id='tourney') ok`,
     "explicit Supabase activation did not activate schema v4"
   );
+  await assert.rejects(
+    unsafeSupabase`
+      select public.roo_capture_tourney_hardening_snapshot(
+        null::jsonb,'{"_id":"tourneyAuthStore"}'::jsonb,'[]'::text
+      )
+    `,
+    (error) => error.code === "22023" &&
+      error.message === "Legacy Tourney snapshot is incomplete or malformed",
+    "Supabase snapshot RPC iterated a non-object legacy snapshot"
+  );
   await unsafeSupabase`truncate table tourney.shadow_latency_baselines`;
   psql("supabase_unsafe", captureLatencyBaseline);
   await assertSql(
