@@ -50,14 +50,85 @@ const row = ({
 });
 const sqlMock = (...results) => {
   let resultIndex = 0;
-  return jest.fn((first) => {
+  let nextOperationInsertError = null;
+  const ledger = new Map();
+  const sql = jest.fn((first, ...values) => {
     if (typeof first === "string") return first;
+    const text = first.join(" ").replace(/\s+/g, " ").trim();
+    if (text.includes("set_config('roo.tourney_cutover_compensation'")) {
+      return Promise.resolve([{ set_config: "1" }]);
+    }
+    if (text.startsWith("select operation_kind") && text.includes("target_writes_paused")) {
+      const [, kind, id] = values;
+      const record = ledger.get(`${kind}:${id}`);
+      return Promise.resolve(record ? [record] : []);
+    }
+    if (text.startsWith("insert into") && text.includes("operation_kind")) {
+      if (nextOperationInsertError) {
+        const error = nextOperationInsertError;
+        nextOperationInsertError = null;
+        return Promise.reject(error);
+      }
+      const [, kind, id, primaryBackend, generation, writesPaused] = values;
+      const key = `${kind}:${id}`;
+      if (ledger.has(key)) {
+        return Promise.reject(Object.assign(new Error("duplicate operation"), {
+          code: "23505",
+        }));
+      }
+      const record = {
+        operation_kind: kind,
+        operation_id: id,
+        primary_backend: primaryBackend,
+        generation,
+        target_writes_paused: writesPaused,
+      };
+      ledger.set(key, record);
+      return Promise.resolve([record]);
+    }
+    if (text.startsWith("delete from") && text.includes("operation_kind")) {
+      const [, kind, id] = values;
+      const removed = ledger.delete(`${kind}:${id}`);
+      return Promise.resolve(removed ? [{ operation_id: id }] : []);
+    }
     const result = results[resultIndex++];
     return result instanceof Error ? Promise.reject(result) : Promise.resolve(result);
   });
+  sql.begin = jest.fn(async (callback) => {
+    const snapshot = new Map(ledger);
+    try {
+      return await callback(sql);
+    } catch (error) {
+      ledger.clear();
+      for (const [key, value] of snapshot) ledger.set(key, value);
+      throw error;
+    }
+  });
+  sql.seedOperation = (record) => {
+    ledger.set(`${record.operation_kind}:${record.operation_id}`, record);
+  };
+  sql.failNextOperationInsert = (error) => {
+    nextOperationInsertError = error;
+  };
+  sql.hasOperation = ({ kind, id }) => ledger.has(`${kind}:${id}`);
+  return sql;
 };
+const operationRow = ({
+  id = operationId,
+  kind = "pause",
+  paused = true,
+} = {}) => ({
+  operation_kind: kind,
+  operation_id: id,
+  primary_backend: "supabase",
+  generation: 1,
+  target_writes_paused: paused,
+});
 const templateCalls = (sql) => sql.mock.calls.filter(([first]) =>
   typeof first !== "string"
+);
+const callsContaining = (sql, fragment) => templateCalls(sql).filter(([first]) =>
+  first.join(" ").includes(fragment)
 );
 const request = (overrides = {}) => ({
   env,
@@ -144,8 +215,10 @@ describe("Tourney dual-database activation controls", () => {
       },
       fingerprints: { legacy: legacyFingerprint, supabase: supabaseFingerprint },
     });
-    expect(templateCalls(legacySql)[1][0].join(" ")).toContain("xmin =");
-    expect(templateCalls(supabaseSql)[1][0].join(" ")).toContain("xmin =");
+    expect(callsContaining(legacySql, "xmin =")).toHaveLength(1);
+    expect(callsContaining(supabaseSql, "xmin =")).toHaveLength(1);
+    expect(legacySql.begin).toHaveBeenCalledTimes(1);
+    expect(supabaseSql.begin).toHaveBeenCalledTimes(1);
   });
 
   test("accepts only an operation-bound idempotent replay", async () => {
@@ -157,6 +230,8 @@ describe("Tourney dual-database activation controls", () => {
     });
     const legacySql = sqlMock([applied]);
     const supabaseSql = sqlMock([applied]);
+    legacySql.seedOperation(operationRow());
+    supabaseSql.seedOperation(operationRow());
     mockGetBackendSql.mockImplementation(({ backend }) =>
       Promise.resolve(backend === "legacy" ? legacySql : supabaseSql)
     );
@@ -165,20 +240,24 @@ describe("Tourney dual-database activation controls", () => {
       changed: false,
       replayed: true,
     });
-    expect(templateCalls(legacySql)).toHaveLength(1);
-    expect(templateCalls(supabaseSql)).toHaveLength(1);
+    expect(templateCalls(legacySql)).toHaveLength(2);
+    expect(templateCalls(supabaseSql)).toHaveLength(2);
+    expect(legacySql.begin).not.toHaveBeenCalled();
+    expect(supabaseSql.begin).not.toHaveBeenCalled();
   });
 
-  test("does not re-pause when pause A arrives after resume B", async () => {
+  test("does not re-pause a delayed pause after multiple inverse cycles", async () => {
     const resumed = row({
       paused: false,
-      lastPauseOperationId: operationId,
-      lastResumeOperationId: "resume-20260715t010000z",
-      updatedBy: "schema-v4-resume:resume-20260715t010000z",
-      version: "12",
+      lastPauseOperationId: "pause-20260715t030000z",
+      lastResumeOperationId: "resume-20260715t040000z",
+      updatedBy: "schema-v4-resume:resume-20260715t040000z",
+      version: "14",
     });
     const legacySql = sqlMock([resumed]);
     const supabaseSql = sqlMock([resumed]);
+    legacySql.seedOperation(operationRow());
+    supabaseSql.seedOperation(operationRow());
     mockGetBackendSql.mockImplementation(({ backend }) =>
       Promise.resolve(backend === "legacy" ? legacySql : supabaseSql)
     );
@@ -190,13 +269,103 @@ describe("Tourney dual-database activation controls", () => {
       controls: {
         legacy: {
           writesPaused: false,
-          lastPauseOperationId: operationId,
-          lastResumeOperationId: "resume-20260715t010000z",
+          lastPauseOperationId: "pause-20260715t030000z",
+          lastResumeOperationId: "resume-20260715t040000z",
         },
       },
     });
-    expect(templateCalls(legacySql)).toHaveLength(1);
-    expect(templateCalls(supabaseSql)).toHaveLength(1);
+    expect(templateCalls(legacySql)).toHaveLength(2);
+    expect(templateCalls(supabaseSql)).toHaveLength(2);
+    expect(legacySql.begin).not.toHaveBeenCalled();
+    expect(supabaseSql.begin).not.toHaveBeenCalled();
+  });
+
+  test("serves concurrent duplicate replays from the immutable ledger", async () => {
+    const applied = row({
+      paused: true,
+      updatedBy: actor,
+      lastPauseOperationId: operationId,
+      version: "11",
+    });
+    const legacySql = sqlMock([applied], [applied]);
+    const supabaseSql = sqlMock([applied], [applied]);
+    legacySql.seedOperation(operationRow());
+    supabaseSql.seedOperation(operationRow());
+    mockGetBackendSql.mockImplementation(({ backend }) =>
+      Promise.resolve(backend === "legacy" ? legacySql : supabaseSql)
+    );
+
+    const results = await Promise.all([
+      setTourneyDualDatabaseWritesPausedV4(request()),
+      setTourneyDualDatabaseWritesPausedV4(request()),
+    ]);
+
+    expect(results).toEqual([
+      expect.objectContaining({ changed: false, replayed: true, superseded: false }),
+      expect.objectContaining({ changed: false, replayed: true, superseded: false }),
+    ]);
+    expect(legacySql.begin).not.toHaveBeenCalled();
+    expect(supabaseSql.begin).not.toHaveBeenCalled();
+  });
+
+  test("fails closed when only one backend records an operation", async () => {
+    const current = row({ paused: false, version: "10" });
+    const legacySql = sqlMock([current]);
+    const supabaseSql = sqlMock([current]);
+    legacySql.seedOperation(operationRow());
+    mockGetBackendSql.mockImplementation(({ backend }) =>
+      Promise.resolve(backend === "legacy" ? legacySql : supabaseSql)
+    );
+
+    await expect(setTourneyDualDatabaseWritesPausedV4(request())).rejects.toMatchObject({
+      code: "TOURNEY_CUTOVER_RECOVERY_REQUIRED",
+      status: 503,
+    });
+    expect(legacySql.begin).not.toHaveBeenCalled();
+    expect(supabaseSql.begin).not.toHaveBeenCalled();
+  });
+
+  test("fails closed when backend ledgers disagree on an operation target", async () => {
+    const current = row({ paused: false, version: "10" });
+    const legacySql = sqlMock([current]);
+    const supabaseSql = sqlMock([current]);
+    legacySql.seedOperation(operationRow());
+    supabaseSql.seedOperation(operationRow({ paused: false }));
+    mockGetBackendSql.mockImplementation(({ backend }) =>
+      Promise.resolve(backend === "legacy" ? legacySql : supabaseSql)
+    );
+
+    await expect(setTourneyDualDatabaseWritesPausedV4(request())).rejects.toMatchObject({
+      code: "TOURNEY_CUTOVER_RECOVERY_REQUIRED",
+      status: 503,
+    });
+    expect(legacySql.begin).not.toHaveBeenCalled();
+    expect(supabaseSql.begin).not.toHaveBeenCalled();
+  });
+
+  test("rolls back a control CAS when its ledger insert fails", async () => {
+    const expected = row({ paused: false, version: "10" });
+    const changed = row({
+      paused: true,
+      updatedBy: actor,
+      lastPauseOperationId: operationId,
+      version: "11",
+    });
+    const legacySql = sqlMock([expected], [changed], [expected]);
+    const supabaseSql = sqlMock([{ ...expected, row_version: "20" }]);
+    legacySql.failNextOperationInsert(Object.assign(new Error("ledger rejected"), {
+      code: "23514",
+    }));
+    mockGetBackendSql.mockImplementation(({ backend }) =>
+      Promise.resolve(backend === "legacy" ? legacySql : supabaseSql)
+    );
+
+    await expect(setTourneyDualDatabaseWritesPausedV4(request())).rejects.toMatchObject({
+      code: "23514",
+    });
+    expect(legacySql.begin).toHaveBeenCalledTimes(1);
+    expect(supabaseSql.begin).not.toHaveBeenCalled();
+    expect(legacySql.hasOperation({ kind: "pause", id: operationId })).toBe(false);
   });
 
   test("rejects a stale expected state before either write", async () => {
@@ -211,8 +380,8 @@ describe("Tourney dual-database activation controls", () => {
       code: "TOURNEY_CUTOVER_EXPECTATION_MISMATCH",
       status: 409,
     });
-    expect(templateCalls(legacySql)).toHaveLength(1);
-    expect(templateCalls(supabaseSql)).toHaveLength(1);
+    expect(templateCalls(legacySql)).toHaveLength(2);
+    expect(templateCalls(supabaseSql)).toHaveLength(2);
   });
 
   test("compensates a verified second-target failure", async () => {
@@ -246,6 +415,11 @@ describe("Tourney dual-database activation controls", () => {
       code: "TOURNEY_CUTOVER_SECOND_TARGET_FAILED_COMPENSATED",
       status: 503,
     });
+    expect(legacySql.begin).toHaveBeenCalledTimes(2);
+    expect(supabaseSql.begin).toHaveBeenCalledTimes(1);
+    expect(callsContaining(legacySql, "roo.tourney_cutover_compensation")).toHaveLength(1);
+    expect(callsContaining(legacySql, "delete from")).toHaveLength(1);
+    expect(legacySql.hasOperation({ kind: "pause", id: operationId })).toBe(false);
   });
 
   test("requires recovery when a partial outcome cannot be observed", async () => {

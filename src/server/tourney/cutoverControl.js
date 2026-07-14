@@ -13,6 +13,10 @@ const cutoverRelation = (backend) => backend === "supabase"
   ? "tourney.cutover_metadata"
   : "tourney_cutover_metadata";
 
+const cutoverOperationRelation = (backend) => backend === "supabase"
+  ? "tourney.cutover_control_operations"
+  : "tourney_cutover_control_operations";
+
 const normalizeCutoverState = (control) => ({
   primaryBackend: String(control.primary_backend || "").toLowerCase(),
   generation: Number(control.generation),
@@ -54,6 +58,41 @@ const readCutoverControl = async ({ sql, backend }) => {
 const readNormalizedCutoverControl = async ({ sql, backend }) =>
   normalizeCutoverState(await readCutoverControl({ sql, backend }));
 
+const normalizeCutoverOperation = (row) => row ? ({
+  operationKind: String(row.operation_kind || ""),
+  operationId: String(row.operation_id || ""),
+  primaryBackend: String(row.primary_backend || "").toLowerCase(),
+  generation: Number(row.generation),
+  writesPaused: row.target_writes_paused === true,
+}) : null;
+
+const readCutoverOperation = async ({ sql, backend, operation }) => {
+  const rows = await sql`
+    select operation_kind, operation_id, primary_backend, generation,
+      target_writes_paused
+    from ${sql(cutoverOperationRelation(backend))}
+    where operation_kind = ${operation.kind} and operation_id = ${operation.id}
+  `;
+  if (rows.length > 1) {
+    throw cutoverFailure("TOURNEY_CUTOVER_OPERATION_LEDGER_INVALID");
+  }
+  return normalizeCutoverOperation(rows[0]);
+};
+
+const sameCutoverOperation = (left, right) => Boolean(left && right) &&
+  left.operationKind === right.operationKind &&
+  left.operationId === right.operationId &&
+  left.primaryBackend === right.primaryBackend &&
+  left.generation === right.generation &&
+  left.writesPaused === right.writesPaused;
+
+const operationMatchesTarget = (record, operation, state) => Boolean(record) &&
+  record.operationKind === operation.kind &&
+  record.operationId === operation.id &&
+  record.primaryBackend === state.primaryBackend &&
+  record.generation === state.generation &&
+  record.writesPaused === state.writesPaused;
+
 const writeCutoverControl = async ({
   sql,
   backend,
@@ -86,8 +125,86 @@ const cutoverFailure = (code, cause, status = 503) => Object.assign(
   { code, cause, status }
 );
 
+const insertCutoverOperation = async ({ sql, backend, operation, state, actor }) => {
+  const rows = await sql`
+    insert into ${sql(cutoverOperationRelation(backend))} (
+      operation_kind, operation_id, primary_backend, generation,
+      target_writes_paused, actor
+    ) values (
+      ${operation.kind}, ${operation.id}, ${state.primaryBackend},
+      ${state.generation}, ${state.writesPaused}, ${actor}
+    )
+    returning operation_kind, operation_id, primary_backend, generation,
+      target_writes_paused
+  `;
+  if (rows.length !== 1) {
+    throw cutoverFailure("TOURNEY_CUTOVER_OPERATION_INSERT_FAILED");
+  }
+  return normalizeCutoverOperation(rows[0]);
+};
+
+const deleteCutoverOperation = async ({ sql, backend, operation }) => {
+  const rows = await sql`
+    delete from ${sql(cutoverOperationRelation(backend))}
+    where operation_kind = ${operation.kind} and operation_id = ${operation.id}
+    returning operation_id
+  `;
+  if (rows.length !== 1) {
+    throw cutoverFailure("TOURNEY_CUTOVER_OPERATION_DELETE_FAILED");
+  }
+};
+
+const writeCutoverControlAndOperation = async ({
+  sql,
+  backend,
+  state,
+  expected,
+  actor,
+  operation,
+}) => sql.begin(async (transaction) => {
+  const control = await writeCutoverControl({
+    sql: transaction,
+    backend,
+    state,
+    expected,
+    actor,
+  });
+  await insertCutoverOperation({
+    sql: transaction,
+    backend,
+    operation,
+    state,
+    actor,
+  });
+  return control;
+});
+
+const restoreCutoverControlAndOperation = async ({
+  sql,
+  backend,
+  state,
+  expected,
+  actor,
+  operation,
+}) => sql.begin(async (transaction) => {
+  await transaction`
+    select set_config('roo.tourney_cutover_compensation', '1', true)
+  `;
+  const control = await writeCutoverControl({
+    sql: transaction,
+    backend,
+    state,
+    expected,
+    actor,
+  });
+  await deleteCutoverOperation({ sql: transaction, backend, operation });
+  return control;
+});
+
 const DEFINITE_CUTOVER_FAILURE_CODES = new Set([
   "TOURNEY_CUTOVER_CONTROL_UPDATE_FAILED",
+  "TOURNEY_CUTOVER_OPERATION_INSERT_FAILED",
+  "TOURNEY_CUTOVER_OPERATION_DELETE_FAILED",
 ]);
 const AMBIGUOUS_SQLSTATE_CODES = new Set([
   "40003",
@@ -108,9 +225,6 @@ const operationMarker = (operation) => operation?.kind === "pause"
   ? "lastPauseOperationId"
   : "lastResumeOperationId";
 
-const operationRecordedByState = (state, operation) =>
-  Boolean(operation?.id) && state[operationMarker(operation)] === operation.id;
-
 const applyOperationMarker = (state, operation) => operation
   ? { ...state, [operationMarker(operation)]: operation.id }
   : state;
@@ -120,34 +234,46 @@ const inspectCutoverState = async ({
   backend,
   expected,
   operation,
+  expectOperation = true,
   logLabel,
 }) => {
   try {
-    const state = await readNormalizedCutoverControl({ sql, backend });
+    const [state, recorded] = await Promise.all([
+      readNormalizedCutoverControl({ sql, backend }),
+      operation ? readCutoverOperation({ sql, backend, operation }) : null,
+    ]);
     const matches = sameCutoverRecord(state, expected) &&
-      (!operation || operationRecordedByState(state, operation));
-    return { matches, readable: true, state };
+      (!operation || (
+        expectOperation
+          ? operationMatchesTarget(recorded, operation, expected)
+          : recorded === null
+      ));
+    return { matches, readable: true, recorded, state };
   } catch (error) {
     logSafeError(logLabel, error);
-    return { matches: false, readable: false, state: null };
+    return { matches: false, readable: false, recorded: null, state: null };
   }
 };
 
 const hasCutoverState = async (options) =>
   (await inspectCutoverState(options)).matches;
 
-const previousControlsRestored = async ({ databases, previous }) => {
+const previousControlsRestored = async ({ databases, previous, operation }) => {
   const [legacyRestored, supabaseRestored] = await Promise.all([
     hasCutoverState({
       sql: databases.legacy,
       backend: "legacy",
       expected: previous.legacy,
+      operation,
+      expectOperation: false,
       logLabel: "Tourney cutover legacy compensation verification failed",
     }),
     hasCutoverState({
       sql: databases.supabase,
       backend: "supabase",
       expected: previous.supabase,
+      operation,
+      expectOperation: false,
       logLabel: "Tourney cutover Supabase compensation verification failed",
     }),
   ]);
@@ -163,20 +289,29 @@ const compensateFirstCutover = async ({
   secondTargetError,
   secondTargetOutcomeAmbiguous,
   compensationActor,
+  operation,
 }) => {
   let compensationError = null;
   try {
-    await writeCutoverControl({
+    const restore = operation
+      ? restoreCutoverControlAndOperation
+      : writeCutoverControl;
+    await restore({
       sql: databases[firstBackend],
       backend: firstBackend,
       state: previous[firstBackend],
       expected: appliedFirst,
       actor: compensationActor,
+      operation,
     });
   } catch (error) {
     compensationError = error;
   }
-  const restored = await previousControlsRestored({ databases, previous });
+  const restored = await previousControlsRestored({
+    databases,
+    previous,
+    operation,
+  });
   if (!restored || secondTargetOutcomeAmbiguous) {
     logSafeError(
       restored
@@ -222,6 +357,7 @@ const recoverSecondTargetFailure = async ({
     secondTargetError: error,
     secondTargetOutcomeAmbiguous: !cutoverWriteDefinitelyFailed(error),
     compensationActor,
+    operation,
   });
 };
 
@@ -234,12 +370,16 @@ const writeFirstCutoverControl = async ({
   operation,
 }) => {
   try {
-    return await writeCutoverControl({
+    const write = operation
+      ? writeCutoverControlAndOperation
+      : writeCutoverControl;
+    return await write({
       sql: databases[backend],
       backend,
       state: next,
       expected: previous,
       actor,
+      operation,
     });
   } catch (error) {
     const verification = await inspectCutoverState({
@@ -355,23 +495,23 @@ const checkSupabaseResumeReadiness = async ({ databases, generation }) => {
   return [...new Set(blockers)];
 };
 
-const controlsMatch = ({ legacy, supabase }, expected, operation = null) =>
-  sameCutoverRecord(legacy, expected) && sameCutoverRecord(supabase, expected) &&
-  (!operation || (
-    operationRecordedByState(legacy, operation) &&
-    operationRecordedByState(supabase, operation)
-  ));
-
 const verifyCompletedCutover = async ({
   databases,
   next,
   operation,
 }) => {
-  const [legacy, supabase] = await Promise.all([
+  const [legacy, supabase, legacyOperation, supabaseOperation] = await Promise.all([
     readNormalizedCutoverControl({ sql: databases.legacy, backend: "legacy" }),
     readNormalizedCutoverControl({ sql: databases.supabase, backend: "supabase" }),
+    readCutoverOperation({ sql: databases.legacy, backend: "legacy", operation }),
+    readCutoverOperation({ sql: databases.supabase, backend: "supabase", operation }),
   ]);
-  if (!controlsMatch({ legacy, supabase }, next, operation)) {
+  if (
+    !sameCutoverRecord(legacy, next) ||
+    !sameCutoverRecord(supabase, next) ||
+    !sameCutoverOperation(legacyOperation, supabaseOperation) ||
+    !operationMatchesTarget(legacyOperation, operation, next)
+  ) {
     throw cutoverFailure("TOURNEY_CUTOVER_RECOVERY_REQUIRED");
   }
 };
@@ -401,9 +541,15 @@ export const applyTourneyCutoverControl = async ({
     return { error: "Invalid cutover control state." };
   }
 
-  const [legacy, supabase] = await Promise.all([
+  const [legacy, supabase, legacyOperation, supabaseOperation] = await Promise.all([
     readNormalizedCutoverControl({ sql: databases.legacy, backend: "legacy" }),
     readNormalizedCutoverControl({ sql: databases.supabase, backend: "supabase" }),
+    operation
+      ? readCutoverOperation({ sql: databases.legacy, backend: "legacy", operation })
+      : null,
+    operation
+      ? readCutoverOperation({ sql: databases.supabase, backend: "supabase", operation })
+      : null,
   ]);
   const current = { legacy, supabase };
   if (!sameCutoverRecord(legacy, supabase)) {
@@ -413,8 +559,24 @@ export const applyTourneyCutoverControl = async ({
       status: 409,
     };
   }
-  const operationRecorded = operation && operationRecordedByState(legacy, operation);
-  if (operationRecorded) {
+  if (operation && Boolean(legacyOperation) !== Boolean(supabaseOperation)) {
+    return {
+      error: "Tourney cutover operation ledgers disagree and require recovery.",
+      code: "TOURNEY_CUTOVER_RECOVERY_REQUIRED",
+      status: 503,
+    };
+  }
+  if (operation && legacyOperation && (
+    !sameCutoverOperation(legacyOperation, supabaseOperation) ||
+    !operationMatchesTarget(legacyOperation, operation, next)
+  )) {
+    return {
+      error: "Tourney cutover operation ledger record is inconsistent.",
+      code: "TOURNEY_CUTOVER_RECOVERY_REQUIRED",
+      status: 503,
+    };
+  }
+  if (operation && legacyOperation) {
     return {
       ...legacy,
       changed: false,
@@ -543,12 +705,16 @@ export const applyTourneyCutoverControl = async ({
     operation,
   });
   try {
-    await writeCutoverControl({
+    const writeSecond = operation
+      ? writeCutoverControlAndOperation
+      : writeCutoverControl;
+    await writeSecond({
       sql: databases[secondBackend],
       backend: secondBackend,
       state: target,
       expected: previous[secondBackend],
       actor,
+      operation,
     });
   } catch (error) {
     await recoverSecondTargetFailure({

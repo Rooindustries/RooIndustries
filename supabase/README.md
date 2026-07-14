@@ -106,16 +106,17 @@ five-route latency baseline.
 Use this exact order. Keep the permission-restricted environment file outside
 the worktree and keep writes paused throughout these steps:
 
-1. Apply the Supabase expand and forward-repair migrations and run
-   `node scripts/tourney-cutover.mjs --expand-legacy-v4`, followed by
-   `--repair-legacy-v4`. Do not activate either database yet.
+1. Apply the Supabase additive expand/forward-repair migrations, then run only
+   `node scripts/tourney-cutover.mjs --expand-legacy-v4`. Do not repair or
+   activate the legacy schema yet, and do not activate Supabase.
 2. Deploy this release from `main` with hardening and schema-v4 activation
-   disabled. While the deployment still has `TOURNEY_WRITES_PAUSED=0`, pause
-   both database controls through the production endpoint. Read the normalized
-   controls and credential-free target fingerprints first, then bind the
-   mutation to that exact state and those exact targets. Generate a new
-   operation ID for a new operation; reuse the same ID only when retrying an
-   ambiguous response:
+   disabled.
+3. While the deployment still has `TOURNEY_WRITES_PAUSED=0`, pause both
+   database controls through the production endpoint. Read and fail-closed
+   validate the normalized controls and credential-free target fingerprints
+   first, then bind the mutation to that exact state and those exact targets.
+   Generate a new operation ID for a new operation; reuse the same ID only when
+   retrying an ambiguous response:
 
    ```bash
    CUTOVER_STATE="$(curl --fail-with-body --silent \
@@ -123,6 +124,19 @@ the worktree and keep writes paused throughout these steps:
      -H "Content-Type: application/json" \
      --data '{"action":"cutover-state"}' \
      https://www.rooindustries.com/api/admin/tourney-activation)"
+   printf '%s' "$CUTOVER_STATE" | jq -e '
+     .ok == true and
+     (.controls.legacy.primaryBackend == "supabase") and
+     (.controls.supabase.primaryBackend == "supabase") and
+     (.controls.legacy.generation == 1) and
+     (.controls.supabase.generation == 1) and
+     (.controls.legacy.writesPaused == false) and
+     (.controls.supabase.writesPaused == false) and
+     (.controls.legacy.lastPauseOperationId == .controls.supabase.lastPauseOperationId) and
+     (.controls.legacy.lastResumeOperationId == .controls.supabase.lastResumeOperationId) and
+     (.fingerprints.legacy | type == "string" and test("^[0-9a-f]{64}$")) and
+     (.fingerprints.supabase | type == "string" and test("^[0-9a-f]{64}$"))
+   ' >/dev/null
    LEGACY_TARGET_FINGERPRINT="$(printf '%s' "$CUTOVER_STATE" | jq -er '.fingerprints.legacy')"
    SUPABASE_TARGET_FINGERPRINT="$(printf '%s' "$CUTOVER_STATE" | jq -er '.fingerprints.supabase')"
    PAUSE_OPERATION_ID="pause-$(date -u +%Y%m%dt%H%M%Sz)"
@@ -131,11 +145,28 @@ the worktree and keep writes paused throughout these steps:
      -H "Content-Type: application/json" \
      --data "{\"action\":\"pause-writes\",\"operationId\":\"$PAUSE_OPERATION_ID\",\"expectedPrimaryBackend\":\"supabase\",\"expectedGeneration\":1,\"expectedWritesPaused\":false,\"legacyTargetFingerprint\":\"$LEGACY_TARGET_FINGERPRINT\",\"supabaseTargetFingerprint\":\"$SUPABASE_TARGET_FINGERPRINT\"}" \
      https://www.rooindustries.com/api/admin/tourney-activation
-   curl --fail-with-body --silent \
+   PAUSED_STATE="$(curl --fail-with-body --silent \
      -H "Authorization: Bearer $CRON_SECRET" \
      -H "Content-Type: application/json" \
      --data '{"action":"cutover-state"}' \
-     https://www.rooindustries.com/api/admin/tourney-activation
+     https://www.rooindustries.com/api/admin/tourney-activation)"
+   printf '%s' "$PAUSED_STATE" | jq -e \
+     --arg operation "$PAUSE_OPERATION_ID" \
+     --arg legacyFingerprint "$LEGACY_TARGET_FINGERPRINT" \
+     --arg supabaseFingerprint "$SUPABASE_TARGET_FINGERPRINT" '
+       .ok == true and
+       (.controls.legacy.primaryBackend == "supabase") and
+       (.controls.supabase.primaryBackend == "supabase") and
+       (.controls.legacy.generation == 1) and
+       (.controls.supabase.generation == 1) and
+       (.controls.legacy.writesPaused == true) and
+       (.controls.supabase.writesPaused == true) and
+       (.controls.legacy.lastPauseOperationId == $operation) and
+       (.controls.supabase.lastPauseOperationId == $operation) and
+       (.controls.legacy.lastResumeOperationId == .controls.supabase.lastResumeOperationId) and
+       (.fingerprints.legacy == $legacyFingerprint) and
+       (.fingerprints.supabase == $supabaseFingerprint)
+     ' >/dev/null
    ```
 
    A successful response means only that both database controls are paused.
@@ -143,10 +174,10 @@ the worktree and keep writes paused throughout these steps:
    controls paused and `lastPauseOperationId` equal to
    `$PAUSE_OPERATION_ID`. A replay after a later resume returns
    `superseded:true` and never pauses writes again.
-3. Deploy the staged runtime tuple above with `TOURNEY_WRITES_PAUSED=1`.
+4. Deploy the staged runtime tuple above with `TOURNEY_WRITES_PAUSED=1`.
    Confirm both control rows are Supabase-primary, generation 1, paused, and
    writable as a fallback (`fallback_read_only=false`).
-4. Capture the full Supabase/Auth, Vercel-managed fallback PostgreSQL, Sanity,
+5. Capture the full Supabase/Auth, Vercel-managed fallback PostgreSQL, Sanity,
    email, Discord, receipt, and queue snapshot. This command refuses an
    incomplete legacy schema, a missing Sanity account document, incomplete
    hosted payloads, and use of a generic `POSTGRES_URL`. It never falls back to
@@ -159,7 +190,7 @@ the worktree and keep writes paused throughout these steps:
      --verify-snapshot /absolute/path/to/unique-pre-cutover.enc
    ```
 
-5. After every shadow route has at least 30 real pre-activation samples,
+6. After every shadow route has at least 30 real pre-activation samples,
    capture the baseline inside the deployed runtime. Do not run the local
    command for production: `SUPABASE_DATABASE_URL` is intentionally not
    exportable from Vercel. Exactly five route baselines are required by
@@ -173,13 +204,16 @@ the worktree and keep writes paused throughout these steps:
      https://www.rooindustries.com/api/admin/tourney-activation
    ```
 
-6. Run `node scripts/tourney-cutover.mjs --activate-legacy-v4`, then call the
-   deployed `activate-schema` action below. Both actions re-read paused control
-   state before mutation.
-7. Call `inventory`, preserve its exact hash, then call `apply` with that hash.
+7. Run `node scripts/tourney-cutover.mjs --activate-legacy-v4`. It re-reads the
+   paused controls before mutation.
+8. Run `node scripts/tourney-cutover.mjs --repair-legacy-v4` only after legacy
+   activation succeeds.
+9. Call the deployed `activate-schema` action below to activate Supabase. It
+   also re-reads the paused controls before mutation.
+10. Call `inventory`, preserve its exact hash, then call `apply` with that hash.
    Apply is rejected if the inventory changes while the reconciliation lease is
    acquired.
-8. Dry-run fallback bootstrapping and bind apply to that exact read-only
+11. Dry-run fallback bootstrapping and bind apply to that exact read-only
    Vercel-managed PostgreSQL snapshot:
 
    ```bash
@@ -188,7 +222,7 @@ the worktree and keep writes paused throughout these steps:
      --expected-legacy-hash "$LEGACY_SNAPSHOT_HASH"
    ```
 
-9. Drain and verify all queues and parity while paused. Activation readiness
+12. Drain and verify all queues and parity while paused. Activation readiness
    must report zero active queue blockers, every Discord authority bucket
    (including inactive Tourney accounts), both database controls ready, and all
    five latency baselines present. Deploy
@@ -203,6 +237,19 @@ the worktree and keep writes paused throughout these steps:
      -H "Content-Type: application/json" \
      --data '{"action":"cutover-state"}' \
      https://www.rooindustries.com/api/admin/tourney-activation)"
+   printf '%s' "$CUTOVER_STATE" | jq -e '
+     .ok == true and
+     (.controls.legacy.primaryBackend == "supabase") and
+     (.controls.supabase.primaryBackend == "supabase") and
+     (.controls.legacy.generation == 1) and
+     (.controls.supabase.generation == 1) and
+     (.controls.legacy.writesPaused == true) and
+     (.controls.supabase.writesPaused == true) and
+     (.controls.legacy.lastPauseOperationId == .controls.supabase.lastPauseOperationId) and
+     (.controls.legacy.lastResumeOperationId == .controls.supabase.lastResumeOperationId) and
+     (.fingerprints.legacy | type == "string" and test("^[0-9a-f]{64}$")) and
+     (.fingerprints.supabase | type == "string" and test("^[0-9a-f]{64}$"))
+   ' >/dev/null
    LEGACY_TARGET_FINGERPRINT="$(printf '%s' "$CUTOVER_STATE" | jq -er '.fingerprints.legacy')"
    SUPABASE_TARGET_FINGERPRINT="$(printf '%s' "$CUTOVER_STATE" | jq -er '.fingerprints.supabase')"
    RESUME_OPERATION_ID="resume-$(date -u +%Y%m%dt%H%M%Sz)"
@@ -211,11 +258,28 @@ the worktree and keep writes paused throughout these steps:
      -H "Content-Type: application/json" \
      --data "{\"action\":\"resume-writes\",\"operationId\":\"$RESUME_OPERATION_ID\",\"expectedPrimaryBackend\":\"supabase\",\"expectedGeneration\":1,\"expectedWritesPaused\":true,\"legacyTargetFingerprint\":\"$LEGACY_TARGET_FINGERPRINT\",\"supabaseTargetFingerprint\":\"$SUPABASE_TARGET_FINGERPRINT\"}" \
      https://www.rooindustries.com/api/admin/tourney-activation
-   curl --fail-with-body --silent \
+   RESUMED_STATE="$(curl --fail-with-body --silent \
      -H "Authorization: Bearer $CRON_SECRET" \
      -H "Content-Type: application/json" \
      --data '{"action":"cutover-state"}' \
-     https://www.rooindustries.com/api/admin/tourney-activation
+     https://www.rooindustries.com/api/admin/tourney-activation)"
+   printf '%s' "$RESUMED_STATE" | jq -e \
+     --arg operation "$RESUME_OPERATION_ID" \
+     --arg legacyFingerprint "$LEGACY_TARGET_FINGERPRINT" \
+     --arg supabaseFingerprint "$SUPABASE_TARGET_FINGERPRINT" '
+       .ok == true and
+       (.controls.legacy.primaryBackend == "supabase") and
+       (.controls.supabase.primaryBackend == "supabase") and
+       (.controls.legacy.generation == 1) and
+       (.controls.supabase.generation == 1) and
+       (.controls.legacy.writesPaused == false) and
+       (.controls.supabase.writesPaused == false) and
+       (.controls.legacy.lastPauseOperationId == .controls.supabase.lastPauseOperationId) and
+       (.controls.legacy.lastResumeOperationId == $operation) and
+       (.controls.supabase.lastResumeOperationId == $operation) and
+       (.fingerprints.legacy == $legacyFingerprint) and
+       (.fingerprints.supabase == $supabaseFingerprint)
+     ' >/dev/null
    ```
 
    This resumes only the two database controls. Keep the deployment environment
