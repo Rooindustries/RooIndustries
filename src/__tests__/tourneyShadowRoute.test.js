@@ -95,6 +95,8 @@ const makeSql = (
     generation: 0,
     writes_paused: true,
     updated_by: "fixture",
+    last_pause_operation_id: null,
+    last_resume_operation_id: null,
     row_version: "1",
   };
   let shouldFailUpdate = failUpdate;
@@ -143,7 +145,10 @@ const makeSql = (
       return Promise.resolve([{ ...state }]);
     }
     if (text.includes("update") && text.includes("primary_backend")) {
-      const [, primaryBackend, generation, writesPaused, actor, expectedVersion] =
+      const [
+        , primaryBackend, generation, writesPaused, actor,
+        lastPauseOperationId, lastResumeOperationId, expectedVersion,
+      ] =
         values;
       events.push(`${backend}:update:${actor}`);
       updates.push({ primaryBackend, generation, writesPaused, actor });
@@ -153,6 +158,8 @@ const makeSql = (
         generation,
         writes_paused: writesPaused,
         updated_by: actor,
+        last_pause_operation_id: lastPauseOperationId,
+        last_resume_operation_id: lastResumeOperationId,
         row_version: String(Number(state.row_version) + 1),
       });
       if (shouldFailUpdate) {

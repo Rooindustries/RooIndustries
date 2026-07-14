@@ -1,9 +1,13 @@
 import { logSafeError } from "../safeErrorLog.js";
+import migrationTargetSafety from "../supabase/migrationTargetSafety.cjs";
 import { getTourneySqlForBackend } from "./sqlClient.js";
 import {
   checkTourneyManualFailoverReadiness,
   resolveTourneyStorePolicy,
 } from "./store.js";
+
+const { computeMigrationTargetFingerprints } = migrationTargetSafety;
+const FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/;
 
 const cutoverRelation = (backend) => backend === "supabase"
   ? "tourney.cutover_metadata"
@@ -15,6 +19,8 @@ const normalizeCutoverState = (control) => ({
   writesPaused: control.writes_paused === true,
   rowVersion: String(control.row_version || ""),
   updatedBy: String(control.updated_by || ""),
+  lastPauseOperationId: String(control.last_pause_operation_id || ""),
+  lastResumeOperationId: String(control.last_resume_operation_id || ""),
 });
 
 const sameCutoverState = (left, right) =>
@@ -22,11 +28,17 @@ const sameCutoverState = (left, right) =>
   left.generation === right.generation &&
   left.writesPaused === right.writesPaused;
 
-const sameCutoverActor = (state, actor) => state.updatedBy === actor;
+const sameCutoverMarkers = (left, right) =>
+  left.lastPauseOperationId === right.lastPauseOperationId &&
+  left.lastResumeOperationId === right.lastResumeOperationId;
+
+const sameCutoverRecord = (left, right) =>
+  sameCutoverState(left, right) && sameCutoverMarkers(left, right);
 
 const readCutoverControl = async ({ sql, backend }) => {
   const rows = await sql`
     select primary_backend, generation, writes_paused, updated_by,
+      last_pause_operation_id, last_resume_operation_id,
       xmin::text as row_version
     from ${sql(cutoverRelation(backend))}
     where id = 'tourney'
@@ -53,9 +65,12 @@ const writeCutoverControl = async ({
     update ${sql(cutoverRelation(backend))}
     set primary_backend = ${state.primaryBackend}, generation = ${state.generation},
         writes_paused = ${state.writesPaused}, updated_at = now(),
-        updated_by = ${actor}
+        updated_by = ${actor},
+        last_pause_operation_id = ${state.lastPauseOperationId || null},
+        last_resume_operation_id = ${state.lastResumeOperationId || null}
     where id = 'tourney' and xmin = ${expected.rowVersion}::xid
     returning primary_backend, generation, writes_paused, updated_by,
+      last_pause_operation_id, last_resume_operation_id,
       xmin::text as row_version
   `;
   if (rows.length !== 1) {
@@ -89,18 +104,28 @@ const cutoverWriteDefinitelyFailed = (error) => {
     !AMBIGUOUS_SQLSTATE_CODES.has(code);
 };
 
+const operationMarker = (operation) => operation?.kind === "pause"
+  ? "lastPauseOperationId"
+  : "lastResumeOperationId";
+
+const operationRecordedByState = (state, operation) =>
+  Boolean(operation?.id) && state[operationMarker(operation)] === operation.id;
+
+const applyOperationMarker = (state, operation) => operation
+  ? { ...state, [operationMarker(operation)]: operation.id }
+  : state;
+
 const inspectCutoverState = async ({
   sql,
   backend,
   expected,
-  actor,
-  requireActorMatch = false,
+  operation,
   logLabel,
 }) => {
   try {
     const state = await readNormalizedCutoverControl({ sql, backend });
-    const matches = sameCutoverState(state, expected) &&
-      (!requireActorMatch || sameCutoverActor(state, actor));
+    const matches = sameCutoverRecord(state, expected) &&
+      (!operation || operationRecordedByState(state, operation));
     return { matches, readable: true, state };
   } catch (error) {
     logSafeError(logLabel, error);
@@ -127,7 +152,7 @@ const previousControlsRestored = async ({ databases, previous }) => {
     }),
   ]);
   return legacyRestored && supabaseRestored &&
-    sameCutoverState(previous.legacy, previous.supabase);
+    sameCutoverRecord(previous.legacy, previous.supabase);
 };
 
 const compensateFirstCutover = async ({
@@ -178,16 +203,14 @@ const recoverSecondTargetFailure = async ({
   previous,
   appliedFirst,
   error,
-  actor,
   compensationActor,
-  requireActorMatch,
+  operation,
 }) => {
   const appliedSecond = await hasCutoverState({
     sql: databases[secondBackend],
     backend: secondBackend,
     expected: next,
-    actor,
-    requireActorMatch,
+    operation,
     logLabel: "Tourney cutover second-target verification failed",
   });
   if (appliedSecond) return next;
@@ -208,7 +231,7 @@ const writeFirstCutoverControl = async ({
   next,
   previous,
   actor,
-  requireActorMatch,
+  operation,
 }) => {
   try {
     return await writeCutoverControl({
@@ -223,8 +246,7 @@ const writeFirstCutoverControl = async ({
       sql: databases[backend],
       backend,
       expected: next,
-      actor,
-      requireActorMatch,
+      operation,
       logLabel: "Tourney cutover first-target verification failed",
     });
     if (verification.matches) return verification.state;
@@ -333,23 +355,23 @@ const checkSupabaseResumeReadiness = async ({ databases, generation }) => {
   return [...new Set(blockers)];
 };
 
-const controlsMatch = ({ legacy, supabase }, expected, actor, requireActorMatch) =>
-  sameCutoverState(legacy, expected) && sameCutoverState(supabase, expected) &&
-  (!requireActorMatch || (
-    sameCutoverActor(legacy, actor) && sameCutoverActor(supabase, actor)
+const controlsMatch = ({ legacy, supabase }, expected, operation = null) =>
+  sameCutoverRecord(legacy, expected) && sameCutoverRecord(supabase, expected) &&
+  (!operation || (
+    operationRecordedByState(legacy, operation) &&
+    operationRecordedByState(supabase, operation)
   ));
 
 const verifyCompletedCutover = async ({
   databases,
   next,
-  actor,
-  requireActorMatch,
+  operation,
 }) => {
   const [legacy, supabase] = await Promise.all([
     readNormalizedCutoverControl({ sql: databases.legacy, backend: "legacy" }),
     readNormalizedCutoverControl({ sql: databases.supabase, backend: "supabase" }),
   ]);
-  if (!controlsMatch({ legacy, supabase }, next, actor, requireActorMatch)) {
+  if (!controlsMatch({ legacy, supabase }, next, operation)) {
     throw cutoverFailure("TOURNEY_CUTOVER_RECOVERY_REQUIRED");
   }
 };
@@ -361,7 +383,7 @@ export const applyTourneyCutoverControl = async ({
   actor = "manual-cutover",
   compensationActor = "manual-cutover-compensation",
   expectedCurrent = null,
-  requireActorMatch = false,
+  operation = null,
   verifyCompletion = false,
 }) => {
   const next = {
@@ -384,32 +406,42 @@ export const applyTourneyCutoverControl = async ({
     readNormalizedCutoverControl({ sql: databases.supabase, backend: "supabase" }),
   ]);
   const current = { legacy, supabase };
-  if (controlsMatch(current, next, actor, requireActorMatch)) {
-    return requireActorMatch
-      ? { ...next, changed: false, replayed: true }
-      : next;
-  }
-  if (!sameCutoverState(legacy, supabase)) {
+  if (!sameCutoverRecord(legacy, supabase)) {
     return {
       error: "Tourney cutover controls disagree and require recovery.",
       code: "TOURNEY_CUTOVER_CONTROL_MISMATCH",
       status: 409,
     };
   }
-  if (expectedCurrent && !controlsMatch(current, expectedCurrent, actor, false)) {
+  const operationRecorded = operation && operationRecordedByState(legacy, operation);
+  if (operationRecorded) {
+    return {
+      ...legacy,
+      changed: false,
+      replayed: true,
+      superseded: !sameCutoverState(legacy, next),
+    };
+  }
+  if (!operation && sameCutoverState(legacy, next)) return next;
+  if (expectedCurrent && !sameCutoverState(legacy, expectedCurrent)) {
     return {
       error: "Tourney cutover controls do not match the expected state.",
       code: "TOURNEY_CUTOVER_EXPECTATION_MISMATCH",
       status: 409,
     };
   }
-  if (requireActorMatch && sameCutoverState(legacy, next)) {
+  if (operation && sameCutoverState(legacy, next)) {
     return {
       error: "Tourney cutover state was applied by another operation.",
       code: "TOURNEY_CUTOVER_EXPECTATION_MISMATCH",
       status: 409,
     };
   }
+  const target = applyOperationMarker({
+    ...next,
+    lastPauseOperationId: legacy.lastPauseOperationId,
+    lastResumeOperationId: legacy.lastResumeOperationId,
+  }, operation);
   const backendChanged = legacy.primaryBackend !== next.primaryBackend;
   const generationChanged = legacy.generation !== next.generation;
   if (backendChanged && next.generation !== legacy.generation + 1) {
@@ -505,16 +537,16 @@ export const applyTourneyCutoverControl = async ({
   const appliedFirst = await writeFirstCutoverControl({
     backend: firstBackend,
     databases,
-    next,
+    next: target,
     previous: previous[firstBackend],
     actor,
-    requireActorMatch,
+    operation,
   });
   try {
     await writeCutoverControl({
       sql: databases[secondBackend],
       backend: secondBackend,
-      state: next,
+      state: target,
       expected: previous[secondBackend],
       actor,
     });
@@ -523,27 +555,124 @@ export const applyTourneyCutoverControl = async ({
       databases,
       firstBackend,
       secondBackend,
-      next,
+      next: target,
       previous,
       appliedFirst,
       error,
-      actor,
       compensationActor,
-      requireActorMatch,
+      operation,
     });
   }
   if (verifyCompletion) {
-    await verifyCompletedCutover({ databases, next, actor, requireActorMatch });
+    await verifyCompletedCutover({ databases, next: target, operation });
   }
-  return requireActorMatch
-    ? { ...next, changed: true, replayed: false }
+  return operation
+    ? { ...target, changed: true, replayed: false, superseded: false }
     : next;
 };
 
-const strictCutoverError = (message, code, status = 409) => Object.assign(
+const strictCutoverError = (message, code, status = 409, cause) => Object.assign(
   new Error(message),
-  { code, status }
+  { code, status, ...(cause ? { cause } : {}) }
 );
+
+const publicCutoverControl = (state) => ({
+  primaryBackend: state.primaryBackend,
+  generation: state.generation,
+  writesPaused: state.writesPaused,
+  lastPauseOperationId: state.lastPauseOperationId || null,
+  lastResumeOperationId: state.lastResumeOperationId || null,
+});
+
+const runtimeTargetFingerprints = ({
+  env,
+  legacyTargetFingerprint,
+  requireRequestFingerprints = false,
+  supabaseTargetFingerprint,
+}) => {
+  let actual;
+  try {
+    actual = computeMigrationTargetFingerprints({
+      ...env,
+      SUPABASE_MIGRATION_TARGET_ENVIRONMENT: "production",
+    });
+  } catch (cause) {
+    throw strictCutoverError(
+      "The Tourney cutover database targets are invalid.",
+      "TOURNEY_CUTOVER_TARGET_INVALID",
+      503,
+      cause
+    );
+  }
+  const expected = {
+    legacy: String(env.SUPABASE_MIGRATION_EXPECTED_LEGACY_FINGERPRINT || "")
+      .trim().toLowerCase(),
+    supabase: String(env.SUPABASE_MIGRATION_EXPECTED_SUPABASE_FINGERPRINT || "")
+      .trim().toLowerCase(),
+  };
+  if (
+    !FINGERPRINT_PATTERN.test(actual.legacy) ||
+    !FINGERPRINT_PATTERN.test(actual.supabase) ||
+    !FINGERPRINT_PATTERN.test(expected.legacy) ||
+    !FINGERPRINT_PATTERN.test(expected.supabase) ||
+    actual.legacy !== expected.legacy ||
+    actual.supabase !== expected.supabase
+  ) {
+    throw strictCutoverError(
+      "The Tourney cutover database targets do not match their pinned fingerprints.",
+      "TOURNEY_CUTOVER_TARGET_FINGERPRINT_MISMATCH"
+    );
+  }
+  if (!requireRequestFingerprints) return actual;
+  const supplied = {
+    legacy: String(legacyTargetFingerprint || "").trim().toLowerCase(),
+    supabase: String(supabaseTargetFingerprint || "").trim().toLowerCase(),
+  };
+  if (
+    !FINGERPRINT_PATTERN.test(supplied.legacy) ||
+    !FINGERPRINT_PATTERN.test(supplied.supabase)
+  ) {
+    throw strictCutoverError(
+      "Exact Tourney cutover target fingerprints are required.",
+      "TOURNEY_CUTOVER_TARGET_FINGERPRINT_REQUIRED",
+      400
+    );
+  }
+  if (supplied.legacy !== actual.legacy || supplied.supabase !== actual.supabase) {
+    throw strictCutoverError(
+      "The supplied Tourney cutover target fingerprints do not match.",
+      "TOURNEY_CUTOVER_TARGET_FINGERPRINT_MISMATCH"
+    );
+  }
+  return actual;
+};
+
+const getCutoverDatabases = async (env) => ({
+  legacy: await getTourneySqlForBackend({ backend: "legacy", env }),
+  supabase: await getTourneySqlForBackend({ backend: "supabase", env }),
+});
+
+const readCutoverPair = async (databases) => {
+  const [legacy, supabase] = await Promise.all([
+    readNormalizedCutoverControl({ sql: databases.legacy, backend: "legacy" }),
+    readNormalizedCutoverControl({ sql: databases.supabase, backend: "supabase" }),
+  ]);
+  return { legacy, supabase };
+};
+
+export const readTourneyDualDatabaseCutoverState = async ({
+  env = process.env,
+} = {}) => {
+  const fingerprints = runtimeTargetFingerprints({ env });
+  const controls = await readCutoverPair(await getCutoverDatabases(env));
+  return {
+    controls: {
+      legacy: publicCutoverControl(controls.legacy),
+      supabase: publicCutoverControl(controls.supabase),
+    },
+    fingerprints,
+  };
+};
 
 const validateStrictWritesPausedRequest = ({
   expectedGeneration,
@@ -580,7 +709,9 @@ export const setTourneyDualDatabaseWritesPausedV4 = async ({
   expectedGeneration,
   expectedPrimaryBackend,
   expectedWritesPaused,
+  legacyTargetFingerprint,
   operationId,
+  supabaseTargetFingerprint,
   writesPaused,
 } = {}) => {
   const { expected, normalizedOperationId } = validateStrictWritesPausedRequest({
@@ -602,11 +733,18 @@ export const setTourneyDualDatabaseWritesPausedV4 = async ({
       "TOURNEY_CUTOVER_DEPLOYMENT_MISMATCH"
     );
   }
+  const fingerprints = runtimeTargetFingerprints({
+    env,
+    legacyTargetFingerprint,
+    requireRequestFingerprints: true,
+    supabaseTargetFingerprint,
+  });
   const actor = `schema-v4-${writesPaused ? "pause" : "resume"}:${normalizedOperationId}`;
-  const databases = {
-    legacy: await getTourneySqlForBackend({ backend: "legacy", env }),
-    supabase: await getTourneySqlForBackend({ backend: "supabase", env }),
+  const operation = {
+    id: normalizedOperationId,
+    kind: writesPaused ? "pause" : "resume",
   };
+  const databases = await getCutoverDatabases(env);
   const result = await applyTourneyCutoverControl({
     payload: { ...expected, writesPaused },
     databases,
@@ -614,7 +752,7 @@ export const setTourneyDualDatabaseWritesPausedV4 = async ({
     actor,
     compensationActor: `${actor}:compensated`,
     expectedCurrent: expected,
-    requireActorMatch: true,
+    operation,
     verifyCompletion: true,
   });
   if (result.error) {
@@ -623,17 +761,11 @@ export const setTourneyDualDatabaseWritesPausedV4 = async ({
   return {
     changed: result.changed,
     replayed: result.replayed,
+    superseded: result.superseded,
     controls: {
-      legacy: {
-        primaryBackend: result.primaryBackend,
-        generation: result.generation,
-        writesPaused: result.writesPaused,
-      },
-      supabase: {
-        primaryBackend: result.primaryBackend,
-        generation: result.generation,
-        writesPaused: result.writesPaused,
-      },
+      legacy: publicCutoverControl(result),
+      supabase: publicCutoverControl(result),
     },
+    fingerprints,
   };
 };

@@ -9,6 +9,7 @@ import {
   inventoryTourneyV4Activation,
 } from "../../../../src/server/tourney/activation";
 import {
+  readTourneyDualDatabaseCutoverState,
   setTourneyDualDatabaseWritesPausedV4,
 } from "../../../../src/server/tourney/cutoverControl";
 
@@ -51,6 +52,12 @@ export async function POST(request) {
         ...(await captureTourneyLatencyBaselineV4()),
       });
     }
+    if (action === "cutover-state") {
+      return respond({
+        ok: true,
+        ...(await readTourneyDualDatabaseCutoverState()),
+      });
+    }
     if (action === "pause-writes" || action === "resume-writes") {
       return respond({
         ok: true,
@@ -59,7 +66,9 @@ export async function POST(request) {
           expectedPrimaryBackend: payload.expectedPrimaryBackend,
           expectedGeneration: payload.expectedGeneration,
           expectedWritesPaused: payload.expectedWritesPaused,
+          legacyTargetFingerprint: payload.legacyTargetFingerprint,
           writesPaused: action === "pause-writes",
+          supabaseTargetFingerprint: payload.supabaseTargetFingerprint,
         })),
       });
     }
