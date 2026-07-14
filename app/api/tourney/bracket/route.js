@@ -21,6 +21,10 @@ import { buildTourneyPublicError } from "../../../../src/server/tourney/publicEr
 import { readPublicTourneyBracket } from "../../../../src/server/tourney/readService";
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
 import {
+  readBoundedFormData,
+  readBoundedJson,
+} from "../../../../src/server/request/boundedJson";
+import {
   executeTourneyCommand,
   readTourneyCommandId,
 } from "../../../../src/server/tourney/store";
@@ -53,10 +57,13 @@ const getSession = async (request) => {
 
 const readPayload = async (request) => {
   const contentType = String(request.headers.get("content-type") || "").toLowerCase();
-  if (contentType.includes("application/json")) {
-    return request.json().catch(() => ({}));
+  if (contentType.startsWith("application/json")) {
+    return readBoundedJson(request, { maxBytes: 32 * 1024 });
   }
-  const form = await request.formData();
+  const form = await readBoundedFormData(request, {
+    maxBytes: 32 * 1024,
+    maxFields: 16,
+  });
   return Object.fromEntries(form.entries());
 };
 

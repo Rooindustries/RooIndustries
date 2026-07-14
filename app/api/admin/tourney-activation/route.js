@@ -1,8 +1,11 @@
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { logSafeError } from "../../../../src/server/safeErrorLog";
+import { readBoundedJson } from "../../../../src/server/request/boundedJson";
 import {
+  activateTourneySchemaV4,
   applyTourneyV4Activation,
+  captureTourneyLatencyBaselineV4,
   inventoryTourneyV4Activation,
 } from "../../../../src/server/tourney/activation";
 
@@ -31,10 +34,19 @@ const respond = (body, status = 200) => NextResponse.json(body, {
 export async function POST(request) {
   if (!authorized(request)) return respond({ ok: false, error: "Not found." }, 404);
   try {
-    const payload = await request.json().catch(() => ({}));
+    const payload = await readBoundedJson(request, { maxBytes: 4 * 1024 });
     const action = String(payload.action || "").trim().toLowerCase();
+    if (action === "activate-schema") {
+      return respond({ ok: true, ...(await activateTourneySchemaV4()) });
+    }
     if (action === "inventory") {
       return respond({ ok: true, ...(await inventoryTourneyV4Activation()) });
+    }
+    if (action === "capture-latency-baseline") {
+      return respond({
+        ok: true,
+        ...(await captureTourneyLatencyBaselineV4()),
+      });
     }
     if (action === "apply") {
       return respond({

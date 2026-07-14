@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   checkTourneyRateLimit,
-  createTourneyPasswordResetToken,
+  createTourneyPasswordReset,
   findTourneyAccount,
   findTourneyAccountByEmail,
   getTourneyAdminEmail,
@@ -12,6 +12,10 @@ import { enqueueTourneyEmailDispatch } from "../../../../src/server/tourney/emai
 import { createTourneyResetToken } from "../../../../src/server/tourney/playerStore";
 import { logSafeError } from "../../../../src/server/safeErrorLog";
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
+import {
+  readBoundedFormData,
+  readBoundedJson,
+} from "../../../../src/server/request/boundedJson";
 import {
   executeTourneyCommand,
   readTourneyCommandId,
@@ -25,9 +29,20 @@ export async function POST(request) {
     return NextResponse.json({ ok: false, error: "Cross-origin request rejected." }, { status: 403 });
   }
   const contentType = String(request.headers.get("content-type") || "").toLowerCase();
-  const payload = contentType.includes("application/json")
-    ? await request.json().catch(() => ({}))
-    : Object.fromEntries((await request.formData()).entries());
+  let payload;
+  try {
+    payload = contentType.startsWith("application/json")
+      ? await readBoundedJson(request, { maxBytes: 8 * 1024 })
+      : Object.fromEntries((await readBoundedFormData(request, {
+          maxBytes: 8 * 1024,
+          maxFields: 3,
+        })).entries());
+  } catch (error) {
+    return NextResponse.json(
+      { ok: false, error: error?.message || "Invalid reset request." },
+      { status: Number(error?.status || 400) }
+    );
+  }
   const login = String(payload.login || payload.email || payload.username || "").trim();
   const clientAddress = getClientAddressFromHeaders(request.headers);
   const rateLimit = await checkTourneyRateLimit({
@@ -62,14 +77,15 @@ export async function POST(request) {
       requestPayload: { login: login.toLowerCase() },
       callback: async () => {
         if (adminAccount && adminEmail) {
-          const token = createTourneyPasswordResetToken({ account: adminAccount });
+          const reset = createTourneyPasswordReset({ account: adminAccount });
           await enqueueTourneyEmailDispatch({
             commandId,
             dispatchKind: "reset",
             recipient: adminEmail,
             payload: {
               player: { username: adminAccount.username, email: adminEmail },
-              token,
+              token: reset.token,
+              expiresAt: reset.expiresAt,
               baseUrl: new URL(request.url).origin,
             },
           });
@@ -83,6 +99,7 @@ export async function POST(request) {
               payload: {
                 player: reset.player,
                 token: reset.token,
+                expiresAt: reset.expiresAt,
                 baseUrl: new URL(request.url).origin,
               },
             });

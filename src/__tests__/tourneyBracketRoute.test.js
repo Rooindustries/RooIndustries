@@ -55,19 +55,21 @@ const snapshot = {
   audit: [],
 };
 
-const makeJsonRequest = (payload, cookie = "session") => ({
+const makeJsonRequest = (payload, cookie = "session", contentLength = "") => ({
   url: "https://www.rooindustries.com/api/tourney/bracket",
   headers: {
-    get: (name) =>
-      String(name || "").toLowerCase() === "content-type"
-        ? "application/json"
-        : "",
+    get: (name) => {
+      const key = String(name || "").toLowerCase();
+      if (key === "content-type") return "application/json";
+      if (key === "content-length") return contentLength;
+      return "";
+    },
   },
   cookies: {
     get: (name) =>
       name === "tourney_session" && cookie ? { value: cookie } : undefined,
   },
-  json: async () => payload,
+  text: async () => JSON.stringify(payload),
 });
 
 describe("tourney bracket API route", () => {
@@ -109,6 +111,12 @@ describe("tourney bracket API route", () => {
     expect(response.status).toBe(200);
     expect(body).toEqual(snapshot);
     expect(mockReadTourneySessionFromStore).not.toHaveBeenCalled();
+  });
+
+  test("rejects an oversized bracket mutation", async () => {
+    const response = await POST(makeJsonRequest({ action: "score-match" }, "session", "32769"));
+    expect(response.status).toBe(413);
+    expect(mockScoreTourneyBracketMatch).not.toHaveBeenCalled();
   });
 
   test("allows casters to score matches", async () => {

@@ -6,6 +6,8 @@ const mockCreateTourneyPasswordHash = jest.fn();
 const mockGetTourneyRegistrationCloseIso = jest.fn();
 const mockIsTourneyRegistrationClosed = jest.fn();
 const mockSendTourneyRegistrationApprovalEmails = jest.fn();
+const mockGetNextSupabaseUser = jest.fn();
+const mockResolveSupabaseAccountByUserId = jest.fn();
 const originalResponseJson = Response.json;
 
 if (!Response.json) {
@@ -19,14 +21,32 @@ if (!Response.json) {
     });
 }
 
+const createNextResponse = (body, init = {}) => {
+  const headerValues = new Map(
+    Object.entries(init.headers || {}).map(([name, value]) => [
+      String(name).toLowerCase(),
+      String(value),
+    ])
+  );
+  const cookieValues = [];
+  return {
+    status: init.status || 200,
+    json: async () => body,
+    headers: {
+      get: (name) => headerValues.get(String(name).toLowerCase()) || null,
+      set: (name, value) =>
+        headerValues.set(String(name).toLowerCase(), String(value)),
+    },
+    cookies: {
+      getAll: () => [...cookieValues],
+      set: (cookie) => cookieValues.push(cookie),
+      values: cookieValues,
+    },
+  };
+};
+
 jest.mock("next/server", () => ({
-  NextResponse: {
-    json: (body, init = {}) => ({
-      status: init.status || 200,
-      json: async () => body,
-      headers: init.headers || {},
-    }),
-  },
+  NextResponse: { json: (body, init = {}) => createNextResponse(body, init) },
 }));
 
 jest.mock("../server/tourney/auth", () => ({
@@ -47,6 +67,15 @@ jest.mock("../server/tourney/playerStore", () => ({
   getTourneyRegistrationCloseIso: (...args) =>
     mockGetTourneyRegistrationCloseIso(...args),
   isTourneyRegistrationClosed: (...args) => mockIsTourneyRegistrationClosed(...args),
+}));
+
+jest.mock("../server/supabase/serverSession", () => ({
+  getNextSupabaseUser: (...args) => mockGetNextSupabaseUser(...args),
+}));
+
+jest.mock("../server/supabase/accounts", () => ({
+  resolveSupabaseAccountByUserId: (...args) =>
+    mockResolveSupabaseAccountByUserId(...args),
 }));
 
 const { POST } = require("../../app/api/tourney/register/route.js");
@@ -103,6 +132,8 @@ describe("tourney register API route", () => {
     mockGetTourneyRegistrationCloseIso.mockReset();
     mockIsTourneyRegistrationClosed.mockReset();
     mockSendTourneyRegistrationApprovalEmails.mockReset();
+    mockGetNextSupabaseUser.mockReset();
+    mockResolveSupabaseAccountByUserId.mockReset();
 
     mockIsTourneyRegistrationClosed.mockReturnValue(false);
     mockGetTourneyRegistrationCloseIso.mockReturnValue("2026-07-22T00:00:00.000Z");
@@ -122,6 +153,8 @@ describe("tourney register API route", () => {
     });
     mockCreateTourneyPasswordHash.mockResolvedValue("prepared-password-hash");
     mockSendTourneyRegistrationApprovalEmails.mockResolvedValue({ id: "email_1" });
+    mockGetNextSupabaseUser.mockResolvedValue(null);
+    mockResolveSupabaseAccountByUserId.mockResolvedValue(null);
   });
 
   test("passes substitute-pool confirmation through to player creation", async () => {
@@ -139,18 +172,21 @@ describe("tourney register API route", () => {
   });
 
   test("passes creator eligibility acknowledgement through from form submissions", async () => {
-    const formValues = new Map(
+    const formValues = new URLSearchParams(
       Object.entries({
         ...basePayload,
         acceptedCreatorEligibility: "on",
-      })
-    );
+      }).map(([key, value]) => [key, String(value)])
+    ).toString();
     const request = {
       url: "https://www.rooindustries.com/api/tourney/register",
-      headers: { get: () => "" },
-      formData: async () => ({
-        get: (key) => formValues.get(key) || null,
-      }),
+      headers: { get: (name) => {
+        const key = String(name).toLowerCase();
+        if (key === "content-type") return "application/x-www-form-urlencoded";
+        if (key === "content-length") return String(Buffer.byteLength(formValues));
+        return "";
+      } },
+      text: async () => formValues,
     };
 
     const response = await POST(request);
@@ -164,6 +200,61 @@ describe("tourney register API route", () => {
       authUserId: "",
       preparedPasswordHash: "prepared-password-hash",
     });
+  });
+
+  test("forwards refreshed Supabase cookies on successful registration", async () => {
+    mockGetNextSupabaseUser.mockImplementation(async ({ response }) => {
+      response.cookies.set({ name: "sb-refresh-token", value: "fresh", path: "/" });
+      return { id: "auth-user-1" };
+    });
+    mockResolveSupabaseAccountByUserId.mockResolvedValue({
+      verified_real_email: basePayload.email,
+    });
+
+    const response = await POST(makeJsonRequest(basePayload));
+
+    expect(response.status).toBe(200);
+    expect(response.cookies.values).toContainEqual(
+      expect.objectContaining({ name: "sb-refresh-token", value: "fresh" })
+    );
+  });
+
+  test("forwards refreshed Supabase cookies on verified-email conflicts", async () => {
+    mockGetNextSupabaseUser.mockImplementation(async ({ response }) => {
+      response.cookies.set({ name: "sb-refresh-token", value: "fresh", path: "/" });
+      return { id: "auth-user-1" };
+    });
+    mockResolveSupabaseAccountByUserId.mockResolvedValue({
+      verified_real_email: "different@example.com",
+    });
+
+    const response = await POST(makeJsonRequest(basePayload));
+
+    expect(response.status).toBe(409);
+    expect(response.cookies.values).toContainEqual(
+      expect.objectContaining({ name: "sb-refresh-token", value: "fresh" })
+    );
+    expect(mockCreatePendingTourneyPlayer).not.toHaveBeenCalled();
+  });
+
+  test("forwards refreshed Supabase cookies when registration fails after auth", async () => {
+    mockGetNextSupabaseUser.mockImplementation(async ({ response }) => {
+      response.cookies.set({ name: "sb-refresh-token", value: "fresh", path: "/" });
+      return { id: "auth-user-1" };
+    });
+    mockResolveSupabaseAccountByUserId.mockResolvedValue({
+      verified_real_email: basePayload.email,
+    });
+    mockCreatePendingTourneyPlayer.mockRejectedValue(
+      Object.assign(new Error("Registration already exists."), { status: 409 })
+    );
+
+    const response = await POST(makeJsonRequest(basePayload));
+
+    expect(response.status).toBe(409);
+    expect(response.cookies.values).toContainEqual(
+      expect.objectContaining({ name: "sb-refresh-token", value: "fresh" })
+    );
   });
 
   test("blocks registrations after the configured close time", async () => {

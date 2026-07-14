@@ -6,6 +6,9 @@ const {
   resolvePaymentProviders,
   resolvePaymentRuntimePolicy,
 } = require("../src/server/api/payment/providerConfig.js");
+const {
+  inspectMigrationTargets,
+} = require("../src/server/supabase/migrationTargetSafety.cjs");
 
 const vercelEnv = (process.env.VERCEL_ENV || "").trim().toLowerCase();
 const hasExplicitVercelEnv = vercelEnv.length > 0;
@@ -38,6 +41,7 @@ const getFirstValue = (keys = []) => {
 };
 const hasAny = (keys = []) => Boolean(getFirstValue(keys));
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
+const FALSE_VALUES = new Set(["0", "false", "no", "off"]);
 const isEnabled = (key) =>
   TRUE_VALUES.has(String(process.env[key] || "").trim().toLowerCase());
 const numericPercent = (key) => {
@@ -278,8 +282,18 @@ const commercePrimaryBackend =
 const tourneyDatabaseMode =
   getFirstValue(["TOURNEY_DATABASE_MODE"]).toLowerCase() || "legacy";
 const tourneyMirrorEnabled = isEnabled("TOURNEY_MIRROR_ENABLED");
+const tourneyWritesPaused = isEnabled("TOURNEY_WRITES_PAUSED");
+const tourneyHardeningV4Enabled = isEnabled("TOURNEY_HARDENING_V4_ENABLED");
+const tourneyV4ActivationValue = getFirstValue([
+  "TOURNEY_V4_ACTIVATION_ENABLED",
+]).toLowerCase();
+const tourneyV4ActivationEnabled = TRUE_VALUES.has(tourneyV4ActivationValue);
 const tourneyFailoverGeneration =
   getFirstValue(["TOURNEY_FAILOVER_GENERATION"]) || "0";
+const numericTourneyGeneration = /^\d+$/.test(tourneyFailoverGeneration)
+  ? Number(tourneyFailoverGeneration)
+  : Number.NaN;
+const tourneyV4ActivationStaged = tourneyV4ActivationEnabled;
 const contentCanaryPercent = numericPercent("SUPABASE_CONTENT_CANARY_PERCENT");
 const commerceCanaryPercent = numericPercent("SUPABASE_COMMERCE_CANARY_PERCENT");
 const authCanaryConfigured = Boolean(
@@ -296,15 +310,45 @@ const socialAuthEnabled = isEnabled("SUPABASE_SOCIAL_AUTH_ENABLED");
 const publicSocialAuthEnabled = isEnabled(
   "NEXT_PUBLIC_SUPABASE_SOCIAL_AUTH_ENABLED"
 );
+const requireRuntimeKey = (key) => {
+  if (!hasAny([key]) && !missing.includes(key)) missing.push(key);
+};
+const discordInventoryKeys = [
+  "DISCORD_BOT_TOKEN",
+  "DISCORD_GUILD_ID",
+  "DISCORD_PARTICIPANT_ROLE_ID",
+  "DISCORD_HOST_ROLE_ID",
+];
+if (
+  tourneyV4ActivationValue &&
+  !TRUE_VALUES.has(tourneyV4ActivationValue) &&
+  !FALSE_VALUES.has(tourneyV4ActivationValue)
+) {
+  supabaseConsistencyFailures.push(
+    "TOURNEY_V4_ACTIVATION_ENABLED must be an explicit boolean value."
+  );
+}
 if (socialAuthEnabled) {
-  for (const key of [
-    "DISCORD_BOT_TOKEN",
-    "DISCORD_GUILD_ID",
-    "DISCORD_PARTICIPANT_ROLE_ID",
-    "DISCORD_HOST_ROLE_ID",
-  ]) {
-    if (!hasAny([key])) missing.push(key);
+  discordInventoryKeys.forEach(requireRuntimeKey);
+}
+if (tourneyV4ActivationStaged) {
+  if (!tourneyV4ActivationEnabled) {
+    supabaseConsistencyFailures.push(
+      "The activation-ready v4 control tuple requires TOURNEY_V4_ACTIVATION_ENABLED=1."
+    );
   }
+  if (
+    tourneyDatabaseMode !== "supabase" ||
+    !tourneyMirrorEnabled ||
+    !tourneyWritesPaused ||
+    tourneyFailoverGeneration !== "1" ||
+    tourneyHardeningV4Enabled
+  ) {
+    supabaseConsistencyFailures.push(
+      "Tourney v4 activation requires Supabase primary, mirroring enabled, writes paused, failover generation 1, and v4 hardening disabled until database activation completes."
+    );
+  }
+  discordInventoryKeys.forEach(requireRuntimeKey);
 }
 const migrationEndpointEnabled = isEnabled(
   "SUPABASE_MIGRATION_ENDPOINT_ENABLED"
@@ -319,7 +363,6 @@ const anySupabaseRuntimeEnabled =
   shadowWritesEnabled ||
   socialAuthEnabled ||
   licensingEnabled ||
-  migrationEndpointEnabled ||
   tourneyMirrorEnabled;
 const tourneyNeedsSupabase = tourneyDatabaseMode === "supabase" || tourneyMirrorEnabled;
 
@@ -496,14 +539,28 @@ if (
     "Supabase licensing requires APP_DEVICE_HASH_SECRET with at least 32 characters."
   );
 }
-if (migrationEndpointEnabled && isProdBuild) {
-  supabaseConsistencyFailures.push(
-    "SUPABASE_MIGRATION_ENDPOINT_ENABLED must remain disabled in production."
-  );
+if (migrationEndpointEnabled) {
+  if (isProdBuild) {
+    supabaseConsistencyFailures.push(
+      "SUPABASE_MIGRATION_ENDPOINT_ENABLED must remain disabled in production."
+    );
+  }
+  const migrationTargets = inspectMigrationTargets(process.env);
+  for (const targetFailure of migrationTargets.failures) {
+    supabaseConsistencyFailures.push(targetFailure.message);
+  }
 }
 if (socialAuthEnabled !== publicSocialAuthEnabled) {
   supabaseConsistencyFailures.push(
     "SUPABASE_SOCIAL_AUTH_ENABLED and NEXT_PUBLIC_SUPABASE_SOCIAL_AUTH_ENABLED must match."
+  );
+}
+if (
+  tourneyDatabaseMode === "supabase" &&
+  (!socialAuthEnabled || !publicSocialAuthEnabled)
+) {
+  supabaseConsistencyFailures.push(
+    "Supabase Tourney mode requires Google and Discord social Auth to remain enabled."
   );
 }
 if (

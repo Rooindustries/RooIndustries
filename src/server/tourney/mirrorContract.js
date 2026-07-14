@@ -103,7 +103,8 @@ export const TOURNEY_MIRROR_CONTRACT = Object.freeze({
     allowedColumns: columns(
       "command_id", "purpose", "request_hash", "status", "result_status",
       "result_body", "generation", "created_at", "committed_at", "completed_at",
-      "failed_at", "updated_at"
+      "failed_at", "failure_code", "failure_evidence", "recovered_at", "recovery_evidence",
+      "updated_at"
     ),
   },
   account_snapshots: {
@@ -119,6 +120,7 @@ export const TOURNEY_MIRROR_CONTRACT = Object.freeze({
     relations: { supabase: "tourney.external_operations", legacy: "tourney_external_operations" },
     allowedColumns: columns(
       "operation_key", "command_id", "operation_kind", "entity_type", "entity_id",
+      "serialization_key",
       "desired_state", "desired_state_hash", "status", "attempt_count",
       "max_attempts", "next_attempt_at", "lease_id", "lease_expires_at",
       "last_error_code", "completed_at", "created_at", "updated_at"
@@ -129,10 +131,12 @@ export const TOURNEY_MIRROR_CONTRACT = Object.freeze({
     relations: { supabase: "accounts.discord_role_assignments", legacy: "tourney_discord_role_assignments" },
     allowedColumns: columns(
       "principal_id", "user_id", "player_id", "discord_user_id",
-      "previous_discord_user_id", "guild_id", "tourney_role", "desired_role",
+      "previous_discord_user_id", "stale_discord_user_ids", "guild_id",
+      "tourney_role", "desired_role",
       "applied_role", "generation", "applied_generation", "status",
       "attempt_count", "last_error", "joined_at", "applied_at", "created_at",
-      "updated_at", "lease_id", "lease_expires_at", "max_attempts", "blocked_at"
+      "updated_at", "lease_id", "lease_expires_at", "max_attempts", "blocked_at",
+      "pending_since"
     ),
   },
 });

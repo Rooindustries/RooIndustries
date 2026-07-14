@@ -11,6 +11,7 @@ import {
 import { clearNextSupabaseSession } from "../../../../src/server/supabase/serverSession";
 import { REF_SESSION_COOKIE } from "../../../../src/server/api/ref/auth";
 import { TOURNEY_SESSION_COOKIE } from "../../../../src/server/tourney/auth";
+import { isSupabaseTourneyDatabase } from "../../../../src/server/tourney/sqlClient";
 import { readReauthToken } from "../../../../src/server/supabase/reauth";
 
 export const runtime = "nodejs";
@@ -101,10 +102,7 @@ export async function POST(request) {
       )
     );
   }
-  if (
-    flow === "tourney" &&
-    String(process.env.TOURNEY_DATABASE_MODE || "").trim().toLowerCase() === "legacy"
-  ) {
+  if (flow === "tourney" && !isSupabaseTourneyDatabase(process.env)) {
     return noStore(
       NextResponse.json(
         {

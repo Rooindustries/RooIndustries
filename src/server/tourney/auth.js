@@ -1,15 +1,16 @@
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
-import { readPersistedTourneyAccountsJson } from "./accountStore";
+import { readPersistedTourneyAccountsJson } from "./accountStore.js";
 import {
   findTourneyPlayerForSession,
   verifyTourneyPlayerCredentials,
-} from "./playerStore";
-import { getClientAddressFromFetchHeaders } from "../request/clientAddress";
-import { requireRateLimit } from "../api/ref/rateLimit";
-import { authenticateSupabaseAccount, resolveSupabaseAccountAlias } from "../supabase/accounts";
-import { isSupabaseAdminConfigured } from "../supabase/adminClient";
-import { isSupabaseTourneyDatabase } from "./sqlClient";
+} from "./playerStore.js";
+import { getClientAddressFromFetchHeaders } from "../request/clientAddress.js";
+import { requireRateLimit } from "../api/ref/rateLimit.js";
+import { authenticateSupabaseAccount, resolveSupabaseAccountAlias } from "../supabase/accounts.js";
+import { isSupabaseAdminConfigured } from "../supabase/adminClient.js";
+import { isSupabaseTourneyDatabase } from "./sqlClient.js";
+import { isEnabledTourneyFlag } from "./canonical.js";
 
 export const TOURNEY_SESSION_COOKIE = "tourney_session";
 export const TOURNEY_ADMIN_ROLES = Object.freeze(["viewer", "caster", "owner"]);
@@ -131,6 +132,11 @@ export const readEffectiveTourneyAccounts = async ({
 } = {}) => {
   const persistedRaw = await readPersistedAccountsJson(env);
   const persistedAccounts = parseTourneyAccounts(persistedRaw);
+  if (isEnabledTourneyFlag(env.TOURNEY_HARDENING_V4_ENABLED)) {
+    return persistedAccounts.sort((left, right) =>
+      left.username.localeCompare(right.username)
+    );
+  }
   return mergeTourneyAccounts(
     readTourneyAccounts(env),
     readBootstrapTourneyAccounts(env),
@@ -365,7 +371,17 @@ export const verifyTourneyCredentials = async ({
   };
 
   if (getSessionSecret(env) && account?.active && passwordMatches) {
-    return { ok: true, account, supabaseSession: await bridgeSession() };
+    if (
+      isEnabledTourneyFlag(env.TOURNEY_HARDENING_V4_ENABLED) &&
+      !String(account.principalId || "").trim()
+    ) {
+      return { ok: false, account: null, reason: "unavailable" };
+    }
+    return {
+      ok: true,
+      account: { ...account, authBackend: "supabase" },
+      supabaseSession: await bridgeSession(),
+    };
   }
 
   const playerResult = await verifyTourneyPlayerCredentials({
@@ -374,6 +390,12 @@ export const verifyTourneyCredentials = async ({
     env,
   });
   if (getSessionSecret(env) && playerResult.ok) {
+    if (
+      isEnabledTourneyFlag(env.TOURNEY_HARDENING_V4_ENABLED) &&
+      !String(playerResult.account?.principalId || "").trim()
+    ) {
+      return { ok: false, account: null, reason: "unavailable" };
+    }
     return {
       ok: true,
       account: playerResult.account,
@@ -528,13 +550,15 @@ export const createTourneySessionToken = ({
   return `${encodedPayload}.${signature}`;
 };
 
-export const createTourneyPasswordResetToken = ({
+export const createTourneyPasswordReset = ({
   account,
   env = process.env,
   maxAgeSeconds = PASSWORD_RESET_MAX_AGE_SECONDS,
 } = {}) => {
   const secret = getSessionSecret(env);
-  if (!secret || !account?.username || !account?.role) return "";
+  if (!secret || !account?.username || !account?.role) {
+    return { token: "", expiresAt: "" };
+  }
 
   const now = Math.floor(Date.now() / 1000);
   const payload = {
@@ -548,8 +572,14 @@ export const createTourneyPasswordResetToken = ({
   };
   const encodedPayload = base64UrlEncode(JSON.stringify(payload));
   const signature = sign(encodedPayload, secret);
-  return `${encodedPayload}.${signature}`;
+  return {
+    token: `${encodedPayload}.${signature}`,
+    expiresAt: new Date(payload.exp * 1000).toISOString(),
+  };
 };
+
+export const createTourneyPasswordResetToken = (options = {}) =>
+  createTourneyPasswordReset(options).token;
 
 export const readTourneySessionPayload = ({
   token,
@@ -666,6 +696,10 @@ export const readTourneySessionFromStore = async ({
   if (payload.authBackend === "supabase") {
     if (!isSupabaseTourneyDatabase(env)) {
       if (payload.role === "player") {
+        if (
+          isEnabledTourneyFlag(env.TOURNEY_HARDENING_V4_ENABLED) &&
+          (!payload.principalId || !payload.playerId)
+        ) return null;
         const player = await findTourneyPlayerForSession({
           username: payload.username,
           version: payload.accountVersion,
@@ -678,6 +712,7 @@ export const readTourneySessionFromStore = async ({
           username: player.username,
           role: "player",
           playerId: player.id,
+          ...(player.principalId ? { principalId: player.principalId } : {}),
           authBackend: "supabase",
           expiresAt: payload.expiresAt,
         };
@@ -689,10 +724,13 @@ export const readTourneySessionFromStore = async ({
       const account = findTourneyAccount(payload.username, accounts);
       if (!account || !account.active || account.role !== payload.role ||
           String(account.version || "1") !== payload.accountVersion ||
+          (isEnabledTourneyFlag(env.TOURNEY_HARDENING_V4_ENABLED) &&
+            (!payload.principalId || !String(account.principalId || ""))) ||
           (payload.principalId && payload.principalId !== String(account.principalId || ""))) return null;
       return {
         username: account.username,
         role: account.role,
+        ...(account.principalId ? { principalId: account.principalId } : {}),
         authBackend: "supabase",
         expiresAt: payload.expiresAt,
       };
@@ -722,6 +760,7 @@ export const readTourneySessionFromStore = async ({
       ...(role === "player" && (account.tourney_legacy_player_id || account.legacy_sanity_id)
         ? { playerId: account.tourney_legacy_player_id || account.legacy_sanity_id }
         : {}),
+      ...(account.principal_id ? { principalId: account.principal_id } : {}),
       authBackend: "supabase",
       expiresAt: payload.expiresAt,
     };

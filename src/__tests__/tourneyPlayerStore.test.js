@@ -723,6 +723,7 @@ describe("tourney player store", () => {
       env,
     });
     expect(reset.player.discord).toBe("PlayerOne#1234");
+    expect(reset.expiresAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 
     await store.resetTourneyPlayerPassword({
       token: reset.token,
@@ -1233,5 +1234,92 @@ describe("tourney player store", () => {
         }),
       ]),
     });
+  });
+
+  test("keeps admin capacity, pool, and role mutations inside the role cap", async () => {
+    const store = loadStore();
+    store.resetMemoryTourneyPlayerStoreForTests();
+    await store.updateTourneyRegistrationConfig({
+      teamCount: 2,
+      actorUsername: "serviroo",
+      env,
+    });
+    const payloadFor = (index, extra = {}) => ({
+      ...basePayload,
+      email: `admincap${index}@example.com`,
+      discord: `AdminCap${index}#1234`,
+      displayName: `Admin Cap ${index}`,
+      twitchUsername: `admincap${index}`,
+      ...extra,
+    });
+
+    for (let index = 1; index <= 3; index += 1) {
+      await store.createApprovedTourneyPlayer({
+        payload: payloadFor(index),
+        actorUsername: "serviroo",
+        env,
+      });
+    }
+    const overflow = await store.createApprovedTourneyPlayer({
+      payload: payloadFor(4),
+      actorUsername: "serviroo",
+      env,
+    });
+    expect(overflow.registrationPool).toBe("substitute");
+
+    await expect(store.updateTourneyPlayerDetails({
+      playerId: overflow.id,
+      payload: {
+        displayName: overflow.displayName,
+        twitchUsername: overflow.twitchUsername,
+        teamName: overflow.teamName,
+        registrationPool: "main",
+      },
+      actorUsername: "serviroo",
+      env,
+    })).rejects.toMatchObject({
+      code: "TOURNEY_ROLE_CAPACITY_FULL",
+      status: 409,
+    });
+
+    const damagePlayer = await store.createApprovedTourneyPlayer({
+      payload: payloadFor(5, {
+        rolePlay: "Damage",
+        secondaryRolePlay: "",
+      }),
+      actorUsername: "serviroo",
+      env,
+    });
+    await expect(store.updateTourneyPlayerApprovedRole({
+      playerId: damagePlayer.id,
+      rolePlay: "Support",
+      actorUsername: "serviroo",
+      env,
+    })).rejects.toMatchObject({
+      code: "TOURNEY_ROLE_CAPACITY_FULL",
+      status: 409,
+    });
+
+    await store.updateTourneyRegistrationConfig({
+      teamCount: 3,
+      actorUsername: "serviroo",
+      env,
+    });
+    for (let index = 6; index <= 7; index += 1) {
+      await store.createApprovedTourneyPlayer({
+        payload: payloadFor(index),
+        actorUsername: "serviroo",
+        env,
+      });
+    }
+    await expect(store.updateTourneyRegistrationConfig({
+      teamCount: 2,
+      actorUsername: "serviroo",
+      env,
+    })).rejects.toMatchObject({
+      code: "TOURNEY_ROLE_CAPACITY_FULL",
+      status: 409,
+    });
+    expect((await store.getTourneyRoleCapacitySnapshot({ env })).teamCount).toBe(3);
   });
 });

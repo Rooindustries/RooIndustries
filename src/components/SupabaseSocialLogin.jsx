@@ -100,7 +100,7 @@ export default function SupabaseSocialLogin({
       const options = {
         redirectTo: intent.callbackUrl,
         ...(provider === "discord"
-          ? { scopes: flow === "tourney" ? "identify email guilds.join" : "identify email" }
+          ? { scopes: "identify email guilds.join" }
           : {}),
       };
       const method = action === "link" ? "linkIdentity" : "signInWithOAuth";

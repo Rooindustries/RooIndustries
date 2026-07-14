@@ -1687,11 +1687,12 @@ export const TourneyStyles = () => (
       gap: 14px;
       width: min(100%, 54rem);
       margin: 0 auto 2rem;
-      border: 1px solid rgba(14, 165, 233, 0.3);
+      border: 1px solid var(--tourney-border-accent);
       border-radius: 1rem;
       padding: 1.25rem;
-      background: rgba(11, 17, 32, 0.8);
-      box-shadow: 0 0 25px rgba(14, 165, 233, 0.12);
+      background:
+        linear-gradient(145deg, var(--tourney-surface), var(--tourney-surface-strong));
+      box-shadow: var(--tourney-card-shadow);
     }
 
     .tourney-connected-copy h2,
@@ -1700,7 +1701,7 @@ export const TourneyStyles = () => (
     }
 
     .tourney-connected-copy h2 {
-      color: #fff;
+      color: var(--tourney-text);
       font-size: 1.1rem;
     }
 
@@ -1726,9 +1727,48 @@ export const TourneyStyles = () => (
     }
 
     .tourney-connected-status span.is-linked {
-      border-color: rgba(52, 211, 153, 0.4);
-      color: #a7f3d0;
-      background: rgba(16, 185, 129, 0.1);
+      border-color: var(--color-success-border);
+      color: var(--color-success-text);
+      background: var(--color-success-soft);
+    }
+
+    .tourney-connected-reauth {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: stretch;
+      width: 100%;
+    }
+
+    .tourney-connected-input {
+      min-width: 0;
+      min-height: 46px;
+      border: 1px solid var(--color-border-input);
+      border-radius: 0.75rem;
+      padding: 0 14px;
+      color: var(--tourney-text);
+      background: var(--tourney-input);
+      box-shadow: inset 0 1px 0 color-mix(in srgb, var(--tourney-text) 5%, transparent);
+      font: inherit;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 160ms ease, box-shadow 160ms ease,
+        background-color 160ms ease;
+    }
+
+    .tourney-connected-input::placeholder {
+      color: var(--tourney-text-muted);
+      opacity: 1;
+    }
+
+    .tourney-connected-input:focus-visible {
+      border-color: var(--tourney-focus);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--tourney-focus) 26%, transparent);
+    }
+
+    .tourney-connected-confirm {
+      min-width: 10.5rem;
+      padding-inline: 1rem;
     }
 
     .tourney-connected-accounts .cs-social,
@@ -1776,12 +1816,29 @@ export const TourneyStyles = () => (
       min-height: 46px;
       border: 1px solid var(--tourney-border);
       border-radius: 999px;
-      color: #fff;
-      background: rgba(12, 22, 42, 0.92);
+      color: var(--tourney-text);
+      background:
+        linear-gradient(145deg, var(--tourney-surface), var(--tourney-surface-strong));
       cursor: pointer;
       font: inherit;
       font-size: 0.86rem;
       font-weight: 700;
+      transition: border-color 160ms ease, background-color 160ms ease,
+        transform 160ms ease;
+    }
+
+    .tourney-connected-accounts .cs-social-button:hover:not(:disabled),
+    .tourney-form > .cs-social .cs-social-button:hover:not(:disabled) {
+      border-color: var(--tourney-border-accent);
+      background: var(--color-surface-hover-accent);
+      transform: translateY(-1px);
+    }
+
+    .tourney-connected-accounts .cs-social-button:focus-visible,
+    .tourney-form > .cs-social .cs-social-button:focus-visible {
+      border-color: var(--tourney-focus);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--tourney-focus) 26%, transparent);
+      outline: none;
     }
 
     .tourney-connected-accounts .cs-social-icon,
@@ -4331,6 +4388,20 @@ export const TourneyStyles = () => (
 
       .tourney-shell {
         padding-inline: 0.875rem;
+      }
+
+      .tourney-connected-accounts {
+        padding: 1rem;
+      }
+
+      .tourney-connected-reauth,
+      .tourney-connected-accounts .cs-social-buttons {
+        grid-template-columns: 1fr;
+      }
+
+      .tourney-connected-confirm {
+        width: 100%;
+        min-width: 0;
       }
 
       .tourney-nav-row {

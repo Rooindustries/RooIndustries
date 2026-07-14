@@ -16,6 +16,37 @@ export const REQUIRED_HARDENED_TOURNEY_SCHEMA_VERSION = 4;
 
 const normalize = (value) => String(value || "").trim();
 
+const SCHEMA_MIGRATION_ERROR_CODES = new Set([
+  "3F000", // invalid_schema_name
+  "42P01", // undefined_table
+  "42703", // undefined_column
+  "TOURNEY_SCHEMA_VERSION_TOO_OLD",
+]);
+
+export const buildTourneySchemaCheckError = ({ backend, cause } = {}) => {
+  const label = backend === "supabase" ? "Supabase" : "legacy";
+  const migrationRequired = SCHEMA_MIGRATION_ERROR_CODES.has(
+    String(cause?.code || "")
+  );
+  const error = new Error(
+    migrationRequired
+      ? `The ${label} Tourney database migration is required.`
+      : `The ${label} Tourney database is temporarily unavailable.`
+  );
+  error.status = 503;
+  error.code = migrationRequired
+    ? "TOURNEY_SCHEMA_MIGRATION_REQUIRED"
+    : "TOURNEY_DATABASE_UNAVAILABLE";
+  error.cause = cause;
+  return error;
+};
+
+const throwSchemaVersionTooOld = (message) => {
+  const error = new Error(message);
+  error.code = "TOURNEY_SCHEMA_VERSION_TOO_OLD";
+  throw error;
+};
+
 export const isSupabaseTourneyDatabase = (env = process.env) =>
   normalize(env.TOURNEY_DATABASE_MODE).toLowerCase() === "supabase";
 
@@ -134,17 +165,11 @@ export const assertSupabaseTourneySchemaVersion = async (
       `;
       const version = Number(rows?.[0]?.schema_version || 0);
       if (version < required) {
-        throw new Error("Supabase Tourney schema is not ready.");
+        throwSchemaVersionTooOld("Supabase Tourney schema is not ready.");
       }
       return true;
     } catch (cause) {
-      const error = new Error(
-        "The Supabase Tourney database migration is required before this mode can be enabled."
-      );
-      error.status = 503;
-      error.code = "TOURNEY_SCHEMA_MIGRATION_REQUIRED";
-      error.cause = cause;
-      throw error;
+      throw buildTourneySchemaCheckError({ backend: "supabase", cause });
     }
   })();
 
@@ -174,15 +199,11 @@ export const assertTourneySchemaVersion = async (env = process.env) => {
         where schema_name = 'tourney' limit 1
       `;
       if (Number(rows[0]?.schema_version || 0) < required) {
-        throw new Error("Legacy Tourney schema is not ready.");
+        throwSchemaVersionTooOld("Legacy Tourney schema is not ready.");
       }
       return true;
     } catch (cause) {
-      const error = new Error("The legacy Tourney database migration is required.");
-      error.status = 503;
-      error.code = "TOURNEY_SCHEMA_MIGRATION_REQUIRED";
-      error.cause = cause;
-      throw error;
+      throw buildTourneySchemaCheckError({ backend: "legacy", cause });
     }
   })();
   SCHEMA_CHECKS.set(cacheKey, check);

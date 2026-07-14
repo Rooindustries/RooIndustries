@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 import { createSupabaseAdminClient } from "./adminClient.js";
 import { stableJson } from "./shadowStore.js";
+import { enqueueTourneyExternalOperation } from "../tourney/externalOperations.js";
+import { executeTourneyCommand } from "../tourney/store.js";
 
 const normalize = (value) => String(value || "").trim();
 
@@ -28,6 +30,9 @@ const playerAuthEmail = (username) =>
     .update(normalize(username).toLowerCase())
     .digest("hex")
     .slice(0, 24)}@auth.rooindustries.invalid`;
+
+export const selectTourneyImportAuthUserId = ({ principal, authEmail } = {}) =>
+  normalize(principal?.auth_user_id) || deterministicUuid(authEmail);
 
 const jsonSafe = (value) =>
   JSON.parse(
@@ -122,12 +127,20 @@ export const readTourneySnapshot = async ({ env = process.env } = {}) => {
     missingTables,
     sourceHash: crypto
       .createHash("sha256")
-      .update(stableJson({ snapshot, missingTables }))
+      .update(stableJson(snapshot))
       .digest("hex"),
   };
 };
 
-const importPlayerAuth = async ({ player, client }) => {
+export const assertCompleteTourneySnapshot = ({ missingTables = [] } = {}) => {
+  if (!Array.isArray(missingTables) || missingTables.length === 0) return true;
+  const error = new Error("The legacy Tourney snapshot is incomplete.");
+  error.code = "TOURNEY_SNAPSHOT_INCOMPLETE";
+  error.missingTableCount = missingTables.length;
+  throw error;
+};
+
+const preflightPlayerAuth = async ({ player, client, claimedUserIds }) => {
   const passwordHash = normalize(player.password_hash);
   if (!/^\$2[aby]\$/.test(passwordHash)) {
     throw new Error("A Tourney player credential is not bcrypt.");
@@ -147,96 +160,30 @@ const importPlayerAuth = async ({ player, client }) => {
     conflict.code = "TOURNEY_IDENTITY_CONFLICT";
     throw conflict;
   }
-  const userId = normalize(principal?.principal_id) || deterministicUuid(authEmail);
-  const authAttributes = {
-    email: authEmail,
-    email_confirm: true,
-    password_hash: passwordHash,
-    user_metadata: {
-      display_name: normalize(player.display_name || player.discord || username),
-    },
-    app_metadata: {
-      imported_from: "legacy-tourney-database",
-      legacy_player_id: player.id,
-      roles: ["tourney_player"],
-    },
-  };
-
+  const userId = selectTourneyImportAuthUserId({ principal, authEmail });
   const existing = await client.auth.admin.getUserById(userId);
   if (existing.error && Number(existing.error.status || 0) !== 404) {
     throw new Error("Tourney Auth inventory failed.");
   }
-  let createdThisPlayer = false;
-  if (existing.data?.user) {
-    const updated = await client.auth.admin.updateUserById(userId, authAttributes);
-    if (updated.error) throw new Error("Tourney Auth synchronization failed.");
-  } else {
-    const created = await client.auth.admin.createUser({ id: userId, ...authAttributes });
-    if (created.error) throw new Error("Tourney Auth import failed.");
-    createdThisPlayer = true;
+  const existingLegacyId = normalize(
+    existing.data?.user?.app_metadata?.legacy_player_id
+  );
+  if (existingLegacyId && existingLegacyId !== normalize(player.id)) {
+    const conflict = new Error("Tourney Auth user belongs to another player.");
+    conflict.code = "TOURNEY_IDENTITY_CONFLICT";
+    throw conflict;
   }
-
-  const sourceHash = crypto
-    .createHash("sha256")
-    .update(stableJson(player))
-    .digest("hex");
-  try {
-    requireRpcData(
-      await client.rpc("roo_import_tourney_player_account", {
-        p_account: {
-          user_id: userId,
-          auth_email: authEmail,
-          login_email: normalize(player.email).toLowerCase(),
-          username,
-          player_id: player.id,
-          display_name: normalize(player.display_name || player.discord || username),
-          status: player.status,
-          credential_version: String(player.version || "1"),
-          source_hash: sourceHash,
-          legacy_payload: {
-            status: player.status,
-            discord_key: player.discord_key,
-            registration_pool: player.registration_pool,
-          },
-        },
-      }),
-      "Tourney player account import"
-    );
-  } catch (error) {
-    if (createdThisPlayer) {
-      await client.auth.admin.deleteUser(userId).catch(() => {});
-    }
-    throw error;
+  if (claimedUserIds.has(userId)) {
+    const conflict = new Error("Two Tourney players resolve to one Auth user.");
+    conflict.code = "TOURNEY_IDENTITY_CONFLICT";
+    throw conflict;
   }
+  claimedUserIds.add(userId);
+  return { authEmail, userId };
 };
 
-export const migrateTourneyShadow = async ({
-  env = process.env,
-  client = createSupabaseAdminClient({ env }),
-} = {}) => {
-  const { snapshot, sourceHash, missingTables } = await readTourneySnapshot({ env });
-  const imported = requireRpcData(
-    await client.rpc("roo_import_tourney_snapshot_v4", {
-      p_snapshot: snapshot,
-      p_source_hash: sourceHash,
-      p_allow_tombstones: false,
-    }),
-    "Tourney snapshot import"
-  );
-  if (imported?.status === "quarantined") {
-    const error = new Error("Tourney import collisions require review.");
-    error.code = "TOURNEY_IMPORT_QUARANTINED";
-    error.collisionCount = Number(imported.collision_count || 0);
-    throw error;
-  }
-
-  let authImported = 0;
-  for (const player of snapshot.tourney_players) {
-    await importPlayerAuth({ player, client });
-    authImported += 1;
-  }
-
-  const sourceCounts = snapshot._counts;
+export const verifyTourneyImportResult = ({ imported, snapshot } = {}) => {
+  const sourceCounts = snapshot?._counts || {};
   const targetCounts = imported?.target_counts || {};
   const drift = Object.keys(sourceCounts).filter(
     (table) => Number(sourceCounts[table]) !== Number(targetCounts[table])
@@ -252,15 +199,112 @@ export const migrateTourneyShadow = async ({
   if (hashDrift.length > 0) {
     throw new Error("Tourney shadow canonical hash verification failed.");
   }
+  const relationships = imported?.relationships || {};
+  if (
+    Number(relationships.orphan_team_members || 0) !== 0 ||
+    Number(relationships.orphan_player_members || 0) !== 0
+  ) {
+    throw new Error("Tourney shadow relationship verification failed.");
+  }
+  const sourceStatusCounts = (snapshot?.tourney_players || []).reduce((counts, player) => {
+    const status = normalize(player.status);
+    counts[status] = Number(counts[status] || 0) + 1;
+    return counts;
+  }, {});
+  const targetStatusCounts = imported?.status_counts || {};
+  if (stableJson(sourceStatusCounts) !== stableJson(targetStatusCounts)) {
+    throw new Error("Tourney shadow status verification failed.");
+  }
+  return { relationships, targetCounts, targetHashes, targetStatusCounts };
+};
+
+export const migrateTourneyShadow = async ({
+  env = process.env,
+  client = createSupabaseAdminClient({ env }),
+} = {}) => {
+  const { snapshot, sourceHash, missingTables } = await readTourneySnapshot({ env });
+  assertCompleteTourneySnapshot({ missingTables });
+  const claimedUserIds = new Set();
+  const authTargets = new Map();
+  for (const player of snapshot.tourney_players) {
+    authTargets.set(
+      player.id,
+      await preflightPlayerAuth({ player, client, claimedUserIds })
+    );
+  }
+  const preflight = requireRpcData(
+    await client.rpc("roo_preflight_tourney_snapshot_v4", {
+      p_snapshot: snapshot,
+      p_source_hash: sourceHash,
+      p_allow_tombstones: false,
+    }),
+    "Tourney snapshot preflight"
+  );
+  if (!normalize(preflight?.preflight_id)) {
+    throw new Error("Tourney snapshot preflight token is missing.");
+  }
+  const imported = requireRpcData(
+    await client.rpc("roo_import_tourney_snapshot_v4", {
+      p_snapshot: snapshot,
+      p_source_hash: sourceHash,
+      p_allow_tombstones: false,
+      p_preflight_id: preflight.preflight_id,
+    }),
+    "Tourney snapshot import"
+  );
+  if (imported?.status === "quarantined") {
+    const error = new Error("Tourney import collisions require review.");
+    error.code = "TOURNEY_IMPORT_QUARANTINED";
+    error.collisionCount = Number(imported.collision_count || 0);
+    throw error;
+  }
+  if (imported?.status !== "completed") {
+    const error = new Error("Tourney import target changed after preflight.");
+    error.code = "TOURNEY_IMPORT_TARGET_CHANGED";
+    throw error;
+  }
+
+  const { relationships, targetCounts, targetHashes, targetStatusCounts } =
+    verifyTourneyImportResult({ imported, snapshot });
+
+  let authQueued = 0;
+  for (const player of snapshot.tourney_players) {
+    const playerHash = crypto.createHash("sha256").update(stableJson(player)).digest("hex");
+    const commandId = `migration-player-auth:${player.id}:${playerHash.slice(0, 24)}`;
+    await executeTourneyCommand({
+      commandId,
+      purpose: "identity:migration-player-auth",
+      requestPayload: { playerId: player.id, sourceHash: playerHash },
+      maintenanceWhilePaused: true,
+      attemptExternalWork: false,
+      env,
+      callback: async () => ({
+        body: await enqueueTourneyExternalOperation({
+          commandId,
+          operationKind: "supabase_player_auth",
+          entityType: "player",
+          entityId: player.id,
+          desiredState: {
+            authUserId: authTargets.get(player.id)?.userId || "",
+            player,
+            installPassword: true,
+          },
+          env,
+        }),
+      }),
+    });
+    authQueued += 1;
+  }
 
   return {
     sourceHash,
     counts: targetCounts,
-    authImported,
+    authImported: 0,
+    authQueued,
     missingTables,
     driftCount: 0,
     canonicalHashes: targetHashes,
-    statusCounts: imported?.status_counts || {},
-    relationships: imported?.relationships || {},
+    statusCounts: targetStatusCounts,
+    relationships,
   };
 };

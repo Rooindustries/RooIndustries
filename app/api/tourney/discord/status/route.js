@@ -6,7 +6,8 @@ import {
 import {
   getApprovedTourneyPlayerById,
 } from "../../../../../src/server/tourney/playerStore";
-import { listTourneyDiscordDesiredState } from "../../../../../src/server/tourney/discordDesiredState";
+import { getTourneyDiscordStatusForPlayer } from "../../../../../src/server/tourney/discordDesiredState";
+import { logSafeError } from "../../../../../src/server/safeErrorLog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,26 +19,33 @@ export async function GET(request) {
     return NextResponse.json({ ok: false, error: "Not found." }, { status: 404 });
   }
 
-  const [player, assignments] = await Promise.all([
-    getApprovedTourneyPlayerById({ playerId: session.playerId }),
-    listTourneyDiscordDesiredState().catch(() => []),
-  ]);
+  const player = await getApprovedTourneyPlayerById({ playerId: session.playerId });
   if (!player) {
     return NextResponse.json({ ok: false, error: "Not found." }, { status: 404 });
   }
 
-  const assignment = assignments.find(
-    (entry) => entry.player_id === session.playerId
-  );
+  let durableStatus;
+  try {
+    durableStatus = await getTourneyDiscordStatusForPlayer({
+      playerId: session.playerId,
+    });
+  } catch (error) {
+    logSafeError("Tournament Discord status failed", error);
+    return NextResponse.json(
+      { ok: false, error: "Discord role status is temporarily unavailable." },
+      { status: 503 }
+    );
+  }
+  const linked = durableStatus?.linked ?? Boolean(player.discordUserId);
   return NextResponse.json({
     ok: true,
     discord: {
-      linked: Boolean(player.discordUserId),
-      roleAssigned: assignment?.status === "applied",
+      linked,
+      roleAssigned: durableStatus?.roleAssigned === true,
       linkedAt: player.discordLinkedAt || "",
-      roleAssignedAt: assignment?.applied_at || "",
-      lastError: assignment?.last_error || "",
-      state: assignment?.status || (player.discordUserId ? "pending" : "unlinked"),
+      roleAssignedAt: durableStatus?.roleAssignedAt || "",
+      lastError: durableStatus?.lastError || player.discordRoleLastError || "",
+      state: durableStatus?.state || (linked ? "pending" : "unlinked"),
     },
   });
 }
