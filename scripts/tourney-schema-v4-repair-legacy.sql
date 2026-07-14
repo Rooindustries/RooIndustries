@@ -1,4 +1,5 @@
--- Forward repair for already-activated legacy Neon schema-v4 databases.
+-- Forward repair for the already-activated Vercel-managed fallback PostgreSQL
+-- schema-v4 database.
 -- Apply while both Tourney databases remain paused at Supabase generation 1.
 set lock_timeout = '5s';
 set statement_timeout = '120s';
@@ -99,7 +100,50 @@ alter table public.tourney_external_operations
 alter table public.tourney_cutover_metadata
   add column if not exists reconciliation_lease_id uuid,
   add column if not exists reconciliation_lease_expires_at timestamptz,
-  add column if not exists reconciliation_heartbeat_at timestamptz;
+  add column if not exists reconciliation_heartbeat_at timestamptz,
+  add column if not exists last_pause_operation_id text,
+  add column if not exists last_resume_operation_id text;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_catalog.pg_constraint
+    where conrelid = 'public.tourney_cutover_metadata'::pg_catalog.regclass
+      and conname = 'tourney_cutover_metadata_last_pause_operation_id_check'
+  ) then
+    alter table public.tourney_cutover_metadata
+      add constraint tourney_cutover_metadata_last_pause_operation_id_check check (
+        last_pause_operation_id is null or (
+          last_pause_operation_id = pg_catalog.btrim(last_pause_operation_id)
+          and pg_catalog.char_length(last_pause_operation_id) between 8 and 128
+          and last_pause_operation_id ~ '^[a-z0-9][a-z0-9:_-]{7,127}$'
+        )
+      ) not valid;
+  end if;
+
+  if not exists (
+    select 1
+    from pg_catalog.pg_constraint
+    where conrelid = 'public.tourney_cutover_metadata'::pg_catalog.regclass
+      and conname = 'tourney_cutover_metadata_last_resume_operation_id_check'
+  ) then
+    alter table public.tourney_cutover_metadata
+      add constraint tourney_cutover_metadata_last_resume_operation_id_check check (
+        last_resume_operation_id is null or (
+          last_resume_operation_id = pg_catalog.btrim(last_resume_operation_id)
+          and pg_catalog.char_length(last_resume_operation_id) between 8 and 128
+          and last_resume_operation_id ~ '^[a-z0-9][a-z0-9:_-]{7,127}$'
+        )
+      ) not valid;
+  end if;
+end;
+$$;
+
+alter table public.tourney_cutover_metadata
+  validate constraint tourney_cutover_metadata_last_pause_operation_id_check;
+alter table public.tourney_cutover_metadata
+  validate constraint tourney_cutover_metadata_last_resume_operation_id_check;
 
 alter table public.tourney_discord_role_assignments
   add column if not exists stale_discord_user_ids text[] not null default '{}'::text[],
