@@ -8,6 +8,9 @@ import {
   captureTourneyLatencyBaselineV4,
   inventoryTourneyV4Activation,
 } from "../../../../src/server/tourney/activation";
+import {
+  setTourneyDualDatabaseWritesPausedV4,
+} from "../../../../src/server/tourney/cutoverControl";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,6 +49,18 @@ export async function POST(request) {
       return respond({
         ok: true,
         ...(await captureTourneyLatencyBaselineV4()),
+      });
+    }
+    if (action === "pause-writes" || action === "resume-writes") {
+      return respond({
+        ok: true,
+        ...(await setTourneyDualDatabaseWritesPausedV4({
+          operationId: payload.operationId,
+          expectedPrimaryBackend: payload.expectedPrimaryBackend,
+          expectedGeneration: payload.expectedGeneration,
+          expectedWritesPaused: payload.expectedWritesPaused,
+          writesPaused: action === "pause-writes",
+        })),
       });
     }
     if (action === "apply") {
