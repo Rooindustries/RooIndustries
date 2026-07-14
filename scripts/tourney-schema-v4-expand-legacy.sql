@@ -1,4 +1,5 @@
--- Schema-v4 expand phase for legacy Neon. Additive and rolling-deploy safe.
+-- Schema-v4 expand phase for the Vercel-managed fallback PostgreSQL database.
+-- Additive and rolling-deploy safe; no separate database-provider account is required.
 set lock_timeout = '5s';
 set statement_timeout = '120s';
 
