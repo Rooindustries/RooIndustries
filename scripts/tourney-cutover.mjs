@@ -746,7 +746,10 @@ const applyLegacySchema = async () => {
   return { applied: true };
 };
 
-const assertSupabaseLegacyActivationControls = async ({ requireHardened = false } = {}) => {
+const assertSupabaseLegacyActivationControls = async ({
+  requireHardened = false,
+  requireMirrorBindings = false,
+} = {}) => {
   const readiness = await createSupabaseAdminClient().rpc("roo_tourney_readiness");
   if (readiness.error) {
     const failure = new Error("Supabase Tourney activation preflight failed.");
@@ -759,7 +762,8 @@ const assertSupabaseLegacyActivationControls = async ({ requireHardened = false 
     Number(data?.generation) !== 1 ||
     data?.writes_paused !== true ||
     data?.fallback_read_only === true ||
-    (requireHardened && data?.hardened_active !== true)
+    (requireHardened && data?.hardened_active !== true) ||
+    (requireMirrorBindings && readiness.data?.mirror_trigger_bindings?.ready !== true)
   ) {
     const failure = new Error(
       "Supabase Tourney controls are not safe for legacy schema-v4 activation."
@@ -776,11 +780,19 @@ const applyLegacyV4Phase = async (phase) => {
     activate: "tourney-schema-v4-activate-legacy.sql",
     expand: "tourney-schema-v4-expand-legacy.sql",
     repair: "tourney-schema-v4-repair-legacy.sql",
+    triggerBindings: "tourney-schema-v4-trigger-binding-repair-legacy.sql",
   }[phase];
   if (!fileName) throw new Error("Unsupported legacy schema-v4 phase.");
   if (phase === "activate") {
     assertStagedActivationEnvironment();
     await assertSupabaseLegacyActivationControls();
+  }
+  if (phase === "triggerBindings") {
+    assertStagedActivationEnvironment();
+    await assertSupabaseLegacyActivationControls({
+      requireHardened: true,
+      requireMirrorBindings: true,
+    });
   }
   await applyLegacySqlFile({
     databaseUrl,
@@ -801,6 +813,23 @@ const applyLegacyV4Phase = async (phase) => {
     )::text from tourney_schema_metadata where schema_name='tourney'`,
   ]);
   const metadata = JSON.parse(stdout.trim());
+  if (phase === "triggerBindings") {
+    const { stdout: bindingStdout } = await runPsql(databaseUrl, [
+      "-X",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-Atq",
+      "-c",
+      "select public.tourney_mirror_trigger_binding_status_v4()::text",
+    ]);
+    const mirrorTriggerBindings = JSON.parse(bindingStdout.trim());
+    if (mirrorTriggerBindings?.ready !== true) {
+      const error = new Error("Legacy Tourney mirror trigger repair did not verify.");
+      error.code = "TOURNEY_LEGACY_TRIGGER_BINDING_REPAIR_FAILED";
+      throw error;
+    }
+    return { applied: true, phase, ...metadata, mirrorTriggerBindings };
+  }
   return { applied: true, phase, ...metadata };
 };
 
@@ -915,6 +944,7 @@ const actions = [
   { flag: "--activate-legacy-v4", touchesLegacy: true, touchesSupabase: true, execute: () => applyLegacyV4Phase("activate") },
   { flag: "--activate-supabase-v4", touchesLegacy: true, touchesSupabase: true, touchesSupabaseDatabase: true, execute: activateSupabaseSchemaV4 },
   { flag: "--repair-legacy-v4", touchesLegacy: true, touchesSupabase: false, execute: () => applyLegacyV4Phase("repair") },
+  { flag: "--repair-legacy-trigger-bindings-v4", touchesLegacy: true, touchesSupabase: true, execute: () => applyLegacyV4Phase("triggerBindings") },
   { flag: "--inventory-activation-v4", touchesLegacy: true, touchesSupabase: true, touchesSupabaseDatabase: true, touchesSanity: true, touchesDiscord: true, execute: inventoryActivationV4 },
   { flag: "--capture-latency-baseline-v4", touchesLegacy: false, touchesSupabase: true, touchesSupabaseDatabase: true, execute: captureLatencyBaselineV4 },
   { flag: "--apply-activation-v4", touchesLegacy: true, touchesSupabase: true, touchesSupabaseDatabase: true, touchesSanity: true, touchesDiscord: true, options: ["--inventory-hash"], required: ["--inventory-hash"], execute: applyActivationV4 },

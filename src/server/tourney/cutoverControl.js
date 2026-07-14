@@ -422,7 +422,9 @@ const checkSupabaseResumeReadiness = async ({ databases, generation }) => {
             when jsonb_typeof(accounts_json)='object' then coalesce(accounts_json->'accounts','[]'::jsonb)
             else '[]'::jsonb end
           from tourney_account_snapshots order by version desc limit 1
-        ),'[]'::jsonb)) account where coalesce(account->>'principalId','') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') account_principals
+        ),'[]'::jsonb)) account where coalesce(account->>'principalId','') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') account_principals,
+        (public.tourney_mirror_trigger_binding_status_v4()->>'ready')::boolean
+          mirror_bindings_ready
     `,
     databases.supabase`
       select
@@ -448,7 +450,9 @@ const checkSupabaseResumeReadiness = async ({ databases, generation }) => {
             when jsonb_typeof(accounts_json)='object' then coalesce(accounts_json->'accounts','[]'::jsonb)
             else '[]'::jsonb end
           from tourney.account_snapshots order by version desc limit 1
-        ),'[]'::jsonb)) account where coalesce(account->>'principalId','') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') account_principals
+        ),'[]'::jsonb)) account where coalesce(account->>'principalId','') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') account_principals,
+        (tourney.mirror_trigger_binding_status_v4()->>'ready')::boolean
+          mirror_bindings_ready
     `,
     databases.supabase`
       select status, created_at,
@@ -477,6 +481,9 @@ const checkSupabaseResumeReadiness = async ({ databases, generation }) => {
     }
     if (backend === "legacy" && state?.fallback_read_only === true) {
       blockers.push("legacy_read_only");
+    }
+    if (state?.mirror_bindings_ready !== true) {
+      blockers.push(`${backend}_mirror_trigger_bindings`);
     }
     for (const field of [
       "mirror", "external", "email", "receipts", "discord", "conflicts",

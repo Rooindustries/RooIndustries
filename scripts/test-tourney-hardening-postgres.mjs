@@ -492,8 +492,16 @@ try {
     root,
     "supabase/migrations/20260715040000_reset_tourney_hardening_clock_for_baseline_recovery.sql"
   );
+  const supabaseTriggerBindingRepair = path.join(
+    root,
+    "supabase/migrations/20260715060000_repair_tourney_mirror_trigger_bindings.sql"
+  );
   const legacyActivation = path.join(root, "scripts/tourney-schema-v4-activate-legacy.sql");
   const legacyRepair = path.join(root, "scripts/tourney-schema-v4-repair-legacy.sql");
+  const legacyTriggerBindingRepair = path.join(
+    root,
+    "scripts/tourney-schema-v4-trigger-binding-repair-legacy.sql"
+  );
   const activateSupabaseV4 = writeTemp(
     "activate-supabase-v4.sql",
     "select public.roo_activate_tourney_schema_v4('postgres17-fixture');\n"
@@ -554,6 +562,68 @@ insert into tourney_external_operations(
     "legacy-missing-serialization-drift.sql",
     "alter table if exists tourney_external_operations drop column if exists serialization_key cascade;\n"
   );
+  const supabaseTriggerBindingDrift = writeTemp(
+    "supabase-trigger-binding-drift.sql",
+    `create or replace function tourney.capture_mirror_event_fail_open_fixture()
+     returns trigger language plpgsql security definer set search_path=''
+     as $$ begin
+       if tg_op='DELETE' then return old; end if;
+       return new;
+     end $$;
+     create or replace function tourney.capture_mirror_event_v4()
+     returns trigger language plpgsql security definer set search_path=''
+     as $$ begin
+       if tg_op='DELETE' then return old; end if;
+       return new;
+     end $$;
+     do $$
+     declare v_contract record;
+     begin
+       for v_contract in
+         select supabase_relation from tourney.mirror_contracts where enabled
+       loop
+         execute pg_catalog.format(
+           'drop trigger if exists capture_tourney_mirror_event on %s',
+           v_contract.supabase_relation::pg_catalog.regclass
+         );
+         execute pg_catalog.format(
+           'create trigger capture_tourney_mirror_event after insert or update or delete on %s for each row execute function tourney.capture_mirror_event_fail_open_fixture()',
+           v_contract.supabase_relation::pg_catalog.regclass
+         );
+       end loop;
+     end $$;`
+  );
+  const legacyTriggerBindingDrift = writeTemp(
+    "legacy-trigger-binding-drift.sql",
+    `create or replace function public.capture_tourney_mirror_event_fail_open_fixture()
+     returns trigger language plpgsql set search_path=''
+     as $$ begin
+       if tg_op='DELETE' then return old; end if;
+       return new;
+     end $$;
+     create or replace function public.capture_tourney_mirror_event()
+     returns trigger language plpgsql set search_path=''
+     as $$ begin
+       if tg_op='DELETE' then return old; end if;
+       return new;
+     end $$;
+     do $$
+     declare v_contract record;
+     begin
+       for v_contract in
+         select legacy_relation from public.tourney_mirror_contracts where enabled
+       loop
+         execute pg_catalog.format(
+           'drop trigger if exists capture_tourney_mirror_event on %s',
+           v_contract.legacy_relation::pg_catalog.regclass
+         );
+         execute pg_catalog.format(
+           'create trigger capture_tourney_mirror_event after insert or update or delete on %s for each row execute function public.capture_tourney_mirror_event_fail_open_fixture()',
+           v_contract.legacy_relation::pg_catalog.regclass
+         );
+       end loop;
+     end $$;`
+  );
 
   psql(
     "supabase_unsafe",
@@ -572,7 +642,8 @@ insert into tourney_external_operations(
     supabaseSnapshotRpcRepair,
     supabaseSnapshotRpcTimeout,
     supabaseCompactSnapshotPayload,
-    supabaseBaselineRecovery
+    supabaseBaselineRecovery,
+    supabaseTriggerBindingRepair
   );
   psql("supabase_unsafe", supabasePostInstallOldWriter);
   const unsafeSupabase = postgres(
@@ -681,9 +752,41 @@ insert into tourney_external_operations(
     unsafeSupabase,
     `select
       (select schema_version from tourney.schema_metadata where schema_name='tourney')=4
-      and (select hardened_active from tourney.cutover_metadata where id='tourney') ok`,
+      and (select hardened_active from tourney.cutover_metadata where id='tourney')
+      and (tourney.mirror_trigger_binding_status_v4()->>'ready')::boolean
+      and (tourney.mirror_trigger_binding_status_v4()->>'correctly_bound')::integer=17 ok`,
     "explicit Supabase activation did not activate schema v4"
   );
+  const [supabaseTriggerBeforeUnsafeRepair] = await unsafeSupabase`
+    select pg_get_functiondef(
+      'tourney.capture_mirror_event_v4()'::regprocedure
+    ) definition
+  `;
+  await unsafeSupabase`
+    update tourney.cutover_metadata set writes_paused=false where id='tourney'
+  `;
+  const unsafeActiveSupabaseRepair = psqlFails(
+    "supabase_unsafe",
+    supabaseTriggerBindingRepair
+  );
+  assert.notEqual(
+    unsafeActiveSupabaseRepair.status,
+    0,
+    "unpaused active Supabase trigger-binding repair succeeded"
+  );
+  const [supabaseTriggerAfterUnsafeRepair] = await unsafeSupabase`
+    select pg_get_functiondef(
+      'tourney.capture_mirror_event_v4()'::regprocedure
+    ) definition
+  `;
+  assert.equal(
+    supabaseTriggerAfterUnsafeRepair.definition,
+    supabaseTriggerBeforeUnsafeRepair.definition,
+    "unsafe active Supabase repair replaced the trigger function"
+  );
+  await unsafeSupabase`
+    update tourney.cutover_metadata set writes_paused=true where id='tourney'
+  `;
   await assert.rejects(
     unsafeSupabase`
       select public.roo_capture_tourney_hardening_snapshot(
@@ -878,6 +981,15 @@ insert into tourney_external_operations(
   `;
   const unsafeLegacyRepair = psqlFails("legacy_unsafe", legacyRepair);
   assert.notEqual(unsafeLegacyRepair.status, 0, "unsafe legacy repair succeeded");
+  const unsafeLegacyTriggerRepair = psqlFails(
+    "legacy_unsafe",
+    legacyTriggerBindingRepair
+  );
+  assert.notEqual(
+    unsafeLegacyTriggerRepair.status,
+    0,
+    "unsafe legacy trigger-binding repair succeeded"
+  );
   const [legacyTriggerAfterRepair] = await unsafeLegacy`
     select pg_get_functiondef(
       'public.capture_tourney_mirror_event()'::regprocedure
@@ -946,12 +1058,19 @@ insert into accounts.discord_role_assignments(
     path.join(root, "scripts/tourney-schema-v4-expand-legacy.sql"),
     legacyControls,
     legacyActivation,
-    legacyRepair
+    legacyRepair,
+    legacyTriggerBindingDrift,
+    legacyTriggerBindingRepair
   );
   process.stderr.write("[postgres17] legacy schema v4 and forward repair applied\n");
 
   psql("supabase_fixture", activateSupabaseV4);
-  process.stderr.write("[postgres17] Supabase schema v4 activated after legacy readiness\n");
+  psql(
+    "supabase_fixture",
+    supabaseTriggerBindingDrift,
+    supabaseTriggerBindingRepair
+  );
+  process.stderr.write("[postgres17] schema v4 trigger bindings repaired\n");
 
   const supabaseUrl = `postgres://127.0.0.1:${port}/supabase_fixture`;
   const legacyUrl = `postgres://127.0.0.1:${port}/legacy_fixture`;
@@ -972,6 +1091,157 @@ insert into accounts.discord_role_assignments(
     DISCORD_PARTICIPANT_ROLE_ID: "710000000000000001",
     DISCORD_HOST_ROLE_ID: "710000000000000002",
   };
+
+  await assertSql(
+    source,
+    `select
+      (status->>'ready')::boolean
+      and (status->>'enabled_contracts')::integer=17
+      and (status->>'correctly_bound')::integer=17
+      and (status->>'function_body_matches')::boolean ok
+     from (select tourney.mirror_trigger_binding_status_v4() status) binding`,
+    "Supabase trigger-binding repair did not verify the fail-closed contract"
+  );
+  await assertSql(
+    target,
+    `select
+      (status->>'ready')::boolean
+      and (status->>'enabled_contracts')::integer=17
+      and (status->>'correctly_bound')::integer=17
+      and (status->>'function_body_matches')::boolean ok
+     from (select public.tourney_mirror_trigger_binding_status_v4() status) binding`,
+    "legacy trigger-binding repair did not verify the fail-closed contract"
+  );
+  await assertSql(
+    source,
+    `select count(*)=17 ok
+     from tourney.mirror_contracts contract
+     join pg_catalog.pg_trigger trigger
+       on trigger.tgrelid=contract.supabase_relation::pg_catalog.regclass
+      and trigger.tgname='capture_tourney_mirror_event'
+     where contract.enabled
+       and trigger.tgfoid='tourney.capture_mirror_event_v4()'::regprocedure
+       and trigger.tgtype=29 and trigger.tgenabled='O' and not trigger.tgisinternal`,
+    "Supabase trigger OIDs were not bound to the canonical v4 function"
+  );
+  await assertSql(
+    target,
+    `select count(*)=17 ok
+     from public.tourney_mirror_contracts contract
+     join pg_catalog.pg_trigger trigger
+       on trigger.tgrelid=contract.legacy_relation::pg_catalog.regclass
+      and trigger.tgname='capture_tourney_mirror_event'
+     where contract.enabled
+       and trigger.tgfoid='public.capture_tourney_mirror_event()'::regprocedure
+       and trigger.tgtype=29 and trigger.tgenabled='O' and not trigger.tgisinternal`,
+    "legacy trigger OIDs were not bound to the canonical v4 function"
+  );
+  await assertSql(
+    source,
+    `select clean_since is null
+       and natural_mutation_verified_at is null
+       and first_zero_drift_at is null
+       and second_zero_drift_at is null
+       and clock_last_reset_reason='mirror_trigger_binding_repaired' ok
+     from tourney.cutover_metadata where id='tourney'`,
+    "Supabase trigger-binding repair did not reset the hardening clock"
+  );
+  await assertSql(
+    target,
+    `select clean_since is null
+       and natural_mutation_verified_at is null
+       and first_zero_drift_at is null
+       and second_zero_drift_at is null
+       and clock_last_reset_reason='mirror_trigger_binding_repaired' ok
+     from public.tourney_cutover_metadata where id='tourney'`,
+    "legacy trigger-binding repair did not reset the hardening clock"
+  );
+  await assertSql(
+    source,
+    `select count(*)=1 ok from tourney.cutover_gate_events
+     where event_kind='clock_reset'
+       and evidence @> '{"reason":"mirror_trigger_binding_repaired","correctly_bound":17}'::jsonb`,
+    "Supabase trigger-binding clock reset was not audited"
+  );
+  await assertSql(
+    target,
+    `select count(*)=1 ok from public.tourney_cutover_gate_events
+     where event_kind='clock_reset'
+       and evidence @> '{"reason":"mirror_trigger_binding_repaired","correctly_bound":17}'::jsonb`,
+    "legacy trigger-binding clock reset was not audited"
+  );
+  await assertSql(
+    source,
+    `select
+      (select count(*)=5 from jsonb_object_keys(readiness->'shadow_reads'))
+      and readiness->'shadow_reads_since_natural_mutation'='{}'::jsonb ok
+     from (select public.roo_tourney_readiness() readiness) state`,
+    "Supabase readiness did not expose the latest real shadow-read summaries"
+  );
+
+  const [canonicalSupabaseTrigger] = await source`
+    select pg_get_functiondef(
+      'tourney.capture_mirror_event_v4()'::regprocedure
+    ) definition
+  `;
+  await source.unsafe(`
+    create or replace function tourney.capture_mirror_event_v4()
+    returns trigger language plpgsql security definer set search_path=''
+    as $$ begin
+      if tg_op='DELETE' then return old; end if;
+      return new;
+    end $$
+  `);
+  await assertSql(
+    source,
+    `select not (status->>'ready')::boolean
+       and not (status->>'function_body_matches')::boolean ok
+     from (select tourney.mirror_trigger_binding_status_v4() status) binding`,
+    "Supabase trigger status accepted a fail-open function body"
+  );
+  await assertSql(
+    source,
+    `select readiness->'clock_blockers' ? 'mirror_trigger_binding_drift' ok
+     from (select public.roo_tourney_readiness() readiness) state`,
+    "Supabase readiness accepted a fail-open function body"
+  );
+  await assert.rejects(
+    source`select public.roo_activate_tourney_schema_v4('postgres17-body-drift')`,
+    (error) => error.code === "55000",
+    "Supabase activation accepted a fail-open function body"
+  );
+  await source.unsafe(canonicalSupabaseTrigger.definition);
+
+  await source.unsafe(`
+    drop trigger capture_tourney_mirror_event on tourney.tourney_players;
+    create trigger capture_tourney_mirror_event
+    after insert or update or delete on tourney.tourney_players
+    for each row execute function tourney.capture_mirror_event_fail_open_fixture()
+  `);
+  await assertSql(
+    source,
+    `select not (status->>'ready')::boolean
+       and (status->>'correctly_bound')::integer=16
+       and status->'drifted_tables' ? 'tourney_players' ok
+     from (select tourney.mirror_trigger_binding_status_v4() status) binding`,
+    "Supabase trigger status accepted a wrong trigger function OID"
+  );
+  await assert.rejects(
+    source`select public.roo_activate_tourney_schema_v4('postgres17-oid-drift')`,
+    (error) => error.code === "55000",
+    "Supabase activation accepted a wrong trigger function OID"
+  );
+  await source.unsafe(`
+    drop trigger capture_tourney_mirror_event on tourney.tourney_players;
+    create trigger capture_tourney_mirror_event
+    after insert or update or delete on tourney.tourney_players
+    for each row execute function tourney.capture_mirror_event_v4()
+  `);
+  await assertSql(
+    source,
+    "select (tourney.mirror_trigger_binding_status_v4()->>'ready')::boolean ok",
+    "Supabase trigger status did not recover after restoring the canonical binding"
+  );
 
   const cutoverOperationFixtures = [
     ["pause", "fixture:pause-0001", true],
@@ -4551,6 +4821,9 @@ insert into accounts.discord_role_assignments(
       "URI-derived isolated libpq environment connection",
       "pre-DDL activation safety on both databases",
       "legacy empty-search-path trigger repair",
+      "fail-closed mirror trigger bodies and 17-table OID bindings",
+      "trigger-drift readiness and activation rejection",
+      "latest shadow-read summaries before the natural mutation window",
       "registry composite keys",
       "collision quarantine and guarded destructive import",
       "semantic timestamp and numeric canonical hashes",
