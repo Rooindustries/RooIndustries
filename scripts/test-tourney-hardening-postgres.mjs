@@ -3636,6 +3636,189 @@ insert into accounts.discord_role_assignments(
     TOURNEY_FAILOVER_GENERATION: "2",
     TOURNEY_WRITES_PAUSED: "1",
   };
+
+  await target.begin(async (sql) => {
+    await sql`select set_config('roo.tourney_mirror_apply','1',true)`;
+    await sql`
+      insert into tourney_players(
+        id,username,email,password_hash,status,discord,display_name,discord_key,
+        battlenet,rank_name,role_play,approved_role_play,registration_pool,
+        twitch_username,version
+      ) values(
+        'legacy-decision-atomic','legacy-decision-atomic',
+        'legacy-decision-atomic@example.com',
+        '$2b$12$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','pending',
+        'LegacyDecisionAtomic','Legacy Decision Atomic','legacy-decision-atomic',
+        'LegacyDecision#1','Master','Damage','','main','legacydecisionatomic',1
+      )
+    `;
+    await sql`
+      insert into tourney_player_tokens(
+        id,player_id,token_hash,purpose,expires_at
+      ) values(
+        'legacy-decision-atomic-token','legacy-decision-atomic',
+        ${"a".repeat(64)},'approve','9999-12-31T23:59:59.999Z'
+      )
+    `;
+  });
+  const legacyQueueFailureUrl = new URL(legacyUrl);
+  legacyQueueFailureUrl.searchParams.set(
+    "options",
+    "-c roo.tourney_mirror_apply=1"
+  );
+  await assert.rejects(
+    applyRegistrationDecision({
+      tokenHash: "a".repeat(64),
+      playerId: "legacy-decision-atomic",
+      purpose: "approve",
+      actorUsername: "fixture",
+      approvedRolePlay: "Damage",
+      env: {
+        ...failoverEnv,
+        TOURNEY_DATABASE_URL: legacyQueueFailureUrl.toString(),
+      },
+    }),
+    (error) => error?.code === "TOURNEY_COMMAND_CONTEXT_REQUIRED",
+    "legacy decision queue failure did not reject"
+  );
+  await assertSql(
+    target,
+    `select player.status='pending' and player.version=1 and token.used_at is null ok
+     from tourney_players player
+     join tourney_player_tokens token on token.player_id=player.id
+     where player.id='legacy-decision-atomic'`,
+    "legacy decision queue failure committed player or token state"
+  );
+  await target.begin(async (sql) => {
+    await sql`select set_config('roo.tourney_mirror_apply','1',true)`;
+    await sql`delete from tourney_player_tokens where player_id='legacy-decision-atomic'`;
+    await sql`delete from tourney_players where id='legacy-decision-atomic'`;
+  });
+
+  const [legacyCapacityConfig] = await target`
+    select team_count,updated_at,updated_by from tourney_registration_config
+    where id='legacy-series-2026'
+  `;
+  await target.begin(async (sql) => {
+    await sql`select set_config('roo.tourney_mirror_apply','1',true)`;
+    await sql`
+      insert into tourney_registration_config(id,team_count,updated_by)
+      values('legacy-series-2026',2,'fixture')
+      on conflict(id) do update set team_count=excluded.team_count
+    `;
+    await sql`
+      insert into tourney_players(
+        id,username,email,password_hash,status,discord,display_name,discord_key,
+        battlenet,rank_name,role_play,approved_role_play,registration_pool,
+        twitch_username,version
+      ) values
+        ('legacy-capacity-main','legacy-capacity-main','legacy-capacity-main@example.com',
+          '$2b$12$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','approved',
+          'LegacyCapacityMain','Legacy Capacity Main','legacy-capacity-main',
+          'LegacyCapacity#1','Master','Tank','Tank','main','legacycapacitymain',1),
+        ('legacy-capacity-main-2','legacy-capacity-main-2','legacy-capacity-main-2@example.com',
+          '$2b$12$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','approved',
+          'LegacyCapacityMain2','Legacy Capacity Main 2','legacy-capacity-main-2',
+          'LegacyCapacity#4','Master','Tank','Tank','main','legacycapacitymain2',1),
+        ('legacy-capacity-main-3','legacy-capacity-main-3','legacy-capacity-main-3@example.com',
+          '$2b$12$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','approved',
+          'LegacyCapacityMain3','Legacy Capacity Main 3','legacy-capacity-main-3',
+          'LegacyCapacity#5','Master','Tank','Tank','main','legacycapacitymain3',1),
+        ('legacy-capacity-sub','legacy-capacity-sub','legacy-capacity-sub@example.com',
+          '$2b$12$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','approved',
+          'LegacyCapacitySub','Legacy Capacity Sub','legacy-capacity-sub',
+          'LegacyCapacity#2','Master','Tank','Tank','substitute','legacycapacitysub',1),
+        ('legacy-capacity-damage','legacy-capacity-damage','legacy-capacity-damage@example.com',
+          '$2b$12$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','approved',
+          'LegacyCapacityDamage','Legacy Capacity Damage','legacy-capacity-damage',
+          'LegacyCapacity#3','Master','Damage','Damage','main','legacycapacitydamage',1)
+    `;
+  });
+  const legacyDirectUrl = new URL(legacyUrl);
+  legacyDirectUrl.searchParams.set(
+    "options",
+    "-c roo.tourney_command_id=fixture:legacy-direct-capacity " +
+      "-c roo.tourney_mirror_apply=1"
+  );
+  const directLegacyEnv = {
+    ...failoverEnv,
+    TOURNEY_DATABASE_URL: legacyDirectUrl.toString(),
+  };
+  const directCapacityResults = await Promise.allSettled([
+    updateTourneyPlayerDetails({
+      playerId: "legacy-capacity-sub",
+      payload: {
+        displayName: "Legacy Capacity Sub",
+        twitchUsername: "legacycapacitysub",
+        teamName: "",
+        registrationPool: "main",
+      },
+      actorUsername: "fixture",
+      env: directLegacyEnv,
+    }),
+    updateTourneyPlayerApprovedRole({
+      playerId: "legacy-capacity-damage",
+      rolePlay: "Tank",
+      actorUsername: "fixture",
+      env: directLegacyEnv,
+    }),
+  ]);
+  const [directCapacityState] = await target`
+    select
+      (select team_count from tourney_registration_config
+       where id='legacy-series-2026') team_count,
+      count(*) filter (
+        where status='approved' and registration_pool='main'
+          and coalesce(nullif(approved_role_play,''),role_play)='Tank'
+          and id like 'legacy-capacity-%'
+      )::integer main_count,
+      jsonb_object_agg(id, jsonb_build_object(
+        'pool',registration_pool,
+        'role',coalesce(nullif(approved_role_play,''),role_play)
+      )) states
+    from tourney_players where id like 'legacy-capacity-%'
+  `;
+  assert.equal(
+    directCapacityResults.filter((result) => result.status === "fulfilled").length,
+    1,
+    `direct legacy capacity mutations consumed the same final slot: ${JSON.stringify(
+      directCapacityState
+    )}`
+  );
+  assert.equal(
+    directCapacityResults.filter((result) =>
+      result.status === "rejected" &&
+      result.reason?.code === "TOURNEY_ROLE_CAPACITY_FULL"
+    ).length,
+    1,
+    "direct legacy capacity loser did not report the role-cap conflict"
+  );
+  await assertSql(
+    target,
+    `select count(*)<=4 ok from tourney_players
+     where status='approved' and registration_pool='main'
+       and coalesce(nullif(approved_role_play,''),role_play)='Tank'
+       and id like 'legacy-capacity-%'`,
+    "direct legacy capacity mutations overfilled Tank capacity"
+  );
+  await target.begin(async (sql) => {
+    await sql`select set_config('roo.tourney_mirror_apply','1',true)`;
+    await sql`delete from tourney_players where id like 'legacy-capacity-%'`;
+    if (legacyCapacityConfig) {
+      await sql`
+        update tourney_registration_config set
+          team_count=${legacyCapacityConfig.team_count},
+          updated_at=${legacyCapacityConfig.updated_at},
+          updated_by=${legacyCapacityConfig.updated_by}
+        where id='legacy-series-2026'
+      `;
+    } else {
+      await sql`
+        delete from tourney_registration_config where id='legacy-series-2026'
+      `;
+    }
+  });
+
   const failoverReady = await checkTourneyManualFailoverReadiness({ env: failoverEnv });
   assert.equal(failoverReady.ready, true, `manual failover was blocked: ${failoverReady.blockers.join(",")}`);
 
@@ -3807,6 +3990,8 @@ insert into accounts.discord_role_assignments(
       "database-authoritative write pause with maintenance bypass",
       "update and delete mirroring for every registered domain",
       "receipt mirroring",
+      "atomic legacy registration decision and token rollback",
+      "direct capacity mutation serialization",
       "opposite terminal registration decision conflict",
       "serialized payout transition email deduplication",
       "expired reset dispatch suppression",
