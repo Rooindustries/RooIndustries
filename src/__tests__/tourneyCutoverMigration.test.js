@@ -64,6 +64,24 @@ const baselineRestoreV4 = fs.readFileSync(
   ),
   "utf8"
 );
+const snapshotRpcRepairV4 = fs.readFileSync(
+  path.join(
+    process.cwd(),
+    "supabase",
+    "migrations",
+    "20260715020000_repair_tourney_hardening_snapshot_rpc.sql"
+  ),
+  "utf8"
+);
+const baselineRecoveryV4 = fs.readFileSync(
+  path.join(
+    process.cwd(),
+    "supabase",
+    "migrations",
+    "20260715030000_allow_paused_tourney_baseline_recovery.sql"
+  ),
+  "utf8"
+);
 const legacyActivationV4 = fs.readFileSync(
   path.join(process.cwd(), "scripts", "tourney-schema-v4-activate-legacy.sql"),
   "utf8"
@@ -106,8 +124,10 @@ describe("Tourney cutover migration", () => {
     expect(cutoverCli).not.toContain("roo_capture_tourney_pre_cutover_snapshot");
     expect(cutoverCli).not.toContain("POSTGRES_URL_NON_POOLING");
     expect(cutoverCli).toContain("process.env.TOURNEY_DATABASE_URL");
-    expect(cutoverCli).toContain('PGCONNECT_TIMEOUT: "15"');
-    expect(cutoverCli).toContain("PGDATABASE: databaseUrl");
+    expect(cutoverCli).toContain('psqlEnv.PGCONNECT_TIMEOUT = "15"');
+    expect(cutoverCli).toContain("psqlEnv.PGDATABASE = databaseUrl");
+    expect(cutoverCli).toContain('execFileAsync("psql", args');
+    expect(cutoverCli).not.toContain('[databaseUrl, ...args]');
     expect(cutoverCli).toContain("normalize(process.env.TOURNEY_SNAPSHOT_KEY)");
     expect(cutoverCli).not.toMatch(/TOURNEY_SNAPSHOT_KEY\s*\|\|/);
     expect(cutoverCli).toContain("plaintextSha256");
@@ -226,9 +246,8 @@ describe("Tourney cutover migration", () => {
   test("keeps the Supabase forward repair install-only while legacy repair stays guarded", () => {
     const repairDdl = repairV4.indexOf("create or replace function");
     expect(repairDdl).toBeGreaterThan(0);
-    expect(repairV4).toContain(
-      "activation remains gated by public.roo_activate_tourney_schema_v4(text)"
-    );
+    expect(repairV4).not.toContain("set hardened_active = true");
+    expect(repairV4).not.toContain("roo_activate_tourney_schema_v4(");
     expect(repairV4).not.toContain("Supabase Tourney repair safety preconditions");
     expect(legacyRepairV4).toContain("for share;");
   });
@@ -245,6 +264,35 @@ describe("Tourney cutover migration", () => {
     );
     expect(repairV4).not.toContain(
       "create table if not exists tourney.shadow_latency_baselines"
+    );
+  });
+
+  test("repairs the hosted snapshot RPC without retaining the incomplete signature", () => {
+    expect(snapshotRpcRepairV4).toContain(
+      "drop function if exists public.roo_capture_tourney_hardening_snapshot(jsonb,jsonb)"
+    );
+    expect(snapshotRpcRepairV4).toContain("p_legacy_snapshot_text text default null");
+    expect(snapshotRpcRepairV4).toContain("p_legacy_snapshot_text::jsonb");
+    expect(snapshotRpcRepairV4).toContain("metadata.schema_version");
+    expect(snapshotRpcRepairV4).not.toContain("metadata.expanded_version");
+    expect(snapshotRpcRepairV4).toContain("'hosted_roundtrip_verified',true");
+    expect(snapshotRpcRepairV4).toContain(
+      "grant execute on function public.roo_capture_tourney_hardening_snapshot(jsonb,jsonb,text)"
+    );
+  });
+
+  test("allows only an empty paused active baseline set to be recovered", () => {
+    expect(baselineRecoveryV4).toContain("v_meta.hardened_active");
+    expect(baselineRecoveryV4).toContain(
+      "exists(select 1 from tourney.shadow_latency_baselines)"
+    );
+    expect(baselineRecoveryV4).toContain("schema_version");
+    expect(baselineRecoveryV4).toContain("v_meta.clean_since is not null");
+    expect(baselineRecoveryV4).toContain("'baseline_recovery',true");
+    expect(baselineRecoveryV4).toContain("not v_meta.writes_paused");
+    expect(baselineRecoveryV4).toContain("v_meta.fallback_read_only");
+    expect(baselineRecoveryV4).toContain(
+      "grant execute on function public.roo_capture_tourney_shadow_latency_baseline(text)"
     );
   });
 

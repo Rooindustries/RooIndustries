@@ -1,6 +1,3 @@
--- Schema-v4 install phase. This migration is additive and safe to install
--- before the final pause. Runtime activation is a separate audited RPC below.
-
 set lock_timeout = '5s';
 set statement_timeout = '120s';
 
@@ -833,10 +830,6 @@ begin
     updated_at = now(),
     updated_by = v_actor
   where id = 'tourney';
-  -- Rows created by the expanded application before activation were not yet
-  -- covered by v4 triggers. Queue an authoritative generation-1 bootstrap for
-  -- every registered row while writes are paused; normal mirror checkpoints
-  -- make any duplicate event harmless.
   for v_contract in
     select logical_table, supabase_relation
     from tourney.mirror_contracts where enabled order by logical_table

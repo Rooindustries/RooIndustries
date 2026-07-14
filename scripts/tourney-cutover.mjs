@@ -58,9 +58,14 @@ const assertStagedActivationEnvironment = () => {
 };
 const legacyDatabaseUrl = () => normalize(process.env.TOURNEY_DATABASE_URL);
 const runPsql = async (databaseUrl, args, options = {}) => {
+  const psqlEnv = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith("PG"))
+  );
+  psqlEnv.PGCONNECT_TIMEOUT = "15";
+  psqlEnv.PGDATABASE = databaseUrl;
   try {
     return await execFileAsync("psql", args, {
-      env: { ...process.env, PGCONNECT_TIMEOUT: "15", PGDATABASE: databaseUrl },
+      env: psqlEnv,
       maxBuffer: options.maxBuffer || 20 * 1024 * 1024,
     });
   } catch (cause) {
