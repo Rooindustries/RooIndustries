@@ -41,6 +41,11 @@ const validReleaseEnv = () => ({
   BOOKING_EMAIL_TOKEN_SECRET: "booking-email-token-secret-placeholder",
   UPGRADE_INTENT_SECRET: "upgrade-intent-secret-placeholder",
   DOWNLOAD_TOKEN_SECRET: "download-token-secret-placeholder",
+  DOWNLOAD_CATALOG_JSON: "",
+  DOWNLOAD_STORAGE_BACKEND: "",
+  BLOB_READ_WRITE_TOKEN: "",
+  BLOB_STORE_ID: "",
+  VERCEL_OIDC_TOKEN: "",
   REF_ADMIN_KEY: "ref-admin-secret-placeholder",
   CRON_SECRET: "cron-secret-placeholder",
   SANITY_WEBHOOK_SECRET: "sanity-webhook-secret-placeholder",
@@ -79,6 +84,19 @@ const validReleaseEnv = () => ({
   SUPABASE_PREVIEW_SECRET_KEY: "",
   SUPABASE_PREVIEW_SERVICE_ROLE_KEY: "",
 });
+
+const validUtilitiesCatalog = (patch = {}) => JSON.stringify([
+  {
+    slug: "utilities",
+    fileName: "utilities.zip",
+    blobPath: "downloads/utilities.zip",
+    storageBackend: "blob",
+    sizeBytes: 3_692_474_026,
+    sha256: "5".repeat(64),
+    blobEtag: '"verified-blob-etag"',
+    ...patch,
+  },
+]);
 
 const validate = (overrides = {}) => {
   const result = spawnSync(process.execPath, ["scripts/validate-runtime-env.js"], {
@@ -141,6 +159,91 @@ describe("release runtime environment validation", () => {
     const result = validate();
     expect(result.status).toBe(0);
     expect(result.output).toContain("Runtime secret validation passed");
+  });
+
+  test("accepts a production Blob download with a fully pinned utilities catalog", () => {
+    const result = validate({
+      VERCEL_ENV: "production",
+      BLOB_READ_WRITE_TOKEN: "blob-token-placeholder",
+      DOWNLOAD_CATALOG_JSON: validUtilitiesCatalog(),
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.output).toContain("Runtime secret validation passed");
+  });
+
+  test.each([
+    ["missing", "", "require DOWNLOAD_CATALOG_JSON"],
+    ["malformed", "{not-json", "must contain valid JSON"],
+    [
+      "without utilities",
+      JSON.stringify([{ slug: "other" }]),
+      "exactly one utilities entry",
+    ],
+    [
+      "with an invalid utilities path",
+      validUtilitiesCatalog({ blobPath: "downloads/other.zip" }),
+      "invalid fileName or blobPath",
+    ],
+  ])(
+    "blocks production Blob downloads when the catalog is %s",
+    (_case, catalog, error) => {
+      const result = validate({
+        VERCEL_ENV: "production",
+        BLOB_READ_WRITE_TOKEN: "blob-token-placeholder",
+        DOWNLOAD_CATALOG_JSON: catalog,
+      });
+
+      expect(result.status).toBe(1);
+      expect(result.output).toContain(error);
+    }
+  );
+
+  test.each([
+    ["sizeBytes", { sizeBytes: 0 }],
+    ["sha256", { sha256: "not-a-sha" }],
+    ["blobEtag", { blobEtag: "" }],
+  ])(
+    "blocks a production utilities catalog without a valid %s pin",
+    (pin, patch) => {
+      const result = validate({
+        VERCEL_ENV: "production",
+        BLOB_READ_WRITE_TOKEN: "blob-token-placeholder",
+        DOWNLOAD_CATALOG_JSON: validUtilitiesCatalog(patch),
+      });
+
+      expect(result.status).toBe(1);
+      expect(result.output).toContain(`valid ${pin}`);
+    }
+  );
+
+  test("treats an explicit production Blob backend as configured without a local token", () => {
+    const result = validate({
+      VERCEL_ENV: "production",
+      DOWNLOAD_STORAGE_BACKEND: "blob",
+      DOWNLOAD_CATALOG_JSON: "",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain("require DOWNLOAD_CATALOG_JSON");
+  });
+
+  test.each([
+    [
+      "preview",
+      { VERCEL_ENV: "preview", BLOB_READ_WRITE_TOKEN: "blob-token-placeholder" },
+    ],
+    [
+      "local storage",
+      { VERCEL_ENV: "production", DOWNLOAD_STORAGE_BACKEND: "local" },
+    ],
+  ])("preserves %s builds without a utilities catalog", (_case, environment) => {
+    const result = validate({
+      ...environment,
+      DOWNLOAD_CATALOG_JSON: "",
+    });
+
+    expect(result.status).toBe(0);
   });
 
   test("requires a dedicated Sanity webhook secret", () => {
