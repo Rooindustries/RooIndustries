@@ -1,4 +1,5 @@
 import { selectPaymentStartBackend } from "../server/api/payment/backend";
+import { issueHoldToken } from "../server/booking/holdToken";
 import { issueUpgradeIntentToken } from "../server/api/ref/upgradeIntentToken";
 
 describe("payment backend pinning", () => {
@@ -75,5 +76,78 @@ describe("payment backend pinning", () => {
         },
       })
     ).toBe("sanity");
+  });
+
+  test("routes a generation-one start to Supabase despite a legacy Sanity hold", () => {
+    const slotHoldId = "slotHold.legacy";
+    const slotHoldToken = issueHoldToken({
+      holdId: slotHoldId,
+      startTimeUTC: "2026-07-15T08:00:00.000Z",
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      backend: "sanity",
+      cutoverGeneration: 0,
+    });
+
+    expect(selectPaymentStartBackend({
+      body: { bookingPayload: { slotHoldId, slotHoldToken } },
+      cutoverGeneration: 1,
+      env: {
+        DATA_PRIMARY_BACKEND: "supabase",
+        COMMERCE_PRIMARY_BACKEND: "supabase",
+        SUPABASE_CUTOVER_ENABLED: "1",
+        COMMERCE_CUTOVER_ENABLED: "1",
+        SANITY_REVERSE_MIRROR_WRITES: "1",
+        COMMERCE_FAILOVER_GENERATION: "1",
+      },
+    })).toBe("supabase");
+  });
+
+  test("routes a generation-one upgrade to Supabase despite a legacy Sanity intent", () => {
+    const bookingPayload = {
+      originalOrderId: "booking.legacy",
+      email: "customer@example.com",
+      packageTitle: "Performance Vertex Max",
+    };
+    bookingPayload.upgradeIntentToken = issueUpgradeIntentToken({
+      bookingId: bookingPayload.originalOrderId,
+      email: bookingPayload.email,
+      targetPackageTitle: bookingPayload.packageTitle,
+      backend: "sanity",
+      cutoverGeneration: 0,
+    });
+
+    expect(selectPaymentStartBackend({
+      body: { bookingPayload },
+      cutoverGeneration: 1,
+      env: {
+        DATA_PRIMARY_BACKEND: "supabase",
+        COMMERCE_PRIMARY_BACKEND: "supabase",
+        SUPABASE_CUTOVER_ENABLED: "1",
+        COMMERCE_CUTOVER_ENABLED: "1",
+        SANITY_REVERSE_MIRROR_WRITES: "1",
+        COMMERCE_FAILOVER_GENERATION: "1",
+      },
+    })).toBe("supabase");
+  });
+
+  test("routes new generation-two starts to a manually selected Sanity fallback", () => {
+    const slotHoldId = "slotHold.supabase";
+    const slotHoldToken = issueHoldToken({
+      holdId: slotHoldId,
+      startTimeUTC: "2026-07-15T08:00:00.000Z",
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      backend: "supabase",
+      cutoverGeneration: 1,
+    });
+
+    expect(selectPaymentStartBackend({
+      body: { bookingPayload: { slotHoldId, slotHoldToken } },
+      cutoverGeneration: 2,
+      env: {
+        DATA_PRIMARY_BACKEND: "sanity",
+        COMMERCE_PRIMARY_BACKEND: "sanity",
+        COMMERCE_FAILOVER_GENERATION: "2",
+      },
+    })).toBe("sanity");
   });
 });

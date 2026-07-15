@@ -1,7 +1,24 @@
 const documents = new Map();
 const mockSendVerification = jest.fn();
+const testPassword = `fixture-${"x".repeat(24)}`;
 const mockClient = {
   fetch: jest.fn(async () => null),
+  patch(id) {
+    const unsetFields = [];
+    const patch = {
+      unset(fields) {
+        unsetFields.push(...fields);
+        return patch;
+      },
+      async commit() {
+        const document = documents.get(id);
+        if (!document) throw new Error("Document not found");
+        unsetFields.forEach((field) => delete document[field]);
+        return { ...document };
+      },
+    };
+    return patch;
+  },
   transaction() {
     const creates = [];
     const deletes = [];
@@ -95,7 +112,7 @@ describe("referral registration identity claims", () => {
         email: "same@example.com",
         paypalEmail: `${slug}@example.com`,
         slug,
-        password: "correct-horse-battery-staple",
+        password: testPassword,
       },
     });
     const first = createRes();
@@ -119,7 +136,7 @@ describe("referral registration identity claims", () => {
     expect(mockSendVerification).toHaveBeenCalledTimes(1);
   });
 
-  test("removes the pending account and both claims when email delivery fails", async () => {
+  test("keeps the committed pending account when email delivery is ambiguous", async () => {
     mockSendVerification.mockResolvedValue({
       data: null,
       error: new Error("provider unavailable"),
@@ -135,13 +152,60 @@ describe("referral registration identity claims", () => {
           email: "failure@example.com",
           paypalEmail: "failure@example.com",
           slug: "creator-failure",
-          password: "correct-horse-battery-staple",
+          password: testPassword,
         },
       },
       response
     );
 
     expect(response.statusCode).toBe(503);
-    expect([...documents.values()]).toHaveLength(0);
+    expect(
+      [...documents.values()].filter((document) => document._type === "referral")
+    ).toHaveLength(1);
+    expect(
+      [...documents.values()].filter(
+        (document) => document._type === "referralIdentityClaim"
+      )
+    ).toHaveLength(2);
+  });
+
+  test("retries the same sealed verification token in Sanity fallback mode", async () => {
+    const request = {
+      method: "POST",
+      headers: { "x-forwarded-for": "203.0.113.92" },
+      body: {
+        discordUsername: "Creator Retry",
+        email: "retry@example.com",
+        paypalEmail: "retry@example.com",
+        slug: "creator-retry",
+        password: testPassword,
+      },
+    };
+    mockSendVerification
+      .mockResolvedValueOnce({ data: null, error: new Error("response timed out") })
+      .mockResolvedValueOnce({ data: { id: "email_fixture" }, error: null });
+    const first = createRes();
+    await register(request, first);
+    const pending = [...documents.values()].find(
+      (document) => document._type === "referral"
+    );
+    expect(first.statusCode).toBe(503);
+    expect(pending.registrationVerificationDeliveryToken).toMatch(/^v1\./);
+    expect(pending.registrationVerificationDeliveryToken).not.toContain(
+      pending.registrationVerificationTokenHash
+    );
+
+    mockClient.fetch.mockImplementationOnce(async () => ({ ...pending }));
+    const second = createRes();
+    await register(request, second);
+
+    expect(second.statusCode).toBe(202);
+    expect(mockSendVerification).toHaveBeenCalledTimes(2);
+    expect(mockSendVerification.mock.calls[0][1].idempotencyKey).toBe(
+      mockSendVerification.mock.calls[1][1].idempotencyKey
+    );
+    expect(
+      documents.get(pending._id).registrationVerificationDeliveryToken
+    ).toBeUndefined();
   });
 });

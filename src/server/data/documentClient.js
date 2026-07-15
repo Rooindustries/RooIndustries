@@ -7,11 +7,20 @@ import { createSupabaseAdminClient } from "../supabase/adminClient.js";
 
 const DEFAULT_API_VERSION = "2023-10-01";
 const DOCUMENT_BACKENDS = new Set(["sanity", "supabase"]);
+const PRIVATE_SANITY_TARGET_KEYS = [
+  "SANITY_PRIVATE_PROJECT_ID",
+  "SANITY_PRIVATE_DATASET",
+  "SANITY_PRIVATE_READ_TOKEN",
+  "SANITY_PRIVATE_WRITE_TOKEN",
+];
 
 const readFirst = (env, keys) =>
   keys
     .map((key) => String(env?.[key] || "").trim())
     .find(Boolean) || "";
+
+const hasPrivateSanityTarget = (env) =>
+  PRIVATE_SANITY_TARGET_KEYS.some((key) => String(env?.[key] || "").trim());
 
 const resolveDocumentBackend = ({ override, primary }) => {
   const backend = String(override || primary || "").trim().toLowerCase();
@@ -26,26 +35,41 @@ const resolvePolicyBackend = ({ policy, domain = "global" }) =>
     ? policy.commercePrimaryBackend
     : policy.primaryBackend;
 
+const assertRollbackMirror = ({ backend, policy }) => {
+  if (backend === "supabase" && !policy.reverseMirrorEnabled) {
+    throw new Error(
+      "Supabase document writes require SANITY_REVERSE_MIRROR_WRITES=1."
+    );
+  }
+};
+
 const resolveSupabaseClient = ({ env, client }) =>
   client || createSupabaseAdminClient({ env });
 
 const resolveSanityEnv = (env = process.env, { requireWrite = false } = {}) => {
-  const projectId = readFirst(env, ["SANITY_PRIVATE_PROJECT_ID", "SANITY_PROJECT_ID"]);
-  const dataset = readFirst(env, ["SANITY_PRIVATE_DATASET", "SANITY_DATASET"]);
-  const apiVersion =
-    readFirst(env, ["SANITY_PRIVATE_API_VERSION", "SANITY_API_VERSION"]) ||
-    DEFAULT_API_VERSION;
-  const token = readFirst(
+  const usePrivateTarget = hasPrivateSanityTarget(env);
+  const projectId = readFirst(
     env,
-    requireWrite
-      ? ["SANITY_PRIVATE_WRITE_TOKEN", "SANITY_WRITE_TOKEN"]
-      : [
-          "SANITY_PRIVATE_READ_TOKEN",
-          "SANITY_READ_TOKEN",
-          "SANITY_PRIVATE_WRITE_TOKEN",
-          "SANITY_WRITE_TOKEN",
-        ]
+    usePrivateTarget ? ["SANITY_PRIVATE_PROJECT_ID"] : ["SANITY_PROJECT_ID"]
   );
+  const dataset = readFirst(
+    env,
+    usePrivateTarget ? ["SANITY_PRIVATE_DATASET"] : ["SANITY_DATASET"]
+  );
+  const apiVersion = readFirst(
+    env,
+    usePrivateTarget
+      ? ["SANITY_PRIVATE_API_VERSION", "SANITY_API_VERSION"]
+      : ["SANITY_API_VERSION"]
+  ) || DEFAULT_API_VERSION;
+  const tokenKeys = usePrivateTarget
+    ? requireWrite
+      ? ["SANITY_PRIVATE_WRITE_TOKEN"]
+      : ["SANITY_PRIVATE_READ_TOKEN", "SANITY_PRIVATE_WRITE_TOKEN"]
+    : requireWrite
+      ? ["SANITY_WRITE_TOKEN"]
+      : ["SANITY_READ_TOKEN", "SANITY_WRITE_TOKEN"];
+  const token = readFirst(env, tokenKeys);
 
   if (!projectId || !dataset || !token) {
     throw new Error(
@@ -68,6 +92,13 @@ const createConfiguredSanityClient = ({
     perspective,
   });
 
+const createSanityWriteClient = ({ env, fallbackConfig = null }) => {
+  if (hasPrivateSanityTarget(env)) {
+    return createConfiguredSanityClient({ env, requireWrite: true });
+  }
+  return createSanityClient(fallbackConfig || {});
+};
+
 export const createDataClient = (
   sanityConfig = {},
   {
@@ -83,6 +114,7 @@ export const createDataClient = (
     primary: resolvePolicyBackend({ policy, domain }),
   });
   if (backend === "supabase") {
+    assertRollbackMirror({ backend, policy });
     const resolvedSupabaseClient = resolveSupabaseClient({
       env,
       client: supabaseClient,
@@ -92,15 +124,14 @@ export const createDataClient = (
       commerceOnly: domain === "commerce",
       cutoverGeneration: policy.commerceFailoverGeneration,
     });
-    if (!policy.reverseMirrorEnabled) return client;
     return createReverseMirroringSupabaseClient({
       supabaseClient: client,
-      sanityClient: createSanityClient(sanityConfig),
+      sanityClient: createConfiguredSanityClient({ env, requireWrite: true }),
       recoveryClient: resolvedSupabaseClient,
     });
   }
 
-  const sanityClient = createSanityClient(sanityConfig);
+  const sanityClient = createSanityWriteClient({ env, fallbackConfig: sanityConfig });
   if (!policy.shadowWritesEnabled) return sanityClient;
   return createShadowingSanityClient({
     sanityClient,
@@ -147,6 +178,7 @@ export const createDocumentWriteClient = ({
     primary: resolvePolicyBackend({ policy, domain }),
   });
   if (backend === "supabase") {
+    assertRollbackMirror({ backend, policy });
     const resolvedSupabaseClient = resolveSupabaseClient({
       env,
       client: supabaseClient,
@@ -156,7 +188,6 @@ export const createDocumentWriteClient = ({
       commerceOnly: domain === "commerce",
       cutoverGeneration: policy.commerceFailoverGeneration,
     });
-    if (!policy.reverseMirrorEnabled) return client;
     return createReverseMirroringSupabaseClient({
       supabaseClient: client,
       sanityClient: createConfiguredSanityClient({ env, requireWrite: true }),

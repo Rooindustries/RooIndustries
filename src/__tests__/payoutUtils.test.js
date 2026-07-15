@@ -3,6 +3,7 @@ import {
   computeEarningsFromBookings,
   fetchReferralEarnings,
 } from "../server/api/ref/payoutUtils";
+import { createCommerceStore } from "../server/commerce/store.js";
 
 describe("referral payout utilities", () => {
   test("reduces owed balance by logged payments", () => {
@@ -75,5 +76,31 @@ describe("referral payout utilities", () => {
       byPackage: { "Performance Vertex Max": 12.5 },
     });
     expect(client.fetch).not.toHaveBeenCalled();
+  });
+
+  test("falls back to booking rows when the Sanity commerce store has no typed aggregate", async () => {
+    const sanityClient = {
+      fetch: jest.fn().mockResolvedValue([
+        {
+          packageTitle: "Performance Vertex Overhaul",
+          commissionAmount: 10,
+        },
+      ]),
+    };
+    const client = createCommerceStore({ client: sanityClient, backend: "sanity" });
+
+    await expect(
+      fetchReferralEarnings({
+        client,
+        referralId: "referral.creator",
+        referralCode: "creator",
+      })
+    ).resolves.toEqual({
+      xoc: 0,
+      vertex: 10,
+      total: 10,
+      byPackage: { "Performance Vertex Overhaul": 10 },
+    });
+    expect(sanityClient.fetch).toHaveBeenCalledTimes(1);
   });
 });

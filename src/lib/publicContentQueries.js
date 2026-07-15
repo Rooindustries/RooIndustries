@@ -48,7 +48,9 @@ export const PUBLIC_CONTENT_QUERIES = Object.freeze({
   contact: `*[_type == "contact"][0]{title,subtitle,email,formId}`,
   tools: `*[_type == "tool"] | order(sortOrder asc, title asc){
     _id,title,category,shortDescription,downloadMode,downloadUrl,officialSite,
-    downloadNote,"iconUrl":icon.asset->url,"fileUrl":downloadFile.asset->url
+    downloadNote,
+    "iconUrl":coalesce(icon.asset->url,icon.asset._ref),
+    "fileUrl":coalesce(downloadFile.asset->url,downloadFile.asset._ref)
   }`,
   benchmarks: `*[_type == "benchmark"] | order(coalesce(sortOrder, 9999) asc, _createdAt asc){
     title,subtitle,
@@ -77,5 +79,5 @@ export const PUBLIC_CONTENT_QUERIES = Object.freeze({
 });
 
 export const PUBLIC_CONTENT_RESOURCES = Object.freeze(
-  Object.keys(PUBLIC_CONTENT_QUERIES)
+  Object.keys(PUBLIC_CONTENT_QUERIES),
 );

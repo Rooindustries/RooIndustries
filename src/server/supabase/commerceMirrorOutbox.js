@@ -15,6 +15,8 @@ const REFERRAL_COMMERCE_FIELDS = Object.freeze([
   "successfulReferrals",
   "currentCommissionPercent",
   "currentDiscountPercent",
+  "maxCommissionPercent",
+  "bypassUnlock",
   "isFirstTime",
   "xocPayments",
   "vertexPayments",

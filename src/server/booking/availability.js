@@ -46,14 +46,16 @@ export async function getBookingAvailability({ client } = {}) {
   const secondaryBackend = primaryBackend === "supabase" ? "sanity" : "supabase";
   const primaryClient =
     client || createCommerceReadClient({ backendOverride: primaryBackend });
-  const clients = client
-    ? [primaryClient]
-    : secondaryBackend === "supabase" && !isSupabaseAdminConfigured()
-      ? [primaryClient]
-      : [
-          primaryClient,
-          createCommerceReadClient({ backendOverride: secondaryBackend }),
-        ];
+  const includeSecondary =
+    !client &&
+    policy.commerceFailoverGeneration < 1 &&
+    (secondaryBackend !== "supabase" || isSupabaseAdminConfigured());
+  const clients = includeSecondary
+    ? [
+        primaryClient,
+        createCommerceReadClient({ backendOverride: secondaryBackend }),
+      ]
+    : [primaryClient];
   const [settings, backendResults] = await Promise.all([
     getBookingSettings({ client: primaryClient }),
     Promise.all(

@@ -3,7 +3,6 @@ import "../src/index.css";
 import seo from "@/src/lib/seo";
 import AppClientRuntime from "@/src/next/AppClientRuntime";
 
-// Keep root metadata static at layout level so core tags appear immediately.
 export const metadata = seo.getMetadataForPath("/");
 const SUPABASE_ASSET_ORIGIN =
   "https://ntezmxzaibrrsgtujgxu.supabase.co";
@@ -11,8 +10,6 @@ const shouldPreconnectSupabase =
   process.env.DATA_PRIMARY_BACKEND === "supabase" ||
   Number(process.env.SUPABASE_CONTENT_CANARY_PERCENT || 0) > 0;
 
-// Two themes only: "default" (Roo Blue) and "dark" (Blackout). Legacy
-// stored values ("light"/"system") normalize to default.
 const themeInitScript = `
 (function() {
   try {

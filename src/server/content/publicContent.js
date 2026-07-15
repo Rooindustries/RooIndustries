@@ -5,17 +5,13 @@ import {
 } from "../../lib/publicContentQueries";
 import { createSupabaseDocumentClient } from "../supabase/documentClient.js";
 import { enrichSupabaseContentAssets } from "../supabase/assets.js";
+import { resolveGlobalSanityReadConfig } from "../cms/globalSanityConfig.js";
 
 const DEFAULT_API_VERSION = "2026-06-09";
 const SUPABASE_CONTENT_CACHE_TTL_MS = 60 * 1000;
 const SUPABASE_CONTENT_STALE_TTL_MS = 10 * 60 * 1000;
 const SUPABASE_CONTENT_RETRY_TTL_MS = 5 * 1000;
 const supabaseContentCache = new Map();
-
-const readEnv = (...keys) =>
-  keys
-    .map((key) => String(process.env[key] || "").trim())
-    .find(Boolean) || "";
 
 const DOCUMENT_TYPES_BY_RESOURCE = Object.freeze({
   reviews: ["proReviewsCarousel"],
@@ -55,22 +51,16 @@ const createPublicContentClient = ({ backend, resource }) => {
     });
   }
 
-  const projectId = readEnv("SANITY_PROJECT_ID", "NEXT_PUBLIC_SANITY_PROJECT_ID");
-  const dataset = readEnv("SANITY_DATASET", "NEXT_PUBLIC_SANITY_DATASET") || "production";
-  const token = readEnv(
-    "SANITY_READ_TOKEN",
-    "SANITY_PRIVATE_READ_TOKEN",
-    "SANITY_WRITE_TOKEN"
-  );
-  if (!projectId || !dataset) {
+  const config = resolveGlobalSanityReadConfig(process.env);
+  if (!config) {
     throw new Error("Sanity public content access is not configured.");
   }
+  const { token, ...target } = config;
   return createSanityClient({
-    projectId,
-    dataset,
-    apiVersion: readEnv("SANITY_API_VERSION") || DEFAULT_API_VERSION,
+    ...target,
+    apiVersion: config.apiVersion || DEFAULT_API_VERSION,
     ...(token ? { token } : {}),
-    useCdn: true,
+    useCdn: !token,
     perspective: "published",
   });
 };
@@ -78,7 +68,11 @@ const createPublicContentClient = ({ backend, resource }) => {
 const parseTitles = (searchParams) => {
   const raw = searchParams.getAll("title").flatMap((value) => value.split(","));
   const titles = [...new Set(raw.map((value) => value.trim()).filter(Boolean))];
-  if (titles.length < 1 || titles.length > 8 || titles.some((value) => value.length > 100)) {
+  if (
+    titles.length < 1 ||
+    titles.length > 8 ||
+    titles.some((value) => value.length > 100)
+  ) {
     const error = new Error("A valid package title is required.");
     error.status = 400;
     throw error;
@@ -87,7 +81,9 @@ const parseTitles = (searchParams) => {
 };
 
 const parseSlug = (searchParams) => {
-  const slug = String(searchParams.get("slug") || "").trim().toLowerCase();
+  const slug = String(searchParams.get("slug") || "")
+    .trim()
+    .toLowerCase();
   if (!/^[a-z0-9-]{1,80}$/.test(slug)) {
     const error = new Error("A valid upgrade slug is required.");
     error.status = 400;
@@ -104,7 +100,7 @@ const validateAllowedParameters = (resource, searchParams) => {
       ? ["title"]
       : resource === "upgrade-link"
         ? ["slug"]
-        : []
+        : [],
   );
   for (const key of searchParams.keys()) {
     if (!allowed.has(key)) {

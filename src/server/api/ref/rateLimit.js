@@ -18,6 +18,7 @@ const COMMERCE_KEY_PREFIXES = [
   "validate-referral:",
   "validate-coupon:",
   "get-upgrade-info:",
+  "download-validate:",
 ];
 
 const isCommerceKey = (key) =>
