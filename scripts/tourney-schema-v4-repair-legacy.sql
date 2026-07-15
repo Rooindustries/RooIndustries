@@ -333,10 +333,10 @@ begin
       'hex'
     )
   end;
-  insert into public.tourney_mirror_outbox (
+  insert into public.tourney_mirror_outbox(
     command_id, source_backend, generation, table_name, operation,
     record_key, record_data, record_hash, status
-  ) values (
+  ) values(
     v_command_id, 'legacy', v_meta.generation, v_logical_table,
     case when tg_op = 'DELETE' then 'delete' else 'upsert' end,
     v_key, v_data, v_hash, 'pending'
