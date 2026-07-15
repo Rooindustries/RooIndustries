@@ -885,6 +885,29 @@ describe("tourney player store", () => {
     });
   });
 
+  test("returns the manage list and capacity from one snapshot contract", async () => {
+    const store = loadStore();
+    store.resetMemoryTourneyPlayerStoreForTests();
+    const created = await store.createPendingTourneyPlayer({
+      payload: basePayload,
+      recipients: approvers,
+      env,
+    });
+
+    const snapshot = await store.getManageTourneyPlayersSnapshot({ env });
+    expect(snapshot.players).toEqual(
+      await store.listManageTourneyPlayers({ env })
+    );
+    expect(snapshot.capacity).toEqual(
+      await store.getTourneyRoleCapacitySnapshot({ env })
+    );
+    expect(snapshot.players[0]).toMatchObject({
+      id: created.player.id,
+      email: basePayload.email,
+      status: "pending",
+    });
+  });
+
   test("uses only approved main-pool players for role caps and confirmed substitute overflow", async () => {
     const store = loadStore();
     store.resetMemoryTourneyPlayerStoreForTests();
