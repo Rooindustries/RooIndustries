@@ -67,6 +67,7 @@ export const EXPECTED_LIVE_DRIFT = Object.freeze({
 const REPAIR_VERSION = "tourney-live-drift-repair-v1";
 const BLOCKED_ERROR_CODE = "identity_principal_collision";
 const LEGACY_TRIGGER_BODY_HASH = "36214a1fe065a142c2d83684c9f8e7d6";
+const LIVE_DRIFT_CONNECTION_LIMIT = 7;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
 const sha256 = (value) => crypto.createHash("sha256").update(String(value)).digest("hex");
@@ -183,7 +184,7 @@ const assertRuntimeEnvironment = (env = process.env) => {
 
 const connect = (databaseUrl, applicationName) => postgres({
   ...buildPostgresConnectionOptions(databaseUrl),
-  max: 1,
+  max: LIVE_DRIFT_CONNECTION_LIMIT,
   idle_timeout: 10,
   connect_timeout: 10,
   prepare: false,
@@ -494,13 +495,13 @@ const inspectCollision = async (source) => {
     )
     select count(*)::integer count,
       encode(extensions.digest(coalesce(jsonb_agg(snapshot order by player_id)::text,'[]'),'sha256'),'hex') source_hash,
-      min(player_id) player_id,min(linked_principal_id)::text linked_principal_id,
-      min(canonical_principal_id)::text canonical_principal_id,
-      min(discord_user_id) discord_user_id,min(identity_link_id)::text identity_link_id,
+      min(player_id) player_id,min(linked_principal_id::text) linked_principal_id,
+      min(canonical_principal_id::text) canonical_principal_id,
+      min(discord_user_id) discord_user_id,min(identity_link_id::text) identity_link_id,
       encode(extensions.digest(min(player_id),'sha256'),'hex') player_hash,
       encode(extensions.digest(min(discord_user_id),'sha256'),'hex') discord_hash,
-      encode(extensions.digest(min(linked_principal_id)::text,'sha256'),'hex') linked_principal_hash,
-      encode(extensions.digest(min(canonical_principal_id)::text,'sha256'),'hex') canonical_principal_hash,
+      encode(extensions.digest(min(linked_principal_id::text),'sha256'),'hex') linked_principal_hash,
+      encode(extensions.digest(min(canonical_principal_id::text),'sha256'),'hex') canonical_principal_hash,
       jsonb_build_object(
         'canonical',bool_and(
           identity_backend_owner='supabase' and auth_identity_id is not null
