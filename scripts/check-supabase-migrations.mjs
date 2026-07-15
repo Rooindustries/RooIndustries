@@ -319,10 +319,49 @@ for (const file of [
   "20260715110000_add_referral_email_dispatch_ledger.sql",
   "20260715115000_harden_commerce_readiness_evidence.sql",
   "20260715120000_add_global_cms_publish_authority.sql",
+  "20260715140000_terminalize_stale_provider_recovery.sql",
+  "20260715150000_block_legacy_discord_reauth.sql",
 ]) {
   const sql = fs.readFileSync(path.join(migrationsDirectory, file), "utf8");
   if (!hasBoundedMigrationPrefix(sql)) {
     failures.push(`Final release migration lacks bounded timeouts: ${file}`);
+  }
+}
+
+const discordReauthRepairFile = path.join(
+  migrationsDirectory,
+  "20260715150000_block_legacy_discord_reauth.sql"
+);
+if (!fs.existsSync(discordReauthRepairFile)) {
+  failures.push("Legacy Discord re-auth repair migration is missing.");
+} else {
+  const sql = fs.readFileSync(discordReauthRepairFile, "utf8");
+  for (const required of [
+    "migration.block_legacy_discord_reauth",
+    "discord_auth_reconnect_required",
+    "assignment.desired_role = 'none'",
+    "assignment.applied_role = 'participant'",
+    "principal.status = 'active'",
+    "mapping.principal_id = assignment.principal_id",
+    "player.principal_id = assignment.principal_id",
+    "identity.provider = 'discord'",
+    "operation.status in ('pending', 'processing', 'retry')",
+    "set_config('roo.tourney_command_id'",
+    "insert into tourney.command_receipts",
+    "status = 'blocked_reauth'",
+    "v_updated_count <> v_candidate_count",
+    "from public, anon, authenticated, service_role",
+  ]) {
+    if (!sql.includes(required)) {
+      failures.push(`Discord re-auth repair migration lacks: ${required}`);
+    }
+  }
+  if (
+    /grant\s+execute\s+on\s+function\s+migration\.block_legacy_discord_reauth/i.test(
+      sql
+    )
+  ) {
+    failures.push("Discord re-auth repair must remain owner-only.");
   }
 }
 
@@ -369,6 +408,41 @@ if (!fs.existsSync(credentialRecoveryFile)) {
   }
   if (sql.includes("credential_operations_source_recovery_idx")) {
     failures.push("Credential recovery queue index is not staged separately.");
+  }
+}
+
+const providerRecoveryFile = path.join(
+  migrationsDirectory,
+  "20260715140000_terminalize_stale_provider_recovery.sql"
+);
+if (!fs.existsSync(providerRecoveryFile)) {
+  failures.push("Stale provider recovery migration is missing.");
+} else {
+  const sql = fs.readFileSync(providerRecoveryFile, "utf8");
+  for (const required of [
+    "migration.terminalize_stale_provider_recoveries",
+    "provider_order_not_found_after_recovery_window",
+    "paymentAliasesTotal",
+    "validPaymentAliases",
+    "invalidPaymentAliases",
+    "openRescheduleCases",
+    "notifiedRescheduleCases",
+    "unnotifiedRescheduleCases",
+    "v_starts_paused",
+    "payment.resource_release_pending",
+    "redemption.state = 'reserved'",
+    "hold.phase in ('active', 'payment')",
+  ]) {
+    if (!sql.includes(required)) {
+      failures.push(`Stale provider recovery migration lacks: ${required}`);
+    }
+  }
+  if (
+    /grant\s+execute\s+on\s+function\s+migration\.terminalize_stale_provider_recoveries/i.test(
+      sql
+    )
+  ) {
+    failures.push("Stale provider recovery repair must remain owner-only.");
   }
 }
 

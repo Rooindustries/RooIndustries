@@ -63,8 +63,14 @@ const releaseReadiness = (overrides = {}) => {
     capturedWithoutBooking: 0,
     reciprocalLinkMismatches: 0,
     duplicatePaymentAliases: 0,
+    validPaymentAliases: 0,
+    paymentAliasesTotal: 0,
+    invalidPaymentAliases: 0,
     providerRecoveryCases: 0,
     rescheduleCases: 0,
+    openRescheduleCases: 0,
+    notifiedRescheduleCases: 0,
+    unnotifiedRescheduleCases: 0,
     discordRetry: { pending: 0, oldestAt: null },
     oauthIntents: { expiredPending: 0, terminalOlderThanSevenDays: 0 },
   };
@@ -420,9 +426,9 @@ describe("commerce readiness route", () => {
       "creator_projection_drift",
     ],
     [
-      "duplicate payment alias",
-      releaseReadiness({ duplicatePaymentAliases: 1 }),
-      "duplicate_payment_aliases",
+      "invalid payment alias",
+      releaseReadiness({ invalidPaymentAliases: 1 }),
+      "invalid_payment_aliases",
     ],
     [
       "stale provider recovery",
@@ -445,9 +451,9 @@ describe("commerce readiness route", () => {
       "provider_recovery_cases",
     ],
     [
-      "unresolved reschedule case",
-      releaseReadiness({ rescheduleCases: 1 }),
-      "reschedule_cases",
+      "unnotified reschedule case",
+      releaseReadiness({ unnotifiedRescheduleCases: 1 }),
+      "unnotified_reschedule_cases",
     ],
     [
       "overdue Discord retry",
