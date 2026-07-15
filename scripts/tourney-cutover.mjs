@@ -23,6 +23,7 @@ import migrationTargetSafety from "../src/server/supabase/migrationTargetSafety.
 import { migrateTourneyShadow } from "../src/server/supabase/tourneyMigration.js";
 import { TOURNEY_MIRROR_CONTRACT } from "../src/server/tourney/mirrorContract.js";
 import { runTourneyParity } from "../src/server/tourney/store.js";
+import { SNAPSHOT_TRANSPORT_CHUNK_BYTES } from "../src/server/tourney/snapshotTransport.js";
 import {
   stableSnapshotJson,
   TOURNEY_HOSTED_SNAPSHOT_RELATIONS,
@@ -54,6 +55,7 @@ const snapshotDirectory = path.join(
   "Tourney Cutover"
 );
 const isolatedEnvironmentPrefixes = [
+  "CRON_",
   "DISCORD_",
   "NEXT_PUBLIC_SANITY_",
   "NEXT_PUBLIC_SUPABASE_",
@@ -111,6 +113,9 @@ const loadEnvironment = () => {
 const normalize = (value) => String(value || "").trim();
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const stableJson = stableSnapshotJson;
+const SNAPSHOT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SNAPSHOT_SHA256 = /^[0-9a-f]{64}$/;
+const MAX_TRANSPORT_SNAPSHOT_BYTES = 128 * 1024 * 1024;
 const isEnabled = (value) => ["1", "true", "yes", "on"].includes(
   normalize(value).toLowerCase()
 );
@@ -657,7 +662,12 @@ const assertTransportFingerprints = ({ actual, expected }) => {
 
 const HOSTED_SNAPSHOT_RELATIONS = TOURNEY_HOSTED_SNAPSHOT_RELATIONS;
 
-const validateHostedSnapshot = ({ data, legacyData, sanityAccount }) => {
+const validateHostedSnapshot = ({
+  data,
+  legacyData,
+  sanityAccount,
+  deriveTableCounts = false,
+}) => {
   const payloadText = typeof data?.payload_text === "string" ? data.payload_text : "";
   let parsedPayload;
   try {
@@ -665,13 +675,32 @@ const validateHostedSnapshot = ({ data, legacyData, sanityAccount }) => {
   } catch {
     parsedPayload = null;
   }
+  const expectedTableCounts = parsedPayload
+    ? derivedHostedTableCounts(parsedPayload)
+    : null;
+  const suppliedTableCounts = data?.table_counts;
+  const tableCounts = suppliedTableCounts || (
+    deriveTableCounts ? expectedTableCounts : null
+  );
+  const tableCountKeys = tableCounts && typeof tableCounts === "object" &&
+    !Array.isArray(tableCounts)
+    ? Object.keys(tableCounts).sort()
+    : [];
+  const expectedTableCountKeys = Object.keys(expectedTableCounts || {}).sort();
+  const validTableCounts =
+    stableJson(tableCountKeys) === stableJson(expectedTableCountKeys) &&
+    expectedTableCountKeys.every((relation) => {
+      const count = Number(tableCounts?.[relation]);
+      return Number.isSafeInteger(count) && count >= 0 &&
+        count === expectedTableCounts[relation];
+    });
   const validMetadata =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
       String(data?.snapshot_id || "")
     ) &&
     /^[0-9a-f]{64}$/.test(String(data?.payload_sha256 || "")) &&
     data?.hosted_roundtrip_verified === true &&
-    data?.table_counts && typeof data.table_counts === "object" &&
+    validTableCounts &&
     parsedPayload && sha256(payloadText) === data.payload_sha256 &&
     (data?.payload === undefined || (
       data.payload && typeof data.payload === "object" &&
@@ -685,14 +714,12 @@ const validateHostedSnapshot = ({ data, legacyData, sanityAccount }) => {
   const missingRelations = HOSTED_SNAPSHOT_RELATIONS.filter(
     (relation) => !Array.isArray(parsedPayload[relation])
   );
-  const wrongCounts = HOSTED_SNAPSHOT_RELATIONS.filter(
-    (relation) => Number(data.table_counts[relation]) !== parsedPayload[relation]?.length
-  );
   if (
     missingRelations.length > 0 ||
-    wrongCounts.length > 0 ||
-    stableJson(parsedPayload.legacy) !== stableJson(legacyData) ||
-    stableJson(parsedPayload.sanity_account) !== stableJson(sanityAccount)
+    (legacyData !== undefined &&
+      stableJson(parsedPayload.legacy) !== stableJson(legacyData)) ||
+    (sanityAccount !== undefined &&
+      stableJson(parsedPayload.sanity_account) !== stableJson(sanityAccount))
   ) {
     const error = new Error("Supabase Tourney snapshot payload is incomplete or inconsistent.");
     error.code = "TOURNEY_HOSTED_SNAPSHOT_INCOMPLETE";
@@ -704,6 +731,11 @@ const validateHostedSnapshot = ({ data, legacyData, sanityAccount }) => {
   return {
     payload: parsedPayload,
     payloadTextSha256: sha256(payloadText),
+    hostedTableCounts: Object.fromEntries(HOSTED_SNAPSHOT_RELATIONS.map((relation) => [
+      relation,
+      parsedPayload[relation].length,
+    ])),
+    tableCounts: expectedTableCounts,
     fullLogical,
   };
 };
@@ -848,11 +880,57 @@ const inspectProductionSnapshotTransport = async () => {
   };
 };
 
-const downloadTransportSnapshot = async ({ capture, expected, keyPair }) => {
-  const chunks = [];
+const parseSnapshotResumeMetadata = () => {
+  const snapshotId = valueAfter("--snapshot-id").toLowerCase();
+  const payloadSha256 = valueAfter("--snapshot-sha256").toLowerCase();
+  const totalBytesText = hasFlag("--snapshot-total-bytes")
+    ? valueAfter("--snapshot-total-bytes")
+    : "";
+  const totalBytes = /^\d+$/.test(totalBytesText) ? Number(totalBytesText) : undefined;
+  if (
+    !SNAPSHOT_UUID.test(snapshotId) ||
+    !SNAPSHOT_SHA256.test(payloadSha256) ||
+    (totalBytesText && (
+      !Number.isSafeInteger(totalBytes) ||
+      totalBytes < 1 ||
+      totalBytes > MAX_TRANSPORT_SNAPSHOT_BYTES
+    ))
+  ) {
+    const error = new Error("The stored Tourney snapshot metadata is invalid.");
+    error.code = "TOURNEY_SNAPSHOT_RESUME_METADATA_INVALID";
+    throw error;
+  }
+  return {
+    snapshotId,
+    payloadSha256,
+    ...(totalBytes === undefined ? {} : { totalBytes }),
+  };
+};
+
+const downloadTransportSnapshot = async ({
+  capture,
+  expected,
+  keyPair,
+  postTransport = postSnapshotTransport,
+}) => {
+  if (
+    !SNAPSHOT_UUID.test(String(capture?.snapshotId || "")) ||
+    !SNAPSHOT_SHA256.test(String(capture?.payloadSha256 || "")) ||
+    (capture?.totalBytes !== undefined && (
+      !Number.isSafeInteger(capture.totalBytes) ||
+      capture.totalBytes < 1 ||
+      capture.totalBytes > MAX_TRANSPORT_SNAPSHOT_BYTES
+    ))
+  ) {
+    const error = new Error("The Tourney snapshot transport metadata is invalid.");
+    error.code = "TOURNEY_SNAPSHOT_TRANSPORT_CAPTURE_INVALID";
+    throw error;
+  }
   let offset = 0;
-  while (offset < capture.totalBytes) {
-    const opened = await postSnapshotTransport({
+  let totalBytes = capture.totalBytes;
+  let payload;
+  do {
+    const opened = await postTransport({
       action: "chunk",
       body: {
         expectedTargets: expected,
@@ -862,27 +940,193 @@ const downloadTransportSnapshot = async ({ capture, expected, keyPair }) => {
       },
       keyPair,
     });
+    const receivedTotalBytes = opened?.metadata?.totalBytes;
     if (
-      opened.metadata.payloadSha256 !== capture.payloadSha256 ||
-      opened.metadata.offset !== offset ||
-      opened.metadata.totalBytes !== capture.totalBytes ||
-      opened.plaintext.byteLength !== opened.metadata.chunkBytes
+      !Number.isSafeInteger(receivedTotalBytes) ||
+      receivedTotalBytes < 1 ||
+      receivedTotalBytes > MAX_TRANSPORT_SNAPSHOT_BYTES ||
+      (totalBytes !== undefined && receivedTotalBytes !== totalBytes)
     ) {
       const error = new Error("The Tourney snapshot transport chunk is invalid.");
       error.code = "TOURNEY_SNAPSHOT_TRANSPORT_CHUNK_INVALID";
       throw error;
     }
-    chunks.push(opened.plaintext);
+    totalBytes = receivedTotalBytes;
+    if (!payload) payload = Buffer.allocUnsafe(totalBytes);
+    const expectedChunkBytes = Math.min(
+      SNAPSHOT_TRANSPORT_CHUNK_BYTES,
+      totalBytes - offset
+    );
+    if (
+      opened?.metadata?.payloadSha256 !== capture.payloadSha256 ||
+      opened.metadata.offset !== offset ||
+      !Buffer.isBuffer(opened.plaintext) ||
+      opened.plaintext.byteLength !== opened.metadata.chunkBytes ||
+      opened.plaintext.byteLength !== expectedChunkBytes
+    ) {
+      const error = new Error("The Tourney snapshot transport chunk is invalid.");
+      error.code = "TOURNEY_SNAPSHOT_TRANSPORT_CHUNK_INVALID";
+      throw error;
+    }
+    opened.plaintext.copy(payload, offset);
     offset += opened.plaintext.byteLength;
-  }
-  const payload = Buffer.concat(chunks, capture.totalBytes);
-  if (payload.byteLength !== capture.totalBytes || sha256(payload) !== capture.payloadSha256) {
+  } while (offset < totalBytes);
+  if (payload.byteLength !== totalBytes || sha256(payload) !== capture.payloadSha256) {
     const error = new Error("The Tourney snapshot transport payload hash is invalid.");
     error.code = "TOURNEY_SNAPSHOT_TRANSPORT_HASH_MISMATCH";
     throw error;
   }
   return payload.toString("utf8");
 };
+
+const derivedHostedTableCounts = (payload) => {
+  const hostedCounts = Object.fromEntries(HOSTED_SNAPSHOT_RELATIONS.map((relation) => [
+    relation,
+    Array.isArray(payload?.[relation]) ? payload[relation].length : -1,
+  ]));
+  const logicalCounts = payload?.full_logical?.relationCounts;
+  return {
+    ...hostedCounts,
+    ...(logicalCounts && typeof logicalCounts === "object" && !Array.isArray(logicalCounts)
+      ? logicalCounts
+      : {}),
+  };
+};
+
+const buildTransportSnapshotBundle = ({
+  capturedAt,
+  capture,
+  legacyCapture,
+  sanityAccount,
+  payloadText,
+  tableCounts,
+}) => {
+  const hostedProof = validateHostedSnapshot({
+    data: {
+      snapshot_id: capture.snapshotId,
+      payload_sha256: capture.payloadSha256,
+      table_counts: tableCounts,
+      payload_text: payloadText,
+      hosted_roundtrip_verified: true,
+    },
+    legacyData: legacyCapture?.data,
+    sanityAccount,
+    deriveTableCounts: tableCounts === undefined,
+  });
+  const legacyData = legacyCapture?.data ?? hostedProof.payload.legacy;
+  const embeddedSanityAccount = sanityAccount ?? hostedProof.payload.sanity_account;
+  if (
+    !legacyData || typeof legacyData !== "object" || Array.isArray(legacyData) ||
+    LEGACY_TABLES.some((table) => !Array.isArray(legacyData[table])) ||
+    !embeddedSanityAccount || embeddedSanityAccount._id !== "tourneyAuthStore"
+  ) {
+    const error = new Error("The hosted Tourney source snapshot is incomplete.");
+    error.code = "TOURNEY_HOSTED_SNAPSHOT_INCOMPLETE";
+    throw error;
+  }
+  const logicalProof = hostedProof.fullLogical;
+  if (
+    !logicalProof ||
+    (capture.fullLogicalRelations !== undefined &&
+      logicalProof.relationCount !== capture.fullLogicalRelations) ||
+    (capture.fullLogicalRows !== undefined &&
+      logicalProof.rowCount !== capture.fullLogicalRows)
+  ) {
+    const error = new Error("The full Supabase logical snapshot proof is inconsistent.");
+    error.code = "TOURNEY_SNAPSHOT_FULL_LOGICAL_PROOF_INVALID";
+    throw error;
+  }
+  const localCapturedAt = legacyCapture
+    ? capturedAt
+    : hostedProof.payload.full_logical.capturedAt;
+  const legacyPayloadText = legacyCapture?.payloadText ?? stableJson(legacyData);
+  return {
+    logicalProof,
+    hostedTableCounts: hostedProof.hostedTableCounts,
+    snapshot: {
+      version: 2,
+      capturedAt: localCapturedAt,
+      ...(legacyCapture ? {} : { recoveredAt: capturedAt }),
+      legacy: legacyData,
+      legacyPayloadText,
+      legacyPayloadSha256: sha256(legacyPayloadText),
+      legacyPayloadEncoding: legacyCapture
+        ? "postgres-json-text"
+        : "normalized-hosted-json",
+      supabase: {
+        hostedEncryptedSnapshot: true,
+        captureFunction: "public.roo_capture_tourney_hardening_snapshot",
+        snapshotId: capture.snapshotId,
+        payloadSha256: capture.payloadSha256,
+        hostedTableCounts: hostedProof.hostedTableCounts,
+        tableCounts: hostedProof.tableCounts,
+        ...(legacyCapture ? { payload: hostedProof.payload } : {}),
+        payloadText,
+        payloadTextSha256Verified: hostedProof.payloadTextSha256,
+        hostedRoundtripVerified: true,
+        transportEncrypted: true,
+        ...(legacyCapture ? {} : {
+          payloadStoredVerbatim: true,
+          recoveredFromStoredSnapshot: true,
+        }),
+      },
+      sanityAccount: embeddedSanityAccount,
+    },
+  };
+};
+
+const writeTransportSnapshotArchive = async ({
+  capturedAt,
+  reservation,
+  snapshot,
+  storeSecret = storeSnapshotSecret,
+  deleteSecret = deleteSnapshotSecret,
+}) => {
+  const secret = crypto.randomBytes(48).toString("base64url");
+  const keychainService = snapshotKeychainService(capturedAt);
+  const encrypted = encryptSnapshot({ snapshot, secret, keychainService });
+  const decrypted = decryptSnapshot({ encrypted, secret });
+  if (stableJson(decrypted) !== stableJson(snapshot)) {
+    throw new Error("Local Tourney snapshot decrypt verification failed.");
+  }
+  try {
+    await storeSecret({ service: keychainService, secret });
+    fs.writeFileSync(reservation.descriptor, encrypted);
+    fs.fsyncSync(reservation.descriptor);
+    return { encrypted, keychainService };
+  } catch (error) {
+    await deleteSecret(keychainService);
+    throw error;
+  }
+};
+
+const transportSnapshotResult = ({
+  reservation,
+  archive,
+  legacyCapture,
+  logicalProof,
+  recovered,
+}) => ({
+  output: reservation.output,
+  sha256: sha256(archive.encrypted),
+  keychainService: archive.keychainService,
+  legacyCounts: Object.fromEntries(
+    Object.entries(legacyCapture.data).map(([table, rows]) => [table, rows.length])
+  ),
+  supabaseSnapshot: recovered
+    ? "hosted-encrypted-transport-recovered"
+    : "hosted-encrypted-transport",
+  sanityAccountCaptured: true,
+  localDecryptVerified: true,
+  hostedPayloadHashVerified: true,
+  fullLogicalRelations: logicalProof.relationCount,
+  fullLogicalRows: logicalProof.rowCount,
+  ...(recovered
+    ? { fullLogicalManifestVerified: true }
+    : { fullLogicalRestoreManifestVerified: true }),
+  transportEncrypted: true,
+  ...(recovered ? { recoveredFromStoredSnapshot: true } : {}),
+});
 
 const captureSnapshotViaProduction = async () => {
   assertSnapshotEnvironment();
@@ -891,7 +1135,7 @@ const captureSnapshotViaProduction = async () => {
   const keyPair = generateSnapshotTransportKeyPair();
   const expected = localTransportTargetPins();
   let completed = false;
-  let keychainService = "";
+  let archive;
   try {
     const [legacyCapture, sanityAccount] = await Promise.all([
       readLegacySnapshot(legacyDatabaseUrl()),
@@ -915,9 +1159,10 @@ const captureSnapshotViaProduction = async () => {
     }
     if (
       capture?.action !== "capture" ||
-      !/^[0-9a-f-]{36}$/i.test(String(capture.snapshotId || "")) ||
-      !/^[0-9a-f]{64}$/.test(String(capture.payloadSha256 || "")) ||
+      !SNAPSHOT_UUID.test(String(capture.snapshotId || "")) ||
+      !SNAPSHOT_SHA256.test(String(capture.payloadSha256 || "")) ||
       !Number.isSafeInteger(capture.totalBytes) || capture.totalBytes < 1 ||
+      capture.totalBytes > MAX_TRANSPORT_SNAPSHOT_BYTES ||
       capture.hostedRoundtripVerified !== true ||
       capture.fullLogicalVerified !== true ||
       !Number.isSafeInteger(capture.fullLogicalRelations) ||
@@ -933,86 +1178,77 @@ const captureSnapshotViaProduction = async () => {
     }
     assertTransportFingerprints({ actual: capture.fingerprints, expected });
     const payloadText = await downloadTransportSnapshot({ capture, expected, keyPair });
-    const hostedData = {
-      snapshot_id: capture.snapshotId,
-      payload_sha256: capture.payloadSha256,
-      table_counts: capture.tableCounts,
-      payload_text: payloadText,
-      hosted_roundtrip_verified: true,
-    };
-    const hostedProof = validateHostedSnapshot({
-      data: hostedData,
-      legacyData: legacyCapture.data,
-      sanityAccount,
-    });
-    const logicalProof = hostedProof.fullLogical;
-    if (
-      !logicalProof ||
-      logicalProof.relationCount !== capture.fullLogicalRelations ||
-      logicalProof.rowCount !== capture.fullLogicalRows
-    ) {
-      const error = new Error("The full Supabase logical snapshot proof is inconsistent.");
-      error.code = "TOURNEY_SNAPSHOT_FULL_LOGICAL_PROOF_INVALID";
-      throw error;
-    }
-    const snapshot = {
-      version: 2,
+    const { logicalProof, snapshot } = buildTransportSnapshotBundle({
       capturedAt,
-      legacy: legacyCapture.data,
-      legacyPayloadText: legacyCapture.payloadText,
-      legacyPayloadSha256: sha256(legacyCapture.payloadText),
-      supabase: {
-        hostedEncryptedSnapshot: true,
-        captureFunction: "public.roo_capture_tourney_hardening_snapshot",
-        snapshotId: capture.snapshotId,
-        payloadSha256: capture.payloadSha256,
-        tableCounts: capture.tableCounts,
-        payload: hostedProof.payload,
-        payloadText,
-        payloadTextSha256Verified: hostedProof.payloadTextSha256,
-        hostedRoundtripVerified: true,
-        transportEncrypted: true,
-      },
+      capture,
+      legacyCapture,
       sanityAccount,
-    };
-    const secret = crypto.randomBytes(48).toString("base64url");
-    keychainService = snapshotKeychainService(capturedAt);
-    const encrypted = encryptSnapshot({
-      snapshot,
-      secret,
-      keychainService,
+      payloadText,
+      tableCounts: capture.tableCounts,
     });
-    const decrypted = decryptSnapshot({ encrypted, secret });
-    if (stableJson(decrypted) !== stableJson(snapshot)) {
-      throw new Error("Local Tourney snapshot decrypt verification failed.");
-    }
-    await storeSnapshotSecret({ service: keychainService, secret });
-    fs.writeFileSync(reservation.descriptor, encrypted);
-    fs.fsyncSync(reservation.descriptor);
+    archive = await writeTransportSnapshotArchive({
+      capturedAt,
+      reservation,
+      snapshot,
+    });
+    const result = transportSnapshotResult({
+      reservation,
+      archive,
+      legacyCapture,
+      logicalProof,
+      recovered: false,
+    });
     completed = true;
-    return {
-      output: reservation.output,
-      sha256: sha256(encrypted),
-      keychainService,
-      legacyCounts: Object.fromEntries(
-        Object.entries(legacyCapture.data).map(([table, rows]) => [table, rows.length])
-      ),
-      supabaseSnapshot: "hosted-encrypted-transport",
-      sanityAccountCaptured: true,
-      localDecryptVerified: true,
-      hostedPayloadHashVerified: true,
-      fullLogicalRelations: logicalProof.relationCount,
-      fullLogicalRows: logicalProof.rowCount,
-      fullLogicalRestoreManifestVerified: true,
-      transportEncrypted: true,
-    };
+    return result;
   } finally {
     fs.closeSync(reservation.descriptor);
     if (!completed) {
       try {
         fs.unlinkSync(reservation.output);
       } catch {}
-      await deleteSnapshotSecret(keychainService);
+      await deleteSnapshotSecret(archive?.keychainService);
+    }
+  }
+};
+
+const resumeSnapshotViaProduction = async () => {
+  assertHostedExecutionEnvironment();
+  assertSnapshotEnvironment();
+  const capture = parseSnapshotResumeMetadata();
+  const keyPair = generateSnapshotTransportKeyPair();
+  const expected = localTransportTargetPins();
+  const capturedAt = new Date().toISOString();
+  const reservation = reserveSnapshotOutput(capturedAt);
+  let completed = false;
+  let archive;
+  try {
+    const payloadText = await downloadTransportSnapshot({ capture, expected, keyPair });
+    const { logicalProof, snapshot } = buildTransportSnapshotBundle({
+      capturedAt,
+      capture,
+      payloadText,
+    });
+    archive = await writeTransportSnapshotArchive({
+      capturedAt,
+      reservation,
+      snapshot,
+    });
+    const result = transportSnapshotResult({
+      reservation,
+      archive,
+      legacyCapture: { data: snapshot.legacy },
+      logicalProof,
+      recovered: true,
+    });
+    completed = true;
+    return result;
+  } finally {
+    fs.closeSync(reservation.descriptor);
+    if (!completed) {
+      try {
+        fs.unlinkSync(reservation.output);
+      } catch {}
+      await deleteSnapshotSecret(archive?.keychainService);
     }
   }
 };
@@ -1101,10 +1337,13 @@ const captureSnapshot = async () => {
   }
 };
 
-const verifySnapshot = async () => {
-  const input = resolveSnapshotInput();
+const verifySnapshot = async ({
+  allowedRoot = snapshotDirectory,
+  secretEnv = process.env,
+} = {}) => {
+  const input = resolveSnapshotInput({ allowedRoot });
   const encrypted = fs.readFileSync(input);
-  const secret = await readSnapshotSecret(encrypted);
+  const secret = await readSnapshotSecret(encrypted, secretEnv);
   const snapshot = decryptSnapshot({ encrypted, secret });
   const hostedProof = validateHostedSnapshot({
     data: {
@@ -1118,14 +1357,30 @@ const verifySnapshot = async () => {
     legacyData: snapshot?.legacy,
     sanityAccount: snapshot?.sanityAccount,
   });
+  let parsedLegacyPayload;
+  try {
+    parsedLegacyPayload = JSON.parse(snapshot?.legacyPayloadText || "null");
+  } catch {
+    parsedLegacyPayload = null;
+  }
+  const recovered = snapshot?.supabase?.recoveredFromStoredSnapshot === true;
   if (
     snapshot?.version !== 2 ||
     snapshot?.supabase?.hostedRoundtripVerified !== true ||
     snapshot?.supabase?.payloadTextSha256Verified !== snapshot?.supabase?.payloadSha256 ||
     sha256(String(snapshot?.legacyPayloadText || "")) !== snapshot?.legacyPayloadSha256 ||
-    stableJson(JSON.parse(snapshot?.legacyPayloadText || "null")) !== stableJson(snapshot?.legacy) ||
-    stableJson(snapshot?.supabase?.payload?.legacy) !== stableJson(snapshot?.legacy) ||
-    stableJson(snapshot?.supabase?.payload?.sanity_account) !== stableJson(snapshot?.sanityAccount) ||
+    stableJson(parsedLegacyPayload) !== stableJson(snapshot?.legacy) ||
+    stableJson(hostedProof.payload.legacy) !== stableJson(snapshot?.legacy) ||
+    stableJson(hostedProof.payload.sanity_account) !== stableJson(snapshot?.sanityAccount) ||
+    (recovered && (
+      snapshot?.legacyPayloadEncoding !== "normalized-hosted-json" ||
+      snapshot?.supabase?.payloadStoredVerbatim !== true ||
+      snapshot?.supabase?.payload !== undefined ||
+      stableJson(snapshot?.supabase?.hostedTableCounts) !==
+        stableJson(hostedProof.hostedTableCounts) ||
+      snapshot?.capturedAt !== hostedProof.payload.full_logical?.capturedAt ||
+      !Number.isFinite(Date.parse(String(snapshot?.recoveredAt || "")))
+    )) ||
     (snapshot?.supabase?.transportEncrypted === true && !hostedProof.fullLogical)
   ) {
     const error = new Error("Tourney snapshot contents failed verification.");
@@ -1144,6 +1399,7 @@ const verifySnapshot = async () => {
     sanityAccountCaptured: true,
     localDecryptVerified: true,
     hostedPayloadHashVerified: true,
+    ...(recovered ? { recoveredFromStoredSnapshot: true } : {}),
     ...(hostedProof.fullLogical ? {
       fullLogicalRelations: hostedProof.fullLogical.relationCount,
       fullLogicalRows: hostedProof.fullLogical.rowCount,
@@ -1355,6 +1611,26 @@ const actions = [
   { flag: "--inspect-snapshot-transport", requiresEnvironment: true, touchesLegacy: false, touchesSupabase: false, options: ["--snapshot-transport-url"], required: ["--snapshot-transport-url"], execute: inspectProductionSnapshotTransport },
   { flag: "--snapshot", touchesLegacy: true, touchesSupabase: true, touchesSupabaseDatabase: true, touchesSanity: true, options: ["--output", "--supabase-database-url-stdin"], execute: captureSnapshot },
   { flag: "--snapshot-via-production", touchesLegacy: true, touchesSupabase: false, touchesSanity: true, options: ["--output", "--snapshot-transport-url"], required: ["--snapshot-transport-url"], execute: captureSnapshotViaProduction },
+  {
+    flag: "--resume-snapshot-via-production",
+    requiresEnvironment: true,
+    touchesLegacy: false,
+    touchesSupabase: false,
+    touchesSanity: false,
+    options: [
+      "--output",
+      "--snapshot-id",
+      "--snapshot-sha256",
+      "--snapshot-total-bytes",
+      "--snapshot-transport-url",
+    ],
+    required: [
+      "--snapshot-id",
+      "--snapshot-sha256",
+      "--snapshot-transport-url",
+    ],
+    execute: resumeSnapshotViaProduction,
+  },
   { flag: "--verify-snapshot", touchesLegacy: false, touchesSupabase: false, execute: verifySnapshot },
   { flag: "--apply-legacy-schema", touchesLegacy: true, touchesSupabase: false, execute: applyLegacySchema },
   { flag: "--expand-legacy-v4", touchesLegacy: true, touchesSupabase: false, execute: () => applyLegacyV4Phase("expand") },
@@ -1376,6 +1652,9 @@ const valueFlags = new Set([
   "--expected-legacy-hash",
   "--inventory-hash",
   "--output",
+  "--snapshot-id",
+  "--snapshot-sha256",
+  "--snapshot-total-bytes",
   "--snapshot-transport-url",
   "--verify-snapshot",
 ]);
@@ -1385,6 +1664,9 @@ const knownFlags = new Set([
   "--expected-legacy-hash",
   "--inventory-hash",
   "--output",
+  "--snapshot-id",
+  "--snapshot-sha256",
+  "--snapshot-total-bytes",
   "--snapshot-transport-url",
   "--supabase-database-url-stdin",
 ]);
@@ -1480,11 +1762,14 @@ export {
   assertSupabaseDatabaseConnectionTarget,
   assertHostedExecutionEnvironment,
   assertSnapshotEnvironment,
+  buildTransportSnapshotBundle,
   decryptSnapshot,
+  downloadTransportSnapshot,
   encryptSnapshot,
   loadEnvironment,
   main,
   parseCliAction,
+  parseSnapshotResumeMetadata,
   printTargetFingerprints,
   readSnapshotSecret,
   reserveSnapshotOutput,
@@ -1493,6 +1778,8 @@ export {
   stableJson,
   validateHostedSnapshot,
   valueAfter,
+  verifySnapshot,
+  writeTransportSnapshotArchive,
 };
 
 if (path.resolve(process.argv[1] || "") === fileURLToPath(import.meta.url)) {
