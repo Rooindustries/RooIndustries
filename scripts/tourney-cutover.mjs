@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import crypto from "node:crypto";
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -14,6 +14,11 @@ import {
   buildPostgresConnectionEnv,
   buildPostgresSessionArgs,
 } from "./lib/postgres-connection-env.mjs";
+import {
+  deleteGenericPassword,
+  runMacosSecurityCommand,
+  storeVerifiedGenericPassword,
+} from "./lib/keychain-secret.mjs";
 import {
   expectedConnectedDatabaseUsername,
   loadSupabaseDatabaseTargetFromStdin,
@@ -459,48 +464,30 @@ const decryptSnapshot = ({ encrypted, secret }) => {
 const snapshotKeychainService = (capturedAt) =>
   `RooIndustries-Tourney-Snapshot-${capturedAt.replace(/[^0-9A-Za-z]/g, "")}-${crypto.randomBytes(6).toString("hex")}`;
 
-const runSecurityWithInput = ({ args, input }) => new Promise((resolve, reject) => {
-  const child = spawn("security", args, { stdio: ["pipe", "pipe", "pipe"] });
-  const stderr = [];
-  child.stderr.on("data", (chunk) => {
-    if (Buffer.concat(stderr).byteLength < 4096) stderr.push(chunk);
-  });
-  child.on("error", reject);
-  child.on("close", (code) => {
-    if (code === 0) resolve();
-    else reject(Object.assign(new Error("The snapshot key could not be stored."), {
-      code: "TOURNEY_SNAPSHOT_KEYCHAIN_FAILED",
-    }));
-  });
-  child.stdin.end(Buffer.from(`${input}\n`));
-});
-
-const storeSnapshotSecret = async ({ service, secret }) => {
-  await runSecurityWithInput({
-    args: [
-      "add-generic-password",
-      "-U",
-      "-a",
-      process.env.USER || "serviroo",
-      "-s",
-      service,
-      "-w",
-    ],
-    input: secret,
-  });
+const storeSnapshotSecret = async ({
+  service,
+  secret,
+  account = process.env.USER || "serviroo",
+  runCommand = runMacosSecurityCommand,
+}) => {
+  try {
+    await storeVerifiedGenericPassword({ service, secret, account, runCommand });
+  } catch {
+    const error = new Error("The snapshot key could not be stored and verified.");
+    error.code = "TOURNEY_SNAPSHOT_KEYCHAIN_FAILED";
+    throw error;
+  }
 };
 
-const deleteSnapshotSecret = async (service) => {
+const deleteSnapshotSecret = async (
+  service,
+  {
+    account = process.env.USER || "serviroo",
+    runCommand = runMacosSecurityCommand,
+  } = {}
+) => {
   if (!service) return;
-  try {
-    await execFileAsync("security", [
-      "delete-generic-password",
-      "-a",
-      process.env.USER || "serviroo",
-      "-s",
-      service,
-    ]);
-  } catch {}
+  await deleteGenericPassword({ service, account, runCommand });
 };
 
 const readSnapshotSecret = async (encrypted, env = process.env) => {
@@ -1776,6 +1763,7 @@ export {
   resolveSnapshotInput,
   runPsql,
   stableJson,
+  storeSnapshotSecret,
   validateHostedSnapshot,
   valueAfter,
   verifySnapshot,
