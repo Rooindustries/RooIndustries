@@ -128,5 +128,9 @@ describe("in-memory Supabase database target", () => {
       ...identity,
       hostname: `db.${projectRef}.supabase.co`,
     })).toBe(`roo_cutover.${projectRef}`);
+    expect(expectedConnectedDatabaseUsername({
+      ...identity,
+      username: `.${projectRef}`,
+    })).toBe(`.${projectRef}`);
   });
 });
