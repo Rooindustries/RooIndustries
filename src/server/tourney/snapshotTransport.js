@@ -4,6 +4,7 @@ import postgres from "postgres";
 import migrationTargetSafety from "../supabase/migrationTargetSafety.cjs";
 import { buildTourneyPostgresOptions } from "./sqlClient.js";
 import {
+  SUPABASE_FULL_SNAPSHOT_EXCLUDED_RELATIONS,
   SUPABASE_FULL_SNAPSHOT_SCHEMAS,
   resolveFullLogicalSnapshotProfile,
   stableSnapshotJson,
@@ -296,6 +297,7 @@ const readFullLogicalRelations = async (transaction) => {
   const relationCounts = {};
   for (const relation of catalogRows) {
     const name = `${relation.schema_name}.${relation.relation_name}`;
+    if (SUPABASE_FULL_SNAPSHOT_EXCLUDED_RELATIONS.includes(name)) continue;
     const qualified = `${quoteIdentifier(relation.schema_name)}.${quoteIdentifier(
       relation.relation_name
     )}`;
@@ -316,32 +318,6 @@ const readFullLogicalRelations = async (transaction) => {
     relationPayloads[name] = row.rows_text;
     relationCounts[name] = row.row_count;
   }
-  const [vaultRow] = await transaction`
-    select coalesce(
-      jsonb_agg(
-        jsonb_build_object(
-          'id',secret.id,
-          'decrypted_secret',secret.decrypted_secret
-        )
-        order by secret.id::text
-      ),
-      '[]'::jsonb
-    )::text rows_text,
-    count(*)::integer row_count
-    from vault.decrypted_secrets secret
-    where secret.id in (
-      select distinct snapshot.key_secret_id
-      from migration.tourney_pre_cutover_snapshots snapshot
-    )
-  `;
-  if (
-    typeof vaultRow?.rows_text !== "string" ||
-    !Number.isSafeInteger(vaultRow?.row_count) || vaultRow.row_count < 0
-  ) {
-    throw failure("TOURNEY_SNAPSHOT_VAULT_KEYS_INVALID");
-  }
-  relationPayloads["vault.tourney_snapshot_keys"] = vaultRow.rows_text;
-  relationCounts["vault.tourney_snapshot_keys"] = vaultRow.row_count;
   return {
     catalogRelations: Object.keys(relationPayloads).sort(),
     relationCounts,
