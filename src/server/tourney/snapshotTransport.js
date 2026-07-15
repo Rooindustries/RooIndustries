@@ -552,6 +552,50 @@ export const captureSnapshotTransport = async ({
   }
 };
 
+export const readStoredSnapshotChunk = async ({
+  sql,
+  snapshotId,
+  payloadSha256,
+  offset,
+} = {}) => {
+  const [row] = await sql`
+    with decrypted as (
+      select
+        snapshot.payload_sha256,
+        pg_catalog.convert_to(
+          extensions.pgp_sym_decrypt(snapshot.ciphertext, secret.decrypted_secret),
+          'UTF8'
+        ) payload
+      from migration.tourney_pre_cutover_snapshots snapshot
+      join vault.decrypted_secrets secret on secret.id=snapshot.key_secret_id
+      where snapshot.id=${snapshotId}::uuid
+        and snapshot.payload_sha256=${payloadSha256}
+    )
+    select
+      payload_sha256,
+      pg_catalog.octet_length(payload)::integer total_bytes,
+      pg_catalog.encode(
+        pg_catalog.substring(
+          payload,
+          ${offset + 1},
+          ${SNAPSHOT_TRANSPORT_CHUNK_BYTES}
+        ),
+        'base64'
+      ) chunk
+    from decrypted
+  `;
+  const totalBytes = Number(row?.total_bytes);
+  const chunk = Buffer.from(String(row?.chunk || ""), "base64");
+  if (
+    !Number.isSafeInteger(totalBytes) || totalBytes < 1 || offset >= totalBytes ||
+    chunk.byteLength < 1 || chunk.byteLength > SNAPSHOT_TRANSPORT_CHUNK_BYTES ||
+    offset + chunk.byteLength > totalBytes
+  ) {
+    throw failure("TOURNEY_SNAPSHOT_CHUNK_UNAVAILABLE");
+  }
+  return { chunk, totalBytes };
+};
+
 export const readSnapshotTransportChunk = async ({
   env = process.env,
   expectedTargets,
@@ -583,42 +627,13 @@ export const readSnapshotTransportChunk = async ({
       expected: checked.identities.database,
       code: "TOURNEY_SNAPSHOT_SUPABASE_IDENTITY_MISMATCH",
     });
-    const [row] = await sql`
-      with decrypted as (
-        select
-          snapshot.payload_sha256,
-          pg_catalog.convert_to(
-            extensions.pgp_sym_decrypt(snapshot.ciphertext, secret.decrypted_secret),
-            'UTF8'
-          ) payload
-        from migration.tourney_pre_cutover_snapshots snapshot
-        join vault.decrypted_secrets secret on secret.id=snapshot.key_secret_id
-        where snapshot.id=${snapshotId}::uuid
-          and snapshot.payload_sha256=${payloadSha256}
-      )
-      select
-        payload_sha256,
-        pg_catalog.octet_length(payload)::integer total_bytes,
-        pg_catalog.encode(
-          pg_catalog.substring(
-            payload from ${offset + 1} for ${SNAPSHOT_TRANSPORT_CHUNK_BYTES}
-          ),
-          'base64'
-        ) chunk
-      from decrypted
-    `;
-    const totalBytes = Number(row?.total_bytes);
-    const chunk = Buffer.from(String(row?.chunk || ""), "base64");
-    if (
-      !Number.isSafeInteger(totalBytes) || totalBytes < 1 || offset >= totalBytes ||
-      chunk.byteLength < 1 || chunk.byteLength > SNAPSHOT_TRANSPORT_CHUNK_BYTES ||
-      offset + chunk.byteLength > totalBytes
-    ) {
-      throw failure("TOURNEY_SNAPSHOT_CHUNK_UNAVAILABLE");
-    }
     return {
-      chunk,
-      totalBytes,
+      ...await readStoredSnapshotChunk({
+        sql,
+        snapshotId,
+        payloadSha256,
+        offset,
+      }),
       fingerprints: checked.fingerprints,
     };
   } finally {
