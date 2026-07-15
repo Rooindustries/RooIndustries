@@ -323,10 +323,67 @@ for (const file of [
   "20260715150000_block_legacy_discord_reauth.sql",
   "20260715160000_generalize_stale_provider_recovery.sql",
   "20260715170000_repair_recovery_scope_guards.sql",
+  "20260715180000_finalize_noop_discord_and_readiness.sql",
+  "20260715180100_filter_commerce_traffic_metrics.sql",
 ]) {
   const sql = fs.readFileSync(path.join(migrationsDirectory, file), "utf8");
   if (!hasBoundedMigrationPrefix(sql)) {
     failures.push(`Final release migration lacks bounded timeouts: ${file}`);
+  }
+}
+
+const finalReadinessRepairFile = path.join(
+  migrationsDirectory,
+  "20260715180000_finalize_noop_discord_and_readiness.sql"
+);
+if (!fs.existsSync(finalReadinessRepairFile)) {
+  failures.push("Final readiness repair migration is missing.");
+} else {
+  const sql = fs.readFileSync(finalReadinessRepairFile, "utf8");
+  for (const required of [
+    "migration.finalize_inactive_noop_discord_assignments",
+    "assignment.desired_role = 'none'",
+    "assignment.applied_role = 'none'",
+    "assignment.applied_generation < assignment.generation",
+    "not account.active or account.lifecycle_status <> 'approved'",
+    "operation.status in ('pending', 'processing', 'retry')",
+    "set_config('roo.tourney_command_id'",
+    "insert into tourney.command_receipts",
+    "applied_generation = assignment.generation",
+    "v_updated_count <> v_candidate_count",
+    "from public, anon, authenticated, service_role",
+  ]) {
+    if (!sql.includes(required)) {
+      failures.push(`Final readiness repair migration lacks: ${required}`);
+    }
+  }
+  if (
+    /grant\s+execute\s+on\s+function\s+migration\.finalize_inactive_noop_discord_assignments/i.test(
+      sql
+    )
+  ) {
+    failures.push("No-op Discord repair must remain owner-only.");
+  }
+}
+
+const commerceTrafficMetricsFile = path.join(
+  migrationsDirectory,
+  "20260715180100_filter_commerce_traffic_metrics.sql"
+);
+if (!fs.existsSync(commerceTrafficMetricsFile)) {
+  failures.push("Commerce traffic metric filter migration is missing.");
+} else {
+  const sql = fs.readFileSync(commerceTrafficMetricsFile, "utf8");
+  for (const required of [
+    "public.roo_commerce_readiness",
+    "migration.commerce_request_metrics",
+    "route not in ('payment/reconcile', 'ref/cronsyncall')",
+    "from public, anon, authenticated",
+    "to service_role",
+  ]) {
+    if (!sql.includes(required)) {
+      failures.push(`Commerce traffic metric filter migration lacks: ${required}`);
+    }
   }
 }
 

@@ -45,18 +45,20 @@ async function handle(request, context, methodOverride) {
     handler: publicHandler,
     methodOverride,
   });
-  const metricResponse = response.clone();
-  try {
-    after(() =>
-      recordCommerceResponseMetric({
-        route: `payment/${action}`,
-        durationMs: performance.now() - startedAt,
-        statusCode: response.status,
-        response: metricResponse,
-      })
-    );
-  } catch (error) {
-    if (process.env.NODE_ENV !== "test") throw error;
+  if (action !== "reconcile") {
+    const metricResponse = response.clone();
+    try {
+      after(() =>
+        recordCommerceResponseMetric({
+          route: `payment/${action}`,
+          durationMs: performance.now() - startedAt,
+          statusCode: response.status,
+          response: metricResponse,
+        })
+      );
+    } catch (error) {
+      if (process.env.NODE_ENV !== "test") throw error;
+    }
   }
   if (action === "cancel" || action === "finalize" || action === "status") {
     response.headers.set("cache-control", "private, no-store");
