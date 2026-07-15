@@ -60,6 +60,7 @@ create table migration.source_documents(
   payload jsonb not null default '{}'::jsonb
 );
 create table migration.commerce_request_metrics(
+  route text not null,
   duration_ms integer not null,
   status_code integer not null,
   response_bytes integer not null default 0,
@@ -106,6 +107,7 @@ try {
   for (const migration of [
     "20260712121529_fix_commerce_readiness_mirror_states.sql",
     "20260715115000_harden_commerce_readiness_evidence.sql",
+    "20260715180100_filter_commerce_traffic_metrics.sql",
   ]) {
     run(path.join(pgBin, "psql"), [
       "-h", "127.0.0.1",
@@ -143,9 +145,16 @@ try {
   `;
   await sql`
     insert into migration.commerce_request_metrics(
-      duration_ms, status_code, response_bytes
+      route, duration_ms, status_code, response_bytes
     )
-    select 100, 200, 512 from generate_series(1, 30)
+    select 'booking/availability', 100, 200, 512 from generate_series(1, 30)
+  `;
+  await sql`
+    insert into migration.commerce_request_metrics(
+      route, duration_ms, status_code, response_bytes
+    ) values
+      ('payment/reconcile', 50000, 500, 1024),
+      ('ref/cronsyncall', 50000, 500, 1024)
   `;
 
   const [row] = await sql`select public.roo_commerce_readiness() readiness`;
@@ -210,7 +219,7 @@ try {
   process.stdout.write(`${JSON.stringify({
     ok: true,
     postgres: run(path.join(pgBin, "postgres"), ["--version"]).trim(),
-    checks: 10,
+    checks: 11,
   }, null, 2)}\n`);
 } finally {
   if (sql) await sql.end({ timeout: 1 });

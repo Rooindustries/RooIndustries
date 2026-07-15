@@ -18,6 +18,7 @@ import {
 import { reconcileCredentialOperations } from "../../supabase/credentialRecovery.js";
 import { isEnabledTourneyFlag } from "../../tourney/canonical.js";
 import { createDocumentWriteClient } from "../../data/documentClient.js";
+import { refreshCommerceParityIfStale } from "../../supabase/commerceParity.js";
 
 const reconcileDocumentMirror = async (options = {}) => {
   const client = createDocumentWriteClient({ backendOverride: "supabase" });
@@ -47,7 +48,10 @@ export default async function handler(req, res) {
   )
     .trim()
     .toLowerCase();
-  if (scope && !["full", "mirror-only", "tourney-only"].includes(scope)) {
+  if (
+    scope &&
+    !["full", "mirror-only", "parity-only", "tourney-only"].includes(scope)
+  ) {
     return res.status(400).json({ ok: false, error: "Invalid reconciliation scope." });
   }
 
@@ -105,6 +109,23 @@ export default async function handler(req, res) {
     }
   }
 
+  if (scope === "parity-only") {
+    try {
+      return res.status(200).json({
+        ok: true,
+        summary: {
+          commerceParity: await refreshCommerceParityIfStale({ force: true }),
+        },
+      });
+    } catch (error) {
+      logSafeError("Commerce parity refresh failed", error);
+      return res.status(Number(error?.status || 503)).json({
+        ok: false,
+        error: "Commerce parity verification is temporarily unavailable.",
+      });
+    }
+  }
+
   const referralEmailReconciliationPromise = isSupabaseAdminConfigured()
     ? reconcileReferralEmailDispatches({ limit: 10 }).then(
         (value) => ({ value, error: null }),
@@ -130,6 +151,15 @@ export default async function handler(req, res) {
         (error) => ({ value: null, error })
       )
     : null;
+  const commerceParityPromise = isSupabaseAdminConfigured()
+    ? refreshCommerceParityIfStale().then(
+        (value) => ({ value, error: null }),
+        (error) => ({ value: null, error })
+      )
+    : Promise.resolve({
+        value: { supported: false, skipped: true, reason: "supabase_unavailable" },
+        error: null,
+      });
 
   let incrementalShadowSync = null;
   try {
@@ -204,6 +234,13 @@ export default async function handler(req, res) {
   } else {
     result.body.summary.referralEmailRecovery =
       referralEmailReconciliation.value;
+  }
+  const commerceParity = await commerceParityPromise;
+  if (commerceParity.error) {
+    logSafeError("Commerce parity refresh failed", commerceParity.error);
+    result.body.summary.commerceParity = { pending: true };
+  } else {
+    result.body.summary.commerceParity = commerceParity.value;
   }
   if (result.httpStatus === 200) {
     result.body.summary.incrementalShadowSync = incrementalShadowSync;
