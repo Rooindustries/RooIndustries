@@ -201,6 +201,8 @@ describe("commerce mirror outbox", () => {
                   _id: "referral.creator",
                   _type: "referral",
                   _rev: "supabase-referral-revision",
+                  backendOwner: "supabase",
+                  cutoverGeneration: 5,
                   successfulReferrals: 7,
                   maxCommissionPercent: 20,
                   currentCommissionPercent: 10,
@@ -235,6 +237,8 @@ describe("commerce mirror outbox", () => {
       operation: "patch",
       id: "referral.creator",
       values: {
+        backendOwner: "supabase",
+        cutoverGeneration: 5,
         successfulReferrals: 7,
         maxCommissionPercent: 20,
         currentCommissionPercent: 10,
