@@ -9,6 +9,11 @@ import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import dotenv from "dotenv";
 import { stableSnapshotJson } from "../../src/server/tourney/snapshotContract.js";
+import {
+  deleteGenericPassword,
+  runMacosSecurityCommand,
+  storeVerifiedGenericPassword,
+} from "./keychain-secret.mjs";
 
 const exportRoot = path.join(os.homedir(), "Documents", "Roo Industries Migration");
 const archiveMagic = Buffer.from("ROOENC2\n");
@@ -358,37 +363,32 @@ export const verifyEncryptedTarArchive = async ({
   };
 };
 
-export const storeExportPassphrase = ({ service, passphrase, account }) =>
-  new Promise((resolve, reject) => {
-    const child = spawn("security", [
-      "add-generic-password",
-      "-U",
-      "-a",
-      account,
-      "-s",
+export const storeExportPassphrase = async ({
+  service,
+  passphrase,
+  account,
+  runCommand = runMacosSecurityCommand,
+}) => {
+  try {
+    await storeVerifiedGenericPassword({
       service,
-      "-w",
-    ], { stdio: ["pipe", "ignore", "ignore"] });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code === 0) resolve();
-      else reject(exportError("The export key could not be stored.", "EXPORT_KEYCHAIN_FAILED"));
+      account,
+      secret: passphrase,
+      runCommand,
     });
-    child.stdin.end(Buffer.from(`${passphrase}\n`));
-  });
+  } catch {
+    throw exportError(
+      "The export key could not be stored and verified.",
+      "EXPORT_KEYCHAIN_FAILED"
+    );
+  }
+};
 
-export const deleteExportPassphrase = ({ service, account }) =>
-  new Promise((resolve) => {
-    const child = spawn("security", [
-      "delete-generic-password",
-      "-a",
-      account,
-      "-s",
-      service,
-    ], { stdio: "ignore" });
-    child.on("error", () => resolve());
-    child.on("close", () => resolve());
-  });
+export const deleteExportPassphrase = ({
+  service,
+  account,
+  runCommand = runMacosSecurityCommand,
+}) => deleteGenericPassword({ service, account, runCommand });
 
 export const defaultExportRoot = exportRoot;
 export const stableExportJson = stableSnapshotJson;
