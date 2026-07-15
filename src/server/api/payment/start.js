@@ -48,6 +48,7 @@ export default async function handler(req, res) {
   const backend = selectPaymentStartBackend({
     body,
     clientAddress,
+    cutoverGeneration: commerceControl.generation,
   });
   const client = createPaymentBackendClientOverride(backend);
   const result = await startPaymentSession({

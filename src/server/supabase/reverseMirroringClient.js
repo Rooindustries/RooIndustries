@@ -6,6 +6,7 @@ import {
   resolveMirrorFailure,
 } from "./mirrorRecovery.js";
 import { drainCommerceMirrorOutbox } from "./commerceMirrorOutbox.js";
+import { drainDocumentMutationOutbox } from "./documentMutationOutbox.js";
 
 const cleanForSanity = (document) => {
   if (!document || typeof document !== "object") return document;
@@ -13,13 +14,37 @@ const cleanForSanity = (document) => {
   return clean;
 };
 
+const hasDurableMirrorMarker = (document) => {
+  const sequence = String(document?._supabaseSequence ?? "").trim();
+  return /^\d+$/.test(sequence) && BigInt(sequence) > 0n;
+};
+
+const listLegacyEligibleIds = async ({ sanityClient, ids }) => {
+  if (typeof sanityClient?.fetch !== "function") {
+    throw new Error("Sanity mirror reads are unavailable.");
+  }
+  const current = await sanityClient.fetch(
+    `*[_id in $ids]`,
+    { ids },
+    { perspective: "raw" }
+  );
+  const protectedIds = new Set(
+    (Array.isArray(current) ? current : [])
+      .filter(hasDurableMirrorMarker)
+      .map((document) => String(document?._id || ""))
+  );
+  return ids.filter((id) => !protectedIds.has(id));
+};
+
 const applyMirror = async ({ supabaseClient, sanityClient, ids, deleted }) => {
   const uniqueIds = [...new Set((ids || []).map(String).filter(Boolean))];
   if (uniqueIds.length < 1) return;
+  const eligibleIds = await listLegacyEligibleIds({ sanityClient, ids: uniqueIds });
+  if (eligibleIds.length < 1) return;
 
   if (deleted) {
     let transaction = sanityClient.transaction();
-    uniqueIds.forEach((id) => {
+    eligibleIds.forEach((id) => {
       transaction = transaction.delete(id);
     });
     await transaction.commit();
@@ -27,13 +52,13 @@ const applyMirror = async ({ supabaseClient, sanityClient, ids, deleted }) => {
   }
 
   const documents = await supabaseClient.fetch(`*[_id in $ids]`, {
-    ids: uniqueIds,
+    ids: eligibleIds,
   });
   const byId = new Map(
     (documents || []).map((document) => [String(document?._id || ""), document])
   );
   let transaction = sanityClient.transaction();
-  for (const id of uniqueIds) {
+  for (const id of eligibleIds) {
     const document = byId.get(id);
     transaction = document
       ? transaction.createOrReplace(cleanForSanity(document))
@@ -199,6 +224,15 @@ export const createReverseMirroringSupabaseClient = ({
       });
       return drained;
     }
+    const drained = await drainDocumentMutationOutbox({
+      supabaseClient: recoveryClient,
+      sanityClient,
+      requiredDocumentIds: ids,
+      limit: 10,
+      maxBatches: 2,
+      budgetMs: 5_000,
+    });
+    if (drained.supported) return drained;
     return mirrorIds({
       supabaseClient,
       sanityClient,
@@ -233,7 +267,11 @@ export const createReverseMirroringSupabaseClient = ({
                   failClosed: false,
                   ...options,
                 })
-              : { supported: false, attempted: 0, mirrored: 0, failed: 0 };
+              : await drainDocumentMutationOutbox({
+                  supabaseClient: recoveryClient,
+                  sanityClient,
+                  ...options,
+                });
           const legacy = target.commerceOnly === true
             ? { attempted: 0, mirrored: 0, queued: 0, supersededByOutbox: true }
             : await retryReverseMirrorFailures({

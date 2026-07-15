@@ -1,28 +1,15 @@
-import {createDataClient as createClient} from '../../data/documentClient.js';
+import {
+  createCommerceReadClient,
+  createCommerceWriteClient,
+} from './sanity.js';
 import {requireAdminKey} from './auth.js';
 import {logSafeError} from '../../safeErrorLog.js';
+import {assertCommerceWriteAllowed} from '../../supabase/commerceControl.js';
 import {
   buildBalance,
   fetchReferralEarnings,
   sumPayments,
 } from './payoutUtils.js';
-
-const readClient = createClient({
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || 'production',
-  apiVersion: process.env.SANITY_API_VERSION || '2023-10-01',
-  token: process.env.SANITY_READ_TOKEN || process.env.SANITY_WRITE_TOKEN,
-  useCdn: false,
-  perspective: 'published',
-}, {domain: 'commerce'});
-
-const writeClient = createClient({
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || 'production',
-  apiVersion: process.env.SANITY_API_VERSION || '2023-10-01',
-  token: process.env.SANITY_WRITE_TOKEN,
-  useCdn: false,
-}, {domain: 'commerce'});
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -33,17 +20,16 @@ export default async function handler(req, res) {
     const {referralId} = req.body || {};
     if (!requireAdminKey(req, res)) return;
 
-    if (!process.env.SANITY_WRITE_TOKEN) {
-      return res
-        .status(500)
-        .json({ok: false, error: 'SANITY_WRITE_TOKEN missing on server'});
-    }
-
     if (!referralId) {
       return res
         .status(400)
         .json({ok: false, error: 'Missing referral creator id'});
     }
+
+    await assertCommerceWriteAllowed();
+
+    const readClient = createCommerceReadClient();
+    const writeClient = createCommerceWriteClient();
 
     const referral = await readClient.fetch(
       `*[_type == "referral" && _id == $id][0]{
@@ -146,9 +132,13 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     logSafeError('Referral payout sync failed', err);
-    return res.status(500).json({
+    const status = Number(err?.statusCode || err?.status || 500);
+    return res.status(status).json({
       ok: false,
-      error: 'Server error',
+      error:
+        status === 503
+          ? 'Commerce changes are temporarily unavailable.'
+          : 'Server error',
     });
   }
 }

@@ -1626,7 +1626,6 @@ export default function BookingForm({ isMobile }) {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                   transition={{ duration: 0.3, ease: "easeInOut" }}
-                  // NOTE: removed backdrop-blur-sm to fix text fuzziness
                   className="max-w-3xl mx-auto bg-surface-card border border-line-input rounded-2xl p-8 text-center shadow-[0_0_25px_rgba(14,165,233,0.15)]"
                 >
                   <h3 className="text-accent text-lg font-semibold mb-2">
@@ -1914,7 +1913,6 @@ export default function BookingForm({ isMobile }) {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                   transition={{ duration: 0.3, ease: "easeInOut" }}
-                  // NOTE: removed backdrop-blur-sm
                   className="max-w-2xl mx-auto bg-surface-card border border-line-input rounded-2xl p-8 shadow-[0_0_25px_rgba(14,165,233,0.15)] space-y-6"
                 >
                   {hasActiveHold && (

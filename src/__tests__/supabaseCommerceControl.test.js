@@ -1,5 +1,6 @@
 import {
   assertCommerceStartAllowed,
+  assertCommerceWriteAllowed,
   getCommerceControl,
 } from "../server/supabase/commerceControl";
 
@@ -53,6 +54,21 @@ describe("Supabase commerce control plane", () => {
         client,
       })
     ).resolves.toMatchObject({ primaryBackend: "sanity" });
+    expect(client.rpc).not.toHaveBeenCalled();
+  });
+
+  test("blocks all ordinary writes during a deployment pause", async () => {
+    const client = { rpc: jest.fn() };
+    await expect(
+      assertCommerceWriteAllowed({
+        env: {
+          NODE_ENV: "test",
+          COMMERCE_PRIMARY_BACKEND: "sanity",
+          COMMERCE_STARTS_PAUSED: "1",
+        },
+        client,
+      })
+    ).rejects.toMatchObject({ code: "COMMERCE_STARTS_PAUSED", status: 503 });
     expect(client.rpc).not.toHaveBeenCalled();
   });
 

@@ -20,6 +20,10 @@ const postgresConnectionEnv = fs.readFileSync(
   path.join(process.cwd(), "scripts", "lib", "postgres-connection-env.mjs"),
   "utf8"
 );
+const postgresConnectionTarget = fs.readFileSync(
+  path.join(process.cwd(), "scripts", "lib", "postgres-connection-target.cjs"),
+  "utf8"
+);
 const activationWorker = fs.readFileSync(
   path.join(process.cwd(), "src", "server", "tourney", "activation.js"),
   "utf8"
@@ -170,17 +174,26 @@ describe("Tourney cutover migration", () => {
     expect(cutoverCli).not.toContain("POSTGRES_URL_NON_POOLING");
     expect(cutoverCli).toContain("process.env.TOURNEY_DATABASE_URL");
     expect(cutoverCli).toContain("const env = buildPostgresConnectionEnv(databaseUrl)");
-    expect(postgresConnectionEnv).toContain('env.PGCONNECT_TIMEOUT = "15"');
-    expect(postgresConnectionEnv).toContain("env.PGHOST");
-    expect(postgresConnectionEnv).toContain("env.PGPORT");
-    expect(postgresConnectionEnv).toContain("env.PGUSER");
-    expect(postgresConnectionEnv).toContain("env.PGPASSWORD");
-    expect(postgresConnectionEnv).toContain("env.PGDATABASE");
-    expect(postgresConnectionEnv).toContain("buildPostgresSessionArgs");
+    expect(postgresConnectionEnv).toContain(
+      "connectionTarget.buildPostgresConnectionEnv"
+    );
+    expect(postgresConnectionEnv).toContain(
+      "connectionTarget.buildPostgresConnectionOptions"
+    );
+    expect(postgresConnectionEnv).toContain(
+      "connectionTarget.buildPostgresSessionArgs"
+    );
+    expect(postgresConnectionTarget).toContain('env.PGCONNECT_TIMEOUT = "15"');
+    expect(postgresConnectionTarget).toContain("env.PGHOST");
+    expect(postgresConnectionTarget).toContain("env.PGPORT");
+    expect(postgresConnectionTarget).toContain("env.PGUSER");
+    expect(postgresConnectionTarget).toContain("env.PGPASSWORD");
+    expect(postgresConnectionTarget).toContain("env.PGDATABASE");
+    expect(postgresConnectionTarget).toContain("buildPostgresSessionArgs");
     expect(cutoverCli).toContain('execFileAsync("psql", buildPostgresSessionArgs(args)');
-    expect(postgresConnectionEnv).toContain("set search_path=pg_catalog,public");
-    expect(postgresConnectionEnv).toContain("set statement_timeout='120s'");
-    expect(postgresConnectionEnv).toContain("set lock_timeout='5s'");
+    expect(postgresConnectionTarget).toContain("set search_path=pg_catalog,public");
+    expect(postgresConnectionTarget).toContain("set statement_timeout='120s'");
+    expect(postgresConnectionTarget).toContain("set lock_timeout='5s'");
     expect(cutoverCli).not.toContain('[databaseUrl, ...args]');
     expect(cutoverCli).toContain("normalize(process.env.TOURNEY_SNAPSHOT_KEY)");
     expect(cutoverCli).not.toMatch(/TOURNEY_SNAPSHOT_KEY\s*\|\|/);
@@ -301,9 +314,12 @@ describe("Tourney cutover migration", () => {
       "--input-type=module",
       "--eval",
       `
-        import { buildPostgresConnectionEnv } from ${JSON.stringify(moduleUrl)};
+        import {
+          buildPostgresConnectionEnv,
+          buildPostgresConnectionOptions,
+        } from ${JSON.stringify(moduleUrl)};
         const env = buildPostgresConnectionEnv(
-          "postgresql://user%40tenant:p%3A%40ss@[2001:db8::1]:6543/tourney%20fallback?sslmode=require&channel_binding=require&target_session_attrs=read-write",
+          "postgresql://user%40tenant:p%3A%40ss@[2001:db8::1]:6543/tourney%20fallback?sslmode=require&channel_binding=prefer&target_session_attrs=read-write",
           { PATH: "/bin", PGHOST: "stale", PGPASSWORD: "stale", pgservice: "stale" }
         );
         const defaults = buildPostgresConnectionEnv(
@@ -311,6 +327,14 @@ describe("Tourney cutover migration", () => {
           { PATH: "/bin" }
         );
         const rejected = [];
+        let requiredChannelBinding;
+        try {
+          buildPostgresConnectionOptions(
+            "postgres://user:secret@database.example/roo?sslmode=require&channel_binding=require"
+          );
+        } catch (error) {
+          requiredChannelBinding = error.message;
+        }
         for (const value of [
           "https://database.example/roo",
           "postgres:///roo",
@@ -337,7 +361,7 @@ describe("Tourney cutover migration", () => {
             rejected.push(error.message);
           }
         }
-        process.stdout.write(JSON.stringify({ env, defaults, rejected }));
+        process.stdout.write(JSON.stringify({ env, defaults, rejected, requiredChannelBinding }));
       `,
     ], { encoding: "utf8" });
     const result = JSON.parse(output);
@@ -349,7 +373,7 @@ describe("Tourney cutover migration", () => {
       PGDATABASE: "tourney fallback",
       PGCONNECT_TIMEOUT: "15",
       PGPASSWORD: "p:@ss",
-      PGCHANNELBINDING: "require",
+      PGCHANNELBINDING: "prefer",
       PGSSLMODE: "require",
       PGTARGETSESSIONATTRS: "read-write",
     });
@@ -365,6 +389,9 @@ describe("Tourney cutover migration", () => {
     });
     expect(result.rejected).toHaveLength(18);
     expect(result.rejected.join(" ")).not.toContain("bad%ZZ");
+    expect(result.requiredChannelBinding).toBe(
+      "The PostgreSQL connection URL has an invalid parameter value."
+    );
   });
 
   test("fails closed on unsafe CLI arguments, paths, environments, and timeouts", () => {
@@ -549,7 +576,7 @@ describe("Tourney cutover migration", () => {
           fs.writeFileSync(fakePsql, "#!/usr/bin/env node\\nsetTimeout(() => {}, 10000);\\n", { mode: 0o700 });
           process.env.PATH = bin + path.delimiter + process.env.PATH;
           const timeout = await capture(() => runPsql(
-            "postgresql://user:password@database.example/roo?sslmode=require&channel_binding=require",
+            "postgresql://user:password@database.example/roo?sslmode=require&channel_binding=prefer",
             [],
             { timeout: 20 }
           ));

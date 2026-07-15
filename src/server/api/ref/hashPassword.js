@@ -6,13 +6,19 @@ import {
 } from "./auth.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import {
+  buildCredentialSourcePreconditions,
+  buildCredentialSourceMutation,
   completeSupabaseCredentialMirror,
+  markSupabaseCredentialSourceApplied,
+  resolveCredentialSourceRevision,
   resolveSupabaseAccountAlias,
   updateSupabaseAccountPassword,
 } from "../../supabase/accounts.js";
 import { createSupabaseAdminClient } from "../../supabase/adminClient.js";
+import { reconcileSupabaseCredentialSource } from "../../supabase/credentialRecovery.js";
 import { clearLegacySupabaseSession } from "../../supabase/serverSession.js";
 import { hashReauthToken, readReauthToken } from "../../supabase/reauth.js";
+import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
 import { logSafeError } from "../../safeErrorLog.js";
 
 const client = createClient({
@@ -29,6 +35,14 @@ export default async function handler(req, res) {
   try {
     const session = await requireReferralSession(req, res);
     if (!session) return;
+    const policy = resolveSupabaseRuntimePolicy();
+    if (policy.primaryBackend === "sanity" && policy.cutoverEnabled) {
+      return res.status(503).json({
+        ok: false,
+        error:
+          "Password changes are temporarily unavailable during manual authentication failover.",
+      });
+    }
     const creatorId = session.referralId;
     const { password } = req.body || {};
     const normalizedPassword = String(password || "");
@@ -52,7 +66,18 @@ export default async function handler(req, res) {
     const hash = await bcrypt.hash(normalizedPassword, 12);
 
     const referral = await client.fetch(
-      `*[_id == $id][0]{_id,_rev,creatorEmail,slug}`,
+      `*[_id == $id][0]{
+        _id,
+        _rev,
+        _supabaseRevision,
+        creatorEmail,
+        creatorPassword,
+        credentialVersion,
+        resetTokenHash,
+        resetTokenExpiresAt,
+        resetDeliveryToken,
+        slug
+      }`,
       { id: creatorId }
     );
     if (!referral?._id) {
@@ -83,12 +108,30 @@ export default async function handler(req, res) {
       });
     }
 
+    const sourceBackend = policy.primaryBackend;
+    const sourceRevision = resolveCredentialSourceRevision({
+      document: referral,
+      sourceBackend,
+    });
+    const sourceMutation = buildCredentialSourceMutation({
+      passwordHash: hash,
+      passwordChangedAt,
+      consumeResetToken: true,
+    });
+    const sourcePreconditions = buildCredentialSourcePreconditions({
+      document: referral,
+    });
     let credentialOperation;
     try {
       credentialOperation = await updateSupabaseAccountPassword({
         identifier: referral.creatorEmail || referral.slug?.current || session.code,
         passwordHash: hash,
-        sourceRevision: referral._rev || "",
+        sourceBackend,
+        sourceDocumentId: referral._id,
+        sourcePreconditions,
+        sourceMutation,
+        sourceRevision,
+        operationKey: `credential:change:${hashReauthToken(reauthToken)}`,
       });
       if (!credentialOperation.updated) {
         throw new Error("Supabase creator account was not found.");
@@ -101,23 +144,38 @@ export default async function handler(req, res) {
       });
     }
 
-    let finalPatch = client.patch(creatorId);
-    if (referral._rev && typeof finalPatch.ifRevisionId === "function") {
-      finalPatch = finalPatch.ifRevisionId(referral._rev);
+    try {
+      if (sourceBackend === "supabase") {
+        await reconcileSupabaseCredentialSource({
+          operationKey: credentialOperation.operationKey,
+          sourceDocumentId: referral._id,
+        });
+      } else {
+        const committedMutation = credentialOperation.sourceMutation || sourceMutation;
+        let finalPatch = client.patch(creatorId);
+        if (referral._rev && typeof finalPatch.ifRevisionId === "function") {
+          finalPatch = finalPatch.ifRevisionId(referral._rev);
+        }
+        finalPatch = finalPatch.set(committedMutation.set);
+        if (Array.isArray(committedMutation.unset) && committedMutation.unset.length) {
+          finalPatch = finalPatch.unset(committedMutation.unset);
+        }
+        const committed = await finalPatch.commit({ visibility: "sync" });
+        await markSupabaseCredentialSourceApplied({
+          operationKey: credentialOperation.operationKey,
+          sourceRevision: committed?._rev || referral._rev,
+        });
+        await completeSupabaseCredentialMirror({
+          operationKey: credentialOperation.operationKey,
+        });
+      }
+    } catch (error) {
+      logSafeError("Supabase referral password source update pending", error);
+      return res.status(503).json({
+        ok: false,
+        error: "Password update is finishing. Please sign in again shortly.",
+      });
     }
-    await finalPatch
-      .set({
-        creatorPassword: hash,
-        passwordResetRequired: false,
-        credentialVersion: 2,
-        passwordChangedAt,
-        passwordLoginEnabled: true,
-      })
-      .commit({ visibility: "sync" });
-
-    await completeSupabaseCredentialMirror({
-      operationKey: credentialOperation.operationKey,
-    });
     clearReferralSessionCookie(res);
     await clearLegacySupabaseSession({ req, res }).catch(() => {});
 
