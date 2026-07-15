@@ -23,9 +23,12 @@ import {
 import { TOURNEY_MIRROR_CONTRACT } from "../src/server/tourney/mirrorContract.js";
 import {
   stableSnapshotJson,
+  SUPABASE_FULL_CAPTURE_REQUIRED_RELATIONS,
+  SUPABASE_FULL_COMPACT_EXPANDED_PROFILE,
   SUPABASE_FULL_EXPANDED_MIGRATION_NAMES,
   SUPABASE_FULL_EXPANDED_PROFILE,
   SUPABASE_FULL_REQUIRED_RELATIONS,
+  SUPABASE_FULL_SNAPSHOT_EXCLUDED_RELATIONS,
   SUPABASE_FULL_SNAPSHOT_SCHEMAS,
 } from "../src/server/tourney/snapshotContract.js";
 import {
@@ -1021,10 +1024,19 @@ insert into tourney_external_operations(
   );
   assert.match(String(fullCapture.snapshotId), /^[0-9a-f-]{36}$/i);
   assert.match(fullCapture.payloadSha256, /^[0-9a-f]{64}$/);
-  assert.equal(fullCapture.validation.contractProfile, "roo-supabase-expanded-v1");
+  assert.equal(
+    fullCapture.validation.contractProfile,
+    SUPABASE_FULL_COMPACT_EXPANDED_PROFILE
+  );
   assert.deepEqual(fullCapture.validation.deferredRelations, []);
   assert.equal(
-    fullCapture.validation.relationCount >= SUPABASE_FULL_REQUIRED_RELATIONS.length,
+    fullCapture.validation.relationCount >= SUPABASE_FULL_CAPTURE_REQUIRED_RELATIONS.length,
+    true
+  );
+  assert.equal(
+    SUPABASE_FULL_SNAPSHOT_EXCLUDED_RELATIONS.every(
+      (relation) => !fullCapture.validation.relationNames.includes(relation)
+    ),
     true
   );
   const fullCaptureChunk = await readStoredSnapshotChunk({
