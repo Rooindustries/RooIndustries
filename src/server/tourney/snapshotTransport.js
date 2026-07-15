@@ -114,6 +114,59 @@ const assertExpectedTargets = ({ env, expectedTargets, requireDatabasePin }) => 
   };
 };
 
+export const readSnapshotDatabaseTarget = async ({
+  createSqlClient = createSql,
+  env = process.env,
+  expectedTargets,
+} = {}) => {
+  if (
+    !enabled(env.TOURNEY_DATABASE_TARGET_TRANSPORT_ENABLED) ||
+    !enabled(env.TOURNEY_WRITES_PAUSED) ||
+    normalize(env.TOURNEY_DATABASE_MODE).toLowerCase() !== "supabase" ||
+    normalize(env.TOURNEY_FAILOVER_GENERATION) !== "1" ||
+    !enabled(env.TOURNEY_HARDENING_V4_ENABLED) ||
+    !enabled(env.TOURNEY_MIRROR_ENABLED)
+  ) {
+    throw failure("TOURNEY_SNAPSHOT_DATABASE_TARGET_TRANSPORT_DISABLED");
+  }
+  const targets = assertExpectedTargets({
+    env,
+    expectedTargets,
+    requireDatabasePin: true,
+  });
+  const sql = createSqlClient({
+    backend: "supabase",
+    databaseUrl: targets.connections.databaseUrl,
+    applicationName: "tourney-snapshot-database-target",
+    statementTimeout: 15000,
+  });
+  try {
+    await assertConnectedSnapshotIdentity({
+      sql,
+      expected: targets.identities.database,
+      code: "TOURNEY_SNAPSHOT_SUPABASE_CONNECTION_IDENTITY_INVALID",
+    });
+    const [gate] = await sql`
+      select primary_backend,generation,writes_paused,hardened_active
+      from tourney.cutover_metadata where id='tourney'
+    `;
+    if (
+      gate?.primary_backend !== "supabase" ||
+      Number(gate?.generation) !== 1 ||
+      gate?.writes_paused !== true ||
+      gate?.hardened_active !== true
+    ) {
+      throw failure("TOURNEY_SNAPSHOT_DATABASE_TARGET_GATE_INVALID");
+    }
+    return {
+      supabaseDatabaseUrl: targets.connections.databaseUrl,
+      expectedFingerprint: targets.fingerprints.supabaseDatabase,
+    };
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+};
+
 export const assertConnectedSnapshotIdentity = async ({ sql, expected, code }) => {
   const [row] = await sql`
     select pg_catalog.current_database() database, current_user username
