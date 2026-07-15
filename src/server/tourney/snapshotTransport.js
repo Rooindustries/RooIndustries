@@ -18,6 +18,7 @@ const {
   assertTourneyCutoverSupabaseApiTarget,
   assertTourneyCutoverSupabaseDatabaseTarget,
   computeTourneyCutoverSupabaseDatabaseTargetFingerprint,
+  expectedConnectedDatabaseUsername,
 } = migrationTargetSafety;
 
 export const SNAPSHOT_TRANSPORT_CHUNK_BYTES = 512 * 1024;
@@ -113,11 +114,14 @@ const assertExpectedTargets = ({ env, expectedTargets, requireDatabasePin }) => 
   };
 };
 
-const assertConnectedIdentity = async ({ sql, expected, code }) => {
+export const assertConnectedSnapshotIdentity = async ({ sql, expected, code }) => {
   const [row] = await sql`
     select pg_catalog.current_database() database, current_user username
   `;
-  if (row?.database !== expected.database || row?.username !== expected.username) {
+  if (
+    row?.database !== expected.database ||
+    row?.username !== expectedConnectedDatabaseUsername(expected)
+  ) {
     throw failure(code);
   }
 };
@@ -416,12 +420,12 @@ export const inspectSnapshotTransport = async ({
   });
   try {
     await Promise.all([
-      assertConnectedIdentity({
+      assertConnectedSnapshotIdentity({
         sql: legacy,
         expected: checked.identities.legacy,
         code: "TOURNEY_SNAPSHOT_LEGACY_IDENTITY_MISMATCH",
       }),
-      assertConnectedIdentity({
+      assertConnectedSnapshotIdentity({
         sql: supabase,
         expected: checked.identities.database,
         code: "TOURNEY_SNAPSHOT_SUPABASE_IDENTITY_MISMATCH",
@@ -459,12 +463,12 @@ export const captureSnapshotTransport = async ({
   });
   try {
     await Promise.all([
-      assertConnectedIdentity({
+      assertConnectedSnapshotIdentity({
         sql: legacySql,
         expected: checked.identities.legacy,
         code: "TOURNEY_SNAPSHOT_LEGACY_IDENTITY_MISMATCH",
       }),
-      assertConnectedIdentity({
+      assertConnectedSnapshotIdentity({
         sql: supabaseSql,
         expected: checked.identities.database,
         code: "TOURNEY_SNAPSHOT_SUPABASE_IDENTITY_MISMATCH",
@@ -544,7 +548,7 @@ export const readSnapshotTransportChunk = async ({
     applicationName: "roo-tourney-snapshot-read-chunk",
   });
   try {
-    await assertConnectedIdentity({
+    await assertConnectedSnapshotIdentity({
       sql,
       expected: checked.identities.database,
       code: "TOURNEY_SNAPSHOT_SUPABASE_IDENTITY_MISMATCH",

@@ -1,5 +1,6 @@
 import process from "node:process";
 
+import migrationTargetSafety from "../../src/server/supabase/migrationTargetSafety.cjs";
 import { buildPostgresConnectionEnv } from "./postgres-connection-env.mjs";
 
 const MAX_PAYLOAD_BYTES = 16 * 1024;
@@ -97,14 +98,5 @@ export const loadSupabaseDatabaseTargetFromStdin = async ({
     target.expectedFingerprint;
 };
 
-export const expectedConnectedDatabaseUsername = (identity = {}) => {
-  const hostname = String(identity.hostname || "").toLowerCase();
-  const username = String(identity.username || "");
-  const projectRef = String(identity.projectRef || "").toLowerCase();
-  if (!hostname.endsWith(".pooler.supabase.com") || !projectRef) return username;
-  const suffix = `.${projectRef}`;
-  if (!username.toLowerCase().endsWith(suffix) || username.length === suffix.length) {
-    return username;
-  }
-  return username.slice(0, -suffix.length);
-};
+export const expectedConnectedDatabaseUsername =
+  migrationTargetSafety.expectedConnectedDatabaseUsername;
