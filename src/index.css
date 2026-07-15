@@ -2227,6 +2227,10 @@ html.animations-ready .glass-premium {
   backdrop-filter: saturate(120%) blur(16px);
 }
 
+.booking-modal-overlay {
+  background: var(--color-overlay-solid);
+}
+
 .glass-card-surface {
   box-shadow: var(--highlight-glass-top), var(--shadow-surface-deep);
 }
@@ -2291,6 +2295,12 @@ html.low-performance-mode .is-modal-blur .site-nav {
 
 html.low-performance-mode .low-perf-overlay,
 html.low-performance-mode .glass-overlay {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  background: var(--color-overlay-solid) !important;
+}
+
+html.low-performance-mode .booking-modal-overlay {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
   background: var(--color-overlay-solid) !important;
