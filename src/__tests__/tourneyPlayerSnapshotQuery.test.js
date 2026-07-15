@@ -45,7 +45,9 @@ describe("Tourney admin player snapshot query", () => {
 
     expect(mockAssertTourneySchemaVersion).toHaveBeenCalledTimes(1);
     expect(mockSql).toHaveBeenCalledTimes(1);
-    expect(mockSql.mock.calls[0][0].join(" ")).toContain("jsonb_agg");
+    const query = mockSql.mock.calls[0][0].join("$parameter");
+    expect(query).toContain("jsonb_agg");
+    expect(query).toContain("$parameter::integer");
     expect(result.players).toEqual([
       expect.objectContaining({
         id: "player-1",
