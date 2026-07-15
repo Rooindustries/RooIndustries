@@ -40,6 +40,12 @@ const loadHandler = async ({ authorized = true } = {}) => {
     events.push("credentials");
     return { checked: 0 };
   });
+  const refreshCommerceParityIfStale = jest.fn(async () => ({
+    supported: true,
+    skipped: false,
+    mode: "verify",
+    parity: { ok: true, compared: 204, failures: 0 },
+  }));
   const runTourneyReconciliation = jest.fn(async () => {
     events.push("tourney-full");
     return {
@@ -93,6 +99,9 @@ const loadHandler = async ({ authorized = true } = {}) => {
   jest.doMock("../server/supabase/credentialRecovery.js", () => ({
     reconcileCredentialOperations,
   }));
+  jest.doMock("../server/supabase/commerceParity.js", () => ({
+    refreshCommerceParityIfStale,
+  }));
   jest.doMock("../server/tourney/reconcile.js", () => ({
     runTourneyReconciliation,
   }));
@@ -119,6 +128,7 @@ const loadHandler = async ({ authorized = true } = {}) => {
     events,
     adminRpc,
     reconcileCredentialOperations,
+    refreshCommerceParityIfStale,
     runTourneyReconciliation,
     reconcileReverseMirror,
     reconcileDocumentMirror,
@@ -212,6 +222,37 @@ describe("payment reconciliation route authorization", () => {
     expect(loaded.runTourneyReconciliation).toHaveBeenCalledWith();
     expect(loaded.syncSanityCommerceChanges).not.toHaveBeenCalled();
     expect(loaded.reconcilePaymentSessions).not.toHaveBeenCalled();
+  });
+
+  test("parity-only scope verifies commerce without payments, emails, or Tourney work", async () => {
+    const loaded = await loadHandler();
+    const { response, state } = createResponse();
+
+    await loaded.handler(
+      {
+        method: "POST",
+        headers: { "x-reconcile-scope": "parity-only" },
+      },
+      response
+    );
+
+    expect(state.status).toBe(200);
+    expect(state.body).toEqual({
+      ok: true,
+      summary: {
+        commerceParity: {
+          supported: true,
+          skipped: false,
+          mode: "verify",
+          parity: { ok: true, compared: 204, failures: 0 },
+        },
+      },
+    });
+    expect(loaded.refreshCommerceParityIfStale).toHaveBeenCalledWith({ force: true });
+    expect(loaded.reconcilePaymentSessions).not.toHaveBeenCalled();
+    expect(loaded.reconcileBookingEmailDispatches).not.toHaveBeenCalled();
+    expect(loaded.reconcileReferralEmailDispatches).not.toHaveBeenCalled();
+    expect(loaded.runTourneyReconciliation).not.toHaveBeenCalled();
   });
 
   test("safely skips Tourney reconciliation while another worker holds the lease", async () => {
@@ -324,6 +365,7 @@ describe("payment reconciliation route authorization", () => {
         maxBatches: 4,
         budgetMs: 30_000,
       });
+      expect(loaded.refreshCommerceParityIfStale).toHaveBeenCalledWith();
       expect(loaded.adminRpc).toHaveBeenCalledWith(
         "roo_reconcile_account_security",
         { p_guild_id: null }

@@ -528,6 +528,10 @@ try {
     root,
     "supabase/migrations/20260715170000_repair_recovery_scope_guards.sql"
   );
+  const supabaseFinalReadinessRepair = path.join(
+    root,
+    "supabase/migrations/20260715180000_finalize_noop_discord_and_readiness.sql"
+  );
   const legacyActivation = path.join(root, "scripts/tourney-schema-v4-activate-legacy.sql");
   const legacyRepair = path.join(root, "scripts/tourney-schema-v4-repair-legacy.sql");
   const legacyTriggerBindingRepair = path.join(
@@ -681,7 +685,8 @@ insert into tourney_external_operations(
     supabaseBaselineRecovery,
     supabaseTriggerBindingRepair,
     supabaseDiscordReauthRepair,
-    supabaseRecoveryScopeGuards
+    supabaseRecoveryScopeGuards,
+    supabaseFinalReadinessRepair
   );
   psql("supabase_unsafe", supabasePostInstallOldWriter);
   const unsafeSupabase = postgres(
@@ -1228,7 +1233,8 @@ insert into accounts.discord_role_assignments(
     supabaseTriggerBindingDrift,
     supabaseTriggerBindingRepair,
     supabaseDiscordReauthRepair,
-    supabaseRecoveryScopeGuards
+    supabaseRecoveryScopeGuards,
+    supabaseFinalReadinessRepair
   );
   process.stderr.write("[postgres17] schema v4 trigger bindings repaired\n");
 
@@ -1392,6 +1398,126 @@ insert into accounts.discord_role_assignments(
       where command_id=${reauthApply.result.commandId}`;
     await sql`delete from tourney_discord_role_assignments
       where principal_id=${reauthPrincipalId}::uuid`;
+  });
+
+  const noopUserId = "87000000-0000-4000-8000-000000000011";
+  const noopIdentityId = "89000000-0000-4000-8000-000000000011";
+  const noopPrincipalId = "88000000-0000-4000-8000-000000000011";
+  const noopDiscordId = "920000000000000011";
+  await source.begin(async (sql) => {
+    await sql`select set_config('roo.tourney_mirror_apply','1',true)`;
+    await sql`insert into auth.users(id,email)
+      values(${noopUserId}::uuid,'discord-noop@example.invalid')`;
+    await sql`insert into accounts.principals(id)
+      values(${noopPrincipalId}::uuid)`;
+    await sql`insert into accounts.principal_auth_users(
+      user_id,principal_id,is_primary,source
+    ) values(${noopUserId}::uuid,${noopPrincipalId}::uuid,true,'fixture')`;
+    await sql`insert into auth.identities(id,user_id,provider,provider_id)
+      values(${noopIdentityId}::uuid,${noopUserId}::uuid,'discord',${noopDiscordId})`;
+    await sql`insert into accounts.identity_links(
+      principal_id,provider,provider_subject,metadata,last_seen_at
+    ) values(
+      ${noopPrincipalId}::uuid,'discord',${noopDiscordId},'{}'::jsonb,now()
+    )`;
+    await sql`insert into accounts.tourney_accounts(
+      user_id,principal_id,username,role,active,lifecycle_status,legacy_sanity_id
+    ) values(
+      ${noopUserId}::uuid,${noopPrincipalId}::uuid,'discord-noop-player',
+      'tourney_player',false,'withdrawn','discord-noop-player'
+    )`;
+    await sql`insert into accounts.discord_role_assignments(
+      user_id,principal_id,player_id,discord_user_id,guild_id,tourney_role,
+      desired_role,applied_role,generation,applied_generation,status
+    ) values(
+      ${noopUserId}::uuid,${noopPrincipalId}::uuid,'discord-noop-player',
+      ${noopDiscordId},'610000000000000001','tourney_player',
+      'none','none',1,0,'pending'
+    )`;
+  });
+  const [noopDryRun] = await source`
+    select migration.finalize_inactive_noop_discord_assignments(false) result
+  `;
+  assert.equal(noopDryRun.result.applied, false);
+  assert.equal(noopDryRun.result.candidateCount, 1);
+  await source`update tourney.cutover_metadata set writes_paused=false where id='tourney'`;
+  await assert.rejects(
+    source`select migration.finalize_inactive_noop_discord_assignments(true)`,
+    (error) => error.code === "55000",
+    "No-op Discord repair accepted unpaused controls"
+  );
+  await source`update tourney.cutover_metadata set writes_paused=true where id='tourney'`;
+  const [noopApply] = await source`
+    select migration.finalize_inactive_noop_discord_assignments(true) result
+  `;
+  assert.equal(noopApply.result.applied, true);
+  assert.equal(noopApply.result.candidateCount, 1);
+  await assertSql(
+    source,
+    `select status='applied' and desired_role='none' and applied_role='none'
+      and applied_generation=generation and applied_at is not null
+      and pending_since is null and last_error is null ok
+    from accounts.discord_role_assignments
+    where principal_id='88000000-0000-4000-8000-000000000011'::uuid`,
+    "No-op Discord repair changed role state or failed to finalize the generation"
+  );
+  await assertSql(
+    source,
+    `select count(*)=2
+      and count(*) filter(where table_name='command_receipts')=1
+      and count(*) filter(where table_name='discord_role_assignments')=1
+      and bool_and(status='pending' and generation=1) ok
+    from tourney.mirror_outbox
+    where command_id like 'discord-noop-finalize:%'`,
+    "No-op Discord repair did not emit its receipt and assignment mirror events"
+  );
+  const [noopReplay] = await source`
+    select migration.finalize_inactive_noop_discord_assignments(true) result
+  `;
+  assert.equal(noopReplay.result.applied, false);
+  assert.equal(noopReplay.result.candidateCount, 0);
+  assert.equal(
+    await source`select count(*)::integer count from tourney.external_operations
+      where command_id=${noopApply.result.commandId}`.then(([row]) => row.count),
+    0,
+    "No-op Discord repair queued an external Discord operation"
+  );
+  await drainTourneyMirror({ env });
+  await assertSql(
+    target,
+    `select status='applied' and desired_role='none' and applied_role='none'
+      and applied_generation=generation ok
+    from tourney_discord_role_assignments
+    where principal_id='88000000-0000-4000-8000-000000000011'::uuid`,
+    "No-op Discord repair did not mirror to the fallback database"
+  );
+  await source.begin(async (sql) => {
+    await sql`select set_config('roo.tourney_mirror_apply','1',true)`;
+    await sql`delete from tourney.mirror_outbox
+      where command_id=${noopApply.result.commandId}`;
+    await sql`delete from tourney.command_receipts
+      where command_id=${noopApply.result.commandId}`;
+    await sql`delete from accounts.discord_role_assignments
+      where principal_id=${noopPrincipalId}::uuid`;
+    await sql`delete from accounts.identity_links
+      where principal_id=${noopPrincipalId}::uuid`;
+    await sql`delete from auth.identities where id=${noopIdentityId}::uuid`;
+    await sql`delete from accounts.tourney_accounts where user_id=${noopUserId}::uuid`;
+    await sql`delete from accounts.principal_auth_users where user_id=${noopUserId}::uuid`;
+    await sql`delete from accounts.principals where id=${noopPrincipalId}::uuid`;
+    await sql`delete from auth.users where id=${noopUserId}::uuid`;
+    await sql`update tourney.cutover_metadata set
+      clean_since=null,natural_mutation_verified_at=null,
+      first_zero_drift_at=null,second_zero_drift_at=null,
+      clock_last_reset_reason='mirror_trigger_binding_repaired'
+      where id='tourney'`;
+  });
+  await target.begin(async (sql) => {
+    await sql`select set_config('roo.tourney_mirror_apply','1',true)`;
+    await sql`delete from tourney_command_receipts
+      where command_id=${noopApply.result.commandId}`;
+    await sql`delete from tourney_discord_role_assignments
+      where principal_id=${noopPrincipalId}::uuid`;
   });
 
   const restoreRelations = Object.fromEntries(
