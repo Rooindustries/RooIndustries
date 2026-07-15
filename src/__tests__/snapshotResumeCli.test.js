@@ -13,6 +13,99 @@ const runModule = (source) => JSON.parse(execFileSync(process.execPath, [
 ], { encoding: "utf8", maxBuffer: 20 * 1024 * 1024 }));
 
 describe("stored Tourney snapshot recovery", () => {
+  test("requires exact Keychain readback for snapshots and encrypted exports", () => {
+    const result = runModule(`
+      import { storeSnapshotSecret } from ${JSON.stringify(
+        moduleUrl("scripts/tourney-cutover.mjs")
+      )};
+      import { storeExportPassphrase } from ${JSON.stringify(
+        moduleUrl("scripts/lib/encrypted-export.mjs")
+      )};
+      const fakeKeychain = (readback) => {
+        let stored = "";
+        const commands = [];
+        return {
+          commands,
+          runCommand: async (args) => {
+            commands.push(args[0]);
+            if (args[0] === "add-generic-password") {
+              stored = args.at(-1);
+              return { stdout: "" };
+            }
+            if (args[0] === "find-generic-password") {
+              const value = readback === "exact" ? stored : readback;
+              return { stdout: value + "\\n" };
+            }
+            return { stdout: "" };
+          },
+          addedSecretAsArgument: () => stored,
+        };
+      };
+      const snapshotExact = fakeKeychain("exact");
+      const snapshotSecret = "snapshot-secret-" + "s".repeat(40);
+      await storeSnapshotSecret({
+        service: "snapshot-test",
+        secret: snapshotSecret,
+        account: "fixture",
+        runCommand: snapshotExact.runCommand,
+      });
+      const exportExact = fakeKeychain("exact");
+      const exportSecret = "export-secret-" + "e".repeat(40);
+      await storeExportPassphrase({
+        service: "export-test",
+        passphrase: exportSecret,
+        account: "fixture",
+        runCommand: exportExact.runCommand,
+      });
+      const empty = fakeKeychain("");
+      let emptyCode = "";
+      try {
+        await storeSnapshotSecret({
+          service: "snapshot-empty-test",
+          secret: "",
+          account: "fixture",
+          runCommand: empty.runCommand,
+        });
+      } catch (error) {
+        emptyCode = error.code;
+      }
+      const mismatch = fakeKeychain("different-secret");
+      let mismatchCode = "";
+      try {
+        await storeExportPassphrase({
+          service: "export-mismatch-test",
+          passphrase: exportSecret,
+          account: "fixture",
+          runCommand: mismatch.runCommand,
+        });
+      } catch (error) {
+        mismatchCode = error.code;
+      }
+      process.stdout.write(JSON.stringify({
+        snapshotCommands: snapshotExact.commands,
+        exportCommands: exportExact.commands,
+        snapshotSecretPassedAsArgument:
+          snapshotExact.addedSecretAsArgument() === snapshotSecret,
+        exportSecretPassedAsArgument:
+          exportExact.addedSecretAsArgument() === exportSecret,
+        emptyCode,
+        emptyDeleted: empty.commands.at(-1) === "delete-generic-password",
+        mismatchCode,
+        mismatchDeleted: mismatch.commands.at(-1) === "delete-generic-password",
+      }));
+    `);
+    expect(result).toEqual({
+      snapshotCommands: ["add-generic-password", "find-generic-password"],
+      exportCommands: ["add-generic-password", "find-generic-password"],
+      snapshotSecretPassedAsArgument: true,
+      exportSecretPassedAsArgument: true,
+      emptyCode: "TOURNEY_SNAPSHOT_KEYCHAIN_FAILED",
+      emptyDeleted: true,
+      mismatchCode: "EXPORT_KEYCHAIN_FAILED",
+      mismatchDeleted: true,
+    });
+  });
+
   test("parses a recovery action without legacy or Sanity target access", () => {
     const result = runModule(`
       import fs from "node:fs";
