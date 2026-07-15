@@ -277,12 +277,15 @@ describe("encrypted export hardening", () => {
       import crypto from "node:crypto";
       import {
         stableSnapshotJson,
+        SUPABASE_FULL_CAPTURE_REQUIRED_RELATIONS,
+        SUPABASE_FULL_COMPACT_EXPANDED_PROFILE,
         SUPABASE_FULL_EXPANDED_MIGRATION_NAMES,
         SUPABASE_FULL_EXPANDED_PROFILE,
         SUPABASE_FULL_PRE_EXPAND_DEFERRED_RELATIONS,
         SUPABASE_FULL_PRE_EXPAND_MIGRATION_VERSION,
         SUPABASE_FULL_PRE_EXPAND_PROFILE,
         SUPABASE_FULL_REQUIRED_RELATIONS,
+        SUPABASE_FULL_SNAPSHOT_EXCLUDED_RELATIONS,
         SUPABASE_FULL_SNAPSHOT_SCHEMAS,
         validateFullLogicalSnapshot,
       } from ${JSON.stringify(moduleUrl("src/server/tourney/snapshotContract.js"))};
@@ -327,6 +330,40 @@ describe("encrypted export hardening", () => {
         },
       };
       const proof = validateFullLogicalSnapshot(payload, { hash });
+      const compact = structuredClone(payload);
+      for (const relation of SUPABASE_FULL_SNAPSHOT_EXCLUDED_RELATIONS) {
+        delete compact.full_logical.relationPayloads[relation];
+        delete compact.full_logical.relationCounts[relation];
+        delete compact.full_logical.relationHashes[relation];
+      }
+      compact.full_logical.contractProfile = SUPABASE_FULL_COMPACT_EXPANDED_PROFILE;
+      compact.full_logical.requiredRelations = [...SUPABASE_FULL_CAPTURE_REQUIRED_RELATIONS];
+      compact.full_logical.catalogRelations = Object.keys(
+        compact.full_logical.relationPayloads
+      ).sort();
+      compact.full_logical.catalogSha256 = hash(
+        stableSnapshotJson(compact.full_logical.catalogRelations)
+      );
+      const compactProof = validateFullLogicalSnapshot(compact, { hash });
+      const partialCompact = structuredClone(payload);
+      const partiallyExcluded = SUPABASE_FULL_SNAPSHOT_EXCLUDED_RELATIONS[0];
+      delete partialCompact.full_logical.relationPayloads[partiallyExcluded];
+      delete partialCompact.full_logical.relationCounts[partiallyExcluded];
+      delete partialCompact.full_logical.relationHashes[partiallyExcluded];
+      partialCompact.full_logical.contractProfile = SUPABASE_FULL_COMPACT_EXPANDED_PROFILE;
+      partialCompact.full_logical.requiredRelations = [...SUPABASE_FULL_CAPTURE_REQUIRED_RELATIONS];
+      partialCompact.full_logical.catalogRelations = Object.keys(
+        partialCompact.full_logical.relationPayloads
+      ).sort();
+      partialCompact.full_logical.catalogSha256 = hash(
+        stableSnapshotJson(partialCompact.full_logical.catalogRelations)
+      );
+      let partialCompactRejected = false;
+      try {
+        validateFullLogicalSnapshot(partialCompact, { hash });
+      } catch {
+        partialCompactRejected = true;
+      }
       const tampered = structuredClone(payload);
       delete tampered.full_logical.relationPayloads["commerce.bookings"];
       let missingRejected = false;
@@ -455,6 +492,11 @@ describe("encrypted export hardening", () => {
       }
       process.stdout.write(JSON.stringify({
         relationCount: proof.relationCount,
+        compactProfile: compactProof.contractProfile,
+        compactExcluded: SUPABASE_FULL_SNAPSHOT_EXCLUDED_RELATIONS.every(
+          (relation) => !compactProof.relationNames.includes(relation)
+        ),
+        partialCompactRejected,
         rowCount: proof.rowCount,
         missingRejected,
         hashRejected,
@@ -474,6 +516,9 @@ describe("encrypted export hardening", () => {
     `);
     expect(result).toEqual({
       relationCount: expect.any(Number),
+      compactProfile: "roo-supabase-expanded-v2",
+      compactExcluded: true,
+      partialCompactRejected: true,
       rowCount: 1,
       missingRejected: true,
       hashRejected: true,
