@@ -5,6 +5,7 @@ import { logSafeError } from "../../../../src/server/safeErrorLog";
 import {
   captureSnapshotTransport,
   inspectSnapshotTransport,
+  readSnapshotDatabaseTarget,
   readSnapshotTransportChunk,
 } from "../../../../src/server/tourney/snapshotTransport";
 import {
@@ -84,6 +85,22 @@ export async function POST(request) {
       return respond({ ok: false, error: "Invalid snapshot request." }, 400);
     }
     const publicKey = String(payload.publicKey || "");
+    if (action === "database-target") {
+      const target = await readSnapshotDatabaseTarget({
+        expectedTargets: expectedTargets(payload),
+      });
+      const object = { action, requestId, ...target };
+      const plaintext = Buffer.from(stableSnapshotJson(object));
+      return respond({
+        ok: true,
+        envelope: sealObject({
+          object,
+          publicKey,
+          requestId,
+          payloadSha256: crypto.createHash("sha256").update(plaintext).digest("hex"),
+        }),
+      });
+    }
     if (action === "inspect") {
       const result = await inspectSnapshotTransport({
         expectedTargets: expectedTargets(payload, { requireDatabase: false }),
