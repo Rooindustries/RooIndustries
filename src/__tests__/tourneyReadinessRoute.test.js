@@ -22,7 +22,10 @@ jest.mock("../server/tourney/store", () => ({
   }),
 }));
 
-const { GET } = require("../../app/api/admin/tourney-readiness/route.js");
+const {
+  GET,
+  normalizeTourneyReadinessForResponse,
+} = require("../../app/api/admin/tourney-readiness/route.js");
 const originalAdminKey = process.env.REF_ADMIN_KEY;
 const originalHardening = process.env.TOURNEY_HARDENING_V4_ENABLED;
 const originalActivation = process.env.TOURNEY_V4_ACTIVATION_ENABLED;
@@ -129,5 +132,40 @@ describe("Tourney legacy readiness route", () => {
     expect(body.controlMatchesDeployment).toBe(false);
     expect(body.activationEnabled).toBe(true);
     expect(body.finalReadiness).toBe(false);
+  });
+
+  test("reports only current routes and deduplicates blockers", () => {
+    expect(normalizeTourneyReadinessForResponse({
+      clock_blockers: [
+        "discord_blocker",
+        "shadow_acceptance_gate_failed",
+        "discord_blocker",
+      ],
+      shadow_reads: {
+        public_roster: { samples: 30, mismatches: 0 },
+        public_bracket: { samples: 30, mismatches: 0 },
+        admin_players: { samples: 30, mismatches: 0 },
+        appeals: { samples: 30, mismatches: 0 },
+        payouts: { samples: 30, mismatches: 0 },
+        players: { samples: 30, mismatches: 30 },
+        bracket: { samples: 30, mismatches: 30 },
+        operations: { samples: 30, mismatches: 30 },
+      },
+    })).toMatchObject({
+      clock_blockers: [
+        "discord_blocker",
+        "shadow_acceptance_gate_failed",
+      ],
+      shadow_reads: {
+        public_roster: { samples: 30, mismatches: 0 },
+        public_bracket: { samples: 30, mismatches: 0 },
+        admin_players: { samples: 30, mismatches: 0 },
+        appeals: { samples: 30, mismatches: 0 },
+        payouts: { samples: 30, mismatches: 0 },
+      },
+    });
+    expect(normalizeTourneyReadinessForResponse({
+      shadow_reads: { operations: { samples: 30, mismatches: 30 } },
+    }).shadow_reads).toEqual({});
   });
 });

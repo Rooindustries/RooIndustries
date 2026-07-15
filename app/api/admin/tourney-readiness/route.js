@@ -21,6 +21,25 @@ const authorized = (request) =>
 const enabled = (value) => ["1", "true", "yes", "on"].includes(
   String(value || "").trim().toLowerCase()
 );
+const currentShadowRoutes = new Set([
+  "public_roster",
+  "public_bracket",
+  "admin_players",
+  "appeals",
+  "payouts",
+]);
+
+export const normalizeTourneyReadinessForResponse = (readiness = {}) => ({
+  ...readiness,
+  clock_blockers: [...new Set(
+    Array.isArray(readiness.clock_blockers) ? readiness.clock_blockers : []
+  )],
+  shadow_reads: Object.fromEntries(
+    Object.entries(readiness.shadow_reads || {}).filter(([route]) =>
+      currentShadowRoutes.has(route)
+    )
+  ),
+});
 
 const readLegacyReadiness = async (sql) => {
   const [mirrorTriggerBindings] = await sql`
@@ -159,9 +178,10 @@ export async function GET(request) {
     const sql = await getTourneySqlForBackend({
       backend: policy.primaryBackend,
     });
-    const readiness = policy.primaryBackend === "supabase"
+    const rawReadiness = policy.primaryBackend === "supabase"
       ? (await sql`select public.roo_tourney_readiness() as readiness`)[0]?.readiness
       : await readLegacyReadiness(sql);
+    const readiness = normalizeTourneyReadinessForResponse(rawReadiness);
     const databaseControl = readiness?.control || {};
     const hardenedEnabled = enabled(process.env.TOURNEY_HARDENING_V4_ENABLED);
     const activationEnabled = enabled(process.env.TOURNEY_V4_ACTIVATION_ENABLED);
