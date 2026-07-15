@@ -23,15 +23,17 @@ export const readPublicTourneyBracket = ({ env = process.env } = {}) =>
     ? getTourneyBracketSnapshot()
     : getTourneyBracketSnapshot({ env });
 
-export const readAdminTourneyPlayers = async ({ env = process.env } = {}) => ({
-  ok: true,
-  players: await (env === process.env
-    ? listManageTourneyPlayers()
-    : listManageTourneyPlayers({ env })),
-  capacity: await (env === process.env
-    ? getTourneyRoleCapacitySnapshot()
-    : getTourneyRoleCapacitySnapshot({ env })),
-});
+export const readAdminTourneyPlayers = async ({ env = process.env } = {}) => {
+  const [players, capacity] = await Promise.all([
+    env === process.env
+      ? listManageTourneyPlayers()
+      : listManageTourneyPlayers({ env }),
+    env === process.env
+      ? getTourneyRoleCapacitySnapshot()
+      : getTourneyRoleCapacitySnapshot({ env }),
+  ]);
+  return { ok: true, players, capacity };
+};
 
 export const readTourneyAppeals = async ({ session, env = process.env } = {}) => ({
   ok: true,
