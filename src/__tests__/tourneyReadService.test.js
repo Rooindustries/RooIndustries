@@ -1,5 +1,4 @@
-const mockListManageTourneyPlayers = jest.fn();
-const mockGetTourneyRoleCapacitySnapshot = jest.fn();
+const mockGetManageTourneyPlayersSnapshot = jest.fn();
 
 jest.mock("../server/tourney/appealPayoutStore", () => ({
   listTourneyAppealsForSession: jest.fn(),
@@ -9,10 +8,9 @@ jest.mock("../server/tourney/bracketStore", () => ({
   getTourneyBracketSnapshot: jest.fn(),
 }));
 jest.mock("../server/tourney/playerStore", () => ({
-  getTourneyRoleCapacitySnapshot: (...args) =>
-    mockGetTourneyRoleCapacitySnapshot(...args),
+  getManageTourneyPlayersSnapshot: (...args) =>
+    mockGetManageTourneyPlayersSnapshot(...args),
   listApprovedTourneyPlayers: jest.fn(),
-  listManageTourneyPlayers: (...args) => mockListManageTourneyPlayers(...args),
 }));
 
 const {
@@ -24,36 +22,25 @@ describe("Tourney read services", () => {
     jest.clearAllMocks();
   });
 
-  test("reads admin players and capacity concurrently", async () => {
-    let resolvePlayers;
-    let resolveCapacity;
-    mockListManageTourneyPlayers.mockReturnValue(new Promise((resolve) => {
-      resolvePlayers = resolve;
-    }));
-    mockGetTourneyRoleCapacitySnapshot.mockReturnValue(new Promise((resolve) => {
-      resolveCapacity = resolve;
-    }));
-
+  test("reads admin players and capacity from one snapshot", async () => {
     const env = { TOURNEY_DATABASE_MODE: "supabase" };
-    const pending = readAdminTourneyPlayers({ env });
-
-    expect(mockListManageTourneyPlayers).toHaveBeenCalledWith({ env });
-    expect(mockGetTourneyRoleCapacitySnapshot).toHaveBeenCalledWith({ env });
-
-    resolvePlayers([{ id: "player-1" }]);
-    resolveCapacity({ tank: { remaining: 2 } });
-
-    await expect(pending).resolves.toEqual({
+    mockGetManageTourneyPlayersSnapshot.mockResolvedValue({
+      players: [{ id: "player-1" }],
+      capacity: { tank: { remaining: 2 } },
+    });
+    await expect(readAdminTourneyPlayers({ env })).resolves.toEqual({
       ok: true,
       players: [{ id: "player-1" }],
       capacity: { tank: { remaining: 2 } },
     });
+    expect(mockGetManageTourneyPlayersSnapshot).toHaveBeenCalledTimes(1);
+    expect(mockGetManageTourneyPlayersSnapshot).toHaveBeenCalledWith({ env });
   });
 
   test("preserves the default environment call contract", async () => {
-    mockListManageTourneyPlayers.mockResolvedValue([{ id: "player-2" }]);
-    mockGetTourneyRoleCapacitySnapshot.mockResolvedValue({
-      healer: { remaining: 1 },
+    mockGetManageTourneyPlayersSnapshot.mockResolvedValue({
+      players: [{ id: "player-2" }],
+      capacity: { healer: { remaining: 1 } },
     });
 
     await expect(readAdminTourneyPlayers()).resolves.toEqual({
@@ -61,7 +48,6 @@ describe("Tourney read services", () => {
       players: [{ id: "player-2" }],
       capacity: { healer: { remaining: 1 } },
     });
-    expect(mockListManageTourneyPlayers).toHaveBeenCalledWith();
-    expect(mockGetTourneyRoleCapacitySnapshot).toHaveBeenCalledWith();
+    expect(mockGetManageTourneyPlayersSnapshot).toHaveBeenCalledWith();
   });
 });

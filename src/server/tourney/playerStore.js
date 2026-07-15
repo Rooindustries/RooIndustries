@@ -798,6 +798,88 @@ export async function getTourneyRoleCapacitySnapshot({
   return buildTourneyRoleCapacitySnapshot({ config, players });
 }
 
+const readManageTourneyPlayersSnapshot = async (env) => {
+  await ensureTourneyPlayerSchema(env);
+  const sql = await getSql(env);
+  const [snapshot] = await sql`
+    select
+      coalesce(
+        jsonb_agg(to_jsonb(player_rows) order by player_rows.created_at desc)
+          filter (where player_rows.id is not null),
+        '[]'::jsonb
+      ) as players,
+      coalesce(
+        (
+          select jsonb_build_object(
+            'team_count', team_count,
+            'updated_at', updated_at,
+            'updated_by', updated_by
+          )
+          from tourney_registration_config
+          where id = ${TOURNEY_CONFIG_ID}
+          limit 1
+        ),
+        jsonb_build_object(
+          'team_count', ${TOURNEY_DEFAULT_TEAM_COUNT},
+          'updated_at', '',
+          'updated_by', ''
+        )
+      ) as config
+    from (
+      select id, username, email, status, discord, display_name, discord_key,
+        battlenet, rank_name, role_play, secondary_role_play, approved_role_play,
+        registration_pool, time_zone, twitch_username, team_name,
+        available_aug_1_2, accepted_rules, accepted_roo_visibility, notes,
+        version, created_at, updated_at, approved_at, approved_by, denied_at,
+        denied_by, removed_at, removed_by, withdrawn_at, withdrawn_by,
+        discord_invite_sent_at, discord_invite_email_id,
+        discord_invite_last_error, discord_user_id, discord_oauth_username,
+        discord_oauth_global_name, discord_linked_at, discord_role_assigned_at,
+        discord_role_last_error
+      from tourney_players
+    ) player_rows
+  `;
+  return snapshot || {};
+};
+
+const buildManageTourneyPlayersSnapshot = ({ config = {}, playerRows = [] }) => {
+  const capacityPlayers = playerRows
+    .filter((player) => player.status === "approved")
+    .map(mapPlayer);
+  return {
+    players: playerRows.map(managePlayer),
+    capacity: buildTourneyRoleCapacitySnapshot({
+      config: {
+        teamCount:
+          config.team_count || config.teamCount || TOURNEY_DEFAULT_TEAM_COUNT,
+        updatedAt: config.updated_at || config.updatedAt || "",
+        updatedBy: config.updated_by || config.updatedBy || "",
+      },
+      players: capacityPlayers,
+    }),
+  };
+};
+
+export async function getManageTourneyPlayersSnapshot({
+  env = process.env,
+} = {}) {
+  if (isMemoryMode(env)) {
+    return buildManageTourneyPlayersSnapshot({
+      config: getMemoryRegistrationConfig(),
+      playerRows: [...MEMORY_STORE.players].sort((left, right) =>
+        String(left.created_at || left.createdAt || "").localeCompare(
+          String(right.created_at || right.createdAt || "")
+        )
+      ),
+    });
+  }
+  const snapshot = await readManageTourneyPlayersSnapshot(env);
+  return buildManageTourneyPlayersSnapshot({
+    config: snapshot.config,
+    playerRows: Array.isArray(snapshot.players) ? snapshot.players : [],
+  });
+}
+
 const getRoleCapacity = (snapshot, rolePlay) =>
   snapshot.roles.find((role) => role.role === rolePlay) || null;
 
