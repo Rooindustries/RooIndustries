@@ -28,6 +28,10 @@ count drift.
 - `SUPABASE_CUTOVER_ENABLED`: required before production can use Supabase as
   primary.
 - `SANITY_REVERSE_MIRROR_WRITES`: preserves Sanity as the rollback copy.
+- `CMS_WRITES_PAUSED`: blocks global CMS publish, unpublish, and delete commands
+  with a retryable `503`. Missing or invalid values fail closed.
+- `SANITY_STUDIO_CMS_WRITES_PAUSED`: disables the corresponding global Sanity
+  Studio actions. It must be an explicit boolean matching `CMS_WRITES_PAUSED`.
 - `TOURNEY_DATABASE_MODE`: `legacy` or `supabase`.
 - `TOURNEY_MIRROR_ENABLED`: writes ordered mutation events to the opposite
   Tourney backend; required while Supabase is primary and legacy is retained.
@@ -208,17 +212,62 @@ deployed activation endpoint because that credential is not exportable.
 5. Capture the full Supabase/Auth, Vercel-managed fallback PostgreSQL, Sanity,
    email, Discord, receipt, and queue snapshot. This command refuses an
    incomplete legacy schema, a missing Sanity account document, incomplete
-   hosted payloads, and use of a generic `POSTGRES_URL`. It never falls back to
-   the older partial snapshot function:
+   hosted payload, an unpinned target, or a private env file that is not owned
+   by the current user and mode `0600`. The fallback database may be supplied
+   as either `TOURNEY_DATABASE_URL` or Vercel's `POSTGRES_URL`; if both exist,
+   they must resolve to the same credential-free fingerprint.
+
+   First use the authenticated production transport to discover only the
+   credential-free Supabase database fingerprint, then copy the returned
+   `TOURNEY_CUTOVER_EXPECTED_SUPABASE_DATABASE_FINGERPRINT` into the same
+   private env file. `CRON_SECRET` must be at least 32 bytes. The runtime
+   database URL and snapshot encryption key never leave the server:
 
    ```bash
    node scripts/tourney-cutover.mjs --env /absolute/path/to/restricted.env \
-     --snapshot \
+     --inspect-snapshot-transport \
+     --snapshot-transport-url \
+       https://www.rooindustries.com/api/admin/tourney-snapshot-transport
+
+   node scripts/tourney-cutover.mjs --env /absolute/path/to/restricted.env \
+     --snapshot-via-production \
+     --snapshot-transport-url \
+       https://www.rooindustries.com/api/admin/tourney-snapshot-transport \
      --output "$HOME/Documents/Codex/Tourney Cutover/unique-pre-cutover.enc"
+
    node scripts/tourney-cutover.mjs --env /absolute/path/to/restricted.env \
      --verify-snapshot \
      "$HOME/Documents/Codex/Tourney Cutover/unique-pre-cutover.enc"
    ```
+
+   Capture downloads 512 KiB chunks sealed to a one-time RSA-3072 public key,
+   verifies the server and local canonical hashes, and encrypts the final mode
+   `0600` file with a new secret stored in macOS Keychain. The logical payload
+   inventories every table present in `accounts`, `auth`, `cms`, `commerce`,
+   `migration`, and `tourney`, plus the Vault keys referenced by historical
+   Tourney snapshots. Required relations and per-relation hashes are checked
+   before the file is accepted.
+
+   The complete Sanity archive is a separate encrypted artifact because its
+   asset binaries are not PostgreSQL rows. Print and pin each export target,
+   then run the exports from the same private env file:
+
+   ```bash
+   node scripts/export-sanity-encrypted.mjs \
+     --env /absolute/path/to/restricted.env --print-target-fingerprint
+   node scripts/export-sanity-encrypted.mjs \
+     --env /absolute/path/to/restricted.env
+
+   node scripts/export-supabase-commerce-encrypted.mjs \
+     --env /absolute/path/to/restricted.env --print-target-fingerprint
+   node scripts/export-supabase-commerce-encrypted.mjs \
+     --env /absolute/path/to/restricted.env
+   ```
+
+   The Sanity archive includes all documents, referenced image/file binaries,
+   a complete manifest, source SHA-1 checks, archive SHA-256 checks, and an
+   exact decrypt/list verification. The commerce export independently performs
+   a deep contract, count, canonical-hash, and decrypt verification.
 
 6. After every shadow route has at least 30 real pre-activation samples,
    capture the baseline inside the deployed runtime. Do not run the local

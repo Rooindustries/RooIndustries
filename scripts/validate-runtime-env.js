@@ -10,6 +10,9 @@ const {
 const {
   inspectMigrationTargets,
 } = require("../src/server/supabase/migrationTargetSafety.cjs");
+const {
+  buildPostgresConnectionEnv,
+} = require("./lib/postgres-connection-target.cjs");
 
 const vercelEnv = (process.env.VERCEL_ENV || "").trim().toLowerCase();
 const hasExplicitVercelEnv = vercelEnv.length > 0;
@@ -45,6 +48,12 @@ const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
 const FALSE_VALUES = new Set(["0", "false", "no", "off"]);
 const isEnabled = (key) =>
   TRUE_VALUES.has(String(process.env[key] || "").trim().toLowerCase());
+const readExplicitBoolean = (key) => {
+  const value = String(process.env[key] || "").trim().toLowerCase();
+  if (TRUE_VALUES.has(value)) return { configured: true, value: true };
+  if (FALSE_VALUES.has(value)) return { configured: true, value: false };
+  return { configured: false, value: true };
+};
 const numericPercent = (key) => {
   const parsed = Number(String(process.env[key] || "").trim() || 0);
   return Number.isFinite(parsed) ? Math.max(0, Math.min(100, parsed)) : 0;
@@ -240,6 +249,29 @@ const providerConsistencyFailures = [];
 const providerConsistencyWarnings = [];
 const supabaseConsistencyFailures = [];
 const downloadConsistencyFailures = [];
+const cmsWritePause = readExplicitBoolean("CMS_WRITES_PAUSED");
+const studioCmsWritePause = readExplicitBoolean(
+  "SANITY_STUDIO_CMS_WRITES_PAUSED"
+);
+if (!cmsWritePause.configured) {
+  supabaseConsistencyFailures.push(
+    "CMS_WRITES_PAUSED must be an explicit boolean value."
+  );
+}
+if (!studioCmsWritePause.configured) {
+  supabaseConsistencyFailures.push(
+    "SANITY_STUDIO_CMS_WRITES_PAUSED must be an explicit boolean value."
+  );
+}
+if (
+  cmsWritePause.configured &&
+  studioCmsWritePause.configured &&
+  cmsWritePause.value !== studioCmsWritePause.value
+) {
+  supabaseConsistencyFailures.push(
+    "CMS_WRITES_PAUSED and SANITY_STUDIO_CMS_WRITES_PAUSED must match."
+  );
+}
 const compatibilityDeadlines = [
   ["PAYMENT_LEGACY_COMPLETION_UNTIL", 60 * 60 * 1000],
   ["PAYMENT_LEGACY_CHECKOUT_UNTIL", 60 * 60 * 1000],
@@ -402,6 +434,36 @@ const sanityWriteRequired =
   commercePrimaryBackend === "sanity" ||
   reverseMirrorEnabled;
 const sanityTargetRequired = sanityReadRequired || sanityWriteRequired;
+const privateSanityConfigured = hasAny([
+  "SANITY_PRIVATE_PROJECT_ID",
+  "SANITY_PRIVATE_DATASET",
+  "SANITY_PRIVATE_READ_TOKEN",
+  "SANITY_PRIVATE_WRITE_TOKEN",
+]);
+if (privateSanityConfigured && sanityTargetRequired) {
+  const privateTargetMissing = [
+    ...(!hasAny(["SANITY_PRIVATE_PROJECT_ID"])
+      ? ["SANITY_PRIVATE_PROJECT_ID"]
+      : []),
+    ...(!hasAny(["SANITY_PRIVATE_DATASET"])
+      ? ["SANITY_PRIVATE_DATASET"]
+      : []),
+    ...(sanityWriteRequired && !hasAny(["SANITY_PRIVATE_WRITE_TOKEN"])
+      ? ["SANITY_PRIVATE_WRITE_TOKEN"]
+      : []),
+    ...(sanityReadRequired &&
+      !hasAny(["SANITY_PRIVATE_READ_TOKEN", "SANITY_PRIVATE_WRITE_TOKEN"])
+      ? ["SANITY_PRIVATE_READ_TOKEN"]
+      : []),
+  ];
+  if (privateTargetMissing.length > 0) {
+    supabaseConsistencyFailures.push(
+      `Private Sanity configuration is incomplete: ${privateTargetMissing.join(
+        ", "
+      )}.`
+    );
+  }
+}
 const sanityRequiredChecks = [
   ...(sanityTargetRequired
     ? [
@@ -620,11 +682,15 @@ if (commercePrimaryBackend === "supabase" && !commerceCutoverEnabled) {
   );
 }
 if (
-  (commercePrimaryBackend === "supabase" || commerceCanaryPercent > 0) &&
+  (
+    primaryBackend === "supabase" ||
+    commercePrimaryBackend === "supabase" ||
+    commerceCanaryPercent > 0
+  ) &&
   !reverseMirrorEnabled
 ) {
   supabaseConsistencyFailures.push(
-    "Supabase commerce writes require SANITY_REVERSE_MIRROR_WRITES=1 during the rollback window."
+    "Supabase primary writes require SANITY_REVERSE_MIRROR_WRITES=1 during the rollback window."
   );
 }
 if (commerceCanaryPercent > 0 && !shadowWritesEnabled) {
@@ -642,7 +708,9 @@ if (
 }
 if (tourneyDatabaseMode === "supabase" && hasAny(["SUPABASE_DATABASE_URL"])) {
   try {
-    const databaseUrl = new URL(getFirstValue(["SUPABASE_DATABASE_URL"]));
+    const databaseUrlValue = getFirstValue(["SUPABASE_DATABASE_URL"]);
+    buildPostgresConnectionEnv(databaseUrlValue, {});
+    const databaseUrl = new URL(databaseUrlValue);
     const apiUrl = new URL(
       getFirstValue(["SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"])
     );
@@ -663,6 +731,18 @@ if (tourneyDatabaseMode === "supabase" && hasAny(["SUPABASE_DATABASE_URL"])) {
   } catch {
     supabaseConsistencyFailures.push(
       "SUPABASE_DATABASE_URL must connect to the configured Supabase project, not the legacy Tourney database."
+    );
+  }
+}
+if (tourneyMirrorEnabled && hasAny(["TOURNEY_DATABASE_URL", "POSTGRES_URL"])) {
+  try {
+    buildPostgresConnectionEnv(
+      getFirstValue(["TOURNEY_DATABASE_URL", "POSTGRES_URL"]),
+      {}
+    );
+  } catch {
+    supabaseConsistencyFailures.push(
+      "TOURNEY_DATABASE_URL must use a supported PostgreSQL target and require TLS when hosted."
     );
   }
 }
@@ -767,6 +847,13 @@ if (providerConsistencyWarnings.length > 0) {
   console.warn(`[env] ${providerConsistencyWarnings.join("\n[env] ")}`);
 }
 
+console.log(
+  `[env] CMS write control: apiConfigured=${cmsWritePause.configured}, apiPaused=${cmsWritePause.value}, studioConfigured=${studioCmsWritePause.configured}, studioPaused=${studioCmsWritePause.value}, matches=${
+    cmsWritePause.configured &&
+    studioCmsWritePause.configured &&
+    cmsWritePause.value === studioCmsWritePause.value
+  }`
+);
 console.log(
   `[env] Payment runtime: runtime=${paymentRuntimePolicy.runtime}, previewPaymentsEnabled=${previewPaymentsEnabled}, livePaymentsEnabled=${livePaymentsEnabled}, razorpayEnabled=${paymentProviders.razorpay.enabled}, paypalEnabled=${paymentProviders.paypal.enabled}`
 );

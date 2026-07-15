@@ -1,6 +1,8 @@
 import { createDataClient as createClient } from "../data/documentClient.js";
 import crypto from "crypto";
 import { verifyHoldToken } from "./holdToken.js";
+import { selectHoldAuthority } from "./holdAuthority.js";
+import { resolveSupabaseRuntimePolicy } from "../supabase/runtime.js";
 import { getClientAddress, requireRateLimit } from "../api/ref/rateLimit.js";
 import { logSafeError } from "../safeErrorLog.js";
 
@@ -41,7 +43,12 @@ export default async function handler(req, res) {
     holdId,
     ignoreExpiry: true,
   });
-  const backend = tokenPayload?.be === "supabase" ? "supabase" : "sanity";
+  const policy = resolveSupabaseRuntimePolicy();
+  const backend = selectHoldAuthority({
+    tokenPayload,
+    fallbackBackend: policy.commercePrimaryBackend,
+    policy,
+  });
   const client = createReleaseClient(backend);
 
   try {

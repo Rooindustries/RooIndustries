@@ -5,6 +5,12 @@ import { createSupabaseAuthClient } from "./authClient.js";
 
 const normalizeIdentifier = (value) => String(value || "").trim().toLowerCase();
 const normalizePassword = (value) => String(value || "");
+const RESET_CREDENTIAL_FIELDS = [
+  "resetToken",
+  "resetTokenHash",
+  "resetTokenExpiresAt",
+  "resetDeliveryToken",
+];
 
 const requireRpcData = ({ data, error }, operation) => {
   if (error) {
@@ -153,6 +159,10 @@ export const updateSupabaseAccountPassword = async ({
   identifier,
   password,
   passwordHash = "",
+  sourceBackend = "",
+  sourceDocumentId = "",
+  sourcePreconditions = null,
+  sourceMutation = null,
   sourceRevision = "",
   operationKey = `credential:${crypto.randomUUID()}`,
   adminClient = createSupabaseAdminClient(),
@@ -168,41 +178,130 @@ export const updateSupabaseAccountPassword = async ({
   const account = await resolveSupabaseAccountAlias({ identifier, adminClient });
   if (!account?.user_id) return { updated: false };
   const resolvedHash = importedHash || (await bcrypt.hash(normalizedPassword, 12));
-  requireRpcData(
-    await adminClient.rpc("roo_prepare_credential_operation", {
+  const normalizedSourceBackend = String(sourceBackend || "").trim().toLowerCase();
+  const normalizedSourceDocumentId = String(sourceDocumentId || "").trim();
+  const normalizedSourceRevision = String(sourceRevision || "").trim();
+  if (
+    !["sanity", "supabase"].includes(normalizedSourceBackend) ||
+    !normalizedSourceDocumentId ||
+    !normalizedSourceRevision ||
+    !sourcePreconditions ||
+    typeof sourcePreconditions !== "object" ||
+    !sourceMutation ||
+    typeof sourceMutation !== "object"
+  ) {
+    throw new Error("Credential source recovery metadata is required.");
+  }
+  const prepared = requireRpcData(
+    await adminClient.rpc("roo_prepare_credential_operation_v2", {
       p_operation_key: operationKey,
       p_user_id: account.user_id,
       p_password_hash: resolvedHash,
-      p_source_revision: sourceRevision || null,
+      p_source_backend: normalizedSourceBackend,
+      p_source_document_id: normalizedSourceDocumentId,
+      p_source_expected_revision: normalizedSourceRevision,
+      p_source_preconditions: sourcePreconditions,
+      p_source_mutation: sourceMutation,
     }),
     "credential recovery preparation"
   );
-  const result = await adminClient.auth.admin.updateUserById(account.user_id, {
-    password_hash: resolvedHash,
-  });
-  if (result.error) throw new Error("Supabase password update failed.");
-  requireRpcData(
-    await adminClient.rpc("roo_mark_credential_operation", {
-      p_operation_key: operationKey,
-      p_status: "auth_applied",
-      p_error_code: null,
-    }),
-    "credential recovery checkpoint"
-  );
-  requireRpcData(
-    await adminClient.rpc("roo_complete_credential_migration", {
-      p_user_id: account.user_id,
-    }),
-    "credential migration"
-  );
+  const effectiveHash = String(prepared?.password_hash || resolvedHash);
+  if (prepared?.status === "prepared") {
+    const result = await adminClient.auth.admin.updateUserById(account.user_id, {
+      password_hash: effectiveHash,
+    });
+    if (result.error) throw new Error("Supabase password update failed.");
+    requireRpcData(
+      await adminClient.rpc("roo_mark_credential_operation", {
+        p_operation_key: operationKey,
+        p_status: "auth_applied",
+        p_error_code: null,
+      }),
+      "credential recovery checkpoint"
+    );
+  }
   return {
     updated: true,
     userId: account.user_id,
     principalId: account.principal_id,
     operationKey,
-    passwordHash: resolvedHash,
+    passwordHash: effectiveHash,
+    sourceBackend: normalizedSourceBackend,
+    sourceDocumentId: normalizedSourceDocumentId,
+    sourcePreconditions: prepared?.source_preconditions || sourcePreconditions,
+    sourceMutation: prepared?.source_mutation || sourceMutation,
   };
 };
+
+export const getSupabaseCredentialOperation = async ({
+  operationKey,
+  adminClient = createSupabaseAdminClient(),
+} = {}) =>
+  requireRpcData(
+    await adminClient.rpc("roo_get_credential_operation", {
+      p_operation_key: String(operationKey || "").trim(),
+    }),
+    "credential operation lookup"
+  );
+
+export const buildCredentialSourceMutation = ({
+  passwordHash,
+  passwordChangedAt,
+  consumeResetToken = false,
+} = {}) => ({
+  set: {
+    creatorPassword: String(passwordHash || ""),
+    credentialVersion: 2,
+    passwordLoginEnabled: true,
+    passwordResetRequired: false,
+    passwordChangedAt: String(passwordChangedAt || ""),
+  },
+  unset: consumeResetToken ? RESET_CREDENTIAL_FIELDS : [],
+});
+
+export const buildCredentialSourcePreconditions = ({
+  document,
+  resetTokenHash = "",
+} = {}) => {
+  const preconditions = {};
+  for (const field of [
+    "creatorPassword",
+    "credentialVersion",
+    "resetTokenExpiresAt",
+  ]) {
+    if (document?.[field] !== undefined) preconditions[field] = document[field];
+  }
+  const normalizedResetTokenHash = String(resetTokenHash || "").trim();
+  if (normalizedResetTokenHash) {
+    preconditions.resetTokenHash = normalizedResetTokenHash;
+  } else if (document?.resetTokenHash !== undefined) {
+    preconditions.resetTokenHash = document.resetTokenHash;
+  }
+  return preconditions;
+};
+
+export const resolveCredentialSourceRevision = ({
+  document,
+  sourceBackend,
+} = {}) => {
+  if (String(sourceBackend || "").trim().toLowerCase() === "supabase") {
+    return String(document?._supabaseRevision || document?._rev || "").trim();
+  }
+  return String(document?._rev || "").trim();
+};
+
+export const markSupabaseCredentialSourceApplied = async ({
+  operationKey,
+  sourceRevision,
+  adminClient = createSupabaseAdminClient(),
+} = {}) =>
+  requireRpcData(
+    await adminClient.rpc("roo_mark_credential_source_applied", {
+      p_operation_key: operationKey,
+      p_source_revision: sourceRevision,
+    }),
+    "credential source checkpoint"
+  );
 
 export const completeSupabaseCredentialMirror = async ({
   operationKey,

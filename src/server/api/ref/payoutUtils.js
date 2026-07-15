@@ -71,15 +71,17 @@ export function computeEarningsFromBookings(bookings = []) {
 export async function fetchReferralEarnings({ client, referralId, referralCode }) {
   if (typeof client?.referralEarnings === "function") {
     const summary = await client.referralEarnings({ referralId, referralCode });
-    return {
-      xoc: normalizeNumber(summary?.xoc),
-      vertex: normalizeNumber(summary?.vertex),
-      total: normalizeNumber(summary?.total),
-      byPackage:
-        summary?.byPackage && typeof summary.byPackage === "object"
-          ? summary.byPackage
-          : {},
-    };
+    if (summary !== null && summary !== undefined) {
+      return {
+        xoc: normalizeNumber(summary?.xoc),
+        vertex: normalizeNumber(summary?.vertex),
+        total: normalizeNumber(summary?.total),
+        byPackage:
+          summary?.byPackage && typeof summary.byPackage === "object"
+            ? summary.byPackage
+            : {},
+      };
+    }
   }
   const bookings = await client.fetch(
     `*[_type == "booking"

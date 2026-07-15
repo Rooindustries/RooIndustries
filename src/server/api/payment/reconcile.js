@@ -10,12 +10,22 @@ import {
   isSupabaseAdminConfigured,
 } from "../../supabase/adminClient.js";
 import { reconcileBookingEmailDispatches } from "../ref/bookingEmails.js";
+import { reconcileReferralEmailDispatches } from "../ref/referralEmailDispatches.js";
 import { syncSanityCommerceChanges } from "../../supabase/incrementalCommerceSync.js";
 import {
   runTourneyReconciliation,
 } from "../../tourney/reconcile.js";
 import { reconcileCredentialOperations } from "../../supabase/credentialRecovery.js";
 import { isEnabledTourneyFlag } from "../../tourney/canonical.js";
+import { createDocumentWriteClient } from "../../data/documentClient.js";
+
+const reconcileDocumentMirror = async (options = {}) => {
+  const client = createDocumentWriteClient({ backendOverride: "supabase" });
+  if (typeof client?.reconcileReverseMirror !== "function") {
+    return { supported: false, attempted: 0, applied: 0 };
+  }
+  return client.reconcileReverseMirror(options);
+};
 
 export default async function handler(req, res) {
   if (req.method !== "GET" && req.method !== "POST") {
@@ -60,7 +70,15 @@ export default async function handler(req, res) {
         limit: 100,
         maxBatches: 10,
       });
-      return res.status(200).json({ ok: true, summary: { reverseMirror } });
+      const documentMirror = await reconcileDocumentMirror({
+        limit: 100,
+        maxBatches: 10,
+        budgetMs: 60_000,
+      });
+      return res.status(200).json({
+        ok: true,
+        summary: { reverseMirror, documentMirror },
+      });
     } catch (error) {
       logSafeError("Reverse-mirror reconciliation failed", error);
       return res.status(503).json({
@@ -87,12 +105,31 @@ export default async function handler(req, res) {
     }
   }
 
+  const referralEmailReconciliationPromise = isSupabaseAdminConfigured()
+    ? reconcileReferralEmailDispatches({ limit: 10 }).then(
+        (value) => ({ value, error: null }),
+        (error) => ({ value: null, error })
+      )
+    : Promise.resolve({
+        value: { skipped: true, reason: "supabase_unavailable" },
+        error: null,
+      });
   const tourneyReconciliationPromise = runTourneyReconciliation({
     budgetMs: 90_000,
   }).then(
     (value) => ({ value, error: null }),
     (error) => ({ value: null, error })
   );
+  const documentMirrorPromise = isSupabaseAdminConfigured()
+    ? reconcileDocumentMirror({
+        limit: 25,
+        maxBatches: 4,
+        budgetMs: 30_000,
+      }).then(
+        (value) => ({ value, error: null }),
+        (error) => ({ value: null, error })
+      )
+    : null;
 
   let incrementalShadowSync = null;
   try {
@@ -147,6 +184,27 @@ export default async function handler(req, res) {
       }, {}),
     },
   };
+  result.body.summary ||= {};
+  if (documentMirrorPromise) {
+    const documentMirror = await documentMirrorPromise;
+    if (documentMirror.error) {
+      logSafeError("Document mirror reconciliation failed", documentMirror.error);
+      result.body.summary.documentMirror = { pending: true };
+    } else {
+      result.body.summary.documentMirror = documentMirror.value;
+    }
+  }
+  const referralEmailReconciliation = await referralEmailReconciliationPromise;
+  if (referralEmailReconciliation.error) {
+    logSafeError(
+      "Referral email reconciliation failed",
+      referralEmailReconciliation.error
+    );
+    result.body.summary.referralEmailRecovery = { pending: true };
+  } else {
+    result.body.summary.referralEmailRecovery =
+      referralEmailReconciliation.value;
+  }
   if (result.httpStatus === 200) {
     result.body.summary.incrementalShadowSync = incrementalShadowSync;
     result.body.summary.emailOnlyRecovery = {};
@@ -239,7 +297,6 @@ export default async function handler(req, res) {
       }
     }
   }
-  result.body.summary ||= {};
   const tourneyReconciliation = await tourneyReconciliationPromise;
   if (tourneyReconciliation.error) {
     const error = tourneyReconciliation.error;

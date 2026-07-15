@@ -21,8 +21,17 @@ export const getPaymentTokenBackend = (token) => {
 export const selectPaymentStartBackend = ({
   body = {},
   clientAddress = "",
+  cutoverGeneration,
   env = process.env,
 } = {}) => {
+  const policy = resolveSupabaseRuntimePolicy(env);
+  const activeGeneration = cutoverGeneration === undefined
+    ? policy.commerceFailoverGeneration
+    : Math.max(0, Number(cutoverGeneration) || 0);
+  if (activeGeneration >= 1) {
+    return normalizeBackend(policy.commercePrimaryBackend);
+  }
+
   const bookingPayload = body?.bookingPayload || {};
   const holdPayload = verifyHoldToken({
     token: bookingPayload.slotHoldToken,
@@ -41,7 +50,6 @@ export const selectPaymentStartBackend = ({
     if (upgradePayload?.bid) return normalizeBackend(upgradePayload.be);
   }
 
-  const policy = resolveSupabaseRuntimePolicy(env);
   return normalizeBackend(policy.commercePrimaryBackend);
 };
 

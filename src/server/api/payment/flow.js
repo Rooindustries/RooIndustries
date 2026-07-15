@@ -2712,6 +2712,8 @@ const createOrReusePaymentRecordForStart = async ({
   };
   const holdPatch = holdDoc?._id
     ? {
+        backendOwner: backendOwner === "supabase" ? "supabase" : "sanity",
+        cutoverGeneration: Math.max(0, Number(cutoverGeneration) || 0),
         phase: HOLD_PHASE_PAYMENT_PENDING,
         paymentRecordId,
         paymentProvider: provider,
@@ -2902,6 +2904,7 @@ export const startPaymentSession = async ({
         email: bookingPayload.email,
         targetPackageTitle: bookingPayload.packageTitle,
         backend,
+        cutoverGeneration: pinnedCutoverGeneration,
       });
       if (!verifiedUpgradeIntent) {
         return {
@@ -2916,12 +2919,6 @@ export const startPaymentSession = async ({
       upgradeIntentSnapshot = freezeUpgradeIntent({
         payload: verifiedUpgradeIntent,
       });
-      if (verifiedUpgradeIntent.gen !== undefined) {
-        pinnedCutoverGeneration = Math.max(
-          0,
-          Number(verifiedUpgradeIntent.gen) || 0
-        );
-      }
     }
 
     const quote = await resolvePaymentQuote({
@@ -3032,9 +3029,7 @@ export const startPaymentSession = async ({
       prepareCouponReservation,
       appendCouponReservation,
       backendOwner: backend,
-      cutoverGeneration: Number(
-        holdDoc?.cutoverGeneration ?? pinnedCutoverGeneration
-      ),
+      cutoverGeneration: pinnedCutoverGeneration,
     });
     const refreshed = record?._id
       ? record

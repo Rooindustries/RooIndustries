@@ -4,6 +4,8 @@ do $$
 declare
   v_generation integer;
   v_quote jsonb;
+  v_referral_result jsonb;
+  v_referral_event_key text;
 begin
   select generation into v_generation
   from migration.commerce_control where singleton;
@@ -125,6 +127,135 @@ begin
     raise exception 'canonical duplicate alias was reported as a broken reciprocal link';
   end if;
 
+  insert into auth.users (id, email)
+  values (
+    '10000000-0000-4000-8000-000000000091',
+    'referral-integrity-fixture@example.invalid'
+  ) on conflict (id) do nothing;
+  insert into migration.source_documents (
+    legacy_sanity_id, document_type, source_revision, source_hash, payload,
+    operational_imported, cms_imported, tombstoned, backend_owner,
+    cutover_generation
+  ) values (
+    'referral.integrity-fixture',
+    'referral',
+    'referral-integrity-revision-1',
+    repeat('d', 64),
+    '{
+      "_id":"referral.integrity-fixture",
+      "_type":"referral",
+      "name":"Referral Integrity Fixture",
+      "creatorEmail":"referral-integrity-fixture@example.invalid",
+      "slug":{"current":"referral-integrity-fixture"},
+      "maxCommissionPercent":15,
+      "currentCommissionPercent":10,
+      "currentDiscountPercent":0,
+      "successfulReferrals":0,
+      "bypassUnlock":false
+    }'::jsonb,
+    true,
+    true,
+    false,
+    'supabase',
+    v_generation
+  ) on conflict (legacy_sanity_id) do update set
+    source_revision = excluded.source_revision,
+    source_hash = excluded.source_hash,
+    payload = excluded.payload,
+    tombstoned = false,
+    backend_owner = excluded.backend_owner,
+    cutover_generation = excluded.cutover_generation;
+  insert into accounts.creator_profiles (
+    user_id, referral_code, legacy_sanity_id, source_revision, source_hash,
+    backend_owner
+  ) values (
+    '10000000-0000-4000-8000-000000000091',
+    'referral-integrity-fixture',
+    'referral.integrity-fixture',
+    'referral-integrity-revision-1',
+    repeat('d', 64),
+    'supabase'
+  ) on conflict (user_id) do update set
+    legacy_sanity_id = excluded.legacy_sanity_id,
+    source_revision = excluded.source_revision,
+    source_hash = excluded.source_hash,
+    backend_owner = excluded.backend_owner,
+    active = true;
+
+  begin
+    perform public.roo_admin_update_creator_terms(
+      'fixture:referral-wrong-generation',
+      '10000000-0000-4000-8000-000000000091',
+      1, 2000, 1000, 1000, true,
+      'Wrong generation fixture',
+      v_generation + 1
+    );
+    raise exception 'stale referral generation was accepted';
+  exception when sqlstate '40001' then null;
+  end;
+
+  update migration.commerce_control
+  set primary_backend = 'sanity'
+  where singleton;
+  begin
+    perform public.roo_admin_update_creator_terms(
+      'fixture:referral-sanity-primary',
+      '10000000-0000-4000-8000-000000000091',
+      1, 2000, 1000, 1000, true,
+      'Sanity primary fixture',
+      v_generation
+    );
+    raise exception 'Sanity-primary referral mutation was accepted';
+  exception when sqlstate '55000' then null;
+  end;
+  update migration.commerce_control
+  set primary_backend = 'supabase'
+  where singleton;
+
+  v_referral_result := public.roo_admin_update_creator_terms(
+    'fixture:referral-generation-one',
+    '10000000-0000-4000-8000-000000000091',
+    1, 2000, 1000, 1000, true,
+    'Generation one referral fixture',
+    v_generation
+  );
+  v_referral_event_key := v_referral_result->>'mirror_event_key';
+  if coalesce((v_referral_result->>'terms_version')::bigint, 0) <> 2
+    or coalesce((v_referral_result->>'total_basis_points')::integer, -1) <> 2000
+    or coalesce((v_referral_result->>'bypass_referral_requirement')::boolean, false) is not true
+  then
+    raise exception 'generation-one referral terms were not projected';
+  end if;
+  if not exists (
+    select 1
+    from migration.commerce_mirror_outbox mirror
+    where mirror.event_key = v_referral_event_key
+      and mirror.status = 'pending'
+      and mirror.cutover_generation = v_generation
+      and mirror.document_ids @> array['referral.integrity-fixture']::text[]
+      and mirror.canonical_hash ~ '^[0-9a-f]{64}$'
+  ) then
+    raise exception 'generation-one referral mirror event is incomplete';
+  end if;
+  if not exists (
+    select 1
+    from migration.source_documents source
+    where source.legacy_sanity_id = 'referral.integrity-fixture'
+      and source.backend_owner = 'supabase'
+      and source.cutover_generation = v_generation
+      and source.payload->>'maxCommissionPercent' = '20.0000000000000000'
+      and source.payload->>'currentCommissionPercent' = '10.0000000000000000'
+      and source.payload->>'currentDiscountPercent' = '10.0000000000000000'
+      and source.payload->>'bypassUnlock' = 'true'
+  ) then
+    raise exception 'generation-one referral source document is incomplete';
+  end if;
+  if jsonb_array_length(public.roo_admin_list_creator_terms(
+    'referral-integrity-fixture@example.invalid', 10, 0
+  )) <> 1 then
+    raise exception 'server-side referral creator search failed';
+  end if;
+
   insert into migration.source_documents (
     legacy_sanity_id, document_type, source_hash, payload,
     operational_imported, cms_imported
@@ -185,6 +316,21 @@ begin
     or not has_function_privilege('service_role', 'public.roo_commerce_control()', 'execute')
   then
     raise exception 'commerce RPC privileges are unsafe';
+  end if;
+  if has_function_privilege(
+    'anon',
+    'public.roo_admin_list_creator_terms(text,integer,integer)',
+    'execute'
+  ) or has_function_privilege(
+    'authenticated',
+    'public.roo_admin_update_creator_terms(text,uuid,bigint,integer,integer,integer,boolean,text,integer)',
+    'execute'
+  ) or not has_function_privilege(
+    'service_role',
+    'public.roo_admin_update_creator_terms(text,uuid,bigint,integer,integer,integer,boolean,text,integer)',
+    'execute'
+  ) then
+    raise exception 'referral creator editor RPC privileges are unsafe';
   end if;
   if has_function_privilege(
     'anon',

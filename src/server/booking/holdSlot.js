@@ -1,6 +1,7 @@
-import { createDataClient as createClient } from "../data/documentClient.js";
+import { createCommerceWriteClient } from "../api/ref/sanity.js";
 import crypto from "crypto";
 import { issueHoldToken, verifyHoldToken } from "./holdToken.js";
+import { selectHoldAuthority } from "./holdAuthority.js";
 import {
   buildBookingSlotId,
   buildSlotHoldId,
@@ -19,16 +20,7 @@ import { isSupabaseAdminConfigured } from "../supabase/adminClient.js";
 import { assertCommerceStartAllowed } from "../supabase/commerceControl.js";
 
 const createHoldClient = (backendOverride) =>
-  createClient(
-    {
-      projectId: process.env.SANITY_PROJECT_ID,
-      dataset: process.env.SANITY_DATASET || "production",
-      apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
-      token: process.env.SANITY_WRITE_TOKEN,
-      useCdn: false,
-    },
-    { backendOverride, domain: "commerce" }
-  );
+  createCommerceWriteClient({ backendOverride });
 
 export const HOLD_DURATION_MS = 20 * 60 * 1000;
 
@@ -71,12 +63,19 @@ export const isSameSupabaseOwnedHold = ({ current, mirror }) => {
   );
 };
 
-const fetchOtherBackendSlotState = async ({
+export const fetchOtherBackendSlotState = async ({
   backend,
   holdId,
   slotLockId,
   startTimeUTC,
 }) => {
+  const policy = resolveSupabaseRuntimePolicy();
+  if (
+    backend === policy.commercePrimaryBackend &&
+    policy.commerceFailoverGeneration >= 1
+  ) {
+    return { hold: null, slotLock: null, bookings: [] };
+  }
   const otherBackend = backend === "supabase" ? "sanity" : "supabase";
   if (otherBackend === "supabase" && !isSupabaseAdminConfigured()) {
     return { hold: null, slotLock: null, bookings: [] };
@@ -136,23 +135,21 @@ const issueResponse = ({
   });
 };
 
-const selectHoldBackend = ({
+export const selectHoldBackend = ({
   previousHoldId,
   previousHoldToken,
-  startTimeUTC,
-  packageTitle,
-  clientAddress,
 }) => {
   const previous = verifyHoldToken({
     token: previousHoldToken,
     holdId: previousHoldId,
     ignoreExpiry: true,
   });
-  if (previous?.hid) {
-    return previous.be === "supabase" ? "supabase" : "sanity";
-  }
   const policy = resolveSupabaseRuntimePolicy();
-  return policy.commercePrimaryBackend === "supabase" ? "supabase" : "sanity";
+  return selectHoldAuthority({
+    tokenPayload: previous,
+    fallbackBackend: policy.commercePrimaryBackend,
+    policy,
+  });
 };
 
 const releasePreviousHold = async ({
@@ -170,8 +167,12 @@ const releasePreviousHold = async ({
       holdId: previousHoldId,
       ignoreExpiry: true,
     });
-    const previousBackend =
-      previousTokenPayload?.be === "supabase" ? "supabase" : "sanity";
+    const policy = resolveSupabaseRuntimePolicy();
+    const previousBackend = selectHoldAuthority({
+      tokenPayload: previousTokenPayload,
+      fallbackBackend: policy.commercePrimaryBackend,
+      policy,
+    });
     const client = createHoldClient(previousBackend);
     const previousHold = await client.fetch(
       `*[_type == "slotHold" && _id == $id][0]`,
@@ -261,9 +262,6 @@ export default async function handler(req, res) {
   const backend = selectHoldBackend({
     previousHoldId,
     previousHoldToken,
-    startTimeUTC: normalizedStartTimeUTC,
-    packageTitle,
-    clientAddress,
   });
   const cutoverGeneration = commerceControl.generation;
   const client = createHoldClient(backend);

@@ -9,8 +9,14 @@ import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import postgres from "postgres";
 import migrationTargetSafety from "../src/server/supabase/migrationTargetSafety.cjs";
+import { buildPostgresConnectionOptions } from "./lib/postgres-connection-env.mjs";
+import {
+  expectedConnectedDatabaseUsername,
+  loadSupabaseDatabaseTargetFromStdin,
+} from "./lib/supabase-database-target-stdin.mjs";
 import {
   decryptSnapshot,
+  readSnapshotSecret,
   stableJson,
   validateHostedSnapshot,
 } from "./tourney-cutover.mjs";
@@ -90,7 +96,8 @@ export const buildLiveDriftConflictId = (collisionHash) => {
 export const parseLiveDriftArguments = (argv = process.argv.slice(2)) => {
   const actionFlags = new Set(["--preflight", "--apply", "--finalize"]);
   const valueFlags = new Set(["--env", "--authorization-hash", "--verified-snapshot"]);
-  const allowed = new Set([...actionFlags, ...valueFlags]);
+  const booleanFlags = new Set(["--supabase-database-url-stdin"]);
+  const allowed = new Set([...actionFlags, ...valueFlags, ...booleanFlags]);
   const seen = new Set();
   const actions = [];
   for (let index = 0; index < argv.length; index += 1) {
@@ -102,12 +109,18 @@ export const parseLiveDriftArguments = (argv = process.argv.slice(2)) => {
       actions.push(token);
       continue;
     }
+    if (booleanFlags.has(token)) continue;
     const value = String(argv[index + 1] || "").trim();
     requireCondition(value && !value.startsWith("--"),
       `A value is required after ${token}.`, "LIVE_DRIFT_ARGUMENT_INVALID");
     index += 1;
   }
   requireCondition(actions.length === 1, "Select exactly one repair action.", "LIVE_DRIFT_ACTION_INVALID");
+  requireCondition(
+    seen.has("--supabase-database-url-stdin"),
+    "The Supabase database target must be supplied through stdin.",
+    "LIVE_DRIFT_DATABASE_STDIN_REQUIRED"
+  );
   const readValue = (flag, required = false) => {
     const index = argv.indexOf(flag);
     const value = index >= 0 ? String(argv[index + 1] || "").trim() : "";
@@ -122,6 +135,7 @@ export const parseLiveDriftArguments = (argv = process.argv.slice(2)) => {
     envPath: readValue("--env", true),
     authorizationHash: readValue("--authorization-hash", action !== "preflight"),
     snapshotPath: readValue("--verified-snapshot", action === "apply"),
+    useSupabaseDatabaseUrlStdin: seen.has("--supabase-database-url-stdin"),
   };
 };
 
@@ -167,7 +181,8 @@ const assertRuntimeEnvironment = (env = process.env) => {
   return { sourceIdentity, legacyIdentity };
 };
 
-const connect = (databaseUrl, applicationName) => postgres(databaseUrl, {
+const connect = (databaseUrl, applicationName) => postgres({
+  ...buildPostgresConnectionOptions(databaseUrl),
   max: 1,
   idle_timeout: 10,
   connect_timeout: 10,
@@ -183,7 +198,7 @@ export const assertConnectedDatabaseIdentity = async (sql, identity, code) => {
     select pg_catalog.current_database() database, current_user username
   `;
   requireCondition(connected?.database === identity?.database &&
-    connected?.username === identity?.username,
+    connected?.username === expectedConnectedDatabaseUsername(identity),
   "Connected PostgreSQL identity does not match the pinned target.", code);
   return connected;
 };
@@ -561,12 +576,15 @@ export const resolveApprovedSnapshotPath = (
   return snapshotRealPath;
 };
 
-const verifySnapshotProof = ({ snapshotPath, state, env = process.env }) => {
+const verifySnapshotProof = async ({ snapshotPath, state, env = process.env }) => {
   const resolved = resolveApprovedSnapshotPath(snapshotPath);
-  const secret = String(env.TOURNEY_SNAPSHOT_KEY || "");
-  requireCondition(Buffer.byteLength(secret) >= 32,
-    "Snapshot key is unavailable.", "LIVE_DRIFT_SNAPSHOT_KEY_INVALID");
   const encrypted = fs.readFileSync(resolved);
+  let secret;
+  try {
+    secret = await readSnapshotSecret(encrypted, env);
+  } catch {
+    throw repairError("Snapshot key is unavailable.", "LIVE_DRIFT_SNAPSHOT_KEY_INVALID");
+  }
   const snapshot = decryptSnapshot({ encrypted, secret });
   validateHostedSnapshot({
     data: {
@@ -974,6 +992,9 @@ const safePreflightOutput = (state, authorizationHash) => ({
 export const main = async (argv = process.argv.slice(2)) => {
   const args = parseLiveDriftArguments(argv);
   loadPrivateEnvironment(args.envPath);
+  if (args.useSupabaseDatabaseUrlStdin) {
+    await loadSupabaseDatabaseTargetFromStdin();
+  }
   const identities = assertRuntimeEnvironment(process.env);
   const authorizationHash = buildLiveDriftAuthorizationHash();
   if (args.action !== "preflight") {
@@ -1004,7 +1025,7 @@ export const main = async (argv = process.argv.slice(2)) => {
         legacy,
         allowConflictId: expectedConflictId,
       });
-      const snapshot = verifySnapshotProof({ snapshotPath: args.snapshotPath, state });
+      const snapshot = await verifySnapshotProof({ snapshotPath: args.snapshotPath, state });
       const conflictId = buildLiveDriftConflictId(state.collision.source_hash);
       const details = conflictDetails(state, authorizationHash);
       await insertLegacyConflict({ legacy, conflictId, details, state });
