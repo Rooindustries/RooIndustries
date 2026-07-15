@@ -1,6 +1,7 @@
 const mockInspect = jest.fn();
 const mockCapture = jest.fn();
 const mockReadChunk = jest.fn();
+const mockReadDatabaseTarget = jest.fn();
 const mockSeal = jest.fn();
 
 jest.mock("next/server", () => ({
@@ -16,6 +17,7 @@ jest.mock("../server/safeErrorLog", () => ({ logSafeError: jest.fn() }));
 jest.mock("../server/tourney/snapshotTransport", () => ({
   inspectSnapshotTransport: (...args) => mockInspect(...args),
   captureSnapshotTransport: (...args) => mockCapture(...args),
+  readSnapshotDatabaseTarget: (...args) => mockReadDatabaseTarget(...args),
   readSnapshotTransportChunk: (...args) => mockReadChunk(...args),
 }));
 jest.mock("../server/tourney/snapshotTransportCrypto", () => ({
@@ -80,6 +82,31 @@ describe("Tourney snapshot transport route", () => {
     expect(body).toMatchObject({ ok: true, envelope: { sealed: true } });
     expect(mockInspect).toHaveBeenCalledWith({ expectedTargets: known });
     expect(JSON.stringify(body)).not.toContain(supabaseDatabase);
+  });
+
+  test("returns the database target only inside the sealed envelope", async () => {
+    const supabaseDatabaseUrl = [
+      "postgresql://postgres.project",
+      ":fixture-value",
+      "@pooler.supabase.com:5432/postgres?sslmode=require",
+    ].join("");
+    mockReadDatabaseTarget.mockResolvedValue({
+      supabaseDatabaseUrl,
+      expectedFingerprint: fingerprints.supabaseDatabase,
+    });
+    const response = await POST(request({
+      action: "database-target",
+      expectedTargets: fingerprints,
+    }));
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(mockReadDatabaseTarget).toHaveBeenCalledWith({
+      expectedTargets: fingerprints,
+    });
+    expect(mockSeal).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.any(Buffer),
+    }));
+    expect(JSON.stringify(body)).not.toContain(supabaseDatabaseUrl);
   });
 
   test("returns only sealed capture metadata and sealed bounded chunks", async () => {
