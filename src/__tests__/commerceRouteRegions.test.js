@@ -13,6 +13,7 @@ const COMMERCE_PATTERNS = [
 const TOURNEY_PATTERNS = [
   "app/api/tourney/**/*",
   "app/api/admin/tourney-*/route.js",
+  "app/api/supabase/tourney-shadow/route.js",
   "app/tourney/**/*",
 ];
 
