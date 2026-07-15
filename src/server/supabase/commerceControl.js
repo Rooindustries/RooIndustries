@@ -30,24 +30,25 @@ export const getCommerceControl = async ({
   return normalizeControl(data);
 };
 
-export const assertCommerceStartAllowed = async ({
+const assertCommerceAllowed = async ({
   env = process.env,
   client,
+  pauseMessage,
 } = {}) => {
   const policy = resolveSupabaseRuntimePolicy(env);
+  if (policy.commerceStartsPaused) {
+    throw unavailable(
+      pauseMessage,
+      "COMMERCE_STARTS_PAUSED"
+    );
+  }
+
   if (policy.commercePrimaryBackend !== "supabase") {
     return {
       primaryBackend: policy.commercePrimaryBackend,
       generation: policy.commerceFailoverGeneration,
-      startsPaused: policy.commerceStartsPaused,
+      startsPaused: false,
     };
-  }
-
-  if (policy.commerceStartsPaused) {
-    throw unavailable(
-      "New commerce starts are temporarily paused.",
-      "COMMERCE_STARTS_PAUSED"
-    );
   }
 
   const control = await getCommerceControl({ ...(client ? { client } : {}) });
@@ -65,9 +66,21 @@ export const assertCommerceStartAllowed = async ({
   }
   if (control.startsPaused) {
     throw unavailable(
-      "New commerce starts are temporarily paused.",
+      pauseMessage,
       "COMMERCE_STARTS_PAUSED"
     );
   }
   return control;
 };
+
+export const assertCommerceStartAllowed = (options = {}) =>
+  assertCommerceAllowed({
+    ...options,
+    pauseMessage: "New commerce starts are temporarily paused.",
+  });
+
+export const assertCommerceWriteAllowed = (options = {}) =>
+  assertCommerceAllowed({
+    ...options,
+    pauseMessage: "Commerce changes are temporarily paused.",
+  });

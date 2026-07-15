@@ -1,10 +1,17 @@
 import { createDataClient as createClient } from "../../data/documentClient.js";
 import bcrypt from "bcryptjs";
 import crypto from "node:crypto";
-import { setReferralSessionCookie } from "./auth.js";
+import {
+  isActiveReferralFallbackAuthority,
+  readReferralFallbackAuthority,
+  setReferralSessionCookie,
+} from "./auth.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import { logSafeError } from "../../safeErrorLog.js";
-import { shouldUseSupabaseForAccount } from "../../supabase/runtime.js";
+import {
+  resolveSupabaseRuntimePolicy,
+  shouldUseSupabaseForAccount,
+} from "../../supabase/runtime.js";
 import { authenticateSupabaseAccount } from "../../supabase/accounts.js";
 import {
   clearLegacySupabaseSession,
@@ -46,7 +53,13 @@ export default async function handler(req, res) {
       return;
     }
 
-    if (shouldUseSupabaseForAccount({ identifier: normalizedIdentifier })) {
+    const policy = resolveSupabaseRuntimePolicy();
+    const manualFallback =
+      policy.primaryBackend === "sanity" && policy.cutoverEnabled;
+    if (
+      !manualFallback &&
+      shouldUseSupabaseForAccount({ identifier: normalizedIdentifier })
+    ) {
       const result = await authenticateSupabaseAccount({
         identifier: normalizedIdentifier,
         password: normalizedPassword,
@@ -166,24 +179,37 @@ export default async function handler(req, res) {
       }
     }
 
-    await clearLegacySupabaseSession({ req, res }).catch(() => {});
-    let bridgeAccount = null;
-    try {
-      const bridge = await authenticateSupabaseAccount({
-        identifier: normalizedIdentifier,
-        password: normalizedPassword,
-        requiredRoles: ["creator"],
-      });
-      if (bridge.ok) {
-        bridgeAccount = bridge.account;
-        await installLegacySupabaseSession({
-          req,
-          res,
-          session: bridge.session,
+    let fallbackAuthority = null;
+    if (manualFallback) {
+      try {
+        fallbackAuthority = await readReferralFallbackAuthority({
+          legacyCreatorId: referral._id,
+        });
+      } catch (error) {
+        logSafeError("Referral fallback authority read failed", error);
+        return res.status(503).json({
+          ok: false,
+          error: "Login is temporarily unavailable. Please try again shortly.",
         });
       }
-    } catch {
-      // Sanity remains the compatibility authority until this account is projected.
+      if (!fallbackAuthority) {
+        return res.status(503).json({
+          ok: false,
+          error: "Login is temporarily unavailable. Please try again shortly.",
+        });
+      }
+      if (
+        !isActiveReferralFallbackAuthority(fallbackAuthority, {
+          legacyCreatorId: referral._id,
+          referralCode: referral.slug?.current,
+        })
+      ) {
+        return res.status(401).json({
+          ok: false,
+          error:
+            "Invalid login details. Use Forgot Password if you need to reset access.",
+        });
+      }
     }
 
     setReferralSessionCookie(
@@ -191,9 +217,10 @@ export default async function handler(req, res) {
       {
         referralId: referral._id,
         code: referral.slug?.current || code,
-        authBackend: bridgeAccount ? "supabase" : "sanity",
-        principalId: bridgeAccount?.principal_id || "",
-        sessionVersion: bridgeAccount?.session_version || 1,
+        authBackend: "sanity",
+        principalId: fallbackAuthority?.principalId || "",
+        sessionVersion: fallbackAuthority?.principalSessionVersion || 1,
+        credentialVersion: fallbackAuthority?.credentialVersion || 1,
       },
       Boolean(rememberMe)
     );

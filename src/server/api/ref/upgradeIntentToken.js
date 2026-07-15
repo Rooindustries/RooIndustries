@@ -92,8 +92,8 @@ export const verifyUpgradeIntentToken = ({
     }
     if (
       cutoverGeneration !== undefined &&
-      payload.gen !== undefined &&
-      Number(payload.gen) !== Math.max(0, Number(cutoverGeneration) || 0)
+      (payload.gen === undefined ||
+        Number(payload.gen) !== Math.max(0, Number(cutoverGeneration) || 0))
     ) {
       return null;
     }

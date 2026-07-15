@@ -29,6 +29,12 @@ const loadHandler = async ({ authorized = true } = {}) => {
     return { httpStatus: 200, body: { ok: true, summary: { checked: 1 } } };
   });
   const reconcileBookingEmailDispatches = jest.fn(async () => ({}));
+  const reconcileReferralEmailDispatches = jest.fn(async () => ({
+    claimed: 0,
+    sent: 0,
+    retry: 0,
+    deadLetter: 0,
+  }));
   const cleanupExpiredRateLimitBuckets = jest.fn(async () => 0);
   const reconcileCredentialOperations = jest.fn(async () => {
     events.push("credentials");
@@ -52,6 +58,12 @@ const loadHandler = async ({ authorized = true } = {}) => {
     mirrored: 3,
     failed: 0,
   });
+  const reconcileDocumentMirror = jest.fn().mockResolvedValue({
+    supported: true,
+    attempted: 2,
+    applied: 2,
+    deadLettered: 0,
+  });
 
   jest.doMock("../server/safeErrorLog.js", () => ({
     logSafeError: jest.fn(),
@@ -71,6 +83,9 @@ const loadHandler = async ({ authorized = true } = {}) => {
   jest.doMock("../server/api/ref/bookingEmails.js", () => ({
     reconcileBookingEmailDispatches,
   }));
+  jest.doMock("../server/api/ref/referralEmailDispatches.js", () => ({
+    reconcileReferralEmailDispatches,
+  }));
   jest.doMock("../server/supabase/adminClient.js", () => ({
     createSupabaseAdminClient: jest.fn(() => ({ rpc: adminRpc })),
     isSupabaseAdminConfigured: jest.fn(() => true),
@@ -87,6 +102,11 @@ const loadHandler = async ({ authorized = true } = {}) => {
       shadowClient: null,
     })),
   }));
+  jest.doMock("../server/data/documentClient.js", () => ({
+    createDocumentWriteClient: jest.fn(() => ({
+      reconcileReverseMirror: reconcileDocumentMirror,
+    })),
+  }));
 
   const handler = require("../server/api/payment/reconcile.js").default;
   return {
@@ -94,12 +114,14 @@ const loadHandler = async ({ authorized = true } = {}) => {
     syncSanityCommerceChanges,
     reconcilePaymentSessions,
     reconcileBookingEmailDispatches,
+    reconcileReferralEmailDispatches,
     cleanupExpiredRateLimitBuckets,
     events,
     adminRpc,
     reconcileCredentialOperations,
     runTourneyReconciliation,
     reconcileReverseMirror,
+    reconcileDocumentMirror,
   };
 };
 
@@ -119,6 +141,7 @@ describe("payment reconciliation route authorization", () => {
     expect(loaded.syncSanityCommerceChanges).not.toHaveBeenCalled();
     expect(loaded.reconcilePaymentSessions).not.toHaveBeenCalled();
     expect(loaded.reconcileReverseMirror).not.toHaveBeenCalled();
+    expect(loaded.reconcileReferralEmailDispatches).not.toHaveBeenCalled();
   });
 
   test("mirror-only scope drains the outbox without payments or emails", async () => {
@@ -143,15 +166,27 @@ describe("payment reconciliation route authorization", () => {
           mirrored: 3,
           failed: 0,
         },
+        documentMirror: {
+          supported: true,
+          attempted: 2,
+          applied: 2,
+          deadLettered: 0,
+        },
       },
     });
     expect(loaded.reconcileReverseMirror).toHaveBeenCalledWith({
       limit: 100,
       maxBatches: 10,
     });
+    expect(loaded.reconcileDocumentMirror).toHaveBeenCalledWith({
+      limit: 100,
+      maxBatches: 10,
+      budgetMs: 60_000,
+    });
     expect(loaded.syncSanityCommerceChanges).not.toHaveBeenCalled();
     expect(loaded.reconcilePaymentSessions).not.toHaveBeenCalled();
     expect(loaded.reconcileBookingEmailDispatches).not.toHaveBeenCalled();
+    expect(loaded.reconcileReferralEmailDispatches).not.toHaveBeenCalled();
     expect(loaded.cleanupExpiredRateLimitBuckets).not.toHaveBeenCalled();
   });
 
@@ -235,6 +270,38 @@ describe("payment reconciliation route authorization", () => {
     );
   });
 
+  test("runs referral email recovery even when payment reconciliation fails", async () => {
+    const loaded = await loadHandler();
+    loaded.reconcilePaymentSessions.mockResolvedValue({
+      httpStatus: 503,
+      body: {
+        ok: false,
+        error: "Payment reconciliation is temporarily unavailable.",
+        summary: {},
+      },
+    });
+    loaded.reconcileReferralEmailDispatches.mockResolvedValue({
+      claimed: 1,
+      sent: 1,
+      retry: 0,
+      deadLetter: 0,
+    });
+    const { response, state } = createResponse();
+
+    await loaded.handler({ method: "GET", headers: {} }, response);
+
+    expect(state.status).toBe(503);
+    expect(loaded.reconcileReferralEmailDispatches).toHaveBeenCalledWith({
+      limit: 10,
+    });
+    expect(state.body.summary.referralEmailRecovery).toEqual({
+      claimed: 1,
+      sent: 1,
+      retry: 0,
+      deadLetter: 0,
+    });
+  });
+
   test("runs the Tourney worker independently on the shared payment schedule", async () => {
     const previous = process.env.SUPABASE_SOCIAL_AUTH_ENABLED;
     const previousHardening = process.env.TOURNEY_HARDENING_V4_ENABLED;
@@ -252,6 +319,11 @@ describe("payment reconciliation route authorization", () => {
       expect(loaded.runTourneyReconciliation).toHaveBeenCalledWith({
         budgetMs: 90_000,
       });
+      expect(loaded.reconcileDocumentMirror).toHaveBeenCalledWith({
+        limit: 25,
+        maxBatches: 4,
+        budgetMs: 30_000,
+      });
       expect(loaded.adminRpc).toHaveBeenCalledWith(
         "roo_reconcile_account_security",
         { p_guild_id: null }
@@ -268,5 +340,38 @@ describe("payment reconciliation route authorization", () => {
       if (previousGuild === undefined) delete process.env.DISCORD_GUILD_ID;
       else process.env.DISCORD_GUILD_ID = previousGuild;
     }
+  });
+
+  test("runs document recovery even when payment reconciliation fails", async () => {
+    const loaded = await loadHandler();
+    loaded.reconcilePaymentSessions.mockResolvedValue({
+      httpStatus: 503,
+      body: {
+        ok: false,
+        error: "Payment reconciliation is temporarily unavailable.",
+        summary: {},
+      },
+    });
+    const { response, state } = createResponse();
+
+    await loaded.handler({ method: "GET", headers: {} }, response);
+
+    expect(state.status).toBe(503);
+    expect(state.body).toMatchObject({
+      ok: false,
+      summary: {
+        documentMirror: {
+          supported: true,
+          attempted: 2,
+          applied: 2,
+          deadLettered: 0,
+        },
+      },
+    });
+    expect(loaded.reconcileDocumentMirror).toHaveBeenCalledWith({
+      limit: 25,
+      maxBatches: 4,
+      budgetMs: 30_000,
+    });
   });
 });

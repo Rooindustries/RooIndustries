@@ -81,6 +81,14 @@ export const resolveSupabaseRuntimePolicy = (env = process.env) => {
     );
   }
   if (
+    requestedPrimary === "supabase" &&
+    !reverseMirrorEnabled
+  ) {
+    throw new Error(
+      "Supabase primary writes require SANITY_REVERSE_MIRROR_WRITES=1."
+    );
+  }
+  if (
     (requestedCommercePrimary === "supabase" || commerceCanaryPercentage > 0) &&
     !reverseMirrorEnabled
   ) {

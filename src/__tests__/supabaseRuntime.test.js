@@ -35,6 +35,26 @@ describe("Supabase runtime selection", () => {
     ).toThrow("SUPABASE_SHADOW_WRITES");
   });
 
+  test("requires the rollback mirror for the global Supabase primary", () => {
+    expect(() =>
+      resolveSupabaseRuntimePolicy({
+        DATA_PRIMARY_BACKEND: "supabase",
+        SUPABASE_CUTOVER_ENABLED: "1",
+      })
+    ).toThrow("SANITY_REVERSE_MIRROR_WRITES");
+
+    expect(
+      resolveSupabaseRuntimePolicy({
+        DATA_PRIMARY_BACKEND: "supabase",
+        SUPABASE_CUTOVER_ENABLED: "1",
+        SANITY_REVERSE_MIRROR_WRITES: "1",
+      })
+    ).toMatchObject({
+      primaryBackend: "supabase",
+      reverseMirrorEnabled: true,
+    });
+  });
+
   test("moves commerce without moving CMS, Auth, or Tourney", () => {
     expect(
       resolveSupabaseRuntimePolicy({
