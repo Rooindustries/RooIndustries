@@ -163,6 +163,17 @@ export const SUPABASE_FULL_REQUIRED_RELATIONS = Object.freeze([
   "vault.tourney_snapshot_keys",
 ]);
 
+export const SUPABASE_FULL_SNAPSHOT_EXCLUDED_RELATIONS = Object.freeze([
+  "migration.tourney_pre_cutover_snapshots",
+  "vault.tourney_snapshot_keys",
+]);
+
+export const SUPABASE_FULL_CAPTURE_REQUIRED_RELATIONS = Object.freeze(
+  SUPABASE_FULL_REQUIRED_RELATIONS.filter(
+    (relation) => !SUPABASE_FULL_SNAPSHOT_EXCLUDED_RELATIONS.includes(relation)
+  )
+);
+
 export const SUPABASE_FULL_PRE_EXPAND_MIGRATION_VERSION = "20260714230345";
 export const SUPABASE_FULL_EXPANDED_MINIMUM_MIGRATION_VERSION = "20260715120000";
 export const SUPABASE_FULL_EXPANDED_MIGRATION_NAMES = Object.freeze([
@@ -185,6 +196,7 @@ export const SUPABASE_FULL_PRE_EXPAND_DEFERRED_RELATIONS = Object.freeze([
 export const SUPABASE_FULL_PRE_EXPAND_PROFILE =
   "roo-supabase-pre-expand-20260714230345-v1";
 export const SUPABASE_FULL_EXPANDED_PROFILE = "roo-supabase-expanded-v1";
+export const SUPABASE_FULL_COMPACT_EXPANDED_PROFILE = "roo-supabase-expanded-v2";
 
 export const canonicalizeSnapshotJson = (value) => {
   if (Array.isArray(value)) return value.map(canonicalizeSnapshotJson);
@@ -249,8 +261,26 @@ export const resolveFullLogicalSnapshotProfile = ({
   const missing = SUPABASE_FULL_REQUIRED_RELATIONS.filter(
     (relation) => !names.includes(relation)
   );
+  const compactMissing = SUPABASE_FULL_CAPTURE_REQUIRED_RELATIONS.filter(
+    (relation) => !names.includes(relation)
+  );
+  const excludesSnapshotArtifacts = SUPABASE_FULL_SNAPSHOT_EXCLUDED_RELATIONS.every(
+    (relation) => !names.includes(relation)
+  );
   const expandedMigrationsPresent = validMigrationNames &&
     SUPABASE_FULL_EXPANDED_MIGRATION_NAMES.every((name) => migrationNames.includes(name));
+  if (
+    compactMissing.length === 0 &&
+    excludesSnapshotArtifacts &&
+    version > SUPABASE_FULL_PRE_EXPAND_MIGRATION_VERSION &&
+    expandedMigrationsPresent
+  ) {
+    return {
+      contractProfile: SUPABASE_FULL_COMPACT_EXPANDED_PROFILE,
+      deferredRelations: [],
+      requiredRelations: [...SUPABASE_FULL_CAPTURE_REQUIRED_RELATIONS],
+    };
+  }
   if (
     missing.length === 0 &&
     version > SUPABASE_FULL_PRE_EXPAND_MIGRATION_VERSION &&
