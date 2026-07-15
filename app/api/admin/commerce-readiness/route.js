@@ -123,12 +123,12 @@ const derivePortClosureBlockers = (portClosure) => {
   );
   for (const [key, blocker] of [
     ["creatorProjectionDrift", "creator_projection_drift"],
-    ["duplicatePaymentAliases", "duplicate_payment_aliases"],
+    ["invalidPaymentAliases", "invalid_payment_aliases"],
     ["staleProviderRecovery", "stale_provider_recovery"],
     ["capturedWithoutBooking", "port_captured_without_booking"],
     ["reciprocalLinkMismatches", "reciprocal_link_mismatches"],
     ["providerRecoveryCases", "provider_recovery_cases"],
-    ["rescheduleCases", "reschedule_cases"],
+    ["unnotifiedRescheduleCases", "unnotified_reschedule_cases"],
   ]) {
     requireCount(portClosure, key, `portClosure.${key}`, blocker);
   }

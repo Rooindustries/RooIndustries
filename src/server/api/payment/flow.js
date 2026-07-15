@@ -108,6 +108,12 @@ const isFutureIso = (value) => {
   return Number.isFinite(timestamp) && timestamp > Date.now();
 };
 
+const isDefinitiveMissingProviderOrder = (inspection = {}) =>
+  inspection.state === "unavailable" &&
+  /^(paypal|razorpay)_lookup_failed_404$/.test(
+    String(inspection.reason || "").trim().toLowerCase()
+  );
+
 const fromSubunits = (value, currency = "USD") => {
   const factor = String(currency || "").trim().toUpperCase() === "JPY" ? 1 : 100;
   return toMoney(Number(value || 0) / factor);
@@ -3519,6 +3525,33 @@ const scheduleProviderRecoveryCheck = async ({
   });
 };
 
+const closeExpiredLateCaptureWatch = async ({ client, record }) => {
+  const reason = "provider_order_not_found_after_late_capture_watch";
+  try {
+    return await patchPaymentRecord({
+      client,
+      record,
+      revisionGuard: true,
+      set: {
+        recoveryReason: reason,
+        lateCaptureWatchUntil: "",
+        nextRecoveryAt: "",
+        providerRecoveryTerminal: true,
+        providerRecoveryTerminalAt: nowIso(),
+        providerRecoveryTerminalReason: reason,
+      },
+      event: buildPaymentRecordEvent({
+        status: PAYMENT_STATUS_ABANDONED,
+        source: "reconcile",
+        reason,
+      }),
+    });
+  } catch (error) {
+    if (!isConflictError(error)) throw error;
+    return (await getPaymentRecordById(client, record._id)) || record;
+  }
+};
+
 const inspectProviderOrderForRecovery = async (record = {}) => {
   const provider = String(record.provider || "").trim().toLowerCase();
   const providerOrderId = String(record.providerOrderId || "").trim();
@@ -4106,6 +4139,12 @@ export const reconcilePaymentSessions = async ({
         } else {
           summary.recovery += 1;
         }
+      } else if (
+        isDefinitiveMissingProviderOrder(inspection) &&
+        !isFutureIso(record.lateCaptureWatchUntil)
+      ) {
+        await closeExpiredLateCaptureWatch({ client, record });
+        summary.abandoned += 1;
       } else {
         await scheduleProviderRecoveryCheck({
           client,
@@ -4295,6 +4334,29 @@ export const reconcilePaymentSessions = async ({
         summary.pending += 1;
         continue;
       } else {
+        if (
+          isDefinitiveMissingProviderOrder(inspection) &&
+          createdAgeMinutes >= PAYMENT_HOLD_MINUTES &&
+          !String(record.providerPaymentId || "").trim()
+        ) {
+          const abandoned = await abandonStartedPaymentRecord({
+            client,
+            record,
+            reason: "provider_order_not_found_after_expiry",
+            releaseCouponReservation,
+          });
+          if (
+            String(abandoned?.paymentRecord?.status || "")
+              .trim()
+              .toLowerCase() === PAYMENT_STATUS_ABANDONED &&
+            abandoned?.paymentRecord?.resourceReleasePending !== true
+          ) {
+            summary.abandoned += 1;
+          } else {
+            summary.recovery += 1;
+          }
+          continue;
+        }
         await markRetryableFinalizeFailure({
           client,
           record,
