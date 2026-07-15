@@ -315,13 +315,22 @@ export const captureFullLogicalSnapshotTransaction = async ({
     throw failure("TOURNEY_SNAPSHOT_MIGRATION_LEDGER_MISSING");
   }
   const [migration] = await transaction`
-    select max(version)::text source_migration_version
+    select
+      max(version)::text source_migration_version,
+      coalesce(
+        array_agg(distinct name order by name) filter(where name is not null),
+        '{}'::text[]
+      ) source_migration_names
     from supabase_migrations.schema_migrations
   `;
   const sourceMigrationVersion = String(migration?.source_migration_version || "");
+  const sourceMigrationNames = Array.isArray(migration?.source_migration_names)
+    ? migration.source_migration_names.map((name) => String(name))
+    : [];
   const profile = resolveFullLogicalSnapshotProfile({
     relationNames: catalogRelations,
     sourceMigrationVersion,
+    sourceMigrationNames,
   });
   const relationHashes = {};
   for (const [relation, rowsText] of Object.entries(relationPayloads)) {
@@ -335,6 +344,7 @@ export const captureFullLogicalSnapshotTransaction = async ({
     capturedAt: new Date(clock.captured_at).toISOString(),
     sourceSnapshotId: partialProof.snapshot_id,
     sourceMigrationVersion,
+    sourceMigrationNames,
     contractProfile: profile.contractProfile,
     schemas: [...SUPABASE_FULL_SNAPSHOT_SCHEMAS],
     requiredRelations: profile.requiredRelations,
