@@ -105,6 +105,18 @@ describe("deterministic Tourney live-drift repair", () => {
     expect(scriptSource).not.toMatch(/update\s+tourney_(?:players|player_tokens|discord_role_assignments)/i);
   });
 
+  test("casts UUID identifiers before applying PostgreSQL aggregates", () => {
+    expect(scriptSource).toContain("min(linked_principal_id::text) linked_principal_id");
+    expect(scriptSource).toContain("min(canonical_principal_id::text) canonical_principal_id");
+    expect(scriptSource).toContain("min(identity_link_id::text) identity_link_id");
+    expect(scriptSource).not.toMatch(/min\((?:linked_principal_id|canonical_principal_id|identity_link_id)\)::text/);
+  });
+
+  test("does not serialize the concurrent inspection queries onto one connection", () => {
+    expect(scriptSource).toContain("const LIVE_DRIFT_CONNECTION_LIMIT = 7;");
+    expect(scriptSource).toContain("max: LIVE_DRIFT_CONNECTION_LIMIT");
+  });
+
   test("allows apply to resume after the deterministic fallback audit was committed", () => {
     expect(scriptSource).toContain("allowConflictId: expectedConflictId");
     expect(scriptSource).toContain("assertLiveDriftLegacyDatabaseGate(legacy, { allowConflictId })");
