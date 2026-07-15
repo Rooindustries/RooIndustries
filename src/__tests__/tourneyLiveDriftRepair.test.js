@@ -216,7 +216,7 @@ describe("deterministic Tourney live-drift repair", () => {
       const os=(await import('node:os')).default;
       const path=(await import('node:path')).default;
       const home=fs.mkdtempSync(path.join(os.tmpdir(),'live-drift-snapshot-'));
-      const root=path.join(home,'Documents','Codex','Tourney Cutover');
+      const root=path.join(home,'Servi','snapshots','Tourney Cutover');
       fs.mkdirSync(root,{recursive:true});
       const approved=path.join(root,'verified.snapshot.enc');
       const outside=path.join(home,'outside.snapshot.enc');
