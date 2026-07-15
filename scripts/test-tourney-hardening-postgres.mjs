@@ -23,6 +23,7 @@ import {
 import { TOURNEY_MIRROR_CONTRACT } from "../src/server/tourney/mirrorContract.js";
 import {
   stableSnapshotJson,
+  SUPABASE_FULL_EXPANDED_PROFILE,
   SUPABASE_FULL_REQUIRED_RELATIONS,
   SUPABASE_FULL_SNAPSHOT_SCHEMAS,
 } from "../src/server/tourney/snapshotContract.js";
@@ -973,6 +974,28 @@ insert into tourney_external_operations(
     order by snapshot.captured_at desc,snapshot.id desc
     limit 1
   `;
+  await assert.rejects(
+    unsafeSupabase.begin((transaction) =>
+      captureFullLogicalSnapshotTransaction({
+        transaction,
+        partialProof: {
+          snapshot_id: partialSnapshot.snapshot_id,
+          table_counts: partialSnapshot.table_counts,
+        },
+        partialPayloadText: partialSnapshot.payload_text,
+      })
+    ),
+    (error) => error.code === "TOURNEY_SNAPSHOT_MIGRATION_LEDGER_MISSING",
+    "full logical snapshot accepted a missing migration ledger"
+  );
+  await unsafeSupabase.unsafe(`
+    create schema supabase_migrations;
+    create table supabase_migrations.schema_migrations(
+      version text primary key
+    );
+    insert into supabase_migrations.schema_migrations(version)
+    values('20260715130100')
+  `);
   const fullCapture = await unsafeSupabase.begin((transaction) =>
     captureFullLogicalSnapshotTransaction({
       transaction,
@@ -985,6 +1008,8 @@ insert into tourney_external_operations(
   );
   assert.match(String(fullCapture.snapshotId), /^[0-9a-f-]{36}$/i);
   assert.match(fullCapture.payloadSha256, /^[0-9a-f]{64}$/);
+  assert.equal(fullCapture.validation.contractProfile, "roo-supabase-expanded-v1");
+  assert.deepEqual(fullCapture.validation.deferredRelations, []);
   assert.equal(
     fullCapture.validation.relationCount >= SUPABASE_FULL_REQUIRED_RELATIONS.length,
     true
@@ -1188,8 +1213,15 @@ insert into accounts.discord_role_assignments(
       format: "roo-supabase-full-logical-snapshot-v1",
       capturedAt: "2026-07-15T00:00:00.000Z",
       sourceSnapshotId: "91000000-0000-4000-8000-000000000001",
+      sourceMigrationVersion: "20260715130100",
+      contractProfile: SUPABASE_FULL_EXPANDED_PROFILE,
       schemas: [...SUPABASE_FULL_SNAPSHOT_SCHEMAS],
       requiredRelations: [...SUPABASE_FULL_REQUIRED_RELATIONS],
+      deferredRelations: [],
+      catalogRelations: Object.keys(restoreRelations).sort(),
+      catalogSha256: crypto.createHash("sha256").update(
+        stableSnapshotJson(Object.keys(restoreRelations).sort())
+      ).digest("hex"),
       relationPayloads: Object.fromEntries(
         Object.entries(restoreRelations).map(([relation, rows]) => [
           relation,
