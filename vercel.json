@@ -28,6 +28,9 @@
     "app/api/admin/tourney-*/route.js": {
       "regions": ["dub1"]
     },
+    "app/api/supabase/tourney-shadow/route.js": {
+      "regions": ["dub1"]
+    },
     "app/tourney/**/*": {
       "regions": ["dub1"]
     }
