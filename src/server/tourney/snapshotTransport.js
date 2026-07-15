@@ -4,8 +4,8 @@ import postgres from "postgres";
 import migrationTargetSafety from "../supabase/migrationTargetSafety.cjs";
 import { buildTourneyPostgresOptions } from "./sqlClient.js";
 import {
-  SUPABASE_FULL_REQUIRED_RELATIONS,
   SUPABASE_FULL_SNAPSHOT_SCHEMAS,
+  resolveFullLogicalSnapshotProfile,
   stableSnapshotJson,
   TOURNEY_HOSTED_SNAPSHOT_RELATIONS,
   TOURNEY_LEGACY_SNAPSHOT_TABLES,
@@ -289,7 +289,11 @@ const readFullLogicalRelations = async (transaction) => {
   }
   relationPayloads["vault.tourney_snapshot_keys"] = vaultRow.rows_text;
   relationCounts["vault.tourney_snapshot_keys"] = vaultRow.row_count;
-  return { relationCounts, relationPayloads };
+  return {
+    catalogRelations: Object.keys(relationPayloads).sort(),
+    relationCounts,
+    relationPayloads,
+  };
 };
 
 export const captureFullLogicalSnapshotTransaction = async ({
@@ -297,7 +301,28 @@ export const captureFullLogicalSnapshotTransaction = async ({
   partialProof,
   partialPayloadText,
 }) => {
-  const { relationCounts, relationPayloads } = await readFullLogicalRelations(transaction);
+  const {
+    catalogRelations,
+    relationCounts,
+    relationPayloads,
+  } = await readFullLogicalRelations(transaction);
+  const [migrationLedger] = await transaction`
+    select pg_catalog.to_regclass(
+      'supabase_migrations.schema_migrations'
+    ) migration_ledger
+  `;
+  if (!migrationLedger?.migration_ledger) {
+    throw failure("TOURNEY_SNAPSHOT_MIGRATION_LEDGER_MISSING");
+  }
+  const [migration] = await transaction`
+    select max(version)::text source_migration_version
+    from supabase_migrations.schema_migrations
+  `;
+  const sourceMigrationVersion = String(migration?.source_migration_version || "");
+  const profile = resolveFullLogicalSnapshotProfile({
+    relationNames: catalogRelations,
+    sourceMigrationVersion,
+  });
   const relationHashes = {};
   for (const [relation, rowsText] of Object.entries(relationPayloads)) {
     relationHashes[relation] = sha256(rowsText);
@@ -309,8 +334,13 @@ export const captureFullLogicalSnapshotTransaction = async ({
     format: "roo-supabase-full-logical-snapshot-v1",
     capturedAt: new Date(clock.captured_at).toISOString(),
     sourceSnapshotId: partialProof.snapshot_id,
+    sourceMigrationVersion,
+    contractProfile: profile.contractProfile,
     schemas: [...SUPABASE_FULL_SNAPSHOT_SCHEMAS],
-    requiredRelations: [...SUPABASE_FULL_REQUIRED_RELATIONS],
+    requiredRelations: profile.requiredRelations,
+    deferredRelations: profile.deferredRelations,
+    catalogRelations,
+    catalogSha256: sha256(stableSnapshotJson(catalogRelations)),
     relationPayloads,
     relationCounts,
     relationHashes,
