@@ -570,7 +570,7 @@ export const resolveApprovedSnapshotPath = (
 ) => {
   requireCondition(path.isAbsolute(snapshotPath),
     "Verified snapshot path must be absolute.", "LIVE_DRIFT_SNAPSHOT_INVALID");
-  const approvedRoot = path.join(homeDirectory, "Documents", "Codex", "Tourney Cutover");
+  const approvedRoot = path.join(homeDirectory, "Servi", "snapshots", "Tourney Cutover");
   let rootRealPath;
   let snapshotRealPath;
   let snapshotStats;

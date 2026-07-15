@@ -55,8 +55,8 @@ const {
 } = migrationTargetSafety;
 const snapshotDirectory = path.join(
   os.homedir(),
-  "Documents",
-  "Codex",
+  "Servi",
+  "snapshots",
   "Tourney Cutover"
 );
 const isolatedEnvironmentPrefixes = [
