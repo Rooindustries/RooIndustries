@@ -344,6 +344,7 @@ describe("stored Tourney snapshot recovery", () => {
         writeTransportSnapshotArchive,
       } from ${JSON.stringify(moduleUrl("scripts/tourney-cutover.mjs"))};
       import {
+        SUPABASE_FULL_EXPANDED_MIGRATION_NAMES,
         SUPABASE_FULL_EXPANDED_PROFILE,
         SUPABASE_FULL_REQUIRED_RELATIONS,
         SUPABASE_FULL_SNAPSHOT_SCHEMAS,
@@ -380,6 +381,7 @@ describe("stored Tourney snapshot recovery", () => {
         capturedAt: "2026-07-15T05:32:33.727Z",
         sourceSnapshotId: "9f3bce71-174f-48f1-afe3-c22d62c89e73",
         sourceMigrationVersion: "20260715130100",
+        sourceMigrationNames: [...SUPABASE_FULL_EXPANDED_MIGRATION_NAMES],
         contractProfile: SUPABASE_FULL_EXPANDED_PROFILE,
         schemas: [...SUPABASE_FULL_SNAPSHOT_SCHEMAS],
         requiredRelations: [...SUPABASE_FULL_REQUIRED_RELATIONS],
