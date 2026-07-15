@@ -10,14 +10,18 @@ const COMMERCE_PATTERNS = [
   "app/api/ref/**/*",
 ];
 
-describe("commerce route regions", () => {
+const TOURNEY_PATTERNS = [
+  "app/api/tourney/**/*",
+  "app/api/admin/tourney-*/route.js",
+  "app/tourney/**/*",
+];
+
+describe("Supabase route regions", () => {
   test.each(COMMERCE_PATTERNS)("pins %s near Supabase", (pattern) => {
     expect(config.functions[pattern]).toEqual({ regions: ["dub1"] });
   });
 
-  test("does not move Tourney routes", () => {
-    expect(
-      Object.keys(config.functions).some((pattern) => pattern.includes("tourney"))
-    ).toBe(false);
+  test.each(TOURNEY_PATTERNS)("pins %s near Supabase", (pattern) => {
+    expect(config.functions[pattern]).toEqual({ regions: ["dub1"] });
   });
 });
