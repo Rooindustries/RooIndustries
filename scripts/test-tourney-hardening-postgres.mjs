@@ -21,7 +21,14 @@ import {
   runTourneyParity,
 } from "../src/server/tourney/store.js";
 import { TOURNEY_MIRROR_CONTRACT } from "../src/server/tourney/mirrorContract.js";
+import {
+  stableSnapshotJson,
+  SUPABASE_FULL_REQUIRED_RELATIONS,
+  SUPABASE_FULL_SNAPSHOT_SCHEMAS,
+} from "../src/server/tourney/snapshotContract.js";
+import { captureFullLogicalSnapshotTransaction } from "../src/server/tourney/snapshotTransport.js";
 import { getTourneySql } from "../src/server/tourney/sqlClient.js";
+import { verifyFullLogicalSnapshotRestore } from "./lib/logical-snapshot-restore.mjs";
 import {
   enqueueTourneyExternalOperation,
   claimTourneyExternalOperations,
@@ -928,6 +935,61 @@ insert into tourney_external_operations(
     (error) => error.code === "55000",
     "Supabase baseline recovery overwrote an existing active baseline set"
   );
+  for (const schema of SUPABASE_FULL_SNAPSHOT_SCHEMAS) {
+    const quotedSchema = `"${schema.replaceAll('"', '""')}"`;
+    const [existing] = await unsafeSupabase`
+      select exists(
+        select 1 from pg_catalog.pg_namespace where nspname=${schema}
+      ) present
+    `;
+    if (!existing.present) {
+      await unsafeSupabase.unsafe(`create schema ${quotedSchema}`);
+    }
+  }
+  for (const relation of SUPABASE_FULL_REQUIRED_RELATIONS) {
+    if (relation.startsWith("vault.")) continue;
+    const [schema, table] = relation.split(".");
+    const quotedSchema = `"${schema.replaceAll('"', '""')}"`;
+    const quotedTable = `"${table.replaceAll('"', '""')}"`;
+    const [existing] = await unsafeSupabase`
+      select pg_catalog.to_regclass(${relation}) is not null present
+    `;
+    if (!existing.present) {
+      await unsafeSupabase.unsafe(
+        `create table ${quotedSchema}.${quotedTable}(id text primary key)`
+      );
+    }
+  }
+  const [partialSnapshot] = await unsafeSupabase`
+    select
+      snapshot.id snapshot_id,
+      snapshot.table_counts,
+      extensions.pgp_sym_decrypt(
+        snapshot.ciphertext,
+        secret.decrypted_secret
+      ) payload_text
+    from migration.tourney_pre_cutover_snapshots snapshot
+    join vault.decrypted_secrets secret on secret.id=snapshot.key_secret_id
+    order by snapshot.captured_at desc,snapshot.id desc
+    limit 1
+  `;
+  const fullCapture = await unsafeSupabase.begin((transaction) =>
+    captureFullLogicalSnapshotTransaction({
+      transaction,
+      partialProof: {
+        snapshot_id: partialSnapshot.snapshot_id,
+        table_counts: partialSnapshot.table_counts,
+      },
+      partialPayloadText: partialSnapshot.payload_text,
+    })
+  );
+  assert.match(String(fullCapture.snapshotId), /^[0-9a-f-]{36}$/i);
+  assert.match(fullCapture.payloadSha256, /^[0-9a-f]{64}$/);
+  assert.equal(
+    fullCapture.validation.relationCount >= SUPABASE_FULL_REQUIRED_RELATIONS.length,
+    true
+  );
+  assert.equal(fullCapture.totalBytes > 0, true);
   await unsafeSupabase.end({ timeout: 5 });
 
   psql(
@@ -1092,8 +1154,9 @@ insert into accounts.discord_role_assignments(
   );
   process.stderr.write("[postgres17] schema v4 trigger bindings repaired\n");
 
-  const supabaseUrl = `postgres://127.0.0.1:${port}/supabase_fixture`;
-  const legacyUrl = `postgres://127.0.0.1:${port}/legacy_fixture`;
+  const fixtureCredentials = `${encodeURIComponent(databaseUser)}:fixture`;
+  const supabaseUrl = `postgres://${fixtureCredentials}@127.0.0.1:${port}/supabase_fixture`;
+  const legacyUrl = `postgres://${fixtureCredentials}@127.0.0.1:${port}/legacy_fixture`;
   const source = postgres(supabaseUrl, { max: 5, prepare: false });
   const target = postgres(legacyUrl, { max: 5, prepare: false });
   const env = {
@@ -1111,6 +1174,53 @@ insert into accounts.discord_role_assignments(
     DISCORD_PARTICIPANT_ROLE_ID: "710000000000000001",
     DISCORD_HOST_ROLE_ID: "710000000000000002",
   };
+
+  const restoreRelations = Object.fromEntries(
+    SUPABASE_FULL_REQUIRED_RELATIONS.map((relation) => [
+      relation,
+      relation === "auth.users"
+        ? [{ id: "81000000-0000-4000-8000-000000000001", email: "fixture@example.test" }]
+        : [],
+    ])
+  );
+  const restorePayload = {
+    full_logical: {
+      format: "roo-supabase-full-logical-snapshot-v1",
+      capturedAt: "2026-07-15T00:00:00.000Z",
+      sourceSnapshotId: "91000000-0000-4000-8000-000000000001",
+      schemas: [...SUPABASE_FULL_SNAPSHOT_SCHEMAS],
+      requiredRelations: [...SUPABASE_FULL_REQUIRED_RELATIONS],
+      relationPayloads: Object.fromEntries(
+        Object.entries(restoreRelations).map(([relation, rows]) => [
+          relation,
+          relation === "auth.users"
+            ? '[{"id": 9007199254740993, "email": "fixture@example.test"}]'
+            : stableSnapshotJson(rows),
+        ])
+      ),
+      relationCounts: Object.fromEntries(
+        Object.entries(restoreRelations).map(([relation, rows]) => [relation, rows.length])
+      ),
+      relationHashes: Object.fromEntries(
+        Object.entries(restoreRelations).map(([relation, rows]) => [
+          relation,
+          crypto.createHash("sha256").update(
+            relation === "auth.users"
+              ? '[{"id": 9007199254740993, "email": "fixture@example.test"}]'
+              : stableSnapshotJson(rows)
+          ).digest("hex"),
+        ])
+      ),
+    },
+  };
+  const restoredSnapshot = await verifyFullLogicalSnapshotRestore({
+    sql: source,
+    payload: restorePayload,
+  });
+  assert.equal(restoredSnapshot.postgresVersionNum >= 170000, true);
+  assert.equal(restoredSnapshot.relationCount, SUPABASE_FULL_REQUIRED_RELATIONS.length);
+  assert.equal(restoredSnapshot.rowCount, 1);
+  assert.equal(restoredSnapshot.canonicalRoundtripVerified, true);
 
   await assertSql(
     source,
@@ -4540,11 +4650,6 @@ insert into accounts.discord_role_assignments(
       )
     `;
   });
-  const legacyQueueFailureUrl = new URL(legacyUrl);
-  legacyQueueFailureUrl.searchParams.set(
-    "options",
-    "-c roo.tourney_mirror_apply=1"
-  );
   await assert.rejects(
     applyRegistrationDecision({
       tokenHash: "a".repeat(64),
@@ -4552,12 +4657,12 @@ insert into accounts.discord_role_assignments(
       purpose: "approve",
       actorUsername: "fixture",
       approvedRolePlay: "Damage",
-      env: {
-        ...failoverEnv,
-        TOURNEY_DATABASE_URL: legacyQueueFailureUrl.toString(),
-      },
+      env: failoverEnv,
     }),
-    (error) => error?.code === "TOURNEY_COMMAND_CONTEXT_REQUIRED",
+    (error) => (
+      error?.code === "TOURNEY_COMMAND_CONTEXT_REQUIRED" ||
+      (error?.code === "22023" && /mirror command context is required/i.test(error?.message || ""))
+    ),
     "legacy decision queue failure did not reject"
   );
   await assertSql(
@@ -4613,33 +4718,49 @@ insert into accounts.discord_role_assignments(
           'LegacyCapacity#3','Master','Damage','Damage','main','legacycapacitydamage',1)
     `;
   });
-  const legacyDirectUrl = new URL(legacyUrl);
-  legacyDirectUrl.searchParams.set(
-    "options",
-    "-c roo.tourney_command_id=fixture:legacy-direct-capacity " +
-      "-c roo.tourney_mirror_apply=1"
-  );
   const directLegacyEnv = {
     ...failoverEnv,
-    TOURNEY_DATABASE_URL: legacyDirectUrl.toString(),
+    TOURNEY_MIRROR_ENABLED: "0",
   };
   const directCapacityResults = await Promise.allSettled([
-    updateTourneyPlayerDetails({
-      playerId: "legacy-capacity-sub",
-      payload: {
-        displayName: "Legacy Capacity Sub",
-        twitchUsername: "legacycapacitysub",
-        teamName: "",
-        registrationPool: "main",
-      },
-      actorUsername: "fixture",
+    executeTourneyCommand({
+      commandId: "fixture:legacy-direct-capacity-details",
+      purpose: "players:update-details",
+      requestPayload: { playerId: "legacy-capacity-sub", registrationPool: "main" },
       env: directLegacyEnv,
+      maintenanceWhilePaused: true,
+      attemptExternalWork: false,
+      callback: async () => ({
+        status: 200,
+        body: await updateTourneyPlayerDetails({
+          playerId: "legacy-capacity-sub",
+          payload: {
+            displayName: "Legacy Capacity Sub",
+            twitchUsername: "legacycapacitysub",
+            teamName: "",
+            registrationPool: "main",
+          },
+          actorUsername: "fixture",
+          env: directLegacyEnv,
+        }),
+      }),
     }),
-    updateTourneyPlayerApprovedRole({
-      playerId: "legacy-capacity-damage",
-      rolePlay: "Tank",
-      actorUsername: "fixture",
+    executeTourneyCommand({
+      commandId: "fixture:legacy-direct-capacity-role",
+      purpose: "players:update-role",
+      requestPayload: { playerId: "legacy-capacity-damage", rolePlay: "Tank" },
       env: directLegacyEnv,
+      maintenanceWhilePaused: true,
+      attemptExternalWork: false,
+      callback: async () => ({
+        status: 200,
+        body: await updateTourneyPlayerApprovedRole({
+          playerId: "legacy-capacity-damage",
+          rolePlay: "Tank",
+          actorUsername: "fixture",
+          env: directLegacyEnv,
+        }),
+      }),
     }),
   ]);
   const [directCapacityState] = await target`
@@ -4660,9 +4781,16 @@ insert into accounts.discord_role_assignments(
   assert.equal(
     directCapacityResults.filter((result) => result.status === "fulfilled").length,
     1,
-    `direct legacy capacity mutations consumed the same final slot: ${JSON.stringify(
-      directCapacityState
-    )}`
+    `direct legacy capacity mutations consumed the same final slot: ${JSON.stringify({
+      state: directCapacityState,
+      results: directCapacityResults.map((result) => result.status === "fulfilled"
+        ? { status: result.status }
+        : {
+            status: result.status,
+            code: result.reason?.code,
+            message: result.reason?.message,
+          }),
+    })}`
   );
   assert.equal(
     directCapacityResults.filter((result) =>
@@ -4683,6 +4811,34 @@ insert into accounts.discord_role_assignments(
   await target.begin(async (sql) => {
     await sql`select set_config('roo.tourney_mirror_apply','1',true)`;
     await sql`delete from tourney_players where id like 'legacy-capacity-%'`;
+    await sql`
+      delete from tourney_mirror_outbox
+      where command_id in (
+        'fixture:legacy-direct-capacity-details',
+        'fixture:legacy-direct-capacity-role'
+      )
+    `;
+    await sql`
+      delete from tourney_external_operations
+      where command_id in (
+        'fixture:legacy-direct-capacity-details',
+        'fixture:legacy-direct-capacity-role'
+      )
+    `;
+    await sql`
+      delete from tourney_email_dispatches
+      where command_id in (
+        'fixture:legacy-direct-capacity-details',
+        'fixture:legacy-direct-capacity-role'
+      )
+    `;
+    await sql`
+      delete from tourney_command_receipts
+      where command_id in (
+        'fixture:legacy-direct-capacity-details',
+        'fixture:legacy-direct-capacity-role'
+      )
+    `;
     if (legacyCapacityConfig) {
       await sql`
         update tourney_registration_config set
@@ -5140,6 +5296,8 @@ insert into accounts.discord_role_assignments(
     mirrorApplied: firstMirror.applied,
     verified: [
       "URI-derived isolated libpq environment connection",
+      "full logical snapshot PostgreSQL 17 structural restore and canonical hashes",
+      "server-side full logical snapshot Vault storage and decrypted roundtrip",
       "pre-DDL activation safety on both databases",
       "legacy empty-search-path trigger repair",
       "fail-closed mirror trigger bodies and 17-table OID bindings",

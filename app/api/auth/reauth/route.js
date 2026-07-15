@@ -12,6 +12,7 @@ import {
   hashReauthToken,
   reauthCookie,
 } from "../../../../src/server/supabase/reauth";
+import { resolveSupabaseRuntimePolicy } from "../../../../src/server/supabase/runtime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,6 +48,24 @@ export async function POST(request) {
   const password = String(payload.password || "");
   if (!flows.has(flow) || !purposes.has(purpose) || !slots.has(slot) || (provider && !providers.has(provider))) {
     return noStore(NextResponse.json({ ok: false, error: "Reauthentication request is invalid." }, { status: 400 }));
+  }
+  const policy = resolveSupabaseRuntimePolicy();
+  if (
+    flow === "referral" &&
+    purpose === "change_password" &&
+    policy.primaryBackend === "sanity" &&
+    policy.cutoverEnabled
+  ) {
+    return noStore(
+      NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Password changes are temporarily unavailable during manual authentication failover.",
+        },
+        { status: 503 }
+      )
+    );
   }
   const response = NextResponse.json({ ok: true });
   try {

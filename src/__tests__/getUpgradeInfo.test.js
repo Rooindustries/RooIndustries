@@ -6,6 +6,7 @@ const mockCreateClient = jest.fn(() => ({
   getDocument: mockGetDocument,
   fetch: mockFetch,
 }));
+const mockAssertCommerceStartAllowed = jest.fn();
 
 jest.mock("@sanity/client", () => ({
   createClient: (...args) => mockCreateClient(...args),
@@ -13,6 +14,10 @@ jest.mock("@sanity/client", () => ({
 
 jest.mock("dotenv", () => ({
   config: jest.fn(),
+}));
+
+jest.mock("../../src/server/supabase/commerceControl.js", () => ({
+  assertCommerceStartAllowed: (...args) => mockAssertCommerceStartAllowed(...args),
 }));
 
 const createReq = (input = {}, method = "GET") => ({
@@ -97,6 +102,11 @@ beforeAll(() => {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockAssertCommerceStartAllowed.mockResolvedValue({
+    primaryBackend: "sanity",
+    generation: 0,
+    startsPaused: false,
+  });
   globalThis.__rooRateLimitBuckets?.clear?.();
 });
 
@@ -249,6 +259,70 @@ describe("getUpgradeInfo API", () => {
         targetPackageTitle: "",
       })
     ).toBeNull();
+  });
+
+  test("binds imported legacy bookings to the active commerce generation", async () => {
+    const previous = {
+      COMMERCE_PRIMARY_BACKEND: process.env.COMMERCE_PRIMARY_BACKEND,
+      COMMERCE_CUTOVER_ENABLED: process.env.COMMERCE_CUTOVER_ENABLED,
+      COMMERCE_FAILOVER_GENERATION: process.env.COMMERCE_FAILOVER_GENERATION,
+      SANITY_REVERSE_MIRROR_WRITES: process.env.SANITY_REVERSE_MIRROR_WRITES,
+    };
+    Object.assign(process.env, {
+      COMMERCE_PRIMARY_BACKEND: "supabase",
+      COMMERCE_CUTOVER_ENABLED: "1",
+      COMMERCE_FAILOVER_GENERATION: "1",
+      SANITY_REVERSE_MIRROR_WRITES: "1",
+    });
+
+    try {
+      mockAssertCommerceStartAllowed.mockResolvedValue({
+        primaryBackend: "supabase",
+        generation: 1,
+        startsPaused: false,
+      });
+      const booking = paidBooking({
+        backendOwner: "sanity",
+        cutoverGeneration: 0,
+      });
+      mockGetDocument.mockResolvedValue(booking);
+      setupFetch({ booking });
+      const res = createRes();
+
+      await getUpgradeInfo(
+        createReq({ id: booking._id, email: booking.email }, "POST"),
+        res
+      );
+
+      const { verifyUpgradeIntentToken } = require("../../src/server/api/ref/upgradeIntentToken");
+      expect(res.statusCode).toBe(200);
+      expect(
+        verifyUpgradeIntentToken({
+          token: res.body.upgradeIntentToken,
+          bookingId: booking._id,
+          email: booking.email,
+          targetPackageTitle: "Performance Vertex Max",
+          backend: "supabase",
+          cutoverGeneration: 1,
+        })
+      ).toBeTruthy();
+      expect(
+        verifyUpgradeIntentToken({
+          token: res.body.upgradeIntentToken,
+          bookingId: booking._id,
+          email: booking.email,
+          targetPackageTitle: "Performance Vertex Max",
+          backend: "sanity",
+          cutoverGeneration: 0,
+        })
+      ).toBeNull();
+      expect(mockAssertCommerceStartAllowed).toHaveBeenCalledTimes(1);
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
   });
 
   test("a verified upgrade snapshot stays bound after the browser token expires", () => {

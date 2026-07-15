@@ -40,6 +40,7 @@ jest.mock("../server/supabase/reverseMirroringClient", () => ({
 
 import {
   createDataClient,
+  createDocumentReadClient,
   createDocumentWriteClient,
 } from "../server/data/documentClient";
 import { createDownloadDataClient } from "../server/downloads/downloadAccess";
@@ -59,6 +60,9 @@ describe("Supabase document client wiring", () => {
       COMMERCE_CUTOVER_ENABLED: "1",
       SANITY_REVERSE_MIRROR_WRITES: "1",
       COMMERCE_FAILOVER_GENERATION: "3",
+      SANITY_PRIVATE_PROJECT_ID: "private-project",
+      SANITY_PRIVATE_DATASET: "private-dataset",
+      SANITY_PRIVATE_WRITE_TOKEN: "private-write-token",
       SUPABASE_URL: "https://project.supabase.co",
       SUPABASE_SECRET_KEY: "server-secret-placeholder",
     };
@@ -80,7 +84,50 @@ describe("Supabase document client wiring", () => {
       sanityClient,
       recoveryClient: adminClient,
     });
+    expect(mockCreateSanityClient).toHaveBeenCalledWith({
+      projectId: "private-project",
+      dataset: "private-dataset",
+      apiVersion: "2023-10-01",
+      token: "private-write-token",
+      useCdn: false,
+      perspective: "published",
+    });
   });
+
+  test.each([
+    ["global", "supabase", "sanity"],
+    ["commerce", "sanity", "supabase"],
+  ])(
+    "uses the private Sanity fallback for %s Supabase legacy clients",
+    (domain, globalBackend, commerceBackend) => {
+      const env = {
+        NODE_ENV: "test",
+        DATA_PRIMARY_BACKEND: globalBackend,
+        COMMERCE_PRIMARY_BACKEND: commerceBackend,
+        SUPABASE_CUTOVER_ENABLED: "1",
+        COMMERCE_CUTOVER_ENABLED: "1",
+        SANITY_REVERSE_MIRROR_WRITES: "1",
+        SANITY_PRIVATE_PROJECT_ID: "private-project",
+        SANITY_PRIVATE_DATASET: "private-dataset",
+        SANITY_PRIVATE_WRITE_TOKEN: "private-write-token",
+        SUPABASE_URL: "https://project.supabase.co",
+        SUPABASE_SECRET_KEY: "server-secret-placeholder",
+      };
+
+      expect(createDataClient(
+        { projectId: "public-project", dataset: "public", token: "public-token" },
+        { env, domain }
+      )).toBe(reverseMirroringClient);
+      expect(mockCreateSanityClient).toHaveBeenLastCalledWith({
+        projectId: "private-project",
+        dataset: "private-dataset",
+        apiVersion: "2023-10-01",
+        token: "private-write-token",
+        useCdn: false,
+        perspective: "published",
+      });
+    }
+  );
 
   test("forces an explicit Sanity write client under full Supabase", () => {
     const env = {
@@ -110,6 +157,87 @@ describe("Supabase document client wiring", () => {
     expect(mockCreateSupabaseDocumentClient).not.toHaveBeenCalled();
     expect(mockCreateReverseMirroringSupabaseClient).not.toHaveBeenCalled();
   });
+
+  test("rejects global Supabase writes without the rollback mirror", () => {
+    const env = {
+      NODE_ENV: "test",
+      DATA_PRIMARY_BACKEND: "supabase",
+      COMMERCE_PRIMARY_BACKEND: "sanity",
+      SUPABASE_CUTOVER_ENABLED: "1",
+    };
+
+    expect(() => createDocumentWriteClient({ env })).toThrow(
+      "SANITY_REVERSE_MIRROR_WRITES"
+    );
+    expect(mockCreateSupabaseAdminClient).not.toHaveBeenCalled();
+    expect(mockCreateSupabaseDocumentClient).not.toHaveBeenCalled();
+  });
+
+  test("uses the private Sanity target for manual fallback writes", () => {
+    const env = {
+      NODE_ENV: "test",
+      DATA_PRIMARY_BACKEND: "sanity",
+      COMMERCE_PRIMARY_BACKEND: "sanity",
+      SANITY_PRIVATE_PROJECT_ID: "private-project",
+      SANITY_PRIVATE_DATASET: "private-dataset",
+      SANITY_PRIVATE_WRITE_TOKEN: "private-write-token",
+    };
+
+    expect(createDataClient(
+      { projectId: "public-project", dataset: "public", token: "public-token" },
+      { env }
+    )).toBe(sanityClient);
+    expect(mockCreateSanityClient).toHaveBeenCalledWith({
+      projectId: "private-project",
+      dataset: "private-dataset",
+      apiVersion: "2023-10-01",
+      token: "private-write-token",
+      useCdn: false,
+      perspective: "published",
+    });
+  });
+
+  test.each([
+    [
+      "read",
+      () =>
+        createDocumentReadClient({
+          env: {
+            DATA_PRIMARY_BACKEND: "sanity",
+            SANITY_PRIVATE_PROJECT_ID: "private-project",
+            SANITY_DATASET: "public-dataset",
+            SANITY_READ_TOKEN: "public-read-token",
+          },
+        }),
+      "Sanity read access is not configured.",
+    ],
+    [
+      "write",
+      () =>
+        createDataClient(
+          {
+            projectId: "public-project",
+            dataset: "public-dataset",
+            token: "public-write-token",
+          },
+          {
+            env: {
+              DATA_PRIMARY_BACKEND: "sanity",
+              SANITY_PRIVATE_DATASET: "private-dataset",
+              SANITY_PROJECT_ID: "public-project",
+              SANITY_WRITE_TOKEN: "public-write-token",
+            },
+          }
+        ),
+      "Sanity write access is not configured.",
+    ],
+  ])(
+    "fails closed for a partial private Sanity %s target",
+    (name, create, error) => {
+      expect(create).toThrow(error);
+      expect(mockCreateSanityClient).not.toHaveBeenCalled();
+    }
+  );
 
   test.each([
     ["sanity", "sanity", "sanity"],
@@ -153,6 +281,7 @@ describe("Supabase document client wiring", () => {
       DATA_PRIMARY_BACKEND: "supabase",
       COMMERCE_PRIMARY_BACKEND: "sanity",
       SUPABASE_CUTOVER_ENABLED: "1",
+      SANITY_REVERSE_MIRROR_WRITES: "1",
       SANITY_PROJECT_ID: "sanity-project",
       SANITY_DATASET: "production",
       SANITY_WRITE_TOKEN: "sanity-write-token",

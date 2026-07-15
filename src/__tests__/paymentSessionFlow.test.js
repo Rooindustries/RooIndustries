@@ -2627,7 +2627,7 @@ describe("payment session flow", () => {
     expect(mockCreatePayPalOrder).not.toHaveBeenCalled();
 
     const acceptedQuote = await invokeQuote(authorizedPayload);
-    const acceptedStart = await startPaymentSession({
+    const staleStart = await startPaymentSession({
       body: { provider: "paypal", bookingPayload: authorizedPayload },
       client: mockClient,
       backend: "supabase",
@@ -2636,11 +2636,34 @@ describe("payment session flow", () => {
 
     expect(acceptedQuote.status).toBe(200);
     expect(acceptedQuote.body.quoteFingerprint).toHaveLength(64);
+    expect(staleStart).toMatchObject({
+      httpStatus: 403,
+      body: { ok: false, code: "upgrade_intent_invalid" },
+    });
+    expect(mockCreatePayPalOrder).not.toHaveBeenCalled();
+
+    const currentPayload = {
+      ...upgradePayload,
+      upgradeIntentToken: issueUpgradeIntentToken({
+        bookingId: originalOrderId,
+        email: upgradePayload.email,
+        targetPackageTitle: upgradePayload.packageTitle,
+        backend: "supabase",
+        cutoverGeneration: 9,
+      }),
+    };
+    const acceptedStart = await startPaymentSession({
+      body: { provider: "paypal", bookingPayload: currentPayload },
+      client: mockClient,
+      backend: "supabase",
+      cutoverGeneration: 9,
+    });
+
     expect(acceptedStart.httpStatus).toBe(200);
     expect(mockCreatePayPalOrder).toHaveBeenCalledTimes(1);
     expect(getOnlyPaymentRecord()).toMatchObject({
       backendOwner: "supabase",
-      cutoverGeneration: 4,
+      cutoverGeneration: 9,
     });
   });
 
@@ -2749,6 +2772,97 @@ describe("payment session flow", () => {
       })
     ).toBeTruthy();
   });
+
+  test.each([
+    {
+      sourceBackend: "sanity",
+      sourceGeneration: 0,
+      activeBackend: "supabase",
+      activeGeneration: 1,
+    },
+    {
+      sourceBackend: "supabase",
+      sourceGeneration: 1,
+      activeBackend: "sanity",
+      activeGeneration: 2,
+    },
+  ])(
+    "adopts an in-flight $sourceBackend hold into $activeBackend generation $activeGeneration",
+    async ({
+      sourceBackend,
+      sourceGeneration,
+      activeBackend,
+      activeGeneration,
+    }) => {
+      const hold = createHold();
+      Object.assign(hold, {
+        backendOwner: sourceBackend,
+        cutoverGeneration: sourceGeneration,
+      });
+      const { issueHoldToken, verifyHoldToken } = require("../server/booking/holdToken");
+      const originalToken = issueHoldToken({
+        holdId: hold._id,
+        startTimeUTC: hold.startTimeUTC,
+        expiresAt: hold.expiresAt,
+        holdNonce: hold.holdNonce,
+        backend: sourceBackend,
+        cutoverGeneration: sourceGeneration,
+      });
+
+      const started = await startPaymentSession({
+        body: {
+          provider: "paypal",
+          bookingPayload: baseBookingPayload({ slotHoldToken: originalToken }),
+        },
+        client: mockClient,
+        backend: activeBackend,
+        cutoverGeneration: activeGeneration,
+      });
+
+      expect(started.httpStatus).toBe(200);
+      expect(getOnlyPaymentRecord()).toMatchObject({
+        backendOwner: activeBackend,
+        cutoverGeneration: activeGeneration,
+      });
+      expect(
+        verifyHoldToken({
+          token: started.body.refreshedHold.slotHoldToken,
+          holdId: hold._id,
+          startTimeUTC: hold.startTimeUTC,
+          holdNonce: hold.holdNonce,
+          backend: activeBackend,
+          cutoverGeneration: activeGeneration,
+        })
+      ).toBeTruthy();
+      expect(
+        verifyHoldToken({
+          token: started.body.refreshedHold.slotHoldToken,
+          holdId: hold._id,
+          startTimeUTC: hold.startTimeUTC,
+          holdNonce: hold.holdNonce,
+          backend: sourceBackend,
+          cutoverGeneration: sourceGeneration,
+        })
+      ).toBeNull();
+
+      expect(hold).toMatchObject({
+        backendOwner: activeBackend,
+        cutoverGeneration: activeGeneration,
+      });
+      const finalized = await finalizePaymentSession({
+        body: {
+          paymentAccessToken: started.body.paymentAccessToken,
+          providerData: { paypalOrderId: "paypal_order_1" },
+        },
+        client: mockClient,
+      });
+
+      expect(finalized.httpStatus).toBe(200);
+      expect(mockCreateBooking.mock.calls.at(-1)?.[0]?.body.slotHoldToken).toBe(
+        started.body.refreshedHold.slotHoldToken
+      );
+    }
+  );
 
   test("concurrent providers cannot create two payable orders for one hold", async () => {
     const hold = createHold();

@@ -8,6 +8,7 @@ import packageContent from "../../../lib/packageContent.js";
 import packagePricing from "../../../lib/packagePricing.js";
 import { issueUpgradeIntentToken } from "./upgradeIntentToken.js";
 import { logSafeError } from "../../safeErrorLog.js";
+import { assertCommerceStartAllowed } from "../../supabase/commerceControl.js";
 
 const { normalizePackageText } = packageContent;
 const {
@@ -305,12 +306,13 @@ export default async function handler(req, res) {
       localTimeZone: booking.localTimeZone,
       startTimeUTC: booking.startTimeUTC,
     };
+    const commerceControl = await assertCommerceStartAllowed();
     const upgradeIntentToken = issueUpgradeIntentToken({
       bookingId: booking._id,
       email: normalizedEmail,
       targetPackageTitle: upgradeContext.targetPackage.title,
-      backend: booking.backendOwner || "sanity",
-      cutoverGeneration: Number(booking.cutoverGeneration || 0),
+      backend: commerceControl.primaryBackend,
+      cutoverGeneration: commerceControl.generation,
     });
 
     return res.status(200).json({

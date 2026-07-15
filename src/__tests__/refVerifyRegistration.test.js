@@ -142,6 +142,7 @@ describe("referral registration confirmation", () => {
     expect(patch.unset).toHaveBeenCalledWith([
       "registrationVerificationTokenHash",
       "registrationVerificationExpiresAt",
+      "registrationVerificationDeliveryToken",
     ]);
     expect(mockSetReferralSessionCookie).toHaveBeenCalledWith(
       response,

@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { isEnabledTourneyFlag } from "./canonical.js";
+import { buildPostgresConnectionOptions } from "../../../scripts/lib/postgres-connection-env.mjs";
 
 const SQL_CLIENTS =
   globalThis.__rooTourneySharedSqlClients ||
@@ -55,6 +56,21 @@ export const resolveTourneyDatabaseUrl = (env = process.env) =>
     ? normalize(env.SUPABASE_DATABASE_URL)
     : normalize(env.TOURNEY_DATABASE_URL || env.POSTGRES_URL);
 
+export const buildTourneyPostgresOptions = ({
+  backend,
+  databaseUrl,
+} = {}) => ({
+  ...buildPostgresConnectionOptions(databaseUrl),
+  max: backend === "supabase" ? 3 : 2,
+  idle_timeout: 20,
+  connect_timeout: 10,
+  prepare: false,
+  connection: {
+    application_name: `roo-industries-tourney-${backend}`,
+    search_path: backend === "supabase" ? "tourney,public" : "public",
+  },
+});
+
 const getBaseTourneySql = async (env = process.env) => {
   const databaseUrl = resolveTourneyDatabaseUrl(env);
   if (!databaseUrl) {
@@ -70,16 +86,7 @@ const getBaseTourneySql = async (env = process.env) => {
   if (SQL_CLIENTS.has(cacheKey)) return SQL_CLIENTS.get(cacheKey);
 
   const { default: postgres } = await import("postgres");
-  const sql = postgres(databaseUrl, {
-    max: backend === "supabase" ? 3 : 2,
-    idle_timeout: 20,
-    connect_timeout: 10,
-    prepare: false,
-    connection: {
-      application_name: `roo-industries-tourney-${backend}`,
-      search_path: backend === "supabase" ? "tourney,public" : "public",
-    },
-  });
+  const sql = postgres(buildTourneyPostgresOptions({ backend, databaseUrl }));
   SQL_CLIENTS.set(cacheKey, sql);
   return sql;
 };

@@ -70,6 +70,8 @@ const validReleaseEnv = () => ({
   TOURNEY_DATABASE_MODE: "legacy",
   TOURNEY_MIRROR_ENABLED: "0",
   TOURNEY_WRITES_PAUSED: "0",
+  CMS_WRITES_PAUSED: "0",
+  SANITY_STUDIO_CMS_WRITES_PAUSED: "0",
   TOURNEY_FAILOVER_GENERATION: "0",
   TOURNEY_HARDENING_V4_ENABLED: "0",
   TOURNEY_V4_ACTIVATION_ENABLED: "0",
@@ -114,12 +116,12 @@ const supabaseTourneyEnv = {
   TOURNEY_DATABASE_MODE: "supabase",
   TOURNEY_MIRROR_ENABLED: "1",
   TOURNEY_DATABASE_URL:
-    "postgresql://legacy_owner:placeholder@legacy.example.com/tourney",
+    "postgresql://legacy_owner:placeholder@legacy.example.com/tourney?sslmode=require",
   SUPABASE_URL: "https://ntezmxzaibrrsgtujgxu.supabase.co",
   SUPABASE_SECRET_KEY: "s".repeat(40),
   SUPABASE_PUBLISHABLE_KEY: "p".repeat(24),
   SUPABASE_DATABASE_URL:
-    "postgresql://postgres.ntezmxzaibrrsgtujgxu:placeholder@aws-0-eu-west-1.pooler.supabase.com:6543/postgres",
+    "postgresql://postgres.ntezmxzaibrrsgtujgxu:placeholder@aws-0-eu-west-1.pooler.supabase.com:6543/postgres?sslmode=require",
   SUPABASE_SOCIAL_AUTH_ENABLED: "1",
   NEXT_PUBLIC_SUPABASE_SOCIAL_AUTH_ENABLED: "1",
   SUPABASE_MANUAL_LINKING_ENABLED: "1",
@@ -192,6 +194,7 @@ describe("release runtime environment validation", () => {
         DATA_PRIMARY_BACKEND: "supabase",
         COMMERCE_PRIMARY_BACKEND: "sanity",
         SUPABASE_CUTOVER_ENABLED: "1",
+        SANITY_REVERSE_MIRROR_WRITES: "1",
       },
     ],
     [
@@ -214,6 +217,50 @@ describe("release runtime environment validation", () => {
 
     expect(result.status).toBe(0);
     expect(result.output).not.toContain("Commerce-only cutover");
+  });
+
+  test.each([
+    ["writes enabled", "0"],
+    ["rollback pause enabled", "1"],
+  ])("accepts matching CMS controls with %s", (_label, value) => {
+    const result = validate({
+      CMS_WRITES_PAUSED: value,
+      SANITY_STUDIO_CMS_WRITES_PAUSED: value,
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.output).toContain(
+      `apiPaused=${value === "1"}, studioConfigured=true, studioPaused=${
+        value === "1"
+      }, matches=true`,
+    );
+  });
+
+  test("rejects mismatched CMS API and Studio pause controls", () => {
+    const result = validate({
+      CMS_WRITES_PAUSED: "1",
+      SANITY_STUDIO_CMS_WRITES_PAUSED: "0",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(
+      "CMS_WRITES_PAUSED and SANITY_STUDIO_CMS_WRITES_PAUSED must match",
+    );
+  });
+
+  test.each([
+    ["CMS_WRITES_PAUSED", { CMS_WRITES_PAUSED: "" }],
+    [
+      "SANITY_STUDIO_CMS_WRITES_PAUSED",
+      { SANITY_STUDIO_CMS_WRITES_PAUSED: "sometimes" },
+    ],
+  ])("rejects an invalid %s control", (key, override) => {
+    const result = validate(override);
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(
+      `${key} must be an explicit boolean value`,
+    );
   });
 
   test("does not require Sanity read or webhook credentials for full Supabase", () => {
@@ -257,6 +304,25 @@ describe("release runtime environment validation", () => {
     expect(result.status).toBe(0);
   });
 
+  test("rejects a partial private Sanity target instead of mixing public fields", () => {
+    const result = validate({
+      ...supabaseDocumentEnv,
+      DATA_PRIMARY_BACKEND: "supabase",
+      COMMERCE_PRIMARY_BACKEND: "supabase",
+      SUPABASE_CUTOVER_ENABLED: "1",
+      COMMERCE_CUTOVER_ENABLED: "1",
+      SANITY_REVERSE_MIRROR_WRITES: "1",
+      SANITY_PRIVATE_PROJECT_ID: "private-project",
+      SANITY_PRIVATE_DATASET: "",
+      SANITY_PRIVATE_WRITE_TOKEN: "",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain("Private Sanity configuration is incomplete");
+    expect(result.output).toContain("SANITY_PRIVATE_DATASET");
+    expect(result.output).toContain("SANITY_PRIVATE_WRITE_TOKEN");
+  });
+
   test.each([
     ["SANITY_PROJECT_ID", { SANITY_PROJECT_ID: "", SANITY_PRIVATE_PROJECT_ID: "" }],
     ["SANITY_DATASET", { SANITY_DATASET: "", SANITY_PRIVATE_DATASET: "" }],
@@ -284,6 +350,7 @@ describe("release runtime environment validation", () => {
       DATA_PRIMARY_BACKEND: "supabase",
       COMMERCE_PRIMARY_BACKEND: "sanity",
       SUPABASE_CUTOVER_ENABLED: "1",
+      SANITY_REVERSE_MIRROR_WRITES: "1",
       SANITY_READ_TOKEN: "",
       SANITY_WEBHOOK_SECRET: "",
     });
@@ -291,6 +358,19 @@ describe("release runtime environment validation", () => {
     expect(result.status).toBe(1);
     expect(result.output).toContain("SANITY_READ_TOKEN");
     expect(result.output).toContain("SANITY_WEBHOOK_SECRET");
+  });
+
+  test("rejects global Supabase without its rollback mirror", () => {
+    const result = validate({
+      ...supabaseDocumentEnv,
+      DATA_PRIMARY_BACKEND: "supabase",
+      COMMERCE_PRIMARY_BACKEND: "sanity",
+      SUPABASE_CUTOVER_ENABLED: "1",
+      SANITY_REVERSE_MIRROR_WRITES: "",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain("SANITY_REVERSE_MIRROR_WRITES");
   });
 
   test.each([

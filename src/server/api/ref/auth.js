@@ -75,6 +75,10 @@ const buildSessionToken = (payload, maxAgeSeconds) => {
     ab: payload.authBackend === "supabase" ? "supabase" : "sanity",
     pid: payload.principalId || "",
     sv: Math.max(1, Number(payload.sessionVersion) || 1),
+    cv: Math.max(
+      1,
+      Number(payload.credentialVersion) || Number(payload.sessionVersion) || 1
+    ),
   };
   const encodedPayload = base64UrlEncode(JSON.stringify(body));
   const signature = sign(encodedPayload, REF_SESSION_SECRET);
@@ -155,44 +159,234 @@ export const getReferralSession = (req) => {
       authBackend: payload.ab === "supabase" ? "supabase" : "sanity",
       principalId: payload.pid || "",
       sessionVersion: Math.max(1, Number(payload.sv) || 1),
+      credentialVersion: Math.max(
+        1,
+        Number(payload.cv) || Number(payload.sv) || 1
+      ),
+      issuedAt: Math.max(0, Number(payload.iat) || 0),
     };
   } catch (error) {
     return null;
   }
 };
 
+const validateSupabaseReferralSession = async (session) => {
+  const { createSupabaseAdminClient } = await import("../../supabase/adminClient.js");
+  const result = await createSupabaseAdminClient().rpc(
+    "roo_validate_referral_session",
+    {
+      p_creator_legacy_id: session.referralId,
+      p_session_version: session.sessionVersion,
+    }
+  );
+  if (result.error) throw new Error("referral_session_verification_unavailable");
+  const account = result.data;
+  if (
+    account?.creator_legacy_sanity_id !== session.referralId ||
+    (session.code && account.referral_code !== session.code)
+  ) {
+    return null;
+  }
+  return {
+    ...session,
+    code: account.referral_code || session.code,
+    principalId: account.principal_id,
+    sessionVersion: account.session_version,
+    credentialVersion: account.session_version,
+  };
+};
+
+const changedAfterSessionIssued = (changedAt, issuedAt) => {
+  const changedAtMs = Date.parse(String(changedAt || ""));
+  if (!Number.isFinite(changedAtMs) || !issuedAt) return false;
+  return Math.floor(changedAtMs / 1000) > issuedAt;
+};
+
+const validatePreCutoverSanityReferralSession = async (session) => {
+  const { createDocumentReadClient } = await import("../../data/documentClient.js");
+  const client = createDocumentReadClient({
+    backendOverride: "sanity",
+    domain: "global",
+  });
+  const account = await client.fetch(
+    `*[_type == "referral" && _id == $id][0]{
+      _id,
+      "code": slug.current,
+      registrationStatus,
+      passwordResetRequired,
+      passwordLoginEnabled,
+      passwordChangedAt
+    }`,
+    { id: session.referralId }
+  );
+  if (
+    account?._id !== session.referralId ||
+    !account.code ||
+    (session.code && account.code !== session.code) ||
+    account.registrationStatus !== "active" ||
+    account.passwordResetRequired === true ||
+    account.passwordLoginEnabled === false ||
+    changedAfterSessionIssued(account.passwordChangedAt, session.issuedAt)
+  ) {
+    return null;
+  }
+  return { ...session, code: account.code };
+};
+
+const positiveSafeInteger = (value) => {
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number > 0 ? number : 0;
+};
+
+const normalizeFallbackAuthority = (value) => {
+  const authoritySchemaVersion = positiveSafeInteger(value?.authoritySchemaVersion);
+  const principalSessionVersion = positiveSafeInteger(
+    value?.principalSessionVersion
+  );
+  const credentialVersion = positiveSafeInteger(value?.credentialVersion);
+  const authorityVersion = positiveSafeInteger(value?.authorityVersion);
+  const credentialChangedAt = String(value?.credentialChangedAt || "");
+  const principalId = String(value?.principalId || "").trim().toLowerCase();
+  if (
+    authoritySchemaVersion !== 1 ||
+    !String(value?.legacyCreatorId || "").trim() ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+      principalId
+    ) ||
+    !String(value?.referralCode || "").trim() ||
+    !principalSessionVersion ||
+    !credentialVersion ||
+    !authorityVersion ||
+    !Number.isFinite(Date.parse(credentialChangedAt)) ||
+    typeof value?.creatorActive !== "boolean" ||
+    typeof value?.creatorRolePresent !== "boolean" ||
+    typeof value?.currentRecord !== "boolean" ||
+    !["active", "disabled", "deleted"].includes(value?.principalStatus)
+  ) {
+    return null;
+  }
+  return {
+    authoritySchemaVersion,
+    legacyCreatorId: String(value.legacyCreatorId),
+    principalId,
+    referralCode: String(value.referralCode).trim().toLowerCase(),
+    principalSessionVersion,
+    principalStatus: value.principalStatus,
+    creatorActive: value.creatorActive,
+    creatorRolePresent: value.creatorRolePresent,
+    credentialVersion,
+    credentialChangedAt,
+    currentRecord: value.currentRecord,
+    authorityVersion,
+  };
+};
+
+export const readReferralFallbackAuthority = async ({
+  legacyCreatorId,
+  client = null,
+  env = process.env,
+} = {}) => {
+  const creatorId = String(legacyCreatorId || "").trim();
+  if (!creatorId) return null;
+  let readClient = client;
+  if (!readClient) {
+    const privateProjectId = String(env.SANITY_PRIVATE_PROJECT_ID || "").trim();
+    const privateDataset = String(env.SANITY_PRIVATE_DATASET || "").trim();
+    const privateToken = String(
+      env.SANITY_PRIVATE_READ_TOKEN || env.SANITY_PRIVATE_WRITE_TOKEN || ""
+    ).trim();
+    if (!privateProjectId || !privateDataset || !privateToken) {
+      throw new Error("Private referral fallback authority is not configured.");
+    }
+    const { createDocumentReadClient } = await import(
+      "../../data/documentClient.js"
+    );
+    readClient = createDocumentReadClient({
+      env,
+      backendOverride: "sanity",
+      domain: "global",
+    });
+  }
+  const authority = await readClient.fetch(
+    `*[
+      _type == "referralAuthAuthority"
+      && legacyCreatorId == $legacyCreatorId
+    ][0]{
+      authoritySchemaVersion,
+      legacyCreatorId,
+      principalId,
+      referralCode,
+      principalSessionVersion,
+      principalStatus,
+      creatorActive,
+      creatorRolePresent,
+      credentialVersion,
+      credentialChangedAt,
+      currentRecord,
+      authorityVersion
+    }`,
+    { legacyCreatorId: creatorId }
+  );
+  return normalizeFallbackAuthority(authority);
+};
+
+export const isActiveReferralFallbackAuthority = (
+  authority,
+  { legacyCreatorId = "", referralCode = "" } = {}
+) =>
+  Boolean(
+    authority &&
+      authority.legacyCreatorId === String(legacyCreatorId || "").trim() &&
+      authority.referralCode === String(referralCode || "").trim().toLowerCase() &&
+      authority.principalStatus === "active" &&
+      authority.creatorActive === true &&
+      authority.creatorRolePresent === true &&
+      authority.currentRecord === true
+  );
+
+const validateFallbackAuthoritySession = async (session) => {
+  const authority = await readReferralFallbackAuthority({
+    legacyCreatorId: session.referralId,
+  });
+  if (
+    !isActiveReferralFallbackAuthority(authority, {
+      legacyCreatorId: session.referralId,
+      referralCode: session.code,
+    }) ||
+    !session.principalId ||
+    authority.principalId !== session.principalId.toLowerCase() ||
+    authority.principalSessionVersion !== session.sessionVersion ||
+    authority.credentialVersion !== session.credentialVersion ||
+    changedAfterSessionIssued(authority.credentialChangedAt, session.issuedAt)
+  ) {
+    return null;
+  }
+  return {
+    ...session,
+    code: authority.referralCode,
+    principalId: authority.principalId,
+    sessionVersion: authority.principalSessionVersion,
+    credentialVersion: authority.credentialVersion,
+  };
+};
+
 export const requireReferralSession = async (req, res) => {
   const session = getReferralSession(req);
   if (session) {
     try {
-      const { createSupabaseAdminClient } = await import("../../supabase/adminClient.js");
-      const result = await createSupabaseAdminClient().rpc(
-        "roo_validate_referral_session",
-        {
-          p_creator_legacy_id: session.referralId,
-          p_session_version: session.sessionVersion,
-        }
+      const { resolveSupabaseRuntimePolicy } = await import(
+        "../../supabase/runtime.js"
       );
-      const account = result.data;
-      if (
-        !result.error &&
-        account?.creator_legacy_sanity_id === session.referralId &&
-        (!session.code || account.referral_code === session.code)
-      ) {
-        return {
-          ...session,
-          code: account.referral_code || session.code,
-          principalId: account.principal_id,
-          sessionVersion: account.session_version,
-        };
-      }
-      if (result.error) {
-        res.status(503).json({
-          ok: false,
-          error: "Account verification is temporarily unavailable.",
-        });
-        return null;
-      }
+      const policy = resolveSupabaseRuntimePolicy();
+      const manualFallback =
+        policy.primaryBackend === "sanity" && policy.cutoverEnabled;
+      const verified = manualFallback
+        ? await validateFallbackAuthoritySession(session)
+        : session.authBackend === "supabase" ||
+            policy.primaryBackend === "supabase"
+          ? await validateSupabaseReferralSession(session)
+          : await validatePreCutoverSanityReferralSession(session);
+      if (verified) return verified;
     } catch {
       res.status(503).json({
         ok: false,

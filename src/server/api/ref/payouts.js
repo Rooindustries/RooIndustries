@@ -1,31 +1,11 @@
-import {createDataClient as createClient} from '../../data/documentClient.js';
+import {createCommerceReadClient} from './sanity.js';
 import {requireReferralSession} from './auth.js';
-import {getSafeErrorCode, logSafeError} from '../../safeErrorLog.js';
+import {logSafeError} from '../../safeErrorLog.js';
 import {
   buildBalance,
   fetchReferralEarnings,
   sumPayments,
 } from './payoutUtils.js';
-
-const readClient = createClient({
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || 'production',
-  apiVersion: process.env.SANITY_API_VERSION || '2023-10-01',
-  token: process.env.SANITY_READ_TOKEN || process.env.SANITY_WRITE_TOKEN,
-  useCdn: false,
-  perspective: 'published',
-}, {domain: 'commerce'});
-
-const writeToken = process.env.SANITY_WRITE_TOKEN;
-const writeClient =
-  writeToken &&
-  createClient({
-    projectId: process.env.SANITY_PROJECT_ID,
-    dataset: process.env.SANITY_DATASET || 'production',
-    apiVersion: process.env.SANITY_API_VERSION || '2023-10-01',
-    token: writeToken,
-    useCdn: false,
-  }, {domain: 'commerce'});
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -36,6 +16,7 @@ export default async function handler(req, res) {
     const session = await requireReferralSession(req, res);
     if (!session) return;
     const id = session.referralId;
+    const readClient = createCommerceReadClient();
 
     const referral = await readClient.fetch(
       `*[_type == "referral" && _id == $id][0]{
@@ -103,32 +84,6 @@ export default async function handler(req, res) {
       paidVertex
     );
 
-    let syncStatus = {attempted: false, success: false, error: ''};
-
-    if (writeClient && referral._id) {
-      syncStatus.attempted = true;
-      try {
-        await writeClient
-          .patch(referral._id)
-          .set({
-            earnedXoc: earnings.xoc,
-            earnedVertex: earnings.vertex,
-            earnedTotal: earnings.total,
-            paidXoc,
-            paidVertex,
-            paidTotal: payments.total,
-            owedXoc: owed.xoc,
-            owedVertex: owed.vertex,
-            owedTotal: owed.total,
-          })
-          .commit({autoGenerateArrayKeys: true});
-        syncStatus.success = true;
-      } catch (err) {
-        logSafeError('Referral payout auto-sync failed', err);
-        syncStatus.error = getSafeErrorCode(err, 'sync_failed');
-      }
-    }
-
     return res.status(200).json({
       ok: true,
       referral: {
@@ -150,7 +105,7 @@ export default async function handler(req, res) {
         xoc: xocPayments,
         vertex: vertexPayments,
       },
-      sync: syncStatus,
+      sync: {attempted: false, success: true, error: ''},
     });
   } catch (err) {
     logSafeError('Referral payout read failed', err);

@@ -104,10 +104,12 @@ const request = (url, cookie = "") => ({
 
 const creatorAccount = {
   user_id: authUser.id,
+  principal_id: "10000000-0000-4000-8000-000000000001",
   status: "active",
   roles: ["creator"],
   legacy_sanity_id: "referral.creator",
   referral_code: "creator",
+  session_version: 7,
 };
 
 describe("Supabase Auth callback", () => {
@@ -165,6 +167,13 @@ describe("Supabase Auth callback", () => {
     expect(response.cookies.values).toContainEqual(
       expect.objectContaining({ name: "ref_session", value: "ref-token" })
     );
+    expect(mockCreateReferralSessionCookie).toHaveBeenCalledWith({
+      authBackend: "supabase",
+      code: "creator",
+      principalId: "10000000-0000-4000-8000-000000000001",
+      referralId: "referral.creator",
+      sessionVersion: 7,
+    });
   });
 
   test("does not authorize an email match owned by another Auth user", async () => {
