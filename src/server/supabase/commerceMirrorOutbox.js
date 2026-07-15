@@ -12,6 +12,8 @@ const normalizeIds = (value) =>
   [...new Set((Array.isArray(value) ? value : []).map(String).filter(Boolean))].sort();
 
 const REFERRAL_COMMERCE_FIELDS = Object.freeze([
+  "backendOwner",
+  "cutoverGeneration",
   "successfulReferrals",
   "currentCommissionPercent",
   "currentDiscountPercent",
