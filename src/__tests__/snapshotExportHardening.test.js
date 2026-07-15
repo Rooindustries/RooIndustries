@@ -277,6 +277,10 @@ describe("encrypted export hardening", () => {
       import crypto from "node:crypto";
       import {
         stableSnapshotJson,
+        SUPABASE_FULL_EXPANDED_PROFILE,
+        SUPABASE_FULL_PRE_EXPAND_DEFERRED_RELATIONS,
+        SUPABASE_FULL_PRE_EXPAND_MIGRATION_VERSION,
+        SUPABASE_FULL_PRE_EXPAND_PROFILE,
         SUPABASE_FULL_REQUIRED_RELATIONS,
         SUPABASE_FULL_SNAPSHOT_SCHEMAS,
         validateFullLogicalSnapshot,
@@ -301,8 +305,13 @@ describe("encrypted export hardening", () => {
           format: "roo-supabase-full-logical-snapshot-v1",
           capturedAt: "2026-07-15T00:00:00.000Z",
           sourceSnapshotId: "10000000-0000-4000-8000-000000000001",
+          sourceMigrationVersion: "20260715130100",
+          contractProfile: SUPABASE_FULL_EXPANDED_PROFILE,
           schemas: [...SUPABASE_FULL_SNAPSHOT_SCHEMAS],
           requiredRelations: [...SUPABASE_FULL_REQUIRED_RELATIONS],
+          deferredRelations: [],
+          catalogRelations: Object.keys(relationPayloads).sort(),
+          catalogSha256: hash(stableSnapshotJson(Object.keys(relationPayloads).sort())),
           relationPayloads,
           relationCounts: Object.fromEntries(
             Object.entries(relations).map(([relation, rows]) => [relation, rows.length])
@@ -332,11 +341,118 @@ describe("encrypted export hardening", () => {
       } catch {
         hashRejected = true;
       }
+      const preExpand = structuredClone(payload);
+      preExpand.full_logical.sourceMigrationVersion =
+        SUPABASE_FULL_PRE_EXPAND_MIGRATION_VERSION;
+      preExpand.full_logical.contractProfile = SUPABASE_FULL_PRE_EXPAND_PROFILE;
+      preExpand.full_logical.requiredRelations = SUPABASE_FULL_REQUIRED_RELATIONS.filter(
+        (relation) => !SUPABASE_FULL_PRE_EXPAND_DEFERRED_RELATIONS.includes(relation)
+      );
+      preExpand.full_logical.deferredRelations = [
+        ...SUPABASE_FULL_PRE_EXPAND_DEFERRED_RELATIONS,
+      ];
+      for (const relation of SUPABASE_FULL_PRE_EXPAND_DEFERRED_RELATIONS) {
+        delete preExpand.full_logical.relationPayloads[relation];
+        delete preExpand.full_logical.relationCounts[relation];
+        delete preExpand.full_logical.relationHashes[relation];
+      }
+      preExpand.full_logical.catalogRelations = Object.keys(
+        preExpand.full_logical.relationPayloads
+      ).sort();
+      preExpand.full_logical.catalogSha256 = hash(
+        stableSnapshotJson(preExpand.full_logical.catalogRelations)
+      );
+      const preExpandProof = validateFullLogicalSnapshot(preExpand, { hash });
+      const partialExpand = structuredClone(preExpand);
+      const restoredRelation = SUPABASE_FULL_PRE_EXPAND_DEFERRED_RELATIONS[0];
+      partialExpand.full_logical.relationPayloads[restoredRelation] = "[]";
+      partialExpand.full_logical.relationCounts[restoredRelation] = 0;
+      partialExpand.full_logical.relationHashes[restoredRelation] = hash("[]");
+      partialExpand.full_logical.catalogRelations = Object.keys(
+        partialExpand.full_logical.relationPayloads
+      ).sort();
+      partialExpand.full_logical.catalogSha256 = hash(
+        stableSnapshotJson(partialExpand.full_logical.catalogRelations)
+      );
+      partialExpand.full_logical.requiredRelations.push(restoredRelation);
+      partialExpand.full_logical.deferredRelations =
+        partialExpand.full_logical.deferredRelations.filter(
+          (relation) => relation !== restoredRelation
+        );
+      let partialExpandRejected = false;
+      try {
+        validateFullLogicalSnapshot(partialExpand, { hash });
+      } catch {
+        partialExpandRejected = true;
+      }
+      const unexpectedMissing = structuredClone(preExpand);
+      delete unexpectedMissing.full_logical.relationPayloads["commerce.bookings"];
+      delete unexpectedMissing.full_logical.relationCounts["commerce.bookings"];
+      delete unexpectedMissing.full_logical.relationHashes["commerce.bookings"];
+      unexpectedMissing.full_logical.catalogRelations = Object.keys(
+        unexpectedMissing.full_logical.relationPayloads
+      ).sort();
+      unexpectedMissing.full_logical.catalogSha256 = hash(
+        stableSnapshotJson(unexpectedMissing.full_logical.catalogRelations)
+      );
+      unexpectedMissing.full_logical.requiredRelations =
+        unexpectedMissing.full_logical.requiredRelations.filter(
+          (relation) => relation !== "commerce.bookings"
+        );
+      unexpectedMissing.full_logical.deferredRelations.push("commerce.bookings");
+      let unexpectedMissingRejected = false;
+      try {
+        validateFullLogicalSnapshot(unexpectedMissing, { hash });
+      } catch {
+        unexpectedMissingRejected = true;
+      }
+      const oldProfile = structuredClone(preExpand);
+      oldProfile.full_logical.contractProfile = SUPABASE_FULL_EXPANDED_PROFILE;
+      let oldProfileRejected = false;
+      try {
+        validateFullLogicalSnapshot(oldProfile, { hash });
+      } catch {
+        oldProfileRejected = true;
+      }
+      const oldSnapshot = structuredClone(payload);
+      delete oldSnapshot.full_logical.sourceMigrationVersion;
+      delete oldSnapshot.full_logical.contractProfile;
+      let oldSnapshotRejected = false;
+      try {
+        validateFullLogicalSnapshot(oldSnapshot, { hash });
+      } catch {
+        oldSnapshotRejected = true;
+      }
+      const countTampered = structuredClone(payload);
+      countTampered.full_logical.relationCounts["auth.users"] = 2;
+      let countRejected = false;
+      try {
+        validateFullLogicalSnapshot(countTampered, { hash });
+      } catch {
+        countRejected = true;
+      }
+      const malformed = structuredClone(payload);
+      malformed.full_logical.relationPayloads["auth.users"] = "[not-json]";
+      malformed.full_logical.relationHashes["auth.users"] = hash("[not-json]");
+      let malformedRejected = false;
+      try {
+        validateFullLogicalSnapshot(malformed, { hash });
+      } catch {
+        malformedRejected = true;
+      }
       process.stdout.write(JSON.stringify({
         relationCount: proof.relationCount,
         rowCount: proof.rowCount,
         missingRejected,
         hashRejected,
+        preExpandProfile: preExpandProof.contractProfile,
+        preExpandDeferred: preExpandProof.deferredRelations.length,
+        partialExpandRejected,
+        unexpectedMissingRejected,
+        oldProfileRejected,
+        oldSnapshotRejected,
+        countRejected,
+        malformedRejected,
         numericExact: payload.full_logical.relationPayloads["auth.users"].includes(
           "9007199254740993"
         ),
@@ -347,6 +463,14 @@ describe("encrypted export hardening", () => {
       rowCount: 1,
       missingRejected: true,
       hashRejected: true,
+      preExpandProfile: "roo-supabase-pre-expand-20260714230345-v1",
+      preExpandDeferred: 6,
+      partialExpandRejected: true,
+      unexpectedMissingRejected: true,
+      oldProfileRejected: true,
+      oldSnapshotRejected: true,
+      countRejected: true,
+      malformedRejected: true,
       numericExact: true,
     });
     expect(result.relationCount).toBeGreaterThan(80);
