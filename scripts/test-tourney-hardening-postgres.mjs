@@ -27,7 +27,11 @@ import {
   SUPABASE_FULL_REQUIRED_RELATIONS,
   SUPABASE_FULL_SNAPSHOT_SCHEMAS,
 } from "../src/server/tourney/snapshotContract.js";
-import { captureFullLogicalSnapshotTransaction } from "../src/server/tourney/snapshotTransport.js";
+import {
+  captureFullLogicalSnapshotTransaction,
+  readStoredSnapshotChunk,
+  SNAPSHOT_TRANSPORT_CHUNK_BYTES,
+} from "../src/server/tourney/snapshotTransport.js";
 import { getTourneySql } from "../src/server/tourney/sqlClient.js";
 import { verifyFullLogicalSnapshotRestore } from "./lib/logical-snapshot-restore.mjs";
 import {
@@ -1013,6 +1017,17 @@ insert into tourney_external_operations(
   assert.equal(
     fullCapture.validation.relationCount >= SUPABASE_FULL_REQUIRED_RELATIONS.length,
     true
+  );
+  const fullCaptureChunk = await readStoredSnapshotChunk({
+    sql: unsafeSupabase,
+    snapshotId: fullCapture.snapshotId,
+    payloadSha256: fullCapture.payloadSha256,
+    offset: 0,
+  });
+  assert.equal(fullCaptureChunk.totalBytes, fullCapture.totalBytes);
+  assert.equal(
+    fullCaptureChunk.chunk.byteLength,
+    Math.min(fullCapture.totalBytes, SNAPSHOT_TRANSPORT_CHUNK_BYTES)
   );
   assert.equal(fullCapture.totalBytes > 0, true);
   await unsafeSupabase.end({ timeout: 5 });
@@ -5330,6 +5345,7 @@ insert into accounts.discord_role_assignments(
       "URI-derived isolated libpq environment connection",
       "full logical snapshot PostgreSQL 17 structural restore and canonical hashes",
       "server-side full logical snapshot Vault storage and decrypted roundtrip",
+      "encrypted snapshot chunk extraction and boundary validation",
       "pre-DDL activation safety on both databases",
       "legacy empty-search-path trigger repair",
       "fail-closed mirror trigger bodies and 17-table OID bindings",
