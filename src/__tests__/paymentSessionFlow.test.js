@@ -2084,6 +2084,48 @@ describe("payment session flow", () => {
     );
   });
 
+  test("an expired late-capture watch stops after a definitive missing order", async () => {
+    store.paymentRecords.push({
+      _id: "paymentRecord.paypal.expired-missing-watch",
+      _rev: nextRevision(),
+      _type: "paymentRecord",
+      provider: "paypal",
+      providerOrderId: "paypal_order_expired_missing_watch",
+      status: paymentRecordConstants.PAYMENT_STATUS_ABANDONED,
+      bookingPayload: baseBookingPayload(),
+      pricingSnapshot: { netAmount: 84.99 },
+      providerPublicData: { currency: "USD" },
+      lateCaptureWatchUntil: "2000-01-01T00:00:00.000Z",
+      nextRecoveryAt: "2000-01-01T00:00:00.000Z",
+      createdAt: "2000-01-01T00:00:00.000Z",
+      updatedAt: "2000-01-01T00:00:00.000Z",
+      events: [],
+    });
+    mockInspectPayPalOrder.mockResolvedValueOnce({
+      state: "unavailable",
+      reason: "paypal_lookup_failed_404",
+    });
+
+    const result = await reconcilePaymentSessions({
+      req: createReq({}, { authorization: "Bearer cron-secret" }),
+      client: mockClient,
+    });
+
+    expect(result.body.summary).toMatchObject({
+      abandoned: 1,
+      providerUnavailable: 0,
+      recovery: 0,
+    });
+    expect(getOnlyPaymentRecord()).toMatchObject({
+      status: paymentRecordConstants.PAYMENT_STATUS_ABANDONED,
+      lateCaptureWatchUntil: "",
+      nextRecoveryAt: "",
+      providerRecoveryTerminal: true,
+      providerRecoveryTerminalReason:
+        "provider_order_not_found_after_late_capture_watch",
+    });
+  });
+
   test("reconcile backs off unpaid sessions without starving the next batch", async () => {
     const hold = createHold();
     const bookingPayload = baseBookingPayload({
@@ -3684,6 +3726,87 @@ describe("payment session flow", () => {
     }).payload.paymentRecordId).status).toBe(
       paymentRecordConstants.PAYMENT_STATUS_BOOKED
     );
+  });
+
+  test("reconcile abandons an expired missing provider order without infinite retries", async () => {
+    const hold = createHold();
+    await startPaymentSession({
+      body: {
+        provider: "paypal",
+        bookingPayload: baseBookingPayload({
+          slotHoldToken: issueTokenForHold(hold),
+        }),
+      },
+      client: mockClient,
+    });
+    const record = getOnlyPaymentRecord();
+    record.status = paymentRecordConstants.PAYMENT_STATUS_NEEDS_RECOVERY;
+    record.createdAt = "2000-01-01T00:00:00.000Z";
+    record.updatedAt = "2000-01-01T00:00:00.000Z";
+    record.nextRecoveryAt = "2000-01-01T00:00:00.000Z";
+    mockInspectPayPalOrder.mockResolvedValueOnce({
+      state: "unavailable",
+      reason: "paypal_lookup_failed_404",
+    });
+
+    const result = await reconcilePaymentSessions({
+      req: createReq({}, { authorization: "Bearer cron-secret" }),
+      client: mockClient,
+    });
+
+    expect(result.body.summary).toMatchObject({ abandoned: 1, recovery: 0 });
+    expect(getOnlyPaymentRecord()).toMatchObject({
+      status: paymentRecordConstants.PAYMENT_STATUS_ABANDONED,
+      recoveryReason: "provider_order_not_found_after_expiry",
+      resourceReleasePending: false,
+      lateCaptureWatchUntil: expect.any(String),
+      nextRecoveryAt: expect.any(String),
+    });
+    expect(store.slotHolds[0]).toMatchObject({
+      phase: "released",
+      paymentRecordId: "",
+    });
+  });
+
+  test("reconcile abandons an expired missing Razorpay order without infinite retries", async () => {
+    const hold = createHold();
+    await startPaymentSession({
+      body: {
+        provider: "razorpay",
+        bookingPayload: baseBookingPayload({
+          slotHoldToken: issueTokenForHold(hold),
+        }),
+      },
+      client: mockClient,
+    });
+    const record = getOnlyPaymentRecord();
+    record.status = paymentRecordConstants.PAYMENT_STATUS_NEEDS_RECOVERY;
+    record.createdAt = "2000-01-01T00:00:00.000Z";
+    record.updatedAt = "2000-01-01T00:00:00.000Z";
+    record.nextRecoveryAt = "2000-01-01T00:00:00.000Z";
+    mockInspectRazorpayOrder.mockResolvedValueOnce({
+      state: "unavailable",
+      reason: "razorpay_lookup_failed_404",
+    });
+
+    const result = await reconcilePaymentSessions({
+      req: createReq({}, { authorization: "Bearer cron-secret" }),
+      client: mockClient,
+    });
+
+    expect(result.body.summary).toMatchObject({ abandoned: 1, recovery: 0 });
+    expect(getOnlyPaymentRecord()).toMatchObject({
+      provider: "razorpay",
+      status: paymentRecordConstants.PAYMENT_STATUS_ABANDONED,
+      recoveryReason: "provider_order_not_found_after_expiry",
+      resourceReleasePending: false,
+      lateCaptureWatchUntil: expect.any(String),
+      nextRecoveryAt: expect.any(String),
+    });
+    expect(store.slotHolds[0]).toMatchObject({
+      phase: "released",
+      paymentRecordId: "",
+    });
   });
 
   test("captured records without payload become visible reschedule bookings", async () => {

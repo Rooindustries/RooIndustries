@@ -195,7 +195,9 @@ select id,secret as decrypted_secret from vault.secrets;
 create table auth.users(id uuid primary key, email text);
 create table auth.identities(
   id uuid primary key,
-  user_id uuid not null references auth.users(id)
+  user_id uuid not null references auth.users(id),
+  provider text,
+  provider_id text
 );
 create table accounts.principals(id uuid primary key default gen_random_uuid(), status text not null default 'active');
 create table accounts.login_aliases(
@@ -518,6 +520,14 @@ try {
     root,
     "supabase/migrations/20260715060000_repair_tourney_mirror_trigger_bindings.sql"
   );
+  const supabaseDiscordReauthRepair = path.join(
+    root,
+    "supabase/migrations/20260715150000_block_legacy_discord_reauth.sql"
+  );
+  const supabaseRecoveryScopeGuards = path.join(
+    root,
+    "supabase/migrations/20260715170000_repair_recovery_scope_guards.sql"
+  );
   const legacyActivation = path.join(root, "scripts/tourney-schema-v4-activate-legacy.sql");
   const legacyRepair = path.join(root, "scripts/tourney-schema-v4-repair-legacy.sql");
   const legacyTriggerBindingRepair = path.join(
@@ -669,7 +679,9 @@ insert into tourney_external_operations(
     supabaseSnapshotRpcTimeout,
     supabaseCompactSnapshotPayload,
     supabaseBaselineRecovery,
-    supabaseTriggerBindingRepair
+    supabaseTriggerBindingRepair,
+    supabaseDiscordReauthRepair,
+    supabaseRecoveryScopeGuards
   );
   psql("supabase_unsafe", supabasePostInstallOldWriter);
   const unsafeSupabase = postgres(
@@ -1214,7 +1226,9 @@ insert into accounts.discord_role_assignments(
   psql(
     "supabase_fixture",
     supabaseTriggerBindingDrift,
-    supabaseTriggerBindingRepair
+    supabaseTriggerBindingRepair,
+    supabaseDiscordReauthRepair,
+    supabaseRecoveryScopeGuards
   );
   process.stderr.write("[postgres17] schema v4 trigger bindings repaired\n");
 
@@ -1238,6 +1252,147 @@ insert into accounts.discord_role_assignments(
     DISCORD_PARTICIPANT_ROLE_ID: "710000000000000001",
     DISCORD_HOST_ROLE_ID: "710000000000000002",
   };
+
+  const reauthUserId = "87000000-0000-4000-8000-000000000001";
+  const reauthSecondUserId = "87000000-0000-4000-8000-000000000002";
+  const reauthIdentityId = "89000000-0000-4000-8000-000000000001";
+  const reauthPrincipalId = "88000000-0000-4000-8000-000000000001";
+  const reauthPlayerId = "discord-reauth-player";
+  const reauthDiscordId = "920000000000000001";
+  await source.begin(async (sql) => {
+    await sql`select set_config('roo.tourney_mirror_apply','1',true)`;
+    await sql`insert into auth.users(id,email) values(
+      ${reauthUserId}::uuid,'discord-reauth@example.invalid'
+    )`;
+    await sql`insert into auth.users(id,email) values(
+      ${reauthSecondUserId}::uuid,'discord-reauth-second@example.invalid'
+    )`;
+    await sql`insert into accounts.principals(id) values(${reauthPrincipalId}::uuid)`;
+    await sql`insert into accounts.principal_auth_users(
+      user_id,principal_id,is_primary,source
+    ) values(${reauthUserId}::uuid,${reauthPrincipalId}::uuid,true,'fixture')`;
+    await sql`insert into accounts.principal_auth_users(
+      user_id,principal_id,is_primary,source
+    ) values(${reauthSecondUserId}::uuid,${reauthPrincipalId}::uuid,false,'fixture')`;
+    await sql`insert into auth.identities(id,user_id,provider,provider_id) values(
+      ${reauthIdentityId}::uuid,${reauthSecondUserId}::uuid,'discord',
+      ${reauthDiscordId}
+    )`;
+    await sql`insert into tourney.tourney_players(
+      id,username,email,password_hash,status,discord,discord_key,battlenet,
+      rank_name,role_play,version,principal_id
+    ) values(
+      ${reauthPlayerId},'discord-reauth-player','discord-reauth@example.invalid',
+      '$2b$12$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','approved',
+      'discord-reauth-player','discord-reauth-player','discord-reauth-player',
+      'Master','Tank',1,${reauthPrincipalId}::uuid
+    )`;
+    await sql`insert into accounts.discord_role_assignments(
+      user_id,principal_id,player_id,discord_user_id,guild_id,tourney_role,
+      desired_role,applied_role,status
+    ) values(
+      ${reauthUserId}::uuid,${reauthPrincipalId}::uuid,${reauthPlayerId},
+      ${reauthDiscordId},'610000000000000001','tourney_player',
+      'none','participant','pending'
+    )`;
+  });
+  const [reauthPrincipalIdentityDryRun] = await source`
+    select migration.block_legacy_discord_reauth(false) result
+  `;
+  assert.equal(reauthPrincipalIdentityDryRun.result.candidateCount, 0);
+  assert.equal(reauthPrincipalIdentityDryRun.result.unresolvedCount, 0);
+  assert.equal(reauthPrincipalIdentityDryRun.result.applied, false);
+  await source.begin(async (sql) => {
+    await sql`delete from auth.identities where id=${reauthIdentityId}::uuid`;
+    await sql`delete from accounts.principal_auth_users
+      where user_id=${reauthSecondUserId}::uuid`;
+    await sql`delete from auth.users where id=${reauthSecondUserId}::uuid`;
+  });
+  const [reauthDryRun] = await source`
+    select migration.block_legacy_discord_reauth(false) result
+  `;
+  assert.equal(reauthDryRun.result.candidateCount, 1);
+  assert.equal(reauthDryRun.result.unresolvedCount, 1);
+  assert.equal(reauthDryRun.result.applied, false);
+  await source`update tourney.cutover_metadata set writes_paused=false where id='tourney'`;
+  await assert.rejects(
+    source`select migration.block_legacy_discord_reauth(true)`,
+    (error) => error.code === "55000",
+    "Discord re-auth repair accepted unpaused controls"
+  );
+  await source`update tourney.cutover_metadata set writes_paused=true where id='tourney'`;
+  const [reauthApply] = await source`
+    select migration.block_legacy_discord_reauth(true) result
+  `;
+  assert.equal(reauthApply.result.applied, true);
+  assert.equal(reauthApply.result.candidateCount, 1);
+  await assertSql(
+    source,
+    `select status='blocked_reauth'
+      and desired_role='none' and applied_role='participant'
+      and last_error='discord_auth_reconnect_required'
+      and blocked_at is not null and lease_id is null ok
+    from accounts.discord_role_assignments
+    where principal_id='88000000-0000-4000-8000-000000000001'::uuid`,
+    "Discord re-auth repair changed roles or failed to block the assignment"
+  );
+  await assertSql(
+    source,
+    `select count(*)=2
+      and count(*) filter(where table_name='command_receipts')=1
+      and count(*) filter(where table_name='discord_role_assignments')=1
+      and bool_and(status='pending' and generation=1) ok
+    from tourney.mirror_outbox
+    where command_id like 'discord-reauth-block:%'`,
+    "Discord re-auth repair did not emit its receipt and assignment mirror events"
+  );
+  const [reauthReplay] = await source`
+    select migration.block_legacy_discord_reauth(true) result
+  `;
+  assert.equal(reauthReplay.result.applied, false);
+  assert.equal(reauthReplay.result.candidateCount, 0);
+  assert.equal(
+    await source`select count(*)::integer count from tourney.external_operations
+      where command_id=${reauthApply.result.commandId}`.then(([row]) => row.count),
+    0,
+    "Discord re-auth repair queued an external Discord operation"
+  );
+  await drainTourneyMirror({ env });
+  await assertSql(
+    target,
+    `select status='blocked_reauth'
+      and desired_role='none' and applied_role='participant'
+      and last_error='discord_auth_reconnect_required' ok
+    from tourney_discord_role_assignments
+    where principal_id='88000000-0000-4000-8000-000000000001'::uuid`,
+    "Discord re-auth repair did not mirror to the fallback database"
+  );
+  await source.begin(async (sql) => {
+    await sql`select set_config('roo.tourney_mirror_apply','1',true)`;
+    await sql`delete from tourney.mirror_outbox
+      where command_id=${reauthApply.result.commandId}`;
+    await sql`delete from tourney.command_receipts
+      where command_id=${reauthApply.result.commandId}`;
+    await sql`delete from accounts.discord_role_assignments
+      where principal_id=${reauthPrincipalId}::uuid`;
+    await sql`delete from tourney.tourney_players where id=${reauthPlayerId}`;
+    await sql`delete from accounts.principal_auth_users
+      where user_id=${reauthUserId}::uuid`;
+    await sql`delete from accounts.principals where id=${reauthPrincipalId}::uuid`;
+    await sql`delete from auth.users where id=${reauthUserId}::uuid`;
+    await sql`update tourney.cutover_metadata set
+      clean_since=null,natural_mutation_verified_at=null,
+      first_zero_drift_at=null,second_zero_drift_at=null,
+      clock_last_reset_reason='mirror_trigger_binding_repaired'
+      where id='tourney'`;
+  });
+  await target.begin(async (sql) => {
+    await sql`select set_config('roo.tourney_mirror_apply','1',true)`;
+    await sql`delete from tourney_command_receipts
+      where command_id=${reauthApply.result.commandId}`;
+    await sql`delete from tourney_discord_role_assignments
+      where principal_id=${reauthPrincipalId}::uuid`;
+  });
 
   const restoreRelations = Object.fromEntries(
     SUPABASE_FULL_REQUIRED_RELATIONS.map((relation) => [
