@@ -1199,9 +1199,12 @@ insert into accounts.discord_role_assignments(
     legacyActivation,
     legacyRepair,
     legacyTriggerBindingDrift,
-    legacyTriggerBindingRepair
+    legacyTriggerBindingRepair,
+    legacyRepair
   );
-  process.stderr.write("[postgres17] legacy schema v4 and forward repair applied\n");
+  process.stderr.write(
+    "[postgres17] legacy schema v4 and repeat-safe forward repair applied\n"
+  );
 
   psql(
     "supabase_fixture",
