@@ -21,6 +21,15 @@
     },
     "app/api/ref/**/*": {
       "regions": ["dub1"]
+    },
+    "app/api/tourney/**/*": {
+      "regions": ["dub1"]
+    },
+    "app/api/admin/tourney-*/route.js": {
+      "regions": ["dub1"]
+    },
+    "app/tourney/**/*": {
+      "regions": ["dub1"]
     }
   },
   "redirects": [
