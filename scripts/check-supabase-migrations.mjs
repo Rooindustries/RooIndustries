@@ -322,10 +322,42 @@ for (const file of [
   "20260715140000_terminalize_stale_provider_recovery.sql",
   "20260715150000_block_legacy_discord_reauth.sql",
   "20260715160000_generalize_stale_provider_recovery.sql",
+  "20260715170000_repair_recovery_scope_guards.sql",
 ]) {
   const sql = fs.readFileSync(path.join(migrationsDirectory, file), "utf8");
   if (!hasBoundedMigrationPrefix(sql)) {
     failures.push(`Final release migration lacks bounded timeouts: ${file}`);
+  }
+}
+
+const recoveryScopeGuardsFile = path.join(
+  migrationsDirectory,
+  "20260715170000_repair_recovery_scope_guards.sql"
+);
+if (!fs.existsSync(recoveryScopeGuardsFile)) {
+  failures.push("Recovery scope guard migration is missing.");
+} else {
+  const sql = fs.readFileSync(recoveryScopeGuardsFile, "utf8");
+  for (const required of [
+    "migration.terminalize_stale_provider_recoveries",
+    "join migration.source_documents payment_source",
+    "payment.recovery_attempt_count >= 24",
+    "payment.resource_release_pending",
+    "hold.phase in ('active', 'payment')",
+    "redemption.state = 'reserved'",
+    "group by payment.id",
+    "migration.block_legacy_discord_reauth",
+    "from accounts.principal_auth_users auth_mapping",
+    "identity.user_id = auth_mapping.user_id",
+    "auth_mapping.principal_id = assignment.principal_id",
+    "from public, anon, authenticated, service_role",
+  ]) {
+    if (!sql.includes(required)) {
+      failures.push(`Recovery scope guard migration lacks: ${required}`);
+    }
+  }
+  if (/grant\s+execute\s+on\s+function\s+migration\./i.test(sql)) {
+    failures.push("Recovery scope guard functions must remain owner-only.");
   }
 }
 
