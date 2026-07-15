@@ -23,6 +23,7 @@ import {
 import { TOURNEY_MIRROR_CONTRACT } from "../src/server/tourney/mirrorContract.js";
 import {
   stableSnapshotJson,
+  SUPABASE_FULL_EXPANDED_MIGRATION_NAMES,
   SUPABASE_FULL_EXPANDED_PROFILE,
   SUPABASE_FULL_REQUIRED_RELATIONS,
   SUPABASE_FULL_SNAPSHOT_SCHEMAS,
@@ -995,10 +996,18 @@ insert into tourney_external_operations(
   await unsafeSupabase.unsafe(`
     create schema supabase_migrations;
     create table supabase_migrations.schema_migrations(
-      version text primary key
+      version text primary key,
+      name text not null
     );
-    insert into supabase_migrations.schema_migrations(version)
-    values('20260715130100')
+    insert into supabase_migrations.schema_migrations(version,name)
+    values
+      ('20260715080000','add_referral_creator_terms_editor'),
+      ('20260715090000','add_document_mutation_mirror_outbox'),
+      ('20260715100000','add_referral_fallback_authority'),
+      ('20260715110000','add_referral_email_dispatch_ledger'),
+      ('20260715115000','harden_commerce_readiness_evidence'),
+      ('20260715120000','add_global_cms_publish_authority'),
+      ('20260715130100','add_credential_recovery_queue_index')
   `);
   const fullCapture = await unsafeSupabase.begin((transaction) =>
     captureFullLogicalSnapshotTransaction({
@@ -1229,6 +1238,7 @@ insert into accounts.discord_role_assignments(
       capturedAt: "2026-07-15T00:00:00.000Z",
       sourceSnapshotId: "91000000-0000-4000-8000-000000000001",
       sourceMigrationVersion: "20260715130100",
+      sourceMigrationNames: [...SUPABASE_FULL_EXPANDED_MIGRATION_NAMES],
       contractProfile: SUPABASE_FULL_EXPANDED_PROFILE,
       schemas: [...SUPABASE_FULL_SNAPSHOT_SCHEMAS],
       requiredRelations: [...SUPABASE_FULL_REQUIRED_RELATIONS],
