@@ -1,10 +1,11 @@
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const moduleUrl = pathToFileURL(
-  path.join(process.cwd(), "scripts", "tourney-cutover.mjs")
-).href;
+const scriptPath = path.join(process.cwd(), "scripts", "tourney-cutover.mjs");
+const scriptSource = fs.readFileSync(scriptPath, "utf8");
+const moduleUrl = pathToFileURL(scriptPath).href;
 const runModule = (body) => JSON.parse(execFileSync(
   process.execPath,
   ["--input-type=module", "--eval", `import * as cutover from ${JSON.stringify(moduleUrl)};${body}`],
@@ -58,6 +59,7 @@ describe("Tourney snapshot operational input", () => {
   });
 
   test("accepts the stdin target only for snapshot capture", () => {
+    expect(scriptSource).toContain("await loadSupabaseDatabaseTargetFromStdin();");
     const result = runModule(`
       process.argv = [
         "node",

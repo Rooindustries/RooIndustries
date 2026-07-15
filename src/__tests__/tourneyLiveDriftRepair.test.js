@@ -132,6 +132,7 @@ describe("deterministic Tourney live-drift repair", () => {
   });
 
   test("accepts one in-memory Supabase target flag for every repair phase", () => {
+    expect(scriptSource).toContain("await loadSupabaseDatabaseTargetFromStdin();");
     const result = runModule(`
       const parsed=['--preflight','--apply','--finalize'].map((action)=>{
         const args=[action,'--env','/tmp/private-env','--supabase-database-url-stdin'];

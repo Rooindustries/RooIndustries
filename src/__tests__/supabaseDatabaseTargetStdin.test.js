@@ -10,9 +10,10 @@ const projectRef = "ntezmxzaibrrsgtujgxu";
 const databaseUrl =
   `postgresql://roo_cutover.${projectRef}:temporary-secret@` +
   "aws-0-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=require";
+const databaseUrlWithoutQuery = databaseUrl.split("?")[0];
 const fingerprint = "a".repeat(64);
-const payload = () => JSON.stringify({
-  supabaseDatabaseUrl: databaseUrl,
+const payload = (supabaseDatabaseUrl = databaseUrl) => JSON.stringify({
+  supabaseDatabaseUrl,
   expectedFingerprint: fingerprint,
 });
 
@@ -41,6 +42,36 @@ describe("in-memory Supabase database target", () => {
       }),
     ]) {
       expect(() => parseSupabaseDatabaseTargetPayload(value)).toThrow(
+        expect.objectContaining({ code: "TOURNEY_SUPABASE_DATABASE_STDIN_INVALID" })
+      );
+    }
+  });
+
+  test("accepts only secure PostgreSQL connection options", () => {
+    for (const sslmode of ["require", "verify-ca", "verify-full"]) {
+      const secureUrl = `${databaseUrlWithoutQuery}?sslmode=${sslmode}`;
+      expect(parseSupabaseDatabaseTargetPayload(payload(secureUrl))).toEqual({
+        supabaseDatabaseUrl: secureUrl,
+        expectedFingerprint: fingerprint,
+      });
+    }
+
+    for (const unsafeUrl of [
+      databaseUrlWithoutQuery,
+      `${databaseUrlWithoutQuery}?sslmode=disable`,
+      `${databaseUrlWithoutQuery}?sslmode=allow`,
+      `${databaseUrlWithoutQuery}?sslmode=prefer`,
+      `${databaseUrlWithoutQuery}?sslmode=require&sslmode=prefer`,
+      `${databaseUrlWithoutQuery}?sslmode=require&host=attacker.example.com`,
+      `${databaseUrlWithoutQuery}?sslmode=require&user=attacker`,
+      `${databaseUrlWithoutQuery}?sslmode=require&password=attacker`,
+      `${databaseUrlWithoutQuery}?sslmode=require&options=-csearch_path%3Dpublic`,
+      `${databaseUrlWithoutQuery}?sslmode=require&service=attacker`,
+      `${databaseUrlWithoutQuery}?sslmode=require&unknown=value`,
+      `${databaseUrlWithoutQuery}?sslmode=require#fragment`,
+      `${databaseUrlWithoutQuery}?sslmode=require#`,
+    ]) {
+      expect(() => parseSupabaseDatabaseTargetPayload(payload(unsafeUrl))).toThrow(
         expect.objectContaining({ code: "TOURNEY_SUPABASE_DATABASE_STDIN_INVALID" })
       );
     }

@@ -1,7 +1,10 @@
 import process from "node:process";
 
+import { buildPostgresConnectionEnv } from "./postgres-connection-env.mjs";
+
 const MAX_PAYLOAD_BYTES = 16 * 1024;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+const SECURE_SSL_MODES = new Set(["require", "verify-ca", "verify-full"]);
 
 const inputError = (code) => Object.assign(
   new Error("The in-memory Supabase database target is invalid."),
@@ -35,8 +38,17 @@ export const parseSupabaseDatabaseTargetPayload = (text) => {
     !parsed.username ||
     !parsed.password ||
     !parsed.pathname.replace(/^\/+/, "") ||
+    supabaseDatabaseUrl.includes("#") ||
     !SHA256_PATTERN.test(expectedFingerprint)
   ) {
+    throw inputError("TOURNEY_SUPABASE_DATABASE_STDIN_INVALID");
+  }
+  try {
+    const connectionEnv = buildPostgresConnectionEnv(supabaseDatabaseUrl, {});
+    if (!SECURE_SSL_MODES.has(connectionEnv.PGSSLMODE)) {
+      throw new Error("TLS is required.");
+    }
+  } catch {
     throw inputError("TOURNEY_SUPABASE_DATABASE_STDIN_INVALID");
   }
   return { supabaseDatabaseUrl, expectedFingerprint };
