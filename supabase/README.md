@@ -233,11 +233,11 @@ deployed activation endpoint because that credential is not exportable.
      --snapshot-via-production \
      --snapshot-transport-url \
        https://www.rooindustries.com/api/admin/tourney-snapshot-transport \
-     --output "$HOME/Documents/Codex/Tourney Cutover/unique-pre-cutover.enc"
+     --output "$HOME/Servi/snapshots/Tourney Cutover/unique-pre-cutover.enc"
 
    node scripts/tourney-cutover.mjs --env /absolute/path/to/restricted.env \
      --verify-snapshot \
-     "$HOME/Documents/Codex/Tourney Cutover/unique-pre-cutover.enc"
+     "$HOME/Servi/snapshots/Tourney Cutover/unique-pre-cutover.enc"
    ```
 
    Capture downloads 512 KiB chunks sealed to a one-time RSA-3072 public key,
