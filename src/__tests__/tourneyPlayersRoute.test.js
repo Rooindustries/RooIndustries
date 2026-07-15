@@ -3,6 +3,7 @@ const mockGetClientAddressFromHeaders = jest.fn();
 const mockReadTourneySessionFromStore = jest.fn();
 const mockApplyRegistrationDecision = jest.fn();
 const mockCreateApprovedTourneyPlayer = jest.fn();
+const mockGetManageTourneyPlayersSnapshot = jest.fn();
 const mockGetTourneyRoleCapacitySnapshot = jest.fn();
 const mockKickTourneyPlayer = jest.fn();
 const mockListManageTourneyPlayers = jest.fn();
@@ -50,6 +51,8 @@ jest.mock("../server/tourney/emailDispatch", () => ({
 jest.mock("../server/tourney/playerStore", () => ({
   applyRegistrationDecision: (...args) => mockApplyRegistrationDecision(...args),
   createApprovedTourneyPlayer: (...args) => mockCreateApprovedTourneyPlayer(...args),
+  getManageTourneyPlayersSnapshot: (...args) =>
+    mockGetManageTourneyPlayersSnapshot(...args),
   getTourneyRoleCapacitySnapshot: (...args) =>
     mockGetTourneyRoleCapacitySnapshot(...args),
   kickTourneyPlayer: (...args) => mockKickTourneyPlayer(...args),
@@ -96,6 +99,7 @@ describe("tourney players API route", () => {
     mockReadTourneySessionFromStore.mockReset();
     mockApplyRegistrationDecision.mockReset();
     mockCreateApprovedTourneyPlayer.mockReset();
+    mockGetManageTourneyPlayersSnapshot.mockReset();
     mockGetTourneyRoleCapacitySnapshot.mockReset();
     mockKickTourneyPlayer.mockReset();
     mockListManageTourneyPlayers.mockReset();
@@ -116,6 +120,10 @@ describe("tourney players API route", () => {
       teamCount: 8,
       roles: [],
     });
+    mockGetManageTourneyPlayersSnapshot.mockImplementation(async (...args) => ({
+      players: await mockListManageTourneyPlayers(...args),
+      capacity: await mockGetTourneyRoleCapacitySnapshot(...args),
+    }));
     mockEnqueueTourneyEmailDispatch.mockResolvedValue({ id: "dispatch_1" });
   });
 
