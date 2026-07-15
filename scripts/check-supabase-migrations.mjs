@@ -321,10 +321,43 @@ for (const file of [
   "20260715120000_add_global_cms_publish_authority.sql",
   "20260715140000_terminalize_stale_provider_recovery.sql",
   "20260715150000_block_legacy_discord_reauth.sql",
+  "20260715160000_generalize_stale_provider_recovery.sql",
 ]) {
   const sql = fs.readFileSync(path.join(migrationsDirectory, file), "utf8");
   if (!hasBoundedMigrationPrefix(sql)) {
     failures.push(`Final release migration lacks bounded timeouts: ${file}`);
+  }
+}
+
+const generalizedProviderRecoveryFile = path.join(
+  migrationsDirectory,
+  "20260715160000_generalize_stale_provider_recovery.sql"
+);
+if (!fs.existsSync(generalizedProviderRecoveryFile)) {
+  failures.push("Generalized provider recovery migration is missing.");
+} else {
+  const sql = fs.readFileSync(generalizedProviderRecoveryFile, "utf8");
+  for (const required of [
+    "migration.terminalize_stale_provider_recoveries",
+    "payment.provider in ('paypal', 'razorpay')",
+    "recovery.reason = payment.provider || '_lookup_failed_404'",
+    "provider_order_not_found_after_recovery_window",
+    "v_starts_paused",
+    "payment.resource_release_pending",
+    "redemption.state = 'reserved'",
+    "hold.phase in ('active', 'payment')",
+    "from public, anon, authenticated, service_role",
+  ]) {
+    if (!sql.includes(required)) {
+      failures.push(`Generalized provider recovery migration lacks: ${required}`);
+    }
+  }
+  if (
+    /grant\s+execute\s+on\s+function\s+migration\.terminalize_stale_provider_recoveries/i.test(
+      sql
+    )
+  ) {
+    failures.push("Generalized provider recovery repair must remain owner-only.");
   }
 }
 
