@@ -49,7 +49,6 @@ const ACTION_HANDLERS = {
 };
 
 const COMMERCE_ACTIONS = new Set([
-  "cronSyncAll",
   "createBooking",
   "getData",
   "getUpgradeInfo",

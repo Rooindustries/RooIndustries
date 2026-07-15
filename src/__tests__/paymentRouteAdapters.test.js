@@ -45,6 +45,7 @@ const buildEchoHandler = (name) =>
 
 const loadPaymentActionRoute = async (handlerOverrides = {}) => {
   jest.resetModules();
+  const recordCommerceResponseMetric = jest.fn(async () => {});
 
   const handlers = {
     cancel: handlerOverrides.cancel || buildEchoHandler("cancel"),
@@ -85,11 +86,18 @@ const loadPaymentActionRoute = async (handlerOverrides = {}) => {
     __esModule: true,
     default: handlers.status,
   }));
+  jest.doMock("next/server", () => ({
+    after: (callback) => callback(),
+  }));
+  jest.doMock("../server/supabase/commerceMetrics.js", () => ({
+    recordCommerceResponseMetric,
+  }));
 
   const route = require("../../app/api/payment/[action]/route.js");
   return {
     route,
     handlers,
+    recordCommerceResponseMetric,
   };
 };
 
@@ -150,7 +158,8 @@ describe("payment app route adapters", () => {
   });
 
   test("start forwards the canonical payment body through the App Router adapter", async () => {
-    const { route, handlers } = await loadPaymentActionRoute();
+    const { route, handlers, recordCommerceResponseMetric } =
+      await loadPaymentActionRoute();
     const request = buildJsonRequest("https://example.com/api/payment/start", {
       method: "POST",
       body: {
@@ -181,6 +190,10 @@ describe("payment app route adapters", () => {
       },
     });
     expect(handlers.start).toHaveBeenCalledTimes(1);
+    expect(recordCommerceResponseMetric).toHaveBeenCalledWith(expect.objectContaining({
+      route: "payment/start",
+      statusCode: 200,
+    }));
   });
 
   test("accepts the canonical production origin behind Vercel's internal request URL", async () => {
@@ -286,7 +299,8 @@ describe("payment app route adapters", () => {
   });
 
   test("reconcile accepts authenticated GET requests from Vercel Cron", async () => {
-    const { route, handlers } = await loadPaymentActionRoute();
+    const { route, handlers, recordCommerceResponseMetric } =
+      await loadPaymentActionRoute();
     const request = buildJsonRequest("https://example.com/api/payment/reconcile", {
       method: "GET",
       headers: { authorization: "Bearer cron-secret" },
@@ -304,6 +318,7 @@ describe("payment app route adapters", () => {
       headers: { authorization: "Bearer cron-secret" },
     });
     expect(handlers.reconcile).toHaveBeenCalledTimes(1);
+    expect(recordCommerceResponseMetric).not.toHaveBeenCalled();
   });
 
   test("unknown payment actions return a 404 JSON response", async () => {
