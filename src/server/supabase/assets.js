@@ -2,6 +2,7 @@ import { createSupabaseAdminClient } from "./adminClient.js";
 
 const MANIFEST_TTL_MS = 60 * 1000;
 const PRIVATE_URL_TTL_SECONDS = 15 * 60;
+const ASSET_REFERENCE_PATTERN = /^(?:image|file)-[A-Za-z0-9_.-]{1,240}$/;
 const manifestCache = new Map();
 
 const requireData = ({ data, error }, operation) => {
@@ -13,14 +14,18 @@ const requireData = ({ data, error }, operation) => {
   return data;
 };
 
-const collectReferences = (value, result = { ids: new Set(), urls: new Set() }) => {
+const collectReferences = (
+  value,
+  result = { ids: new Set(), urls: new Set() },
+) => {
   if (Array.isArray(value)) {
     value.forEach((entry) => collectReferences(entry, result));
     return result;
   }
   if (!value || typeof value !== "object") {
-    if (typeof value === "string" && /^https?:\/\//i.test(value)) {
-      result.urls.add(value);
+    if (typeof value === "string") {
+      if (/^https?:\/\//i.test(value)) result.urls.add(value);
+      else if (ASSET_REFERENCE_PATTERN.test(value)) result.ids.add(value);
     }
     return result;
   }
@@ -48,17 +53,17 @@ const getManifest = async (client, references) => {
       p_asset_ids: assetIds,
       p_source_urls: sourceUrls,
     }),
-    "asset manifest"
+    "asset manifest",
   );
   const entries = Array.isArray(data) ? data : [];
   const manifest = {
     byId: new Map(
-      entries.map((entry) => [entry.legacy_sanity_asset_id, entry])
+      entries.map((entry) => [entry.legacy_sanity_asset_id, entry]),
     ),
     bySourceUrl: new Map(
       entries
         .filter((entry) => entry.source_url)
-        .map((entry) => [entry.source_url, entry])
+        .map((entry) => [entry.source_url, entry]),
     ),
   };
   if (manifestCache.size >= 100) {
@@ -69,7 +74,13 @@ const getManifest = async (client, references) => {
 };
 
 const collectEntries = (value, manifest, entries = new Map()) => {
-  if (!value || typeof value !== "object") return entries;
+  if (!value || typeof value !== "object") {
+    if (typeof value === "string") {
+      const asset = manifest.byId.get(value) || manifest.bySourceUrl.get(value);
+      if (asset) entries.set(asset.legacy_sanity_asset_id, asset);
+    }
+    return entries;
+  }
   if (Array.isArray(value)) {
     value.forEach((entry) => collectEntries(entry, manifest, entries));
     return entries;
@@ -105,7 +116,7 @@ const resolveUrls = async (entries, client) => {
       await client.storage
         .from(entry.storage_bucket)
         .createSignedUrl(entry.storage_path, PRIVATE_URL_TTL_SECONDS),
-      "private asset signing"
+      "private asset signing",
     );
     resolved.set(entry.legacy_sanity_asset_id, data.signedUrl);
   }
@@ -118,22 +129,24 @@ const replaceUrls = (value, manifest, resolved) => {
   }
   if (!value || typeof value !== "object") {
     if (typeof value !== "string") return value;
+    const referencedAsset = manifest.byId.get(value);
+    if (referencedAsset) {
+      return resolved.get(referencedAsset.legacy_sanity_asset_id) || value;
+    }
     const asset = manifest.bySourceUrl.get(value);
-    return asset
-      ? resolved.get(asset.legacy_sanity_asset_id) || value
-      : value;
+    return asset ? resolved.get(asset.legacy_sanity_asset_id) || value : value;
   }
 
   const next = {};
   for (const [key, entry] of Object.entries(value)) {
-    next[key] = replaceUrls(entry, manifest, resolved);
+    next[key] = key === "_ref" ? entry : replaceUrls(entry, manifest, resolved);
   }
   const reference = String(value?._ref || "").trim();
   if (reference && resolved.has(reference)) {
     next._supabaseUrl = resolved.get(reference);
   }
   const linkedAsset = manifest.byId.get(
-    String(value?.asset?._ref || "").trim()
+    String(value?.asset?._ref || "").trim(),
   );
   const width = Number(linkedAsset?.width || 0);
   const height = Number(linkedAsset?.height || 0);

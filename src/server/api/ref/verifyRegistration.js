@@ -76,6 +76,7 @@ export default async function handler(req, res) {
       .unset([
         "registrationVerificationTokenHash",
         "registrationVerificationExpiresAt",
+        "registrationVerificationDeliveryToken",
       ])
       .commit({ visibility: "sync" });
 

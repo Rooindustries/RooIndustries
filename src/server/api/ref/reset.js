@@ -5,16 +5,23 @@ import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import { logSafeError } from "../../safeErrorLog.js";
 import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
 import {
+  buildCredentialSourcePreconditions,
+  buildCredentialSourceMutation,
   completeSupabaseCredentialMirror,
+  markSupabaseCredentialSourceApplied,
+  resolveCredentialSourceRevision,
   updateSupabaseAccountPassword,
 } from "../../supabase/accounts.js";
+import {
+  reconcileSupabaseCredentialSource,
+  resumeSupabaseCredentialOperation,
+} from "../../supabase/credentialRecovery.js";
 
-// Initialize Sanity with WRITE permissions
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
   dataset: process.env.SANITY_DATASET || "production",
   apiVersion: "2023-10-01",
-  token: process.env.SANITY_WRITE_TOKEN, // CRITICAL: Must be a write token
+  token: process.env.SANITY_WRITE_TOKEN,
   useCdn: false,
 });
 
@@ -53,9 +60,37 @@ export default async function handler(req, res) {
       .createHash("sha256")
       .update(String(token))
       .digest("hex");
+    const policy = resolveSupabaseRuntimePolicy();
+    const operationKey = `credential:reset:${tokenHash}`;
+    const manualFallback =
+      policy.primaryBackend === "sanity" && policy.cutoverEnabled === true;
+    if (manualFallback) {
+      return res.status(503).json({
+        ok: false,
+        error:
+          "Password resets are temporarily unavailable during manual authentication failover. Existing reset links are unchanged.",
+      });
+    }
+    const useSupabaseCredentialSaga =
+      policy.primaryBackend === "supabase" || policy.shadowWritesEnabled;
+
+    if (useSupabaseCredentialSaga) {
+      try {
+        const resumed = await resumeSupabaseCredentialOperation({ operationKey });
+        if (resumed.resumed) {
+          return res.status(200).json({ ok: true, replayed: true });
+        }
+      } catch (error) {
+        logSafeError("Referral password reset recovery remains pending", error);
+        return res.status(503).json({
+          ok: false,
+          error: "Password update is finishing. Please try signing in shortly.",
+        });
+      }
+    }
 
     const referral = await client.fetch(
-      `*[_type == "referral" && registrationStatus != "pending_email" && resetTokenHash == $tokenHash && resetTokenExpiresAt > $now][0]{ _id, _rev, creatorEmail, slug }`,
+      `*[_type == "referral" && registrationStatus != "pending_email" && resetTokenHash == $tokenHash && resetTokenExpiresAt > $now][0]{ _id, _rev, _supabaseRevision, creatorEmail, creatorPassword, credentialVersion, resetTokenHash, resetTokenExpiresAt, slug }`,
       { tokenHash, now }
     );
 
@@ -65,23 +100,45 @@ export default async function handler(req, res) {
         .json({ ok: false, error: "Invalid or expired reset link" });
     }
 
-    // 2. Hash new password
     const hash = await bcrypt.hash(normalizedPassword, 12);
-    const policy = resolveSupabaseRuntimePolicy();
+    const sourceBackend = policy.primaryBackend;
+    const sourceRevision = resolveCredentialSourceRevision({
+      document: referral,
+      sourceBackend,
+    });
+    const sourceMutation = buildCredentialSourceMutation({
+      passwordHash: hash,
+      passwordChangedAt: now,
+      consumeResetToken: true,
+    });
+    const sourcePreconditions = buildCredentialSourcePreconditions({
+      document: referral,
+      resetTokenHash: tokenHash,
+    });
     let credentialOperation = null;
 
-    if (policy.primaryBackend === "supabase" || policy.shadowWritesEnabled) {
+    if (useSupabaseCredentialSaga) {
       try {
         credentialOperation = await updateSupabaseAccountPassword({
           identifier: referral.creatorEmail || referral.slug?.current,
           passwordHash: hash,
-          sourceRevision: referral._rev || "",
+          sourceBackend,
+          sourceDocumentId: referral._id,
+          sourcePreconditions,
+          sourceMutation,
+          sourceRevision,
+          operationKey,
         });
         if (!credentialOperation.updated) {
           throw new Error("Supabase creator account was not found.");
         }
       } catch (error) {
         logSafeError("Supabase referral password update failed", error);
+        if (["23505", "40001"].includes(String(error?.code || ""))) {
+          return res
+            .status(400)
+            .json({ ok: false, error: "Invalid or expired reset link" });
+        }
         return res.status(503).json({
           ok: false,
           error: "Password update is temporarily unavailable. Please retry the link.",
@@ -89,25 +146,44 @@ export default async function handler(req, res) {
       }
     }
 
-    // 3. Update password and remove reset tokens
-    let patch = client.patch(referral._id);
-    if (referral._rev && typeof patch.ifRevisionId === "function") {
-      patch = patch.ifRevisionId(referral._rev);
-    }
-    await patch
-      .set({
-        creatorPassword: hash,
-        passwordResetRequired: false,
-        credentialVersion: 2,
-        passwordChangedAt: now,
-        passwordLoginEnabled: true,
-      })
-      .unset(["resetToken", "resetTokenHash", "resetTokenExpiresAt"])
-      .commit({ visibility: "sync" });
+    try {
+      if (credentialOperation?.updated && sourceBackend === "supabase") {
+        await reconcileSupabaseCredentialSource({
+          operationKey: credentialOperation.operationKey,
+          sourceDocumentId: referral._id,
+        });
+      } else {
+        const committedMutation =
+          credentialOperation?.sourceMutation || sourceMutation;
+        let patch = client.patch(referral._id);
+        if (referral._rev && typeof patch.ifRevisionId === "function") {
+          patch = patch.ifRevisionId(referral._rev);
+        }
+        const committed = await patch
+          .set(committedMutation.set)
+          .unset(committedMutation.unset)
+          .commit({ visibility: "sync" });
 
-    if (credentialOperation?.updated) {
-      await completeSupabaseCredentialMirror({
-        operationKey: credentialOperation.operationKey,
+        if (credentialOperation?.updated) {
+          await markSupabaseCredentialSourceApplied({
+            operationKey: credentialOperation.operationKey,
+            sourceRevision: committed?._rev || referral._rev,
+          });
+          await completeSupabaseCredentialMirror({
+            operationKey: credentialOperation.operationKey,
+          });
+        }
+      }
+    } catch (error) {
+      logSafeError("Referral password source update pending", error);
+      if (Number(error?.statusCode || error?.status || 0) === 409) {
+        return res
+          .status(400)
+          .json({ ok: false, error: "Invalid or expired reset link" });
+      }
+      return res.status(503).json({
+        ok: false,
+        error: "Password update is finishing. Please try signing in shortly.",
       });
     }
 

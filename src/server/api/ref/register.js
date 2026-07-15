@@ -16,8 +16,16 @@ import {
 } from "../../supabase/accounts.js";
 import { hashShadowDocument } from "../../supabase/shadowStore.js";
 import { getLegacySupabaseUser } from "../../supabase/serverSession.js";
-import { Resend } from "resend";
-import { buildReferralVerificationEmail } from "../../email/referralVerificationEmail.js";
+import {
+  deliverReferralEmailDispatch,
+  enqueueReferralEmailMutation,
+  requeueReferralEmailDispatch,
+  sendReferralEmailDirect,
+} from "./referralEmailDispatches.js";
+import {
+  sealReferralEmailToken,
+  unsealReferralEmailToken,
+} from "./referralEmailTokenSeal.js";
 
 const client = createClient({
   projectId: process.env.SANITY_PROJECT_ID,
@@ -26,11 +34,6 @@ const client = createClient({
   token: process.env.SANITY_WRITE_TOKEN,
   useCdn: false,
 });
-
-const createResendClient = () => {
-  const apiKey = String(process.env.RESEND_API_KEY || "").trim();
-  return apiKey ? new Resend(apiKey) : null;
-};
 
 const isExpiredPendingRegistration = (referral) =>
   referral?.registrationStatus === "pending_email" &&
@@ -51,6 +54,29 @@ const removeExpiredPendingRegistration = async (referral) => {
   if (slugClaimId) transaction = transaction.delete(slugClaimId);
   await transaction.commit();
   return true;
+};
+
+const recoverPendingRegistrationToken = (referral) => {
+  try {
+    const token = unsealReferralEmailToken(
+      referral?.registrationVerificationDeliveryToken
+    );
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    return tokenHash === referral?.registrationVerificationTokenHash ? token : "";
+  } catch {
+    return "";
+  }
+};
+
+const clearRegistrationDeliveryToken = async (referralId) => {
+  try {
+    await client
+      .patch(referralId)
+      .unset(["registrationVerificationDeliveryToken"])
+      .commit({ visibility: "sync" });
+  } catch (error) {
+    logSafeError("Referral verification token cleanup failed", error);
+  }
 };
 
 export default async function handler(req, res) {
@@ -104,6 +130,7 @@ export default async function handler(req, res) {
     const socialAccount = socialUser?.id
       ? await resolveSupabaseAccountByUserId({ userId: socialUser.id }).catch(() => null)
       : null;
+    const policy = resolveSupabaseRuntimePolicy();
     if (
       socialUser &&
       String(socialAccount?.verified_real_email || "").trim().toLowerCase() !== trimmedEmail
@@ -151,14 +178,88 @@ export default async function handler(req, res) {
     // Check email uniqueness (login email)
     const existingByEmail = await client.fetch(
       `*[_type == "referral" && lower(creatorEmail) == $email][0]{
-        _id,_rev,creatorEmail,slug,registrationStatus,registrationVerificationExpiresAt
+        _id,_rev,name,creatorEmail,slug,registrationStatus,
+        registrationVerificationTokenHash,registrationVerificationExpiresAt,
+        registrationVerificationDeliveryToken
       }`,
       { email: trimmedEmail }
     );
-    if (existingByEmail && !(await removeExpiredPendingRegistration(existingByEmail)))
+    let expiredSupabaseRegistration = null;
+    if (existingByEmail && isExpiredPendingRegistration(existingByEmail)) {
+      if (policy.primaryBackend === "supabase") {
+        if (existingByEmail.slug?.current !== trimmedSlug) {
+          return res
+            .status(409)
+            .json({ ok: false, error: "Email already registered" });
+        }
+        expiredSupabaseRegistration = existingByEmail;
+      } else {
+        await removeExpiredPendingRegistration(existingByEmail);
+      }
+    } else if (existingByEmail) {
+      if (
+        policy.primaryBackend === "supabase" &&
+        existingByEmail.registrationStatus === "pending_email"
+      ) {
+        try {
+          const recovery = await requeueReferralEmailDispatch({
+            referralId: existingByEmail._id,
+            dispatchKind: "registration_verification",
+          });
+          const recoverable =
+            recovery?.sent === true ||
+            recovery?.requeued === true ||
+            ["pending", "retry", "sending"].includes(recovery?.status);
+          if (!recoverable) throw Object.assign(
+            new Error("Verification email recovery is blocked."),
+            { code: recovery?.recovery_blocked_reason || "email_recovery_blocked" }
+          );
+          return res.status(202).json({
+            ok: true,
+            pendingVerification: true,
+            message: "Check your email to finish creating your account.",
+            ...(recovery?.sent === true ? {} : { syncPending: true }),
+          });
+        } catch (error) {
+          logSafeError("Referral verification email recovery failed", error);
+          return res.status(503).json({
+            ok: false,
+            error: "Verification email could not be recovered. Please try again.",
+          });
+        }
+      }
+      const retryToken =
+        policy.primaryBackend === "sanity" &&
+        existingByEmail.registrationStatus === "pending_email"
+          ? recoverPendingRegistrationToken(existingByEmail)
+          : "";
+      if (retryToken) {
+        try {
+          await sendReferralEmailDirect({
+            dispatchKind: "registration_verification",
+            referralId: existingByEmail._id,
+            recipientEmail: trimmedEmail,
+            token: retryToken,
+            name: existingByEmail.name,
+          });
+          await clearRegistrationDeliveryToken(existingByEmail._id);
+          return res.status(202).json({
+            ok: true,
+            pendingVerification: true,
+            message: "Check your email to finish creating your account.",
+          });
+        } catch (error) {
+          logSafeError("Referral verification email retry failed", error);
+          return res.status(503).json({
+            ok: false,
+            error: "Verification email could not be sent. Please try again.",
+          });
+        }
+      }
       return res
         .status(409)
         .json({ ok: false, error: "Email already registered" });
+    }
 
     // Check slug uniqueness
     const existingBySlug = await client.fetch(
@@ -167,10 +268,19 @@ export default async function handler(req, res) {
       }`,
       { slug: trimmedSlug }
     );
-    if (existingBySlug && !(await removeExpiredPendingRegistration(existingBySlug)))
-      return res
-        .status(409)
-        .json({ ok: false, error: "Referral code already taken" });
+    if (
+      existingBySlug &&
+      existingBySlug._id !== expiredSupabaseRegistration?._id
+    ) {
+      const removed =
+        policy.primaryBackend === "sanity" &&
+        (await removeExpiredPendingRegistration(existingBySlug));
+      if (!removed) {
+        return res
+          .status(409)
+          .json({ ok: false, error: "Referral code already taken" });
+      }
+    }
 
     // Hash password
     const passwordMaterial =
@@ -178,7 +288,8 @@ export default async function handler(req, res) {
     const hash = await bcrypt.hash(passwordMaterial, 12);
 
     // Create the referral and both unique identity claims atomically.
-    const referralId = `referral.${crypto.randomUUID()}`;
+    const referralId =
+      expiredSupabaseRegistration?._id || `referral.${crypto.randomUUID()}`;
     const createdAt = new Date().toISOString();
     const verificationToken = socialUser
       ? ""
@@ -210,6 +321,12 @@ export default async function handler(req, res) {
         ? {
             registrationVerificationTokenHash: verificationTokenHash,
             registrationVerificationExpiresAt: verificationExpiresAt,
+            ...(policy.primaryBackend === "sanity"
+              ? {
+                  registrationVerificationDeliveryToken:
+                    sealReferralEmailToken(verificationToken),
+                }
+              : {}),
           }
         : {}),
     };
@@ -225,48 +342,102 @@ export default async function handler(req, res) {
       referralId,
       createdAt,
     });
-    await client
-      .transaction()
-      .create(emailClaim)
-      .create(slugClaim)
-      .create(referral)
-      .commit();
+    let emailDispatch = null;
+    if (!socialUser && policy.primaryBackend === "supabase") {
+      const mutations = expiredSupabaseRegistration
+        ? [
+            {
+              operation: "replace",
+              document: referral,
+              expected_revision: expiredSupabaseRegistration._rev || "",
+            },
+          ]
+        : [emailClaim, slugClaim, referral].map((document) => ({
+            operation: "create",
+            document,
+          }));
+      emailDispatch = await enqueueReferralEmailMutation({
+        mutations,
+        referralId,
+        dispatchKind: "registration_verification",
+        recipientEmail: trimmedEmail,
+        token: verificationToken,
+        name: trimmedDiscordUsername,
+        expiresAt: verificationExpiresAt,
+      });
+    } else {
+      await client
+        .transaction()
+        .create(emailClaim)
+        .create(slugClaim)
+        .create(referral)
+        .commit();
+    }
 
     if (!socialUser) {
-      const resend = createResendClient();
-      const baseUrl =
-        process.env.NEXT_PUBLIC_BASE_URL ||
-        process.env.SITE_URL ||
-        "https://www.rooindustries.com";
-      const verifyLink = `${baseUrl}/referrals/verify#token=${verificationToken}`;
-      const fromAddress = process.env.FROM_EMAIL || "onboarding@resend.dev";
+      let syncPending = false;
       try {
-        if (!resend) throw new Error("Resend is not configured.");
-        const sent = await resend.emails.send(
-          {
-            from: fromAddress,
-            to: [trimmedEmail],
-            subject: "Confirm your Roo Industries creator account",
-            react: buildReferralVerificationEmail({
-              name: trimmedDiscordUsername,
-              verifyLink,
-            }),
-          },
-          { idempotencyKey: `ref-signup-${verificationTokenHash.slice(0, 32)}` }
-        );
-        if (sent.error) throw sent.error;
+        if (policy.primaryBackend === "supabase") {
+          const delivery = await deliverReferralEmailDispatch({
+            idempotencyKey: emailDispatch?.idempotency_key,
+          });
+          if (delivery.deadLetter > 0) {
+            let recovery;
+            try {
+              recovery = await requeueReferralEmailDispatch({
+                referralId,
+                dispatchKind: "registration_verification",
+              });
+            } catch (error) {
+              const terminalError =
+                error instanceof Error
+                  ? error
+                  : new Error("Verification email recovery failed.");
+              terminalError.terminalDelivery = true;
+              throw terminalError;
+            }
+            if (recovery?.requeued !== true && recovery?.sent !== true) {
+              const error = new Error("Verification email recovery is blocked.");
+              error.code =
+                recovery?.recovery_blocked_reason || "email_recovery_blocked";
+              error.terminalDelivery = true;
+              throw error;
+            }
+          }
+          syncPending = delivery.sent !== 1;
+        } else {
+          await sendReferralEmailDirect({
+            dispatchKind: "registration_verification",
+            referralId,
+            recipientEmail: trimmedEmail,
+            token: verificationToken,
+            name: trimmedDiscordUsername,
+          });
+          await clearRegistrationDeliveryToken(referralId);
+        }
       } catch (error) {
         logSafeError("Referral verification email failed", error);
-        await client
-          .transaction()
-          .delete(referralId)
-          .delete(emailClaim._id)
-          .delete(slugClaim._id)
-          .commit()
-          .catch(() => {});
-        return res.status(503).json({
-          ok: false,
-          error: "Verification email could not be sent. Please try again.",
+        if (policy.primaryBackend === "supabase") {
+          if (error?.terminalDelivery === true) {
+            return res.status(503).json({
+              ok: false,
+              error: "Verification email could not be recovered. Please try again.",
+            });
+          }
+          syncPending = true;
+        } else {
+          return res.status(503).json({
+            ok: false,
+            error: "Verification email could not be sent. Please try again.",
+          });
+        }
+      }
+      if (policy.primaryBackend === "supabase") {
+        return res.status(202).json({
+          ok: true,
+          pendingVerification: true,
+          message: "Check your email to finish creating your account.",
+          ...(syncPending ? { syncPending: true } : {}),
         });
       }
       return res.status(202).json({
@@ -276,7 +447,6 @@ export default async function handler(req, res) {
       });
     }
 
-    const policy = resolveSupabaseRuntimePolicy();
     let supabaseAccount = null;
     if (
       socialUser ||
