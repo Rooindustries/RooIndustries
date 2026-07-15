@@ -98,6 +98,21 @@ const databaseProjectReference = (database) => {
   return pooler;
 };
 
+const expectedConnectedDatabaseUsername = (identity = {}) => {
+  const hostname = String(identity.hostname || "").toLowerCase();
+  const username = String(identity.username || "");
+  const projectRef = String(identity.projectRef || "").toLowerCase();
+  if (!hostname.endsWith(".pooler.supabase.com") || !projectRef) return username;
+  const suffix = `.${projectRef}`;
+  if (
+    !username.toLowerCase().endsWith(suffix) ||
+    username.length === suffix.length
+  ) {
+    return username;
+  }
+  return username.slice(0, -suffix.length);
+};
+
 const supabaseDatabaseIdentity = (values) => {
   const database = databaseIdentity(
     values.supabaseDatabaseUrl,
@@ -529,6 +544,7 @@ module.exports = {
       "supabase-postgres",
       cutoverSupabaseDatabaseIdentity({ databaseUrl, supabaseUrl })
     ),
+  expectedConnectedDatabaseUsername,
   computeTourneyCutoverDiscordTargetFingerprint: (target) =>
     cutoverFingerprint("discord", discordIdentity(target)),
   computeMigrationTargetFingerprints: (env = process.env) =>
