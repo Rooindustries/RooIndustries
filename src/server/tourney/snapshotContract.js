@@ -163,6 +163,21 @@ export const SUPABASE_FULL_REQUIRED_RELATIONS = Object.freeze([
   "vault.tourney_snapshot_keys",
 ]);
 
+export const SUPABASE_FULL_PRE_EXPAND_MIGRATION_VERSION = "20260714230345";
+export const SUPABASE_FULL_EXPANDED_MINIMUM_MIGRATION_VERSION = "20260715120000";
+export const SUPABASE_FULL_PRE_EXPAND_DEFERRED_RELATIONS = Object.freeze([
+  "accounts.creator_fallback_authorities",
+  "accounts.creator_terms_audit",
+  "accounts.referral_email_dispatches",
+  "migration.cms_publish_commands",
+  "migration.document_mutation_mirror_actions",
+  "migration.document_mutation_mirror_outbox",
+]);
+
+export const SUPABASE_FULL_PRE_EXPAND_PROFILE =
+  "roo-supabase-pre-expand-20260714230345-v1";
+export const SUPABASE_FULL_EXPANDED_PROFILE = "roo-supabase-expanded-v1";
+
 export const canonicalizeSnapshotJson = (value) => {
   if (Array.isArray(value)) return value.map(canonicalizeSnapshotJson);
   if (!value || typeof value !== "object") return value;
@@ -180,11 +195,66 @@ export const stableSnapshotJson = (value) =>
 const SNAPSHOT_RELATION = /^(accounts|auth|cms|commerce|migration|tourney)\.[a-z0-9_]+$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MIGRATION_VERSION = /^\d{14}$/;
 
 const invalidFullSnapshot = () => Object.assign(
   new Error("The full Supabase logical snapshot is incomplete or invalid."),
   { code: "SUPABASE_FULL_LOGICAL_SNAPSHOT_INVALID" }
 );
+
+const matchingStringLists = (left, right) =>
+  stableSnapshotJson([...left].sort()) === stableSnapshotJson([...right].sort());
+
+const validRelationPayload = ({ rowsText, count, expectedHash, hash }) => {
+  if (
+    typeof rowsText !== "string" ||
+    !Number.isSafeInteger(count) ||
+    count < 0 ||
+    !SHA256.test(String(expectedHash || "")) ||
+    typeof hash !== "function" ||
+    hash(rowsText) !== expectedHash
+  ) {
+    return false;
+  }
+  try {
+    const rows = JSON.parse(rowsText);
+    return Array.isArray(rows) && rows.length === count;
+  } catch {
+    return false;
+  }
+};
+
+export const resolveFullLogicalSnapshotProfile = ({
+  relationNames,
+  sourceMigrationVersion,
+} = {}) => {
+  const names = Array.isArray(relationNames) ? [...new Set(relationNames)].sort() : [];
+  const version = String(sourceMigrationVersion || "");
+  if (!MIGRATION_VERSION.test(version)) throw invalidFullSnapshot();
+  const missing = SUPABASE_FULL_REQUIRED_RELATIONS.filter(
+    (relation) => !names.includes(relation)
+  );
+  if (missing.length === 0 && version >= SUPABASE_FULL_EXPANDED_MINIMUM_MIGRATION_VERSION) {
+    return {
+      contractProfile: SUPABASE_FULL_EXPANDED_PROFILE,
+      deferredRelations: [],
+      requiredRelations: [...SUPABASE_FULL_REQUIRED_RELATIONS],
+    };
+  }
+  if (
+    version === SUPABASE_FULL_PRE_EXPAND_MIGRATION_VERSION &&
+    matchingStringLists(missing, SUPABASE_FULL_PRE_EXPAND_DEFERRED_RELATIONS)
+  ) {
+    return {
+      contractProfile: SUPABASE_FULL_PRE_EXPAND_PROFILE,
+      deferredRelations: [...SUPABASE_FULL_PRE_EXPAND_DEFERRED_RELATIONS],
+      requiredRelations: SUPABASE_FULL_REQUIRED_RELATIONS.filter(
+        (relation) => !SUPABASE_FULL_PRE_EXPAND_DEFERRED_RELATIONS.includes(relation)
+      ),
+    };
+  }
+  throw invalidFullSnapshot();
+};
 
 export const validateFullLogicalSnapshot = (payload, { hash } = {}) => {
   const snapshot = payload?.full_logical;
@@ -195,27 +265,39 @@ export const validateFullLogicalSnapshot = (payload, { hash } = {}) => {
     !Array.isArray(relationPayloads)
     ? Object.keys(relationPayloads).sort()
     : [];
+  const catalogRelations = Array.isArray(snapshot?.catalogRelations)
+    ? [...snapshot.catalogRelations].sort()
+    : [];
   const expectedSchemas = [...SUPABASE_FULL_SNAPSHOT_SCHEMAS];
   const actualSchemas = Array.isArray(snapshot?.schemas) ? [...snapshot.schemas].sort() : [];
   const required = Array.isArray(snapshot?.requiredRelations)
     ? [...snapshot.requiredRelations].sort()
     : [];
+  const deferred = Array.isArray(snapshot?.deferredRelations)
+    ? [...snapshot.deferredRelations].sort()
+    : [];
+  const profile = resolveFullLogicalSnapshotProfile({
+    relationNames,
+    sourceMigrationVersion: snapshot?.sourceMigrationVersion,
+  });
   const validNames = relationNames.every((name) =>
     SNAPSHOT_RELATION.test(name) || name === "vault.tourney_snapshot_keys"
   );
   const validRelations = relationNames.length > 0 && relationNames.every((name) =>
-    typeof relationPayloads[name] === "string" &&
-    relationPayloads[name].startsWith("[") &&
-    relationPayloads[name].endsWith("]") &&
-    Number.isSafeInteger(counts?.[name]) &&
-    counts[name] >= 0 &&
-    SHA256.test(String(hashes?.[name] || "")) &&
-    typeof hash === "function" &&
-    hash(relationPayloads[name]) === hashes[name]
+    validRelationPayload({
+      rowsText: relationPayloads[name],
+      count: counts?.[name],
+      expectedHash: hashes?.[name],
+      hash,
+    })
   );
   const matchingKeys = relationNames.length === Object.keys(counts || {}).length &&
     relationNames.length === Object.keys(hashes || {}).length;
-  const complete = SUPABASE_FULL_REQUIRED_RELATIONS.every((name) =>
+  const matchingCatalog = matchingStringLists(catalogRelations, relationNames) &&
+    SHA256.test(String(snapshot?.catalogSha256 || "")) &&
+    typeof hash === "function" &&
+    hash(stableSnapshotJson(catalogRelations)) === snapshot.catalogSha256;
+  const complete = profile.requiredRelations.every((name) =>
     relationNames.includes(name)
   );
   if (
@@ -223,15 +305,17 @@ export const validateFullLogicalSnapshot = (payload, { hash } = {}) => {
     !UUID.test(String(snapshot?.sourceSnapshotId || "")) ||
     !Number.isFinite(Date.parse(String(snapshot?.capturedAt || ""))) ||
     stableSnapshotJson(actualSchemas) !== stableSnapshotJson(expectedSchemas) ||
-    stableSnapshotJson(required) !== stableSnapshotJson(
-      [...SUPABASE_FULL_REQUIRED_RELATIONS].sort()
-    ) ||
-    !validNames || !validRelations || !matchingKeys || !complete
+    snapshot?.contractProfile !== profile.contractProfile ||
+    !matchingStringLists(required, profile.requiredRelations) ||
+    !matchingStringLists(deferred, profile.deferredRelations) ||
+    !validNames || !validRelations || !matchingKeys || !matchingCatalog || !complete
   ) {
     throw invalidFullSnapshot();
   }
   return {
     relationCount: relationNames.length,
+    contractProfile: profile.contractProfile,
+    deferredRelations: profile.deferredRelations,
     rowCount: relationNames.reduce((total, name) => total + counts[name], 0),
     relationNames,
   };
