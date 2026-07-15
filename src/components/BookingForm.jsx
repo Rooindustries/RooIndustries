@@ -7,6 +7,7 @@ import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import packageContent from "../lib/packageContent";
 import packagePricing from "../lib/packagePricing";
 import PriceDisplay from "./PriceDisplay";
+import { getWarrantyCallout } from "./Packages";
 import {
   BOOKING_DRAFT_STORAGE_KEY,
   CHECKOUT_BOOKING_STORAGE_KEY,
@@ -37,6 +38,50 @@ const BOOKING_CONFIRMATION_STORAGE_KEY = "booking_confirmation_state";
 const SESSION_STATE_KEY = "booking_modal_state";
 const REFERRAL_STORAGE_KEY = "referral_session";
 const BOOKING_FETCH_TIMEOUT_MS = 8000;
+const GOAL_OPTIONS = ["Lowest latency", "More FPS", "Stable frametimes"];
+const DEFAULT_GOALS = ["More FPS"];
+const REASSURANCE_COPY =
+  "You won't be charged until you confirm on the payment page.";
+const PAYMENT_PENDING_EXPIRY_ERROR =
+  "This reservation expired while payment is still pending. Return to payment to check its status or release payment to try again.";
+const BOOKING_STEPS = ["Pick a slot", "PC details", "Review & pay"];
+const STEP_PROGRESS_LABELS = {
+  1: "Step 1 of 3 · 33% complete",
+  2: "Step 2 of 3 · 67% complete",
+  3: "Step 3 of 3 · Ready to pay",
+};
+const normalizeGoals = (value) => {
+  if (!Array.isArray(value)) return [];
+  return GOAL_OPTIONS.filter((goal) => value.includes(goal));
+};
+const createFreshForm = () => ({
+  discord: "",
+  email: "",
+  specs: "",
+  mainGame: "",
+  notes: "",
+  goals: [...DEFAULT_GOALS],
+  goalsTouched: false,
+});
+const normalizeForm = (value = {}) => ({
+  discord: typeof value.discord === "string" ? value.discord : "",
+  email: typeof value.email === "string" ? value.email : "",
+  specs: typeof value.specs === "string" ? value.specs : "",
+  mainGame: typeof value.mainGame === "string" ? value.mainGame : "",
+  notes: typeof value.notes === "string" ? value.notes : "",
+  goals: Object.prototype.hasOwnProperty.call(value, "goals")
+    ? normalizeGoals(value.goals)
+    : [...DEFAULT_GOALS],
+  goalsTouched: value.goalsTouched === true,
+});
+const buildCheckoutMessage = (notes, goals) => {
+  const lines = [String(notes || "").trim()];
+  const normalizedGoals = normalizeGoals(goals);
+  if (normalizedGoals.length) {
+    lines.push(`Goals: ${normalizedGoals.join(", ")}`);
+  }
+  return lines.filter(Boolean).join("\n");
+};
 const readReferralFromSession = () => {
   try {
     return sessionStorage.getItem(REFERRAL_STORAGE_KEY) || "";
@@ -46,11 +91,13 @@ const readReferralFromSession = () => {
 };
 const getDraftKey = (pkg) => (pkg?.title ? pkg.title : "_default");
 const isDraftEmpty = (formObj) =>
-  !formObj.discord.trim() &&
-  !formObj.email.trim() &&
-  !formObj.specs.trim() &&
-  !formObj.mainGame.trim() &&
-  !formObj.notes.trim();
+  !String(formObj?.discord || "").trim() &&
+  !String(formObj?.email || "").trim() &&
+  !String(formObj?.specs || "").trim() &&
+  !String(formObj?.mainGame || "").trim() &&
+  !String(formObj?.notes || "").trim() &&
+  normalizeGoals(formObj?.goals).length === 0 &&
+  formObj?.goalsTouched !== true;
 
 // Read query params
 function useQuery() {
@@ -133,6 +180,92 @@ const formatCountdown = (ms) => {
   const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 };
+
+const formatShortLocalDate = (utcDate, timeZone) => {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      ...(timeZone ? { timeZone } : {}),
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    }).format(utcDate);
+  } catch {
+    return utcDate.toLocaleDateString();
+  }
+};
+
+function BookingStepTracker({ step }) {
+  return (
+    <div className="mb-6" data-testid="booking-step-tracker">
+      <ol
+        aria-label="Booking progress"
+        className="grid grid-cols-3 gap-2 text-center"
+      >
+        {BOOKING_STEPS.map((label, index) => {
+          const stepNumber = index + 1;
+          const isActive = step === stepNumber;
+          const isComplete = step > stepNumber;
+          return (
+            <li
+              key={label}
+              aria-current={isActive ? "step" : undefined}
+              className={`rounded-lg border px-2 py-2 text-xs font-semibold transition ${
+                isActive
+                  ? "border-info-border bg-info-soft text-info-text"
+                  : isComplete
+                  ? "border-line-input text-accent"
+                  : "border-line-input text-ink-muted"
+              }`}
+            >
+              <span aria-hidden="true" className="mr-1">
+                {isComplete ? "✓" : stepNumber}
+              </span>
+              {label}
+            </li>
+          );
+        })}
+      </ol>
+      <p className="mt-2 text-xs text-accent">
+        {STEP_PROGRESS_LABELS[step]}
+      </p>
+    </div>
+  );
+}
+
+function HoldBanner({
+  active,
+  countdownMs,
+  isPaymentPending,
+  localTimeLabel,
+  onRelease,
+  className = "",
+}) {
+  if (!active) return null;
+
+  return (
+    <div
+      className={`rounded-xl border border-purple-500/40 bg-purple-500/10 px-4 py-3 ${className}`}
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-xs font-medium text-ink sm:text-sm">
+          Slot <strong>{localTimeLabel || "--"}</strong> is reserved.{" "}
+          <span className="text-info-text">
+            Expires in {formatCountdown(countdownMs)}.
+          </span>
+        </p>
+        {!isPaymentPending && (
+          <button
+            type="button"
+            onClick={onRelease}
+            className="inline-flex items-center justify-center rounded-lg border border-purple-300/40 bg-purple-900/40 px-3 py-1.5 text-xs font-semibold text-purple-100 transition hover:bg-purple-800/60"
+          >
+            Release Slot
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 const fetchJsonWithRetry = async (
   url,
@@ -285,13 +418,7 @@ export default function BookingForm({ isMobile }) {
     }
   }, []);
 
-  const [form, setForm] = useState({
-    discord: "",
-    email: "",
-    specs: "",
-    mainGame: "",
-    notes: "",
-  });
+  const [form, setForm] = useState(createFreshForm);
 
   const [showVertexModal, setShowVertexModal] = useState(false);
   const [vertexPackage, setVertexPackage] = useState(null);
@@ -331,8 +458,10 @@ export default function BookingForm({ isMobile }) {
   const [lockingSlot, setLockingSlot] = useState(false);
   const [holdCountdownMs, setHoldCountdownMs] = useState(null);
   const [releasingPayment, setReleasingPayment] = useState(false);
+  const [paymentReleaseStatus, setPaymentReleaseStatus] = useState("");
   const clearedNoHoldRef = useRef(false);
-  const sessionRestoredRef = useRef(false);
+  const [restoredSessionPackageTitle, setRestoredSessionPackageTitle] =
+    useState("");
 
   const closeVertexModal = () => {
     document.body.classList.remove("is-modal-blur");
@@ -405,13 +534,17 @@ export default function BookingForm({ isMobile }) {
 
   // Restore modal session state if present
   useEffect(() => {
-    if (sessionRestoredRef.current) return;
+    if (!selectedPackage.title) return;
     try {
       const raw = sessionStorage.getItem(SESSION_STATE_KEY);
       if (raw) {
         const saved = JSON.parse(raw);
         if (saved.packageTitle === selectedPackage.title) {
-          if (saved.step) setStep(saved.step);
+          const savedStep = Number(saved.step);
+          const restoredStep = Number.isFinite(savedStep)
+            ? Math.min(3, Math.max(1, Math.trunc(savedStep)))
+            : 1;
+          setStep(restoredStep);
           if (saved.month) {
             const m = new Date(saved.month);
             if (!isNaN(m)) setMonth(m);
@@ -441,12 +574,13 @@ export default function BookingForm({ isMobile }) {
     } catch {
       console.error("Failed to restore session state");
     } finally {
-      sessionRestoredRef.current = true;
+      setRestoredSessionPackageTitle(selectedPackage.title);
     }
   }, [selectedPackage.title]);
 
   // Persist modal session state
   useEffect(() => {
+    if (restoredSessionPackageTitle !== selectedPackage.title) return;
     try {
       const payload = {
         packageTitle: selectedPackage.title,
@@ -465,7 +599,14 @@ export default function BookingForm({ isMobile }) {
     } catch {
       console.error("Failed to persist session state");
     }
-  }, [step, month, selectedDate, selectedSlot, selectedPackage.title]);
+  }, [
+    step,
+    month,
+    selectedDate,
+    selectedSlot,
+    selectedPackage.title,
+    restoredSessionPackageTitle,
+  ]);
 
   // If no active reservation, reset and clear persisted data so we land on times
   useEffect(() => {
@@ -477,14 +618,10 @@ export default function BookingForm({ isMobile }) {
     if (clearedNoHoldRef.current) return;
 
     const key = getDraftKey(selectedPackage);
-    clearDraftForPackage(key);
-    setForm({
-      discord: "",
-      email: "",
-      specs: "",
-      mainGame: "",
-      notes: "",
-    });
+    if (form.goalsTouched !== true) {
+      clearDraftForPackage(key);
+      setForm(createFreshForm());
+    }
     setSelectedSlot(null);
     setStep(1);
     clearedNoHoldRef.current = true;
@@ -493,7 +630,7 @@ export default function BookingForm({ isMobile }) {
     } catch {
       console.error("Failed to clear session state");
     }
-  }, [draftLoading, myHold, selectedPackage]);
+  }, [draftLoading, form.goalsTouched, myHold, selectedPackage]);
 
   // Load the tab-scoped hold on mount.
   useEffect(() => {
@@ -534,6 +671,7 @@ export default function BookingForm({ isMobile }) {
   // Align UI with any active hold (including persisted)
   useEffect(() => {
     if (!myHold) return;
+    if (restoredSessionPackageTitle !== selectedPackage.title) return;
 
     if (preventHoldAutoload) {
       setSelectedSlot(null);
@@ -549,28 +687,39 @@ export default function BookingForm({ isMobile }) {
     const utcDate = getUtcDateFromHold(myHold);
 
     if (utcDate && !isNaN(utcDate.getTime())) {
-      const localDate = new Date(utcDate);
-      localDate.setHours(0, 0, 0, 0);
-      setSelectedDate(localDate);
+      const localDateKey = getLocalDateKey(utcDate, userTimeZone);
+      const localDate = localDateKey ? new Date(localDateKey) : null;
+      if (localDate && !Number.isNaN(localDate.getTime())) {
+        localDate.setHours(0, 0, 0, 0);
+        setSelectedDate(localDate);
+      }
     }
 
     if (samePackage && utcDate) {
       const slotId = utcDate.toISOString();
-      setSelectedSlot((prev) =>
-        prev?.slotId === slotId
-          ? prev
-          : {
-              slotId,
-              utcStart: utcDate,
-              localLabel: formatLocalTime(utcDate, userTimeZone),
-            }
+      const localLabel = formatLocalTime(utcDate, userTimeZone);
+      setSelectedSlot((prev) => {
+        if (prev?.slotId === slotId && prev.localLabel === localLabel) {
+          return prev;
+        }
+        return { slotId, utcStart: utcDate, localLabel };
+      });
+      const paymentPending =
+        String(myHold.phase || "").trim().toLowerCase() === "payment_pending";
+      setStep((currentStep) =>
+        paymentPending ? 3 : currentStep === 3 ? 3 : 2
       );
-      setStep(2);
     } else {
       setSelectedSlot(null);
       setStep(1);
     }
-  }, [myHold, selectedPackage.title, preventHoldAutoload, userTimeZone]);
+  }, [
+    myHold,
+    selectedPackage.title,
+    preventHoldAutoload,
+    restoredSessionPackageTitle,
+    userTimeZone,
+  ]);
 
   // Countdown + expiry handling for holds
   useEffect(() => {
@@ -588,7 +737,14 @@ export default function BookingForm({ isMobile }) {
     const tick = () => {
       const diff = expiresAtMs - Date.now();
       if (diff <= 0) {
-        releaseHold();
+        setHoldCountdownMs(0);
+        const paymentPending =
+          String(myHold.phase || "").trim().toLowerCase() === "payment_pending";
+        if (paymentPending) {
+          setErrorStep2(PAYMENT_PENDING_EXPIRY_ERROR);
+        } else {
+          releaseHold();
+        }
         return false;
       }
       setHoldCountdownMs(diff);
@@ -728,6 +884,44 @@ export default function BookingForm({ isMobile }) {
     return map;
   }, [dateSlotMap, userTimeZone]);
 
+  const earliestAvailableSlot = useMemo(() => {
+    if (!settings || !localSlotMap) return null;
+
+    const bookedSet = new Set();
+    const heldMap = new Map();
+    (settings.bookedSlots || []).forEach((slot) => {
+      if (!slot.startTimeUTC) return;
+      if (slot.isHold) {
+        if (slot.isExpiredHold) return;
+        heldMap.set(slot.startTimeUTC, slot.holdId || "");
+        return;
+      }
+      bookedSet.add(slot.startTimeUTC);
+    });
+
+    const now = new Date();
+    const available = Object.values(localSlotMap)
+      .flat()
+      .filter((slot) => {
+        const holdId = heldMap.get(slot.slotId);
+        const isHeldOther = !!holdId && holdId !== myHold?.holdId;
+        return (
+          slot.utcStart > now &&
+          !bookedSet.has(slot.slotId) &&
+          !isHeldOther
+        );
+      })
+      .sort((left, right) => left.utcStart - right.utcStart);
+
+    const earliest = available[0];
+    if (!earliest) return null;
+    const localDateKey = getLocalDateKey(earliest.utcStart, userTimeZone);
+    const localDate = localDateKey ? new Date(localDateKey) : null;
+    if (!localDate || Number.isNaN(localDate.getTime())) return null;
+    localDate.setHours(0, 0, 0, 0);
+    return { ...earliest, localDate };
+  }, [localSlotMap, myHold?.holdId, settings, userTimeZone]);
+
   const isDateAllowed = (dateObj) => {
     if (!settings) return false;
     const d = new Date(dateObj);
@@ -796,7 +990,7 @@ export default function BookingForm({ isMobile }) {
         const stored = sessionStorage.getItem(FORM_PREFILL_KEY);
         if (stored) {
           const parsed = JSON.parse(stored);
-          setForm((prev) => ({ ...prev, ...parsed }));
+          setForm((prev) => normalizeForm({ ...prev, ...parsed }));
           sessionStorage.removeItem(FORM_PREFILL_KEY);
         }
       } catch {
@@ -819,7 +1013,7 @@ export default function BookingForm({ isMobile }) {
           (parsed.lastTitle && parsed.packages && parsed.packages[parsed.lastTitle]) ||
           null;
         if (draftForPkg) {
-          if (draftForPkg.form) setForm((prev) => ({ ...prev, ...draftForPkg.form }));
+          if (draftForPkg.form) setForm(normalizeForm(draftForPkg.form));
           if (draftForPkg.selectedPackage) {
             setPersistedPackage(draftForPkg.selectedPackage);
           }
@@ -1132,15 +1326,26 @@ export default function BookingForm({ isMobile }) {
     }
   };
 
+  const handleGoalToggle = (goal) => {
+    if (isPaymentPendingHold || !GOAL_OPTIONS.includes(goal)) return;
+    const nextGoals = form.goals.includes(goal)
+      ? form.goals.filter((item) => item !== goal)
+      : GOAL_OPTIONS.filter((item) => [...form.goals, goal].includes(item));
+    const nextForm = { ...form, goals: nextGoals, goalsTouched: true };
+    setForm(nextForm);
+    if (isDraftEmpty(nextForm)) {
+      clearDraftForPackage(getDraftKey(selectedPackage));
+    } else {
+      persistDraft({
+        form: nextForm,
+        selectedPackage: { ...selectedPackage },
+      });
+    }
+  };
+
   useEffect(() => {
     if (draftLoading) return;
-    const allEmpty =
-      !form.discord.trim() &&
-      !form.email.trim() &&
-      !form.specs.trim() &&
-      !form.mainGame.trim() &&
-      !form.notes.trim();
-    if (allEmpty) {
+    if (isDraftEmpty(form)) {
       clearDraftForPackage(getDraftKey(selectedPackage));
     }
   }, [
@@ -1149,6 +1354,7 @@ export default function BookingForm({ isMobile }) {
     form.specs,
     form.mainGame,
     form.notes,
+    form.goals,
     selectedPackage,
     draftLoading,
   ]);
@@ -1169,16 +1375,37 @@ export default function BookingForm({ isMobile }) {
     });
   };
 
+  const handleEarliestSlotClick = () => {
+    if (!earliestAvailableSlot || isPaymentPendingHold) return;
+    const date = new Date(earliestAvailableSlot.localDate);
+    setMonth(new Date(date.getFullYear(), date.getMonth(), 1));
+    setSelectedDate(date);
+    setSelectedSlot(earliestAvailableSlot);
+    setPreventHoldAutoload(false);
+    setErrorStep1("");
+  };
+
   const holdLocalTimeLabel = useMemo(() => {
     if (!myHold) return "";
     const utcDate = getUtcDateFromHold(myHold);
     if (!utcDate) return "";
     return formatLocalTime(utcDate, userTimeZone);
   }, [myHold, userTimeZone]);
-  const hasActiveHold =
-    !!myHold && holdCountdownMs !== null && holdCountdownMs > 0;
   const isPaymentPendingHold =
     String(myHold?.phase || "").trim().toLowerCase() === "payment_pending";
+  const hasActiveHold =
+    !!myHold &&
+    holdCountdownMs !== null &&
+    (holdCountdownMs > 0 || isPaymentPendingHold);
+  const reviewDateTimeLabel = useMemo(() => {
+    if (!selectedSlot?.utcStart) return "";
+    const utcStart = new Date(selectedSlot.utcStart);
+    if (Number.isNaN(utcStart.getTime())) return "";
+    const dateLabel = formatShortLocalDate(utcStart, userTimeZone);
+    const timeLabel =
+      formatLocalTime(utcStart, userTimeZone) || selectedSlot.localLabel;
+    return `${dateLabel} · ${timeLabel} (${userTimeZone})`;
+  }, [selectedSlot, userTimeZone]);
 
   const clearHoldState = (resetStep = true, clearStorage = true) => {
     setMyHold(null);
@@ -1260,7 +1487,9 @@ export default function BookingForm({ isMobile }) {
   const releaseHold = async (resetStep = true) => {
     if (!myHold) return;
     if (isPaymentPendingHold) {
-      setErrorStep1("Your payment session is already in progress. Return to payment to finish it.");
+      setErrorStep2(
+        "Your payment session is already in progress. Return to payment to finish it."
+      );
       return;
     }
 
@@ -1287,6 +1516,7 @@ export default function BookingForm({ isMobile }) {
     if (!isPaymentPendingHold || releasingPayment) return;
     setReleasingPayment(true);
     setErrorStep2("");
+    setPaymentReleaseStatus("");
     try {
       const stored = JSON.parse(
         sessionStorage.getItem(PAYMENT_SESSION_STORAGE_KEY) || "null"
@@ -1329,12 +1559,13 @@ export default function BookingForm({ isMobile }) {
       const checkoutUpdated = updateStoredCheckoutHold(refreshed);
       sessionStorage.removeItem(PAYMENT_SESSION_STORAGE_KEY);
       broadcastHold(nextHold);
-      setErrorStep2(
+      setPaymentReleaseStatus(
         checkoutUpdated
           ? "Payment method released. You can choose another payment method."
           : "Payment method released. Review your booking details and submit again."
       );
     } catch (error) {
+      setPaymentReleaseStatus("");
       setErrorStep2(error.message || "The payment session could not be released.");
     } finally {
       setReleasingPayment(false);
@@ -1436,7 +1667,14 @@ export default function BookingForm({ isMobile }) {
   };
 
   // ---------- SUBMIT ----------
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
+    const validationError = getStep2Error();
+    if (validationError) {
+      setErrorStep2(validationError);
+      setStep(2);
+      return;
+    }
+
     if (!selectedDate || !selectedSlot) {
       setStep(1);
       setErrorStep1("Please select a time slot before continuing.");
@@ -1481,7 +1719,8 @@ export default function BookingForm({ isMobile }) {
       email: form.email.trim(),
       specs: form.specs.trim(),
       mainGame: form.mainGame.trim(),
-      message: form.notes.trim(),
+      goals: normalizeGoals(form.goals),
+      message: buildCheckoutMessage(form.notes, form.goals),
 
       packageTitle: selectedPackage.title,
       packagePrice: selectedPackage.price,
@@ -1524,6 +1763,26 @@ export default function BookingForm({ isMobile }) {
       },
     });
   };
+
+  const handleReviewBeforePayment = () => {
+    const validationError = getStep2Error();
+    if (validationError) {
+      setErrorStep2(validationError);
+      return;
+    }
+    setErrorStep2("");
+    setPaymentReleaseStatus("");
+    setStep(3);
+  };
+
+  const handlePay = () => {
+    if (loading) return;
+    setLoading(true);
+    handleSubmit();
+    setLoading(false);
+  };
+
+  const warrantyCallout = getWarrantyCallout(selectedPackage);
 
   // ---------- CALENDAR DATA ----------
   const startOfMonth = new Date(month.getFullYear(), month.getMonth(), 1);
@@ -1602,7 +1861,7 @@ export default function BookingForm({ isMobile }) {
           </div>
         ) : (
           <>
-            {selectedPackage.title && (
+            {step === 1 && selectedPackage.title && (
               <div className="mb-8 max-w-lg mx-auto bg-surface-card border border-line-input rounded-xl p-6 text-center shadow-[0_0_15px_rgba(14,165,233,0.25)]">
                 {selectedPackage.tag && (
                   <div className="mb-2">
@@ -1628,6 +1887,7 @@ export default function BookingForm({ isMobile }) {
                   transition={{ duration: 0.3, ease: "easeInOut" }}
                   className="max-w-3xl mx-auto bg-surface-card border border-line-input rounded-2xl p-8 text-center shadow-[0_0_25px_rgba(14,165,233,0.15)]"
                 >
+                  <BookingStepTracker step={1} />
                   <h3 className="text-accent text-lg font-semibold mb-2">
                     Select a Date and Time for Your Session
                   </h3>
@@ -1636,27 +1896,27 @@ export default function BookingForm({ isMobile }) {
                     <span className="font-semibold">your local time</span> (
                     {userTimeZone}).
                   </p>
-                  {hasActiveHold && (
-                    <div className="mb-6 rounded-xl border border-purple-500/40 bg-purple-500/10 px-4 py-3 text-left">
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                        <p className="text-xs sm:text-sm text-ink font-medium">
-                          Slot <strong>{holdLocalTimeLabel || "--"}</strong> is
-                          reserved.{" "}
-                          <span className="text-info-text">
-                            Expires in {formatCountdown(holdCountdownMs)}.
-                          </span>
-                        </p>
-                        {!isPaymentPendingHold && (
-                          <button
-                            type="button"
-                            onClick={() => releaseHold(true)}
-                            className="inline-flex items-center justify-center rounded-lg border border-purple-300/40 bg-purple-900/40 px-3 py-1.5 text-xs font-semibold text-purple-100 hover:bg-purple-800/60 transition"
-                          >
-                            Release Slot
-                          </button>
-                        )}
-                      </div>
-                    </div>
+                  <HoldBanner
+                    active={hasActiveHold}
+                    countdownMs={holdCountdownMs}
+                    isPaymentPending={isPaymentPendingHold}
+                    localTimeLabel={holdLocalTimeLabel}
+                    onRelease={() => releaseHold(true)}
+                    className="mb-6 text-left"
+                  />
+                  {earliestAvailableSlot && (
+                    <button
+                      type="button"
+                      onClick={handleEarliestSlotClick}
+                      className="mb-6 rounded-lg border border-info-border bg-info-soft px-4 py-2 text-sm font-semibold text-info-text transition hover:bg-surface-hover-accent"
+                    >
+                      Earliest available:{" "}
+                      {formatShortLocalDate(
+                        earliestAvailableSlot.utcStart,
+                        userTimeZone
+                      )}{" "}
+                      at {earliestAvailableSlot.localLabel}
+                    </button>
                   )}
 
                   <div
@@ -1854,6 +2114,9 @@ export default function BookingForm({ isMobile }) {
                             );
                           })}
                         </div>
+                        <p className="mt-4 text-xs text-accent">
+                          {REASSURANCE_COPY}
+                        </p>
                       </div>
                     )}
                   </div>
@@ -1901,7 +2164,7 @@ export default function BookingForm({ isMobile }) {
                   </div>
 
                   {errorStep1 && (
-                    <p className="text-danger-text mt-3 text-sm">{errorStep1}</p>
+                    <p role="alert" className="text-danger-text mt-3 text-sm">{errorStep1}</p>
                   )}
                 </motion.div>
               )}
@@ -1913,81 +2176,277 @@ export default function BookingForm({ isMobile }) {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                   transition={{ duration: 0.3, ease: "easeInOut" }}
-                  className="max-w-2xl mx-auto bg-surface-card border border-line-input rounded-2xl p-8 shadow-[0_0_25px_rgba(14,165,233,0.15)] space-y-6"
+                  className="max-w-4xl mx-auto bg-surface-card border border-line-input rounded-2xl p-8 shadow-[0_0_25px_rgba(14,165,233,0.15)]"
                 >
-                  {hasActiveHold && (
-                    <div className="bg-purple-500/10 border border-purple-500/40 p-3 rounded-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                        <p className="text-xs text-ink font-medium">
-                        Slot <strong>{holdLocalTimeLabel || "--"}</strong> is
-                        reserved.{" "}
-                        <span className="text-info-text">
-                          Expires in {formatCountdown(holdCountdownMs)}.
-                        </span>
-                      </p>
-                      {!isPaymentPendingHold && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            releaseHold(true);
-                            setStep(1);
-                          }}
-                          className="inline-flex items-center justify-center rounded-lg border border-purple-300/40 bg-purple-900/40 px-3 py-1.5 text-xs font-semibold text-purple-100 hover:bg-purple-800/60 transition"
-                        >
-                          Release Slot
-                        </button>
-                      )}
+                  <BookingStepTracker step={2} />
+                  <HoldBanner
+                    active={hasActiveHold}
+                    countdownMs={holdCountdownMs}
+                    isPaymentPending={isPaymentPendingHold}
+                    localTimeLabel={holdLocalTimeLabel}
+                    onRelease={() => releaseHold(true)}
+                    className="mb-6"
+                  />
+
+                  <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                    <div className="space-y-4">
+                      <input
+                        name="discord"
+                        aria-label="Discord username"
+                        placeholder="Discord (e.g. Servi#1234 or @Servi)"
+                        onChange={handleChange}
+                        value={form.discord}
+                        className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
+                      />
+                      <input
+                        name="email"
+                        aria-label="Booking email"
+                        type="email"
+                        placeholder="Email"
+                        onChange={handleChange}
+                        value={form.email}
+                        className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
+                      />
+                      <input
+                        name="specs"
+                        aria-label="PC specifications"
+                        placeholder="PC Specs"
+                        onChange={handleChange}
+                        value={form.specs}
+                        className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
+                      />
+                      <input
+                        name="mainGame"
+                        aria-label="Main game or application"
+                        placeholder="Main use case (Game/Apps)"
+                        onChange={handleChange}
+                        value={form.mainGame}
+                        className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
+                      />
+                      <textarea
+                        name="notes"
+                        aria-label="Extra booking requirements"
+                        placeholder="Any extra requirements?"
+                        onChange={handleChange}
+                        value={form.notes}
+                        className="w-full bg-surface-input border border-line-input rounded-lg p-3 h-24 focus:outline-none focus:border-info-border transition"
+                      />
+
+                      <fieldset>
+                        <legend className="mb-2 text-sm font-semibold text-info-text">
+                          What matters most? <span className="text-xs text-ink-muted">Optional</span>
+                        </legend>
+                        <div className="flex flex-wrap gap-2">
+                          {GOAL_OPTIONS.map((goal) => {
+                            const isSelected = form.goals.includes(goal);
+                            return (
+                              <button
+                                key={goal}
+                                type="button"
+                                aria-pressed={isSelected}
+                                onClick={() => handleGoalToggle(goal)}
+                                className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
+                                  isSelected
+                                    ? "bg-accent-strong text-accent-contrast shadow-glow-soft border-info-border"
+                                    : "bg-surface-input border-line-input text-ink-muted hover:bg-surface-hover"
+                                }`}
+                              >
+                                {goal}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </fieldset>
                     </div>
-                  )}
 
-                  <input
-                    name="discord"
-                    aria-label="Discord username"
-                    placeholder="Discord (e.g. Servi#1234 or @Servi)"
-                    onChange={handleChange}
-                    value={form.discord}
-                    className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
-                  />
-                  <input
-                    name="email"
-                    aria-label="Booking email"
-                    type="email"
-                    placeholder="Email"
-                    onChange={handleChange}
-                    value={form.email}
-                    className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
-                  />
-                  <input
-                    name="specs"
-                    aria-label="PC specifications"
-                    placeholder="PC Specs"
-                    onChange={handleChange}
-                    value={form.specs}
-                    className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
-                  />
-                  <input
-                    name="mainGame"
-                    aria-label="Main game or application"
-                    placeholder="Main use case (Game/Apps)"
-                    onChange={handleChange}
-                    value={form.mainGame}
-                    className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
-                  />
+                    <aside className="bg-surface-card border border-line-input rounded-xl p-6 text-center shadow-[0_0_15px_rgba(14,165,233,0.25)]">
+                      <p className="text-xs font-semibold text-accent">
+                        Your optimization plan
+                      </p>
+                      <h3 className="mt-2 text-xl font-bold text-info-text">
+                        {selectedPackage.title}
+                      </h3>
+                      <p className="mt-3 text-sm text-ink-muted">
+                        {reviewDateTimeLabel || holdLocalTimeLabel || "Choose a slot"}
+                      </p>
+                      {form.goals.length > 0 && (
+                        <div className="mt-4 flex flex-wrap justify-center gap-2">
+                          {form.goals.map((goal) => (
+                            <span
+                              key={goal}
+                              className="rounded-lg bg-accent-strong px-3 py-1.5 text-xs font-semibold text-accent-contrast shadow-glow-soft"
+                            >
+                              {goal}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <PriceDisplay
+                        pkg={selectedPackage}
+                        size="summary"
+                        className="mt-6"
+                      />
+                    </aside>
+                  </div>
 
-                  <textarea
-                    name="notes"
-                    aria-label="Extra booking requirements"
-                    placeholder="Any extra requirements?"
-                    onChange={handleChange}
-                    value={form.notes}
-                    className="w-full bg-surface-input border border-line-input rounded-lg p-3 h-24 focus:outline-none focus:border-info-border transition"
-                  ></textarea>
-
-                  <p className="text-accent text-xs">
+                  <p className="mt-6 text-xs text-accent">
                     Please read the FAQ before booking — it answers everything you
                     need to know.
                   </p>
 
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => setStep(1)}
+                      className="w-full min-w-0 bg-surface-input hover:bg-surface-hover py-3 rounded-lg font-semibold transition"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleReviewBeforePayment}
+                      className={`glow-button w-full min-w-0 py-3 rounded-lg font-semibold transition inline-flex items-center justify-center gap-2 ${
+                        !isStep2Complete ? "opacity-60 cursor-not-allowed" : ""
+                      }`}
+                    >
+                      Review before payment
+                      <span className="glow-line glow-line-top" />
+                      <span className="glow-line glow-line-right" />
+                      <span className="glow-line glow-line-bottom" />
+                      <span className="glow-line glow-line-left" />
+                    </button>
+                  </div>
+                  {errorStep2 && (
+                    <p role="alert" className="mt-3 text-sm text-danger-text">{errorStep2}</p>
+                  )}
+                </motion.div>
+              )}
+
+              {step === 3 && (
+                <motion.div
+                  key="step3"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3, ease: "easeInOut" }}
+                  className="max-w-3xl mx-auto bg-surface-card border border-line-input rounded-2xl p-8 shadow-[0_0_25px_rgba(14,165,233,0.15)]"
+                >
+                  <BookingStepTracker step={3} />
+                  <HoldBanner
+                    active={hasActiveHold}
+                    countdownMs={holdCountdownMs}
+                    isPaymentPending={isPaymentPendingHold}
+                    localTimeLabel={holdLocalTimeLabel}
+                    onRelease={() => releaseHold(true)}
+                    className="mb-6"
+                  />
+
+                  <div className="rounded-xl border border-line-input bg-surface-card p-5">
+                    <div className="flex items-center justify-between gap-4 border-b border-line-input pb-4">
+                      <h3 className="text-lg font-semibold text-info-text">
+                        Review your booking
+                      </h3>
+                      {!isPaymentPendingHold && (
+                        <button
+                          type="button"
+                          onClick={() => setStep(2)}
+                          className="text-xs font-semibold text-accent underline underline-offset-2 transition hover:text-info-text"
+                        >
+                          Edit details
+                        </button>
+                      )}
+                    </div>
+                    <dl className="divide-y divide-line-input text-sm">
+                      <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
+                        <dt className="text-ink-muted">Package</dt>
+                        <dd className="font-semibold text-ink">
+                          {selectedPackage.title}
+                        </dd>
+                      </div>
+                      <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr_auto] sm:items-center">
+                        <dt className="text-ink-muted">Date &amp; time</dt>
+                        <dd className="font-semibold text-ink">
+                          {reviewDateTimeLabel || "Not selected"}
+                        </dd>
+                        {!isPaymentPendingHold && (
+                          <button
+                            type="button"
+                            onClick={() => setStep(1)}
+                            className="justify-self-start text-xs font-semibold text-accent underline underline-offset-2 transition hover:text-info-text sm:justify-self-end"
+                          >
+                            Edit
+                          </button>
+                        )}
+                      </div>
+                      <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
+                        <dt className="text-ink-muted">Discord</dt>
+                        <dd className="break-words text-ink">{form.discord}</dd>
+                      </div>
+                      <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
+                        <dt className="text-ink-muted">Email</dt>
+                        <dd className="break-words text-ink">{form.email}</dd>
+                      </div>
+                      <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
+                        <dt className="text-ink-muted">PC specs</dt>
+                        <dd className="whitespace-pre-wrap break-words text-ink">
+                          {form.specs}
+                        </dd>
+                      </div>
+                      <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
+                        <dt className="text-ink-muted">Main game/app</dt>
+                        <dd className="break-words text-ink">{form.mainGame}</dd>
+                      </div>
+                      {form.goals.length > 0 && (
+                        <div className="grid gap-2 py-3 sm:grid-cols-[9rem_1fr]">
+                          <dt className="text-ink-muted">Goals</dt>
+                          <dd className="flex flex-wrap gap-2">
+                            {form.goals.map((goal) => (
+                              <span
+                                key={goal}
+                                className="rounded-lg bg-accent-strong px-3 py-1.5 text-xs font-semibold text-accent-contrast shadow-glow-soft"
+                              >
+                                {goal}
+                              </span>
+                            ))}
+                          </dd>
+                        </div>
+                      )}
+                      {form.notes.trim() && (
+                        <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
+                          <dt className="text-ink-muted">Extra requirements</dt>
+                          <dd className="whitespace-pre-wrap break-words text-ink">
+                            {form.notes}
+                          </dd>
+                        </div>
+                      )}
+                    </dl>
+                  </div>
+
+                  <div className="mt-6 rounded-xl border border-line-input bg-surface-card p-5 text-center shadow-[0_0_15px_rgba(14,165,233,0.25)]">
+                    <p className="text-xs font-semibold text-accent">Total</p>
+                    <PriceDisplay
+                      pkg={selectedPackage}
+                      size="summary"
+                      className="mt-2"
+                    />
+                  </div>
+
+                  <div className="mt-6 grid grid-cols-1 gap-3 text-center text-xs sm:grid-cols-3">
+                    <Link
+                      to="/reviews"
+                      className="rounded-lg border border-line-input bg-surface-input px-3 py-3 font-semibold text-info-text transition hover:bg-surface-hover"
+                    >
+                      5.0★ from 139+ verified reviews
+                    </Link>
+                    <div className="rounded-lg border border-line-input bg-surface-input px-3 py-3 font-semibold text-info-text">
+                      {warrantyCallout.title}
+                    </div>
+                    <div className="rounded-lg border border-line-input bg-surface-input px-3 py-3 font-semibold text-info-text">
+                      {REASSURANCE_COPY}
+                    </div>
+                  </div>
+
+                  <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
                     {isPaymentPendingHold ? (
                       <>
                         <button
@@ -1996,7 +2455,9 @@ export default function BookingForm({ isMobile }) {
                           disabled={releasingPayment}
                           className="w-full min-w-0 rounded-lg border border-danger-border bg-danger-soft py-3 font-semibold text-danger-text transition hover:bg-surface-hover disabled:cursor-wait disabled:opacity-60"
                         >
-                          {releasingPayment ? "Checking payment..." : "Release payment"}
+                          {releasingPayment
+                            ? "Checking payment..."
+                            : "Release payment"}
                         </button>
                         <button
                           type="button"
@@ -2012,51 +2473,36 @@ export default function BookingForm({ isMobile }) {
                       </>
                     ) : (
                       <>
-                    <button
-                      onClick={() => {
-                        releaseHold(true);
-                        setStep(1);
-                      }}
-                      className="w-full min-w-0 bg-surface-input hover:bg-surface-hover py-3 rounded-lg font-semibold transition"
-                    >
-                      Back
-                    </button>
-
-                    <button
-                      onClick={async () => {
-                        if (loading) return;
-
-                        const validationError = getStep2Error();
-                        if (validationError) {
-                          setErrorStep2(validationError);
-                          return;
-                        }
-
-                        setErrorStep2("");
-                        setLoading(true);
-                        await handleSubmit();
-                        setLoading(false);
-                      }}
-                      className={`glow-button w-full min-w-0 py-3 rounded-lg font-semibold transition inline-flex items-center justify-center gap-2 ${
-                        loading || !isStep2Complete
-                          ? "opacity-60 cursor-not-allowed"
-                          : ""
-                      }`}
-                    >
-                      {loading
-                          ? "Submitting..."
-                          : "Submit & Pay"}
-                      <span className="glow-line glow-line-top" />
-                      <span className="glow-line glow-line-right" />
-                      <span className="glow-line glow-line-bottom" />
-                      <span className="glow-line glow-line-left" />
-                    </button>
+                        <button
+                          type="button"
+                          onClick={() => setStep(2)}
+                          className="w-full min-w-0 bg-surface-input hover:bg-surface-hover py-3 rounded-lg font-semibold transition"
+                        >
+                          Back
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handlePay}
+                          className={`glow-button inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-lg py-3 font-semibold transition ${
+                            loading ? "cursor-wait opacity-60" : ""
+                          }`}
+                        >
+                          {loading ? "Preparing payment..." : `Pay ${selectedPackage.price}`}
+                          <span className="glow-line glow-line-top" />
+                          <span className="glow-line glow-line-right" />
+                          <span className="glow-line glow-line-bottom" />
+                          <span className="glow-line glow-line-left" />
+                        </button>
                       </>
                     )}
-
                   </div>
+                  {paymentReleaseStatus && (
+                    <p className="mt-3 text-sm text-success-text">
+                      {paymentReleaseStatus}
+                    </p>
+                  )}
                   {errorStep2 && (
-                    <p className="text-info-text text-sm">{errorStep2}</p>
+                    <p role="alert" className="mt-3 text-sm text-danger-text">{errorStep2}</p>
                   )}
                 </motion.div>
               )}
