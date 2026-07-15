@@ -117,6 +117,18 @@ describe("deterministic Tourney live-drift repair", () => {
     expect(scriptSource).toContain("max: LIVE_DRIFT_CONNECTION_LIMIT");
   });
 
+  test("fences apply against the validated full logical snapshot", () => {
+    expect(scriptSource).toContain(
+      "validateFullLogicalSnapshot(snapshot?.supabase?.payload, { hash: sha256 })"
+    );
+    expect(scriptSource).toContain(
+      'readFullLogicalSnapshotRows(snapshot, "accounts.identity_links")'
+    );
+    expect(scriptSource).not.toContain(
+      'snapshot.supabase?.payload?.["accounts.identity_links"]'
+    );
+  });
+
   test("allows apply to resume after the deterministic fallback audit was committed", () => {
     expect(scriptSource).toContain("allowConflictId: expectedConflictId");
     expect(scriptSource).toContain("assertLiveDriftLegacyDatabaseGate(legacy, { allowConflictId })");
