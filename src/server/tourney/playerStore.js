@@ -820,7 +820,7 @@ const readManageTourneyPlayersSnapshot = async (env) => {
           limit 1
         ),
         jsonb_build_object(
-          'team_count', ${TOURNEY_DEFAULT_TEAM_COUNT},
+          'team_count', ${TOURNEY_DEFAULT_TEAM_COUNT}::integer,
           'updated_at', '',
           'updated_by', ''
         )
