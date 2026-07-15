@@ -165,6 +165,14 @@ export const SUPABASE_FULL_REQUIRED_RELATIONS = Object.freeze([
 
 export const SUPABASE_FULL_PRE_EXPAND_MIGRATION_VERSION = "20260714230345";
 export const SUPABASE_FULL_EXPANDED_MINIMUM_MIGRATION_VERSION = "20260715120000";
+export const SUPABASE_FULL_EXPANDED_MIGRATION_NAMES = Object.freeze([
+  "add_referral_creator_terms_editor",
+  "add_document_mutation_mirror_outbox",
+  "add_referral_fallback_authority",
+  "add_referral_email_dispatch_ledger",
+  "harden_commerce_readiness_evidence",
+  "add_global_cms_publish_authority",
+]);
 export const SUPABASE_FULL_PRE_EXPAND_DEFERRED_RELATIONS = Object.freeze([
   "accounts.creator_fallback_authorities",
   "accounts.creator_terms_audit",
@@ -196,6 +204,7 @@ const SNAPSHOT_RELATION = /^(accounts|auth|cms|commerce|migration|tourney)\.[a-z
 const SHA256 = /^[0-9a-f]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MIGRATION_VERSION = /^\d{14}$/;
+const MIGRATION_NAME = /^[a-z0-9][a-z0-9_]{0,127}$/;
 
 const invalidFullSnapshot = () => Object.assign(
   new Error("The full Supabase logical snapshot is incomplete or invalid."),
@@ -227,14 +236,26 @@ const validRelationPayload = ({ rowsText, count, expectedHash, hash }) => {
 export const resolveFullLogicalSnapshotProfile = ({
   relationNames,
   sourceMigrationVersion,
+  sourceMigrationNames,
 } = {}) => {
   const names = Array.isArray(relationNames) ? [...new Set(relationNames)].sort() : [];
   const version = String(sourceMigrationVersion || "");
   if (!MIGRATION_VERSION.test(version)) throw invalidFullSnapshot();
+  const migrationNames = Array.isArray(sourceMigrationNames)
+    ? [...new Set(sourceMigrationNames)].sort()
+    : [];
+  const validMigrationNames = migrationNames.length === (sourceMigrationNames?.length || 0) &&
+    migrationNames.every((name) => MIGRATION_NAME.test(name));
   const missing = SUPABASE_FULL_REQUIRED_RELATIONS.filter(
     (relation) => !names.includes(relation)
   );
-  if (missing.length === 0 && version >= SUPABASE_FULL_EXPANDED_MINIMUM_MIGRATION_VERSION) {
+  const expandedMigrationsPresent = validMigrationNames &&
+    SUPABASE_FULL_EXPANDED_MIGRATION_NAMES.every((name) => migrationNames.includes(name));
+  if (
+    missing.length === 0 &&
+    version > SUPABASE_FULL_PRE_EXPAND_MIGRATION_VERSION &&
+    expandedMigrationsPresent
+  ) {
     return {
       contractProfile: SUPABASE_FULL_EXPANDED_PROFILE,
       deferredRelations: [],
@@ -279,6 +300,7 @@ export const validateFullLogicalSnapshot = (payload, { hash } = {}) => {
   const profile = resolveFullLogicalSnapshotProfile({
     relationNames,
     sourceMigrationVersion: snapshot?.sourceMigrationVersion,
+    sourceMigrationNames: snapshot?.sourceMigrationNames,
   });
   const validNames = relationNames.every((name) =>
     SNAPSHOT_RELATION.test(name) || name === "vault.tourney_snapshot_keys"

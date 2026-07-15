@@ -277,6 +277,7 @@ describe("encrypted export hardening", () => {
       import crypto from "node:crypto";
       import {
         stableSnapshotJson,
+        SUPABASE_FULL_EXPANDED_MIGRATION_NAMES,
         SUPABASE_FULL_EXPANDED_PROFILE,
         SUPABASE_FULL_PRE_EXPAND_DEFERRED_RELATIONS,
         SUPABASE_FULL_PRE_EXPAND_MIGRATION_VERSION,
@@ -305,7 +306,8 @@ describe("encrypted export hardening", () => {
           format: "roo-supabase-full-logical-snapshot-v1",
           capturedAt: "2026-07-15T00:00:00.000Z",
           sourceSnapshotId: "10000000-0000-4000-8000-000000000001",
-          sourceMigrationVersion: "20260715130100",
+          sourceMigrationVersion: "20260715071825",
+          sourceMigrationNames: [...SUPABASE_FULL_EXPANDED_MIGRATION_NAMES],
           contractProfile: SUPABASE_FULL_EXPANDED_PROFILE,
           schemas: [...SUPABASE_FULL_SNAPSHOT_SCHEMAS],
           requiredRelations: [...SUPABASE_FULL_REQUIRED_RELATIONS],
@@ -344,6 +346,7 @@ describe("encrypted export hardening", () => {
       const preExpand = structuredClone(payload);
       preExpand.full_logical.sourceMigrationVersion =
         SUPABASE_FULL_PRE_EXPAND_MIGRATION_VERSION;
+      delete preExpand.full_logical.sourceMigrationNames;
       preExpand.full_logical.contractProfile = SUPABASE_FULL_PRE_EXPAND_PROFILE;
       preExpand.full_logical.requiredRelations = SUPABASE_FULL_REQUIRED_RELATIONS.filter(
         (relation) => !SUPABASE_FULL_PRE_EXPAND_DEFERRED_RELATIONS.includes(relation)
@@ -416,12 +419,22 @@ describe("encrypted export hardening", () => {
       }
       const oldSnapshot = structuredClone(payload);
       delete oldSnapshot.full_logical.sourceMigrationVersion;
+      delete oldSnapshot.full_logical.sourceMigrationNames;
       delete oldSnapshot.full_logical.contractProfile;
       let oldSnapshotRejected = false;
       try {
         validateFullLogicalSnapshot(oldSnapshot, { hash });
       } catch {
         oldSnapshotRejected = true;
+      }
+      const missingMigration = structuredClone(payload);
+      missingMigration.full_logical.sourceMigrationNames =
+        missingMigration.full_logical.sourceMigrationNames.slice(1);
+      let missingMigrationRejected = false;
+      try {
+        validateFullLogicalSnapshot(missingMigration, { hash });
+      } catch {
+        missingMigrationRejected = true;
       }
       const countTampered = structuredClone(payload);
       countTampered.full_logical.relationCounts["auth.users"] = 2;
@@ -451,6 +464,7 @@ describe("encrypted export hardening", () => {
         unexpectedMissingRejected,
         oldProfileRejected,
         oldSnapshotRejected,
+        missingMigrationRejected,
         countRejected,
         malformedRejected,
         numericExact: payload.full_logical.relationPayloads["auth.users"].includes(
@@ -469,6 +483,7 @@ describe("encrypted export hardening", () => {
       unexpectedMissingRejected: true,
       oldProfileRejected: true,
       oldSnapshotRejected: true,
+      missingMigrationRejected: true,
       countRejected: true,
       malformedRejected: true,
       numericExact: true,
