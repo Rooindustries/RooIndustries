@@ -20,6 +20,7 @@ import {
   stableJson,
   validateHostedSnapshot,
 } from "./tourney-cutover.mjs";
+import { validateFullLogicalSnapshot } from "../src/server/tourney/snapshotContract.js";
 
 const {
   assertTourneyCutoverLegacyTarget,
@@ -74,6 +75,18 @@ const sha256 = (value) => crypto.createHash("sha256").update(String(value)).dige
 const normalizeRows = (rows = []) => JSON.parse(JSON.stringify(rows)).sort((left, right) =>
   stableJson(left).localeCompare(stableJson(right))
 );
+const readFullLogicalSnapshotRows = (snapshot, relation) => {
+  const rowsText = snapshot?.supabase?.payload?.full_logical?.relationPayloads?.[relation];
+  let rows;
+  try {
+    rows = JSON.parse(rowsText);
+  } catch {
+    rows = null;
+  }
+  requireCondition(Array.isArray(rows),
+    "Verified snapshot relation is invalid.", "LIVE_DRIFT_SNAPSHOT_INVALID");
+  return rows;
+};
 const repairError = (message, code) => Object.assign(new Error(message), { code });
 const requireCondition = (condition, message, code) => {
   if (!condition) throw repairError(message, code);
@@ -599,6 +612,14 @@ const verifySnapshotProof = async ({ snapshotPath, state, env = process.env }) =
     legacyData: snapshot?.legacy,
     sanityAccount: snapshot?.sanityAccount,
   });
+  try {
+    validateFullLogicalSnapshot(snapshot?.supabase?.payload, { hash: sha256 });
+  } catch {
+    throw repairError(
+      "Verified snapshot full logical proof is invalid.",
+      "LIVE_DRIFT_SNAPSHOT_INVALID"
+    );
+  }
   const ageMs = Date.now() - Date.parse(snapshot.capturedAt || "");
   requireCondition(Number.isFinite(ageMs) && ageMs >= 0 && ageMs <= 30 * 60 * 1000,
     "Verified snapshot is not fresh.", "LIVE_DRIFT_SNAPSHOT_STALE");
@@ -606,10 +627,10 @@ const verifySnapshotProof = async ({ snapshotPath, state, env = process.env }) =
     [snapshot.legacy?.tourney_player_tokens, state.legacyRows.tokens],
     [snapshot.legacy?.tourney_discord_role_assignments, state.legacyRows.assignments],
     [snapshot.legacy?.tourney_players, state.legacyRows.players],
-    [snapshot.supabase?.payload?.tourney_player_tokens, state.sourceRows.tokens],
-    [snapshot.supabase?.payload?.discord_role_assignments, state.sourceRows.assignments],
-    [snapshot.supabase?.payload?.tourney_players, state.sourceRows.players],
-    [snapshot.supabase?.payload?.["accounts.identity_links"], state.sourceRows.identities],
+    [readFullLogicalSnapshotRows(snapshot, "tourney.tourney_player_tokens"), state.sourceRows.tokens],
+    [readFullLogicalSnapshotRows(snapshot, "accounts.discord_role_assignments"), state.sourceRows.assignments],
+    [readFullLogicalSnapshotRows(snapshot, "tourney.tourney_players"), state.sourceRows.players],
+    [readFullLogicalSnapshotRows(snapshot, "accounts.identity_links"), state.sourceRows.identities],
   ];
   requireCondition(comparisons.every(([snapshotRows, currentRows]) =>
     stableJson(normalizeRows(snapshotRows)) === stableJson(normalizeRows(currentRows))
