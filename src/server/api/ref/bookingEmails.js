@@ -621,7 +621,7 @@ export const sendBookingEmailsForBooking = async ({
           html: emailHtml({
             logoUrl,
             siteName,
-            heading: "Booking Received ✨",
+            heading: "Booking Received",
             intro:
               "To continue with your booking, please join the Roo Industries Discord using the button above. I'll contact you there (or by email if needed) to confirm your time and details.",
             fields: clientFields,
