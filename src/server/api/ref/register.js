@@ -261,6 +261,16 @@ export default async function handler(req, res) {
         .json({ ok: false, error: "Email already registered" });
     }
 
+    const existingCoupon = await client.fetch(
+      `*[_type == "coupon" && lower(code) == $slug][0]{_id}`,
+      { slug: trimmedSlug }
+    );
+    if (existingCoupon?._id) {
+      return res
+        .status(409)
+        .json({ ok: false, error: "Referral code already taken" });
+    }
+
     // Check slug uniqueness
     const existingBySlug = await client.fetch(
       `*[_type == "referral" && lower(slug.current) == $slug][0]{

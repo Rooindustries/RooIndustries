@@ -128,23 +128,24 @@ export default async function handler(req, res) {
     }
 
     const discountType = normalizeDiscountType(coupon.discountType);
-    const discountAmount =
-      discountType === "fixed" ? Number(coupon.discountAmount || 0) : null;
-    const discountPercent =
-      discountType === "percent" ? Number(coupon.discountPercent || 0) : 0;
+    const rawDiscountAmount = Number(coupon.discountAmount || 0);
+    const rawDiscountPercent = Number(coupon.discountPercent || 0);
+    const discountAmount = Number.isFinite(rawDiscountAmount)
+      ? Math.max(0, rawDiscountAmount)
+      : 0;
+    const discountPercent = Number.isFinite(rawDiscountPercent)
+      ? Math.min(100, Math.max(0, rawDiscountPercent))
+      : 0;
 
     return res.status(200).json({
       ok: true,
       coupon: {
-        id: coupon._id,
-        title: coupon.title,
         code: coupon.code,
         discountType,
-        discountPercent,
-        discountAmount,
+        ...(discountType === "fixed"
+          ? { discountAmount }
+          : { discountPercent }),
         canCombineWithReferral: coupon.canCombineWithReferral ?? false,
-        maxUses: max ?? null,
-        timesUsed: used,
       },
     });
   } catch (err) {
