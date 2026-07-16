@@ -651,7 +651,12 @@ describe("booking calendar UI", () => {
     await waitFor(() =>
       expectActiveStep("Review & pay", "Step 3 of 3 · Ready to pay")
     );
-    expect(screen.getByText(REASSURANCE_COPY)).toBeInTheDocument();
+    expect(
+      screen.getByText("No charge until you confirm")
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /139\+ verified reviews/i })
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /submit & pay/i })
     ).not.toBeInTheDocument();

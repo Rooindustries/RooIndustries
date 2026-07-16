@@ -448,7 +448,7 @@ export default function BookingForm({ isMobile }) {
   const selectedPackage = useMemo(() => {
     if (navigationPackage?.title) return preparePackage(navigationPackage);
     if (persistedPackage) return preparePackage(persistedPackage);
-    return preparePackage({});
+    return DEFAULT_VERTEX_PACKAGE;
   }, [navigationPackage, persistedPackage]);
 
   const prevPackageRef = useRef(selectedPackage.title);
@@ -2399,15 +2399,8 @@ export default function BookingForm({ isMobile }) {
                       {form.goals.length > 0 && (
                         <div className="grid gap-2 py-3 sm:grid-cols-[9rem_1fr]">
                           <dt className="text-ink-muted">Goals</dt>
-                          <dd className="flex flex-wrap gap-2">
-                            {form.goals.map((goal) => (
-                              <span
-                                key={goal}
-                                className="rounded-lg bg-accent-strong px-3 py-1.5 text-xs font-semibold text-accent-contrast shadow-glow-soft"
-                              >
-                                {goal}
-                              </span>
-                            ))}
+                          <dd className="break-words text-ink">
+                            {form.goals.join(" · ")}
                           </dd>
                         </div>
                       )}
@@ -2431,20 +2424,18 @@ export default function BookingForm({ isMobile }) {
                     />
                   </div>
 
-                  <div className="mt-6 grid grid-cols-1 gap-3 text-center text-xs sm:grid-cols-3">
+                  <p className="mt-5 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center text-xs text-ink-muted">
                     <Link
                       to="/reviews"
-                      className="rounded-lg border border-line-input bg-surface-input px-3 py-3 font-semibold text-info-text transition hover:bg-surface-hover"
+                      className="font-semibold text-info-text transition hover:text-accent"
                     >
-                      5.0★ from 139+ verified reviews
+                      5.0★ 139+ verified reviews
                     </Link>
-                    <div className="rounded-lg border border-line-input bg-surface-input px-3 py-3 font-semibold text-info-text">
-                      {warrantyCallout.title}
-                    </div>
-                    <div className="rounded-lg border border-line-input bg-surface-input px-3 py-3 font-semibold text-info-text">
-                      {REASSURANCE_COPY}
-                    </div>
-                  </div>
+                    <span aria-hidden="true">·</span>
+                    <span>{warrantyCallout.title}</span>
+                    <span aria-hidden="true">·</span>
+                    <span>No charge until you confirm</span>
+                  </p>
 
                   <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
                     {isPaymentPendingHold ? (
@@ -2487,7 +2478,11 @@ export default function BookingForm({ isMobile }) {
                             loading ? "cursor-wait opacity-60" : ""
                           }`}
                         >
-                          {loading ? "Preparing payment..." : `Pay ${selectedPackage.price}`}
+                          {loading
+                            ? "Preparing payment..."
+                            : selectedPackage.price
+                            ? `Pay ${selectedPackage.price}`
+                            : "Continue to payment"}
                           <span className="glow-line glow-line-top" />
                           <span className="glow-line glow-line-right" />
                           <span className="glow-line glow-line-bottom" />
