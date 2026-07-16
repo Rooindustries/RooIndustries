@@ -198,7 +198,7 @@ export default function BookingModal({ open, onClose, children }) {
 
           {/* BACKDROP */}
           <div 
-            className="glass-overlay low-perf-overlay fixed inset-0"
+            className="booking-modal-overlay glass-overlay low-perf-overlay fixed inset-0"
             style={{ pointerEvents: "none" }}
           />
 
