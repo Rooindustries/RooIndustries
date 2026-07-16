@@ -75,7 +75,6 @@ const VALID_FORM = {
   specs: "Ryzen 9 9950X3D, RTX 5090",
   mainGame: "Valorant",
   notes: "Keep fan noise low",
-  goals: ["More FPS"],
 };
 
 const setBookingLocation = (bookingPackage = OVERHAUL_PACKAGE) => {
@@ -628,6 +627,9 @@ describe("booking calendar UI", () => {
     await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
     await screen.findByLabelText("Discord username");
     expectActiveStep("PC details", "Step 2 of 3 · 67% complete");
+    expect(screen.getByText("Your optimization plan").closest("aside")).toHaveClass(
+      "self-start"
+    );
 
     await userEvent.click(
       screen.getByRole("button", { name: /^review before payment$/i })
@@ -655,6 +657,12 @@ describe("booking calendar UI", () => {
       screen.getByText("No charge until you confirm on the payment page.")
     ).toBeInTheDocument();
     expect(screen.getByText("Total")).toBeInTheDocument();
+    expect(screen.getByText("Total").closest("div")).toHaveClass(
+      "grid",
+      "gap-1",
+      "py-3",
+      "sm:grid-cols-[9rem_1fr]"
+    );
     expect(
       screen.queryByRole("link", { name: /verified reviews/i })
     ).not.toBeInTheDocument();
@@ -663,74 +671,7 @@ describe("booking calendar UI", () => {
     ).not.toBeInTheDocument();
   });
 
-  test("goal chips toggle and persist the per-package draft", async () => {
-    seedBookingSession();
-    installDefaultFetch();
-    setBookingLocation();
-
-    render(<BookingForm />);
-
-    const moreFps = await screen.findByRole("button", { name: "More FPS" });
-    const stableFrametimes = screen.getByRole("button", {
-      name: "Stable frametimes",
-    });
-    expect(moreFps).toHaveAttribute("aria-pressed", "true");
-    expect(stableFrametimes).toHaveAttribute("aria-pressed", "false");
-
-    await userEvent.click(moreFps);
-    await userEvent.click(stableFrametimes);
-
-    expect(moreFps).toHaveAttribute("aria-pressed", "false");
-    expect(stableFrametimes).toHaveAttribute("aria-pressed", "true");
-    await waitFor(() => {
-      const stored = JSON.parse(sessionStorage.getItem("booking_draft"));
-      expect(
-        stored.packages[OVERHAUL_PACKAGE.title].form.goals
-      ).toEqual(["Stable frametimes"]);
-    });
-  });
-
-  test("persists a blank form's explicit empty goals across remount", async () => {
-    seedBookingSession({
-      form: {
-        discord: "",
-        email: "",
-        specs: "",
-        mainGame: "",
-        notes: "",
-        goals: ["More FPS"],
-      },
-    });
-    installDefaultFetch();
-    setBookingLocation();
-
-    const { unmount } = render(<BookingForm />);
-
-    await userEvent.click(
-      await screen.findByRole("button", { name: /^more fps$/i })
-    );
-    await waitFor(() => {
-      const stored = JSON.parse(sessionStorage.getItem("booking_draft"));
-      expect(stored.packages[OVERHAUL_PACKAGE.title].form).toMatchObject({
-        goals: [],
-        goalsTouched: true,
-      });
-    });
-    unmount();
-
-    render(<BookingForm />);
-
-    expect(
-      await screen.findByRole("button", { name: /^more fps$/i })
-    ).toHaveAttribute("aria-pressed", "false");
-    const restored = JSON.parse(sessionStorage.getItem("booking_draft"));
-    expect(restored.packages[OVERHAUL_PACKAGE.title].form).toMatchObject({
-      goals: [],
-      goalsTouched: true,
-    });
-  });
-
-  test("review shows the summary and Pay navigates with goals plus augmented message", async () => {
+  test("review shows the summary and Pay navigates with plain notes", async () => {
     seedBookingSession();
     installDefaultFetch();
     setBookingLocation();
@@ -738,10 +679,7 @@ describe("booking calendar UI", () => {
     render(<BookingForm />);
 
     await userEvent.click(
-      await screen.findByRole("button", { name: "Lowest latency" })
-    );
-    await userEvent.click(
-      screen.getByRole("button", { name: /^review before payment$/i })
+      await screen.findByRole("button", { name: /^review before payment$/i })
     );
 
     await screen.findByRole("button", { name: /^pay \$54\.95$/i });
@@ -765,9 +703,7 @@ describe("booking calendar UI", () => {
       expect.objectContaining({
         state: expect.objectContaining({
           bookingData: expect.objectContaining({
-            goals: ["Lowest latency", "More FPS"],
-            message:
-              "Keep fan noise low\nGoals: Lowest latency, More FPS",
+            message: "Keep fan noise low",
           }),
         }),
       })
@@ -775,10 +711,8 @@ describe("booking calendar UI", () => {
     const checkout = JSON.parse(
       sessionStorage.getItem("checkout_booking_state")
     );
-    expect(checkout.goals).toEqual(["Lowest latency", "More FPS"]);
-    expect(checkout.message).toBe(
-      "Keep fan noise low\nGoals: Lowest latency, More FPS"
-    );
+    expect(checkout).not.toHaveProperty("goals");
+    expect(checkout.message).toBe("Keep fan noise low");
     const draft = JSON.parse(sessionStorage.getItem("booking_draft"));
     expect(draft.packages[OVERHAUL_PACKAGE.title].form.notes).toBe(
       "Keep fan noise low"
@@ -935,38 +869,34 @@ describe("booking calendar UI", () => {
     }
   );
 
-  test("old drafts default goals while an explicit empty selection stays empty", async () => {
-    const { goals: _goals, ...legacyForm } = VALID_FORM;
-    seedBookingSession({ form: legacyForm });
+  test("restores current-preview drafts while ignoring removed goal keys", async () => {
+    seedBookingSession({
+      form: {
+        ...VALID_FORM,
+        goals: ["Lowest latency", "More FPS"],
+        goalsTouched: true,
+      },
+    });
     installDefaultFetch();
     setBookingLocation();
 
-    const { unmount } = render(<BookingForm />);
-
-    expect(
-      await screen.findByRole("button", { name: "More FPS" })
-    ).toHaveAttribute("aria-pressed", "true");
-    unmount();
-
-    window.sessionStorage.clear();
-    seedBookingSession({ form: { ...VALID_FORM, goals: [] } });
-    mockNavigate.mockClear();
     render(<BookingForm />);
 
-    expect(
-      await screen.findByRole("button", { name: "More FPS" })
-    ).toHaveAttribute("aria-pressed", "false");
-    await userEvent.click(
-      screen.getByRole("button", { name: /^review before payment$/i })
+    expect(await screen.findByLabelText("Discord username")).toHaveValue(
+      VALID_FORM.discord
     );
-    expect(screen.queryByText(/^Goals$/)).not.toBeInTheDocument();
-    await userEvent.click(
-      await screen.findByRole("button", { name: /^pay \$54\.95$/i })
+    expect(screen.queryByText("What matters most?")).not.toBeInTheDocument();
+    await userEvent.type(
+      screen.getByLabelText("Extra booking requirements"),
+      " please"
     );
-    const payload = mockNavigate.mock.calls.at(-1)[1].state.bookingData;
-    expect(payload.goals).toEqual([]);
-    expect(payload.message).toBe("Keep fan noise low");
-    expect(payload.message).not.toContain("Goals:");
+    await waitFor(() => {
+      const stored = JSON.parse(sessionStorage.getItem("booking_draft"));
+      expect(stored.packages[OVERHAUL_PACKAGE.title].form).toEqual({
+        ...VALID_FORM,
+        notes: "Keep fan noise low please",
+      });
+    });
   });
 
   test("restores step 3 without the hydration write resetting it", async () => {
@@ -1009,7 +939,6 @@ describe("booking calendar UI", () => {
         specs: "",
         mainGame: "",
         notes: "",
-        goals: ["More FPS"],
       },
     });
     installDefaultFetch();
