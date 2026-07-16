@@ -7,6 +7,7 @@ import {
 } from "./mirrorRecovery.js";
 import { drainCommerceMirrorOutbox } from "./commerceMirrorOutbox.js";
 import { drainDocumentMutationOutbox } from "./documentMutationOutbox.js";
+import { logSanityMirrorEvent } from "./mirrorObservability.js";
 
 const cleanForSanity = (document) => {
   if (!document || typeof document !== "object") return document;
@@ -73,7 +74,6 @@ const mirrorIds = async ({
   recoveryClient,
   ids,
   deleted = false,
-  failClosed = true,
 }) => {
   const operation = deleted
     ? "supabase_to_sanity_delete"
@@ -101,6 +101,11 @@ const mirrorIds = async ({
     return { mirrored: event.ids.length, queued: false };
   } catch (error) {
     logSafeError("Sanity reverse mirror failed", error);
+    logSanityMirrorEvent({
+      event: "sanity_mirror_lag",
+      reason: "delivery_failed",
+      domain: supabaseClient?.commerceOnly === true ? "commerce" : "global",
+    });
     try {
       await recordMirrorFailure({
         client: recoveryClient,
@@ -112,14 +117,10 @@ const mirrorIds = async ({
       return { mirrored: 0, queued: true };
     } catch (queueError) {
       logSafeError("Reverse mirror recovery queue failed", queueError);
-      if (failClosed) {
-        const failure = new Error(
-          "The primary write completed, but its rollback mirror could not be queued."
-        );
-        failure.code = "REVERSE_MIRROR_UNRECORDED";
-        failure.cause = queueError;
-        throw failure;
-      }
+      logSanityMirrorEvent({
+        event: "sanity_mirror_lag",
+        reason: "recovery_queue_unavailable",
+      });
       return { mirrored: 0, queued: false };
     }
   }
@@ -143,7 +144,6 @@ export const retryReverseMirrorFailures = async ({
       recoveryClient,
       ids: Array.isArray(entry?.ids) ? entry.ids : [],
       deleted: entry?.operation === "supabase_to_sanity_delete",
-      failClosed: false,
     });
     summary.mirrored += Number(result.mirrored || 0);
     summary.queued += result.queued ? 1 : 0;
@@ -214,46 +214,45 @@ export const createReverseMirroringSupabaseClient = ({
   if (!supabaseClient || !sanityClient) {
     throw new Error("Both document backends are required for reverse mirroring.");
   }
-  const drainOrFallback = async ({ ids, deleted = false, failClosed = false }) => {
-    if (supabaseClient.commerceOnly === true) {
-      const drained = await drainCommerceMirrorOutbox({
+  const domain = supabaseClient.commerceOnly === true ? "commerce" : "global";
+  const drainOrFallback = async ({ ids, deleted = false, ...options }) => {
+    try {
+      if (supabaseClient.commerceOnly === true) {
+        return await drainCommerceMirrorOutbox({
+          supabaseClient: recoveryClient,
+          sanityClient,
+          requiredDocumentIds: ids,
+          ...options,
+        });
+      }
+      const drained = await drainDocumentMutationOutbox({
         supabaseClient: recoveryClient,
         sanityClient,
-        failClosed,
-        requiredDocumentIds: failClosed ? ids : [],
+        requiredDocumentIds: ids,
+        limit: 10,
+        maxBatches: 2,
+        budgetMs: 5_000,
       });
-      return drained;
+      if (drained.supported) return drained;
+      return mirrorIds({
+        supabaseClient,
+        sanityClient,
+        recoveryClient,
+        ids,
+        deleted,
+      });
+    } catch (error) {
+      logSafeError("Sanity mirror delivery failed", error);
+      logSanityMirrorEvent({
+        event: "sanity_mirror_lag",
+        reason: "delivery_failed",
+        domain,
+      });
+      return { supported: true, mirrored: 0, queued: true, pending: true };
     }
-    const drained = await drainDocumentMutationOutbox({
-      supabaseClient: recoveryClient,
-      sanityClient,
-      requiredDocumentIds: ids,
-      limit: 10,
-      maxBatches: 2,
-      budgetMs: 5_000,
-    });
-    if (drained.supported) return drained;
-    return mirrorIds({
-      supabaseClient,
-      sanityClient,
-      recoveryClient,
-      ids,
-      deleted,
-      failClosed,
-    });
   };
-  const onCommitted = (ids) =>
-    drainOrFallback({
-      ids,
-      deleted: false,
-      failClosed: supabaseClient.commerceOnly !== true,
-    });
-  const onDeleted = (ids) =>
-    drainOrFallback({
-      ids,
-      deleted: true,
-      failClosed: supabaseClient.commerceOnly !== true,
-    });
+  const onCommitted = async () => ({ deferred: true });
+  const onDeleted = async () => ({ deferred: true });
 
   return new Proxy(supabaseClient, {
     get(target, property) {
@@ -264,7 +263,6 @@ export const createReverseMirroringSupabaseClient = ({
               ? await drainCommerceMirrorOutbox({
                   supabaseClient: recoveryClient,
                   sanityClient,
-                  failClosed: false,
                   ...options,
                 })
               : await drainDocumentMutationOutbox({
@@ -284,20 +282,27 @@ export const createReverseMirroringSupabaseClient = ({
         };
       }
       if (property === "flushCommerceMirror") {
-        return ({ failClosed = true, ...options } = {}) =>
-          target.commerceOnly === true
-            ? drainCommerceMirrorOutbox({
-                supabaseClient: recoveryClient,
-                sanityClient,
-                failClosed,
-                ...options,
-              })
-            : Promise.resolve({
-                supported: false,
-                attempted: 0,
-                mirrored: 0,
-                failed: 0,
-              });
+        return (options = {}) => {
+          if (target.commerceOnly !== true) {
+            return Promise.resolve({
+              supported: false,
+              attempted: 0,
+              mirrored: 0,
+              failed: 0,
+            });
+          }
+          const {
+            requiredDocumentIds: ids = [],
+            limit,
+            maxBatches,
+          } = options;
+          return drainOrFallback({
+            ids,
+            deleted: false,
+            ...(limit === undefined ? {} : { limit }),
+            ...(maxBatches === undefined ? {} : { maxBatches }),
+          });
+        };
       }
       if (["create", "createIfNotExists", "createOrReplace"].includes(property)) {
         return async (document, ...args) => {

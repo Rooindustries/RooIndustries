@@ -8,6 +8,11 @@ import status from "../../../../src/server/api/payment/status.js";
 import cancel from "../../../../src/server/api/payment/cancel.js";
 import { after } from "next/server";
 import { recordCommerceResponseMetric } from "../../../../src/server/supabase/commerceMetrics";
+import {
+  flushDeferredCommerceMirror,
+  isDeferredCommerceMirrorEnabled,
+} from "../../../../src/server/supabase/deferredCommerceMirror";
+import { logSanityMirrorEvent } from "../../../../src/server/supabase/mirrorObservability";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,6 +27,7 @@ const ACTION_HANDLERS = {
   start,
   status,
 };
+const MUTATING_ACTIONS = new Set(["cancel", "finalize", "start"]);
 
 async function handle(request, context, methodOverride) {
   const startedAt = performance.now();
@@ -56,8 +62,21 @@ async function handle(request, context, methodOverride) {
           response: metricResponse,
         })
       );
-    } catch (error) {
-      if (process.env.NODE_ENV !== "test") throw error;
+    } catch {}
+    if (
+      response.ok &&
+      MUTATING_ACTIONS.has(action) &&
+      isDeferredCommerceMirrorEnabled()
+    ) {
+      try {
+        after(() => flushDeferredCommerceMirror());
+      } catch {
+        logSanityMirrorEvent({
+          event: "sanity_mirror_lag",
+          reason: "deferred_schedule_failed",
+          domain: "commerce",
+        });
+      }
     }
   }
   if (action === "cancel" || action === "finalize" || action === "status") {

@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 const rawToken = "a".repeat(64);
 const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
 let referral;
+const previousDataPrimary = process.env.DATA_PRIMARY_BACKEND;
 
 const conflict = () =>
   Object.assign(new Error("Revision changed"), { status: 409, statusCode: 409 });
@@ -67,8 +68,14 @@ describe("referral password reset concurrency", () => {
   let reset;
 
   beforeAll(() => {
+    process.env.DATA_PRIMARY_BACKEND = "sanity";
     const module = require("../server/api/ref/reset");
     reset = module.default || module;
+  });
+
+  afterAll(() => {
+    if (previousDataPrimary === undefined) delete process.env.DATA_PRIMARY_BACKEND;
+    else process.env.DATA_PRIMARY_BACKEND = previousDataPrimary;
   });
 
   beforeEach(() => {

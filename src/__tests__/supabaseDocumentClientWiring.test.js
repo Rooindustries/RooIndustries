@@ -158,19 +158,27 @@ describe("Supabase document client wiring", () => {
     expect(mockCreateReverseMirroringSupabaseClient).not.toHaveBeenCalled();
   });
 
-  test("rejects global Supabase writes without the rollback mirror", () => {
+  test("constructs a plain Supabase write client without Sanity", () => {
     const env = {
       NODE_ENV: "test",
       DATA_PRIMARY_BACKEND: "supabase",
-      COMMERCE_PRIMARY_BACKEND: "sanity",
+      COMMERCE_PRIMARY_BACKEND: "supabase",
       SUPABASE_CUTOVER_ENABLED: "1",
+      COMMERCE_CUTOVER_ENABLED: "1",
+      COMMERCE_FAILOVER_GENERATION: "1",
     };
 
-    expect(() => createDocumentWriteClient({ env })).toThrow(
-      "SANITY_REVERSE_MIRROR_WRITES"
+    expect(createDocumentWriteClient({ env, domain: "commerce" })).toBe(
+      supabaseDocumentClient
     );
-    expect(mockCreateSupabaseAdminClient).not.toHaveBeenCalled();
-    expect(mockCreateSupabaseDocumentClient).not.toHaveBeenCalled();
+    expect(mockCreateSupabaseAdminClient).toHaveBeenCalledWith({ env });
+    expect(mockCreateSupabaseDocumentClient).toHaveBeenCalledWith({
+      shadowClient: adminClient,
+      commerceOnly: true,
+      cutoverGeneration: 1,
+    });
+    expect(mockCreateReverseMirroringSupabaseClient).not.toHaveBeenCalled();
+    expect(mockCreateSanityClient).not.toHaveBeenCalled();
   });
 
   test("uses the private Sanity target for manual fallback writes", () => {

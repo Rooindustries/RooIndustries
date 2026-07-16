@@ -390,6 +390,88 @@ const deriveCommerceBlockers = ({ readiness, integrity, databaseControl }) => {
   return [...blockers];
 };
 
+const isCommerceFailoverBlocker = (blocker) =>
+  blocker.startsWith("parity_") ||
+  blocker.startsWith("mirror_") ||
+  blocker.startsWith("integrity_mirror_") ||
+  blocker.startsWith("readiness_schema_invalid:last_parity") ||
+  blocker.startsWith("readiness_schema_invalid:last_mirror_checkpoint") ||
+  blocker.startsWith("readiness_schema_invalid:mirror.") ||
+  blocker.startsWith("readiness_schema_invalid:integrity.mirror.");
+
+const isPortFailoverBlocker = (blocker) =>
+  blocker === "document_mutation_mirror_not_ready" ||
+  blocker === "referral_fallback_authority_not_ready" ||
+  blocker === "port_parity_stale" ||
+  blocker.startsWith(
+    "readiness_schema_invalid:portClosure.documentMutationMirror",
+  ) ||
+  blocker.startsWith(
+    "readiness_schema_invalid:portClosure.referralFallbackAuthority",
+  ) ||
+  blocker.startsWith("readiness_schema_invalid:portClosure.parityAgeSeconds");
+
+const splitBlockers = (blockers, isFailoverBlocker) => ({
+  primary: blockers.filter((blocker) => !isFailoverBlocker(blocker)),
+  failover: blockers.filter(isFailoverBlocker),
+});
+
+const deriveFailoverConfiguration = (policy) => {
+  const status = ["absent", "partial", "complete"].includes(
+    policy.sanityConfigurationStatus,
+  )
+    ? policy.sanityConfigurationStatus
+    : "unknown";
+  if (status !== "complete") {
+    return {
+      ready: false,
+      reason: `sanity_configuration_${status}`,
+      status,
+    };
+  }
+  if (policy.reverseMirrorEnabled !== true) {
+    return {
+      ready: false,
+      reason: "sanity_reverse_mirror_disabled",
+      status,
+    };
+  }
+  return { ready: true, reason: "", status };
+};
+
+const deriveCmsReadiness = ({ cms, cmsControl }) => {
+  const hasComponentReadiness =
+    cms.receipts !== undefined ||
+    cms.assets !== undefined ||
+    cms.content_mirror !== undefined ||
+    cms.commerce_mirror !== undefined;
+  const primaryBackendReady = hasComponentReadiness
+    ? cms.receipts?.ready === true && cms.assets?.ready === true
+    : cms.ready === true;
+  const failoverBackendReady = hasComponentReadiness
+    ? cms.content_mirror?.ready === true && cms.commerce_mirror?.ready === true
+    : cms.ready === true;
+  const primaryBlockers = [
+    ...cmsControl.blockers,
+    ...(primaryBackendReady ? [] : ["cms_primary_readiness_not_ready"]),
+  ];
+  const failoverBlockers = failoverBackendReady
+    ? []
+    : ["cms_failover_mirror_not_ready"];
+  const blockers = [
+    ...cmsControl.blockers,
+    ...(cms.ready === true ? [] : ["cms_publish_readiness_not_ready"]),
+  ];
+  return {
+    blockers,
+    ready: blockers.length === 0,
+    primaryBlockers,
+    primaryReady: primaryBlockers.length === 0,
+    failoverBlockers,
+    failoverReady: failoverBlockers.length === 0,
+  };
+};
+
 export async function GET(request) {
   if (!authorized(request)) {
     return NextResponse.json(
@@ -445,31 +527,59 @@ export async function GET(request) {
       databaseControl,
     });
     const portClosureBlockers = derivePortClosureBlockers(portClosure);
+    const commerceSplit = splitBlockers(
+      commerceBlockers,
+      isCommerceFailoverBlocker,
+    );
+    const portClosureSplit = splitBlockers(
+      portClosureBlockers,
+      isPortFailoverBlocker,
+    );
     const commerceReady = commerceBlockers.length === 0;
     const portClosureReady = portClosureBlockers.length === 0;
     const cmsControl = resolveGlobalCmsWriteControl(process.env);
-    const cmsBlockers = [
-      ...cmsControl.blockers,
-      ...(cms.ready === true ? [] : ["cms_publish_readiness_not_ready"]),
-    ];
-    const cmsReady = cmsBlockers.length === 0;
+    const cmsReadiness = deriveCmsReadiness({ cms, cmsControl });
+    const failoverConfiguration = deriveFailoverConfiguration(policy);
+    const commercePrimaryReady = commerceSplit.primary.length === 0;
+    const commerceFailoverReady = commerceSplit.failover.length === 0;
+    const portClosurePrimaryReady = portClosureSplit.primary.length === 0;
+    const portClosureFailoverReady = portClosureSplit.failover.length === 0;
     const controlMatchesDeployment =
       databaseControl.primary_backend === policy.commercePrimaryBackend &&
       Number(databaseControl.generation) ===
         policy.commerceFailoverGeneration &&
       databaseControl.starts_paused === policy.commerceStartsPaused;
+    const primaryReady =
+      commercePrimaryReady &&
+      controlMatchesDeployment &&
+      portClosurePrimaryReady &&
+      referralEmails.ready === true &&
+      cmsReadiness.primaryReady;
+    const failoverChecksReady =
+      commerceFailoverReady &&
+      portClosureFailoverReady &&
+      cmsReadiness.failoverReady;
+    const failoverReady =
+      failoverConfiguration.ready && failoverChecksReady;
+    const failoverReason = failoverConfiguration.reason ||
+      (failoverChecksReady ? "" : "failover_checks_failed");
     return NextResponse.json(
       {
         ok: true,
         ...readiness,
         commerceReady,
         commerceBlockers,
-        ready:
-          commerceReady &&
-          controlMatchesDeployment &&
-          portClosureReady &&
-          referralEmails.ready === true &&
-          cmsReady,
+        commercePrimaryReady,
+        commercePrimaryBlockers: commerceSplit.primary,
+        commerceFailoverReady,
+        commerceFailoverBlockers: commerceSplit.failover,
+        ready: primaryReady,
+        primaryReady,
+        failoverReady,
+        failoverReason,
+        failoverConfigurationReady: failoverConfiguration.ready,
+        sanityConfigurationStatus: failoverConfiguration.status,
+        reverseMirrorEnabled: policy.reverseMirrorEnabled === true,
         primaryBackend: policy.commercePrimaryBackend,
         cutoverEnabled: policy.commerceCutoverEnabled,
         startsPaused: policy.commerceStartsPaused,
@@ -478,6 +588,10 @@ export async function GET(request) {
         controlMatchesDeployment,
         portClosureReady,
         portClosureBlockers,
+        portClosurePrimaryReady,
+        portClosurePrimaryBlockers: portClosureSplit.primary,
+        portClosureFailoverReady,
+        portClosureFailoverBlockers: portClosureSplit.failover,
         integrity: {
           mirror: integrity.mirror || {},
           orphanClaimedProofs: Number(integrity.orphan_claimed_proofs || 0),
@@ -491,11 +605,15 @@ export async function GET(request) {
         referralFallbackAuthorityReady:
           referralFallbackAuthority.ready === true,
         referralEmailReady: referralEmails.ready === true,
-        cmsReady,
-        cmsBlockers,
+        cmsReady: cmsReadiness.ready,
+        cmsBlockers: cmsReadiness.blockers,
+        cmsPrimaryReady: cmsReadiness.primaryReady,
+        cmsPrimaryBlockers: cmsReadiness.primaryBlockers,
+        cmsFailoverReady: cmsReadiness.failoverReady,
+        cmsFailoverBlockers: cmsReadiness.failoverBlockers,
         cmsControl,
-        globalCmsReady: cmsReady,
-        globalCmsBlockers: cmsBlockers,
+        globalCmsReady: cmsReadiness.ready,
+        globalCmsBlockers: cmsReadiness.blockers,
         globalCmsControl: cmsControl,
         cms,
         portClosure,

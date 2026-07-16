@@ -46,7 +46,7 @@ describe("public content privacy boundary", () => {
     delete process.env.SANITY_PRIVATE_WRITE_TOKEN;
     delete process.env.NEXT_PUBLIC_SANITY_PROJECT_ID;
     delete process.env.NEXT_PUBLIC_SANITY_DATASET;
-    delete process.env.DATA_PRIMARY_BACKEND;
+    process.env.DATA_PRIMARY_BACKEND = "sanity";
     delete process.env.SUPABASE_CONTENT_CANARY_PERCENT;
     mockFetch.mockResolvedValue({ title: "Public copy" });
     mockSupabaseFetch.mockReset();

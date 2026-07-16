@@ -1,21 +1,47 @@
 import { verifyHoldToken } from "../../booking/holdToken.js";
-import { createCommerceWriteClient } from "../ref/sanity.js";
+import {
+  createCommerceReadClient,
+  createCommerceWriteClient,
+} from "../ref/sanity.js";
 import {
   resolveSupabaseRuntimePolicy,
 } from "../../supabase/runtime.js";
 import { verifyPaymentAccessToken } from "./accessToken.js";
 import { findPaymentRecordByProviderData } from "./paymentRecord.js";
 import { verifyUpgradeIntentToken } from "../ref/upgradeIntentToken.js";
+import sanityConfiguration from "../../supabase/sanityConfiguration.cjs";
+
+const { inspectSanityConfiguration } = sanityConfiguration;
 
 const normalizeBackend = (value) =>
   String(value || "").trim().toLowerCase() === "supabase"
     ? "supabase"
     : "sanity";
 
-export const getPaymentTokenBackend = (token) => {
+export const selectPaymentAuthority = ({
+  backendOwner = "sanity",
+  cutoverGeneration = 0,
+  policy = resolveSupabaseRuntimePolicy(),
+} = {}) => {
+  const embeddedGeneration = Math.max(0, Number(cutoverGeneration) || 0);
+  const currentGeneration = Math.max(
+    0,
+    Number(policy.commerceFailoverGeneration) || 0
+  );
+  if (embeddedGeneration < currentGeneration) {
+    return normalizeBackend(policy.commercePrimaryBackend);
+  }
+  return normalizeBackend(backendOwner);
+};
+
+export const getPaymentTokenBackend = (token, env = process.env) => {
   const result = verifyPaymentAccessToken({ token });
   if (!result.ok && !result.expired) return "";
-  return normalizeBackend(result.payload?.backend);
+  return selectPaymentAuthority({
+    backendOwner: result.payload?.backend,
+    cutoverGeneration: result.payload?.cutoverGeneration,
+    policy: resolveSupabaseRuntimePolicy(env),
+  });
 };
 
 export const selectPaymentStartBackend = ({
@@ -56,6 +82,9 @@ export const selectPaymentStartBackend = ({
 export const createPaymentBackendClient = (backend) =>
   createCommerceWriteClient({ backendOverride: normalizeBackend(backend) });
 
+export const createPaymentBackendReadClient = (backend) =>
+  createCommerceReadClient({ backendOverride: normalizeBackend(backend) });
+
 export const createPaymentBackendClientOverride = (
   backend,
   env = process.env
@@ -88,17 +117,34 @@ export const resolveWebhookBackend = async ({
   provider,
   body,
   env = process.env,
+  createReadClient = createPaymentBackendReadClient,
 } = {}) => {
   const ids = webhookProviderData({ provider, body });
   if (ids.providerOrderId || ids.providerPaymentId) {
-    for (const backend of ["sanity", "supabase"]) {
+    const policy = resolveSupabaseRuntimePolicy(env);
+    const activeBackend = normalizeBackend(policy.commercePrimaryBackend);
+    const legacyBackend = activeBackend === "supabase" ? "sanity" : "supabase";
+    const legacyBackendConfigured =
+      legacyBackend !== "sanity" ||
+      inspectSanityConfiguration(env).readConfigured;
+    const backends = [
+      activeBackend,
+      ...(legacyBackendConfigured ? [legacyBackend] : []),
+    ];
+    for (const backend of backends) {
       try {
         const record = await findPaymentRecordByProviderData({
-          client: createPaymentBackendClient(backend),
+          client: createReadClient(backend),
           provider,
           ...ids,
         });
-        if (record?._id) return normalizeBackend(record.backendOwner || backend);
+        if (record?._id) {
+          return selectPaymentAuthority({
+            backendOwner: record.backendOwner || backend,
+            cutoverGeneration: record.cutoverGeneration,
+            policy,
+          });
+        }
       } catch {
         // The other backend can still resolve an in-flight provider event.
       }
