@@ -1,4 +1,8 @@
-import { selectPaymentStartBackend } from "../server/api/payment/backend";
+import {
+  resolveWebhookBackend,
+  selectPaymentAuthority,
+  selectPaymentStartBackend,
+} from "../server/api/payment/backend";
 import { issueHoldToken } from "../server/booking/holdToken";
 import { issueUpgradeIntentToken } from "../server/api/ref/upgradeIntentToken";
 
@@ -149,5 +153,45 @@ describe("payment backend pinning", () => {
         COMMERCE_FAILOVER_GENERATION: "2",
       },
     })).toBe("sanity");
+  });
+
+  test("promotes generation-one payment capabilities to generation-two Sanity", () => {
+    expect(selectPaymentAuthority({
+      backendOwner: "supabase",
+      cutoverGeneration: 1,
+      policy: {
+        commercePrimaryBackend: "sanity",
+        commerceFailoverGeneration: 2,
+      },
+    })).toBe("sanity");
+  });
+
+  test("resolves a generation-one Supabase webhook record to promoted Sanity", async () => {
+    const fetch = jest.fn().mockResolvedValue({
+      _id: "paymentRecord.promoted",
+      _type: "paymentRecord",
+      provider: "razorpay",
+      providerOrderId: "order-promoted",
+      backendOwner: "supabase",
+      cutoverGeneration: 1,
+    });
+    const createReadClient = jest.fn(() => ({ fetch }));
+
+    await expect(resolveWebhookBackend({
+      provider: "razorpay",
+      body: {
+        payload: {
+          payment: { entity: { order_id: "order-promoted" } },
+        },
+      },
+      env: {
+        DATA_PRIMARY_BACKEND: "sanity",
+        COMMERCE_PRIMARY_BACKEND: "sanity",
+        COMMERCE_FAILOVER_GENERATION: "2",
+      },
+      createReadClient,
+    })).resolves.toBe("sanity");
+    expect(createReadClient).toHaveBeenCalledTimes(1);
+    expect(createReadClient).toHaveBeenCalledWith("sanity");
   });
 });

@@ -41,7 +41,7 @@ export const canIssueBookingEmailDispatchToken = () => !!resolveTokenSecret();
 export const issueBookingEmailDispatchToken = ({
   bookingId = "",
   email = "",
-  backend = "sanity",
+  backend = "supabase",
   cutoverGeneration = 0,
   expirySeconds = 60 * 30,
 }) => {

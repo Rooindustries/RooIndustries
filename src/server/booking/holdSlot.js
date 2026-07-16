@@ -1,4 +1,7 @@
-import { createCommerceWriteClient } from "../api/ref/sanity.js";
+import {
+  createCommerceReadClient,
+  createCommerceWriteClient,
+} from "../api/ref/sanity.js";
 import crypto from "crypto";
 import { issueHoldToken, verifyHoldToken } from "./holdToken.js";
 import { selectHoldAuthority } from "./holdAuthority.js";
@@ -21,6 +24,8 @@ import { assertCommerceStartAllowed } from "../supabase/commerceControl.js";
 
 const createHoldClient = (backendOverride) =>
   createCommerceWriteClient({ backendOverride });
+const createHoldReadClient = (backendOverride) =>
+  createCommerceReadClient({ backendOverride });
 
 export const HOLD_DURATION_MS = 20 * 60 * 1000;
 
@@ -80,7 +85,7 @@ export const fetchOtherBackendSlotState = async ({
   if (otherBackend === "supabase" && !isSupabaseAdminConfigured()) {
     return { hold: null, slotLock: null, bookings: [] };
   }
-  const otherClient = createHoldClient(otherBackend);
+  const otherClient = createHoldReadClient(otherBackend);
   const [hold, slotLock, bookings] = await Promise.all([
     otherClient.fetch(`*[_type == "slotHold" && _id == $id][0]`, {
       id: holdId,

@@ -1,4 +1,6 @@
 let getUpgradeInfo;
+const previousDataPrimary = process.env.DATA_PRIMARY_BACKEND;
+const previousCommercePrimary = process.env.COMMERCE_PRIMARY_BACKEND;
 
 const mockGetDocument = jest.fn();
 const mockFetch = jest.fn();
@@ -96,8 +98,20 @@ const setupFetch = ({ booking = paidBooking(), extraFetch = null } = {}) => {
 };
 
 beforeAll(() => {
+  process.env.DATA_PRIMARY_BACKEND = "sanity";
+  process.env.COMMERCE_PRIMARY_BACKEND = "sanity";
   const mod = require("../../src/server/api/ref/getUpgradeInfo");
   getUpgradeInfo = mod && mod.default ? mod.default : mod;
+});
+
+afterAll(() => {
+  if (previousDataPrimary === undefined) delete process.env.DATA_PRIMARY_BACKEND;
+  else process.env.DATA_PRIMARY_BACKEND = previousDataPrimary;
+  if (previousCommercePrimary === undefined) {
+    delete process.env.COMMERCE_PRIMARY_BACKEND;
+  } else {
+    process.env.COMMERCE_PRIMARY_BACKEND = previousCommercePrimary;
+  }
 });
 
 beforeEach(() => {

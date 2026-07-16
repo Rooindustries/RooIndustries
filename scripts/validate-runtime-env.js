@@ -13,6 +13,9 @@ const {
 const {
   buildPostgresConnectionEnv,
 } = require("./lib/postgres-connection-target.cjs");
+const {
+  inspectSanityConfiguration,
+} = require("../src/server/supabase/sanityConfiguration.cjs");
 
 const vercelEnv = (process.env.VERCEL_ENV || "").trim().toLowerCase();
 const hasExplicitVercelEnv = vercelEnv.length > 0;
@@ -374,7 +377,7 @@ if (
   }
 }
 
-const primaryBackend = getFirstValue(["DATA_PRIMARY_BACKEND"]).toLowerCase() || "sanity";
+const primaryBackend = getFirstValue(["DATA_PRIMARY_BACKEND"]).toLowerCase() || "supabase";
 const commercePrimaryBackend =
   getFirstValue(["COMMERCE_PRIMARY_BACKEND"]).toLowerCase() || primaryBackend;
 const tourneyDatabaseMode =
@@ -405,7 +408,6 @@ const authCanaryConfigured = Boolean(
   getFirstValue(["SUPABASE_AUTH_CANARY_ACCOUNTS"])
 );
 const shadowWritesEnabled = isEnabled("SUPABASE_SHADOW_WRITES");
-const reverseMirrorEnabled = isEnabled("SANITY_REVERSE_MIRROR_WRITES");
 const cutoverEnabled = isEnabled("SUPABASE_CUTOVER_ENABLED");
 const commerceCutoverEnabled = isEnabled("COMMERCE_CUTOVER_ENABLED");
 const commerceFailoverGeneration =
@@ -426,70 +428,30 @@ const hasBlobCredentials = hasAny([
 const blobDownloadsEnabled =
   downloadStorageBackend === "blob" ||
   (downloadStorageBackend !== "local" && hasBlobCredentials);
-const sanityReadRequired =
-  primaryBackend === "sanity" ||
-  commercePrimaryBackend === "sanity";
-const sanityWriteRequired =
-  primaryBackend === "sanity" ||
-  commercePrimaryBackend === "sanity" ||
-  reverseMirrorEnabled;
-const sanityTargetRequired = sanityReadRequired || sanityWriteRequired;
-const privateSanityConfigured = hasAny([
-  "SANITY_PRIVATE_PROJECT_ID",
-  "SANITY_PRIVATE_DATASET",
-  "SANITY_PRIVATE_READ_TOKEN",
-  "SANITY_PRIVATE_WRITE_TOKEN",
-]);
-if (privateSanityConfigured && sanityTargetRequired) {
-  const privateTargetMissing = [
-    ...(!hasAny(["SANITY_PRIVATE_PROJECT_ID"])
-      ? ["SANITY_PRIVATE_PROJECT_ID"]
-      : []),
-    ...(!hasAny(["SANITY_PRIVATE_DATASET"])
-      ? ["SANITY_PRIVATE_DATASET"]
-      : []),
-    ...(sanityWriteRequired && !hasAny(["SANITY_PRIVATE_WRITE_TOKEN"])
-      ? ["SANITY_PRIVATE_WRITE_TOKEN"]
-      : []),
-    ...(sanityReadRequired &&
-      !hasAny(["SANITY_PRIVATE_READ_TOKEN", "SANITY_PRIVATE_WRITE_TOKEN"])
-      ? ["SANITY_PRIVATE_READ_TOKEN"]
-      : []),
-  ];
-  if (privateTargetMissing.length > 0) {
-    supabaseConsistencyFailures.push(
-      `Private Sanity configuration is incomplete: ${privateTargetMissing.join(
-        ", "
-      )}.`
-    );
-  }
+const sanityPrimaryRequired =
+  primaryBackend === "sanity" || commercePrimaryBackend === "sanity";
+const sanityConfiguration = inspectSanityConfiguration(process.env);
+if (sanityConfiguration.status === "partial") {
+  supabaseConsistencyFailures.push(
+    `Sanity configuration is incomplete: ${sanityConfiguration.missing.join(
+      ", "
+    )}. Configure a complete writable backup or delete the partial SANITY_* target variables.`
+  );
 }
 const sanityRequiredChecks = [
-  ...(sanityTargetRequired
+  ...(sanityPrimaryRequired
     ? [
         {
-          keys: ["SANITY_PRIVATE_PROJECT_ID", "SANITY_PROJECT_ID"],
+          keys: [sanityConfiguration.keys.projectId],
           label: "SANITY_PROJECT_ID",
         },
         {
-          keys: ["SANITY_PRIVATE_DATASET", "SANITY_DATASET"],
+          keys: [sanityConfiguration.keys.dataset],
           label: "SANITY_DATASET",
         },
-      ]
-    : []),
-  ...(sanityWriteRequired
-    ? [
         {
-          keys: ["SANITY_PRIVATE_WRITE_TOKEN", "SANITY_WRITE_TOKEN"],
+          keys: [sanityConfiguration.keys.writeToken],
           label: "SANITY_WRITE_TOKEN",
-        },
-      ]
-    : []),
-  ...(sanityReadRequired
-    ? [
-        {
-          keys: ["SANITY_PRIVATE_READ_TOKEN", "SANITY_READ_TOKEN"],
-          label: "SANITY_READ_TOKEN",
         },
       ]
     : []),
@@ -581,6 +543,25 @@ if (!["sanity", "supabase"].includes(commercePrimaryBackend)) {
 if (!/^[0-9]+$/.test(commerceFailoverGeneration)) {
   supabaseConsistencyFailures.push(
     "COMMERCE_FAILOVER_GENERATION must be a non-negative integer."
+  );
+}
+if (
+  commerceFailoverGeneration === "0" &&
+  !sanityConfiguration.readConfigured
+) {
+  supabaseConsistencyFailures.push(
+    "COMMERCE_FAILOVER_GENERATION=0 requires a complete legacy Sanity read target for the dual-backend occupancy check. Pin the active generation (1 or higher) or configure Sanity."
+  );
+}
+const obsoleteCanaryVariables = [
+  ...(contentCanaryPercent > 0 ? ["SUPABASE_CONTENT_CANARY_PERCENT"] : []),
+  ...(commerceCanaryPercent > 0 ? ["SUPABASE_COMMERCE_CANARY_PERCENT"] : []),
+];
+if (obsoleteCanaryVariables.length > 0) {
+  supabaseConsistencyFailures.push(
+    `Supabase is primary; nonzero canary percentages are obsolete. Delete ${obsoleteCanaryVariables.join(
+      ", "
+    )}.`
   );
 }
 if (!["legacy", "supabase"].includes(tourneyDatabaseMode)) {
@@ -679,23 +660,6 @@ if (primaryBackend === "supabase" && !cutoverEnabled) {
 if (commercePrimaryBackend === "supabase" && !commerceCutoverEnabled) {
   supabaseConsistencyFailures.push(
     "Supabase commerce primary mode requires COMMERCE_CUTOVER_ENABLED=1."
-  );
-}
-if (
-  (
-    primaryBackend === "supabase" ||
-    commercePrimaryBackend === "supabase" ||
-    commerceCanaryPercent > 0
-  ) &&
-  !reverseMirrorEnabled
-) {
-  supabaseConsistencyFailures.push(
-    "Supabase primary writes require SANITY_REVERSE_MIRROR_WRITES=1 during the rollback window."
-  );
-}
-if (commerceCanaryPercent > 0 && !shadowWritesEnabled) {
-  supabaseConsistencyFailures.push(
-    "Supabase commerce canaries require SUPABASE_SHADOW_WRITES=1."
   );
 }
 if (

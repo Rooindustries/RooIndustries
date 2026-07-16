@@ -4,7 +4,7 @@ const normalizeBackend = (value) =>
     : "sanity";
 
 export class CommerceStore {
-  constructor({ client, backend = "sanity", cutoverGeneration = 0 } = {}) {
+  constructor({ client, backend = "supabase", cutoverGeneration = 0 } = {}) {
     if (!client) throw new Error("A commerce document backend is required.");
     this.client = client;
     this.backend = normalizeBackend(client.backend || backend);

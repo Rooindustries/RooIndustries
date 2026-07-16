@@ -1,5 +1,21 @@
 import { createDocumentWriteClient } from "../data/documentClient.js";
 import { logSafeError } from "../safeErrorLog.js";
+import { resolveSupabaseRuntimePolicy } from "./runtime.js";
+import sanityConfiguration from "./sanityConfiguration.cjs";
+import { logSanityMirrorEvent } from "./mirrorObservability.js";
+
+const { inspectSanityConfiguration } = sanityConfiguration;
+
+export const isDeferredCommerceMirrorEnabled = (env = process.env) => {
+  try {
+    return (
+      resolveSupabaseRuntimePolicy(env).commercePrimaryBackend === "supabase" &&
+      inspectSanityConfiguration(env).writeConfigured
+    );
+  } catch {
+    return false;
+  }
+};
 
 const wait = (delayMs) =>
   new Promise((resolve) => setTimeout(resolve, Math.max(0, delayMs)));
@@ -17,6 +33,16 @@ export const flushDeferredCommerceMirror = async ({
   maxAttempts = 4,
   retryDelayMs = 350,
 } = {}) => {
+  if (!isDeferredCommerceMirrorEnabled()) {
+    return {
+      supported: false,
+      skipped: true,
+      reason: "sanity_unconfigured_or_inactive",
+      attempted: 0,
+      mirrored: 0,
+      failed: 0,
+    };
+  }
   try {
     const client = createDocumentWriteClient({
       backendOverride: "supabase",
@@ -35,7 +61,6 @@ export const flushDeferredCommerceMirror = async ({
     };
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       const result = await client.flushCommerceMirror({
-        failClosed: false,
         limit: 25,
         maxBatches: 2,
       });
@@ -51,6 +76,11 @@ export const flushDeferredCommerceMirror = async ({
     return summary;
   } catch (error) {
     logSafeError("Deferred commerce mirror flush failed", error);
+    logSanityMirrorEvent({
+      event: "sanity_mirror_lag",
+      reason: "deferred_flush_failed",
+      domain: "commerce",
+    });
     return { supported: false, attempted: 0, mirrored: 0, failed: 1 };
   }
 };

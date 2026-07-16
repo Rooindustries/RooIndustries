@@ -561,6 +561,12 @@ describe("payment bearer-token handlers", () => {
       __esModule: true,
       finalizePaymentSession,
     }));
+    const createPaymentBackendClientOverride = jest.fn();
+    jest.doMock("../server/api/payment/backend.js", () => ({
+      __esModule: true,
+      getPaymentTokenBackend: jest.fn(() => ""),
+      createPaymentBackendClientOverride,
+    }));
     process.env.PAYMENT_LEGACY_COMPLETION_UNTIL = "2000-01-01T00:00:00.000Z";
     const handler = require("../server/api/payment/finalize.js").default;
     const { response, state } = createLegacyResponse();
@@ -581,6 +587,7 @@ describe("payment bearer-token handlers", () => {
       })
     );
     expect(state.headers["cache-control"]).toBe("private, no-store");
+    expect(createPaymentBackendClientOverride).not.toHaveBeenCalled();
   });
 
   test("status POST forwards bearer auth and disables query fallback", async () => {
@@ -592,6 +599,12 @@ describe("payment bearer-token handlers", () => {
     jest.doMock("../server/api/payment/flow.js", () => ({
       __esModule: true,
       getPaymentStatus,
+    }));
+    const createPaymentBackendClientOverride = jest.fn();
+    jest.doMock("../server/api/payment/backend.js", () => ({
+      __esModule: true,
+      getPaymentTokenBackend: jest.fn(() => ""),
+      createPaymentBackendClientOverride,
     }));
     const handler = require("../server/api/payment/status.js").default;
     const { response, state } = createLegacyResponse();
@@ -612,6 +625,41 @@ describe("payment bearer-token handlers", () => {
       allowLegacyTokenFallback: false,
     });
     expect(state.headers["cache-control"]).toBe("private, no-store");
+    expect(createPaymentBackendClientOverride).not.toHaveBeenCalled();
+  });
+
+  test("cancel reaches the auth verdict without constructing a legacy client", async () => {
+    jest.dontMock("../server/api/payment/cancel.js");
+    const cancelPaymentSession = jest.fn().mockResolvedValue({
+      httpStatus: 401,
+      body: { ok: false },
+    });
+    const createPaymentBackendClientOverride = jest.fn();
+    jest.doMock("../server/api/payment/flow.js", () => ({
+      __esModule: true,
+      cancelPaymentSession,
+    }));
+    jest.doMock("../server/api/payment/backend.js", () => ({
+      __esModule: true,
+      getPaymentTokenBackend: jest.fn(() => ""),
+      createPaymentBackendClientOverride,
+    }));
+    const handler = require("../server/api/payment/cancel.js").default;
+    const { response } = createLegacyResponse();
+
+    await handler(
+      {
+        method: "POST",
+        headers: { authorization: "Bearer invalid_payment_token" },
+        body: {},
+      },
+      response
+    );
+
+    expect(cancelPaymentSession).toHaveBeenCalledWith({
+      paymentAccessToken: "invalid_payment_token",
+    });
+    expect(createPaymentBackendClientOverride).not.toHaveBeenCalled();
   });
 
   test("legacy GET status expires completely after its compatibility deadline", async () => {
