@@ -652,11 +652,12 @@ describe("booking calendar UI", () => {
       expectActiveStep("Review & pay", "Step 3 of 3 · Ready to pay")
     );
     expect(
-      screen.getByText("No charge until you confirm")
+      screen.getByText("No charge until you confirm on the payment page.")
     ).toBeInTheDocument();
+    expect(screen.getByText("Total")).toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: /139\+ verified reviews/i })
-    ).toBeInTheDocument();
+      screen.queryByRole("link", { name: /verified reviews/i })
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /submit & pay/i })
     ).not.toBeInTheDocument();

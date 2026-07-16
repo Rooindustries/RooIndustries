@@ -2236,7 +2236,7 @@ export default function BookingForm({ isMobile }) {
                         <legend className="mb-2 text-sm font-semibold text-info-text">
                           What matters most? <span className="text-xs text-ink-muted">Optional</span>
                         </legend>
-                        <div className="flex flex-wrap gap-2">
+                        <div className="flex flex-wrap justify-center gap-2">
                           {GOAL_OPTIONS.map((goal) => {
                             const isSelected = form.goals.includes(goal);
                             return (
@@ -2363,6 +2363,12 @@ export default function BookingForm({ isMobile }) {
                           {selectedPackage.title}
                         </dd>
                       </div>
+                      <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
+                        <dt className="text-ink-muted">Warranty</dt>
+                        <dd className="break-words text-ink">
+                          {warrantyCallout.title}
+                        </dd>
+                      </div>
                       <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr_auto] sm:items-center">
                         <dt className="text-ink-muted">Date &amp; time</dt>
                         <dd className="font-semibold text-ink">
@@ -2412,30 +2418,14 @@ export default function BookingForm({ isMobile }) {
                           </dd>
                         </div>
                       )}
+                      <div className="flex items-center justify-between gap-4 py-3">
+                        <dt className="font-semibold text-ink">Total</dt>
+                        <dd>
+                          <PriceDisplay pkg={selectedPackage} size="row" />
+                        </dd>
+                      </div>
                     </dl>
                   </div>
-
-                  <div className="mt-6 rounded-xl border border-line-input bg-surface-card p-5 text-center shadow-[0_0_15px_rgba(14,165,233,0.25)]">
-                    <p className="text-xs font-semibold text-accent">Total</p>
-                    <PriceDisplay
-                      pkg={selectedPackage}
-                      size="summary"
-                      className="mt-2"
-                    />
-                  </div>
-
-                  <p className="mt-5 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center text-xs text-ink-muted">
-                    <Link
-                      to="/reviews"
-                      className="font-semibold text-info-text transition hover:text-accent"
-                    >
-                      5.0★ 139+ verified reviews
-                    </Link>
-                    <span aria-hidden="true">·</span>
-                    <span>{warrantyCallout.title}</span>
-                    <span aria-hidden="true">·</span>
-                    <span>No charge until you confirm</span>
-                  </p>
 
                   <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
                     {isPaymentPendingHold ? (
@@ -2491,6 +2481,11 @@ export default function BookingForm({ isMobile }) {
                       </>
                     )}
                   </div>
+                  {!isPaymentPendingHold && (
+                    <p className="mt-3 text-center text-xs text-ink-muted">
+                      No charge until you confirm on the payment page.
+                    </p>
+                  )}
                   {paymentReleaseStatus && (
                     <p className="mt-3 text-sm text-success-text">
                       {paymentReleaseStatus}
