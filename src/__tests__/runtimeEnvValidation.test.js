@@ -199,17 +199,46 @@ describe("release runtime environment validation", () => {
     expect(result.output).toContain("Runtime secret validation passed");
   });
 
-  test("defaults both selectors to Supabase with no Sanity configuration", () => {
+  test.each(["", "  "])(
+    "defaults %j selectors to Supabase with no Sanity configuration",
+    (blank) => {
+      const result = validate({
+        ...absentSanityEnv,
+        DATA_PRIMARY_BACKEND: blank,
+        COMMERCE_PRIMARY_BACKEND: blank,
+        COMMERCE_FAILOVER_GENERATION: "1",
+        COMMERCE_STARTS_PAUSED: blank,
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.output).not.toContain("SANITY_");
+      expect(result.output).not.toContain("partial");
+    }
+  );
+
+  test("treats non-backend selector debris as unset", () => {
     const result = validate({
       ...absentSanityEnv,
-      DATA_PRIMARY_BACKEND: "",
-      COMMERCE_PRIMARY_BACKEND: "",
+      DATA_PRIMARY_BACKEND: "not-a-backend",
+      COMMERCE_PRIMARY_BACKEND: "unknown",
       COMMERCE_FAILOVER_GENERATION: "1",
     });
 
     expect(result.status).toBe(0);
     expect(result.output).not.toContain("SANITY_");
   });
+
+  test.each(["", "  "])(
+    "uses generation zero when COMMERCE_FAILOVER_GENERATION is %j",
+    (blank) => {
+      const result = validate({ COMMERCE_FAILOVER_GENERATION: blank });
+
+      expect(result.status).toBe(0);
+      expect(result.output).not.toContain(
+        "COMMERCE_FAILOVER_GENERATION must be a non-negative integer"
+      );
+    }
+  );
 
   test("rejects generation zero when the legacy Sanity read target is absent", () => {
     const result = validate({
@@ -440,9 +469,11 @@ describe("release runtime environment validation", () => {
   });
 
   test.each([
-    ["SUPABASE_CUTOVER_ENABLED", { SUPABASE_CUTOVER_ENABLED: "" }],
-    ["COMMERCE_CUTOVER_ENABLED", { COMMERCE_CUTOVER_ENABLED: "" }],
-  ])("rejects full Supabase without %s", (gate, disabledGate) => {
+    ["SUPABASE_CUTOVER_ENABLED", ""],
+    ["SUPABASE_CUTOVER_ENABLED", "  "],
+    ["COMMERCE_CUTOVER_ENABLED", ""],
+    ["COMMERCE_CUTOVER_ENABLED", "  "],
+  ])("rejects full Supabase when %s is %j", (gate, blank) => {
     const result = validate({
       ...supabaseDocumentEnv,
       DATA_PRIMARY_BACKEND: "supabase",
@@ -450,7 +481,7 @@ describe("release runtime environment validation", () => {
       SUPABASE_CUTOVER_ENABLED: "1",
       COMMERCE_CUTOVER_ENABLED: "1",
       SANITY_REVERSE_MIRROR_WRITES: "1",
-      ...disabledGate,
+      [gate]: blank,
     });
 
     expect(result.status).toBe(1);

@@ -1,3 +1,5 @@
+const { readEnvValue } = require("./envValue.cjs");
+
 const PRIVATE_TARGET_KEYS = Object.freeze({
   projectId: "SANITY_PRIVATE_PROJECT_ID",
   dataset: "SANITY_PRIVATE_DATASET",
@@ -12,7 +14,7 @@ const PUBLIC_TARGET_KEYS = Object.freeze({
   writeToken: "SANITY_WRITE_TOKEN",
 });
 
-const read = (env, key) => String(env?.[key] || "").trim();
+const read = (env, key) => readEnvValue(env, key);
 const hasAny = (env, keys) => keys.some((key) => Boolean(read(env, key)));
 
 const inspectSanityConfiguration = (env = process.env) => {

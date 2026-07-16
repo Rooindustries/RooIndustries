@@ -36,6 +36,56 @@ describe("Supabase runtime selection", () => {
       .toBe(true);
   });
 
+  test.each(["", "  "])(
+    "treats %j backend selectors as unset Supabase defaults",
+    (blank) => {
+      expect(
+        resolveSupabaseRuntimePolicy({
+          DATA_PRIMARY_BACKEND: blank,
+          COMMERCE_PRIMARY_BACKEND: blank,
+        })
+      ).toMatchObject({
+        primaryBackend: "supabase",
+        commercePrimaryBackend: "supabase",
+      });
+    }
+  );
+
+  test("treats an invalid backend selection as unset", () => {
+    expect(
+      resolveSupabaseRuntimePolicy({
+        DATA_PRIMARY_BACKEND: "not-a-backend",
+        COMMERCE_PRIMARY_BACKEND: "unknown",
+      })
+    ).toMatchObject({
+      primaryBackend: "supabase",
+      commercePrimaryBackend: "supabase",
+    });
+  });
+
+  test.each(["", "  "])(
+    "treats blank generation and gates as absent for %j",
+    (blank) => {
+      expect(
+        resolveSupabaseRuntimePolicy({
+          COMMERCE_FAILOVER_GENERATION: blank,
+          SUPABASE_CUTOVER_ENABLED: blank,
+          COMMERCE_CUTOVER_ENABLED: blank,
+          COMMERCE_STARTS_PAUSED: blank,
+          SUPABASE_SHADOW_WRITES: blank,
+          SANITY_REVERSE_MIRROR_WRITES: blank,
+        })
+      ).toMatchObject({
+        commerceFailoverGeneration: 0,
+        cutoverEnabled: false,
+        commerceCutoverEnabled: false,
+        commerceStartsPaused: false,
+        shadowWritesEnabled: false,
+        reverseMirrorLegacyFlagEnabled: false,
+      });
+    }
+  );
+
   test("enables mirroring from complete Sanity configuration, not its legacy flag", () => {
     expect(resolveSupabaseRuntimePolicy({})).toMatchObject({
       reverseMirrorEnabled: false,
