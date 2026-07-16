@@ -31,7 +31,7 @@ const toTitleCase = (str) =>
     return word.split("-").map(capitalizeWord).join("-");
   });
 
-const getWarrantyCallout = (pkg) => {
+export const getWarrantyCallout = (pkg) => {
   const isMax = isTopPackageTitle(pkg?.title || pkg?.sourceTitle);
 
   return {
