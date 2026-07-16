@@ -20,7 +20,8 @@ const HOME_COPY = {
   },
   services: {
     heading: "Built For Ranked Games",
-    subheading: "More FPS, lower delay, cleaner frametimes, better stream settings.",
+    subheading:
+      "Stock settings leave FPS sitting idle in hardware you already paid for. We put it back into your games — more FPS, lower delay, cleaner frametimes.",
     cards: [
       {
         iconType: "clock",
@@ -106,7 +107,7 @@ const HOME_COPY = {
     heading: "Lock In More FPS",
     badgeText: "Remote Sessions",
     subheading:
-      "Start with game settings, go deeper into Windows and BIOS, or book the full pass when you want more FPS and smoother ranked games.",
+      "Start with game settings, go deeper into Windows and BIOS, or book the full pass when you want more FPS and smoother ranked games. Before you price a new GPU: a tune costs a fraction of one, and the 20-92% gains in our reviews rival an upgrade.",
     dividerText: "Book it, send specs, pay, get the session details by email.",
   },
   faqSettings: {
