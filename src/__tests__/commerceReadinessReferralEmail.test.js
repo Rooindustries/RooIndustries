@@ -46,6 +46,8 @@ jest.mock("../server/supabase/runtime", () => ({
     commerceCutoverEnabled: true,
     commerceStartsPaused: false,
     commerceFailoverGeneration: 1,
+    sanityConfigurationStatus: "complete",
+    reverseMirrorEnabled: true,
   }),
 }));
 

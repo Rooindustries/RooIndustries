@@ -19,6 +19,11 @@ import { reconcileCredentialOperations } from "../../supabase/credentialRecovery
 import { isEnabledTourneyFlag } from "../../tourney/canonical.js";
 import { createDocumentWriteClient } from "../../data/documentClient.js";
 import { refreshCommerceParityIfStale } from "../../supabase/commerceParity.js";
+import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
+import { logSanityMirrorEvent } from "../../supabase/mirrorObservability.js";
+import sanityConfiguration from "../../supabase/sanityConfiguration.cjs";
+
+const { inspectSanityConfiguration } = sanityConfiguration;
 
 const reconcileDocumentMirror = async (options = {}) => {
   const client = createDocumentWriteClient({ backendOverride: "supabase" });
@@ -26,6 +31,18 @@ const reconcileDocumentMirror = async (options = {}) => {
     return { supported: false, attempted: 0, applied: 0 };
   }
   return client.reconcileReverseMirror(options);
+};
+
+const cleanupExpiredSupabaseHolds = async ({ generation, limit = 100 }) => {
+  const { data, error } = await createSupabaseAdminClient().rpc(
+    "roo_cleanup_expired_supabase_holds",
+    {
+      p_cutover_generation: generation,
+      p_limit: limit,
+    }
+  );
+  if (error) throw error;
+  return data || { expired_holds: 0, removed_slot_claims: 0 };
 };
 
 export default async function handler(req, res) {
@@ -40,6 +57,17 @@ export default async function handler(req, res) {
     return res.status(Number(error?.status || 403)).json({
       ok: false,
       error: "Payment reconciliation is temporarily unavailable.",
+    });
+  }
+
+  const policy = resolveSupabaseRuntimePolicy();
+  const sanity = inspectSanityConfiguration(process.env);
+  const sanityConfigured = sanity.writeConfigured;
+  if (!sanityConfigured) {
+    logSanityMirrorEvent({
+      event: "sanity_mirror_skipped",
+      reason: sanity.status === "partial" ? "sanity_incomplete" : "sanity_unconfigured",
+      domain: "commerce",
     });
   }
 
@@ -60,6 +88,15 @@ export default async function handler(req, res) {
       return res.status(503).json({
         ok: false,
         error: "Commerce mirror reconciliation is unavailable.",
+      });
+    }
+    if (!sanityConfigured) {
+      return res.status(200).json({
+        ok: true,
+        summary: {
+          reverseMirror: { skipped: true, reason: "sanity_unconfigured" },
+          documentMirror: { skipped: true, reason: "sanity_unconfigured" },
+        },
       });
     }
     const client = createPaymentBackendClient("supabase");
@@ -85,6 +122,11 @@ export default async function handler(req, res) {
       });
     } catch (error) {
       logSafeError("Reverse-mirror reconciliation failed", error);
+      logSanityMirrorEvent({
+        event: "sanity_mirror_lag",
+        reason: "reconciliation_failed",
+        domain: "commerce",
+      });
       return res.status(503).json({
         ok: false,
         error: "Commerce mirror reconciliation is temporarily unavailable.",
@@ -110,6 +152,14 @@ export default async function handler(req, res) {
   }
 
   if (scope === "parity-only") {
+    if (!sanityConfigured) {
+      return res.status(200).json({
+        ok: true,
+        summary: {
+          commerceParity: { skipped: true, reason: "sanity_unconfigured" },
+        },
+      });
+    }
     try {
       return res.status(200).json({
         ok: true,
@@ -141,7 +191,11 @@ export default async function handler(req, res) {
     (value) => ({ value, error: null }),
     (error) => ({ value: null, error })
   );
-  const documentMirrorPromise = isSupabaseAdminConfigured()
+  const supabaseConfigured = isSupabaseAdminConfigured();
+  const mirrorSkipReason = supabaseConfigured
+    ? "sanity_unconfigured"
+    : "supabase_unavailable";
+  const documentMirrorPromise = supabaseConfigured && sanityConfigured
     ? reconcileDocumentMirror({
         limit: 25,
         maxBatches: 4,
@@ -150,32 +204,59 @@ export default async function handler(req, res) {
         (value) => ({ value, error: null }),
         (error) => ({ value: null, error })
       )
-    : null;
-  const commerceParityPromise = isSupabaseAdminConfigured()
+    : Promise.resolve({
+        value: { skipped: true, reason: mirrorSkipReason },
+        error: null,
+      });
+  const commerceParityPromise = supabaseConfigured && sanityConfigured
     ? refreshCommerceParityIfStale().then(
         (value) => ({ value, error: null }),
         (error) => ({ value: null, error })
       )
     : Promise.resolve({
-        value: { supported: false, skipped: true, reason: "supabase_unavailable" },
+        value: { supported: false, skipped: true, reason: mirrorSkipReason },
         error: null,
       });
+  const expiredHoldCleanupPromise =
+    supabaseConfigured && policy.commercePrimaryBackend === "supabase"
+      ? cleanupExpiredSupabaseHolds({
+          generation: policy.commerceFailoverGeneration,
+        }).then(
+          (value) => ({ value, error: null }),
+          (error) => ({ value: null, error })
+        )
+      : Promise.resolve({
+          value: { skipped: true, reason: "supabase_not_primary" },
+          error: null,
+        });
 
-  let incrementalShadowSync = null;
-  try {
-    incrementalShadowSync = await syncSanityCommerceChanges();
-  } catch (error) {
-    logSafeError("Incremental commerce shadow sync failed", error);
-    incrementalShadowSync = {
-      supported: true,
-      pending: true,
-      errorCode: String(error?.code || "COMMERCE_SYNC_FAILED").slice(0, 128),
-    };
+  let incrementalShadowSync = {
+    skipped: true,
+    reason: sanityConfigured
+      ? "sanity_non_authoritative"
+      : "sanity_unconfigured",
+  };
+  if (policy.commercePrimaryBackend === "sanity" && sanityConfigured) {
+    try {
+      incrementalShadowSync = await syncSanityCommerceChanges();
+    } catch (error) {
+      logSafeError("Incremental commerce shadow sync failed", error);
+      incrementalShadowSync = {
+        supported: true,
+        pending: true,
+        errorCode: String(error?.code || "COMMERCE_SYNC_FAILED").slice(0, 128),
+      };
+    }
   }
 
-  const backends = isSupabaseAdminConfigured()
-    ? ["sanity", "supabase"]
-    : ["sanity"];
+  const primaryBackend = policy.commercePrimaryBackend;
+  const secondaryBackend = primaryBackend === "supabase" ? "sanity" : "supabase";
+  const backends = [
+    primaryBackend,
+    ...(secondaryBackend === "sanity" && !sanityConfigured
+      ? []
+      : [secondaryBackend]),
+  ];
   const results = [];
   const backendClients = [];
   let supabaseClient = null;
@@ -184,45 +265,74 @@ export default async function handler(req, res) {
       const client = createPaymentBackendClient(backend);
       if (backend === "supabase") supabaseClient = client;
       backendClients.push({ backend, client });
-      results.push(await reconcilePaymentSessions({
-        req,
+      results.push({
         backend,
-        client,
-      }));
+        result: await reconcilePaymentSessions({
+          req,
+          backend,
+          client,
+        }),
+      });
     } catch (error) {
       logSafeError(`${backend} payment reconciliation failed`, error);
       results.push({
-        httpStatus: 503,
-        body: {
-          ok: false,
-          error: "Payment reconciliation is temporarily unavailable.",
-          summary: {},
+        backend,
+        result: {
+          httpStatus: 503,
+          body: {
+            ok: false,
+            error: "Payment reconciliation is temporarily unavailable.",
+            summary: {},
+          },
         },
       });
     }
   }
-  const failed = results.find((entry) => entry.httpStatus !== 200);
-  const result = failed || {
-    httpStatus: 200,
-    body: {
-      ok: true,
-      summary: results.reduce((summary, entry) => {
-        for (const [key, value] of Object.entries(entry.body?.summary || {})) {
-          summary[key] = Number(summary[key] || 0) + Number(value || 0);
-        }
-        return summary;
-      }, {}),
-    },
-  };
+  const primaryResult = results.find((entry) => entry.backend === primaryBackend)?.result;
+  const aggregateSummary = results
+    .filter((entry) => entry.result.httpStatus === 200)
+    .reduce((summary, entry) => {
+      for (const [key, value] of Object.entries(entry.result.body?.summary || {})) {
+        summary[key] = Number(summary[key] || 0) + Number(value || 0);
+      }
+      return summary;
+    }, {});
+  const result = primaryResult?.httpStatus === 200
+    ? { httpStatus: 200, body: { ok: true, summary: aggregateSummary } }
+    : primaryResult || {
+        httpStatus: 503,
+        body: {
+          ok: false,
+          error: "Primary payment reconciliation is unavailable.",
+          summary: {},
+        },
+      };
   result.body.summary ||= {};
-  if (documentMirrorPromise) {
-    const documentMirror = await documentMirrorPromise;
-    if (documentMirror.error) {
-      logSafeError("Document mirror reconciliation failed", documentMirror.error);
-      result.body.summary.documentMirror = { pending: true };
-    } else {
-      result.body.summary.documentMirror = documentMirror.value;
-    }
+  result.body.summary.backendReconciliation = Object.fromEntries(
+    results.map(({ backend, result: backendResult }) => [
+      backend,
+      backendResult.httpStatus === 200
+        ? { ok: true }
+        : { ok: false, pending: true },
+    ])
+  );
+  if (!sanityConfigured) {
+    result.body.summary.backendReconciliation.sanity = {
+      skipped: true,
+      reason: "sanity_unconfigured",
+    };
+  }
+  const documentMirror = await documentMirrorPromise;
+  if (documentMirror.error) {
+    logSafeError("Document mirror reconciliation failed", documentMirror.error);
+    logSanityMirrorEvent({
+      event: "sanity_mirror_lag",
+      reason: "document_reconciliation_failed",
+      domain: "global",
+    });
+    result.body.summary.documentMirror = { pending: true };
+  } else {
+    result.body.summary.documentMirror = documentMirror.value;
   }
   const referralEmailReconciliation = await referralEmailReconciliationPromise;
   if (referralEmailReconciliation.error) {
@@ -242,6 +352,13 @@ export default async function handler(req, res) {
   } else {
     result.body.summary.commerceParity = commerceParity.value;
   }
+  const expiredHoldCleanup = await expiredHoldCleanupPromise;
+  if (expiredHoldCleanup.error) {
+    logSafeError("Expired Supabase hold cleanup failed", expiredHoldCleanup.error);
+    result.body.summary.expiredSupabaseHoldCleanup = { pending: true };
+  } else {
+    result.body.summary.expiredSupabaseHoldCleanup = expiredHoldCleanup.value;
+  }
   if (result.httpStatus === 200) {
     result.body.summary.incrementalShadowSync = incrementalShadowSync;
     result.body.summary.emailOnlyRecovery = {};
@@ -254,14 +371,27 @@ export default async function handler(req, res) {
         result.body.summary.emailOnlyRecovery[backend] = { pending: true };
       }
     }
-    if (typeof supabaseClient?.reconcileReverseMirror === "function") {
+    if (
+      sanityConfigured &&
+      typeof supabaseClient?.reconcileReverseMirror === "function"
+    ) {
       try {
         result.body.summary.reverseMirror =
           await supabaseClient.reconcileReverseMirror({ limit: 25 });
       } catch (error) {
         logSafeError("Reverse-mirror reconciliation failed", error);
+        logSanityMirrorEvent({
+          event: "sanity_mirror_lag",
+          reason: "reconciliation_failed",
+          domain: "commerce",
+        });
         result.body.summary.reverseMirror = { pending: true };
       }
+    } else if (!sanityConfigured) {
+      result.body.summary.reverseMirror = {
+        skipped: true,
+        reason: "sanity_unconfigured",
+      };
     }
     if (supabaseClient?.shadowClient?.rpc) {
       try {

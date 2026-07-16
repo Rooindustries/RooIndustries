@@ -31,10 +31,24 @@ const validReleaseEnv = () => ({
   VERCEL: "1",
   VERCEL_ENV: "preview",
   NODE_ENV: "production",
+  SUPABASE_URL: "https://ntezmxzaibrrsgtujgxu.supabase.co",
+  SUPABASE_SECRET_KEY: "s".repeat(40),
+  SUPABASE_PUBLISHABLE_KEY: "p".repeat(24),
+  SUPABASE_CUTOVER_ENABLED: "1",
+  COMMERCE_CUTOVER_ENABLED: "1",
+  COMMERCE_FAILOVER_GENERATION: "1",
+  SUPABASE_CONTENT_CANARY_PERCENT: "0",
+  SUPABASE_COMMERCE_CANARY_PERCENT: "0",
   SANITY_PROJECT_ID: "project",
   SANITY_DATASET: "production",
   SANITY_WRITE_TOKEN: "write-token-placeholder",
   SANITY_READ_TOKEN: "read-token-placeholder",
+  SANITY_API_VERSION: "2023-10-01",
+  SANITY_PRIVATE_PROJECT_ID: "",
+  SANITY_PRIVATE_DATASET: "",
+  SANITY_PRIVATE_WRITE_TOKEN: "",
+  SANITY_PRIVATE_READ_TOKEN: "",
+  SANITY_PRIVATE_API_VERSION: "",
   REF_SESSION_SECRET: "ref-session-secret-placeholder",
   PAYMENT_SESSION_SECRET: "payment-session-secret-placeholder",
   HOLD_TOKEN_SECRET: "hold-token-secret-placeholder",
@@ -139,8 +153,24 @@ const supabaseDocumentEnv = {
   SUPABASE_PUBLISHABLE_KEY: "p".repeat(24),
 };
 
+const absentSanityEnv = {
+  SANITY_PROJECT_ID: "",
+  SANITY_DATASET: "",
+  SANITY_READ_TOKEN: "",
+  SANITY_WRITE_TOKEN: "",
+  SANITY_API_VERSION: "",
+  SANITY_PRIVATE_PROJECT_ID: "",
+  SANITY_PRIVATE_DATASET: "",
+  SANITY_PRIVATE_READ_TOKEN: "",
+  SANITY_PRIVATE_WRITE_TOKEN: "",
+  SANITY_PRIVATE_API_VERSION: "",
+  SANITY_WEBHOOK_SECRET: "",
+};
+
 const previewMigrationEnv = (overrides = {}) => {
   const selected = {
+    DATA_PRIMARY_BACKEND: "sanity",
+    COMMERCE_PRIMARY_BACKEND: "sanity",
     SUPABASE_MIGRATION_ENDPOINT_ENABLED: "1",
     SUPABASE_MIGRATION_TARGET_ENVIRONMENT: "preview",
     TOURNEY_PREVIEW_DATABASE_URL:
@@ -167,6 +197,72 @@ describe("release runtime environment validation", () => {
     const result = validate();
     expect(result.status).toBe(0);
     expect(result.output).toContain("Runtime secret validation passed");
+  });
+
+  test.each(["", "  "])(
+    "defaults %j selectors to Supabase with no Sanity configuration",
+    (blank) => {
+      const result = validate({
+        ...absentSanityEnv,
+        DATA_PRIMARY_BACKEND: blank,
+        COMMERCE_PRIMARY_BACKEND: blank,
+        COMMERCE_FAILOVER_GENERATION: "1",
+        COMMERCE_STARTS_PAUSED: blank,
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.output).not.toContain("SANITY_");
+      expect(result.output).not.toContain("partial");
+    }
+  );
+
+  test("treats non-backend selector debris as unset", () => {
+    const result = validate({
+      ...absentSanityEnv,
+      DATA_PRIMARY_BACKEND: "not-a-backend",
+      COMMERCE_PRIMARY_BACKEND: "unknown",
+      COMMERCE_FAILOVER_GENERATION: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.output).not.toContain("SANITY_");
+  });
+
+  test.each(["", "  "])(
+    "uses generation zero when COMMERCE_FAILOVER_GENERATION is %j",
+    (blank) => {
+      const result = validate({ COMMERCE_FAILOVER_GENERATION: blank });
+
+      expect(result.status).toBe(0);
+      expect(result.output).not.toContain(
+        "COMMERCE_FAILOVER_GENERATION must be a non-negative integer"
+      );
+    }
+  );
+
+  test("rejects generation zero when the legacy Sanity read target is absent", () => {
+    const result = validate({
+      ...absentSanityEnv,
+      DATA_PRIMARY_BACKEND: "",
+      COMMERCE_PRIMARY_BACKEND: "",
+      COMMERCE_FAILOVER_GENERATION: "0",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(
+      "COMMERCE_FAILOVER_GENERATION=0 requires a complete legacy Sanity read target"
+    );
+  });
+
+  test.each([
+    "SUPABASE_CONTENT_CANARY_PERCENT",
+    "SUPABASE_COMMERCE_CANARY_PERCENT",
+  ])("rejects retired nonzero %s", (variable) => {
+    const result = validate({ [variable]: "1" });
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(variable);
+    expect(result.output).toContain("Delete");
   });
 
   test.each([
@@ -318,7 +414,7 @@ describe("release runtime environment validation", () => {
     });
 
     expect(result.status).toBe(1);
-    expect(result.output).toContain("Private Sanity configuration is incomplete");
+    expect(result.output).toContain("Sanity configuration is incomplete");
     expect(result.output).toContain("SANITY_PRIVATE_DATASET");
     expect(result.output).toContain("SANITY_PRIVATE_WRITE_TOKEN");
   });
@@ -327,7 +423,7 @@ describe("release runtime environment validation", () => {
     ["SANITY_PROJECT_ID", { SANITY_PROJECT_ID: "", SANITY_PRIVATE_PROJECT_ID: "" }],
     ["SANITY_DATASET", { SANITY_DATASET: "", SANITY_PRIVATE_DATASET: "" }],
     ["SANITY_WRITE_TOKEN", { SANITY_WRITE_TOKEN: "", SANITY_PRIVATE_WRITE_TOKEN: "" }],
-  ])("requires the %s rollback target for full Supabase", (label, missingTarget) => {
+  ])("rejects a partial Sanity backup missing %s", (label, missingTarget) => {
     const result = validate({
       ...supabaseDocumentEnv,
       DATA_PRIMARY_BACKEND: "supabase",
@@ -344,7 +440,7 @@ describe("release runtime environment validation", () => {
     expect(result.output).toContain(label);
   });
 
-  test("requires Sanity read and webhook credentials while commerce uses Sanity", () => {
+  test("requires a writable Sanity target and webhook while commerce uses Sanity", () => {
     const result = validate({
       ...supabaseDocumentEnv,
       DATA_PRIMARY_BACKEND: "supabase",
@@ -356,28 +452,28 @@ describe("release runtime environment validation", () => {
     });
 
     expect(result.status).toBe(1);
-    expect(result.output).toContain("SANITY_READ_TOKEN");
     expect(result.output).toContain("SANITY_WEBHOOK_SECRET");
   });
 
-  test("rejects global Supabase without its rollback mirror", () => {
+  test("accepts Supabase-primary when the retired mirror flag is absent", () => {
     const result = validate({
       ...supabaseDocumentEnv,
       DATA_PRIMARY_BACKEND: "supabase",
-      COMMERCE_PRIMARY_BACKEND: "sanity",
+      COMMERCE_PRIMARY_BACKEND: "supabase",
       SUPABASE_CUTOVER_ENABLED: "1",
+      COMMERCE_CUTOVER_ENABLED: "1",
       SANITY_REVERSE_MIRROR_WRITES: "",
     });
 
-    expect(result.status).toBe(1);
-    expect(result.output).toContain("SANITY_REVERSE_MIRROR_WRITES");
+    expect(result.status).toBe(0);
   });
 
   test.each([
-    ["SUPABASE_CUTOVER_ENABLED", { SUPABASE_CUTOVER_ENABLED: "" }],
-    ["COMMERCE_CUTOVER_ENABLED", { COMMERCE_CUTOVER_ENABLED: "" }],
-    ["SANITY_REVERSE_MIRROR_WRITES", { SANITY_REVERSE_MIRROR_WRITES: "" }],
-  ])("rejects full Supabase without %s", (gate, disabledGate) => {
+    ["SUPABASE_CUTOVER_ENABLED", ""],
+    ["SUPABASE_CUTOVER_ENABLED", "  "],
+    ["COMMERCE_CUTOVER_ENABLED", ""],
+    ["COMMERCE_CUTOVER_ENABLED", "  "],
+  ])("rejects full Supabase when %s is %j", (gate, blank) => {
     const result = validate({
       ...supabaseDocumentEnv,
       DATA_PRIMARY_BACKEND: "supabase",
@@ -385,7 +481,7 @@ describe("release runtime environment validation", () => {
       SUPABASE_CUTOVER_ENABLED: "1",
       COMMERCE_CUTOVER_ENABLED: "1",
       SANITY_REVERSE_MIRROR_WRITES: "1",
-      ...disabledGate,
+      [gate]: blank,
     });
 
     expect(result.status).toBe(1);
@@ -478,7 +574,10 @@ describe("release runtime environment validation", () => {
   });
 
   test("requires a dedicated Sanity webhook secret", () => {
-    const result = validate({ SANITY_WEBHOOK_SECRET: "   " });
+    const result = validate({
+      COMMERCE_PRIMARY_BACKEND: "sanity",
+      SANITY_WEBHOOK_SECRET: "   ",
+    });
     expect(result.status).toBe(1);
     expect(result.output).toContain("SANITY_WEBHOOK_SECRET");
     expect(result.output).not.toContain("cron-secret-placeholder");
@@ -503,6 +602,8 @@ describe("release runtime environment validation", () => {
 
   test("does not accept public-prefixed aliases for server secrets", () => {
     const result = validate({
+      DATA_PRIMARY_BACKEND: "sanity",
+      COMMERCE_PRIMARY_BACKEND: "sanity",
       SANITY_WRITE_TOKEN: "",
       REACT_APP_SANITY_WRITE_TOKEN: "public-prefixed-token-must-not-count",
       PAYPAL_CLIENT_ID: "public-client-id",
@@ -934,10 +1035,11 @@ describe("release runtime environment validation", () => {
       "Preview migration targets that match inherited generic targets require SUPABASE_MIGRATION_ALLOW_PRODUCTION_MUTATIONS=1"
     );
     expect(result.output).not.toContain("preview-secret-placeholder");
-    expect(validate({
+    const allowed = validate({
       ...inherited,
       SUPABASE_MIGRATION_ALLOW_PRODUCTION_MUTATIONS: "1",
-    }).status).toBe(0);
+    });
+    expect(allowed.status).toBe(0);
   });
 
   test("detects inherited targets through whitespace-only primary variables", () => {
@@ -962,6 +1064,8 @@ describe("release runtime environment validation", () => {
 
   test("requires a separate flag for intentional production mutations", () => {
     const productionTargets = {
+      DATA_PRIMARY_BACKEND: "sanity",
+      COMMERCE_PRIMARY_BACKEND: "sanity",
       SUPABASE_MIGRATION_ENDPOINT_ENABLED: "1",
       SUPABASE_MIGRATION_TARGET_ENVIRONMENT: "production",
       TOURNEY_DATABASE_URL:
@@ -986,9 +1090,10 @@ describe("release runtime environment validation", () => {
     expect(blocked.output).toContain(
       "SUPABASE_MIGRATION_ALLOW_PRODUCTION_MUTATIONS=1"
     );
-    expect(validate({
+    const allowed = validate({
       ...configured,
       SUPABASE_MIGRATION_ALLOW_PRODUCTION_MUTATIONS: "1",
-    }).status).toBe(0);
+    });
+    expect(allowed.status).toBe(0);
   });
 });

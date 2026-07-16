@@ -26,7 +26,7 @@ export const issueHoldToken = ({
   startTimeUTC,
   expiresAt,
   holdNonce = "",
-  backend = "sanity",
+  backend = "supabase",
   cutoverGeneration = 0,
 }) => {
   assertSecret();

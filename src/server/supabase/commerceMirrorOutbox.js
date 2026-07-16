@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { getSafeErrorCode, logSafeError } from "../safeErrorLog.js";
+import { logSanityMirrorEvent } from "./mirrorObservability.js";
 
 const normalizeDocuments = (value) =>
   (Array.isArray(value) ? value : [])
@@ -266,6 +267,11 @@ export const drainCommerceMirrorOutbox = async ({
       }
       if (failClosed) throw error;
       logSafeError("Commerce mirror outbox claim failed", error);
+      logSanityMirrorEvent({
+        event: "sanity_mirror_lag",
+        reason: "outbox_unavailable",
+        domain: "commerce",
+      });
       return summary;
     }
 
@@ -302,6 +308,11 @@ export const drainCommerceMirrorOutbox = async ({
           );
         } catch (completionError) {
           logSafeError("Commerce mirror retry recording failed", completionError);
+          logSanityMirrorEvent({
+            event: "sanity_mirror_lag",
+            reason: "recovery_queue_unavailable",
+            domain: "commerce",
+          });
         }
         if (failClosed && eventIsRequired(event)) {
           const failure = new Error(
@@ -314,6 +325,11 @@ export const drainCommerceMirrorOutbox = async ({
           throw failure;
         }
         logSafeError("Commerce fallback mirror failed", error);
+        logSanityMirrorEvent({
+          event: "sanity_mirror_lag",
+          reason: "delivery_failed",
+          domain: "commerce",
+        });
       }
     }
     if (events.length < Math.max(1, Math.min(100, Number(limit) || 25))) {

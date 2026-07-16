@@ -6,6 +6,7 @@ import process from "node:process";
 import { createClient as createSanityClient } from "@sanity/client";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
+import { resolveSupabaseRuntimePolicy } from "../src/server/supabase/runtime.js";
 import {
   accountRpcPayload,
   assetStorageDescriptor,
@@ -56,18 +57,11 @@ const concurrency = Math.min(
 const readEnv = (...keys) =>
   keys.map((key) => String(process.env[key] || "").trim()).find(Boolean) || "";
 
+const runtimePolicy = resolveSupabaseRuntimePolicy(process.env);
 if (
   apply &&
-  (
-    String(process.env.DATA_PRIMARY_BACKEND || "sanity").trim().toLowerCase() ===
-      "supabase" ||
-    String(
-      process.env.COMMERCE_PRIMARY_BACKEND ||
-        process.env.DATA_PRIMARY_BACKEND ||
-        "sanity"
-    )
-      .trim()
-      .toLowerCase() === "supabase"
+  [runtimePolicy.primaryBackend, runtimePolicy.commercePrimaryBackend].some(
+    (backend) => backend.toLowerCase() === "supabase"
   )
 ) {
   throw new Error(

@@ -18,7 +18,7 @@ export const issueUpgradeIntentToken = ({
   bookingId,
   email,
   targetPackageTitle,
-  backend = "sanity",
+  backend = "supabase",
   cutoverGeneration = 0,
   expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString(),
 }) => {

@@ -1,4 +1,5 @@
 const documents = new Map();
+const previousDataPrimary = process.env.DATA_PRIMARY_BACKEND;
 const mockSendVerification = jest.fn();
 const testPassword = `fixture-${"x".repeat(24)}`;
 const mockClient = {
@@ -89,10 +90,16 @@ describe("referral registration identity claims", () => {
   let register;
 
   beforeAll(() => {
+    process.env.DATA_PRIMARY_BACKEND = "sanity";
     process.env.REF_SESSION_SECRET = "registration-test-session-secret";
     process.env.RESEND_API_KEY = "re_test";
     const module = require("../server/api/ref/register");
     register = module.default || module;
+  });
+
+  afterAll(() => {
+    if (previousDataPrimary === undefined) delete process.env.DATA_PRIMARY_BACKEND;
+    else process.env.DATA_PRIMARY_BACKEND = previousDataPrimary;
   });
 
   beforeEach(() => {
