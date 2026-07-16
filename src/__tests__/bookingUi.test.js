@@ -150,6 +150,11 @@ const installDefaultFetch = ({ settings = { dateSlots: [] } } = {}) => {
   });
 };
 
+const getAvailabilityFetchCalls = () =>
+  global.fetch.mock.calls.filter(
+    ([url]) => url === "/api/bookingAvailability"
+  );
+
 const expectActiveStep = (label, progress) => {
   const tracker = screen.getByTestId("booking-step-tracker");
   const activeStep = tracker.querySelector('[aria-current="step"]');
@@ -183,6 +188,56 @@ describe("booking calendar UI", () => {
     if (resolvedOptionsSpy) {
       resolvedOptionsSpy.mockRestore();
     }
+  });
+
+  test("refreshes visible step-1 availability on focus and every 60 seconds", async () => {
+    jest.useFakeTimers();
+    installDefaultFetch();
+    setBookingLocation();
+
+    render(<BookingForm />);
+
+    await screen.findByTestId("booking-step-tracker");
+    expect(getAvailabilityFetchCalls()).toHaveLength(1);
+
+    await act(async () => {
+      jest.advanceTimersByTime(5_000);
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    expect(getAvailabilityFetchCalls()).toHaveLength(2);
+
+    await act(async () => {
+      jest.advanceTimersByTime(55_000);
+      await Promise.resolve();
+    });
+    expect(getAvailabilityFetchCalls()).toHaveLength(3);
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    expect(getAvailabilityFetchCalls()).toHaveLength(3);
+  });
+
+  test("does not refresh availability on focus or the interval while on step 2", async () => {
+    jest.useFakeTimers();
+    seedBookingSession();
+    installDefaultFetch();
+    setBookingLocation();
+
+    render(<BookingForm />);
+
+    await screen.findByRole("button", { name: /^review before payment$/i });
+    expectActiveStep("PC details", "Step 2 of 3 · 67% complete");
+    expect(getAvailabilityFetchCalls()).toHaveLength(1);
+
+    await act(async () => {
+      jest.advanceTimersByTime(60_000);
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    expect(getAvailabilityFetchCalls()).toHaveLength(1);
   });
 
   test("shows client-local times only and uses the fixed client email", async () => {
