@@ -1,3 +1,21 @@
+export const validateCouponCodeNamespace = async (value, context) => {
+  const code = String(value || '').trim().toLowerCase()
+  if (!code) return true
+
+  try {
+    const client = context.getClient({apiVersion: '2023-10-01'})
+    const referralId = await client.fetch(
+      `*[_type == "referral" && lower(slug.current) == $code][0]._id`,
+      {code},
+    )
+    return referralId
+      ? 'This code is already used by a referral creator. Choose a different coupon code.'
+      : true
+  } catch {
+    return 'Could not verify code uniqueness. Try again before publishing.'
+  }
+}
+
 export default {
   name: 'coupon',
   title: 'Coupons',
@@ -15,7 +33,8 @@ export default {
       title: 'Coupon Code',
       type: 'string',
       description: "What customers type at checkout (case-insensitive, e.g. 'BF10')",
-      validation: (Rule) => Rule.required().min(2).max(32),
+      validation: (Rule) =>
+        Rule.required().min(2).max(32).custom(validateCouponCodeNamespace),
     },
     {
       name: 'discountType',

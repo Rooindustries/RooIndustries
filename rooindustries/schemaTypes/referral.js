@@ -1,3 +1,21 @@
+export const validateReferralCodeNamespace = async (value, context) => {
+  const code = String(value?.current || '').trim().toLowerCase()
+  if (!code) return true
+
+  try {
+    const client = context.getClient({apiVersion: '2023-10-01'})
+    const couponId = await client.fetch(
+      `*[_type == "coupon" && lower(code) == $code][0]._id`,
+      {code},
+    )
+    return couponId
+      ? 'This code is already used by a coupon. Choose a different referral code.'
+      : true
+  } catch {
+    return 'Could not verify code uniqueness. Try again before publishing.'
+  }
+}
+
 export default {
   name: 'referral',
   title: 'Referral Creators',
@@ -22,7 +40,7 @@ export default {
             .replace(/[^\w-]+/g, '')
             .slice(0, 50),
       },
-      validation: (Rule) => Rule.required(),
+      validation: (Rule) => Rule.required().custom(validateReferralCodeNamespace),
     },
     {
       name: 'maxCommissionPercent',
