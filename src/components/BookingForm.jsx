@@ -2446,7 +2446,7 @@ export default function BookingForm({ isMobile }) {
                   </div>
                   {!isPaymentPendingHold && (
                     <p className="mt-3 text-center text-xs text-ink-muted">
-                      No charge until you confirm on the payment page. Referral or coupon codes are applied there too.
+                      No charge until you confirm on the payment page.
                     </p>
                   )}
                   {paymentReleaseStatus && (
