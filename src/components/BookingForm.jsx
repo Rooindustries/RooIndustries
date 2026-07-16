@@ -1,4 +1,10 @@
-import React, { useEffect, useMemo, useState, useRef } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import { getPublicContent } from "../lib/publicContentClient";
 import { useLocation, useNavigate, Link } from "react-router-dom";
@@ -38,6 +44,8 @@ const BOOKING_CONFIRMATION_STORAGE_KEY = "booking_confirmation_state";
 const SESSION_STATE_KEY = "booking_modal_state";
 const REFERRAL_STORAGE_KEY = "referral_session";
 const BOOKING_FETCH_TIMEOUT_MS = 8000;
+const AVAILABILITY_REFRESH_INTERVAL_MS = 60_000;
+const AVAILABILITY_REFRESH_DEBOUNCE_MS = 5_000;
 const REASSURANCE_COPY =
   "You won't be charged until you confirm on the payment page.";
 const PAYMENT_PENDING_EXPIRY_ERROR =
@@ -375,6 +383,9 @@ export default function BookingForm({ isMobile }) {
   const [settings, setSettings] = useState(null);
   const [settingsError, setSettingsError] = useState("");
   const [settingsReloadKey, setSettingsReloadKey] = useState(0);
+  const availabilityFetchMountedRef = useRef(false);
+  const availabilityFetchInFlightRef = useRef(false);
+  const lastAvailabilityFetchAtRef = useRef(0);
 
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedSlot, setSelectedSlot] = useState(null);
@@ -914,42 +925,80 @@ export default function BookingForm({ isMobile }) {
 
   // ---------- FETCH SETTINGS + ACTIVE HOLDS ----------
   useEffect(() => {
-    let isActive = true;
-
-    const fetchData = async () => {
-      setSettingsError("");
-      try {
-        const data = await fetchJsonWithRetry("/api/bookingAvailability");
-        if (!data?.settings) {
-          throw new Error("Missing booking availability settings.");
-        }
-
-        const s = { ...data.settings };
-
-        s.dateSlotMap = normalizeDateSlots(s.dateSlots);
-        s.xocDateSlotMap = normalizeDateSlots(s.xocDateSlots);
-        s.vertexEssentialsDateSlotMap = normalizeDateSlots(
-          s.vertexEssentialsDateSlots
-        );
-        s.packageDateSlotMaps = normalizePackageDateSlots(s.packageDateSlots);
-        s.bookedSlots = Array.isArray(data.bookedSlots)
-          ? data.bookedSlots
-          : [];
-
-        if (isActive) setSettings(s);
-      } catch {
-        console.error("Failed to fetch booking availability");
-        if (isActive) {
-          setSettingsError("Booking availability took too long to load.");
-        }
-      }
-    };
-
-    fetchData();
+    availabilityFetchMountedRef.current = true;
     return () => {
-      isActive = false;
+      availabilityFetchMountedRef.current = false;
     };
-  }, [settingsReloadKey]);
+  }, []);
+
+  const fetchAvailability = useCallback(async () => {
+    if (availabilityFetchInFlightRef.current) return;
+
+    availabilityFetchInFlightRef.current = true;
+    lastAvailabilityFetchAtRef.current = Date.now();
+    setSettingsError("");
+
+    try {
+      const data = await fetchJsonWithRetry("/api/bookingAvailability");
+      if (!data?.settings) {
+        throw new Error("Missing booking availability settings.");
+      }
+
+      const s = { ...data.settings };
+
+      s.dateSlotMap = normalizeDateSlots(s.dateSlots);
+      s.xocDateSlotMap = normalizeDateSlots(s.xocDateSlots);
+      s.vertexEssentialsDateSlotMap = normalizeDateSlots(
+        s.vertexEssentialsDateSlots
+      );
+      s.packageDateSlotMaps = normalizePackageDateSlots(s.packageDateSlots);
+      s.bookedSlots = Array.isArray(data.bookedSlots) ? data.bookedSlots : [];
+
+      if (availabilityFetchMountedRef.current) setSettings(s);
+    } catch {
+      console.error("Failed to fetch booking availability");
+      if (availabilityFetchMountedRef.current) {
+        setSettingsError("Booking availability took too long to load.");
+      }
+    } finally {
+      availabilityFetchInFlightRef.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAvailability();
+  }, [fetchAvailability, settingsReloadKey]);
+
+  useEffect(() => {
+    if (step !== 1) return undefined;
+
+    const requestAvailabilityRefresh = () => {
+      if (document.visibilityState !== "visible") return;
+      if (availabilityFetchInFlightRef.current) return;
+
+      const now = Date.now();
+      if (
+        now - lastAvailabilityFetchAtRef.current <
+        AVAILABILITY_REFRESH_DEBOUNCE_MS
+      ) {
+        return;
+      }
+
+      lastAvailabilityFetchAtRef.current = now;
+      setSettingsReloadKey((key) => key + 1);
+    };
+
+    window.addEventListener("focus", requestAvailabilityRefresh);
+    const intervalId = window.setInterval(
+      requestAvailabilityRefresh,
+      AVAILABILITY_REFRESH_INTERVAL_MS
+    );
+
+    return () => {
+      window.removeEventListener("focus", requestAvailabilityRefresh);
+      window.clearInterval(intervalId);
+    };
+  }, [step]);
 
   // page fade-in on route change
   useEffect(() => {
