@@ -19,11 +19,6 @@ const sizeClasses = {
     compare: "text-sm",
     slash: "h-px",
   },
-  row: {
-    current: "text-xl",
-    compare: "text-xs",
-    slash: "h-px",
-  },
 };
 
 export default function PriceDisplay({
