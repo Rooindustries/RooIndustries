@@ -2438,6 +2438,8 @@ html.perf-reduced-effects-mode .site-navbar-glass,
 html.perf-reduced-effects-mode .glass-premium {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
+  background-image: none !important;
+  background-color: var(--color-surface-solid) !important;
 }
 
 html.perf-no-banner-blur .reservation-banner-surface,
