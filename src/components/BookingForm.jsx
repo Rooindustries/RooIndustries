@@ -2145,68 +2145,64 @@ export default function BookingForm({ isMobile }) {
                     className="mb-6"
                   />
 
-                  <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-                    <div className="space-y-4">
-                      <input
-                        name="discord"
-                        aria-label="Discord username"
-                        placeholder="Discord (e.g. Servi#1234 or @Servi)"
-                        onChange={handleChange}
-                        value={form.discord}
-                        className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
-                      />
-                      <input
-                        name="email"
-                        aria-label="Booking email"
-                        type="email"
-                        placeholder="Email"
-                        onChange={handleChange}
-                        value={form.email}
-                        className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
-                      />
-                      <input
-                        name="specs"
-                        aria-label="PC specifications"
-                        placeholder="PC Specs"
-                        onChange={handleChange}
-                        value={form.specs}
-                        className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
-                      />
-                      <input
-                        name="mainGame"
-                        aria-label="Main game or application"
-                        placeholder="Main use case (Game/Apps)"
-                        onChange={handleChange}
-                        value={form.mainGame}
-                        className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
-                      />
-                      <textarea
-                        name="notes"
-                        aria-label="Extra booking requirements"
-                        placeholder="Any extra requirements?"
-                        onChange={handleChange}
-                        value={form.notes}
-                        className="w-full bg-surface-input border border-line-input rounded-lg p-3 h-24 focus:outline-none focus:border-info-border transition"
-                      />
-
-                    </div>
-
-                    <aside className="self-start bg-surface-card border border-line-input rounded-xl p-6 text-center shadow-[0_0_15px_rgba(14,165,233,0.25)]">
-                      <p className="text-xs font-semibold text-accent">
-                        Your optimization plan
-                      </p>
-                      <h3 className="mt-2 text-xl font-bold text-info-text">
+                  <div className="mb-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 rounded-xl border border-line-input bg-surface-input px-4 py-3 text-left">
+                    <div>
+                      <p className="font-semibold text-info-text">
                         {selectedPackage.title}
-                      </h3>
-                      <p className="mt-3 text-sm text-ink-muted">
-                        {reviewDateTimeLabel || holdLocalTimeLabel || "Choose a slot"}
                       </p>
-                      <PriceDisplay
-                        pkg={selectedPackage}
-                        size="summary"
-                        className="mt-6"
-                      />
-                    </aside>
+                      <p className="text-xs text-ink-muted">
+                        {reviewDateTimeLabel ||
+                          holdLocalTimeLabel ||
+                          "Choose a slot"}
+                      </p>
+                    </div>
+                    <p className="text-lg font-bold text-accent">
+                      {selectedPackage.price}
+                    </p>
+                  </div>
+
+                  <div className="space-y-4">
+                    <input
+                      name="discord"
+                      aria-label="Discord username"
+                      placeholder="Discord (e.g. Servi#1234 or @Servi)"
+                      onChange={handleChange}
+                      value={form.discord}
+                      className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
+                    />
+                    <input
+                      name="email"
+                      aria-label="Booking email"
+                      type="email"
+                      placeholder="Email"
+                      onChange={handleChange}
+                      value={form.email}
+                      className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
+                    />
+                    <input
+                      name="specs"
+                      aria-label="PC specifications"
+                      placeholder="PC Specs"
+                      onChange={handleChange}
+                      value={form.specs}
+                      className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
+                    />
+                    <input
+                      name="mainGame"
+                      aria-label="Main game or application"
+                      placeholder="Main use case (Game/Apps)"
+                      onChange={handleChange}
+                      value={form.mainGame}
+                      className="w-full bg-surface-input border border-line-input rounded-lg p-3 focus:outline-none focus:border-info-border transition"
+                    />
+                    <textarea
+                      name="notes"
+                      aria-label="Extra booking requirements"
+                      placeholder="Any extra requirements?"
+                      onChange={handleChange}
+                      value={form.notes}
+                      className="w-full bg-surface-input border border-line-input rounded-lg p-3 h-24 focus:outline-none focus:border-info-border transition"
+                    />
                   </div>
 
                   <p className="mt-6 text-xs text-accent">
@@ -2276,22 +2272,22 @@ export default function BookingForm({ isMobile }) {
                         </button>
                       )}
                     </div>
-                    <dl className="divide-y divide-line-input text-sm">
+                    <dl className="divide-y divide-line-input text-left text-sm">
                       <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
                         <dt className="text-ink-muted">Package</dt>
-                        <dd className="font-semibold text-ink">
+                        <dd className="font-semibold text-ink sm:text-right">
                           {selectedPackage.title}
                         </dd>
                       </div>
                       <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
                         <dt className="text-ink-muted">Warranty</dt>
-                        <dd className="break-words text-ink">
+                        <dd className="break-words text-ink sm:text-right">
                           {warrantyCallout.title}
                         </dd>
                       </div>
                       <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr_auto] sm:items-center">
                         <dt className="text-ink-muted">Date &amp; time</dt>
-                        <dd className="font-semibold text-ink">
+                        <dd className="font-semibold text-ink sm:text-right">
                           {reviewDateTimeLabel || "Not selected"}
                         </dd>
                         {!isPaymentPendingHold && (
@@ -2306,34 +2302,40 @@ export default function BookingForm({ isMobile }) {
                       </div>
                       <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
                         <dt className="text-ink-muted">Discord</dt>
-                        <dd className="break-words text-ink">{form.discord}</dd>
+                        <dd className="break-words text-ink sm:text-right">
+                          {form.discord}
+                        </dd>
                       </div>
                       <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
                         <dt className="text-ink-muted">Email</dt>
-                        <dd className="break-words text-ink">{form.email}</dd>
+                        <dd className="break-words text-ink sm:text-right">
+                          {form.email}
+                        </dd>
                       </div>
                       <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
                         <dt className="text-ink-muted">PC specs</dt>
-                        <dd className="whitespace-pre-wrap break-words text-ink">
+                        <dd className="whitespace-pre-wrap break-words text-ink sm:text-right">
                           {form.specs}
                         </dd>
                       </div>
                       <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
                         <dt className="text-ink-muted">Main game/app</dt>
-                        <dd className="break-words text-ink">{form.mainGame}</dd>
+                        <dd className="break-words text-ink sm:text-right">
+                          {form.mainGame}
+                        </dd>
                       </div>
                       {form.notes.trim() && (
                         <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
                           <dt className="text-ink-muted">Extra requirements</dt>
-                          <dd className="whitespace-pre-wrap break-words text-ink">
+                          <dd className="whitespace-pre-wrap break-words text-ink sm:text-right">
                             {form.notes}
                           </dd>
                         </div>
                       )}
-                      <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
+                      <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr] sm:items-center">
                         <dt className="font-semibold text-ink">Total</dt>
-                        <dd className="flex justify-center">
-                          <PriceDisplay pkg={selectedPackage} size="row" />
+                        <dd className="text-lg font-bold text-accent sm:text-right">
+                          {selectedPackage.price}
                         </dd>
                       </div>
                     </dl>

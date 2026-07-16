@@ -627,9 +627,9 @@ describe("booking calendar UI", () => {
     await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
     await screen.findByLabelText("Discord username");
     expectActiveStep("PC details", "Step 2 of 3 · 67% complete");
-    expect(screen.getByText("Your optimization plan").closest("aside")).toHaveClass(
-      "self-start"
-    );
+    expect(
+      screen.getByText("Performance Vertex Overhaul")
+    ).toBeInTheDocument();
 
     await userEvent.click(
       screen.getByRole("button", { name: /^review before payment$/i })
@@ -689,9 +689,19 @@ describe("booking calendar UI", () => {
     expect(screen.getByText(VALID_FORM.mainGame)).toBeInTheDocument();
     expect(screen.getByText(VALID_FORM.notes)).toBeInTheDocument();
     expect(screen.getByText(/America\/Los_Angeles/)).toBeInTheDocument();
+    const totalRow = screen.getByText("Total").closest("div");
+    const totalPrice = within(totalRow).getByText("$54.95");
+    expect(totalPrice.tagName).toBe("DD");
+    expect(totalPrice).toHaveClass(
+      "text-lg",
+      "font-bold",
+      "text-accent",
+      "sm:text-right"
+    );
+    expect(screen.queryByText("$79.95")).not.toBeInTheDocument();
     expect(
-      screen.getByLabelText("Price $54.95, previous price $79.95")
-    ).toBeInTheDocument();
+      screen.queryByLabelText("Price $54.95, previous price $79.95")
+    ).not.toBeInTheDocument();
     expect(screen.getByText("90 day warranty included")).toBeInTheDocument();
 
     await userEvent.click(
