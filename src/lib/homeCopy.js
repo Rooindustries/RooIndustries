@@ -21,7 +21,7 @@ const HOME_COPY = {
   services: {
     heading: "Built For Ranked Games",
     subheading:
-      "Stock settings leave FPS sitting idle in hardware you already paid for. We put it back into your games — more FPS, lower delay, cleaner frametimes.",
+      "Stock settings leave FPS sitting idle in hardware you already paid for. We put it back into your games: more FPS, lower delay, cleaner frametimes.",
     cards: [
       {
         iconType: "clock",
