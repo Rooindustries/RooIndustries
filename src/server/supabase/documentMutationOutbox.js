@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { getSafeErrorCode, logSafeError } from "../safeErrorLog.js";
+import { logSanityMirrorEvent } from "./mirrorObservability.js";
 
 const normalizeDocuments = (value) =>
   (Array.isArray(value) ? value : [])
@@ -293,8 +294,18 @@ const processEvent = async ({
       else summary.retried += 1;
     } catch (completionError) {
       logSafeError("Document mirror retry recording failed", completionError);
+      logSanityMirrorEvent({
+        event: "sanity_mirror_lag",
+        reason: "recovery_queue_unavailable",
+        domain: "global",
+      });
     }
     logSafeError("Document fallback mirror failed", error);
+    logSanityMirrorEvent({
+      event: "sanity_mirror_lag",
+      reason: "delivery_failed",
+      domain: "global",
+    });
   }
 };
 
@@ -358,6 +369,11 @@ export const drainDocumentMutationOutbox = async ({
   } catch (error) {
     if (isMissingRpc(error)) return { ...summary, supported: false };
     logSafeError("Document mirror outbox claim failed", error);
+    logSanityMirrorEvent({
+      event: "sanity_mirror_lag",
+      reason: "outbox_unavailable",
+      domain: "global",
+    });
     return { ...summary, pending: true, errorCode: getSafeErrorCode(error) };
   }
 
@@ -368,6 +384,11 @@ export const drainDocumentMutationOutbox = async ({
     })) };
   } catch (error) {
     logSafeError("Document mirror backlog check failed", error);
+    logSanityMirrorEvent({
+      event: "sanity_mirror_lag",
+      reason: "backlog_unavailable",
+      domain: "global",
+    });
     return { ...summary, pending: true, errorCode: getSafeErrorCode(error) };
   }
 };

@@ -1,17 +1,22 @@
 import { resolveSupabaseRuntimePolicy } from "../supabase/runtime.js";
+import envValue from "../supabase/envValue.cjs";
+
+const { normalizeBackend } = envValue;
 
 export const selectHoldAuthority = ({
   tokenPayload,
-  fallbackBackend = "sanity",
+  fallbackBackend = "",
   policy = resolveSupabaseRuntimePolicy(),
 } = {}) => {
+  const policyBackend = normalizeBackend(
+    policy.commercePrimaryBackend,
+    "supabase"
+  );
   if (policy.commerceFailoverGeneration >= 1) {
-    return policy.commercePrimaryBackend === "supabase"
-      ? "supabase"
-      : "sanity";
+    return policyBackend;
   }
   if (tokenPayload?.hid) {
-    return tokenPayload.be === "supabase" ? "supabase" : "sanity";
+    return normalizeBackend(tokenPayload.be, "sanity");
   }
-  return fallbackBackend === "supabase" ? "supabase" : "sanity";
+  return normalizeBackend(fallbackBackend, policyBackend);
 };

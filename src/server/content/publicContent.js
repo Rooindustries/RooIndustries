@@ -5,6 +5,7 @@ import {
 } from "../../lib/publicContentQueries";
 import { createSupabaseDocumentClient } from "../supabase/documentClient.js";
 import { enrichSupabaseContentAssets } from "../supabase/assets.js";
+import { resolveSupabaseRuntimePolicy } from "../supabase/runtime.js";
 import { resolveGlobalSanityReadConfig } from "../cms/globalSanityConfig.js";
 
 const DEFAULT_API_VERSION = "2026-06-09";
@@ -167,7 +168,7 @@ export const clearSupabasePublicContentCache = () => {
 export const fetchPublicContent = async ({
   resource,
   searchParams,
-  backend = "sanity",
+  backend = "",
 }) => {
   const query = PUBLIC_CONTENT_QUERIES[resource];
   if (!query) {
@@ -183,8 +184,15 @@ export const fetchPublicContent = async ({
       : resource === "upgrade-link"
         ? { slug: parseSlug(searchParams) }
         : {};
-  if (backend === "supabase") {
+  const selectedBackend =
+    backend === "sanity" || backend === "supabase"
+      ? backend
+      : resolveSupabaseRuntimePolicy().primaryBackend;
+  if (selectedBackend === "supabase") {
     return loadSupabasePublicContent({ resource, query, params });
   }
-  return createPublicContentClient({ backend, resource }).fetch(query, params);
+  return createPublicContentClient({ backend: selectedBackend, resource }).fetch(
+    query,
+    params
+  );
 };

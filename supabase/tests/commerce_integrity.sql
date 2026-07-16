@@ -6,6 +6,8 @@ declare
   v_quote jsonb;
   v_referral_result jsonb;
   v_referral_event_key text;
+  v_cleanup_result jsonb;
+  v_cleanup_replay jsonb;
 begin
   select generation into v_generation
   from migration.commerce_control where singleton;
@@ -37,6 +39,80 @@ begin
     '[{"operation":"create","document":{"_id":"slotHold.fixture","_type":"slotHold","startTimeUTC":"2099-01-01T00:00:00.000Z","phase":"holding","expiresAt":"2099-01-01T00:20:00.000Z","holdNonce":"fixture"}}]'::jsonb,
     v_generation
   );
+
+  perform public.roo_apply_commerce_document_mutations(
+    'fixture:create-expired-supabase-hold',
+    '[{"operation":"create","document":{"_id":"slotHold.cleanup-fixture","_type":"slotHold","startTimeUTC":"2000-01-01T00:00:00.000Z","packageTitle":"Cleanup Fixture","phase":"holding","expiresAt":"2000-01-01T00:20:00.000Z","holdNonce":"cleanup-fixture"}}]'::jsonb,
+    v_generation
+  );
+  insert into commerce.slot_claims (
+    start_time_utc, claim_type, hold_id, expires_at, legacy_sanity_id,
+    source_revision, source_hash, backend_owner
+  )
+  select
+    hold.start_time_utc, 'hold', hold.id, hold.expires_at,
+    hold.legacy_sanity_id, hold.source_revision, hold.source_hash, 'supabase'
+  from commerce.slot_holds hold
+  where hold.legacy_sanity_id = 'slotHold.cleanup-fixture';
+
+  v_cleanup_result := public.roo_cleanup_expired_supabase_holds(
+    v_generation,
+    10
+  );
+  if coalesce((v_cleanup_result->>'expired_holds')::integer, -1) <> 1
+    or coalesce((v_cleanup_result->>'removed_slot_claims')::integer, -1) <> 1
+    or coalesce((v_cleanup_result->>'mirror_events_enqueued')::integer, -1) <> 1
+  then
+    raise exception 'expired Supabase hold cleanup returned invalid counters';
+  end if;
+  if not exists (
+    select 1
+    from migration.source_documents source
+    join commerce.slot_holds hold
+      on hold.legacy_sanity_id = source.legacy_sanity_id
+    where source.legacy_sanity_id = 'slotHold.cleanup-fixture'
+      and source.backend_owner = 'supabase'
+      and source.cutover_generation = v_generation
+      and source.payload->>'phase' = 'expired'
+      and source.payload->>'releaseReason' = 'expired_by_operational_cleanup'
+      and nullif(source.payload->>'holdNonce', '') is not null
+      and hold.backend_owner = 'supabase'
+      and hold.cutover_generation = v_generation
+      and hold.phase = 'expired'
+      and hold.release_reason = 'expired_by_operational_cleanup'
+  ) then
+    raise exception 'expired Supabase hold cleanup did not converge canonical and typed state';
+  end if;
+  if exists (
+    select 1 from commerce.slot_claims claim
+    join commerce.slot_holds hold on hold.id = claim.hold_id
+    where hold.legacy_sanity_id = 'slotHold.cleanup-fixture'
+  ) then
+    raise exception 'expired Supabase hold cleanup left its slot claim active';
+  end if;
+  if (
+    select count(*)
+    from migration.commerce_mirror_outbox mirror
+    where mirror.document_ids @> array['slotHold.cleanup-fixture']::text[]
+  ) <> 2 then
+    raise exception 'expired Supabase hold cleanup did not enqueue exactly one new mirror event';
+  end if;
+
+  v_cleanup_replay := public.roo_cleanup_expired_supabase_holds(
+    v_generation,
+    10
+  );
+  if coalesce((v_cleanup_replay->>'expired_holds')::integer, -1) <> 0
+    or coalesce((v_cleanup_replay->>'removed_slot_claims')::integer, -1) <> 0
+    or coalesce((v_cleanup_replay->>'mirror_events_enqueued')::integer, -1) <> 0
+  then
+    raise exception 'expired Supabase hold cleanup replay was not idempotent';
+  end if;
+  begin
+    perform public.roo_cleanup_expired_supabase_holds(v_generation + 1, 10);
+    raise exception 'expired Supabase hold cleanup accepted a stale generation';
+  exception when sqlstate '40001' then null;
+  end;
 
   -- Exact response replay must succeed even if a pause begins after commit.
   perform public.roo_set_commerce_starts_paused(
@@ -316,6 +392,21 @@ begin
     or not has_function_privilege('service_role', 'public.roo_commerce_control()', 'execute')
   then
     raise exception 'commerce RPC privileges are unsafe';
+  end if;
+  if has_function_privilege(
+    'anon',
+    'public.roo_cleanup_expired_supabase_holds(integer,integer)',
+    'execute'
+  ) or has_function_privilege(
+    'authenticated',
+    'public.roo_cleanup_expired_supabase_holds(integer,integer)',
+    'execute'
+  ) or not has_function_privilege(
+    'service_role',
+    'public.roo_cleanup_expired_supabase_holds(integer,integer)',
+    'execute'
+  ) then
+    raise exception 'expired Supabase hold cleanup RPC privileges are unsafe';
   end if;
   if has_function_privilege(
     'anon',

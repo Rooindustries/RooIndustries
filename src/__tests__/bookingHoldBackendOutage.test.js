@@ -1,4 +1,5 @@
 const mockCreateCommerceWriteClient = jest.fn();
+const mockCreateCommerceReadClient = jest.fn();
 const mockCreateDataClient = jest.fn();
 const mockRequireRateLimit = jest.fn(async () => true);
 const mockAssertCommerceStartAllowed = jest.fn(async () => ({ generation: 1 }));
@@ -12,6 +13,8 @@ const mockIsSlotAllowedForPackage = jest.fn(() => ({
 jest.mock("../server/api/ref/sanity.js", () => ({
   createCommerceWriteClient: (...args) =>
     mockCreateCommerceWriteClient(...args),
+  createCommerceReadClient: (...args) =>
+    mockCreateCommerceReadClient(...args),
 }));
 
 jest.mock("../server/data/documentClient.js", () => ({
@@ -70,7 +73,9 @@ const createResponse = () => {
 const createSupabaseClient = ({ existingHold }) => ({
   fetch: jest.fn(async (query, params) => {
     if (query.includes('_type == "slotHold"')) {
-      return params?.id === existingHold._id ? existingHold : null;
+      return existingHold && params?.id === existingHold._id
+        ? existingHold
+        : null;
     }
     if (query.includes('_type == "bookingSlot"')) return null;
     if (query.includes('_type == "booking"')) return [];
@@ -91,8 +96,26 @@ const createSupabaseClient = ({ existingHold }) => ({
     };
     return patch;
   }),
-  create: jest.fn(),
+  create: jest.fn(async (document) => ({ ...document, _rev: "supabase-rev-1" })),
 });
+
+const clearSanityConfiguration = () => {
+  for (const key of [
+    "SANITY_PROJECT_ID",
+    "SANITY_DATASET",
+    "SANITY_READ_TOKEN",
+    "SANITY_WRITE_TOKEN",
+    "SANITY_API_VERSION",
+    "SANITY_PRIVATE_PROJECT_ID",
+    "SANITY_PRIVATE_DATASET",
+    "SANITY_PRIVATE_READ_TOKEN",
+    "SANITY_PRIVATE_WRITE_TOKEN",
+    "SANITY_PRIVATE_API_VERSION",
+    "SANITY_WEBHOOK_SECRET",
+  ]) {
+    delete process.env[key];
+  }
+};
 
 const configureGenerationOne = (client) => {
   process.env.DATA_PRIMARY_BACKEND = "supabase";
@@ -100,7 +123,7 @@ const configureGenerationOne = (client) => {
   process.env.COMMERCE_PRIMARY_BACKEND = "supabase";
   process.env.COMMERCE_CUTOVER_ENABLED = "1";
   process.env.COMMERCE_FAILOVER_GENERATION = "1";
-  process.env.SANITY_REVERSE_MIRROR_WRITES = "1";
+  clearSanityConfiguration();
   mockCreateCommerceWriteClient.mockImplementation(({ backendOverride }) => {
     if (backendOverride === "sanity") throw new Error("Sanity unavailable");
     return client;
@@ -138,6 +161,7 @@ const clearEnvironment = () => {
   ]) {
     delete process.env[key];
   }
+  clearSanityConfiguration();
 };
 
 describe("booking hold backend isolation", () => {
@@ -164,6 +188,54 @@ describe("booking hold backend isolation", () => {
       })
     ).resolves.toEqual({ hold: null, slotLock: null, bookings: [] });
     expect(mockCreateCommerceWriteClient).not.toHaveBeenCalled();
+    expect(mockCreateCommerceReadClient).not.toHaveBeenCalled();
+  });
+
+  test("uses the read factory for the generation-zero secondary occupancy check", async () => {
+    const otherClient = {
+      fetch: jest.fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce([]),
+    };
+    process.env.DATA_PRIMARY_BACKEND = "supabase";
+    process.env.COMMERCE_PRIMARY_BACKEND = "supabase";
+    process.env.COMMERCE_FAILOVER_GENERATION = "0";
+    mockCreateCommerceReadClient.mockReturnValue(otherClient);
+
+    await expect(fetchOtherBackendSlotState({
+      backend: "supabase",
+      holdId: "hold-1",
+      slotLockId: "slot-1",
+      startTimeUTC: "2099-01-05T04:30:00.000Z",
+    })).resolves.toEqual({ hold: null, slotLock: null, bookings: [] });
+
+    expect(mockCreateCommerceReadClient).toHaveBeenCalledWith({
+      backendOverride: "sanity",
+    });
+    expect(mockCreateCommerceWriteClient).not.toHaveBeenCalled();
+  });
+
+  test("creates a generation-one Supabase hold with zero Sanity environment", async () => {
+    const client = createSupabaseClient({ existingHold: null });
+    configureGenerationOne(client);
+    const response = createResponse();
+
+    await holdSlot({
+      method: "POST",
+      body: {
+        startTimeUTC: "2099-01-05T04:30:00.000Z",
+        packageTitle: "Test Package",
+      },
+      headers: {},
+    }, response);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({ backend: "supabase" });
+    expect(client.create).toHaveBeenCalledTimes(1);
+    expect(mockCreateCommerceWriteClient).not.toHaveBeenCalledWith({
+      backendOverride: "sanity",
+    });
   });
 
   test.each([
@@ -282,6 +354,25 @@ describe("booking hold backend isolation", () => {
         },
       })
     ).toBe("sanity");
+  });
+
+  test.each(["", "  "])(
+    "does not coerce %j policy debris to Sanity hold authority",
+    (blank) => {
+      expect(
+        selectHoldAuthority({
+          tokenPayload: { hid: "hold-1", be: "sanity", gen: 0 },
+          policy: {
+            commercePrimaryBackend: blank,
+            commerceFailoverGeneration: 1,
+          },
+        })
+      ).toBe("supabase");
+    }
+  );
+
+  test("defaults an unowned hold to the Supabase policy", () => {
+    expect(selectHoldAuthority()).toBe("supabase");
   });
 
   test("refreshes a Supabase hold only through Sanity after manual failover", async () => {

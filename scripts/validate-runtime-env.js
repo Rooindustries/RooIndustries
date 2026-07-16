@@ -1,4 +1,13 @@
-if (!process.env.CI && !process.env.VERCEL) {
+const {
+  normalizeBackend,
+  readEnvValue,
+  readFirstEnvValue,
+} = require("../src/server/supabase/envValue.cjs");
+
+if (
+  !readEnvValue(process.env, "CI") &&
+  !readEnvValue(process.env, "VERCEL")
+) {
   require("dotenv").config({ path: ".env.local" });
 }
 
@@ -13,16 +22,20 @@ const {
 const {
   buildPostgresConnectionEnv,
 } = require("./lib/postgres-connection-target.cjs");
-
-const vercelEnv = (process.env.VERCEL_ENV || "").trim().toLowerCase();
+const {
+  inspectSanityConfiguration,
+} = require("../src/server/supabase/sanityConfiguration.cjs");
+const vercelEnv = readEnvValue(process.env, "VERCEL_ENV").toLowerCase();
 const hasExplicitVercelEnv = vercelEnv.length > 0;
-const isCi = String(process.env.CI || "").toLowerCase() === "true";
-const isVercelBuild = Boolean(process.env.VERCEL) || hasExplicitVercelEnv;
-const nextPhase = String(process.env.NEXT_PHASE || "").trim().toLowerCase();
+const isCi = readEnvValue(process.env, "CI").toLowerCase() === "true";
+const isVercelBuild =
+  Boolean(readEnvValue(process.env, "VERCEL")) || hasExplicitVercelEnv;
+const nextPhase = readEnvValue(process.env, "NEXT_PHASE").toLowerCase();
 const isNextProductionBuild = nextPhase === "phase-production-build";
 const forceStrict =
-  String(process.env.VALIDATE_RUNTIME_ENV_STRICT || "").toLowerCase() === "1" ||
-  String(process.env.REQUIRE_RUNTIME_SECRETS || "").toLowerCase() === "1";
+  readEnvValue(process.env, "VALIDATE_RUNTIME_ENV_STRICT").toLowerCase() ===
+    "1" ||
+  readEnvValue(process.env, "REQUIRE_RUNTIME_SECRETS").toLowerCase() === "1";
 const paymentRuntimePolicy = resolvePaymentRuntimePolicy();
 const paymentProviders = resolvePaymentProviders();
 
@@ -36,26 +49,20 @@ const isReleaseBuild = isProdBuild || isPreviewBuild;
 const shouldFailClosed =
   missing => missing.length > 0 && isReleaseBuild && (isCi || isVercelBuild || isNextProductionBuild || forceStrict);
 
-const getFirstValue = (keys = []) => {
-  for (const key of keys) {
-    const value = String(process.env[key] || "").trim();
-    if (value) return value;
-  }
-  return "";
-};
+const getFirstValue = (keys = []) => readFirstEnvValue(process.env, keys);
 const hasAny = (keys = []) => Boolean(getFirstValue(keys));
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
 const FALSE_VALUES = new Set(["0", "false", "no", "off"]);
 const isEnabled = (key) =>
-  TRUE_VALUES.has(String(process.env[key] || "").trim().toLowerCase());
+  TRUE_VALUES.has(readEnvValue(process.env, key).toLowerCase());
 const readExplicitBoolean = (key) => {
-  const value = String(process.env[key] || "").trim().toLowerCase();
+  const value = readEnvValue(process.env, key).toLowerCase();
   if (TRUE_VALUES.has(value)) return { configured: true, value: true };
   if (FALSE_VALUES.has(value)) return { configured: true, value: false };
   return { configured: false, value: true };
 };
 const numericPercent = (key) => {
-  const parsed = Number(String(process.env[key] || "").trim() || 0);
+  const parsed = Number(readEnvValue(process.env, key) || 0);
   return Number.isFinite(parsed) ? Math.max(0, Math.min(100, parsed)) : 0;
 };
 
@@ -239,11 +246,10 @@ const razorpayKeySecret = getFirstValue(["RAZORPAY_KEY_SECRET"]);
 const razorpayWebhookSecret = getFirstValue(["RAZORPAY_WEBHOOK_SECRET"]);
 const paypalClientId = getFirstValue(paypalClientIdKeys);
 const paypalClientSecret = getFirstValue(paypalClientSecretKeys);
-const explicitPayPalEnv = String(
-  process.env.PAYPAL_ENV || process.env.NEXT_PUBLIC_PAYPAL_ENV || ""
-)
-  .trim()
-  .toLowerCase();
+const explicitPayPalEnv = getFirstValue([
+  "PAYPAL_ENV",
+  "NEXT_PUBLIC_PAYPAL_ENV",
+]).toLowerCase();
 
 const providerConsistencyFailures = [];
 const providerConsistencyWarnings = [];
@@ -280,7 +286,7 @@ const compatibilityDeadlines = [
 ];
 
 for (const [key, maximumFutureMs] of compatibilityDeadlines) {
-  const raw = String(process.env[key] || "").trim();
+  const raw = readEnvValue(process.env, key);
   if (!raw) continue;
   const deadline = new Date(raw).getTime();
   if (!Number.isFinite(deadline)) {
@@ -374,9 +380,14 @@ if (
   }
 }
 
-const primaryBackend = getFirstValue(["DATA_PRIMARY_BACKEND"]).toLowerCase() || "sanity";
-const commercePrimaryBackend =
-  getFirstValue(["COMMERCE_PRIMARY_BACKEND"]).toLowerCase() || primaryBackend;
+const primaryBackend = normalizeBackend(
+  getFirstValue(["DATA_PRIMARY_BACKEND"]),
+  "supabase"
+);
+const commercePrimaryBackend = normalizeBackend(
+  getFirstValue(["COMMERCE_PRIMARY_BACKEND"]),
+  primaryBackend
+);
 const tourneyDatabaseMode =
   getFirstValue(["TOURNEY_DATABASE_MODE"]).toLowerCase() || "legacy";
 const tourneyMirrorEnabled = isEnabled("TOURNEY_MIRROR_ENABLED");
@@ -405,7 +416,6 @@ const authCanaryConfigured = Boolean(
   getFirstValue(["SUPABASE_AUTH_CANARY_ACCOUNTS"])
 );
 const shadowWritesEnabled = isEnabled("SUPABASE_SHADOW_WRITES");
-const reverseMirrorEnabled = isEnabled("SANITY_REVERSE_MIRROR_WRITES");
 const cutoverEnabled = isEnabled("SUPABASE_CUTOVER_ENABLED");
 const commerceCutoverEnabled = isEnabled("COMMERCE_CUTOVER_ENABLED");
 const commerceFailoverGeneration =
@@ -426,70 +436,30 @@ const hasBlobCredentials = hasAny([
 const blobDownloadsEnabled =
   downloadStorageBackend === "blob" ||
   (downloadStorageBackend !== "local" && hasBlobCredentials);
-const sanityReadRequired =
-  primaryBackend === "sanity" ||
-  commercePrimaryBackend === "sanity";
-const sanityWriteRequired =
-  primaryBackend === "sanity" ||
-  commercePrimaryBackend === "sanity" ||
-  reverseMirrorEnabled;
-const sanityTargetRequired = sanityReadRequired || sanityWriteRequired;
-const privateSanityConfigured = hasAny([
-  "SANITY_PRIVATE_PROJECT_ID",
-  "SANITY_PRIVATE_DATASET",
-  "SANITY_PRIVATE_READ_TOKEN",
-  "SANITY_PRIVATE_WRITE_TOKEN",
-]);
-if (privateSanityConfigured && sanityTargetRequired) {
-  const privateTargetMissing = [
-    ...(!hasAny(["SANITY_PRIVATE_PROJECT_ID"])
-      ? ["SANITY_PRIVATE_PROJECT_ID"]
-      : []),
-    ...(!hasAny(["SANITY_PRIVATE_DATASET"])
-      ? ["SANITY_PRIVATE_DATASET"]
-      : []),
-    ...(sanityWriteRequired && !hasAny(["SANITY_PRIVATE_WRITE_TOKEN"])
-      ? ["SANITY_PRIVATE_WRITE_TOKEN"]
-      : []),
-    ...(sanityReadRequired &&
-      !hasAny(["SANITY_PRIVATE_READ_TOKEN", "SANITY_PRIVATE_WRITE_TOKEN"])
-      ? ["SANITY_PRIVATE_READ_TOKEN"]
-      : []),
-  ];
-  if (privateTargetMissing.length > 0) {
-    supabaseConsistencyFailures.push(
-      `Private Sanity configuration is incomplete: ${privateTargetMissing.join(
-        ", "
-      )}.`
-    );
-  }
+const sanityPrimaryRequired =
+  primaryBackend === "sanity" || commercePrimaryBackend === "sanity";
+const sanityConfiguration = inspectSanityConfiguration(process.env);
+if (sanityConfiguration.status === "partial") {
+  supabaseConsistencyFailures.push(
+    `Sanity configuration is incomplete: ${sanityConfiguration.missing.join(
+      ", "
+    )}. Configure a complete writable backup or delete the partial SANITY_* target variables.`
+  );
 }
 const sanityRequiredChecks = [
-  ...(sanityTargetRequired
+  ...(sanityPrimaryRequired
     ? [
         {
-          keys: ["SANITY_PRIVATE_PROJECT_ID", "SANITY_PROJECT_ID"],
+          keys: [sanityConfiguration.keys.projectId],
           label: "SANITY_PROJECT_ID",
         },
         {
-          keys: ["SANITY_PRIVATE_DATASET", "SANITY_DATASET"],
+          keys: [sanityConfiguration.keys.dataset],
           label: "SANITY_DATASET",
         },
-      ]
-    : []),
-  ...(sanityWriteRequired
-    ? [
         {
-          keys: ["SANITY_PRIVATE_WRITE_TOKEN", "SANITY_WRITE_TOKEN"],
+          keys: [sanityConfiguration.keys.writeToken],
           label: "SANITY_WRITE_TOKEN",
-        },
-      ]
-    : []),
-  ...(sanityReadRequired
-    ? [
-        {
-          keys: ["SANITY_PRIVATE_READ_TOKEN", "SANITY_READ_TOKEN"],
-          label: "SANITY_READ_TOKEN",
         },
       ]
     : []),
@@ -508,7 +478,7 @@ const missing = [...requiredChecks, ...sanityRequiredChecks]
 
 if (isProdBuild && blobDownloadsEnabled) {
   const catalogFailure = validateUtilitiesDownloadCatalog(
-    process.env.DOWNLOAD_CATALOG_JSON
+    readEnvValue(process.env, "DOWNLOAD_CATALOG_JSON")
   );
   if (catalogFailure) downloadConsistencyFailures.push(catalogFailure);
 }
@@ -568,19 +538,28 @@ const anySupabaseRuntimeEnabled =
   tourneyMirrorEnabled;
 const tourneyNeedsSupabase = tourneyDatabaseMode === "supabase" || tourneyMirrorEnabled;
 
-if (!["sanity", "supabase"].includes(primaryBackend)) {
-  supabaseConsistencyFailures.push(
-    "DATA_PRIMARY_BACKEND must be sanity or supabase."
-  );
-}
-if (!["sanity", "supabase"].includes(commercePrimaryBackend)) {
-  supabaseConsistencyFailures.push(
-    "COMMERCE_PRIMARY_BACKEND must be sanity or supabase."
-  );
-}
 if (!/^[0-9]+$/.test(commerceFailoverGeneration)) {
   supabaseConsistencyFailures.push(
     "COMMERCE_FAILOVER_GENERATION must be a non-negative integer."
+  );
+}
+if (
+  commerceFailoverGeneration === "0" &&
+  !sanityConfiguration.readConfigured
+) {
+  supabaseConsistencyFailures.push(
+    "COMMERCE_FAILOVER_GENERATION=0 requires a complete legacy Sanity read target for the dual-backend occupancy check. Pin the active generation (1 or higher) or configure Sanity."
+  );
+}
+const obsoleteCanaryVariables = [
+  ...(contentCanaryPercent > 0 ? ["SUPABASE_CONTENT_CANARY_PERCENT"] : []),
+  ...(commerceCanaryPercent > 0 ? ["SUPABASE_COMMERCE_CANARY_PERCENT"] : []),
+];
+if (obsoleteCanaryVariables.length > 0) {
+  supabaseConsistencyFailures.push(
+    `Supabase is primary; nonzero canary percentages are obsolete. Delete ${obsoleteCanaryVariables.join(
+      ", "
+    )}.`
   );
 }
 if (!["legacy", "supabase"].includes(tourneyDatabaseMode)) {
@@ -679,23 +658,6 @@ if (primaryBackend === "supabase" && !cutoverEnabled) {
 if (commercePrimaryBackend === "supabase" && !commerceCutoverEnabled) {
   supabaseConsistencyFailures.push(
     "Supabase commerce primary mode requires COMMERCE_CUTOVER_ENABLED=1."
-  );
-}
-if (
-  (
-    primaryBackend === "supabase" ||
-    commercePrimaryBackend === "supabase" ||
-    commerceCanaryPercent > 0
-  ) &&
-  !reverseMirrorEnabled
-) {
-  supabaseConsistencyFailures.push(
-    "Supabase primary writes require SANITY_REVERSE_MIRROR_WRITES=1 during the rollback window."
-  );
-}
-if (commerceCanaryPercent > 0 && !shadowWritesEnabled) {
-  supabaseConsistencyFailures.push(
-    "Supabase commerce canaries require SUPABASE_SHADOW_WRITES=1."
   );
 }
 if (

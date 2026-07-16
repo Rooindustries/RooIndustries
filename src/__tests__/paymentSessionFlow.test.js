@@ -12,6 +12,7 @@ let paymentRecordConstants;
 const mockCreateBooking = jest.fn();
 const mockResolvePaymentQuote = jest.fn();
 const mockCreateRefWriteClient = jest.fn();
+const mockCreateCommerceWriteClient = jest.fn();
 const mockGetBookingSettings = jest.fn();
 const mockIsSlotAllowedForPackage = jest.fn();
 const mockResolvePaymentProviders = jest.fn();
@@ -27,6 +28,9 @@ const mockVerifyRazorpayPayment = jest.fn();
 const mockVerifyRazorpaySignature = jest.fn();
 const mockVerifyRazorpayWebhookSignature = jest.fn();
 const mockDispatchRescheduleNotifications = jest.fn();
+const mockFlushCommerceMirror = jest.fn(async () => {
+  throw new Error("Sanity mirror unavailable");
+});
 
 jest.mock("../server/api/ref/createBooking", () => ({
   __esModule: true,
@@ -41,6 +45,7 @@ jest.mock("../server/api/ref/pricing", () => ({
 jest.mock("../server/api/ref/sanity", () => ({
   __esModule: true,
   createRefWriteClient: (...args) => mockCreateRefWriteClient(...args),
+  createCommerceWriteClient: (...args) => mockCreateCommerceWriteClient(...args),
 }));
 
 jest.mock("../server/booking/slotPolicy", () => ({
@@ -174,7 +179,9 @@ const removeDocById = (id) => {
 };
 
 const mockClient = {
-  fetch: async (query, params = {}) => {
+  backend: "sanity",
+  flushCommerceMirror: (...args) => mockFlushCommerceMirror(...args),
+  fetch: jest.fn(async (query, params = {}) => {
     const q = String(query || "");
 
     if (q.includes('_type == "slotHold"') && q.includes("_id == $id")) {
@@ -281,6 +288,17 @@ const mockClient = {
     if (q.includes("lower(status) in $statuses")) {
       return [...store.paymentRecords]
         .filter((entry) => {
+          const recordGeneration = Math.max(
+            0,
+            Number(entry.cutoverGeneration) || 0
+          );
+          if (recordGeneration < Number(params.currentGeneration || 0)) {
+            return params.backend === params.primaryBackend;
+          }
+          const owner = entry.backendOwner === "supabase" ? "supabase" : "sanity";
+          return owner === params.backend;
+        })
+        .filter((entry) => {
           const status = String(entry.status || "").trim().toLowerCase();
           return (
             (Array.isArray(params.statuses) && params.statuses.includes(status)) ||
@@ -304,7 +322,7 @@ const mockClient = {
     }
 
     return null;
-  },
+  }),
   create: async (doc) => {
     const next = { ...doc, _rev: doc._rev || nextRevision() };
     if (!next._id) {
@@ -503,6 +521,8 @@ const issueTokenForHold = (hold) => {
     startTimeUTC: hold.startTimeUTC,
     expiresAt: hold.expiresAt,
     holdNonce: hold.holdNonce,
+    backend: hold.backendOwner || mockClient.backend,
+    cutoverGeneration: Number(hold.cutoverGeneration || 0),
   });
 };
 
@@ -535,6 +555,21 @@ const invokeQuote = async (body = {}) => {
   };
   await quotePaymentSession({ method: "POST", body }, res);
   return state;
+};
+
+const withRuntimeEnv = async (overrides, callback) => {
+  const previous = Object.fromEntries(
+    Object.keys(overrides).map((key) => [key, process.env[key]])
+  );
+  Object.assign(process.env, overrides);
+  try {
+    return await callback();
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 };
 
 beforeAll(() => {
@@ -693,6 +728,25 @@ beforeEach(() => {
 });
 
 describe("payment session flow", () => {
+  test.each([
+    ["finalize", () => finalizePaymentSession({
+      body: {},
+      paymentAccessToken: "invalid.token",
+      allowLegacyTokenFallback: false,
+    })],
+    ["cancel", () => cancelPaymentSession({
+      paymentAccessToken: "invalid.token",
+    })],
+    ["status", () => getPaymentStatus({
+      query: {},
+      paymentAccessToken: "invalid.token",
+      allowLegacyTokenFallback: false,
+    })],
+  ])("rejects an unresolved %s token before constructing a backend", async (_name, invoke) => {
+    await expect(invoke()).resolves.toMatchObject({ httpStatus: 401 });
+    expect(mockCreateCommerceWriteClient).not.toHaveBeenCalled();
+  });
+
   test("fails closed before writing when atomic payment storage is unavailable", async () => {
     const hold = createHold();
     const bookingPayload = baseBookingPayload();
@@ -802,6 +856,7 @@ describe("payment session flow", () => {
       phase: paymentRecordConstants.HOLD_PHASE_PAYMENT_PENDING,
       paymentRecordId: record._id,
     });
+    expect(mockFlushCommerceMirror).not.toHaveBeenCalled();
   });
 
   test("start returns a Razorpay session with provider payload", async () => {
@@ -1260,6 +1315,97 @@ describe("payment session flow", () => {
       verificationWarning: "",
       emailDispatchToken: `dispatch_${store.bookings[0]._id}`,
     });
+    expect(mockFlushCommerceMirror).not.toHaveBeenCalled();
+  });
+
+  test("status and finalize use promoted Sanity for a generation-one Supabase payment", async () => {
+    const hold = createHold();
+    const started = await startPaymentSession({
+      body: {
+        provider: "paypal",
+        bookingPayload: baseBookingPayload({
+          slotHoldToken: issueTokenForHold(hold),
+        }),
+      },
+      client: mockClient,
+      backend: "supabase",
+      cutoverGeneration: 1,
+    });
+    expect(getOnlyPaymentRecord()).toMatchObject({
+      backendOwner: "supabase",
+      cutoverGeneration: 1,
+    });
+
+    await withRuntimeEnv({
+      DATA_PRIMARY_BACKEND: "sanity",
+      COMMERCE_PRIMARY_BACKEND: "sanity",
+      COMMERCE_FAILOVER_GENERATION: "2",
+    }, async () => {
+      mockCreateCommerceWriteClient.mockImplementationOnce(() => mockClient);
+      const status = await getPaymentStatus({
+        query: {},
+        paymentAccessToken: started.body.paymentAccessToken,
+        allowLegacyTokenFallback: false,
+      });
+      expect(status).toMatchObject({
+        httpStatus: 200,
+        body: { status: paymentRecordConstants.PAYMENT_STATUS_STARTED },
+      });
+      expect(mockCreateCommerceWriteClient).toHaveBeenLastCalledWith({
+        backendOverride: "sanity",
+      });
+
+      mockCreateCommerceWriteClient.mockImplementationOnce(() => mockClient);
+      const finalized = await finalizePaymentSession({
+        body: { providerData: { paypalOrderId: "paypal_order_1" } },
+        paymentAccessToken: started.body.paymentAccessToken,
+        allowLegacyTokenFallback: false,
+      });
+      expect(finalized).toMatchObject({
+        httpStatus: 200,
+        body: {
+          ok: true,
+          bookingId: expect.stringMatching(/^booking_/),
+        },
+      });
+      expect(mockCreateCommerceWriteClient).toHaveBeenLastCalledWith({
+        backendOverride: "sanity",
+      });
+      expect(store.bookings).toHaveLength(1);
+    });
+  });
+
+  test("cancel uses promoted Sanity for a generation-one Supabase payment", async () => {
+    const hold = createHold();
+    const started = await startPaymentSession({
+      body: {
+        provider: "paypal",
+        bookingPayload: baseBookingPayload({
+          slotHoldToken: issueTokenForHold(hold),
+        }),
+      },
+      client: mockClient,
+      backend: "supabase",
+      cutoverGeneration: 1,
+    });
+
+    await withRuntimeEnv({
+      DATA_PRIMARY_BACKEND: "sanity",
+      COMMERCE_PRIMARY_BACKEND: "sanity",
+      COMMERCE_FAILOVER_GENERATION: "2",
+    }, async () => {
+      mockCreateCommerceWriteClient.mockImplementationOnce(() => mockClient);
+      const cancelled = await cancelPaymentSession({
+        paymentAccessToken: started.body.paymentAccessToken,
+      });
+      expect(cancelled).toMatchObject({
+        httpStatus: 200,
+        body: { ok: true, cancelled: true },
+      });
+      expect(mockCreateCommerceWriteClient).toHaveBeenLastCalledWith({
+        backendOverride: "sanity",
+      });
+    });
   });
 
   test("finalize books a Razorpay session with captured upstream verification", async () => {
@@ -1494,6 +1640,8 @@ describe("payment session flow", () => {
       paymentRecordId: record._id,
       provider: record.provider,
       pricingFingerprint: record.pricingFingerprint,
+      backend: record.backendOwner,
+      cutoverGeneration: record.cutoverGeneration,
       issuedAtMs: Date.now() - 36 * 60 * 1000,
       expirySeconds: 60,
     });
@@ -1710,6 +1858,58 @@ describe("payment session flow", () => {
       emailDispatchAlreadyComplete: true,
       emailDispatchCompletedAt: "2000-01-01T00:05:00.000Z",
       preserveHistoricalAccounting: true,
+    });
+  });
+
+  test("reconcile books a captured generation-one payment on promoted Sanity", async () => {
+    const hold = createHold();
+    const started = await startPaymentSession({
+      body: {
+        provider: "paypal",
+        bookingPayload: baseBookingPayload({
+          slotHoldToken: issueTokenForHold(hold),
+        }),
+      },
+      client: mockClient,
+      backend: "supabase",
+      cutoverGeneration: 1,
+    });
+    const decoded = verifyPaymentAccessToken({
+      token: started.body.paymentAccessToken,
+    });
+    const record = getPaymentRecord(decoded.payload.paymentRecordId);
+    record.status = paymentRecordConstants.PAYMENT_STATUS_CAPTURED_CLIENT;
+    record.historicalBookingReconstruction = true;
+    record.updatedAt = "2000-01-01T00:00:00.000Z";
+
+    await withRuntimeEnv({
+      DATA_PRIMARY_BACKEND: "sanity",
+      COMMERCE_PRIMARY_BACKEND: "sanity",
+      COMMERCE_FAILOVER_GENERATION: "2",
+    }, async () => {
+      const reconciled = await reconcilePaymentSessions({
+        req: createReq({}, { authorization: "Bearer cron-secret" }),
+        client: mockClient,
+        backend: "sanity",
+      });
+      expect(reconciled).toMatchObject({
+        httpStatus: 200,
+        body: { summary: { scanned: 1, finalized: 1 } },
+      });
+      expect(getOnlyPaymentRecord()).toMatchObject({
+        backendOwner: "supabase",
+        cutoverGeneration: 1,
+        status: paymentRecordConstants.PAYMENT_STATUS_BOOKED,
+      });
+      expect(store.bookings).toHaveLength(1);
+      expect(mockClient.fetch).toHaveBeenCalledWith(
+        expect.stringContaining("coalesce(cutoverGeneration, 0)"),
+        expect.objectContaining({
+          backend: "sanity",
+          primaryBackend: "sanity",
+          currentGeneration: 2,
+        })
+      );
     });
   });
 
@@ -2721,6 +2921,7 @@ describe("payment session flow", () => {
         bookingId: originalOrderId,
         email: "client@example.com",
         targetPackageTitle: "Performance Vertex Overhaul",
+        backend: mockClient.backend,
       }),
     });
 
@@ -2756,6 +2957,7 @@ describe("payment session flow", () => {
         bookingId: originalOrderId,
         email: "client@example.com",
         targetPackageTitle: "Performance Vertex Overhaul",
+        backend: mockClient.backend,
       }),
     });
     const first = await startPaymentSession({
@@ -3316,6 +3518,7 @@ describe("payment session flow", () => {
       refundRequiresBookingSync: false,
     });
     expect(getOnlyPaymentRecord().refunds).toHaveLength(1);
+    expect(mockFlushCommerceMirror).not.toHaveBeenCalled();
   });
 
   test("Razorpay refund events count only unique processed refund IDs", async () => {
