@@ -642,6 +642,7 @@ describe("Supabase-primary referral email routes", () => {
     };
     loaded.fetch
       .mockResolvedValueOnce(existing)
+      .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(existing);
     const response = createResponse();
 
