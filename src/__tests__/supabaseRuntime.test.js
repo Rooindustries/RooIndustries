@@ -7,6 +7,7 @@ import {
   deterministicCanaryBucket,
   resolveSupabaseRuntimePolicy,
   selectCanaryBackend,
+  shouldUseSupabaseForAccount,
 } from "../server/supabase/runtime";
 
 describe("Supabase runtime selection", () => {
@@ -19,39 +20,84 @@ describe("Supabase runtime selection", () => {
     ).toThrow("SUPABASE_CUTOVER_ENABLED");
   });
 
-  test("requires both rollback mirrors for a commerce canary", () => {
-    expect(() =>
-      resolveSupabaseRuntimePolicy({
-        SUPABASE_COMMERCE_CANARY_PERCENT: "10",
-        SUPABASE_SHADOW_WRITES: "1",
-      })
-    ).toThrow("SANITY_REVERSE_MIRROR_WRITES");
-
-    expect(() =>
-      resolveSupabaseRuntimePolicy({
-        SUPABASE_COMMERCE_CANARY_PERCENT: "10",
-        SANITY_REVERSE_MIRROR_WRITES: "1",
-      })
-    ).toThrow("SUPABASE_SHADOW_WRITES");
+  test("defaults data, commerce, content, and auth reads to Supabase", () => {
+    expect(resolveSupabaseRuntimePolicy({})).toMatchObject({
+      primaryBackend: "supabase",
+      commercePrimaryBackend: "supabase",
+      commerceFailoverGeneration: 0,
+      reverseMirrorEnabled: false,
+    });
+    expect(selectContentBackend({ env: {} })).toEqual({
+      backend: "supabase",
+      canaryActive: false,
+      assignmentCookie: "",
+    });
+    expect(shouldUseSupabaseForAccount({ identifier: "person@example.com", env: {} }))
+      .toBe(true);
   });
 
-  test("requires the rollback mirror for the global Supabase primary", () => {
-    expect(() =>
-      resolveSupabaseRuntimePolicy({
-        DATA_PRIMARY_BACKEND: "supabase",
-        SUPABASE_CUTOVER_ENABLED: "1",
-      })
-    ).toThrow("SANITY_REVERSE_MIRROR_WRITES");
+  test.each(["", "  "])(
+    "treats %j backend selectors as unset Supabase defaults",
+    (blank) => {
+      expect(
+        resolveSupabaseRuntimePolicy({
+          DATA_PRIMARY_BACKEND: blank,
+          COMMERCE_PRIMARY_BACKEND: blank,
+        })
+      ).toMatchObject({
+        primaryBackend: "supabase",
+        commercePrimaryBackend: "supabase",
+      });
+    }
+  );
 
+  test("treats an invalid backend selection as unset", () => {
     expect(
       resolveSupabaseRuntimePolicy({
-        DATA_PRIMARY_BACKEND: "supabase",
-        SUPABASE_CUTOVER_ENABLED: "1",
-        SANITY_REVERSE_MIRROR_WRITES: "1",
+        DATA_PRIMARY_BACKEND: "not-a-backend",
+        COMMERCE_PRIMARY_BACKEND: "unknown",
       })
     ).toMatchObject({
       primaryBackend: "supabase",
+      commercePrimaryBackend: "supabase",
+    });
+  });
+
+  test.each(["", "  "])(
+    "treats blank generation and gates as absent for %j",
+    (blank) => {
+      expect(
+        resolveSupabaseRuntimePolicy({
+          COMMERCE_FAILOVER_GENERATION: blank,
+          SUPABASE_CUTOVER_ENABLED: blank,
+          COMMERCE_CUTOVER_ENABLED: blank,
+          COMMERCE_STARTS_PAUSED: blank,
+          SUPABASE_SHADOW_WRITES: blank,
+          SANITY_REVERSE_MIRROR_WRITES: blank,
+        })
+      ).toMatchObject({
+        commerceFailoverGeneration: 0,
+        cutoverEnabled: false,
+        commerceCutoverEnabled: false,
+        commerceStartsPaused: false,
+        shadowWritesEnabled: false,
+        reverseMirrorLegacyFlagEnabled: false,
+      });
+    }
+  );
+
+  test("enables mirroring from complete Sanity configuration, not its legacy flag", () => {
+    expect(resolveSupabaseRuntimePolicy({})).toMatchObject({
+      reverseMirrorEnabled: false,
+      reverseMirrorLegacyFlagEnabled: false,
+    });
+    expect(resolveSupabaseRuntimePolicy({
+      SANITY_PROJECT_ID: "project",
+      SANITY_DATASET: "production",
+      SANITY_WRITE_TOKEN: "write-token",
+    })).toMatchObject({
       reverseMirrorEnabled: true,
+      reverseMirrorLegacyFlagEnabled: false,
     });
   });
 
@@ -115,7 +161,7 @@ describe("Supabase runtime selection", () => {
     });
     expect(selected).toMatchObject({
       backend: "supabase",
-      canaryActive: true,
+      canaryActive: false,
       assignmentCookie: "",
     });
   });

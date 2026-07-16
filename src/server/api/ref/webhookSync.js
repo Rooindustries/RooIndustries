@@ -1,29 +1,17 @@
-import {createDataClient as createClient} from '../../data/documentClient.js';
+import {
+  createDocumentReadClient,
+  createDocumentWriteClient,
+} from '../../data/documentClient.js';
 import crypto from 'crypto';
 import {requireSecret} from './auth.js';
 import {logSafeError} from '../../safeErrorLog.js';
+import {resolveSupabaseRuntimePolicy} from '../../supabase/runtime.js';
+import {logSanityMirrorEvent} from '../../supabase/mirrorObservability.js';
 import {
   buildBalance,
   fetchReferralEarnings,
   sumPayments,
 } from './payoutUtils.js';
-
-const readClient = createClient({
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || 'production',
-  apiVersion: process.env.SANITY_API_VERSION || '2023-10-01',
-  token: process.env.SANITY_READ_TOKEN || process.env.SANITY_WRITE_TOKEN,
-  useCdn: false,
-  perspective: 'published',
-}, {domain: 'commerce'});
-
-const writeClient = createClient({
-  projectId: process.env.SANITY_PROJECT_ID,
-  dataset: process.env.SANITY_DATASET || 'production',
-  apiVersion: process.env.SANITY_API_VERSION || '2023-10-01',
-  token: process.env.SANITY_WRITE_TOKEN,
-  useCdn: false,
-}, {domain: 'commerce'});
 
 const getWebhookSecret = () =>
   String(process.env.SANITY_WEBHOOK_SECRET || '').trim();
@@ -58,8 +46,23 @@ export default async function handler(req, res) {
     return res.status(401).json({ok: false, error: 'Invalid signature'});
   }
 
+  if (resolveSupabaseRuntimePolicy().commercePrimaryBackend !== 'sanity') {
+    logSanityMirrorEvent({
+      event: 'sanity_webhook_skipped',
+      reason: 'supabase_primary',
+      domain: 'commerce',
+    });
+    return res.status(200).json({
+      ok: true,
+      skipped: true,
+      reason: 'sanity_non_authoritative',
+    });
+  }
+
   try {
     const body = req.body || {};
+    const readClient = createDocumentReadClient({domain: 'commerce'});
+    const writeClient = createDocumentWriteClient({domain: 'commerce'});
 
     const referralId = body._id;
 

@@ -73,6 +73,8 @@ import {
   PAYMENT_STATUS_REFUNDED,
   PAYMENT_STATUS_STARTED,
 } from "./paymentRecord.js";
+import { selectPaymentAuthority } from "./backend.js";
+import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
 
 export { authorizeCronRequest };
 
@@ -87,15 +89,6 @@ const normalizeObject = (value) =>
   value && typeof value === "object" && !Array.isArray(value) ? value : {};
 
 const nowIso = () => new Date().toISOString();
-
-const flushCriticalCommerceMirror = async (client, requiredDocumentIds = []) => {
-  if (typeof client?.flushCommerceMirror !== "function") return null;
-  return client.flushCommerceMirror({
-    failClosed: true,
-    requiredDocumentIds: [...new Set(requiredDocumentIds.filter(Boolean))],
-    limit: 100,
-  });
-};
 
 const getFutureIso = (seconds) =>
   new Date(Date.now() + Math.max(1, Number(seconds) || 1) * 1000).toISOString();
@@ -635,7 +628,7 @@ const mirrorLegacyBookingToPaymentRecord = async ({
   booking,
   source = "legacy",
   eventType = "",
-  backendOwner = "sanity",
+  backendOwner = "supabase",
   cutoverGeneration = 0,
 }) => {
   if (!booking?._id) return null;
@@ -800,7 +793,19 @@ const resolveRecordFromAccessToken = async ({
   }
 
   const payload = tokenResult.payload || {};
-  const record = await getPaymentRecordById(client, payload.paymentRecordId);
+  const authority = selectPaymentAuthority({
+    backendOwner: payload.backend,
+    cutoverGeneration: payload.cutoverGeneration,
+  });
+  const resolvedClient =
+    client ||
+    createCommerceWriteClient({
+      backendOverride: authority,
+    });
+  const record = await getPaymentRecordById(
+    resolvedClient,
+    payload.paymentRecordId
+  );
   if (!record?._id) {
     const error = new Error("Payment session not found.");
     error.status = 404;
@@ -828,7 +833,7 @@ const resolveRecordFromAccessToken = async ({
     }
   }
 
-  return { payload, record };
+  return { payload, record, client: resolvedClient };
 };
 
 const getSubmittedProviderIdentifiers = ({ record = {}, providerData = {} }) => {
@@ -1379,7 +1384,7 @@ const claimWebhookReceipt = async ({
   eventId,
   eventType,
   rawBody,
-  backendOwner = "sanity",
+  backendOwner = "supabase",
 }) => {
   const receiptId = buildWebhookReceiptId({ provider, eventId, eventType, rawBody });
   const existing = await getWebhookReceipt({ client, id: receiptId });
@@ -2263,45 +2268,6 @@ const finalizePaymentRecordInternal = async ({
       }
     }
 
-    try {
-      await flushCriticalCommerceMirror(client, [bookingId, nextRecord?._id]);
-    } catch (error) {
-      const recoveryAttemptCount = Number(nextRecord?.recoveryAttemptCount || 0) + 1;
-      let pendingRecord = nextRecord;
-      try {
-        pendingRecord = await patchPaymentRecord({
-          client,
-          record: nextRecord,
-          revisionGuard: true,
-          set: {
-            status: PAYMENT_STATUS_NEEDS_RECOVERY,
-            recoveryReason: "sanity_mirror_pending_after_capture",
-            recoveryAttemptCount,
-            nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
-            finalizationLeaseId: "",
-            finalizationLeaseExpiresAt: "",
-          },
-          event: buildPaymentRecordEvent({
-            status: PAYMENT_STATUS_NEEDS_RECOVERY,
-            source: normalizedSource,
-            reason: "sanity_mirror_pending_after_capture",
-          }),
-        });
-      } catch (patchError) {
-        pendingRecord =
-          (await getPaymentRecordById(client, nextRecord?._id)) || nextRecord;
-      }
-      return {
-        ok: false,
-        httpStatus: 202,
-        paymentRecord: pendingRecord,
-        response: {
-          ...buildPublicStatusBody(pendingRecord),
-          status: PAYMENT_STATUS_FINALIZING,
-        },
-      };
-    }
-
     return {
       ok: true,
       httpStatus: 200,
@@ -2564,7 +2530,7 @@ const createOrReusePaymentRecordForStart = async ({
   upgradeIntentSnapshot = null,
   prepareCouponReservation = null,
   appendCouponReservation = null,
-  backendOwner = "sanity",
+  backendOwner = "supabase",
   cutoverGeneration = 0,
 }) => {
   const bookingSeedKey = buildBookingSeedKey({
@@ -2767,36 +2733,6 @@ const createOrReusePaymentRecordForStart = async ({
     throw error;
   }
 
-  try {
-    await flushCriticalCommerceMirror(client, [
-      record._id,
-      startClaimId,
-      holdDoc?._id,
-      couponReservationPlan?.redemption?._id,
-    ]);
-  } catch (error) {
-    const recoveryAttemptCount = Number(record.recoveryAttemptCount || 0) + 1;
-    await patchPaymentRecord({
-      client,
-      record,
-      set: {
-        status: PAYMENT_STATUS_NEEDS_RECOVERY,
-        orderState: "mirror_pending_before_provider",
-        recoveryReason: "sanity_mirror_pending_before_provider",
-        recoveryAttemptCount,
-        nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
-        orderCreationLeaseId: "",
-        orderCreationLeaseExpiresAt: "",
-      },
-      event: buildPaymentRecordEvent({
-        status: PAYMENT_STATUS_NEEDS_RECOVERY,
-        source: "start",
-        reason: "sanity_mirror_pending_before_provider",
-      }),
-    }).catch(() => null);
-    throw error;
-  }
-
   let providerPayload;
   try {
     providerPayload = await createProviderOrderForRecord(record, {
@@ -2829,35 +2765,13 @@ const createOrReusePaymentRecordForStart = async ({
   }
 
   record = await attachImmutableProviderOrder({ client, record, providerPayload });
-  try {
-    await flushCriticalCommerceMirror(client, [record._id]);
-  } catch (error) {
-    const recoveryAttemptCount = Number(record.recoveryAttemptCount || 0) + 1;
-    await patchPaymentRecord({
-      client,
-      record,
-      set: {
-        status: PAYMENT_STATUS_NEEDS_RECOVERY,
-        orderState: "mirror_pending_after_provider",
-        recoveryReason: "sanity_mirror_pending_after_provider",
-        recoveryAttemptCount,
-        nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
-      },
-      event: buildPaymentRecordEvent({
-        status: PAYMENT_STATUS_NEEDS_RECOVERY,
-        source: "start",
-        reason: "sanity_mirror_pending_after_provider",
-      }),
-    }).catch(() => null);
-    throw error;
-  }
   return record;
 };
 
 export const startPaymentSession = async ({
   body,
   client = createCommerceWriteClient(),
-  backend = "sanity",
+  backend = client?.backend === "sanity" ? "sanity" : "supabase",
   cutoverGeneration = 0,
   prepareCouponReservation = null,
   appendCouponReservation = null,
@@ -3131,7 +3045,7 @@ export const finalizePaymentSession = async ({
   body,
   paymentAccessToken = "",
   allowLegacyTokenFallback = true,
-  client = createCommerceWriteClient(),
+  client = null,
 }) => {
   const requestBody = normalizeObject(body);
   const flatProviderData = sanitizeProviderFinalizeData({
@@ -3149,6 +3063,7 @@ export const finalizePaymentSession = async ({
       ).trim(),
       allowRecoveryExtension: true,
     });
+    client = resolved.client;
   } catch (error) {
     return buildPublicFailure({
       error,
@@ -3194,7 +3109,7 @@ export const finalizePaymentSession = async ({
 
 export const cancelPaymentSession = async ({
   paymentAccessToken = "",
-  client = createCommerceWriteClient(),
+  client = null,
   releaseCouponReservation = null,
   prepareCouponRelease = null,
   appendCouponRelease = null,
@@ -3206,6 +3121,7 @@ export const cancelPaymentSession = async ({
       paymentAccessToken: String(paymentAccessToken || "").trim(),
       allowRecoveryExtension: false,
     });
+    client = resolved.client;
   } catch (error) {
     return buildPublicFailure({
       error,
@@ -3929,7 +3845,7 @@ export const getPaymentStatus = async ({
   query,
   paymentAccessToken: suppliedPaymentAccessToken = "",
   allowLegacyTokenFallback = true,
-  client = createCommerceWriteClient(),
+  client = null,
 }) => {
   const paymentAccessToken = String(
     suppliedPaymentAccessToken ||
@@ -3956,6 +3872,7 @@ export const getPaymentStatus = async ({
       allowRecoveryExtension: false,
       allowStatusReadExtension: true,
     });
+    client = resolved.client;
   } catch (error) {
     return buildPublicFailure({
       error,
@@ -3972,7 +3889,7 @@ export const getPaymentStatus = async ({
 export const reconcilePaymentSessions = async ({
   req,
   client = createCommerceWriteClient(),
-  backend = "sanity",
+  backend = client?.backend === "sanity" ? "sanity" : "supabase",
   createRequiresRescheduleBooking = null,
   applyBookingRefund = null,
   releaseCouponReservation = null,
@@ -3987,9 +3904,25 @@ export const reconcilePaymentSessions = async ({
     });
   }
 
+  const policy = resolveSupabaseRuntimePolicy();
+  const currentGeneration = Math.max(
+    0,
+    Number(policy.commerceFailoverGeneration) || 0
+  );
+  const primaryBackend =
+    policy.commercePrimaryBackend === "sanity" ? "sanity" : "supabase";
   const records = await client.fetch(
     `*[_type == $type
-      && coalesce(backendOwner, "sanity") == $backend
+      && (
+        (
+          coalesce(cutoverGeneration, 0) < $currentGeneration
+          && $backend == $primaryBackend
+        )
+        || (
+          coalesce(cutoverGeneration, 0) >= $currentGeneration
+          && coalesce(backendOwner, "sanity") == $backend
+        )
+      )
       && (
         lower(status) in $statuses
         || (lower(status) == $refundedStatus && refundRequiresBookingSync == true)
@@ -4010,6 +3943,8 @@ export const reconcilePaymentSessions = async ({
     {
       type: PAYMENT_RECORD_TYPE,
       backend: backend === "supabase" ? "supabase" : "sanity",
+      primaryBackend,
+      currentGeneration,
       statuses: [
         PAYMENT_STATUS_STARTED,
         PAYMENT_STATUS_CAPTURED_CLIENT,
@@ -4441,7 +4376,7 @@ const findOrCreateWebhookRecoveryRecord = async ({
   providerPaymentId = "",
   payerEmail = "",
   eventType = "",
-  backendOwner = "sanity",
+  backendOwner = "supabase",
 }) => {
   const existing = await loadPaymentRecordForFinalize({
     client,
@@ -4708,7 +4643,7 @@ const processPaymentRefund = async ({
   currency = "",
   reversed = false,
   applyBookingRefund = null,
-  backendOwner = "sanity",
+  backendOwner = "supabase",
 }) => {
   let resolvedProviderOrderId = String(providerOrderId || "").trim();
   let razorpayPaymentLookup = null;
@@ -4933,39 +4868,6 @@ const processPaymentRefund = async ({
     }
   }
 
-  try {
-    await flushCriticalCommerceMirror(client, [
-      nextRecord._id,
-      nextRecord.bookingId,
-      nextRecord.couponReservationId,
-      nextRecord.bookingPayload?.referralId,
-    ]);
-  } catch {
-    const recoveryAttemptCount = Number(nextRecord.recoveryAttemptCount || 0) + 1;
-    nextRecord = await patchPaymentRecord({
-      client,
-      record: nextRecord,
-      set: {
-        recoveryReason: "sanity_mirror_pending_after_refund",
-        recoveryAttemptCount,
-        nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
-        refundRequiresBookingSync: true,
-      },
-      event: buildPaymentRecordEvent({
-        status: nextRecord.status,
-        source: "webhook",
-        reason: "sanity_mirror_pending_after_refund",
-      }),
-    }).catch(() => nextRecord);
-    return {
-      httpStatus: 202,
-      body: {
-        ...buildPublicStatusBody(nextRecord),
-        refundState,
-      },
-    };
-  }
-
   return {
     httpStatus: isFullRefund && nextRecord.refundRequiresBookingSync ? 202 : 200,
     body: {
@@ -4979,7 +4881,7 @@ export const handleRazorpayWebhook = async ({
   req,
   client = createCommerceWriteClient(),
   applyBookingRefund = null,
-  backendOwner = "sanity",
+  backendOwner = client?.backend === "sanity" ? "sanity" : "supabase",
 }) => {
   const signature = String(req?.headers?.["x-razorpay-signature"] || "").trim();
   const verified = verifyRazorpayWebhookSignature({
@@ -5091,7 +4993,7 @@ export const handlePayPalWebhook = async ({
   req,
   client = createCommerceWriteClient(),
   applyBookingRefund = null,
-  backendOwner = "sanity",
+  backendOwner = client?.backend === "sanity" ? "sanity" : "supabase",
 }) => {
   const verified = await verifyPayPalWebhookSignature({
     rawBody: String(req?.rawBody || ""),

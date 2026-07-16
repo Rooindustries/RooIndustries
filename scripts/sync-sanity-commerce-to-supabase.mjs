@@ -11,6 +11,7 @@ import {
   COMMERCE_RECONCILABLE_DOCUMENT_TYPES,
   COMMERCE_SHADOW_DOCUMENT_TYPES,
 } from "../src/server/commerce/documentTypes.js";
+import { resolveSupabaseRuntimePolicy } from "../src/server/supabase/runtime.js";
 import { sha256 } from "./lib/supabase-shadow-migration.mjs";
 
 const explicitEnvIndex = process.argv.indexOf("--env");
@@ -39,12 +40,10 @@ const mode = apply ? "apply" : verifyOnly ? "verify" : "dry-run";
 const readEnv = (...keys) =>
   keys.map((key) => String(process.env[key] || "").trim()).find(Boolean) || "";
 
-const globalBackend = readEnv("DATA_PRIMARY_BACKEND") || "sanity";
-const commerceBackend =
-  readEnv("COMMERCE_PRIMARY_BACKEND") || globalBackend || "sanity";
+const runtimePolicy = resolveSupabaseRuntimePolicy(process.env);
 if (
   apply &&
-  [globalBackend, commerceBackend].some(
+  [runtimePolicy.primaryBackend, runtimePolicy.commercePrimaryBackend].some(
     (backend) => backend.toLowerCase() === "supabase"
   )
 ) {

@@ -31,15 +31,6 @@ const createResendClient = () => {
 
 const resend = createResendClient();
 
-const flushCriticalBookingMirror = async (client, requiredDocumentIds = []) => {
-  if (typeof client?.flushCommerceMirror !== "function") return null;
-  return client.flushCommerceMirror({
-    failClosed: true,
-    requiredDocumentIds: [...new Set(requiredDocumentIds.filter(Boolean))],
-    limit: 100,
-  });
-};
-
 const recordEmailLedgerOutcome = async ({
   client,
   dispatch,
@@ -496,33 +487,6 @@ export const sendBookingEmailsForBooking = async ({
     throw error;
   }
 
-  try {
-    await flushCriticalBookingMirror(client, [resolvedBooking._id]);
-  } catch (error) {
-    await client
-      .patch(resolvedBooking._id)
-      .set({
-        emailDispatchStatus: "retry",
-        emailDispatchLastError: "sanity_mirror_pending_before_email",
-        emailDispatchLeaseId: "",
-        emailDispatchLeaseExpiresAt: "",
-        emailDispatchNextAttemptAt: new Date(nowMs + 5 * 60 * 1000).toISOString(),
-      })
-      .commit()
-      .catch(() => null);
-    return {
-      httpStatus: 503,
-      body: {
-        ok: false,
-        bookingId: resolvedBooking._id,
-        retryable: true,
-        code: "sanity_mirror_pending_before_email",
-        error: "Booking confirmation is saved and will retry shortly.",
-        emailDispatch: buildDeferredEmailDispatch({ booking: resolvedBooking }),
-      },
-    };
-  }
-
   let ledger = null;
   try {
     ledger = await claimEmailDispatchPair({
@@ -635,9 +599,6 @@ export const sendBookingEmailsForBooking = async ({
       ? ""
       : new Date(nowMs + 5 * 60 * 1000).toISOString();
     await client.patch(resolvedBooking._id).set(patchValues).commit();
-    await flushCriticalBookingMirror(client, [resolvedBooking._id]).catch(
-      () => null
-    );
     return {
       httpStatus: dispatch.allSent ? 200 : 503,
       body: {
@@ -828,22 +789,6 @@ export const sendBookingEmailsForBooking = async ({
     await completionPatch.set(patchValues).commit();
   }
 
-  try {
-    await flushCriticalBookingMirror(client, [resolvedBooking._id]);
-  } catch {
-    return {
-      httpStatus: 503,
-      body: {
-        ok: false,
-        bookingId: resolvedBooking._id,
-        retryable: true,
-        code: "sanity_mirror_pending_after_email",
-        error: "Email delivery is recorded and its fallback copy will retry.",
-        emailDispatch: dispatch,
-      },
-    };
-  }
-
   return {
     httpStatus: dispatch.allSent ? 200 : 503,
     body: {
@@ -977,30 +922,6 @@ export const dispatchRescheduleNotifications = async ({
       };
     }
     throw error;
-  }
-
-  try {
-    await flushCriticalBookingMirror(client, [recoveryBooking._id]);
-  } catch {
-    await client
-      .patch(recoveryBooking._id)
-      .set({
-        recoveryNotificationStatus: "pending",
-        recoveryNotificationLastError: "sanity_mirror_pending_before_email",
-        recoveryNotificationLeaseId: "",
-        recoveryNotificationLeaseExpiresAt: "",
-        recoveryNotificationNextAttemptAt: new Date(
-          nowMs + 5 * 60 * 1000
-        ).toISOString(),
-      })
-      .commit()
-      .catch(() => null);
-    return {
-      ok: false,
-      bookingId: recoveryBooking._id,
-      notificationRequired: true,
-      reason: "sanity_mirror_pending_before_email",
-    };
   }
 
   let recoveryLedger = null;
@@ -1289,22 +1210,6 @@ export const dispatchRescheduleNotifications = async ({
       })
       .commit()
       .catch(() => {});
-  }
-
-  try {
-    await flushCriticalBookingMirror(client, [
-      recoveryBooking._id,
-      recoveryCase?._id,
-    ]);
-  } catch {
-    return {
-      ok: false,
-      bookingId: recoveryBooking._id,
-      notificationRequired: true,
-      status: patchValues.recoveryNotificationStatus,
-      reason: "sanity_mirror_pending_after_email",
-      errors: [...errors, "sanity_mirror_pending_after_email"],
-    };
   }
 
   return {

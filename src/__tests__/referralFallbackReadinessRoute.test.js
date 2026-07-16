@@ -45,6 +45,8 @@ jest.mock("../server/supabase/runtime.js", () => ({
     commerceCutoverEnabled: true,
     commerceStartsPaused: false,
     commerceFailoverGeneration: 1,
+    sanityConfigurationStatus: "complete",
+    reverseMirrorEnabled: true,
   })),
 }));
 
@@ -161,7 +163,7 @@ describe("referral fallback authority readiness", () => {
     expect(mockRpc).toHaveBeenCalledWith("roo_supabase_release_readiness");
   });
 
-  test("blocks release readiness when the authority is incomplete", async () => {
+  test("surfaces incomplete fallback authority without blocking primary readiness", async () => {
     mockRpc
       .mockResolvedValueOnce({ data: healthyCommerceReadiness(), error: null })
       .mockResolvedValueOnce({
@@ -193,7 +195,9 @@ describe("referral fallback authority readiness", () => {
     expect(body).toMatchObject({
       ok: true,
       commerceReady: true,
-      ready: false,
+      ready: true,
+      primaryReady: true,
+      failoverReady: false,
       documentMutationMirrorReady: true,
       referralFallbackAuthorityReady: false,
     });

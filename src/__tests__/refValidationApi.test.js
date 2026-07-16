@@ -2,10 +2,27 @@ const mockCreateClient = jest.fn(() => ({
   config: () => ({ projectId: "test-project", dataset: "production" }),
   fetch: jest.fn(),
 }));
+const previousDataPrimary = process.env.DATA_PRIMARY_BACKEND;
+const previousCommercePrimary = process.env.COMMERCE_PRIMARY_BACKEND;
 
 jest.mock("@sanity/client", () => ({
   createClient: (...args) => mockCreateClient(...args),
 }));
+
+beforeAll(() => {
+  process.env.DATA_PRIMARY_BACKEND = "sanity";
+  process.env.COMMERCE_PRIMARY_BACKEND = "sanity";
+});
+
+afterAll(() => {
+  if (previousDataPrimary === undefined) delete process.env.DATA_PRIMARY_BACKEND;
+  else process.env.DATA_PRIMARY_BACKEND = previousDataPrimary;
+  if (previousCommercePrimary === undefined) {
+    delete process.env.COMMERCE_PRIMARY_BACKEND;
+  } else {
+    process.env.COMMERCE_PRIMARY_BACKEND = previousCommercePrimary;
+  }
+});
 
 const createRes = () => ({
   statusCode: 200,

@@ -9,6 +9,7 @@ const originalCanaries = process.env.SUPABASE_AUTH_CANARY_ACCOUNTS;
 const originalPrivateProject = process.env.SANITY_PRIVATE_PROJECT_ID;
 const originalPrivateDataset = process.env.SANITY_PRIVATE_DATASET;
 const originalPrivateReadToken = process.env.SANITY_PRIVATE_READ_TOKEN;
+const originalPrivateWriteToken = process.env.SANITY_PRIVATE_WRITE_TOKEN;
 const principalId = "10000000-0000-4000-8000-000000000001";
 
 jest.mock("../server/supabase/accounts.js", () => ({
@@ -111,6 +112,11 @@ const fallbackAuthority = (overrides = {}) => ({
 });
 
 beforeAll(() => {
+  process.env.DATA_PRIMARY_BACKEND = "sanity";
+  process.env.SANITY_PRIVATE_PROJECT_ID = "private-project";
+  process.env.SANITY_PRIVATE_DATASET = "private-dataset";
+  process.env.SANITY_PRIVATE_READ_TOKEN = "private-read-token";
+  process.env.SANITY_PRIVATE_WRITE_TOKEN = "private-write-token";
   const loginModule = require("../../src/server/api/ref/login");
   login = loginModule.default || loginModule;
   ({ getReferralSession } = require("../../src/server/api/ref/auth"));
@@ -123,6 +129,7 @@ beforeEach(() => {
   process.env.SANITY_PRIVATE_PROJECT_ID = "private-project";
   process.env.SANITY_PRIVATE_DATASET = "private-dataset";
   process.env.SANITY_PRIVATE_READ_TOKEN = "private-read-token";
+  process.env.SANITY_PRIVATE_WRITE_TOKEN = "private-write-token";
   delete process.env.SUPABASE_CUTOVER_ENABLED;
   delete process.env.SUPABASE_AUTH_CANARY_ACCOUNTS;
 });
@@ -140,6 +147,8 @@ afterAll(() => {
   else process.env.SANITY_PRIVATE_DATASET = originalPrivateDataset;
   if (originalPrivateReadToken === undefined) delete process.env.SANITY_PRIVATE_READ_TOKEN;
   else process.env.SANITY_PRIVATE_READ_TOKEN = originalPrivateReadToken;
+  if (originalPrivateWriteToken === undefined) delete process.env.SANITY_PRIVATE_WRITE_TOKEN;
+  else process.env.SANITY_PRIVATE_WRITE_TOKEN = originalPrivateWriteToken;
 });
 
 describe("referral login API", () => {

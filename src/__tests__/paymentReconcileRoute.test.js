@@ -17,7 +17,11 @@ const createResponse = () => {
   return { response, state };
 };
 
-const loadHandler = async ({ authorized = true } = {}) => {
+const loadHandler = async ({
+  authorized = true,
+  primaryBackend = "supabase",
+  sanityConfigured = true,
+} = {}) => {
   jest.resetModules();
   const events = [];
   const syncSanityCommerceChanges = jest.fn(async () => {
@@ -101,6 +105,18 @@ const loadHandler = async ({ authorized = true } = {}) => {
   }));
   jest.doMock("../server/supabase/commerceParity.js", () => ({
     refreshCommerceParityIfStale,
+  }));
+  jest.doMock("../server/supabase/runtime.js", () => ({
+    resolveSupabaseRuntimePolicy: jest.fn(() => ({
+      commercePrimaryBackend: primaryBackend,
+      commerceFailoverGeneration: 1,
+    })),
+  }));
+  jest.doMock("../server/supabase/sanityConfiguration.cjs", () => ({
+    inspectSanityConfiguration: jest.fn(() => ({
+      status: sanityConfigured ? "complete" : "absent",
+      writeConfigured: sanityConfigured,
+    })),
   }));
   jest.doMock("../server/tourney/reconcile.js", () => ({
     runTourneyReconciliation,
@@ -198,6 +214,54 @@ describe("payment reconciliation route authorization", () => {
     expect(loaded.reconcileBookingEmailDispatches).not.toHaveBeenCalled();
     expect(loaded.reconcileReferralEmailDispatches).not.toHaveBeenCalled();
     expect(loaded.cleanupExpiredRateLimitBuckets).not.toHaveBeenCalled();
+  });
+
+  test("reports unconfigured Sanity as skipped without failing Supabase reconciliation", async () => {
+    const loaded = await loadHandler({ sanityConfigured: false });
+    const { response, state } = createResponse();
+
+    await loaded.handler({ method: "GET", headers: {} }, response);
+
+    expect(state.status).toBe(200);
+    expect(loaded.reconcilePaymentSessions).toHaveBeenCalledTimes(1);
+    expect(loaded.reconcilePaymentSessions).toHaveBeenCalledWith(
+      expect.objectContaining({ backend: "supabase" })
+    );
+    expect(state.body.summary).toMatchObject({
+      backendReconciliation: {
+        supabase: { ok: true },
+        sanity: { skipped: true, reason: "sanity_unconfigured" },
+      },
+      documentMirror: { skipped: true, reason: "sanity_unconfigured" },
+      reverseMirror: { skipped: true, reason: "sanity_unconfigured" },
+      commerceParity: { skipped: true, reason: "sanity_unconfigured" },
+    });
+    expect(loaded.adminRpc).toHaveBeenCalledWith(
+      "roo_cleanup_expired_supabase_holds",
+      { p_cutover_generation: 1, p_limit: 100 }
+    );
+  });
+
+  test("does not fail Supabase reconciliation when the Sanity pass fails", async () => {
+    const loaded = await loadHandler();
+    loaded.reconcilePaymentSessions.mockImplementation(async ({ backend }) => {
+      if (backend === "sanity") throw new Error("Sanity unavailable");
+      return { httpStatus: 200, body: { ok: true, summary: { checked: 1 } } };
+    });
+    const { response, state } = createResponse();
+
+    await loaded.handler({ method: "GET", headers: {} }, response);
+
+    expect(state.status).toBe(200);
+    expect(state.body).toMatchObject({
+      ok: true,
+      summary: {
+        backendReconciliation: {
+          supabase: { ok: true },
+          sanity: { ok: false, pending: true },
+        },
+      },
+    });
   });
 
   test("keeps the manual Tourney scope while the shared scheduler uses a bounded budget", async () => {

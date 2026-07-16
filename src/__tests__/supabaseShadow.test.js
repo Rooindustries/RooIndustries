@@ -102,9 +102,10 @@ const createRpcClient = (seed = []) => {
 };
 
 describe("Supabase runtime policy", () => {
-  test("defaults to Sanity with every migration feature disabled", () => {
+  test("defaults to Supabase with optional migration features disabled", () => {
     expect(resolveSupabaseRuntimePolicy({ NODE_ENV: "test" })).toMatchObject({
-      primaryBackend: "sanity",
+      primaryBackend: "supabase",
+      commercePrimaryBackend: "supabase",
       shadowWritesEnabled: false,
       contentCanaryPercentage: 0,
       commerceCanaryPercentage: 0,
