@@ -209,7 +209,7 @@ function BookingStepTracker({ step }) {
             <li
               key={label}
               aria-current={isActive ? "step" : undefined}
-              className={`rounded-lg border px-2 py-2 text-xs font-semibold transition ${
+              className={`rounded-lg border px-2 py-2 text-xs sm:px-3 sm:py-2.5 sm:text-sm font-semibold transition ${
                 isActive
                   ? "border-info-border bg-info-soft text-info-text"
                   : isComplete
@@ -218,7 +218,7 @@ function BookingStepTracker({ step }) {
               }`}
             >
               <span aria-hidden="true" className="mr-1">
-                {isComplete ? "✓" : stepNumber}
+                {isComplete ? "✓" : `${stepNumber})`}
               </span>
               {label}
             </li>
