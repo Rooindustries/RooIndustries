@@ -76,38 +76,28 @@ const emailHtml = ({
   discordInviteUrl = "",
   discordLabel = "",
 }) => `
-  <div style="margin:0;padding:0;background:#020617;color:#e2e8f0;font-family:Arial,sans-serif">
-    <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;background:#020617;padding:24px 0">
+  <div style="margin:0;padding:0;background:#e9edf3;font-family:Arial,Helvetica,sans-serif">
+    <div style="display:none;max-height:0;overflow:hidden;mso-hide:all">${escapeHtml(intro)}</div>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;background:#e9edf3;padding:32px 12px">
       <tr>
         <td align="center">
-          <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:640px;background:#0f172a;border:1px solid rgba(56,189,248,.18);border-radius:18px;padding:28px">
+          <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:640px;background:#0f172a;border:1px solid #2a3f5c;border-radius:16px;overflow:hidden">
             <tr>
-              <td style="text-align:center;padding-bottom:20px">
-                <img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(siteName)}" style="height:48px;display:block;margin:0 auto 8px"/>
-                <div style="font-weight:700;font-size:18px;color:#7dd3fc">${escapeHtml(siteName)}</div>
+              <td style="padding:26px 28px 18px;text-align:center;background:#0b1120">
+                <img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(siteName)}" height="44" style="height:44px;display:block;margin:0 auto 8px"/>
+                <div style="font-weight:700;font-size:16px;color:#7dd3fc;letter-spacing:.4px">${escapeHtml(siteName)}</div>
               </td>
             </tr>
+            <tr><td style="height:2px;background:#0ea5e9;font-size:0;line-height:0">&nbsp;</td></tr>
             <tr>
-              <td>
-                <h1 style="margin:0 0 8px;font-size:20px;color:#a5e8ff">${escapeHtml(heading)}</h1>
+              <td style="padding:28px">
+                <h1 style="margin:0 0 10px;font-size:21px;line-height:1.3;color:#a5e8ff">${escapeHtml(heading)}</h1>
+                <p style="margin:0 0 18px;font-size:14px;line-height:1.65;color:#cbd5e1">${escapeHtml(intro)}</p>
                 ${
                   discordInviteUrl
-                    ? `<p style="margin:0 0 14px">
-                <a
-                  href="${escapeHtml(discordInviteUrl)}"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style="
-                    display:inline-block;
-                    padding:8px 14px;
-                    border-radius:999px;
-                    background:#38bdf8;
-                    color:#0b1120;
-                    font-size:13px;
-                    text-decoration:none;
-                    font-weight:600;
-                  "
-                >
+                    ? `<p style="margin:0 0 22px">
+                <a href="${escapeHtml(discordInviteUrl)}" target="_blank" rel="noopener noreferrer"
+                   style="display:inline-block;padding:11px 20px;border-radius:8px;background:#38bdf8;color:#0b1120;font-size:14px;font-weight:700;text-decoration:none">
                   ${escapeHtml(
                     discordLabel || "Join the Roo Industries Discord (Required)"
                   )}
@@ -115,25 +105,26 @@ const emailHtml = ({
               </p>`
                     : ""
                 }
-
-                <p style="margin:10px 0 16px;opacity:.85">${escapeHtml(intro)}</p>
-                <table cellpadding="0" cellspacing="0" style="width:100%;background:#0b1120;border:1px solid rgba(56,189,248,.15);border-radius:12px">
+                <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;background:#0b1120;border:1px solid #24405e;border-radius:10px">
                   <tbody>
                     ${fields
                       .map(
-                        (field) => `
+                        (field, index) => `
                       <tr>
-                        <td style="padding:10px 14px;color:#93c5fd;width:40%">${escapeHtml(field.label)}</td>
-                        <td style="padding:10px 14px;color:#e5f2ff">${escapeHtml(field.value)}</td>
+                        <td style="padding:11px 16px;font-size:13px;color:#93c5fd${index === 0 ? ";width:40%" : ""}${index === fields.length - 1 ? "" : ";border-bottom:1px solid #16263d"}">${escapeHtml(field.label)}</td>
+                        <td style="padding:11px 16px;font-size:13px;font-weight:600;color:#e5f2ff${index === fields.length - 1 ? "" : ";border-bottom:1px solid #16263d"}">${escapeHtml(field.value)}</td>
                       </tr>`
                       )
                       .join("")}
                   </tbody>
                 </table>
-                <p style="margin:18px 0 0;font-size:12px;color:#94a3b8">This is an automatic email from ${escapeHtml(siteName)}.</p>
+                <p style="margin:20px 0 0;font-size:12px;line-height:1.6;color:#64748b">This is an automatic email from ${escapeHtml(siteName)}.</p>
               </td>
             </tr>
           </table>
+          <div style="max-width:640px;margin:14px auto 0;font-size:11px;color:#8494ab;text-align:center">
+            Roo Industries · Precision Performance Engineering
+          </div>
         </td>
       </tr>
     </table>
