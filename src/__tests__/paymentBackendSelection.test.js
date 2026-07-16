@@ -166,6 +166,47 @@ describe("payment backend pinning", () => {
     })).toBe("sanity");
   });
 
+  test.each(["", "  ", "not-a-backend"])(
+    "routes stale payment authority to Supabase when policy backend is %j",
+    (policyBackend) => {
+      expect(selectPaymentAuthority({
+        backendOwner: "sanity",
+        cutoverGeneration: 0,
+        policy: {
+          commercePrimaryBackend: policyBackend,
+          commerceFailoverGeneration: 1,
+        },
+      })).toBe("supabase");
+    }
+  );
+
+  test.each(["", "  "])(
+    "starts generation-one payments on Supabase with %j selector debris",
+    (blank) => {
+      expect(selectPaymentStartBackend({
+        body: { bookingPayload: { packageTitle: "Performance Vertex Max" } },
+        env: {
+          DATA_PRIMARY_BACKEND: blank,
+          COMMERCE_PRIMARY_BACKEND: blank,
+          COMMERCE_FAILOVER_GENERATION: "1",
+        },
+      })).toBe("supabase");
+    }
+  );
+
+  test.each(["", "  "])(
+    "treats %j explicit payment generation as absent",
+    (blank) => {
+      expect(selectPaymentStartBackend({
+        body: { bookingPayload: { packageTitle: "Performance Vertex Max" } },
+        cutoverGeneration: blank,
+        env: {
+          COMMERCE_FAILOVER_GENERATION: "1",
+        },
+      })).toBe("supabase");
+    }
+  );
+
   test("resolves a generation-one Supabase webhook record to promoted Sanity", async () => {
     const fetch = jest.fn().mockResolvedValue({
       _id: "paymentRecord.promoted",

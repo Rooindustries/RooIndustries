@@ -1,5 +1,8 @@
 import { createSupabaseAdminClient } from "./adminClient.js";
 import { resolveSupabaseRuntimePolicy } from "./runtime.js";
+import envValue from "./envValue.cjs";
+
+const { normalizeBackend } = envValue;
 
 const unavailable = (message, code = "COMMERCE_CONTROL_UNAVAILABLE") => {
   const error = new Error(message);
@@ -10,10 +13,7 @@ const unavailable = (message, code = "COMMERCE_CONTROL_UNAVAILABLE") => {
 };
 
 const normalizeControl = (value = {}) => ({
-  primaryBackend:
-    String(value?.primary_backend || "").trim().toLowerCase() === "supabase"
-      ? "supabase"
-      : "sanity",
+  primaryBackend: normalizeBackend(value?.primary_backend),
   generation: Math.max(0, Number(value?.generation) || 0),
   startsPaused: Boolean(value?.starts_paused),
   changeReason: String(value?.change_reason || "").trim(),

@@ -1,4 +1,13 @@
-if (!process.env.CI && !process.env.VERCEL) {
+const {
+  normalizeBackend,
+  readEnvValue,
+  readFirstEnvValue,
+} = require("../src/server/supabase/envValue.cjs");
+
+if (
+  !readEnvValue(process.env, "CI") &&
+  !readEnvValue(process.env, "VERCEL")
+) {
   require("dotenv").config({ path: ".env.local" });
 }
 
@@ -16,16 +25,17 @@ const {
 const {
   inspectSanityConfiguration,
 } = require("../src/server/supabase/sanityConfiguration.cjs");
-
-const vercelEnv = (process.env.VERCEL_ENV || "").trim().toLowerCase();
+const vercelEnv = readEnvValue(process.env, "VERCEL_ENV").toLowerCase();
 const hasExplicitVercelEnv = vercelEnv.length > 0;
-const isCi = String(process.env.CI || "").toLowerCase() === "true";
-const isVercelBuild = Boolean(process.env.VERCEL) || hasExplicitVercelEnv;
-const nextPhase = String(process.env.NEXT_PHASE || "").trim().toLowerCase();
+const isCi = readEnvValue(process.env, "CI").toLowerCase() === "true";
+const isVercelBuild =
+  Boolean(readEnvValue(process.env, "VERCEL")) || hasExplicitVercelEnv;
+const nextPhase = readEnvValue(process.env, "NEXT_PHASE").toLowerCase();
 const isNextProductionBuild = nextPhase === "phase-production-build";
 const forceStrict =
-  String(process.env.VALIDATE_RUNTIME_ENV_STRICT || "").toLowerCase() === "1" ||
-  String(process.env.REQUIRE_RUNTIME_SECRETS || "").toLowerCase() === "1";
+  readEnvValue(process.env, "VALIDATE_RUNTIME_ENV_STRICT").toLowerCase() ===
+    "1" ||
+  readEnvValue(process.env, "REQUIRE_RUNTIME_SECRETS").toLowerCase() === "1";
 const paymentRuntimePolicy = resolvePaymentRuntimePolicy();
 const paymentProviders = resolvePaymentProviders();
 
@@ -39,26 +49,20 @@ const isReleaseBuild = isProdBuild || isPreviewBuild;
 const shouldFailClosed =
   missing => missing.length > 0 && isReleaseBuild && (isCi || isVercelBuild || isNextProductionBuild || forceStrict);
 
-const getFirstValue = (keys = []) => {
-  for (const key of keys) {
-    const value = String(process.env[key] || "").trim();
-    if (value) return value;
-  }
-  return "";
-};
+const getFirstValue = (keys = []) => readFirstEnvValue(process.env, keys);
 const hasAny = (keys = []) => Boolean(getFirstValue(keys));
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
 const FALSE_VALUES = new Set(["0", "false", "no", "off"]);
 const isEnabled = (key) =>
-  TRUE_VALUES.has(String(process.env[key] || "").trim().toLowerCase());
+  TRUE_VALUES.has(readEnvValue(process.env, key).toLowerCase());
 const readExplicitBoolean = (key) => {
-  const value = String(process.env[key] || "").trim().toLowerCase();
+  const value = readEnvValue(process.env, key).toLowerCase();
   if (TRUE_VALUES.has(value)) return { configured: true, value: true };
   if (FALSE_VALUES.has(value)) return { configured: true, value: false };
   return { configured: false, value: true };
 };
 const numericPercent = (key) => {
-  const parsed = Number(String(process.env[key] || "").trim() || 0);
+  const parsed = Number(readEnvValue(process.env, key) || 0);
   return Number.isFinite(parsed) ? Math.max(0, Math.min(100, parsed)) : 0;
 };
 
@@ -242,11 +246,10 @@ const razorpayKeySecret = getFirstValue(["RAZORPAY_KEY_SECRET"]);
 const razorpayWebhookSecret = getFirstValue(["RAZORPAY_WEBHOOK_SECRET"]);
 const paypalClientId = getFirstValue(paypalClientIdKeys);
 const paypalClientSecret = getFirstValue(paypalClientSecretKeys);
-const explicitPayPalEnv = String(
-  process.env.PAYPAL_ENV || process.env.NEXT_PUBLIC_PAYPAL_ENV || ""
-)
-  .trim()
-  .toLowerCase();
+const explicitPayPalEnv = getFirstValue([
+  "PAYPAL_ENV",
+  "NEXT_PUBLIC_PAYPAL_ENV",
+]).toLowerCase();
 
 const providerConsistencyFailures = [];
 const providerConsistencyWarnings = [];
@@ -283,7 +286,7 @@ const compatibilityDeadlines = [
 ];
 
 for (const [key, maximumFutureMs] of compatibilityDeadlines) {
-  const raw = String(process.env[key] || "").trim();
+  const raw = readEnvValue(process.env, key);
   if (!raw) continue;
   const deadline = new Date(raw).getTime();
   if (!Number.isFinite(deadline)) {
@@ -377,9 +380,14 @@ if (
   }
 }
 
-const primaryBackend = getFirstValue(["DATA_PRIMARY_BACKEND"]).toLowerCase() || "supabase";
-const commercePrimaryBackend =
-  getFirstValue(["COMMERCE_PRIMARY_BACKEND"]).toLowerCase() || primaryBackend;
+const primaryBackend = normalizeBackend(
+  getFirstValue(["DATA_PRIMARY_BACKEND"]),
+  "supabase"
+);
+const commercePrimaryBackend = normalizeBackend(
+  getFirstValue(["COMMERCE_PRIMARY_BACKEND"]),
+  primaryBackend
+);
 const tourneyDatabaseMode =
   getFirstValue(["TOURNEY_DATABASE_MODE"]).toLowerCase() || "legacy";
 const tourneyMirrorEnabled = isEnabled("TOURNEY_MIRROR_ENABLED");
@@ -470,7 +478,7 @@ const missing = [...requiredChecks, ...sanityRequiredChecks]
 
 if (isProdBuild && blobDownloadsEnabled) {
   const catalogFailure = validateUtilitiesDownloadCatalog(
-    process.env.DOWNLOAD_CATALOG_JSON
+    readEnvValue(process.env, "DOWNLOAD_CATALOG_JSON")
   );
   if (catalogFailure) downloadConsistencyFailures.push(catalogFailure);
 }
@@ -530,16 +538,6 @@ const anySupabaseRuntimeEnabled =
   tourneyMirrorEnabled;
 const tourneyNeedsSupabase = tourneyDatabaseMode === "supabase" || tourneyMirrorEnabled;
 
-if (!["sanity", "supabase"].includes(primaryBackend)) {
-  supabaseConsistencyFailures.push(
-    "DATA_PRIMARY_BACKEND must be sanity or supabase."
-  );
-}
-if (!["sanity", "supabase"].includes(commercePrimaryBackend)) {
-  supabaseConsistencyFailures.push(
-    "COMMERCE_PRIMARY_BACKEND must be sanity or supabase."
-  );
-}
 if (!/^[0-9]+$/.test(commerceFailoverGeneration)) {
   supabaseConsistencyFailures.push(
     "COMMERCE_FAILOVER_GENERATION must be a non-negative integer."

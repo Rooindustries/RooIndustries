@@ -5,10 +5,10 @@ import { resolveSupabaseRuntimePolicy } from "../supabase/runtime.js";
 import { createReverseMirroringSupabaseClient } from "../supabase/reverseMirroringClient.js";
 import { createSupabaseAdminClient } from "../supabase/adminClient.js";
 import sanityConfiguration from "../supabase/sanityConfiguration.cjs";
+import envValue from "../supabase/envValue.cjs";
 import { logSanityMirrorEvent } from "../supabase/mirrorObservability.js";
 
 const DEFAULT_API_VERSION = "2023-10-01";
-const DOCUMENT_BACKENDS = new Set(["sanity", "supabase"]);
 const PRIVATE_SANITY_TARGET_KEYS = [
   "SANITY_PRIVATE_PROJECT_ID",
   "SANITY_PRIVATE_DATASET",
@@ -16,6 +16,7 @@ const PRIVATE_SANITY_TARGET_KEYS = [
   "SANITY_PRIVATE_WRITE_TOKEN",
 ];
 const { inspectSanityConfiguration } = sanityConfiguration;
+const { normalizeBackend } = envValue;
 
 const readFirst = (env, keys) =>
   keys
@@ -25,13 +26,8 @@ const readFirst = (env, keys) =>
 const hasPrivateSanityTarget = (env) =>
   PRIVATE_SANITY_TARGET_KEYS.some((key) => String(env?.[key] || "").trim());
 
-const resolveDocumentBackend = ({ override, primary }) => {
-  const backend = String(override || primary || "").trim().toLowerCase();
-  if (!DOCUMENT_BACKENDS.has(backend)) {
-    throw new Error("Document backend override must be sanity or supabase.");
-  }
-  return backend;
-};
+const resolveDocumentBackend = ({ override, primary }) =>
+  normalizeBackend(override, normalizeBackend(primary, "supabase"));
 
 const resolvePolicyBackend = ({ policy, domain = "global" }) =>
   domain === "commerce"

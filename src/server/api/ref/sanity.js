@@ -5,8 +5,10 @@ import {
 } from "../../data/documentClient.js";
 import { createCommerceStore } from "../../commerce/store.js";
 import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
+import envValue from "../../supabase/envValue.cjs";
 
 const DEFAULT_API_VERSION = "2023-10-01";
+const { normalizeBackend } = envValue;
 
 const readFirstEnv = (keys = []) =>
   keys
@@ -56,7 +58,10 @@ export const createCommerceReadClient = ({
   backendOverride = "",
 } = {}) => {
   const policy = resolveSupabaseRuntimePolicy();
-  const backend = backendOverride || policy.commercePrimaryBackend;
+  const backend = normalizeBackend(
+    backendOverride,
+    normalizeBackend(policy.commercePrimaryBackend, "supabase")
+  );
   return createCommerceStore({
     backend,
     cutoverGeneration: policy.commerceFailoverGeneration,
@@ -70,7 +75,10 @@ export const createCommerceReadClient = ({
 
 export const createCommerceWriteClient = ({ backendOverride = "" } = {}) => {
   const policy = resolveSupabaseRuntimePolicy();
-  const backend = backendOverride || policy.commercePrimaryBackend;
+  const backend = normalizeBackend(
+    backendOverride,
+    normalizeBackend(policy.commercePrimaryBackend, "supabase")
+  );
   return createCommerceStore({
     backend,
     cutoverGeneration: policy.commerceFailoverGeneration,

@@ -356,6 +356,25 @@ describe("booking hold backend isolation", () => {
     ).toBe("sanity");
   });
 
+  test.each(["", "  "])(
+    "does not coerce %j policy debris to Sanity hold authority",
+    (blank) => {
+      expect(
+        selectHoldAuthority({
+          tokenPayload: { hid: "hold-1", be: "sanity", gen: 0 },
+          policy: {
+            commercePrimaryBackend: blank,
+            commerceFailoverGeneration: 1,
+          },
+        })
+      ).toBe("supabase");
+    }
+  );
+
+  test("defaults an unowned hold to the Supabase policy", () => {
+    expect(selectHoldAuthority()).toBe("supabase");
+  });
+
   test("refreshes a Supabase hold only through Sanity after manual failover", async () => {
     const startTimeUTC = "2099-01-05T04:30:00.000Z";
     const holdId = buildSlotHoldId(startTimeUTC);

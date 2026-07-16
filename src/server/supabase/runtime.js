@@ -1,11 +1,12 @@
 import sanityConfiguration from "./sanityConfiguration.cjs";
+import envValue from "./envValue.cjs";
 
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
-const BACKENDS = new Set(["sanity", "supabase"]);
 const { inspectSanityConfiguration } = sanityConfiguration;
+const { normalizeBackend, readEnvValue } = envValue;
 
-const read = (env, key) => String(env?.[key] || "").trim();
-const readBoolean = (env, key) => TRUE_VALUES.has(read(env, key).toLowerCase());
+const readBoolean = (env, key) =>
+  TRUE_VALUES.has(readEnvValue(env, key).toLowerCase());
 
 const parsePercentage = (value) => {
   const number = Number(value || 0);
@@ -35,27 +36,24 @@ const parseGeneration = (value) => {
 
 export const resolveSupabaseRuntimePolicy = (env = process.env) => {
   const runtime =
-    read(env, "VERCEL_ENV").toLowerCase() ||
-    (read(env, "NODE_ENV").toLowerCase() === "production"
+    readEnvValue(env, "VERCEL_ENV").toLowerCase() ||
+    (readEnvValue(env, "NODE_ENV").toLowerCase() === "production"
       ? "production"
       : "development");
-  const requestedPrimary =
-    read(env, "DATA_PRIMARY_BACKEND").toLowerCase() || "supabase";
-  const requestedCommercePrimary =
-    read(env, "COMMERCE_PRIMARY_BACKEND").toLowerCase() || requestedPrimary;
-
-  if (!BACKENDS.has(requestedPrimary)) {
-    throw new Error("DATA_PRIMARY_BACKEND must be sanity or supabase.");
-  }
-  if (!BACKENDS.has(requestedCommercePrimary)) {
-    throw new Error("COMMERCE_PRIMARY_BACKEND must be sanity or supabase.");
-  }
+  const requestedPrimary = normalizeBackend(
+    readEnvValue(env, "DATA_PRIMARY_BACKEND"),
+    "supabase"
+  );
+  const requestedCommercePrimary = normalizeBackend(
+    readEnvValue(env, "COMMERCE_PRIMARY_BACKEND"),
+    requestedPrimary
+  );
 
   const cutoverEnabled = readBoolean(env, "SUPABASE_CUTOVER_ENABLED");
   const commerceCutoverEnabled = readBoolean(env, "COMMERCE_CUTOVER_ENABLED");
   const commerceStartsPaused = readBoolean(env, "COMMERCE_STARTS_PAUSED");
   const commerceFailoverGeneration = parseGeneration(
-    read(env, "COMMERCE_FAILOVER_GENERATION")
+    readEnvValue(env, "COMMERCE_FAILOVER_GENERATION")
   );
   const shadowWritesEnabled = readBoolean(env, "SUPABASE_SHADOW_WRITES");
   const sanity = inspectSanityConfiguration(env);
@@ -64,7 +62,7 @@ export const resolveSupabaseRuntimePolicy = (env = process.env) => {
     "SANITY_REVERSE_MIRROR_WRITES"
   );
   const commerceCanaryPercentage = parsePercentage(
-    read(env, "SUPABASE_COMMERCE_CANARY_PERCENT")
+    readEnvValue(env, "SUPABASE_COMMERCE_CANARY_PERCENT")
   );
   if (
     runtime === "production" &&
@@ -97,11 +95,11 @@ export const resolveSupabaseRuntimePolicy = (env = process.env) => {
     reverseMirrorLegacyFlagEnabled,
     sanityConfigurationStatus: sanity.status,
     contentCanaryPercentage: parsePercentage(
-      read(env, "SUPABASE_CONTENT_CANARY_PERCENT")
+      readEnvValue(env, "SUPABASE_CONTENT_CANARY_PERCENT")
     ),
     commerceCanaryPercentage,
     authCanaryAccounts: parseCanaryAccounts(
-      read(env, "SUPABASE_AUTH_CANARY_ACCOUNTS")
+      readEnvValue(env, "SUPABASE_AUTH_CANARY_ACCOUNTS")
     ),
   };
 };
