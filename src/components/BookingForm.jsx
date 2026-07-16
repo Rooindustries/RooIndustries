@@ -38,8 +38,6 @@ const BOOKING_CONFIRMATION_STORAGE_KEY = "booking_confirmation_state";
 const SESSION_STATE_KEY = "booking_modal_state";
 const REFERRAL_STORAGE_KEY = "referral_session";
 const BOOKING_FETCH_TIMEOUT_MS = 8000;
-const GOAL_OPTIONS = ["Lowest latency", "More FPS", "Stable frametimes"];
-const DEFAULT_GOALS = ["More FPS"];
 const REASSURANCE_COPY =
   "You won't be charged until you confirm on the payment page.";
 const PAYMENT_PENDING_EXPIRY_ERROR =
@@ -50,18 +48,12 @@ const STEP_PROGRESS_LABELS = {
   2: "Step 2 of 3 · 67% complete",
   3: "Step 3 of 3 · Ready to pay",
 };
-const normalizeGoals = (value) => {
-  if (!Array.isArray(value)) return [];
-  return GOAL_OPTIONS.filter((goal) => value.includes(goal));
-};
 const createFreshForm = () => ({
   discord: "",
   email: "",
   specs: "",
   mainGame: "",
   notes: "",
-  goals: [...DEFAULT_GOALS],
-  goalsTouched: false,
 });
 const normalizeForm = (value = {}) => ({
   discord: typeof value.discord === "string" ? value.discord : "",
@@ -69,19 +61,7 @@ const normalizeForm = (value = {}) => ({
   specs: typeof value.specs === "string" ? value.specs : "",
   mainGame: typeof value.mainGame === "string" ? value.mainGame : "",
   notes: typeof value.notes === "string" ? value.notes : "",
-  goals: Object.prototype.hasOwnProperty.call(value, "goals")
-    ? normalizeGoals(value.goals)
-    : [...DEFAULT_GOALS],
-  goalsTouched: value.goalsTouched === true,
 });
-const buildCheckoutMessage = (notes, goals) => {
-  const lines = [String(notes || "").trim()];
-  const normalizedGoals = normalizeGoals(goals);
-  if (normalizedGoals.length) {
-    lines.push(`Goals: ${normalizedGoals.join(", ")}`);
-  }
-  return lines.filter(Boolean).join("\n");
-};
 const readReferralFromSession = () => {
   try {
     return sessionStorage.getItem(REFERRAL_STORAGE_KEY) || "";
@@ -95,9 +75,7 @@ const isDraftEmpty = (formObj) =>
   !String(formObj?.email || "").trim() &&
   !String(formObj?.specs || "").trim() &&
   !String(formObj?.mainGame || "").trim() &&
-  !String(formObj?.notes || "").trim() &&
-  normalizeGoals(formObj?.goals).length === 0 &&
-  formObj?.goalsTouched !== true;
+  !String(formObj?.notes || "").trim();
 
 // Read query params
 function useQuery() {
@@ -618,10 +596,8 @@ export default function BookingForm({ isMobile }) {
     if (clearedNoHoldRef.current) return;
 
     const key = getDraftKey(selectedPackage);
-    if (form.goalsTouched !== true) {
-      clearDraftForPackage(key);
-      setForm(createFreshForm());
-    }
+    clearDraftForPackage(key);
+    setForm(createFreshForm());
     setSelectedSlot(null);
     setStep(1);
     clearedNoHoldRef.current = true;
@@ -630,7 +606,7 @@ export default function BookingForm({ isMobile }) {
     } catch {
       console.error("Failed to clear session state");
     }
-  }, [draftLoading, form.goalsTouched, myHold, selectedPackage]);
+  }, [draftLoading, myHold, selectedPackage]);
 
   // Load the tab-scoped hold on mount.
   useEffect(() => {
@@ -1326,23 +1302,6 @@ export default function BookingForm({ isMobile }) {
     }
   };
 
-  const handleGoalToggle = (goal) => {
-    if (isPaymentPendingHold || !GOAL_OPTIONS.includes(goal)) return;
-    const nextGoals = form.goals.includes(goal)
-      ? form.goals.filter((item) => item !== goal)
-      : GOAL_OPTIONS.filter((item) => [...form.goals, goal].includes(item));
-    const nextForm = { ...form, goals: nextGoals, goalsTouched: true };
-    setForm(nextForm);
-    if (isDraftEmpty(nextForm)) {
-      clearDraftForPackage(getDraftKey(selectedPackage));
-    } else {
-      persistDraft({
-        form: nextForm,
-        selectedPackage: { ...selectedPackage },
-      });
-    }
-  };
-
   useEffect(() => {
     if (draftLoading) return;
     if (isDraftEmpty(form)) {
@@ -1354,7 +1313,6 @@ export default function BookingForm({ isMobile }) {
     form.specs,
     form.mainGame,
     form.notes,
-    form.goals,
     selectedPackage,
     draftLoading,
   ]);
@@ -1719,8 +1677,7 @@ export default function BookingForm({ isMobile }) {
       email: form.email.trim(),
       specs: form.specs.trim(),
       mainGame: form.mainGame.trim(),
-      goals: normalizeGoals(form.goals),
-      message: buildCheckoutMessage(form.notes, form.goals),
+      message: form.notes.trim(),
 
       packageTitle: selectedPackage.title,
       packagePrice: selectedPackage.price,
@@ -2232,34 +2189,9 @@ export default function BookingForm({ isMobile }) {
                         className="w-full bg-surface-input border border-line-input rounded-lg p-3 h-24 focus:outline-none focus:border-info-border transition"
                       />
 
-                      <fieldset>
-                        <legend className="mb-2 text-sm font-semibold text-info-text">
-                          What matters most? <span className="text-xs text-ink-muted">Optional</span>
-                        </legend>
-                        <div className="flex flex-wrap justify-center gap-2">
-                          {GOAL_OPTIONS.map((goal) => {
-                            const isSelected = form.goals.includes(goal);
-                            return (
-                              <button
-                                key={goal}
-                                type="button"
-                                aria-pressed={isSelected}
-                                onClick={() => handleGoalToggle(goal)}
-                                className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
-                                  isSelected
-                                    ? "bg-accent-strong text-accent-contrast shadow-glow-soft border-info-border"
-                                    : "bg-surface-input border-line-input text-ink-muted hover:bg-surface-hover"
-                                }`}
-                              >
-                                {goal}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </fieldset>
                     </div>
 
-                    <aside className="bg-surface-card border border-line-input rounded-xl p-6 text-center shadow-[0_0_15px_rgba(14,165,233,0.25)]">
+                    <aside className="self-start bg-surface-card border border-line-input rounded-xl p-6 text-center shadow-[0_0_15px_rgba(14,165,233,0.25)]">
                       <p className="text-xs font-semibold text-accent">
                         Your optimization plan
                       </p>
@@ -2269,18 +2201,6 @@ export default function BookingForm({ isMobile }) {
                       <p className="mt-3 text-sm text-ink-muted">
                         {reviewDateTimeLabel || holdLocalTimeLabel || "Choose a slot"}
                       </p>
-                      {form.goals.length > 0 && (
-                        <div className="mt-4 flex flex-wrap justify-center gap-2">
-                          {form.goals.map((goal) => (
-                            <span
-                              key={goal}
-                              className="rounded-lg bg-accent-strong px-3 py-1.5 text-xs font-semibold text-accent-contrast shadow-glow-soft"
-                            >
-                              {goal}
-                            </span>
-                          ))}
-                        </div>
-                      )}
                       <PriceDisplay
                         pkg={selectedPackage}
                         size="summary"
@@ -2402,14 +2322,6 @@ export default function BookingForm({ isMobile }) {
                         <dt className="text-ink-muted">Main game/app</dt>
                         <dd className="break-words text-ink">{form.mainGame}</dd>
                       </div>
-                      {form.goals.length > 0 && (
-                        <div className="grid gap-2 py-3 sm:grid-cols-[9rem_1fr]">
-                          <dt className="text-ink-muted">Goals</dt>
-                          <dd className="break-words text-ink">
-                            {form.goals.join(" · ")}
-                          </dd>
-                        </div>
-                      )}
                       {form.notes.trim() && (
                         <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
                           <dt className="text-ink-muted">Extra requirements</dt>
@@ -2418,9 +2330,9 @@ export default function BookingForm({ isMobile }) {
                           </dd>
                         </div>
                       )}
-                      <div className="flex items-center justify-between gap-4 py-3">
+                      <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
                         <dt className="font-semibold text-ink">Total</dt>
-                        <dd>
+                        <dd className="flex justify-center">
                           <PriceDisplay pkg={selectedPackage} size="row" />
                         </dd>
                       </div>
