@@ -10,13 +10,10 @@ import { verifyPaymentAccessToken } from "./accessToken.js";
 import { findPaymentRecordByProviderData } from "./paymentRecord.js";
 import { verifyUpgradeIntentToken } from "../ref/upgradeIntentToken.js";
 import sanityConfiguration from "../../supabase/sanityConfiguration.cjs";
+import envValue from "../../supabase/envValue.cjs";
 
 const { inspectSanityConfiguration } = sanityConfiguration;
-
-const normalizeBackend = (value) =>
-  String(value || "").trim().toLowerCase() === "supabase"
-    ? "supabase"
-    : "sanity";
+const { normalizeBackend } = envValue;
 
 export const selectPaymentAuthority = ({
   backendOwner = "sanity",
@@ -29,9 +26,9 @@ export const selectPaymentAuthority = ({
     Number(policy.commerceFailoverGeneration) || 0
   );
   if (embeddedGeneration < currentGeneration) {
-    return normalizeBackend(policy.commercePrimaryBackend);
+    return normalizeBackend(policy.commercePrimaryBackend, "supabase");
   }
-  return normalizeBackend(backendOwner);
+  return normalizeBackend(backendOwner, "sanity");
 };
 
 export const getPaymentTokenBackend = (token, env = process.env) => {
@@ -51,11 +48,12 @@ export const selectPaymentStartBackend = ({
   env = process.env,
 } = {}) => {
   const policy = resolveSupabaseRuntimePolicy(env);
-  const activeGeneration = cutoverGeneration === undefined
+  const normalizedGeneration = String(cutoverGeneration ?? "").trim();
+  const activeGeneration = normalizedGeneration === ""
     ? policy.commerceFailoverGeneration
-    : Math.max(0, Number(cutoverGeneration) || 0);
+    : Math.max(0, Number(normalizedGeneration) || 0);
   if (activeGeneration >= 1) {
-    return normalizeBackend(policy.commercePrimaryBackend);
+    return normalizeBackend(policy.commercePrimaryBackend, "supabase");
   }
 
   const bookingPayload = body?.bookingPayload || {};
@@ -64,7 +62,7 @@ export const selectPaymentStartBackend = ({
     holdId: bookingPayload.slotHoldId,
     ignoreExpiry: true,
   });
-  if (holdPayload?.hid) return normalizeBackend(holdPayload.be);
+  if (holdPayload?.hid) return normalizeBackend(holdPayload.be, "sanity");
 
   if (bookingPayload.originalOrderId) {
     const upgradePayload = verifyUpgradeIntentToken({
@@ -73,23 +71,29 @@ export const selectPaymentStartBackend = ({
       email: bookingPayload.email,
       targetPackageTitle: bookingPayload.packageTitle,
     });
-    if (upgradePayload?.bid) return normalizeBackend(upgradePayload.be);
+    if (upgradePayload?.bid) {
+      return normalizeBackend(upgradePayload.be, "sanity");
+    }
   }
 
-  return normalizeBackend(policy.commercePrimaryBackend);
+  return normalizeBackend(policy.commercePrimaryBackend, "supabase");
 };
 
 export const createPaymentBackendClient = (backend) =>
-  createCommerceWriteClient({ backendOverride: normalizeBackend(backend) });
+  createCommerceWriteClient({
+    backendOverride: normalizeBackend(backend, "supabase"),
+  });
 
 export const createPaymentBackendReadClient = (backend) =>
-  createCommerceReadClient({ backendOverride: normalizeBackend(backend) });
+  createCommerceReadClient({
+    backendOverride: normalizeBackend(backend, "supabase"),
+  });
 
 export const createPaymentBackendClientOverride = (
   backend,
   env = process.env
 ) =>
-  normalizeBackend(backend) ===
+  normalizeBackend(backend, "supabase") ===
   resolveSupabaseRuntimePolicy(env).commercePrimaryBackend
     ? null
     : createPaymentBackendClient(backend);
@@ -122,7 +126,10 @@ export const resolveWebhookBackend = async ({
   const ids = webhookProviderData({ provider, body });
   if (ids.providerOrderId || ids.providerPaymentId) {
     const policy = resolveSupabaseRuntimePolicy(env);
-    const activeBackend = normalizeBackend(policy.commercePrimaryBackend);
+    const activeBackend = normalizeBackend(
+      policy.commercePrimaryBackend,
+      "supabase"
+    );
     const legacyBackend = activeBackend === "supabase" ? "sanity" : "supabase";
     const legacyBackendConfigured =
       legacyBackend !== "sanity" ||

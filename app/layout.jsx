@@ -2,13 +2,18 @@ import "../src/roboto-latin.css";
 import "../src/index.css";
 import seo from "@/src/lib/seo";
 import AppClientRuntime from "@/src/next/AppClientRuntime";
+import envValue from "@/src/server/supabase/envValue.cjs";
 
 export const metadata = seo.getMetadataForPath("/");
 const SUPABASE_ASSET_ORIGIN =
   "https://ntezmxzaibrrsgtujgxu.supabase.co";
+const { normalizeBackend, readEnvValue } = envValue;
 const shouldPreconnectSupabase =
-  process.env.DATA_PRIMARY_BACKEND === "supabase" ||
-  Number(process.env.SUPABASE_CONTENT_CANARY_PERCENT || 0) > 0;
+  normalizeBackend(
+    readEnvValue(process.env, "DATA_PRIMARY_BACKEND"),
+    "supabase"
+  ) === "supabase" ||
+  Number(readEnvValue(process.env, "SUPABASE_CONTENT_CANARY_PERCENT") || 0) > 0;
 
 const themeInitScript = `
 (function() {
