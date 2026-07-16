@@ -2,6 +2,7 @@ import {
   createReverseMirroringSupabaseClient,
   retryReverseMirrorFailures,
 } from "../server/supabase/reverseMirroringClient";
+import { resetSanityMirrorEventRateLimitForTests } from "../server/supabase/mirrorObservability";
 
 const createSanityClient = ({ current = [] } = {}) => {
   const operations = [];
@@ -39,8 +40,26 @@ const createSanityClient = ({ current = [] } = {}) => {
   };
 };
 
+const createCommerceMirrorEvent = (id) => ({
+  event_key: `commerce:${id}`,
+  sequence_no: 1,
+  cutover_generation: 1,
+  document_ids: [id],
+  deleted_ids: [],
+  documents: [{
+    _id: id,
+    _type: "booking",
+    _rev: "supabase-rev",
+    _supabaseSequence: 1,
+  }],
+});
+
 describe("Supabase to Sanity rollback mirroring", () => {
-  test("removes backend-managed fields before writing to Sanity", async () => {
+  beforeEach(() => {
+    resetSanityMirrorEventRateLimitForTests();
+  });
+
+  test("returns the generic primary write before mirror delivery", async () => {
     const supabaseClient = {
       create: jest.fn().mockResolvedValue({ _id: "booking.one" }),
       fetch: jest.fn().mockResolvedValue([
@@ -60,22 +79,13 @@ describe("Supabase to Sanity rollback mirroring", () => {
       sanityClient,
     });
 
-    await client.create({
+    await expect(client.create({
       _id: "booking.one",
       _type: "booking",
       status: "captured",
-    });
+    })).resolves.toEqual({ _id: "booking.one" });
 
-    expect(sanityClient.operations).toEqual([
-      {
-        operation: "createOrReplace",
-        document: {
-          _id: "booking.one",
-          _type: "booking",
-          status: "captured",
-        },
-      },
-    ]);
+    expect(sanityClient.operations).toEqual([]);
   });
 
   test("allows commerce holds to defer an already-durable outbox mirror", async () => {
@@ -103,7 +113,7 @@ describe("Supabase to Sanity rollback mirroring", () => {
     expect(sanityClient.transaction).not.toHaveBeenCalled();
   });
 
-  test("does not allow non-commerce writes to defer rollback mirroring", async () => {
+  test("does not let a legacy defer option alter a non-commerce primary result", async () => {
     const supabaseClient = {
       create: jest.fn().mockResolvedValue({ _id: "content.immediate" }),
       fetch: jest.fn().mockResolvedValue([
@@ -121,10 +131,7 @@ describe("Supabase to Sanity rollback mirroring", () => {
       { deferMirror: true }
     );
 
-    expect(sanityClient.operations).toContainEqual({
-      operation: "createOrReplace",
-      document: { _id: "content.immediate", _type: "siteSettings" },
-    });
+    expect(sanityClient.operations).toEqual([]);
   });
 
   test("drains the atomic generic outbox after a primary write", async () => {
@@ -173,6 +180,10 @@ describe("Supabase to Sanity rollback mirroring", () => {
       _id: "content.durable",
       _type: "siteSettings",
     })).resolves.toEqual({ _id: "content.durable" });
+    await client.reconcileReverseMirror({
+      requiredDocumentIds: ["content.durable"],
+      maxBatches: 1,
+    });
 
     expect(supabaseClient.fetch).not.toHaveBeenCalled();
     expect(sanityClient.operations).toContainEqual({
@@ -185,7 +196,7 @@ describe("Supabase to Sanity rollback mirroring", () => {
     });
   });
 
-  test("mirrors Supabase deletes as Sanity deletes", async () => {
+  test("returns Supabase deletes before mirror delivery", async () => {
     const supabaseClient = {
       delete: jest.fn().mockResolvedValue({ deleted: true }),
       fetch: jest.fn(),
@@ -198,28 +209,90 @@ describe("Supabase to Sanity rollback mirroring", () => {
 
     await client.delete("hold.one");
 
-    expect(sanityClient.operations).toEqual([
-      { operation: "delete", id: "hold.one" },
-    ]);
+    expect(sanityClient.operations).toEqual([]);
     expect(supabaseClient.fetch).not.toHaveBeenCalled();
   });
 
-  test("durably queues a failed rollback mirror without losing the primary result", async () => {
+  test("records retry state when deferred outbox delivery is rejected", async () => {
     const supabaseClient = {
+      commerceOnly: true,
       create: jest.fn().mockResolvedValue({ _id: "booking.queued" }),
-      fetch: jest.fn().mockResolvedValue([
-        { _id: "booking.queued", _type: "booking", status: "captured" },
-      ]),
     };
     const sanityClient = createSanityClient();
     sanityClient.transaction().commit.mockRejectedValueOnce(
       Object.assign(new Error("Sanity unavailable"), { code: "ETIMEDOUT" })
     );
     const recoveryClient = {
+      rpc: jest.fn(async (name) => {
+        if (name === "roo_claim_commerce_mirror_events") {
+          return {
+            data: [createCommerceMirrorEvent("booking.queued")],
+            error: null,
+          };
+        }
+        return { data: { status: "retry" }, error: null };
+      }),
+    };
+    const client = createReverseMirroringSupabaseClient({
+      supabaseClient,
+      sanityClient,
+      recoveryClient,
+    });
+
+    const error = jest.spyOn(console, "error").mockImplementation(() => {});
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const primaryResult = await client.create({
+        _id: "booking.queued",
+        _type: "booking",
+      });
+      const workerResult = await client.flushCommerceMirror({
+        requiredDocumentIds: ["booking.queued"],
+        limit: 25,
+        maxBatches: 2,
+      });
+
+      expect(primaryResult).toEqual({ _id: "booking.queued" });
+      expect(workerResult).toMatchObject({
+        supported: true,
+        attempted: 1,
+        mirrored: 0,
+        failed: 1,
+      });
+      expect(recoveryClient.rpc).toHaveBeenCalledWith(
+        "roo_complete_commerce_mirror_event",
+        expect.objectContaining({
+          p_event_key: "commerce:booking.queued",
+          p_success: false,
+          p_error_code: "ETIMEDOUT",
+        })
+      );
+      expect(warn).toHaveBeenCalledWith(
+        "event=sanity_mirror_lag reason=delivery_failed domain=commerce"
+      );
+    } finally {
+      error.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  test("keeps the primary result when deferred retry queueing is unavailable", async () => {
+    const supabaseClient = {
+      commerceOnly: true,
+      create: jest.fn().mockResolvedValue({ _id: "booking.unrecorded" }),
+    };
+    const sanityClient = createSanityClient();
+    sanityClient.transaction().commit.mockRejectedValueOnce(
+      new Error("Sanity unavailable")
+    );
+    const recoveryClient = {
       rpc: jest.fn(async (name) =>
-        name === "roo_claim_document_mutation_mirror_events"
-          ? { data: null, error: { code: "PGRST202" } }
-          : { data: { queued: true }, error: null }
+        name === "roo_claim_commerce_mirror_events"
+          ? {
+              data: [createCommerceMirrorEvent("booking.unrecorded")],
+              error: null,
+            }
+          : { data: null, error: { code: "PGRST500" } }
       ),
     };
     const client = createReverseMirroringSupabaseClient({
@@ -228,49 +301,40 @@ describe("Supabase to Sanity rollback mirroring", () => {
       recoveryClient,
     });
 
-    await expect(
-      client.create({ _id: "booking.queued", _type: "booking" })
-    ).resolves.toEqual({ _id: "booking.queued" });
-    expect(recoveryClient.rpc).toHaveBeenCalledWith(
-      "roo_record_mirror_failure",
-      expect.objectContaining({
-        p_operation: "supabase_to_sanity_upsert",
-        p_ids: ["booking.queued"],
-        p_error_code: "ETIMEDOUT",
-      })
-    );
-  });
+    const error = jest.spyOn(console, "error").mockImplementation(() => {});
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const primaryResult = await client.create({
+        _id: "booking.unrecorded",
+        _type: "booking",
+      });
+      const workerResult = await client.flushCommerceMirror({
+        requiredDocumentIds: ["booking.unrecorded"],
+        limit: 25,
+        maxBatches: 2,
+      });
 
-  test("fails closed when neither the rollback mirror nor its queue is available", async () => {
-    const supabaseClient = {
-      create: jest.fn().mockResolvedValue({ _id: "booking.unrecorded" }),
-      fetch: jest.fn().mockResolvedValue([
-        { _id: "booking.unrecorded", _type: "booking" },
-      ]),
-    };
-    const sanityClient = createSanityClient();
-    sanityClient.transaction().commit.mockRejectedValueOnce(
-      new Error("Sanity unavailable")
-    );
-    const recoveryClient = {
-      rpc: jest.fn(async (name) => ({
-        data: null,
-        error: {
-          code: name === "roo_claim_document_mutation_mirror_events"
-            ? "PGRST202"
-            : "PGRST500",
-        },
-      })),
-    };
-    const client = createReverseMirroringSupabaseClient({
-      supabaseClient,
-      sanityClient,
-      recoveryClient,
-    });
-
-    await expect(
-      client.create({ _id: "booking.unrecorded", _type: "booking" })
-    ).rejects.toMatchObject({ code: "REVERSE_MIRROR_UNRECORDED" });
+      expect(primaryResult).toEqual({ _id: "booking.unrecorded" });
+      expect(workerResult).toMatchObject({
+        supported: true,
+        attempted: 1,
+        mirrored: 0,
+        failed: 1,
+      });
+      expect(recoveryClient.rpc).toHaveBeenCalledWith(
+        "roo_complete_commerce_mirror_event",
+        expect.objectContaining({ p_success: false })
+      );
+      expect(warn).toHaveBeenCalledWith(
+        "event=sanity_mirror_lag reason=recovery_queue_unavailable domain=commerce"
+      );
+      expect(warn).toHaveBeenCalledWith(
+        "event=sanity_mirror_lag reason=delivery_failed domain=commerce"
+      );
+    } finally {
+      error.mockRestore();
+      warn.mockRestore();
+    }
   });
 
   test("retries queued rollback mirrors and converges removed documents", async () => {

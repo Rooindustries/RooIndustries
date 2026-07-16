@@ -1,5 +1,8 @@
+import sanityConfiguration from "./sanityConfiguration.cjs";
+
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
 const BACKENDS = new Set(["sanity", "supabase"]);
+const { inspectSanityConfiguration } = sanityConfiguration;
 
 const read = (env, key) => String(env?.[key] || "").trim();
 const readBoolean = (env, key) => TRUE_VALUES.has(read(env, key).toLowerCase());
@@ -37,7 +40,7 @@ export const resolveSupabaseRuntimePolicy = (env = process.env) => {
       ? "production"
       : "development");
   const requestedPrimary =
-    read(env, "DATA_PRIMARY_BACKEND").toLowerCase() || "sanity";
+    read(env, "DATA_PRIMARY_BACKEND").toLowerCase() || "supabase";
   const requestedCommercePrimary =
     read(env, "COMMERCE_PRIMARY_BACKEND").toLowerCase() || requestedPrimary;
 
@@ -55,7 +58,8 @@ export const resolveSupabaseRuntimePolicy = (env = process.env) => {
     read(env, "COMMERCE_FAILOVER_GENERATION")
   );
   const shadowWritesEnabled = readBoolean(env, "SUPABASE_SHADOW_WRITES");
-  const reverseMirrorEnabled = readBoolean(
+  const sanity = inspectSanityConfiguration(env);
+  const reverseMirrorLegacyFlagEnabled = readBoolean(
     env,
     "SANITY_REVERSE_MIRROR_WRITES"
   );
@@ -80,28 +84,6 @@ export const resolveSupabaseRuntimePolicy = (env = process.env) => {
       "Production Supabase commerce cutover requires COMMERCE_CUTOVER_ENABLED=1."
     );
   }
-  if (
-    requestedPrimary === "supabase" &&
-    !reverseMirrorEnabled
-  ) {
-    throw new Error(
-      "Supabase primary writes require SANITY_REVERSE_MIRROR_WRITES=1."
-    );
-  }
-  if (
-    (requestedCommercePrimary === "supabase" || commerceCanaryPercentage > 0) &&
-    !reverseMirrorEnabled
-  ) {
-    throw new Error(
-      "Supabase commerce writes require SANITY_REVERSE_MIRROR_WRITES=1."
-    );
-  }
-  if (commerceCanaryPercentage > 0 && !shadowWritesEnabled) {
-    throw new Error(
-      "Supabase commerce canaries require SUPABASE_SHADOW_WRITES=1."
-    );
-  }
-
   return {
     runtime,
     primaryBackend: requestedPrimary,
@@ -111,7 +93,9 @@ export const resolveSupabaseRuntimePolicy = (env = process.env) => {
     commerceStartsPaused,
     commerceFailoverGeneration,
     shadowWritesEnabled,
-    reverseMirrorEnabled,
+    reverseMirrorEnabled: sanity.writeConfigured,
+    reverseMirrorLegacyFlagEnabled,
+    sanityConfigurationStatus: sanity.status,
     contentCanaryPercentage: parsePercentage(
       read(env, "SUPABASE_CONTENT_CANARY_PERCENT")
     ),

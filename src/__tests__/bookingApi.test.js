@@ -13,8 +13,13 @@ let createRequiresRescheduleBooking;
 const CLIENT_EMAIL = "vihaann2.0@gmail.com";
 const OWNER_EMAIL = "serviroo@rooindustries.com";
 const OWNER_TZ = "Asia/Kolkata";
+const previousDataPrimary = process.env.DATA_PRIMARY_BACKEND;
+const previousCommercePrimary = process.env.COMMERCE_PRIMARY_BACKEND;
 
 const mockSendEmail = jest.fn().mockResolvedValue({ error: null });
+const mockFlushCommerceMirror = jest.fn(async () => {
+  throw new Error("Sanity mirror unavailable");
+});
 
 let store;
 let idCounter = 1;
@@ -189,6 +194,7 @@ const createConflictError = () => {
 };
 
 const mockSanityClient = {
+  flushCommerceMirror: (...args) => mockFlushCommerceMirror(...args),
   fetch: async (query, params = {}) => {
     const q = String(query || "");
     if (q.includes('_type == "bookingSettings"')) {
@@ -647,6 +653,8 @@ const createPaidBooking = async ({
 };
 
 beforeAll(() => {
+  process.env.DATA_PRIMARY_BACKEND = "sanity";
+  process.env.COMMERCE_PRIMARY_BACKEND = "sanity";
   process.env.SANITY_PROJECT_ID = "test-project";
   process.env.SANITY_DATASET = "test-dataset";
   process.env.SANITY_WRITE_TOKEN = "test-write-token";
@@ -683,10 +691,21 @@ beforeAll(() => {
   ));
 });
 
+afterAll(() => {
+  if (previousDataPrimary === undefined) delete process.env.DATA_PRIMARY_BACKEND;
+  else process.env.DATA_PRIMARY_BACKEND = previousDataPrimary;
+  if (previousCommercePrimary === undefined) {
+    delete process.env.COMMERCE_PRIMARY_BACKEND;
+  } else {
+    process.env.COMMERCE_PRIMARY_BACKEND = previousCommercePrimary;
+  }
+});
+
 beforeEach(() => {
   resetStore();
   mockSendEmail.mockReset();
   mockSendEmail.mockResolvedValue({ error: null });
+  mockFlushCommerceMirror.mockClear();
   process.env.OWNER_EMAIL = OWNER_EMAIL;
   process.env.RAZORPAY_KEY_ID = "";
   process.env.RAZORPAY_KEY_SECRET = "";
@@ -1195,6 +1214,7 @@ describe("booking reservation API", () => {
     expect(secondDispatchRes.statusCode).toBe(200);
     expect(secondDispatchRes.body.ok).toBe(true);
     expect(mockSendEmail).toHaveBeenCalledTimes(2);
+    expect(mockFlushCommerceMirror).not.toHaveBeenCalled();
   });
 
   test("sendBookingEmailsForBooking refetches full booking data before rendering", async () => {
@@ -1953,6 +1973,7 @@ describe("booking reservation API", () => {
     );
     expect(clientEmail.html).not.toContain("2025-01-15T08:00:00.000Z");
     expect(store.bookings[0].recoveryNotificationStatus).toBe("sent");
+    expect(mockFlushCommerceMirror).not.toHaveBeenCalled();
   });
 
   test("reschedule emails render the requested time without exposing an ISO timestamp", () => {

@@ -4,6 +4,8 @@ import { createShadowingSanityClient } from "../supabase/shadowingSanityClient.j
 import { resolveSupabaseRuntimePolicy } from "../supabase/runtime.js";
 import { createReverseMirroringSupabaseClient } from "../supabase/reverseMirroringClient.js";
 import { createSupabaseAdminClient } from "../supabase/adminClient.js";
+import sanityConfiguration from "../supabase/sanityConfiguration.cjs";
+import { logSanityMirrorEvent } from "../supabase/mirrorObservability.js";
 
 const DEFAULT_API_VERSION = "2023-10-01";
 const DOCUMENT_BACKENDS = new Set(["sanity", "supabase"]);
@@ -13,6 +15,7 @@ const PRIVATE_SANITY_TARGET_KEYS = [
   "SANITY_PRIVATE_READ_TOKEN",
   "SANITY_PRIVATE_WRITE_TOKEN",
 ];
+const { inspectSanityConfiguration } = sanityConfiguration;
 
 const readFirst = (env, keys) =>
   keys
@@ -34,14 +37,6 @@ const resolvePolicyBackend = ({ policy, domain = "global" }) =>
   domain === "commerce"
     ? policy.commercePrimaryBackend
     : policy.primaryBackend;
-
-const assertRollbackMirror = ({ backend, policy }) => {
-  if (backend === "supabase" && !policy.reverseMirrorEnabled) {
-    throw new Error(
-      "Supabase document writes require SANITY_REVERSE_MIRROR_WRITES=1."
-    );
-  }
-};
 
 const resolveSupabaseClient = ({ env, client }) =>
   client || createSupabaseAdminClient({ env });
@@ -99,6 +94,40 @@ const createSanityWriteClient = ({ env, fallbackConfig = null }) => {
   return createSanityClient(fallbackConfig || {});
 };
 
+const addOptionalSanityMirror = ({
+  env,
+  supabaseClient,
+  recoveryClient,
+  domain,
+}) => {
+  const configuration = inspectSanityConfiguration(env);
+  if (!configuration.writeConfigured) {
+    logSanityMirrorEvent({
+      event: "sanity_mirror_skipped",
+      reason:
+        configuration.status === "partial"
+          ? "sanity_incomplete"
+          : "sanity_unconfigured",
+      domain,
+    });
+    return supabaseClient;
+  }
+  try {
+    return createReverseMirroringSupabaseClient({
+      supabaseClient,
+      sanityClient: createConfiguredSanityClient({ env, requireWrite: true }),
+      recoveryClient,
+    });
+  } catch (error) {
+    logSanityMirrorEvent({
+      event: "sanity_mirror_skipped",
+      reason: "sanity_client_unavailable",
+      domain,
+    });
+    return supabaseClient;
+  }
+};
+
 export const createDataClient = (
   sanityConfig = {},
   {
@@ -114,7 +143,6 @@ export const createDataClient = (
     primary: resolvePolicyBackend({ policy, domain }),
   });
   if (backend === "supabase") {
-    assertRollbackMirror({ backend, policy });
     const resolvedSupabaseClient = resolveSupabaseClient({
       env,
       client: supabaseClient,
@@ -124,10 +152,11 @@ export const createDataClient = (
       commerceOnly: domain === "commerce",
       cutoverGeneration: policy.commerceFailoverGeneration,
     });
-    return createReverseMirroringSupabaseClient({
+    return addOptionalSanityMirror({
+      env,
       supabaseClient: client,
-      sanityClient: createConfiguredSanityClient({ env, requireWrite: true }),
       recoveryClient: resolvedSupabaseClient,
+      domain,
     });
   }
 
@@ -178,7 +207,6 @@ export const createDocumentWriteClient = ({
     primary: resolvePolicyBackend({ policy, domain }),
   });
   if (backend === "supabase") {
-    assertRollbackMirror({ backend, policy });
     const resolvedSupabaseClient = resolveSupabaseClient({
       env,
       client: supabaseClient,
@@ -188,10 +216,11 @@ export const createDocumentWriteClient = ({
       commerceOnly: domain === "commerce",
       cutoverGeneration: policy.commerceFailoverGeneration,
     });
-    return createReverseMirroringSupabaseClient({
+    return addOptionalSanityMirror({
+      env,
       supabaseClient: client,
-      sanityClient: createConfiguredSanityClient({ env, requireWrite: true }),
       recoveryClient: resolvedSupabaseClient,
+      domain,
     });
   }
 

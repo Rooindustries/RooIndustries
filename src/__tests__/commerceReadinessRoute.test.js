@@ -1,6 +1,7 @@
 /** @jest-environment node */
 
 const mockRpc = jest.fn();
+const mockResolveRuntimePolicy = jest.fn();
 
 const commerceReadiness = (overrides = {}) => ({
   last_parity: {
@@ -106,12 +107,7 @@ jest.mock("../server/supabase/adminClient.js", () => ({
 }));
 
 jest.mock("../server/supabase/runtime.js", () => ({
-  resolveSupabaseRuntimePolicy: jest.fn(() => ({
-    commercePrimaryBackend: "supabase",
-    commerceCutoverEnabled: true,
-    commerceStartsPaused: false,
-    commerceFailoverGeneration: 1,
-  })),
+  resolveSupabaseRuntimePolicy: (...args) => mockResolveRuntimePolicy(...args),
 }));
 
 describe("commerce readiness route", () => {
@@ -124,6 +120,14 @@ describe("commerce readiness route", () => {
     process.env.REF_ADMIN_KEY = "readiness-secret";
     process.env.CMS_WRITES_PAUSED = "0";
     process.env.SANITY_STUDIO_CMS_WRITES_PAUSED = "0";
+    mockResolveRuntimePolicy.mockReset().mockReturnValue({
+      commercePrimaryBackend: "supabase",
+      commerceCutoverEnabled: true,
+      commerceStartsPaused: false,
+      commerceFailoverGeneration: 1,
+      sanityConfigurationStatus: "complete",
+      reverseMirrorEnabled: true,
+    });
     mockRpc.mockImplementation(async (name) => {
       if (name === "roo_commerce_readiness") {
         return { data: commerceReadiness(), error: null };
@@ -169,7 +173,15 @@ describe("commerce readiness route", () => {
     }
   });
 
-  test("exposes the durable document mirror acceptance gate", async () => {
+  test("keeps primary readiness honest when Sanity is absent", async () => {
+    mockResolveRuntimePolicy.mockReturnValue({
+      commercePrimaryBackend: "supabase",
+      commerceCutoverEnabled: true,
+      commerceStartsPaused: false,
+      commerceFailoverGeneration: 1,
+      sanityConfigurationStatus: "absent",
+      reverseMirrorEnabled: false,
+    });
     const { GET } =
       await import("../../app/api/admin/commerce-readiness/route.js");
     const response = await GET(
@@ -184,6 +196,12 @@ describe("commerce readiness route", () => {
       ok: true,
       commerceReady: true,
       ready: true,
+      primaryReady: true,
+      failoverReady: false,
+      failoverReason: "sanity_configuration_absent",
+      failoverConfigurationReady: false,
+      sanityConfigurationStatus: "absent",
+      reverseMirrorEnabled: false,
       documentMutationMirrorReady: true,
       cmsReady: true,
       cmsBlockers: [],
@@ -213,7 +231,53 @@ describe("commerce readiness route", () => {
     });
   });
 
-  test("fails the top-level gate when the document mirror has a dead letter", async () => {
+  test("allows healthy failover checks only with complete writable Sanity", async () => {
+    const { GET } = await import(
+      "../../app/api/admin/commerce-readiness/route.js"
+    );
+    const response = await GET(new Request("https://example.test/readiness", {
+      headers: { "x-admin-key": "readiness-secret" },
+    }));
+    const body = await response.json();
+
+    expect(body).toMatchObject({
+      ready: true,
+      primaryReady: true,
+      failoverReady: true,
+      failoverReason: "",
+      failoverConfigurationReady: true,
+      sanityConfigurationStatus: "complete",
+      reverseMirrorEnabled: true,
+    });
+  });
+
+  test("does not let clean database metrics hide partial Sanity configuration", async () => {
+    mockResolveRuntimePolicy.mockReturnValue({
+      commercePrimaryBackend: "supabase",
+      commerceCutoverEnabled: true,
+      commerceStartsPaused: false,
+      commerceFailoverGeneration: 1,
+      sanityConfigurationStatus: "partial",
+      reverseMirrorEnabled: false,
+    });
+    const { GET } = await import(
+      "../../app/api/admin/commerce-readiness/route.js"
+    );
+    const response = await GET(new Request("https://example.test/readiness", {
+      headers: { "x-admin-key": "readiness-secret" },
+    }));
+    const body = await response.json();
+
+    expect(body).toMatchObject({
+      commerceReady: true,
+      commerceFailoverReady: true,
+      failoverReady: false,
+      failoverReason: "sanity_configuration_partial",
+      failoverConfigurationReady: false,
+    });
+  });
+
+  test("surfaces a document-mirror dead letter without blocking primary readiness", async () => {
     mockRpc
       .mockResolvedValueOnce({ data: commerceReadiness(), error: null })
       .mockResolvedValueOnce({ data: commerceIntegrity(), error: null })
@@ -241,7 +305,9 @@ describe("commerce readiness route", () => {
     expect(body).toMatchObject({
       ok: true,
       commerceReady: true,
-      ready: false,
+      ready: true,
+      primaryReady: true,
+      failoverReady: false,
       documentMutationMirrorReady: false,
     });
   });
@@ -395,7 +461,16 @@ describe("commerce readiness route", () => {
     }));
     const body = await response.json();
 
-    expect(body.ready).toBe(false);
+    const failoverOnly = [
+      "parity_stale",
+      "parity_drift",
+      "parity_invalid",
+      "mirror_checkpoint_invalid",
+      "mirror_overdue",
+    ].includes(blocker);
+    expect(body.ready).toBe(failoverOnly);
+    expect(body.primaryReady).toBe(failoverOnly);
+    if (failoverOnly) expect(body.failoverReady).toBe(false);
     expect(body.commerceBlockers).toContain(blocker);
   });
 
@@ -506,12 +581,18 @@ describe("commerce readiness route", () => {
     }));
     const body = await response.json();
 
-    expect(body.ready).toBe(false);
+    const failoverOnly = [
+      "port_parity_stale",
+      "referral_fallback_authority_not_ready",
+    ].includes(blocker);
+    expect(body.ready).toBe(failoverOnly);
+    expect(body.primaryReady).toBe(failoverOnly);
+    if (failoverOnly) expect(body.failoverReady).toBe(false);
     expect(body.portClosureReady).toBe(false);
     expect(body.portClosureBlockers).toContain(blocker);
   });
 
-  test("fails closed on a partial readiness RPC shape", async () => {
+  test("treats a partial mirror-readiness shape as failover degradation", async () => {
     mockRpc
       .mockResolvedValueOnce({
         data: {
@@ -534,7 +615,9 @@ describe("commerce readiness route", () => {
     }));
     const body = await response.json();
 
-    expect(body.ready).toBe(false);
+    expect(body.ready).toBe(true);
+    expect(body.primaryReady).toBe(true);
+    expect(body.failoverReady).toBe(false);
     expect(body.commerceBlockers).toContain(
       "readiness_schema_invalid:mirror.dead_letters"
     );
@@ -565,6 +648,40 @@ describe("commerce readiness route", () => {
     const body = await response.json();
 
     expect(body).toMatchObject({ ready: false, cmsReady: false });
+  });
+
+  test("surfaces CMS mirror degradation without blocking CMS primary readiness", async () => {
+    mockRpc
+      .mockResolvedValueOnce({ data: commerceReadiness(), error: null })
+      .mockResolvedValueOnce({ data: commerceIntegrity(), error: null })
+      .mockResolvedValueOnce({ data: releaseReadiness(), error: null })
+      .mockResolvedValueOnce({ data: { ready: true }, error: null })
+      .mockResolvedValueOnce({
+        data: {
+          ready: false,
+          receipts: { processing: 0, ready: true },
+          content_mirror: { ready: false },
+          commerce_mirror: { ready: false },
+          assets: { ready: true, unverified_links: 0 },
+        },
+        error: null,
+      });
+    const { GET } = await import(
+      "../../app/api/admin/commerce-readiness/route.js"
+    );
+    const response = await GET(new Request("https://example.test/readiness", {
+      headers: { "x-admin-key": "readiness-secret" },
+    }));
+    const body = await response.json();
+
+    expect(body).toMatchObject({
+      ready: true,
+      primaryReady: true,
+      failoverReady: false,
+      cmsReady: false,
+      cmsPrimaryReady: true,
+      cmsFailoverReady: false,
+    });
   });
 
   test("surfaces the rollback pause and blocks global readiness", async () => {

@@ -1,8 +1,9 @@
-# Supabase shadow migration
+# Supabase-primary data platform
 
-The production safety default is Sanity-primary with Supabase shadow writes.
-Do not enable a Supabase commerce canary or primary cutover without the reverse
-Sanity mirror.
+Supabase is the production default for data, CMS, authentication, and
+commerce. Sanity is a warm, best-effort backup and becomes authoritative only
+through the generation-based failover procedure in
+[`docs/commerce-failover.md`](../docs/commerce-failover.md).
 
 ## Data checks
 
@@ -19,15 +20,22 @@ count drift.
 
 ## Runtime controls
 
-- `DATA_PRIMARY_BACKEND`: `sanity` or `supabase`.
+- `DATA_PRIMARY_BACKEND`: `supabase` by default; explicit `sanity` selects the
+  full data/CMS/auth failover path.
+- `COMMERCE_PRIMARY_BACKEND`: inherits `DATA_PRIMARY_BACKEND`; explicit
+  `sanity` selects commerce failover.
+- `COMMERCE_FAILOVER_GENERATION`: deployment-pinned generation that must match
+  `roo_commerce_control()`; it does not change automatically with defaults.
 - `SUPABASE_SHADOW_WRITES`: mirrors successful Sanity writes into Supabase.
-- `SUPABASE_CONTENT_CANARY_PERCENT`: deterministic content and asset canary.
-- `SUPABASE_COMMERCE_CANARY_PERCENT`: checkout canary; requires shadow writes
-  and the reverse mirror.
+- `SUPABASE_CONTENT_CANARY_PERCENT` and
+  `SUPABASE_COMMERCE_CANARY_PERCENT`: retired cutover controls. Runtime
+  validation rejects nonzero values; delete them instead of using a canary.
 - `SUPABASE_AUTH_CANARY_ACCOUNTS`: comma-separated account identifiers.
 - `SUPABASE_CUTOVER_ENABLED`: required before production can use Supabase as
   primary.
-- `SANITY_REVERSE_MIRROR_WRITES`: preserves Sanity as the rollback copy.
+- Complete Sanity write configuration automatically enables best-effort
+  Supabase-to-Sanity mirroring. `SANITY_REVERSE_MIRROR_WRITES` is no longer a
+  Supabase write gate.
 - `CMS_WRITES_PAUSED`: blocks global CMS publish, unpublish, and delete commands
   with a retryable `503`. Missing or invalid values fail closed.
 - `SANITY_STUDIO_CMS_WRITES_PAUSED`: disables the corresponding global Sanity
