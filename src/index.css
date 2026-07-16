@@ -41,6 +41,7 @@ html[data-theme="default"] {
   --color-surface: #07162d;
   --color-surface-elevated: #061226;
   --color-surface-solid: rgba(6, 18, 38, 0.95);
+  --color-surface-opaque: rgb(6, 18, 38);
   --color-surface-veil: rgba(7, 26, 51, 0.6);
   --color-surface-hover: rgba(255, 255, 255, 0.05);
   --color-surface-hover-accent: rgba(34, 211, 238, 0.1);
@@ -253,6 +254,7 @@ html[data-theme="dark"] {
   --color-surface: #0d0d0d;
   --color-surface-elevated: #090909;
   --color-surface-solid: rgba(9, 9, 9, 0.97);
+  --color-surface-opaque: rgb(9, 9, 9);
   --color-surface-veil: rgba(10, 10, 10, 0.65);
   --color-surface-hover: rgba(255, 255, 255, 0.05);
   --color-surface-hover-accent: rgba(240, 195, 90, 0.08);
@@ -2284,7 +2286,7 @@ html.low-performance-mode .low-perf-surface {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
   background-image: none !important;
-  background-color: var(--color-surface-solid) !important;
+  background-color: var(--color-surface-opaque) !important;
   box-shadow: var(--highlight-glass-top) !important;
 }
 
@@ -2439,7 +2441,7 @@ html.perf-reduced-effects-mode .glass-premium {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
   background-image: none !important;
-  background-color: var(--color-surface-solid) !important;
+  background-color: var(--color-surface-opaque) !important;
 }
 
 html.perf-no-banner-blur .reservation-banner-surface,
