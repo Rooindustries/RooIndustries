@@ -156,9 +156,17 @@ const buildBookingSuccessResponse = ({
 };
 
 const toMoney = (value) => {
-  const parsed = Number(
-    typeof value === "string" ? value.replace(/[^0-9.]/g, "") : value
-  );
+  const normalized =
+    typeof value === "string"
+      ? value.trim().replace(/,/g, "").replace(/[$€£₹]/g, "").trim()
+      : value;
+  if (
+    typeof normalized === "string" &&
+    !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalized)
+  ) {
+    return 0;
+  }
+  const parsed = Number(normalized);
   if (!Number.isFinite(parsed)) return 0;
   return +parsed.toFixed(2);
 };
@@ -868,47 +876,6 @@ export default async function handler(req, res) {
           error: "Free bookings must have status 'captured'.",
         });
       }
-
-      if (!couponCode) {
-        return res.status(400).json({
-          error: "Free bookings require a valid coupon code.",
-        });
-      }
-
-      const freeCoupon = preserveHistoricalAccounting
-        ? null
-        : await writeClient.fetch(
-            `*[_type == "coupon" && lower(code) == $code][0]{
-              _id,
-              isActive,
-              timesUsed,
-              maxUses,
-              discountType,
-              discountPercent,
-              discountAmount
-            }`,
-            { code: String(couponCode).toLowerCase() }
-          );
-
-      if (!preserveHistoricalAccounting && !freeCoupon) {
-        return res.status(400).json({
-          error: "Coupon not found or inactive for free booking.",
-        });
-      }
-
-      const currentUsed = freeCoupon?.timesUsed ?? 0;
-      const maxUses = freeCoupon?.maxUses;
-
-      if (
-        !preserveHistoricalAccounting &&
-        (freeCoupon?.isActive === false ||
-          (typeof maxUses === "number" && maxUses > 0 && currentUsed >= maxUses)
-        )
-      ) {
-        return res.status(400).json({
-          error: "This coupon can no longer be used for free bookings.",
-        });
-      }
     }
 
     if (paymentProvider === "paypal" || paymentProvider === "razorpay") {
@@ -1148,6 +1115,11 @@ export default async function handler(req, res) {
       effectiveReferralId,
       commissionAmount,
     } = resolvedPricing;
+    if (paymentProvider === "free" && effectiveNetAmount > 0) {
+      return res.status(400).json({
+        error: "The server quote still requires payment.",
+      });
+    }
     const resolvedPackagePrice = `$${effectiveGrossAmount.toFixed(2)}`;
 
     let verifiedPayerEmail = payerEmail;

@@ -43,15 +43,11 @@ export default async function handler(req, res) {
     if (!code)
       return res.status(400).json({ ok: false, error: "Missing code" });
 
-    // return fields used in the frontend/payment logic
+    // Public checkout projection. Creator details stay behind authenticated routes.
     const ref = await readClient.fetch(
       `*[_type == "referral" && registrationStatus != "pending_email" && slug.current == $code][0]{
-        _id,
-        name,
         "code": slug.current,
-        currentCommissionPercent,
-        currentDiscountPercent,
-        isFirstTime
+        currentDiscountPercent
       }`,
       { code }
     );
@@ -60,7 +56,18 @@ export default async function handler(req, res) {
       return res.status(404).json({ ok: false, error: "Not found" });
     }
 
-    return res.status(200).json({ ok: true, referral: ref });
+    const discountPercent = Number(ref.currentDiscountPercent);
+    return res.status(200).json({
+      ok: true,
+      active: true,
+      eligible: true,
+      referral: {
+        code: String(ref.code || code).trim(),
+        currentDiscountPercent: Number.isFinite(discountPercent)
+          ? Math.min(100, Math.max(0, discountPercent))
+          : 0,
+      },
+    });
   } catch (e) {
     logSafeError("Referral validation failed", e);
     return res.status(500).json({ ok: false, error: "Server error" });

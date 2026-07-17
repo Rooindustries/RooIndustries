@@ -95,6 +95,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  jest.useRealTimers();
   delete window.Razorpay;
   if (global.fetch?.mockReset) global.fetch.mockReset();
 });
@@ -294,8 +295,8 @@ describe("payment session UI", () => {
     expect(paypalShell).toHaveClass("overflow-hidden", "rounded-lg");
     expect(paypalShell.className).toContain("[&_iframe]:!border-0");
     expect(
-      screen.getByRole("link", { name: /back to booking/i }).parentElement
-    ).toHaveClass("pb-36");
+      screen.getByRole("link", { name: /back to booking/i }).closest("section")
+    ).toHaveClass("py-4");
 
     const clientCreate = jest.fn();
     let orderId;
@@ -570,34 +571,49 @@ describe("payment session UI", () => {
     expect(screen.getByText("$12.00 USD")).toBeInTheDocument();
   });
 
-  test("free checkout also uses the payment session endpoint", async () => {
+  test("a collision entered as a coupon resolves to a free referral and finalizes", async () => {
     const fetchCalls = [];
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
     global.fetch = jest.fn(async (url, options = {}) => {
       const body = JSON.parse(options.body || "{}");
       fetchCalls.push({ url, body });
       if (url === "/api/payment/providers") {
         return response({ ok: true, providers: {} });
       }
+      if (String(url).startsWith("/api/ref/validateReferral")) {
+        return response({
+          ok: true,
+          referral: {
+            _id: "referral.creatorfree",
+            name: "Private Creator Name",
+            currentCommissionPercent: 25,
+            code: "creatorfree",
+            currentDiscountPercent: 100,
+          },
+        });
+      }
       if (String(url).startsWith("/api/ref/validateCoupon")) {
         return response({
           ok: true,
           coupon: {
-            code: "FREE100",
+            id: "coupon.creatorfree",
+            title: "Internal coupon title",
+            code: "CREATORFREE",
             discountType: "fixed",
-            discountAmount: 10,
+            discountAmount: 54.95,
             canCombineWithReferral: true,
           },
         });
       }
       if (url === "/api/payment/quote") {
-        const free = body.couponCode === "FREE100";
+        const free = body.referralCode === "creatorfree";
         return response({
           ok: true,
           quoteFingerprint: free ? "quote_free" : "quote_paid",
           quote: {
-            grossAmount: 10,
-            discountAmount: free ? 10 : 0,
-            netAmount: free ? 0 : 10,
+            grossAmount: 54.95,
+            discountAmount: free ? 54.95 : 0,
+            netAmount: free ? 0 : 54.95,
             isFree: free,
           },
         });
@@ -615,10 +631,26 @@ describe("payment session UI", () => {
       return response({ ok: true });
     });
 
-    renderPayment(bookingFixture());
-    await userEvent.type(screen.getByPlaceholderText(/e\.g\. BF10/i), "FREE100");
+    renderPayment(bookingFixture({ packagePrice: "$54.95" }));
+    const couponInput = screen.getByPlaceholderText(/e\.g\. BF10/i);
+    await waitFor(() => expect(couponInput).not.toBeDisabled());
+    await userEvent.type(
+      couponInput,
+      "CREATORFREE"
+    );
     const applyButtons = screen.getAllByRole("button", { name: /apply/i });
     await userEvent.click(applyButtons[1]);
+
+    expect(
+      await screen.findByText(
+        "This code is a referral, so it was applied as a referral."
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByText(/creatorfree · −\$/))
+      .toBeInTheDocument();
+    expect(screen.queryByText(/Private Creator Name/i)).not.toBeInTheDocument();
+    expect(await screen.findByText("$0.00 USD")).toBeInTheDocument();
+    expect(couponInput).toHaveValue("");
 
     const freeButton = await screen.findByRole("button", {
       name: /confirm free booking/i,
@@ -632,6 +664,20 @@ describe("payment session UI", () => {
       (call) => call.url === "/api/payment/start" && call.body.provider === "free"
     );
     expect(start.body.quoteFingerprint).toBe("quote_free");
+    expect(start.body.bookingPayload).toMatchObject({
+      packageTitle: "Performance Vertex Overhaul",
+      packagePrice: "$54.95",
+      referralCode: "creatorfree",
+      couponCode: "",
+    });
+    expect(start.body.bookingPayload).not.toHaveProperty("referralId");
+    const finalQuote = fetchCalls
+      .filter((call) => call.url === "/api/payment/quote")
+      .at(-1);
+    expect(finalQuote.body).toMatchObject({
+      referralCode: "creatorfree",
+      couponCode: "",
+    });
     expect(fetchCalls.some((call) => call.url === "/api/ref/createBooking")).toBe(
       false
     );
@@ -646,6 +692,188 @@ describe("payment session UI", () => {
         replace: true,
       })
     );
+    expect(warn).toHaveBeenCalledWith(
+      "checkout_code_namespace_collision",
+      expect.objectContaining({
+        code: "creatorfree",
+        precedence: "referral_first",
+      })
+    );
+    warn.mockRestore();
+  });
+
+  test("a BookingForm referral payload is validated, quoted, and sent to payment start", async () => {
+    const fetchCalls = [];
+    global.fetch = jest.fn(async (url, options = {}) => {
+      const requestUrl = String(url);
+      const body = JSON.parse(options.body || "{}");
+      fetchCalls.push({ url: requestUrl, body });
+      if (requestUrl === "/api/payment/providers") {
+        return response({ ok: true, providers: {} });
+      }
+      if (requestUrl.startsWith("/api/ref/validateReferral")) {
+        return response({
+          ok: true,
+          referral: {
+            code: "bookingfree",
+            currentDiscountPercent: 100,
+            name: "Private Creator Name",
+            currentCommissionPercent: 25,
+          },
+        });
+      }
+      if (requestUrl.startsWith("/api/ref/validateCoupon")) {
+        return response(
+          { ok: false, error: "Coupon not found" },
+          { ok: false, status: 404 }
+        );
+      }
+      if (requestUrl === "/api/payment/quote") {
+        const free = body.referralCode === "bookingfree";
+        return response({
+          ok: true,
+          quoteFingerprint: "booking-referral-free-quote",
+          quote: {
+            grossAmount: 54.95,
+            discountAmount: free ? 54.95 : 0,
+            netAmount: free ? 0 : 54.95,
+            isFree: free,
+          },
+        });
+      }
+      if (requestUrl === "/api/payment/start") {
+        return response({
+          ok: true,
+          provider: "free",
+          status: "booked",
+          bookingId: "booking_referral_free",
+          emailDispatchToken: "dispatch_referral_free",
+        });
+      }
+      return response({ ok: true });
+    });
+
+    renderPayment(
+      bookingFixture({
+        packagePrice: "$54.95",
+        referralCode: "bookingfree",
+      })
+    );
+
+    expect(await screen.findByText(/bookingfree · −\$54\.95/))
+      .toBeInTheDocument();
+    expect(screen.getByText("$0.00 USD")).toBeInTheDocument();
+    expect(screen.queryByText(/Private Creator Name/i)).not.toBeInTheDocument();
+    const freeButton = await screen.findByRole("button", {
+      name: /confirm free booking/i,
+    });
+    await waitFor(() => expect(freeButton).not.toBeDisabled());
+    await act(async () => userEvent.click(freeButton));
+
+    const quote = fetchCalls
+      .filter((call) => call.url === "/api/payment/quote")
+      .at(-1);
+    const start = fetchCalls.find((call) => call.url === "/api/payment/start");
+    expect(quote.body).toMatchObject({
+      packageTitle: "Performance Vertex Overhaul",
+      referralCode: "bookingfree",
+      couponCode: "",
+    });
+    expect(start.body).toMatchObject({
+      provider: "free",
+      quoteFingerprint: "booking-referral-free-quote",
+      bookingPayload: {
+        packageTitle: "Performance Vertex Overhaul",
+        packagePrice: "$54.95",
+        referralCode: "bookingfree",
+        couponCode: "",
+      },
+    });
+    await waitFor(() =>
+      expect(mockNavigate).toHaveBeenCalledWith(
+        "/thank-you",
+        expect.objectContaining({ replace: true })
+      )
+    );
+  });
+
+  test("does not apply a code when the slot hold expires during validation", async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2099-01-15T08:00:00.000Z"));
+    const fetchCalls = [];
+    let releaseReferral;
+    let markValidationStarted;
+    const validationStarted = new Promise((resolve) => {
+      markValidationStarted = resolve;
+    });
+    global.fetch = jest.fn(async (url, options = {}) => {
+      const requestUrl = String(url);
+      const body = JSON.parse(options.body || "{}");
+      fetchCalls.push({ url: requestUrl, body });
+      if (requestUrl === "/api/payment/providers") {
+        return response({ ok: true, providers: {} });
+      }
+      if (requestUrl.startsWith("/api/ref/validateReferral")) {
+        markValidationStarted();
+        return new Promise((resolve) => {
+          releaseReferral = () =>
+            resolve(
+              response({
+                ok: true,
+                referral: {
+                  code: "racecreator",
+                  currentDiscountPercent: 10,
+                },
+              })
+            );
+        });
+      }
+      if (requestUrl.startsWith("/api/ref/validateCoupon")) {
+        return response(
+          { ok: false, error: "Coupon not found" },
+          { ok: false, status: 404 }
+        );
+      }
+      if (requestUrl === "/api/payment/quote") {
+        return response({
+          ok: true,
+          quoteFingerprint: "hold-expired-quote",
+          quote: { grossAmount: 54.95, netAmount: 54.95, isFree: false },
+        });
+      }
+      return response({ ok: true });
+    });
+
+    renderPayment(
+      bookingFixture({
+        packagePrice: "$54.95",
+        referralCode: "racecreator",
+        slotHoldExpiresAt: "2099-01-15T08:00:01.000Z",
+      })
+    );
+    await act(async () => validationStarted);
+    expect(releaseReferral).toEqual(expect.any(Function));
+
+    act(() => jest.advanceTimersByTime(1001));
+    await act(async () => releaseReferral());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockNavigate).toHaveBeenCalledWith(
+      "/booking",
+      expect.objectContaining({ replace: true })
+    );
+    expect(screen.queryByText(/racecreator/i)).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("e.g. vouch")).toHaveValue("");
+    const quoteCalls = fetchCalls.filter(
+      (call) => call.url === "/api/payment/quote"
+    );
+    quoteCalls.forEach((call) => {
+      expect(call.body.referralCode).toBe("");
+      expect(call.body.couponCode).toBe("");
+    });
   });
 
   test("legacy query payload is scrubbed immediately and never enables legacy flow", async () => {

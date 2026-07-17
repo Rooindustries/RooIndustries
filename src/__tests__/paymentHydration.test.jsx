@@ -2,6 +2,7 @@ import React from "react";
 import { act } from "react";
 import { hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import Payment from "../components/Payment";
 
@@ -123,5 +124,290 @@ describe("payment reload hydration", () => {
     errorSpy.mockRestore();
     timeZoneSpy.mockRestore();
     container.remove();
+  });
+
+  test("validates booking payload codes into the payment inputs on arrival", async () => {
+    const bookingData = {
+      ...checkout,
+      referralCode: "creator",
+      couponCode: "SAVE10",
+    };
+    const quotePayloads = [];
+    global.fetch = jest.fn(async (url, options = {}) => {
+      const requestUrl = String(url);
+      if (requestUrl.startsWith("/api/ref/validateReferral")) {
+        const code = new URL(requestUrl, "https://rooindustries.com")
+          .searchParams.get("code")
+          ?.toLowerCase();
+        if (code !== "creator") {
+          return {
+            ok: false,
+            status: 404,
+            json: async () => ({ ok: false, error: "Not found" }),
+          };
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            referral: {
+              _id: "referral.creator",
+              name: "Private Creator Name",
+              currentCommissionPercent: 25,
+              code: "creator",
+              currentDiscountPercent: 10,
+            },
+          }),
+        };
+      }
+      if (requestUrl.startsWith("/api/ref/validateCoupon")) {
+        const code = new URL(requestUrl, "https://rooindustries.com")
+          .searchParams.get("code")
+          ?.toLowerCase();
+        if (code !== "save10") {
+          return {
+            ok: false,
+            status: 404,
+            json: async () => ({ ok: false, error: "Coupon not found" }),
+          };
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            coupon: {
+              id: "coupon.save10",
+              code: "SAVE10",
+              discountType: "fixed",
+              discountAmount: 10,
+              canCombineWithReferral: true,
+            },
+          }),
+        };
+      }
+      if (requestUrl === "/api/payment/quote") {
+        quotePayloads.push(JSON.parse(options.body || "{}"));
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            quoteFingerprint: "prefilled-quote",
+            quote: { grossAmount: 99.95, netAmount: 80.95, isFree: false },
+            providers: {
+              razorpay: { enabled: false },
+              paypal: { enabled: false, clientId: "" },
+            },
+          }),
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          providers: {
+            razorpay: { enabled: false },
+            paypal: { enabled: false, clientId: "" },
+          },
+        }),
+      };
+    });
+
+    render(
+      <MemoryRouter
+        initialEntries={[{ pathname: "/payment", state: { bookingData } }]}
+      >
+        <Payment hideFooter />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("e.g. vouch")).toHaveValue("creator");
+      expect(screen.getByPlaceholderText("e.g. BF10")).toHaveValue("SAVE10");
+    });
+    expect(await screen.findByText("$80.95 USD")).toBeInTheDocument();
+    expect(screen.getByText(/creator · −\$/)).toBeInTheDocument();
+    expect(screen.queryByText(/Private Creator Name/i)).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        "/api/ref/validateReferral?code=creator"
+      );
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining("/api/ref/validateCoupon?code=SAVE10")
+      );
+    });
+    expect(quotePayloads.at(-1)).toMatchObject({
+      packageTitle: "Performance Vertex Max",
+      referralCode: "creator",
+      couponCode: "SAVE10",
+    });
+    expect(quotePayloads.at(-1)).not.toHaveProperty("referralId");
+  });
+
+  test("drops an expired restored coupon before requesting a quote", async () => {
+    const bookingData = {
+      ...checkout,
+      couponCode: "EXPIRED",
+    };
+    const quotePayloads = [];
+    global.fetch = jest.fn(async (url, options = {}) => {
+      const requestUrl = String(url);
+      if (requestUrl.startsWith("/api/ref/validateReferral")) {
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({ ok: false, error: "Not found" }),
+        };
+      }
+      if (requestUrl.startsWith("/api/ref/validateCoupon")) {
+        return {
+          ok: false,
+          status: 400,
+          json: async () => ({
+            ok: false,
+            error: "This coupon has expired.",
+          }),
+        };
+      }
+      if (requestUrl === "/api/payment/quote") {
+        quotePayloads.push(JSON.parse(options.body || "{}"));
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            quoteFingerprint: "expired-code-removed",
+            quote: { grossAmount: 99.95, netAmount: 99.95, isFree: false },
+            providers: {},
+          }),
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({ ok: true, providers: {} }),
+      };
+    });
+
+    render(
+      <MemoryRouter
+        initialEntries={[{ pathname: "/payment", state: { bookingData } }]}
+      >
+        <Payment hideFooter />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This coupon has expired."
+    );
+    expect(screen.getByPlaceholderText("e.g. BF10")).toHaveValue("");
+    await waitFor(() => expect(quotePayloads).toHaveLength(1));
+    expect(quotePayloads[0]).toMatchObject({
+      referralCode: "",
+      couponCode: "",
+    });
+    expect(await screen.findByText("$99.95 USD")).toBeInTheDocument();
+  });
+
+  test("pre-applies referral then checks coupon stacking against that fresh result", async () => {
+    const bookingData = {
+      ...checkout,
+      referralCode: "creator",
+      couponCode: "SAVE10",
+    };
+    const requestedUrls = [];
+    const quotePayloads = [];
+    let releaseReferral;
+    global.fetch = jest.fn(async (url, options = {}) => {
+      const requestUrl = String(url);
+      requestedUrls.push(requestUrl);
+      if (requestUrl.startsWith("/api/ref/validateReferral")) {
+        const code = new URL(requestUrl, "https://rooindustries.com")
+          .searchParams.get("code")
+          ?.toLowerCase();
+        if (code === "creator") {
+          return new Promise((resolve) => {
+            releaseReferral = () =>
+              resolve({
+                ok: true,
+                json: async () => ({
+                  ok: true,
+                  referral: {
+                    code: "creator",
+                    currentDiscountPercent: 10,
+                  },
+                }),
+              });
+          });
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({ ok: false, error: "Not found" }),
+        };
+      }
+      if (requestUrl.startsWith("/api/ref/validateCoupon")) {
+        const code = new URL(requestUrl, "https://rooindustries.com")
+          .searchParams.get("code")
+          ?.toLowerCase();
+        return code === "save10"
+          ? {
+              ok: true,
+              json: async () => ({
+                ok: true,
+                coupon: {
+                  code: "SAVE10",
+                  discountType: "fixed",
+                  discountAmount: 10,
+                  canCombineWithReferral: false,
+                },
+              }),
+            }
+          : {
+              ok: false,
+              status: 404,
+              json: async () => ({ ok: false, error: "Coupon not found" }),
+            };
+      }
+      if (requestUrl === "/api/payment/quote") {
+        quotePayloads.push(JSON.parse(options.body || "{}"));
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            quoteFingerprint: "sequential-stack-quote",
+            quote: { grossAmount: 99.95, netAmount: 89.95, isFree: false },
+            providers: {},
+          }),
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({ ok: true, providers: {} }),
+      };
+    });
+
+    render(
+      <MemoryRouter
+        initialEntries={[{ pathname: "/payment", state: { bookingData } }]}
+      >
+        <Payment hideFooter />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => expect(releaseReferral).toEqual(expect.any(Function)));
+    expect(requestedUrls.some((url) => url.includes("code=SAVE10"))).toBe(false);
+    await act(async () => releaseReferral());
+    await waitFor(() =>
+      expect(requestedUrls.some((url) => url.includes("code=SAVE10"))).toBe(true)
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This coupon can't be used together with a referral discount."
+    );
+    expect(screen.getByPlaceholderText("e.g. vouch")).toHaveValue("creator");
+    expect(screen.getByPlaceholderText("e.g. BF10")).toHaveValue("");
+    await waitFor(() => expect(quotePayloads).toHaveLength(1));
+    expect(quotePayloads[0]).toMatchObject({
+      referralCode: "creator",
+      couponCode: "",
+    });
   });
 });

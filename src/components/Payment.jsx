@@ -3,6 +3,14 @@ import { useLocation, Link, useNavigate } from "react-router-dom";
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 import { motion } from "framer-motion";
 import packagePricing from "../lib/packagePricing";
+import {
+  calculateCheckoutDiscounts,
+  formatCouponValue,
+  resolveCheckoutCode,
+  sanitizeCouponForCheckout,
+  sanitizeReferralForCheckout,
+  toMoney,
+} from "../lib/checkoutCodes";
 
 const { applyPackagePricing } = packagePricing;
 const formatLocalDate = (utcDate, timeZone) => {
@@ -29,41 +37,6 @@ const formatLocalTime = (utcDate, timeZone) => {
   } catch {
     return "--";
   }
-};
-
-const toMoney = (value) => {
-  const parsed = Number(
-    typeof value === "string" ? value.replace(/[^0-9.]/g, "") : value
-  );
-  if (!Number.isFinite(parsed)) return 0;
-  return +parsed.toFixed(2);
-};
-
-const getCouponDiscountType = (coupon) =>
-  String(coupon?.discountType || "").trim().toLowerCase() === "fixed"
-    ? "fixed"
-    : "percent";
-
-const getCouponDiscountValue = (coupon) =>
-  getCouponDiscountType(coupon) === "fixed"
-    ? toMoney(coupon?.discountAmount || 0)
-    : toMoney(coupon?.discountPercent || 0);
-
-const getCouponDiscountAmount = (coupon, baseAmount) => {
-  if (!coupon || baseAmount <= 0) return 0;
-  const discountType = getCouponDiscountType(coupon);
-  const rawAmount =
-    discountType === "fixed"
-      ? getCouponDiscountValue(coupon)
-      : baseAmount * (getCouponDiscountValue(coupon) / 100);
-  return Math.min(baseAmount, toMoney(rawAmount));
-};
-
-const formatCouponValue = (coupon) => {
-  if (getCouponDiscountType(coupon) === "fixed") {
-    return `$${getCouponDiscountValue(coupon).toFixed(2)} off`;
-  }
-  return `${getCouponDiscountValue(coupon)}% off`;
 };
 
 const parseCheckoutFingerprint = (value) => {
@@ -351,6 +324,8 @@ export default function Payment({ hideFooter = false }) {
     !holdExpired;
   const canSubmitBooking = isUpgrade ? hasTimeslot : hasTimeslot && hasSlotHold;
   const holdExpiryHandledRef = useRef(false);
+  const codeApplicationAllowedRef = useRef(canSubmitBooking);
+  codeApplicationAllowedRef.current = canSubmitBooking;
 
   const ensureSlotBeforeAction = () => {
     if (canSubmitBooking) return true;
@@ -391,16 +366,18 @@ export default function Payment({ hideFooter = false }) {
   const time =
     bookingData.displayTime ||
     (utcStart ? formatLocalTime(utcStart, userTimeZone) : "--");
-  const baseAmount =
-    parseFloat(String(packagePrice).replace(/[^0-9.]/g, "")) || 0;
+  const baseAmount = Math.max(0, toMoney(packagePrice));
 
   const [referralInput, setReferralInput] = useState("");
   const [referral, setReferral] = useState(null);
   const [validating, setValidating] = useState(false);
+  const [referralError, setReferralError] = useState("");
 
   const [couponInput, setCouponInput] = useState("");
   const [coupon, setCoupon] = useState(null);
   const [validatingCoupon, setValidatingCoupon] = useState(false);
+  const [couponError, setCouponError] = useState("");
+  const [preApplyingCodes, setPreApplyingCodes] = useState(true);
 
   const [banner, setBanner] = useState(null);
   const [serverQuote, setServerQuote] = useState(null);
@@ -422,6 +399,7 @@ export default function Payment({ hideFooter = false }) {
     const triggerExpiry = () => {
       if (holdExpiryHandledRef.current) return;
       holdExpiryHandledRef.current = true;
+      codeApplicationAllowedRef.current = false;
       showBanner(
         "error",
         "Your reserved slot expired. Please select a new time before completing your booking."
@@ -453,66 +431,22 @@ export default function Payment({ hideFooter = false }) {
     return () => clearTimeout(timeoutId);
   }, [holdExpiresAt, navigate, navState, location]);
 
-  const referralPercent = referral?.currentDiscountPercent || 0;
-  const couponDiscountAmount = getCouponDiscountAmount(coupon, baseAmount);
-  const canStackCouponWithReferral =
-    coupon?.canCombineWithReferral === true || false;
-
-  let referralDiscountAmount = 0;
-
-  if (baseAmount > 0) {
-    if (referralPercent > 0) {
-      const referralBase =
-        coupon && canStackCouponWithReferral
-          ? Math.max(0, baseAmount - couponDiscountAmount)
-          : baseAmount;
-      referralDiscountAmount = +(
-        referralBase *
-        (referralPercent / 100)
-      ).toFixed(2);
-    }
-  }
-
-  const canApplyCouponWithReferral =
-    !(coupon && referral && !canStackCouponWithReferral);
-  const uncappedTotalDiscount = canApplyCouponWithReferral
-    ? +((referralDiscountAmount || 0) + (couponDiscountAmount || 0)).toFixed(2)
-    : Math.max(referralDiscountAmount || 0, couponDiscountAmount || 0);
-
-  const totalDiscountAmount =
-    baseAmount > 0 ? Math.min(baseAmount, uncappedTotalDiscount) : 0;
-
-  const rawFinalAmount = Math.max(
-    0,
-    +(baseAmount - totalDiscountAmount).toFixed(2)
-  );
-
-  const hasFreeCoupon = !!coupon && couponDiscountAmount >= baseAmount;
-  const clientIsFree = hasFreeCoupon && rawFinalAmount === 0;
-  const isFree =
-    typeof serverQuote?.isFree === "boolean"
-      ? serverQuote.isFree
-      : clientIsFree;
-  const preventedFreeReduction =
-    !clientIsFree && rawFinalAmount === 0 && baseAmount > 0;
-  const minPayable = 0.01;
-
-  const quotedNetAmount = Number(serverQuote?.netAmount);
-  const finalAmount = Number.isFinite(quotedNetAmount)
-    ? Math.max(0, quotedNetAmount)
-    : isFree
-      ? 0
-      : Math.max(minPayable, rawFinalAmount);
-
-  const effectiveDiscountAmount = preventedFreeReduction
-    ? +(baseAmount - finalAmount).toFixed(2)
-    : totalDiscountAmount;
-
-  const discountPercentCombined = preventedFreeReduction
-    ? +((effectiveDiscountAmount / baseAmount) * 100 || 0).toFixed(2)
-    : baseAmount > 0
-    ? +((totalDiscountAmount / baseAmount) * 100 || 0).toFixed(2)
-    : 0;
+  const {
+    referralPercent,
+    couponDiscountAmount,
+    canStackCouponWithReferral,
+    referralDiscountAmount,
+    isFree,
+    preventedFreeReduction,
+    finalAmount,
+    effectiveDiscountAmount,
+    discountPercentCombined,
+  } = calculateCheckoutDiscounts({
+    baseAmount,
+    referral,
+    coupon,
+    serverQuote,
+  });
 
   const [rzpReady, setRzpReady] = useState(false);
   const [payingRzp, setPayingRzp] = useState(false);
@@ -558,9 +492,8 @@ export default function Payment({ hideFooter = false }) {
     localTimeZone: userTimeZone,
     displayDate: date,
     displayTime: time,
-    referralCode: referral?.code || referralInput || "",
-    referralId: referral?._id || "",
-    couponCode: coupon?.code || couponInput || "",
+    referralCode: referral?.code || "",
+    couponCode: coupon?.code || "",
     slotHoldId: sessionHold?.slotHoldId || bookingData.slotHoldId || "",
     slotHoldToken: sessionHold?.slotHoldToken || bookingData.slotHoldToken || "",
     slotHoldExpiresAt:
@@ -577,8 +510,8 @@ export default function Payment({ hideFooter = false }) {
         originalOrderId: bookingData.originalOrderId || "",
         startTimeUTC: bookingData.startTimeUTC || "",
         email: bookingData.email || "",
-        referralCode: referral?.code || referralInput || "",
-        couponCode: coupon?.code || couponInput || "",
+        referralCode: referral?.code || "",
+        couponCode: coupon?.code || "",
       }),
     [
       packageTitle,
@@ -586,16 +519,15 @@ export default function Payment({ hideFooter = false }) {
       bookingData.startTimeUTC,
       bookingData.email,
       referral?.code,
-      referralInput,
       coupon?.code,
-      couponInput,
     ]
   );
 
   useEffect(() => {
-    if (!packageTitle) {
+    if (!packageTitle || preApplyingCodes) {
       setServerQuote(null);
       setQuoteFingerprint("");
+      setQuoteLoading(false);
       return;
     }
 
@@ -612,9 +544,8 @@ export default function Payment({ hideFooter = false }) {
         originalOrderId: bookingData.originalOrderId || "",
         startTimeUTC: bookingData.startTimeUTC || "",
         email: bookingData.email || "",
-        referralId: referral?._id || "",
-        referralCode: referral?.code || referralInput || "",
-        couponCode: coupon?.code || couponInput || "",
+        referralCode: referral?.code || "",
+        couponCode: coupon?.code || "",
         upgradeIntentToken: bookingData.upgradeIntentToken || "",
       }),
       signal: controller?.signal,
@@ -652,33 +583,120 @@ export default function Payment({ hideFooter = false }) {
     packageTitle,
     bookingData.originalOrderId,
     bookingData.upgradeIntentToken,
-    referral?._id,
     referral?.code,
-    referralInput,
     coupon?.code,
-    couponInput,
+    preApplyingCodes,
   ]);
 
   useEffect(() => {
+    if (!hydrated || !packageTitle) return;
+
     const params = new URLSearchParams(location.search);
-    const fromUrl = params.get("ref");
+    const referralCode = String(
+      params.get("ref") || bookingData.referralCode || readStoredReferral() || ""
+    ).trim();
+    const couponCode = String(bookingData.couponCode || "").trim();
+    let active = true;
+    setPreApplyingCodes(true);
+    setReferral(null);
+    setCoupon(null);
+    setReferralError("");
+    setCouponError("");
 
-    if (fromUrl) {
-      writeStoredReferral(fromUrl);
-      setReferralInput(fromUrl);
-      validateReferral(fromUrl);
-      return;
-    }
+    const preApplyCodes = async () => {
+      let nextReferral = null;
+      let nextCoupon = null;
+      let nextReferralInput = referralCode;
+      let nextCouponInput = couponCode;
+      let infoMessage = "";
 
-    const stored = readStoredReferral();
-    if (stored) {
-      setReferralInput(stored);
-      validateReferral(stored);
-    } else {
-      writeStoredReferral("");
-    }
+      const applyResolved = (result, source) => {
+        if (!result?.ok) {
+          if (source === "referral") {
+            nextReferralInput = "";
+            setReferralError("Invalid or inactive referral code.");
+          } else {
+            nextCouponInput = "";
+            setCouponError(result?.error || "Invalid coupon code.");
+          }
+          return;
+        }
+
+        if (result.type === "referral") {
+          const safeReferral = sanitizeReferralForCheckout(result.value);
+          if (!safeReferral) return;
+          nextReferral = safeReferral;
+          nextReferralInput = safeReferral.code;
+          if (source === "coupon") {
+            nextCouponInput = "";
+            infoMessage =
+              "This code is a referral, so it was applied as a referral.";
+          }
+          if (nextCoupon?.canCombineWithReferral === false) {
+            nextCoupon = null;
+            nextCouponInput = "";
+          }
+          return;
+        }
+
+        const safeCoupon = sanitizeCouponForCheckout(result.value);
+        if (!safeCoupon) return;
+        if (safeCoupon.canCombineWithReferral === false && nextReferral) {
+          nextCouponInput = "";
+          setCouponError(
+            "This coupon can't be used together with a referral discount."
+          );
+          return;
+        }
+        nextCoupon = safeCoupon;
+        nextCouponInput = safeCoupon.code;
+        if (source === "referral") {
+          nextReferralInput = nextReferral?.code || "";
+          infoMessage = "This code is a coupon, so it was applied as a coupon.";
+        }
+      };
+
+      if (referralCode) {
+        const result = await resolveCheckoutCode(referralCode, packageTitle);
+        if (!active || !codeApplicationAllowedRef.current) return;
+        applyResolved(result, "referral");
+      }
+
+      if (
+        couponCode &&
+        couponCode.toLowerCase() !== referralCode.toLowerCase()
+      ) {
+        const result = await resolveCheckoutCode(couponCode, packageTitle);
+        if (!active || !codeApplicationAllowedRef.current) return;
+        applyResolved(result, "coupon");
+      } else if (couponCode && nextReferral) {
+        nextCouponInput = "";
+      }
+
+      if (!active || !codeApplicationAllowedRef.current) return;
+      setReferral(nextReferral);
+      setCoupon(nextCoupon);
+      setReferralInput(nextReferralInput);
+      setCouponInput(nextCouponInput);
+      writeStoredReferral(nextReferral?.code || "");
+      if (infoMessage) showBanner("info", infoMessage);
+    };
+
+    preApplyCodes().finally(() => {
+      if (active) setPreApplyingCodes(false);
+    });
+
+    return () => {
+      active = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.search]);
+  }, [
+    bookingData.couponCode,
+    bookingData.referralCode,
+    hydrated,
+    location.search,
+    packageTitle,
+  ]);
 
   useEffect(() => {
     if (!canUseRazorpay) {
@@ -1150,45 +1168,65 @@ export default function Payment({ hideFooter = false }) {
   };
 
   async function validateReferral(code) {
-    if (!code) {
+    const normalizedCode = String(code || "").trim();
+    if (!normalizedCode) {
       setReferral(null);
-
+      setReferralError("");
+      writeStoredReferral("");
       return;
     }
     try {
       setValidating(true);
-      const r = await fetch(
-        `/api/ref/validateReferral?code=${encodeURIComponent(code)}`
-      );
-      const data = await r.json();
-      if (data.ok && data.referral) {
-        setReferral(data.referral);
-
-        writeStoredReferral(data.referral.code || "");
-
-        if (
-          coupon &&
-          coupon.canCombineWithReferral === false &&
-          data.referral
-        ) {
-          setCoupon(null);
-          setCouponInput("");
-          showBanner(
-            "info",
-            "Current coupon can't be combined with referrals and was removed."
-          );
-        }
-      } else {
+      setReferralError("");
+      const result = await resolveCheckoutCode(normalizedCode, packageTitle);
+      if (!codeApplicationAllowedRef.current) return;
+      if (!result.ok) {
         setReferral(null);
         writeStoredReferral("");
-        showBanner("error", "Invalid or inactive referral code.");
+        setReferralError("Invalid or inactive referral code.");
+        return;
+      }
+
+      if (result.type === "coupon") {
+        const safeCoupon = sanitizeCouponForCheckout(result.value);
+        if (!safeCoupon) {
+          setReferralError("Invalid or inactive referral code.");
+          return;
+        }
+        if (safeCoupon.canCombineWithReferral === false && referral) {
+          setCouponError(
+            "This coupon can't be used together with a referral discount."
+          );
+          return;
+        }
+        setCoupon(safeCoupon);
+        setCouponInput(safeCoupon.code);
+        setReferralInput(referral?.code || "");
+        showBanner("info", "This code is a coupon, so it was applied as a coupon.");
+        return;
+      }
+
+      const safeReferral = sanitizeReferralForCheckout(result.value);
+      if (!safeReferral) {
+        setReferralError("Invalid or inactive referral code.");
+        return;
+      }
+      setReferral(safeReferral);
+      setReferralInput(safeReferral.code);
+      writeStoredReferral(safeReferral.code);
+      if (coupon?.canCombineWithReferral === false) {
+        setCoupon(null);
+        setCouponInput("");
+        showBanner(
+          "info",
+          "Current coupon can't be combined with referrals and was removed."
+        );
       }
     } catch {
       console.error("Referral validation failed");
       setReferral(null);
       writeStoredReferral("");
-      showBanner(
-        "error",
+      setReferralError(
         "We couldn't validate that referral code. Please try again."
       );
     } finally {
@@ -1197,42 +1235,61 @@ export default function Payment({ hideFooter = false }) {
   }
 
   async function validateCoupon(code) {
-    if (!code) {
+    const normalizedCode = String(code || "").trim();
+    if (!normalizedCode) {
       setCoupon(null);
+      setCouponError("");
       return;
     }
     try {
       setValidatingCoupon(true);
-      const r = await fetch(
-        `/api/ref/validateCoupon?code=${encodeURIComponent(
-          code
-        )}&packageTitle=${encodeURIComponent(packageTitle)}`
-      );
-      const data = await r.json();
-      if (data.ok && data.coupon) {
-        if (data.coupon.canCombineWithReferral === false && referral) {
-          setCoupon(null);
-          showBanner(
-            "error",
-            "This coupon can't be used together with a referral discount. Remove the referral or use a different coupon."
-          );
+      setCouponError("");
+      const result = await resolveCheckoutCode(normalizedCode, packageTitle);
+      if (!codeApplicationAllowedRef.current) return;
+      if (!result.ok) {
+        setCoupon(null);
+        setCouponError(result.error || "Invalid coupon code.");
+        return;
+      }
+
+      if (result.type === "referral") {
+        const safeReferral = sanitizeReferralForCheckout(result.value);
+        if (!safeReferral) {
+          setCouponError("Invalid coupon code.");
           return;
         }
-
-        setCoupon(data.coupon);
-        showBanner(
-          "success",
-          `Coupon applied: ${formatCouponValue(data.coupon)}`
-        );
-      } else {
+        setReferral(safeReferral);
+        setReferralInput(safeReferral.code);
+        writeStoredReferral(safeReferral.code);
         setCoupon(null);
-        showBanner("error", data.error || "Invalid coupon code.");
+        setCouponInput("");
+        showBanner(
+          "info",
+          "This code is a referral, so it was applied as a referral."
+        );
+        return;
       }
+
+      const safeCoupon = sanitizeCouponForCheckout(result.value);
+      if (!safeCoupon) {
+        setCouponError("Invalid coupon code.");
+        return;
+      }
+      if (safeCoupon.canCombineWithReferral === false && referral) {
+        setCoupon(null);
+        setCouponError(
+          "This coupon can't be used together with a referral discount. Remove the referral or use a different coupon."
+        );
+        return;
+      }
+
+      setCoupon(safeCoupon);
+      setCouponInput(safeCoupon.code);
+      showBanner("success", `Coupon applied: ${formatCouponValue(safeCoupon)}`);
     } catch {
       console.error("Coupon validation failed");
       setCoupon(null);
-      showBanner(
-        "error",
+      setCouponError(
         "We couldn't validate that coupon code. Please try again."
       );
     } finally {
@@ -1413,7 +1470,7 @@ export default function Payment({ hideFooter = false }) {
 
   return (
     <motion.section
-      className="relative z-10 py-4 md:py-32 px-6 max-w-3xl mx-auto text-ink"
+      className="relative z-10 py-4 px-6 max-w-3xl mx-auto text-ink"
       variants={containerVariants}
       initial="hidden"
       animate="visible"
@@ -1471,58 +1528,64 @@ export default function Payment({ hideFooter = false }) {
             Please review your {isUpgrade ? "upgrade" : "booking"} details
           </p>
 
-          <div className="mt-6">
-            <p className="font-semibold text-lg text-ink">{packageTitle}</p>
-            <div className="mt-2 space-y-1">
-              {(referralPercent > 0 || couponDiscountAmount > 0) && (
-                <p className="text-xl text-ink-secondary line-through">
-                  ${baseAmount.toFixed(2)}
-                </p>
-              )}
-              <p className="text-3xl font-extrabold text-accent">
-                ${finalAmount.toFixed(2)} USD
-              </p>
-              <p className="text-xs text-ink-muted">
-                {quoteLoading
-                  ? "Confirming the current price..."
-                  : quoteFingerprint
-                    ? "Current total confirmed securely by Roo Industries."
-                    : "Price confirmation is unavailable. Payment is disabled."}
-              </p>
-
+          <div className="mt-2">
+            <dl className="divide-y divide-line-input text-left text-sm">
+              <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
+                <dt className="text-ink-muted">Package</dt>
+                <dd className="break-words font-semibold text-ink sm:text-right">
+                  {packageTitle}
+                </dd>
+              </div>
+              <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
+                <dt className="text-ink-muted">Date & time</dt>
+                <dd className="font-semibold text-ink sm:text-right">
+                  {date} · {time}
+                  {userTimeZone ? (
+                    <span className="font-normal text-ink-muted">
+                      {" "}
+                      ({userTimeZone})
+                    </span>
+                  ) : null}
+                </dd>
+              </div>
               {referralPercent > 0 && (
-                <p className="text-sm text-success-text">
-                  Referral: {referralPercent}% ($
-                  {referralDiscountAmount.toFixed(2)}
-                  {referral?.name ? ` via ${referral.name}` : ""})
-                </p>
+                <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
+                  <dt className="text-ink-muted">Referral</dt>
+                  <dd className="font-semibold text-ink sm:text-right">
+                    {referral?.code} · −${referralDiscountAmount.toFixed(2)}
+                  </dd>
+                </div>
               )}
               {couponDiscountAmount > 0 && coupon && (
-                <p className="text-sm text-success-text">
-                  Coupon "{coupon.code}": {formatCouponValue(coupon)} ($
-                  {couponDiscountAmount.toFixed(2)})
-                  {canStackCouponWithReferral && referralPercent > 0
-                    ? " (stacked with referral)"
-                    : ""}
-                </p>
+                <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
+                  <dt className="text-ink-muted">Coupon</dt>
+                  <dd className="font-semibold text-ink sm:text-right">
+                    {coupon.code} · −${couponDiscountAmount.toFixed(2)}
+                  </dd>
+                </div>
               )}
-              {effectiveDiscountAmount > 0 && (
-                <p className="text-xs text-ink-secondary">
-                  Total savings: {discountPercentCombined}% (${effectiveDiscountAmount.toFixed(2)})
-                </p>
-              )}
-
-              <p className="text-sm text-ink-muted mt-1">
-                Your time: <span className="text-accent">{date}</span> at{" "}
-                <span className="text-accent">{time}</span>
-              </p>
-              {userTimeZone && (
-                <p className="text-xs text-ink-muted">
-                  Time zone:{" "}
-                  <span className="text-ink-secondary">{userTimeZone}</span>
-                </p>
-              )}
-
+              <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr] sm:items-baseline">
+                <dt className="font-semibold text-ink">Total</dt>
+                <dd className="sm:text-right">
+                  {(referralPercent > 0 || couponDiscountAmount > 0) && (
+                    <span className="mr-2 text-sm text-ink-secondary line-through">
+                      ${baseAmount.toFixed(2)}
+                    </span>
+                  )}
+                  <span className="text-2xl font-extrabold text-accent">
+                    ${finalAmount.toFixed(2)} USD
+                  </span>
+                </dd>
+              </div>
+            </dl>
+            <p className="mt-1 text-xs text-ink-muted sm:text-right">
+              {quoteLoading
+                ? "Confirming the current price..."
+                : quoteFingerprint
+                  ? "Price confirmed for this session."
+                  : "Price confirmation is unavailable. Payment is disabled."}
+            </p>
+            <div className="space-y-1">
               {isFree && (
                 <p className="text-xs text-success-text mt-2">
                   This booking has a 100% discount applied. No payment is required - just confirm your free booking below.
@@ -1554,15 +1617,22 @@ export default function Payment({ hideFooter = false }) {
               <div className="flex flex-wrap gap-2 items-center">
                 <input
                   value={referralInput}
-                  onChange={(e) => setReferralInput(e.target.value.trim())}
-                  disabled={!!lockedProvider}
+                  onChange={(e) => {
+                    setReferralInput(e.target.value.trim());
+                    if (referralError) setReferralError("");
+                  }}
+                  disabled={preApplyingCodes || !!lockedProvider}
+                  aria-invalid={referralError ? "true" : "false"}
+                  aria-describedby={
+                    referralError ? "payment-referral-code-error" : undefined
+                  }
                   placeholder="e.g. vouch"
                   className="w-60 bg-surface-input border border-line-input rounded-md px-3 py-2 outline-none text-sm disabled:opacity-60"
                 />
 
                 <button
                   onClick={() => validateReferral(referralInput)}
-                  disabled={validating || !!lockedProvider}
+                  disabled={preApplyingCodes || validating || !!lockedProvider}
                   className="glow-button px-3 py-2 rounded-md font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 text-sm"
                 >
                   {validating ? "Checking..." : "Apply"}
@@ -1572,9 +1642,13 @@ export default function Payment({ hideFooter = false }) {
                   <span className="glow-line glow-line-left" />
                 </button>
               </div>
-              {referralInput && !referral && !validating && (
-                <p className="text-sm text-danger-text mt-2">
-                  Invalid or inactive referral code.
+              {referralError && !validating && (
+                <p
+                  id="payment-referral-code-error"
+                  role="alert"
+                  className="text-sm text-danger-text mt-2"
+                >
+                  {referralError}
                 </p>
               )}
             </div>
@@ -1587,15 +1661,24 @@ export default function Payment({ hideFooter = false }) {
               <div className="flex flex-wrap gap-2 items-center">
                 <input
                   value={couponInput}
-                  onChange={(e) => setCouponInput(e.target.value.trim())}
-                  disabled={!!lockedProvider}
+                  onChange={(e) => {
+                    setCouponInput(e.target.value.trim());
+                    if (couponError) setCouponError("");
+                  }}
+                  disabled={preApplyingCodes || !!lockedProvider}
+                  aria-invalid={couponError ? "true" : "false"}
+                  aria-describedby={
+                    couponError ? "payment-coupon-code-error" : undefined
+                  }
                   placeholder="e.g. BF10"
                   className="w-60 bg-surface-input border border-line-input rounded-md px-3 py-2 outline-none text-sm disabled:opacity-60"
                 />
 
                 <button
                   onClick={() => validateCoupon(couponInput)}
-                  disabled={validatingCoupon || !!lockedProvider}
+                  disabled={
+                    preApplyingCodes || validatingCoupon || !!lockedProvider
+                  }
                   className="glow-button px-3 py-2 rounded-md font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 text-sm"
                 >
                   {validatingCoupon ? "Checking..." : "Apply"}
@@ -1610,6 +1693,7 @@ export default function Payment({ hideFooter = false }) {
                     onClick={() => {
                       setCoupon(null);
                       setCouponInput("");
+                      setCouponError("");
                     }}
                     disabled={!!lockedProvider}
                     className="text-xs text-ink-secondary underline underline-offset-2"
@@ -1618,6 +1702,15 @@ export default function Payment({ hideFooter = false }) {
                   </button>
                 )}
               </div>
+              {couponError && !validatingCoupon && (
+                <p
+                  id="payment-coupon-code-error"
+                  role="alert"
+                  className="text-sm text-danger-text mt-2"
+                >
+                  {couponError}
+                </p>
+              )}
               {coupon &&
                 coupon.canCombineWithReferral === false &&
                 referral && (
@@ -1872,7 +1965,7 @@ export default function Payment({ hideFooter = false }) {
       {(isModalMode || !hideFooter) && (
         <motion.div
           variants={itemVariants}
-          className="mt-10 flex justify-center pb-36 sm:pb-40"
+          className="mt-10 flex justify-center"
         >
           <Link
             to="/booking"

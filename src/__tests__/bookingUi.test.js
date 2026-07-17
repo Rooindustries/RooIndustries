@@ -2,6 +2,7 @@ import React from "react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import BookingForm from "../components/BookingForm";
+import { calculateCheckoutDiscounts } from "../lib/checkoutCodes";
 
 let mockLocation = {
   pathname: "/booking",
@@ -59,12 +60,12 @@ const formatLocalTime = (utcDate, timeZone) =>
 
 const OVERHAUL_PACKAGE = {
   title: "Performance Vertex Overhaul",
-  price: "$79.95",
+  price: "$54.95",
   tag: "Test",
 };
 const MAX_PACKAGE = {
   title: "Performance Vertex Max",
-  price: "$149.95",
+  price: "$99.95",
   tag: "Test",
 };
 const FUTURE_SLOT = "2099-01-05T04:30:00.000Z";
@@ -76,11 +77,36 @@ const VALID_FORM = {
   mainGame: "Valorant",
   notes: "Keep fan noise low",
 };
+const CREATOR_REFERRAL = {
+  _id: "referral.creator",
+  name: "Private Creator Name",
+  currentCommissionPercent: 25,
+  code: "creator",
+  currentDiscountPercent: 10,
+};
+const FIXED_COUPON = {
+  id: "coupon.save10",
+  title: "Internal coupon title",
+  code: "SAVE10",
+  discountType: "fixed",
+  discountAmount: 10,
+  discountPercent: 0,
+  canCombineWithReferral: true,
+  timesUsed: 4,
+};
+const STACKING_COUPON = {
+  id: "coupon.club5",
+  code: "CLUB5",
+  discountType: "percent",
+  discountPercent: 5,
+  discountAmount: null,
+  canCombineWithReferral: true,
+};
 
-const setBookingLocation = (bookingPackage = OVERHAUL_PACKAGE) => {
+const setBookingLocation = (bookingPackage = OVERHAUL_PACKAGE, search = "") => {
   __setMockLocation({
     pathname: "/booking",
-    search: "",
+    search,
     hash: "",
     state: { bookingPackage },
   });
@@ -92,6 +118,7 @@ const seedBookingSession = ({
   holdPhase = "active",
   expiresAt = FUTURE_EXPIRY,
   step = 2,
+  checkoutCodes = null,
 } = {}) => {
   window.sessionStorage.setItem(
     "my_slot_hold",
@@ -126,14 +153,46 @@ const seedBookingSession = ({
         [bookingPackage.title]: {
           selectedPackage: bookingPackage,
           form,
+          ...(checkoutCodes ? { checkoutCodes } : {}),
         },
       },
     })
   );
 };
 
-const installDefaultFetch = ({ settings = { dateSlots: [] } } = {}) => {
+const installDefaultFetch = ({
+  settings = { dateSlots: [] },
+  referrals = {},
+  coupons = {},
+} = {}) => {
   global.fetch = jest.fn(async (url) => {
+    const requestUrl = String(url);
+    if (requestUrl.startsWith("/api/ref/validateReferral")) {
+      const code = new URL(requestUrl, "https://rooindustries.com")
+        .searchParams.get("code")
+        ?.toLowerCase();
+      const referral = referrals[code];
+      return {
+        ok: !!referral,
+        json: async () =>
+          referral
+            ? { ok: true, referral }
+            : { ok: false, error: "Not found" },
+      };
+    }
+    if (requestUrl.startsWith("/api/ref/validateCoupon")) {
+      const code = new URL(requestUrl, "https://rooindustries.com")
+        .searchParams.get("code")
+        ?.toLowerCase();
+      const coupon = coupons[code];
+      return {
+        ok: !!coupon,
+        json: async () =>
+          coupon
+            ? { ok: true, coupon }
+            : { ok: false, error: "Invalid referral or coupon code." },
+      };
+    }
     if (String(url).startsWith("/api/content/package")) {
       return {
         ok: true,
@@ -150,11 +209,26 @@ const installDefaultFetch = ({ settings = { dateSlots: [] } } = {}) => {
   });
 };
 
+const PROGRESS_PERCENT_LABELS = {
+  "Step 1 of 3": "33%",
+  "Step 2 of 3": "67%",
+  "Step 3 of 3": "100%",
+};
+
+const getAvailabilityFetchCalls = () =>
+  global.fetch.mock.calls.filter(
+    ([url]) => url === "/api/bookingAvailability"
+  );
+
 const expectActiveStep = (label, progress) => {
   const tracker = screen.getByTestId("booking-step-tracker");
   const activeStep = tracker.querySelector('[aria-current="step"]');
   expect(activeStep).toHaveTextContent(label);
-  expect(within(tracker).getByText(progress)).toBeInTheDocument();
+  const progressBar = within(tracker).getByRole("progressbar");
+  expect(progressBar).toHaveAttribute("aria-valuetext", progress);
+  expect(
+    within(tracker).getByText(PROGRESS_PERCENT_LABELS[progress])
+  ).toBeInTheDocument();
 };
 
 describe("booking calendar UI", () => {
@@ -183,6 +257,56 @@ describe("booking calendar UI", () => {
     if (resolvedOptionsSpy) {
       resolvedOptionsSpy.mockRestore();
     }
+  });
+
+  test("refreshes visible step-1 availability on focus and every 60 seconds", async () => {
+    jest.useFakeTimers();
+    installDefaultFetch();
+    setBookingLocation();
+
+    render(<BookingForm />);
+
+    await screen.findByTestId("booking-step-tracker");
+    expect(getAvailabilityFetchCalls()).toHaveLength(1);
+
+    await act(async () => {
+      jest.advanceTimersByTime(5_000);
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    expect(getAvailabilityFetchCalls()).toHaveLength(2);
+
+    await act(async () => {
+      jest.advanceTimersByTime(55_000);
+      await Promise.resolve();
+    });
+    expect(getAvailabilityFetchCalls()).toHaveLength(3);
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    expect(getAvailabilityFetchCalls()).toHaveLength(3);
+  });
+
+  test("does not refresh availability on focus or the interval while on step 2", async () => {
+    jest.useFakeTimers();
+    seedBookingSession();
+    installDefaultFetch();
+    setBookingLocation();
+
+    render(<BookingForm />);
+
+    await screen.findByRole("button", { name: /^review before payment$/i });
+    expectActiveStep("PC details", "Step 2 of 3");
+    expect(getAvailabilityFetchCalls()).toHaveLength(1);
+
+    await act(async () => {
+      jest.advanceTimersByTime(60_000);
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    expect(getAvailabilityFetchCalls()).toHaveLength(1);
   });
 
   test("shows client-local times only and uses the fixed client email", async () => {
@@ -372,7 +496,7 @@ describe("booking calendar UI", () => {
     render(<BookingForm />);
 
     await waitFor(() =>
-      expectActiveStep("Review & pay", "Step 3 of 3 · Ready to pay")
+      expectActiveStep("Review & pay", "Step 3 of 3")
     );
     const releaseButton = await screen.findByRole("button", {
       name: /^release payment$/i,
@@ -382,6 +506,11 @@ describe("booking calendar UI", () => {
     ).toHaveLength(1);
     expect(screen.queryByRole("button", { name: /^back$/i })).not.toBeInTheDocument();
     expect(releaseButton.parentElement).toHaveClass("grid", "sm:grid-cols-2");
+    expect(
+      screen.queryByRole("button", {
+        name: /have a referral or coupon code/i,
+      })
+    ).not.toBeInTheDocument();
 
     await userEvent.click(
       screen.getByRole("button", { name: /^return to payment$/i })
@@ -400,7 +529,7 @@ describe("booking calendar UI", () => {
     expect(
       await screen.findByText(/payment method released/i)
     ).toBeInTheDocument();
-    expectActiveStep("Review & pay", "Step 3 of 3 · Ready to pay");
+    expectActiveStep("Review & pay", "Step 3 of 3");
     expect(
       screen.getByRole("button", { name: /^pay \$54\.95$/i })
     ).toBeInTheDocument();
@@ -462,7 +591,7 @@ describe("booking calendar UI", () => {
       /^payment cancellation was rejected\.$/i
     );
     expect(error).toHaveClass("text-danger-text");
-    expectActiveStep("Review & pay", "Step 3 of 3 · Ready to pay");
+    expectActiveStep("Review & pay", "Step 3 of 3");
   });
 
   test("releases an ordinary step-3 hold when its countdown expires", async () => {
@@ -512,7 +641,7 @@ describe("booking calendar UI", () => {
     expect(screen.getByText(PAYMENT_PENDING_EXPIRY_ERROR)).toHaveClass(
       "text-danger-text"
     );
-    expectActiveStep("Review & pay", "Step 3 of 3 · Ready to pay");
+    expectActiveStep("Review & pay", "Step 3 of 3");
     expect(window.sessionStorage.getItem("my_slot_hold")).not.toBeNull();
     expect(
       global.fetch.mock.calls.filter(([url]) => url === "/api/releaseHold")
@@ -616,7 +745,7 @@ describe("booking calendar UI", () => {
     await screen.findByRole("button", {
       name: formatLocalTime(utcStart, "America/Los_Angeles"),
     });
-    expectActiveStep("Pick a slot", "Step 1 of 3 · 33% complete");
+    expectActiveStep("Pick a slot", "Step 1 of 3");
     expect(screen.getByText(REASSURANCE_COPY)).toBeInTheDocument();
 
     await userEvent.click(
@@ -626,7 +755,7 @@ describe("booking calendar UI", () => {
     );
     await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
     await screen.findByLabelText("Discord username");
-    expectActiveStep("PC details", "Step 2 of 3 · 67% complete");
+    expectActiveStep("PC details", "Step 2 of 3");
     expect(
       screen.getByText("Performance Vertex Overhaul")
     ).toBeInTheDocument();
@@ -634,7 +763,7 @@ describe("booking calendar UI", () => {
     await userEvent.click(
       screen.getByRole("button", { name: /^review before payment$/i })
     );
-    expectActiveStep("PC details", "Step 2 of 3 · 67% complete");
+    expectActiveStep("PC details", "Step 2 of 3");
     expect(
       screen.getByText("Please fill out all required fields.")
     ).toHaveClass("text-danger-text");
@@ -651,7 +780,7 @@ describe("booking calendar UI", () => {
     );
 
     await waitFor(() =>
-      expectActiveStep("Review & pay", "Step 3 of 3 · Ready to pay")
+      expectActiveStep("Review & pay", "Step 3 of 3")
     );
     expect(
       screen.getByText("No charge until you confirm on the payment page.")
@@ -729,6 +858,336 @@ describe("booking calendar UI", () => {
     );
   });
 
+  test("applies a coupon with Enter and keeps the discounted total across steps", async () => {
+    seedBookingSession({ step: 3 });
+    installDefaultFetch({ coupons: { save10: FIXED_COUPON } });
+    setBookingLocation();
+
+    render(<BookingForm />);
+
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: /have a referral or coupon code/i,
+      })
+    );
+    await userEvent.type(screen.getByPlaceholderText("Enter code"), "SAVE10{enter}");
+
+    expect(
+      await screen.findByRole("button", { name: /^pay \$44\.95$/i })
+    ).toBeInTheDocument();
+    expect(screen.getByText("SAVE10 · −$10.00")).toBeInTheDocument();
+    expect(within(screen.getByText("Total").closest("div")).getByText("$44.95"))
+      .toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Enter code")).not.toBeInTheDocument();
+    expect(
+      JSON.parse(sessionStorage.getItem("booking_draft")).packages[
+        OVERHAUL_PACKAGE.title
+      ].checkoutCodes
+    ).toEqual({
+      referral: null,
+      coupon: {
+        code: "SAVE10",
+        discountType: "fixed",
+        discountAmount: 10,
+        canCombineWithReferral: true,
+      },
+      dismissedReferralCode: "",
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: /^back$/i }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: /^review before payment$/i })
+    );
+    expect(
+      await screen.findByRole("button", { name: /^pay \$44\.95$/i })
+    ).toBeInTheDocument();
+  });
+
+  test("keeps the code input open and shows an inline alert after failure", async () => {
+    seedBookingSession({ step: 3 });
+    installDefaultFetch();
+    setBookingLocation();
+
+    render(<BookingForm />);
+
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: /have a referral or coupon code/i,
+      })
+    );
+    const input = screen.getByPlaceholderText("Enter code");
+    await userEvent.type(input, "NOTREAL{enter}");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Invalid referral or coupon code."
+    );
+    expect(input).toHaveValue("NOTREAL");
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAttribute(
+      "aria-describedby",
+      "booking-review-code-error"
+    );
+    expect(document.getElementById("booking-review-code-error")).toHaveTextContent(
+      "Invalid referral or coupon code."
+    );
+  });
+
+  test("removing an applied coupon restores Total and the Pay amount", async () => {
+    seedBookingSession({ step: 3 });
+    installDefaultFetch({ coupons: { save10: FIXED_COUPON } });
+    setBookingLocation();
+
+    render(<BookingForm />);
+
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: /have a referral or coupon code/i,
+      })
+    );
+    await userEvent.type(screen.getByPlaceholderText("Enter code"), "SAVE10{enter}");
+    await screen.findByRole("button", { name: /^pay \$44\.95$/i });
+    await userEvent.click(
+      screen.getByRole("button", { name: /remove coupon code save10/i })
+    );
+
+    expect(
+      screen.getByRole("button", { name: /^pay \$54\.95$/i })
+    ).toBeInTheDocument();
+    expect(within(screen.getByText("Total").closest("div")).getByText("$54.95"))
+      .toBeInTheDocument();
+    expect(screen.queryByText("SAVE10 · −$10.00")).not.toBeInTheDocument();
+  });
+
+  test("automatically shows a validated referral from ?ref= with the input collapsed", async () => {
+    seedBookingSession({ step: 3 });
+    installDefaultFetch({ referrals: { creator: CREATOR_REFERRAL } });
+    setBookingLocation(OVERHAUL_PACKAGE, "?ref=creator");
+
+    render(<BookingForm />);
+
+    expect(await screen.findByText("Referral")).toBeInTheDocument();
+    expect(screen.getByText("creator · −$5.50")).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Enter code")).not.toBeInTheDocument();
+  });
+
+  test("drops a restored referral session that no longer validates", async () => {
+    seedBookingSession({ step: 3 });
+    sessionStorage.setItem("referral_session", "expiredcreator");
+    installDefaultFetch();
+    setBookingLocation();
+
+    render(<BookingForm />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Invalid referral or coupon code."
+    );
+    expect(sessionStorage.getItem("referral_session")).toBeNull();
+    expect(screen.queryByText(/expiredcreator ·/i)).not.toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /^pay \$54\.95$/i })
+    );
+    const bookingData = mockNavigate.mock.calls.at(-1)[1].state.bookingData;
+    expect(bookingData).not.toHaveProperty("referralCode");
+    expect(bookingData).not.toHaveProperty("couponCode");
+  });
+
+  test("carries stacked codes in the payload using shared payment-page math", async () => {
+    seedBookingSession({ step: 3 });
+    installDefaultFetch({
+      referrals: { creator: CREATOR_REFERRAL },
+      coupons: { club5: STACKING_COUPON },
+    });
+    setBookingLocation(OVERHAUL_PACKAGE, "?ref=creator");
+
+    render(<BookingForm />);
+
+    await screen.findByText("creator · −$5.50");
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: /have a referral or coupon code/i,
+      })
+    );
+    await userEvent.type(screen.getByPlaceholderText("Enter code"), "CLUB5{enter}");
+
+    const sharedPricing = calculateCheckoutDiscounts({
+      baseAmount: 54.95,
+      referral: CREATOR_REFERRAL,
+      coupon: STACKING_COUPON,
+    });
+    const expectedTotal = `$${sharedPricing.finalAmount.toFixed(2)}`;
+    const payButton = await screen.findByRole("button", {
+      name: `Pay ${expectedTotal}`,
+    });
+    expect(sharedPricing).toMatchObject({
+      couponDiscountAmount: 2.75,
+      referralDiscountAmount: 5.22,
+      finalAmount: 46.98,
+    });
+
+    await userEvent.click(payButton);
+
+    expect(mockNavigate).toHaveBeenLastCalledWith(
+      "/payment",
+      expect.objectContaining({
+        state: expect.objectContaining({
+          bookingData: expect.objectContaining({
+            referralCode: "creator",
+            couponCode: "CLUB5",
+          }),
+        }),
+      })
+    );
+    expect(
+      JSON.parse(sessionStorage.getItem("checkout_booking_state"))
+    ).toMatchObject({
+      referralCode: "creator",
+      couponCode: "CLUB5",
+    });
+  });
+
+  test("restores an applied code from the per-package draft after reload", async () => {
+    seedBookingSession({
+      step: 3,
+      checkoutCodes: {
+        referral: null,
+        coupon: FIXED_COUPON,
+        dismissedReferralCode: "",
+      },
+    });
+    installDefaultFetch({ coupons: { save10: FIXED_COUPON } });
+    setBookingLocation();
+
+    render(<BookingForm />);
+
+    expect(await screen.findByText("SAVE10 · −$10.00")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^pay \$44\.95$/i })
+    ).toBeInTheDocument();
+    expect(
+      JSON.parse(sessionStorage.getItem("booking_draft")).packages[
+        OVERHAUL_PACKAGE.title
+      ].checkoutCodes.coupon
+    ).toEqual({
+      code: "SAVE10",
+      discountType: "fixed",
+      discountAmount: 10,
+      canCombineWithReferral: true,
+    });
+  });
+
+  test("drops a restored coupon that no longer validates", async () => {
+    seedBookingSession({
+      step: 3,
+      checkoutCodes: {
+        referral: null,
+        coupon: FIXED_COUPON,
+        dismissedReferralCode: "",
+      },
+    });
+    installDefaultFetch();
+    setBookingLocation();
+
+    render(<BookingForm />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Invalid referral or coupon code."
+    );
+    expect(screen.queryByText("SAVE10 · −$10.00")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Enter code")).toHaveValue("");
+    expect(
+      screen.getByRole("button", { name: /^pay \$54\.95$/i })
+    ).toBeInTheDocument();
+    expect(
+      JSON.parse(sessionStorage.getItem("booking_draft")).packages[
+        OVERHAUL_PACKAGE.title
+      ].checkoutCodes.coupon
+    ).toBeNull();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /^pay \$54\.95$/i })
+    );
+    const bookingData = mockNavigate.mock.calls.at(-1)[1].state.bookingData;
+    expect(bookingData).not.toHaveProperty("couponCode");
+    expect(bookingData).not.toHaveProperty("referralCode");
+  });
+
+  test("resolves a collision as a sanitized referral and sends one code identity", async () => {
+    const collisionReferral = {
+      ...CREATOR_REFERRAL,
+      code: "creatorfree",
+      currentDiscountPercent: 100,
+    };
+    const collisionCoupon = {
+      ...FIXED_COUPON,
+      code: "CREATORFREE",
+      discountAmount: 54.95,
+    };
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    seedBookingSession({ step: 3 });
+    installDefaultFetch({
+      referrals: { creatorfree: collisionReferral },
+      coupons: { creatorfree: collisionCoupon },
+    });
+    setBookingLocation();
+
+    render(<BookingForm />);
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: /have a referral or coupon code/i,
+      })
+    );
+    await userEvent.type(
+      screen.getByPlaceholderText("Enter code"),
+      "CREATORFREE{enter}"
+    );
+
+    expect(await screen.findByText("creatorfree · −$54.95")).toBeInTheDocument();
+    expect(screen.queryByText("CREATORFREE · −$54.95")).not.toBeInTheDocument();
+    const draftCodes = JSON.parse(sessionStorage.getItem("booking_draft"))
+      .packages[OVERHAUL_PACKAGE.title].checkoutCodes;
+    expect(draftCodes).toEqual({
+      referral: { code: "creatorfree", currentDiscountPercent: 100 },
+      coupon: null,
+      dismissedReferralCode: "",
+    });
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /^pay \$0\.00$/i })
+    );
+    const bookingData = mockNavigate.mock.calls.at(-1)[1].state.bookingData;
+    expect(bookingData).toMatchObject({ referralCode: "creatorfree" });
+    expect(bookingData).not.toHaveProperty("couponCode");
+    expect(bookingData).not.toHaveProperty("referralId");
+    expect(warn).toHaveBeenCalledWith(
+      "checkout_code_namespace_collision",
+      expect.objectContaining({
+        code: "creatorfree",
+        precedence: "referral_first",
+      })
+    );
+    warn.mockRestore();
+  });
+
+  test("uses the payment fallback when the review price is zero", async () => {
+    const missingPricePackage = {
+      ...OVERHAUL_PACKAGE,
+      price: "$0.00",
+    };
+    seedBookingSession({ bookingPackage: missingPricePackage, step: 3 });
+    installDefaultFetch();
+    setBookingLocation(missingPricePackage);
+
+    render(<BookingForm />);
+
+    expect(
+      await screen.findByRole("button", { name: /^continue to payment$/i })
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /pay \$0\.01/i }))
+      .not.toBeInTheDocument();
+    expect(screen.getByText("Confirmed on payment page")).toBeInTheDocument();
+  });
+
   test("step navigation edits and Back preserve the active hold", async () => {
     seedBookingSession();
     installDefaultFetch();
@@ -745,12 +1204,12 @@ describe("booking calendar UI", () => {
       await screen.findByRole("button", { name: /^edit details$/i })
     );
     await waitFor(() =>
-      expectActiveStep("PC details", "Step 2 of 3 · 67% complete")
+      expectActiveStep("PC details", "Step 2 of 3")
     );
 
     await userEvent.click(screen.getByRole("button", { name: /^back$/i }));
     await waitFor(() =>
-      expectActiveStep("Pick a slot", "Step 1 of 3 · 33% complete")
+      expectActiveStep("Pick a slot", "Step 1 of 3")
     );
     await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
     await userEvent.click(
@@ -763,7 +1222,7 @@ describe("booking calendar UI", () => {
     );
 
     await waitFor(() =>
-      expectActiveStep("Pick a slot", "Step 1 of 3 · 33% complete")
+      expectActiveStep("Pick a slot", "Step 1 of 3")
     );
     expect(sessionStorage.getItem("my_slot_hold")).not.toBeNull();
     expect(
@@ -783,7 +1242,7 @@ describe("booking calendar UI", () => {
     );
 
     await waitFor(() =>
-      expectActiveStep("PC details", "Step 2 of 3 · 67% complete")
+      expectActiveStep("PC details", "Step 2 of 3")
     );
     expect(window.sessionStorage.getItem("my_slot_hold")).not.toBeNull();
     expect(
@@ -917,7 +1376,7 @@ describe("booking calendar UI", () => {
     render(<BookingForm />);
 
     await waitFor(() =>
-      expectActiveStep("Review & pay", "Step 3 of 3 · Ready to pay")
+      expectActiveStep("Review & pay", "Step 3 of 3")
     );
     await waitFor(() => {
       const stored = JSON.parse(sessionStorage.getItem("booking_modal_state"));
@@ -933,7 +1392,7 @@ describe("booking calendar UI", () => {
     render(<BookingForm />);
 
     await waitFor(() =>
-      expectActiveStep("Review & pay", "Step 3 of 3 · Ready to pay")
+      expectActiveStep("Review & pay", "Step 3 of 3")
     );
     expect(
       JSON.parse(sessionStorage.getItem("booking_modal_state")).step
@@ -961,7 +1420,7 @@ describe("booking calendar UI", () => {
     );
 
     await waitFor(() =>
-      expectActiveStep("PC details", "Step 2 of 3 · 67% complete")
+      expectActiveStep("PC details", "Step 2 of 3")
     );
     expect(
       screen.getByText("Please fill out all required fields.")
