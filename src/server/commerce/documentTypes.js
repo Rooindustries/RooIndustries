@@ -37,5 +37,50 @@ export const COMMERCE_EPHEMERAL_DOCUMENT_TYPES = Object.freeze([
   "refRateLimitBucket",
 ]);
 
+export const COMMERCE_PARITY_EXCLUDED_DOCUMENT_KEYS = Object.freeze([
+  "_rev",
+  "_createdAt",
+  "_updatedAt",
+  "_system",
+  "_supabaseRevision",
+  "_supabaseCanonicalHash",
+  "_supabaseSequence",
+  "_commerceCutoverGeneration",
+  "_supabaseMirroredAt",
+]);
+
+export const REFERRAL_PARITY_CREDENTIAL_KEYS = Object.freeze([
+  "creatorPassword",
+  "resetToken",
+  "resetTokenHash",
+  "resetTokenExpiresAt",
+  "resetDeliveryToken",
+  "registrationVerificationTokenHash",
+  "registrationVerificationExpiresAt",
+  "registrationVerificationDeliveryToken",
+  "passwordResetRequired",
+  "credentialVersion",
+]);
+
+const parityExcludedKeys = new Set(COMMERCE_PARITY_EXCLUDED_DOCUMENT_KEYS);
+const referralParityExcludedKeys = new Set([
+  ...COMMERCE_PARITY_EXCLUDED_DOCUMENT_KEYS,
+  ...REFERRAL_PARITY_CREDENTIAL_KEYS,
+]);
+
+export const canonicalizeCommerceParityValue = (value) => {
+  if (Array.isArray(value)) return value.map(canonicalizeCommerceParityValue);
+  if (!value || typeof value !== "object") return value;
+  const ignoredKeys =
+    value._type === "referral"
+      ? referralParityExcludedKeys
+      : parityExcludedKeys;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !ignoredKeys.has(key))
+      .map(([key, child]) => [key, canonicalizeCommerceParityValue(child)])
+  );
+};
+
 export const isCommerceShadowDocumentType = (type) =>
   COMMERCE_SHADOW_DOCUMENT_TYPES.includes(String(type || ""));

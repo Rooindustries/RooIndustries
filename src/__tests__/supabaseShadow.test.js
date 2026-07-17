@@ -11,6 +11,7 @@ import {
   normalizeShadowDocument,
 } from "../server/supabase/shadowStore";
 import { SupabaseDocumentClient } from "../server/supabase/documentClient";
+import { createSupabaseAdminFetch } from "../server/supabase/adminClient";
 
 const createRpcClient = (seed = []) => {
   const documents = new Map(seed.map((document) => [document._id, document]));
@@ -488,5 +489,37 @@ describe("Supabase document compatibility client", () => {
       code: "COMMERCE_PAYLOAD_BUDGET_EXCEEDED",
       statusCode: 503,
     });
+  });
+});
+
+describe("Supabase admin PostgREST transport", () => {
+  const response = (code, status) => ({
+    status,
+    clone: () => ({ json: async () => ({ code }) }),
+  });
+
+  test("retries PGRST303 exactly once and does not retry pool timeouts", async () => {
+    const recovered = response("", 200);
+    const jwtFetch = jest
+      .fn()
+      .mockResolvedValueOnce(response("PGRST303", 401))
+      .mockResolvedValueOnce(recovered);
+    await expect(
+      createSupabaseAdminFetch({ fetchImpl: jwtFetch })("https://example.test")
+    ).resolves.toBe(recovered);
+    expect(jwtFetch).toHaveBeenCalledTimes(2);
+
+    const poolTimeout = response("PGRST003", 503);
+    const poolFetch = jest.fn(async () => poolTimeout);
+    await expect(
+      createSupabaseAdminFetch({ fetchImpl: poolFetch })("https://example.test")
+    ).resolves.toBe(poolTimeout);
+    expect(poolFetch).toHaveBeenCalledTimes(1);
+
+    const persistentJwtFetch = jest.fn(async () => response("PGRST303", 401));
+    await createSupabaseAdminFetch({ fetchImpl: persistentJwtFetch })(
+      "https://example.test"
+    );
+    expect(persistentJwtFetch).toHaveBeenCalledTimes(2);
   });
 });
