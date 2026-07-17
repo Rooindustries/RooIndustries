@@ -215,4 +215,70 @@ describe("getBookingAvailability", () => {
       backendOverride: "sanity",
     });
   });
+
+  test("uses primary availability when the secondary backend is unavailable", async () => {
+    process.env.COMMERCE_PRIMARY_BACKEND = "supabase";
+    process.env.COMMERCE_CUTOVER_ENABLED = "1";
+    process.env.COMMERCE_FAILOVER_GENERATION = "0";
+    process.env.SANITY_REVERSE_MIRROR_WRITES = "1";
+    const clients = {
+      supabase: {
+        fetchAvailability: jest.fn().mockResolvedValue({
+          bookings: [
+            {
+              _id: "booking_primary",
+              startTimeUTC: "2099-01-05T04:30:00.000Z",
+              status: "captured",
+            },
+          ],
+          holds: [],
+          slotLocks: [],
+        }),
+      },
+      sanity: {
+        fetchAvailability: jest
+          .fn()
+          .mockRejectedValue(new Error("Secondary backend unavailable")),
+      },
+    };
+    createCommerceReadClient.mockImplementation(
+      ({ backendOverride }) => clients[backendOverride]
+    );
+
+    await expect(getBookingAvailability()).resolves.toMatchObject({
+      bookedSlots: [
+        { startTimeUTC: "2099-01-05T04:30:00.000Z", isHold: false },
+      ],
+    });
+    expect(clients.supabase.fetchAvailability).toHaveBeenCalledTimes(1);
+    expect(clients.sanity.fetchAvailability).toHaveBeenCalledTimes(1);
+  });
+
+  test("still fails when the authoritative primary read is unavailable", async () => {
+    process.env.COMMERCE_PRIMARY_BACKEND = "supabase";
+    process.env.COMMERCE_CUTOVER_ENABLED = "1";
+    process.env.COMMERCE_FAILOVER_GENERATION = "0";
+    process.env.SANITY_REVERSE_MIRROR_WRITES = "1";
+    const clients = {
+      supabase: {
+        fetchAvailability: jest
+          .fn()
+          .mockRejectedValue(new Error("Primary backend unavailable")),
+      },
+      sanity: {
+        fetchAvailability: jest.fn().mockResolvedValue({
+          bookings: [],
+          holds: [],
+          slotLocks: [],
+        }),
+      },
+    };
+    createCommerceReadClient.mockImplementation(
+      ({ backendOverride }) => clients[backendOverride]
+    );
+
+    await expect(getBookingAvailability()).rejects.toThrow(
+      "Primary backend unavailable"
+    );
+  });
 });

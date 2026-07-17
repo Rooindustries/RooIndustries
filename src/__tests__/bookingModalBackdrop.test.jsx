@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import BookingModal from "../components/BookingModal";
 import PackageDetailsModal from "../components/PackageDetailsModal";
 
@@ -53,6 +53,41 @@ describe("booking modal backdrop isolation", () => {
     expect(packageOverlay).not.toHaveClass("booking-modal-overlay");
   });
 
+  test("moves focus into the dialog, traps Tab, and restores focus", () => {
+    const trigger = document.createElement("button");
+    trigger.textContent = "Open booking";
+    document.body.appendChild(trigger);
+    trigger.focus();
+    const onClose = jest.fn();
+    const { rerender } = render(
+      <BookingModal open onClose={onClose}>
+        <BookingFocusContent />
+      </BookingModal>
+    );
+
+    const closeButton = screen.getByRole("button", { name: "Close" });
+    const lastButton = screen.getByRole("button", {
+      name: "Last booking action",
+    });
+    expect(closeButton).toHaveFocus();
+
+    lastButton.focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(closeButton).toHaveFocus();
+
+    closeButton.focus();
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(lastButton).toHaveFocus();
+
+    rerender(
+      <BookingModal open={false} onClose={onClose}>
+        <BookingFocusContent />
+      </BookingModal>
+    );
+    expect(trigger).toHaveFocus();
+    trigger.remove();
+  });
+
   test("marks excluded canonical package rows as not included", () => {
     render(
       <PackageDetailsModal
@@ -77,4 +112,13 @@ describe("booking modal backdrop isolation", () => {
 
 function BookingContent() {
   return <div>Booking content</div>;
+}
+
+function BookingFocusContent() {
+  return (
+    <>
+      <button type="button">First booking action</button>
+      <button type="button">Last booking action</button>
+    </>
+  );
 }
