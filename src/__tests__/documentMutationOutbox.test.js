@@ -69,6 +69,7 @@ const backlog = {
 describe("document mutation mirror outbox", () => {
   test("applies and completes a leased event with idempotency markers", async () => {
     const queued = event();
+    let requiredChecks = 0;
     const rpc = jest.fn(async (name, args) => {
       if (name === "roo_claim_document_mutation_mirror_events") {
         expect(args.p_preferred_document_ids).toEqual(["settings.site"]);
@@ -83,7 +84,11 @@ describe("document mutation mirror outbox", () => {
         return { data: backlog, error: null };
       }
       if (name === "roo_document_mutation_mirror_status_for_ids") {
-        return { data: { pending: 0, dead_letters: 0 }, error: null };
+        requiredChecks += 1;
+        return {
+          data: { pending: requiredChecks === 1 ? 1 : 0, dead_letters: 0 },
+          error: null,
+        };
       }
       throw new Error(`Unexpected RPC: ${name}`);
     });
@@ -117,6 +122,55 @@ describe("document mutation mirror outbox", () => {
     expect(
       sanity.client.transaction.mock.results[0].value.commit
     ).toHaveBeenCalledWith({ visibility: "sync" });
+    expect(
+      rpc.mock.calls.filter(([name]) =>
+        name === "roo_claim_document_mutation_mirror_events"
+      )
+    ).toHaveLength(1);
+  });
+
+  test("does not claim unrelated work after the required document is clear", async () => {
+    const queued = event();
+    let requiredChecks = 0;
+    const rpc = jest.fn(async (name) => {
+      if (name === "roo_document_mutation_mirror_status_for_ids") {
+        requiredChecks += 1;
+        return {
+          data: { pending: requiredChecks === 1 ? 1 : 0, dead_letters: 0 },
+          error: null,
+        };
+      }
+      if (name === "roo_claim_document_mutation_mirror_events") {
+        return { data: [queued], error: null };
+      }
+      if (name === "roo_complete_document_mutation_mirror_event") {
+        return { data: { status: "applied" }, error: null };
+      }
+      if (name === "roo_document_mutation_mirror_backlog") {
+        return { data: { ...backlog, pending: 7 }, error: null };
+      }
+      throw new Error(`Unexpected RPC: ${name}`);
+    });
+    const sanity = createSanityClient();
+
+    await expect(
+      drainDocumentMutationOutbox({
+        supabaseClient: { rpc },
+        sanityClient: sanity.client,
+        requiredDocumentIds: ["settings.site"],
+        limit: 10,
+        maxBatches: 2,
+      })
+    ).resolves.toMatchObject({
+      applied: 1,
+      attempted: 1,
+      required: { pending: 0, dead_letters: 0 },
+    });
+    expect(
+      rpc.mock.calls.filter(([name]) =>
+        name === "roo_claim_document_mutation_mirror_events"
+      )
+    ).toHaveLength(1);
   });
 
   test("does not deliver twice after Sanity accepted but completion timed out", async () => {
