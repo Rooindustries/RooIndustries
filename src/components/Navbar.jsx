@@ -396,10 +396,26 @@ export default function Navbar({ routeShell = "browser" }) {
       }
     };
 
+    const handleKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+
+      if (proofOpen) {
+        setProofOpen(false);
+        proofDropdownRef.current?.querySelector("button")?.focus();
+      }
+      if (referralsOpen) {
+        setReferralsOpen(false);
+        referralsDropdownRef.current?.querySelector("button")?.focus();
+      }
+    };
+
     document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
 
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
     };
   }, [proofOpen, referralsOpen]);
 
@@ -614,7 +630,15 @@ export default function Navbar({ routeShell = "browser" }) {
               >
                 Benefits
               </a>
-              <div className="relative" ref={proofDropdownRef}>
+              <div
+                className="relative"
+                ref={proofDropdownRef}
+                onBlur={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget)) {
+                    setProofOpen(false);
+                  }
+                }}
+              >
                 <button
                   type="button"
                   onClick={() =>
@@ -627,8 +651,8 @@ export default function Navbar({ routeShell = "browser" }) {
                   className={`${linkBase} ${
                     isProofActive ? linkActive : linkIdle
                   } inline-flex items-center gap-1`}
-                  aria-haspopup="menu"
                   aria-expanded={proofOpen}
+                  aria-controls="desktop-proof-menu"
                 >
                   Proof
                   <svg
@@ -646,38 +670,38 @@ export default function Navbar({ routeShell = "browser" }) {
                     />
                   </svg>
                 </button>
-                {proofOpen ? (
-                  <div className="glass-premium glass-menu-surface absolute right-0 top-full z-[80] mt-2 w-44 overflow-hidden rounded-2xl transition-all duration-200">
-                    <Link
-                      to="/benchmarks"
-                      onClick={() => {
-                        cancelSectionTransition();
-                        setProofOpen(false);
-                      }}
-                      className={`block px-4 py-3 text-sm transition ${
-                        isActive("/benchmarks")
-                          ? menuItemActive
-                          : menuItemIdle
-                      }`}
-                    >
-                      Benchmarks
-                    </Link>
-                    <Link
-                      to="/reviews"
-                      onClick={() => {
-                        cancelSectionTransition();
-                        setProofOpen(false);
-                      }}
-                      className={`block px-4 py-3 text-sm transition ${
-                        isActive("/reviews")
-                          ? menuItemActive
-                          : menuItemIdle
-                      }`}
-                    >
-                      Reviews
-                    </Link>
-                  </div>
-                ) : null}
+                <div
+                  id="desktop-proof-menu"
+                  hidden={!proofOpen}
+                  className="glass-premium glass-menu-surface absolute right-0 top-full z-[80] mt-2 w-44 overflow-hidden rounded-2xl transition-all duration-200"
+                >
+                  <Link
+                    to="/benchmarks"
+                    onClick={() => {
+                      cancelSectionTransition();
+                      setProofOpen(false);
+                    }}
+                    className={`block px-4 py-3 text-sm transition ${
+                      isActive("/benchmarks")
+                        ? menuItemActive
+                        : menuItemIdle
+                    }`}
+                  >
+                    Benchmarks
+                  </Link>
+                  <Link
+                    to="/reviews"
+                    onClick={() => {
+                      cancelSectionTransition();
+                      setProofOpen(false);
+                    }}
+                    className={`block px-4 py-3 text-sm transition ${
+                      isActive("/reviews") ? menuItemActive : menuItemIdle
+                    }`}
+                  >
+                    Reviews
+                  </Link>
+                </div>
               </div>
               <a
                 href={buildHomeSectionHref(SECTION_HASHES.faq)}
@@ -690,7 +714,15 @@ export default function Navbar({ routeShell = "browser" }) {
               >
                 FAQ
               </a>
-              <div className="relative" ref={referralsDropdownRef}>
+              <div
+                className="relative"
+                ref={referralsDropdownRef}
+                onBlur={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget)) {
+                    setReferralsOpen(false);
+                  }
+                }}
+              >
                 <button
                   type="button"
                   onClick={() =>
@@ -703,9 +735,8 @@ export default function Navbar({ routeShell = "browser" }) {
                   className={`${linkBase} ${
                     isReferralsActive ? linkActive : linkIdle
                   } inline-flex items-center gap-1`}
-                  aria-haspopup="menu"
                   aria-expanded={referralsOpen}
-                  aria-controls={referralsOpen ? "desktop-referrals-menu" : undefined}
+                  aria-controls="desktop-referrals-menu"
                 >
                   Referrals
                   <svg
@@ -723,38 +754,40 @@ export default function Navbar({ routeShell = "browser" }) {
                     />
                   </svg>
                 </button>
-                {referralsOpen ? (
-                  <div id="desktop-referrals-menu" className="glass-premium glass-menu-surface absolute right-0 top-full z-[80] mt-2 w-44 overflow-hidden rounded-2xl transition-all duration-200">
-                    <Link
-                      to="/referrals/register"
-                      onClick={() => {
-                        cancelSectionTransition();
-                        setReferralsOpen(false);
-                      }}
-                      className={`block px-4 py-3 text-sm transition ${
-                        isActive("/referrals/register")
-                          ? menuItemActive
-                          : menuItemIdle
-                      }`}
-                    >
-                      Sign Up
-                    </Link>
-                    <Link
-                      to="/referrals/login"
-                      onClick={() => {
-                        cancelSectionTransition();
-                        setReferralsOpen(false);
-                      }}
-                      className={`block px-4 py-3 text-sm transition ${
-                        isReferralsActive && !isActive("/referrals/register")
-                          ? menuItemActive
-                          : menuItemIdle
-                      }`}
-                    >
-                      Dashboard
-                    </Link>
-                  </div>
-                ) : null}
+                <div
+                  id="desktop-referrals-menu"
+                  hidden={!referralsOpen}
+                  className="glass-premium glass-menu-surface absolute right-0 top-full z-[80] mt-2 w-44 overflow-hidden rounded-2xl transition-all duration-200"
+                >
+                  <Link
+                    to="/referrals/register"
+                    onClick={() => {
+                      cancelSectionTransition();
+                      setReferralsOpen(false);
+                    }}
+                    className={`block px-4 py-3 text-sm transition ${
+                      isActive("/referrals/register")
+                        ? menuItemActive
+                        : menuItemIdle
+                    }`}
+                  >
+                    Sign Up
+                  </Link>
+                  <Link
+                    to="/referrals/login"
+                    onClick={() => {
+                      cancelSectionTransition();
+                      setReferralsOpen(false);
+                    }}
+                    className={`block px-4 py-3 text-sm transition ${
+                      isReferralsActive && !isActive("/referrals/register")
+                        ? menuItemActive
+                        : menuItemIdle
+                    }`}
+                  >
+                    Dashboard
+                  </Link>
+                </div>
               </div>
             </nav>
 

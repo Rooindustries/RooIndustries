@@ -1,5 +1,14 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { getPublicContent } from "../lib/publicContentClient";
+
+const FOCUSABLE_SELECTOR = [
+  "button:not([disabled])",
+  "a[href]",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
 
 // Category label is now just the text from Sanity, or "Tool" if empty
 const categoryLabel = (cat) => cat || "Tool";
@@ -17,6 +26,11 @@ export default function Tools() {
   const [pendingDownload, setPendingDownload] = useState(null);
   const [downloadFadeOut, setDownloadFadeOut] = useState(false);
   const [downloadFadeIn, setDownloadFadeIn] = useState(false);
+  const dialogRef = useRef(null);
+  const closeButtonRef = useRef(null);
+  const previousFocusRef = useRef(null);
+  const openTimerRef = useRef(null);
+  const closeTimerRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,24 +74,83 @@ export default function Tools() {
     };
   }, [showDownloadModal]);
 
+  useEffect(
+    () => () => {
+      window.clearTimeout(openTimerRef.current);
+      window.clearTimeout(closeTimerRef.current);
+    },
+    []
+  );
+
   const openDownloadModal = (toolMeta) => {
     if (!toolMeta?.href) return;
+    window.clearTimeout(openTimerRef.current);
+    window.clearTimeout(closeTimerRef.current);
     setDownloadFadeOut(false);
     setDownloadFadeIn(false);
     setPendingDownload(toolMeta);
     setShowDownloadModal(true);
-    setTimeout(() => setDownloadFadeIn(true), 20);
+    openTimerRef.current = window.setTimeout(() => {
+      setDownloadFadeIn(true);
+      openTimerRef.current = null;
+    }, 20);
   };
 
-  const closeDownloadModal = () => {
+  const closeDownloadModal = useCallback(() => {
+    window.clearTimeout(openTimerRef.current);
+    window.clearTimeout(closeTimerRef.current);
     setDownloadFadeOut(true);
     setDownloadFadeIn(false);
-    setTimeout(() => {
+    closeTimerRef.current = window.setTimeout(() => {
       setShowDownloadModal(false);
       setPendingDownload(null);
       setDownloadFadeOut(false);
+      closeTimerRef.current = null;
     }, 200);
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!showDownloadModal) return undefined;
+    previousFocusRef.current = document.activeElement;
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeDownloadModal();
+        return;
+      }
+
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(
+        dialogRef.current?.querySelectorAll(FOCUSABLE_SELECTOR) || []
+      );
+      if (focusable.length === 0) {
+        event.preventDefault();
+        dialogRef.current?.focus();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const activeElement = document.activeElement;
+      const focusIsInside = dialogRef.current?.contains(activeElement);
+
+      if (event.shiftKey && (activeElement === first || !focusIsInside)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (activeElement === last || !focusIsInside)) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      previousFocusRef.current?.focus?.();
+    };
+  }, [closeDownloadModal, showDownloadModal]);
 
   const handleConfirmDownload = () => {
     if (!pendingDownload?.href) return;
@@ -285,10 +358,18 @@ export default function Tools() {
           onClick={closeDownloadModal}
         >
           <div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="download-dialog-title"
+            aria-describedby="download-dialog-description"
+            tabIndex={-1}
             className="relative w-full max-w-md bg-panel border border-info-border rounded-2xl shadow-glow-strong p-6 text-center transition-all duration-300 hover:shadow-glow-strong"
             onClick={(e) => e.stopPropagation()}
           >
             <button
+              ref={closeButtonRef}
+              type="button"
               aria-label="Close"
               className="absolute right-3 top-3 text-info-text hover:text-white transition text-2xl"
               onClick={closeDownloadModal}
@@ -316,10 +397,13 @@ export default function Tools() {
               )}
             </div>
 
-            <h3 className="text-2xl font-bold text-ink">
+            <h3 id="download-dialog-title" className="text-2xl font-bold text-ink">
               {pendingDownload.title || "Download"}
             </h3>
-            <p className="mt-2 text-sm text-ink-secondary">
+            <p
+              id="download-dialog-description"
+              className="mt-2 text-sm text-ink-secondary"
+            >
               You&apos;re about to download this tool. Continue?
             </p>
 

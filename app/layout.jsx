@@ -67,6 +67,9 @@ export default function RootLayout({ children }) {
         />
       </head>
       <body>
+        <a className="skip-to-content" href="#main-content">
+          Skip to content
+        </a>
         <AppClientRuntime />
         {children}
       </body>
