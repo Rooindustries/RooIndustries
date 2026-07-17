@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
+import { isEnabledTourneyFlag } from "./canonical.js";
 import {
   extractTwitchLogin,
   getTwitchLiveStatusMap,
@@ -248,12 +249,8 @@ const isMemoryMode = (env = process.env) =>
 
 const shouldSyncSupabasePlayerAuth = (env = process.env) =>
   isSupabaseTourneyDatabase(env) ||
-  ["1", "true", "yes", "on"].includes(
-    String(env.SUPABASE_SOCIAL_AUTH_ENABLED || "").trim().toLowerCase()
-  ) ||
-  ["1", "true", "yes", "on"].includes(
-    String(env.SUPABASE_SHADOW_WRITES || "").trim().toLowerCase()
-  );
+  isEnabledTourneyFlag(env.SUPABASE_SOCIAL_AUTH_ENABLED) ||
+  isEnabledTourneyFlag(env.SUPABASE_SHADOW_WRITES);
 
 const syncTourneyPlayerAuth = async ({
   installPassword = true,

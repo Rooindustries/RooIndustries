@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { createClient as createSanityClient } from "@sanity/client";
 import postgres from "postgres";
 import migrationTargetSafety from "../supabase/migrationTargetSafety.cjs";
+import { isEnabledTourneyFlag } from "./canonical.js";
 import { buildTourneyPostgresOptions } from "./sqlClient.js";
 import {
   SUPABASE_FULL_SNAPSHOT_EXCLUDED_RELATIONS,
@@ -27,9 +28,6 @@ const SHA256 = /^[0-9a-f]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const normalize = (value) => String(value || "").trim();
-const enabled = (value) => ["1", "true", "yes", "on"].includes(
-  normalize(value).toLowerCase()
-);
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const failure = (code) => Object.assign(
   new Error("Tourney snapshot transport is not ready."),
@@ -121,12 +119,12 @@ export const readSnapshotDatabaseTarget = async ({
   expectedTargets,
 } = {}) => {
   if (
-    !enabled(env.TOURNEY_DATABASE_TARGET_TRANSPORT_ENABLED) ||
-    !enabled(env.TOURNEY_WRITES_PAUSED) ||
+    !isEnabledTourneyFlag(env.TOURNEY_DATABASE_TARGET_TRANSPORT_ENABLED) ||
+    !isEnabledTourneyFlag(env.TOURNEY_WRITES_PAUSED) ||
     normalize(env.TOURNEY_DATABASE_MODE).toLowerCase() !== "supabase" ||
     normalize(env.TOURNEY_FAILOVER_GENERATION) !== "1" ||
-    !enabled(env.TOURNEY_HARDENING_V4_ENABLED) ||
-    !enabled(env.TOURNEY_MIRROR_ENABLED)
+    !isEnabledTourneyFlag(env.TOURNEY_HARDENING_V4_ENABLED) ||
+    !isEnabledTourneyFlag(env.TOURNEY_MIRROR_ENABLED)
   ) {
     throw failure("TOURNEY_SNAPSHOT_DATABASE_TARGET_TRANSPORT_DISABLED");
   }
@@ -456,11 +454,13 @@ export const captureFullLogicalSnapshotTransaction = async ({
 };
 
 const assertSnapshotRuntime = (env) => {
-  const hardened = enabled(env.TOURNEY_HARDENING_V4_ENABLED);
-  const activation = enabled(env.TOURNEY_V4_ACTIVATION_ENABLED) && !hardened;
+  const hardened = isEnabledTourneyFlag(env.TOURNEY_HARDENING_V4_ENABLED);
+  const activation = isEnabledTourneyFlag(env.TOURNEY_V4_ACTIVATION_ENABLED) &&
+    !hardened;
   if (
     normalize(env.TOURNEY_DATABASE_MODE).toLowerCase() !== "supabase" ||
-    !enabled(env.TOURNEY_MIRROR_ENABLED) || !enabled(env.TOURNEY_WRITES_PAUSED) ||
+    !isEnabledTourneyFlag(env.TOURNEY_MIRROR_ENABLED) ||
+    !isEnabledTourneyFlag(env.TOURNEY_WRITES_PAUSED) ||
     normalize(env.TOURNEY_FAILOVER_GENERATION) !== "1" ||
     (!hardened && !activation)
   ) {
