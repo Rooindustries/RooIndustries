@@ -5,6 +5,7 @@ import {
 } from "@/src/server/supabase/accounts";
 import {
   clearOAuthIntentCookie,
+  failOAuthIntent,
   finalizeOAuthIntent,
   OAUTH_INTENT_COOKIE,
   oauthIntentCookieName,
@@ -13,6 +14,7 @@ import {
 import {
   clearNextSupabaseSession,
   createNextSupabaseSessionClient,
+  installNextSupabaseSession,
 } from "@/src/server/supabase/serverSession";
 import {
   createReferralSessionCookie,
@@ -38,6 +40,11 @@ import {
   clearPendingDiscordLinkCookie,
   createPendingDiscordLinkCookie,
 } from "@/src/server/supabase/pendingSocialLink";
+import {
+  clearReferralOrphanReclaimCookie,
+  createReferralOrphanReclaimCookie,
+  reclaimReferralOrphanIdentity,
+} from "@/src/server/supabase/orphanIdentityReclaim";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,6 +53,8 @@ const flowDefaults = {
   referral: "/referrals/dashboard",
   tourney: "/tourney",
 };
+
+const sessionPreservingActions = new Set(["link", "reauth", "merge", "reclaim"]);
 
 const normalizeFlow = (value) => {
   const flow = String(value || "").trim().toLowerCase();
@@ -106,6 +115,17 @@ const errorTarget = ({ origin, flow, error }) => {
     error
   );
   return target;
+};
+
+const providerCallbackError = (url) => {
+  const errorCode = String(url.searchParams.get("error_code") || "")
+    .trim()
+    .toLowerCase();
+  if (/^[a-z0-9_]{1,80}$/.test(errorCode)) return errorCode;
+  const fallback = String(url.searchParams.get("error") || "")
+    .trim()
+    .toLowerCase();
+  return /^[a-z0-9_]{1,80}$/.test(fallback) ? fallback : "";
 };
 
 const getCookieValue = (request, name) => {
@@ -193,9 +213,9 @@ const fail = async ({
   response.cookies.set(clearOAuthIntentCookie(intentId));
   if (
     !preserveExistingSession &&
-    (clearSupabaseSession || !["link", "reauth", "merge"].includes(action))
+    (clearSupabaseSession || !sessionPreservingActions.has(action))
   ) {
-    if (flow && !["link", "reauth", "merge"].includes(action)) {
+    if (flow && !sessionPreservingActions.has(action)) {
       clearDomainCookie(response, flow);
     }
     await clearNextSupabaseSession({ request, response }).catch(() => {});
@@ -293,9 +313,53 @@ export async function GET(request) {
 
   const code = String(url.searchParams.get("code") || "").trim();
   if (!code) {
+    const callbackError = providerCallbackError(url);
+    if (callbackError && intent && token && validIntentId) {
+      try {
+        await failOAuthIntent({
+          failureCode: callbackError,
+          intentId: validIntentId,
+          token,
+        });
+      } catch {
+        return fail({
+          action: intent.action,
+          error: "unavailable",
+          flow,
+          request,
+          response,
+        });
+      }
+      if (
+        callbackError === "identity_already_exists" &&
+        intent.action === "link" &&
+        intent.flow === "referral" &&
+        ["google", "discord"].includes(intent.provider) &&
+        intent.target_user_id &&
+        intent.principal_id
+      ) {
+        const target = new URL(
+          safeNextPath(intent.return_path, "referral"),
+          url.origin
+        );
+        target.searchParams.set("oauth", "identity_already_exists");
+        target.searchParams.set("provider", intent.provider);
+        response.cookies.set(
+          createReferralOrphanReclaimCookie({
+            originalIntentId: validIntentId,
+            principalId: intent.principal_id,
+            provider: intent.provider,
+            targetUserId: intent.target_user_id,
+          })
+        );
+        response.cookies.set(clearOAuthIntentCookie(validIntentId));
+        response.cookies.set(clearReauthCookie());
+        return setRedirect(response, target);
+      }
+    }
     return fail({
       action: intent?.action,
-      error: "missing_code",
+      error: callbackError || "missing_code",
       flow,
       request,
       response,
@@ -303,6 +367,29 @@ export async function GET(request) {
   }
 
   const supabase = createNextSupabaseSessionClient({ request, response });
+  let preservedPrimarySession = null;
+  if (intent?.action === "reclaim") {
+    const [primaryUser, primarySession] = await Promise.all([
+      supabase.auth.getUser(),
+      supabase.auth.getSession(),
+    ]);
+    if (
+      primaryUser.error ||
+      primarySession.error ||
+      primaryUser.data?.user?.id !== intent.target_user_id ||
+      !primarySession.data?.session?.access_token ||
+      !primarySession.data?.session?.refresh_token
+    ) {
+      return fail({
+        action: intent.action,
+        error: "recovery_session_expired",
+        flow,
+        request,
+        response,
+      });
+    }
+    preservedPrimarySession = primarySession.data.session;
+  }
   const result = await supabase.auth.exchangeCodeForSession(code);
   if (result.error || !result.data?.user?.id || !result.data?.session) {
     return fail({
@@ -315,6 +402,85 @@ export async function GET(request) {
   }
   const claimedUserId = String(result.data.user.id || "").trim();
   const accountUserId = String(intent?.target_user_id || claimedUserId).trim();
+  if (intent?.action === "reclaim") {
+    let reclaimResult;
+    try {
+      reclaimResult = await reclaimReferralOrphanIdentity({
+        orphanUserId: claimedUserId,
+        provider: intent.provider,
+        token,
+      });
+      await installNextSupabaseSession({
+        request,
+        response,
+        session: preservedPrimarySession,
+      });
+    } catch {
+      await installNextSupabaseSession({
+        request,
+        response,
+        session: preservedPrimarySession,
+      }).catch(() => {});
+      const target = new URL(
+        safeNextPath(intent.return_path, "referral"),
+        url.origin
+      );
+      target.searchParams.set("oauth", "identity_recovery_failed");
+      target.searchParams.set("provider", intent.provider);
+      response.cookies.set(clearOAuthIntentCookie(validIntentId));
+      return setRedirect(response, target);
+    }
+
+    const target = new URL(
+      safeNextPath(intent.return_path, "referral"),
+      url.origin
+    );
+    response.cookies.set(clearOAuthIntentCookie(validIntentId));
+    response.cookies.set(clearReferralOrphanReclaimCookie());
+    response.cookies.set(clearReauthCookie());
+    if (reclaimResult.reclaimed || reclaimResult.alreadyLinked) {
+      const roleSession = await resolveRoleSession({
+        flow: "referral",
+        userId: accountUserId,
+      });
+      if (!roleSession.cookie) {
+        target.searchParams.set("oauth", "identity_recovery_failed");
+        target.searchParams.set("provider", intent.provider);
+        return setRedirect(response, target);
+      }
+      setRoleCookie(response, roleSession.cookie);
+      target.searchParams.set("linked", intent.provider);
+      target.searchParams.set("reclaimed", "1");
+      if (intent.provider === "discord") {
+        try {
+          const sync = await queueTourneyDiscordAuthProjection({
+            accountUserId,
+            accessToken: String(result.data.session.provider_token || ""),
+            attemptExternalWork: true,
+            claimedUserId: accountUserId,
+            commandId: `discord-orphan-reclaim:${validIntentId}:${accountUserId}`,
+            deferUntil: intent.expires_at,
+            intentId: validIntentId,
+            userId: accountUserId,
+          });
+          if (!sync.applied && !["not_linked", "not_configured"].includes(sync.reason)) {
+            target.searchParams.set("discord_role", "pending");
+          }
+        } catch {
+          target.searchParams.set("discord_role", "pending");
+        }
+      }
+      return setRedirect(response, target);
+    }
+    target.searchParams.set(
+      "oauth",
+      reclaimResult.reason === "active_account"
+        ? "identity_owned_by_active_account"
+        : "identity_not_reclaimable"
+    );
+    target.searchParams.set("provider", intent.provider);
+    return setRedirect(response, target);
+  }
   if (
     intent?.target_user_id && claimedUserId !== accountUserId &&
     intent.action !== "reauth"
@@ -328,7 +494,8 @@ export async function GET(request) {
       response,
     });
   }
-  const discordProjection = intent?.provider === "discord" && validIntentId
+  const discordProjection = intent?.provider === "discord" &&
+    intent?.action !== "reclaim" && validIntentId
     ? {
         accountUserId,
         claimedUserId,

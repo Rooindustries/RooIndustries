@@ -7,16 +7,41 @@ const { normalizePackageText } = packageContent;
 
 const resolveAuthNotice = (search) => {
   const query = new URLSearchParams(search);
-  if (
-    query.get("linked") === "discord" ||
-    query.get("notice") === "discord-linked"
-  ) {
+  const linkedProvider = query.get("linked");
+  if (["google", "discord"].includes(linkedProvider)) {
+    const label = linkedProvider[0].toUpperCase() + linkedProvider.slice(1);
+    return { type: "success", message: `${label} linked to your account.` };
+  }
+  if (query.get("notice") === "discord-linked") {
     return { type: "success", message: "Discord linked to your account." };
   }
   if (query.get("notice") === "discord-link-failed") {
     return {
       type: "error",
       message: "Discord linking did not complete. Try the Discord login again.",
+    };
+  }
+  const oauthError = query.get("oauth");
+  const provider = query.get("provider");
+  const providerLabel = ["google", "discord"].includes(provider)
+    ? provider[0].toUpperCase() + provider.slice(1)
+    : "social account";
+  if (oauthError === "identity_already_exists") {
+    return {
+      type: "error",
+      message: `That ${providerLabel} is attached to an unused sign-in. Confirm your identity below, then select Recover ${providerLabel} to link it safely.`,
+    };
+  }
+  if (oauthError === "identity_owned_by_active_account") {
+    return {
+      type: "error",
+      message: `That ${providerLabel} belongs to an active account and was not changed. Sign in to that account or contact support.`,
+    };
+  }
+  if (["identity_not_reclaimable", "identity_recovery_failed"].includes(oauthError)) {
+    return {
+      type: "error",
+      message: `${providerLabel} recovery could not be completed. Start the link again or contact support.`,
     };
   }
   return null;

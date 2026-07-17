@@ -49,6 +49,12 @@ jest.mock("../server/supabase/authRateLimit", () => ({
 }));
 
 jest.mock("../server/supabase/reauth", () => ({
+  clearReauthCookie: (slot) => ({
+    name: slot ? `roo_reauth_${slot}` : "roo_reauth_grant",
+    value: "",
+    maxAge: 0,
+    path: "/",
+  }),
   createReauthToken: () => "reauth-token",
   hashReauthToken: (value) => `hash:${value}`,
   reauthCookie: (value, slot) => ({
@@ -146,6 +152,9 @@ describe("Supabase reauthentication route", () => {
     );
     expect(response.status).toBe(401);
     expect(mockRpc).not.toHaveBeenCalled();
+    expect(response.cookies.values).toContainEqual(
+      expect.objectContaining({ name: "roo_reauth_grant", maxAge: 0 })
+    );
   });
 
   test("fails closed on cross-origin requests", async () => {

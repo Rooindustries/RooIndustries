@@ -41,8 +41,11 @@ const tourneyStyles = {
 export default function SupabaseSocialLogin({
   action = "signin",
   flow,
+  linkProof = null,
   nextPath,
   onBeforeRedirect,
+  onProofConsumed,
+  onProofFailure,
   providerIds = ["google", "discord"],
   reauthPurpose = "",
   variant = "referral",
@@ -67,19 +70,31 @@ export default function SupabaseSocialLogin({
 
   const actionCopy = {
     link: { button: "Link", divider: "or link an account", error: "Account linking" },
+    reclaim: { button: "Recover", divider: "recover the blocked account", error: "Account recovery" },
     reauth: { button: "Reauthenticate with", divider: "or reauthenticate with", error: "Reauthentication" },
     signup: { button: "Sign up with", divider: "or sign up with", error: "Sign-up" },
     signin: { button: "Continue with", divider: "or continue with", error: "Sign-in" },
   }[action] || { button: "Continue with", divider: "or continue with", error: "Sign-in" };
+  const requiresLinkProof = ["link", "reclaim"].includes(action);
+  const proofExpiresAt = Date.parse(String(linkProof?.expiresAt || ""));
+  const hasLinkProof =
+    linkProof?.confirmed === true &&
+    Number.isFinite(proofExpiresAt) &&
+    proofExpiresAt > Date.now();
 
   const start = async (provider) => {
+    if (requiresLinkProof && !hasLinkProof) {
+      setMessage("Confirm your identity before linking a provider.");
+      onProofFailure?.();
+      return;
+    }
     setBusyProvider(provider);
     setMessage("");
 
     try {
       onBeforeRedirect?.();
       const client = getSupabaseBrowserClient();
-      if (!["link", "reauth"].includes(action)) {
+      if (!["link", "reauth", "reclaim"].includes(action)) {
         await client.auth.signOut({ scope: "local" }).catch(() => {});
       }
       const intentResponse = await fetch("/api/auth/intent", {
@@ -97,6 +112,7 @@ export default function SupabaseSocialLogin({
       if (!intentResponse.ok || intent.ok !== true || !intent.callbackUrl) {
         throw new Error(intent.error || "OAuth intent failed");
       }
+      if (requiresLinkProof) onProofConsumed?.();
       const options = {
         redirectTo: intent.callbackUrl,
         ...(provider === "discord"
@@ -114,6 +130,7 @@ export default function SupabaseSocialLogin({
       });
       if (error) throw error;
     } catch {
+      if (requiresLinkProof) onProofFailure?.();
       setMessage(`${actionCopy.error} could not be started. Please try again.`);
       setBusyProvider("");
     }
@@ -133,7 +150,11 @@ export default function SupabaseSocialLogin({
           <button
             aria-label={`${actionCopy.button} ${label}`}
             className={styles.button}
-            disabled={previewOnly || Boolean(busyProvider)}
+            disabled={
+              previewOnly ||
+              Boolean(busyProvider) ||
+              (requiresLinkProof && !hasLinkProof)
+            }
             key={id}
             onClick={() => start(id)}
             type="button"
