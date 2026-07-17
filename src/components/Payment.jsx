@@ -1470,10 +1470,7 @@ export default function Payment({ hideFooter = false }) {
 
   return (
     <motion.section
-      className="relative z-10 pt-4 md:pt-10 px-6 max-w-3xl mx-auto text-ink"
-      style={{
-        paddingBottom: "calc(var(--reservation-banner-clearance, 2rem) + 2rem)",
-      }}
+      className="relative z-10 py-4 px-6 max-w-3xl mx-auto text-ink"
       variants={containerVariants}
       initial="hidden"
       animate="visible"
