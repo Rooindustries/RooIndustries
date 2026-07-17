@@ -129,6 +129,12 @@ describe("referral password change", () => {
     );
 
     expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      ok: true,
+      signedOut: true,
+      status: "updated",
+      message: "Password updated. Log in with your new password.",
+    });
     const request = mockUpdateSupabaseAccountPassword.mock.calls[0][0];
     expect(request.password).toBe("new-password-value");
     expect(request.sourcePreconditions).toMatchObject({
@@ -205,5 +211,54 @@ describe("referral password change", () => {
     expect(response.statusCode).toBe(503);
     expect(mockUpdateSupabaseAccountPassword).not.toHaveBeenCalled();
     expect(mockPatch).not.toHaveBeenCalled();
+  });
+
+  test("returns an explicit pending state while the source mirror finishes", async () => {
+    mockReconcileSupabaseCredentialSource.mockRejectedValue(
+      Object.assign(new Error("mirror pending"), {
+        code: "CREDENTIAL_MIRROR_PENDING",
+      })
+    );
+    const response = createResponse();
+
+    await handler(
+      {
+        method: "POST",
+        headers: { "x-forwarded-for": "203.0.113.50" },
+        body: { password: "new-password-value" },
+      },
+      response
+    );
+
+    expect(response.statusCode).toBe(202);
+    expect(response.headers["Retry-After"]).toBe("2");
+    expect(response.body).toEqual({
+      ok: true,
+      status: "pending",
+      message: "Your password change is saving. It will finish in a moment.",
+    });
+  });
+
+  test("surfaces an already active credential operation", async () => {
+    mockUpdateSupabaseAccountPassword.mockRejectedValue(
+      Object.assign(new Error("operation active"), { code: "55006" })
+    );
+    const response = createResponse();
+
+    await handler(
+      {
+        method: "POST",
+        headers: { "x-forwarded-for": "203.0.113.50" },
+        body: { password: "new-password-value" },
+      },
+      response
+    );
+
+    expect(response.statusCode).toBe(503);
+    expect(response.body).toEqual({
+      ok: false,
+      error:
+        "A previous password change is still in progress. Please try again shortly.",
+    });
   });
 });
