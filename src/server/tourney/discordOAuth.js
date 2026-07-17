@@ -5,8 +5,6 @@ import {
 } from "./discordConfig.js";
 
 const OAUTH_STATE_MAX_AGE_SECONDS = 60 * 15;
-const DISCORD_SCOPES = Object.freeze(["identify", "guilds.join"]);
-
 const base64UrlEncode = (value) => Buffer.from(value).toString("base64url");
 const base64UrlDecode = (value) =>
   Buffer.from(String(value || ""), "base64url").toString("utf8");
@@ -158,84 +156,3 @@ export const buildTourneyDiscordStartUrl = ({
   if (!oauthConfig.enabled) return getTourneyDiscordInviteUrl(env);
   return new URL("/tourney/discord", baseUrl).toString();
 };
-
-export const buildDiscordAuthorizationUrl = ({
-  state,
-  config,
-} = {}) => {
-  const url = new URL(config.authorizeUrl);
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("client_id", config.clientId);
-  url.searchParams.set("redirect_uri", config.redirectUri);
-  url.searchParams.set("scope", DISCORD_SCOPES.join(" "));
-  url.searchParams.set("state", state);
-  url.searchParams.set("prompt", "consent");
-  return url.toString();
-};
-
-const parseDiscordResponseBody = async (response) => {
-  const text = await response.text().catch(() => "");
-  if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { message: text };
-  }
-};
-
-const getDiscordError = async (response, fallback) => {
-  const body = await parseDiscordResponseBody(response);
-  return (
-    body?.message ||
-    body?.error_description ||
-    body?.error ||
-    `${fallback} (${response.status})`
-  );
-};
-
-export async function exchangeDiscordOAuthCode({
-  code,
-  config,
-  fetchImpl = fetch,
-} = {}) {
-  const body = new URLSearchParams();
-  body.set("client_id", config.clientId);
-  body.set("client_secret", config.clientSecret);
-  body.set("grant_type", "authorization_code");
-  body.set("code", code);
-  body.set("redirect_uri", config.redirectUri);
-
-  const response = await fetchImpl(`${config.apiBaseUrl}/oauth2/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
-  if (!response.ok) {
-    throw new Error(await getDiscordError(response, "Discord token exchange failed"));
-  }
-
-  const token = await response.json();
-  if (!token?.access_token) {
-    throw new Error("Discord token exchange did not return an access token.");
-  }
-  return token;
-}
-
-export async function fetchDiscordCurrentUser({
-  accessToken,
-  config,
-  fetchImpl = fetch,
-} = {}) {
-  const response = await fetchImpl(`${config.apiBaseUrl}/users/@me`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  if (!response.ok) {
-    throw new Error(await getDiscordError(response, "Unable to read Discord user"));
-  }
-
-  const user = await response.json();
-  if (!user?.id) {
-    throw new Error("Discord user response did not include an id.");
-  }
-  return user;
-}
