@@ -104,7 +104,8 @@ describe("referral registration identity claims", () => {
 
   beforeEach(() => {
     documents.clear();
-    mockClient.fetch.mockClear();
+    mockClient.fetch.mockReset();
+    mockClient.fetch.mockResolvedValue(null);
     mockSendVerification.mockReset();
     mockSendVerification.mockResolvedValue({ data: { id: "email_fixture" }, error: null });
     globalThis.__rooRateLimitBuckets?.clear?.();
@@ -141,6 +142,38 @@ describe("referral registration identity claims", () => {
       )
     ).toHaveLength(1);
     expect(mockSendVerification).toHaveBeenCalledTimes(1);
+  });
+
+  test("rejects a referral registration that collides with a coupon code", async () => {
+    mockClient.fetch.mockImplementation(async (query) =>
+      String(query).includes('_type == "coupon"')
+        ? { _id: "coupon.creator" }
+        : null
+    );
+    const response = createRes();
+
+    await register(
+      {
+        method: "POST",
+        headers: { "x-forwarded-for": "203.0.113.93" },
+        body: {
+          discordUsername: "Creator Collision",
+          email: "collision@example.com",
+          paypalEmail: "collision@example.com",
+          slug: "save10",
+          password: testPassword,
+        },
+      },
+      response
+    );
+
+    expect(response.statusCode).toBe(409);
+    expect(response.body).toEqual({
+      ok: false,
+      error: "Referral code already taken",
+    });
+    expect(documents.size).toBe(0);
+    expect(mockSendVerification).not.toHaveBeenCalled();
   });
 
   test("keeps the committed pending account when email delivery is ambiguous", async () => {

@@ -1,4 +1,10 @@
-import React, { useEffect, useMemo, useState, useRef } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import { getPublicContent } from "../lib/publicContentClient";
 import { useLocation, useNavigate, Link } from "react-router-dom";
@@ -15,6 +21,13 @@ import {
   readStoredCheckoutBooking,
   updateStoredCheckoutHold,
 } from "../lib/checkoutStorage";
+import {
+  calculateCheckoutDiscounts,
+  resolveCheckoutCode,
+  sanitizeCouponForCheckout,
+  sanitizeReferralForCheckout,
+  toMoney,
+} from "../lib/checkoutCodes";
 
 const { applyPackageContentOverrides } = packageContent;
 const {
@@ -37,17 +50,22 @@ const PAYMENT_SESSION_STORAGE_KEY = "payment_session_state";
 const BOOKING_CONFIRMATION_STORAGE_KEY = "booking_confirmation_state";
 const SESSION_STATE_KEY = "booking_modal_state";
 const REFERRAL_STORAGE_KEY = "referral_session";
+const INVALID_CHECKOUT_CODE_MESSAGE = "Invalid referral or coupon code.";
 const BOOKING_FETCH_TIMEOUT_MS = 8000;
+const AVAILABILITY_REFRESH_INTERVAL_MS = 60_000;
+const AVAILABILITY_REFRESH_DEBOUNCE_MS = 5_000;
 const REASSURANCE_COPY =
   "You won't be charged until you confirm on the payment page.";
 const PAYMENT_PENDING_EXPIRY_ERROR =
   "This reservation expired while payment is still pending. Return to payment to check its status or release payment to try again.";
 const BOOKING_STEPS = ["Pick a slot", "PC details", "Review & pay"];
 const STEP_PROGRESS_LABELS = {
-  1: "Step 1 of 3 · 33% complete",
-  2: "Step 2 of 3 · 67% complete",
-  3: "Step 3 of 3 · Ready to pay",
+  1: "Step 1 of 3",
+  2: "Step 2 of 3",
+  3: "Step 3 of 3",
 };
+const STEP_PROGRESS_WIDTHS = { 1: "33%", 2: "67%", 3: "100%" };
+const STEP_PROGRESS_PERCENTS = { 1: 33, 2: 67, 3: 100 };
 const createFreshForm = () => ({
   discord: "",
   email: "",
@@ -69,6 +87,7 @@ const readReferralFromSession = () => {
     return "";
   }
 };
+const formatUsd = (value) => `$${toMoney(value).toFixed(2)}`;
 const getDraftKey = (pkg) => (pkg?.title ? pkg.title : "_default");
 const isDraftEmpty = (formObj) =>
   !String(formObj?.discord || "").trim() &&
@@ -76,12 +95,6 @@ const isDraftEmpty = (formObj) =>
   !String(formObj?.specs || "").trim() &&
   !String(formObj?.mainGame || "").trim() &&
   !String(formObj?.notes || "").trim();
-
-// Read query params
-function useQuery() {
-  const { search } = useLocation();
-  return new URLSearchParams(search);
-}
 
 const isSameDay = (a, b) =>
   a.getFullYear() === b.getFullYear() &&
@@ -203,9 +216,32 @@ function BookingStepTracker({ step }) {
           );
         })}
       </ol>
-      <p className="mt-2 text-xs text-accent">
-        {STEP_PROGRESS_LABELS[step]}
-      </p>
+      <div
+        className="relative mt-2 pb-5"
+        role="progressbar"
+        aria-valuenow={STEP_PROGRESS_PERCENTS[step]}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuetext={STEP_PROGRESS_LABELS[step]}
+        aria-label="Booking progress"
+      >
+        <div className="h-0.5 w-full rounded-full bg-surface-input">
+          <div
+            className="h-0.5 rounded-full bg-accent-strong transition-all duration-300"
+            style={{ width: STEP_PROGRESS_WIDTHS[step] }}
+          />
+        </div>
+        <span
+          aria-hidden="true"
+          className="absolute top-2 text-[11px] font-medium text-accent transition-all duration-300"
+          style={{
+            left: STEP_PROGRESS_WIDTHS[step],
+            transform: step === 3 ? "translateX(-100%)" : "translateX(-50%)",
+          }}
+        >
+          {STEP_PROGRESS_WIDTHS[step]}
+        </span>
+      </div>
     </div>
   );
 }
@@ -368,13 +404,22 @@ const getUtcDateFromHold = (hold) => {
 export default function BookingForm({ isMobile }) {
   const handleHomeSectionLink = useHomeSectionLinkHandler();
   const location = useLocation();
-  const q = useQuery();
   const navigate = useNavigate();
+  const referralQuery = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return {
+      code: String(params.get("ref") || "").trim(),
+      present: params.has("ref"),
+    };
+  }, [location.search]);
 
   const [step, setStep] = useState(1);
   const [settings, setSettings] = useState(null);
   const [settingsError, setSettingsError] = useState("");
   const [settingsReloadKey, setSettingsReloadKey] = useState(0);
+  const availabilityFetchMountedRef = useRef(false);
+  const availabilityFetchInFlightRef = useRef(false);
+  const lastAvailabilityFetchAtRef = useRef(0);
 
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedSlot, setSelectedSlot] = useState(null);
@@ -397,6 +442,16 @@ export default function BookingForm({ isMobile }) {
   }, []);
 
   const [form, setForm] = useState(createFreshForm);
+  const [codeEntryOpen, setCodeEntryOpen] = useState(false);
+  const [codeInput, setCodeInput] = useState("");
+  const [codeError, setCodeError] = useState("");
+  const [validatingCode, setValidatingCode] = useState(false);
+  const [appliedReferral, setAppliedReferral] = useState(null);
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [dismissedReferralCode, setDismissedReferralCode] = useState("");
+  const [restoredCodeCandidates, setRestoredCodeCandidates] = useState(null);
+  const autoReferralAttemptRef = useRef("");
+  const hasActiveHoldRef = useRef(false);
 
   const [showVertexModal, setShowVertexModal] = useState(false);
   const [vertexPackage, setVertexPackage] = useState(null);
@@ -433,6 +488,8 @@ export default function BookingForm({ isMobile }) {
   const prevPackageDataRef = useRef(selectedPackage);
   const [draftLoading, setDraftLoading] = useState(true);
   const [myHold, setMyHold] = useState(null);
+  const isPaymentPendingHold =
+    String(myHold?.phase || "").trim().toLowerCase() === "payment_pending";
   const [lockingSlot, setLockingSlot] = useState(false);
   const [holdCountdownMs, setHoldCountdownMs] = useState(null);
   const [releasingPayment, setReleasingPayment] = useState(false);
@@ -475,16 +532,19 @@ export default function BookingForm({ isMobile }) {
   // Persist referral from URL into session storage; clear only if explicitly blank
   useEffect(() => {
     try {
-      const ref = q.get("ref") || "";
-      if (ref) {
-        sessionStorage.setItem(REFERRAL_STORAGE_KEY, ref);
-      } else if (q.has("ref")) {
+      const normalizedDismissed = dismissedReferralCode.toLowerCase();
+      if (
+        referralQuery.code &&
+        referralQuery.code.toLowerCase() !== normalizedDismissed
+      ) {
+        sessionStorage.setItem(REFERRAL_STORAGE_KEY, referralQuery.code);
+      } else if (referralQuery.present || normalizedDismissed) {
         sessionStorage.removeItem(REFERRAL_STORAGE_KEY);
       }
     } catch {
       console.error("Failed to persist referral session");
     }
-  }, [q]);
+  }, [dismissedReferralCode, referralQuery]);
 
   useEffect(() => {
     const prevTitle = prevPackageRef.current;
@@ -713,6 +773,7 @@ export default function BookingForm({ isMobile }) {
     const tick = () => {
       const diff = expiresAtMs - Date.now();
       if (diff <= 0) {
+        hasActiveHoldRef.current = false;
         setHoldCountdownMs(0);
         const paymentPending =
           String(myHold.phase || "").trim().toLowerCase() === "payment_pending";
@@ -914,42 +975,80 @@ export default function BookingForm({ isMobile }) {
 
   // ---------- FETCH SETTINGS + ACTIVE HOLDS ----------
   useEffect(() => {
-    let isActive = true;
-
-    const fetchData = async () => {
-      setSettingsError("");
-      try {
-        const data = await fetchJsonWithRetry("/api/bookingAvailability");
-        if (!data?.settings) {
-          throw new Error("Missing booking availability settings.");
-        }
-
-        const s = { ...data.settings };
-
-        s.dateSlotMap = normalizeDateSlots(s.dateSlots);
-        s.xocDateSlotMap = normalizeDateSlots(s.xocDateSlots);
-        s.vertexEssentialsDateSlotMap = normalizeDateSlots(
-          s.vertexEssentialsDateSlots
-        );
-        s.packageDateSlotMaps = normalizePackageDateSlots(s.packageDateSlots);
-        s.bookedSlots = Array.isArray(data.bookedSlots)
-          ? data.bookedSlots
-          : [];
-
-        if (isActive) setSettings(s);
-      } catch {
-        console.error("Failed to fetch booking availability");
-        if (isActive) {
-          setSettingsError("Booking availability took too long to load.");
-        }
-      }
-    };
-
-    fetchData();
+    availabilityFetchMountedRef.current = true;
     return () => {
-      isActive = false;
+      availabilityFetchMountedRef.current = false;
     };
-  }, [settingsReloadKey]);
+  }, []);
+
+  const fetchAvailability = useCallback(async () => {
+    if (availabilityFetchInFlightRef.current) return;
+
+    availabilityFetchInFlightRef.current = true;
+    lastAvailabilityFetchAtRef.current = Date.now();
+    setSettingsError("");
+
+    try {
+      const data = await fetchJsonWithRetry("/api/bookingAvailability");
+      if (!data?.settings) {
+        throw new Error("Missing booking availability settings.");
+      }
+
+      const s = { ...data.settings };
+
+      s.dateSlotMap = normalizeDateSlots(s.dateSlots);
+      s.xocDateSlotMap = normalizeDateSlots(s.xocDateSlots);
+      s.vertexEssentialsDateSlotMap = normalizeDateSlots(
+        s.vertexEssentialsDateSlots
+      );
+      s.packageDateSlotMaps = normalizePackageDateSlots(s.packageDateSlots);
+      s.bookedSlots = Array.isArray(data.bookedSlots) ? data.bookedSlots : [];
+
+      if (availabilityFetchMountedRef.current) setSettings(s);
+    } catch {
+      console.error("Failed to fetch booking availability");
+      if (availabilityFetchMountedRef.current) {
+        setSettingsError("Booking availability took too long to load.");
+      }
+    } finally {
+      availabilityFetchInFlightRef.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAvailability();
+  }, [fetchAvailability, settingsReloadKey]);
+
+  useEffect(() => {
+    if (step !== 1) return undefined;
+
+    const requestAvailabilityRefresh = () => {
+      if (document.visibilityState !== "visible") return;
+      if (availabilityFetchInFlightRef.current) return;
+
+      const now = Date.now();
+      if (
+        now - lastAvailabilityFetchAtRef.current <
+        AVAILABILITY_REFRESH_DEBOUNCE_MS
+      ) {
+        return;
+      }
+
+      lastAvailabilityFetchAtRef.current = now;
+      setSettingsReloadKey((key) => key + 1);
+    };
+
+    window.addEventListener("focus", requestAvailabilityRefresh);
+    const intervalId = window.setInterval(
+      requestAvailabilityRefresh,
+      AVAILABILITY_REFRESH_INTERVAL_MS
+    );
+
+    return () => {
+      window.removeEventListener("focus", requestAvailabilityRefresh);
+      window.clearInterval(intervalId);
+    };
+  }, [step]);
 
   // page fade-in on route change
   useEffect(() => {
@@ -979,6 +1078,13 @@ export default function BookingForm({ isMobile }) {
   // Load drafts (per-package)
   useEffect(() => {
     try {
+      setAppliedReferral(null);
+      setAppliedCoupon(null);
+      setDismissedReferralCode("");
+      setCodeEntryOpen(false);
+      setCodeInput("");
+      setCodeError("");
+      setRestoredCodeCandidates(null);
       const storedDraft = sessionStorage.getItem(BOOKING_DRAFT_KEY);
       if (storedDraft) {
         const parsed = JSON.parse(storedDraft);
@@ -992,6 +1098,26 @@ export default function BookingForm({ isMobile }) {
           if (draftForPkg.form) setForm(normalizeForm(draftForPkg.form));
           if (draftForPkg.selectedPackage) {
             setPersistedPackage(draftForPkg.selectedPackage);
+          }
+          const checkoutCodes = draftForPkg.checkoutCodes;
+          if (checkoutCodes && typeof checkoutCodes === "object") {
+            const referralCode = String(
+              checkoutCodes.referral?.code || ""
+            ).trim();
+            const couponCode = String(
+              checkoutCodes.coupon?.code || ""
+            ).trim();
+            const dismissedCode = String(
+              checkoutCodes.dismissedReferralCode || ""
+            ).trim();
+            setDismissedReferralCode(dismissedCode);
+            if (referralCode || couponCode) {
+              setRestoredCodeCandidates({
+                referralCode,
+                couponCode,
+                dismissedCode,
+              });
+            }
           }
           setPreventHoldAutoload(false);
         }
@@ -1011,13 +1137,30 @@ export default function BookingForm({ isMobile }) {
         parsed = { lastTitle: null, packages: {}, ...JSON.parse(current) };
       }
       const key = getDraftKey(payload.selectedPackage);
-      parsed.packages[key] = payload;
+      parsed.packages[key] = {
+        ...(parsed.packages[key] || {}),
+        ...payload,
+      };
       parsed.lastTitle = key;
       setDrafts(parsed.packages);
       sessionStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify(parsed));
     } catch {
       console.error("Failed to persist booking draft");
     }
+  };
+
+  const persistCheckoutCodes = ({ referral, coupon, dismissedCode = "" }) => {
+    const safeReferral = sanitizeReferralForCheckout(referral);
+    const safeCoupon = sanitizeCouponForCheckout(coupon);
+    persistDraft({
+      form: { ...form },
+      selectedPackage: { ...selectedPackage },
+      checkoutCodes: {
+        referral: safeReferral,
+        coupon: safeCoupon,
+        dismissedReferralCode: String(dismissedCode || "").trim(),
+      },
+    });
   };
 
   const clearDraftForPackage = (pkgKey) => {
@@ -1349,12 +1492,11 @@ export default function BookingForm({ isMobile }) {
     if (!utcDate) return "";
     return formatLocalTime(utcDate, userTimeZone);
   }, [myHold, userTimeZone]);
-  const isPaymentPendingHold =
-    String(myHold?.phase || "").trim().toLowerCase() === "payment_pending";
   const hasActiveHold =
     !!myHold &&
     holdCountdownMs !== null &&
     (holdCountdownMs > 0 || isPaymentPendingHold);
+  hasActiveHoldRef.current = hasActiveHold;
   const reviewDateTimeLabel = useMemo(() => {
     if (!selectedSlot?.utcStart) return "";
     const utcStart = new Date(selectedSlot.utcStart);
@@ -1364,8 +1506,335 @@ export default function BookingForm({ isMobile }) {
       formatLocalTime(utcStart, userTimeZone) || selectedSlot.localLabel;
     return `${dateLabel} · ${timeLabel} (${userTimeZone})`;
   }, [selectedSlot, userTimeZone]);
+  const reviewBaseAmount = Math.max(0, toMoney(selectedPackage.price));
+  const reviewDiscounts = useMemo(
+    () =>
+      calculateCheckoutDiscounts({
+        baseAmount: reviewBaseAmount,
+        referral: appliedReferral,
+        coupon: appliedCoupon,
+      }),
+    [appliedCoupon, appliedReferral, reviewBaseAmount]
+  );
+  const reviewTotal =
+    reviewBaseAmount > 0 ? formatUsd(reviewDiscounts.finalAmount) : "";
+
+  const closeCodeEntry = () => {
+    setCodeEntryOpen(false);
+    setCodeInput("");
+    setCodeError("");
+  };
+
+  const storeReferralSession = (code) => {
+    try {
+      if (code) {
+        sessionStorage.setItem(REFERRAL_STORAGE_KEY, code);
+      } else {
+        sessionStorage.removeItem(REFERRAL_STORAGE_KEY);
+      }
+    } catch {
+      console.error("Failed to persist referral session");
+    }
+  };
+
+  const applyResolvedReferral = (referral) => {
+    const safeReferral = sanitizeReferralForCheckout(referral);
+    if (!safeReferral) {
+      setCodeError(INVALID_CHECKOUT_CODE_MESSAGE);
+      return;
+    }
+    const nextCoupon =
+      appliedCoupon?.canCombineWithReferral === false
+        ? null
+        : sanitizeCouponForCheckout(appliedCoupon);
+    setAppliedReferral(safeReferral);
+    setAppliedCoupon(nextCoupon);
+    setDismissedReferralCode("");
+    storeReferralSession(safeReferral.code || codeInput.trim());
+    persistCheckoutCodes({ referral: safeReferral, coupon: nextCoupon });
+    closeCodeEntry();
+  };
+
+  const applyResolvedCoupon = (coupon) => {
+    const safeCoupon = sanitizeCouponForCheckout(coupon);
+    if (!safeCoupon) {
+      setCodeError(INVALID_CHECKOUT_CODE_MESSAGE);
+      return;
+    }
+    if (safeCoupon.canCombineWithReferral === false && appliedReferral) {
+      setCodeError(
+        "This coupon can't be used together with a referral discount. Remove the referral or use a different coupon."
+      );
+      return;
+    }
+
+    setAppliedCoupon(safeCoupon);
+    persistCheckoutCodes({
+      referral: sanitizeReferralForCheckout(appliedReferral),
+      coupon: safeCoupon,
+      dismissedCode: dismissedReferralCode,
+    });
+    closeCodeEntry();
+  };
+
+  const handleCodeSubmit = async (event) => {
+    event.preventDefault();
+    if (isPaymentPendingHold || validatingCode) return;
+
+    const code = codeInput.trim();
+    if (!code) {
+      setCodeError("Enter a referral or coupon code.");
+      return;
+    }
+
+    setValidatingCode(true);
+    setCodeError("");
+
+    try {
+      const result = await resolveCheckoutCode(code, selectedPackage.title);
+      if (!hasActiveHoldRef.current || isPaymentPendingHold) return;
+      if (!result.ok) {
+        setCodeError(result.error || INVALID_CHECKOUT_CODE_MESSAGE);
+        return;
+      }
+
+      if (result.type === "referral") {
+        applyResolvedReferral(result.value);
+        return;
+      }
+      applyResolvedCoupon(result.value);
+    } finally {
+      setValidatingCode(false);
+    }
+  };
+
+  const removeAppliedReferral = () => {
+    if (isPaymentPendingHold) return;
+    const removedCode = String(appliedReferral?.code || "").trim();
+    autoReferralAttemptRef.current = "";
+    setAppliedReferral(null);
+    setDismissedReferralCode(removedCode);
+    storeReferralSession("");
+    persistCheckoutCodes({
+      referral: null,
+      coupon: sanitizeCouponForCheckout(appliedCoupon),
+      dismissedCode: removedCode,
+    });
+  };
+
+  const removeAppliedCoupon = () => {
+    if (isPaymentPendingHold) return;
+    setAppliedCoupon(null);
+    persistCheckoutCodes({
+      referral: sanitizeReferralForCheckout(appliedReferral),
+      coupon: null,
+      dismissedCode: dismissedReferralCode,
+    });
+  };
+
+  useEffect(() => {
+    if (
+      !restoredCodeCandidates ||
+      !hasActiveHold ||
+      isPaymentPendingHold ||
+      step !== 3
+    ) {
+      return;
+    }
+
+    let active = true;
+    setValidatingCode(true);
+    setCodeError("");
+
+    const restoreValidatedCodes = async () => {
+      let nextReferral = null;
+      let nextCoupon = null;
+      let nextDismissedCode = restoredCodeCandidates.dismissedCode || "";
+      let invalidCodeFound = false;
+
+      const applyResult = (result, sourceType, sourceCode) => {
+        if (!result?.ok) {
+          invalidCodeFound = true;
+          if (sourceType === "referral") {
+            nextDismissedCode = sourceCode;
+          }
+          return;
+        }
+
+        if (result.type === "referral") {
+          const safeReferral = sanitizeReferralForCheckout(result.value);
+          if (!safeReferral) {
+            invalidCodeFound = true;
+            return;
+          }
+          nextReferral = safeReferral;
+          nextDismissedCode = "";
+          if (nextCoupon?.canCombineWithReferral === false) {
+            nextCoupon = null;
+          }
+          return;
+        }
+
+        const safeCoupon = sanitizeCouponForCheckout(result.value);
+        if (
+          !safeCoupon ||
+          (safeCoupon.canCombineWithReferral === false && nextReferral)
+        ) {
+          invalidCodeFound = true;
+          return;
+        }
+        nextCoupon = safeCoupon;
+      };
+
+      const referralCode = restoredCodeCandidates.referralCode;
+      if (referralCode) {
+        const result = await resolveCheckoutCode(
+          referralCode,
+          selectedPackage.title
+        );
+        if (!active || !hasActiveHoldRef.current) return;
+        applyResult(result, "referral", referralCode);
+      }
+
+      const couponCode = restoredCodeCandidates.couponCode;
+      if (couponCode && couponCode.toLowerCase() !== referralCode.toLowerCase()) {
+        const result = await resolveCheckoutCode(
+          couponCode,
+          selectedPackage.title
+        );
+        if (!active || !hasActiveHoldRef.current) return;
+        applyResult(result, "coupon", couponCode);
+      }
+
+      if (!active || !hasActiveHoldRef.current) return;
+      setAppliedReferral(nextReferral);
+      setAppliedCoupon(nextCoupon);
+      setDismissedReferralCode(nextDismissedCode);
+      storeReferralSession(nextReferral?.code || "");
+      persistCheckoutCodes({
+        referral: nextReferral,
+        coupon: nextCoupon,
+        dismissedCode: nextDismissedCode,
+      });
+      setRestoredCodeCandidates(null);
+
+      if (invalidCodeFound) {
+        setCodeEntryOpen(true);
+        setCodeError(INVALID_CHECKOUT_CODE_MESSAGE);
+      }
+    };
+
+    restoreValidatedCodes().finally(() => {
+      if (active) setValidatingCode(false);
+    });
+
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    hasActiveHold,
+    isPaymentPendingHold,
+    restoredCodeCandidates,
+    selectedPackage.title,
+    step,
+  ]);
+
+  useEffect(() => {
+    if (
+      draftLoading ||
+      restoredCodeCandidates ||
+      step !== 3 ||
+      !hasActiveHold ||
+      isPaymentPendingHold ||
+      appliedReferral
+    ) {
+      return;
+    }
+
+    const storedReferral = readReferralFromSession();
+    const autoCode = referralQuery.code || storedReferral;
+    if (
+      !autoCode ||
+      autoCode.toLowerCase() === dismissedReferralCode.toLowerCase()
+    ) {
+      return;
+    }
+
+    const attemptKey = `${selectedPackage.title}:${autoCode.toLowerCase()}`;
+    if (autoReferralAttemptRef.current === attemptKey) return;
+    autoReferralAttemptRef.current = attemptKey;
+    let active = true;
+    setValidatingCode(true);
+
+    resolveCheckoutCode(autoCode, selectedPackage.title)
+      .then((result) => {
+        if (!active || !hasActiveHoldRef.current) return;
+        if (!result?.ok) {
+          const nextCoupon = sanitizeCouponForCheckout(appliedCoupon);
+          setDismissedReferralCode(autoCode);
+          storeReferralSession("");
+          persistCheckoutCodes({
+            referral: null,
+            coupon: nextCoupon,
+            dismissedCode: autoCode,
+          });
+          setCodeEntryOpen(true);
+          setCodeInput("");
+          setCodeError(INVALID_CHECKOUT_CODE_MESSAGE);
+          return;
+        }
+        if (result.type === "coupon") {
+          const safeCoupon = sanitizeCouponForCheckout(result.value);
+          if (
+            !safeCoupon ||
+            (safeCoupon.canCombineWithReferral === false && appliedReferral)
+          ) {
+            return;
+          }
+          setAppliedCoupon(safeCoupon);
+          persistCheckoutCodes({
+            referral: sanitizeReferralForCheckout(appliedReferral),
+            coupon: safeCoupon,
+            dismissedCode: dismissedReferralCode,
+          });
+          return;
+        }
+
+        const safeReferral = sanitizeReferralForCheckout(result.value);
+        if (!safeReferral) return;
+        const nextCoupon =
+          appliedCoupon?.canCombineWithReferral === false
+            ? null
+            : sanitizeCouponForCheckout(appliedCoupon);
+        setAppliedReferral(safeReferral);
+        setAppliedCoupon(nextCoupon);
+        storeReferralSession(safeReferral.code || autoCode);
+        persistCheckoutCodes({ referral: safeReferral, coupon: nextCoupon });
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setValidatingCode(false);
+      });
+
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    appliedReferral,
+    dismissedReferralCode,
+    draftLoading,
+    hasActiveHold,
+    isPaymentPendingHold,
+    referralQuery.code,
+    restoredCodeCandidates,
+    selectedPackage.title,
+    step,
+  ]);
 
   const clearHoldState = (resetStep = true, clearStorage = true) => {
+    hasActiveHoldRef.current = false;
     setMyHold(null);
     if (clearStorage) {
       sessionStorage.removeItem(HOLD_STORAGE_KEY);
@@ -1660,9 +2129,8 @@ export default function BookingForm({ isMobile }) {
       formatLocalTime(selectedSlot.utcStart, userTimeZone) ||
       selectedSlot.localLabel;
 
-    const referralFromQuery = q.get("ref") || "";
-    const referralFromSession = readReferralFromSession();
-    const finalReferralCode = referralFromQuery || referralFromSession;
+    const finalReferralCode = String(appliedReferral?.code || "").trim();
+    const finalCouponCode = String(appliedCoupon?.code || "").trim();
 
     const payload = {
       displayDate,
@@ -1690,12 +2158,18 @@ export default function BookingForm({ isMobile }) {
       slotHoldExpiresAt: myHold?.expiresAt || null,
 
       ...(finalReferralCode ? { referralCode: finalReferralCode } : {}),
+      ...(finalCouponCode ? { couponCode: finalCouponCode } : {}),
     };
 
     try {
       persistDraft({
         form: { ...form },
         selectedPackage: { ...selectedPackage },
+        checkoutCodes: {
+          referral: sanitizeReferralForCheckout(appliedReferral),
+          coupon: sanitizeCouponForCheckout(appliedCoupon),
+          dismissedReferralCode,
+        },
       });
     } catch {
       console.error("Failed to persist booking draft");
@@ -1733,7 +2207,7 @@ export default function BookingForm({ isMobile }) {
   };
 
   const handlePay = () => {
-    if (loading) return;
+    if (loading || validatingCode || restoredCodeCandidates) return;
     setLoading(true);
     handleSubmit();
     setLoading(false);
@@ -2206,7 +2680,7 @@ export default function BookingForm({ isMobile }) {
                   </div>
 
                   <p className="mt-6 text-xs text-accent">
-                    Please read the FAQ before booking — it answers everything you
+                    Please read the FAQ before booking. It answers everything you
                     need to know.
                   </p>
 
@@ -2332,10 +2806,124 @@ export default function BookingForm({ isMobile }) {
                           </dd>
                         </div>
                       )}
+                      {appliedReferral && (
+                        <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr] sm:items-center">
+                          <dt className="text-ink-muted">Referral</dt>
+                          <dd className="flex flex-wrap items-center gap-2 font-semibold text-ink sm:justify-end sm:text-right">
+                            <span>
+                              {appliedReferral.code} · −
+                              {formatUsd(
+                                reviewDiscounts.referralDiscountAmount
+                              )}
+                            </span>
+                            {!isPaymentPendingHold && (
+                              <button
+                                type="button"
+                                onClick={removeAppliedReferral}
+                                aria-label={`Remove referral code ${appliedReferral.code}`}
+                                className="text-sm font-semibold text-ink-muted transition hover:text-danger-text"
+                              >
+                                ×
+                              </button>
+                            )}
+                          </dd>
+                        </div>
+                      )}
+                      {appliedCoupon && (
+                        <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr] sm:items-center">
+                          <dt className="text-ink-muted">Coupon</dt>
+                          <dd className="flex flex-wrap items-center gap-2 font-semibold text-ink sm:justify-end sm:text-right">
+                            <span>
+                              {appliedCoupon.code} · −
+                              {formatUsd(reviewDiscounts.couponDiscountAmount)}
+                            </span>
+                            {!isPaymentPendingHold && (
+                              <button
+                                type="button"
+                                onClick={removeAppliedCoupon}
+                                aria-label={`Remove coupon code ${appliedCoupon.code}`}
+                                className="text-sm font-semibold text-ink-muted transition hover:text-danger-text"
+                              >
+                                ×
+                              </button>
+                            )}
+                          </dd>
+                        </div>
+                      )}
+                      {!isPaymentPendingHold && (
+                        <div className="py-3">
+                          <dt className="sr-only">
+                            Referral or coupon code
+                          </dt>
+                          <dd>
+                            {!codeEntryOpen ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCodeEntryOpen(true);
+                                  setCodeError("");
+                                }}
+                                className="text-xs font-semibold text-accent underline underline-offset-2 transition hover:text-info-text"
+                              >
+                                Have a referral or coupon code?
+                              </button>
+                            ) : (
+                              <form onSubmit={handleCodeSubmit}>
+                                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                  <label
+                                    htmlFor="booking-review-code"
+                                    className="sr-only"
+                                  >
+                                    Referral or coupon code
+                                  </label>
+                                  <input
+                                    id="booking-review-code"
+                                    value={codeInput}
+                                    onChange={(event) => {
+                                      setCodeInput(event.target.value);
+                                      if (codeError) setCodeError("");
+                                    }}
+                                    disabled={
+                                      validatingCode || !!restoredCodeCandidates
+                                    }
+                                    aria-invalid={codeError ? "true" : "false"}
+                                    aria-describedby={
+                                      codeError
+                                        ? "booking-review-code-error"
+                                        : undefined
+                                    }
+                                    autoFocus
+                                    placeholder="Enter code"
+                                    className="min-w-0 flex-1 rounded-lg border border-line-input bg-surface-input p-3 text-sm outline-none transition focus:border-info-border disabled:cursor-wait disabled:opacity-60"
+                                  />
+                                  <button
+                                    type="submit"
+                                    disabled={
+                                      validatingCode || !!restoredCodeCandidates
+                                    }
+                                    className="rounded-lg border border-line-input bg-surface-input px-4 py-3 text-sm font-semibold text-ink transition hover:bg-surface-hover disabled:cursor-wait disabled:opacity-60"
+                                  >
+                                    {validatingCode ? "Checking..." : "Apply"}
+                                  </button>
+                                </div>
+                                {codeError && (
+                                  <p
+                                    id="booking-review-code-error"
+                                    role="alert"
+                                    className="mt-2 text-sm text-danger-text"
+                                  >
+                                    {codeError}
+                                  </p>
+                                )}
+                              </form>
+                            )}
+                          </dd>
+                        </div>
+                      )}
                       <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr] sm:items-center">
                         <dt className="font-semibold text-ink">Total</dt>
                         <dd className="text-lg font-bold text-accent sm:text-right">
-                          {selectedPackage.price}
+                          {reviewTotal || "Confirmed on payment page"}
                         </dd>
                       </div>
                     </dl>
@@ -2378,14 +2966,21 @@ export default function BookingForm({ isMobile }) {
                         <button
                           type="button"
                           onClick={handlePay}
+                          disabled={
+                            validatingCode || !!restoredCodeCandidates
+                          }
                           className={`glow-button inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-lg py-3 font-semibold transition ${
-                            loading ? "cursor-wait opacity-60" : ""
+                            loading || validatingCode || restoredCodeCandidates
+                              ? "cursor-wait opacity-60"
+                              : ""
                           }`}
                         >
                           {loading
                             ? "Preparing payment..."
-                            : selectedPackage.price
-                            ? `Pay ${selectedPackage.price}`
+                            : validatingCode || restoredCodeCandidates
+                            ? "Checking code..."
+                            : reviewTotal
+                            ? `Pay ${reviewTotal}`
                             : "Continue to payment"}
                           <span className="glow-line glow-line-top" />
                           <span className="glow-line glow-line-right" />

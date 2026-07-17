@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
@@ -219,6 +219,45 @@ export default function ReservationBanner() {
 
   const shouldRender = hold && countdown !== null && countdown > 0 && !path.startsWith("/booking");
 
+  const bannerRef = useRef(null);
+
+  // Publish the banner's real footprint so screens underneath can reserve
+  // exactly that much space, whatever the banner's current height is.
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+    const root = document.documentElement;
+    if (!shouldRender) {
+      root.style.removeProperty("--reservation-banner-clearance");
+      document.body.style.removeProperty("padding-bottom");
+      return undefined;
+    }
+    const node = bannerRef.current;
+    if (!node) return undefined;
+    const update = () => {
+      const rect = node.getBoundingClientRect();
+      const clearance = Math.max(0, Math.ceil(window.innerHeight - rect.top));
+      root.style.setProperty(
+        "--reservation-banner-clearance",
+        `${clearance}px`
+      );
+      // Also extend the document itself: overlaid screens scroll against the
+      // page behind them, so the scroll range must grow by the banner's
+      // footprint or the tail of the content can never clear it.
+      document.body.style.paddingBottom = `${clearance}px`;
+    };
+    update();
+    const observer =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
+    observer?.observe(node);
+    window.addEventListener("resize", update);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", update);
+      root.style.removeProperty("--reservation-banner-clearance");
+      document.body.style.removeProperty("padding-bottom");
+    };
+  }, [shouldRender]);
+
   const continueBooking = () => {
     if (String(hold?.phase || "").trim().toLowerCase() === "payment_pending") {
       const bookingData = readStoredCheckoutBooking();
@@ -289,22 +328,20 @@ export default function ReservationBanner() {
 
   const bannerWidthClass = (() => {
     if (isPaymentScreen) {
-      return isMobileWidth
-        ? "w-full max-w-full"
-        : "w-full max-w-[36rem] lg:max-w-[50rem]";
+      return isMobileWidth ? "w-auto max-w-[95vw]" : "w-auto max-w-[46rem]";
     }
     return isMobileWidth
       ? "w-auto max-w-[90vw] sm:max-w-[30rem]"
-      : "w-full max-w-[42rem] lg:max-w-[50rem]";
+      : "w-auto max-w-[46rem]";
   })();
 
   const paddingClass = isPaymentScreen
     ? isMobileWidth
       ? "py-1.5 px-3 sm:px-4"
-      : "py-3.5 px-5 lg:px-6"
+      : "py-2 px-5"
     : isMobileWidth
     ? "py-2 px-3 sm:px-4"
-    : "py-3.5 px-5 lg:px-6";
+    : "py-2 px-5";
 
   const innerFlexDirectionClass = isPaymentScreen
     ? isMobileWidth
@@ -342,8 +379,9 @@ export default function ReservationBanner() {
       className={`pointer-events-none fixed inset-x-0 z-[9999] flex ${alignmentClass} ${containerSpacingClass}`}
     >
       <div
+            ref={bannerRef}
             className={`
-              pointer-events-auto relative overflow-hidden 
+              pointer-events-auto relative overflow-hidden
               ${bannerWidthClass}
               rounded-2xl 
               glass-premium glass-scroll-lite
@@ -353,11 +391,13 @@ export default function ReservationBanner() {
             `}
       >
         {/* Text Block */}
-        <div className={`min-w-0 z-10 ${textAlignmentClass}`}>
+        <div
+          className={`min-w-0 z-10 ${textAlignmentClass} lg:flex lg:items-baseline lg:gap-2.5`}
+        >
           <p className={`font-semibold text-ink truncate drop-shadow-md ${titleSizeClass}`}>
             Slot {holdLocalTimeLabel || "--"}
             {hold?.packageTitle
-              ? ` — ${getPublicPackageTitle(hold.packageTitle)}`
+              ? ` · ${getPublicPackageTitle(hold.packageTitle)}`
               : ""}
           </p>
           <p className={`text-info-text truncate drop-shadow-sm ${subtitleSizeClass}`}>

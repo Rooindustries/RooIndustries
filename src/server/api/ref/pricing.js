@@ -24,17 +24,23 @@ const createApiError = (status, message, code = "") => {
 };
 
 const toMoney = (value) => {
-  const parsed = Number(
-    typeof value === "string" ? value.replace(/[^0-9.]/g, "") : value
-  );
+  const normalized =
+    typeof value === "string"
+      ? value.trim().replace(/,/g, "").replace(/[$€£₹]/g, "").trim()
+      : value;
+  if (
+    typeof normalized === "string" &&
+    !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalized)
+  ) {
+    return 0;
+  }
+  const parsed = Number(normalized);
   if (!Number.isFinite(parsed)) return 0;
   return +parsed.toFixed(2);
 };
 
 const clampPercent = (value) => {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return 0;
-  return Math.min(100, Math.max(0, parsed));
+  return Math.min(100, Math.max(0, toMoney(value)));
 };
 
 const normalizeDiscountType = (value) =>
@@ -376,7 +382,9 @@ export async function resolveBookingPricing({
       ? clampPercent(couponDoc?.discountPercent || 0)
       : 0;
   const configuredCouponAmount =
-    couponDiscountType === "fixed" ? toMoney(couponDoc?.discountAmount || 0) : 0;
+    couponDiscountType === "fixed"
+      ? Math.max(0, toMoney(couponDoc?.discountAmount || 0))
+      : 0;
   const couponDiscountValue =
     couponDiscountType === "fixed"
       ? configuredCouponAmount
@@ -386,7 +394,7 @@ export async function resolveBookingPricing({
       ? configuredCouponAmount
       : toMoney(effectiveGrossAmount * (configuredCouponPercent / 100));
   const couponDiscountAmount = couponDoc
-    ? Math.min(effectiveGrossAmount, rawCouponDiscountAmount)
+    ? Math.min(effectiveGrossAmount, Math.max(0, rawCouponDiscountAmount))
     : 0;
   const couponDiscountPercent =
     couponDiscountType === "fixed"
@@ -420,26 +428,15 @@ export async function resolveBookingPricing({
     effectiveDiscountAmount
   );
 
-  if (paymentProvider === "free") {
-    if (!couponDoc || couponDiscountAmount < effectiveGrossAmount) {
-      throw createApiError(
-        400,
-        "This coupon does not provide a full discount.",
-        "free_coupon_not_full"
-      );
-    }
-    effectiveDiscountAmount = effectiveGrossAmount;
-  }
-
-  const effectiveNetAmount =
-    paymentProvider === "free"
-      ? 0
-      : toMoney(effectiveGrossAmount - effectiveDiscountAmount);
+  const effectiveNetAmount = Math.max(
+    0,
+    toMoney(effectiveGrossAmount - effectiveDiscountAmount)
+  );
 
   if (paymentProvider === "free" && effectiveNetAmount > 0) {
     throw createApiError(
       400,
-      "This booking still requires payment.",
+      "The server quote still requires payment.",
       "free_requires_zero"
     );
   }
