@@ -31,9 +31,11 @@ const errorMessage = (error) => {
 export default function TourneyLoginForm({
   buttonLabel = "Sign in",
   initialError = "",
+  linkDiscord = false,
   navigate,
   note = "Assigned accounts only.",
   redirectTo = "/tourney",
+  showRegistrationLink = false,
   socialLogin = null,
 }) {
   const [message, setMessage] = useState(errorMessage(initialError));
@@ -59,6 +61,7 @@ export default function TourneyLoginForm({
           password: String(form.get("password") || ""),
           rememberMe: form.get("rememberMe") === "on",
           redirectTo,
+          ...(linkDiscord ? { linkDiscord: true } : {}),
         }),
       });
       const result = await response.json().catch(() => ({}));
@@ -68,10 +71,17 @@ export default function TourneyLoginForm({
         );
         return;
       }
+      const destination = linkDiscord
+        ? `/tourney?notice=${
+            result.discordLinked === true
+              ? "discord-linked"
+              : "discord-link-failed"
+          }`
+        : redirectTo;
       if (typeof navigate === "function") {
-        navigate(redirectTo);
+        navigate(destination);
       } else {
-        window.location.assign(redirectTo);
+        window.location.assign(destination);
       }
     } catch {
       setMessage("Sign in is temporarily unavailable. Please try again.");
@@ -106,7 +116,11 @@ export default function TourneyLoginForm({
           <span>Remember me</span>
         </label>
         <button className="cs-button" disabled={busy} type="submit">
-          {busy ? "Signing in…" : buttonLabel}
+          {busy
+            ? linkDiscord
+              ? "Logging in and linking…"
+              : "Signing in…"
+            : buttonLabel}
         </button>
       </form>
       {socialLogin}
@@ -114,9 +128,14 @@ export default function TourneyLoginForm({
         <p className="cs-error cs-r5" role="alert">
           {message}
         </p>
-      ) : (
+      ) : note ? (
         <p className="cs-note cs-r5">{note}</p>
-      )}
+      ) : null}
+      {showRegistrationLink ? (
+        <p className="cs-note cs-r5">
+          New here? <a href="/tourney/register">Register for the tournament.</a>
+        </p>
+      ) : null}
       <p className="cs-note cs-r5">
         <a href="/tourney/forgot">Forgot password?</a>
       </p>

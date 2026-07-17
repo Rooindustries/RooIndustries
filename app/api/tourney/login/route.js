@@ -19,6 +19,13 @@ import {
   readBoundedJson,
 } from "../../../../src/server/request/boundedJson";
 import { logSafeError } from "../../../../src/server/safeErrorLog";
+import {
+  clearPendingDiscordLinkCookie,
+  linkPendingDiscordIdentity,
+  readPendingDiscordLink,
+  resolvePendingDiscordUser,
+} from "../../../../src/server/supabase/pendingSocialLink";
+import { queueTourneyDiscordAuthProjection } from "../../../../src/server/tourney/discordDesiredState";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,6 +36,8 @@ const SUSPENDED_LOGIN_MESSAGE =
   "You have been suspended from the tourney. Please contact serviroo through Discord or at serviroo@rooindustries.com for further queries.";
 const UNAVAILABLE_LOGIN_MESSAGE =
   "Tournament sign-in is temporarily unavailable. Please try again shortly.";
+const DISCORD_LINK_FAILED_MESSAGE =
+  "Discord linking did not complete. Try the Discord login again.";
 
 const wantsJson = (request) =>
   String(request.headers.get("accept") || "").includes("application/json");
@@ -77,9 +86,10 @@ const readLoginPayload = async (request) => {
 
   const form = await readBoundedFormData(request, {
     maxBytes: 8 * 1024,
-    maxFields: 4,
+    maxFields: 5,
   });
   return {
+    linkDiscord: form.get("linkDiscord"),
     username: form.get("username"),
     password: form.get("password"),
     rememberMe: form.get("rememberMe"),
@@ -183,13 +193,70 @@ export async function POST(request) {
     return invalidResponse(request, payload, 503);
   }
 
+  const linkDiscord = isRememberMeEnabled(payload?.linkDiscord);
+  let discordLinked = false;
+  let discordLinkError = "";
+  if (linkDiscord) {
+    try {
+      const pendingLink = readPendingDiscordLink({
+        flow: "tourney",
+        request,
+      });
+      const pendingUser = pendingLink
+        ? await resolvePendingDiscordUser({ flow: "tourney", request })
+        : null;
+      const primaryUserId = String(
+        result.supabaseSession?.user?.id || ""
+      ).trim();
+      if (!pendingLink || !pendingUser || !primaryUserId) {
+        discordLinkError = DISCORD_LINK_FAILED_MESSAGE;
+      } else {
+        const linked = await linkPendingDiscordIdentity({
+          accountScope: "tourney",
+          pendingUser,
+          primaryUserId,
+        });
+        if (!linked.linked) {
+          discordLinkError = DISCORD_LINK_FAILED_MESSAGE;
+        } else {
+          const resumed = await queueTourneyDiscordAuthProjection({
+            accountUserId: pendingLink.userId,
+            attemptExternalWork: true,
+            claimedUserId: pendingLink.userId,
+            commandId: `discord-oauth:${pendingLink.intentId}:${pendingLink.userId}`,
+            intentId: pendingLink.intentId,
+            resumeStoredCredential: true,
+            userId: pendingLink.userId,
+          });
+          if (!resumed.applied && resumed.reason !== "pending") {
+            discordLinkError = DISCORD_LINK_FAILED_MESSAGE;
+          } else {
+            discordLinked = true;
+          }
+        }
+      }
+    } catch (error) {
+      logSafeError("Tournament pending Discord linking failed", error);
+      discordLinkError = DISCORD_LINK_FAILED_MESSAGE;
+    }
+  }
+
   const response = wantsJson(request)
     ? NextResponse.json({
         ok: true,
         role: result.account.role,
         username: result.account.username,
+        ...(discordLinked ? { discordLinked: true } : {}),
+        ...(discordLinkError ? { discordLinkError } : {}),
       })
-    : redirectToPath(request, payload?.redirectTo);
+    : redirectToPath(
+        request,
+        linkDiscord
+          ? `/tourney?notice=${
+              discordLinked ? "discord-linked" : "discord-link-failed"
+            }`
+          : payload?.redirectTo
+      );
   response.cookies.set({
     name: TOURNEY_SESSION_COOKIE,
     value: token,
@@ -204,6 +271,11 @@ export async function POST(request) {
       response,
       session: result.supabaseSession,
     }).catch(() => {});
+  }
+  if (linkDiscord) {
+    response.cookies.set(
+      clearPendingDiscordLinkCookie({ flow: "tourney" })
+    );
   }
   response.headers.set("Cache-Control", "private, no-store");
   return response;
