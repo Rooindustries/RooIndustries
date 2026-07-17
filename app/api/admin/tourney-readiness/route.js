@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { logSafeError } from "../../../../src/server/safeErrorLog";
+import { isEnabledTourneyFlag } from "../../../../src/server/tourney/canonical";
 import { getTourneySqlForBackend } from "../../../../src/server/tourney/sqlClient";
 import { resolveTourneyStorePolicy } from "../../../../src/server/tourney/store";
 
@@ -18,9 +19,6 @@ const safeEqual = (left, right) => {
 
 const authorized = (request) =>
   safeEqual(process.env.REF_ADMIN_KEY, request.headers.get("x-admin-key"));
-const enabled = (value) => ["1", "true", "yes", "on"].includes(
-  String(value || "").trim().toLowerCase()
-);
 const currentShadowRoutes = new Set([
   "public_roster",
   "public_bracket",
@@ -183,8 +181,12 @@ export async function GET(request) {
       : await readLegacyReadiness(sql);
     const readiness = normalizeTourneyReadinessForResponse(rawReadiness);
     const databaseControl = readiness?.control || {};
-    const hardenedEnabled = enabled(process.env.TOURNEY_HARDENING_V4_ENABLED);
-    const activationEnabled = enabled(process.env.TOURNEY_V4_ACTIVATION_ENABLED);
+    const hardenedEnabled = isEnabledTourneyFlag(
+      process.env.TOURNEY_HARDENING_V4_ENABLED
+    );
+    const activationEnabled = isEnabledTourneyFlag(
+      process.env.TOURNEY_V4_ACTIVATION_ENABLED
+    );
     const controlMatchesDeployment =
       databaseControl.primary_backend === policy.primaryBackend &&
       Number(databaseControl.generation || 0) === policy.generation &&

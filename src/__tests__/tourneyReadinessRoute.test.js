@@ -134,6 +134,21 @@ describe("Tourney legacy readiness route", () => {
     expect(body.finalReadiness).toBe(false);
   });
 
+  test("accepts canonical truthy deployment flag values", async () => {
+    const sql = createLegacySql();
+    mockGetBackendSql.mockResolvedValue(sql);
+    process.env.TOURNEY_HARDENING_V4_ENABLED = "  On  ";
+    process.env.TOURNEY_V4_ACTIVATION_ENABLED = "off";
+
+    const response = await GET(request());
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.hardenedEnabled).toBe(true);
+    expect(body.activationEnabled).toBe(false);
+    expect(body.controlMatchesDeployment).toBe(true);
+  });
+
   test("reports only current routes and deduplicates blockers", () => {
     expect(normalizeTourneyReadinessForResponse({
       clock_blockers: [
