@@ -238,18 +238,21 @@ const emptySummary = () => ({
   budgetExhausted: false,
 });
 
+const readRequiredStatus = async ({ supabaseClient, requiredDocumentIds }) =>
+  requireRpc(
+    await supabaseClient.rpc("roo_document_mutation_mirror_status_for_ids", {
+      p_document_ids: requiredDocumentIds,
+    }),
+    "document mirror status"
+  );
+
 const readBacklog = async ({ supabaseClient, requiredDocumentIds }) => {
   const backlog = requireRpc(
     await supabaseClient.rpc("roo_document_mutation_mirror_backlog", {}),
     "document mirror backlog"
   );
   const required = requiredDocumentIds.length > 0
-    ? requireRpc(
-        await supabaseClient.rpc("roo_document_mutation_mirror_status_for_ids", {
-          p_document_ids: requiredDocumentIds,
-        }),
-        "document mirror status"
-      )
+    ? await readRequiredStatus({ supabaseClient, requiredDocumentIds })
     : null;
   return { backlog: backlog || {}, required };
 };
@@ -323,6 +326,18 @@ const drainEvents = async ({
       summary.budgetExhausted = true;
       break;
     }
+    if (preferredIds.length > 0) {
+      const required = await readRequiredStatus({
+        supabaseClient,
+        requiredDocumentIds: preferredIds,
+      });
+      if (
+        Number(required?.pending ?? 1) === 0 ||
+        Number(required?.dead_letters ?? 0) > 0
+      ) {
+        break;
+      }
+    }
     const leaseId = crypto.randomUUID();
     const events = await claimBatch({
       supabaseClient,
@@ -335,7 +350,9 @@ const drainEvents = async ({
     const eventKey = String(event?.event_key || "");
     if (seenEventKeys.has(eventKey)) break;
     seenEventKeys.add(eventKey);
+    const failuresBefore = summary.retried + summary.deadLettered;
     await processEvent({ supabaseClient, sanityClient, event, leaseId, summary });
+    if (summary.retried + summary.deadLettered > failuresBefore) break;
   }
 };
 
