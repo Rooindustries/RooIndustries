@@ -197,6 +197,7 @@ export default async function handler(req, res) {
           account.primary_email ||
           referral.creatorEmail ||
           referral.slug?.current,
+        password: normalizedPassword,
         passwordHash,
         sourceBackend,
         sourceDocumentId: referral._id,

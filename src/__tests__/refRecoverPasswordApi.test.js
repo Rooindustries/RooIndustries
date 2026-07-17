@@ -160,6 +160,7 @@ describe("referral authenticated recovery API", () => {
       expect.objectContaining({
         identifier: "creator@example.com",
         operationKey: expect.stringMatching(/^credential:recovery:[a-f0-9]{64}$/),
+        password: "new-password-123",
         passwordHash: "$2b$12$recovery-password-hash",
         sourceBackend: "supabase",
         sourceDocumentId: "referral.recovery-smoke",

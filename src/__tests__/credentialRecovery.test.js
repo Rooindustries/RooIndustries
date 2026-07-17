@@ -257,7 +257,7 @@ describe("credential recovery saga", () => {
     expect(sanity.state.document.creatorPassword).toBe(passwordHash);
   });
 
-  test("keeps a prepared operation and its source untouched when Auth fails", async () => {
+  test("keeps a prepared operation pending for the original password request", async () => {
     const sanity = createSanityClient({
       _id: "referral.auth-retry",
       _type: "referral",
@@ -277,23 +277,21 @@ describe("credential recovery saga", () => {
       source_mutation: mutation,
     };
     let listCount = 0;
-    let authAttempts = 0;
     let completed = 0;
+    const updateUserById = jest.fn();
     const adminClient = {
       auth: {
         admin: {
-          updateUserById: jest.fn(async () => {
-            authAttempts += 1;
-            return authAttempts === 1
-              ? { data: null, error: { code: "AUTH_DOWN" } }
-              : { data: { user: { id: row.user_id } }, error: null };
-          }),
+          updateUserById,
         },
       },
       rpc: jest.fn(async (name, args) => {
         if (name === "roo_list_credential_recovery") {
           listCount += 1;
           return { data: listCount <= 2 ? [{ ...row }] : [], error: null };
+        }
+        if (name === "roo_get_credential_operation") {
+          return { data: { ...row }, error: null };
         }
         if (name === "roo_record_credential_recovery_error") {
           expect(args.p_expected_status).toBe("prepared");
@@ -322,11 +320,18 @@ describe("credential recovery saga", () => {
 
     await expect(
       reconcileCredentialOperations({ adminClient, sanityClient: sanity.client })
-    ).resolves.toEqual({ checked: 1, recovered: 1, pending: 0 });
-    expect(sanity.state.document.resetTokenHash).toBeUndefined();
-    expect(sanity.state.document.creatorPassword).toBe(passwordHash);
-    expect(authAttempts).toBe(2);
-    expect(completed).toBe(1);
+    ).resolves.toEqual({ checked: 1, recovered: 0, pending: 1 });
+    await expect(
+      resumeSupabaseCredentialOperation({
+        operationKey: row.operation_key,
+        adminClient,
+        sanityClient: sanity.client,
+      })
+    ).resolves.toEqual({ resumed: false, status: "prepared" });
+    expect(sanity.state.document.resetTokenHash).toBe("retry-token");
+    expect(sanity.state.commits).toBe(0);
+    expect(updateUserById).not.toHaveBeenCalled();
+    expect(completed).toBe(0);
   });
 
   test("does not touch Auth or Sanity for a quarantined legacy operation", async () => {
