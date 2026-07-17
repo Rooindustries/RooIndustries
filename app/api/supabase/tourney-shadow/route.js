@@ -9,6 +9,7 @@ import {
 } from "../../../../src/server/supabase/tourneyMigration";
 import { createSupabaseAdminClient } from "../../../../src/server/supabase/adminClient";
 import { readPersistedTourneyAccountsJson } from "../../../../src/server/tourney/accountStore";
+import { isEnabledTourneyFlag } from "../../../../src/server/tourney/canonical";
 import { applyTourneyCutoverControl } from "../../../../src/server/tourney/cutoverControl";
 import { splitPostgresStatements } from "../../../../src/server/tourney/sqlStatements";
 import {
@@ -73,10 +74,8 @@ const requestHostnames = (request) => [
 ].map(normalizeHostname).filter(Boolean);
 
 const migrationEndpointEnabled = (request) => {
-  const enabled = ["1", "true", "yes", "on"].includes(
-    String(process.env.SUPABASE_MIGRATION_ENDPOINT_ENABLED || "")
-      .trim()
-      .toLowerCase()
+  const enabled = isEnabledTourneyFlag(
+    process.env.SUPABASE_MIGRATION_ENDPOINT_ENABLED
   );
   const vercelEnv = String(process.env.VERCEL_ENV || "").trim().toLowerCase();
   const productionHosted = requestHostnames(request).some((hostname) =>
