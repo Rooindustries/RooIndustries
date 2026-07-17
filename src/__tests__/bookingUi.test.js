@@ -58,6 +58,20 @@ const formatLocalTime = (utcDate, timeZone) =>
     minute: "2-digit",
   }).format(utcDate);
 
+const waitForAbort = (signal) =>
+  new Promise((resolve, reject) => {
+    const rejectRequest = () => {
+      const error = new Error("Request timed out.");
+      error.name = "TimeoutError";
+      reject(error);
+    };
+    if (signal?.aborted) {
+      rejectRequest();
+      return;
+    }
+    signal?.addEventListener("abort", rejectRequest, { once: true });
+  });
+
 const OVERHAUL_PACKAGE = {
   title: "Performance Vertex Overhaul",
   price: "$54.95",
@@ -167,6 +181,7 @@ const seedBookingSession = ({
 
 const installDefaultFetch = ({
   settings = { dateSlots: [] },
+  bookedSlots = [],
   referrals = {},
   coupons = {},
   packageData = OVERHAUL_PACKAGE,
@@ -212,7 +227,7 @@ const installDefaultFetch = ({
     if (url === "/api/bookingAvailability") {
       return {
         ok: true,
-        json: async () => ({ ok: true, settings, bookedSlots: [] }),
+        json: async () => ({ ok: true, settings, bookedSlots }),
       };
     }
     return { ok: true, json: async () => ({ ok: true }) };
@@ -243,6 +258,8 @@ const expectActiveStep = (label, progress) => {
 
 describe("booking calendar UI", () => {
   let resolvedOptionsSpy;
+  let abortTimeoutSpy;
+  let consoleErrorSpy;
 
   beforeEach(() => {
     mockNavigate.mockReset();
@@ -262,6 +279,10 @@ describe("booking calendar UI", () => {
 
   afterEach(() => {
     jest.useRealTimers();
+    abortTimeoutSpy?.mockRestore();
+    abortTimeoutSpy = null;
+    consoleErrorSpy?.mockRestore();
+    consoleErrorSpy = null;
     if (global.fetch && global.fetch.mockReset) {
       global.fetch.mockReset();
     }
@@ -318,6 +339,47 @@ describe("booking calendar UI", () => {
       await Promise.resolve();
     });
     expect(getAvailabilityFetchCalls()).toHaveLength(1);
+  });
+
+  test("names calendar navigation and per-day availability controls", async () => {
+    const bookedSlot = getUtcFromHostLocal(2099, 0, 6, 10).toISOString();
+    installDefaultFetch({
+      settings: {
+        dateSlots: [
+          {
+            date: "2099-01-05",
+            times: ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00"],
+          },
+          { date: "2099-01-06", times: ["10:00"] },
+          { date: "2099-01-07", times: ["10:00"] },
+        ],
+      },
+      bookedSlots: [{ startTimeUTC: bookedSlot }],
+    });
+    setBookingLocation();
+
+    render(<BookingForm />);
+
+    const availableDay = await screen.findByRole("button", {
+      name: /fully available$/i,
+    });
+    const limitedDay = screen.getByRole("button", { name: /limited slots$/i });
+    const bookedDay = screen.getByRole("button", { name: /fully booked$/i });
+    expect(availableDay.querySelector('[aria-hidden="true"]')).toHaveClass(
+      "rounded-full"
+    );
+    expect(limitedDay.querySelector('[aria-hidden="true"]')).toHaveClass(
+      "rotate-45"
+    );
+    expect(bookedDay.querySelector('[aria-hidden="true"]')).toHaveClass(
+      "rounded-sm"
+    );
+    expect(
+      screen.getByRole("button", { name: "Previous month" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Next month" })
+    ).toBeInTheDocument();
   });
 
   test("shows client-local times only and uses the fixed client email", async () => {
@@ -394,7 +456,7 @@ describe("booking calendar UI", () => {
     expect(document.body.textContent).not.toContain("UTC");
 
     await userEvent.click(timeSlotButton);
-    const nextButton = screen.getByRole("button", { name: /next/i });
+    const nextButton = screen.getByRole("button", { name: /^next$/i });
     await userEvent.click(nextButton);
 
     const emailInput = await screen.findByPlaceholderText("Email");
@@ -405,6 +467,192 @@ describe("booking calendar UI", () => {
     expect(holdRequestBody.hostDate).toBeUndefined();
     expect(holdRequestBody.hostTime).toBeUndefined();
     expect(holdRequestBody.hostTimeZone).toBeUndefined();
+  });
+
+  test("re-enables slot reservation after the hold request times out", async () => {
+    const controller = new AbortController();
+    abortTimeoutSpy = jest
+      .spyOn(AbortSignal, "timeout")
+      .mockReturnValue(controller.signal);
+    consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    const settings = {
+      dateSlots: [{ date: "2099-01-05", times: ["10:00"] }],
+    };
+    global.fetch = jest.fn(async (url, options = {}) => {
+      if (url === "/api/bookingAvailability") {
+        return {
+          ok: true,
+          json: async () => ({ ok: true, settings, bookedSlots: [] }),
+        };
+      }
+      if (url === "/api/holdSlot") {
+        return waitForAbort(options.signal);
+      }
+      return { ok: true, json: async () => ({ ok: true }) };
+    });
+    setBookingLocation();
+
+    render(<BookingForm />);
+
+    const slotTime = formatLocalTime(
+      getUtcFromHostLocal(2099, 0, 5, 10),
+      "America/Los_Angeles"
+    );
+    await userEvent.click(
+      await screen.findByRole("button", { name: slotTime })
+    );
+    await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
+
+    await waitFor(() =>
+      expect(abortTimeoutSpy).toHaveBeenCalledWith(8_000)
+    );
+    expect(
+      screen.getByRole("button", { name: "Reserving..." })
+    ).toHaveAttribute("aria-disabled", "true");
+
+    await act(async () => {
+      controller.abort();
+      await Promise.resolve();
+    });
+
+    expect(
+      await screen.findByText(
+        "Could not reserve this slot. Please check your internet and try again."
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^next$/i })).toHaveAttribute(
+      "aria-disabled",
+      "false"
+    );
+  });
+
+  test("continues with a new hold after the previous release times out", async () => {
+    const controllers = [];
+    abortTimeoutSpy = jest
+      .spyOn(AbortSignal, "timeout")
+      .mockImplementation(() => {
+        const controller = new AbortController();
+        controllers.push(controller);
+        return controller.signal;
+      });
+    consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    seedBookingSession({ step: 2 });
+    const settings = {
+      dateSlots: [{ date: "2099-01-05", times: ["10:00", "11:00"] }],
+    };
+    global.fetch = jest.fn(async (url, options = {}) => {
+      if (url === "/api/bookingAvailability") {
+        return {
+          ok: true,
+          json: async () => ({ ok: true, settings, bookedSlots: [] }),
+        };
+      }
+      if (url === "/api/releaseHold") {
+        return waitForAbort(options.signal);
+      }
+      if (url === "/api/holdSlot") {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            holdId: "hold_replacement_1",
+            holdToken: "hold_token_replacement_1",
+            expiresAt: FUTURE_EXPIRY,
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ ok: true }) };
+    });
+    setBookingLocation();
+
+    render(<BookingForm />);
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: /^back$/i })
+    );
+    const replacementTime = formatLocalTime(
+      getUtcFromHostLocal(2099, 0, 5, 11),
+      "America/Los_Angeles"
+    );
+    await userEvent.click(
+      await screen.findByRole("button", { name: replacementTime })
+    );
+    await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
+
+    await waitFor(() => {
+      expect(
+        global.fetch.mock.calls.filter(([url]) => url === "/api/releaseHold")
+      ).toHaveLength(1);
+    });
+    expect(controllers).toHaveLength(1);
+
+    await act(async () => {
+      controllers[0].abort();
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByLabelText("Discord username")).toBeInTheDocument();
+    expect(
+      global.fetch.mock.calls.filter(([url]) => url === "/api/holdSlot")
+    ).toHaveLength(1);
+    expect(abortTimeoutSpy).toHaveBeenCalledTimes(2);
+    expect(abortTimeoutSpy).toHaveBeenNthCalledWith(1, 8_000);
+    expect(abortTimeoutSpy).toHaveBeenNthCalledWith(2, 8_000);
+  });
+
+  test("re-enables payment release after the cancel request times out", async () => {
+    const controller = new AbortController();
+    abortTimeoutSpy = jest
+      .spyOn(AbortSignal, "timeout")
+      .mockReturnValue(controller.signal);
+    seedBookingSession({ holdPhase: "payment_pending", step: 3 });
+    window.sessionStorage.setItem(
+      "payment_session_state",
+      JSON.stringify({ paymentAccessToken: "payment_access_timeout_1" })
+    );
+    global.fetch = jest.fn(async (url, options = {}) => {
+      if (url === "/api/bookingAvailability") {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            settings: { dateSlots: [] },
+            bookedSlots: [],
+          }),
+        };
+      }
+      if (url === "/api/payment/cancel") {
+        return waitForAbort(options.signal);
+      }
+      return { ok: true, json: async () => ({ ok: true }) };
+    });
+    setBookingLocation();
+
+    render(<BookingForm />);
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: /^release payment$/i })
+    );
+    await waitFor(() =>
+      expect(abortTimeoutSpy).toHaveBeenCalledWith(8_000)
+    );
+    expect(
+      screen.getByRole("button", { name: "Checking payment..." })
+    ).toBeDisabled();
+
+    await act(async () => {
+      controller.abort();
+      await Promise.resolve();
+    });
+
+    expect(
+      await screen.findByText(
+        "The payment session could not be released. Please try again."
+      )
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^release payment$/i })
+    ).toBeEnabled();
   });
 
   test("payment-pending booking shows one release action and one return action", async () => {
