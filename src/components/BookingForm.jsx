@@ -2631,7 +2631,7 @@ export default function BookingForm({ isMobile }) {
                   </div>
 
                   <p className="mt-6 text-xs text-accent">
-                    Please read the FAQ before booking — it answers everything you
+                    Please read the FAQ before booking. It answers everything you
                     need to know.
                   </p>
 

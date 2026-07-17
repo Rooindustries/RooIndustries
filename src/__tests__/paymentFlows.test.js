@@ -295,8 +295,8 @@ describe("payment session UI", () => {
     expect(paypalShell).toHaveClass("overflow-hidden", "rounded-lg");
     expect(paypalShell.className).toContain("[&_iframe]:!border-0");
     expect(
-      screen.getByRole("link", { name: /back to booking/i }).parentElement
-    ).toHaveClass("pb-36");
+      screen.getByRole("link", { name: /back to booking/i }).closest("section")
+    ).toHaveClass("pb-32");
 
     const clientCreate = jest.fn();
     let orderId;
@@ -646,7 +646,7 @@ describe("payment session UI", () => {
         "This code is a referral, so it was applied as a referral."
       )
     ).toBeInTheDocument();
-    expect(screen.getByText(/Referral "creatorfree": 100%/i))
+    expect(screen.getByText(/creatorfree · −\$/))
       .toBeInTheDocument();
     expect(screen.queryByText(/Private Creator Name/i)).not.toBeInTheDocument();
     expect(await screen.findByText("$0.00 USD")).toBeInTheDocument();
@@ -760,7 +760,7 @@ describe("payment session UI", () => {
       })
     );
 
-    expect(await screen.findByText(/Referral "bookingfree": 100%/i))
+    expect(await screen.findByText(/bookingfree · −\$54\.95/))
       .toBeInTheDocument();
     expect(screen.getByText("$0.00 USD")).toBeInTheDocument();
     expect(screen.queryByText(/Private Creator Name/i)).not.toBeInTheDocument();
@@ -865,7 +865,7 @@ describe("payment session UI", () => {
       "/booking",
       expect.objectContaining({ replace: true })
     );
-    expect(screen.queryByText(/Referral "racecreator"/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/racecreator/i)).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("e.g. vouch")).toHaveValue("");
     const quoteCalls = fetchCalls.filter(
       (call) => call.url === "/api/payment/quote"
