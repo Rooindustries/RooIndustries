@@ -37,6 +37,8 @@ const PASSWORD_PENDING_MESSAGE =
   "Your password change is saving. It will finish in a moment.";
 const PASSWORD_UPDATED_MESSAGE =
   "Password updated. Log in with your new password.";
+const PASSWORD_OPERATION_BUSY_MESSAGE =
+  "A previous password change is still in progress. Please try again shortly.";
 
 const pendingResponse = (res) => {
   res.setHeader?.("Retry-After", "2");
@@ -229,7 +231,10 @@ export default async function handler(req, res) {
       logSafeError("Supabase referral recovery password update failed", error);
       return res.status(503).json({
         ok: false,
-        error: "Password update is temporarily unavailable. Please try again.",
+        error:
+          String(error?.code || "") === "55006"
+            ? PASSWORD_OPERATION_BUSY_MESSAGE
+            : "Password update is temporarily unavailable. Please try again.",
       });
     }
 
