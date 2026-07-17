@@ -5,7 +5,6 @@ export const PAYMENT_START_CLAIM_TYPE = "paymentStartClaim";
 export const PAYMENT_UPGRADE_LOCK_TYPE = "paymentUpgradeLock";
 export const PAYMENT_PROOF_CLAIM_TYPE = "paymentProofClaim";
 export const PAYMENT_WEBHOOK_RECEIPT_TYPE = "paymentWebhookReceipt";
-export const PAYMENT_RECOVERY_CASE_TYPE = "paymentRecoveryCase";
 export const HOLD_PHASE_HOLDING = "holding";
 export const HOLD_PHASE_PAYMENT_PENDING = "payment_pending";
 
