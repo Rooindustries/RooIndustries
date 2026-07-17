@@ -207,6 +207,12 @@ describe("tourney Discord OAuth routes", () => {
     expect(response.url).toBe("https://www.rooindustries.com/tourney/discord");
   });
 
+  test("does not expose retired direct OAuth helpers", () => {
+    expect(discordOAuth).not.toHaveProperty("buildDiscordAuthorizationUrl");
+    expect(discordOAuth).not.toHaveProperty("exchangeDiscordOAuthCode");
+    expect(discordOAuth).not.toHaveProperty("fetchDiscordCurrentUser");
+  });
+
   test("keeps approved-player Discord email links valid without expiry", () => {
     jest.useFakeTimers();
     try {

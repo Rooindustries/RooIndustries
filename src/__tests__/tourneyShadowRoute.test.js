@@ -301,6 +301,18 @@ describe("Tourney shadow route target safety", () => {
     expect(mockGetBackendSql).not.toHaveBeenCalled();
   });
 
+  test("accepts a canonical truthy migration endpoint flag", async () => {
+    process.env.SUPABASE_MIGRATION_ENDPOINT_ENABLED = "  YeS  ";
+
+    const response = await POST(request({ payload: { action: "unknown" } }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "Invalid migration action.",
+    });
+  });
+
   test("rejects unknown actions instead of falling through to migration", async () => {
     const response = await POST(request({ payload: { action: "migrtae" } }));
 
