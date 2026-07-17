@@ -3,6 +3,7 @@ const mockCreateSignedUrl = jest.fn();
 const mockGetDocument = jest.fn();
 const mockGetDownloadBySlug = jest.fn();
 const mockGetStorageBackend = jest.fn();
+const mockLogSafeError = jest.fn();
 const mockStreamDownload = jest.fn();
 const mockValidateBooking = jest.fn();
 const mockVerifyDownloadToken = jest.fn();
@@ -25,7 +26,9 @@ jest.mock("../server/downloads/downloadStorage", () => ({
 jest.mock("../server/downloads/downloadToken", () => ({
   verifyDownloadToken: (...args) => mockVerifyDownloadToken(...args),
 }));
-jest.mock("../server/safeErrorLog", () => ({ logSafeError: jest.fn() }));
+jest.mock("../server/safeErrorLog", () => ({
+  logSafeError: (...args) => mockLogSafeError(...args),
+}));
 
 const { GET } = require("../../app/api/downloads/file/route.js");
 
@@ -146,6 +149,24 @@ describe("download file route", () => {
     const response = await GET(request());
 
     expect(response.status).toBe(403);
+    expect(mockCreateSignedUrl).not.toHaveBeenCalled();
+    expect(mockStreamDownload).not.toHaveBeenCalled();
+  });
+
+  test("returns a temporary failure when the booking lookup rejects", async () => {
+    const lookupError = new Error("booking backend unavailable");
+    mockGetDocument.mockRejectedValue(lookupError);
+
+    const response = await GET(request());
+
+    expect(response.status).toBe(503);
+    expect(await response.text()).toBe("Download is temporarily unavailable.");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(mockLogSafeError).toHaveBeenCalledWith(
+      "Download booking lookup failed",
+      lookupError
+    );
+    expect(mockValidateBooking).not.toHaveBeenCalled();
     expect(mockCreateSignedUrl).not.toHaveBeenCalled();
     expect(mockStreamDownload).not.toHaveBeenCalled();
   });
