@@ -296,7 +296,8 @@ describe("payment session UI", () => {
     expect(paypalShell.className).toContain("[&_iframe]:!border-0");
     expect(
       screen.getByRole("link", { name: /back to booking/i }).closest("section")
-    ).toHaveClass("pb-32");
+        .style.paddingBottom
+    ).toContain("--reservation-banner-clearance");
 
     const clientCreate = jest.fn();
     let orderId;
