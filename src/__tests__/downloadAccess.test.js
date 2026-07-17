@@ -92,6 +92,24 @@ describe("download access", () => {
     });
   });
 
+  test("fails closed when a paid booking has no owner email", async () => {
+    const booking = paidBooking({ email: "", payerEmail: "" });
+    const result = await validateDownloadAccess({
+      slug: "optimizer-pack-v1",
+      orderId: booking._id,
+      email: "requester@example.com",
+      client: createClient(booking),
+      env,
+      availabilityCheck: async () => true,
+    });
+
+    expect(result.status).toBe(404);
+    expect(result.body).toEqual({
+      ok: false,
+      error: "No paid booking found with that Order ID.",
+    });
+  });
+
   test("rejects bookings that are not marked paid", async () => {
     const booking = paidBooking({ status: "pending" });
     const result = await validateDownloadAccess({
@@ -179,6 +197,25 @@ describe("download access", () => {
 
     expect(allowed.ok).toBe(true);
     expect(denied.status).toBe(403);
+  });
+
+  test("rejects token access when a booking has no owner email hash", () => {
+    const booking = paidBooking({ email: "", payerEmail: "" });
+    const result = validateBookingForDownloadToken({
+      booking,
+      emailHash: hashDownloadEmail("requester@example.com"),
+      download: {
+        slug: "optimizer-pack-v1",
+        fileName: "optimizer-pack-v1.zip",
+        allowedPackageTitles: [],
+      },
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      status: 403,
+      error: "Download access could not be verified.",
+    });
   });
 
   test("expires download tokens", () => {
