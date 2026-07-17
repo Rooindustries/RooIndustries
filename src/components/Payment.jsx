@@ -13,6 +13,10 @@ import {
 } from "../lib/checkoutCodes";
 
 const { applyPackagePricing } = packagePricing;
+const PAYMENT_FETCH_TIMEOUT_MS = 15_000;
+const PAYMENT_STATUS_POLL_TIMEOUT_MS = 90_000;
+const PAYMENT_STATUS_POLL_INTERVAL_MS = 2_500;
+
 const formatLocalDate = (utcDate, timeZone) => {
   try {
     return new Intl.DateTimeFormat(undefined, {
@@ -383,9 +387,11 @@ export default function Payment({ hideFooter = false }) {
   const [serverQuote, setServerQuote] = useState(null);
   const [quoteFingerprint, setQuoteFingerprint] = useState("");
   const [quoteLoading, setQuoteLoading] = useState(false);
+  const [quoteRetryCount, setQuoteRetryCount] = useState(0);
 
-  const showBanner = (type, text) => {
-    setBanner({ type, text });
+  const showBanner = (type, text, options = {}) => {
+    setBanner({ type, text, ...options });
+    if (options.persistent) return;
     setTimeout(() => {
       setBanner((prev) => (prev?.text === text ? null : prev));
     }, 4000);
@@ -533,6 +539,9 @@ export default function Payment({ hideFooter = false }) {
 
     const controller =
       typeof AbortController === "function" ? new AbortController() : null;
+    const timeoutId = controller
+      ? setTimeout(() => controller.abort(), PAYMENT_FETCH_TIMEOUT_MS)
+      : null;
     let active = true;
     setQuoteLoading(true);
 
@@ -565,17 +574,26 @@ export default function Payment({ hideFooter = false }) {
         }
       })
       .catch((error) => {
-        if (!active || error?.name === "AbortError") return;
+        if (!active) return;
         setServerQuote(null);
         setQuoteFingerprint("");
-        showBanner("error", error?.message || "Unable to confirm checkout price.");
+        const quoteTimedOut = error?.name === "AbortError";
+        showBanner(
+          "error",
+          quoteTimedOut
+            ? "Checkout price confirmation took too long. Please try again."
+            : error?.message || "Unable to confirm checkout price.",
+          quoteTimedOut ? { persistent: true, retryQuote: true } : {}
+        );
       })
       .finally(() => {
+        if (timeoutId) clearTimeout(timeoutId);
         if (active) setQuoteLoading(false);
       });
 
     return () => {
       active = false;
+      if (timeoutId) clearTimeout(timeoutId);
       controller?.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -586,6 +604,7 @@ export default function Payment({ hideFooter = false }) {
     referral?.code,
     coupon?.code,
     preApplyingCodes,
+    quoteRetryCount,
   ]);
 
   useEffect(() => {
@@ -918,26 +937,54 @@ export default function Payment({ hideFooter = false }) {
     return buildConfirmationNavigationState(responseBody);
   };
 
-  const fetchJson = async (url, options = {}) => {
-    const response = await fetch(url, options);
-    const data = await response.json().catch(() => ({}));
-    return { response, data };
+  const fetchJson = async (
+    url,
+    options = {},
+    timeoutMs = PAYMENT_FETCH_TIMEOUT_MS
+  ) => {
+    const controller =
+      typeof AbortController === "function" ? new AbortController() : null;
+    const timeoutId = controller
+      ? setTimeout(() => controller.abort(), timeoutMs)
+      : null;
+
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller?.signal || options.signal,
+      });
+      const data = await response.json().catch(() => ({}));
+      return { response, data };
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
   };
 
   const pollPaymentUntilTerminal = async (paymentAccessToken) => {
     const startedAt = Date.now();
-    while (Date.now() - startedAt < 90000) {
-      const { response, data } = await fetchJson(
-        "/api/payment/status",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${paymentAccessToken}`,
-            "Content-Type": "application/json",
+    const deadline = startedAt + PAYMENT_STATUS_POLL_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      let response;
+      let data;
+      try {
+        const result = await fetchJson(
+          "/api/payment/status",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${paymentAccessToken}`,
+              "Content-Type": "application/json",
+            },
+            body: "{}",
           },
-          body: "{}",
-        }
-      );
+          Math.min(PAYMENT_FETCH_TIMEOUT_MS, deadline - Date.now())
+        );
+        response = result.response;
+        data = result.data;
+      } catch (error) {
+        if (error?.name === "AbortError") continue;
+        throw error;
+      }
 
       if (!response.ok) {
         throw new Error(data?.error || "Unable to load payment status.");
@@ -954,7 +1001,15 @@ export default function Payment({ hideFooter = false }) {
         return data;
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 2500));
+      const remainingMs = deadline - Date.now();
+      if (remainingMs > 0) {
+        await new Promise((resolve) =>
+          setTimeout(
+            resolve,
+            Math.min(PAYMENT_STATUS_POLL_INTERVAL_MS, remainingMs)
+          )
+        );
+      }
     }
 
     throw new Error("Timed out waiting for payment confirmation.");
@@ -1489,6 +1544,9 @@ export default function Payment({ hideFooter = false }) {
       <motion.div variants={itemVariants}>
         {banner && banner.text && (
           <div
+            role={banner.type === "error" ? "alert" : "status"}
+            aria-live={banner.type === "error" ? "assertive" : "polite"}
+            aria-atomic="true"
             className={`mt-6 rounded-xl border px-4 py-3 text-sm flex items-center gap-3 shadow-[0_0_25px_rgba(15,23,42,0.8)] ${
               banner.type === "error"
                 ? "border-danger-border bg-danger-soft text-danger-text"
@@ -1497,7 +1555,7 @@ export default function Payment({ hideFooter = false }) {
                 : "border-info-border bg-info-soft text-info-text"
             }`}
           >
-            <span className="text-lg">
+            <span className="text-lg" aria-hidden="true">
               {banner.type === "error"
                 ? "!"
                 : banner.type === "success"
@@ -1505,7 +1563,20 @@ export default function Payment({ hideFooter = false }) {
                 : "i"}
             </span>
             <p className="flex-1">{banner.text}</p>
+            {banner.retryQuote && (
+              <button
+                type="button"
+                onClick={() => {
+                  setBanner(null);
+                  setQuoteRetryCount((count) => count + 1);
+                }}
+                className="rounded-md border border-current px-2 py-1 text-xs font-semibold uppercase tracking-wide hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info-border"
+              >
+                Retry price check
+              </button>
+            )}
             <button
+              type="button"
               onClick={() => setBanner(null)}
               className="text-xs uppercase tracking-wide opacity-70 hover:opacity-100"
             >
@@ -1611,11 +1682,15 @@ export default function Payment({ hideFooter = false }) {
           <>
 
             <div className="mt-6">
-              <label className="block text-sm font-semibold mb-1">
+              <label
+                htmlFor="payment-referral-code"
+                className="block text-sm font-semibold mb-1"
+              >
                 Referral Code (optional)
               </label>
               <div className="flex flex-wrap gap-2 items-center">
                 <input
+                  id="payment-referral-code"
                   value={referralInput}
                   onChange={(e) => {
                     setReferralInput(e.target.value.trim());
@@ -1627,7 +1702,7 @@ export default function Payment({ hideFooter = false }) {
                     referralError ? "payment-referral-code-error" : undefined
                   }
                   placeholder="e.g. vouch"
-                  className="w-60 bg-surface-input border border-line-input rounded-md px-3 py-2 outline-none text-sm disabled:opacity-60"
+                  className="w-60 bg-surface-input border border-line-input rounded-md px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info-border focus-visible:ring-offset-2 focus-visible:ring-offset-surface-card disabled:opacity-60"
                 />
 
                 <button
@@ -1655,11 +1730,15 @@ export default function Payment({ hideFooter = false }) {
 
 
             <div className="mt-5">
-              <label className="block text-sm font-semibold mb-1">
+              <label
+                htmlFor="payment-coupon-code"
+                className="block text-sm font-semibold mb-1"
+              >
                 Coupon Code (optional)
               </label>
               <div className="flex flex-wrap gap-2 items-center">
                 <input
+                  id="payment-coupon-code"
                   value={couponInput}
                   onChange={(e) => {
                     setCouponInput(e.target.value.trim());
@@ -1671,7 +1750,7 @@ export default function Payment({ hideFooter = false }) {
                     couponError ? "payment-coupon-code-error" : undefined
                   }
                   placeholder="e.g. BF10"
-                  className="w-60 bg-surface-input border border-line-input rounded-md px-3 py-2 outline-none text-sm disabled:opacity-60"
+                  className="w-60 bg-surface-input border border-line-input rounded-md px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info-border focus-visible:ring-offset-2 focus-visible:ring-offset-surface-card disabled:opacity-60"
                 />
 
                 <button
