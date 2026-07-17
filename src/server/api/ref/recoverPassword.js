@@ -33,6 +33,19 @@ const client = createClient({
 });
 
 const RECOVERY_SESSION_MAX_AGE_SECONDS = 2 * 60 * 60;
+const PASSWORD_PENDING_MESSAGE =
+  "Your password change is saving. It will finish in a moment.";
+const PASSWORD_UPDATED_MESSAGE =
+  "Password updated. Log in with your new password.";
+
+const pendingResponse = (res) => {
+  res.setHeader?.("Retry-After", "2");
+  return res.status(202).json({
+    ok: true,
+    status: "pending",
+    message: PASSWORD_PENDING_MESSAGE,
+  });
+};
 
 const recoveryMethodPresent = (claims) =>
   (Array.isArray(claims?.amr) ? claims.amr : []).some((entry) => {
@@ -164,14 +177,17 @@ export default async function handler(req, res) {
       const resumed = await resumeSupabaseCredentialOperation({ operationKey });
       if (resumed.resumed) {
         await finishRecoverySession({ req, res });
-        return res.status(200).json({ ok: true, replayed: true, signedOut: true });
+        return res.status(200).json({
+          ok: true,
+          replayed: true,
+          signedOut: true,
+          status: "updated",
+          message: PASSWORD_UPDATED_MESSAGE,
+        });
       }
     } catch (error) {
       logSafeError("Referral recovery password operation remains pending", error);
-      return res.status(503).json({
-        ok: false,
-        error: "Password update is finishing. Please try signing in shortly.",
-      });
+      return pendingResponse(res);
     }
 
     const passwordChangedAt = new Date().toISOString();
@@ -244,14 +260,16 @@ export default async function handler(req, res) {
       }
     } catch (error) {
       logSafeError("Supabase referral recovery source update pending", error);
-      return res.status(503).json({
-        ok: false,
-        error: "Password update is finishing. Please try signing in shortly.",
-      });
+      return pendingResponse(res);
     }
 
     await finishRecoverySession({ req, res });
-    return res.status(200).json({ ok: true, signedOut: true });
+    return res.status(200).json({
+      ok: true,
+      signedOut: true,
+      status: "updated",
+      message: PASSWORD_UPDATED_MESSAGE,
+    });
   } catch (error) {
     logSafeError("Referral recovery password reset failed", error);
     return res.status(500).json({ ok: false, error: "Server error" });

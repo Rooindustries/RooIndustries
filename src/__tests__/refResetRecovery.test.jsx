@@ -84,7 +84,91 @@ describe("referral Supabase recovery", () => {
     });
     expect(
       await screen.findByText(
-        "Password updated. You can log in with your new password."
+        "Password updated. Log in with your new password."
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Update Password" })).toBeEnabled();
+  });
+
+  test("renders the pending copy and polls until the password is updated", async () => {
+    jest.useFakeTimers();
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 202,
+        json: async () => ({
+          ok: true,
+          status: "pending",
+          message: "Your password change is saving. It will finish in a moment.",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, status: "updated" }),
+      });
+    renderReset(
+      "/referrals/reset#access_token=recovery-access&refresh_token=recovery-refresh&type=recovery"
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("Enter new password"), {
+      target: { value: "new-password-123" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Confirm new password"), {
+      target: { value: "new-password-123" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Update Password" }));
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(
+      screen.getByText(
+        "Your password change is saving. It will finish in a moment."
+      )
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      jest.advanceTimersByTime(2_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(
+      screen.getByText("Password updated. Log in with your new password.")
+    ).toBeInTheDocument();
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  test("renders the password API error instead of a generic silent failure", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => ({
+        ok: false,
+        error: "Password update is temporarily unavailable. Please try again.",
+      }),
+    });
+    renderReset(
+      "/referrals/reset#access_token=recovery-access&refresh_token=recovery-refresh&type=recovery"
+    );
+
+    fireEvent.change(await screen.findByPlaceholderText("Enter new password"), {
+      target: { value: "new-password-123" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Confirm new password"), {
+      target: { value: "new-password-123" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Update Password" }));
+
+    expect(
+      await screen.findByText(
+        "Password update is temporarily unavailable. Please try again."
       )
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update Password" })).toBeEnabled();

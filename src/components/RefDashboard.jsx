@@ -1,12 +1,30 @@
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import packageContent from "../lib/packageContent";
 import ConnectedAccounts from "./ConnectedAccounts";
 
 const { normalizePackageText } = packageContent;
 
+const resolveAuthNotice = (search) => {
+  const query = new URLSearchParams(search);
+  if (
+    query.get("linked") === "discord" ||
+    query.get("notice") === "discord-linked"
+  ) {
+    return { type: "success", message: "Discord linked to your account." };
+  }
+  if (query.get("notice") === "discord-link-failed") {
+    return {
+      type: "error",
+      message: "Discord linking did not complete. Try the Discord login again.",
+    };
+  }
+  return null;
+};
+
 export default function RefDashboard() {
   const nav = useNavigate();
+  const location = useLocation();
 
   const [creator, setCreator] = useState(null);
   const [commission, setCommission] = useState(0);
@@ -23,6 +41,7 @@ export default function RefDashboard() {
   const [saving, setSaving] = useState(false);
 
   const [toast, setToast] = useState(null);
+  const [authNotice] = useState(() => resolveAuthNotice(location.search));
   const noScrollbarStyles = `
     .no-scrollbar::-webkit-scrollbar { display: none; }
     .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -360,6 +379,20 @@ export default function RefDashboard() {
       <h1 className="text-4xl font-extrabold text-center text-accent drop-shadow">
         Welcome, {creator.name}
       </h1>
+
+      {authNotice ? (
+        <div
+          aria-live="polite"
+          className={`mt-6 rounded-xl border px-4 py-3 text-sm font-semibold ${
+            authNotice.type === "success"
+              ? "border-success-border bg-success-soft text-success-text"
+              : "border-danger-border bg-danger-soft text-danger-text"
+          }`}
+          role={authNotice.type === "error" ? "alert" : "status"}
+        >
+          {authNotice.message}
+        </div>
+      ) : null}
 
       <p className="mt-1 text-center opacity-70">
         Referral Code: <b className="text-accent">{referralCode}</b>

@@ -8,6 +8,7 @@ jest.mock(
   "react-router-dom",
   () => ({
     __esModule: true,
+    useLocation: () => ({ search: window.location.search }),
     useNavigate: () => mockNavigate,
   }),
   { virtual: true }
@@ -69,6 +70,7 @@ const payoutPayload = {
 describe("RefDashboard payout summary", () => {
   beforeEach(() => {
     mockNavigate.mockReset();
+    window.history.replaceState(null, "", "/referrals/dashboard");
     global.fetch = jest.fn(async (url) => {
       if (url === "/api/ref/getData") {
         return { ok: true, json: async () => referralPayload };
@@ -112,5 +114,35 @@ describe("RefDashboard payout summary", () => {
     );
 
     expect(referralInput.value).not.toContain("#packages");
+  });
+
+  test("keeps Discord link success visible after the dashboard loads", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/referrals/dashboard?notice=discord-linked"
+    );
+
+    render(<RefDashboard />);
+
+    expect(
+      await screen.findByText("Discord linked to your account.")
+    ).toBeInTheDocument();
+  });
+
+  test("keeps a failed Discord link explicit after login reaches the dashboard", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/referrals/dashboard?notice=discord-link-failed"
+    );
+
+    render(<RefDashboard />);
+
+    expect(
+      await screen.findByText(
+        "Discord linking did not complete. Try the Discord login again."
+      )
+    ).toBeInTheDocument();
   });
 });

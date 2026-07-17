@@ -174,7 +174,12 @@ describe("referral authenticated recovery API", () => {
     expect(mockClearReferralSessionCookie).toHaveBeenCalledWith(res);
     expect(mockClearLegacySupabaseSession).toHaveBeenCalledWith({ req, res });
     expect(res.statusCode).toBe(200);
-    expect(res.body).toEqual({ ok: true, signedOut: true });
+    expect(res.body).toEqual({
+      ok: true,
+      signedOut: true,
+      status: "updated",
+      message: "Password updated. Log in with your new password.",
+    });
   });
 
   test("rejects a normal password session as a recovery credential", async () => {
@@ -211,5 +216,44 @@ describe("referral authenticated recovery API", () => {
       error: "Password update is temporarily unavailable. Please try again.",
     });
     expect(mockReconcileCredentialSource).not.toHaveBeenCalled();
+  });
+
+  test("returns an explicit pending state while the durable mirror finishes", async () => {
+    mockReconcileCredentialSource.mockRejectedValue(
+      Object.assign(new Error("mirror pending"), {
+        code: "CREDENTIAL_MIRROR_PENDING",
+      })
+    );
+    const res = createRes();
+
+    await recoverPassword(createReq({ password: "new-password-123" }), res);
+
+    expect(res.statusCode).toBe(202);
+    expect(res.headers["Retry-After"]).toBe("2");
+    expect(res.body).toEqual({
+      ok: true,
+      status: "pending",
+      message: "Your password change is saving. It will finish in a moment.",
+    });
+    expect(mockClearLegacySupabaseSession).not.toHaveBeenCalled();
+  });
+
+  test("returns the same pending copy when an existing recovery is not ready", async () => {
+    mockResumeCredentialOperation.mockRejectedValue(
+      Object.assign(new Error("recovery pending"), {
+        code: "CREDENTIAL_MIRROR_PENDING",
+      })
+    );
+    const res = createRes();
+
+    await recoverPassword(createReq({ password: "new-password-123" }), res);
+
+    expect(res.statusCode).toBe(202);
+    expect(res.body).toEqual({
+      ok: true,
+      status: "pending",
+      message: "Your password change is saving. It will finish in a moment.",
+    });
+    expect(mockUpdatePassword).not.toHaveBeenCalled();
   });
 });

@@ -18,7 +18,15 @@ import {
   getLegacySupabaseUser,
   installLegacySupabaseSession,
 } from "../../supabase/serverSession.js";
-import { linkPendingDiscordIdentity } from "../../supabase/pendingSocialLink.js";
+import {
+  appendPendingDiscordLinkCookie,
+  clearPendingDiscordLinkCookie,
+  linkPendingDiscordIdentity,
+  resolvePendingDiscordUser,
+} from "../../supabase/pendingSocialLink.js";
+
+const DISCORD_LINK_FAILED_MESSAGE =
+  "Discord linking did not complete. Try the Discord login again.";
 
 const DUMMY_PASSWORD_HASH =
   // nosemgrep: generic.secrets.security.detected-bcrypt-hash.detected-bcrypt-hash
@@ -62,9 +70,6 @@ export default async function handler(req, res) {
       !manualFallback &&
       shouldUseSupabaseForAccount({ identifier: normalizedIdentifier })
     ) {
-      const pendingDiscordUser = linkDiscord
-        ? await getLegacySupabaseUser({ req, res }).catch(() => null)
-        : null;
       const result = await authenticateSupabaseAccount({
         identifier: normalizedIdentifier,
         password: normalizedPassword,
@@ -107,7 +112,19 @@ export default async function handler(req, res) {
       }
 
       let discordLinked = false;
+      let discordLinkError = "";
       if (linkDiscord) {
+        let pendingDiscordUser = await resolvePendingDiscordUser({
+          request: req,
+        }).catch((error) => {
+          logSafeError("Pending Discord link proof lookup failed", error);
+          return null;
+        });
+        if (!pendingDiscordUser) {
+          pendingDiscordUser = await getLegacySupabaseUser({ req, res }).catch(
+            () => null
+          );
+        }
         try {
           const linked = await linkPendingDiscordIdentity({
             pendingUser: pendingDiscordUser,
@@ -115,21 +132,13 @@ export default async function handler(req, res) {
             primaryUserId: result.user.id,
           });
           if (!linked.linked) {
-            return res.status(409).json({
-              ok: false,
-              error: "Your Discord sign-in expired. Start with Discord again.",
-            });
+            discordLinkError = DISCORD_LINK_FAILED_MESSAGE;
+          } else {
+            discordLinked = true;
           }
-          discordLinked = true;
         } catch (error) {
           logSafeError("Referral Discord account linking failed", error);
-          return res.status(String(error?.code || "") === "23505" ? 409 : 503).json({
-            ok: false,
-            error:
-              String(error?.code || "") === "23505"
-                ? "That Discord is already linked to another account."
-                : "Discord linking is temporarily unavailable. Please try again.",
-          });
+          discordLinkError = DISCORD_LINK_FAILED_MESSAGE;
         }
       }
 
@@ -139,6 +148,9 @@ export default async function handler(req, res) {
         res,
         session: result.session,
       });
+      if (linkDiscord) {
+        appendPendingDiscordLinkCookie(res, clearPendingDiscordLinkCookie());
+      }
 
       setReferralSessionCookie(
         res,
@@ -158,6 +170,7 @@ export default async function handler(req, res) {
         name: result.account.display_name,
         code: result.account.referral_code,
         ...(discordLinked ? { discordLinked: true } : {}),
+        ...(discordLinkError ? { discordLinkError } : {}),
       });
     }
 
