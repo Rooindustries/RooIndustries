@@ -8,6 +8,7 @@ import { createSupabaseAuthClient } from "../../../../src/server/supabase/authCl
 import { consumeAuthRateLimit } from "../../../../src/server/supabase/authRateLimit";
 import { resolveExactDomainIdentity } from "../../../../src/server/supabase/domainIdentity";
 import {
+  clearReauthCookie,
   createReauthToken,
   hashReauthToken,
   reauthCookie,
@@ -31,15 +32,24 @@ const noStore = (response) => {
   return response;
 };
 
+const failedReauth = ({ error, extra = {}, slot = "", status }) => {
+  const response = NextResponse.json({ ok: false, error, ...extra }, { status });
+  response.cookies.set(clearReauthCookie(slot));
+  return noStore(response);
+};
+
 export async function POST(request) {
   if (!isSameOriginMutation(request)) {
-    return noStore(NextResponse.json({ ok: false, error: "Cross-origin request rejected." }, { status: 403 }));
+    return failedReauth({ error: "Cross-origin request rejected.", status: 403 });
   }
   let payload;
   try {
     payload = await readBoundedJson(request);
   } catch (error) {
-    return noStore(NextResponse.json({ ok: false, error: error.message }, { status: Number(error.status || 400) }));
+    return failedReauth({
+      error: error.message,
+      status: Number(error.status || 400),
+    });
   }
   const flow = String(payload.flow || "").trim().toLowerCase();
   const purpose = String(payload.purpose || "").trim().toLowerCase();
@@ -47,7 +57,11 @@ export async function POST(request) {
   const slot = String(payload.slot || "").trim().toLowerCase();
   const password = String(payload.password || "");
   if (!flows.has(flow) || !purposes.has(purpose) || !slots.has(slot) || (provider && !providers.has(provider))) {
-    return noStore(NextResponse.json({ ok: false, error: "Reauthentication request is invalid." }, { status: 400 }));
+    return failedReauth({
+      error: "Reauthentication request is invalid.",
+      slot: slots.has(slot) ? slot : "",
+      status: 400,
+    });
   }
   const policy = resolveSupabaseRuntimePolicy();
   if (
@@ -56,22 +70,22 @@ export async function POST(request) {
     policy.primaryBackend === "sanity" &&
     policy.cutoverEnabled
   ) {
-    return noStore(
-      NextResponse.json(
-        {
-          ok: false,
-          error:
-            "Password changes are temporarily unavailable during manual authentication failover.",
-        },
-        { status: 503 }
-      )
-    );
+    return failedReauth({
+      error:
+        "Password changes are temporarily unavailable during manual authentication failover.",
+      slot,
+      status: 503,
+    });
   }
   const response = NextResponse.json({ ok: true });
   try {
     const identity = await resolveExactDomainIdentity({ flow, request, response });
     if (!identity?.user?.id || !identity.account?.principal_id) {
-      return noStore(NextResponse.json({ ok: false, error: "Sign in again before changing account security." }, { status: 401 }));
+      return failedReauth({
+        error: "Sign in again before changing account security.",
+        slot,
+        status: 401,
+      });
     }
     const clientAddress = getClientAddressFromFetchHeaders(request.headers);
     const ipLimit = await consumeAuthRateLimit({
@@ -84,22 +98,30 @@ export async function POST(request) {
     });
     if (!ipLimit.allowed || !principalLimit.allowed) {
       const retryAfter = Math.max(ipLimit.retryAfter, principalLimit.retryAfter);
-      const limited = NextResponse.json({ ok: false, error: "Too many attempts. Try again shortly." }, { status: 429 });
+      const limited = failedReauth({
+        error: "Too many attempts. Try again shortly.",
+        slot,
+        status: 429,
+      });
       limited.headers.set("Retry-After", String(retryAfter));
-      return noStore(limited);
+      return limited;
     }
     if (!password) {
       const connected = (identity.account.connected_providers || []).filter((value) => providers.has(value));
-      return noStore(NextResponse.json({
-        ok: false,
+      return failedReauth({
         error: "Reauthenticate with your password or a connected provider.",
-        reauthRequired: true,
-        providers: connected,
-      }, { status: 409 }));
+        extra: { reauthRequired: true, providers: connected },
+        slot,
+        status: 409,
+      });
     }
     const loginEmail = String(identity.account.primary_email || "").trim().toLowerCase();
     if (!loginEmail || password.length > 128) {
-      return noStore(NextResponse.json({ ok: false, error: "Password reauthentication is unavailable for this account." }, { status: 409 }));
+      return failedReauth({
+        error: "Password reauthentication is unavailable for this account.",
+        slot,
+        status: 409,
+      });
     }
     const signedIn = await createSupabaseAuthClient().auth.signInWithPassword({
       email: loginEmail,
@@ -109,7 +131,11 @@ export async function POST(request) {
       ? await resolveSupabaseAccountByUserId({ userId: signedIn.data.user.id })
       : null;
     if (signedIn.error || authenticatedAccount?.principal_id !== identity.account.principal_id) {
-      return noStore(NextResponse.json({ ok: false, error: "Password is incorrect." }, { status: 401 }));
+      return failedReauth({
+        error: "Password is incorrect.",
+        slot,
+        status: 401,
+      });
     }
     const token = createReauthToken();
     const grant = await createSupabaseAdminClient().rpc("roo_create_reauth_grant", {
@@ -124,6 +150,10 @@ export async function POST(request) {
     finalResponse.cookies.set(reauthCookie(token, slot));
     return noStore(finalResponse);
   } catch {
-    return noStore(NextResponse.json({ ok: false, error: "Reauthentication is temporarily unavailable." }, { status: 503 }));
+    return failedReauth({
+      error: "Reauthentication is temporarily unavailable.",
+      slot,
+      status: 503,
+    });
   }
 }

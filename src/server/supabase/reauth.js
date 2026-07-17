@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 
+import { createSupabaseAdminClient } from "./adminClient.js";
+
 export const REAUTH_COOKIE = "roo_reauth_grant";
 export const REAUTH_PRIMARY_COOKIE = "roo_reauth_primary";
 export const REAUTH_SECONDARY_COOKIE = "roo_reauth_secondary";
@@ -51,3 +53,19 @@ export const readRequestCookie = (request, name) => {
 
 export const readReauthToken = (request, slot = "") =>
   readRequestCookie(request, reauthCookieName(slot));
+
+export const readReauthGrantStatus = async ({
+  adminClient = createSupabaseAdminClient(),
+  purpose,
+  token,
+  userId,
+} = {}) => {
+  if (!token || !userId || !purpose) return null;
+  const result = await adminClient.rpc("roo_read_reauth_grant", {
+    p_purpose: String(purpose).trim().toLowerCase(),
+    p_token_hash: hashReauthToken(token),
+    p_user_id: String(userId).trim(),
+  });
+  if (result.error) throw result.error;
+  return result.data || null;
+};
