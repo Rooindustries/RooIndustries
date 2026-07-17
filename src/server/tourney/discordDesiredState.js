@@ -10,6 +10,7 @@ import {
   enqueueTourneyExternalOperation,
   enqueueTourneyIdentityUnlinkOperation,
   rearmTourneyDiscordOperationWithAccessToken,
+  rearmTourneyExternalOperation,
   saveTourneyDiscordOperationAccessToken,
   supersedeQueuedDiscordOperationsForCommand,
 } from "./externalOperations.js";
@@ -1022,6 +1023,7 @@ export const queueTourneyDiscordAuthProjection = async ({
   deferUntil = "",
   env = process.env,
   intentId,
+  resumeStoredCredential = false,
   userId,
 } = {}) => {
   const normalizedUserId = normalize(accountUserId || userId);
@@ -1039,13 +1041,26 @@ export const queueTourneyDiscordAuthProjection = async ({
   const semanticCommandId = normalize(commandId) ||
     `discord-oauth:${normalizedIntentId}:${normalizedUserId}`;
   if (attemptExternalWork) {
-    await rearmTourneyDiscordOperationWithAccessToken({
-      accessToken,
-      commandId: semanticCommandId,
-      entityType: "account",
-      entityId: normalizedUserId,
-      env,
-    });
+    if (resumeStoredCredential) {
+      const rearmed = await rearmTourneyExternalOperation({
+        commandId: semanticCommandId,
+        operationKind: "discord_membership",
+        entityType: "account",
+        entityId: normalizedUserId,
+        env,
+      });
+      if (!rearmed) {
+        throw new Error("The pending Discord projection could not be resumed.");
+      }
+    } else {
+      await rearmTourneyDiscordOperationWithAccessToken({
+        accessToken,
+        commandId: semanticCommandId,
+        entityType: "account",
+        entityId: normalizedUserId,
+        env,
+      });
+    }
     await supersedeQueuedDiscordOperationsForCommand({
       commandId: semanticCommandId,
       env,

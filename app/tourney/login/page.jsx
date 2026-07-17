@@ -31,6 +31,10 @@ const normalizeNextPath = (value) => {
 export default async function TourneyLoginPage({ searchParams }) {
   const resolvedSearchParams = await searchParams;
   const session = await getTourneySession();
+  const pendingDiscordLink =
+    String(resolvedSearchParams?.error || "") === "unlinked" &&
+    String(resolvedSearchParams?.provider || "") === "discord";
+  const redirectTo = normalizeNextPath(resolvedSearchParams?.next);
 
   if (session) {
     redirect("/tourney");
@@ -38,19 +42,26 @@ export default async function TourneyLoginPage({ searchParams }) {
 
   return (
     <LockScreen
-      error={resolvedSearchParams?.error || ""}
-      heading="Sign in."
-      subtitle="Caster, player, and owner access."
-      note="Wait for approval before trying to log in."
-      buttonLabel="Sign in"
-      redirectTo={normalizeNextPath(resolvedSearchParams?.next)}
-      socialLogin={
+      error={pendingDiscordLink ? "" : resolvedSearchParams?.error || ""}
+      heading={pendingDiscordLink ? "No account linked yet" : "Sign in."}
+      subtitle={
+        pendingDiscordLink
+          ? "This Discord isn't linked to a tournament account yet. Enter your Tourney username and password once and we'll link it."
+          : "Caster, player, and owner access."
+      }
+      note={pendingDiscordLink ? "" : "Wait for approval before trying to log in."}
+      buttonLabel={pendingDiscordLink ? "Log in and link Discord" : "Sign in"}
+      linkDiscord={pendingDiscordLink}
+      redirectTo={redirectTo}
+      showRegistrationLink={pendingDiscordLink}
+      socialLogin={pendingDiscordLink ? null : (
         <SupabaseSocialLogin
           flow="tourney"
-          nextPath={normalizeNextPath(resolvedSearchParams?.next)}
+          nextPath={redirectTo}
           variant="tourney"
         />
-      }
+      )}
+      wrapSubtitle={pendingDiscordLink}
     />
   );
 }

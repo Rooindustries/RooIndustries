@@ -384,7 +384,7 @@ describe("Supabase Auth callback", () => {
       credential_version: "3",
     });
 
-    await GET(request(
+    const response = await GET(request(
       `https://www.rooindustries.com/auth/callback?intent=${intentId}&code=one`,
       `roo_oauth_intent.${intentId}=opaque-token`
     ));
@@ -400,6 +400,63 @@ describe("Supabase Auth callback", () => {
     );
     expect(mockQueueDiscordProjection.mock.invocationCallOrder[0]).toBeLessThan(
       mockFinalizeOAuthIntent.mock.invocationCallOrder[0]
+    );
+    expect(response.url).toBe("https://www.rooindustries.com/tourney");
+    expect(response.cookies.values).toContainEqual(
+      expect.objectContaining({
+        name: "roo_pending_tourney_discord_link",
+        maxAge: 0,
+      })
+    );
+  });
+
+  test("routes an unlinked Tourney Discord sign-in to the credential-link prompt", async () => {
+    mockReadOAuthIntent.mockResolvedValue({
+      id: intentId,
+      action: "signin",
+      flow: "tourney",
+      provider: "discord",
+      return_path: "/tourney/manage",
+      target_user_id: null,
+      status: "pending",
+      expires_at: "2099-01-01T00:00:00.000Z",
+    });
+    mockFinalizeOAuthIntent.mockResolvedValue({
+      action: "signin",
+      flow: "tourney",
+      provider: "discord",
+      return_path: "/tourney/manage",
+    });
+    mockResolveSupabaseAccountByUserId.mockResolvedValue(null);
+
+    const response = await GET(request(
+      `https://www.rooindustries.com/auth/callback?intent=${intentId}&code=one`,
+      `roo_oauth_intent.${intentId}=opaque-token`
+    ));
+
+    expect(response.url).toBe(
+      "https://www.rooindustries.com/tourney/login?error=unlinked&provider=discord&next=%2Ftourney%2Fmanage"
+    );
+    expect(mockQueueDiscordProjection).toHaveBeenCalledTimes(1);
+    expect(mockClearNextSupabaseSession).not.toHaveBeenCalled();
+    expect(response.cookies.values).not.toContainEqual(
+      expect.objectContaining({ name: "tourney_session" })
+    );
+    expect(response.cookies.values).toContainEqual(
+      expect.objectContaining({
+        name: `roo_oauth_intent.${intentId}`,
+        maxAge: 0,
+      })
+    );
+    expect(response.cookies.values).toContainEqual(
+      expect.objectContaining({
+        name: "roo_pending_tourney_discord_link",
+        httpOnly: true,
+        maxAge: 15 * 60,
+        path: "/",
+        sameSite: "lax",
+        value: expect.any(String),
+      })
     );
   });
 

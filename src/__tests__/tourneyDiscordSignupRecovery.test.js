@@ -1,5 +1,9 @@
 const mockRunTourneyTransaction = jest.fn();
 const mockResolveTourneyStorePolicy = jest.fn();
+const mockExecuteTourneyCommand = jest.fn();
+const mockRearmTourneyDiscordOperationWithAccessToken = jest.fn();
+const mockRearmTourneyExternalOperation = jest.fn();
+const mockSupersedeQueuedDiscordOperationsForCommand = jest.fn();
 
 jest.mock("../server/tourney/sqlClient.js", () => ({
   getTourneySql: jest.fn(),
@@ -13,18 +17,23 @@ jest.mock("../server/tourney/discordConfig.js", () => ({
 jest.mock("../server/tourney/externalOperations.js", () => ({
   enqueueTourneyExternalOperation: jest.fn(),
   enqueueTourneyIdentityUnlinkOperation: jest.fn(),
-  rearmTourneyDiscordOperationWithAccessToken: jest.fn(),
+  rearmTourneyDiscordOperationWithAccessToken: (...args) =>
+    mockRearmTourneyDiscordOperationWithAccessToken(...args),
+  rearmTourneyExternalOperation: (...args) =>
+    mockRearmTourneyExternalOperation(...args),
   saveTourneyDiscordOperationAccessToken: jest.fn(),
-  supersedeQueuedDiscordOperationsForCommand: jest.fn(),
+  supersedeQueuedDiscordOperationsForCommand: (...args) =>
+    mockSupersedeQueuedDiscordOperationsForCommand(...args),
 }));
 
 jest.mock("../server/tourney/store.js", () => ({
-  executeTourneyCommand: jest.fn(),
+  executeTourneyCommand: (...args) => mockExecuteTourneyCommand(...args),
   resolveTourneyStorePolicy: (...args) => mockResolveTourneyStorePolicy(...args),
 }));
 
 const {
   projectTourneyDiscordOAuthDesiredState,
+  queueTourneyDiscordAuthProjection,
 } = require("../server/tourney/discordDesiredState.js");
 
 const env = {
@@ -95,6 +104,9 @@ describe("delayed Tourney Discord OAuth projection", () => {
       mirrorEnabled: true,
       primaryBackend: "supabase",
     });
+    mockExecuteTourneyCommand.mockResolvedValue({ syncPending: false });
+    mockRearmTourneyExternalOperation.mockResolvedValue(true);
+    mockSupersedeQueuedDiscordOperationsForCommand.mockResolvedValue(0);
   });
 
   afterEach(() => {
@@ -146,6 +158,48 @@ describe("delayed Tourney Discord OAuth projection", () => {
       code: "TOURNEY_DISCORD_SIGNUP_CREDENTIAL_EXPIRED",
       nonRetryable: true,
     });
+  });
+
+  test("re-arms the deferred OAuth projection with its stored credential", async () => {
+    const commandId = `discord-oauth:${intentId}:${userId}`;
+
+    await expect(
+      queueTourneyDiscordAuthProjection({
+        accountUserId: userId,
+        attemptExternalWork: true,
+        claimedUserId: userId,
+        commandId,
+        env,
+        intentId,
+        resumeStoredCredential: true,
+        userId,
+      })
+    ).resolves.toEqual({ applied: true, reason: "applied" });
+
+    expect(mockRearmTourneyExternalOperation).toHaveBeenCalledWith({
+      commandId,
+      operationKind: "discord_membership",
+      entityType: "account",
+      entityId: userId,
+      env,
+    });
+    expect(mockRearmTourneyDiscordOperationWithAccessToken).not.toHaveBeenCalled();
+    expect(mockSupersedeQueuedDiscordOperationsForCommand).toHaveBeenCalledWith({
+      commandId,
+      env,
+    });
+    expect(mockExecuteTourneyCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attemptExternalWork: true,
+        commandId,
+        purpose: "discord:link",
+        requestPayload: {
+          claimedUserId: userId,
+          intentId,
+          userId,
+        },
+      })
+    );
   });
 
   test.each([

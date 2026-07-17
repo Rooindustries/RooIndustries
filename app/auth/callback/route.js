@@ -437,15 +437,25 @@ export async function GET(request) {
       if (!roleSession.cookie) {
         if (
           finalized.action === "signin" &&
-          finalized.flow === "referral" &&
           finalized.provider === "discord" &&
+          ["referral", "tourney"].includes(finalized.flow) &&
           (roleSession.error || "unlinked") === "unlinked"
         ) {
-          const unlinkedTarget = new URL("/referrals/login", url.origin);
-          unlinkedTarget.searchParams.set("oauth", "unlinked");
+          const unlinkedTarget = new URL(
+            finalized.flow === "tourney" ? "/tourney/login" : "/referrals/login",
+            url.origin
+          );
+          unlinkedTarget.searchParams.set(
+            finalized.flow === "tourney" ? "error" : "oauth",
+            "unlinked"
+          );
           unlinkedTarget.searchParams.set("provider", "discord");
+          if (finalized.flow === "tourney" && returnPath !== "/tourney") {
+            unlinkedTarget.searchParams.set("next", returnPath);
+          }
           response.cookies.set(
             createPendingDiscordLinkCookie({
+              flow: finalized.flow,
               intentId: validIntentId,
               userId: claimedUserId,
             })
@@ -465,10 +475,12 @@ export async function GET(request) {
       setRoleCookie(response, roleSession.cookie);
       if (
         finalized.action === "signin" &&
-        finalized.flow === "referral" &&
-        finalized.provider === "discord"
+        finalized.provider === "discord" &&
+        ["referral", "tourney"].includes(finalized.flow)
       ) {
-        response.cookies.set(clearPendingDiscordLinkCookie());
+        response.cookies.set(
+          clearPendingDiscordLinkCookie({ flow: finalized.flow })
+        );
       }
       if (finalized.action === "link") {
         target.searchParams.set("linked", finalized.provider);

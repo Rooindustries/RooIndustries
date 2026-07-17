@@ -9,6 +9,7 @@ import JsonLd from "../../src/next/JsonLd";
 import seo from "../../src/lib/seo";
 import { canAccessTourneyRegistration } from "../../src/server/tourney/access";
 import ConnectedAccounts from "../../src/components/ConnectedAccounts";
+import TourneyLoginOutcome from "./TourneyLoginOutcome";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -170,7 +171,7 @@ const charityRecipients = [
   },
 ];
 
-const DashboardPage = ({ hosts, session }) => (
+const DashboardPage = ({ hosts, loginOutcome = "", session }) => (
   <TourneyShell session={session}>
     <section className="tourney-hero" aria-labelledby="tourney-title">
       <div>
@@ -191,6 +192,8 @@ const DashboardPage = ({ hosts, session }) => (
         ) : null}
       </div>
     </section>
+
+    <TourneyLoginOutcome outcome={loginOutcome} />
 
     {session ? (
       <ConnectedAccounts
@@ -362,16 +365,21 @@ const DashboardPage = ({ hosts, session }) => (
   </TourneyShell>
 );
 
-export default async function TourneyPage() {
-  const [session, hosts] = await Promise.all([
+export default async function TourneyPage({ searchParams } = {}) {
+  const [session, hosts, resolvedSearchParams] = await Promise.all([
     getTourneySession(),
     getTourneyHostsWithLiveStatus(),
+    searchParams || Promise.resolve({}),
   ]);
 
   return (
     <>
       <JsonLd data={seo.buildTourneyEventJsonLd()} />
-      <DashboardPage hosts={hosts} session={session} />
+      <DashboardPage
+        hosts={hosts}
+        loginOutcome={session ? resolvedSearchParams?.notice || "" : ""}
+        session={session}
+      />
     </>
   );
 }
