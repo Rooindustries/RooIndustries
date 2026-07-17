@@ -14,7 +14,7 @@ const fallbackData = HOME_COPY.howItWorks;
 
 export default function HowItWorks({ initialData = null }) {
   const [data, setData] = useState(
-    () => initialData ?? readHomeSectionData(HOME_SECTION_DATA_KEYS.howItWorks) ?? fallbackData
+    () => initialData ?? fallbackData
   );
   const handleHomeSectionLink = useHomeSectionLinkHandler();
 
@@ -27,7 +27,11 @@ export default function HowItWorks({ initialData = null }) {
 
   useEffect(() => {
     if (initialData !== null) return;
-    if (readHomeSectionData(HOME_SECTION_DATA_KEYS.howItWorks) !== null) return;
+    const cachedData = readHomeSectionData(HOME_SECTION_DATA_KEYS.howItWorks);
+    if (cachedData !== null) {
+      setData(cachedData);
+      return;
+    }
     fetchHomeSectionData(HOME_SECTION_DATA_KEYS.howItWorks)
       .then((res) => { if (res) setData(res); })
       .catch((err) => console.error("Sanity fetch error:", err));

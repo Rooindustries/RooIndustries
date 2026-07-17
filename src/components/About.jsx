@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS, readHomeSectionData } from "../lib/homeSectionData";
+import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
 
 /*  Record card design tokens — single source of truth.
     Two accents only: gold (title, via gold-flair-text CSS class) + cyan (everything else). */
@@ -19,9 +19,7 @@ const RC = {
 };
 
 export default function About({ initialData = null }) {
-  const [aboutData, setAboutData] = useState(
-    () => initialData ?? readHomeSectionData(HOME_SECTION_DATA_KEYS.about)
-  );
+  const [aboutData, setAboutData] = useState(() => initialData);
 
   useEffect(() => {
     if (initialData !== null) {
