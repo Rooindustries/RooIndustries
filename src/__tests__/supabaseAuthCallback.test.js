@@ -540,6 +540,16 @@ describe("Supabase Auth callback", () => {
         maxAge: 0,
       })
     );
+    expect(response.cookies.values).toContainEqual(
+      expect.objectContaining({
+        name: "roo_pending_discord_link",
+        httpOnly: true,
+        maxAge: 15 * 60,
+        path: "/",
+        sameSite: "lax",
+        value: expect.any(String),
+      })
+    );
   });
 
   test("does not consume Discord OAuth until the Tourney projection is durable", async () => {

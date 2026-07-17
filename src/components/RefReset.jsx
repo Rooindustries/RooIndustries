@@ -5,6 +5,15 @@ import { getSupabaseBrowserClient } from "../lib/supabaseBrowser";
 
 const RESET_TOKEN_STORAGE_KEY = "referral_reset_token";
 const PASSWORD_UPDATE_TIMEOUT_MS = 15_000;
+const PASSWORD_PENDING_RETRY_MS = 2_000;
+const PASSWORD_PENDING_ATTEMPTS = 3;
+const PASSWORD_PENDING_MESSAGE =
+  "Your password change is saving. It will finish in a moment.";
+const PASSWORD_UPDATED_MESSAGE =
+  "Password updated. Log in with your new password.";
+
+const wait = (milliseconds) =>
+  new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 const readLegacyResetToken = ({ hash }) => {
   if (typeof window === "undefined") return "";
@@ -64,7 +73,7 @@ export default function RefReset() {
   const [pass1, setPass1] = useState("");
   const [pass2, setPass2] = useState("");
   const [loading, setLoading] = useState(false);
-  const [toast, setToast] = useState(null);
+  const [outcome, setOutcome] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -103,66 +112,91 @@ export default function RefReset() {
     };
   }, [recoveryLocation]);
 
-  const showToast = (type, message) => {
-    setToast({ type, message });
-    setTimeout(() => setToast(null), 3000);
-  };
-
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (!pass1 || !pass2) {
-      showToast("error", "Fill in both fields.");
+      setOutcome({ type: "error", message: "Fill in both fields." });
       return;
     }
     if (pass1 !== pass2) {
-      showToast("error", "Passwords do not match.");
+      setOutcome({ type: "error", message: "Passwords do not match." });
       return;
     }
     if (pass1.length < 10 || pass1.length > 128) {
-      showToast("error", "Use a password between 10 and 128 characters.");
+      setOutcome({
+        type: "error",
+        message: "Use a password between 10 and 128 characters.",
+      });
       return;
     }
 
     setLoading(true);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), PASSWORD_UPDATE_TIMEOUT_MS);
+    setOutcome(null);
     try {
       const endpoint = mode === "supabase" ? "recoverPassword" : "reset";
       const body =
         mode === "supabase"
           ? { password: pass1 }
           : { token: legacyToken, password: pass1 };
-      const response = await fetch(`/api/ref/${endpoint}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data.ok) {
-        showToast(
-          "error",
-          data.error || "Password update could not be completed. Please try again."
+      for (let attempt = 0; attempt < PASSWORD_PENDING_ATTEMPTS; attempt += 1) {
+        const controller = new AbortController();
+        const timeout = setTimeout(
+          () => controller.abort(),
+          PASSWORD_UPDATE_TIMEOUT_MS
+        );
+        let response;
+        let data;
+        try {
+          response = await fetch(`/api/ref/${endpoint}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          });
+          data = await response.json().catch(() => ({}));
+        } finally {
+          clearTimeout(timeout);
+        }
+
+        if (response.status === 202 || data.status === "pending") {
+          setOutcome({
+            type: "pending",
+            message: data.message || PASSWORD_PENDING_MESSAGE,
+          });
+          if (attempt < PASSWORD_PENDING_ATTEMPTS - 1) {
+            await wait(PASSWORD_PENDING_RETRY_MS);
+            continue;
+          }
+          return;
+        }
+        if (!response.ok || !data.ok) {
+          setOutcome({
+            type: "error",
+            message:
+              data.error ||
+              "Password update could not be completed. Please try again.",
+          });
+          return;
+        }
+
+        window.sessionStorage.removeItem(RESET_TOKEN_STORAGE_KEY);
+        setOutcome({ type: "success", message: PASSWORD_UPDATED_MESSAGE });
+        setTimeout(
+          () => nav("/referrals/login?notice=password-updated"),
+          1500
         );
         return;
       }
-
-      window.sessionStorage.removeItem(RESET_TOKEN_STORAGE_KEY);
-      showToast(
-        "success",
-        "Password updated. You can log in with your new password."
-      );
-      setTimeout(() => nav("/referrals/login"), 1500);
     } catch (error) {
       console.error("Referral password reset failed");
-      showToast(
-        "error",
-        error?.name === "AbortError"
-          ? "Password update took too long. Please try again."
-          : "Password update could not be completed. Please try again."
-      );
+      setOutcome({
+        type: "error",
+        message:
+          error?.name === "AbortError"
+            ? "Password update took too long. Please try again."
+            : "Password update could not be completed. Please try again.",
+      });
     } finally {
-      clearTimeout(timeout);
       setLoading(false);
     }
   };
@@ -229,6 +263,22 @@ export default function RefReset() {
           />
         </div>
 
+        {outcome ? (
+          <div
+            aria-live="polite"
+            className={`rounded-xl border px-4 py-3 text-sm font-semibold ${
+              outcome.type === "success"
+                ? "border-success-border bg-success-soft text-success-text"
+                : outcome.type === "pending"
+                  ? "border-warning-border bg-warning-soft text-warning-text"
+                  : "border-danger-border bg-danger-soft text-danger-text"
+            }`}
+            role={outcome.type === "error" ? "alert" : "status"}
+          >
+            {outcome.message}
+          </div>
+        ) : null}
+
         <button
           type="submit"
           disabled={loading}
@@ -242,17 +292,6 @@ export default function RefReset() {
         </button>
       </form>
 
-      {toast ? (
-        <div
-          className={`fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-xl text-white text-sm font-semibold shadow-lg transition-all ${
-            toast.type === "success"
-              ? "bg-success shadow-success-soft"
-              : "bg-danger shadow-danger-soft"
-          }`}
-        >
-          {toast.message}
-        </div>
-      ) : null}
     </section>
   );
 }

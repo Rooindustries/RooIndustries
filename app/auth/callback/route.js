@@ -34,6 +34,10 @@ import {
   hashReauthToken,
   reauthCookie,
 } from "@/src/server/supabase/reauth";
+import {
+  clearPendingDiscordLinkCookie,
+  createPendingDiscordLinkCookie,
+} from "@/src/server/supabase/pendingSocialLink";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -440,6 +444,12 @@ export async function GET(request) {
           const unlinkedTarget = new URL("/referrals/login", url.origin);
           unlinkedTarget.searchParams.set("oauth", "unlinked");
           unlinkedTarget.searchParams.set("provider", "discord");
+          response.cookies.set(
+            createPendingDiscordLinkCookie({
+              intentId: validIntentId,
+              userId: claimedUserId,
+            })
+          );
           response.cookies.set(clearOAuthIntentCookie(validIntentId));
           return setRedirect(response, unlinkedTarget);
         }
@@ -453,6 +463,13 @@ export async function GET(request) {
         });
       }
       setRoleCookie(response, roleSession.cookie);
+      if (
+        finalized.action === "signin" &&
+        finalized.flow === "referral" &&
+        finalized.provider === "discord"
+      ) {
+        response.cookies.set(clearPendingDiscordLinkCookie());
+      }
       if (finalized.action === "link") {
         target.searchParams.set("linked", finalized.provider);
         response.cookies.set(clearReauthCookie());

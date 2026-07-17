@@ -1,4 +1,9 @@
-import { linkPendingDiscordIdentity } from "../server/supabase/pendingSocialLink";
+import {
+  createPendingDiscordLinkCookie,
+  linkPendingDiscordIdentity,
+  readPendingDiscordLink,
+  resolvePendingDiscordUser,
+} from "../server/supabase/pendingSocialLink";
 
 const primaryUserId = "10000000-0000-4000-8000-000000000001";
 const pendingUserId = "20000000-0000-4000-8000-000000000002";
@@ -13,6 +18,81 @@ const pendingAccount = {
 };
 
 describe("pending Discord referral linking", () => {
+  test("seals and resolves the pending Discord identity without an OAuth session cookie", async () => {
+    const now = Date.parse("2026-07-17T08:00:00.000Z");
+    const env = {
+      NODE_ENV: "production",
+      REF_SESSION_SECRET: "pending-link-test-secret",
+    };
+    const cookie = createPendingDiscordLinkCookie({
+      env,
+      intentId: "11111111-1111-4111-8111-111111111111",
+      now,
+      userId: pendingUserId,
+    });
+    const request = {
+      headers: {
+        cookie: `${cookie.name}=${encodeURIComponent(cookie.value)}`,
+      },
+    };
+
+    expect(readPendingDiscordLink({ env, now: now + 1_000, request })).toEqual({
+      intentId: "11111111-1111-4111-8111-111111111111",
+      userId: pendingUserId,
+    });
+
+    const getUserById = jest.fn().mockResolvedValue({
+      data: {
+        user: {
+          id: pendingUserId,
+          identities: [{ provider: "discord" }],
+        },
+      },
+      error: null,
+    });
+    await expect(
+      resolvePendingDiscordUser({
+        adminClient: { auth: { admin: { getUserById } } },
+        env,
+        now: now + 1_000,
+        request,
+      })
+    ).resolves.toMatchObject({ id: pendingUserId });
+    expect(getUserById).toHaveBeenCalledWith(pendingUserId);
+  });
+
+  test("rejects tampered or expired pending Discord proofs", () => {
+    const now = Date.parse("2026-07-17T08:00:00.000Z");
+    const env = {
+      NODE_ENV: "production",
+      REF_SESSION_SECRET: "pending-link-test-secret",
+    };
+    const cookie = createPendingDiscordLinkCookie({
+      env,
+      intentId: "11111111-1111-4111-8111-111111111111",
+      now,
+      userId: pendingUserId,
+    });
+    const requestFor = (value) => ({
+      headers: { cookie: `${cookie.name}=${encodeURIComponent(value)}` },
+    });
+
+    expect(
+      readPendingDiscordLink({
+        env,
+        now: now + 1_000,
+        request: requestFor(`${cookie.value}tampered`),
+      })
+    ).toBeNull();
+    expect(
+      readPendingDiscordLink({
+        env,
+        now: now + 15 * 60 * 1_000,
+        request: requestFor(cookie.value),
+      })
+    ).toBeNull();
+  });
+
   test("merges the temporary Discord principal into the creator principal", async () => {
     const rpc = jest.fn((name) => {
       if (name === "roo_create_reauth_grant") {

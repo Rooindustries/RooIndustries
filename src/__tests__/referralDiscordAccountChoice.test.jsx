@@ -11,9 +11,11 @@ const response = (payload, ok = true) => ({
   json: async () => payload,
 });
 
-const renderReferralAuth = () =>
+const renderReferralAuth = (
+  entry = "/referrals/login?oauth=unlinked&provider=discord"
+) =>
   render(
-    <MemoryRouter initialEntries={["/referrals/login?oauth=unlinked&provider=discord"]}>
+    <MemoryRouter initialEntries={[entry]}>
       <Routes>
         <Route path="/referrals/login" element={<RefLogin />} />
         <Route path="/referrals/register" element={<RefRegister />} />
@@ -25,6 +27,7 @@ const renderReferralAuth = () =>
 describe("unlinked referral Discord account choice", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    window.sessionStorage.clear();
     window.history.replaceState(
       null,
       "",
@@ -103,6 +106,86 @@ describe("unlinked referral Discord account choice", () => {
     expect(
       await screen.findByText("Discord linked to your account.")
     ).toBeInTheDocument();
+  });
+
+  test("keeps the account choice open instead of auto-redirecting an existing creator session", async () => {
+    global.fetch.mockImplementation((url) => {
+      if (String(url) === "/api/ref/getData") {
+        return Promise.resolve(response({ ok: true }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+
+    renderReferralAuth();
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(screen.queryByText("Referral dashboard")).not.toBeInTheDocument();
+  });
+
+  test("shows a failed Discord link explicitly while preserving the creator login", async () => {
+    global.fetch.mockImplementation((url) => {
+      if (String(url) === "/api/ref/getData") {
+        return Promise.resolve(response({ ok: false }, false));
+      }
+      if (String(url) === "/api/ref/login") {
+        return Promise.resolve(
+          response({
+            ok: true,
+            code: "creator",
+            discordLinkError:
+              "Discord linking did not complete. Try the Discord login again.",
+          })
+        );
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    renderReferralAuth();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Log in and link" }));
+    fireEvent.change(screen.getByLabelText("Referral code or login email"), {
+      target: { value: "creator@example.com" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "correct-password" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Login" }));
+
+    expect(
+      await screen.findByText(
+        "Discord linking did not complete. Try the Discord login again."
+      )
+    ).toBeInTheDocument();
+  });
+
+  test("restores the selected link action after the login component remounts", async () => {
+    const firstRender = renderReferralAuth();
+    fireEvent.click(await screen.findByRole("button", { name: "Log in and link" }));
+    firstRender.unmount();
+
+    window.history.replaceState(null, "", "/referrals/login");
+    renderReferralAuth("/referrals/login");
+    fireEvent.change(await screen.findByLabelText("Referral code or login email"), {
+      target: { value: "creator@example.com" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "correct-password" },
+    });
+    global.fetch.mockImplementation((url) => {
+      if (String(url) === "/api/ref/login") {
+        return Promise.resolve(
+          response({ ok: true, code: "creator", discordLinked: true })
+        );
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Login" }));
+
+    await waitFor(() => {
+      const loginCall = global.fetch.mock.calls.find(
+        ([url]) => String(url) === "/api/ref/login"
+      );
+      expect(JSON.parse(loginCall[1].body)).toMatchObject({ linkDiscord: true });
+    });
   });
 
   test("carries the Discord session into the existing registration flow", async () => {
