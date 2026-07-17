@@ -7,6 +7,7 @@ import {
   requireSupabaseBearerUser,
   syncSupabaseTourneyAdminAccount,
   syncSupabaseTourneyPlayerAccount,
+  updateSupabaseAccountPassword,
 } from "../server/supabase/accounts";
 
 const creatorAccount = {
@@ -21,6 +22,58 @@ const creatorAccount = {
 };
 
 describe("Supabase account compatibility", () => {
+  test("updates an existing Auth password with plaintext and stores only its hash", async () => {
+    const passwordHash = `$2b$12$${"a".repeat(53)}`;
+    const updateUserById = jest.fn().mockResolvedValue({
+      data: { user: { id: creatorAccount.user_id } },
+      error: null,
+    });
+    const adminClient = {
+      auth: { admin: { updateUserById } },
+      rpc: jest.fn(async (name) => {
+        if (name === "roo_resolve_account_alias") {
+          return { data: creatorAccount, error: null };
+        }
+        if (name === "roo_prepare_credential_operation_v2") {
+          return {
+            data: {
+              password_hash: passwordHash,
+              source_mutation: { set: { creatorPassword: passwordHash } },
+              source_preconditions: { credentialVersion: 2 },
+              status: "prepared",
+            },
+            error: null,
+          };
+        }
+        if (name === "roo_mark_credential_operation") {
+          return { data: { status: "auth_applied" }, error: null };
+        }
+        throw new Error(`Unexpected RPC: ${name}`);
+      }),
+    };
+
+    await expect(
+      updateSupabaseAccountPassword({
+        adminClient,
+        identifier: "creator@example.com",
+        operationKey: "credential:test:plaintext",
+        password: "new-password-value",
+        passwordHash,
+        sourceBackend: "supabase",
+        sourceDocumentId: "referral.creator",
+        sourceMutation: { set: { creatorPassword: passwordHash } },
+        sourcePreconditions: { credentialVersion: 2 },
+        sourceRevision: "source-r1",
+      })
+    ).resolves.toMatchObject({
+      passwordHash,
+      updated: true,
+    });
+    expect(updateUserById).toHaveBeenCalledWith(creatorAccount.user_id, {
+      password: "new-password-value",
+    });
+  });
+
   test("omits absent document fields from credential preconditions", () => {
     expect(
       buildCredentialSourcePreconditions({

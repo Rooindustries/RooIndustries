@@ -167,17 +167,11 @@ const recoverCredentialOperation = async ({ row, adminClient, sanityClient }) =>
   }
   if (row.status === "mirrored") return;
   if (row.status === "prepared") {
-    const updated = await adminClient.auth.admin.updateUserById(row.user_id, {
-      password_hash: row.password_hash,
-    });
-    if (updated.error) {
-      const error = new Error("Auth credential recovery failed.");
-      error.code = "AUTH_CREDENTIAL_RECOVERY_FAILED";
-      throw error;
-    }
-    const checkpoint = await mark(adminClient, row.operation_key, "auth_applied");
-    if (checkpoint.error) throw new Error("Credential checkpoint failed.");
-    row.status = "auth_applied";
+    const error = new Error(
+      "Credential recovery requires the original password request."
+    );
+    error.code = "CREDENTIAL_AUTH_PLAINTEXT_REQUIRED";
+    throw error;
   } else if (row.status === "auth_applied" && !row.sessions_revoked_at) {
     const checkpoint = await mark(adminClient, row.operation_key, "auth_applied");
     if (checkpoint.error) throw new Error("Credential session revocation failed.");
@@ -208,6 +202,13 @@ export const resumeSupabaseCredentialOperation = async ({
 } = {}) => {
   const row = await getSupabaseCredentialOperation({ operationKey, adminClient });
   if (!row) return { resumed: false };
+  if (
+    row.status === "prepared" &&
+    !row.source_recovery_blocked &&
+    ["sanity", "supabase"].includes(row.source_backend)
+  ) {
+    return { resumed: false, status: "prepared" };
+  }
   await recoverCredentialOperation({ row, adminClient, sanityClient });
   return { resumed: true, status: row.status };
 };

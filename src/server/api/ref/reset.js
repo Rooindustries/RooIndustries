@@ -121,6 +121,7 @@ export default async function handler(req, res) {
       try {
         credentialOperation = await updateSupabaseAccountPassword({
           identifier: referral.creatorEmail || referral.slug?.current,
+          password: normalizedPassword,
           passwordHash: hash,
           sourceBackend,
           sourceDocumentId: referral._id,
