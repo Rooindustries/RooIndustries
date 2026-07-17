@@ -269,12 +269,17 @@ export const buildCredentialSourcePreconditions = ({
     "credentialVersion",
     "resetTokenExpiresAt",
   ]) {
-    if (document?.[field] !== undefined) preconditions[field] = document[field];
+    if (document?.[field] !== undefined && document?.[field] !== null) {
+      preconditions[field] = document[field];
+    }
   }
   const normalizedResetTokenHash = String(resetTokenHash || "").trim();
   if (normalizedResetTokenHash) {
     preconditions.resetTokenHash = normalizedResetTokenHash;
-  } else if (document?.resetTokenHash !== undefined) {
+  } else if (
+    document?.resetTokenHash !== undefined &&
+    document?.resetTokenHash !== null
+  ) {
     preconditions.resetTokenHash = document.resetTokenHash;
   }
   return preconditions;
