@@ -11,7 +11,13 @@ const typedSummary = {
   payments: { source: 1, typed: 1 },
   coupons: { source: 1, typed: 1 },
   holds: { source: 1, typed: 1 },
-  email_dispatches: { source: 1, typed: 1 },
+  email_dispatches: {
+    expected: 1,
+    typed: 1,
+    preserved_tombstoned_history: 1,
+    missing_required: 0,
+    unexpected_active: 0,
+  },
   referral_ledger: { source: 1, typed: 1 },
   refunds: { source: 1, typed: 1 },
 };
@@ -127,6 +133,36 @@ describe("Supabase-primary commerce parity refresh", () => {
       p_counters: expect.objectContaining({
         parity: expect.objectContaining({ ok: false, failures: 1 }),
       }),
+    }));
+  });
+
+  test("fails on a missing required email without treating retained history as drift", async () => {
+    const { client, rpc } = clientWith();
+    const originalRpc = client.rpc;
+    client.rpc = jest.fn(async (name, parameters = {}) => {
+      if (name === "roo_commerce_typed_gap_summary") {
+        return {
+          data: {
+            ...typedSummary,
+            email_dispatches: {
+              ...typedSummary.email_dispatches,
+              missing_required: 1,
+            },
+          },
+          error: null,
+        };
+      }
+      return originalRpc(name, parameters);
+    });
+
+    await expect(refreshCommerceParityIfStale({
+      env,
+      force: true,
+      sanityClient: { fetch: jest.fn(async () => [document]) },
+      supabaseClient: client,
+    })).rejects.toMatchObject({ code: "COMMERCE_PARITY_FAILED" });
+    expect(rpc).toHaveBeenCalledWith("roo_finish_sync_run", expect.objectContaining({
+      p_status: "failed",
     }));
   });
 

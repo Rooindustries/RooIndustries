@@ -50,7 +50,7 @@ const collectTypedGapFailures = (value, failures, path = "") => {
   if (typeof value === "number") {
     if (
       value !== 0 &&
-      /mismatch|duplicate|unsafe|missing_creator|ambiguous/i.test(path)
+      /mismatch|duplicate|unsafe|missing|ambiguous|orphan|unexpected/i.test(path)
     ) {
       failures.push({ category: "typed_gap", path });
     }
@@ -94,7 +94,6 @@ const compareCommerceParity = async ({ documents, client }) => {
     "payments",
     "coupons",
     "holds",
-    "email_dispatches",
     "referral_ledger",
     "refunds",
   ]) {
