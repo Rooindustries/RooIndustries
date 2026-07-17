@@ -328,22 +328,20 @@ export default function ReservationBanner() {
 
   const bannerWidthClass = (() => {
     if (isPaymentScreen) {
-      return isMobileWidth
-        ? "w-full max-w-full"
-        : "w-full max-w-[36rem] lg:max-w-[50rem]";
+      return isMobileWidth ? "w-auto max-w-[95vw]" : "w-auto max-w-[46rem]";
     }
     return isMobileWidth
       ? "w-auto max-w-[90vw] sm:max-w-[30rem]"
-      : "w-full max-w-[42rem] lg:max-w-[50rem]";
+      : "w-auto max-w-[46rem]";
   })();
 
   const paddingClass = isPaymentScreen
     ? isMobileWidth
       ? "py-1.5 px-3 sm:px-4"
-      : "py-3.5 px-5 lg:px-6"
+      : "py-2 px-5"
     : isMobileWidth
     ? "py-2 px-3 sm:px-4"
-    : "py-3.5 px-5 lg:px-6";
+    : "py-2 px-5";
 
   const innerFlexDirectionClass = isPaymentScreen
     ? isMobileWidth
@@ -393,7 +391,9 @@ export default function ReservationBanner() {
             `}
       >
         {/* Text Block */}
-        <div className={`min-w-0 z-10 ${textAlignmentClass}`}>
+        <div
+          className={`min-w-0 z-10 ${textAlignmentClass} lg:flex lg:items-baseline lg:gap-2.5`}
+        >
           <p className={`font-semibold text-ink truncate drop-shadow-md ${titleSizeClass}`}>
             Slot {holdLocalTimeLabel || "--"}
             {hold?.packageTitle
