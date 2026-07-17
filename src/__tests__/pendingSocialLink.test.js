@@ -16,6 +16,13 @@ const pendingAccount = {
   principal_id: "40000000-0000-4000-8000-000000000004",
   roles: [],
 };
+const tourneyAccount = {
+  principal_id: primaryAccount.principal_id,
+  roles: ["tourney_player"],
+  status: "active",
+  tourney_active: true,
+  tourney_username: "player-one",
+};
 
 describe("pending Discord referral linking", () => {
   test("seals and resolves the pending Discord identity without an OAuth session cookie", async () => {
@@ -93,6 +100,61 @@ describe("pending Discord referral linking", () => {
     ).toBeNull();
   });
 
+  test("scopes a signed pending Discord proof to the Tourney login flow", () => {
+    const now = Date.parse("2026-07-17T08:00:00.000Z");
+    const env = {
+      NODE_ENV: "production",
+      TOURNEY_SESSION_SECRET: "pending-tourney-link-test-secret",
+    };
+    const cookie = createPendingDiscordLinkCookie({
+      env,
+      flow: "tourney",
+      intentId: "11111111-1111-4111-8111-111111111111",
+      now,
+      userId: pendingUserId,
+    });
+    const requestFor = (value) => ({
+      headers: { cookie: `${cookie.name}=${encodeURIComponent(value)}` },
+    });
+
+    expect(cookie.name).toBe("roo_pending_tourney_discord_link");
+    expect(
+      readPendingDiscordLink({
+        env,
+        flow: "tourney",
+        now: now + 1_000,
+        request: requestFor(cookie.value),
+      })
+    ).toEqual({
+      intentId: "11111111-1111-4111-8111-111111111111",
+      userId: pendingUserId,
+    });
+    expect(
+      readPendingDiscordLink({
+        env,
+        flow: "tourney",
+        now: now + 1_000,
+        request: requestFor(`${cookie.value}tampered`),
+      })
+    ).toBeNull();
+    expect(
+      readPendingDiscordLink({
+        env,
+        flow: "tourney",
+        now: now + 15 * 60 * 1_000,
+        request: requestFor(cookie.value),
+      })
+    ).toBeNull();
+    expect(
+      readPendingDiscordLink({
+        env: { ...env, REF_SESSION_SECRET: env.TOURNEY_SESSION_SECRET },
+        flow: "referral",
+        now: now + 1_000,
+        request: requestFor(cookie.value),
+      })
+    ).toBeNull();
+  });
+
   test("merges the temporary Discord principal into the creator principal", async () => {
     const rpc = jest.fn((name) => {
       if (name === "roo_create_reauth_grant") {
@@ -145,6 +207,39 @@ describe("pending Discord referral linking", () => {
         p_primary_grant_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
         p_secondary_grant_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
       })
+    );
+  });
+
+  test("merges the temporary Discord principal into an active Tourney principal", async () => {
+    const rpc = jest.fn((name) => {
+      if (name === "roo_create_reauth_grant") {
+        return Promise.resolve({ data: { created: true }, error: null });
+      }
+      return Promise.resolve({
+        data: { principal_id: tourneyAccount.principal_id },
+        error: null,
+      });
+    });
+
+    await expect(
+      linkPendingDiscordIdentity({
+        accountScope: "tourney",
+        adminClient: { rpc },
+        pendingUser: {
+          id: pendingUserId,
+          identities: [{ provider: "discord" }],
+        },
+        primaryAccount: tourneyAccount,
+        primaryUserId,
+        resolveAccount: jest.fn().mockResolvedValue(pendingAccount),
+      })
+    ).resolves.toEqual({
+      linked: true,
+      account: { principal_id: tourneyAccount.principal_id },
+    });
+    expect(rpc).toHaveBeenLastCalledWith(
+      "roo_merge_account_principals",
+      expect.any(Object)
     );
   });
 

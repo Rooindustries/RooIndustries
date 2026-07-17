@@ -5,18 +5,43 @@ import { createSupabaseAdminClient } from "./adminClient.js";
 import { readRequestCookie } from "./reauth.js";
 
 export const PENDING_DISCORD_LINK_COOKIE = "roo_pending_discord_link";
+export const PENDING_TOURNEY_DISCORD_LINK_COOKIE =
+  "roo_pending_tourney_discord_link";
 export const PENDING_DISCORD_LINK_MAX_AGE_SECONDS = 15 * 60;
 
-const pendingLinkSecret = (env = process.env) => {
-  const configured = String(env.REF_SESSION_SECRET || "").trim();
+const normalizePendingLinkFlow = (value) =>
+  String(value || "").trim().toLowerCase() === "tourney"
+    ? "tourney"
+    : "referral";
+
+const pendingLinkCookieName = (flow) =>
+  normalizePendingLinkFlow(flow) === "tourney"
+    ? PENDING_TOURNEY_DISCORD_LINK_COOKIE
+    : PENDING_DISCORD_LINK_COOKIE;
+
+const pendingLinkSecret = (env = process.env, flow = "referral") => {
+  const normalizedFlow = normalizePendingLinkFlow(flow);
+  const configured = String(
+    normalizedFlow === "tourney"
+      ? env.TOURNEY_SESSION_SECRET || env.REF_SESSION_SECRET || ""
+      : env.REF_SESSION_SECRET || ""
+  ).trim();
   if (configured) return configured;
-  if (env.NODE_ENV !== "production") return "dev_ref_session_secret";
-  throw new Error("REF_SESSION_SECRET is required for pending Discord links.");
+  if (env.NODE_ENV !== "production") {
+    return normalizedFlow === "tourney"
+      ? "dev_tourney_session_secret"
+      : "dev_ref_session_secret";
+  }
+  throw new Error(
+    normalizedFlow === "tourney"
+      ? "TOURNEY_SESSION_SECRET is required for pending Tourney Discord links."
+      : "REF_SESSION_SECRET is required for pending Discord links."
+  );
 };
 
-const signPendingLink = (value, env) =>
+const signPendingLink = (value, env, flow) =>
   crypto
-    .createHmac("sha256", pendingLinkSecret(env))
+    .createHmac("sha256", pendingLinkSecret(env, flow))
     .update(value)
     .digest("base64url");
 
@@ -59,10 +84,12 @@ const serializePendingLinkCookie = ({
 
 export const createPendingDiscordLinkCookie = ({
   env = process.env,
+  flow = "referral",
   intentId,
   now = Date.now(),
   userId,
 } = {}) => {
+  const normalizedFlow = normalizePendingLinkFlow(flow);
   const normalizedUserId = String(userId || "").trim();
   const normalizedIntentId = String(intentId || "").trim();
   if (!normalizedUserId || !normalizedIntentId) {
@@ -72,21 +99,25 @@ export const createPendingDiscordLinkCookie = ({
   const payload = Buffer.from(
     JSON.stringify({
       exp: issuedAt + PENDING_DISCORD_LINK_MAX_AGE_SECONDS,
+      flow: normalizedFlow,
       iat: issuedAt,
       intentId: normalizedIntentId,
       userId: normalizedUserId,
-      v: 1,
+      v: 2,
     })
   ).toString("base64url");
   return {
-    name: PENDING_DISCORD_LINK_COOKIE,
-    value: `${payload}.${signPendingLink(payload, env)}`,
+    name: pendingLinkCookieName(normalizedFlow),
+    value: `${payload}.${signPendingLink(payload, env, normalizedFlow)}`,
     ...pendingLinkCookieOptions(env),
   };
 };
 
-export const clearPendingDiscordLinkCookie = (env = process.env) => ({
-  name: PENDING_DISCORD_LINK_COOKIE,
+export const clearPendingDiscordLinkCookie = ({
+  env = process.env,
+  flow = "referral",
+} = {}) => ({
+  name: pendingLinkCookieName(flow),
   value: "",
   ...pendingLinkCookieOptions(env),
   maxAge: 0,
@@ -107,18 +138,25 @@ export const appendPendingDiscordLinkCookie = (res, cookie) => {
 
 export const readPendingDiscordLink = ({
   env = process.env,
+  flow = "referral",
   now = Date.now(),
   request,
 } = {}) => {
-  const token = readRequestCookie(request, PENDING_DISCORD_LINK_COOKIE);
+  const normalizedFlow = normalizePendingLinkFlow(flow);
+  const token = readRequestCookie(request, pendingLinkCookieName(normalizedFlow));
   const [payload, signature, extra] = String(token || "").split(".");
   if (!payload || !signature || extra) return null;
-  if (!safeEqual(signature, signPendingLink(payload, env))) return null;
+  if (!safeEqual(signature, signPendingLink(payload, env, normalizedFlow))) {
+    return null;
+  }
   try {
     const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
     const currentTime = Math.floor(now / 1000);
+    const validVersion =
+      (parsed?.v === 2 && parsed.flow === normalizedFlow) ||
+      (parsed?.v === 1 && normalizedFlow === "referral" && !parsed.flow);
     if (
-      parsed?.v !== 1 ||
+      !validVersion ||
       !parsed.userId ||
       !parsed.intentId ||
       Number(parsed.iat) > currentTime + 60 ||
@@ -138,10 +176,11 @@ export const readPendingDiscordLink = ({
 export const resolvePendingDiscordUser = async ({
   adminClient = createSupabaseAdminClient(),
   env = process.env,
+  flow = "referral",
   now = Date.now(),
   request,
 } = {}) => {
-  const pendingLink = readPendingDiscordLink({ env, now, request });
+  const pendingLink = readPendingDiscordLink({ env, flow, now, request });
   if (!pendingLink) return null;
   const result = await adminClient.auth.admin.getUserById(pendingLink.userId);
   if (result.error) throw result.error;
@@ -164,13 +203,33 @@ const hasDomainAccount = (account) =>
     (role) => role === "creator" || String(role).startsWith("tourney_")
   ) || Boolean(account?.creator_legacy_sanity_id || account?.tourney_legacy_player_id);
 
+const isActivePrimaryAccount = (account, accountScope) => {
+  if (!account?.principal_id || account?.status === "deleted") return false;
+  if (accountScope === "tourney") {
+    return (
+      (account.roles || []).some((role) => String(role).startsWith("tourney_")) &&
+      account.tourney_active !== false &&
+      Boolean(account.tourney_username)
+    );
+  }
+  return (
+    (account.roles || []).includes("creator") &&
+    account.creator_active !== false
+  );
+};
+
 export const linkPendingDiscordIdentity = async ({
+  accountScope = "referral",
   adminClient = createSupabaseAdminClient(),
   pendingUser,
   primaryAccount,
   primaryUserId,
   resolveAccount = resolveSupabaseAccountByUserId,
 } = {}) => {
+  const normalizedAccountScope =
+    String(accountScope || "").trim().toLowerCase() === "tourney"
+      ? "tourney"
+      : "referral";
   const pendingUserId = String(pendingUser?.id || "").trim();
   const targetUserId = String(primaryUserId || "").trim();
   if (!pendingUserId || !targetUserId || !providersForUser(pendingUser).has("discord")) {
@@ -187,11 +246,15 @@ export const linkPendingDiscordIdentity = async ({
       : resolveAccount({ userId: targetUserId, adminClient }),
   ]);
   if (
-    !resolvedPrimaryAccount?.principal_id ||
-    !(resolvedPrimaryAccount.roles || []).includes("creator") ||
-    resolvedPrimaryAccount.creator_active === false
+    !isActivePrimaryAccount(resolvedPrimaryAccount, normalizedAccountScope)
   ) {
-    return { linked: false, reason: "creator_account_missing" };
+    return {
+      linked: false,
+      reason:
+        normalizedAccountScope === "tourney"
+          ? "tourney_account_missing"
+          : "creator_account_missing",
+    };
   }
   if (pendingAccount?.principal_id === resolvedPrimaryAccount.principal_id) {
     return {

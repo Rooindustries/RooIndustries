@@ -66,4 +66,83 @@ describe("Tourney login form", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Invalid login.");
     expect(assign).not.toHaveBeenCalled();
   });
+
+  test("submits the pending Discord proof choice and lands on the persistent success outcome", async () => {
+    global.fetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true, discordLinked: true }),
+    });
+    render(
+      <TourneyLoginForm
+        buttonLabel="Log in and link Discord"
+        linkDiscord
+        navigate={assign}
+        redirectTo="/tourney/manage"
+        showRegistrationLink
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Discord username or email"), {
+      target: { value: "player-one" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "correct-password" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Log in and link Discord" })
+    );
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith("/api/tourney/login", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          username: "player-one",
+          password: "correct-password",
+          rememberMe: false,
+          redirectTo: "/tourney/manage",
+          linkDiscord: true,
+        }),
+      });
+      expect(assign).toHaveBeenCalledWith("/tourney?notice=discord-linked");
+    });
+    expect(
+      screen.getByRole("link", { name: "Register for the tournament." })
+    ).toHaveAttribute("href", "/tourney/register");
+  });
+
+  test("keeps a wrong-password error visible without navigating", async () => {
+    global.fetch.mockResolvedValue({
+      ok: false,
+      json: async () => ({
+        ok: false,
+        error: "Invalid Discord username, email, or password. Wait for approval before trying to log in.",
+      }),
+    });
+    render(
+      <TourneyLoginForm
+        buttonLabel="Log in and link Discord"
+        linkDiscord
+        navigate={assign}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Discord username or email"), {
+      target: { value: "player-one" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "wrong-password" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Log in and link Discord" })
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Invalid Discord username, email, or password. Wait for approval before trying to log in."
+    );
+    expect(assign).not.toHaveBeenCalled();
+  });
 });

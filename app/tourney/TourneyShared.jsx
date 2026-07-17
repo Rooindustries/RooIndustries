@@ -4747,6 +4747,11 @@ const LockStyles = () => (
       white-space: nowrap;
     }
 
+    .cs-subtitle.is-wrapped {
+      max-width: 36rem;
+      white-space: normal;
+    }
+
     .cs-login {
       display: grid;
       gap: 12px;
@@ -5006,8 +5011,11 @@ export const LockScreen = ({
   subtitle = "Use your tourney account.",
   note = "Assigned accounts only.",
   buttonLabel = "Sign in",
+  linkDiscord = false,
   redirectTo = "/tourney",
+  showRegistrationLink = false,
   socialLogin = null,
+  wrapSubtitle = false,
 }) => (
   <>
     <TourneyTelemetry />
@@ -5028,12 +5036,20 @@ export const LockScreen = ({
           <h1 id="tourney-login-title" className="cs-heading cs-r3">
             {heading}
           </h1>
-          <p className="cs-subtitle cs-r4">{subtitle}</p>
+          <p
+            className={
+              wrapSubtitle ? "cs-subtitle cs-r4 is-wrapped" : "cs-subtitle cs-r4"
+            }
+          >
+            {subtitle}
+          </p>
           <TourneyLoginForm
             buttonLabel={buttonLabel}
             initialError={error}
+            linkDiscord={linkDiscord}
             note={note}
             redirectTo={redirectTo}
+            showRegistrationLink={showRegistrationLink}
             socialLogin={socialLogin}
           />
         </section>
