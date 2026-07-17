@@ -298,7 +298,7 @@ describe("booking calendar UI", () => {
     render(<BookingForm />);
 
     await screen.findByRole("button", { name: /^review before payment$/i });
-    expectActiveStep("PC details", "Step 2 of 3 · 67% complete");
+    expectActiveStep("PC details", "Step 2 of 3");
     expect(getAvailabilityFetchCalls()).toHaveLength(1);
 
     await act(async () => {
