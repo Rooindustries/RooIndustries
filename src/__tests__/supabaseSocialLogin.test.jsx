@@ -92,11 +92,17 @@ describe("Supabase social login", () => {
   });
 
   test("uses linkIdentity without signing out the authenticated account", async () => {
+    const onProofConsumed = jest.fn();
     render(
       <SupabaseSocialLogin
         action="link"
         flow="tourney"
+        linkProof={{
+          confirmed: true,
+          expiresAt: "2099-01-01T00:00:00.000Z",
+        }}
         nextPath="/tourney"
+        onProofConsumed={onProofConsumed}
         providerIds={["discord"]}
         variant="tourney"
       />
@@ -114,6 +120,53 @@ describe("Supabase social login", () => {
     });
     expect(mockSignOut).not.toHaveBeenCalled();
     expect(mockSignInWithOAuth).not.toHaveBeenCalled();
+    expect(onProofConsumed).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps linkIdentity disabled until server-confirmed proof exists", () => {
+    render(
+      <SupabaseSocialLogin
+        action="link"
+        flow="referral"
+        nextPath="/referrals/dashboard"
+        providerIds={["discord"]}
+      />
+    );
+
+    const link = screen.getByRole("button", { name: "Link Discord" });
+    expect(link).toBeDisabled();
+    fireEvent.click(link);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(mockLinkIdentity).not.toHaveBeenCalled();
+  });
+
+  test("uses provider sign-in for guarded orphan recovery without dropping the primary session", async () => {
+    render(
+      <SupabaseSocialLogin
+        action="reclaim"
+        flow="referral"
+        linkProof={{
+          confirmed: true,
+          expiresAt: "2099-01-01T00:00:00.000Z",
+        }}
+        nextPath="/referrals/dashboard"
+        providerIds={["discord"]}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Recover Discord" }));
+    await waitFor(() =>
+      expect(mockSignInWithOAuth).toHaveBeenCalledWith({
+        provider: "discord",
+        options: {
+          redirectTo:
+            "http://localhost/auth/callback?intent=11111111-1111-4111-8111-111111111111",
+          scopes: "identify email",
+        },
+      })
+    );
+    expect(mockSignOut).not.toHaveBeenCalled();
+    expect(mockLinkIdentity).not.toHaveBeenCalled();
   });
 
   test("requests guild joining only for Tourney Discord OAuth", async () => {

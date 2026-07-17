@@ -3,6 +3,8 @@ const mockCreateOAuthIntent = jest.fn();
 const mockClearNextSupabaseSession = jest.fn();
 const mockConsumeAuthRateLimit = jest.fn();
 const mockReadReauthToken = jest.fn();
+const mockReadRecovery = jest.fn();
+const mockMatchesRecovery = jest.fn();
 const originalTourneyDatabaseMode = process.env.TOURNEY_DATABASE_MODE;
 
 jest.mock("../server/supabase/domainIdentity", () => ({
@@ -28,7 +30,18 @@ jest.mock("../server/supabase/authRateLimit", () => ({
 }));
 
 jest.mock("../server/supabase/reauth", () => ({
+  clearReauthCookie: () => ({
+    name: "roo_reauth_grant",
+    value: "",
+    maxAge: 0,
+    path: "/",
+  }),
   readReauthToken: (...args) => mockReadReauthToken(...args),
+}));
+
+jest.mock("../server/supabase/orphanIdentityReclaim", () => ({
+  matchesReferralOrphanReclaim: (...args) => mockMatchesRecovery(...args),
+  readReferralOrphanReclaim: (...args) => mockReadRecovery(...args),
 }));
 
 const createResponse = (payload, init = {}) => {
@@ -88,6 +101,8 @@ describe("Supabase OAuth intent route", () => {
     mockClearNextSupabaseSession.mockResolvedValue(undefined);
     mockConsumeAuthRateLimit.mockResolvedValue({ allowed: true, retryAfter: 60 });
     mockReadReauthToken.mockReturnValue("recent-auth-token");
+    mockReadRecovery.mockReturnValue(null);
+    mockMatchesRecovery.mockReturnValue(false);
     mockCreateOAuthIntent.mockResolvedValue({
       id: "11111111-1111-4111-8111-111111111111",
       token: "opaque-one-time-token",
@@ -172,6 +187,9 @@ describe("Supabase OAuth intent route", () => {
         httpOnly: true,
       })
     );
+    expect(response.cookies.values).toContainEqual(
+      expect.objectContaining({ name: "roo_reauth_grant", maxAge: 0 })
+    );
     expect(response.headers.get("cache-control")).toBe("private, no-store");
   });
 
@@ -219,6 +237,55 @@ describe("Supabase OAuth intent route", () => {
     );
     expect(response.status).toBe(400);
     expect(mockCreateOAuthIntent).not.toHaveBeenCalled();
+  });
+
+  test("creates referral recovery only from the signed conflict proof", async () => {
+    const recovery = {
+      originalIntentId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      principalId: "d52be0ea-ec6b-47dd-9373-4e30c9dcc6a1",
+      provider: "discord",
+      targetUserId: "e71a5687-daa6-4371-9700-5aef798fdd03",
+    };
+    const domainIdentity = {
+      account: {
+        connected_providers: ["email"],
+        creator_active: true,
+        principal_id: recovery.principalId,
+        roles: ["creator"],
+        status: "active",
+      },
+      domainSubject: "creator-one",
+      user: { id: recovery.targetUserId },
+    };
+    mockResolveExactDomainIdentity.mockResolvedValue(domainIdentity);
+    mockReadRecovery.mockReturnValue(recovery);
+    mockMatchesRecovery.mockReturnValue(true);
+
+    const response = await POST(
+      makeRequest({
+        action: "reclaim",
+        flow: "referral",
+        provider: "discord",
+        returnPath: "/referrals/dashboard",
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockMatchesRecovery).toHaveBeenCalledWith({
+      account: domainIdentity.account,
+      recovery,
+      user: domainIdentity.user,
+    });
+    expect(mockCreateOAuthIntent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "reclaim",
+        flow: "referral",
+        provider: "discord",
+        recoveryForIntentId: recovery.originalIntentId,
+        reauthToken: "recent-auth-token",
+        targetUserId: recovery.targetUserId,
+      })
+    );
   });
 
   test("uses separate cookies for concurrent tab intents", async () => {

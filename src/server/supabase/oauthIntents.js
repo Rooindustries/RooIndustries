@@ -26,6 +26,7 @@ export const createOAuthIntent = async ({
   domainSubject = "",
   flow,
   provider,
+  recoveryForIntentId = "",
   reauthPurpose = "",
   reauthToken = "",
   returnPath,
@@ -43,6 +44,7 @@ export const createOAuthIntent = async ({
       expires_at: expiresAt,
       flow,
       provider,
+      recovery_for_intent_id: recoveryForIntentId || null,
       reauth_purpose: reauthPurpose || null,
       reauth_token_hash: reauthToken ? sha256(reauthToken) : null,
       return_path: returnPath,
@@ -51,9 +53,30 @@ export const createOAuthIntent = async ({
     },
   });
   if (result.error) {
-    throw new Error("OAuth intent could not be created.");
+    const error = new Error("OAuth intent could not be created.");
+    error.code = result.error.code || "OAUTH_INTENT_FAILED";
+    throw error;
   }
   return { token, expiresAt, id: result.data?.id || "" };
+};
+
+export const failOAuthIntent = async ({
+  failureCode,
+  intentId,
+  token,
+  adminClient = createSupabaseAdminClient(),
+} = {}) => {
+  const result = await adminClient.rpc("roo_fail_oauth_intent", {
+    p_failure_code: String(failureCode || "").trim().toLowerCase(),
+    p_intent_id: String(intentId || "").trim().toLowerCase(),
+    p_token_hash: sha256(token),
+  });
+  if (result.error || !result.data) {
+    const error = new Error("OAuth intent could not be failed safely.");
+    error.code = result.error?.code || "OAUTH_INTENT_FAILED";
+    throw error;
+  }
+  return result.data;
 };
 
 export const finalizeOAuthIntent = async ({

@@ -5,6 +5,17 @@ import SupabaseSocialLogin from "./SupabaseSocialLogin";
 
 const allProviders = ["google", "discord"];
 
+const validProof = (proof) => {
+  const expiresAt = Date.parse(String(proof?.expiresAt || ""));
+  return proof?.confirmed === true && Number.isFinite(expiresAt) && expiresAt > Date.now();
+};
+
+const proofExpiryLabel = (expiresAt) =>
+  new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(expiresAt));
+
 export default function ConnectedAccounts({
   flow,
   nextPath,
@@ -15,7 +26,9 @@ export default function ConnectedAccounts({
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [linkProof, setLinkProof] = useState(null);
   const [syncingProvider, setSyncingProvider] = useState("");
+  const proofExpiryTimer = useRef(null);
   const unlinkPollTimer = useRef(null);
   const mounted = useRef(false);
 
@@ -28,20 +41,23 @@ export default function ConnectedAccounts({
       );
       const data = await response.json().catch(() => ({}));
       if (!mounted.current) return;
-      setState(
-        response.ok && data.ok
-          ? { ...data, loading: false, error: "" }
-          : {
-              loading: false,
-              error: data.error || "Account connections are temporarily unavailable.",
-            }
-      );
+      if (response.ok && data.ok) {
+        setState({ ...data, loading: false, error: "" });
+        setLinkProof(validProof(data.linkProof) ? data.linkProof : null);
+      } else {
+        setState({
+          loading: false,
+          error: data.error || "Account connections are temporarily unavailable.",
+        });
+        setLinkProof(null);
+      }
     } catch {
       if (mounted.current) {
         setState({
           loading: false,
           error: "Account connections are temporarily unavailable.",
         });
+        setLinkProof(null);
       }
     }
   }, [flow]);
@@ -52,8 +68,28 @@ export default function ConnectedAccounts({
     return () => {
       mounted.current = false;
       if (unlinkPollTimer.current) clearTimeout(unlinkPollTimer.current);
+      if (proofExpiryTimer.current) clearTimeout(proofExpiryTimer.current);
     };
   }, [load]);
+
+  useEffect(() => {
+    if (proofExpiryTimer.current) clearTimeout(proofExpiryTimer.current);
+    if (!validProof(linkProof)) {
+      if (linkProof) setLinkProof(null);
+      return undefined;
+    }
+    const delay = Math.min(
+      2_147_000_000,
+      Math.max(0, Date.parse(linkProof.expiresAt) - Date.now())
+    );
+    proofExpiryTimer.current = setTimeout(() => {
+      setLinkProof(null);
+      setMessage("Identity confirmation expired. Confirm your identity again.");
+    }, delay);
+    return () => {
+      if (proofExpiryTimer.current) clearTimeout(proofExpiryTimer.current);
+    };
+  }, [linkProof]);
 
   const managedProviders = allProviders.filter((provider) => providerIds.includes(provider));
   const isTourney = variant === "tourney";
@@ -86,6 +122,11 @@ export default function ConnectedAccounts({
   const linked = new Set(state.providers || []);
   const missing = managedProviders.filter((provider) => !linked.has(provider));
   const connectedSocial = managedProviders.filter((provider) => linked.has(provider));
+  const recoveryProvider = missing.includes(state.recovery?.provider)
+    ? state.recovery.provider
+    : "";
+  const standardMissing = missing.filter((provider) => provider !== recoveryProvider);
+  const hasLinkProof = validProof(linkProof);
   const canUnlink = (state.unlinkableProviders || []).length > 1;
   const unlinkable = new Set(state.unlinkableProviders || []);
 
@@ -104,9 +145,16 @@ export default function ConnectedAccounts({
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.ok) throw new Error(data.error || "Unable to confirm your identity.");
+      if (!data.expiresAt || Date.parse(data.expiresAt) <= Date.now()) {
+        throw new Error("Identity confirmation did not return a valid expiry.");
+      }
       setPassword("");
-      setMessage("Identity confirmed. You can link a provider for the next 10 minutes.");
+      setLinkProof({ confirmed: true, expiresAt: data.expiresAt });
+      setMessage(
+        `Identity confirmed until ${proofExpiryLabel(data.expiresAt)}. This proof allows one link attempt.`
+      );
     } catch (error) {
+      setLinkProof(null);
       setMessage(error.message || "Unable to confirm your identity.");
     } finally {
       setBusy(false);
@@ -283,12 +331,51 @@ export default function ConnectedAccounts({
           variant={variant}
         />
       ) : null}
+      {recoveryProvider ? (
+        <p className={isTourney ? "tourney-form-message" : "mt-3 text-xs leading-5 text-danger-text"} role="alert">
+          {`${recoveryProvider[0].toUpperCase() + recoveryProvider.slice(1)} is held by an unused sign-in. Confirm your identity, then use Recover to release only that orphan and finish linking.`}
+        </p>
+      ) : null}
       {missing.length > 0 ? (
+        <p className={isTourney ? "tourney-form-message" : "mt-3 text-xs leading-5 text-ink-muted"}>
+          {hasLinkProof
+            ? `Link proof confirmed until ${proofExpiryLabel(linkProof.expiresAt)}. It will be used by the next link attempt.`
+            : "Confirm your identity to enable provider linking."}
+        </p>
+      ) : null}
+      {recoveryProvider ? (
+        <SupabaseSocialLogin
+          action="reclaim"
+          flow={flow}
+          linkProof={linkProof}
+          nextPath={nextPath}
+          onProofConsumed={() => {
+            setLinkProof(null);
+            setMessage("Identity confirmation used. Complete provider recovery to finish linking.");
+          }}
+          onProofFailure={() => {
+            setLinkProof(null);
+            setMessage("Identity confirmation could not be used. Confirm your identity again.");
+          }}
+          providerIds={[recoveryProvider]}
+          variant={variant}
+        />
+      ) : null}
+      {standardMissing.length > 0 ? (
         <SupabaseSocialLogin
           action="link"
           flow={flow}
+          linkProof={linkProof}
           nextPath={nextPath}
-          providerIds={missing}
+          onProofConsumed={() => {
+            setLinkProof(null);
+            setMessage("Identity confirmation used. Complete provider sign-in to finish linking.");
+          }}
+          onProofFailure={() => {
+            setLinkProof(null);
+            setMessage("Identity confirmation could not be used. Confirm your identity again.");
+          }}
+          providerIds={standardMissing}
           variant={variant}
         />
       ) : null}

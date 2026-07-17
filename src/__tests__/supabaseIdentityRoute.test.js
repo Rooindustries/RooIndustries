@@ -5,6 +5,7 @@ const mockUnlinkIdentity = jest.fn();
 const mockResolveAccount = jest.fn();
 const mockRpc = jest.fn();
 const mockReadReauthToken = jest.fn();
+const mockReadReauthGrantStatus = jest.fn();
 const mockQueueIdentityUnlink = jest.fn();
 const mockResolveExactDomainIdentity = jest.fn();
 const originalTourneyDatabaseMode = process.env.TOURNEY_DATABASE_MODE;
@@ -56,7 +57,19 @@ jest.mock("../server/supabase/domainIdentity", () => ({
 jest.mock("../server/supabase/reauth", () => ({
   clearReauthCookie: () => ({ name: "roo_reauth_grant", value: "", maxAge: 0, path: "/" }),
   hashReauthToken: (value) => `hash:${value}`,
+  readReauthGrantStatus: (...args) => mockReadReauthGrantStatus(...args),
   readReauthToken: (...args) => mockReadReauthToken(...args),
+}));
+
+jest.mock("../server/supabase/orphanIdentityReclaim", () => ({
+  clearReferralOrphanReclaimCookie: () => ({
+    name: "roo_referral_orphan_identity_reclaim",
+    value: "",
+    maxAge: 0,
+    path: "/",
+  }),
+  matchesReferralOrphanReclaim: () => false,
+  readReferralOrphanReclaim: () => null,
 }));
 
 jest.mock("../server/tourney/discordDesiredState", () => ({
@@ -137,6 +150,7 @@ describe("Supabase connected identity route", () => {
       user,
     });
     mockReadReauthToken.mockReturnValue("reauth-token");
+    mockReadReauthGrantStatus.mockResolvedValue(null);
     mockRpc.mockResolvedValue({ data: {}, error: null });
     mockUnlinkIdentity.mockResolvedValue({ error: null });
     mockQueueIdentityUnlink.mockResolvedValue({ syncPending: false });
@@ -162,6 +176,9 @@ describe("Supabase connected identity route", () => {
       unlinkableProviders: ["discord", "email"],
     });
     expect(JSON.stringify(body)).not.toContain("@auth.rooindustries.invalid");
+    expect(response.cookies.getAll()).toContainEqual(
+      expect.objectContaining({ name: "roo_reauth_grant", maxAge: 0 })
+    );
   });
 
   test("queues provider-bound grant consumption inside the durable unlink command", async () => {
