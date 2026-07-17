@@ -2,6 +2,9 @@ import React from "react";
 import { motion } from "framer-motion";
 import PriceDisplay from "./PriceDisplay";
 import SiteDialog from "./SiteDialog";
+import packageContent from "../lib/packageContent";
+
+const { getPackageFeatureItems } = packageContent;
 
 const itemVariants = {
   hidden: { opacity: 0, y: 15 },
@@ -18,43 +21,7 @@ export default function PackageDetailsModal({
   pkg,
   renderFeature,
 }) {
-  const rawFeatures = Array.isArray(pkg?.features) ? pkg.features : [];
-  const normalizedFeatures = rawFeatures
-    .map((item) => {
-      if (typeof item === "string") return item.trim();
-      if (item && typeof item.label === "string") return item.label.trim();
-      if (item && typeof item.text === "string") return item.text.trim();
-      if (item && typeof item.title === "string") return item.title.trim();
-      return "";
-    })
-    .filter(Boolean);
-
-  const fallbackChecklist = Array.isArray(pkg?.featureChecklist)
-    ? pkg.featureChecklist
-        .map((item) => {
-          if (!item) return null;
-          if (typeof item === "string") {
-            return { label: item.trim(), included: true };
-          }
-          const label =
-            typeof item.label === "string"
-              ? item.label.trim()
-              : typeof item.text === "string"
-              ? item.text.trim()
-              : typeof item.title === "string"
-              ? item.title.trim()
-              : "";
-          if (!label) return null;
-          const included =
-            typeof item.included === "boolean" ? item.included : true;
-          return { label, included };
-        })
-        .filter(Boolean)
-    : [];
-
-  const featureItems = normalizedFeatures.length
-    ? normalizedFeatures.map((label) => ({ label, included: true }))
-    : fallbackChecklist;
+  const featureItems = getPackageFeatureItems(pkg);
   const tagText = pkg?.tag || "Roo Industries Package";
 
   return (
@@ -89,8 +56,13 @@ export default function PackageDetailsModal({
             className={`flex items-start gap-2 ${
               item.included === false ? "opacity-40" : ""
             }`}
+            aria-label={`${item.label}: ${
+              item.included ? "included" : "not included"
+            }`}
           >
-            <span className="text-accent mt-1">&#10004;</span>
+            <span className="text-accent mt-1" aria-hidden="true">
+              {item.included ? "\u2713" : "\u25CB"}
+            </span>
             <span className="flex-1">
               {renderFeature ? renderFeature(item.label) : item.label}
             </span>

@@ -131,6 +131,43 @@ const applyPackageContentOverrides = (pkg) => {
 const applyPackagesContentOverrides = (packages) =>
   Array.isArray(packages) ? packages.map(applyPackageContentOverrides) : packages;
 
+const toFeatureItems = (items, included = true) =>
+  Array.isArray(items)
+    ? items
+        .map((item) => {
+          const rawLabel =
+            typeof item === "string"
+              ? item
+              : item?.label || item?.text || item?.title || "";
+          const label = normalizePackageText(rawLabel);
+          if (!label) return null;
+
+          return {
+            label,
+            included:
+              typeof item?.included === "boolean" ? item.included : included,
+          };
+        })
+        .filter(Boolean)
+    : [];
+
+const getPackageFeatureItems = (pkg = {}) => {
+  const normalizedPackage = applyPackageContentOverrides(pkg);
+  const detailedFeatures = toFeatureItems(normalizedPackage?.features);
+  if (detailedFeatures.length > 0) return detailedFeatures;
+
+  const checkedItems = toFeatureItems(normalizedPackage?.checkedBullets);
+  const uncheckedItems = toFeatureItems(
+    normalizedPackage?.uncheckedBullets,
+    false
+  );
+  if (checkedItems.length > 0 || uncheckedItems.length > 0) {
+    return [...checkedItems, ...uncheckedItems];
+  }
+
+  return toFeatureItems(normalizedPackage?.featureChecklist);
+};
+
 const normalizeFaqQuestion = (item = {}) => {
   if (!item || typeof item !== "object") return item;
   const question = String(item.question || "");
@@ -181,6 +218,7 @@ const api = {
   PACKAGE_CONTENT_OVERRIDES,
   applyPackageContentOverrides,
   applyPackagesContentOverrides,
+  getPackageFeatureItems,
   normalizeFaqQuestion,
   normalizeFaqQuestions,
   normalizePackageText,

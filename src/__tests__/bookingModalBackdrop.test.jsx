@@ -1,5 +1,5 @@
 import React from "react";
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import BookingModal from "../components/BookingModal";
 import PackageDetailsModal from "../components/PackageDetailsModal";
 
@@ -51,6 +51,27 @@ describe("booking modal backdrop isolation", () => {
     );
     expect(packageOverlay).toHaveClass("glass-overlay", "low-perf-overlay");
     expect(packageOverlay).not.toHaveClass("booking-modal-overlay");
+  });
+
+  test("marks excluded canonical package rows as not included", () => {
+    render(
+      <PackageDetailsModal
+        open
+        onClose={jest.fn()}
+        pkg={{ title: "Vertex Essentials", price: "$29.95", features: [] }}
+      />
+    );
+
+    expect(
+      screen.getByRole("listitem", {
+        name: "Windows system tuning: included",
+      })
+    ).not.toHaveClass("opacity-40");
+    expect(
+      screen.getByRole("listitem", {
+        name: "CPU GPU RAM tuning: not included",
+      })
+    ).toHaveClass("opacity-40");
   });
 });
 

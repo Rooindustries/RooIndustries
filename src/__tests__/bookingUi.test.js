@@ -63,6 +63,11 @@ const OVERHAUL_PACKAGE = {
   price: "$54.95",
   tag: "Test",
 };
+const ESSENTIALS_PACKAGE = {
+  title: "Vertex Essentials",
+  price: "$29.95",
+  tag: "Test",
+};
 const MAX_PACKAGE = {
   title: "Performance Vertex Max",
   price: "$99.95",
@@ -164,6 +169,7 @@ const installDefaultFetch = ({
   settings = { dateSlots: [] },
   referrals = {},
   coupons = {},
+  packageData = OVERHAUL_PACKAGE,
 } = {}) => {
   global.fetch = jest.fn(async (url) => {
     const requestUrl = String(url);
@@ -200,7 +206,7 @@ const installDefaultFetch = ({
     if (String(url).startsWith("/api/content/package")) {
       return {
         ok: true,
-        json: async () => ({ ok: true, data: OVERHAUL_PACKAGE }),
+        json: async () => ({ ok: true, data: packageData }),
       };
     }
     if (url === "/api/bookingAvailability") {
@@ -251,6 +257,7 @@ describe("booking calendar UI", () => {
     resolvedOptionsSpy = jest
       .spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions")
       .mockReturnValue({ timeZone: "America/Los_Angeles" });
+    window.scrollTo = jest.fn();
   });
 
   afterEach(() => {
@@ -835,7 +842,7 @@ describe("booking calendar UI", () => {
     expect(
       screen.queryByLabelText("Price $54.95, previous price $79.95")
     ).not.toBeInTheDocument();
-    expect(screen.getByText("90 day warranty included")).toBeInTheDocument();
+    expect(screen.getByText("90-day warranty included")).toBeInTheDocument();
 
     await userEvent.click(
       screen.getByRole("button", { name: /^pay \$54\.95$/i })
@@ -1326,8 +1333,8 @@ describe("booking calendar UI", () => {
   });
 
   test.each([
-    [OVERHAUL_PACKAGE, "90 day warranty included", "Lifetime warranty included"],
-    [MAX_PACKAGE, "Lifetime warranty included", "90 day warranty included"],
+    [OVERHAUL_PACKAGE, "90-day warranty included", "Lifetime warranty included"],
+    [MAX_PACKAGE, "Lifetime warranty included", "90-day warranty included"],
   ])(
     "uses the package warranty source for %s",
     async (bookingPackage, expectedWarranty, excludedWarranty) => {
@@ -1341,6 +1348,35 @@ describe("booking calendar UI", () => {
       expect(screen.queryByText(excludedWarranty)).not.toBeInTheDocument();
     }
   );
+
+  test("uses the canonical checklist when plan features are empty", async () => {
+    installDefaultFetch({
+      packageData: { ...ESSENTIALS_PACKAGE, features: [] },
+    });
+    setBookingLocation(ESSENTIALS_PACKAGE);
+
+    render(<BookingForm />);
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: /^view my plan$/i })
+    );
+
+    expect(
+      await screen.findByRole("listitem", {
+        name: "Windows system tuning: included",
+      })
+    ).not.toHaveClass("opacity-40");
+    expect(
+      screen.getByRole("listitem", {
+        name: "CPU GPU RAM tuning: not included",
+      })
+    ).toHaveClass("opacity-40");
+    expect(
+      screen.queryByText(/Overclocking of CPU, GPU, and RAM/i)
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/30 day warranty/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/90 day warranty/i)).not.toBeInTheDocument();
+  });
 
   test("restores current-preview drafts while ignoring removed goal keys", async () => {
     seedBookingSession({
