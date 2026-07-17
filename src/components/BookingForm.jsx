@@ -29,7 +29,7 @@ import {
   toMoney,
 } from "../lib/checkoutCodes";
 
-const { applyPackageContentOverrides } = packageContent;
+const { applyPackageContentOverrides, getPackageFeatureItems } = packageContent;
 const {
   applyPackagePricing,
   getPackageTitleAliases,
@@ -262,7 +262,7 @@ function HoldBanner({
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs font-medium text-ink sm:text-sm">
-          Slot <strong>{localTimeLabel || "--"}</strong> is reserved.{" "}
+          Slot <strong>{localTimeLabel || "-"}</strong> is reserved.{" "}
           <span className="text-info-text">
             Expires in {formatCountdown(countdownMs)}.
           </span>
@@ -823,6 +823,9 @@ export default function BookingForm({ isMobile }) {
     normalizedPackageTitle.includes("vertex essential");
 
   const displayPackage = modalPackage || vertexPackage;
+  const displayFeatureItems = getPackageFeatureItems(
+    displayPackage || DEFAULT_VERTEX_PACKAGE
+  );
   const isStep2Complete = useMemo(() => {
     return Boolean(
       form.discord.trim() &&
@@ -3070,33 +3073,22 @@ export default function BookingForm({ isMobile }) {
                   </motion.div>
 
                   <motion.ul className="mt-4 space-y-2 text-sm text-info-text text-left">
-                    {(displayPackage?.features &&
-                    displayPackage.features.length > 0
-                      ? displayPackage.features
-                      : [
-                          "Guaranteed boost in performance (latency, 1% lows, or average FPS)",
-                          "30 day warranty",
-                          "2-4 hour completion time",
-                          "Same day availability",
-                          "Overclocking of CPU, GPU, and RAM (Timings)",
-                          "Diagnosing issues and full system inspection",
-                          "Hidden BIOS tuning",
-                          "Smooth frametimes",
-                          "Benchmark guaranteed results",
-                          "Fan curves, sound tuning, and input latency-driven adjustments",
-                          "Proper core allocation and game process prioritization",
-                          "Network driver tuning",
-                          "90 day warranty plus future support at discretion",
-                        ]
-                    ).map((text, i) => (
+                    {displayFeatureItems.map((item, i) => (
                       <motion.li
-                        key={text + i}
+                        key={`${item.included ? "on" : "off"}-${item.label}-${i}`}
                         variants={itemVariants}
-                        className="flex items-start gap-2"
+                        className={`flex items-start gap-2 ${
+                          item.included ? "" : "opacity-40"
+                        }`}
+                        aria-label={`${item.label}: ${
+                          item.included ? "included" : "not included"
+                        }`}
                       >
-                        <span className="text-accent mt-0.5">-</span>
+                        <span className="text-accent mt-0.5" aria-hidden="true">
+                          {item.included ? "\u2713" : "\u25CB"}
+                        </span>
                         <span className="flex-1">
-                          {renderFeatureWithUpgradeLink(text)}
+                          {renderFeatureWithUpgradeLink(item.label)}
                         </span>
                       </motion.li>
                     ))}
