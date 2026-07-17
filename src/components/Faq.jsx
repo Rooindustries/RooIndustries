@@ -4,7 +4,7 @@ import { ChevronDown } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import homeCopy from "../lib/homeCopy";
 import packageContent from "../lib/packageContent";
-import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS, readHomeSectionData } from "../lib/homeSectionData";
+import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
 import { alignToHashTarget, getCssHeaderOffsetPx } from "../lib/scrollCoordinator";
 
 // --- HELPERS ---
@@ -98,30 +98,16 @@ export default function FaqSection({
 }) {
   const location = useLocation();
   const [activeHash, setActiveHash] = useState(() =>
-    (
-      (typeof window !== "undefined" ? window.location.hash : "") ||
-      location.hash ||
-      ""
-    ).replace(/^#/, "")
+    (location.hash || "").replace(/^#/, "")
   );
-  const [faqCopy, setFaqCopy] = useState(
-    () =>
-      initialFaqCopy ?? readHomeSectionData(HOME_SECTION_DATA_KEYS.faqSettings)
-  );
+  const [faqCopy, setFaqCopy] = useState(() => initialFaqCopy);
   const [openQuestions, setOpenQuestions] = useState({});
   const [questions, setQuestions] = useState(() =>
     initialQuestions !== null
       ? Array.isArray(initialQuestions)
         ? normalizeFaqQuestions(initialQuestions)
         : []
-      : (() => {
-          const cachedQuestions = readHomeSectionData(
-            HOME_SECTION_DATA_KEYS.faqQuestions
-          );
-          return Array.isArray(cachedQuestions)
-            ? normalizeFaqQuestions(cachedQuestions)
-            : [];
-        })()
+      : null
   );
 
   useEffect(() => {

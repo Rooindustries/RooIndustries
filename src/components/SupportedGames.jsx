@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { urlFor } from "../sanityClient";
-import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS, readHomeSectionData } from "../lib/homeSectionData";
+import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
 
 function GameCard({ game, index }) {
   const title = game?.title || "Game";
@@ -51,9 +51,7 @@ function GameCard({ game, index }) {
 }
 
 export default function SupportedGames({ initialData = null }) {
-  const [data, setData] = useState(
-    () => initialData ?? readHomeSectionData(HOME_SECTION_DATA_KEYS.supportedGames)
-  );
+  const [data, setData] = useState(() => initialData);
 
   useEffect(() => {
     if (initialData !== null) {

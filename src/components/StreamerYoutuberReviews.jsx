@@ -27,9 +27,7 @@ const getReviewAvatarUrl = (pfp) => {
 };
 
 export default function StreamerYoutuberReviews({ initialData = null }) {
-  const [data, setData] = useState(
-    () => initialData ?? readHomeSectionData(HOME_SECTION_DATA_KEYS.reviews)
-  );
+  const [data, setData] = useState(() => initialData);
   const [shouldLoad, setShouldLoad] = useState(() => Boolean(initialData));
   const sectionRef = useRef(null);
 
