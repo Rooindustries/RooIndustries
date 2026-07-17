@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { urlFor } from "../sanityClient";
 import homeCopy from "../lib/homeCopy";
-import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS, readHomeSectionData } from "../lib/homeSectionData";
+import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
 import {
   Clock,
   Shield,
@@ -45,9 +45,7 @@ function AnimatedNumber({ value, duration = 0.65 }) {
 }
 
 export default function Services({ initialData = null }) {
-  const [data, setData] = useState(
-    () => initialData ?? readHomeSectionData(HOME_SECTION_DATA_KEYS.services)
-  );
+  const [data, setData] = useState(() => initialData);
 
   useEffect(() => {
     if (initialData !== null) {
