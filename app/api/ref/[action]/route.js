@@ -7,6 +7,7 @@ import hashPassword from "../../../../src/server/api/ref/hashPassword.js";
 import login from "../../../../src/server/api/ref/login.js";
 import logout from "../../../../src/server/api/ref/logout.js";
 import payouts from "../../../../src/server/api/ref/payouts.js";
+import recoverPassword from "../../../../src/server/api/ref/recoverPassword.js";
 import register from "../../../../src/server/api/ref/register.js";
 import reset from "../../../../src/server/api/ref/reset.js";
 import sendBookingEmails from "../../../../src/server/api/ref/sendBookingEmails.js";
@@ -35,6 +36,7 @@ const ACTION_HANDLERS = {
   login,
   logout,
   payouts,
+  recoverPassword,
   register,
   reset,
   sendBookingEmails,

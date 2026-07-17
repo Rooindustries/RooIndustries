@@ -54,6 +54,17 @@ const NotFound = lazy(() => import("./legacyPages/NotFound"));
 const INTERCOM_DISABLED_ROUTES = [];
 // const INTERCOM_DISABLED_ROUTES = ["/booking"]; // Disables chat on /booking and nested routes.
 
+const isReferralResetHash = (hash) => {
+  const params = new URLSearchParams(String(hash || "").replace(/^#/, ""));
+  const legacyToken = String(params.get("token") || "");
+  if (/^[a-f0-9]{64}$/i.test(legacyToken)) return true;
+  return (
+    params.get("type") === "recovery" &&
+    Boolean(params.get("access_token")) &&
+    Boolean(params.get("refresh_token"))
+  );
+};
+
 const DeferredTelemetry = () => {
   const location = useLocation();
   const [enabled, setEnabled] = useState(false);
@@ -400,10 +411,13 @@ export function AppContent({
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const currentHash = normalizeSectionHash(window.location.hash || "");
+    const rawHash = window.location.hash || "";
+    const currentHash = normalizeSectionHash(rawHash);
     const keepHash =
       location.pathname === "/" && isHomeSectionHash(currentHash)
         ? currentHash
+        : location.pathname === "/referrals/reset" && isReferralResetHash(rawHash)
+          ? rawHash
         : "";
     const sanitizedSearch = sanitizeBrowserSearch(
       location.pathname || "/",
