@@ -1292,6 +1292,7 @@ describe("booking reservation API", () => {
     const booking = store.bookings.find(
       (entry) => entry._id === bookingRes.body.bookingId
     );
+    booking.message = '<script>alert("preview")</script>';
     const partialBooking = {
       _id: booking._id,
       email: booking.email,
@@ -1322,6 +1323,23 @@ describe("booking reservation API", () => {
     expect(renderedOwnerEmail).toContain("GPU/CPU");
     expect(renderedOwnerEmail).toContain("Shooter");
     expect(renderedOwnerEmail).toContain("$84.99");
+    expect(renderedOwnerEmail).toContain(
+      "margin:0;padding:0;background:#e9edf3"
+    );
+    expect(renderedOwnerEmail).toContain(
+      "max-width:640px;background:#0f172a;border:1px solid #2a3f5c"
+    );
+    expect(renderedOwnerEmail).toContain(
+      "text-align:center;background:#0b1120"
+    );
+    expect(renderedOwnerEmail).not.toContain(
+      "margin:0;padding:0;background:#0f172a"
+    );
+    expect(renderedOwnerEmail).not.toContain("#020617");
+    expect(renderedOwnerEmail).toContain(
+      "&lt;script&gt;alert(&quot;preview&quot;)&lt;/script&gt;"
+    );
+    expect(renderedOwnerEmail).not.toContain('<script>alert("preview")</script>');
   });
 
   test("captured paid bookings auto-reconcile after the original hold expires", async () => {
