@@ -1,5 +1,4 @@
 import { useSyncExternalStore } from "react";
-import { isPerfDebugEnabled } from "./perfDebug";
 
 export const PERFORMANCE_PROFILE_EVENT = "roo-performance-mode-change";
 export const PERFORMANCE_PROFILE_STORAGE_KEY = "roo-performance-profile";
@@ -47,12 +46,6 @@ const DIRECT_LITE_THRESHOLDS = Object.freeze({
   severeFrames: 12,
   longTaskTotalMs: 650,
 });
-
-const RUNTIME_DOWNGRADE_REASONS = new Set([
-  "runtime-degraded",
-  "runtime-persistently-degraded",
-  "runtime-severe-degradation",
-]);
 
 const SOFTWARE_RENDERER_PATTERNS = [
   /swiftshader/i,
@@ -553,121 +546,10 @@ export const buildDeviceSignature = (snapshot) => {
   ].join("|");
 };
 
-const readStorageRecord = (storage, key) => {
-  try {
-    const raw = storage?.getItem(key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : null;
-  } catch {
-    return null;
-  }
-};
-
 const removeStorageKey = (storage, key) => {
   try {
     storage?.removeItem(key);
   } catch {}
-};
-
-export const readLegacyManualDecision = ({
-  storage = isBrowser() ? window.localStorage : null,
-  snapshot,
-} = {}) => {
-  if (!storage || !snapshot) return null;
-  try {
-    if (storage.getItem(LEGACY_LITE_MODE_MANUAL_KEY) !== "1") {
-      return null;
-    }
-
-    // The legacy public Lite Mode toggle no longer exists. Only honor those
-    // stale manual overrides when perf debug is explicitly enabled.
-    if (!isPerfDebugEnabled()) {
-      removeStorageKey(storage, LEGACY_LITE_MODE_MANUAL_KEY);
-      removeStorageKey(storage, LEGACY_LITE_MODE_KEY);
-      return null;
-    }
-
-    const storedMode = storage.getItem(LEGACY_LITE_MODE_KEY);
-    if (storedMode === "on") {
-      return {
-        profile: PERFORMANCE_PROFILES.LITE,
-        source: "manual",
-        reason: "legacy-lite-manual-on",
-        deviceClass: snapshot.deviceClass,
-        band: snapshot.deviceClass === DEVICE_CLASSES.DESKTOP ? "unknown" : "low",
-        renderer: snapshot.rendererInfo?.renderer || "",
-      };
-    }
-    if (storedMode === "off") {
-      return {
-        profile: PERFORMANCE_PROFILES.FULL,
-        source: "manual",
-        reason: "legacy-lite-manual-off",
-        deviceClass: snapshot.deviceClass,
-        band: snapshot.deviceClass === DEVICE_CLASSES.DESKTOP ? "unknown" : "mid",
-        renderer: snapshot.rendererInfo?.renderer || "",
-      };
-    }
-
-    removeStorageKey(storage, LEGACY_LITE_MODE_MANUAL_KEY);
-  } catch {}
-  return null;
-};
-
-export const readStoredAutoDecision = ({
-  storage = isBrowser() ? window.localStorage : null,
-  snapshot,
-  now = Date.now(),
-} = {}) => {
-  if (!storage || !snapshot) return null;
-
-  const record = readStorageRecord(storage, PERFORMANCE_PROFILE_STORAGE_KEY);
-  if (!record) return null;
-
-  const expiresAt = Number(record.expiresAt);
-  const recordSignature = String(record.deviceSignature || "");
-  if (
-    record.version !== STORAGE_VERSION ||
-    !isValidProfile(record.profile) ||
-    expiresAt <= now ||
-    recordSignature !== buildDeviceSignature(snapshot)
-  ) {
-    removeStorageKey(storage, PERFORMANCE_PROFILE_STORAGE_KEY);
-    return null;
-  }
-
-  const bandInfo =
-    snapshot.deviceClass === DEVICE_CLASSES.DESKTOP
-      ? { band: "unknown" }
-      : getPerformanceBand(snapshot);
-  const hardFailDecision =
-    snapshot.deviceClass === DEVICE_CLASSES.DESKTOP
-      ? null
-      : resolveHardFailDecision(snapshot);
-
-  // Mobile/tablet devices that are not currently low-band or hard-fail should
-  // not get trapped in a persisted runtime-lite decision from a noisy sample.
-  if (
-    snapshot.deviceClass !== DEVICE_CLASSES.DESKTOP &&
-    !hardFailDecision &&
-    bandInfo.band !== "low" &&
-    record.profile === PERFORMANCE_PROFILES.LITE &&
-    RUNTIME_DOWNGRADE_REASONS.has(String(record.reason || ""))
-  ) {
-    removeStorageKey(storage, PERFORMANCE_PROFILE_STORAGE_KEY);
-    return null;
-  }
-
-  return {
-    profile: record.profile,
-    source: "stored",
-    reason: String(record.reason || "stored-auto-decision"),
-    deviceClass: snapshot.deviceClass,
-    band: bandInfo.band,
-    expiresAt,
-    renderer: snapshot.rendererInfo?.renderer || "",
-  };
 };
 
 const persistAutoDecision = (decision, snapshot) => {

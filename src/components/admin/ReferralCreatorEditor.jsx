@@ -277,7 +277,7 @@ export default function ReferralCreatorEditor() {
 
   if (!unlocked) {
     return (
-      <main className={styles.shell}>
+      <main id="main-content" tabIndex={-1} className={styles.shell}>
         <section className={styles.accessCard}>
           <div className={styles.iconBox}><KeyRound aria-hidden="true" /></div>
           <p className={styles.eyebrow}>Private admin</p>
@@ -312,7 +312,7 @@ export default function ReferralCreatorEditor() {
   }
 
   return (
-    <main className={styles.shell}>
+    <main id="main-content" tabIndex={-1} className={styles.shell}>
       <header className={styles.header}>
         <div>
           <p className={styles.eyebrow}>Supabase primary</p>

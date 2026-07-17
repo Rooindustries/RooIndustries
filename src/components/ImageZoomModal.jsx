@@ -3,11 +3,21 @@ import { createPortal } from "react-dom";
 import { Plus, Minus, X } from "lucide-react";
 import { useLowPerformanceMode } from "../lib/performanceMode";
 
+const FOCUSABLE_SELECTOR = [
+  "button:not([disabled])",
+  "a[href]",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
+const NOOP = () => {};
+
 export default function ImageZoomModal({
   src,
   alt,
   onClose,
-  setIsModalOpen = () => {},
+  setIsModalOpen = NOOP,
 }) {
   const lowPerformanceMode = useLowPerformanceMode();
   const [zoom, setZoom] = useState(1);
@@ -16,6 +26,9 @@ export default function ImageZoomModal({
   const [dragStart, setDragStart] = useState(null);
   const animationRef = useRef(null);
   const scrollLockRef = useRef(null);
+  const closeButtonRef = useRef(null);
+  const dialogRef = useRef(null);
+  const previousFocusRef = useRef(null);
   const [fadeIn, setFadeIn] = useState(false);
 
   useEffect(() => {
@@ -107,23 +120,63 @@ export default function ImageZoomModal({
   };
 
   useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === "Escape") {
-        handleClose(e);
+    previousFocusRef.current = document.activeElement;
+    closeButtonRef.current?.focus();
+
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(
+        dialogRef.current?.querySelectorAll(FOCUSABLE_SELECTOR) || []
+      );
+      if (focusable.length === 0) {
+        event.preventDefault();
+        dialogRef.current?.focus();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const activeElement = document.activeElement;
+      const focusIsInside = dialogRef.current?.contains(activeElement);
+
+      if (event.shiftKey && (activeElement === first || !focusIsInside)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (activeElement === last || !focusIsInside)) {
+        event.preventDefault();
+        first.focus();
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  });
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      previousFocusRef.current?.focus?.();
+    };
+  }, [onClose]);
 
   return createPortal(
     <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label={alt ? `Image preview: ${alt}` : "Image preview"}
+      tabIndex={-1}
       className={`glass-overlay low-perf-overlay fixed inset-0 flex items-center justify-center z-[9999] transition-opacity duration-200 ${
         fadeIn ? "opacity-100" : "opacity-0"
       }`}
       onClick={handleClose}
     >
       <button
+        ref={closeButtonRef}
+        type="button"
+        aria-label="Close image preview"
         onClick={handleClose}
         className="fixed top-6 right-6 p-2 bg-surface-solid border border-line-input rounded-lg hover:bg-surface-hover transition z-[10001] flex items-center justify-center"
         title="Close"
@@ -162,12 +215,16 @@ export default function ImageZoomModal({
         onClick={(e) => e.stopPropagation()}
       >
         <button
+          type="button"
+          aria-label="Zoom out"
           onClick={handleZoomOut}
           className="p-3 rounded-full bg-surface-solid border border-info-border hover:bg-surface-hover transition shadow-info-soft flex items-center justify-center"
         >
           <Minus className="w-5 h-5 text-info-text" />
         </button>
         <button
+          type="button"
+          aria-label="Zoom in"
           onClick={handleZoomIn}
           className="p-3 rounded-full bg-surface-solid border border-info-border hover:bg-surface-hover transition shadow-info-soft flex items-center justify-center"
         >

@@ -93,24 +93,30 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
                   </div>
                   {/* SEO/CLS: keep benchmark images in semantic figures with intrinsic sizing. */}
                   <figure className="m-0">
-                    <img
-                      src={buildImageSrc(b.beforeImage, 1280)}
-                      srcSet={buildImageSrcSet(
-                        b.beforeImage,
-                        BENCHMARK_IMAGE_WIDTHS
-                      )}
-                      alt={beforeAlt}
-                      width={beforeDims?.width}
-                      height={beforeDims?.height}
-                      loading={i === 0 ? "eager" : "lazy"}
-                      fetchPriority={i === 0 ? "high" : "auto"}
-                      decoding="async"
-                      sizes="(max-width: 768px) 94vw, 46vw"
-                      className="rounded w-full cursor-pointer shadow-lg border border-danger-border hover:border-danger hover:shadow-danger-soft transition duration-300"
+                    <button
+                      type="button"
+                      aria-label={`Open ${beforeAlt}`}
+                      className="group block w-full rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--color-canvas-deep)]"
                       onClick={() =>
                         handleOpenZoom(urlFor(b.beforeImage).url(), beforeAlt)
                       }
-                    />
+                    >
+                      <img
+                        src={buildImageSrc(b.beforeImage, 1280)}
+                        srcSet={buildImageSrcSet(
+                          b.beforeImage,
+                          BENCHMARK_IMAGE_WIDTHS
+                        )}
+                        alt={beforeAlt}
+                        width={beforeDims?.width}
+                        height={beforeDims?.height}
+                        loading={i === 0 ? "eager" : "lazy"}
+                        fetchPriority={i === 0 ? "high" : "auto"}
+                        decoding="async"
+                        sizes="(max-width: 768px) 94vw, 46vw"
+                        className="rounded w-full cursor-pointer shadow-lg border border-danger-border group-hover:border-danger group-hover:shadow-danger-soft transition duration-300"
+                      />
+                    </button>
                     <figcaption className="sr-only">{beforeAlt}</figcaption>
                   </figure>
                 </div>
@@ -122,24 +128,30 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
                   </div>
                   {/* SEO/CLS: keep benchmark images in semantic figures with intrinsic sizing. */}
                   <figure className="m-0">
-                    <img
-                      src={buildImageSrc(b.afterImage, 1280)}
-                      srcSet={buildImageSrcSet(
-                        b.afterImage,
-                        BENCHMARK_IMAGE_WIDTHS
-                      )}
-                      alt={afterAlt}
-                      width={afterDims?.width}
-                      height={afterDims?.height}
-                      loading={i === 0 ? "eager" : "lazy"}
-                      fetchPriority={i === 0 ? "high" : "auto"}
-                      decoding="async"
-                      sizes="(max-width: 768px) 94vw, 46vw"
-                      className="rounded w-full cursor-pointer shadow-lg border border-success-border hover:border-success hover:shadow-success-soft transition duration-300"
+                    <button
+                      type="button"
+                      aria-label={`Open ${afterAlt}`}
+                      className="group block w-full rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--color-canvas-deep)]"
                       onClick={() =>
                         handleOpenZoom(urlFor(b.afterImage).url(), afterAlt)
                       }
-                    />
+                    >
+                      <img
+                        src={buildImageSrc(b.afterImage, 1280)}
+                        srcSet={buildImageSrcSet(
+                          b.afterImage,
+                          BENCHMARK_IMAGE_WIDTHS
+                        )}
+                        alt={afterAlt}
+                        width={afterDims?.width}
+                        height={afterDims?.height}
+                        loading={i === 0 ? "eager" : "lazy"}
+                        fetchPriority={i === 0 ? "high" : "auto"}
+                        decoding="async"
+                        sizes="(max-width: 768px) 94vw, 46vw"
+                        className="rounded w-full cursor-pointer shadow-lg border border-success-border group-hover:border-success group-hover:shadow-success-soft transition duration-300"
+                      />
+                    </button>
                     <figcaption className="sr-only">{afterAlt}</figcaption>
                   </figure>
                 </div>
@@ -150,23 +162,29 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
                 <div className="mt-6 text-center">
                   {/* SEO/CLS: include review images in a semantic figure with intrinsic sizing. */}
                   <figure className="m-0">
-                    <img
-                      src={buildImageSrc(b.reviewImage, 960)}
-                      srcSet={buildImageSrcSet(
-                        b.reviewImage,
-                        REVIEW_IMAGE_WIDTHS
-                      )}
-                      alt={reviewAlt}
-                      width={reviewDims?.width}
-                      height={reviewDims?.height}
-                      loading="lazy"
-                      decoding="async"
-                      sizes="(max-width: 768px) 94vw, 62vw"
-                      className="rounded-lg shadow-lg mx-auto cursor-pointer border border-line-strong hover:border-success hover:shadow-success-soft transition duration-300"
+                    <button
+                      type="button"
+                      aria-label={`Open ${reviewAlt}`}
+                      className="group inline-block max-w-full rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--color-canvas-deep)]"
                       onClick={() =>
                         handleOpenZoom(urlFor(b.reviewImage).url(), reviewAlt)
                       }
-                    />
+                    >
+                      <img
+                        src={buildImageSrc(b.reviewImage, 960)}
+                        srcSet={buildImageSrcSet(
+                          b.reviewImage,
+                          REVIEW_IMAGE_WIDTHS
+                        )}
+                        alt={reviewAlt}
+                        width={reviewDims?.width}
+                        height={reviewDims?.height}
+                        loading="lazy"
+                        decoding="async"
+                        sizes="(max-width: 768px) 94vw, 62vw"
+                        className="rounded-lg shadow-lg mx-auto cursor-pointer border border-line-strong group-hover:border-success group-hover:shadow-success-soft transition duration-300"
+                      />
+                    </button>
                     <figcaption className="sr-only">{reviewAlt}</figcaption>
                   </figure>
                 </div>

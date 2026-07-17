@@ -523,14 +523,15 @@ export function AppContent({
         <div className="app-bg-grid-layer absolute inset-0"></div>
         <div className="app-bg-radial-layer absolute inset-0"></div>
 
-        {/* Navbar and pages */}
+        <Navbar routeShell={routeShell} />
+        <ReservationBanner />
+
         <main
-          className="relative z-10 flex flex-col flex-1"
+          id="main-content"
+          tabIndex={-1}
+          className="relative z-10 flex flex-col flex-1 focus:outline-none"
           style={{ paddingTop: "var(--header-offset)" }}
         >
-          <Navbar routeShell={routeShell} />
-          <ReservationBanner />
-
           <AnimatedRoutes
             setIsModalOpen={setIsModalOpen}
             routesLocation={routesLocation}
