@@ -4,6 +4,12 @@ import SupabaseSocialLogin from "./SupabaseSocialLogin";
 
 const REFERRAL_SIGNUP_DRAFT = "referral_signup_draft";
 
+export const resolveReferralCodeAvailability = (response, data) => {
+  if (!response?.ok) return null;
+  if (data?.ok) return false;
+  return data?.reason === "not_found" ? true : null;
+};
+
 export default function RefRegister() {
   const nav = useNavigate();
 
@@ -67,10 +73,7 @@ export default function RefRegister() {
           )}`
         );
         const data = await res.json();
-        // A real match means taken. Only an explicit 404 means available.
-        if (res.ok && data.ok) setSlugAvailable(false);
-        else if (res.status === 404) setSlugAvailable(true);
-        else setSlugAvailable(null);
+        setSlugAvailable(resolveReferralCodeAvailability(res, data));
       } catch (err) {
         // network or server error: we don't assume taken
         setSlugAvailable(null);
@@ -131,11 +134,15 @@ export default function RefRegister() {
           `/api/ref/validateReferral?code=${encodeURIComponent(trimmedSlug)}`
         );
         const dataCheck = await resCheck.json();
-        if (dataCheck.ok) {
+        const availability = resolveReferralCodeAvailability(
+          resCheck,
+          dataCheck
+        );
+        if (availability === false) {
           setSlugAvailable(false);
           showToast("error", "Referral code is already taken.");
           return;
-        } else if (resCheck.status === 404) {
+        } else if (availability === true) {
           setSlugAvailable(true); // available
         } else {
           showToast("error", "Could not validate referral code. Try again.");

@@ -61,9 +61,20 @@ async function run() {
       route: "/api/ref/validateReferral?code=nonexistent",
       method: "GET",
       expect: (response, body, hostDrift) =>
-        response.status === 404 &&
+        response.status === 200 &&
         !hostDrift &&
-        body?.ok === false,
+        body?.ok === false &&
+        body?.reason === "not_found",
+    },
+    {
+      route:
+        "/api/ref/validateCoupon?code=nonexistent&packageTitle=Performance%20Vertex%20Overhaul",
+      method: "GET",
+      expect: (response, body, hostDrift) =>
+        response.status === 200 &&
+        !hostDrift &&
+        body?.ok === false &&
+        body?.reason === "not_found",
     },
     {
       route: "/api/ref/createBooking",
