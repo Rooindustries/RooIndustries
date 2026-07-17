@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { executeGlobalCmsCommand } from "../../../../src/server/cms/publishCommand.js";
 import { assertCmsStudioOrigin } from "../../../../src/server/cms/sanityAuthorization.js";
 import { assertGlobalCmsWritesAllowed } from "../../../../src/server/cms/writeControl.js";
+import { readBeforeDeadline } from "../../../../src/server/request/boundedJson.js";
 import { logSafeError } from "../../../../src/server/safeErrorLog.js";
 import { createSupabaseAdminClient } from "../../../../src/server/supabase/adminClient.js";
 
@@ -9,40 +10,72 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAX_BODY_BYTES = 1024 * 1024;
+const MAX_BODY_READ_MS = 5_000;
 
-const bodyError = (tooLarge) => {
-  const error = new Error(
-    tooLarge
-      ? "CMS request body limit exceeded."
-      : "CMS request body is required.",
-  );
-  error.status = tooLarge ? 413 : 400;
-  error.code = tooLarge ? "CMS_BODY_TOO_LARGE" : "CMS_BODY_REQUIRED";
+const BODY_ERRORS = Object.freeze({
+  required: {
+    message: "CMS request body is required.",
+    status: 400,
+    code: "CMS_BODY_REQUIRED",
+  },
+  timeout: {
+    message: "CMS request body timed out.",
+    status: 408,
+    code: "CMS_BODY_TIMEOUT",
+  },
+  tooLarge: {
+    message: "CMS request body limit exceeded.",
+    status: 413,
+    code: "CMS_BODY_TOO_LARGE",
+  },
+});
+
+const bodyError = (reason) => {
+  const { message, status, code } = BODY_ERRORS[reason];
+  const error = new Error(message);
+  error.status = status;
+  error.code = code;
   return error;
 };
 
 const readBoundedBody = async (request) => {
   const declaredLength = Number(request.headers.get("content-length") || 0);
   if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
-    throw bodyError(true);
+    throw bodyError("tooLarge");
   }
-  if (!request.body) throw bodyError(false);
+  if (!request.body) throw bodyError("required");
   const reader = request.body.getReader();
   const decoder = new TextDecoder();
+  const deadlineAt = Date.now() + MAX_BODY_READ_MS;
   let bytes = 0;
   let rawBody = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    bytes += value.byteLength;
-    if (bytes > MAX_BODY_BYTES) {
-      await reader.cancel().catch(() => {});
-      throw bodyError(true);
+  try {
+    while (true) {
+      let result;
+      try {
+        result = await readBeforeDeadline({
+          promise: reader.read(),
+          deadlineAt,
+          onTimeout: () => Promise.resolve(reader.cancel()).catch(() => {}),
+        });
+      } catch (error) {
+        if (error?.status === 408) throw bodyError("timeout");
+        throw error;
+      }
+      const { done, value } = result;
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_BODY_BYTES) {
+        await reader.cancel().catch(() => {});
+        throw bodyError("tooLarge");
+      }
+      rawBody += decoder.decode(value, { stream: true });
     }
-    rawBody += decoder.decode(value, { stream: true });
+  } finally {
+    reader.releaseLock?.();
   }
   rawBody += decoder.decode();
-  if (!rawBody) throw bodyError(false);
+  if (!rawBody) throw bodyError("required");
   return rawBody;
 };
 
@@ -59,6 +92,7 @@ const corsHeaders = (origin) => ({
 const errorMessage = (status) =>
   ({
     400: "The content command is invalid.",
+    408: "The content request took too long to upload.",
     401: "Sign in to Sanity Studio again.",
     403: "You do not have permission to publish this content.",
     404: "The content document was not found.",
@@ -69,7 +103,7 @@ const errorMessage = (status) =>
 
 const errorResponse = ({ error, origin = "" }) => {
   const requested = Number(error?.status || error?.statusCode || 0);
-  const status = [400, 401, 403, 404, 409, 413].includes(requested)
+  const status = [400, 401, 403, 404, 408, 409, 413].includes(requested)
     ? requested
     : 503;
   return NextResponse.json(
