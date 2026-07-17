@@ -357,7 +357,7 @@ export default function ReservationBanner() {
           <p className={`font-semibold text-ink truncate drop-shadow-md ${titleSizeClass}`}>
             Slot {holdLocalTimeLabel || "--"}
             {hold?.packageTitle
-              ? ` — ${getPublicPackageTitle(hold.packageTitle)}`
+              ? ` · ${getPublicPackageTitle(hold.packageTitle)}`
               : ""}
           </p>
           <p className={`text-info-text truncate drop-shadow-sm ${subtitleSizeClass}`}>

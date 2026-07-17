@@ -1470,7 +1470,7 @@ export default function Payment({ hideFooter = false }) {
 
   return (
     <motion.section
-      className="relative z-10 py-4 md:py-32 px-6 max-w-3xl mx-auto text-ink"
+      className="relative z-10 pt-4 pb-32 md:pt-10 md:pb-40 px-6 max-w-3xl mx-auto text-ink"
       variants={containerVariants}
       initial="hidden"
       animate="visible"
@@ -1528,57 +1528,64 @@ export default function Payment({ hideFooter = false }) {
             Please review your {isUpgrade ? "upgrade" : "booking"} details
           </p>
 
-          <div className="mt-6">
-            <p className="font-semibold text-lg text-ink">{packageTitle}</p>
-            <div className="mt-2 space-y-1">
-              {(referralPercent > 0 || couponDiscountAmount > 0) && (
-                <p className="text-xl text-ink-secondary line-through">
-                  ${baseAmount.toFixed(2)}
-                </p>
-              )}
-              <p className="text-3xl font-extrabold text-accent">
-                ${finalAmount.toFixed(2)} USD
-              </p>
-              <p className="text-xs text-ink-muted">
-                {quoteLoading
-                  ? "Confirming the current price..."
-                  : quoteFingerprint
-                    ? "Current total confirmed securely by Roo Industries."
-                    : "Price confirmation is unavailable. Payment is disabled."}
-              </p>
-
+          <div className="mt-2">
+            <dl className="divide-y divide-line-input text-left text-sm">
+              <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
+                <dt className="text-ink-muted">Package</dt>
+                <dd className="break-words font-semibold text-ink sm:text-right">
+                  {packageTitle}
+                </dd>
+              </div>
+              <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
+                <dt className="text-ink-muted">Date & time</dt>
+                <dd className="font-semibold text-ink sm:text-right">
+                  {date} · {time}
+                  {userTimeZone ? (
+                    <span className="font-normal text-ink-muted">
+                      {" "}
+                      ({userTimeZone})
+                    </span>
+                  ) : null}
+                </dd>
+              </div>
               {referralPercent > 0 && (
-                <p className="text-sm text-success-text">
-                  Referral "{referral?.code}": {referralPercent}% ($
-                  {referralDiscountAmount.toFixed(2)})
-                </p>
+                <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
+                  <dt className="text-ink-muted">Referral</dt>
+                  <dd className="font-semibold text-ink sm:text-right">
+                    {referral?.code} · −${referralDiscountAmount.toFixed(2)}
+                  </dd>
+                </div>
               )}
               {couponDiscountAmount > 0 && coupon && (
-                <p className="text-sm text-success-text">
-                  Coupon "{coupon.code}": {formatCouponValue(coupon)} ($
-                  {couponDiscountAmount.toFixed(2)})
-                  {canStackCouponWithReferral && referralPercent > 0
-                    ? " (stacked with referral)"
-                    : ""}
-                </p>
+                <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr]">
+                  <dt className="text-ink-muted">Coupon</dt>
+                  <dd className="font-semibold text-ink sm:text-right">
+                    {coupon.code} · −${couponDiscountAmount.toFixed(2)}
+                  </dd>
+                </div>
               )}
-              {effectiveDiscountAmount > 0 && (
-                <p className="text-xs text-ink-secondary">
-                  Total savings: {discountPercentCombined}% (${effectiveDiscountAmount.toFixed(2)})
-                </p>
-              )}
-
-              <p className="text-sm text-ink-muted mt-1">
-                Your time: <span className="text-accent">{date}</span> at{" "}
-                <span className="text-accent">{time}</span>
-              </p>
-              {userTimeZone && (
-                <p className="text-xs text-ink-muted">
-                  Time zone:{" "}
-                  <span className="text-ink-secondary">{userTimeZone}</span>
-                </p>
-              )}
-
+              <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr] sm:items-baseline">
+                <dt className="font-semibold text-ink">Total</dt>
+                <dd className="sm:text-right">
+                  {(referralPercent > 0 || couponDiscountAmount > 0) && (
+                    <span className="mr-2 text-sm text-ink-secondary line-through">
+                      ${baseAmount.toFixed(2)}
+                    </span>
+                  )}
+                  <span className="text-2xl font-extrabold text-accent">
+                    ${finalAmount.toFixed(2)} USD
+                  </span>
+                </dd>
+              </div>
+            </dl>
+            <p className="mt-1 text-xs text-ink-muted sm:text-right">
+              {quoteLoading
+                ? "Confirming the current price..."
+                : quoteFingerprint
+                  ? "Price confirmed for this session."
+                  : "Price confirmation is unavailable. Payment is disabled."}
+            </p>
+            <div className="space-y-1">
               {isFree && (
                 <p className="text-xs text-success-text mt-2">
                   This booking has a 100% discount applied. No payment is required - just confirm your free booking below.
@@ -1958,7 +1965,7 @@ export default function Payment({ hideFooter = false }) {
       {(isModalMode || !hideFooter) && (
         <motion.div
           variants={itemVariants}
-          className="mt-10 flex justify-center pb-36 sm:pb-40"
+          className="mt-10 flex justify-center"
         >
           <Link
             to="/booking"
