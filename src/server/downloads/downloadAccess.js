@@ -40,7 +40,7 @@ export const validateBookingForDownload = ({ booking, email, download }) => {
     .map(normalizeEmail)
     .filter(Boolean);
 
-  if (allowedEmails.length > 0 && !allowedEmails.includes(normalizedEmail)) {
+  if (allowedEmails.length === 0 || !allowedEmails.includes(normalizedEmail)) {
     return {
       ok: false,
       status: 404,
@@ -98,7 +98,10 @@ export const validateBookingForDownloadToken = ({
     .map(hashDownloadEmail)
     .filter(Boolean);
 
-  if (allowedEmailHashes.length > 0 && !allowedEmailHashes.includes(emailHash)) {
+  if (
+    allowedEmailHashes.length === 0 ||
+    !allowedEmailHashes.includes(emailHash)
+  ) {
     return {
       ok: false,
       status: 403,
