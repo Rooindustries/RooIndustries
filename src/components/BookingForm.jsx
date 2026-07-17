@@ -58,6 +58,11 @@ const REASSURANCE_COPY =
   "You won't be charged until you confirm on the payment page.";
 const PAYMENT_PENDING_EXPIRY_ERROR =
   "This reservation expired while payment is still pending. Return to payment to check its status or release payment to try again.";
+const CALENDAR_AVAILABILITY_LABELS = Object.freeze({
+  green: "fully available",
+  yellow: "limited slots",
+  red: "fully booked",
+});
 const BOOKING_STEPS = ["Pick a slot", "PC details", "Review & pay"];
 const STEP_PROGRESS_LABELS = {
   1: "Step 1 of 3",
@@ -182,6 +187,18 @@ const formatShortLocalDate = (utcDate, timeZone) => {
     }).format(utcDate);
   } catch {
     return utcDate.toLocaleDateString();
+  }
+};
+
+const formatCalendarDateLabel = (date) => {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    }).format(date);
+  } catch {
+    return date.toDateString();
   }
 };
 
@@ -1936,6 +1953,7 @@ export default function BookingForm({ isMobile }) {
           holdId: holdIdToDelete,
           holdToken: holdTokenToDelete,
         }),
+        signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
       });
     } catch {
       console.error("Failed to release hold on server");
@@ -1962,6 +1980,7 @@ export default function BookingForm({ isMobile }) {
           "Content-Type": "application/json",
         },
         body: "{}",
+        signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
       });
       const data = await response.json().catch(() => ({}));
       if (data?.captured) {
@@ -1996,7 +2015,13 @@ export default function BookingForm({ isMobile }) {
       );
     } catch (error) {
       setPaymentReleaseStatus("");
-      setErrorStep2(error.message || "The payment session could not be released.");
+      const timedOut =
+        error?.name === "AbortError" || error?.name === "TimeoutError";
+      setErrorStep2(
+        timedOut
+          ? "The payment session could not be released. Please try again."
+          : error.message || "The payment session could not be released."
+      );
     } finally {
       setReleasingPayment(false);
     }
@@ -2052,6 +2077,7 @@ export default function BookingForm({ isMobile }) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
       });
 
       const data = await res.json();
@@ -2361,6 +2387,8 @@ export default function BookingForm({ isMobile }) {
                     <div>
                       <div className="flex justify-between items-center mb-4">
                         <button
+                          aria-label="Previous month"
+                          type="button"
                           onClick={() =>
                             setMonth(
                               new Date(
@@ -2381,6 +2409,8 @@ export default function BookingForm({ isMobile }) {
                           {month.getFullYear()}
                         </h4>
                         <button
+                          aria-label="Next month"
+                          type="button"
                           onClick={() =>
                             setMonth(
                               new Date(
@@ -2426,21 +2456,31 @@ export default function BookingForm({ isMobile }) {
                             selectedDate && isSameDay(date, selectedDate);
 
                           const slotInfo = getDaySlotInfo(date);
+                          const availabilityLabel = slotInfo?.color
+                            ? CALENDAR_AVAILABILITY_LABELS[slotInfo.color]
+                            : "";
+                          const dateLabel = formatCalendarDateLabel(date);
                           let dotClass = "";
                           if (slotInfo?.color === "red") {
                             dotClass =
-                              "bg-danger shadow-danger-soft";
+                              "rounded-sm bg-danger shadow-danger-soft";
                           } else if (slotInfo?.color === "yellow") {
                             dotClass =
-                              "bg-warning shadow-[0_0_6px_rgba(251,191,36,0.55)]";
+                              "rotate-45 rounded-[1px] bg-warning shadow-[0_0_6px_rgba(251,191,36,0.55)]";
                           } else if (slotInfo?.color === "green") {
                             dotClass =
-                              "bg-success shadow-success-soft";
+                              "rounded-full bg-success shadow-success-soft";
                           }
 
                           return (
                             <button
                               key={day}
+                              type="button"
+                              aria-label={
+                                availabilityLabel
+                                  ? `${dateLabel}, ${availabilityLabel}`
+                                  : dateLabel
+                              }
                               disabled={disabled}
                               onClick={() => handleDayClick(day)}
                               className={`p-2 rounded-lg transition-all duration-200 flex flex-col items-center justify-center ${
@@ -2454,7 +2494,8 @@ export default function BookingForm({ isMobile }) {
                               <span>{day}</span>
                               {slotInfo?.color && (
                                 <span
-                                  className={`mt-0.5 h-1.5 w-1.5 rounded-full ${dotClass}`}
+                                  aria-hidden="true"
+                                  className={`mt-0.5 h-1.5 w-1.5 ${dotClass}`}
                                 />
                               )}
                             </button>
@@ -2467,11 +2508,11 @@ export default function BookingForm({ isMobile }) {
                           <span>Fully Available</span>
                         </div>
                         <div className="flex items-center gap-1 whitespace-nowrap">
-                          <span className="h-2 w-2 rounded-full bg-warning shadow-[0_0_6px_rgba(251,191,36,0.55)]" />
+                          <span className="h-2 w-2 rotate-45 rounded-[1px] bg-warning shadow-[0_0_6px_rgba(251,191,36,0.55)]" />
                           <span>Limited Slots</span>
                         </div>
                         <div className="flex items-center gap-1 whitespace-nowrap">
-                          <span className="h-2 w-2 rounded-full bg-danger shadow-danger-soft" />
+                          <span className="h-2 w-2 rounded-sm bg-danger shadow-danger-soft" />
                           <span>Fully Booked</span>
                         </div>
                         <div className="flex items-center gap-1 whitespace-nowrap">

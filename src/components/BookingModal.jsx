@@ -2,8 +2,19 @@ import React, { useEffect, useRef, useState, useLayoutEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLowPerformanceMode } from "../lib/performanceMode";
 
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
+
 export default function BookingModal({ open, onClose, children }) {
   const contentRef = useRef(null);
+  const closeButtonRef = useRef(null);
+  const previousFocusRef = useRef(null);
   const layoutFrameRef = useRef(0);
   const lastLayoutRef = useRef({
     scale: 1,
@@ -148,17 +159,45 @@ export default function BookingModal({ open, onClose, children }) {
     };
   }, [open]);
 
-  // Focus trapping
+  // Keyboard focus management
   useEffect(() => {
     if (!open || !contentRef.current) return;
+    previousFocusRef.current = document.activeElement;
+    closeButtonRef.current?.focus();
+
     const handleKeyDown = (e) => {
       if (e.key === "Escape") {
         e.preventDefault();
         onClose?.();
+        return;
+      }
+      if (e.key !== "Tab") return;
+
+      const focusableElements = Array.from(
+        contentRef.current?.querySelectorAll(FOCUSABLE_SELECTOR) || []
+      ).filter((element) => element.getAttribute("aria-hidden") !== "true");
+      if (focusableElements.length === 0) return;
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+      const focusIsOutside = !contentRef.current.contains(document.activeElement);
+      if (e.shiftKey && (document.activeElement === firstElement || focusIsOutside)) {
+        e.preventDefault();
+        lastElement.focus();
+      } else if (
+        !e.shiftKey &&
+        (document.activeElement === lastElement || focusIsOutside)
+      ) {
+        e.preventDefault();
+        firstElement.focus();
       }
     };
     document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      previousFocusRef.current?.focus?.();
+      previousFocusRef.current = null;
+    };
   }, [open, onClose]);
 
   // -- ANIMATION CONFIG --
@@ -281,6 +320,8 @@ export default function BookingModal({ open, onClose, children }) {
                     id="booking-modal-close"
                     aria-label="Close"
                     className="absolute left-0 top-0 z-50 ml-4 md:ml-8 text-info-text hover:text-white transition text-2xl md:text-4xl leading-none opacity-80 hover:opacity-100"
+                    ref={closeButtonRef}
+                    type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       onClose();
