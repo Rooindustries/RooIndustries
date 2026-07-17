@@ -431,6 +431,18 @@ export async function GET(request) {
         userId: result.data.user.id,
       });
       if (!roleSession.cookie) {
+        if (
+          finalized.action === "signin" &&
+          finalized.flow === "referral" &&
+          finalized.provider === "discord" &&
+          (roleSession.error || "unlinked") === "unlinked"
+        ) {
+          const unlinkedTarget = new URL("/referrals/login", url.origin);
+          unlinkedTarget.searchParams.set("oauth", "unlinked");
+          unlinkedTarget.searchParams.set("provider", "discord");
+          response.cookies.set(clearOAuthIntentCookie(validIntentId));
+          return setRedirect(response, unlinkedTarget);
+        }
         return fail({
           action: finalized.action,
           clearSupabaseSession: true,

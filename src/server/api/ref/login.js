@@ -15,8 +15,10 @@ import {
 import { authenticateSupabaseAccount } from "../../supabase/accounts.js";
 import {
   clearLegacySupabaseSession,
+  getLegacySupabaseUser,
   installLegacySupabaseSession,
 } from "../../supabase/serverSession.js";
+import { linkPendingDiscordIdentity } from "../../supabase/pendingSocialLink.js";
 
 const DUMMY_PASSWORD_HASH =
   // nosemgrep: generic.secrets.security.detected-bcrypt-hash.detected-bcrypt-hash
@@ -35,7 +37,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
 
   try {
-    const { code, password, rememberMe = false } = req.body || {};
+    const { code, linkDiscord = false, password, rememberMe = false } = req.body || {};
     const normalizedIdentifier = String(code || "").trim().toLowerCase();
     const normalizedPassword = String(password || "");
     if (!normalizedIdentifier || normalizedIdentifier.length > 254 || normalizedPassword.length > 128) {
@@ -60,6 +62,9 @@ export default async function handler(req, res) {
       !manualFallback &&
       shouldUseSupabaseForAccount({ identifier: normalizedIdentifier })
     ) {
+      const pendingDiscordUser = linkDiscord
+        ? await getLegacySupabaseUser({ req, res }).catch(() => null)
+        : null;
       const result = await authenticateSupabaseAccount({
         identifier: normalizedIdentifier,
         password: normalizedPassword,
@@ -101,6 +106,33 @@ export default async function handler(req, res) {
         });
       }
 
+      let discordLinked = false;
+      if (linkDiscord) {
+        try {
+          const linked = await linkPendingDiscordIdentity({
+            pendingUser: pendingDiscordUser,
+            primaryAccount: result.account,
+            primaryUserId: result.user.id,
+          });
+          if (!linked.linked) {
+            return res.status(409).json({
+              ok: false,
+              error: "Your Discord sign-in expired. Start with Discord again.",
+            });
+          }
+          discordLinked = true;
+        } catch (error) {
+          logSafeError("Referral Discord account linking failed", error);
+          return res.status(String(error?.code || "") === "23505" ? 409 : 503).json({
+            ok: false,
+            error:
+              String(error?.code || "") === "23505"
+                ? "That Discord is already linked to another account."
+                : "Discord linking is temporarily unavailable. Please try again.",
+          });
+        }
+      }
+
       await clearLegacySupabaseSession({ req, res }).catch(() => {});
       await installLegacySupabaseSession({
         req,
@@ -125,6 +157,7 @@ export default async function handler(req, res) {
         creatorId: result.account.legacy_sanity_id,
         name: result.account.display_name,
         code: result.account.referral_code,
+        ...(discordLinked ? { discordLinked: true } : {}),
       });
     }
 

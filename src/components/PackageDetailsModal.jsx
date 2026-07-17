@@ -1,43 +1,7 @@
-import React, { useEffect, useRef } from "react";
-import { createPortal } from "react-dom";
-import { AnimatePresence, motion } from "framer-motion";
-import { useLowPerformanceMode } from "../lib/performanceMode";
+import React from "react";
+import { motion } from "framer-motion";
 import PriceDisplay from "./PriceDisplay";
-
-const overlayVariants = {
-  hidden: { opacity: 0 },
-  visible: {
-    opacity: 1,
-    transition: { duration: 0.3, ease: "easeOut" },
-  },
-  exit: {
-    opacity: 0,
-    transition: { duration: 0.2, ease: "easeIn" },
-  },
-};
-
-const modalContainerVariants = {
-  hidden: { opacity: 0, scale: 0.95, y: 15 },
-  visible: {
-    opacity: 1,
-    scale: 1,
-    y: 0,
-    transition: {
-      type: "spring",
-      damping: 25,
-      stiffness: 300,
-      mass: 0.8,
-      staggerChildren: 0.08,
-      delayChildren: 0.1,
-    },
-  },
-  exit: {
-    opacity: 0,
-    scale: 0.95,
-    y: 15,
-    transition: { duration: 0.2 },
-  },
-};
+import SiteDialog from "./SiteDialog";
 
 const itemVariants = {
   hidden: { opacity: 0, y: 15 },
@@ -54,45 +18,6 @@ export default function PackageDetailsModal({
   pkg,
   renderFeature,
 }) {
-  const scrollLockRef = useRef(null);
-  const lowPerformanceMode = useLowPerformanceMode();
-
-  useEffect(() => {
-    if (!open) return;
-    const handleKeyDown = (event) => {
-      if (event.key === "Escape") {
-        onClose?.();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
-
-  useEffect(() => {
-    if (!open) return;
-    const body = document.body;
-    const html = document.documentElement;
-    const scrollY = window.scrollY;
-    const original = {
-      overflow: body.style.overflow,
-      htmlOverflow: html.style.overflow,
-      scrollY,
-    };
-    scrollLockRef.current = original;
-    body.classList.add("is-modal-open");
-    body.classList.add("is-modal-blur");
-    body.style.overflow = "hidden";
-    html.style.overflow = "hidden";
-    return () => {
-      const stored = scrollLockRef.current || original;
-      body.classList.remove("is-modal-open");
-      body.classList.remove("is-modal-blur");
-      body.style.overflow = stored.overflow || "";
-      html.style.overflow = stored.htmlOverflow || "";
-      window.scrollTo(0, stored.scrollY || 0);
-    };
-  }, [open]);
-
   const rawFeatures = Array.isArray(pkg?.features) ? pkg.features : [];
   const normalizedFeatures = rawFeatures
     .map((item) => {
@@ -132,97 +57,46 @@ export default function PackageDetailsModal({
     : fallbackChecklist;
   const tagText = pkg?.tag || "Roo Industries Package";
 
-  const handleClose = () => {
-    onClose?.();
-  };
+  return (
+    <SiteDialog
+      ariaLabelledBy="package-details-modal-title"
+      onClose={onClose}
+      open={open}
+    >
+      <motion.div variants={itemVariants}>
+        <div className="inline-flex items-center px-4 py-1.5 rounded-full text-xs font-semibold text-accent-contrast bg-info shadow-info-soft mb-4">
+          {tagText}
+        </div>
+      </motion.div>
 
-  if (typeof document === "undefined") return null;
+      <motion.h3
+        id="package-details-modal-title"
+        variants={itemVariants}
+        className="text-2xl font-bold text-info-text"
+      >
+        {pkg?.title}
+      </motion.h3>
 
-  return createPortal(
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          className="glass-overlay low-perf-overlay fixed inset-0 z-[100] flex items-center justify-center px-4"
-          variants={overlayVariants}
-          initial="hidden"
-          animate="visible"
-          exit="exit"
-          onClick={handleClose}
-        >
-          <motion.div
-            variants={
-              lowPerformanceMode
-                ? {
-                    hidden: { opacity: 0, y: 6 },
-                    visible: {
-                      opacity: 1,
-                      y: 0,
-                      transition: { duration: 0.16, ease: "easeOut" },
-                    },
-                    exit: {
-                      opacity: 0,
-                      y: 6,
-                      transition: { duration: 0.12, ease: "easeIn" },
-                    },
-                  }
-                : modalContainerVariants
-            }
-            className="low-perf-surface glass-premium glass-card-surface relative w-full max-w-md rounded-2xl border border-info-border p-6 text-center transition-all duration-500 ease-in-out hover:shadow-glow-strong"
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="package-details-modal-title"
+      <motion.div variants={itemVariants} className="mt-2">
+        <PriceDisplay pkg={pkg} size="modal" />
+      </motion.div>
+
+      <motion.ul className="mt-4 space-y-2 text-sm text-info-text text-left">
+        {featureItems.map((item, i) => (
+          <motion.li
+            key={`${item.label}-${i}`}
+            variants={itemVariants}
+            className={`flex items-start gap-2 ${
+              item.included === false ? "opacity-40" : ""
+            }`}
           >
-            <motion.button
-              aria-label="Close"
-              variants={itemVariants}
-              className="absolute right-3 top-3 text-info-text hover:text-white transition text-2xl z-10"
-              onClick={handleClose}
-            >
-              <span aria-hidden="true">&times;</span>
-            </motion.button>
-
-            <motion.div variants={itemVariants}>
-              <div className="inline-flex items-center px-4 py-1.5 rounded-full text-xs font-semibold text-accent-contrast bg-info shadow-info-soft mb-4">
-                {tagText}
-              </div>
-            </motion.div>
-
-            <motion.h3
-              id="package-details-modal-title"
-              variants={itemVariants}
-              className="text-2xl font-bold text-info-text"
-            >
-              {pkg?.title}
-            </motion.h3>
-
-            <motion.div
-              variants={itemVariants}
-              className="mt-2"
-            >
-              <PriceDisplay pkg={pkg} size="modal" />
-            </motion.div>
-
-            <motion.ul className="mt-4 space-y-2 text-sm text-info-text text-left">
-              {featureItems.map((item, i) => (
-                <motion.li
-                  key={`${item.label}-${i}`}
-                  variants={itemVariants}
-                  className={`flex items-start gap-2 ${
-                    item.included === false ? "opacity-40" : ""
-                  }`}
-                >
-                  <span className="text-accent mt-1">&#10004;</span>
-                  <span className="flex-1">
-                    {renderFeature ? renderFeature(item.label) : item.label}
-                  </span>
-                </motion.li>
-              ))}
-            </motion.ul>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>,
-    document.body
+            <span className="text-accent mt-1">&#10004;</span>
+            <span className="flex-1">
+              {renderFeature ? renderFeature(item.label) : item.label}
+            </span>
+          </motion.li>
+        ))}
+      </motion.ul>
+    </SiteDialog>
   );
 }
