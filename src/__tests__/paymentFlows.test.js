@@ -724,8 +724,8 @@ describe("payment session UI", () => {
       }
       if (requestUrl.startsWith("/api/ref/validateCoupon")) {
         return response(
-          { ok: false, error: "Coupon not found" },
-          { ok: false, status: 404 }
+          { ok: false, error: "Coupon not found", reason: "not_found" },
+          { ok: true, status: 200 }
         );
       }
       if (requestUrl === "/api/payment/quote") {
@@ -830,8 +830,8 @@ describe("payment session UI", () => {
       }
       if (requestUrl.startsWith("/api/ref/validateCoupon")) {
         return response(
-          { ok: false, error: "Coupon not found" },
-          { ok: false, status: 404 }
+          { ok: false, error: "Coupon not found", reason: "not_found" },
+          { ok: true, status: 200 }
         );
       }
       if (requestUrl === "/api/payment/quote") {

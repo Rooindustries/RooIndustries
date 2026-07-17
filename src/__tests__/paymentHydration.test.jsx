@@ -141,9 +141,13 @@ describe("payment reload hydration", () => {
           ?.toLowerCase();
         if (code !== "creator") {
           return {
-            ok: false,
-            status: 404,
-            json: async () => ({ ok: false, error: "Not found" }),
+            ok: true,
+            status: 200,
+            json: async () => ({
+              ok: false,
+              error: "Not found",
+              reason: "not_found",
+            }),
           };
         }
         return {
@@ -166,9 +170,13 @@ describe("payment reload hydration", () => {
           ?.toLowerCase();
         if (code !== "save10") {
           return {
-            ok: false,
-            status: 404,
-            json: async () => ({ ok: false, error: "Coupon not found" }),
+            ok: true,
+            status: 200,
+            json: async () => ({
+              ok: false,
+              error: "Coupon not found",
+              reason: "not_found",
+            }),
           };
         }
         return {
@@ -253,9 +261,13 @@ describe("payment reload hydration", () => {
       const requestUrl = String(url);
       if (requestUrl.startsWith("/api/ref/validateReferral")) {
         return {
-          ok: false,
-          status: 404,
-          json: async () => ({ ok: false, error: "Not found" }),
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: false,
+            error: "Not found",
+            reason: "not_found",
+          }),
         };
       }
       if (requestUrl.startsWith("/api/ref/validateCoupon")) {
@@ -338,9 +350,13 @@ describe("payment reload hydration", () => {
           });
         }
         return {
-          ok: false,
-          status: 404,
-          json: async () => ({ ok: false, error: "Not found" }),
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: false,
+            error: "Not found",
+            reason: "not_found",
+          }),
         };
       }
       if (requestUrl.startsWith("/api/ref/validateCoupon")) {
@@ -361,9 +377,13 @@ describe("payment reload hydration", () => {
               }),
             }
           : {
-              ok: false,
-              status: 404,
-              json: async () => ({ ok: false, error: "Coupon not found" }),
+              ok: true,
+              status: 200,
+              json: async () => ({
+                ok: false,
+                error: "Coupon not found",
+                reason: "not_found",
+              }),
             };
       }
       if (requestUrl === "/api/payment/quote") {

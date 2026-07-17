@@ -105,4 +105,137 @@ describe("referral validation API", () => {
       /\b(?:_id|name|currentCommissionPercent|isFirstTime)\b/
     );
   });
+
+  test("returns a quiet not_found result for an unknown referral", async () => {
+    mockFetch.mockResolvedValue(null);
+    const module = require("../server/api/ref/validateReferral");
+    const handler = module.default || module;
+    const res = createRes();
+
+    await handler(
+      {
+        method: "GET",
+        query: { code: "unknown-referral" },
+        headers: { "x-forwarded-for": "203.0.113.42" },
+      },
+      res
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      ok: false,
+      error: "Not found",
+      reason: "not_found",
+    });
+  });
+
+  test("keeps missing referral code validation at 400", async () => {
+    const module = require("../server/api/ref/validateReferral");
+    const handler = module.default || module;
+    const res = createRes();
+
+    await handler(
+      {
+        method: "GET",
+        query: { code: "" },
+        headers: { "x-forwarded-for": "203.0.113.43" },
+      },
+      res
+    );
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ ok: false, error: "Missing code" });
+  });
+});
+
+describe("coupon validation API", () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+    globalThis.__rooRateLimitBuckets?.clear?.();
+  });
+
+  test("preserves the valid coupon response", async () => {
+    mockFetch.mockResolvedValue({
+      code: "SAVE10",
+      discountType: "fixed",
+      discountAmount: 10,
+      discountPercent: 90,
+      isActive: true,
+      canCombineWithReferral: true,
+      eligiblePackages: [],
+    });
+    const module = require("../server/api/ref/validateCoupon");
+    const handler = module.default || module;
+    const res = createRes();
+
+    await handler(
+      {
+        method: "GET",
+        query: {
+          code: "SAVE10",
+          packageTitle: "Performance Vertex Overhaul",
+        },
+        headers: { "x-forwarded-for": "203.0.113.44" },
+      },
+      res
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      ok: true,
+      coupon: {
+        code: "SAVE10",
+        discountType: "fixed",
+        discountAmount: 10,
+        canCombineWithReferral: true,
+      },
+    });
+  });
+
+  test("returns a quiet not_found result for an unknown coupon", async () => {
+    mockFetch.mockResolvedValue(null);
+    const module = require("../server/api/ref/validateCoupon");
+    const handler = module.default || module;
+    const res = createRes();
+
+    await handler(
+      {
+        method: "GET",
+        query: {
+          code: "unknown-coupon",
+          packageTitle: "Performance Vertex Overhaul",
+        },
+        headers: { "x-forwarded-for": "203.0.113.45" },
+      },
+      res
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      ok: false,
+      error: "Coupon not found or invalid.",
+      reason: "not_found",
+    });
+  });
+
+  test("keeps missing coupon code validation at 400", async () => {
+    const module = require("../server/api/ref/validateCoupon");
+    const handler = module.default || module;
+    const res = createRes();
+
+    await handler(
+      {
+        method: "GET",
+        query: { code: "" },
+        headers: { "x-forwarded-for": "203.0.113.46" },
+      },
+      res
+    );
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({
+      ok: false,
+      error: "Missing coupon code.",
+    });
+  });
 });

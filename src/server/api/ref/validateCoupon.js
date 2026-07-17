@@ -82,8 +82,12 @@ export default async function handler(req, res) {
 
     if (!coupon) {
       return res
-        .status(404)
-        .json({ ok: false, error: "Coupon not found or invalid." });
+        .status(200)
+        .json({
+          ok: false,
+          error: "Coupon not found or invalid.",
+          reason: "not_found",
+        });
     }
 
     if (!coupon.isActive) {
