@@ -39,8 +39,17 @@ export default function BookingModal({ open, onClose, children }) {
       const height = window.innerHeight;
       const currentIsMobile = isMobile || width < 780;
 
-      const paddingY = currentIsMobile ? MOBILE_PADDING_Y : DESKTOP_PADDING_Y; 
+      const paddingY = currentIsMobile ? MOBILE_PADDING_Y : DESKTOP_PADDING_Y;
       const DESKTOP_SCALE_BOOST = 1.03;
+      // The reservation banner floats over the modal; shrink the height
+      // budget by its published footprint so content scales to the space
+      // above it instead of underneath it.
+      const bannerClearance =
+        parseFloat(
+          getComputedStyle(document.documentElement).getPropertyValue(
+            "--reservation-banner-clearance"
+          )
+        ) || 0;
 
       let scale = 1;
       let baseWidth = 0;
@@ -55,10 +64,10 @@ export default function BookingModal({ open, onClose, children }) {
         baseWidth = 1150; 
         const widthScale = (width * 0.95) / baseWidth;
 
-        let heightScale = 1.5; 
+        let heightScale = 1.5;
         if (contentRef.current) {
           const contentH = contentRef.current.offsetHeight;
-          const availableH = height - paddingY; 
+          const availableH = height - paddingY - bannerClearance;
           heightScale = availableH / contentH;
         }
 
@@ -103,15 +112,24 @@ export default function BookingModal({ open, onClose, children }) {
 
     calculateLayout();
     window.addEventListener("resize", scheduleLayout);
-    
+
     const observer = new ResizeObserver(() => scheduleLayout());
     if (contentRef.current) observer.observe(contentRef.current);
+
+    // The banner publishes its footprint on the root element's style;
+    // re-run layout when it appears, resizes, or goes away.
+    const clearanceObserver = new MutationObserver(scheduleLayout);
+    clearanceObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["style"],
+    });
 
     return () => {
       window.removeEventListener("resize", scheduleLayout);
       window.cancelAnimationFrame(layoutFrameRef.current);
       layoutFrameRef.current = 0;
       observer.disconnect();
+      clearanceObserver.disconnect();
     };
   }, [isMobile, children, open]);
 
@@ -205,7 +223,10 @@ export default function BookingModal({ open, onClose, children }) {
           {/* SCROLL CONTAINER */}
           <div 
             className="min-h-full w-full flex flex-col cursor-pointer"
-            style={{ paddingTop: paddingBlockValue, paddingBottom: paddingBlockValue }}
+            style={{
+              paddingTop: paddingBlockValue,
+              paddingBottom: `calc(${paddingBlockValue}px + var(--reservation-banner-clearance, 0px))`,
+            }}
           >
             
             {/* ANIMATED SIZE WRAPPER */}
