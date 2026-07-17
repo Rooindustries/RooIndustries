@@ -57,6 +57,7 @@ const STEP_PROGRESS_LABELS = {
   3: "Step 3 of 3",
 };
 const STEP_PROGRESS_WIDTHS = { 1: "33%", 2: "67%", 3: "100%" };
+const STEP_PROGRESS_PERCENTS = { 1: 33, 2: 67, 3: 100 };
 const createFreshForm = () => ({
   discord: "",
   email: "",
@@ -208,21 +209,31 @@ function BookingStepTracker({ step }) {
         })}
       </ol>
       <div
-        className="mt-2 h-0.5 w-full rounded-full bg-surface-input"
+        className="relative mt-2 pb-5"
         role="progressbar"
-        aria-valuenow={step}
-        aria-valuemin={1}
-        aria-valuemax={3}
+        aria-valuenow={STEP_PROGRESS_PERCENTS[step]}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuetext={STEP_PROGRESS_LABELS[step]}
         aria-label="Booking progress"
       >
-        <div
-          className="h-0.5 rounded-full bg-accent-strong transition-all duration-300"
-          style={{ width: STEP_PROGRESS_WIDTHS[step] }}
-        />
+        <div className="h-0.5 w-full rounded-full bg-surface-input">
+          <div
+            className="h-0.5 rounded-full bg-accent-strong transition-all duration-300"
+            style={{ width: STEP_PROGRESS_WIDTHS[step] }}
+          />
+        </div>
+        <span
+          aria-hidden="true"
+          className="absolute top-2 text-[11px] font-medium text-accent transition-all duration-300"
+          style={{
+            left: STEP_PROGRESS_WIDTHS[step],
+            transform: step === 3 ? "translateX(-100%)" : "translateX(-50%)",
+          }}
+        >
+          {STEP_PROGRESS_WIDTHS[step]}
+        </span>
       </div>
-      <p className="mt-2 text-xs text-accent">
-        {STEP_PROGRESS_LABELS[step]}
-      </p>
     </div>
   );
 }

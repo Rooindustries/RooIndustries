@@ -209,11 +209,21 @@ const installDefaultFetch = ({
   });
 };
 
+const PROGRESS_PERCENT_LABELS = {
+  "Step 1 of 3": "33%",
+  "Step 2 of 3": "67%",
+  "Step 3 of 3": "100%",
+};
+
 const expectActiveStep = (label, progress) => {
   const tracker = screen.getByTestId("booking-step-tracker");
   const activeStep = tracker.querySelector('[aria-current="step"]');
   expect(activeStep).toHaveTextContent(label);
-  expect(within(tracker).getByText(progress)).toBeInTheDocument();
+  const progressBar = within(tracker).getByRole("progressbar");
+  expect(progressBar).toHaveAttribute("aria-valuetext", progress);
+  expect(
+    within(tracker).getByText(PROGRESS_PERCENT_LABELS[progress])
+  ).toBeInTheDocument();
 };
 
 describe("booking calendar UI", () => {
