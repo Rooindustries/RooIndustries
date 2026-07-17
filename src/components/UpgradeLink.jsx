@@ -316,7 +316,7 @@ export default function UpgradeLink() {
             <div className="flex justify-between gap-4">
               <span className="text-ink-secondary">Original package</span>
               <span className="font-semibold text-accent text-right">
-                {upgradeInfo.booking.packageTitle || "--"}
+                {upgradeInfo.booking.packageTitle || "-"}
               </span>
             </div>
             <div className="flex justify-between gap-4">

@@ -39,13 +39,13 @@ export const getWarrantyCallout = (pkg) => {
     className: isMax
       ? "ri-package-warranty-callout-max"
       : "ri-package-warranty-callout-standard",
-    title: isMax ? "Lifetime warranty included" : "90 day warranty included",
+    title: isMax ? "Lifetime warranty included" : "90-day warranty included",
     note: isMax
       ? "Priority support for long-term tuning issues."
       : "Support coverage after your session.",
     ariaLabel: isMax
       ? "Performance Vertex Max includes lifetime warranty support"
-      : `${pkg?.title || "This package"} includes 90 day warranty support`,
+      : `${pkg?.title || "This package"} includes 90-day warranty support`,
   };
 };
 

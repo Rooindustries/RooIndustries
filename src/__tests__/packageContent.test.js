@@ -5,6 +5,7 @@ const {
   WINDOWS_REOPTIMIZATION_LABEL,
   applyPackageContentOverrides,
   applyPackagesContentOverrides,
+  getPackageFeatureItems,
   normalizeFaqQuestions,
 } = packageContent;
 const {
@@ -182,6 +183,36 @@ describe("package content normalization", () => {
     expect(pkg.features.join(" ")).toContain(WINDOWS_REOPTIMIZATION_LABEL);
     expect(pkg.features.join(" ")).not.toMatch(/free reoptimizations/i);
     expect(pkg.features.join(" ")).toContain("Lifetime warranty");
+  });
+
+  test("derives modal rows from the canonical checklist when features are empty", () => {
+    const essentialsItems = getPackageFeatureItems({
+      title: "Vertex Essentials",
+      features: [],
+    });
+    const overhaulItems = getPackageFeatureItems({
+      title: "Performance Vertex Overhaul",
+      features: [],
+    });
+
+    expect(essentialsItems).toHaveLength(9);
+    expect(essentialsItems).toContainEqual({
+      label: "Windows system tuning",
+      included: true,
+    });
+    expect(essentialsItems).toContainEqual({
+      label: "CPU GPU RAM tuning",
+      included: false,
+    });
+    expect(overhaulItems).toContainEqual({
+      label: "CPU GPU RAM tuning",
+      included: true,
+    });
+    expect(overhaulItems).toContainEqual({
+      label: "SQM router setup",
+      included: false,
+    });
+    expect(JSON.stringify(essentialsItems)).not.toMatch(/30-day|90-day/i);
   });
 
   test("rewrites FAQ rows that mention free reoptimization or reXOC", () => {

@@ -395,7 +395,7 @@ export default function ReservationBanner() {
           className={`min-w-0 z-10 ${textAlignmentClass} lg:flex lg:items-baseline lg:gap-2.5`}
         >
           <p className={`font-semibold text-ink truncate drop-shadow-md ${titleSizeClass}`}>
-            Slot {holdLocalTimeLabel || "--"}
+            Slot {holdLocalTimeLabel || "-"}
             {hold?.packageTitle
               ? ` · ${getPublicPackageTitle(hold.packageTitle)}`
               : ""}
