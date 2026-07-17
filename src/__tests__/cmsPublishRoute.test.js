@@ -124,6 +124,45 @@ describe("global CMS publish route", () => {
     expect(mockExecuteGlobalCmsCommand).not.toHaveBeenCalled();
   });
 
+  test("cancels a request body that exceeds the read deadline", async () => {
+    jest.useFakeTimers();
+    const cancel = jest.fn().mockResolvedValue(undefined);
+    const releaseLock = jest.fn();
+    const request = {
+      headers: {
+        get: (name) => {
+          const header = String(name).toLowerCase();
+          if (header === "origin") return studioOrigin;
+          return "";
+        },
+      },
+      body: {
+        getReader: () => ({
+          cancel,
+          read: () => new Promise(() => {}),
+          releaseLock,
+        }),
+      },
+    };
+
+    try {
+      const { POST } = await import("../../app/api/admin/cms-publish/route.js");
+      const responsePromise = POST(request);
+      await jest.advanceTimersByTimeAsync(5_000);
+      const response = await responsePromise;
+      const body = await response.json();
+
+      expect(response.status).toBe(408);
+      expect(body.code).toBe("CMS_BODY_TIMEOUT");
+      expect(cancel).toHaveBeenCalledTimes(1);
+      expect(releaseLock).toHaveBeenCalledTimes(1);
+      expect(mockCreateSupabaseAdminClient).not.toHaveBeenCalled();
+      expect(mockExecuteGlobalCmsCommand).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   test("rejects commands before reading the body while CMS writes are paused", async () => {
     process.env.CMS_WRITES_PAUSED = "1";
     process.env.SANITY_STUDIO_CMS_WRITES_PAUSED = "1";

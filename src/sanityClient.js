@@ -121,4 +121,3 @@ export const urlFor = (source) => {
     ? new DirectAssetUrlBuilder(directUrl)
     : builder.image(source);
 };
-export const publicUrlFor = urlFor;
