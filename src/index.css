@@ -1627,10 +1627,7 @@ html:not([data-theme="dark"]) .ri-packages-heading {
 }
 
 html:not([data-theme="dark"]) .ri-packages-badge {
-  background-color: #0f172a;
   color: #ecfeff;
-  border-color: rgba(34, 211, 238, 0.4);
-  box-shadow: 0 0 18px rgba(56, 189, 248, 0.7);
 }
 
 html:not([data-theme="dark"]) .ri-packages-badge-dot {
