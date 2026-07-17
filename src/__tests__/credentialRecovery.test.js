@@ -151,7 +151,10 @@ describe("credential recovery saga", () => {
           return { data: { ready: true, pending: 0, dead_letters: 0 }, error: null };
         }
         if (name === "roo_document_mutation_mirror_status_for_ids") {
-          return { data: { pending: 0, dead_letters: 0 }, error: null };
+          return {
+            data: { pending: eventClaimed ? 0 : 1, dead_letters: 0 },
+            error: null,
+          };
         }
         if (name === "roo_complete_credential_operation") {
           completions += 1;

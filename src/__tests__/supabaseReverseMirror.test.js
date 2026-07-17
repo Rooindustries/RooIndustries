@@ -140,6 +140,7 @@ describe("Supabase to Sanity rollback mirroring", () => {
       fetch: jest.fn(),
     };
     const sanityClient = createSanityClient();
+    let requiredChecks = 0;
     const recoveryClient = {
       rpc: jest.fn(async (name, args) => {
         if (name === "roo_claim_document_mutation_mirror_events") {
@@ -165,7 +166,11 @@ describe("Supabase to Sanity rollback mirroring", () => {
           return { data: { status: "applied" }, error: null };
         }
         if (name === "roo_document_mutation_mirror_status_for_ids") {
-          return { data: { pending: 0, dead_letters: 0 }, error: null };
+          requiredChecks += 1;
+          return {
+            data: { pending: requiredChecks === 1 ? 1 : 0, dead_letters: 0 },
+            error: null,
+          };
         }
         return { data: { pending: 0, dead_letters: 0, ready: true }, error: null };
       }),
