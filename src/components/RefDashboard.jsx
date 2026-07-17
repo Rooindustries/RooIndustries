@@ -137,7 +137,7 @@ export default function RefDashboard() {
   const formatCurrency = (value) => `$${toMoneyNumber(value).toFixed(2)}`;
 
   const formatDate = (value) => {
-    if (!value) return "--";
+    if (!value) return "-";
     const d = new Date(value);
     if (isNaN(d.getTime())) return value;
     return d.toLocaleDateString(undefined, {

@@ -324,7 +324,7 @@ export default function Services({ initialData = null }) {
                                   "bg-surface-hover-accent text-accent ring-1 ring-line-accent shadow-glow-soft"
                                 }
                               >
-                                {pct === null ? "—" : `+${pct}% ${badgeSuffix}`}
+                                {pct === null ? "-" : `+${pct}% ${badgeSuffix}`}
                               </span>
                             </div>
 
@@ -337,7 +337,7 @@ export default function Services({ initialData = null }) {
                                     </span>
                                     <span className="ri-bench-number font-extrabold text-ink">
                                       {beforeNum === null ? (
-                                        "—"
+                                        "-"
                                       ) : (
                                         <AnimatedNumber value={beforeNum} />
                                       )}
@@ -366,7 +366,7 @@ export default function Services({ initialData = null }) {
                                     </span>
                                     <span className="ri-bench-number font-extrabold text-ink">
                                       {afterNum === null ? (
-                                        "—"
+                                        "-"
                                       ) : (
                                         <AnimatedNumber value={afterNum} />
                                       )}
@@ -408,7 +408,7 @@ export default function Services({ initialData = null }) {
                                     GPU
                                   </span>
                                   <span className="ri-bench-hardware-value text-[11px] font-medium text-ink-secondary leading-tight break-words">
-                                    {g?.gpu || "—"}
+                                    {g?.gpu || "-"}
                                   </span>
                                 </div>
                                 <div className="flex flex-col px-1">
@@ -416,7 +416,7 @@ export default function Services({ initialData = null }) {
                                     CPU
                                   </span>
                                   <span className="ri-bench-hardware-value text-[11px] font-medium text-ink-secondary leading-tight break-words">
-                                    {g?.cpu || "—"}
+                                    {g?.cpu || "-"}
                                   </span>
                                 </div>
                                 <div className="flex flex-col px-1">
@@ -424,7 +424,7 @@ export default function Services({ initialData = null }) {
                                     RAM
                                   </span>
                                   <span className="ri-bench-hardware-value text-[11px] font-medium text-ink-secondary leading-tight break-words">
-                                    {g?.ram || "—"}
+                                    {g?.ram || "-"}
                                   </span>
                                 </div>
                               </div>

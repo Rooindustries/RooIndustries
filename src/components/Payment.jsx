@@ -23,7 +23,7 @@ const formatLocalDate = (utcDate, timeZone) => {
       year: "numeric",
     }).format(utcDate);
   } catch {
-    return "--";
+    return "-";
   }
 };
 
@@ -35,7 +35,7 @@ const formatLocalTime = (utcDate, timeZone) => {
       minute: "2-digit",
     }).format(utcDate);
   } catch {
-    return "--";
+    return "-";
   }
 };
 
@@ -362,10 +362,10 @@ export default function Payment({ hideFooter = false }) {
 
   const date =
     bookingData.displayDate ||
-    (utcStart ? formatLocalDate(utcStart, userTimeZone) : "--");
+    (utcStart ? formatLocalDate(utcStart, userTimeZone) : "-");
   const time =
     bookingData.displayTime ||
-    (utcStart ? formatLocalTime(utcStart, userTimeZone) : "--");
+    (utcStart ? formatLocalTime(utcStart, userTimeZone) : "-");
   const baseAmount = Math.max(0, toMoney(packagePrice));
 
   const [referralInput, setReferralInput] = useState("");
