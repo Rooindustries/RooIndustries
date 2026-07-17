@@ -40,6 +40,22 @@ const isActiveHold = (hold, now) => {
   return phase !== "released" && phase !== "consumed" && !isExpiredHold(hold, now);
 };
 
+const fetchBackendAvailability = async (readClient) => {
+  if (typeof readClient.fetchAvailability === "function") {
+    return readClient.fetchAvailability({
+      bookingsQuery: BOOKINGS_QUERY,
+      holdsQuery: HOLDS_QUERY,
+      slotLocksQuery: SLOT_LOCKS_QUERY,
+    });
+  }
+  const [bookings, holds, slotLocks] = await Promise.all([
+    readClient.fetch(BOOKINGS_QUERY),
+    readClient.fetch(HOLDS_QUERY),
+    readClient.fetch(SLOT_LOCKS_QUERY),
+  ]);
+  return { bookings, holds, slotLocks };
+};
+
 export async function getBookingAvailability({ client } = {}) {
   const policy = resolveSupabaseRuntimePolicy();
   const primaryBackend = policy.commercePrimaryBackend;
@@ -50,32 +66,27 @@ export async function getBookingAvailability({ client } = {}) {
     !client &&
     policy.commerceFailoverGeneration < 1 &&
     (secondaryBackend !== "supabase" || isSupabaseAdminConfigured());
-  const clients = includeSecondary
-    ? [
-        primaryClient,
-        createCommerceReadClient({ backendOverride: secondaryBackend }),
-      ]
-    : [primaryClient];
-  const [settings, backendResults] = await Promise.all([
+  const backendReads = [fetchBackendAvailability(primaryClient)];
+  if (includeSecondary) {
+    backendReads.push(
+      Promise.resolve()
+        .then(() =>
+          createCommerceReadClient({ backendOverride: secondaryBackend })
+        )
+        .then(fetchBackendAvailability)
+    );
+  }
+  const [settings, backendSettlements] = await Promise.all([
     getBookingSettings({ client: primaryClient }),
-    Promise.all(
-      clients.map(async (readClient) => {
-        if (typeof readClient.fetchAvailability === "function") {
-          return readClient.fetchAvailability({
-            bookingsQuery: BOOKINGS_QUERY,
-            holdsQuery: HOLDS_QUERY,
-            slotLocksQuery: SLOT_LOCKS_QUERY,
-          });
-        }
-        const [bookings, holds, slotLocks] = await Promise.all([
-          readClient.fetch(BOOKINGS_QUERY),
-          readClient.fetch(HOLDS_QUERY),
-          readClient.fetch(SLOT_LOCKS_QUERY),
-        ]);
-        return { bookings, holds, slotLocks };
-      })
-    ),
+    Promise.allSettled(backendReads),
   ]);
+  const primaryResult = backendSettlements[0];
+  if (primaryResult.status === "rejected") {
+    throw primaryResult.reason;
+  }
+  const backendResults = backendSettlements
+    .filter((result) => result.status === "fulfilled")
+    .map((result) => result.value);
   const now = Date.now();
   const bookings = backendResults.flatMap((result) => result.bookings || []);
   const holds = backendResults.flatMap((result) => result.holds || []);
