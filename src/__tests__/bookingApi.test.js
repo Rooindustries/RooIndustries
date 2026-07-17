@@ -1111,6 +1111,61 @@ describe("booking reservation API", () => {
     expect(store.coupons[0].timesUsed).toBe(1);
   });
 
+  test("a 100 percent referral finalizes a zero server quote without a coupon", async () => {
+    store.packages.find(
+      (pkg) => pkg.title === "Performance Vertex Overhaul"
+    ).price = "$54.95";
+    store.referrals.push({
+      _id: "referral_free_creator",
+      _type: "referral",
+      slug: { current: "freecreator" },
+      currentCommissionPercent: 0,
+      currentDiscountPercent: 100,
+      successfulReferrals: 0,
+    });
+    const startTimeUTC = "2025-01-15T08:18:00.000Z";
+    const timeZone = "America/Los_Angeles";
+    const utcDate = new Date(startTimeUTC);
+    const hold = await reserveSlot(
+      startTimeUTC,
+      "Performance Vertex Overhaul"
+    );
+    const res = createRes();
+
+    await createBooking(
+      createReq({
+        email: CLIENT_EMAIL,
+        packageTitle: "Performance Vertex Overhaul",
+        packagePrice: "$54.95",
+        status: "captured",
+        paymentProvider: "free",
+        referralCode: "freecreator",
+        startTimeUTC,
+        localTimeZone: timeZone,
+        displayDate: formatClientDate(utcDate, timeZone),
+        displayTime: formatClientTime(utcDate, timeZone),
+        slotHoldId: hold.body.holdId,
+        slotHoldToken: hold.body.holdToken,
+        slotHoldExpiresAt: hold.body.expiresAt,
+      }),
+      res
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(store.bookings).toHaveLength(1);
+    expect(store.bookings[0]).toMatchObject({
+      paymentProvider: "free",
+      grossAmount: 54.95,
+      netAmount: 0,
+      referralCode: "freecreator",
+      discountPercent: 100,
+      discountAmount: 54.95,
+      commissionAmount: 0,
+    });
+    expect(store.bookings[0]).not.toHaveProperty("couponCode");
+    expect(store.referrals[0].successfulReferrals).toBe(1);
+  });
+
   test("rejects non-clubbable coupons when a referral is also present", async () => {
     store.referrals.push({
       _id: "ref_no_club",
@@ -1237,6 +1292,7 @@ describe("booking reservation API", () => {
     const booking = store.bookings.find(
       (entry) => entry._id === bookingRes.body.bookingId
     );
+    booking.message = '<script>alert("preview")</script>';
     const partialBooking = {
       _id: booking._id,
       email: booking.email,
@@ -1267,6 +1323,23 @@ describe("booking reservation API", () => {
     expect(renderedOwnerEmail).toContain("GPU/CPU");
     expect(renderedOwnerEmail).toContain("Shooter");
     expect(renderedOwnerEmail).toContain("$84.99");
+    expect(renderedOwnerEmail).toContain(
+      "margin:0;padding:0;background:#e9edf3"
+    );
+    expect(renderedOwnerEmail).toContain(
+      "max-width:640px;background:#0f172a;border:1px solid #2a3f5c"
+    );
+    expect(renderedOwnerEmail).toContain(
+      "text-align:center;background:#0b1120"
+    );
+    expect(renderedOwnerEmail).not.toContain(
+      "margin:0;padding:0;background:#0f172a"
+    );
+    expect(renderedOwnerEmail).not.toContain("#020617");
+    expect(renderedOwnerEmail).toContain(
+      "&lt;script&gt;alert(&quot;preview&quot;)&lt;/script&gt;"
+    );
+    expect(renderedOwnerEmail).not.toContain('<script>alert("preview")</script>');
   });
 
   test("captured paid bookings auto-reconcile after the original hold expires", async () => {
