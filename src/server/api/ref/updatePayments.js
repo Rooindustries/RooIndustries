@@ -25,6 +25,66 @@ const writeClient = createClient({
   useCdn: false,
 }, {domain: 'commerce'});
 
+const MAX_PAYMENT_UPDATE_ATTEMPTS = 3;
+
+const isRevisionConflict = (error) =>
+  Number(error?.statusCode || error?.status || 0) === 409;
+
+const fetchReferral = (referralId) =>
+  writeClient.fetch(
+    `*[_type == "referral" && _id == $id][0]{
+      _id,
+      _rev,
+      name,
+      slug,
+      paypalEmail,
+      contactDiscord,
+      contactTelegram,
+      contactPhone,
+      xocPayments,
+      vertexPayments
+    }`,
+    {id: referralId}
+  );
+
+const buildPaymentUpdate = ({
+  referral,
+  packageType,
+  entry,
+  entryId,
+  earnings,
+}) => {
+  const payments =
+    packageType === 'xoc'
+      ? [...(referral.xocPayments || [])]
+      : [...(referral.vertexPayments || [])];
+  const existingIndex = payments.findIndex(
+    (payment) => payment?._key === entryId
+  );
+
+  if (entryId && existingIndex >= 0) {
+    payments[existingIndex] = {...payments[existingIndex], ...entry};
+  } else {
+    payments.push(entry);
+  }
+
+  const xocPayments =
+    packageType === 'xoc' ? payments : referral.xocPayments || [];
+  const vertexPayments =
+    packageType === 'vertex' ? payments : referral.vertexPayments || [];
+  const paidXoc = sumPayments(xocPayments);
+  const paidVertex = sumPayments(vertexPayments);
+  const balance = buildBalance(earnings, paidXoc, paidVertex);
+
+  return {
+    xocPayments,
+    vertexPayments,
+    paidXoc,
+    paidVertex,
+    balance,
+  };
+};
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ok: false, error: 'Method not allowed'});
@@ -69,29 +129,11 @@ export default async function handler(req, res) {
         .json({ok: false, error: 'Invalid payment date supplied'});
     }
 
-    const referral = await writeClient.fetch(
-      `*[_type == "referral" && _id == $id][0]{
-        _id,
-        name,
-        slug,
-        paypalEmail,
-        contactDiscord,
-        contactTelegram,
-        contactPhone,
-        xocPayments,
-        vertexPayments
-      }`,
-      {id: referralId}
-    );
+    let referral = await fetchReferral(referralId);
 
     if (!referral) {
       return res.status(404).json({ok: false, error: 'Referral not found'});
     }
-
-    const payments =
-      packageType === 'xoc'
-        ? [...(referral.xocPayments || [])]
-        : [...(referral.vertexPayments || [])];
 
     const key = entryId || randomUUID();
     const entry = {
@@ -102,30 +144,20 @@ export default async function handler(req, res) {
       ...(note ? {note: String(note)} : {}),
     };
 
-    const existingIndex = payments.findIndex((p) => p?._key === entryId);
-
-    if (entryId && existingIndex >= 0) {
-      payments[existingIndex] = {...payments[existingIndex], ...entry};
-    } else {
-      payments.push(entry);
-    }
-
-    const nextXocPayments = packageType === 'xoc' ? payments : referral.xocPayments || [];
-    const nextVertexPayments = packageType === 'vertex' ? payments : referral.vertexPayments || [];
-
     const code = (referral?.slug?.current || '').toLowerCase();
-    const earnings = await fetchReferralEarnings({
-      client: readClient,
-      referralId,
-      referralCode: code,
-    });
-
-    const packages = await readClient.fetch(
-      `*[_type == "package"] | order(coalesce(order, 999) asc, title asc){
-        title,
-        order
-      }`
-    );
+    const [earnings, packages] = await Promise.all([
+      fetchReferralEarnings({
+        client: readClient,
+        referralId,
+        referralCode: code,
+      }),
+      readClient.fetch(
+        `*[_type == "package"] | order(coalesce(order, 999) asc, title asc){
+          title,
+          order
+        }`
+      ),
+    ]);
 
     const earningsByPackage = earnings.byPackage || {};
     const packageBreakdown = (Array.isArray(packages) ? packages : []).map(
@@ -147,37 +179,64 @@ export default async function handler(req, res) {
       });
     }
 
-    const paidXoc = sumPayments(nextXocPayments);
-    const paidVertex = sumPayments(nextVertexPayments);
-
-    const {
-      payments: paymentsTotal,
-      remaining,
-      owed,
-      overpaid,
-    } = buildBalance(earnings, paidXoc, paidVertex);
-
-    const patch = writeClient
-      .patch(referralId)
-      .set({
-        xocPayments: nextXocPayments,
-        vertexPayments: nextVertexPayments,
-        earnedXoc: earnings.xoc,
-        earnedVertex: earnings.vertex,
-        earnedTotal: earnings.total,
-        paidXoc,
-        paidVertex,
-        paidTotal: paymentsTotal.total,
-        owedXoc: owed.xoc,
-        owedVertex: owed.vertex,
-        owedTotal: owed.total,
+    let committedUpdate = null;
+    for (let attempt = 0; attempt < MAX_PAYMENT_UPDATE_ATTEMPTS; attempt += 1) {
+      const update = buildPaymentUpdate({
+        referral,
+        packageType,
+        entry,
+        entryId,
+        earnings,
       });
+      const {payments: paymentsTotal, owed} = update.balance;
+      const patch = writeClient
+        .patch(referralId)
+        .ifRevisionId(referral._rev)
+        .set({
+          xocPayments: update.xocPayments,
+          vertexPayments: update.vertexPayments,
+          earnedXoc: earnings.xoc,
+          earnedVertex: earnings.vertex,
+          earnedTotal: earnings.total,
+          paidXoc: update.paidXoc,
+          paidVertex: update.paidVertex,
+          paidTotal: paymentsTotal.total,
+          owedXoc: owed.xoc,
+          owedVertex: owed.vertex,
+          owedTotal: owed.total,
+        });
 
-    if (typeof internalNotes === 'string') {
-      patch.set({notes: internalNotes});
+      if (typeof internalNotes === 'string') {
+        patch.set({notes: internalNotes});
+      }
+
+      try {
+        await patch.commit();
+        committedUpdate = update;
+        break;
+      } catch (error) {
+        if (!isRevisionConflict(error)) throw error;
+        if (attempt === MAX_PAYMENT_UPDATE_ATTEMPTS - 1) break;
+
+        referral = await fetchReferral(referralId);
+        if (!referral) {
+          return res.status(404).json({ok: false, error: 'Referral not found'});
+        }
+      }
     }
 
-    await patch.commit();
+    if (!committedUpdate) {
+      return res.status(409).json({
+        ok: false,
+        error: 'Payment data changed while saving. Please try again.',
+      });
+    }
+
+    const {
+      xocPayments: nextXocPayments,
+      vertexPayments: nextVertexPayments,
+      balance: {payments: paymentsTotal, remaining, owed, overpaid},
+    } = committedUpdate;
 
     return res.status(200).json({
       ok: true,
