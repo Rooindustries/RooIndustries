@@ -1,13 +1,9 @@
-import fs from "node:fs";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { isSameOriginMutation } from "../server/request/sameOrigin.js";
 
 const JSON_CONTENT_TYPE = "application/json; charset=utf-8";
 const MAX_REQUEST_BODY_BYTES = 128 * 1024;
 const MAX_JSON_DEPTH = 20;
 const MAX_JSON_NODES = 2000;
-let legacyServerEnvInitialized = false;
 
 class RequestInputError extends Error {
   constructor(message, status = 400, code = "invalid_request") {
@@ -16,110 +12,6 @@ class RequestInputError extends Error {
     this.code = code;
   }
 }
-
-const parseDotenvFile = (filePath) => {
-  try {
-    if (!fs.existsSync(filePath)) {
-      return {};
-    }
-
-    const parsed = {};
-    const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
-
-    for (const rawLine of lines) {
-      const line = rawLine.trim();
-      if (!line || line.startsWith("#") || !line.includes("=")) {
-        continue;
-      }
-
-      const separatorIndex = line.indexOf("=");
-      const key = line.slice(0, separatorIndex).trim();
-      let value = line.slice(separatorIndex + 1).trim();
-
-      if (
-        (value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'"))
-      ) {
-        value = value.slice(1, -1);
-      }
-
-      parsed[key] = value;
-    }
-
-    return parsed;
-  } catch {
-    return {};
-  }
-};
-
-const firstDefined = (...values) => {
-  for (const value of values) {
-    if (value && String(value).trim()) {
-      return String(value).trim();
-    }
-  }
-  return "";
-};
-
-const setEnvFallback = (key, value) => {
-  if (!process.env[key] && value) {
-    process.env[key] = value;
-  }
-};
-
-const ensureLegacyServerEnv = () => {
-  if (legacyServerEnvInitialized) {
-    return;
-  }
-  legacyServerEnvInitialized = true;
-
-  const envLocal = parseDotenvFile(path.join(process.cwd(), ".env.local"));
-  const envFile = parseDotenvFile(path.join(process.cwd(), ".env"));
-
-  setEnvFallback(
-    "SANITY_PROJECT_ID",
-    firstDefined(
-      process.env.NEXT_PUBLIC_SANITY_PROJECT_ID,
-      envLocal.SANITY_PROJECT_ID,
-      envLocal.NEXT_PUBLIC_SANITY_PROJECT_ID,
-      envFile.SANITY_PROJECT_ID,
-      envFile.NEXT_PUBLIC_SANITY_PROJECT_ID
-    )
-  );
-
-  setEnvFallback(
-    "SANITY_DATASET",
-    firstDefined(
-      process.env.NEXT_PUBLIC_SANITY_DATASET,
-      envLocal.SANITY_DATASET,
-      envLocal.NEXT_PUBLIC_SANITY_DATASET,
-      envFile.SANITY_DATASET,
-      envFile.NEXT_PUBLIC_SANITY_DATASET
-    )
-  );
-
-  setEnvFallback(
-    "SANITY_API_VERSION",
-    firstDefined(
-      process.env.NEXT_PUBLIC_SANITY_API_VERSION,
-      envLocal.SANITY_API_VERSION,
-      envLocal.NEXT_PUBLIC_SANITY_API_VERSION,
-      envFile.SANITY_API_VERSION,
-      envFile.NEXT_PUBLIC_SANITY_API_VERSION
-    )
-  );
-
-  setEnvFallback(
-    "SANITY_WRITE_TOKEN",
-    firstDefined(
-      process.env.SANITY_API_TOKEN,
-      envLocal.SANITY_WRITE_TOKEN,
-      envLocal.SANITY_API_TOKEN,
-      envFile.SANITY_WRITE_TOKEN,
-      envFile.SANITY_API_TOKEN
-    )
-  );
-};
 
 const setHeaderValue = (store, name, value) => {
   const key = String(name || "").toLowerCase();
@@ -376,12 +268,6 @@ const createMutableResponse = () => {
     getResponse: () => response,
     finalizeDefault: () => finalize(null, { status: statusCode }),
   };
-};
-
-export const loadLegacyApiHandler = async (filePath) => {
-  ensureLegacyServerEnv();
-  const loaded = await import(/* webpackIgnore: true */ pathToFileURL(filePath).href);
-  return loaded?.default || loaded;
 };
 
 export const runLegacyApiHandler = async ({
