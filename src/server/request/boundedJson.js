@@ -3,7 +3,7 @@ const unsafeKeys = new Set(["__proto__", "prototype", "constructor"]);
 const bodyError = (message, status) =>
   Object.assign(new Error(message), { status });
 
-const readBeforeDeadline = async ({ promise, deadlineAt, onTimeout }) => {
+export const readBeforeDeadline = async ({ promise, deadlineAt, onTimeout }) => {
   const remainingMs = Math.max(0, deadlineAt - Date.now());
   if (remainingMs === 0) {
     Promise.resolve().then(() => onTimeout?.()).catch(() => {});
