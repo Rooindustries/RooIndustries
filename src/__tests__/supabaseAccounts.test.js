@@ -1,5 +1,6 @@
 import {
   authenticateSupabaseAccount,
+  buildCredentialSourcePreconditions,
   buildTourneyPlayerAuthEmail,
   completeSupabaseCredentialMirror,
   createSupabaseCreatorAccount,
@@ -20,6 +21,22 @@ const creatorAccount = {
 };
 
 describe("Supabase account compatibility", () => {
+  test("omits absent document fields from credential preconditions", () => {
+    expect(
+      buildCredentialSourcePreconditions({
+        document: {
+          creatorPassword: "stored-hash",
+          credentialVersion: 2,
+          resetTokenExpiresAt: null,
+          resetTokenHash: null,
+        },
+      })
+    ).toEqual({
+      creatorPassword: "stored-hash",
+      credentialVersion: 2,
+    });
+  });
+
   test("derives one normalized synthetic Auth email for Tourney players", () => {
     expect(buildTourneyPlayerAuthEmail("  Player-One  ")).toBe(
       buildTourneyPlayerAuthEmail("player-one")
