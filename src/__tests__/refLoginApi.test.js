@@ -6,7 +6,9 @@ const mockAuthenticateSupabaseAccount = jest.fn();
 const mockClearLegacySupabaseSession = jest.fn();
 const mockGetLegacySupabaseUser = jest.fn();
 const mockInstallLegacySupabaseSession = jest.fn();
+const mockAppendPendingDiscordLinkCookie = jest.fn();
 const mockLinkPendingDiscordIdentity = jest.fn();
+const mockResolvePendingDiscordUser = jest.fn();
 const originalBackend = process.env.DATA_PRIMARY_BACKEND;
 const originalCutover = process.env.SUPABASE_CUTOVER_ENABLED;
 const originalCanaries = process.env.SUPABASE_AUTH_CANARY_ACCOUNTS;
@@ -27,7 +29,15 @@ jest.mock("../server/supabase/serverSession.js", () => ({
 }));
 
 jest.mock("../server/supabase/pendingSocialLink.js", () => ({
+  appendPendingDiscordLinkCookie: (...args) =>
+    mockAppendPendingDiscordLinkCookie(...args),
+  clearPendingDiscordLinkCookie: () => ({
+    name: "roo_pending_discord_link",
+    value: "",
+    maxAge: 0,
+  }),
   linkPendingDiscordIdentity: (...args) => mockLinkPendingDiscordIdentity(...args),
+  resolvePendingDiscordUser: (...args) => mockResolvePendingDiscordUser(...args),
 }));
 
 const mockFetch = jest.fn();
@@ -150,6 +160,7 @@ beforeEach(() => {
   mockGetLegacySupabaseUser.mockResolvedValue(null);
   mockInstallLegacySupabaseSession.mockResolvedValue(true);
   mockLinkPendingDiscordIdentity.mockResolvedValue({ linked: true });
+  mockResolvePendingDiscordUser.mockResolvedValue(null);
 });
 
 afterAll(() => {
@@ -186,7 +197,7 @@ describe("referral login API", () => {
     };
     const user = { id: "30000000-0000-4000-8000-000000000003" };
     const session = { access_token: "creator-access", refresh_token: "creator-refresh" };
-    mockGetLegacySupabaseUser.mockResolvedValue(pendingDiscordUser);
+    mockResolvePendingDiscordUser.mockResolvedValue(pendingDiscordUser);
     mockAuthenticateSupabaseAccount.mockResolvedValue({
       ok: true,
       account,
@@ -210,6 +221,9 @@ describe("referral login API", () => {
       primaryUserId: user.id,
     });
     expect(mockClearLegacySupabaseSession).toHaveBeenCalledTimes(1);
+    expect(mockResolvePendingDiscordUser).toHaveBeenCalledWith({
+      request: expect.any(Object),
+    });
     expect(mockInstallLegacySupabaseSession).toHaveBeenCalledWith(
       expect.objectContaining({ session })
     );
@@ -219,6 +233,101 @@ describe("referral login API", () => {
       code: "creator-code",
       discordLinked: true,
     });
+  });
+
+  test("logs in and reports when the pending Discord identity was lost", async () => {
+    process.env.DATA_PRIMARY_BACKEND = "supabase";
+    const account = {
+      creator_legacy_sanity_id: "ref_creator_1",
+      display_name: "Creator",
+      legacy_sanity_id: "ref_creator_1",
+      principal_id: principalId,
+      referral_code: "creator-code",
+      session_version: 7,
+    };
+    const session = {
+      access_token: "creator-access",
+      refresh_token: "creator-refresh",
+    };
+    mockAuthenticateSupabaseAccount.mockResolvedValue({
+      ok: true,
+      account,
+      user: { id: "30000000-0000-4000-8000-000000000003" },
+      session,
+    });
+    mockResolvePendingDiscordUser.mockResolvedValue(null);
+    mockGetLegacySupabaseUser.mockResolvedValue(null);
+    mockLinkPendingDiscordIdentity.mockResolvedValue({
+      linked: false,
+      reason: "discord_session_missing",
+    });
+    const res = createRes();
+
+    await login(
+      createReq({
+        code: "creator@example.com",
+        linkDiscord: true,
+        password: "correct-password",
+      }),
+      res
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      ok: true,
+      discordLinkError:
+        "Discord linking did not complete. Try the Discord login again.",
+    });
+    expect(mockInstallLegacySupabaseSession).toHaveBeenCalledWith(
+      expect.objectContaining({ session })
+    );
+    expect(mockAppendPendingDiscordLinkCookie).toHaveBeenCalledWith(
+      res,
+      expect.objectContaining({ name: "roo_pending_discord_link", maxAge: 0 })
+    );
+  });
+
+  test("keeps the creator login when Discord principal merging fails", async () => {
+    process.env.DATA_PRIMARY_BACKEND = "supabase";
+    mockResolvePendingDiscordUser.mockResolvedValue({
+      id: "20000000-0000-4000-8000-000000000002",
+      identities: [{ provider: "discord" }],
+    });
+    mockAuthenticateSupabaseAccount.mockResolvedValue({
+      ok: true,
+      account: {
+        creator_legacy_sanity_id: "ref_creator_1",
+        display_name: "Creator",
+        legacy_sanity_id: "ref_creator_1",
+        principal_id: principalId,
+        referral_code: "creator-code",
+        session_version: 7,
+      },
+      user: { id: "30000000-0000-4000-8000-000000000003" },
+      session: {
+        access_token: "creator-access",
+        refresh_token: "creator-refresh",
+      },
+    });
+    mockLinkPendingDiscordIdentity.mockRejectedValue(
+      Object.assign(new Error("merge unavailable"), { code: "55000" })
+    );
+    const res = createRes();
+
+    await login(
+      createReq({
+        code: "creator@example.com",
+        linkDiscord: true,
+        password: "correct-password",
+      }),
+      res
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.discordLinkError).toBe(
+      "Discord linking did not complete. Try the Discord login again."
+    );
+    expect(mockInstallLegacySupabaseSession).toHaveBeenCalledTimes(1);
   });
 
   test("logs in with a referral code", async () => {

@@ -1,52 +1,111 @@
 import React, { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import SupabaseSocialLogin from "./SupabaseSocialLogin";
 import SiteDialog from "./SiteDialog";
 
+const PENDING_DISCORD_CHOICE_KEY = "refPendingDiscordChoice";
+const PENDING_DISCORD_CHOICE_MAX_AGE_MS = 15 * 60 * 1000;
+const DISCORD_LINK_SUCCESS_MESSAGE = "Discord linked to your account.";
+const DISCORD_LINK_FAILED_MESSAGE =
+  "Discord linking did not complete. Try the Discord login again.";
+const PASSWORD_UPDATED_MESSAGE =
+  "Password updated. Log in with your new password.";
+
+const clearPendingDiscordChoice = () => {
+  try {
+    window.sessionStorage.removeItem(PENDING_DISCORD_CHOICE_KEY);
+  } catch {
+    console.error("Pending Discord choice could not be cleared");
+  }
+};
+
+const savePendingDiscordChoice = (state) => {
+  try {
+    window.sessionStorage.setItem(
+      PENDING_DISCORD_CHOICE_KEY,
+      JSON.stringify({
+        expiresAt: Date.now() + PENDING_DISCORD_CHOICE_MAX_AGE_MS,
+        state,
+      })
+    );
+  } catch {
+    console.error("Pending Discord choice could not be saved");
+  }
+};
+
+const readPendingDiscordChoice = () => {
+  try {
+    const value = JSON.parse(
+      window.sessionStorage.getItem(PENDING_DISCORD_CHOICE_KEY) || "null"
+    );
+    if (
+      !["choose", "link"].includes(value?.state) ||
+      Number(value?.expiresAt || 0) <= Date.now()
+    ) {
+      clearPendingDiscordChoice();
+      return "";
+    }
+    return value.state;
+  } catch {
+    clearPendingDiscordChoice();
+    return "";
+  }
+};
+
 export default function RefLogin() {
   const nav = useNavigate();
+  const location = useLocation();
 
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [toast, setToast] = useState(null);
+  const [outcome, setOutcome] = useState(null);
   const [showUnlinkedDiscord, setShowUnlinkedDiscord] = useState(false);
   const [linkDiscord, setLinkDiscord] = useState(false);
   const identifierInputRef = useRef(null);
 
-  function showToast(type, message) {
-    setToast({ type, message });
-    setTimeout(() => setToast(null), 2500);
-  }
-
   // Load saved referral code
   useEffect(() => {
-    const query = new URLSearchParams(window.location.search);
+    const query = new URLSearchParams(location.search);
     const oauthError = query.get("oauth");
+    const provider = query.get("provider");
+    let pendingDiscordChoice = readPendingDiscordChoice();
     if (oauthError) {
-      const provider = query.get("provider");
       if (oauthError === "unlinked" && provider === "discord") {
+        savePendingDiscordChoice("choose");
+        pendingDiscordChoice = "choose";
         setShowUnlinkedDiscord(true);
       } else {
-        showToast(
-          "error",
-          oauthError === "unlinked"
+        setOutcome({
+          type: "error",
+          message:
+            oauthError === "unlinked"
             ? "That Google or Discord email is not linked to a creator account."
-            : "Social sign-in is temporarily unavailable. Use your email or referral code."
-        );
+            : "Social sign-in is temporarily unavailable. Use your email or referral code.",
+        });
       }
       query.delete("oauth");
       query.delete("provider");
-      const cleanSearch = query.toString();
-      window.history.replaceState(
-        null,
-        "",
-        `${window.location.pathname}${cleanSearch ? `?${cleanSearch}` : ""}`
-      );
+    } else if (pendingDiscordChoice === "choose") {
+      setShowUnlinkedDiscord(true);
+    } else if (pendingDiscordChoice === "link") {
+      setLinkDiscord(true);
     }
 
+    if (query.get("notice") === "password-updated") {
+      setOutcome({ type: "success", message: PASSWORD_UPDATED_MESSAGE });
+      query.delete("notice");
+    }
+    const cleanSearch = query.toString();
+    window.history.replaceState(
+      null,
+      "",
+      `${location.pathname}${cleanSearch ? `?${cleanSearch}` : ""}`
+    );
+
     const checkSession = async () => {
+      if (pendingDiscordChoice) return;
       try {
         const sessionRes = await fetch("/api/ref/getData");
         if (sessionRes.ok) {
@@ -64,49 +123,73 @@ export default function RefLogin() {
       setCode(savedCode);
       setRememberMe(true);
     }
-  }, [nav]);
+  }, [location.pathname, location.search, nav]);
 
   async function handleLogin(e) {
     e.preventDefault();
 
     if (!code || !password) {
-      showToast("error", "Please fill in all fields.");
+      setOutcome({ type: "error", message: "Please fill in all fields." });
       return;
     }
 
     setLoading(true);
+    setOutcome(null);
 
     try {
+      const shouldLinkDiscord =
+        linkDiscord || readPendingDiscordChoice() === "link";
       const res = await fetch("/api/ref/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, linkDiscord, password, rememberMe }),
+        body: JSON.stringify({
+          code,
+          linkDiscord: shouldLinkDiscord,
+          password,
+          rememberMe,
+        }),
       });
 
-      const data = await res.json();
-      if (!data.ok) {
-        showToast("error", "Wrong referral code/email or password.");
-        setLoading(false);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        setOutcome({
+          type: "error",
+          message: data.error || "Login could not be completed. Please try again.",
+        });
         return;
       }
 
       sessionStorage.setItem("refLoginCode", data.code || code);
+      if (shouldLinkDiscord) {
+        clearPendingDiscordChoice();
+        const discordLinked = data.discordLinked === true;
+        const message = discordLinked
+          ? DISCORD_LINK_SUCCESS_MESSAGE
+          : data.discordLinkError || DISCORD_LINK_FAILED_MESSAGE;
+        setOutcome({ type: discordLinked ? "success" : "error", message });
+        setTimeout(
+          () =>
+            nav(
+              `/referrals/dashboard?notice=${
+                discordLinked ? "discord-linked" : "discord-link-failed"
+              }`
+            ),
+          900
+        );
+        return;
+      }
 
-      showToast(
-        "success",
-        data.discordLinked ? "Discord linked to your account." : "Logging in..."
-      );
-
-      setTimeout(
-        () => nav("/referrals/dashboard"),
-        data.discordLinked ? 900 : 500
-      );
+      setOutcome({ type: "success", message: "Login successful." });
+      setTimeout(() => nav("/referrals/dashboard"), 500);
     } catch {
       console.error("Referral login failed");
-      showToast("error", "Server error.");
+      setOutcome({
+        type: "error",
+        message: "Login could not be completed. Please try again.",
+      });
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   }
 
   return (
@@ -195,6 +278,20 @@ export default function RefLogin() {
         </div>
 
         {/* Submit Button */}
+        {outcome ? (
+          <div
+            aria-live="polite"
+            className={`rounded-xl border px-4 py-3 text-sm font-semibold ${
+              outcome.type === "success"
+                ? "border-success-border bg-success-soft text-success-text"
+                : "border-danger-border bg-danger-soft text-danger-text"
+            }`}
+            role={outcome.type === "error" ? "alert" : "status"}
+          >
+            {outcome.message}
+          </div>
+        ) : null}
+
         <button
           type="submit"
           disabled={loading}
@@ -255,6 +352,7 @@ export default function RefLogin() {
             className="w-full rounded-xl bg-accent-strong px-5 py-3 text-sm font-semibold text-white shadow-glow-soft transition hover:bg-accent"
             data-autofocus
             onClick={() => {
+              savePendingDiscordChoice("link");
               setLinkDiscord(true);
               setShowUnlinkedDiscord(false);
               requestAnimationFrame(() => identifierInputRef.current?.focus());
@@ -265,7 +363,10 @@ export default function RefLogin() {
           </button>
           <button
             className="w-full rounded-xl border border-line-input bg-surface-input px-5 py-3 text-sm font-semibold text-ink-secondary transition hover:border-info-border hover:bg-surface-hover"
-            onClick={() => nav("/referrals/register?oauth=ready&provider=discord")}
+            onClick={() => {
+              clearPendingDiscordChoice();
+              nav("/referrals/register?oauth=ready&provider=discord");
+            }}
             type="button"
           >
             Create account
@@ -273,20 +374,6 @@ export default function RefLogin() {
         </div>
       </SiteDialog>
 
-      {/* Toast Notification */}
-      {toast && (
-        <div
-          className={`fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-xl text-white text-sm font-semibold shadow-lg transition-all
-            ${
-              toast.type === "success"
-                ? "bg-success shadow-success-soft"
-                : "bg-danger shadow-danger-soft"
-            }
-          `}
-        >
-          {toast.message}
-        </div>
-      )}
     </section>
   );
 }
