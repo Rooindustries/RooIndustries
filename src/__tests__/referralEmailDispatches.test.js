@@ -147,6 +147,12 @@ describe("referral email dispatch worker", () => {
     expect(providerKeys).toEqual([idempotencyKey, idempotencyKey]);
     expect(accepted.size).toBe(1);
     expect(completions.map((entry) => entry.p_success)).toEqual([false, true]);
+    for (const [message] of resendClient.emails.send.mock.calls) {
+      expect(message).toEqual(expect.objectContaining({
+        html: expect.stringContaining("Reset password"),
+      }));
+      expect(message).not.toHaveProperty("react");
+    }
   });
 
   test("continues a leased batch after one provider failure", async () => {

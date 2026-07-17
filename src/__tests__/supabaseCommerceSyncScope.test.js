@@ -3,6 +3,7 @@ import {
   COMMERCE_MIXED_IDENTITY_DOCUMENT_TYPES,
   COMMERCE_RECONCILABLE_DOCUMENT_TYPES,
   COMMERCE_SHADOW_DOCUMENT_TYPES,
+  canonicalizeCommerceParityValue,
   isCommerceShadowDocumentType,
 } from "../server/commerce/documentTypes";
 
@@ -46,5 +47,22 @@ describe("Supabase commerce-only shadow scope", () => {
     expect(COMMERCE_MIXED_IDENTITY_DOCUMENT_TYPES).toEqual(["referral"]);
     expect(isCommerceShadowDocumentType("referral")).toBe(true);
     expect(COMMERCE_RECONCILABLE_DOCUMENT_TYPES).not.toContain("referral");
+  });
+
+  test("excludes mirror metadata and referral delivery credentials from parity", () => {
+    expect(
+      canonicalizeCommerceParityValue({
+        _id: "svc-check-referral",
+        _type: "referral",
+        _supabaseSequence: 76,
+        resetDeliveryToken: "sealed-reset-token",
+        registrationVerificationDeliveryToken: "sealed-verification-token",
+        currentCommissionPercent: 10,
+      })
+    ).toEqual({
+      _id: "svc-check-referral",
+      _type: "referral",
+      currentCommissionPercent: 10,
+    });
   });
 });

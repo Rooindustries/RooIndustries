@@ -1,6 +1,9 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { buildResetEmail } from "../server/email/referralResetEmail";
+import {
+  buildResetEmail,
+  buildResetEmailHtml,
+} from "../server/email/referralResetEmail";
 
 describe("referral reset email", () => {
   test("React escapes customer content and keeps the reset token out of query parameters", () => {
@@ -9,6 +12,19 @@ describe("referral reset email", () => {
     const markup = renderToStaticMarkup(
       buildResetEmail({ name: '<img src=x onerror="alert(1)">', resetLink })
     );
+
+    expect(markup).toContain("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
+    expect(markup).toContain("/referrals/reset#token=private-token");
+    expect(markup).not.toContain("/referrals/reset?token=");
+    expect(markup).not.toContain("<img");
+  });
+
+  test("the provider-ready HTML serializer preserves the same escaping boundary", () => {
+    const markup = buildResetEmailHtml({
+      name: '<img src=x onerror="alert(1)">',
+      resetLink:
+        "https://www.rooindustries.com/referrals/reset#token=private-token",
+    });
 
     expect(markup).toContain("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
     expect(markup).toContain("/referrals/reset#token=private-token");
