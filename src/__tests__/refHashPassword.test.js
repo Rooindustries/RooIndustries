@@ -130,6 +130,7 @@ describe("referral password change", () => {
 
     expect(response.statusCode).toBe(200);
     const request = mockUpdateSupabaseAccountPassword.mock.calls[0][0];
+    expect(request.password).toBe("new-password-value");
     expect(request.sourcePreconditions).toMatchObject({
       resetTokenHash: "outstanding-reset-hash",
       resetTokenExpiresAt: "2099-01-01T00:00:00.000Z",

@@ -170,7 +170,8 @@ export const updateSupabaseAccountPassword = async ({
   const normalizedPassword = normalizePassword(password);
   const importedHash = String(passwordHash || "").trim();
   if (
-    (!importedHash && (normalizedPassword.length < 10 || normalizedPassword.length > 128)) ||
+    normalizedPassword.length < 10 ||
+    normalizedPassword.length > 128 ||
     (importedHash && !/^\$2[aby]\$/.test(importedHash))
   ) {
     throw new Error("Password must be between 10 and 128 characters.");
@@ -208,7 +209,7 @@ export const updateSupabaseAccountPassword = async ({
   const effectiveHash = String(prepared?.password_hash || resolvedHash);
   if (prepared?.status === "prepared") {
     const result = await adminClient.auth.admin.updateUserById(account.user_id, {
-      password_hash: effectiveHash,
+      password: normalizedPassword,
     });
     if (result.error) throw new Error("Supabase password update failed.");
     requireRpcData(
