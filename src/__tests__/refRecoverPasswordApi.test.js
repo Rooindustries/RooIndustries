@@ -218,6 +218,22 @@ describe("referral authenticated recovery API", () => {
     expect(mockReconcileCredentialSource).not.toHaveBeenCalled();
   });
 
+  test("surfaces an already active password operation", async () => {
+    mockUpdatePassword.mockRejectedValue(
+      Object.assign(new Error("operation active"), { code: "55006" })
+    );
+    const res = createRes();
+
+    await recoverPassword(createReq({ password: "new-password-123" }), res);
+
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toEqual({
+      ok: false,
+      error:
+        "A previous password change is still in progress. Please try again shortly.",
+    });
+  });
+
   test("returns an explicit pending state while the durable mirror finishes", async () => {
     mockReconcileCredentialSource.mockRejectedValue(
       Object.assign(new Error("mirror pending"), {

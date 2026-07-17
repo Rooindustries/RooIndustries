@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
+import RefChangePassword from "../components/RefChangePassword";
 import RefReset from "../components/RefReset";
 
 const mockExchangeCodeForSession = jest.fn();
@@ -236,5 +237,115 @@ describe("referral Supabase recovery", () => {
       );
     });
     expect(mockSetSession).not.toHaveBeenCalled();
+  });
+});
+
+const renderChangePassword = () =>
+  render(
+    <MemoryRouter initialEntries={["/referrals/change-password"]}>
+      <RefChangePassword />
+    </MemoryRouter>
+  );
+
+const fillAndSubmitPasswordChange = async () => {
+  fireEvent.change(await screen.findByPlaceholderText("Enter current password"), {
+    target: { value: "current-password-123" },
+  });
+  fireEvent.change(screen.getByPlaceholderText("Enter new password"), {
+    target: { value: "new-password-456" },
+  });
+  fireEvent.change(screen.getByPlaceholderText("Confirm new password"), {
+    target: { value: "new-password-456" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save Password" }));
+};
+
+describe("referral signed-in password change outcomes", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    window.history.replaceState(null, "", "/referrals/change-password");
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  const installFetch = (passwordResponse) => {
+    global.fetch = jest.fn(async (url) => {
+      if (String(url) === "/api/ref/getData") {
+        return { ok: true, status: 200, json: async () => ({ ok: true }) };
+      }
+      if (String(url) === "/api/auth/reauth") {
+        return { ok: true, status: 200, json: async () => ({ ok: true }) };
+      }
+      if (String(url) === "/api/ref/hashPassword") {
+        return passwordResponse;
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+  };
+
+  test("renders the completed password copy", async () => {
+    installFetch({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        status: "updated",
+        message: "Password updated. Log in with your new password.",
+      }),
+    });
+    renderChangePassword();
+
+    await fillAndSubmitPasswordChange();
+
+    expect(
+      await screen.findByText("Password updated. Log in with your new password.")
+    ).toBeInTheDocument();
+  });
+
+  test("renders the durable-write pending copy", async () => {
+    installFetch({
+      ok: true,
+      status: 202,
+      json: async () => ({
+        ok: true,
+        status: "pending",
+        message: "Your password change is saving. It will finish in a moment.",
+      }),
+    });
+    renderChangePassword();
+
+    await fillAndSubmitPasswordChange();
+
+    expect(
+      await screen.findByText(
+        "Your password change is saving. It will finish in a moment."
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Password" })).toBeEnabled();
+  });
+
+  test("renders the active-operation error instead of silently clearing it", async () => {
+    installFetch({
+      ok: false,
+      status: 503,
+      json: async () => ({
+        ok: false,
+        error:
+          "A previous password change is still in progress. Please try again shortly.",
+      }),
+    });
+    renderChangePassword();
+
+    await fillAndSubmitPasswordChange();
+
+    expect(
+      await screen.findByText(
+        "A previous password change is still in progress. Please try again shortly."
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Password" })).toBeEnabled();
   });
 });

@@ -1,6 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+const PASSWORD_PENDING_MESSAGE =
+  "Your password change is saving. It will finish in a moment.";
+const PASSWORD_UPDATED_MESSAGE =
+  "Password updated. Log in with your new password.";
+
 export default function RefChangePassword() {
   const nav = useNavigate();
   const [sessionChecked, setSessionChecked] = useState(false);
@@ -9,7 +14,7 @@ export default function RefChangePassword() {
   const [pass2, setPass2] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [toast, setToast] = useState(null);
+  const [outcome, setOutcome] = useState(null);
 
   useEffect(() => {
     const checkSession = async () => {
@@ -33,18 +38,25 @@ export default function RefChangePassword() {
 
   if (!sessionChecked) return null;
 
-  function showToast(type, msg) {
-    setToast({ type, msg });
-    setTimeout(() => setToast(null), 2200);
-  }
-
   async function update() {
     if (!currentPassword || !pass1 || !pass2) {
-      return showToast("error", "Fill in all three fields");
+      setOutcome({ type: "error", message: "Fill in all three fields." });
+      return;
     }
-    if (pass1 !== pass2) return showToast("error", "Passwords do not match");
+    if (pass1 !== pass2) {
+      setOutcome({ type: "error", message: "Passwords do not match." });
+      return;
+    }
+    if (pass1.length < 10 || pass1.length > 128) {
+      setOutcome({
+        type: "error",
+        message: "Use a password between 10 and 128 characters.",
+      });
+      return;
+    }
 
     setLoading(true);
+    setOutcome(null);
 
     try {
       const reauthResponse = await fetch("/api/auth/reauth", {
@@ -58,8 +70,11 @@ export default function RefChangePassword() {
       });
       const reauth = await reauthResponse.json().catch(() => ({}));
       if (!reauthResponse.ok || !reauth.ok) {
-        setLoading(false);
-        return showToast("error", reauth.error || "Current password is incorrect");
+        setOutcome({
+          type: "error",
+          message: reauth.error || "Current password is incorrect.",
+        });
+        return;
       }
       const res = await fetch("/api/ref/hashPassword", {
         method: "POST",
@@ -67,28 +82,48 @@ export default function RefChangePassword() {
         body: JSON.stringify({ password: pass1 }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
-      if (!data.ok) {
+      if (res.status === 202 || data.status === "pending") {
+        setOutcome({
+          type: "pending",
+          message: data.message || PASSWORD_PENDING_MESSAGE,
+        });
+        return;
+      }
+
+      if (!res.ok || !data.ok) {
         if (res.status === 401) {
           nav("/referrals/login");
           return;
         }
-        setLoading(false);
-        return showToast("error", data.error || "Failed to update password");
+        setOutcome({
+          type: "error",
+          message: data.error || "Password update could not be completed.",
+        });
+        return;
       }
 
-      showToast("success", "Password updated!");
+      setOutcome({
+        type: "success",
+        message: data.message || PASSWORD_UPDATED_MESSAGE,
+      });
       setCurrentPassword("");
       setPass1("");
       setPass2("");
-      setTimeout(() => nav("/referrals/login"), 1200);
+      setTimeout(
+        () => nav("/referrals/login?notice=password-updated"),
+        1500
+      );
     } catch {
       console.error("Referral password change failed");
-      showToast("error", "Server error");
+      setOutcome({
+        type: "error",
+        message: "Password update could not be completed. Please try again.",
+      });
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   }
 
   return (
@@ -147,6 +182,22 @@ export default function RefChangePassword() {
           />
         </div>
 
+        {outcome ? (
+          <div
+            aria-live="polite"
+            className={`rounded-xl border px-4 py-3 text-sm font-semibold ${
+              outcome.type === "success"
+                ? "border-success-border bg-success-soft text-success-text"
+                : outcome.type === "pending"
+                  ? "border-warning-border bg-warning-soft text-warning-text"
+                  : "border-danger-border bg-danger-soft text-danger-text"
+            }`}
+            role={outcome.type === "error" ? "alert" : "status"}
+          >
+            {outcome.message}
+          </div>
+        ) : null}
+
         <button
           onClick={update}
           disabled={loading}
@@ -170,19 +221,6 @@ export default function RefChangePassword() {
         </button>
       </div>
 
-      {toast && (
-        <div
-          className={`fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-xl 
-          text-white text-sm font-semibold shadow-lg transition-all
-          ${
-            toast.type === "success"
-              ? "bg-success shadow-success-soft"
-              : "bg-danger shadow-danger-soft"
-          }`}
-        >
-          {toast.msg}
-        </div>
-      )}
     </section>
   );
 }

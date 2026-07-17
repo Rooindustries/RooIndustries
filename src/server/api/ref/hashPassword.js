@@ -29,6 +29,13 @@ const client = createClient({
   useCdn: false,
 });
 
+const PASSWORD_PENDING_MESSAGE =
+  "Your password change is saving. It will finish in a moment.";
+const PASSWORD_UPDATED_MESSAGE =
+  "Password updated. Log in with your new password.";
+const PASSWORD_OPERATION_BUSY_MESSAGE =
+  "A previous password change is still in progress. Please try again shortly.";
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ ok: false });
 
@@ -141,7 +148,10 @@ export default async function handler(req, res) {
       logSafeError("Supabase referral password change failed", error);
       return res.status(503).json({
         ok: false,
-        error: "Password update is temporarily unavailable. Please try again.",
+        error:
+          String(error?.code || "") === "55006"
+            ? PASSWORD_OPERATION_BUSY_MESSAGE
+            : "Password update is temporarily unavailable. Please try again.",
       });
     }
 
@@ -172,15 +182,22 @@ export default async function handler(req, res) {
       }
     } catch (error) {
       logSafeError("Supabase referral password source update pending", error);
-      return res.status(503).json({
-        ok: false,
-        error: "Password update is finishing. Please sign in again shortly.",
+      res.setHeader?.("Retry-After", "2");
+      return res.status(202).json({
+        ok: true,
+        status: "pending",
+        message: PASSWORD_PENDING_MESSAGE,
       });
     }
     clearReferralSessionCookie(res);
     await clearLegacySupabaseSession({ req, res }).catch(() => {});
 
-    return res.json({ ok: true, signedOut: true });
+    return res.json({
+      ok: true,
+      signedOut: true,
+      status: "updated",
+      message: PASSWORD_UPDATED_MESSAGE,
+    });
   } catch (err) {
     logSafeError("Referral password change failed", err);
     return res.status(500).json({ ok: false, error: "Server error" });
