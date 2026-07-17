@@ -12,13 +12,20 @@ import { clearNextSupabaseSession } from "../../../../src/server/supabase/server
 import { REF_SESSION_COOKIE } from "../../../../src/server/api/ref/auth";
 import { TOURNEY_SESSION_COOKIE } from "../../../../src/server/tourney/auth";
 import { isSupabaseTourneyDatabase } from "../../../../src/server/tourney/sqlClient";
-import { readReauthToken } from "../../../../src/server/supabase/reauth";
+import {
+  clearReauthCookie,
+  readReauthToken,
+} from "../../../../src/server/supabase/reauth";
+import {
+  matchesReferralOrphanReclaim,
+  readReferralOrphanReclaim,
+} from "../../../../src/server/supabase/orphanIdentityReclaim";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const flows = new Set(["referral", "tourney"]);
-const actions = new Set(["signin", "signup", "link", "reauth"]);
+const actions = new Set(["signin", "signup", "link", "reauth", "reclaim"]);
 const providers = new Set(["google", "discord"]);
 const reauthPurposes = new Set([
   "link_identity",
@@ -69,6 +76,14 @@ const clearDomainSession = (response, flow) => {
   });
 };
 
+const proofFailure = ({ action, body, status }) => {
+  const response = NextResponse.json(body, { status });
+  if (["link", "reclaim"].includes(action)) {
+    response.cookies.set(clearReauthCookie());
+  }
+  return noStore(response);
+};
+
 export async function POST(request) {
   if (!isSameOriginMutation(request)) {
     return noStore(
@@ -102,6 +117,14 @@ export async function POST(request) {
       )
     );
   }
+  if (action === "reclaim" && flow !== "referral") {
+    return noStore(
+      NextResponse.json(
+        { ok: false, error: "Identity recovery is available only for creator accounts." },
+        { status: 400 }
+      )
+    );
+  }
   if (flow === "tourney" && !isSupabaseTourneyDatabase(process.env)) {
     return noStore(
       NextResponse.json(
@@ -129,30 +152,33 @@ export async function POST(request) {
       max: 20,
     });
     if (!ipLimit.allowed) {
-      const limited = NextResponse.json(
-        { ok: false, error: "Too many authentication attempts. Try again shortly." },
-        { status: 429 }
-      );
+      const limited = proofFailure({
+        action,
+        body: {
+          ok: false,
+          error: "Too many authentication attempts. Try again shortly.",
+        },
+        status: 429,
+      });
       limited.headers.set("Retry-After", String(ipLimit.retryAfter));
-      return noStore(limited);
+      return limited;
     }
     let domainIdentity = null;
-    if (["link", "reauth"].includes(action)) {
+    if (["link", "reauth", "reclaim"].includes(action)) {
       domainIdentity = await resolveExactDomainIdentity({
         flow,
         request,
         response,
       });
       if (!domainIdentity) {
-        return noStore(
-          NextResponse.json(
-            {
-              ok: false,
-              error: "Sign in with your password again before linking an account.",
-            },
-            { status: 409 }
-          )
-        );
+        return proofFailure({
+          action,
+          body: {
+            ok: false,
+            error: "Sign in with your password again before linking an account.",
+          },
+          status: 409,
+        });
       }
       const connectedProviders = new Set(
         (domainIdentity.account.connected_providers || []).map((value) =>
@@ -167,28 +193,31 @@ export async function POST(request) {
           )
         );
       }
-      if (action === "link" && connectedProviders.has(provider)) {
-        return noStore(
-          NextResponse.json(
-            { ok: false, error: "That account is already linked." },
-            { status: 409 }
-          )
-        );
+      if (["link", "reclaim"].includes(action) && connectedProviders.has(provider)) {
+        return proofFailure({
+          action,
+          body: { ok: false, error: "That account is already linked." },
+          status: 409,
+        });
       }
       const principalLimit = await consumeAuthRateLimit({
         identity: `oauth:${domainIdentity.account.principal_id}:${provider}`,
         max: 5,
       });
       if (!principalLimit.allowed) {
-        const limited = NextResponse.json(
-          { ok: false, error: "Too many authentication attempts. Try again shortly." },
-          { status: 429 }
-        );
+        const limited = proofFailure({
+          action,
+          body: {
+            ok: false,
+            error: "Too many authentication attempts. Try again shortly.",
+          },
+          status: 429,
+        });
         limited.headers.set(
           "Retry-After",
           String(principalLimit.retryAfter)
         );
-        return noStore(limited);
+        return limited;
       }
     } else {
       await clearNextSupabaseSession({ request, response }).catch(() => {});
@@ -204,14 +233,41 @@ export async function POST(request) {
         )
       );
     }
-    const reauthToken = action === "link" ? readReauthToken(request) : "";
-    if (action === "link" && !reauthToken) {
-      return noStore(
-        NextResponse.json(
-          { ok: false, error: "Reauthenticate before linking a provider.", reauthRequired: true },
-          { status: 409 }
-        )
+    const reauthToken = ["link", "reclaim"].includes(action)
+      ? readReauthToken(request)
+      : "";
+    if (["link", "reclaim"].includes(action) && !reauthToken) {
+      return proofFailure({
+        action,
+        body: {
+          ok: false,
+          error: "Reauthenticate before linking a provider.",
+          reauthRequired: true,
+        },
+        status: 409,
+      });
+    }
+    const recovery = action === "reclaim"
+      ? readReferralOrphanReclaim({ request })
+      : null;
+    if (
+      action === "reclaim" &&
+      !matchesReferralOrphanReclaim({
+        account: domainIdentity?.account,
+        recovery,
+        user: domainIdentity?.user,
+      })
+    ) {
+      const invalidRecovery = NextResponse.json(
+        {
+          ok: false,
+          error: "Identity recovery expired. Start the provider link again.",
+          reauthRequired: true,
+        },
+        { status: 409 }
       );
+      invalidRecovery.cookies.set(clearReauthCookie());
+      return noStore(invalidRecovery);
     }
 
     const intent = await createOAuthIntent({
@@ -219,6 +275,7 @@ export async function POST(request) {
       domainSubject: domainIdentity?.domainSubject || "",
       flow,
       provider,
+      recoveryForIntentId: recovery?.originalIntentId || "",
       reauthPurpose,
       reauthToken,
       returnPath,
@@ -233,13 +290,30 @@ export async function POST(request) {
     });
     for (const cookie of response.cookies.getAll()) finalResponse.cookies.set(cookie);
     finalResponse.cookies.set(oauthIntentCookie(intent.token, intent.id));
+    if (["link", "reclaim"].includes(action)) {
+      finalResponse.cookies.set(clearReauthCookie());
+    }
     return noStore(finalResponse);
-  } catch {
-    return noStore(
-      NextResponse.json(
-        { ok: false, error: "OAuth could not be started. Please try again." },
-        { status: 503 }
-      )
+  } catch (error) {
+    if (String(error?.code || "") === "42501") {
+      const expired = NextResponse.json(
+        {
+          ok: false,
+          error: "Reauthentication expired. Confirm your identity again.",
+          reauthRequired: true,
+        },
+        { status: 409 }
+      );
+      expired.cookies.set(clearReauthCookie());
+      return noStore(expired);
+    }
+    const unavailable = NextResponse.json(
+      { ok: false, error: "OAuth could not be started. Please try again." },
+      { status: 503 }
     );
+    if (["link", "reclaim"].includes(action)) {
+      unavailable.cookies.set(clearReauthCookie());
+    }
+    return noStore(unavailable);
   }
 }
