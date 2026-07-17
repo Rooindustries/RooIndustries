@@ -99,4 +99,25 @@ describe("AppContent search sync", () => {
     expect(window.location.search).toBe("");
     expect(replaceStateSpy).toHaveBeenCalled();
   });
+
+  test("preserves a Supabase recovery fragment until the reset page consumes it", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/referrals/reset#type=recovery&access_token=access&refresh_token=refresh"
+    );
+    replaceStateSpy.mockClear();
+
+    render(<AppContent initialHomeData={null} routeShell="memory" />);
+
+    await waitFor(() => {
+      expect(mockSanitizeBrowserSearch).toHaveBeenCalledWith(
+        "/referrals/reset",
+        "?token=abc123"
+      );
+    });
+    expect(window.location.hash).toBe(
+      "#type=recovery&access_token=access&refresh_token=refresh"
+    );
+  });
 });
