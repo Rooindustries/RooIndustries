@@ -4,8 +4,15 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import ConnectedAccounts from "../components/ConnectedAccounts";
 
 jest.mock("../components/SupabaseSocialLogin", () =>
-  function MockSupabaseSocialLogin() {
-    return <div data-testid="social-login" />;
+  function MockSupabaseSocialLogin({ action, linkProof }) {
+    return (
+      <button
+        aria-label={`mock-${action}`}
+        data-testid="social-login"
+        disabled={["link", "reclaim"].includes(action) && !linkProof?.confirmed}
+        type="button"
+      />
+    );
   }
 );
 
@@ -39,6 +46,42 @@ describe("Tourney connected accounts theme and layout", () => {
     expect(screen.getByRole("button", { name: "Confirm identity" })).toHaveClass(
       "tourney-connected-confirm"
     );
+  });
+
+  test("keeps provider linking disabled until confirmation returns a valid expiry", async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          domainAccount: true,
+          providers: ["email"],
+          unlinkableProviders: ["email"],
+          linkProof: null,
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          expiresAt: "2099-01-01T00:00:00.000Z",
+        }),
+      });
+    render(<ConnectedAccounts flow="referral" nextPath="/referrals/dashboard" />);
+
+    const linkControl = await screen.findByRole("button", { name: "mock-link" });
+    expect(linkControl).toBeDisabled();
+    expect(screen.getByText("Confirm your identity to enable provider linking.")).toBeVisible();
+
+    fireEvent.change(screen.getByLabelText("Current password"), {
+      target: { value: "correct password" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm identity" }));
+
+    await waitFor(() => expect(linkControl).toBeEnabled());
+    expect(screen.getByText(/Link proof confirmed until/)).toBeVisible();
+    expect(screen.getByText(/This proof allows one link attempt/)).toBeVisible();
   });
 
   test("styles the card and controls exclusively through active theme tokens", () => {

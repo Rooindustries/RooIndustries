@@ -7,8 +7,14 @@ import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin"
 import {
   clearReauthCookie,
   hashReauthToken,
+  readReauthGrantStatus,
   readReauthToken,
 } from "../../../../src/server/supabase/reauth";
+import {
+  clearReferralOrphanReclaimCookie,
+  matchesReferralOrphanReclaim,
+  readReferralOrphanReclaim,
+} from "../../../../src/server/supabase/orphanIdentityReclaim";
 import {
   createNextSupabaseSessionClient,
   getNextSupabaseUser,
@@ -75,6 +81,31 @@ export async function GET(request) {
         .map((provider) => String(provider || "").toLowerCase())
         .filter((provider) => ["email", "google", "discord"].includes(provider))
     )].sort();
+    const reauthToken = readReauthToken(request);
+    const proof = reauthToken
+      ? await readReauthGrantStatus({
+          purpose: "link_identity",
+          token: reauthToken,
+          userId: user.id,
+        }).catch(() => null)
+      : null;
+    const pendingRecovery = flow === "referral"
+      ? readReferralOrphanReclaim({ request })
+      : null;
+    const recovery = matchesReferralOrphanReclaim({
+      account,
+      recovery: pendingRecovery,
+      user,
+    })
+      ? {
+          expiresAt: pendingRecovery.expiresAt,
+          provider: pendingRecovery.provider,
+        }
+      : null;
+    if (reauthToken && !proof) response.cookies.set(clearReauthCookie());
+    if (pendingRecovery && !recovery) {
+      response.cookies.set(clearReferralOrphanReclaimCookie());
+    }
     return jsonFrom(response, {
         ok: true,
         authenticated: true,
@@ -83,8 +114,13 @@ export async function GET(request) {
         providers,
         unlinkableProviders: sessionProviders,
         domainAccount: hasFlowRole(account, flow),
+        linkProof: proof?.expires_at
+          ? { confirmed: true, expiresAt: proof.expires_at }
+          : null,
+        recovery,
       });
   } catch {
+    response.cookies.set(clearReauthCookie());
     return jsonFrom(
       response,
       { ok: false, error: "Account connections are temporarily unavailable." },

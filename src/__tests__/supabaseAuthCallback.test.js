@@ -1,9 +1,16 @@
 const mockExchangeCodeForSession = jest.fn();
+const mockGetSession = jest.fn();
+const mockGetUser = jest.fn();
 const mockClearNextSupabaseSession = jest.fn();
+const mockInstallNextSupabaseSession = jest.fn();
 const mockBootstrapSupabaseNativeAccount = jest.fn();
 const mockResolveSupabaseAccountByUserId = jest.fn();
 const mockReadOAuthIntent = jest.fn();
 const mockFinalizeOAuthIntent = jest.fn();
+const mockFailOAuthIntent = jest.fn();
+const mockCreateOrphanReclaimCookie = jest.fn();
+const mockClearOrphanReclaimCookie = jest.fn();
+const mockReclaimOrphanIdentity = jest.fn();
 const mockQueueDiscordProjection = jest.fn();
 const mockResolveQueuedDiscordProjection = jest.fn();
 const mockCreateReferralSessionCookie = jest.fn();
@@ -14,8 +21,13 @@ const originalTourneyDatabaseMode = process.env.TOURNEY_DATABASE_MODE;
 jest.mock("../server/supabase/serverSession", () => ({
   clearNextSupabaseSession: (...args) => mockClearNextSupabaseSession(...args),
   createNextSupabaseSessionClient: () => ({
-    auth: { exchangeCodeForSession: (...args) => mockExchangeCodeForSession(...args) },
+    auth: {
+      exchangeCodeForSession: (...args) => mockExchangeCodeForSession(...args),
+      getSession: (...args) => mockGetSession(...args),
+      getUser: (...args) => mockGetUser(...args),
+    },
   }),
+  installNextSupabaseSession: (...args) => mockInstallNextSupabaseSession(...args),
 }));
 
 jest.mock("../server/supabase/accounts", () => ({
@@ -33,7 +45,16 @@ jest.mock("../server/supabase/oauthIntents", () => ({
     path: "/auth/callback",
   }),
   readOAuthIntent: (...args) => mockReadOAuthIntent(...args),
+  failOAuthIntent: (...args) => mockFailOAuthIntent(...args),
   finalizeOAuthIntent: (...args) => mockFinalizeOAuthIntent(...args),
+}));
+
+jest.mock("../server/supabase/orphanIdentityReclaim", () => ({
+  clearReferralOrphanReclaimCookie: (...args) =>
+    mockClearOrphanReclaimCookie(...args),
+  createReferralOrphanReclaimCookie: (...args) =>
+    mockCreateOrphanReclaimCookie(...args),
+  reclaimReferralOrphanIdentity: (...args) => mockReclaimOrphanIdentity(...args),
 }));
 
 jest.mock("../server/tourney/discordDesiredState", () => ({
@@ -124,6 +145,32 @@ describe("Supabase Auth callback", () => {
       error: null,
     });
     mockClearNextSupabaseSession.mockResolvedValue(undefined);
+    mockGetSession.mockResolvedValue({
+      data: {
+        session: {
+          access_token: "primary-access-token",
+          refresh_token: "primary-refresh-token",
+        },
+      },
+      error: null,
+    });
+    mockGetUser.mockResolvedValue({ data: { user: authUser }, error: null });
+    mockInstallNextSupabaseSession.mockResolvedValue(true);
+    mockFailOAuthIntent.mockResolvedValue({ failed: true });
+    mockCreateOrphanReclaimCookie.mockReturnValue({
+      name: "roo_referral_orphan_identity_reclaim",
+      value: "signed-recovery",
+      httpOnly: true,
+      maxAge: 900,
+      path: "/",
+    });
+    mockClearOrphanReclaimCookie.mockReturnValue({
+      name: "roo_referral_orphan_identity_reclaim",
+      value: "",
+      maxAge: 0,
+      path: "/",
+    });
+    mockReclaimOrphanIdentity.mockResolvedValue({ reclaimed: true });
     mockBootstrapSupabaseNativeAccount.mockResolvedValue({ user_id: authUser.id });
     mockCreateReferralSessionCookie.mockReturnValue({
       name: "ref_session",
@@ -796,6 +843,145 @@ describe("Supabase Auth callback", () => {
     );
   });
 
+  test("surfaces identity_already_exists and starts controlled referral recovery", async () => {
+    mockReadOAuthIntent.mockResolvedValue({
+      id: intentId,
+      action: "link",
+      flow: "referral",
+      provider: "discord",
+      principal_id: "10000000-0000-4000-8000-000000000001",
+      return_path: "/referrals/dashboard",
+      target_user_id: authUser.id,
+      status: "pending",
+      expires_at: "2099-01-01T00:00:00.000Z",
+    });
+
+    const response = await GET(
+      request(
+        `https://www.rooindustries.com/auth/callback?intent=${intentId}&error=server_error&error_code=identity_already_exists&error_description=Identity+is+already+linked+to+another+user`,
+        `roo_oauth_intent.${intentId}=opaque-token`
+      )
+    );
+
+    expect(mockFailOAuthIntent).toHaveBeenCalledWith({
+      failureCode: "identity_already_exists",
+      intentId,
+      token: "opaque-token",
+    });
+    expect(mockCreateOrphanReclaimCookie).toHaveBeenCalledWith({
+      originalIntentId: intentId,
+      principalId: "10000000-0000-4000-8000-000000000001",
+      provider: "discord",
+      targetUserId: authUser.id,
+    });
+    expect(response.url).toBe(
+      "https://www.rooindustries.com/referrals/dashboard?oauth=identity_already_exists&provider=discord"
+    );
+    expect(response.url).not.toContain("missing_code");
+    expect(mockExchangeCodeForSession).not.toHaveBeenCalled();
+  });
+
+  test("reclaims a proven provider-only orphan and restores the creator session", async () => {
+    const orphanUser = {
+      ...authUser,
+      id: "394cef15-efb8-4ad3-bce5-280e91f01dbf",
+    };
+    mockReadOAuthIntent.mockResolvedValue({
+      id: intentId,
+      action: "reclaim",
+      flow: "referral",
+      provider: "discord",
+      principal_id: "10000000-0000-4000-8000-000000000001",
+      return_path: "/referrals/dashboard",
+      target_user_id: authUser.id,
+      status: "pending",
+      expires_at: "2099-01-01T00:00:00.000Z",
+    });
+    mockExchangeCodeForSession.mockResolvedValue({
+      data: {
+        session: {
+          access_token: "orphan-access-token",
+          provider_token: "discord-provider-token",
+          refresh_token: "orphan-refresh-token",
+        },
+        user: orphanUser,
+      },
+      error: null,
+    });
+    mockResolveSupabaseAccountByUserId.mockResolvedValue(creatorAccount);
+
+    const response = await GET(
+      request(
+        `https://www.rooindustries.com/auth/callback?intent=${intentId}&code=one`,
+        `roo_oauth_intent.${intentId}=opaque-token`
+      )
+    );
+
+    expect(mockReclaimOrphanIdentity).toHaveBeenCalledWith({
+      orphanUserId: orphanUser.id,
+      provider: "discord",
+      token: "opaque-token",
+    });
+    expect(mockInstallNextSupabaseSession).toHaveBeenCalledWith({
+      request: expect.any(Object),
+      response: expect.any(Object),
+      session: {
+        access_token: "primary-access-token",
+        refresh_token: "primary-refresh-token",
+      },
+    });
+    expect(mockFinalizeOAuthIntent).not.toHaveBeenCalled();
+    expect(response.url).toBe(
+      "https://www.rooindustries.com/referrals/dashboard?linked=discord&reclaimed=1"
+    );
+  });
+
+  test("never links an identity when the guarded owner is active", async () => {
+    const activeOwner = {
+      ...authUser,
+      id: "22222222-2222-4222-8222-222222222222",
+    };
+    mockReadOAuthIntent.mockResolvedValue({
+      id: intentId,
+      action: "reclaim",
+      flow: "referral",
+      provider: "google",
+      principal_id: "10000000-0000-4000-8000-000000000001",
+      return_path: "/referrals/dashboard",
+      target_user_id: authUser.id,
+      status: "pending",
+      expires_at: "2099-01-01T00:00:00.000Z",
+    });
+    mockExchangeCodeForSession.mockResolvedValue({
+      data: {
+        session: {
+          access_token: "active-owner-access-token",
+          refresh_token: "active-owner-refresh-token",
+        },
+        user: activeOwner,
+      },
+      error: null,
+    });
+    mockReclaimOrphanIdentity.mockResolvedValue({
+      reclaimed: false,
+      reason: "active_account",
+    });
+
+    const response = await GET(
+      request(
+        `https://www.rooindustries.com/auth/callback?intent=${intentId}&code=one`,
+        `roo_oauth_intent.${intentId}=opaque-token`
+      )
+    );
+
+    expect(mockReclaimOrphanIdentity).toHaveBeenCalledTimes(1);
+    expect(mockResolveSupabaseAccountByUserId).not.toHaveBeenCalled();
+    expect(mockFinalizeOAuthIntent).not.toHaveBeenCalled();
+    expect(response.url).toBe(
+      "https://www.rooindustries.com/referrals/dashboard?oauth=identity_owned_by_active_account&provider=google"
+    );
+  });
+
   test("preserves the current domain and Supabase sessions when linking is cancelled", async () => {
     mockReadOAuthIntent.mockResolvedValue({
       id: intentId,
@@ -818,8 +1004,13 @@ describe("Supabase Auth callback", () => {
       expect.objectContaining({ name: "tourney_session", maxAge: 0 })
     );
     expect(response.url).toBe(
-      "https://www.rooindustries.com/tourney/login?error=missing_code"
+      "https://www.rooindustries.com/tourney/login?error=access_denied"
     );
+    expect(mockFailOAuthIntent).toHaveBeenCalledWith({
+      failureCode: "access_denied",
+      intentId,
+      token: "opaque-token",
+    });
   });
 
   test("rejects a mismatched intent id without consuming the OAuth code", async () => {
