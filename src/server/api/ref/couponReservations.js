@@ -244,28 +244,6 @@ export const appendCouponConsumption = ({
   return transaction;
 };
 
-export const consumeCouponReservation = async ({
-  client,
-  redemptionId,
-  bookingId,
-}) => {
-  const redemption = await client.fetch(
-    `*[_type == $type && _id == $id][0]{...}`,
-    { type: COUPON_REDEMPTION_TYPE, id: redemptionId }
-  );
-  if (!redemption?._id) throw conflict("Coupon reservation was not found.");
-  if (redemption.status === COUPON_REDEMPTION_STATUS.CONSUMED) {
-    return { redemption, idempotent: true };
-  }
-  const coupon = await client.fetch(`*[_type == "coupon" && _id == $id][0]{...}`, {
-    id: redemption.coupon?._ref,
-  });
-  const transaction = client.transaction();
-  appendCouponConsumption({ transaction, coupon, redemption, bookingId });
-  await transaction.commit();
-  return { redemption: { ...redemption, status: "consumed", bookingId }, idempotent: false };
-};
-
 export const prepareCouponRelease = async ({ client, redemptionId }) => {
   const normalizedRedemptionId = normalize(redemptionId);
   if (!normalizedRedemptionId) return null;
@@ -371,21 +349,4 @@ export const appendCouponRefund = ({
     });
   }
   return transaction;
-};
-
-export const restoreCouponAfterRefund = async ({ client, redemptionId }) => {
-  const redemption = await client.fetch(
-    `*[_type == $type && _id == $id][0]{...}`,
-    { type: COUPON_REDEMPTION_TYPE, id: redemptionId }
-  );
-  if (!redemption?._id || redemption.status === COUPON_REDEMPTION_STATUS.REFUNDED) {
-    return { restored: false, idempotent: true };
-  }
-  const coupon = await client.fetch(`*[_type == "coupon" && _id == $id][0]{...}`, {
-    id: redemption.coupon?._ref,
-  });
-  const transaction = client.transaction();
-  appendCouponRefund({ transaction, coupon, redemption });
-  await transaction.commit();
-  return { restored: true, idempotent: false };
 };

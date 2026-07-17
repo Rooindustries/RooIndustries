@@ -154,7 +154,10 @@ export default function UpgradeXoc() {
 
       {/* Order ID input */}
       <div className="mt-8 rounded-2xl border border-line-input bg-surface-card shadow-[var(--shadow-card-glow-info)] backdrop-blur-md p-6 sm:p-7">
-        <label className="block text-sm font-semibold mb-2">
+        <label
+          className="block text-sm font-semibold mb-2"
+          htmlFor="upgrade-order-id"
+        >
           Enter your Order ID
         </label>
         <p className="text-xs text-ink-muted mb-3">
@@ -162,10 +165,14 @@ export default function UpgradeXoc() {
           &quot;Order ID&quot;).
         </p>
         <div className="mb-3">
-          <label className="block text-sm font-semibold mb-2">
+          <label
+            className="block text-sm font-semibold mb-2"
+            htmlFor="upgrade-booking-email"
+          >
             Booking email
           </label>
           <input
+            id="upgrade-booking-email"
             value={orderEmail}
             onChange={(e) => {
               setOrderEmail(e.target.value);
@@ -173,13 +180,14 @@ export default function UpgradeXoc() {
               setError(null);
             }}
             placeholder="Email used on the original booking"
-            className="w-full bg-surface-input border border-line-input rounded-md px-3 py-2 outline-none text-sm"
+            className="w-full bg-surface-input border border-line-input rounded-md px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info-text focus-visible:ring-offset-2 focus-visible:ring-offset-surface-card"
             type="email"
             autoComplete="email"
           />
         </div>
         <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
           <input
+            id="upgrade-order-id"
             value={orderId}
             onChange={(e) => {
               setOrderId(e.target.value);
@@ -187,7 +195,7 @@ export default function UpgradeXoc() {
               setError(null);
             }}
             placeholder="e.g. 1a2b3c4d5e6f7g8h9i"
-            className="flex-1 bg-surface-input border border-line-input rounded-md px-3 py-2 outline-none text-sm"
+            className="flex-1 bg-surface-input border border-line-input rounded-md px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info-text focus-visible:ring-offset-2 focus-visible:ring-offset-surface-card"
           />
           <button
             onClick={handleCheckOrder}
