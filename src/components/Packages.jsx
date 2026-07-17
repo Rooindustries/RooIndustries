@@ -206,9 +206,9 @@ export default function Packages({
       )}
 
       {badgeText && (
-        <div className="mt-4 flex justify-center">
-          <span className="ri-packages-badge inline-flex items-center gap-2.5 px-5 py-2 rounded-full text-sm sm:text-[0.95rem] font-semibold bg-info-soft text-info-text border border-info-border shadow-info-soft">
-            <span className="ri-packages-badge-dot h-2.5 w-2.5 rounded-full bg-success shadow-success-soft" />
+        <div className="mt-4 flex items-center justify-center gap-2">
+          <span className="ri-packages-badge-dot h-2 w-2 rounded-full bg-success shadow-success-soft" />
+          <span className="ri-packages-badge text-sm sm:text-[0.95rem] font-semibold tracking-wide text-info-text">
             {badgeText}
           </span>
         </div>
