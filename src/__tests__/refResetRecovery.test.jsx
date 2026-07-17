@@ -58,6 +58,21 @@ describe("referral Supabase recovery", () => {
     expect(window.location.hash).toBe("");
   });
 
+  test("associates reset password labels with their fields", async () => {
+    renderReset(
+      "/referrals/reset#access_token=recovery-access&refresh_token=recovery-refresh&type=recovery"
+    );
+
+    expect(await screen.findByLabelText("New Password")).toHaveAttribute(
+      "id",
+      "ref-reset-new-password"
+    );
+    expect(screen.getByLabelText("Confirm Password")).toHaveAttribute(
+      "id",
+      "ref-reset-confirm-password"
+    );
+  });
+
   test("updates the password through the authenticated recovery endpoint", async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
@@ -285,6 +300,28 @@ describe("referral signed-in password change outcomes", () => {
       throw new Error(`Unexpected request: ${url}`);
     });
   };
+
+  test("associates change password labels with all three fields", async () => {
+    installFetch({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    });
+    renderChangePassword();
+
+    expect(await screen.findByLabelText("Current Password")).toHaveAttribute(
+      "id",
+      "ref-change-current-password"
+    );
+    expect(screen.getByLabelText("New Password")).toHaveAttribute(
+      "id",
+      "ref-change-new-password"
+    );
+    expect(screen.getByLabelText("Confirm Password")).toHaveAttribute(
+      "id",
+      "ref-change-confirm-password"
+    );
+  });
 
   test("renders the completed password copy", async () => {
     installFetch({
