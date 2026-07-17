@@ -472,6 +472,76 @@ describe("Supabase Auth callback", () => {
     );
   });
 
+  test("keeps the linked referral Discord sign-in path unchanged", async () => {
+    mockReadOAuthIntent.mockResolvedValue({
+      id: intentId,
+      action: "signin",
+      flow: "referral",
+      provider: "discord",
+      return_path: "/referrals/dashboard",
+      target_user_id: null,
+      status: "pending",
+      expires_at: "2099-01-01T00:00:00.000Z",
+    });
+    mockFinalizeOAuthIntent.mockResolvedValue({
+      action: "signin",
+      flow: "referral",
+      provider: "discord",
+      return_path: "/referrals/dashboard",
+    });
+    mockResolveSupabaseAccountByUserId.mockResolvedValue(creatorAccount);
+
+    const response = await GET(request(
+      `https://www.rooindustries.com/auth/callback?intent=${intentId}&code=one`,
+      `roo_oauth_intent.${intentId}=opaque-token`
+    ));
+
+    expect(response.url).toBe("https://www.rooindustries.com/referrals/dashboard");
+    expect(response.cookies.values).toContainEqual(
+      expect.objectContaining({ name: "ref_session", value: "ref-token" })
+    );
+    expect(mockClearNextSupabaseSession).not.toHaveBeenCalled();
+  });
+
+  test("preserves an unlinked referral Discord session for the account choice", async () => {
+    mockReadOAuthIntent.mockResolvedValue({
+      id: intentId,
+      action: "signin",
+      flow: "referral",
+      provider: "discord",
+      return_path: "/referrals/dashboard",
+      target_user_id: null,
+      status: "pending",
+      expires_at: "2099-01-01T00:00:00.000Z",
+    });
+    mockFinalizeOAuthIntent.mockResolvedValue({
+      action: "signin",
+      flow: "referral",
+      provider: "discord",
+      return_path: "/referrals/dashboard",
+    });
+    mockResolveSupabaseAccountByUserId.mockResolvedValue(null);
+
+    const response = await GET(request(
+      `https://www.rooindustries.com/auth/callback?intent=${intentId}&code=one`,
+      `roo_oauth_intent.${intentId}=opaque-token`
+    ));
+
+    expect(response.url).toBe(
+      "https://www.rooindustries.com/referrals/login?oauth=unlinked&provider=discord"
+    );
+    expect(mockClearNextSupabaseSession).not.toHaveBeenCalled();
+    expect(response.cookies.values).not.toContainEqual(
+      expect.objectContaining({ name: "ref_session" })
+    );
+    expect(response.cookies.values).toContainEqual(
+      expect.objectContaining({
+        name: `roo_oauth_intent.${intentId}`,
+        maxAge: 0,
+      })
+    );
+  });
+
   test("does not consume Discord OAuth until the Tourney projection is durable", async () => {
     mockReadOAuthIntent.mockResolvedValue({
       id: intentId,
