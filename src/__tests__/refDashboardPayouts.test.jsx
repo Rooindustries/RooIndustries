@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import RefDashboard from "../components/RefDashboard";
 
 const mockNavigate = jest.fn();
@@ -144,5 +144,24 @@ describe("RefDashboard payout summary", () => {
         "Discord linking did not complete. Try the Discord login again."
       )
     ).toBeInTheDocument();
+  });
+
+  test("exposes payment logs as a modal dialog and closes it with Escape", async () => {
+    render(<RefDashboard />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "View my payment logs" })
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Payment Logs" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("dialog", { name: "Payment Logs" })
+      ).not.toBeInTheDocument();
+    });
   });
 });

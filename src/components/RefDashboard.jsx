@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import packageContent from "../lib/packageContent";
 import ConnectedAccounts from "./ConnectedAccounts";
@@ -221,13 +221,24 @@ export default function RefDashboard() {
     };
   }, [showLogsModal]);
 
-  const closeLogsModal = () => {
+  const closeLogsModal = useCallback(() => {
     setClosingLogsModal(true);
     setTimeout(() => {
       setShowLogsModal(false);
       setClosingLogsModal(false);
     }, 200);
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!showLogsModal) return undefined;
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") closeLogsModal();
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [closeLogsModal, showLogsModal]);
 
   useEffect(() => {
     if (showLogsModal) {
@@ -694,6 +705,9 @@ export default function RefDashboard() {
           onClick={closeLogsModal}
         >
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="payment-logs-title"
             className={`relative w-full max-w-5xl max-h-[70vh] sm:max-h-[50vh] bg-panel border border-info-border rounded-2xl shadow-glow-strong p-6 transition-all duration-500 ease-in-out ${
               closingLogsModal
                 ? "opacity-0 scale-95"
@@ -716,7 +730,12 @@ export default function RefDashboard() {
                 <p className="text-xs uppercase tracking-wide text-ink-muted">
                   Payment history
                 </p>
-                <h4 className="text-xl font-bold text-ink">Payment Logs</h4>
+                <h4
+                  id="payment-logs-title"
+                  className="text-xl font-bold text-ink"
+                >
+                  Payment Logs
+                </h4>
                 <p className="text-xs text-ink-muted">
                   Read-only. Only admins can add or edit payments.
                 </p>
