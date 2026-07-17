@@ -47,11 +47,11 @@ describe("Supabase database target production transport", () => {
     const supabaseUrl = `https://${projectRef}.supabase.co`;
     const sanity = { projectId: "abc123def", dataset: "production" };
     const env = {
-      TOURNEY_DATABASE_TARGET_TRANSPORT_ENABLED: "1",
-      TOURNEY_WRITES_PAUSED: "1",
+      TOURNEY_DATABASE_TARGET_TRANSPORT_ENABLED: "  On  ",
+      TOURNEY_WRITES_PAUSED: " true ",
       TOURNEY_DATABASE_MODE: "supabase",
       TOURNEY_FAILOVER_GENERATION: "1",
-      TOURNEY_HARDENING_V4_ENABLED: "1",
+      TOURNEY_HARDENING_V4_ENABLED: " YeS ",
       TOURNEY_MIRROR_ENABLED: "1",
       TOURNEY_DATABASE_URL: legacyDatabaseUrl,
       SUPABASE_DATABASE_URL: databaseUrl,
