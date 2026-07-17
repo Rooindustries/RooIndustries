@@ -1,5 +1,13 @@
 import React from "react";
 
+const escapeHtml = (value) =>
+  String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+
 export const buildReferralVerificationEmail = ({ name = "there", verifyLink }) =>
   React.createElement(
     React.Fragment,
@@ -25,3 +33,14 @@ export const buildReferralVerificationEmail = ({ name = "there", verifyLink }) =
       "This private link expires in one hour. If you did not start this signup, you can ignore it."
     )
   );
+
+export const buildReferralVerificationEmailHtml = ({
+  name = "there",
+  verifyLink,
+}) =>
+  [
+    `<p>Hi ${escapeHtml(name || "there")},</p>`,
+    "<p>Confirm this email to finish creating your Roo Industries creator account.</p>",
+    `<p><a href="${escapeHtml(verifyLink)}"><strong>Confirm creator account</strong></a></p>`,
+    "<p>This private link expires in one hour. If you did not start this signup, you can ignore it.</p>",
+  ].join("");
