@@ -60,7 +60,10 @@ const FLOW_ORIGINS = [
     route: "/reviews",
     open: async (page) => {
       await page.goto("/", { waitUntil: "domcontentloaded" });
-      await waitForReactHydratedSelector(page, 'button[aria-haspopup="menu"]');
+      await waitForReactHydratedSelector(
+        page,
+        'button[aria-controls="desktop-proof-menu"]'
+      );
 
       const proofButton = page.getByRole("button", { name: "Proof" }).first();
       await proofButton.click();
@@ -77,7 +80,10 @@ const FLOW_ORIGINS = [
     route: "/benchmarks",
     open: async (page) => {
       await page.goto("/", { waitUntil: "domcontentloaded" });
-      await waitForReactHydratedSelector(page, 'button[aria-haspopup="menu"]');
+      await waitForReactHydratedSelector(
+        page,
+        'button[aria-controls="desktop-proof-menu"]'
+      );
 
       const proofButton = page.getByRole("button", { name: "Proof" }).first();
       await proofButton.click();

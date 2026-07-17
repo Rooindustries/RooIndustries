@@ -331,7 +331,9 @@ export default function Packages({
                               <li
                                 key={`${on ? "on" : "off"}-${index}`}
                                 className={`flex items-start gap-2 transition ${
-                                  on ? "opacity-100" : "opacity-35"
+                                  on
+                                    ? "text-ink-secondary"
+                                    : "ri-package-bullet-excluded text-ink-muted"
                                 }`}
                               >
                                 <span

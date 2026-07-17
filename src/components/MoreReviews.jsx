@@ -111,21 +111,27 @@ export default function Reviews() {
             >
               {/* SEO/CLS: wrap each review image with a semantic figure/caption and intrinsic size. */}
               <figure className="m-0">
-                <img
-                  src={reviewSrc}
-                  srcSet={reviewSrcSet}
-                  alt={reviewAlt}
-                  width={reviewDims?.width}
-                  height={reviewDims?.height}
-                  loading="lazy"
-                  decoding="async"
-                  fetchPriority="auto"
-                  sizes="(max-width: 1023px) 90vw, 46vw"
-                  className="w-full h-auto rounded-xl cursor-pointer shadow-lg hover:shadow-cyan-400/30 transition duration-300 object-contain"
+                <button
+                  type="button"
+                  aria-label={`Open ${reviewAlt}`}
+                  className="group block w-full rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--color-canvas-deep)]"
                   onClick={() =>
                     handleOpenZoom(reviewZoomSrc, reviewAlt)
                   }
-                />
+                >
+                  <img
+                    src={reviewSrc}
+                    srcSet={reviewSrcSet}
+                    alt={reviewAlt}
+                    width={reviewDims?.width}
+                    height={reviewDims?.height}
+                    loading="lazy"
+                    decoding="async"
+                    fetchPriority="auto"
+                    sizes="(max-width: 1023px) 90vw, 46vw"
+                    className="w-full h-auto rounded-xl cursor-pointer shadow-lg group-hover:shadow-cyan-400/30 transition duration-300 object-contain"
+                  />
+                </button>
                 <figcaption className="sr-only">{reviewAlt}</figcaption>
               </figure>
             </div>

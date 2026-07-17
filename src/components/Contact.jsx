@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useForm, ValidationError } from "@formspree/react";
 import { getPublicContent } from "../lib/publicContentClient";
 
 export default function Contact() {
   const [contactData, setContactData] = useState(null);
-  const [copied, setCopied] = useState(false);
+  const [copyStatus, setCopyStatus] = useState("idle");
+  const copyResetTimeoutRef = useRef(null);
 
   const [state, handleSubmit] = useForm("mpwybpen");
 
@@ -14,12 +15,40 @@ export default function Contact() {
       .catch(console.error);
   }, []);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(
-      contactData?.email || "serviroo@rooindustries.com"
-    );
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  useEffect(
+    () => () => {
+      if (copyResetTimeoutRef.current) {
+        clearTimeout(copyResetTimeoutRef.current);
+      }
+    },
+    []
+  );
+
+  const resetCopyStatusLater = () => {
+    if (copyResetTimeoutRef.current) {
+      clearTimeout(copyResetTimeoutRef.current);
+    }
+    copyResetTimeoutRef.current = setTimeout(() => {
+      setCopyStatus("idle");
+      copyResetTimeoutRef.current = null;
+    }, 2000);
+  };
+
+  const handleCopy = async () => {
+    const email = contactData?.email || "serviroo@rooindustries.com";
+    setCopyStatus("copying");
+
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("Clipboard API unavailable");
+      }
+      await navigator.clipboard.writeText(email);
+      setCopyStatus("copied");
+    } catch {
+      setCopyStatus("failed");
+    }
+
+    resetCopyStatusLater();
   };
 
   return (
@@ -50,12 +79,27 @@ export default function Contact() {
           </span>
         </div>
         <button
+          type="button"
           className="text-accent hover:text-[color:var(--color-link-hover)] transition duration-200"
           onClick={handleCopy}
+          disabled={copyStatus === "copying"}
         >
-          {copied ? "Copied!" : "Copy"}
+          {copyStatus === "copied"
+            ? "Copied!"
+            : copyStatus === "copying"
+            ? "Copying..."
+            : "Copy"}
         </button>
       </div>
+      {copyStatus === "failed" ? (
+        <p
+          className="-mt-5 mb-8 w-full max-w-xl text-sm text-danger-text"
+          role="status"
+          aria-live="polite"
+        >
+          Copy failed. Select the email address and copy it manually.
+        </p>
+      ) : null}
 
       {/* Contact Form */}
       {state.succeeded ? (
