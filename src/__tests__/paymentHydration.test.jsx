@@ -225,7 +225,7 @@ describe("payment reload hydration", () => {
       expect(screen.getByPlaceholderText("e.g. BF10")).toHaveValue("SAVE10");
     });
     expect(await screen.findByText("$80.95 USD")).toBeInTheDocument();
-    expect(screen.getByText(/Referral "creator": 10%/i)).toBeInTheDocument();
+    expect(screen.getByText(/creator · −\$/)).toBeInTheDocument();
     expect(screen.queryByText(/Private Creator Name/i)).not.toBeInTheDocument();
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith(
