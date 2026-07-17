@@ -173,11 +173,11 @@ const installDefaultFetch = ({
         ?.toLowerCase();
       const referral = referrals[code];
       return {
-        ok: !!referral,
+        ok: true,
         json: async () =>
           referral
             ? { ok: true, referral }
-            : { ok: false, error: "Not found" },
+            : { ok: false, error: "Not found", reason: "not_found" },
       };
     }
     if (requestUrl.startsWith("/api/ref/validateCoupon")) {
@@ -186,11 +186,15 @@ const installDefaultFetch = ({
         ?.toLowerCase();
       const coupon = coupons[code];
       return {
-        ok: !!coupon,
+        ok: true,
         json: async () =>
           coupon
             ? { ok: true, coupon }
-            : { ok: false, error: "Invalid referral or coupon code." },
+            : {
+                ok: false,
+                error: "Invalid referral or coupon code.",
+                reason: "not_found",
+              },
       };
     }
     if (String(url).startsWith("/api/content/package")) {
