@@ -5020,7 +5020,7 @@ export const LockScreen = ({
   <>
     <TourneyTelemetry />
     <LockStyles />
-    <main className="cs-page">
+    <main id="main-content" tabIndex={-1} className="cs-page">
       <div className="cs-shell">
         <section className="cs-core" aria-labelledby="tourney-login-title">
           <div className="cs-mark cs-r1">
@@ -5160,8 +5160,12 @@ export const TourneyShell = ({ session, activeHref = "", children, wide = false 
     >
       <div className="app-bg-grid-layer absolute inset-0" />
       <div className="app-bg-radial-layer absolute inset-0" />
-      <main className="relative z-10 flex flex-col flex-1">
-        <TourneyNav session={session} activeHref={activeHref} />
+      <TourneyNav session={session} activeHref={activeHref} />
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="relative z-10 flex flex-col flex-1"
+      >
         <div className={wide ? "tourney-shell is-wide" : "tourney-shell"}>
           {children}
         </div>
