@@ -246,9 +246,22 @@ export default function RefLogin() {
 
         {/* Remember Me */}
         <div className="flex items-center justify-between mt-1">
-          <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+          <label
+            htmlFor="ref-login-remember"
+            className="inline-flex items-center gap-2 cursor-pointer select-none"
+          >
+            <input
+              id="ref-login-remember"
+              name="rememberMe"
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+              className="peer sr-only"
+            />
             <div
+              aria-hidden="true"
               className={`w-4 h-4 rounded-[6px] border transition-all flex items-center justify-center
+                peer-focus-visible:ring-2 peer-focus-visible:ring-info-border peer-focus-visible:ring-offset-2
                 ${
                   rememberMe
                     ? "border-info-border bg-info shadow-info-soft"
@@ -260,12 +273,6 @@ export default function RefLogin() {
               )}
             </div>
             <span className="text-xs text-ink-secondary">Remember me</span>
-            <input
-              type="checkbox"
-              checked={rememberMe}
-              onChange={(e) => setRememberMe(e.target.checked)}
-              className="hidden"
-            />
           </label>
 
           <button
