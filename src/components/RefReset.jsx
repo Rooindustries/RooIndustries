@@ -236,10 +236,14 @@ export default function RefReset() {
                   rounded-2xl p-8 space-y-6"
       >
         <div>
-          <label className="text-accent text-sm font-semibold">
+          <label
+            htmlFor="ref-reset-new-password"
+            className="text-accent text-sm font-semibold"
+          >
             New Password
           </label>
           <input
+            id="ref-reset-new-password"
             type="password"
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl
                        outline-none focus:border-info-border transition text-base text-ink"
@@ -250,10 +254,14 @@ export default function RefReset() {
         </div>
 
         <div>
-          <label className="text-accent text-sm font-semibold">
+          <label
+            htmlFor="ref-reset-confirm-password"
+            className="text-accent text-sm font-semibold"
+          >
             Confirm Password
           </label>
           <input
+            id="ref-reset-confirm-password"
             type="password"
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl
                        outline-none focus:border-info-border transition text-base text-ink"

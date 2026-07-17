@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import RefLogin from "../components/RefLogin";
@@ -54,6 +55,23 @@ describe("unlinked referral Discord account choice", () => {
       }
       return Promise.reject(new Error(`Unexpected request: ${url}`));
     });
+  });
+
+  test("keeps Remember me keyboard reachable and operable", async () => {
+    renderReferralAuth("/referrals/login");
+
+    const password = await screen.findByLabelText("Password");
+    const rememberMe = screen.getByRole("checkbox", { name: "Remember me" });
+
+    expect(rememberMe).toHaveClass("sr-only");
+    expect(rememberMe).not.toHaveClass("hidden");
+
+    password.focus();
+    userEvent.tab();
+    expect(rememberMe).toHaveFocus();
+
+    userEvent.keyboard(" ");
+    expect(rememberMe).toBeChecked();
   });
 
   test("shows the approved account choice after an unlinked Discord sign-in", async () => {
