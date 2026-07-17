@@ -98,7 +98,13 @@ export async function GET(request) {
   }
 
   const client = createDownloadDataClient();
-  const booking = await client.getDocument(verified.payload.bookingId);
+  let booking;
+  try {
+    booking = await client.getDocument(verified.payload.bookingId);
+  } catch (error) {
+    logSafeError("Download booking lookup failed", error);
+    return textResponse("Download is temporarily unavailable.", 503);
+  }
   const access = validateBookingForDownloadToken({
     booking,
     emailHash: verified.payload.emailHash,
