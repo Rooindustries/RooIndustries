@@ -90,9 +90,6 @@ const sortValue = (value) => {
 
 export const stableCmsJson = (value) => JSON.stringify(sortValue(value));
 
-export const isGlobalPublicContentType = (value) =>
-  PUBLIC_TYPE_SET.has(String(value || "").trim());
-
 export const isGlobalCmsEditableType = (value) => {
   const type = String(value || "").trim();
   return PUBLIC_TYPE_SET.has(type) || COMMERCE_TYPE_SET.has(type);
