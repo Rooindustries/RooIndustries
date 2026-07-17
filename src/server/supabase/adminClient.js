@@ -35,21 +35,56 @@ export const isSupabaseAdminConfigured = (env = process.env) => {
 
 let cachedClient = null;
 let cachedUrl = "";
+let cachedSecretKey = "";
+
+const postgrestErrorCode = async (response) => {
+  if (!response || Number(response.status) < 400) return "";
+  try {
+    const payload = await response.clone().json();
+    return String(payload?.code || "");
+  } catch {
+    return "";
+  }
+};
+
+export const createSupabaseAdminFetch = ({
+  signal,
+  fetchImpl = fetch,
+} = {}) => {
+  const request = (input, init = {}) => fetchImpl(input, {
+    ...init,
+    signal: init.signal && signal
+      ? AbortSignal.any([init.signal, signal])
+      : init.signal || signal,
+  });
+  return async (input, init = {}) => {
+    const retryInput =
+      typeof Request !== "undefined" && input instanceof Request
+        ? input.clone()
+        : input;
+    const response = await request(input, init);
+    if (
+      signal?.aborted ||
+      init.signal?.aborted ||
+      await postgrestErrorCode(response) !== "PGRST303"
+    ) {
+      return response;
+    }
+    return request(retryInput, init);
+  };
+};
 
 export const createSupabaseAdminClient = ({ env = process.env, signal } = {}) => {
   const { url, secretKey } = resolveSupabaseAdminEnv(env);
-  if (!signal && env === process.env && cachedClient && cachedUrl === url) {
+  if (
+    !signal &&
+    env === process.env &&
+    cachedClient &&
+    cachedUrl === url &&
+    cachedSecretKey === secretKey
+  ) {
     return cachedClient;
   }
-
-  const abortableFetch = signal
-    ? (input, init = {}) => fetch(input, {
-        ...init,
-        signal: init.signal
-          ? AbortSignal.any([init.signal, signal])
-          : signal,
-      })
-    : undefined;
 
   const client = createClient(url, secretKey, {
     auth: {
@@ -60,13 +95,14 @@ export const createSupabaseAdminClient = ({ env = process.env, signal } = {}) =>
     db: { schema: "public" },
     global: {
       headers: { "X-Client-Info": "roo-industries-server" },
-      ...(abortableFetch ? { fetch: abortableFetch } : {}),
+      fetch: createSupabaseAdminFetch({ signal }),
     },
   });
 
   if (!signal && env === process.env) {
     cachedClient = client;
     cachedUrl = url;
+    cachedSecretKey = secretKey;
   }
   return client;
 };

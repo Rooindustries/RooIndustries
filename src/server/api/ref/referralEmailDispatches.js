@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { Resend } from "resend";
-import { buildReferralVerificationEmail } from "../../email/referralVerificationEmail.js";
-import { buildResetEmail } from "../../email/referralResetEmail.js";
+import { buildReferralVerificationEmailHtml } from "../../email/referralVerificationEmail.js";
+import { buildResetEmailHtml } from "../../email/referralResetEmail.js";
 import { createSupabaseAdminClient } from "../../supabase/adminClient.js";
 import { getSafeErrorCode, logSafeError } from "../../safeErrorLog.js";
 
@@ -116,7 +116,7 @@ const renderDispatch = ({ dispatch, env = process.env }) => {
   if (kind === "registration_verification") {
     return {
       subject: "Confirm your Roo Industries creator account",
-      react: buildReferralVerificationEmail({
+      html: buildReferralVerificationEmailHtml({
         name,
         verifyLink: `${baseUrl}/referrals/verify#token=${token}`,
       }),
@@ -124,7 +124,7 @@ const renderDispatch = ({ dispatch, env = process.env }) => {
   }
   return {
     subject: "Reset your Roo Industries password",
-    react: buildResetEmail({
+    html: buildResetEmailHtml({
       name,
       resetLink: `${baseUrl}/referrals/reset#token=${token}`,
     }),

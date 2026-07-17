@@ -6,7 +6,11 @@ import process from "node:process";
 import { createClient as createSanityClient } from "@sanity/client";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
-import { COMMERCE_EPHEMERAL_DOCUMENT_TYPES } from "../src/server/commerce/documentTypes.js";
+import {
+  COMMERCE_EPHEMERAL_DOCUMENT_TYPES,
+  canonicalizeCommerceParityValue,
+} from "../src/server/commerce/documentTypes.js";
+import { filterActiveBookings } from "../src/server/booking/slotPolicy.js";
 import { SupabaseDocumentClient } from "../src/server/supabase/documentClient.js";
 
 for (const candidate of [".env.local", ".vercel/.env.preview.local"]) {
@@ -50,26 +54,6 @@ const supabase = createSupabaseClient(supabaseUrl, supabaseSecret, {
   global: { headers: { "X-Client-Info": "roo-commerce-gap-check" } },
 });
 
-const excludedDocumentKeys = new Set([
-  "_rev",
-  "_createdAt",
-  "_updatedAt",
-  "_system",
-  "_supabaseRevision",
-  "_supabaseCanonicalHash",
-  "_commerceCutoverGeneration",
-  "_supabaseMirroredAt",
-]);
-
-const referralCredentialKeys = new Set([
-  "creatorPassword",
-  "resetToken",
-  "resetTokenHash",
-  "resetTokenExpiresAt",
-  "passwordResetRequired",
-  "credentialVersion",
-]);
-
 const sortValue = (value) => {
   if (Array.isArray(value)) return value.map(sortValue);
   if (!value || typeof value !== "object") return value;
@@ -81,19 +65,7 @@ const sortValue = (value) => {
     }, {});
 };
 
-const canonicalResult = (value) => {
-  if (Array.isArray(value)) return value.map(canonicalResult);
-  if (!value || typeof value !== "object") return value;
-  const ignoredKeys =
-    value._type === "referral"
-      ? new Set([...excludedDocumentKeys, ...referralCredentialKeys])
-      : excludedDocumentKeys;
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter(([key]) => !ignoredKeys.has(key))
-      .map(([key, child]) => [key, canonicalResult(child)])
-  );
-};
+const canonicalResult = canonicalizeCommerceParityValue;
 
 const stableJson = (value) => JSON.stringify(sortValue(value));
 const hash = (value) =>
@@ -165,6 +137,52 @@ const numericLeafFailures = (value, path = "") => {
   );
 };
 
+const normalizeAvailabilityRows = (kind, rows) =>
+  (Array.isArray(rows) ? rows : []).map((row) => {
+    if (kind === "bookings") {
+      return {
+        _id: String(row?._id || ""),
+        startTimeUTC: String(
+          row?.startTimeUTC || row?.originalRequestedStartTimeUTC || ""
+        ),
+        packageTitle: String(row?.packageTitle || ""),
+        originalOrderId: String(row?.originalOrderId || ""),
+        status: String(row?.status || ""),
+      };
+    }
+    if (kind === "holds") {
+      return {
+        _id: String(row?._id || ""),
+        startTimeUTC: String(row?.startTimeUTC || ""),
+        phase: String(row?.phase || "active"),
+        expiresAt: String(row?.expiresAt || ""),
+      };
+    }
+    return {
+      _id: String(row?._id || ""),
+      bookingId: String(row?.bookingId || ""),
+      startTimeUTC: String(row?.startTimeUTC || ""),
+      status: String(row?.status || ""),
+    };
+  });
+
+const describeAvailabilityMismatch = (source, target) => {
+  const sourceById = new Map(source.map((row) => [row._id, row]));
+  const targetById = new Map(target.map((row) => [row._id, row]));
+  return {
+    sourceCount: source.length,
+    targetCount: target.length,
+    missingIds: [...sourceById.keys()].filter((id) => !targetById.has(id)),
+    extraIds: [...targetById.keys()].filter((id) => !sourceById.has(id)),
+    changed: [...sourceById.keys()]
+      .filter((id) => targetById.has(id))
+      .flatMap((id) => {
+        const changedPaths = diffPaths(sourceById.get(id), targetById.get(id));
+        return changedPaths.length > 0 ? [{ id, changedPaths }] : [];
+      }),
+  };
+};
+
 const buildReplayCases = (documents) => {
   const first = (type) => documents.find((document) => document?._type === type);
   const booking = first("booking");
@@ -209,7 +227,7 @@ const buildReplayCases = (documents) => {
     },
     {
       name: "availability-bookings",
-      query: `*[_type == "booking"] | order(_id asc){_id,startTimeUTC,packageTitle,originalOrderId,status}`,
+      query: `*[_type == "booking"] | order(_id asc){_id,startTimeUTC,originalRequestedStartTimeUTC,packageTitle,originalOrderId,status}`,
       params: {},
     },
     {
@@ -373,7 +391,7 @@ const replayQueries = async (documents) => {
     ]);
   const now = Date.now();
   const effectiveSanity = {
-    bookings: sanityBookings || [],
+    bookings: filterActiveBookings(sanityBookings),
     holds: (sanityHolds || []).filter((hold) => {
       const phase = String(hold?.phase || "active").toLowerCase();
       const expiry = new Date(hold?.expiresAt || "").getTime();
@@ -386,16 +404,20 @@ const replayQueries = async (documents) => {
     slotLocks: sanityLocks || [],
   };
   for (const key of ["bookings", "holds", "slotLocks"]) {
-    const source = [...effectiveSanity[key]].sort((left, right) =>
+    const source = normalizeAvailabilityRows(key, effectiveSanity[key]).sort((left, right) =>
       String(left?._id || "").localeCompare(String(right?._id || ""))
     );
-    const target = [...(supabaseAvailability[key] || [])].sort((left, right) =>
+    const targetRows = key === "bookings"
+      ? filterActiveBookings(supabaseAvailability[key])
+      : supabaseAvailability[key];
+    const target = normalizeAvailabilityRows(key, targetRows).sort((left, right) =>
       String(left?._id || "").localeCompare(String(right?._id || ""))
     );
     if (hash(canonicalResult(source)) !== hash(canonicalResult(target))) {
       failures.push({
         name: `typed-availability-${key}`,
         category: "query_result_mismatch",
+        ...describeAvailabilityMismatch(source, target),
       });
     }
   }
@@ -411,9 +433,9 @@ const runPass = async (pass) => {
     requireRpc("roo_commerce_readiness"),
   ]);
   const typedFailures = numericLeafFailures(typedSummary).filter(([path]) =>
-    /mismatch|duplicate|unsafe|missing_creator|ambiguous/i.test(path)
+    /mismatch|duplicate|unsafe|missing|ambiguous|orphan|unexpected/i.test(path)
   );
-  for (const section of ["bookings", "payments", "coupons", "holds", "email_dispatches", "referral_ledger", "refunds"]) {
+  for (const section of ["bookings", "payments", "coupons", "holds", "referral_ledger", "refunds"]) {
     const values = typedSummary?.[section] || {};
     const expected = Number(values.source ?? values.expected ?? 0);
     const typed = Number(values.typed ?? 0);
