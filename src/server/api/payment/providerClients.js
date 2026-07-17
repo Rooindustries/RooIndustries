@@ -544,7 +544,12 @@ export const createPayPalOrder = async ({
 const inspectPayPalDetails = (details = {}) => {
   const status = String(details?.status || "").trim().toUpperCase();
   const capture = details?.purchase_units?.[0]?.payments?.captures?.[0] || {};
-  if (status === "COMPLETED" && capture?.id) {
+  const captureStatus = String(capture?.status || "").trim().toUpperCase();
+  if (
+    status === "COMPLETED" &&
+    capture?.id &&
+    captureStatus === "COMPLETED"
+  ) {
     return {
       state: "captured",
       providerOrderId: String(details?.id || "").trim(),
@@ -553,6 +558,20 @@ const inspectPayPalDetails = (details = {}) => {
       payerId: String(details?.payer?.payer_id || "").trim(),
       details,
     };
+  }
+  if (status === "COMPLETED" && capture?.id) {
+    return {
+      state: "pending",
+      reason: `paypal_capture_status_${
+        captureStatus ? captureStatus.toLowerCase() : "unknown"
+      }`,
+      providerOrderId: String(details?.id || "").trim(),
+      providerPaymentId: String(capture.id || "").trim(),
+      details,
+    };
+  }
+  if (status === "COMPLETED") {
+    return { state: "unavailable", reason: "paypal_capture_missing", details };
   }
   if (["CREATED", "APPROVED", "PAYER_ACTION_REQUIRED", "SAVED"].includes(status)) {
     return { state: status === "CREATED" ? "unpaid" : "pending", details };
@@ -618,17 +637,24 @@ export const verifyPayPalOrder = async ({
       return { ok: false, reason: `paypal_status_${status || "unknown"}` };
     }
 
-    const paidAmount =
-      toMoney(
-        details?.purchase_units?.[0]?.payments?.captures?.[0]?.amount?.value ||
-          details?.purchase_units?.[0]?.amount?.value ||
-          0
-      ) || 0;
+    const capture = details?.purchase_units?.[0]?.payments?.captures?.[0] || {};
+    const captureStatus = String(capture?.status || "").trim().toUpperCase();
+    if (!capture?.id) {
+      return { ok: false, reason: "paypal_capture_missing" };
+    }
+    if (captureStatus !== "COMPLETED") {
+      return {
+        ok: false,
+        captured: true,
+        reason: `paypal_capture_status_${
+          captureStatus ? captureStatus.toLowerCase() : "unknown"
+        }`,
+      };
+    }
+
+    const paidAmount = toMoney(capture?.amount?.value || 0) || 0;
     const paidCurrency = String(
-      details?.purchase_units?.[0]?.payments?.captures?.[0]?.amount
-        ?.currency_code ||
-        details?.purchase_units?.[0]?.amount?.currency_code ||
-        ""
+      capture?.amount?.currency_code || ""
     )
       .trim()
       .toUpperCase();
@@ -641,7 +667,6 @@ export const verifyPayPalOrder = async ({
       return { ok: false, captured: true, reason: "paypal_currency_mismatch" };
     }
 
-    const capture = details?.purchase_units?.[0]?.payments?.captures?.[0] || {};
     return {
       ok: true,
       payerEmail: String(details?.payer?.email_address || "").trim(),
