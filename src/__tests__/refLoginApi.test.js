@@ -3,6 +3,10 @@ const bcrypt = require("bcryptjs");
 let login;
 let getReferralSession;
 const mockAuthenticateSupabaseAccount = jest.fn();
+const mockClearLegacySupabaseSession = jest.fn();
+const mockGetLegacySupabaseUser = jest.fn();
+const mockInstallLegacySupabaseSession = jest.fn();
+const mockLinkPendingDiscordIdentity = jest.fn();
 const originalBackend = process.env.DATA_PRIMARY_BACKEND;
 const originalCutover = process.env.SUPABASE_CUTOVER_ENABLED;
 const originalCanaries = process.env.SUPABASE_AUTH_CANARY_ACCOUNTS;
@@ -14,6 +18,16 @@ const principalId = "10000000-0000-4000-8000-000000000001";
 
 jest.mock("../server/supabase/accounts.js", () => ({
   authenticateSupabaseAccount: (...args) => mockAuthenticateSupabaseAccount(...args),
+}));
+
+jest.mock("../server/supabase/serverSession.js", () => ({
+  clearLegacySupabaseSession: (...args) => mockClearLegacySupabaseSession(...args),
+  getLegacySupabaseUser: (...args) => mockGetLegacySupabaseUser(...args),
+  installLegacySupabaseSession: (...args) => mockInstallLegacySupabaseSession(...args),
+}));
+
+jest.mock("../server/supabase/pendingSocialLink.js", () => ({
+  linkPendingDiscordIdentity: (...args) => mockLinkPendingDiscordIdentity(...args),
 }));
 
 const mockFetch = jest.fn();
@@ -132,6 +146,10 @@ beforeEach(() => {
   process.env.SANITY_PRIVATE_WRITE_TOKEN = "private-write-token";
   delete process.env.SUPABASE_CUTOVER_ENABLED;
   delete process.env.SUPABASE_AUTH_CANARY_ACCOUNTS;
+  mockClearLegacySupabaseSession.mockResolvedValue(undefined);
+  mockGetLegacySupabaseUser.mockResolvedValue(null);
+  mockInstallLegacySupabaseSession.mockResolvedValue(true);
+  mockLinkPendingDiscordIdentity.mockResolvedValue({ linked: true });
 });
 
 afterAll(() => {
@@ -152,6 +170,57 @@ afterAll(() => {
 });
 
 describe("referral login API", () => {
+  test("links a pending Discord identity after creator password authentication", async () => {
+    process.env.DATA_PRIMARY_BACKEND = "supabase";
+    const pendingDiscordUser = {
+      id: "20000000-0000-4000-8000-000000000002",
+      identities: [{ provider: "discord" }],
+    };
+    const account = {
+      creator_legacy_sanity_id: "ref_creator_1",
+      display_name: "Creator",
+      legacy_sanity_id: "ref_creator_1",
+      principal_id: principalId,
+      referral_code: "creator-code",
+      session_version: 7,
+    };
+    const user = { id: "30000000-0000-4000-8000-000000000003" };
+    const session = { access_token: "creator-access", refresh_token: "creator-refresh" };
+    mockGetLegacySupabaseUser.mockResolvedValue(pendingDiscordUser);
+    mockAuthenticateSupabaseAccount.mockResolvedValue({
+      ok: true,
+      account,
+      user,
+      session,
+    });
+    const res = createRes();
+
+    await login(
+      createReq({
+        code: "creator@example.com",
+        linkDiscord: true,
+        password: "correct-password",
+      }),
+      res
+    );
+
+    expect(mockLinkPendingDiscordIdentity).toHaveBeenCalledWith({
+      pendingUser: pendingDiscordUser,
+      primaryAccount: account,
+      primaryUserId: user.id,
+    });
+    expect(mockClearLegacySupabaseSession).toHaveBeenCalledTimes(1);
+    expect(mockInstallLegacySupabaseSession).toHaveBeenCalledWith(
+      expect.objectContaining({ session })
+    );
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      ok: true,
+      code: "creator-code",
+      discordLinked: true,
+    });
+  });
+
   test("logs in with a referral code", async () => {
     const referral = await makeReferral();
     mockFetch.mockImplementation((query, params = {}) =>

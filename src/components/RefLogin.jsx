@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import SupabaseSocialLogin from "./SupabaseSocialLogin";
+import SiteDialog from "./SiteDialog";
 
 export default function RefLogin() {
   const nav = useNavigate();
@@ -10,6 +11,9 @@ export default function RefLogin() {
   const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
+  const [showUnlinkedDiscord, setShowUnlinkedDiscord] = useState(false);
+  const [linkDiscord, setLinkDiscord] = useState(false);
+  const identifierInputRef = useRef(null);
 
   function showToast(type, message) {
     setToast({ type, message });
@@ -21,13 +25,19 @@ export default function RefLogin() {
     const query = new URLSearchParams(window.location.search);
     const oauthError = query.get("oauth");
     if (oauthError) {
-      showToast(
-        "error",
-        oauthError === "unlinked"
-          ? "That Google or Discord email is not linked to a creator account."
-          : "Social sign-in is temporarily unavailable. Use your email or referral code."
-      );
+      const provider = query.get("provider");
+      if (oauthError === "unlinked" && provider === "discord") {
+        setShowUnlinkedDiscord(true);
+      } else {
+        showToast(
+          "error",
+          oauthError === "unlinked"
+            ? "That Google or Discord email is not linked to a creator account."
+            : "Social sign-in is temporarily unavailable. Use your email or referral code."
+        );
+      }
       query.delete("oauth");
+      query.delete("provider");
       const cleanSearch = query.toString();
       window.history.replaceState(
         null,
@@ -70,7 +80,7 @@ export default function RefLogin() {
       const res = await fetch("/api/ref/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, password, rememberMe }),
+        body: JSON.stringify({ code, linkDiscord, password, rememberMe }),
       });
 
       const data = await res.json();
@@ -82,9 +92,15 @@ export default function RefLogin() {
 
       sessionStorage.setItem("refLoginCode", data.code || code);
 
-      showToast("success", "Logging in...");
+      showToast(
+        "success",
+        data.discordLinked ? "Discord linked to your account." : "Logging in..."
+      );
 
-      setTimeout(() => nav("/referrals/dashboard"), 500);
+      setTimeout(
+        () => nav("/referrals/dashboard"),
+        data.discordLinked ? 900 : 500
+      );
     } catch {
       console.error("Referral login failed");
       showToast("error", "Server error.");
@@ -124,6 +140,7 @@ export default function RefLogin() {
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl
                        outline-none focus:border-info-border transition text-base"
             placeholder="Referral code or login email"
+            ref={identifierInputRef}
             value={code}
             onChange={(e) => setCode(e.target.value.trim())}
           />
@@ -213,6 +230,48 @@ export default function RefLogin() {
           Create an account
         </button>
       </div>
+
+      <SiteDialog
+        ariaDescribedBy="unlinked-discord-description"
+        ariaLabelledBy="unlinked-discord-title"
+        dismissible={false}
+        open={showUnlinkedDiscord}
+      >
+        <h2
+          className="text-2xl font-bold text-info-text"
+          id="unlinked-discord-title"
+        >
+          No account linked yet
+        </h2>
+        <p
+          className="mt-3 text-sm leading-6 text-ink-secondary"
+          id="unlinked-discord-description"
+        >
+          This Discord isn&apos;t linked to a creator account yet. Already registered?
+          Log in and we&apos;ll link your Discord to it. New here? Create your account.
+        </p>
+        <div className="mt-6 flex flex-col gap-3">
+          <button
+            className="w-full rounded-xl bg-accent-strong px-5 py-3 text-sm font-semibold text-white shadow-glow-soft transition hover:bg-accent"
+            data-autofocus
+            onClick={() => {
+              setLinkDiscord(true);
+              setShowUnlinkedDiscord(false);
+              requestAnimationFrame(() => identifierInputRef.current?.focus());
+            }}
+            type="button"
+          >
+            Log in and link
+          </button>
+          <button
+            className="w-full rounded-xl border border-line-input bg-surface-input px-5 py-3 text-sm font-semibold text-ink-secondary transition hover:border-info-border hover:bg-surface-hover"
+            onClick={() => nav("/referrals/register?oauth=ready&provider=discord")}
+            type="button"
+          >
+            Create account
+          </button>
+        </div>
+      </SiteDialog>
 
       {/* Toast Notification */}
       {toast && (
