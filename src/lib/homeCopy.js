@@ -107,7 +107,7 @@ const HOME_COPY = {
     heading: "Lock In More FPS",
     badgeText: "Remote Sessions",
     subheading:
-      "Start with game settings, go deeper into Windows and BIOS, or book the full pass when you want more FPS and smoother ranked games. Before you price a new GPU: a tune costs a fraction of one, and the 20-92% gains in our reviews rival an upgrade.",
+      "Start with game settings or go all the way to BIOS. A tune costs a fraction of a new GPU, and the 20-92% gains in our reviews rival one.",
     dividerText: "Book it, send specs, pay, get the session details by email.",
   },
   faqSettings: {

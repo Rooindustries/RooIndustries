@@ -215,7 +215,7 @@ export default function Packages({
       )}
 
       {subheadingText && (
-        <p className="ri-packages-subheading mt-3 text-ink-secondary text-sm sm:text-base">
+        <p className="ri-packages-subheading mx-auto mt-3 max-w-xl px-6 text-ink-secondary text-sm sm:text-base">
           {subheadingText}
         </p>
       )}
