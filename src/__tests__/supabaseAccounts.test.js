@@ -174,6 +174,48 @@ describe("Supabase account compatibility", () => {
     });
   });
 
+  test.each([
+    ["disabled", { ...creatorAccount, status: "disabled", verified_real_email: "creator@example.com" }],
+    ["deleted", { ...creatorAccount, status: "deleted", verified_real_email: "creator@example.com" }],
+    ["missing", null],
+    [
+      "stale administrator",
+      {
+        ...creatorAccount,
+        status: "disabled",
+        roles: ["admin", "customer"],
+        verified_real_email: "creator@example.com",
+      },
+    ],
+  ])("rejects a %s bearer principal", async (_label, account) => {
+    const adminClient = {
+      rpc: jest.fn().mockResolvedValue({ data: account, error: null }),
+      auth: {
+        getUser: jest.fn().mockResolvedValue({
+          data: {
+            user: {
+              id: creatorAccount.user_id,
+              email: "creator@example.com",
+              email_confirmed_at: "2026-07-18T00:00:00.000Z",
+            },
+          },
+          error: null,
+        }),
+      },
+    };
+
+    await expect(
+      requireSupabaseBearerUser({
+        authorization: "Bearer valid-token",
+        adminClient,
+      })
+    ).resolves.toEqual({
+      ok: false,
+      status: 403,
+      reason: "account_inactive",
+    });
+  });
+
   test("does not overwrite another account password when Tourney reuses an email", async () => {
     const adminClient = {
       rpc: jest

@@ -20,6 +20,11 @@ const mockSendEmail = jest.fn().mockResolvedValue({ error: null });
 const mockFlushCommerceMirror = jest.fn(async () => {
   throw new Error("Sanity mirror unavailable");
 });
+const mockAssertCommerceStartAllowed = jest.fn(async () => ({
+  primaryBackend: "sanity",
+  generation: 0,
+  startsPaused: false,
+}));
 
 let store;
 let idCounter = 1;
@@ -594,6 +599,11 @@ jest.mock("resend", () => ({
   })),
 }));
 
+jest.mock("../server/supabase/commerceControl.js", () => ({
+  assertCommerceStartAllowed: (...args) =>
+    mockAssertCommerceStartAllowed(...args),
+}));
+
 const reserveSlot = async (startTimeUTC, packageTitle = "Test Package") => {
   const req = createReq({ startTimeUTC, packageTitle });
   const res = createRes();
@@ -706,6 +716,7 @@ beforeEach(() => {
   mockSendEmail.mockReset();
   mockSendEmail.mockResolvedValue({ error: null });
   mockFlushCommerceMirror.mockClear();
+  mockAssertCommerceStartAllowed.mockClear();
   process.env.OWNER_EMAIL = OWNER_EMAIL;
   process.env.RAZORPAY_KEY_ID = "";
   process.env.RAZORPAY_KEY_SECRET = "";

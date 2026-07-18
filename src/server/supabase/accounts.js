@@ -852,6 +852,9 @@ export const requireSupabaseBearerUser = async ({
     userId: user.id,
     adminClient,
   });
+  if (account?.status !== "active") {
+    return { ok: false, status: 403, reason: "account_inactive" };
+  }
   const verifiedEmail = normalizeIdentifier(account?.verified_real_email);
   if (requireVerifiedEmail && !verifiedEmail) {
     return { ok: false, status: 403, reason: "email_not_verified" };

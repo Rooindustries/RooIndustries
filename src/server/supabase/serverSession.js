@@ -25,6 +25,12 @@ const sameSiteValue = (value) => {
   return "Lax";
 };
 
+export const getSupabaseSessionCookieOptions = (env = process.env) => ({
+  path: "/",
+  sameSite: "lax",
+  secure: env.NODE_ENV === "production",
+});
+
 const serializeCookie = ({ name, value, options = {} }) => {
   const parts = [`${name}=${encodeURIComponent(String(value || ""))}`];
   parts.push(`Path=${options.path || "/"}`);
@@ -60,11 +66,22 @@ const createCookieClient = ({
   setHeaders = () => {},
 } = {}) => {
   const { url, publishableKey } = resolveSupabaseAuthEnv(env);
+  const cookieOptions = getSupabaseSessionCookieOptions(env);
   return createServerClient(url, publishableKey, {
+    cookieOptions,
     cookies: {
       getAll: () => parseCookies(cookieHeader),
       setAll: (cookies, headers = {}) => {
-        for (const cookie of cookies || []) setCookies(cookie);
+        for (const cookie of cookies || []) {
+          setCookies({
+            ...cookie,
+            options: {
+              ...cookieOptions,
+              ...(cookie.options || {}),
+              ...(cookieOptions.secure ? { secure: true } : {}),
+            },
+          });
+        }
         for (const [name, value] of Object.entries(headers || {})) {
           setHeaders(name, value);
         }

@@ -242,6 +242,83 @@ describe("payment reconciliation route authorization", () => {
     );
   });
 
+  test("falls back to guarded canonical mutations when the cleanup RPC is absent", async () => {
+    const loaded = await loadHandler({ sanityConfigured: false });
+    const expired = [
+      {
+        _id: "slotHold.expired-one",
+        _rev: "revision-one",
+        _type: "slotHold",
+        backendOwner: "supabase",
+        cutoverGeneration: 1,
+        phase: "active",
+        expiresAt: "2000-01-01T00:00:00.000Z",
+        holdNonce: "old-one",
+      },
+      {
+        _id: "slotHold.expired-two",
+        _rev: "revision-two",
+        _type: "slotHold",
+        backendOwner: "supabase",
+        cutoverGeneration: 1,
+        phase: "payment_pending",
+        expiresAt: "2000-01-02T00:00:00.000Z",
+        holdNonce: "old-two",
+      },
+    ];
+    loaded.adminRpc.mockImplementation(async (name, args) => {
+      if (name === "roo_cleanup_expired_supabase_holds") {
+        return { data: null, error: { code: "PGRST202" } };
+      }
+      if (name === "roo_fetch_shadow_documents_targeted") {
+        return { data: expired, error: null };
+      }
+      if (name === "roo_apply_commerce_document_mutations") {
+        return { data: { event_key: `event:${args.p_mutations[0].document._id}` }, error: null };
+      }
+      throw new Error(`Unexpected RPC: ${name}`);
+    });
+    const { response, state } = createResponse();
+
+    await loaded.handler({ method: "GET", headers: {} }, response);
+
+    expect(state.status).toBe(200);
+    expect(state.body.summary.expiredSupabaseHoldCleanup).toEqual({
+      expired_holds: 2,
+      removed_slot_claims: null,
+      mirror_events_enqueued: 2,
+      cutover_generation: 1,
+      fallback: "canonical_document_mutations",
+    });
+    expect(loaded.adminRpc).toHaveBeenCalledWith(
+      "roo_fetch_shadow_documents_targeted",
+      expect.objectContaining({
+        p_document_types: ["slotHold"],
+        p_limit: 100,
+      })
+    );
+    const mutationCalls = loaded.adminRpc.mock.calls.filter(
+      ([name]) => name === "roo_apply_commerce_document_mutations"
+    );
+    expect(mutationCalls).toHaveLength(2);
+    for (const [, args] of mutationCalls) {
+      expect(args).toMatchObject({
+        p_cutover_generation: 1,
+        p_mutations: [
+          {
+            operation: "replace",
+            document: {
+              phase: "expired",
+              releaseReason: "expired_by_operational_cleanup",
+            },
+          },
+        ],
+      });
+      expect(args.p_mutations[0].expected_revision).toMatch(/^revision-/);
+      expect(args.p_mutations[0].document.holdNonce).not.toMatch(/^old-/);
+    }
+  });
+
   test("does not fail Supabase reconciliation when the Sanity pass fails", async () => {
     const loaded = await loadHandler();
     loaded.reconcilePaymentSessions.mockImplementation(async ({ backend }) => {

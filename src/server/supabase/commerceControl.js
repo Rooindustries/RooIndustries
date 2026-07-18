@@ -1,5 +1,9 @@
 import { createSupabaseAdminClient } from "./adminClient.js";
 import { resolveSupabaseRuntimePolicy } from "./runtime.js";
+import {
+  assertCommerceControlMatchesLease,
+  requireCommerceFailoverLease,
+} from "./commerceFailoverLease.js";
 import envValue from "./envValue.cjs";
 
 const { normalizeBackend } = envValue;
@@ -23,7 +27,13 @@ const normalizeControl = (value = {}) => ({
 export const getCommerceControl = async ({
   client = createSupabaseAdminClient(),
 } = {}) => {
-  const { data, error } = await client.rpc("roo_commerce_control");
+  let result;
+  try {
+    result = await client.rpc("roo_commerce_control");
+  } catch {
+    throw unavailable("The commerce control plane is unavailable.");
+  }
+  const { data, error } = result || {};
   if (error || !data || typeof data !== "object") {
     throw unavailable("The commerce control plane is unavailable.");
   }
@@ -33,22 +43,33 @@ export const getCommerceControl = async ({
 const assertCommerceAllowed = async ({
   env = process.env,
   client,
+  nowSeconds,
   pauseMessage,
 } = {}) => {
   const policy = resolveSupabaseRuntimePolicy(env);
-  if (policy.commerceStartsPaused) {
-    throw unavailable(
-      pauseMessage,
-      "COMMERCE_STARTS_PAUSED"
-    );
-  }
 
   if (policy.commercePrimaryBackend !== "supabase") {
+    const lease = requireCommerceFailoverLease({ env, policy, nowSeconds });
+    try {
+      const liveControl = await getCommerceControl({ ...(client ? { client } : {}) });
+      assertCommerceControlMatchesLease({ control: liveControl, lease });
+    } catch (error) {
+      if (error?.code !== "COMMERCE_CONTROL_UNAVAILABLE") throw error;
+    }
+    if (lease.startsPaused) {
+      throw unavailable(pauseMessage, "COMMERCE_STARTS_PAUSED");
+    }
     return {
-      primaryBackend: policy.commercePrimaryBackend,
-      generation: policy.commerceFailoverGeneration,
-      startsPaused: false,
+      primaryBackend: lease.backend,
+      generation: lease.generation,
+      startsPaused: lease.startsPaused,
+      deploymentId: lease.deploymentId,
+      leaseExpiresAt: lease.expiresAt,
     };
+  }
+
+  if (policy.commerceStartsPaused) {
+    throw unavailable(pauseMessage, "COMMERCE_STARTS_PAUSED");
   }
 
   const control = await getCommerceControl({ ...(client ? { client } : {}) });
