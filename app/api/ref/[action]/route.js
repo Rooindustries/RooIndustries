@@ -11,6 +11,7 @@ import recoverPassword from "../../../../src/server/api/ref/recoverPassword.js";
 import register from "../../../../src/server/api/ref/register.js";
 import reset from "../../../../src/server/api/ref/reset.js";
 import sendBookingEmails from "../../../../src/server/api/ref/sendBookingEmails.js";
+import sessionStatus from "../../../../src/server/api/ref/sessionStatus.js";
 import syncPayouts from "../../../../src/server/api/ref/syncPayouts.js";
 import updateBookingStatus from "../../../../src/server/api/ref/updateBookingStatus.js";
 import updatePayments from "../../../../src/server/api/ref/updatePayments.js";
@@ -40,6 +41,7 @@ const ACTION_HANDLERS = {
   register,
   reset,
   sendBookingEmails,
+  sessionStatus,
   syncPayouts,
   updateBookingStatus,
   updatePayments,

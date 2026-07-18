@@ -3,6 +3,13 @@ import {
   assertCommerceWriteAllowed,
   getCommerceControl,
 } from "../server/supabase/commerceControl";
+import {
+  issueCommerceFailoverLease,
+  verifyCommerceFailoverLease,
+} from "../server/supabase/commerceFailoverLease";
+
+const nowSeconds = 2_000_000_000;
+const leaseSecret = "commerce-failover-lease-test-secret-1234567890";
 
 const supabaseEnv = (overrides = {}) => ({
   NODE_ENV: "test",
@@ -13,6 +20,30 @@ const supabaseEnv = (overrides = {}) => ({
   COMMERCE_FAILOVER_GENERATION: "4",
   ...overrides,
 });
+
+const sanityEnv = (envOverrides = {}, claimOverrides = {}) => {
+  const env = {
+    NODE_ENV: "test",
+    DATA_PRIMARY_BACKEND: "sanity",
+    COMMERCE_PRIMARY_BACKEND: "sanity",
+    COMMERCE_FAILOVER_GENERATION: "5",
+    COMMERCE_STARTS_PAUSED: "0",
+    COMMERCE_DEPLOYMENT_ID: "deployment-five",
+    COMMERCE_FAILOVER_LEASE_SECRET: leaseSecret,
+    ...envOverrides,
+  };
+  env.COMMERCE_FAILOVER_LEASE = issueCommerceFailoverLease({
+    backend: "sanity",
+    generation: 5,
+    startsPaused: false,
+    deploymentId: "deployment-five",
+    secret: leaseSecret,
+    issuedAt: nowSeconds - 30,
+    expiresAt: nowSeconds + 300,
+    ...claimOverrides,
+  });
+  return env;
+};
 
 describe("Supabase commerce control plane", () => {
   test("accepts a matching unpaused database generation", async () => {
@@ -46,30 +77,140 @@ describe("Supabase commerce control plane", () => {
     ).rejects.toMatchObject({ code, status: 503 });
   });
 
-  test("does not contact Supabase while Sanity is primary", async () => {
-    const client = { rpc: jest.fn() };
+  test("compares a Sanity failover lease to reachable live control", async () => {
+    const client = {
+      rpc: jest.fn().mockResolvedValue({
+        data: {
+          primary_backend: "sanity",
+          generation: 5,
+          starts_paused: false,
+        },
+        error: null,
+      }),
+    };
     await expect(
       assertCommerceStartAllowed({
-        env: { NODE_ENV: "test", COMMERCE_PRIMARY_BACKEND: "sanity" },
+        env: sanityEnv(),
         client,
+        nowSeconds,
       })
-    ).resolves.toMatchObject({ primaryBackend: "sanity" });
-    expect(client.rpc).not.toHaveBeenCalled();
+    ).resolves.toMatchObject({
+      primaryBackend: "sanity",
+      generation: 5,
+      startsPaused: false,
+      deploymentId: "deployment-five",
+    });
+    expect(client.rpc).toHaveBeenCalledWith("roo_commerce_control");
   });
 
-  test("blocks all ordinary writes during a deployment pause", async () => {
-    const client = { rpc: jest.fn() };
+  test("validates the signed lease locally during a control-plane outage", async () => {
+    const client = {
+      rpc: jest.fn().mockResolvedValue({
+        data: null,
+        error: { code: "PGRST000" },
+      }),
+    };
+    await expect(
+      assertCommerceStartAllowed({ env: sanityEnv(), client, nowSeconds })
+    ).resolves.toMatchObject({
+      primaryBackend: "sanity",
+      generation: 5,
+      startsPaused: false,
+    });
+  });
+
+  test("blocks a paused failover without synthesizing an unpaused state", async () => {
+    const env = sanityEnv(
+      { COMMERCE_STARTS_PAUSED: "1" },
+      { startsPaused: true }
+    );
+    const client = {
+      rpc: jest.fn().mockResolvedValue({
+        data: {
+          primary_backend: "sanity",
+          generation: 5,
+          starts_paused: true,
+        },
+        error: null,
+      }),
+    };
     await expect(
       assertCommerceWriteAllowed({
-        env: {
-          NODE_ENV: "test",
-          COMMERCE_PRIMARY_BACKEND: "sanity",
-          COMMERCE_STARTS_PAUSED: "1",
-        },
+        env,
         client,
+        nowSeconds,
       })
     ).rejects.toMatchObject({ code: "COMMERCE_STARTS_PAUSED", status: 503 });
-    expect(client.rpc).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    [
+      "live backend mismatch",
+      sanityEnv(),
+      {
+        data: { primary_backend: "supabase", generation: 5, starts_paused: false },
+        error: null,
+      },
+      "COMMERCE_FAILOVER_LEASE_MISMATCH",
+    ],
+    [
+      "deployment mismatch",
+      sanityEnv({ COMMERCE_DEPLOYMENT_ID: "different-deployment" }),
+      { data: null, error: { code: "PGRST000" } },
+      "COMMERCE_FAILOVER_LEASE_MISMATCH",
+    ],
+    [
+      "expired lease",
+      sanityEnv({}, { issuedAt: nowSeconds - 600, expiresAt: nowSeconds - 1 }),
+      { data: null, error: { code: "PGRST000" } },
+      "COMMERCE_FAILOVER_LEASE_INVALID",
+    ],
+  ])("fails closed for a %s", async (_label, env, rpcResult, code) => {
+    const client = { rpc: jest.fn().mockResolvedValue(rpcResult) };
+    await expect(
+      assertCommerceStartAllowed({ env, client, nowSeconds })
+    ).rejects.toMatchObject({ code, status: 503 });
+  });
+
+  test("rejects a modified failover signature", async () => {
+    const env = sanityEnv();
+    const suffix = env.COMMERCE_FAILOVER_LEASE.endsWith("a") ? "b" : "a";
+    env.COMMERCE_FAILOVER_LEASE =
+      env.COMMERCE_FAILOVER_LEASE.slice(0, -1) + suffix;
+    await expect(
+      assertCommerceStartAllowed({
+        env,
+        client: { rpc: jest.fn() },
+        nowSeconds,
+      })
+    ).rejects.toMatchObject({
+      code: "COMMERCE_FAILOVER_LEASE_INVALID",
+      status: 503,
+    });
+  });
+
+  test("caps signed failover leases at fifteen minutes", () => {
+    expect(() => issueCommerceFailoverLease({
+      backend: "sanity",
+      generation: 5,
+      startsPaused: false,
+      deploymentId: "deployment-five",
+      secret: leaseSecret,
+      issuedAt: nowSeconds,
+      expiresAt: nowSeconds + 901,
+    })).toThrow("claims are invalid");
+
+    const token = issueCommerceFailoverLease({
+      backend: "sanity",
+      generation: 5,
+      startsPaused: false,
+      deploymentId: "deployment-five",
+      secret: leaseSecret,
+      issuedAt: nowSeconds,
+      expiresAt: nowSeconds + 900,
+    });
+    expect(verifyCommerceFailoverLease({ token, secret: leaseSecret, nowSeconds }))
+      .toMatchObject({ generation: 5, deploymentId: "deployment-five" });
   });
 
   test("fails closed when the control RPC is unavailable", async () => {

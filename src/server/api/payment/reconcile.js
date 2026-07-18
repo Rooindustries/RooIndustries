@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import {
   authorizeCronRequest,
   reconcilePaymentSessions,
@@ -33,14 +34,104 @@ const reconcileDocumentMirror = async (options = {}) => {
   return client.reconcileReverseMirror(options);
 };
 
+const CLEANUP_RPC_MISSING_CODES = new Set(["42883", "PGRST202"]);
+const CLEANUP_PHASES = new Set([
+  "active",
+  "holding",
+  "payment",
+  "payment_pending",
+]);
+
+const cleanupExpiredSupabaseHoldsFallback = async ({
+  client,
+  generation,
+  limit,
+}) => {
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const fetched = await client.rpc("roo_fetch_shadow_documents_targeted", {
+    p_document_types: ["slotHold"],
+    p_ids: null,
+    p_filters: [
+      { path: "backendOwner", op: "ieq", value: "supabase" },
+      { path: "cutoverGeneration", op: "eq", value: generation },
+      {
+        path: "phase",
+        op: "in",
+        value: [...CLEANUP_PHASES],
+      },
+      { path: "expiresAt", op: "lte", value: nowIso },
+    ],
+    p_limit: limit,
+  });
+  if (fetched.error) throw fetched.error;
+  const candidates = (Array.isArray(fetched.data) ? fetched.data : []).filter(
+    (document) => {
+      const expiresAt = Date.parse(String(document?.expiresAt || ""));
+      return (
+        document?._type === "slotHold" &&
+        /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/.test(document?._id || "") &&
+        !String(document?._id || "").includes("..") &&
+        Boolean(String(document?._rev || "").trim()) &&
+        String(document?.backendOwner || "").toLowerCase() === "supabase" &&
+        Number(document?.cutoverGeneration) === generation &&
+        CLEANUP_PHASES.has(String(document?.phase || "").toLowerCase()) &&
+        Number.isFinite(expiresAt) &&
+        expiresAt <= now.getTime()
+      );
+    }
+  );
+
+  let expiredHolds = 0;
+  let mirrorEventsEnqueued = 0;
+  for (const document of candidates) {
+    const commandDigest = crypto
+      .createHash("sha256")
+      .update(`${document._id}:${document._rev}`)
+      .digest("hex");
+    const mutation = await client.rpc("roo_apply_commerce_document_mutations", {
+      p_command_id: `cleanup.expired-hold.${commandDigest}`,
+      p_mutations: [
+        {
+          operation: "replace",
+          expected_revision: document._rev,
+          document: {
+            ...document,
+            phase: "expired",
+            releasedAt: nowIso,
+            releaseReason: "expired_by_operational_cleanup",
+            holdNonce: crypto.randomUUID(),
+          },
+        },
+      ],
+      p_cutover_generation: generation,
+    });
+    if (mutation.error) throw mutation.error;
+    expiredHolds += 1;
+    if (mutation.data?.event_key) mirrorEventsEnqueued += 1;
+  }
+
+  return {
+    expired_holds: expiredHolds,
+    removed_slot_claims: null,
+    mirror_events_enqueued: mirrorEventsEnqueued,
+    cutover_generation: generation,
+    fallback: "canonical_document_mutations",
+  };
+};
+
 const cleanupExpiredSupabaseHolds = async ({ generation, limit = 100 }) => {
-  const { data, error } = await createSupabaseAdminClient().rpc(
+  const client = createSupabaseAdminClient();
+  const { data, error } = await client.rpc(
     "roo_cleanup_expired_supabase_holds",
     {
       p_cutover_generation: generation,
       p_limit: limit,
     }
   );
+  if (error && CLEANUP_RPC_MISSING_CODES.has(String(error.code || ""))) {
+    return cleanupExpiredSupabaseHoldsFallback({ client, generation, limit });
+  }
   if (error) throw error;
   return data || { expired_holds: 0, removed_slot_claims: 0 };
 };

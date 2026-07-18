@@ -7,8 +7,9 @@ import RefRegister from "../components/RefRegister";
 
 jest.mock("../components/SupabaseSocialLogin", () => () => null);
 
-const response = (payload, ok = true) => ({
+const response = (payload, ok = true, status = ok ? 200 : 401) => ({
   ok,
+  status,
   json: async () => payload,
 });
 
@@ -40,8 +41,8 @@ describe("unlinked referral Discord account choice", () => {
     };
     window.scrollTo = jest.fn();
     global.fetch = jest.fn((url) => {
-      if (String(url) === "/api/ref/getData") {
-        return Promise.resolve(response({ ok: false }, false));
+      if (String(url) === "/api/ref/sessionStatus") {
+        return Promise.resolve(response({ ok: true, authenticated: false }));
       }
       if (String(url) === "/api/auth/identities?flow=referral") {
         return Promise.resolve(
@@ -74,6 +75,31 @@ describe("unlinked referral Discord account choice", () => {
     expect(rememberMe).toBeChecked();
   });
 
+  test("probes session state without requesting authenticated referral data", async () => {
+    renderReferralAuth("/referrals/login");
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith("/api/ref/sessionStatus");
+    });
+    expect(global.fetch).not.toHaveBeenCalledWith("/api/ref/getData");
+  });
+
+  test("treats an unauthenticated probe as an expected silent state", async () => {
+    const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+    global.fetch.mockResolvedValue(
+      response({ ok: true, authenticated: false })
+    );
+
+    renderReferralAuth("/referrals/login");
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith("/api/ref/sessionStatus");
+    });
+    expect(global.fetch).not.toHaveBeenCalledWith("/api/ref/getData");
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
   test("shows the approved account choice after an unlinked Discord sign-in", async () => {
     renderReferralAuth();
 
@@ -88,9 +114,6 @@ describe("unlinked referral Discord account choice", () => {
 
   test("logs in and links the preserved Discord identity", async () => {
     global.fetch.mockImplementation((url, options = {}) => {
-      if (String(url) === "/api/ref/getData") {
-        return Promise.resolve(response({ ok: false }, false));
-      }
       if (String(url) === "/api/ref/login") {
         return Promise.resolve(
           response({ ok: true, code: "creator", discordLinked: true })
@@ -128,8 +151,8 @@ describe("unlinked referral Discord account choice", () => {
 
   test("keeps the account choice open instead of auto-redirecting an existing creator session", async () => {
     global.fetch.mockImplementation((url) => {
-      if (String(url) === "/api/ref/getData") {
-        return Promise.resolve(response({ ok: true }));
+      if (String(url) === "/api/ref/sessionStatus") {
+        return Promise.resolve(response({ ok: true, authenticated: true }));
       }
       return Promise.reject(new Error(`Unexpected request: ${url}`));
     });
@@ -142,9 +165,6 @@ describe("unlinked referral Discord account choice", () => {
 
   test("shows a failed Discord link explicitly while preserving the creator login", async () => {
     global.fetch.mockImplementation((url) => {
-      if (String(url) === "/api/ref/getData") {
-        return Promise.resolve(response({ ok: false }, false));
-      }
       if (String(url) === "/api/ref/login") {
         return Promise.resolve(
           response({

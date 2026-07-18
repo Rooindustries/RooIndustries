@@ -469,6 +469,22 @@ const sanityRequiredChecks = [
           keys: ["SANITY_WEBHOOK_SECRET"],
           label: "SANITY_WEBHOOK_SECRET",
         },
+        {
+          keys: ["COMMERCE_FAILOVER_LEASE"],
+          label: "COMMERCE_FAILOVER_LEASE",
+        },
+        {
+          keys: ["COMMERCE_FAILOVER_LEASE_SECRET"],
+          label: "COMMERCE_FAILOVER_LEASE_SECRET",
+        },
+        {
+          keys: [
+            "COMMERCE_DEPLOYMENT_ID",
+            "VERCEL_DEPLOYMENT_ID",
+            "VERCEL_GIT_COMMIT_SHA",
+          ],
+          label: "COMMERCE_DEPLOYMENT_ID (or Vercel deployment identity)",
+        },
       ]
     : []),
 ];
@@ -541,6 +557,37 @@ const tourneyNeedsSupabase = tourneyDatabaseMode === "supabase" || tourneyMirror
 if (!/^[0-9]+$/.test(commerceFailoverGeneration)) {
   supabaseConsistencyFailures.push(
     "COMMERCE_FAILOVER_GENERATION must be a non-negative integer."
+  );
+}
+if (commercePrimaryBackend === "sanity") {
+  const lease = getFirstValue(["COMMERCE_FAILOVER_LEASE"]);
+  const leaseSecret = getFirstValue(["COMMERCE_FAILOVER_LEASE_SECRET"]);
+  const deploymentIdentity = getFirstValue([
+    "COMMERCE_DEPLOYMENT_ID",
+    "VERCEL_DEPLOYMENT_ID",
+    "VERCEL_GIT_COMMIT_SHA",
+  ]);
+  if (leaseSecret && Buffer.byteLength(leaseSecret, "utf8") < 32) {
+    supabaseConsistencyFailures.push(
+      "COMMERCE_FAILOVER_LEASE_SECRET must contain at least 32 bytes."
+    );
+  }
+  if (lease && !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(lease)) {
+    supabaseConsistencyFailures.push(
+      "COMMERCE_FAILOVER_LEASE must use the signed two-part lease format."
+    );
+  }
+  if (deploymentIdentity && (
+    deploymentIdentity.length > 200 || /[\x00-\x1f\x7f]/.test(deploymentIdentity)
+  )) {
+    supabaseConsistencyFailures.push(
+      "The commerce deployment identity is invalid."
+    );
+  }
+}
+if (isProdBuild && isEnabled("TOURNEY_ALLOW_INSECURE_COOKIE")) {
+  supabaseConsistencyFailures.push(
+    "TOURNEY_ALLOW_INSECURE_COOKIE=1 is forbidden in production."
   );
 }
 if (

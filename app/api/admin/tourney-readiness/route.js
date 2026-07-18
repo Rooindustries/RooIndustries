@@ -26,18 +26,52 @@ const currentShadowRoutes = new Set([
   "appeals",
   "payouts",
 ]);
+const currentShadowLimits = {
+  public_roster: 750,
+  public_bracket: 750,
+  admin_players: 1000,
+  appeals: 1000,
+  payouts: 1000,
+};
 
-export const normalizeTourneyReadinessForResponse = (readiness = {}) => ({
-  ...readiness,
-  clock_blockers: [...new Set(
-    Array.isArray(readiness.clock_blockers) ? readiness.clock_blockers : []
-  )],
-  shadow_reads: Object.fromEntries(
+export const currentShadowAcceptancePasses = (readiness = {}) =>
+  Object.entries(currentShadowLimits).every(([route, maximumP95]) => {
+    const sample = readiness.shadow_reads?.[route];
+    const baseline = readiness.shadow_latency_baselines?.[route];
+    const primaryP95 = Number(sample?.primary_p95_ms);
+    const shadowP95 = Number(sample?.shadow_p95_ms);
+    const baselineP95 = Number(baseline?.primary_p95_ms);
+    return (
+      Number(sample?.samples) >= 30 &&
+      Number(sample?.mismatches) === 0 &&
+      Number.isFinite(primaryP95) &&
+      Number.isFinite(shadowP95) &&
+      Number.isFinite(baselineP95) &&
+      baselineP95 >= 0 &&
+      primaryP95 < maximumP95 &&
+      shadowP95 < maximumP95 &&
+      primaryP95 <= baselineP95 * 1.2
+    );
+  });
+
+export const normalizeTourneyReadinessForResponse = (readiness = {}) => {
+  const shadowReads = Object.fromEntries(
     Object.entries(readiness.shadow_reads || {}).filter(([route]) =>
       currentShadowRoutes.has(route)
     )
-  ),
-});
+  );
+  const normalized = { ...readiness, shadow_reads: shadowReads };
+  const currentGatePasses = currentShadowAcceptancePasses(normalized);
+  return {
+    ...normalized,
+    clock_blockers: [...new Set(
+      (Array.isArray(readiness.clock_blockers) ? readiness.clock_blockers : [])
+        .filter((blocker) =>
+          blocker !== "shadow_acceptance_gate_failed" || !currentGatePasses
+        )
+    )],
+  };
+};
 
 const readLegacyReadiness = async (sql) => {
   const [mirrorTriggerBindings] = await sql`
@@ -110,6 +144,13 @@ const readLegacyReadiness = async (sql) => {
     where sample_rank <= 30
     group by route order by route
   `;
+  const shadowLatencyBaselines = await sql`
+    select route, primary_p95_ms, sample_count, source_window_started_at,
+      source_window_ended_at, captured_at, captured_by
+    from tourney_shadow_latency_baselines
+    where route in ('public_roster','public_bracket','admin_players','appeals','payouts')
+    order by route
+  `;
   const discord = Object.fromEntries(
     discordRows.map((row) => [row.status, Number(row.count)])
   );
@@ -161,6 +202,16 @@ const readLegacyReadiness = async (sql) => {
     mirror_trigger_bindings: mirrorTriggerBindings?.readiness || { ready: false },
     clock_blockers: [...clockBlockers],
     shadow_reads: shadow,
+    shadow_latency_baselines: Object.fromEntries(
+      shadowLatencyBaselines.map((row) => [row.route, {
+        primary_p95_ms: Number(row.primary_p95_ms || 0),
+        sample_count: Number(row.sample_count || 0),
+        source_window_started_at: row.source_window_started_at,
+        source_window_ended_at: row.source_window_ended_at,
+        captured_at: row.captured_at,
+        captured_by: row.captured_by,
+      }])
+    ),
   };
 };
 

@@ -63,6 +63,7 @@
     "test:referral:postgres17": "node scripts/test-referral-creator-terms-postgres.mjs",
     "test:referral-social:postgres17": "node scripts/test-referral-social-reclaim-postgres.mjs",
     "test:supabase:document-outbox:postgres17": "node scripts/test-document-mutation-outbox-postgres.mjs",
+    "test:backend-integrity:postgres17": "node scripts/test-backend-integrity-postgres.mjs",
     "test:referral-authority:postgres17": "node scripts/test-referral-fallback-authority-postgres.mjs",
     "test:referral-email:postgres17": "node scripts/test-referral-email-dispatch-postgres.mjs",
     "repair:tourney:live-drift": "node scripts/tourney-live-drift-repair.mjs",

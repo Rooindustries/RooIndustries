@@ -580,7 +580,7 @@ describe("tourney auth", () => {
     expect((await auth.checkTourneyRateLimit({ key, max: 2 })).ok).toBe(false);
   });
 
-  test("keeps production cookies secure unless local verification overrides it", () => {
+  test("keeps production cookies secure even when an insecure override is present", () => {
     const auth = loadAuth();
 
     expect(auth.getTourneyCookieOptions({ NODE_ENV: "production" })).toMatchObject({
@@ -592,6 +592,12 @@ describe("tourney auth", () => {
     expect(
       auth.getTourneyCookieOptions({
         NODE_ENV: "production",
+        TOURNEY_ALLOW_INSECURE_COOKIE: "1",
+      })
+    ).toMatchObject({ secure: true });
+    expect(
+      auth.getTourneyCookieOptions({
+        NODE_ENV: "development",
         TOURNEY_ALLOW_INSECURE_COOKIE: "1",
       })
     ).toMatchObject({ secure: false });

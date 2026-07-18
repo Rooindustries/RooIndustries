@@ -797,7 +797,7 @@ export const readTourneySessionFromStore = async ({
 };
 
 const shouldUseSecureCookie = (env = process.env) =>
-  env.TOURNEY_ALLOW_INSECURE_COOKIE === "1" ? false : env.NODE_ENV === "production";
+  env.NODE_ENV === "production";
 
 export const getTourneyCookieOptions = (
   env = process.env,
