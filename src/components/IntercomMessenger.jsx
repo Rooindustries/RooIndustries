@@ -100,11 +100,12 @@ const loadIntercom = (settings) => {
   }
 };
 
-function IntercomMessenger({ disabledRoutes = [] }) {
+function IntercomMessenger({ disabledRoutes = [], disabled = false }) {
   const location = useLocation();
   const isDisabledRef = useRef(false);
   const pathname = location.pathname || "/";
-  const isDisabled = isRouteDisabled(pathname, disabledRoutes);
+  const isDisabled =
+    Boolean(disabled) || isRouteDisabled(pathname, disabledRoutes);
 
   isDisabledRef.current = isDisabled;
 

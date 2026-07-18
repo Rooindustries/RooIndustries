@@ -51,8 +51,7 @@ const BookingModal = lazy(() => import("./components/BookingModal"));
 const MeetTheTeam = lazy(() => import("./legacyPages/MeetTheTeam"));
 const NotFound = lazy(() => import("./legacyPages/NotFound"));
 
-const INTERCOM_DISABLED_ROUTES = [];
-// const INTERCOM_DISABLED_ROUTES = ["/booking"]; // Disables chat on /booking and nested routes.
+const INTERCOM_DISABLED_ROUTES = ["/booking", "/payment"];
 
 const isReferralResetHash = (hash) => {
   const params = new URLSearchParams(String(hash || "").replace(/^#/, ""));
@@ -108,8 +107,10 @@ const DeferredTelemetry = () => {
   );
 };
 
-const IntercomRuntime = ({ disabledRoutes }) => {
-  return <IntercomMessenger disabledRoutes={disabledRoutes} />;
+const IntercomRuntime = ({ disabledRoutes, disabled }) => {
+  return (
+    <IntercomMessenger disabledRoutes={disabledRoutes} disabled={disabled} />
+  );
 };
 
 const RouteFallback = () => (
@@ -507,7 +508,10 @@ export function AppContent({
   return (
     <>
       <DeferredTelemetry />
-      <IntercomRuntime disabledRoutes={INTERCOM_DISABLED_ROUTES} />
+      <IntercomRuntime
+        disabledRoutes={INTERCOM_DISABLED_ROUTES}
+        disabled={isFlowRoute}
+      />
 
       <div
         id="app-shell"

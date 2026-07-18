@@ -5,6 +5,12 @@ import { initializePerformanceProfile } from "../lib/performanceProfile";
 
 const SEORCE_PROJECT_ID = "6a2e76bf3f9dac8c30e27b89";
 const SEORCE_SCRIPT_ID = "seorce-runtime-script";
+// Seorce retries its tracking-config fetch every 90 seconds and logs failures.
+// Keep that third-party loop and production analytics off preview/local hosts.
+const SEORCE_PRODUCTION_HOSTS = new Set([
+  "rooindustries.com",
+  "www.rooindustries.com",
+]);
 const SEORCE_BLOCKED_PREFIXES = [
   "/tourney",
   "/booking",
@@ -18,7 +24,14 @@ const SEORCE_BLOCKED_PREFIXES = [
 const getPathname = () =>
   typeof window === "undefined" ? "" : window.location.pathname || "/";
 
-const shouldLoadSeorce = (pathname = getPathname()) =>
+const getHostname = () =>
+  typeof window === "undefined" ? "" : window.location.hostname || "";
+
+export const shouldLoadSeorce = (
+  pathname = getPathname(),
+  hostname = getHostname()
+) =>
+  SEORCE_PRODUCTION_HOSTS.has(String(hostname).toLowerCase()) &&
   !SEORCE_BLOCKED_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
   );
@@ -33,9 +46,17 @@ const runWhenIdle = (callback) => {
   return () => window.clearTimeout(timeoutId);
 };
 
-const loadSeorceScript = () => {
-  if (typeof document === "undefined" || !shouldLoadSeorce()) return;
-  if (document.getElementById(SEORCE_SCRIPT_ID)) return;
+export const loadSeorceScript = ({
+  pathname = getPathname(),
+  hostname = getHostname(),
+} = {}) => {
+  if (
+    typeof document === "undefined" ||
+    !shouldLoadSeorce(pathname, hostname)
+  ) {
+    return false;
+  }
+  if (document.getElementById(SEORCE_SCRIPT_ID)) return true;
 
   const script = document.createElement("script");
   script.id = SEORCE_SCRIPT_ID;
@@ -44,6 +65,7 @@ const loadSeorceScript = () => {
   script.defer = true;
   script.dataset.uuid = SEORCE_PROJECT_ID;
   document.head.appendChild(script);
+  return true;
 };
 
 export default function AppClientRuntime() {
