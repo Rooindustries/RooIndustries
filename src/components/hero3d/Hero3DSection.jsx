@@ -8,6 +8,7 @@ import React, {
 } from "react";
 import { Link } from "react-router-dom";
 import Hero from "../Hero";
+import HeroSplitCopy from "./HeroSplitCopy";
 import useHomeSectionLinkHandler from "../../lib/useHomeSectionLinkHandler";
 
 const HeroScene3D = lazy(() => import("./HeroScene3D"));
@@ -36,20 +37,20 @@ function supportsWebgl() {
   }
 }
 
-const VARIANT_KEYS = ["v1", "v2", "v3", "v4", "v5"];
-const VARIANT_SCRIM = { v1: 1.0, v2: 0.75, v3: 0.45, v4: 0.3, v5: 0.9 };
+const VARIANT_KEYS = ["v1", "v2", "v3", "v4", "v5", "v6"];
+const VARIANT_SCRIM = { v1: 1.0, v2: 0.75, v3: 0.45, v4: 0.3, v5: 0.9, v6: 0 };
 
 export default function Hero3DSection() {
   const handleHomeSectionLink = useHomeSectionLinkHandler();
   const [enabled, setEnabled] = useState(false);
-  const [variantKey, setVariantKey] = useState("v1");
+  const [variantKey, setVariantKey] = useState("v6");
   const [near, setNear] = useState(false);
   const [active, setActive] = useState(false);
 
   const wrapperRef = useRef(null);
   const viewportRef = useRef(null);
   const scrimRef = useRef(null);
-  const variantRef = useRef("v1");
+  const variantRef = useRef("v6");
   const progressRef = useRef(0);
   const hintRef = useRef(null);
   const payoffRef = useRef(null);
@@ -92,7 +93,8 @@ export default function Hero3DSection() {
 
     if (scrimRef.current) {
       const heroP = 1 - smoothstep(rawP, 0.02, 0.2);
-      const strength = VARIANT_SCRIM[variantRef.current] || 1;
+      const strength =
+        variantRef.current === "v6" ? 0.9 : VARIANT_SCRIM[variantRef.current] || 1;
       scrimRef.current.style.opacity = (heroP * strength).toFixed(3);
     }
 
@@ -164,6 +166,16 @@ export default function Hero3DSection() {
     };
   }, [enabled]);
 
+  useEffect(() => {
+    if (!enabled || variantKey !== "v6") return undefined;
+    document.documentElement.dataset.hero3dBenefits = "on";
+    window.dispatchEvent(new Event("hero3d:benefits"));
+    return () => {
+      delete document.documentElement.dataset.hero3dBenefits;
+      window.dispatchEvent(new Event("hero3d:benefits"));
+    };
+  }, [enabled, variantKey]);
+
   // Gated environments keep the plain hero, untouched.
   if (!enabled) return <Hero />;
 
@@ -172,7 +184,7 @@ export default function Hero3DSection() {
       ref={wrapperRef}
       aria-label="What a Roo Industries optimization touches"
       className="relative"
-      style={{ height: "210vh" }}
+      style={{ height: variantKey === "v6" ? "260vh" : "210vh" }}
     >
       <div
         ref={viewportRef}
@@ -198,7 +210,9 @@ export default function Hero3DSection() {
           className="pointer-events-none absolute inset-0"
           style={{
             background:
-              "linear-gradient(180deg, rgba(4, 8, 16, 0.78) 0%, rgba(4, 8, 16, 0.5) 42%, transparent 72%)",
+              variantKey === "v6"
+                ? "linear-gradient(90deg, rgba(4, 8, 16, 0.85) 0%, rgba(4, 8, 16, 0.55) 40%, transparent 64%)"
+                : "linear-gradient(180deg, rgba(4, 8, 16, 0.78) 0%, rgba(4, 8, 16, 0.5) 42%, transparent 72%)",
           }}
         />
 
@@ -219,6 +233,9 @@ export default function Hero3DSection() {
         >
           <p className="text-2xl sm:text-3xl font-extrabold tracking-tight text-ink">
             Same hardware. More frames.
+          </p>
+          <p className="text-sm text-ink-secondary">
+            OBS, encoder, and capture settings set up around your games too.
           </p>
           <div className="flex items-end gap-10">
             <div className="text-center">
@@ -257,7 +274,7 @@ export default function Hero3DSection() {
       </div>
 
       <div className="relative z-10">
-        <Hero />
+        {variantKey === "v6" ? <HeroSplitCopy /> : <Hero />}
       </div>
     </section>
   );
