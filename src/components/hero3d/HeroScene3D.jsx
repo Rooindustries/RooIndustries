@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Html } from "@react-three/drei";
+import { Html, RoundedBox } from "@react-three/drei";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
@@ -20,7 +20,16 @@ const pulse = (p, inStart, inEnd, outStart, outEnd) =>
 export const heroPhase = (rawP) => 1 - smoothstep(rawP, 0.02, 0.2);
 export const scenePhase = (rawP) => clamp01((rawP - 0.16) / 0.84);
 
-const FIN_COUNT = 22;
+// Five hero compositions sharing one scene graph. Selected via ?hero3d=vN.
+export const HERO3D_VARIANTS = {
+  v1: { loadScale: 0.85, loadY: -0.5, loadX: 0, loadRotY: 0, scrim: 1.0, envRamp: false, preExplode: 0 },
+  v2: { loadScale: 0.8, loadY: -0.35, loadX: 1.5, loadRotY: 1.1, scrim: 0.75, envRamp: false, preExplode: 0 },
+  v3: { loadScale: 1.08, loadY: -1.1, loadX: 0, loadRotY: 0, scrim: 0.45, envRamp: false, preExplode: 0 },
+  v4: { loadScale: 0.9, loadY: -0.45, loadX: 0, loadRotY: 0, scrim: 0.3, envRamp: true, preExplode: 0 },
+  v5: { loadScale: 0.8, loadY: -0.5, loadX: 0, loadRotY: 0, scrim: 0.9, envRamp: false, preExplode: 0.14 },
+};
+
+const FIN_COUNT = 30;
 const BLADE_COUNT = 9;
 const PARTICLE_COUNT = 130;
 
@@ -182,6 +191,21 @@ function Fan({ position, materials, spinRef, glowTexture, glowRef }) {
   );
 }
 
+function EnvRamp({ progressRef, variant }) {
+  const { scene } = useThree();
+
+  useFrame(() => {
+    if (!variant.envRamp) {
+      scene.environmentIntensity = 1;
+      return;
+    }
+    const heroP = heroPhase(progressRef.current);
+    scene.environmentIntensity = 0.12 + (1 - heroP) * 0.88;
+  });
+
+  return null;
+}
+
 function CameraRig({ progressRef }) {
   const { camera, size } = useThree();
 
@@ -200,7 +224,7 @@ function CameraRig({ progressRef }) {
   return null;
 }
 
-function GpuRig({ progressRef, colors }) {
+function GpuRig({ progressRef, colors, variant }) {
   const rigRef = useRef(null);
   const backplateRef = useRef(null);
   const pcbRef = useRef(null);
@@ -270,6 +294,23 @@ function GpuRig({ progressRef, colors }) {
         emissive: accent,
         emissiveIntensity: 1.1,
       }),
+      gold: new THREE.MeshStandardMaterial({
+        color: "#d4a537",
+        metalness: 1,
+        roughness: 0.35,
+        envMapIntensity: 1.2,
+      }),
+      copper: new THREE.MeshStandardMaterial({
+        color: "#b46a3a",
+        metalness: 1,
+        roughness: 0.3,
+        envMapIntensity: 1.15,
+      }),
+      well: new THREE.MeshStandardMaterial({
+        color: "#0a0e13",
+        metalness: 0.4,
+        roughness: 0.7,
+      }),
     };
   }, [colors.accent]);
 
@@ -309,27 +350,35 @@ function GpuRig({ progressRef, colors }) {
     const t = state.clock.elapsedTime;
 
     // Staggered layer choreography: fans lead, backplate trails.
-    const explodeFans = pulse(p, 0.15, 0.4, 0.52, 0.7);
-    const explodeShroud = pulse(p, 0.18, 0.43, 0.53, 0.71);
-    const explodeFins = pulse(p, 0.21, 0.46, 0.54, 0.72);
-    const explodePlate = pulse(p, 0.24, 0.49, 0.55, 0.73);
+    const breathe =
+      variant.preExplode * heroP * (0.8 + Math.sin(t * 1.5) * 0.2);
+    const explodeFans = Math.min(1, pulse(p, 0.15, 0.4, 0.52, 0.7) + breathe);
+    const explodeShroud = Math.min(1, pulse(p, 0.18, 0.43, 0.53, 0.71) + breathe * 0.8);
+    const explodeFins = Math.min(1, pulse(p, 0.21, 0.46, 0.54, 0.72) + breathe * 0.6);
+    const explodePlate = Math.min(1, pulse(p, 0.24, 0.49, 0.55, 0.73) + breathe * 0.5);
     const explode = explodeShroud;
     const payoff = smoothstep(p, 0.7, 0.88);
     const snap = pulse(p, 0.66, 0.7, 0.73, 0.78);
 
     if (rigRef.current) {
-      // While the hero copy overlays the scene the card idles low and small,
-      // then rises to center stage as the copy scrolls away.
-      const scale = 0.62 + (1 - heroP) * 0.38;
+      // While the hero copy overlays the scene the card holds its variant
+      // load pose, then moves to center stage as the copy scrolls away.
+      const scale = variant.loadScale + (1 - heroP) * (1 - variant.loadScale);
       rigRef.current.scale.set(scale, scale, scale);
-      rigRef.current.rotation.y = 0.7 + p * 1.9 + t * heroP * 0.05 + Math.sin(t * 0.4) * 0.03;
+      rigRef.current.rotation.y =
+        0.7 +
+        p * 1.9 +
+        variant.loadRotY * heroP +
+        t * heroP * 0.05 +
+        Math.sin(t * 0.4) * 0.03;
       rigRef.current.rotation.x = 0.32 + Math.sin(t * 0.55) * 0.015;
+      rigRef.current.position.x = variant.loadX * heroP;
       rigRef.current.position.y =
-        Math.sin(t * 0.7) * 0.04 - 0.05 - heroP * 1.55 - explode * 0.55;
+        Math.sin(t * 0.7) * 0.04 - 0.05 + heroP * (variant.loadY + 0.05) - explode * 0.55;
     }
 
     if (backplateRef.current)
-      backplateRef.current.position.y = -0.2 - explodePlate * 0.85;
+      backplateRef.current.position.y = -0.2 - explodePlate * 0.65;
     if (pcbRef.current) pcbRef.current.position.y = -0.12 - explodePlate * 0.25;
     if (finsRef.current) finsRef.current.position.y = 0.12 + explodeFins * 0.55;
     if (shroudRef.current)
@@ -370,39 +419,101 @@ function GpuRig({ progressRef, colors }) {
 
   const labelStyle = {
     color: "var(--color-text-primary, #fff)",
-    background: "rgba(6, 10, 16, 0.9)",
-    border: "1px solid var(--color-border-accent, rgba(103,232,249,0.3))",
-    borderRadius: "8px",
-    padding: "6px 12px",
-    fontSize: "14px",
-    fontWeight: 600,
-    letterSpacing: "0.02em",
+    background: "rgba(5, 9, 15, 0.92)",
+    border: "1px solid rgba(148, 163, 184, 0.25)",
+    borderLeft: "3px solid var(--color-accent, #22d3ee)",
+    borderRadius: "4px",
+    padding: "7px 14px",
+    fontSize: "13px",
+    fontWeight: 700,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
     whiteSpace: "nowrap",
     opacity: 0,
     transition: "opacity 120ms linear",
     pointerEvents: "none",
   };
 
+  const Callout = ({ side, y, children, index }) => {
+    const dir = side === "left" ? -1 : 1;
+    const lineLen = 0.5;
+    const edgeX = dir * 1.68;
+    return (
+      <group>
+        <mesh position={[edgeX, y, 0]} material={materials.accentRing}>
+          <sphereGeometry args={[0.035, 12, 12]} />
+        </mesh>
+        <mesh
+          position={[edgeX + (dir * lineLen) / 2, y, 0]}
+          rotation={[0, 0, Math.PI / 2]}
+          material={materials.accentRing}
+        >
+          <cylinderGeometry args={[0.008, 0.008, lineLen, 6]} />
+        </mesh>
+        <Html
+          position={[edgeX + dir * (lineLen + 0.12), y, 0]}
+          center
+          zIndexRange={[20, 0]}
+        >
+          <div ref={setLabelRef(index)} style={labelStyle}>
+            {children}
+          </div>
+        </Html>
+      </group>
+    );
+  };
+
   return (
     <group ref={rigRef}>
       <group ref={backplateRef}>
-        <mesh material={materials.backplate}>
-          <boxGeometry args={[3.25, 0.06, 1.38]} />
-        </mesh>
+        <RoundedBox
+          args={[3.25, 0.06, 1.38]}
+          radius={0.025}
+          smoothness={2}
+          material={materials.backplate}
+        />
+        {[[-1.5, 0.62], [1.5, 0.62], [-1.5, -0.62], [1.5, -0.62]].map(
+          ([sx, sz]) => (
+            <mesh
+              key={`screw-${sx}-${sz}`}
+              position={[sx, 0.035, sz]}
+              material={materials.hub}
+            >
+              <cylinderGeometry args={[0.035, 0.035, 0.015, 12]} />
+            </mesh>
+          )
+        )}
+        {[-0.9, -0.7, -0.5].map((vx) => (
+          <mesh
+            key={`vent-${vx}`}
+            position={[vx, 0.032, -0.45]}
+            rotation={[0, 0.5, 0]}
+            material={materials.well}
+          >
+            <boxGeometry args={[0.3, 0.012, 0.05]} />
+          </mesh>
+        ))}
         <mesh position={[1.2, 0.01, 0]} material={materials.accentStrip}>
           <boxGeometry args={[0.5, 0.07, 0.05]} />
         </mesh>
-        <Html position={[-2.15, 0, 0]} center zIndexRange={[20, 0]}>
-          <div ref={setLabelRef(2)} style={labelStyle}>
-            Windows & driver debloat
-          </div>
-        </Html>
+        <Callout side="left" y={0.25} index={2}>
+          Windows & driver debloat
+        </Callout>
       </group>
 
       <group ref={pcbRef}>
         <mesh material={materials.pcb}>
           <boxGeometry args={[3.1, 0.07, 1.3]} />
         </mesh>
+        {Array.from({ length: 14 }, (_, i) => (
+          <mesh
+            key={`finger-${i}`}
+            position={[-0.5 + i * 0.09, -0.02, 0.66]}
+            material={materials.gold}
+          >
+            <boxGeometry args={[0.055, 0.035, 0.06]} />
+          </mesh>
+        ))}
         {chips.map((chip, i) => (
           <mesh
             key={`chip-${i}`}
@@ -412,35 +523,60 @@ function GpuRig({ progressRef, colors }) {
             <boxGeometry args={chip.size} />
           </mesh>
         ))}
-        <Html position={[2.15, 0, 0]} center zIndexRange={[20, 0]}>
-          <div ref={setLabelRef(0)} style={labelStyle}>
-            BIOS & NVRAM tuning
-          </div>
-        </Html>
+        <Callout side="right" y={0.1} index={0}>
+          BIOS & NVRAM tuning
+        </Callout>
       </group>
 
       <group ref={finsRef}>
         {fins.map(({ x, key }) => (
           <mesh key={key} position={[x, 0, 0]} material={materials.fin}>
-            <boxGeometry args={[0.035, 0.34, 1.22]} />
+            <boxGeometry args={[0.024, 0.34, 1.22]} />
           </mesh>
         ))}
-        <Html position={[-2.15, 0.1, 0]} center zIndexRange={[20, 0]}>
-          <div ref={setLabelRef(1)} style={labelStyle}>
-            Thermals & fan curves
-          </div>
-        </Html>
+        {[-0.28, 0, 0.28].map((pz) => (
+          <mesh
+            key={`pipe-${pz}`}
+            position={[0, -0.14, pz]}
+            rotation={[0, 0, Math.PI / 2]}
+            material={materials.copper}
+          >
+            <cylinderGeometry args={[0.045, 0.045, 3.0, 16]} />
+          </mesh>
+        ))}
+        <Callout side="left" y={0.15} index={1}>
+          Thermals & fan curves
+        </Callout>
       </group>
 
       <group ref={shroudRef}>
-        <mesh material={materials.shroud}>
-          <boxGeometry args={[3.35, 0.26, 1.46]} />
+        <RoundedBox
+          args={[3.35, 0.26, 1.46]}
+          radius={0.045}
+          smoothness={3}
+          material={materials.shroud}
+        />
+        <mesh position={[-0.78, 0.11, 0]} material={materials.well}>
+          <cylinderGeometry args={[0.42, 0.42, 0.06, 36]} />
+        </mesh>
+        <mesh position={[0.78, 0.11, 0]} material={materials.well}>
+          <cylinderGeometry args={[0.42, 0.42, 0.06, 36]} />
+        </mesh>
+        <mesh
+          position={[1.52, 0.09, 0]}
+          rotation={[0, 0, -0.5]}
+          material={materials.accentStrip}
+        >
+          <boxGeometry args={[0.5, 0.03, 1.3]} />
         </mesh>
         <mesh position={[0, 0.02, 0.72]} material={materials.accentStrip}>
           <boxGeometry args={[3.1, 0.05, 0.04]} />
         </mesh>
         <mesh position={[0, 0.02, -0.72]} material={materials.accentStrip}>
           <boxGeometry args={[3.1, 0.05, 0.04]} />
+        </mesh>
+        <mesh position={[-1.45, 0.05, 0.6]} material={materials.accentStrip}>
+          <boxGeometry args={[0.32, 0.06, 0.1]} />
         </mesh>
       </group>
 
@@ -461,6 +597,16 @@ function GpuRig({ progressRef, colors }) {
         />
       </group>
 
+      <mesh position={[0, -1.72, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[3.4, 48]} />
+        <meshStandardMaterial
+          color="#0a1526"
+          metalness={0.6}
+          roughness={0.55}
+          transparent
+          opacity={0.5}
+        />
+      </mesh>
       <mesh
         ref={shadowRef}
         position={[0, -1.7, 0]}
@@ -478,8 +624,9 @@ function GpuRig({ progressRef, colors }) {
   );
 }
 
-export default function HeroScene3D({ progressRef, active }) {
+export default function HeroScene3D({ progressRef, active, variantKey }) {
   const colors = useMemo(() => readThemeColors(), []);
+  const variant = HERO3D_VARIANTS[variantKey] || HERO3D_VARIANTS.v1;
 
   return (
     <Canvas
@@ -489,13 +636,22 @@ export default function HeroScene3D({ progressRef, active }) {
       camera={{ fov: 40, position: [0, 0.4, 7.4] }}
       style={{ position: "absolute", inset: 0 }}
     >
+      <fog attach="fog" args={["#060d1f", 9, 20]} />
       <StudioEnvironment />
+      <EnvRamp progressRef={progressRef} variant={variant} />
       <CameraRig progressRef={progressRef} />
-      <ambientLight intensity={0.25} />
-      <directionalLight position={[4, 5, 5]} intensity={1.1} />
+      <ambientLight intensity={0.22} />
+      <spotLight
+        position={[0, 6, 3]}
+        angle={0.55}
+        penumbra={0.8}
+        intensity={40}
+        color="#e8f2ff"
+      />
+      <directionalLight position={[4, 5, 5]} intensity={0.9} />
       <pointLight position={[-5, 2, -4]} intensity={14} color={colors.glow} />
       <DepthParticles progressRef={progressRef} colors={colors} />
-      <GpuRig progressRef={progressRef} colors={colors} />
+      <GpuRig progressRef={progressRef} colors={colors} variant={variant} />
     </Canvas>
   );
 }

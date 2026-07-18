@@ -36,14 +36,20 @@ function supportsWebgl() {
   }
 }
 
+const VARIANT_KEYS = ["v1", "v2", "v3", "v4", "v5"];
+const VARIANT_SCRIM = { v1: 1.0, v2: 0.75, v3: 0.45, v4: 0.3, v5: 0.9 };
+
 export default function Hero3DSection() {
   const handleHomeSectionLink = useHomeSectionLinkHandler();
   const [enabled, setEnabled] = useState(false);
+  const [variantKey, setVariantKey] = useState("v1");
   const [near, setNear] = useState(false);
   const [active, setActive] = useState(false);
 
   const wrapperRef = useRef(null);
   const viewportRef = useRef(null);
+  const scrimRef = useRef(null);
+  const variantRef = useRef("v1");
   const progressRef = useRef(0);
   const hintRef = useRef(null);
   const payoffRef = useRef(null);
@@ -52,7 +58,13 @@ export default function Hero3DSection() {
   const rafRef = useRef(0);
 
   useEffect(() => {
-    const force = new URLSearchParams(window.location.search).has("hero3d");
+    const params = new URLSearchParams(window.location.search);
+    const force = params.has("hero3d");
+    const requested = params.get("hero3d");
+    if (VARIANT_KEYS.includes(requested)) {
+      setVariantKey(requested);
+      variantRef.current = requested;
+    }
     const reducedMotion = window.matchMedia(
       "(prefers-reduced-motion: reduce)"
     ).matches;
@@ -76,6 +88,12 @@ export default function Hero3DSection() {
     if (viewportRef.current) {
       const pin = Math.min(Math.max(-rect.top, 0), total);
       viewportRef.current.style.transform = `translate3d(0, ${pin}px, 0)`;
+    }
+
+    if (scrimRef.current) {
+      const heroP = 1 - smoothstep(rawP, 0.02, 0.2);
+      const strength = VARIANT_SCRIM[variantRef.current] || 1;
+      scrimRef.current.style.opacity = (heroP * strength).toFixed(3);
     }
 
     if (hintRef.current) {
@@ -154,7 +172,7 @@ export default function Hero3DSection() {
       ref={wrapperRef}
       aria-label="What a Roo Industries optimization touches"
       className="relative"
-      style={{ height: "230vh" }}
+      style={{ height: "210vh" }}
     >
       <div
         ref={viewportRef}
@@ -163,7 +181,7 @@ export default function Hero3DSection() {
       >
         {near && (
           <Suspense fallback={null}>
-            <HeroScene3D progressRef={progressRef} active={active} />
+            <HeroScene3D progressRef={progressRef} active={active} variantKey={variantKey} />
           </Suspense>
         )}
 
@@ -172,6 +190,15 @@ export default function Hero3DSection() {
           style={{
             background:
               "radial-gradient(ellipse at center, transparent 52%, rgba(2, 6, 14, 0.42) 100%)",
+          }}
+        />
+
+        <div
+          ref={scrimRef}
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              "linear-gradient(180deg, rgba(4, 8, 16, 0.78) 0%, rgba(4, 8, 16, 0.5) 42%, transparent 72%)",
           }}
         />
 
