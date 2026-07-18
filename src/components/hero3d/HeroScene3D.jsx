@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { Suspense, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Canvas, useFrame, useLoader, useThree } from "@react-three/fiber";
 import { Html, RoundedBox } from "@react-three/drei";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 
@@ -25,9 +25,9 @@ export const HERO3D_VARIANTS = {
   v1: { loadScale: 0.85, loadY: -0.5, loadX: 0, loadRotY: 0, scrim: 1.0, envRamp: false, preExplode: 0 },
   v2: { loadScale: 0.8, loadY: -0.35, loadX: 1.5, loadRotY: 1.1, scrim: 0.75, envRamp: false, preExplode: 0 },
   v3: { loadScale: 1.08, loadY: -1.1, loadX: 0, loadRotY: 0, scrim: 0.45, envRamp: false, preExplode: 0 },
-  v4: { loadScale: 0.9, loadY: -0.45, loadX: 0, loadRotY: 0, scrim: 0.3, envRamp: true, preExplode: 0 },
+  v4: { loadScale: 0.9, loadY: -0.45, loadX: 0, loadRotY: 0, scrim: 0.3, envRamp: true, envFloor: 0.12, envCeil: 0.55, dark: true, preExplode: 0 },
   v5: { loadScale: 0.8, loadY: -0.5, loadX: 0, loadRotY: 0, scrim: 0.9, envRamp: false, preExplode: 0.14 },
-  v6: { loadScale: 0.78, loadY: -0.12, loadX: 1.55, loadRotY: 0.9, scrim: 0, envRamp: false, preExplode: 0, split: true, benefits: true },
+  v6: { loadScale: 0.78, loadY: -0.12, loadX: 1.55, loadRotY: 0.9, scrim: 0, envRamp: true, envFloor: 0.28, envCeil: 0.6, dark: true, preExplode: 0.06, split: true, benefits: true },
 };
 
 // Services-section content ridden into the teardown as sequential callouts.
@@ -41,7 +41,7 @@ export const HERO3D_BENEFITS = [
 ];
 
 const FIN_COUNT = 30;
-const BLADE_COUNT = 9;
+const BLADE_COUNT = 11;
 const PARTICLE_COUNT = 130;
 
 function readThemeColors() {
@@ -182,18 +182,31 @@ function Fan({ position, materials, spinRef, glowTexture, glowRef }) {
       <mesh rotation={[Math.PI / 2, 0, 0]} material={materials.accentRing}>
         <torusGeometry args={[0.34, 0.02, 12, 48]} />
       </mesh>
+      <mesh rotation={[Math.PI / 2, 0, 0]} material={materials.well}>
+        <torusGeometry args={[0.3, 0.018, 10, 40]} />
+      </mesh>
       <mesh material={materials.hub}>
         <cylinderGeometry args={[0.1, 0.1, 0.09, 24]} />
+      </mesh>
+      <mesh position={[0, 0.05, 0]} material={materials.blade}>
+        <cylinderGeometry args={[0.065, 0.075, 0.02, 24]} />
       </mesh>
       <group ref={bladesRef}>
         {blades.map(({ angle, key }) => (
           <group key={key} rotation={[0, angle, 0]}>
             <mesh
-              position={[0.21, 0, 0]}
-              rotation={[0, 0.32, 0.18]}
+              position={[0.2, 0, 0]}
+              rotation={[0, 0.3, 0.3]}
               material={materials.blade}
             >
-              <boxGeometry args={[0.26, 0.02, 0.11]} />
+              <boxGeometry args={[0.24, 0.016, 0.1]} />
+            </mesh>
+            <mesh
+              position={[0.27, 0.012, 0.028]}
+              rotation={[0, 0.52, 0.34]}
+              material={materials.blade}
+            >
+              <boxGeometry args={[0.12, 0.014, 0.08]} />
             </mesh>
           </group>
         ))}
@@ -210,8 +223,10 @@ function EnvRamp({ progressRef, variant }) {
       scene.environmentIntensity = 1;
       return;
     }
+    const floor = variant.envFloor ?? 0.12;
+    const ceil = variant.envCeil ?? 1;
     const heroP = heroPhase(progressRef.current);
-    scene.environmentIntensity = 0.12 + (1 - heroP) * 0.88;
+    scene.environmentIntensity = floor + (1 - heroP) * (ceil - floor);
   });
 
   return null;
@@ -227,12 +242,22 @@ function CameraRig({ progressRef }) {
     // Keep the whole card in frame on narrower aspects (16:10 laptops).
     const aspect = size.width / size.height;
     const fit = aspect < 1.7 ? (1.7 - aspect) * 1.6 : 0;
-    camera.position.z = 7.4 + fit + explode * 0.7 - payoff * 0.9;
+    camera.position.z = 7.4 + fit + explode * 0.7 - payoff * 0.55;
     camera.position.y = 0.4 - payoff * 0.15;
     camera.lookAt(0, -0.1, 0);
   });
 
   return null;
+}
+
+function LogoDecal() {
+  const texture = useLoader(THREE.TextureLoader, "/embed_logo.png");
+  return (
+    <mesh position={[0, 0.135, 0.42]} rotation={[-Math.PI / 2, 0, 0]}>
+      <planeGeometry args={[0.62, 0.31]} />
+      <meshBasicMaterial map={texture} transparent opacity={0.92} depthWrite={false} />
+    </mesh>
+  );
 }
 
 function GpuRig({ progressRef, colors, variant }) {
@@ -249,17 +274,20 @@ function GpuRig({ progressRef, colors, variant }) {
 
   const materials = useMemo(() => {
     const accent = new THREE.Color(colors.accent);
+    const dark = Boolean(variant.dark);
     return {
+      // Matte composite shroud against bright machined metal separates the
+      // plastic and metal reads instead of one uniform grey.
       shroud: new THREE.MeshPhysicalMaterial({
-        color: "#1f2833",
-        metalness: 0.85,
-        roughness: 0.38,
-        clearcoat: 0.6,
-        clearcoatRoughness: 0.25,
-        envMapIntensity: 0.9,
+        color: dark ? "#141922" : "#1f2833",
+        metalness: 0.25,
+        roughness: 0.55,
+        clearcoat: 0.35,
+        clearcoatRoughness: 0.35,
+        envMapIntensity: dark ? 0.6 : 0.9,
       }),
       backplate: new THREE.MeshPhysicalMaterial({
-        color: "#2a333f",
+        color: dark ? "#1a212c" : "#2a333f",
         metalness: 0.9,
         roughness: 0.3,
         clearcoat: 0.4,
@@ -323,7 +351,7 @@ function GpuRig({ progressRef, colors, variant }) {
         roughness: 0.7,
       }),
     };
-  }, [colors.accent]);
+  }, [colors.accent, variant.dark]);
 
   const shadowTexture = useMemo(
     () => makeRadialTexture("rgba(0,0,0,0.55)", "rgba(0,0,0,0.2)"),
@@ -630,6 +658,23 @@ function GpuRig({ progressRef, colors, variant }) {
         <mesh position={[-1.45, 0.05, 0.6]} material={materials.accentStrip}>
           <boxGeometry args={[0.32, 0.06, 0.1]} />
         </mesh>
+        <Suspense fallback={null}>
+          <LogoDecal />
+        </Suspense>
+        <group position={[0.6, 0.12, -0.55]}>
+          <mesh material={materials.well}>
+            <boxGeometry args={[0.42, 0.1, 0.2]} />
+          </mesh>
+          {Array.from({ length: 8 }, (_, i) => (
+            <mesh
+              key={`pin-${i}`}
+              position={[-0.155 + (i % 4) * 0.1, 0.045, -0.045 + Math.floor(i / 4) * 0.09]}
+              material={materials.hub}
+            >
+              <cylinderGeometry args={[0.022, 0.022, 0.03, 8]} />
+            </mesh>
+          ))}
+        </group>
         {variant.benefits && (
           <Callout side="right" y={0.1} index={3} desc={HERO3D_BENEFITS[3].desc}>
             {HERO3D_BENEFITS[3].title}
@@ -712,6 +757,7 @@ export default function HeroScene3D({ progressRef, active, variantKey }) {
       />
       <directionalLight position={[4, 5, 5]} intensity={0.9} />
       <pointLight position={[-5, 2, -4]} intensity={14} color={colors.glow} />
+      <pointLight position={[5, 1, -3]} intensity={9} color={colors.glow} />
       <DepthParticles progressRef={progressRef} colors={colors} />
       <GpuRig progressRef={progressRef} colors={colors} variant={variant} />
     </Canvas>
