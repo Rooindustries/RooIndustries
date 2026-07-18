@@ -9,7 +9,7 @@ import {
 import { drainDocumentMutationOutbox } from "./documentMutationOutbox.js";
 
 const mark = (client, operationKey, status, errorCode = null) =>
-  client.rpc("roo_mark_credential_operation", {
+  client.rpc("roo_mark_credential_operation_v2", {
     p_operation_key: operationKey,
     p_status: status,
     p_error_code: errorCode,
@@ -22,9 +22,14 @@ const DETERMINISTIC_ERROR_CODES = new Set([
   "SOURCE_REVISION_CONFLICT",
   "CREDENTIAL_AUTH_PLAINTEXT_REQUIRED",
   "CREDENTIAL_MIRROR_DEAD_LETTER",
-  "CREDENTIAL_SOURCE_DOCUMENT_UNAVAILABLE",
   "CREDENTIAL_SOURCE_PRECONDITION_CHANGED",
   "CREDENTIAL_SOURCE_REPAIR_REQUIRED",
+]);
+
+const MISSING_RECOVERY_RECORDER_CODES = new Set([
+  "PGRST202",
+  "42883",
+  "UNDEFINED_FUNCTION",
 ]);
 
 const RECOVERY_ERROR_MESSAGES = {
@@ -65,15 +70,44 @@ const errorClassification = (error) => {
   };
 };
 
-const recordError = (client, operationKey, expectedStatus, error) => {
+const rpcFailure = (error, operation) => {
+  const failure = new Error(`Supabase ${operation} failed.`);
+  failure.code = error?.code || "CREDENTIAL_RECOVERY_FAILED";
+  failure.status = error?.status || 500;
+  return failure;
+};
+
+const isMissingRecoveryRecorder = (error) =>
+  MISSING_RECOVERY_RECORDER_CODES.has(
+    String(error?.code || "").trim().toUpperCase()
+  );
+
+const recordError = async (client, operationKey, expectedStatus, error) => {
   const failure = errorClassification(error);
-  return client.rpc("roo_record_credential_recovery_failure", {
+  const response = await client.rpc("roo_record_credential_recovery_failure", {
     p_operation_key: operationKey,
     p_expected_status: expectedStatus,
     p_error_code: failure.code,
     p_error_message: failure.message,
     p_error_class: failure.errorClass,
   });
+  if (!response?.error) return response;
+  if (!isMissingRecoveryRecorder(response.error)) {
+    throw rpcFailure(response.error, "credential recovery failure recording");
+  }
+
+  const fallback = await client.rpc("roo_record_credential_recovery_error", {
+    p_operation_key: operationKey,
+    p_expected_status: expectedStatus,
+    p_error_code: failure.code,
+  });
+  if (fallback?.error) {
+    throw rpcFailure(
+      fallback.error,
+      "legacy credential recovery failure recording"
+    );
+  }
+  return fallback;
 };
 
 const deferredCredentialError = (result, fallbackCode) => {
@@ -91,9 +125,7 @@ const deferredCredentialError = (result, fallbackCode) => {
 
 const requireRpcData = ({ data, error }, operation) => {
   if (!error) return data || null;
-  const failure = new Error(`Supabase ${operation} failed.`);
-  failure.code = error.code || "CREDENTIAL_RECOVERY_FAILED";
-  throw failure;
+  throw rpcFailure(error, operation);
 };
 
 const requireCompletedMirror = (result) => {
@@ -126,7 +158,7 @@ export const reconcileSupabaseCredentialSource = async ({
   sanityClient = createRefWriteClient({ backendOverride: "sanity" }),
 } = {}) => {
   const applied = requireRpcData(
-    await adminClient.rpc("roo_apply_credential_source_operation", {
+    await adminClient.rpc("roo_apply_credential_source_operation_v2", {
       p_operation_key: operationKey,
     }),
     "credential source mutation"
@@ -309,7 +341,7 @@ export const reconcileCredentialOperations = async ({
   adminClient = createSupabaseAdminClient(),
   sanityClient = createRefWriteClient({ backendOverride: "sanity" }),
 } = {}) => {
-  const pending = await adminClient.rpc("roo_list_credential_recovery", {
+  const pending = await adminClient.rpc("roo_list_credential_recovery_v2", {
     p_limit: Math.max(1, Math.min(Number(limit) || 10, 25)),
   });
   if (pending.error) throw new Error("Credential recovery queue is unavailable.");
@@ -335,7 +367,7 @@ export const reconcileCredentialOperations = async ({
           row.operation_key,
           row.status === "prepared" ? "prepared" : "auth_applied",
           error
-        ).catch(() => null);
+        );
         retryState = String(
           recorded?.data?.retry_status || recorded?.data?.status || retryState
         );

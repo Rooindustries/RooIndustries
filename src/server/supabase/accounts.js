@@ -226,7 +226,7 @@ export const updateSupabaseAccountPassword = async ({
     });
     if (result.error) throw new Error("Supabase password update failed.");
     requireRpcData(
-      await adminClient.rpc("roo_mark_credential_operation", {
+      await adminClient.rpc("roo_mark_credential_operation_v2", {
         p_operation_key: operationKey,
         p_status: "auth_applied",
         p_error_code: null,
@@ -252,7 +252,7 @@ export const getSupabaseCredentialOperation = async ({
   adminClient = createSupabaseAdminClient(),
 } = {}) =>
   requireRpcData(
-    await adminClient.rpc("roo_get_credential_operation", {
+    await adminClient.rpc("roo_get_credential_operation_v2", {
       p_operation_key: String(operationKey || "").trim(),
     }),
     "credential operation lookup"
@@ -316,7 +316,7 @@ export const markSupabaseCredentialSourceApplied = async ({
 } = {}) =>
   requireCredentialProgress(
     requireRpcData(
-      await adminClient.rpc("roo_mark_credential_source_applied", {
+      await adminClient.rpc("roo_mark_credential_source_applied_v2", {
         p_operation_key: operationKey,
         p_source_revision: sourceRevision,
       }),
@@ -330,7 +330,7 @@ export const completeSupabaseCredentialMirror = async ({
   adminClient = createSupabaseAdminClient(),
 } = {}) => {
   const completed = requireRpcData(
-    await adminClient.rpc("roo_complete_credential_operation", {
+    await adminClient.rpc("roo_complete_credential_operation_v2", {
       p_operation_key: operationKey,
     }),
     "credential mirror completion"

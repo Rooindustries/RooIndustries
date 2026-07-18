@@ -45,7 +45,7 @@ describe("Supabase account compatibility", () => {
             error: null,
           };
         }
-        if (name === "roo_mark_credential_operation") {
+        if (name === "roo_mark_credential_operation_v2") {
           return { data: { status: "auth_applied" }, error: null };
         }
         throw new Error(`Unexpected RPC: ${name}`);
@@ -72,6 +72,58 @@ describe("Supabase account compatibility", () => {
     expect(updateUserById).toHaveBeenCalledWith(creatorAccount.user_id, {
       password: "new-password-value",
     });
+  });
+
+  test("fails safely when the v2 checkpoint RPC is not migrated yet", async () => {
+    const passwordHash = `$2b$12$${"b".repeat(53)}`;
+    const updateUserById = jest.fn().mockResolvedValue({
+      data: { user: { id: creatorAccount.user_id } },
+      error: null,
+    });
+    const adminClient = {
+      auth: { admin: { updateUserById } },
+      rpc: jest.fn(async (name) => {
+        if (name === "roo_resolve_account_alias") {
+          return { data: creatorAccount, error: null };
+        }
+        if (name === "roo_prepare_credential_operation_v2") {
+          return {
+            data: {
+              password_hash: passwordHash,
+              source_mutation: { set: { creatorPassword: passwordHash } },
+              source_preconditions: { credentialVersion: 2 },
+              status: "prepared",
+            },
+            error: null,
+          };
+        }
+        if (name === "roo_mark_credential_operation_v2") {
+          return { data: null, error: { code: "PGRST202" } };
+        }
+        throw new Error(`Unexpected RPC: ${name}`);
+      }),
+    };
+
+    await expect(
+      updateSupabaseAccountPassword({
+        adminClient,
+        identifier: "creator@example.com",
+        operationKey: "credential:test:v2-missing",
+        password: "new-password-value",
+        passwordHash,
+        sourceBackend: "supabase",
+        sourceDocumentId: "referral.creator",
+        sourceMutation: { set: { creatorPassword: passwordHash } },
+        sourcePreconditions: { credentialVersion: 2 },
+        sourceRevision: "source-r1",
+      })
+    ).rejects.toMatchObject({ code: "PGRST202" });
+    expect(updateUserById).toHaveBeenCalledTimes(1);
+    expect(adminClient.rpc.mock.calls.map(([name]) => name)).toEqual([
+      "roo_resolve_account_alias",
+      "roo_prepare_credential_operation_v2",
+      "roo_mark_credential_operation_v2",
+    ]);
   });
 
   test("omits absent document fields from credential preconditions", () => {
@@ -330,7 +382,7 @@ describe("Supabase account compatibility", () => {
     ).resolves.toEqual({ sessionVersion: 7 });
     expect(adminClient.rpc).toHaveBeenCalledTimes(1);
     expect(adminClient.rpc).toHaveBeenCalledWith(
-      "roo_complete_credential_operation",
+      "roo_complete_credential_operation_v2",
       { p_operation_key: "credential:test" }
     );
   });
