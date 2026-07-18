@@ -2528,3 +2528,11 @@ html.perf-reduced-effects-mode .scroll-blur-lite {
 html.perf-reduced-motion-mode {
   scroll-behavior: auto;
 }
+
+/* While the 3D hero stage is on screen, the chat launcher competes with the
+   lower-right composition; hide it until the stage is passed. */
+.hero3d-stage-active #intercom-container,
+.hero3d-stage-active .intercom-lightweight-app,
+.hero3d-stage-active .intercom-launcher {
+  display: none !important;
+}

@@ -84,6 +84,11 @@ export default function Hero3DSection() {
     progressRef.current = rawP;
     const p = scenePhase(rawP);
 
+    document.documentElement.classList.toggle(
+      "hero3d-stage-active",
+      rawP < 0.97
+    );
+
     // Ancestors use overflow hidden, which breaks position sticky, so the
     // viewport is pinned manually from the same scroll frame.
     if (viewportRef.current) {
@@ -135,6 +140,7 @@ export default function Hero3DSection() {
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onScroll);
       cancelAnimationFrame(rafRef.current);
+      document.documentElement.classList.remove("hero3d-stage-active");
     };
   }, [enabled, syncFromScroll]);
 
