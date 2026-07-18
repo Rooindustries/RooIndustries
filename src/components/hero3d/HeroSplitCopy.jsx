@@ -12,18 +12,18 @@ export default function HeroSplitCopy() {
   const handleHomeSectionLink = useHomeSectionLinkHandler();
 
   return (
-    <div className="mx-auto grid min-h-screen w-full max-w-7xl items-center px-6 sm:px-10 lg:grid-cols-2">
-      <div className="max-w-xl py-24 text-left">
+    <div className="mx-auto grid min-h-screen w-full max-w-7xl items-start px-6 sm:px-10 lg:grid-cols-2">
+      <div className="max-w-xl pt-14 pb-16 text-left">
         <h1 className="font-extrabold tracking-tight">
           <span
             className="block text-ink"
-            style={{ fontSize: "clamp(2rem, 1rem + 2.6vw, 3.4rem)", lineHeight: 1.06 }}
+            style={{ fontSize: "clamp(1.9rem, 1rem + 2.3vw, 3.1rem)", lineHeight: 1.07, textWrap: "balance" }}
           >
             {hero.headingLine1}
           </span>
           <span
             className="text-gradient-display block"
-            style={{ fontSize: "clamp(2rem, 1rem + 2.6vw, 3.4rem)", lineHeight: 1.06 }}
+            style={{ fontSize: "clamp(1.9rem, 1rem + 2.3vw, 3.1rem)", lineHeight: 1.07, textWrap: "balance" }}
           >
             {hero.headingLine2}
           </span>

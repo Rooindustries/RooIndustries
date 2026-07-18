@@ -33,11 +33,11 @@ export const HERO3D_VARIANTS = {
 // Services-section content ridden into the teardown as sequential callouts.
 // Windows [in, out] are on scene progress; each anchors to the moving part.
 export const HERO3D_BENEFITS = [
-  { key: "delay", title: "Lower delay", desc: "Polling, drivers, power, and game settings lined up so the mouse tracks closer to your hand.", window: [0.18, 0.33] },
-  { key: "fps", title: "More FPS", desc: "BIOS, Windows, GPU, RAM, and in-game settings tuned around the titles you play most.", window: [0.28, 0.43] },
-  { key: "frames", title: "Stable frames", desc: "1% lows and frametimes tightened so fights feel smooth and the counter matches it.", window: [0.38, 0.53] },
-  { key: "junk", title: "Less junk running", desc: "Cleaner startup, lighter overlays, and power behavior that leaves room for the game.", window: [0.47, 0.62] },
-  { key: "sustain", title: "FPS stays up", desc: "Heat, boost, RAM, and stability dialed in so the PC keeps pace deep into the session.", window: [0.55, 0.7] },
+  { key: "delay", title: "Lower delay", desc: "Polling, drivers, power, and game settings lined up so the mouse tracks closer to your hand.", window: [0.2, 0.31] },
+  { key: "fps", title: "More FPS", desc: "BIOS, Windows, GPU, RAM, and in-game settings tuned around the titles you play most.", window: [0.33, 0.44] },
+  { key: "frames", title: "Stable frames", desc: "1% lows and frametimes tightened so fights feel smooth and the counter matches it.", window: [0.46, 0.57] },
+  { key: "junk", title: "Less junk running", desc: "Cleaner startup, lighter overlays, and power behavior that leaves room for the game.", window: [0.59, 0.7] },
+  { key: "sustain", title: "FPS stays up", desc: "Heat, boost, RAM, and stability dialed in so the PC keeps pace deep into the session.", window: [0.72, 0.83] },
 ];
 
 const FIN_COUNT = 30;
@@ -232,13 +232,17 @@ function EnvRamp({ progressRef, variant }) {
   return null;
 }
 
-function CameraRig({ progressRef }) {
+function CameraRig({ progressRef, variant }) {
   const { camera, size } = useThree();
 
   useFrame(() => {
     const sceneP = scenePhase(progressRef.current);
-    const explode = pulse(sceneP, 0.16, 0.44, 0.52, 0.72);
-    const payoff = smoothstep(sceneP, 0.74, 0.92);
+    const explode = variant.benefits
+      ? pulse(sceneP, 0.16, 0.37, 0.85, 0.93)
+      : pulse(sceneP, 0.16, 0.44, 0.52, 0.72);
+    const payoff = variant.benefits
+      ? smoothstep(sceneP, 0.93, 0.985)
+      : smoothstep(sceneP, 0.74, 0.92);
     // Keep the whole card in frame on narrower aspects (16:10 laptops).
     const aspect = size.width / size.height;
     const fit = aspect < 1.7 ? (1.7 - aspect) * 1.6 : 0;
@@ -388,16 +392,34 @@ function GpuRig({ progressRef, colors, variant }) {
     const p = scenePhase(rawP);
     const t = state.clock.elapsedTime;
 
-    // Staggered layer choreography: fans lead, backplate trails.
+    // Staggered layer choreography: fans lead, backplate trails. The
+    // benefits stage holds the explosion open across all five beats.
     const breathe =
       variant.preExplode * heroP * (0.8 + Math.sin(t * 1.5) * 0.2);
-    const explodeFans = Math.min(1, pulse(p, 0.15, 0.4, 0.52, 0.7) + breathe);
-    const explodeShroud = Math.min(1, pulse(p, 0.18, 0.43, 0.53, 0.71) + breathe * 0.8);
-    const explodeFins = Math.min(1, pulse(p, 0.21, 0.46, 0.54, 0.72) + breathe * 0.6);
-    const explodePlate = Math.min(1, pulse(p, 0.24, 0.49, 0.55, 0.73) + breathe * 0.5);
+    const holdOut = variant.benefits ? [0.84, 0.92] : [0.52, 0.7];
+    const explodeFans = Math.min(
+      1,
+      pulse(p, 0.14, 0.34, holdOut[0], holdOut[1]) + breathe
+    );
+    const explodeShroud = Math.min(
+      1,
+      pulse(p, 0.16, 0.37, holdOut[0] + 0.01, holdOut[1] + 0.01) + breathe * 0.8
+    );
+    const explodeFins = Math.min(
+      1,
+      pulse(p, 0.18, 0.4, holdOut[0] + 0.02, holdOut[1] + 0.02) + breathe * 0.6
+    );
+    const explodePlate = Math.min(
+      1,
+      pulse(p, 0.2, 0.43, holdOut[0] + 0.03, holdOut[1] + 0.03) + breathe * 0.5
+    );
     const explode = explodeShroud;
-    const payoff = smoothstep(p, 0.7, 0.88);
-    const snap = pulse(p, 0.66, 0.7, 0.73, 0.78);
+    const payoff = variant.benefits
+      ? smoothstep(p, 0.93, 0.985)
+      : smoothstep(p, 0.7, 0.88);
+    const snap = variant.benefits
+      ? pulse(p, 0.9, 0.93, 0.95, 0.98)
+      : pulse(p, 0.66, 0.7, 0.73, 0.78);
 
     if (rigRef.current) {
       // While the hero copy overlays the scene the card holds its variant
@@ -479,7 +501,7 @@ function GpuRig({ progressRef, colors, variant }) {
 
   const Callout = ({ side, y, children, index, desc }) => {
     const dir = side === "left" ? -1 : 1;
-    const lineLen = 0.5;
+    const lineLen = 0.58;
     const edgeX = dir * 1.68;
     return (
       <group>
@@ -494,20 +516,47 @@ function GpuRig({ progressRef, colors, variant }) {
           <cylinderGeometry args={[0.008, 0.008, lineLen, 6]} />
         </mesh>
         <Html
-          position={[edgeX + dir * (lineLen + 0.12), y, 0]}
-          center
+          position={[edgeX + dir * lineLen, y, 0]}
           zIndexRange={[20, 0]}
         >
           <div
             ref={setLabelRef(index)}
-            style={desc ? { ...labelStyle, whiteSpace: "normal", width: "250px" } : labelStyle}
+            style={{
+              ...labelStyle,
+              ...(desc ? { whiteSpace: "normal", width: "252px" } : null),
+              borderLeft:
+                dir === 1
+                  ? "3px solid var(--color-accent, #22d3ee)"
+                  : "1px solid rgba(148, 163, 184, 0.25)",
+              borderRight:
+                dir === -1
+                  ? "3px solid var(--color-accent, #22d3ee)"
+                  : "1px solid rgba(148, 163, 184, 0.25)",
+              backdropFilter: "blur(6px)",
+              background: "rgba(7, 12, 19, 0.82)",
+              transform:
+                dir === 1 ? "translate(0, -50%)" : "translate(-100%, -50%)",
+            }}
           >
+            {typeof index === "number" && desc && (
+              <span
+                style={{
+                  color: "var(--color-accent, #22d3ee)",
+                  fontFamily: "ui-monospace, monospace",
+                  fontSize: "11px",
+                  marginRight: "8px",
+                  letterSpacing: "0.12em",
+                }}
+              >
+                {String(index + 1).padStart(2, "0")}
+              </span>
+            )}
             {children}
             {desc && (
               <span
                 style={{
                   display: "block",
-                  marginTop: "4px",
+                  marginTop: "5px",
                   fontSize: "12px",
                   fontWeight: 500,
                   letterSpacing: "0.01em",
@@ -746,7 +795,7 @@ export default function HeroScene3D({ progressRef, active, variantKey }) {
       <fog attach="fog" args={["#060d1f", 9, 20]} />
       <StudioEnvironment />
       <EnvRamp progressRef={progressRef} variant={variant} />
-      <CameraRig progressRef={progressRef} />
+      <CameraRig progressRef={progressRef} variant={variant} />
       <ambientLight intensity={0.22} />
       <spotLight
         position={[0, 6, 3]}
