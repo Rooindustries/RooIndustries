@@ -335,6 +335,31 @@ describe("Supabase account compatibility", () => {
     );
   });
 
+  test("does not treat a parked completion response as success", async () => {
+    const adminClient = {
+      rpc: jest.fn().mockResolvedValue({
+        data: {
+          status: "parked",
+          retry_status: "parked",
+          error_code: "CREDENTIAL_SOURCE_PRECONDITION_CHANGED",
+          last_error: "Credential source precondition changed.",
+        },
+        error: null,
+      }),
+    };
+
+    await expect(
+      completeSupabaseCredentialMirror({
+        operationKey: "credential:parked",
+        adminClient,
+      })
+    ).rejects.toMatchObject({
+      code: "CREDENTIAL_SOURCE_PRECONDITION_CHANGED",
+      credentialRecoveryRecorded: true,
+      retryState: "parked",
+    });
+  });
+
   test("adds Tourney access to a creator principal without replacing its password", async () => {
     const user = {
       id: creatorAccount.user_id,
