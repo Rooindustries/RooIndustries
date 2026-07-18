@@ -22,6 +22,19 @@ const requireRpcData = ({ data, error }, operation) => {
   return data || null;
 };
 
+const requireCredentialProgress = (result, fallbackCode) => {
+  const status = String(result?.retry_status || result?.status || "").trim();
+  if (!["backoff", "not_ready", "parked"].includes(status)) return result;
+  const error = new Error(
+    String(result?.last_error || "Credential recovery is not ready.")
+  );
+  error.code = String(result?.error_code || fallbackCode || "55000");
+  error.credentialRecoveryRecorded = status !== "not_ready";
+  error.retryState = status;
+  error.nextRetryAt = result?.next_retry_at || null;
+  throw error;
+};
+
 export const resolveSupabaseAccountAlias = async ({
   identifier,
   accountScope = "default",
@@ -301,12 +314,15 @@ export const markSupabaseCredentialSourceApplied = async ({
   sourceRevision,
   adminClient = createSupabaseAdminClient(),
 } = {}) =>
-  requireRpcData(
-    await adminClient.rpc("roo_mark_credential_source_applied", {
-      p_operation_key: operationKey,
-      p_source_revision: sourceRevision,
-    }),
-    "credential source checkpoint"
+  requireCredentialProgress(
+    requireRpcData(
+      await adminClient.rpc("roo_mark_credential_source_applied", {
+        p_operation_key: operationKey,
+        p_source_revision: sourceRevision,
+      }),
+      "credential source checkpoint"
+    ),
+    "CREDENTIAL_SOURCE_REPAIR_REQUIRED"
   );
 
 export const completeSupabaseCredentialMirror = async ({
@@ -319,6 +335,7 @@ export const completeSupabaseCredentialMirror = async ({
     }),
     "credential mirror completion"
   );
+  requireCredentialProgress(completed, "CREDENTIAL_SOURCE_REPAIR_REQUIRED");
   return { sessionVersion: Number(completed?.session_version || 0) };
 };
 

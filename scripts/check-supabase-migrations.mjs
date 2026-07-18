@@ -591,6 +591,63 @@ if (!credentialRecoveryIndexFile) {
   }
 }
 
+const credentialRetryHardeningFile = files.find((file) =>
+  file.endsWith("_harden_credential_reconciliation_retry.sql")
+);
+if (!credentialRetryHardeningFile) {
+  failures.push("Credential retry hardening migration is missing.");
+} else {
+  const sql = fs.readFileSync(
+    path.join(migrationsDirectory, credentialRetryHardeningFile),
+    "utf8"
+  );
+  if (!hasBoundedMigrationPrefix(sql)) {
+    failures.push("Credential retry hardening migration lacks bounded timeouts.");
+  }
+  for (const required of [
+    "last_error text",
+    "last_error_class text",
+    "consecutive_error_count integer not null default 0",
+    "next_retry_at timestamptz",
+    "source_recovery_blocked_at timestamptz",
+    "credential_operations_retry_ready_idx",
+    "roo_record_credential_recovery_failure",
+    "v_consecutive_error_count >= 2",
+    "v_attempt_count >= 6",
+    "interval '5 minutes'",
+    "interval '1 minute' * power",
+    "v_operation.next_retry_at > now()",
+    "candidate.next_retry_at <= now()",
+    "exception when sqlstate '40001'",
+    "CREDENTIAL_SOURCE_PRECONDITION_CHANGED",
+    "CREDENTIAL_SOURCE_WRITE_CONFLICT",
+    "create or replace view ops.credential_failures",
+    "with (security_invoker = true)",
+    "grant select on table ops.credential_failures to service_role",
+  ]) {
+    if (!sql.includes(required)) {
+      failures.push(`Credential retry hardening migration lacks: ${required}`);
+    }
+  }
+  if (
+    /Credential source precondition changed'[\s\S]{0,80}errcode\s*=\s*'40001'/i.test(
+      sql
+    )
+  ) {
+    failures.push(
+      "Credential retry hardening still exposes the deterministic precondition as SQLSTATE 40001."
+    );
+  }
+  if (
+    !hasServiceRoleOnlyGrant(
+      sql,
+      /^grant\s+select\s+on\s+table\s+ops\.credential_failures\b/i
+    )
+  ) {
+    failures.push("Credential failure ops view is not service-role only.");
+  }
+}
+
 if (failures.length > 0) {
   console.error(JSON.stringify({ ok: false, failures }, null, 2));
   process.exit(1);
