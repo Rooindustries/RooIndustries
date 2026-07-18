@@ -78,6 +78,48 @@ const mutation = {
 };
 
 describe("credential recovery saga", () => {
+  test("stops after the apply RPC reports a parked operation", async () => {
+    const sanity = createSanityClient({
+      _id: "referral.rpc-parked",
+      _type: "referral",
+      _rev: "sanity-r1",
+    });
+    const adminClient = {
+      rpc: jest.fn(async (name) => {
+        if (name === "roo_apply_credential_source_operation") {
+          return {
+            data: {
+              status: "parked",
+              retry_status: "parked",
+              parked: true,
+              attempt_count: 2,
+              error_code: "CREDENTIAL_SOURCE_PRECONDITION_CHANGED",
+              last_error: "Credential source precondition changed.",
+            },
+            error: null,
+          };
+        }
+        throw new Error(`Unexpected RPC: ${name}`);
+      }),
+    };
+
+    await expect(
+      reconcileSupabaseCredentialSource({
+        operationKey: "credential:reset:rpc-parked",
+        sourceDocumentId: "referral.rpc-parked",
+        adminClient,
+        sanityClient: sanity.client,
+      })
+    ).rejects.toMatchObject({
+      code: "CREDENTIAL_SOURCE_PRECONDITION_CHANGED",
+      credentialRecoveryRecorded: true,
+      retryState: "parked",
+    });
+    expect(adminClient.rpc).toHaveBeenCalledTimes(1);
+    expect(sanity.client.fetch).not.toHaveBeenCalled();
+    expect(sanity.client.transaction).not.toHaveBeenCalled();
+  });
+
   test("recovers an Auth-applied Supabase reset through the durable mirror exactly once", async () => {
     const sanity = createSanityClient({
       _id: "referral.creator",
@@ -209,7 +251,13 @@ describe("credential recovery saga", () => {
 
     await expect(
       reconcileCredentialOperations({ adminClient, sanityClient: sanity.client })
-    ).resolves.toEqual({ checked: 0, recovered: 0, pending: 0 });
+    ).resolves.toEqual({
+      checked: 0,
+      recovered: 0,
+      pending: 0,
+      backoff: 0,
+      parked: 0,
+    });
     expect(sessionVersion).toBe(2);
     expect(completions).toBe(1);
   });
@@ -255,7 +303,13 @@ describe("credential recovery saga", () => {
 
     await expect(
       reconcileCredentialOperations({ adminClient, sanityClient: sanity.client })
-    ).resolves.toEqual({ checked: 1, recovered: 1, pending: 0 });
+    ).resolves.toEqual({
+      checked: 1,
+      recovered: 1,
+      pending: 0,
+      backoff: 0,
+      parked: 0,
+    });
     expect(sanity.state.document.resetTokenHash).toBeUndefined();
     expect(sanity.state.document.creatorPassword).toBe(passwordHash);
   });
@@ -296,9 +350,16 @@ describe("credential recovery saga", () => {
         if (name === "roo_get_credential_operation") {
           return { data: { ...row }, error: null };
         }
-        if (name === "roo_record_credential_recovery_error") {
+        if (name === "roo_record_credential_recovery_failure") {
           expect(args.p_expected_status).toBe("prepared");
-          return { data: { status: "prepared" }, error: null };
+          expect(args).toMatchObject({
+            p_error_code: "CREDENTIAL_AUTH_PLAINTEXT_REQUIRED",
+            p_error_class: "deterministic",
+          });
+          return {
+            data: { status: "backoff", retry_status: "backoff" },
+            error: null,
+          };
         }
         if (name === "roo_mark_credential_operation") {
           return { data: { status: "auth_applied" }, error: null };
@@ -316,14 +377,26 @@ describe("credential recovery saga", () => {
 
     await expect(
       reconcileCredentialOperations({ adminClient, sanityClient: sanity.client })
-    ).resolves.toEqual({ checked: 1, recovered: 0, pending: 1 });
+    ).resolves.toEqual({
+      checked: 1,
+      recovered: 0,
+      pending: 1,
+      backoff: 1,
+      parked: 0,
+    });
     expect(sanity.state.document.resetTokenHash).toBe("retry-token");
     expect(sanity.state.commits).toBe(0);
     expect(completed).toBe(0);
 
     await expect(
       reconcileCredentialOperations({ adminClient, sanityClient: sanity.client })
-    ).resolves.toEqual({ checked: 1, recovered: 0, pending: 1 });
+    ).resolves.toEqual({
+      checked: 1,
+      recovered: 0,
+      pending: 1,
+      backoff: 1,
+      parked: 0,
+    });
     await expect(
       resumeSupabaseCredentialOperation({
         operationKey: row.operation_key,
@@ -373,6 +446,188 @@ describe("credential recovery saga", () => {
     expect(updateUserById).not.toHaveBeenCalled();
     expect(sanity.state.commits).toBe(0);
     expect(sanity.state.document.resetTokenHash).toBe("must-remain");
+  });
+
+  test("skips a parked operation even if a caller re-presents it", async () => {
+    const sanity = createSanityClient({
+      _id: "referral.parked",
+      _type: "referral",
+      _rev: "sanity-r1",
+      resetTokenHash: "must-remain",
+    });
+    const row = {
+      operation_key: "credential:reset:parked",
+      status: "auth_applied",
+      source_backend: "supabase",
+      source_document_id: "referral.parked",
+      source_recovery_blocked: true,
+      last_error_code: "CREDENTIAL_SOURCE_PRECONDITION_CHANGED",
+    };
+    const adminClient = {
+      rpc: jest.fn(async (name) => {
+        if (name === "roo_list_credential_recovery") {
+          return { data: [row], error: null };
+        }
+        throw new Error(`Unexpected RPC: ${name}`);
+      }),
+    };
+
+    await expect(
+      reconcileCredentialOperations({ adminClient, sanityClient: sanity.client })
+    ).resolves.toEqual({
+      checked: 1,
+      recovered: 0,
+      pending: 1,
+      backoff: 0,
+      parked: 1,
+    });
+    expect(adminClient.rpc).toHaveBeenCalledTimes(1);
+    expect(sanity.client.fetch).not.toHaveBeenCalled();
+    expect(sanity.client.patch).not.toHaveBeenCalled();
+  });
+
+  test("honors a future retry gate before any source work", async () => {
+    const sanity = createSanityClient({
+      _id: "referral.backoff",
+      _type: "referral",
+      _rev: "sanity-r1",
+      resetTokenHash: "must-remain",
+    });
+    const row = {
+      operation_key: "credential:reset:backoff",
+      status: "auth_applied",
+      source_backend: "sanity",
+      source_document_id: "referral.backoff",
+      source_recovery_blocked: false,
+      next_retry_at: "2099-01-01T00:00:00.000Z",
+      last_error_code: "CREDENTIAL_MIRROR_PENDING",
+    };
+    const adminClient = {
+      rpc: jest.fn(async (name) => {
+        if (name === "roo_list_credential_recovery") {
+          return { data: [row], error: null };
+        }
+        throw new Error(`Unexpected RPC: ${name}`);
+      }),
+    };
+
+    await expect(
+      reconcileCredentialOperations({ adminClient, sanityClient: sanity.client })
+    ).resolves.toEqual({
+      checked: 1,
+      recovered: 0,
+      pending: 1,
+      backoff: 1,
+      parked: 0,
+    });
+    expect(adminClient.rpc).toHaveBeenCalledTimes(1);
+    expect(sanity.client.fetch).not.toHaveBeenCalled();
+    expect(sanity.client.patch).not.toHaveBeenCalled();
+  });
+
+  test("classifies a source transport failure as transient before recording it", async () => {
+    const sanity = createSanityClient({
+      _id: "referral.transient",
+      _type: "referral",
+      _rev: "sanity-r1",
+      resetTokenHash: "live-token",
+    });
+    const patch = {
+      ifRevisionId: jest.fn(() => patch),
+      set: jest.fn(() => patch),
+      unset: jest.fn(() => patch),
+      commit: jest.fn(async () => {
+        throw Object.assign(new Error("connection reset"), { code: "ECONNRESET" });
+      }),
+    };
+    sanity.client.patch.mockReturnValue(patch);
+    const row = {
+      operation_key: "credential:reset:transient",
+      status: "auth_applied",
+      sessions_revoked_at: "2026-07-18T00:00:00.000Z",
+      source_backend: "sanity",
+      source_document_id: "referral.transient",
+      source_expected_revision: "sanity-r1",
+      source_preconditions: { resetTokenHash: "live-token" },
+      source_mutation: mutation,
+    };
+    const adminClient = {
+      rpc: jest.fn(async (name, args) => {
+        if (name === "roo_list_credential_recovery") {
+          return { data: [row], error: null };
+        }
+        if (name === "roo_record_credential_recovery_failure") {
+          expect(args).toMatchObject({
+            p_operation_key: row.operation_key,
+            p_expected_status: "auth_applied",
+            p_error_code: "ECONNRESET",
+            p_error_class: "transient",
+          });
+          return {
+            data: { status: "backoff", retry_status: "backoff" },
+            error: null,
+          };
+        }
+        throw new Error(`Unexpected RPC: ${name}`);
+      }),
+    };
+
+    await expect(
+      reconcileCredentialOperations({ adminClient, sanityClient: sanity.client })
+    ).resolves.toEqual({
+      checked: 1,
+      recovered: 0,
+      pending: 1,
+      backoff: 1,
+      parked: 0,
+    });
+    expect(patch.commit).toHaveBeenCalledTimes(1);
+    expect(adminClient.rpc).toHaveBeenCalledTimes(2);
+  });
+
+  test("classifies an unavailable Sanity source as deterministic", async () => {
+    const sanity = createSanityClient(null);
+    const row = {
+      operation_key: "credential:reset:missing-source",
+      status: "auth_applied",
+      sessions_revoked_at: "2026-07-18T00:00:00.000Z",
+      source_backend: "sanity",
+      source_document_id: "referral.missing-source",
+      source_preconditions: { resetTokenHash: "missing-token" },
+      source_mutation: mutation,
+    };
+    const adminClient = {
+      rpc: jest.fn(async (name, args) => {
+        if (name === "roo_list_credential_recovery") {
+          return { data: [row], error: null };
+        }
+        if (name === "roo_record_credential_recovery_failure") {
+          expect(args).toMatchObject({
+            p_operation_key: row.operation_key,
+            p_expected_status: "auth_applied",
+            p_error_code: "CREDENTIAL_SOURCE_DOCUMENT_UNAVAILABLE",
+            p_error_class: "deterministic",
+          });
+          return {
+            data: { status: "backoff", retry_status: "backoff" },
+            error: null,
+          };
+        }
+        throw new Error(`Unexpected RPC: ${name}`);
+      }),
+    };
+
+    await expect(
+      reconcileCredentialOperations({ adminClient, sanityClient: sanity.client })
+    ).resolves.toEqual({
+      checked: 1,
+      recovered: 0,
+      pending: 1,
+      backoff: 1,
+      parked: 0,
+    });
+    expect(sanity.client.fetch).toHaveBeenCalledTimes(1);
+    expect(sanity.client.patch).not.toHaveBeenCalled();
   });
 
   test("does not replay a completed Sanity source mutation after unrelated edits", async () => {

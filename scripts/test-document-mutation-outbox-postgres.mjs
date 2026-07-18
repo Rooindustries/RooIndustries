@@ -537,10 +537,29 @@ try {
     "-v", "ON_ERROR_STOP=1", "-f",
     path.join(root, "supabase/migrations/20260715130100_add_credential_recovery_queue_index.sql"),
   ]);
+  run(path.join(pgBin, "psql"), [
+    "-h", "127.0.0.1", "-p", String(port), "-d", database,
+    "-v", "ON_ERROR_STOP=1", "-f",
+    path.join(
+      root,
+      "supabase/migrations/20260718023317_harden_credential_reconciliation_retry.sql",
+    ),
+  ]);
   sql = postgres(databaseUrl, { max: 8 });
 
   const [credentialSchema] = await sql`
     select
+      (select count(*)::integer
+       from pg_attribute
+       where attrelid='accounts.credential_operations'::regclass
+         and attname in (
+           'last_error',
+           'last_error_class',
+           'consecutive_error_count',
+           'next_retry_at',
+           'source_recovery_blocked_at'
+         )
+         and not attisdropped) retry_column_count,
       (select count(*)::integer
        from pg_constraint
        where conrelid='accounts.credential_operations'::regclass
@@ -549,16 +568,25 @@ try {
            'credential_operations_source_document_id_check',
            'credential_operations_source_mutation_check',
            'credential_operations_source_preconditions_check',
-           'credential_operations_source_applied_check'
+           'credential_operations_source_applied_check',
+           'credential_operations_last_error_class_check',
+           'credential_operations_consecutive_error_count_check'
          )
          and convalidated) validated_constraints,
       (select indisvalid
        from pg_index
-       where indexrelid='accounts.credential_operations_source_recovery_idx'::regclass) recovery_index_valid
+       where indexrelid='accounts.credential_operations_source_recovery_idx'::regclass) recovery_index_valid,
+      (select indisvalid
+       from pg_index
+       where indexrelid='accounts.credential_operations_retry_ready_idx'::regclass) retry_index_valid,
+      to_regclass('ops.credential_failures') is not null ops_view_exists
   `;
   assert.deepEqual(credentialSchema, {
-    validated_constraints: 5,
+    retry_column_count: 5,
+    validated_constraints: 7,
     recovery_index_valid: true,
+    retry_index_valid: true,
+    ops_view_exists: true,
   });
 
   const [blockedCredentialRecovery] = await sql`
@@ -1712,12 +1740,125 @@ try {
       payload=payload || '{"_rev":"token-r2","resetTokenHash":"replacement-token"}'::jsonb
     where legacy_sanity_id=${replacedTokenDocumentId}
   `;
-  await assert.rejects(
-    sql`select public.roo_apply_credential_source_operation(
+  const [firstDeterministicFailure] = await sql`
+    select public.roo_apply_credential_source_operation(
       ${replacedTokenOperationKey}
-    )`,
-    (error) => error.code === "40001"
+    ) result
+  `;
+  assert.equal(firstDeterministicFailure.result.status, "backoff");
+  assert.equal(firstDeterministicFailure.result.error_class, "deterministic");
+  assert.equal(firstDeterministicFailure.result.attempt_count, 1);
+  assert.equal(
+    firstDeterministicFailure.result.error_code,
+    "CREDENTIAL_SOURCE_PRECONDITION_CHANGED",
   );
+  const [earlyDeterministicReplay] = await sql`
+    select public.roo_apply_credential_source_operation(
+      ${replacedTokenOperationKey}
+    ) result
+  `;
+  assert.equal(earlyDeterministicReplay.result.status, "backoff");
+  assert.equal(earlyDeterministicReplay.result.idempotent, true);
+  assert.equal(earlyDeterministicReplay.result.attempt_count, 1);
+
+  await sql`
+    update accounts.credential_operations
+    set next_retry_at=now() - interval '1 second'
+    where operation_key=${replacedTokenOperationKey}
+  `;
+  const [parkedDeterministicFailure] = await sql`
+    select public.roo_apply_credential_source_operation(
+      ${replacedTokenOperationKey}
+    ) result
+  `;
+  assert.equal(parkedDeterministicFailure.result.status, "parked");
+  assert.equal(parkedDeterministicFailure.result.attempt_count, 2);
+  assert.equal(parkedDeterministicFailure.result.parked, true);
+
+  const [parkedDeterministicState] = await sql`
+    select
+      source_recovery_blocked,
+      source_recovery_blocked_at is not null parked_at_recorded,
+      attempt_count,
+      consecutive_error_count,
+      last_error_code,
+      last_error,
+      last_error_class,
+      next_retry_at
+    from accounts.credential_operations
+    where operation_key=${replacedTokenOperationKey}
+  `;
+  assert.deepEqual(parkedDeterministicState, {
+    source_recovery_blocked: true,
+    parked_at_recorded: true,
+    attempt_count: 2,
+    consecutive_error_count: 2,
+    last_error_code: "CREDENTIAL_SOURCE_PRECONDITION_CHANGED",
+    last_error: "Credential source precondition changed.",
+    last_error_class: "deterministic",
+    next_retry_at: null,
+  });
+
+  const [recoveryQueueAfterParking] = await sql`
+    select public.roo_list_credential_recovery(25) result
+  `;
+  assert.equal(
+    recoveryQueueAfterParking.result.some(
+      (operation) => operation.operation_key === replacedTokenOperationKey,
+    ),
+    false,
+  );
+
+  const lockSql = postgres(databaseUrl, { max: 1 });
+  let releaseSourceLock;
+  let sourceLockReady;
+  const sourceLockStarted = new Promise((resolve) => {
+    sourceLockReady = resolve;
+  });
+  const sourceLockReleased = new Promise((resolve) => {
+    releaseSourceLock = resolve;
+  });
+  const sourceLock = lockSql.begin(async (transaction) => {
+    await transaction`
+      select 1
+      from migration.source_documents
+      where legacy_sanity_id=${replacedTokenDocumentId}
+      for update
+    `;
+    sourceLockReady();
+    await sourceLockReleased;
+  });
+  await sourceLockStarted;
+  try {
+    const [parkedReplay] = await sql.begin(async (transaction) => {
+      await transaction`set local statement_timeout='500ms'`;
+      return transaction`
+        select public.roo_apply_credential_source_operation(
+          ${replacedTokenOperationKey}
+        ) result
+      `;
+    });
+    assert.equal(parkedReplay.result.status, "parked");
+    assert.equal(parkedReplay.result.idempotent, true);
+    assert.equal(parkedReplay.result.attempt_count, 2);
+  } finally {
+    releaseSourceLock();
+    await sourceLock;
+    await lockSql.end({ timeout: 2 });
+  }
+
+  const [credentialFailureView] = await sql`
+    select verdict, "attemptCount", "lastErrorCode", "lastError", "errorClass"
+    from ops.credential_failures
+    where "operationKey"=${replacedTokenOperationKey}
+  `;
+  assert.deepEqual(credentialFailureView, {
+    verdict: "parked",
+    attemptCount: 2,
+    lastErrorCode: "CREDENTIAL_SOURCE_PRECONDITION_CHANGED",
+    lastError: "Credential source precondition changed.",
+    errorClass: "deterministic",
+  });
   const [replacedTokenSource] = await sql`
     select payload->>'resetTokenHash' reset_token_hash
     from migration.source_documents
@@ -1728,6 +1869,114 @@ try {
     update accounts.credential_operations
     set status='failed'
     where operation_key=${replacedTokenOperationKey}
+  `;
+
+  const transientUserId = "99999999-9999-4999-8999-999999999999";
+  const transientPrincipalId = "12121212-1212-4212-8212-121212121212";
+  const transientOperationKey = "credential:change:transient-cap";
+  await sql`
+    insert into auth.users(id, encrypted_password)
+    values(${transientUserId}::uuid, ${secondPasswordHash})
+  `;
+  await sql`
+    insert into accounts.principals(id)
+    values(${transientPrincipalId}::uuid)
+  `;
+  await sql`
+    insert into accounts.principal_auth_users(user_id, principal_id)
+    values(${transientUserId}::uuid, ${transientPrincipalId}::uuid)
+  `;
+  await sql`
+    insert into accounts.credential_operations(
+      operation_key,
+      user_id,
+      principal_id,
+      password_hash,
+      status,
+      source_backend,
+      source_document_id,
+      sessions_revoked_at,
+      auth_applied_at
+    ) values(
+      ${transientOperationKey},
+      ${transientUserId}::uuid,
+      ${transientPrincipalId}::uuid,
+      ${secondPasswordHash},
+      'auth_applied',
+      'sanity',
+      'referral.transient-cap',
+      now(),
+      now()
+    )
+  `;
+
+  const recordTransientFailure = async () => {
+    const [row] = await sql`
+      select public.roo_record_credential_recovery_failure(
+        ${transientOperationKey},
+        'auth_applied',
+        'CREDENTIAL_MIRROR_PENDING',
+        'Credential fallback mirror is still pending.',
+        'transient'
+      ) result
+    `;
+    return row.result;
+  };
+  const firstTransientFailure = await recordTransientFailure();
+  assert.equal(firstTransientFailure.status, "backoff");
+  assert.equal(firstTransientFailure.attempt_count, 1);
+  assert.equal(firstTransientFailure.parked, false);
+  const earlyTransientReplay = await recordTransientFailure();
+  assert.equal(earlyTransientReplay.idempotent, true);
+  assert.equal(earlyTransientReplay.attempt_count, 1);
+
+  for (let attempt = 2; attempt <= 6; attempt += 1) {
+    await sql`
+      update accounts.credential_operations
+      set next_retry_at=now() - interval '1 second'
+      where operation_key=${transientOperationKey}
+    `;
+    const recorded = await recordTransientFailure();
+    assert.equal(recorded.attempt_count, attempt);
+    assert.equal(recorded.status, attempt === 6 ? "parked" : "backoff");
+  }
+
+  const [transientCapState] = await sql`
+    select
+      source_recovery_blocked,
+      attempt_count,
+      consecutive_error_count,
+      last_error_code,
+      last_error_class,
+      next_retry_at
+    from accounts.credential_operations
+    where operation_key=${transientOperationKey}
+  `;
+  assert.deepEqual(transientCapState, {
+    source_recovery_blocked: true,
+    attempt_count: 6,
+    consecutive_error_count: 6,
+    last_error_code: "CREDENTIAL_MIRROR_PENDING",
+    last_error_class: "transient",
+    next_retry_at: null,
+  });
+  const cappedTransientReplay = await recordTransientFailure();
+  assert.equal(cappedTransientReplay.status, "parked");
+  assert.equal(cappedTransientReplay.idempotent, true);
+  assert.equal(cappedTransientReplay.attempt_count, 6);
+  const [recoveryQueueAfterTransientCap] = await sql`
+    select public.roo_list_credential_recovery(25) result
+  `;
+  assert.equal(
+    recoveryQueueAfterTransientCap.result.some(
+      (operation) => operation.operation_key === transientOperationKey,
+    ),
+    false,
+  );
+  await sql`
+    update accounts.credential_operations
+    set status='failed'
+    where operation_key=${transientOperationKey}
   `;
 
   const credentialLease = crypto.randomUUID();
@@ -1776,6 +2025,7 @@ try {
     select
       principal.session_version,
       operation.status,
+      operation.attempt_count,
       operation.source_applied_revision,
       (select count(*)::integer from auth.sessions
        where user_id=${credentialUserId}::uuid) session_count
@@ -1787,6 +2037,7 @@ try {
   assert.deepEqual(credentialFinal, {
     session_version: "2",
     status: "mirrored",
+    attempt_count: 0,
     source_applied_revision: appliedCredentialSource.result.source_revision,
     session_count: 0,
   });
@@ -1971,6 +2222,10 @@ try {
       "mixed-event stale delete rejection and explicit per-document repair",
       "delete snapshot capture and canonical event hash",
       "Auth-applied credential recovery consumes the authoritative reset token",
+      "deterministic credential failures back off once, park on repeat, and stop applying",
+      "transient credential failures use exponential retry gates and park at six attempts",
+      "parked credential operations short-circuit before locking the source document",
+      "credential retry failures are visible in the service-role ops view",
       "credential replay and completion remain idempotent with one session-version bump",
       "per-principal credential serialization and conflicting same-key rejection",
       "late Auth checkpoints cannot regress a completed operation",
