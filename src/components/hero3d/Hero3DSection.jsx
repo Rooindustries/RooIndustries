@@ -50,6 +50,7 @@ export default function Hero3DSection() {
   const wrapperRef = useRef(null);
   const viewportRef = useRef(null);
   const scrimRef = useRef(null);
+  const copyRef = useRef(null);
   const variantRef = useRef("v6");
   const progressRef = useRef(0);
   const hintRef = useRef(null);
@@ -103,13 +104,22 @@ export default function Hero3DSection() {
       scrimRef.current.style.opacity = (heroP * strength).toFixed(3);
     }
 
+    if (copyRef.current) {
+      const heroP = 1 - smoothstep(rawP, 0.02, 0.18);
+      copyRef.current.style.opacity = heroP.toFixed(3);
+      copyRef.current.style.pointerEvents = heroP > 0.5 ? "auto" : "none";
+    }
+
     if (hintRef.current) {
       hintRef.current.style.opacity = (
         smoothstep(rawP, 0.01, 0.05) * (1 - smoothstep(p, 0.08, 0.16))
       ).toFixed(3);
     }
 
-    const payoff = smoothstep(p, 0.7, 0.9);
+    const payoff =
+      variantRef.current === "v6"
+        ? smoothstep(p, 0.93, 0.985)
+        : smoothstep(p, 0.7, 0.9);
     if (payoffRef.current) {
       payoffRef.current.style.opacity = payoff.toFixed(3);
       payoffRef.current.style.pointerEvents = payoff > 0.6 ? "auto" : "none";
@@ -190,7 +200,7 @@ export default function Hero3DSection() {
       ref={wrapperRef}
       aria-label="What a Roo Industries optimization touches"
       className="relative"
-      style={{ height: variantKey === "v6" ? "260vh" : "210vh" }}
+      style={{ height: variantKey === "v6" ? "320vh" : "210vh" }}
     >
       <div
         ref={viewportRef}
@@ -279,7 +289,7 @@ export default function Hero3DSection() {
         </div>
       </div>
 
-      <div className="relative z-10">
+      <div ref={copyRef} className="relative z-10">
         {variantKey === "v6" ? <HeroSplitCopy /> : <Hero />}
       </div>
     </section>
