@@ -1,5 +1,4 @@
 import React, { lazy, Suspense, useEffect, useRef, useState } from "react";
-import Hero from "../components/Hero";
 import Hero3DSection from "../components/hero3d/Hero3DSection";
 import TournamentAnnouncement from "../components/TournamentAnnouncement";
 import { Link, useLocation } from "react-router-dom";
@@ -156,7 +155,6 @@ export default function Home({ initialData = null }) {
   return (
     <>
       <TournamentAnnouncement />
-      <Hero />
       <Hero3DSection />
       <DeferredSection
         fallbackClassName="min-h-[510px]"

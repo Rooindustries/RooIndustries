@@ -7,6 +7,7 @@ import React, {
   useState,
 } from "react";
 import { Link } from "react-router-dom";
+import Hero from "../Hero";
 import useHomeSectionLinkHandler from "../../lib/useHomeSectionLinkHandler";
 
 const HeroScene3D = lazy(() => import("./HeroScene3D"));
@@ -23,12 +24,13 @@ const smoothstep = (value, edge0, edge1) => {
   return t * t * (3 - 2 * t);
 };
 
+// Must match the remap in HeroScene3D.
+const scenePhase = (rawP) => clamp01((rawP - 0.16) / 0.84);
+
 function supportsWebgl() {
   try {
     const canvas = document.createElement("canvas");
-    return Boolean(
-      canvas.getContext("webgl2") || canvas.getContext("webgl")
-    );
+    return Boolean(canvas.getContext("webgl2") || canvas.getContext("webgl"));
   } catch {
     return false;
   }
@@ -55,8 +57,7 @@ export default function Hero3DSection() {
       "(prefers-reduced-motion: reduce)"
     ).matches;
     const desktop =
-      window.innerWidth >= 1024 &&
-      window.matchMedia("(pointer: fine)").matches;
+      window.innerWidth >= 1024 && window.matchMedia("(pointer: fine)").matches;
     setEnabled((force || (!reducedMotion && desktop)) && supportsWebgl());
   }, []);
 
@@ -66,8 +67,9 @@ export default function Hero3DSection() {
     const rect = wrapper.getBoundingClientRect();
     const total = rect.height - window.innerHeight;
     if (total <= 0) return;
-    const p = clamp01(-rect.top / total);
-    progressRef.current = p;
+    const rawP = clamp01(-rect.top / total);
+    progressRef.current = rawP;
+    const p = scenePhase(rawP);
 
     // Ancestors use overflow hidden, which breaks position sticky, so the
     // viewport is pinned manually from the same scroll frame.
@@ -77,10 +79,12 @@ export default function Hero3DSection() {
     }
 
     if (hintRef.current) {
-      hintRef.current.style.opacity = (1 - smoothstep(p, 0.04, 0.14)).toFixed(3);
+      hintRef.current.style.opacity = (
+        smoothstep(rawP, 0.01, 0.05) * (1 - smoothstep(p, 0.08, 0.16))
+      ).toFixed(3);
     }
 
-    const payoff = smoothstep(p, 0.74, 0.94);
+    const payoff = smoothstep(p, 0.7, 0.9);
     if (payoffRef.current) {
       payoffRef.current.style.opacity = payoff.toFixed(3);
       payoffRef.current.style.pointerEvents = payoff > 0.6 ? "auto" : "none";
@@ -142,14 +146,15 @@ export default function Hero3DSection() {
     };
   }, [enabled]);
 
-  if (!enabled) return null;
+  // Gated environments keep the plain hero, untouched.
+  if (!enabled) return <Hero />;
 
   return (
     <section
       ref={wrapperRef}
       aria-label="What a Roo Industries optimization touches"
       className="relative"
-      style={{ height: "260vh" }}
+      style={{ height: "230vh" }}
     >
       <div
         ref={viewportRef}
@@ -163,17 +168,26 @@ export default function Hero3DSection() {
         )}
 
         <div
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              "radial-gradient(ellipse at center, transparent 52%, rgba(2, 6, 14, 0.42) 100%)",
+          }}
+        />
+
+        <div
           ref={hintRef}
-          className="pointer-events-none absolute inset-x-0 top-14 text-center"
+          className="pointer-events-none absolute inset-x-0 bottom-8 text-center"
+          style={{ opacity: 0 }}
         >
           <p className="text-sm sm:text-base font-semibold tracking-wide text-ink-secondary">
-            Scroll. We take it apart.
+            Keep scrolling. We take it apart.
           </p>
         </div>
 
         <div
           ref={payoffRef}
-          className="absolute inset-x-0 bottom-14 flex flex-col items-center gap-4"
+          className="absolute inset-x-0 bottom-12 flex flex-col items-center gap-4"
           style={{ opacity: 0, pointerEvents: "none" }}
         >
           <p className="text-2xl sm:text-3xl font-extrabold tracking-tight text-ink">
@@ -213,6 +227,10 @@ export default function Hero3DSection() {
             <span className="glow-line glow-line-left" />
           </Link>
         </div>
+      </div>
+
+      <div className="relative z-10">
+        <Hero />
       </div>
     </section>
   );
