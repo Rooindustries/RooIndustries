@@ -461,6 +461,27 @@ const cmsIdentity = (seed) => {
   return { requestHash, commandId: `cms:${requestHash}` };
 };
 
+const credentialV1Catalog = (sql) => sql`
+  select
+    routine.oid::regprocedure::text signature,
+    pg_get_functiondef(routine.oid) definition,
+    coalesce(routine.proacl::text, '') acl,
+    coalesce(routine.proconfig::text, '') configuration,
+    routine.prosecdef security_definer,
+    routine.provolatile volatility
+  from pg_proc routine
+  where routine.oid in (
+    'public.roo_apply_credential_source_operation(text)'::regprocedure,
+    'public.roo_mark_credential_operation(text,text,text)'::regprocedure,
+    'public.roo_mark_credential_source_applied(text,text)'::regprocedure,
+    'public.roo_complete_credential_operation(text)'::regprocedure,
+    'public.roo_record_credential_recovery_error(text,text,text)'::regprocedure,
+    'public.roo_list_credential_recovery(integer)'::regprocedure,
+    'public.roo_get_credential_operation(text)'::regprocedure
+  )
+  order by signature
+`;
+
 let sql;
 let summary;
 try {
@@ -537,6 +558,9 @@ try {
     "-v", "ON_ERROR_STOP=1", "-f",
     path.join(root, "supabase/migrations/20260715130100_add_credential_recovery_queue_index.sql"),
   ]);
+  sql = postgres(databaseUrl, { max: 8 });
+  const credentialV1Before = await credentialV1Catalog(sql);
+  assert.equal(credentialV1Before.length, 7);
   run(path.join(pgBin, "psql"), [
     "-h", "127.0.0.1", "-p", String(port), "-d", database,
     "-v", "ON_ERROR_STOP=1", "-f",
@@ -545,7 +569,18 @@ try {
       "supabase/migrations/20260718023317_harden_credential_reconciliation_retry.sql",
     ),
   ]);
-  sql = postgres(databaseUrl, { max: 8 });
+  const credentialV1After = await credentialV1Catalog(sql);
+  assert.deepEqual(credentialV1After, credentialV1Before);
+  run(path.join(pgBin, "psql"), [
+    "-h", "127.0.0.1", "-p", String(port), "-d", database,
+    "-v", "ON_ERROR_STOP=1", "-f",
+    path.join(
+      root,
+      "supabase/migrations/20260718023317_harden_credential_reconciliation_retry.sql",
+    ),
+  ]);
+  const credentialV1AfterRerun = await credentialV1Catalog(sql);
+  assert.deepEqual(credentialV1AfterRerun, credentialV1Before);
 
   const [credentialSchema] = await sql`
     select
@@ -579,6 +614,33 @@ try {
       (select indisvalid
        from pg_index
        where indexrelid='accounts.credential_operations_retry_ready_idx'::regclass) retry_index_valid,
+      (select count(*)::integer
+       from unnest(array[
+         'public.roo_get_credential_operation_v2(text)',
+         'public.roo_mark_credential_operation_v2(text,text,text)',
+         'public.roo_apply_credential_source_operation_v2(text)',
+         'public.roo_mark_credential_source_applied_v2(text,text)',
+         'public.roo_complete_credential_operation_v2(text)',
+         'public.roo_list_credential_recovery_v2(integer)'
+       ]) signature
+       where to_regprocedure(signature) is not null) v2_function_count,
+      (select count(*)::integer
+       from unnest(array[
+         'public.roo_get_credential_operation_v2(text)',
+         'public.roo_mark_credential_operation_v2(text,text,text)',
+         'public.roo_apply_credential_source_operation_v2(text)',
+         'public.roo_mark_credential_source_applied_v2(text,text)',
+         'public.roo_complete_credential_operation_v2(text)',
+         'public.roo_list_credential_recovery_v2(integer)',
+         'public.roo_record_credential_recovery_failure(text,text,text,text,text)'
+       ]) signature
+       where has_function_privilege('service_role', signature, 'execute')
+         and not has_function_privilege('anon', signature, 'execute')
+         and not has_function_privilege('authenticated', signature, 'execute')
+      ) v2_service_role_only_count,
+      to_regprocedure(
+        'public.roo_record_credential_recovery_failure(text,text,text,text,text)'
+      ) is not null failure_recorder_exists,
       to_regclass('ops.credential_failures') is not null ops_view_exists
   `;
   assert.deepEqual(credentialSchema, {
@@ -586,6 +648,9 @@ try {
     validated_constraints: 7,
     recovery_index_valid: true,
     retry_index_valid: true,
+    v2_function_count: 6,
+    v2_service_role_only_count: 7,
+    failure_recorder_exists: true,
     ops_view_exists: true,
   });
 
@@ -1551,7 +1616,7 @@ try {
     values(${credentialUserId}::uuid)
   `;
   const [authCheckpoint] = await sql`
-    select public.roo_mark_credential_operation(
+    select public.roo_mark_credential_operation_v2(
       ${credentialOperationKey},
       'auth_applied',
       null
@@ -1575,8 +1640,16 @@ try {
     sessions_revoked: true,
     session_count: 0,
   });
+  const [credentialLookup] = await sql`
+    select public.roo_get_credential_operation_v2(
+      ${credentialOperationKey}
+    ) result
+  `;
+  assert.equal(credentialLookup.result.status, "auth_applied");
+  assert.equal(credentialLookup.result.consecutive_error_count, 0);
+  assert.equal(credentialLookup.result.next_retry_at, null);
   await assert.rejects(
-    sql`select public.roo_mark_credential_operation(
+    sql`select public.roo_mark_credential_operation_v2(
       ${credentialOperationKey},
       'failed',
       'SOURCE_PENDING'
@@ -1599,7 +1672,7 @@ try {
     credential_kind: "bcrypt",
   });
   await assert.rejects(
-    sql`select public.roo_complete_credential_operation(
+    sql`select public.roo_complete_credential_operation_v2(
       ${credentialOperationKey}
     )`,
     (error) => error.code === "55000"
@@ -1622,14 +1695,14 @@ try {
   `;
 
   const [appliedCredentialSource] = await sql`
-    select public.roo_apply_credential_source_operation(
+    select public.roo_apply_credential_source_operation_v2(
       ${credentialOperationKey}
     ) result
   `;
   assert.equal(appliedCredentialSource.result.idempotent, false);
   assert.match(appliedCredentialSource.result.source_revision, /^[0-9a-f]{32}$/);
   const [reappliedCredentialSource] = await sql`
-    select public.roo_apply_credential_source_operation(
+    select public.roo_apply_credential_source_operation_v2(
       ${credentialOperationKey}
     ) result
   `;
@@ -1741,7 +1814,7 @@ try {
     where legacy_sanity_id=${replacedTokenDocumentId}
   `;
   const [firstDeterministicFailure] = await sql`
-    select public.roo_apply_credential_source_operation(
+    select public.roo_apply_credential_source_operation_v2(
       ${replacedTokenOperationKey}
     ) result
   `;
@@ -1753,7 +1826,7 @@ try {
     "CREDENTIAL_SOURCE_PRECONDITION_CHANGED",
   );
   const [earlyDeterministicReplay] = await sql`
-    select public.roo_apply_credential_source_operation(
+    select public.roo_apply_credential_source_operation_v2(
       ${replacedTokenOperationKey}
     ) result
   `;
@@ -1767,7 +1840,7 @@ try {
     where operation_key=${replacedTokenOperationKey}
   `;
   const [parkedDeterministicFailure] = await sql`
-    select public.roo_apply_credential_source_operation(
+    select public.roo_apply_credential_source_operation_v2(
       ${replacedTokenOperationKey}
     ) result
   `;
@@ -1800,7 +1873,7 @@ try {
   });
 
   const [recoveryQueueAfterParking] = await sql`
-    select public.roo_list_credential_recovery(25) result
+    select public.roo_list_credential_recovery_v2(25) result
   `;
   assert.equal(
     recoveryQueueAfterParking.result.some(
@@ -1833,7 +1906,7 @@ try {
     const [parkedReplay] = await sql.begin(async (transaction) => {
       await transaction`set local statement_timeout='500ms'`;
       return transaction`
-        select public.roo_apply_credential_source_operation(
+        select public.roo_apply_credential_source_operation_v2(
           ${replacedTokenOperationKey}
         ) result
       `;
@@ -1965,7 +2038,7 @@ try {
   assert.equal(cappedTransientReplay.idempotent, true);
   assert.equal(cappedTransientReplay.attempt_count, 6);
   const [recoveryQueueAfterTransientCap] = await sql`
-    select public.roo_list_credential_recovery(25) result
+    select public.roo_list_credential_recovery_v2(25) result
   `;
   assert.equal(
     recoveryQueueAfterTransientCap.result.some(
@@ -1977,6 +2050,199 @@ try {
     update accounts.credential_operations
     set status='failed'
     where operation_key=${transientOperationKey}
+  `;
+
+  const appearingSourceUserId = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
+  const appearingSourcePrincipalId = "bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb";
+  const appearingSourceOperationKey = "credential:change:source-appears";
+  const appearingSourceDocumentId = "referral.source-appears";
+  const unavailableSourceMutation = {
+    ...credentialMutation,
+    set: { ...credentialMutation.set, creatorPassword: secondPasswordHash },
+  };
+  await sql`
+    insert into auth.users(id, encrypted_password)
+    values(${appearingSourceUserId}::uuid, ${secondPasswordHash})
+  `;
+  await sql`
+    insert into accounts.principals(id)
+    values(${appearingSourcePrincipalId}::uuid)
+  `;
+  await sql`
+    insert into accounts.principal_auth_users(user_id, principal_id)
+    values(${appearingSourceUserId}::uuid, ${appearingSourcePrincipalId}::uuid)
+  `;
+  await sql`
+    insert into accounts.credential_operations(
+      operation_key,
+      user_id,
+      principal_id,
+      password_hash,
+      status,
+      source_backend,
+      source_document_id,
+      source_expected_revision,
+      source_preconditions,
+      source_mutation,
+      sessions_revoked_at,
+      auth_applied_at
+    ) values(
+      ${appearingSourceOperationKey},
+      ${appearingSourceUserId}::uuid,
+      ${appearingSourcePrincipalId}::uuid,
+      ${secondPasswordHash},
+      'auth_applied',
+      'supabase',
+      ${appearingSourceDocumentId},
+      'appearing-r1',
+      ${sql.json({ creatorPassword: credentialPreconditions.creatorPassword })}::jsonb,
+      ${sql.json(unavailableSourceMutation)}::jsonb,
+      now(),
+      now()
+    )
+  `;
+  const applyAppearingSource = async () => {
+    const [row] = await sql`
+      select public.roo_apply_credential_source_operation_v2(
+        ${appearingSourceOperationKey}
+      ) result
+    `;
+    return row.result;
+  };
+  const firstUnavailableSource = await applyAppearingSource();
+  assert.equal(firstUnavailableSource.status, "backoff");
+  assert.equal(firstUnavailableSource.error_class, "transient");
+  assert.equal(firstUnavailableSource.attempt_count, 1);
+  await sql`
+    update accounts.credential_operations
+    set next_retry_at=now() - interval '1 second'
+    where operation_key=${appearingSourceOperationKey}
+  `;
+  const secondUnavailableSource = await applyAppearingSource();
+  assert.equal(secondUnavailableSource.status, "backoff");
+  assert.equal(secondUnavailableSource.error_class, "transient");
+  assert.equal(secondUnavailableSource.attempt_count, 2);
+  assert.equal(secondUnavailableSource.parked, false);
+  await sql`
+    insert into migration.source_documents(
+      legacy_sanity_id, document_type, source_revision, source_hash, payload,
+      source_created_at, source_updated_at, backend_owner
+    ) values(
+      ${appearingSourceDocumentId},
+      'referral',
+      'appearing-r1',
+      ${"1".repeat(64)},
+      ${sql.json({
+        _id: appearingSourceDocumentId,
+        _type: "referral",
+        _rev: "appearing-r1",
+        creatorPassword: credentialPreconditions.creatorPassword,
+      })}::jsonb,
+      now(),
+      now(),
+      'supabase'
+    )
+  `;
+  await sql`
+    update accounts.credential_operations
+    set next_retry_at=now() - interval '1 second'
+    where operation_key=${appearingSourceOperationKey}
+  `;
+  const recoveredAppearingSource = await applyAppearingSource();
+  assert.equal(recoveredAppearingSource.status, "source_applied");
+  assert.equal(recoveredAppearingSource.idempotent, false);
+  const [appearingSourceState] = await sql`
+    select payload->>'creatorPassword' creator_password
+    from migration.source_documents
+    where legacy_sanity_id=${appearingSourceDocumentId}
+  `;
+  assert.equal(appearingSourceState.creator_password, secondPasswordHash);
+
+  const unavailableCapUserId = "cccccccc-1111-4111-8111-cccccccccccc";
+  const unavailableCapPrincipalId = "dddddddd-1111-4111-8111-dddddddddddd";
+  const unavailableCapOperationKey = "credential:change:source-unavailable-cap";
+  await sql`
+    insert into auth.users(id, encrypted_password)
+    values(${unavailableCapUserId}::uuid, ${secondPasswordHash})
+  `;
+  await sql`
+    insert into accounts.principals(id)
+    values(${unavailableCapPrincipalId}::uuid)
+  `;
+  await sql`
+    insert into accounts.principal_auth_users(user_id, principal_id)
+    values(${unavailableCapUserId}::uuid, ${unavailableCapPrincipalId}::uuid)
+  `;
+  await sql`
+    insert into accounts.credential_operations(
+      operation_key,
+      user_id,
+      principal_id,
+      password_hash,
+      status,
+      source_backend,
+      source_document_id,
+      source_expected_revision,
+      source_preconditions,
+      source_mutation,
+      sessions_revoked_at,
+      auth_applied_at
+    ) values(
+      ${unavailableCapOperationKey},
+      ${unavailableCapUserId}::uuid,
+      ${unavailableCapPrincipalId}::uuid,
+      ${secondPasswordHash},
+      'auth_applied',
+      'supabase',
+      'referral.source-never-appears',
+      'missing-r1',
+      ${sql.json({ creatorPassword: credentialPreconditions.creatorPassword })}::jsonb,
+      ${sql.json(unavailableSourceMutation)}::jsonb,
+      now(),
+      now()
+    )
+  `;
+  for (let attempt = 1; attempt <= 6; attempt += 1) {
+    if (attempt > 1) {
+      await sql`
+        update accounts.credential_operations
+        set next_retry_at=now() - interval '1 second'
+        where operation_key=${unavailableCapOperationKey}
+      `;
+    }
+    const [unavailable] = await sql`
+      select public.roo_apply_credential_source_operation_v2(
+        ${unavailableCapOperationKey}
+      ) result
+    `;
+    assert.equal(unavailable.result.attempt_count, attempt);
+    assert.equal(unavailable.result.error_class, "transient");
+    assert.equal(unavailable.result.status, attempt === 6 ? "parked" : "backoff");
+  }
+  const [unavailableCapState] = await sql`
+    select
+      source_recovery_blocked,
+      attempt_count,
+      last_error_code,
+      last_error_class,
+      next_retry_at
+    from accounts.credential_operations
+    where operation_key=${unavailableCapOperationKey}
+  `;
+  assert.deepEqual(unavailableCapState, {
+    source_recovery_blocked: true,
+    attempt_count: 6,
+    last_error_code: "CREDENTIAL_SOURCE_DOCUMENT_UNAVAILABLE",
+    last_error_class: "transient",
+    next_retry_at: null,
+  });
+  await sql`
+    update accounts.credential_operations
+    set status='failed'
+    where operation_key in (
+      ${appearingSourceOperationKey},
+      ${unavailableCapOperationKey}
+    )
   `;
 
   const credentialLease = crypto.randomUUID();
@@ -1999,12 +2265,12 @@ try {
     true
   );
   const [firstCredentialCompletion] = await sql`
-    select public.roo_complete_credential_operation(
+    select public.roo_complete_credential_operation_v2(
       ${credentialOperationKey}
     ) result
   `;
   const [secondCredentialCompletion] = await sql`
-    select public.roo_complete_credential_operation(
+    select public.roo_complete_credential_operation_v2(
       ${credentialOperationKey}
     ) result
   `;
@@ -2013,7 +2279,7 @@ try {
   assert.equal(secondCredentialCompletion.result.session_version, 2);
   assert.equal(secondCredentialCompletion.result.idempotent, true);
   const [lateAuthCheckpoint] = await sql`
-    select public.roo_mark_credential_operation(
+    select public.roo_mark_credential_operation_v2(
       ${credentialOperationKey},
       'auth_applied',
       'LATE_AUTH_RESPONSE'
@@ -2176,6 +2442,74 @@ try {
     where operation_key='credential:reset:same-key'
   `;
 
+  const sanityV2UserId = "eeeeeeee-1111-4111-8111-eeeeeeeeeeee";
+  const sanityV2PrincipalId = "ffffffff-1111-4111-8111-ffffffffffff";
+  const sanityV2OperationKey = "credential:change:sanity-v2";
+  const sanityV2Mutation = {
+    ...credentialMutation,
+    set: { ...credentialMutation.set, creatorPassword: secondPasswordHash },
+  };
+  await sql`
+    insert into auth.users(id, encrypted_password)
+    values(${sanityV2UserId}::uuid, ${secondPasswordHash})
+  `;
+  await sql`
+    insert into accounts.principals(id)
+    values(${sanityV2PrincipalId}::uuid)
+  `;
+  await sql`
+    insert into accounts.principal_auth_users(user_id, principal_id)
+    values(${sanityV2UserId}::uuid, ${sanityV2PrincipalId}::uuid)
+  `;
+  await sql`
+    select public.roo_prepare_credential_operation_v2(
+      ${sanityV2OperationKey},
+      ${sanityV2UserId}::uuid,
+      ${secondPasswordHash},
+      'sanity',
+      'referral.sanity-v2',
+      'sanity-r1',
+      ${sql.json({ creatorPassword: credentialPreconditions.creatorPassword })}::jsonb,
+      ${sql.json(sanityV2Mutation)}::jsonb
+    )
+  `;
+  const [sanityV2Auth] = await sql`
+    select public.roo_mark_credential_operation_v2(
+      ${sanityV2OperationKey},
+      'auth_applied',
+      null
+    ) result
+  `;
+  assert.equal(sanityV2Auth.result.status, "auth_applied");
+  const [sanityV2Source] = await sql`
+    select public.roo_mark_credential_source_applied_v2(
+      ${sanityV2OperationKey},
+      'sanity-r2'
+    ) result
+  `;
+  assert.equal(sanityV2Source.result.status, "source_applied");
+  assert.equal(sanityV2Source.result.idempotent, false);
+  const [sanityV2SourceReplay] = await sql`
+    select public.roo_mark_credential_source_applied_v2(
+      ${sanityV2OperationKey},
+      'sanity-r2'
+    ) result
+  `;
+  assert.equal(sanityV2SourceReplay.result.status, "source_applied");
+  assert.equal(sanityV2SourceReplay.result.idempotent, true);
+  const [sanityV2Complete] = await sql`
+    select public.roo_complete_credential_operation_v2(
+      ${sanityV2OperationKey}
+    ) result
+  `;
+  assert.equal(sanityV2Complete.result.status, "mirrored");
+  const [sanityV2Lookup] = await sql`
+    select public.roo_get_credential_operation_v2(
+      ${sanityV2OperationKey}
+    ) result
+  `;
+  assert.equal(sanityV2Lookup.result.status, "mirrored");
+
   await assert.rejects(
     sql.begin(async (transaction) => {
       await transaction`set local role service_role`;
@@ -2205,6 +2539,57 @@ try {
     await sql`select public.roo_supabase_port_readiness() result`;
   assert.equal(readiness.result.documentMutationMirror.ready, true);
 
+  run(path.join(pgBin, "psql"), [
+    "-h", "127.0.0.1", "-p", String(port), "-d", database,
+    "-v", "ON_ERROR_STOP=1", "-f",
+    path.join(
+      root,
+      "supabase/follow-up-migrations/20260718043839_remove_credential_rpc_v1_after_v2_cutover.sql",
+    ),
+  ]);
+  const [credentialRemovalState] = await sql`
+    select
+      (select count(*)::integer
+       from unnest(array[
+         'public.roo_get_credential_operation(text)',
+         'public.roo_mark_credential_operation(text,text,text)',
+         'public.roo_apply_credential_source_operation(text)',
+         'public.roo_mark_credential_source_applied(text,text)',
+         'public.roo_complete_credential_operation(text)',
+         'public.roo_list_credential_recovery(integer)',
+         'public.roo_record_credential_recovery_error(text,text,text)'
+       ]) signature
+       where to_regprocedure(signature) is null) removed_v1_count,
+      (select count(*)::integer
+       from unnest(array[
+         'public.roo_get_credential_operation_v2(text)',
+         'public.roo_mark_credential_operation_v2(text,text,text)',
+         'public.roo_apply_credential_source_operation_v2(text)',
+         'public.roo_mark_credential_source_applied_v2(text,text)',
+         'public.roo_complete_credential_operation_v2(text)',
+         'public.roo_list_credential_recovery_v2(integer)'
+       ]) signature
+       where to_regprocedure(signature) is not null) retained_v2_count,
+      to_regprocedure(
+        'public.roo_record_credential_recovery_failure(text,text,text,text,text)'
+      ) is not null failure_recorder_retained
+  `;
+  assert.deepEqual(credentialRemovalState, {
+    removed_v1_count: 7,
+    retained_v2_count: 6,
+    failure_recorder_retained: true,
+  });
+  await assert.rejects(
+    sql`select public.roo_get_credential_operation(${sanityV2OperationKey})`,
+    (error) => error.code === "42883"
+  );
+  const [postRemovalV2Lookup] = await sql`
+    select public.roo_get_credential_operation_v2(
+      ${sanityV2OperationKey}
+    ) result
+  `;
+  assert.equal(postRemovalV2Lookup.result.status, "mirrored");
+
   summary = {
     ok: true,
     postgres: await sql`show server_version`.then(
@@ -2222,11 +2607,15 @@ try {
       "mixed-event stale delete rejection and explicit per-document repair",
       "delete snapshot capture and canonical event hash",
       "Auth-applied credential recovery consumes the authoritative reset token",
+      "credential deploy migration preserves all seven v1 definitions and ACLs",
+      "credential v2 RPCs cover lookup, checkpoint, source apply, queue, and completion",
       "deterministic credential failures back off once, park on repeat, and stop applying",
       "transient credential failures use exponential retry gates and park at six attempts",
+      "document-unavailable retries are transient, self-recover when the source appears, and cap at six",
       "parked credential operations short-circuit before locking the source document",
       "credential retry failures are visible in the service-role ops view",
       "credential replay and completion remain idempotent with one session-version bump",
+      "deferred v1 removal validates v2 readiness and removes only the seven v1 RPCs",
       "per-principal credential serialization and conflicting same-key rejection",
       "late Auth checkpoints cannot regress a completed operation",
       "service-role RPC access without direct table access",

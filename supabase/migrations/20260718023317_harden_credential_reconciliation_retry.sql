@@ -1,6 +1,9 @@
 set lock_timeout = '5s';
 set statement_timeout = '120s';
 
+-- Deploy this migration before the application release that calls the v2 RPCs.
+-- The existing credential RPCs are intentionally untouched for rolling safety.
+
 alter table accounts.credential_operations
   add column if not exists last_error text,
   add column if not exists last_error_class text,
@@ -92,7 +95,6 @@ begin
         'SOURCE_REVISION_CONFLICT',
         'CREDENTIAL_AUTH_PLAINTEXT_REQUIRED',
         'CREDENTIAL_MIRROR_DEAD_LETTER',
-        'CREDENTIAL_SOURCE_DOCUMENT_UNAVAILABLE',
         'CREDENTIAL_SOURCE_PRECONDITION_CHANGED',
         'CREDENTIAL_SOURCE_REPAIR_REQUIRED'
       ) then 'deterministic'
@@ -239,26 +241,7 @@ begin
 end;
 $$;
 
-create or replace function public.roo_record_credential_recovery_error(
-  p_operation_key text,
-  p_expected_status text,
-  p_error_code text
-)
-returns jsonb
-language sql
-security definer
-set search_path = ''
-as $$
-  select public.roo_record_credential_recovery_failure(
-    p_operation_key,
-    p_expected_status,
-    p_error_code,
-    null,
-    null
-  );
-$$;
-
-create or replace function public.roo_get_credential_operation(
+create or replace function public.roo_get_credential_operation_v2(
   p_operation_key text
 )
 returns jsonb
@@ -298,7 +281,7 @@ as $$
   where operation.operation_key = p_operation_key;
 $$;
 
-create or replace function public.roo_mark_credential_operation(
+create or replace function public.roo_mark_credential_operation_v2(
   p_operation_key text,
   p_status text,
   p_error_code text default null
@@ -473,7 +456,7 @@ begin
 end;
 $$;
 
-create or replace function public.roo_apply_credential_source_operation(
+create or replace function public.roo_apply_credential_source_operation_v2(
   p_operation_key text
 )
 returns jsonb
@@ -599,7 +582,7 @@ begin
       v_operation.status,
       'CREDENTIAL_SOURCE_DOCUMENT_UNAVAILABLE',
       'Credential source document is unavailable.',
-      'deterministic'
+      'transient'
     );
     return v_retry || jsonb_build_object(
       'source_document_id', v_operation.source_document_id
@@ -679,7 +662,7 @@ begin
 end;
 $$;
 
-create or replace function public.roo_mark_credential_source_applied(
+create or replace function public.roo_mark_credential_source_applied_v2(
   p_operation_key text,
   p_source_revision text
 )
@@ -785,7 +768,7 @@ begin
 end;
 $$;
 
-create or replace function public.roo_complete_credential_operation(
+create or replace function public.roo_complete_credential_operation_v2(
   p_operation_key text
 )
 returns jsonb
@@ -886,7 +869,7 @@ begin
 end;
 $$;
 
-create or replace function public.roo_list_credential_recovery(
+create or replace function public.roo_list_credential_recovery_v2(
   p_limit integer default 10
 )
 returns jsonb
@@ -945,7 +928,7 @@ begin
     for update of principal skip locked
     limit greatest(1, least(coalesce(p_limit, 10), 25))
   loop
-    perform public.roo_mark_credential_operation(
+    perform public.roo_mark_credential_operation_v2(
       v_operation_key,
       'auth_applied',
       null
@@ -1069,19 +1052,17 @@ revoke all on function public.roo_record_credential_recovery_failure(
   text,
   text
 ) from public, anon, authenticated;
-revoke all on function public.roo_record_credential_recovery_error(text, text, text)
+revoke all on function public.roo_get_credential_operation_v2(text)
   from public, anon, authenticated;
-revoke all on function public.roo_get_credential_operation(text)
+revoke all on function public.roo_mark_credential_operation_v2(text, text, text)
   from public, anon, authenticated;
-revoke all on function public.roo_mark_credential_operation(text, text, text)
+revoke all on function public.roo_apply_credential_source_operation_v2(text)
   from public, anon, authenticated;
-revoke all on function public.roo_apply_credential_source_operation(text)
+revoke all on function public.roo_mark_credential_source_applied_v2(text, text)
   from public, anon, authenticated;
-revoke all on function public.roo_mark_credential_source_applied(text, text)
+revoke all on function public.roo_complete_credential_operation_v2(text)
   from public, anon, authenticated;
-revoke all on function public.roo_complete_credential_operation(text)
-  from public, anon, authenticated;
-revoke all on function public.roo_list_credential_recovery(integer)
+revoke all on function public.roo_list_credential_recovery_v2(integer)
   from public, anon, authenticated;
 revoke all on table ops.credential_failures from public, anon, authenticated;
 
@@ -1092,18 +1073,16 @@ grant execute on function public.roo_record_credential_recovery_failure(
   text,
   text
 ) to service_role;
-grant execute on function public.roo_record_credential_recovery_error(text, text, text)
+grant execute on function public.roo_get_credential_operation_v2(text)
   to service_role;
-grant execute on function public.roo_get_credential_operation(text)
+grant execute on function public.roo_mark_credential_operation_v2(text, text, text)
   to service_role;
-grant execute on function public.roo_mark_credential_operation(text, text, text)
+grant execute on function public.roo_apply_credential_source_operation_v2(text)
   to service_role;
-grant execute on function public.roo_apply_credential_source_operation(text)
+grant execute on function public.roo_mark_credential_source_applied_v2(text, text)
   to service_role;
-grant execute on function public.roo_mark_credential_source_applied(text, text)
+grant execute on function public.roo_complete_credential_operation_v2(text)
   to service_role;
-grant execute on function public.roo_complete_credential_operation(text)
-  to service_role;
-grant execute on function public.roo_list_credential_recovery(integer)
+grant execute on function public.roo_list_credential_recovery_v2(integer)
   to service_role;
 grant select on table ops.credential_failures to service_role;
