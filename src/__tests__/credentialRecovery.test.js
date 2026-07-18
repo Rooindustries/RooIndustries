@@ -86,7 +86,7 @@ describe("credential recovery saga", () => {
     });
     const adminClient = {
       rpc: jest.fn(async (name) => {
-        if (name === "roo_apply_credential_source_operation") {
+        if (name === "roo_apply_credential_source_operation_v2") {
           return {
             data: {
               status: "parked",
@@ -115,6 +115,34 @@ describe("credential recovery saga", () => {
       credentialRecoveryRecorded: true,
       retryState: "parked",
     });
+    expect(adminClient.rpc).toHaveBeenCalledTimes(1);
+    expect(sanity.client.fetch).not.toHaveBeenCalled();
+    expect(sanity.client.transaction).not.toHaveBeenCalled();
+  });
+
+  test("stops safely when the v2 apply RPC is not migrated yet", async () => {
+    const sanity = createSanityClient({
+      _id: "referral.rpc-missing",
+      _type: "referral",
+      _rev: "sanity-r1",
+    });
+    const adminClient = {
+      rpc: jest.fn(async (name) => {
+        if (name === "roo_apply_credential_source_operation_v2") {
+          return { data: null, error: { code: "PGRST202" } };
+        }
+        throw new Error(`Unexpected RPC: ${name}`);
+      }),
+    };
+
+    await expect(
+      reconcileSupabaseCredentialSource({
+        operationKey: "credential:reset:rpc-missing",
+        sourceDocumentId: "referral.rpc-missing",
+        adminClient,
+        sanityClient: sanity.client,
+      })
+    ).rejects.toMatchObject({ code: "PGRST202" });
     expect(adminClient.rpc).toHaveBeenCalledTimes(1);
     expect(sanity.client.fetch).not.toHaveBeenCalled();
     expect(sanity.client.transaction).not.toHaveBeenCalled();
@@ -162,7 +190,7 @@ describe("credential recovery saga", () => {
     const adminClient = {
       auth: { admin: { updateUserById: jest.fn() } },
       rpc: jest.fn(async (name) => {
-        if (name === "roo_apply_credential_source_operation") {
+        if (name === "roo_apply_credential_source_operation_v2") {
           sourceAttempts += 1;
           if (sourceAttempts === 1) {
             return { data: null, error: { code: "SOURCE_WRITE_FAILED" } };
@@ -175,10 +203,10 @@ describe("credential recovery saga", () => {
             error: null,
           };
         }
-        if (name === "roo_list_credential_recovery") {
+        if (name === "roo_list_credential_recovery_v2") {
           return { data: [], error: null };
         }
-        if (name === "roo_get_credential_operation") {
+        if (name === "roo_get_credential_operation_v2") {
           return { data: row, error: null };
         }
         if (name === "roo_claim_document_mutation_mirror_events") {
@@ -198,7 +226,7 @@ describe("credential recovery saga", () => {
             error: null,
           };
         }
-        if (name === "roo_complete_credential_operation") {
+        if (name === "roo_complete_credential_operation_v2") {
           completions += 1;
           if (completions === 1) sessionVersion += 1;
           return {
@@ -206,7 +234,7 @@ describe("credential recovery saga", () => {
             error: null,
           };
         }
-        if (name === "roo_mark_credential_operation") {
+        if (name === "roo_mark_credential_operation_v2") {
           return { data: { status: "auth_applied" }, error: null };
         }
         throw new Error(`Unexpected RPC: ${name}`);
@@ -241,7 +269,7 @@ describe("credential recovery saga", () => {
     expect(sessionVersion).toBe(2);
     expect(completions).toBe(1);
     expect(adminClient.rpc).toHaveBeenCalledWith(
-      "roo_mark_credential_operation",
+      "roo_mark_credential_operation_v2",
       {
         p_operation_key: row.operation_key,
         p_status: "auth_applied",
@@ -285,16 +313,16 @@ describe("credential recovery saga", () => {
     const adminClient = {
       auth: { admin: { updateUserById: jest.fn() } },
       rpc: jest.fn(async (name, args) => {
-        if (name === "roo_list_credential_recovery") {
+        if (name === "roo_list_credential_recovery_v2") {
           if (listed) return { data: [], error: null };
           listed = true;
           return { data: [row], error: null };
         }
-        if (name === "roo_mark_credential_source_applied") {
+        if (name === "roo_mark_credential_source_applied_v2") {
           expect(args.p_source_revision).toBe("sanity-r1-next");
           return { data: { status: "source_applied" }, error: null };
         }
-        if (name === "roo_complete_credential_operation") {
+        if (name === "roo_complete_credential_operation_v2") {
           return { data: { session_version: 3 }, error: null };
         }
         throw new Error(`Unexpected RPC: ${name}`);
@@ -343,11 +371,11 @@ describe("credential recovery saga", () => {
         },
       },
       rpc: jest.fn(async (name, args) => {
-        if (name === "roo_list_credential_recovery") {
+        if (name === "roo_list_credential_recovery_v2") {
           listCount += 1;
           return { data: listCount <= 2 ? [{ ...row }] : [], error: null };
         }
-        if (name === "roo_get_credential_operation") {
+        if (name === "roo_get_credential_operation_v2") {
           return { data: { ...row }, error: null };
         }
         if (name === "roo_record_credential_recovery_failure") {
@@ -361,13 +389,13 @@ describe("credential recovery saga", () => {
             error: null,
           };
         }
-        if (name === "roo_mark_credential_operation") {
+        if (name === "roo_mark_credential_operation_v2") {
           return { data: { status: "auth_applied" }, error: null };
         }
-        if (name === "roo_mark_credential_source_applied") {
+        if (name === "roo_mark_credential_source_applied_v2") {
           return { data: { status: "source_applied" }, error: null };
         }
-        if (name === "roo_complete_credential_operation") {
+        if (name === "roo_complete_credential_operation_v2") {
           completed += 1;
           return { data: { session_version: 2 }, error: null };
         }
@@ -421,7 +449,7 @@ describe("credential recovery saga", () => {
     const adminClient = {
       auth: { admin: { updateUserById } },
       rpc: jest.fn(async (name) => {
-        if (name === "roo_get_credential_operation") {
+        if (name === "roo_get_credential_operation_v2") {
           return {
             data: {
               operation_key: "credential:reset:quarantined",
@@ -465,7 +493,7 @@ describe("credential recovery saga", () => {
     };
     const adminClient = {
       rpc: jest.fn(async (name) => {
-        if (name === "roo_list_credential_recovery") {
+        if (name === "roo_list_credential_recovery_v2") {
           return { data: [row], error: null };
         }
         throw new Error(`Unexpected RPC: ${name}`);
@@ -504,7 +532,7 @@ describe("credential recovery saga", () => {
     };
     const adminClient = {
       rpc: jest.fn(async (name) => {
-        if (name === "roo_list_credential_recovery") {
+        if (name === "roo_list_credential_recovery_v2") {
           return { data: [row], error: null };
         }
         throw new Error(`Unexpected RPC: ${name}`);
@@ -553,7 +581,7 @@ describe("credential recovery saga", () => {
     };
     const adminClient = {
       rpc: jest.fn(async (name, args) => {
-        if (name === "roo_list_credential_recovery") {
+        if (name === "roo_list_credential_recovery_v2") {
           return { data: [row], error: null };
         }
         if (name === "roo_record_credential_recovery_failure") {
@@ -585,7 +613,109 @@ describe("credential recovery saga", () => {
     expect(adminClient.rpc).toHaveBeenCalledTimes(2);
   });
 
-  test("classifies an unavailable Sanity source as deterministic", async () => {
+  test("falls back to the v1 recorder when the v2 recorder is missing", async () => {
+    const sanity = createSanityClient(null);
+    const row = {
+      operation_key: "credential:reset:recorder-rollout",
+      status: "auth_applied",
+      sessions_revoked_at: "2026-07-18T00:00:00.000Z",
+      source_backend: "sanity",
+      source_document_id: "referral.recorder-rollout",
+      source_preconditions: { resetTokenHash: "missing-token" },
+      source_mutation: mutation,
+    };
+    const adminClient = {
+      rpc: jest.fn(async (name, args) => {
+        if (name === "roo_list_credential_recovery_v2") {
+          return { data: [row], error: null };
+        }
+        if (name === "roo_record_credential_recovery_failure") {
+          return { data: null, error: { code: "PGRST202" } };
+        }
+        if (name === "roo_record_credential_recovery_error") {
+          expect(args).toEqual({
+            p_operation_key: row.operation_key,
+            p_expected_status: "auth_applied",
+            p_error_code: "CREDENTIAL_SOURCE_DOCUMENT_UNAVAILABLE",
+          });
+          return { data: { status: "auth_applied" }, error: null };
+        }
+        throw new Error(`Unexpected RPC: ${name}`);
+      }),
+    };
+
+    await expect(
+      reconcileCredentialOperations({ adminClient, sanityClient: sanity.client })
+    ).resolves.toEqual({
+      checked: 1,
+      recovered: 0,
+      pending: 1,
+      backoff: 0,
+      parked: 0,
+    });
+    expect(adminClient.rpc).toHaveBeenCalledTimes(3);
+  });
+
+  test("surfaces an error when the v1 recorder fallback also fails", async () => {
+    const row = {
+      operation_key: "credential:reset:recorder-fallback-failed",
+      status: "auth_applied",
+      sessions_revoked_at: "2026-07-18T00:00:00.000Z",
+      source_backend: null,
+    };
+    const adminClient = {
+      rpc: jest.fn(async (name) => {
+        if (name === "roo_list_credential_recovery_v2") {
+          return { data: [row], error: null };
+        }
+        if (name === "roo_record_credential_recovery_failure") {
+          return { data: null, error: { code: "PGRST202" } };
+        }
+        if (name === "roo_record_credential_recovery_error") {
+          return { data: null, error: { code: "RECORDER_FALLBACK_FAILED" } };
+        }
+        throw new Error(`Unexpected RPC: ${name}`);
+      }),
+    };
+
+    await expect(
+      reconcileCredentialOperations({
+        adminClient,
+        sanityClient: createSanityClient(null).client,
+      })
+    ).rejects.toMatchObject({ code: "RECORDER_FALLBACK_FAILED" });
+    expect(adminClient.rpc).toHaveBeenCalledTimes(3);
+  });
+
+  test("surfaces a resolved non-missing recorder error without falling back", async () => {
+    const row = {
+      operation_key: "credential:reset:recorder-write-failed",
+      status: "auth_applied",
+      sessions_revoked_at: "2026-07-18T00:00:00.000Z",
+      source_backend: null,
+    };
+    const adminClient = {
+      rpc: jest.fn(async (name) => {
+        if (name === "roo_list_credential_recovery_v2") {
+          return { data: [row], error: null };
+        }
+        if (name === "roo_record_credential_recovery_failure") {
+          return { data: null, error: { code: "RECORDER_WRITE_FAILED" } };
+        }
+        throw new Error(`Unexpected RPC: ${name}`);
+      }),
+    };
+
+    await expect(
+      reconcileCredentialOperations({
+        adminClient,
+        sanityClient: createSanityClient(null).client,
+      })
+    ).rejects.toMatchObject({ code: "RECORDER_WRITE_FAILED" });
+    expect(adminClient.rpc).toHaveBeenCalledTimes(2);
+  });
+
+  test("classifies an unavailable Sanity source as transient", async () => {
     const sanity = createSanityClient(null);
     const row = {
       operation_key: "credential:reset:missing-source",
@@ -598,7 +728,7 @@ describe("credential recovery saga", () => {
     };
     const adminClient = {
       rpc: jest.fn(async (name, args) => {
-        if (name === "roo_list_credential_recovery") {
+        if (name === "roo_list_credential_recovery_v2") {
           return { data: [row], error: null };
         }
         if (name === "roo_record_credential_recovery_failure") {
@@ -606,7 +736,7 @@ describe("credential recovery saga", () => {
             p_operation_key: row.operation_key,
             p_expected_status: "auth_applied",
             p_error_code: "CREDENTIAL_SOURCE_DOCUMENT_UNAVAILABLE",
-            p_error_class: "deterministic",
+            p_error_class: "transient",
           });
           return {
             data: { status: "backoff", retry_status: "backoff" },
@@ -642,7 +772,7 @@ describe("credential recovery saga", () => {
     const adminClient = {
       auth: { admin: { updateUserById } },
       rpc: jest.fn(async (name) => {
-        if (name === "roo_get_credential_operation") {
+        if (name === "roo_get_credential_operation_v2") {
           return {
             data: {
               operation_key: "credential:reset:completed",

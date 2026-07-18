@@ -612,6 +612,12 @@ if (!credentialRetryHardeningFile) {
     "source_recovery_blocked_at timestamptz",
     "credential_operations_retry_ready_idx",
     "roo_record_credential_recovery_failure",
+    "roo_get_credential_operation_v2",
+    "roo_mark_credential_operation_v2",
+    "roo_apply_credential_source_operation_v2",
+    "roo_mark_credential_source_applied_v2",
+    "roo_complete_credential_operation_v2",
+    "roo_list_credential_recovery_v2",
     "v_consecutive_error_count >= 2",
     "v_attempt_count >= 6",
     "interval '5 minutes'",
@@ -629,6 +635,48 @@ if (!credentialRetryHardeningFile) {
       failures.push(`Credential retry hardening migration lacks: ${required}`);
     }
   }
+  for (const v1Function of [
+    "roo_apply_credential_source_operation",
+    "roo_mark_credential_operation",
+    "roo_mark_credential_source_applied",
+    "roo_complete_credential_operation",
+    "roo_record_credential_recovery_error",
+    "roo_list_credential_recovery",
+    "roo_get_credential_operation",
+  ]) {
+    const v1Reference = new RegExp(
+      `public\\.${v1Function}\\s*\\(`,
+      "i"
+    );
+    if (v1Reference.test(sql)) {
+      failures.push(
+        `Credential retry deploy migration alters or calls v1 RPC: ${v1Function}`
+      );
+    }
+  }
+  const classificationStart = sql.indexOf("v_error_class := coalesce");
+  const classificationEnd = sql.indexOf(
+    "v_error_message :=",
+    classificationStart
+  );
+  const defaultClassification = sql.slice(
+    classificationStart,
+    classificationEnd
+  );
+  if (defaultClassification.includes("CREDENTIAL_SOURCE_DOCUMENT_UNAVAILABLE")) {
+    failures.push(
+      "Credential source document unavailability is still deterministic by default."
+    );
+  }
+  if (
+    !/roo_record_credential_recovery_failure\([\s\S]{0,240}'CREDENTIAL_SOURCE_DOCUMENT_UNAVAILABLE'[\s\S]{0,160}'transient'/i.test(
+      sql
+    )
+  ) {
+    failures.push(
+      "Credential source document unavailability is not recorded as transient."
+    );
+  }
   if (
     /Credential source precondition changed'[\s\S]{0,80}errcode\s*=\s*'40001'/i.test(
       sql
@@ -645,6 +693,50 @@ if (!credentialRetryHardeningFile) {
     )
   ) {
     failures.push("Credential failure ops view is not service-role only.");
+  }
+}
+
+const credentialV1RemovalName =
+  "20260718043839_remove_credential_rpc_v1_after_v2_cutover.sql";
+const credentialV1RemovalFile = path.resolve(
+  process.cwd(),
+  "supabase/follow-up-migrations",
+  credentialV1RemovalName
+);
+if (files.includes(credentialV1RemovalName)) {
+  failures.push(
+    "Credential v1 removal migration must not be part of the first deploy."
+  );
+} else if (!fs.existsSync(credentialV1RemovalFile)) {
+  failures.push("Deferred credential v1 removal migration is missing.");
+} else {
+  const sql = fs.readFileSync(credentialV1RemovalFile, "utf8");
+  if (!hasBoundedMigrationPrefix(sql)) {
+    failures.push("Deferred credential v1 removal lacks bounded timeouts.");
+  }
+  for (const required of [
+    "Credential v2 RPC cutover is incomplete",
+    "Credential v1 RPC removal precondition failed",
+    "public.roo_get_credential_operation_v2(text)",
+    "public.roo_mark_credential_operation_v2(text,text,text)",
+    "public.roo_apply_credential_source_operation_v2(text)",
+    "public.roo_mark_credential_source_applied_v2(text,text)",
+    "public.roo_complete_credential_operation_v2(text)",
+    "public.roo_list_credential_recovery_v2(integer)",
+    "drop function public.roo_get_credential_operation(text);",
+    "drop function public.roo_mark_credential_operation(text, text, text);",
+    "drop function public.roo_apply_credential_source_operation(text);",
+    "drop function public.roo_mark_credential_source_applied(text, text);",
+    "drop function public.roo_complete_credential_operation(text);",
+    "drop function public.roo_list_credential_recovery(integer);",
+    "drop function public.roo_record_credential_recovery_error(text, text, text);",
+  ]) {
+    if (!sql.includes(required)) {
+      failures.push(`Deferred credential v1 removal lacks: ${required}`);
+    }
+  }
+  if (/\bcascade\b/i.test(sql)) {
+    failures.push("Deferred credential v1 removal must not use CASCADE.");
   }
 }
 
