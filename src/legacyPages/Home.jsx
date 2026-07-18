@@ -152,39 +152,52 @@ export default function Home({ initialData = null }) {
     return undefined;
   }, [isLowPerf]);
 
+  const [servicesAbsorbed, setServicesAbsorbed] = useState(false);
+  useEffect(() => {
+    const sync = () =>
+      setServicesAbsorbed(
+        document.documentElement.dataset.hero3dBenefits === "on"
+      );
+    sync();
+    window.addEventListener("hero3d:benefits", sync);
+    return () => window.removeEventListener("hero3d:benefits", sync);
+  }, []);
+
   return (
     <>
       <TournamentAnnouncement />
       <Hero3DSection />
       <DeferredSection
         fallbackClassName="min-h-[510px]"
-        rootMargin="160px 0px"
-        eager={eagerAll}
-      >
-        <StreamerYoutuberReviews initialData={initialData?.reviews || null} />
-      </DeferredSection>
-      <DeferredSection
-        fallbackClassName="min-h-[260px]"
-        rootMargin="160px 0px"
-        eager={eagerAll}
-      >
-        <div className="deferred-section-content">
-          <About initialData={initialData?.about || null} />
-        </div>
-      </DeferredSection>
-      <section id="services" style={{ scrollMarginTop: "var(--section-nav-offset)" }}>
-        <DeferredSection
-          fallbackClassName="min-h-[3100px] sm:min-h-[520px]"
-          rootMargin="240px 0px"
+          rootMargin="160px 0px"
           eager={eagerAll}
         >
-          <Suspense fallback={<div className="min-h-[520px]" />}>
-            <div className="deferred-section-content">
-              <Services initialData={initialData?.services || null} />
-            </div>
-          </Suspense>
+          <StreamerYoutuberReviews initialData={initialData?.reviews || null} />
         </DeferredSection>
-      </section>
+        <DeferredSection
+          fallbackClassName="min-h-[260px]"
+          rootMargin="160px 0px"
+          eager={eagerAll}
+        >
+          <div className="deferred-section-content">
+            <About initialData={initialData?.about || null} />
+          </div>
+        </DeferredSection>
+      {!servicesAbsorbed && (
+        <section id="services" style={{ scrollMarginTop: "var(--section-nav-offset)" }}>
+          <DeferredSection
+            fallbackClassName="min-h-[3100px] sm:min-h-[520px]"
+            rootMargin="240px 0px"
+            eager={eagerAll}
+          >
+            <Suspense fallback={<div className="min-h-[520px]" />}>
+              <div className="deferred-section-content">
+                <Services initialData={initialData?.services || null} />
+              </div>
+            </Suspense>
+          </DeferredSection>
+        </section>
+      )}
       <section id="packages" style={{ scrollMarginTop: "var(--section-nav-offset)" }}>
         <DeferredSection
           fallbackClassName="min-h-[2800px] sm:min-h-[620px]"

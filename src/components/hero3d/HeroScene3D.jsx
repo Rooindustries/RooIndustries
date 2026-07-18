@@ -27,7 +27,18 @@ export const HERO3D_VARIANTS = {
   v3: { loadScale: 1.08, loadY: -1.1, loadX: 0, loadRotY: 0, scrim: 0.45, envRamp: false, preExplode: 0 },
   v4: { loadScale: 0.9, loadY: -0.45, loadX: 0, loadRotY: 0, scrim: 0.3, envRamp: true, preExplode: 0 },
   v5: { loadScale: 0.8, loadY: -0.5, loadX: 0, loadRotY: 0, scrim: 0.9, envRamp: false, preExplode: 0.14 },
+  v6: { loadScale: 0.78, loadY: -0.12, loadX: 1.55, loadRotY: 0.9, scrim: 0, envRamp: false, preExplode: 0, split: true, benefits: true },
 };
+
+// Services-section content ridden into the teardown as sequential callouts.
+// Windows [in, out] are on scene progress; each anchors to the moving part.
+export const HERO3D_BENEFITS = [
+  { key: "delay", title: "Lower delay", desc: "Polling, drivers, power, and game settings lined up so the mouse tracks closer to your hand.", window: [0.18, 0.33] },
+  { key: "fps", title: "More FPS", desc: "BIOS, Windows, GPU, RAM, and in-game settings tuned around the titles you play most.", window: [0.28, 0.43] },
+  { key: "frames", title: "Stable frames", desc: "1% lows and frametimes tightened so fights feel smooth and the counter matches it.", window: [0.38, 0.53] },
+  { key: "junk", title: "Less junk running", desc: "Cleaner startup, lighter overlays, and power behavior that leaves room for the game.", window: [0.47, 0.62] },
+  { key: "sustain", title: "FPS stays up", desc: "Heat, boost, RAM, and stability dialed in so the PC keeps pace deep into the session.", window: [0.55, 0.7] },
+];
 
 const FIN_COUNT = 30;
 const BLADE_COUNT = 9;
@@ -403,11 +414,15 @@ function GpuRig({ progressRef, colors, variant }) {
       shadowRef.current.scale.set(spread, spread, 1);
     }
 
-    const labelPhases = [
-      pulse(p, 0.2, 0.27, 0.5, 0.58),
-      pulse(p, 0.26, 0.33, 0.5, 0.58),
-      pulse(p, 0.32, 0.39, 0.5, 0.58),
-    ];
+    const labelPhases = variant.benefits
+      ? HERO3D_BENEFITS.map((b) =>
+          pulse(p, b.window[0], b.window[0] + 0.05, b.window[1] - 0.04, b.window[1])
+        )
+      : [
+          pulse(p, 0.2, 0.27, 0.5, 0.58),
+          pulse(p, 0.26, 0.33, 0.5, 0.58),
+          pulse(p, 0.32, 0.39, 0.5, 0.58),
+        ];
     labelRefs.current.forEach((el, i) => {
       if (el) el.style.opacity = labelPhases[i].toFixed(3);
     });
@@ -434,7 +449,7 @@ function GpuRig({ progressRef, colors, variant }) {
     pointerEvents: "none",
   };
 
-  const Callout = ({ side, y, children, index }) => {
+  const Callout = ({ side, y, children, index, desc }) => {
     const dir = side === "left" ? -1 : 1;
     const lineLen = 0.5;
     const edgeX = dir * 1.68;
@@ -455,8 +470,27 @@ function GpuRig({ progressRef, colors, variant }) {
           center
           zIndexRange={[20, 0]}
         >
-          <div ref={setLabelRef(index)} style={labelStyle}>
+          <div
+            ref={setLabelRef(index)}
+            style={desc ? { ...labelStyle, whiteSpace: "normal", width: "250px" } : labelStyle}
+          >
             {children}
+            {desc && (
+              <span
+                style={{
+                  display: "block",
+                  marginTop: "4px",
+                  fontSize: "12px",
+                  fontWeight: 500,
+                  letterSpacing: "0.01em",
+                  textTransform: "none",
+                  color: "rgba(226, 236, 248, 0.85)",
+                  lineHeight: 1.45,
+                }}
+              >
+                {desc}
+              </span>
+            )}
           </div>
         </Html>
       </group>
@@ -496,9 +530,15 @@ function GpuRig({ progressRef, colors, variant }) {
         <mesh position={[1.2, 0.01, 0]} material={materials.accentStrip}>
           <boxGeometry args={[0.5, 0.07, 0.05]} />
         </mesh>
-        <Callout side="left" y={0.25} index={2}>
-          Windows & driver debloat
-        </Callout>
+        {variant.benefits ? (
+          <Callout side="left" y={0.3} index={0} desc={HERO3D_BENEFITS[0].desc}>
+            {HERO3D_BENEFITS[0].title}
+          </Callout>
+        ) : (
+          <Callout side="left" y={0.25} index={2}>
+            Windows & driver debloat
+          </Callout>
+        )}
       </group>
 
       <group ref={pcbRef}>
@@ -523,9 +563,15 @@ function GpuRig({ progressRef, colors, variant }) {
             <boxGeometry args={chip.size} />
           </mesh>
         ))}
-        <Callout side="right" y={0.1} index={0}>
-          BIOS & NVRAM tuning
-        </Callout>
+        {variant.benefits ? (
+          <Callout side="right" y={0.15} index={1} desc={HERO3D_BENEFITS[1].desc}>
+            {HERO3D_BENEFITS[1].title}
+          </Callout>
+        ) : (
+          <Callout side="right" y={0.1} index={0}>
+            BIOS & NVRAM tuning
+          </Callout>
+        )}
       </group>
 
       <group ref={finsRef}>
@@ -544,9 +590,15 @@ function GpuRig({ progressRef, colors, variant }) {
             <cylinderGeometry args={[0.045, 0.045, 3.0, 16]} />
           </mesh>
         ))}
-        <Callout side="left" y={0.15} index={1}>
-          Thermals & fan curves
-        </Callout>
+        {variant.benefits ? (
+          <Callout side="left" y={0.2} index={2} desc={HERO3D_BENEFITS[2].desc}>
+            {HERO3D_BENEFITS[2].title}
+          </Callout>
+        ) : (
+          <Callout side="left" y={0.15} index={1}>
+            Thermals & fan curves
+          </Callout>
+        )}
       </group>
 
       <group ref={shroudRef}>
@@ -578,6 +630,11 @@ function GpuRig({ progressRef, colors, variant }) {
         <mesh position={[-1.45, 0.05, 0.6]} material={materials.accentStrip}>
           <boxGeometry args={[0.32, 0.06, 0.1]} />
         </mesh>
+        {variant.benefits && (
+          <Callout side="right" y={0.1} index={3} desc={HERO3D_BENEFITS[3].desc}>
+            {HERO3D_BENEFITS[3].title}
+          </Callout>
+        )}
       </group>
 
       <group ref={fansRef}>
@@ -595,6 +652,11 @@ function GpuRig({ progressRef, colors, variant }) {
           glowTexture={glowTexture}
           glowRef={glowRef}
         />
+        {variant.benefits && (
+          <Callout side="left" y={0.05} index={4} desc={HERO3D_BENEFITS[4].desc}>
+            {HERO3D_BENEFITS[4].title}
+          </Callout>
+        )}
       </group>
 
       <mesh position={[0, -1.72, 0]} rotation={[-Math.PI / 2, 0, 0]}>
