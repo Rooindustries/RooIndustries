@@ -17,13 +17,17 @@ const mockLocation = {
 };
 
 const mockNavigate = jest.fn();
+const mockIntercomMessenger = jest.fn(() => null);
 const marker = (name) => () => <div>{name}</div>;
 const originalSetImmediate = global.setImmediate;
 const originalClearImmediate = global.clearImmediate;
 
 jest.mock("../components/Navbar", () => () => null);
 jest.mock("../components/ReservationBanner", () => () => null);
-jest.mock("../components/IntercomMessenger", () => () => null);
+jest.mock(
+  "../components/IntercomMessenger",
+  () => (props) => mockIntercomMessenger(props)
+);
 jest.mock("../components/PerfDebugOverlay", () => () => null);
 jest.mock("../components/BookingModal", () => ({ children }) => (
   <div role="dialog">{children}</div>
@@ -125,6 +129,7 @@ describe("checkout background hydration", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
     window.scrollTo = jest.fn();
+    mockIntercomMessenger.mockClear();
   });
 
   test("restores the stored background only after the first client render", async () => {
@@ -150,6 +155,12 @@ describe("checkout background hydration", () => {
       expect(container).toHaveTextContent("REVIEWS BACKGROUND");
     });
     expect(container).toHaveTextContent("PAYMENT MODAL");
+    expect(mockIntercomMessenger).toHaveBeenCalledWith(
+      expect.objectContaining({
+        disabled: true,
+        disabledRoutes: ["/booking", "/payment"],
+      })
+    );
     const hydrationErrors = errorSpy.mock.calls.filter((args) =>
       args.some((value) =>
         /hydration failed|did not match|minified react error #418/i.test(
