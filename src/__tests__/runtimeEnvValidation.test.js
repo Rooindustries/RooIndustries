@@ -37,6 +37,9 @@ const validReleaseEnv = () => ({
   SUPABASE_CUTOVER_ENABLED: "1",
   COMMERCE_CUTOVER_ENABLED: "1",
   COMMERCE_FAILOVER_GENERATION: "1",
+  COMMERCE_FAILOVER_LEASE: `eyJ2ZXJzaW9uIjoxfQ.${"a".repeat(43)}`,
+  COMMERCE_FAILOVER_LEASE_SECRET: "commerce-failover-lease-secret-placeholder",
+  COMMERCE_DEPLOYMENT_ID: "runtime-validation-deployment",
   SUPABASE_CONTENT_CANARY_PERCENT: "0",
   SUPABASE_COMMERCE_CANARY_PERCENT: "0",
   SANITY_PROJECT_ID: "project",
@@ -89,6 +92,7 @@ const validReleaseEnv = () => ({
   TOURNEY_FAILOVER_GENERATION: "0",
   TOURNEY_HARDENING_V4_ENABLED: "0",
   TOURNEY_V4_ACTIVATION_ENABLED: "0",
+  TOURNEY_ALLOW_INSECURE_COOKIE: "0",
   SUPABASE_MIGRATION_ENDPOINT_ENABLED: "0",
   SUPABASE_MIGRATION_TARGET_ENVIRONMENT: "",
   SUPABASE_MIGRATION_EXPECTED_LEGACY_FINGERPRINT: "",
@@ -313,6 +317,54 @@ describe("release runtime environment validation", () => {
 
     expect(result.status).toBe(0);
     expect(result.output).not.toContain("Commerce-only cutover");
+  });
+
+  test.each([
+    ["COMMERCE_FAILOVER_LEASE", { COMMERCE_FAILOVER_LEASE: "" }],
+    ["COMMERCE_FAILOVER_LEASE_SECRET", { COMMERCE_FAILOVER_LEASE_SECRET: "" }],
+    [
+      "COMMERCE_DEPLOYMENT_ID",
+      {
+        COMMERCE_DEPLOYMENT_ID: "",
+        VERCEL_DEPLOYMENT_ID: "",
+        VERCEL_GIT_COMMIT_SHA: "",
+      },
+    ],
+  ])("requires %s for a Sanity commerce failover", (key, override) => {
+    const result = validate({
+      VERCEL_ENV: "production",
+      DATA_PRIMARY_BACKEND: "supabase",
+      COMMERCE_PRIMARY_BACKEND: "sanity",
+      ...override,
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(key);
+  });
+
+  test("rejects a short Sanity commerce failover signing secret", () => {
+    const result = validate({
+      VERCEL_ENV: "production",
+      COMMERCE_PRIMARY_BACKEND: "sanity",
+      COMMERCE_FAILOVER_LEASE_SECRET: "too-short",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(
+      "COMMERCE_FAILOVER_LEASE_SECRET must contain at least 32 bytes"
+    );
+  });
+
+  test("rejects insecure Tourney cookies in production", () => {
+    const result = validate({
+      VERCEL_ENV: "production",
+      TOURNEY_ALLOW_INSECURE_COOKIE: "1",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(
+      "TOURNEY_ALLOW_INSECURE_COOKIE=1 is forbidden in production"
+    );
   });
 
   test.each([

@@ -24,6 +24,7 @@ jest.mock("../server/tourney/store", () => ({
 
 const {
   GET,
+  currentShadowAcceptancePasses,
   normalizeTourneyReadinessForResponse,
 } = require("../../app/api/admin/tourney-readiness/route.js");
 const originalAdminKey = process.env.REF_ADMIN_KEY;
@@ -75,6 +76,13 @@ const createLegacySql = () => jest.fn(async (strings) => {
       primary_p95_ms: 10,
       shadow_p95_ms: 12,
       last_observed_at: new Date("2026-07-14T00:00:00.000Z"),
+    }];
+  }
+  if (query.includes("from tourney_shadow_latency_baselines")) {
+    return [{
+      route: "public_roster",
+      primary_p95_ms: 10,
+      sample_count: 30,
     }];
   }
   if (query.includes("from tourney_identity_conflicts")) return [{ count: 0 }];
@@ -150,37 +158,85 @@ describe("Tourney legacy readiness route", () => {
   });
 
   test("reports only current routes and deduplicates blockers", () => {
-    expect(normalizeTourneyReadinessForResponse({
+    const cleanRoute = {
+      samples: 30,
+      mismatches: 0,
+      primary_p95_ms: 100,
+      shadow_p95_ms: 110,
+    };
+    const readiness = {
       clock_blockers: [
         "discord_blocker",
         "shadow_acceptance_gate_failed",
         "discord_blocker",
       ],
       shadow_reads: {
-        public_roster: { samples: 30, mismatches: 0 },
-        public_bracket: { samples: 30, mismatches: 0 },
-        admin_players: { samples: 30, mismatches: 0 },
-        appeals: { samples: 30, mismatches: 0 },
-        payouts: { samples: 30, mismatches: 0 },
+        public_roster: cleanRoute,
+        public_bracket: cleanRoute,
+        admin_players: cleanRoute,
+        appeals: cleanRoute,
+        payouts: cleanRoute,
         players: { samples: 30, mismatches: 30 },
         bracket: { samples: 30, mismatches: 30 },
         operations: { samples: 30, mismatches: 30 },
       },
-    })).toMatchObject({
-      clock_blockers: [
-        "discord_blocker",
-        "shadow_acceptance_gate_failed",
-      ],
+      shadow_latency_baselines: Object.fromEntries(
+        [
+          "public_roster",
+          "public_bracket",
+          "admin_players",
+          "appeals",
+          "payouts",
+        ].map((route) => [route, { primary_p95_ms: 100 }])
+      ),
+    };
+    expect(currentShadowAcceptancePasses(readiness)).toBe(true);
+    expect(normalizeTourneyReadinessForResponse(readiness)).toMatchObject({
+      clock_blockers: ["discord_blocker"],
       shadow_reads: {
-        public_roster: { samples: 30, mismatches: 0 },
-        public_bracket: { samples: 30, mismatches: 0 },
-        admin_players: { samples: 30, mismatches: 0 },
-        appeals: { samples: 30, mismatches: 0 },
-        payouts: { samples: 30, mismatches: 0 },
+        public_roster: cleanRoute,
+        public_bracket: cleanRoute,
+        admin_players: cleanRoute,
+        appeals: cleanRoute,
+        payouts: cleanRoute,
       },
     });
     expect(normalizeTourneyReadinessForResponse({
       shadow_reads: { operations: { samples: 30, mismatches: 30 } },
     }).shadow_reads).toEqual({});
   });
+
+  test("retains the acceptance blocker when a current route misses the contract", () => {
+    const readiness = {
+      clock_blockers: ["shadow_acceptance_gate_failed"],
+      shadow_reads: Object.fromEntries(
+        [...currentShadowRoutesForTest()].map((route) => [route, {
+          samples: route === "payouts" ? 29 : 30,
+          mismatches: 0,
+          primary_p95_ms: 100,
+          shadow_p95_ms: 110,
+        }])
+      ),
+      shadow_latency_baselines: Object.fromEntries(
+        [...currentShadowRoutesForTest()].map((route) => [
+          route,
+          { primary_p95_ms: 100 },
+        ])
+      ),
+    };
+
+    expect(currentShadowAcceptancePasses(readiness)).toBe(false);
+    expect(normalizeTourneyReadinessForResponse(readiness).clock_blockers)
+      .toContain("shadow_acceptance_gate_failed");
+  });
 });
+
+function currentShadowRoutesForTest() {
+  return new Set([
+    "public_roster",
+    "public_bracket",
+    "admin_players",
+    "appeals",
+    "payouts",
+  ]);
+}

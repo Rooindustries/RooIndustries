@@ -12,6 +12,50 @@ begin
   select generation into v_generation
   from migration.commerce_control where singleton;
 
+  begin
+    perform public.roo_apply_commerce_document_mutations(
+      'fixture:too-many-mutations',
+      (
+        select jsonb_agg(jsonb_build_object(
+          'operation', 'delete',
+          'id', 'coupon.bound-' || item::text
+        ))
+        from generate_series(1, 101) item
+      ),
+      v_generation
+    );
+    raise exception 'commerce mutation count bound was not enforced';
+  exception when sqlstate '22023' then null;
+  end;
+
+  begin
+    perform public.roo_apply_commerce_document_mutations(
+      'fixture:invalid-identifier',
+      '[{"operation":"create","document":{"_id":"coupon..invalid","_type":"coupon","code":"INVALID"}}]'::jsonb,
+      v_generation
+    );
+    raise exception 'commerce mutation identifier grammar was not enforced';
+  exception when sqlstate '22023' then null;
+  end;
+
+  begin
+    perform public.roo_apply_commerce_document_mutations(
+      'fixture:oversized-document',
+      jsonb_build_array(jsonb_build_object(
+        'operation', 'create',
+        'document', jsonb_build_object(
+          '_id', 'coupon.oversized',
+          '_type', 'coupon',
+          'code', 'OVERSIZED',
+          'notes', repeat('x', 262145)
+        )
+      )),
+      v_generation
+    );
+    raise exception 'commerce mutation document size bound was not enforced';
+  exception when sqlstate '22023' then null;
+  end;
+
   perform public.roo_set_commerce_starts_paused(
     v_generation,
     true,
@@ -39,6 +83,189 @@ begin
     '[{"operation":"create","document":{"_id":"slotHold.fixture","_type":"slotHold","startTimeUTC":"2099-01-01T00:00:00.000Z","phase":"holding","expiresAt":"2099-01-01T00:20:00.000Z","holdNonce":"fixture"}}]'::jsonb,
     v_generation
   );
+
+  if not exists (
+    select 1
+    from commerce.slot_claims claim
+    join commerce.slot_holds hold on hold.id = claim.hold_id
+    where hold.legacy_sanity_id = 'slotHold.fixture'
+      and claim.claim_type = 'hold'
+  ) then
+    raise exception 'new hold did not acquire the authoritative slot claim';
+  end if;
+
+  perform public.roo_apply_commerce_document_mutations(
+    'fixture:hold-payment',
+    jsonb_build_array(jsonb_build_object(
+      'operation', 'replace',
+      'expected_revision', (
+        select source_revision from migration.source_documents
+        where legacy_sanity_id = 'slotHold.fixture'
+      ),
+      'document', (
+        select payload || jsonb_build_object('phase', 'payment_pending')
+        from migration.source_documents
+        where legacy_sanity_id = 'slotHold.fixture'
+      )
+    )),
+    v_generation
+  );
+  if not exists (
+    select 1
+    from commerce.slot_claims claim
+    join commerce.slot_holds hold on hold.id = claim.hold_id
+    where hold.legacy_sanity_id = 'slotHold.fixture'
+      and hold.phase = 'payment'
+      and claim.claim_type = 'hold'
+  ) then
+    raise exception 'payment transition did not retain hold claim ownership';
+  end if;
+
+  begin
+    delete from commerce.slot_claims claim
+    using commerce.slot_holds hold
+    where hold.id = claim.hold_id
+      and hold.legacy_sanity_id = 'slotHold.fixture';
+    perform public.roo_apply_commerce_document_mutations(
+      'fixture:payment-without-claim',
+      jsonb_build_array(jsonb_build_object(
+        'operation', 'replace',
+        'expected_revision', (
+          select source_revision from migration.source_documents
+          where legacy_sanity_id = 'slotHold.fixture'
+        ),
+        'document', (
+          select payload || jsonb_build_object('expiresAt', '2099-01-01T00:25:00.000Z')
+          from migration.source_documents
+          where legacy_sanity_id = 'slotHold.fixture'
+        )
+      )),
+      v_generation
+    );
+    raise exception 'payment transition without an owned claim was accepted';
+  exception when unique_violation then null;
+  end;
+
+  perform public.roo_apply_commerce_document_mutations(
+    'fixture:booked-slot',
+    '[
+      {"operation":"create","document":{"_id":"booking.claimed-slot","_type":"booking","status":"captured","packageTitle":"Claim Fixture","startTimeUTC":"2099-02-01T00:00:00.000Z","grossAmount":10,"currency":"USD"}},
+      {"operation":"create","document":{"_id":"bookingSlot.claimed-slot","_type":"bookingSlot","bookingId":"booking.claimed-slot","startTimeUTC":"2099-02-01T00:00:00.000Z","status":"active","lockedAt":"2099-01-01T00:00:00.000Z"}}
+    ]'::jsonb,
+    v_generation
+  );
+  begin
+    perform public.roo_apply_commerce_document_mutations(
+      'fixture:hold-races-booking',
+      '[{"operation":"create","document":{"_id":"slotHold.races-booking","_type":"slotHold","startTimeUTC":"2099-02-01T00:00:00.000Z","packageTitle":"Claim Fixture","phase":"holding","expiresAt":"2099-02-01T00:20:00.000Z","holdNonce":"racing-hold"}}]'::jsonb,
+      v_generation
+    );
+    raise exception 'a hold acquired an already booked slot';
+  exception when unique_violation then null;
+  end;
+  if exists (
+    select 1 from migration.source_documents
+    where legacy_sanity_id = 'slotHold.races-booking'
+  ) or not exists (
+    select 1 from commerce.slot_claims claim
+    join commerce.bookings booking on booking.id = claim.booking_id
+    where booking.legacy_sanity_id = 'booking.claimed-slot'
+      and claim.claim_type = 'booking'
+  ) then
+    raise exception 'conflicting hold rollback damaged the booking claim';
+  end if;
+
+  perform public.roo_apply_commerce_document_mutations(
+    'fixture:hold-before-recovery',
+    '[{"operation":"create","document":{"_id":"slotHold.before-recovery","_type":"slotHold","startTimeUTC":"2099-02-02T00:00:00.000Z","packageTitle":"Claim Fixture","phase":"holding","expiresAt":"2099-02-02T00:20:00.000Z","holdNonce":"existing-hold"}}]'::jsonb,
+    v_generation
+  );
+  begin
+    perform public.roo_apply_commerce_document_mutations(
+      'fixture:recovery-races-hold',
+      '[
+        {"operation":"create","document":{"_id":"booking.races-hold","_type":"booking","status":"captured","packageTitle":"Claim Fixture","startTimeUTC":"2099-02-02T00:00:00.000Z","grossAmount":10,"currency":"USD"}},
+        {"operation":"create","document":{"_id":"bookingSlot.races-hold","_type":"bookingSlot","bookingId":"booking.races-hold","startTimeUTC":"2099-02-02T00:00:00.000Z","status":"active","lockedAt":"2099-01-01T00:00:00.000Z"}}
+      ]'::jsonb,
+      v_generation
+    );
+    raise exception 'missing-hold recovery replaced another customer hold';
+  exception when unique_violation then null;
+  end;
+  if exists (
+    select 1 from migration.source_documents
+    where legacy_sanity_id = 'booking.races-hold'
+  ) or not exists (
+    select 1 from commerce.slot_claims claim
+    join commerce.slot_holds hold on hold.id = claim.hold_id
+    where hold.legacy_sanity_id = 'slotHold.before-recovery'
+      and claim.claim_type = 'hold'
+  ) then
+    raise exception 'conflicting recovery rollback damaged the hold claim';
+  end if;
+
+  perform public.roo_apply_commerce_document_mutations(
+    'fixture:missing-hold-recovery',
+    '[
+      {"operation":"create","document":{"_id":"booking.missing-hold","_type":"booking","status":"captured","packageTitle":"Claim Fixture","startTimeUTC":"2099-02-03T00:00:00.000Z","grossAmount":10,"currency":"USD"}},
+      {"operation":"create","document":{"_id":"bookingSlot.missing-hold","_type":"bookingSlot","bookingId":"booking.missing-hold","startTimeUTC":"2099-02-03T00:00:00.000Z","status":"active","lockedAt":"2099-01-01T00:00:00.000Z"}}
+    ]'::jsonb,
+    v_generation
+  );
+  if not exists (
+    select 1 from commerce.slot_claims claim
+    join commerce.bookings booking on booking.id = claim.booking_id
+    where booking.legacy_sanity_id = 'booking.missing-hold'
+      and claim.claim_type = 'booking'
+  ) then
+    raise exception 'missing-hold recovery did not atomically claim the slot';
+  end if;
+
+  perform public.roo_apply_commerce_document_mutations(
+    'fixture:hold-for-booking',
+    '[{"operation":"create","document":{"_id":"slotHold.for-booking","_type":"slotHold","startTimeUTC":"2099-02-04T00:00:00.000Z","packageTitle":"Claim Fixture","phase":"holding","expiresAt":"2099-02-04T00:20:00.000Z","holdNonce":"booking-hold"}}]'::jsonb,
+    v_generation
+  );
+  perform public.roo_apply_commerce_document_mutations(
+    'fixture:consume-hold-booking',
+    jsonb_build_array(
+      jsonb_build_object(
+        'operation', 'create',
+        'document', '{"_id":"booking.consumes-hold","_type":"booking","status":"captured","packageTitle":"Claim Fixture","startTimeUTC":"2099-02-04T00:00:00.000Z","grossAmount":10,"currency":"USD"}'::jsonb
+      ),
+      jsonb_build_object(
+        'operation', 'create',
+        'document', '{"_id":"bookingSlot.consumes-hold","_type":"bookingSlot","bookingId":"booking.consumes-hold","startTimeUTC":"2099-02-04T00:00:00.000Z","status":"active","lockedAt":"2099-01-01T00:00:00.000Z"}'::jsonb
+      ),
+      jsonb_build_object(
+        'operation', 'replace',
+        'expected_revision', (
+          select source_revision from migration.source_documents
+          where legacy_sanity_id = 'slotHold.for-booking'
+        ),
+        'document', (
+          select payload || jsonb_build_object(
+            'phase', 'consumed',
+            'bookingId', 'booking.consumes-hold'
+          )
+          from migration.source_documents
+          where legacy_sanity_id = 'slotHold.for-booking'
+        )
+      )
+    ),
+    v_generation
+  );
+  if not exists (
+    select 1 from commerce.slot_claims claim
+    join commerce.bookings booking on booking.id = claim.booking_id
+    join commerce.slot_holds hold
+      on hold.legacy_sanity_id = 'slotHold.for-booking'
+    where booking.legacy_sanity_id = 'booking.consumes-hold'
+      and claim.claim_type = 'booking'
+      and hold.phase = 'consumed'
+  ) then
+    raise exception 'normal hold-to-booking transition did not transfer the slot claim';
+  end if;
 
   perform public.roo_apply_commerce_document_mutations(
     'fixture:create-expired-supabase-hold',
@@ -466,6 +693,79 @@ begin
   ) then
     raise exception 'future function default privileges are unsafe';
   end if;
+
+  insert into auth.users (id, email)
+  values (
+    '10000000-0000-4000-8000-000000000092',
+    'inactive-licensing-fixture@example.invalid'
+  ) on conflict (id) do nothing;
+  insert into accounts.principals (id, status)
+  values ('20000000-0000-4000-8000-000000000092', 'active');
+  insert into accounts.principal_auth_users (
+    principal_id,
+    user_id,
+    is_primary,
+    verified_at,
+    source
+  ) values (
+    '20000000-0000-4000-8000-000000000092',
+    '10000000-0000-4000-8000-000000000092',
+    true,
+    now(),
+    'migration'
+  );
+  insert into auth.sessions (user_id)
+  values ('10000000-0000-4000-8000-000000000092');
+
+  if public.roo_entitlement_status(
+    '10000000-0000-4000-8000-000000000092'
+  ) <> '[]'::jsonb then
+    raise exception 'active licensing principal returned an invalid status payload';
+  end if;
+
+  update accounts.principals
+  set status = 'disabled'
+  where id = '20000000-0000-4000-8000-000000000092';
+
+  if exists (
+    select 1 from auth.sessions
+    where user_id = '10000000-0000-4000-8000-000000000092'
+  ) or not exists (
+    select 1 from auth.users
+    where id = '10000000-0000-4000-8000-000000000092'
+      and banned_until = 'infinity'::timestamptz
+  ) then
+    raise exception 'disabling a principal did not revoke and ban its sessions';
+  end if;
+
+  begin
+    perform public.roo_entitlement_status(
+      '10000000-0000-4000-8000-000000000092'
+    );
+    raise exception 'disabled principal retained licensing access';
+  exception when sqlstate 'P0002' then null;
+  end;
+
+  update accounts.principals
+  set status = 'deleted'
+  where id = '20000000-0000-4000-8000-000000000092';
+  begin
+    perform public.roo_claim_entitlement(
+      '10000000-0000-4000-8000-000000000092',
+      'inactive-licensing-fixture@example.invalid',
+      null
+    );
+    raise exception 'deleted principal retained licensing access';
+  exception when sqlstate 'P0002' then null;
+  end;
+
+  begin
+    perform public.roo_entitlement_status(
+      '10000000-0000-4000-8000-000000000099'
+    );
+    raise exception 'missing principal retained licensing access';
+  exception when sqlstate 'P0002' then null;
+  end;
 
   begin
     insert into licensing.products (sku, name, default_max_devices)

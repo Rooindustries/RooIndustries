@@ -107,14 +107,13 @@ export default function RefLogin() {
     const checkSession = async () => {
       if (pendingDiscordChoice) return;
       try {
-        const sessionRes = await fetch("/api/ref/getData");
+        const sessionRes = await fetch("/api/ref/sessionStatus");
         if (sessionRes.ok) {
+          const session = await sessionRes.json();
+          if (!session?.authenticated) return;
           nav("/referrals/dashboard");
-          return;
         }
-      } catch {
-        console.error("Referral session check failed");
-      }
+      } catch {}
     };
     checkSession();
 

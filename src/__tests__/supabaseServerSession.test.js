@@ -17,6 +17,7 @@ jest.mock("../server/supabase/authClient", () => ({
 const {
   clearLegacySupabaseSession,
   getNextSupabaseUser,
+  getSupabaseSessionCookieOptions,
   installLegacySupabaseSession,
 } = require("../server/supabase/serverSession");
 
@@ -92,6 +93,30 @@ describe("Supabase server session bridge", () => {
 
     mockGetUser.mockResolvedValue({ data: { user: verifiedUser }, error: new Error("bad jwt") });
     await expect(getNextSupabaseUser({ request, response })).resolves.toBeNull();
+  });
+
+  test("forces Secure on production Auth cookies without changing HttpOnly", async () => {
+    const req = { headers: { cookie: "" } };
+    const res = createLegacyResponse();
+
+    await installLegacySupabaseSession({
+      req,
+      res,
+      env: { NODE_ENV: "production" },
+      session: { access_token: "access", refresh_token: "refresh" },
+    });
+
+    expect(getSupabaseSessionCookieOptions({ NODE_ENV: "production" })).toEqual({
+      path: "/",
+      sameSite: "lax",
+      secure: true,
+    });
+    for (const cookie of res.getHeader("Set-Cookie")) {
+      expect(cookie).toContain("Secure");
+      expect(cookie).toContain("HttpOnly");
+    }
+    expect(mockCreateServerClient.mock.calls.at(-1)[2].cookieOptions)
+      .toMatchObject({ secure: true, sameSite: "lax", path: "/" });
   });
 
   test("clears only the local Supabase session", async () => {

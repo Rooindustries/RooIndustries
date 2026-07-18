@@ -1,4 +1,7 @@
-import { getSupabaseBrowserClient } from "../lib/supabaseBrowser";
+import {
+  getSupabaseBrowserClient,
+  getSupabaseBrowserCookieOptions,
+} from "../lib/supabaseBrowser";
 
 const mockClient = { auth: {} };
 const mockCreateBrowserClient = jest.fn(() => mockClient);
@@ -25,6 +28,11 @@ describe("Supabase browser client", () => {
       "https://project.supabase.co",
       "sb_publishable_test",
       {
+        cookieOptions: {
+          path: "/",
+          sameSite: "lax",
+          secure: false,
+        },
         auth: {
           autoRefreshToken: false,
           detectSessionInUrl: false,
@@ -32,5 +40,13 @@ describe("Supabase browser client", () => {
         },
       }
     );
+  });
+
+  test("marks browser Auth cookies Secure in production", () => {
+    expect(getSupabaseBrowserCookieOptions({ NODE_ENV: "production" })).toEqual({
+      path: "/",
+      sameSite: "lax",
+      secure: true,
+    });
   });
 });
