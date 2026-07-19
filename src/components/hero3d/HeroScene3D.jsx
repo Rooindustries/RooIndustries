@@ -365,8 +365,8 @@ function GpuRig({ progressRef, topFracRef, colors, variant, onReady }) {
         (1 - payoff * 0.12);
       rigRef.current.scale.set(scale, scale, scale);
       rigRef.current.rotation.y =
-        0.7 +
-        p * 1.9 +
+        0.7 -
+        p * 0.35 +
         variant.loadRotY * heroP +
         t * heroP * 0.05 +
         Math.sin(t * 0.4) * 0.03;
@@ -380,12 +380,12 @@ function GpuRig({ progressRef, topFracRef, colors, variant, onReady }) {
     }
 
     // The exported model carries its own rest pose; choreography adds deltas.
-    if (backplateRef.current) backplateRef.current.position.y = -explodePlate * 0.65;
-    if (pcbRef.current) pcbRef.current.position.y = -explodePlate * 0.25;
-    if (finsRef.current) finsRef.current.position.y = explodeFins * 0.55;
+    if (backplateRef.current) backplateRef.current.position.y = -explodePlate * 0.55;
+    if (pcbRef.current) pcbRef.current.position.y = explodePlate * 0.5;
+    if (finsRef.current) finsRef.current.position.y = -explodeFins * 0.2;
     if (shroudRef.current) shroudRef.current.position.y = explodeShroud * 1.0;
     if (fansRef.current) {
-      fansRef.current.position.y = explodeFans * 1.45;
+      fansRef.current.position.y = explodeFans * 1.35;
       fansRef.current.position.z = explodeFans * 0.25;
     }
 
