@@ -175,7 +175,10 @@ function CameraRig({ progressRef, variant }) {
         : aspect > 1.85
           ? (aspect - 1.85) * 1.5
           : 0;
-    camera.position.z = 7.4 + fit + explode * 0.7 - payoff * 0.55;
+    // Short maximized-browser viewports need extra distance to keep the
+    // load composition inside the first screen.
+    const shortFit = size.height < 860 ? (860 - size.height) / 200 : 0;
+    camera.position.z = 7.4 + fit + shortFit + explode * 0.7 - payoff * 0.55;
     camera.position.y = 0.4 - payoff * 0.15;
     camera.lookAt(0, -0.1, 0);
   });
