@@ -88,7 +88,7 @@ export default function Hero3DSection() {
 
     document.documentElement.classList.toggle(
       "hero3d-stage-active",
-      rect.bottom > window.innerHeight * 0.35
+      rect.bottom > 0
     );
 
     // Ancestors use overflow hidden, which breaks position sticky, and a
