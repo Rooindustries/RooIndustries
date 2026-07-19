@@ -87,7 +87,7 @@ export default function Hero3DSection() {
 
     document.documentElement.classList.toggle(
       "hero3d-stage-active",
-      rawP < 0.97
+      rect.bottom > window.innerHeight * 0.35
     );
 
     // Ancestors use overflow hidden, which breaks position sticky, so the
@@ -200,7 +200,7 @@ export default function Hero3DSection() {
       ref={wrapperRef}
       aria-label="What a Roo Industries optimization touches"
       className="relative"
-      style={{ height: variantKey === "v6" ? "320vh" : "210vh" }}
+      style={{ height: variantKey === "v6" ? "380vh" : "210vh" }}
     >
       <div
         ref={viewportRef}

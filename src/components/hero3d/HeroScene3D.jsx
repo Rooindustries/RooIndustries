@@ -33,11 +33,11 @@ export const HERO3D_VARIANTS = {
 // Services-section content ridden into the teardown as sequential callouts.
 // Windows [in, out] are on scene progress; each anchors to the moving part.
 export const HERO3D_BENEFITS = [
-  { key: "delay", title: "Lower delay", desc: "Polling, drivers, power, and game settings lined up so the mouse tracks closer to your hand.", window: [0.2, 0.31] },
-  { key: "fps", title: "More FPS", desc: "BIOS, Windows, GPU, RAM, and in-game settings tuned around the titles you play most.", window: [0.33, 0.44] },
-  { key: "frames", title: "Stable frames", desc: "1% lows and frametimes tightened so fights feel smooth and the counter matches it.", window: [0.46, 0.57] },
-  { key: "junk", title: "Less junk running", desc: "Cleaner startup, lighter overlays, and power behavior that leaves room for the game.", window: [0.59, 0.7] },
-  { key: "sustain", title: "FPS stays up", desc: "Heat, boost, RAM, and stability dialed in so the PC keeps pace deep into the session.", window: [0.72, 0.83] },
+  { key: "delay", title: "Lower delay", desc: "Polling, drivers, power, and game settings lined up so the mouse tracks closer to your hand.", window: [0.2, 0.32] },
+  { key: "fps", title: "More FPS", desc: "BIOS, Windows, GPU, RAM, and in-game settings tuned around the titles you play most.", window: [0.33, 0.45] },
+  { key: "frames", title: "Stable frames", desc: "1% lows and frametimes tightened so fights feel smooth and the counter matches it.", window: [0.46, 0.58] },
+  { key: "junk", title: "Less junk running", desc: "Cleaner startup, lighter overlays, and power behavior that leaves room for the game.", window: [0.59, 0.71] },
+  { key: "sustain", title: "FPS stays up", desc: "Heat, boost, RAM, and stability dialed in so the PC keeps pace deep into the session.", window: [0.72, 0.84] },
 ];
 
 const FIN_COUNT = 30;
@@ -466,7 +466,7 @@ function GpuRig({ progressRef, colors, variant }) {
 
     const labelPhases = variant.benefits
       ? HERO3D_BENEFITS.map((b) =>
-          pulse(p, b.window[0], b.window[0] + 0.05, b.window[1] - 0.04, b.window[1])
+          pulse(p, b.window[0], b.window[0] + 0.02, b.window[1] - 0.02, b.window[1])
         )
       : [
           pulse(p, 0.2, 0.27, 0.5, 0.58),
