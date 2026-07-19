@@ -51,6 +51,7 @@ export default function Hero3DSection() {
   const viewportRef = useRef(null);
   const scrimRef = useRef(null);
   const copyRef = useRef(null);
+  const pinModeRef = useRef("before");
   const variantRef = useRef("v6");
   const progressRef = useRef(0);
   const hintRef = useRef(null);
@@ -90,11 +91,33 @@ export default function Hero3DSection() {
       rect.bottom > window.innerHeight * 0.35
     );
 
-    // Ancestors use overflow hidden, which breaks position sticky, so the
-    // viewport is pinned manually from the same scroll frame.
+    // Ancestors use overflow hidden, which breaks position sticky, and a
+    // transform pin lags scroll by a frame. Fixed-position pinning holds the
+    // stage without any per-frame movement.
     if (viewportRef.current) {
-      const pin = Math.min(Math.max(-rect.top, 0), total);
-      viewportRef.current.style.transform = `translate3d(0, ${pin}px, 0)`;
+      const vh = window.innerHeight;
+      const mode =
+        rect.top > 0 ? "before" : rect.bottom < vh ? "after" : "pinned";
+      if (mode !== pinModeRef.current) {
+        pinModeRef.current = mode;
+        const style = viewportRef.current.style;
+        if (mode === "pinned") {
+          style.position = "fixed";
+          style.top = "0";
+          style.bottom = "auto";
+        } else if (mode === "before") {
+          style.position = "absolute";
+          style.top = "0";
+          style.bottom = "auto";
+        } else {
+          style.position = "absolute";
+          style.top = "auto";
+          style.bottom = "0";
+        }
+        style.left = "0";
+        style.right = "0";
+        style.transform = "none";
+      }
     }
 
     if (scrimRef.current) {
@@ -200,7 +223,10 @@ export default function Hero3DSection() {
       ref={wrapperRef}
       aria-label="What a Roo Industries optimization touches"
       className="relative"
-      style={{ height: variantKey === "v6" ? "380vh" : "210vh" }}
+      style={{
+        height: variantKey === "v6" ? "380vh" : "210vh",
+        contain: "none",
+      }}
     >
       <div
         ref={viewportRef}
