@@ -13,31 +13,31 @@ export default function HeroSplitCopy() {
 
   return (
     <div className="mx-auto grid min-h-screen w-full max-w-7xl items-start px-6 sm:px-10 lg:grid-cols-2">
-      <div className="max-w-xl pt-8 pb-12 text-left lg:pt-14">
+      <div className="max-w-xl text-left" style={{ paddingTop: "3vh", paddingBottom: "4vh" }}>
         <h1 className="font-extrabold tracking-tight">
           <span
             className="block text-ink"
-            style={{ fontSize: "clamp(1.7rem, 0.6rem + 2.1vw + 0.5vh, 3.1rem)", lineHeight: 1.07, textWrap: "balance" }}
+            style={{ fontSize: "clamp(1.5rem, 0.5rem + 1.4vw + 1.6vh, 3.1rem)", lineHeight: 1.07, textWrap: "balance" }}
           >
             {hero.headingLine1}
           </span>
           <span
             className="text-gradient-display block"
-            style={{ fontSize: "clamp(1.7rem, 0.6rem + 2.1vw + 0.5vh, 3.1rem)", lineHeight: 1.07, textWrap: "balance" }}
+            style={{ fontSize: "clamp(1.5rem, 0.5rem + 1.4vw + 1.6vh, 3.1rem)", lineHeight: 1.07, textWrap: "balance" }}
           >
             {hero.headingLine2}
           </span>
         </h1>
 
-        <p className="mt-5 max-w-md text-sm leading-relaxed text-ink-secondary sm:text-base">
+        <p className="max-w-md text-sm leading-relaxed text-ink-secondary sm:text-base" style={{ marginTop: "1.8vh" }}>
           {hero.description}
         </p>
 
-        <p className="mt-4 text-sm font-semibold hero-subtext-accent sm:text-base">
+        <p className="text-sm font-semibold hero-subtext-accent sm:text-base" style={{ marginTop: "1.5vh" }}>
           {hero.subtext}
         </p>
 
-        <div className="mt-7 flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3" style={{ marginTop: "2.4vh" }}>
           <Link
             to="/#packages"
             onClick={(event) => handleHomeSectionLink(event, "#packages")}
@@ -63,7 +63,7 @@ export default function HeroSplitCopy() {
         </div>
 
         {hero.ctaNote && (
-          <p className="gold-flair-text mt-5 text-sm font-extrabold tracking-wide">
+          <p className="gold-flair-text text-sm font-extrabold tracking-wide" style={{ marginTop: "1.8vh" }}>
             {hero.ctaNote}
           </p>
         )}

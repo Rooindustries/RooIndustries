@@ -54,6 +54,7 @@ export default function Hero3DSection() {
   const pinModeRef = useRef("before");
   const variantRef = useRef("v6");
   const progressRef = useRef(0);
+  const topFracRef = useRef(0);
   const hintRef = useRef(null);
   const payoffRef = useRef(null);
   const fpsRef = useRef(null);
@@ -84,6 +85,7 @@ export default function Hero3DSection() {
     if (total <= 0) return;
     const rawP = clamp01(-rect.top / total);
     progressRef.current = rawP;
+    topFracRef.current = Math.max(0, rect.top) / window.innerHeight;
     const p = scenePhase(rawP);
 
     document.documentElement.classList.toggle(
@@ -235,7 +237,7 @@ export default function Hero3DSection() {
       >
         {near && (
           <Suspense fallback={null}>
-            <HeroScene3D progressRef={progressRef} active={active} variantKey={variantKey} />
+            <HeroScene3D progressRef={progressRef} topFracRef={topFracRef} active={active} variantKey={variantKey} />
           </Suspense>
         )}
 
