@@ -30,7 +30,7 @@ export const HERO3D_VARIANTS = {
   v3: { loadScale: 1.08, loadY: -1.1, loadX: 0, loadRotY: 0, scrim: 0.45, envRamp: false, preExplode: 0 },
   v4: { loadScale: 0.9, loadY: -0.45, loadX: 0, loadRotY: 0, scrim: 0.3, envRamp: true, envFloor: 0.12, envCeil: 0.55, preExplode: 0 },
   v5: { loadScale: 0.8, loadY: -0.5, loadX: 0, loadRotY: 0, scrim: 0.9, envRamp: false, preExplode: 0.14 },
-  v6: { loadScale: 0.72, loadY: 0.05, loadX: 1.55, loadRotY: 0.9, scrim: 0, envRamp: true, envFloor: 0.28, envCeil: 0.6, preExplode: 0.06, split: true, benefits: true },
+  v6: { loadScale: 0.78, loadY: 0.05, loadX: 1.55, loadRotY: 0.9, scrim: 0, envRamp: true, envFloor: 0.45, envCeil: 0.72, preExplode: 0.06, split: true, benefits: true },
 };
 
 // Services-section content ridden into the teardown as sequential callouts.
@@ -99,10 +99,16 @@ function StudioEnvironment() {
   return null;
 }
 
-function EnvRamp({ progressRef, variant }) {
+function EnvRamp({ progressRef, variant, spotRef }) {
   const { scene } = useThree();
 
   useFrame(() => {
+    const sceneP = scenePhase(progressRef.current);
+    const explode = variant.benefits
+      ? pulse(sceneP, 0.16, 0.37, 0.85, 0.93)
+      : pulse(sceneP, 0.16, 0.44, 0.52, 0.72);
+    // The stage spot blows out flat internals during the teardown.
+    if (spotRef?.current) spotRef.current.intensity = 40 - explode * 26;
     if (!variant.envRamp) {
       scene.environmentIntensity = 1;
       return;
@@ -110,7 +116,8 @@ function EnvRamp({ progressRef, variant }) {
     const floor = variant.envFloor ?? 0.12;
     const ceil = variant.envCeil ?? 1;
     const heroP = heroPhase(progressRef.current);
-    scene.environmentIntensity = floor + (1 - heroP) * (ceil - floor);
+    scene.environmentIntensity =
+      floor + (1 - heroP) * (ceil - floor) - explode * 0.12;
   });
 
   return null;
@@ -234,7 +241,7 @@ function FanHalo({ position, texture, glowRef }) {
   );
 }
 
-function GpuRig({ progressRef, colors, variant }) {
+function GpuRig({ progressRef, topFracRef, colors, variant }) {
   const gltf = useLoader(GLTFLoader, GPU_MODEL_URL);
   const modelScene = gltf.scene;
   const nodes = useMemo(() => {
@@ -261,9 +268,24 @@ function GpuRig({ progressRef, colors, variant }) {
   // snap pulse can drive them like the old procedural accents.
   useEffect(() => {
     const found = new Set();
+    // The HDR studio environment makes even dark metals read bright, so the
+    // internals take a reduced env share while the shell keeps its shine.
+    const envShare = [
+      ["Backplate", 0.3],
+      ["Recessed Black Fan", 0.4],
+      ["Fan Hub", 0.4],
+      ["Black Fin Blocks", 0.5],
+      ["Dense Black PCB", 0.4],
+      ["Gunmetal Heatpipe Spreader", 0.35],
+      ["PCB Microchips", 0.4],
+    ];
     modelScene.traverse((child) => {
       const material = child.material;
-      if (!material || !material.emissive) return;
+      if (!material) return;
+      const name = material.name || "";
+      const share = envShare.find(([prefix]) => name.startsWith(prefix));
+      if (share) material.envMapIntensity = share[1];
+      if (!material.emissive) return;
       const { r, g, b } = material.emissive;
       if (b > 0.15 && b >= r && g >= r) found.add(material);
     });
@@ -347,8 +369,11 @@ function GpuRig({ progressRef, colors, variant }) {
         Math.sin(t * 0.4) * 0.03;
       rigRef.current.rotation.x = 0.32 + Math.sin(t * 0.55) * 0.015;
       rigRef.current.position.x = variant.loadX * heroP;
+      // While the tournament banner occludes the top of the stage, keep the
+      // card centered within the VISIBLE slice of the canvas.
+      const occlusionLift = (topFracRef?.current || 0) * 2.6;
       rigRef.current.position.y =
-        Math.sin(t * 0.7) * 0.04 - 0.05 + heroP * (variant.loadY + 0.05) - explode * 0.55;
+        Math.sin(t * 0.7) * 0.04 - 0.05 + heroP * (variant.loadY + 0.05) + occlusionLift - explode * 0.55;
     }
 
     // The exported model carries its own rest pose; choreography adds deltas.
@@ -585,9 +610,10 @@ function GpuRig({ progressRef, colors, variant }) {
   );
 }
 
-export default function HeroScene3D({ progressRef, active, variantKey }) {
+export default function HeroScene3D({ progressRef, topFracRef, active, variantKey }) {
   const colors = useMemo(() => readThemeColors(), []);
   const variant = HERO3D_VARIANTS[variantKey] || HERO3D_VARIANTS.v1;
+  const spotRef = useRef(null);
 
   return (
     <Canvas
@@ -599,10 +625,11 @@ export default function HeroScene3D({ progressRef, active, variantKey }) {
     >
       <fog attach="fog" args={["#060d1f", 9, 20]} />
       <StudioEnvironment />
-      <EnvRamp progressRef={progressRef} variant={variant} />
+      <EnvRamp progressRef={progressRef} variant={variant} spotRef={spotRef} />
       <CameraRig progressRef={progressRef} variant={variant} />
       <ambientLight intensity={0.35} />
       <spotLight
+        ref={spotRef}
         position={[0, 6, 3]}
         angle={0.55}
         penumbra={0.8}
@@ -614,7 +641,7 @@ export default function HeroScene3D({ progressRef, active, variantKey }) {
       <pointLight position={[5, 1, -3]} intensity={9} color={colors.glow} />
       <DepthParticles progressRef={progressRef} colors={colors} />
       <Suspense fallback={null}>
-        <GpuRig progressRef={progressRef} colors={colors} variant={variant} />
+        <GpuRig progressRef={progressRef} topFracRef={topFracRef} colors={colors} variant={variant} />
       </Suspense>
     </Canvas>
   );
