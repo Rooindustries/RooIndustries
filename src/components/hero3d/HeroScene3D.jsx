@@ -30,7 +30,7 @@ export const HERO3D_VARIANTS = {
   v3: { loadScale: 1.08, loadY: -1.1, loadX: 0, loadRotY: 0, scrim: 0.45, envRamp: false, preExplode: 0 },
   v4: { loadScale: 0.9, loadY: -0.45, loadX: 0, loadRotY: 0, scrim: 0.3, envRamp: true, envFloor: 0.12, envCeil: 0.55, preExplode: 0 },
   v5: { loadScale: 0.8, loadY: -0.5, loadX: 0, loadRotY: 0, scrim: 0.9, envRamp: false, preExplode: 0.14 },
-  v6: { loadScale: 0.78, loadY: 0.05, loadX: 1.55, loadRotY: 0.9, scrim: 0, envRamp: true, envFloor: 0.45, envCeil: 0.72, preExplode: 0.06, split: true, benefits: true },
+  v6: { loadScale: 0.72, loadY: 0.05, loadX: 1.45, loadRotY: 0.35, scrim: 0, envRamp: true, envFloor: 0.45, envCeil: 0.72, preExplode: 0.06, split: true, benefits: true },
 };
 
 // Services-section content ridden into the teardown as sequential callouts.
@@ -367,7 +367,7 @@ function GpuRig({ progressRef, topFracRef, colors, variant }) {
         variant.loadRotY * heroP +
         t * heroP * 0.05 +
         Math.sin(t * 0.4) * 0.03;
-      rigRef.current.rotation.x = 0.32 + Math.sin(t * 0.55) * 0.015;
+      rigRef.current.rotation.x = 0.5 + Math.sin(t * 0.55) * 0.015;
       rigRef.current.position.x = variant.loadX * heroP;
       // While the tournament banner occludes the top of the stage, keep the
       // card centered within the VISIBLE slice of the canvas.

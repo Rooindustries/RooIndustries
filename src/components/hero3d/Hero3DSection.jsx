@@ -1,4 +1,5 @@
 import React, {
+  Component,
   lazy,
   Suspense,
   useCallback,
@@ -12,6 +13,23 @@ import HeroSplitCopy from "./HeroSplitCopy";
 import useHomeSectionLinkHandler from "../../lib/useHomeSectionLinkHandler";
 
 const HeroScene3D = lazy(() => import("./HeroScene3D"));
+
+// A model or WebGL failure inside the canvas must degrade to "no 3D", never
+// crash the page tree.
+class SceneErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { failed: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+}
 
 const FPS_FROM = 96;
 const FPS_TO = 244;
@@ -236,9 +254,11 @@ export default function Hero3DSection() {
         style={{ willChange: "transform" }}
       >
         {near && (
-          <Suspense fallback={null}>
-            <HeroScene3D progressRef={progressRef} topFracRef={topFracRef} active={active} variantKey={variantKey} />
-          </Suspense>
+          <SceneErrorBoundary>
+            <Suspense fallback={null}>
+              <HeroScene3D progressRef={progressRef} topFracRef={topFracRef} active={active} variantKey={variantKey} />
+            </Suspense>
+          </SceneErrorBoundary>
         )}
 
         <div

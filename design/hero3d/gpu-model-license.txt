@@ -1,0 +1,11 @@
+Model Information:
+* title:	NVIDIA RTX 5090 Founders Edition
+* source:	https://sketchfab.com/3d-models/nvidia-rtx-5090-founders-edition-5934a7ddfa144951ac66eb8cab13f220
+* author:	DavidWorks (https://sketchfab.com/DavidWorks)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "NVIDIA RTX 5090 Founders Edition" (https://sketchfab.com/3d-models/nvidia-rtx-5090-founders-edition-5934a7ddfa144951ac66eb8cab13f220) by DavidWorks (https://sketchfab.com/DavidWorks) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
