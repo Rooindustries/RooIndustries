@@ -27,7 +27,7 @@ export const HERO3D_VARIANTS = {
   v3: { loadScale: 1.08, loadY: -1.1, loadX: 0, loadRotY: 0, scrim: 0.45, envRamp: false, preExplode: 0 },
   v4: { loadScale: 0.9, loadY: -0.45, loadX: 0, loadRotY: 0, scrim: 0.3, envRamp: true, envFloor: 0.12, envCeil: 0.55, dark: true, preExplode: 0 },
   v5: { loadScale: 0.8, loadY: -0.5, loadX: 0, loadRotY: 0, scrim: 0.9, envRamp: false, preExplode: 0.14 },
-  v6: { loadScale: 0.78, loadY: -0.12, loadX: 1.55, loadRotY: 0.9, scrim: 0, envRamp: true, envFloor: 0.28, envCeil: 0.6, dark: true, preExplode: 0.06, split: true, benefits: true },
+  v6: { loadScale: 0.72, loadY: 0.05, loadX: 1.55, loadRotY: 0.9, scrim: 0, envRamp: true, envFloor: 0.28, envCeil: 0.6, dark: true, preExplode: 0.06, split: true, benefits: true },
 };
 
 // Services-section content ridden into the teardown as sequential callouts.
@@ -245,7 +245,12 @@ function CameraRig({ progressRef, variant }) {
       : smoothstep(sceneP, 0.74, 0.92);
     // Keep the whole card in frame on narrower aspects (16:10 laptops).
     const aspect = size.width / size.height;
-    const fit = aspect < 1.7 ? (1.7 - aspect) * 1.6 : 0;
+    const fit =
+      aspect < 1.7
+        ? (1.7 - aspect) * 1.6
+        : aspect > 1.85
+          ? (aspect - 1.85) * 1.5
+          : 0;
     camera.position.z = 7.4 + fit + explode * 0.7 - payoff * 0.55;
     camera.position.y = 0.4 - payoff * 0.15;
     camera.lookAt(0, -0.1, 0);
@@ -275,6 +280,7 @@ function GpuRig({ progressRef, colors, variant }) {
   const spinRef = useRef(0);
   const glowRef = useRef(0);
   const labelRefs = useRef([]);
+  const calloutRefs = useRef([]);
 
   const materials = useMemo(() => {
     const accent = new THREE.Color(colors.accent);
@@ -476,10 +482,17 @@ function GpuRig({ progressRef, colors, variant }) {
     labelRefs.current.forEach((el, i) => {
       if (el) el.style.opacity = labelPhases[i].toFixed(3);
     });
+    calloutRefs.current.forEach((group, i) => {
+      if (group) group.visible = (labelPhases[i] || 0) > 0.02;
+    });
   });
 
   const setLabelRef = (index) => (el) => {
     labelRefs.current[index] = el;
+  };
+
+  const setCalloutRef = (index) => (group) => {
+    calloutRefs.current[index] = group;
   };
 
   const labelStyle = {
@@ -504,7 +517,7 @@ function GpuRig({ progressRef, colors, variant }) {
     const lineLen = 0.58;
     const edgeX = dir * 1.68;
     return (
-      <group>
+      <group ref={setCalloutRef(index)} visible={false}>
         <mesh position={[edgeX, y, 0]} material={materials.accentRing}>
           <sphereGeometry args={[0.035, 12, 12]} />
         </mesh>
