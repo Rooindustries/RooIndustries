@@ -241,7 +241,7 @@ function FanHalo({ position, texture, glowRef }) {
   );
 }
 
-function GpuRig({ progressRef, topFracRef, colors, variant }) {
+function GpuRig({ progressRef, topFracRef, colors, variant, onReady }) {
   const gltf = useLoader(GLTFLoader, GPU_MODEL_URL);
   const modelScene = gltf.scene;
   const nodes = useMemo(() => {
@@ -267,6 +267,7 @@ function GpuRig({ progressRef, topFracRef, colors, variant }) {
   // Collect the model's cyan emissive materials once so the payoff glow and
   // snap pulse can drive them like the old procedural accents.
   useEffect(() => {
+    onReady?.();
     const found = new Set();
     // The HDR studio environment makes even dark metals read bright, so the
     // internals take a reduced env share while the shell keeps its shine.
@@ -359,7 +360,9 @@ function GpuRig({ progressRef, topFracRef, colors, variant }) {
     if (rigRef.current) {
       // While the hero copy overlays the scene the card holds its variant
       // load pose, then moves to center stage as the copy scrolls away.
-      const scale = variant.loadScale + (1 - heroP) * (1 - variant.loadScale);
+      const scale =
+        (variant.loadScale + (1 - heroP) * (1 - variant.loadScale)) *
+        (1 - payoff * 0.12);
       rigRef.current.scale.set(scale, scale, scale);
       rigRef.current.rotation.y =
         0.7 +
@@ -373,7 +376,7 @@ function GpuRig({ progressRef, topFracRef, colors, variant }) {
       // card centered within the VISIBLE slice of the canvas.
       const occlusionLift = (topFracRef?.current || 0) * 2.6;
       rigRef.current.position.y =
-        Math.sin(t * 0.7) * 0.04 - 0.05 + heroP * (variant.loadY + 0.05) + occlusionLift - explode * 0.55;
+        Math.sin(t * 0.7) * 0.04 - 0.05 + heroP * (variant.loadY + 0.05) + occlusionLift - explode * 0.55 + payoff * 0.5;
     }
 
     // The exported model carries its own rest pose; choreography adds deltas.
@@ -610,7 +613,7 @@ function GpuRig({ progressRef, topFracRef, colors, variant }) {
   );
 }
 
-export default function HeroScene3D({ progressRef, topFracRef, active, variantKey }) {
+export default function HeroScene3D({ progressRef, topFracRef, active, variantKey, onReady }) {
   const colors = useMemo(() => readThemeColors(), []);
   const variant = HERO3D_VARIANTS[variantKey] || HERO3D_VARIANTS.v1;
   const spotRef = useRef(null);
@@ -641,7 +644,7 @@ export default function HeroScene3D({ progressRef, topFracRef, active, variantKe
       <pointLight position={[5, 1, -3]} intensity={9} color={colors.glow} />
       <DepthParticles progressRef={progressRef} colors={colors} />
       <Suspense fallback={null}>
-        <GpuRig progressRef={progressRef} topFracRef={topFracRef} colors={colors} variant={variant} />
+        <GpuRig progressRef={progressRef} topFracRef={topFracRef} colors={colors} variant={variant} onReady={onReady} />
       </Suspense>
     </Canvas>
   );

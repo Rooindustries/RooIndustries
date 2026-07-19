@@ -64,6 +64,7 @@ export default function Hero3DSection() {
   const [variantKey, setVariantKey] = useState("v6");
   const [near, setNear] = useState(false);
   const [active, setActive] = useState(false);
+  const [modelReady, setModelReady] = useState(false);
 
   const wrapperRef = useRef(null);
   const viewportRef = useRef(null);
@@ -256,7 +257,7 @@ export default function Hero3DSection() {
         {near && (
           <SceneErrorBoundary>
             <Suspense fallback={null}>
-              <HeroScene3D progressRef={progressRef} topFracRef={topFracRef} active={active} variantKey={variantKey} />
+              <HeroScene3D progressRef={progressRef} topFracRef={topFracRef} active={active} variantKey={variantKey} onReady={() => setModelReady(true)} />
             </Suspense>
           </SceneErrorBoundary>
         )}
@@ -268,6 +269,21 @@ export default function Hero3DSection() {
               "radial-gradient(ellipse at center, transparent 52%, rgba(2, 6, 14, 0.42) 100%)",
           }}
         />
+
+        {!modelReady && variantKey === "v6" && (
+          <div
+            className="pointer-events-none absolute animate-pulse"
+            style={{
+              right: "8%",
+              top: "38%",
+              width: "38%",
+              height: "42%",
+              background:
+                "radial-gradient(ellipse at center, rgba(34, 211, 238, 0.14) 0%, rgba(34, 211, 238, 0.05) 45%, transparent 70%)",
+              filter: "blur(2px)",
+            }}
+          />
+        )}
 
         <div
           ref={scrimRef}
