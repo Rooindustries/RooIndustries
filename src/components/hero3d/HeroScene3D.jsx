@@ -272,8 +272,8 @@ function GpuRig({ progressRef, topFracRef, colors, variant }) {
     // internals take a reduced env share while the shell keeps its shine.
     const envShare = [
       ["Backplate", 0.3],
-      ["Recessed Black Fan", 0.4],
-      ["Fan Hub", 0.4],
+      ["Recessed Black Fan", 0.25],
+      ["Fan Hub", 0.25],
       ["Black Fin Blocks", 0.5],
       ["Dense Black PCB", 0.4],
       ["Gunmetal Heatpipe Spreader", 0.35],

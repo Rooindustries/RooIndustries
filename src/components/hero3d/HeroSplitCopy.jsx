@@ -37,7 +37,7 @@ export default function HeroSplitCopy() {
           {hero.subtext}
         </p>
 
-        <div className="flex flex-wrap items-center gap-3" style={{ marginTop: "2.4vh" }}>
+        <div className="flex flex-wrap items-center gap-3" style={{ marginTop: "2vh" }}>
           <Link
             to="/#packages"
             onClick={(event) => handleHomeSectionLink(event, "#packages")}
@@ -63,7 +63,7 @@ export default function HeroSplitCopy() {
         </div>
 
         {hero.ctaNote && (
-          <p className="gold-flair-text text-sm font-extrabold tracking-wide" style={{ marginTop: "1.8vh" }}>
+          <p className="gold-flair-text text-sm font-extrabold tracking-wide" style={{ marginTop: "1.4vh" }}>
             {hero.ctaNote}
           </p>
         )}
