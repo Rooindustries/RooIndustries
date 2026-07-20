@@ -769,6 +769,8 @@ export const createSupabaseCreatorAccount = async ({
           referral_code: code,
           paypal_email: normalizeIdentifier(referral.paypalEmail) || null,
           contact_discord: String(referral.contactDiscord || "").trim() || null,
+          registration_status:
+            String(referral.registrationStatus || "").trim() || "active",
           legacy_sanity_id: legacyId,
           source_revision: sourceRevision || referral._rev || null,
           source_hash: sourceHash || null,
@@ -825,10 +827,28 @@ export const bootstrapSupabaseNativeAccount = async ({
 
 export const createVerifiedSupabaseBrowserSession = async ({
   userId,
+  expectedLegacySanityId = "",
   adminClient = createSupabaseAdminClient(),
   authClient = createSupabaseAuthClient(),
 } = {}) => {
   const account = await resolveSupabaseAccountByUserId({ userId, adminClient });
+  const roles = Array.isArray(account?.roles) ? account.roles : [];
+  const expectedLegacyId = String(expectedLegacySanityId || "").trim();
+  const linkedLegacyId = String(
+    account?.creator_legacy_sanity_id || account?.legacy_sanity_id || ""
+  ).trim();
+  if (
+    account?.status !== "active" ||
+    account?.creator_active !== true ||
+    !roles.includes("creator") ||
+    (expectedLegacyId && linkedLegacyId !== expectedLegacyId)
+  ) {
+    const error = new Error("Creator account activation is incomplete.");
+    error.code = "CREATOR_ACCOUNT_INACTIVE";
+    error.status = 409;
+    error.statusCode = 409;
+    throw error;
+  }
   const email = normalizeIdentifier(account?.verified_real_email);
   if (!email) throw new Error("A verified real email is required for browser sign-in.");
   const generated = await adminClient.auth.admin.generateLink({

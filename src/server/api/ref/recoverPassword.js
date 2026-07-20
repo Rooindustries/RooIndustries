@@ -30,7 +30,7 @@ const client = createClient({
   apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
   token: process.env.SANITY_WRITE_TOKEN,
   useCdn: false,
-});
+}, { allowLegacyFallback: false });
 
 const RECOVERY_SESSION_MAX_AGE_SECONDS = 2 * 60 * 60;
 const PASSWORD_PENDING_MESSAGE =

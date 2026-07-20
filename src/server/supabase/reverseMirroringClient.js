@@ -1,3 +1,7 @@
+import {
+  isReferralCommerceField,
+  pickReferralGeneralFields,
+} from "../commerce/documentTypes.js";
 import { logSafeError } from "../safeErrorLog.js";
 import {
   buildMirrorEvent,
@@ -7,17 +11,27 @@ import {
 } from "./mirrorRecovery.js";
 import { drainCommerceMirrorOutbox } from "./commerceMirrorOutbox.js";
 import { drainDocumentMutationOutbox } from "./documentMutationOutbox.js";
+import {
+  hasDurableMirrorMarker,
+  MIRROR_METADATA_KEYS,
+} from "./mirrorMetadata.js";
 import { logSanityMirrorEvent } from "./mirrorObservability.js";
+
+const legacyExcludedKeys = new Set([
+  "_rev",
+  "_createdAt",
+  "_updatedAt",
+  "_originalId",
+  "_system",
+  "_commerceCutoverGeneration",
+  ...MIRROR_METADATA_KEYS,
+]);
 
 const cleanForSanity = (document) => {
   if (!document || typeof document !== "object") return document;
-  const { _rev, _createdAt, _updatedAt, ...clean } = document;
-  return clean;
-};
-
-const hasDurableMirrorMarker = (document) => {
-  const sequence = String(document?._supabaseSequence ?? "").trim();
-  return /^\d+$/.test(sequence) && BigInt(sequence) > 0n;
+  return Object.fromEntries(
+    Object.entries(document).filter(([key]) => !legacyExcludedKeys.has(key))
+  );
 };
 
 const listLegacyEligibleIds = async ({ sanityClient, ids }) => {
@@ -29,23 +43,60 @@ const listLegacyEligibleIds = async ({ sanityClient, ids }) => {
     { ids },
     { perspective: "raw" }
   );
-  const protectedIds = new Set(
+  const currentById = new Map(
     (Array.isArray(current) ? current : [])
-      .filter(hasDurableMirrorMarker)
-      .map((document) => String(document?._id || ""))
+      .filter((document) => document?._id)
+      .map((document) => [String(document._id), document])
   );
-  return ids.filter((id) => !protectedIds.has(id));
+  const eligibleIds = ids.filter(
+    (id) => !hasDurableMirrorMarker(currentById.get(id))
+  );
+  return { eligibleIds, currentById };
+};
+
+const immutableSanityKeys = new Set([
+  "_id",
+  "_type",
+  "_rev",
+  "_createdAt",
+  "_updatedAt",
+  "_originalId",
+  "_system",
+  "_commerceCutoverGeneration",
+  ...MIRROR_METADATA_KEYS,
+]);
+
+const applyLegacyReferral = ({ transaction, current, document }) => {
+  if (!current) return transaction.createIfNotExists(cleanForSanity(document));
+  const set = pickReferralGeneralFields(cleanForSanity(document));
+  delete set._id;
+  delete set._type;
+  const unset = Object.keys(current).filter(
+    (key) =>
+      !immutableSanityKeys.has(key) &&
+      !isReferralCommerceField(key) &&
+      key !== "_commerceCutoverGeneration" &&
+      !Object.prototype.hasOwnProperty.call(set, key)
+  );
+  return transaction.patch(document._id, (patch) => {
+    const guarded =
+      current._rev && typeof patch.ifRevisionId === "function"
+        ? patch.ifRevisionId(current._rev)
+        : patch;
+    const setPatch = guarded.set(set);
+    return unset.length > 0 ? setPatch.unset(unset) : setPatch;
+  });
 };
 
 const applyMirror = async ({ supabaseClient, sanityClient, ids, deleted }) => {
   const uniqueIds = [...new Set((ids || []).map(String).filter(Boolean))];
   if (uniqueIds.length < 1) return;
-  const eligibleIds = await listLegacyEligibleIds({ sanityClient, ids: uniqueIds });
-  if (eligibleIds.length < 1) return;
+  const eligible = await listLegacyEligibleIds({ sanityClient, ids: uniqueIds });
+  if (eligible.eligibleIds.length < 1) return;
 
   if (deleted) {
     let transaction = sanityClient.transaction();
-    eligibleIds.forEach((id) => {
+    eligible.eligibleIds.forEach((id) => {
       transaction = transaction.delete(id);
     });
     await transaction.commit();
@@ -53,17 +104,19 @@ const applyMirror = async ({ supabaseClient, sanityClient, ids, deleted }) => {
   }
 
   const documents = await supabaseClient.fetch(`*[_id in $ids]`, {
-    ids: eligibleIds,
+    ids: eligible.eligibleIds,
   });
   const byId = new Map(
     (documents || []).map((document) => [String(document?._id || ""), document])
   );
   let transaction = sanityClient.transaction();
-  for (const id of eligibleIds) {
+  for (const id of eligible.eligibleIds) {
     const document = byId.get(id);
-    transaction = document
-      ? transaction.createOrReplace(cleanForSanity(document))
-      : transaction.delete(id);
+    const current = eligible.currentById.get(id);
+    if (!document) transaction = transaction.delete(id);
+    else if (document._type === "referral") {
+      transaction = applyLegacyReferral({ transaction, current, document });
+    } else transaction = transaction.createOrReplace(cleanForSanity(document));
   }
   await transaction.commit();
 };

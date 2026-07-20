@@ -6,13 +6,17 @@ const mockResolvePolicy = jest.fn();
 const mockPatch = jest.fn();
 const mockMarkSupabaseCredentialSourceApplied = jest.fn();
 const mockCompleteSupabaseCredentialMirror = jest.fn();
+const mockDataClientOptions = [];
 
 jest.mock("bcryptjs", () => ({
   hash: jest.fn(async () => `$2b$12$${"n".repeat(53)}`),
 }));
 
 jest.mock("../server/data/documentClient.js", () => ({
-  createDataClient: () => ({ fetch: mockFetch, patch: mockPatch }),
+  createDataClient: (_config, options) => {
+    mockDataClientOptions.push(options);
+    return { fetch: mockFetch, patch: mockPatch };
+  },
 }));
 
 jest.mock("../server/api/ref/auth.js", () => ({
@@ -115,6 +119,10 @@ describe("referral password change", () => {
     mockReconcileSupabaseCredentialSource.mockResolvedValue({ completed: true });
     mockMarkSupabaseCredentialSourceApplied.mockResolvedValue({ updated: true });
     mockCompleteSupabaseCredentialMirror.mockResolvedValue({ completed: true });
+  });
+
+  test("disables broad Supabase fallback for credential reads", () => {
+    expect(mockDataClientOptions).toContainEqual({ allowLegacyFallback: false });
   });
 
   test("consumes every outstanding reset-token field in the credential saga", async () => {

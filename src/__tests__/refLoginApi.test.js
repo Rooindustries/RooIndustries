@@ -56,10 +56,22 @@ const mockCreateClient = jest.fn(() => ({
   fetch: mockFetch,
   patch: mockPatch,
 }));
+const mockDataClientOptions = [];
 
 jest.mock("@sanity/client", () => ({
   createClient: (...args) => mockCreateClient(...args),
 }));
+
+jest.mock("../server/data/documentClient.js", () => {
+  const actual = jest.requireActual("../server/data/documentClient.js");
+  return {
+    ...actual,
+    createDataClient: (config, options) => {
+      mockDataClientOptions.push(options);
+      return actual.createDataClient(config, options);
+    },
+  };
+});
 
 const createReq = (body = {}) => ({
   method: "POST",
@@ -181,6 +193,10 @@ afterAll(() => {
 });
 
 describe("referral login API", () => {
+  test("disables broad Supabase fallback for credential reads", () => {
+    expect(mockDataClientOptions).toContainEqual({ allowLegacyFallback: false });
+  });
+
   test("links a pending Discord identity after creator password authentication", async () => {
     process.env.DATA_PRIMARY_BACKEND = "supabase";
     const pendingDiscordUser = {
