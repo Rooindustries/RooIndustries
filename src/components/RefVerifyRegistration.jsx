@@ -3,21 +3,41 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 const TOKEN_KEY = "referral_registration_verification";
 
+const readVerificationToken = ({ hash }) => {
+  if (typeof window === "undefined") return "";
+  const fragment = new URLSearchParams(String(hash || "").replace(/^#/, ""));
+  const fragmentToken = String(fragment.get("token") || "").trim();
+  if (fragmentToken) window.sessionStorage.setItem(TOKEN_KEY, fragmentToken);
+  return fragmentToken || window.sessionStorage.getItem(TOKEN_KEY) || "";
+};
+
 export default function RefVerifyRegistration() {
   const location = useLocation();
   const navigate = useNavigate();
   const started = useRef(false);
+  const [verificationLocation] = useState(() => ({
+    hash:
+      (typeof window !== "undefined" ? window.location.hash : "") ||
+      location.hash ||
+      "",
+    pathname: location.pathname,
+    search:
+      (typeof window !== "undefined" ? window.location.search : "") ||
+      location.search ||
+      "",
+  }));
   const [state, setState] = useState({ status: "working", message: "Confirming your email…" });
 
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    const fragment = new URLSearchParams(String(location.hash || "").replace(/^#/, ""));
-    const fragmentToken = String(fragment.get("token") || "").trim();
-    if (fragmentToken) sessionStorage.setItem(TOKEN_KEY, fragmentToken);
-    const token = fragmentToken || sessionStorage.getItem(TOKEN_KEY) || "";
-    if (location.hash || location.search) {
-      navigate(location.pathname, { replace: true });
+    const token = readVerificationToken(verificationLocation);
+    if (verificationLocation.hash || verificationLocation.search) {
+      window.history.replaceState(
+        window.history.state,
+        "",
+        verificationLocation.pathname
+      );
     }
     if (!token) {
       setState({ status: "error", message: "This confirmation link is missing or invalid." });
@@ -30,10 +50,12 @@ export default function RefVerifyRegistration() {
     })
       .then(async (response) => ({
         ok: response.ok,
+        status: response.status,
         data: await response.json().catch(() => ({})),
       }))
-      .then(({ ok, data }) => {
+      .then(({ ok, status, data }) => {
         if (!ok || data.ok !== true) {
+          if (status === 400) window.sessionStorage.removeItem(TOKEN_KEY);
           setState({
             status: "error",
             message: data.error || "This confirmation link is invalid or expired.",
@@ -46,7 +68,7 @@ export default function RefVerifyRegistration() {
       .catch(() => {
         setState({ status: "error", message: "Confirmation is temporarily unavailable. Please try again." });
       });
-  }, [location.hash, location.pathname, location.search, navigate]);
+  }, [verificationLocation]);
 
   return (
     <section className="pt-32 px-6 min-h-screen text-ink flex flex-col items-center">

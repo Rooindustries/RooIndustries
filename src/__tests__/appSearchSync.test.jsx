@@ -37,6 +37,7 @@ jest.mock("../legacyPages/RefChangePassword", () => () => null);
 jest.mock("../legacyPages/RefForgot", () => () => null);
 jest.mock("../legacyPages/RefReset", () => () => null);
 jest.mock("../legacyPages/RefRegister", () => () => null);
+jest.mock("../legacyPages/RefVerifyRegistration", () => () => null);
 jest.mock("../legacyPages/MeetTheTeam", () => () => null);
 jest.mock("../legacyPages/NotFound", () => () => null);
 jest.mock("../lib/homeSectionData", () => ({
@@ -74,6 +75,10 @@ describe("AppContent search sync", () => {
     mockSanitizeBrowserSearch.mockReset();
     mockSanitizeBrowserSearch.mockReturnValue("");
     mockNavigate.mockReset();
+    mockLocation.pathname = "/referrals/reset";
+    mockLocation.search = "?token=abc123";
+    mockLocation.hash = "";
+    mockLocation.state = null;
     window.scrollTo = jest.fn();
     window.history.replaceState({}, "", "/referrals/reset?token=abc123");
     replaceStateSpy = jest.spyOn(window.history, "replaceState");
@@ -119,5 +124,27 @@ describe("AppContent search sync", () => {
     expect(window.location.hash).toBe(
       "#type=recovery&access_token=access&refresh_token=refresh"
     );
+  });
+
+  test("preserves a registration fragment until the verification page consumes it", async () => {
+    const token = "A".repeat(43);
+    mockLocation.pathname = "/referrals/verify";
+    mockLocation.search = "";
+    window.history.replaceState(
+      {},
+      "",
+      `/referrals/verify#token=${token}`
+    );
+    replaceStateSpy.mockClear();
+
+    render(<AppContent initialHomeData={null} routeShell="memory" />);
+
+    await waitFor(() => {
+      expect(mockSanitizeBrowserSearch).toHaveBeenCalledWith(
+        "/referrals/verify",
+        ""
+      );
+    });
+    expect(window.location.hash).toBe(`#token=${token}`);
   });
 });
