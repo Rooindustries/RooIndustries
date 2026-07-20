@@ -21,6 +21,7 @@ import {
   buildConfirmationDigest,
   createRepairSanityClient,
   createRepairSupabaseClient,
+  isValidSanityDocumentId,
   loadRepairEnvironment,
   parseExpectedGeneration,
   requireRpc,
@@ -49,7 +50,7 @@ if (allReferrals === (requestedIds.length > 0)) {
 }
 if (
   requestedIds.length > 500 ||
-  requestedIds.some((id) => !/^referral[.][A-Za-z0-9_-]{1,120}$/.test(id))
+  requestedIds.some((id) => !isValidSanityDocumentId(id))
 ) {
   throw new Error("Referral mirror targets are invalid or exceed the 500-document limit.");
 }
@@ -113,7 +114,7 @@ const inspect = async () => {
   }
   const ids = states.map((state) => String(state?.referral_id || "")).sort();
   if (
-    ids.some((id) => !/^referral[.][A-Za-z0-9_-]{1,120}$/.test(id)) ||
+    ids.some((id) => !isValidSanityDocumentId(id)) ||
     (!allReferrals && stableJson(ids) !== stableJson(requestedIds))
   ) {
     throw new Error("Referral mirror state did not match the requested targets.");
