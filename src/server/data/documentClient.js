@@ -131,6 +131,7 @@ export const createDataClient = (
     supabaseClient,
     backendOverride = "",
     domain = "global",
+    allowLegacyFallback,
   } = {}
 ) => {
   const policy = resolveSupabaseRuntimePolicy(env);
@@ -146,6 +147,7 @@ export const createDataClient = (
     const client = createSupabaseDocumentClient({
       shadowClient: resolvedSupabaseClient,
       commerceOnly: domain === "commerce",
+      allowLegacyFallback,
       cutoverGeneration: policy.commerceFailoverGeneration,
     });
     return addOptionalSanityMirror({
@@ -171,6 +173,7 @@ export const createDocumentReadClient = ({
   supabaseClient,
   backendOverride = "",
   domain = "global",
+  allowLegacyFallback,
 } = {}) => {
   const policy = resolveSupabaseRuntimePolicy(env);
   const backend = resolveDocumentBackend({
@@ -185,6 +188,7 @@ export const createDocumentReadClient = ({
     return createSupabaseDocumentClient({
       shadowClient: resolvedSupabaseClient,
       commerceOnly: domain === "commerce",
+      allowLegacyFallback,
       cutoverGeneration: policy.commerceFailoverGeneration,
     });
   }
@@ -196,6 +200,7 @@ export const createDocumentWriteClient = ({
   supabaseClient,
   backendOverride = "",
   domain = "global",
+  allowLegacyFallback,
 } = {}) => {
   const policy = resolveSupabaseRuntimePolicy(env);
   const backend = resolveDocumentBackend({
@@ -210,6 +215,7 @@ export const createDocumentWriteClient = ({
     const client = createSupabaseDocumentClient({
       shadowClient: resolvedSupabaseClient,
       commerceOnly: domain === "commerce",
+      allowLegacyFallback,
       cutoverGeneration: policy.commerceFailoverGeneration,
     });
     return addOptionalSanityMirror({
@@ -234,6 +240,7 @@ export const createOptionalDocumentWriteClient = ({
   supabaseClient,
   backendOverride = "",
   domain = "global",
+  allowLegacyFallback,
 } = {}) => {
   try {
     return createDocumentWriteClient({
@@ -241,6 +248,7 @@ export const createOptionalDocumentWriteClient = ({
       supabaseClient,
       backendOverride,
       domain,
+      allowLegacyFallback,
     });
   } catch {
     return null;

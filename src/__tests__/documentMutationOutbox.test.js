@@ -20,15 +20,44 @@ const event = (overrides = {}) => ({
   ...overrides,
 });
 
+const clone = (value) => JSON.parse(JSON.stringify(value));
+
 const createSanityClient = ({ current = [], afterCommit = null } = {}) => {
-  const state = { current: [...current], commits: 0, operations: [] };
+  const state = { current: current.map(clone), commits: 0, operations: [] };
   const client = {
-    fetch: jest.fn(async () => state.current),
+    fetch: jest.fn(async () => state.current.map(clone)),
     transaction: jest.fn(() => {
       const operations = [];
       const transaction = {
         createOrReplace: jest.fn((document) => {
-          operations.push({ operation: "upsert", document });
+          operations.push({ operation: "upsert", document: clone(document) });
+          return transaction;
+        }),
+        createIfNotExists: jest.fn((document) => {
+          operations.push({
+            operation: "create_if_missing",
+            document: clone(document),
+          });
+          return transaction;
+        }),
+        patch: jest.fn((id, mutate) => {
+          const update = { set: {}, unset: [], expectedRevision: "" };
+          const patch = {
+            ifRevisionId: jest.fn((revision) => {
+              update.expectedRevision = revision;
+              return patch;
+            }),
+            set: jest.fn((value) => {
+              Object.assign(update.set, clone(value));
+              return patch;
+            }),
+            unset: jest.fn((fields) => {
+              update.unset.push(...fields);
+              return patch;
+            }),
+          };
+          mutate(patch);
+          operations.push({ operation: "patch", id, ...update });
           return transaction;
         }),
         delete: jest.fn((id) => {
@@ -37,16 +66,47 @@ const createSanityClient = ({ current = [], afterCommit = null } = {}) => {
         }),
         commit: jest.fn(async () => {
           state.commits += 1;
-          state.operations.push(...operations);
+          state.operations.push(...operations.map(clone));
           for (const operation of operations) {
+            const index = state.current.findIndex(
+              (item) => item._id === (operation.id || operation.document?._id)
+            );
+            const existing = index >= 0 ? state.current[index] : null;
             if (operation.operation === "delete") {
               state.current = state.current.filter((item) => item._id !== operation.id);
-            } else {
-              state.current = [
-                ...state.current.filter((item) => item._id !== operation.document._id),
-                operation.document,
-              ];
+              continue;
             }
+            if (operation.operation === "upsert") {
+              state.current = [
+                ...state.current.filter(
+                  (item) => item._id !== operation.document._id
+                ),
+                clone(operation.document),
+              ];
+              continue;
+            }
+            if (operation.operation === "create_if_missing") {
+              if (!existing) state.current.push(clone(operation.document));
+              continue;
+            }
+            if (!existing) {
+              throw Object.assign(new Error("patch target missing"), {
+                status: 409,
+                statusCode: 409,
+              });
+            }
+            if (
+              operation.expectedRevision &&
+              operation.expectedRevision !== existing._rev
+            ) {
+              throw Object.assign(new Error("revision conflict"), {
+                status: 409,
+                statusCode: 409,
+              });
+            }
+            const updated = { ...existing, ...clone(operation.set) };
+            operation.unset.forEach((field) => delete updated[field]);
+            state.current[index] = updated;
           }
           if (afterCommit) afterCommit(state);
           return { ok: true };
@@ -114,6 +174,7 @@ describe("document mutation mirror outbox", () => {
       _supabaseCanonicalHash: hash,
       _supabaseRevision: "source-revision",
       _supabaseSequence: "7",
+      _supabaseSequences: { global: "7" },
     });
     expect(sanity.client.fetch).toHaveBeenCalledTimes(2);
     for (const call of sanity.client.fetch.mock.calls) {
@@ -127,6 +188,50 @@ describe("document mutation mirror outbox", () => {
         name === "roo_claim_document_mutation_mirror_events"
       )
     ).toHaveLength(1);
+  });
+
+  test("creates a missing referral without replacing a concurrently-created target", async () => {
+    const queued = event({
+      document_ids: ["referral.creator"],
+      documents: [
+        {
+          _id: "referral.creator",
+          _type: "referral",
+          _rev: "source-referral-revision",
+          _supabaseCanonicalHash: hash,
+          creatorEmail: "creator@example.com",
+          paidTotal: 25,
+        },
+      ],
+    });
+    const rpc = jest.fn(async (name) => {
+      if (name === "roo_claim_document_mutation_mirror_events") {
+        return { data: [queued], error: null };
+      }
+      if (name === "roo_complete_document_mutation_mirror_event") {
+        return { data: { status: "applied" }, error: null };
+      }
+      return { data: backlog, error: null };
+    });
+    const sanity = createSanityClient();
+
+    await expect(
+      drainDocumentMutationOutbox({
+        supabaseClient: { rpc },
+        sanityClient: sanity.client,
+        maxBatches: 1,
+      })
+    ).resolves.toMatchObject({ applied: 1, mutations: 1 });
+
+    expect(sanity.state.operations).toEqual([
+      expect.objectContaining({
+        operation: "create_if_missing",
+        document: expect.objectContaining({
+          _id: "referral.creator",
+          _supabaseSequences: { global: "7" },
+        }),
+      }),
+    ]);
   });
 
   test("does not claim unrelated work after the required document is clear", async () => {
@@ -225,6 +330,7 @@ describe("document mutation mirror outbox", () => {
           _id: "settings.site",
           _type: "siteSettings",
           _supabaseSequence: "9",
+          _supabaseSequences: { global: "9" },
           _supabaseCanonicalHash: "b".repeat(64),
           title: "Newer",
         },
@@ -258,6 +364,7 @@ describe("document mutation mirror outbox", () => {
           _id: "settings.site",
           _type: "siteSettings",
           _supabaseSequence: "7",
+          _supabaseSequences: { global: "7" },
           _supabaseCanonicalHash: hash,
           _supabaseRevision: "source-revision",
           title: "Manually changed",
@@ -396,6 +503,69 @@ describe("document mutation mirror outbox", () => {
       { ids: ["drafts.settings"] },
       { perspective: "raw" }
     );
+  });
+
+  test("applies a delayed global referral event without overwriting newer commerce state", async () => {
+    const referralEvent = event({
+      sequence_no: "7",
+      document_ids: ["referral.creator"],
+      documents: [
+        {
+          _id: "referral.creator",
+          _type: "referral",
+          _rev: "source-referral-revision",
+          _supabaseCanonicalHash: "c".repeat(64),
+          creatorEmail: "new@example.com",
+          name: "Creator",
+          owedTotal: 5,
+        },
+      ],
+    });
+    const sanity = createSanityClient({
+      current: [
+        {
+          _id: "referral.creator",
+          _rev: "sanity-referral-revision",
+          _type: "referral",
+          _supabaseSequence: "99",
+          _supabaseSequences: { global: "0", commerce: "12" },
+          creatorEmail: "old@example.com",
+          staleGeneralField: true,
+          owedTotal: 25,
+        },
+      ],
+    });
+    const rpc = jest.fn(async (name) => {
+      if (name === "roo_claim_document_mutation_mirror_events") {
+        return { data: [referralEvent], error: null };
+      }
+      if (name === "roo_complete_document_mutation_mirror_event") {
+        return { data: { status: "applied" }, error: null };
+      }
+      return { data: backlog, error: null };
+    });
+
+    await expect(
+      drainDocumentMutationOutbox({
+        supabaseClient: { rpc },
+        sanityClient: sanity.client,
+        maxBatches: 1,
+      })
+    ).resolves.toMatchObject({ applied: 1, mutations: 1, superseded: 0 });
+
+    expect(sanity.state.current[0]).toMatchObject({
+      creatorEmail: "new@example.com",
+      owedTotal: 25,
+      _supabaseSequence: "99",
+      _supabaseSequences: { global: "7", commerce: "12" },
+    });
+    expect(sanity.state.current[0]).not.toHaveProperty("staleGeneralField");
+    expect(sanity.state.operations[0]).toMatchObject({
+      operation: "patch",
+      id: "referral.creator",
+      expectedRevision: "sanity-referral-revision",
+    });
+    expect(sanity.state.operations[0].set).not.toHaveProperty("owedTotal");
   });
 
   test("reports rolling-deployment fallback when the claim RPC is absent", async () => {

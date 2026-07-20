@@ -470,6 +470,67 @@ describe("Supabase document compatibility client", () => {
     );
   });
 
+  test("keeps the global compatibility fallback enabled by default", async () => {
+    const shadowClient = {
+      rpc: jest.fn(async (name) => {
+        if (name === "roo_fetch_shadow_documents_targeted") {
+          return { data: null, error: { code: "PGRST202" } };
+        }
+        if (name === "roo_fetch_shadow_documents") {
+          return {
+            data: [
+              {
+                _id: "referral.compatibility",
+                _type: "referral",
+                creatorEmail: "creator@example.com",
+              },
+            ],
+            error: null,
+          };
+        }
+        throw new Error(`Unexpected RPC: ${name}`);
+      }),
+    };
+    const client = new SupabaseDocumentClient({ shadowClient });
+
+    await expect(
+      client.fetch(`*[_type == "referral" && _id == $id][0]`, {
+        id: "referral.compatibility",
+      })
+    ).resolves.toMatchObject({ _id: "referral.compatibility" });
+    expect(shadowClient.rpc).toHaveBeenCalledWith(
+      "roo_fetch_shadow_documents",
+      { p_document_types: ["referral"] }
+    );
+  });
+
+  test("can disable broad fallback for credential-sensitive global reads", async () => {
+    const shadowClient = {
+      rpc: jest.fn(async (name) =>
+        name === "roo_fetch_shadow_documents_targeted"
+          ? { data: null, error: { code: "PGRST202" } }
+          : { data: [], error: null }
+      ),
+    };
+    const client = new SupabaseDocumentClient({
+      shadowClient,
+      allowLegacyFallback: false,
+    });
+
+    await expect(client.getDocument("referral.sensitive")).rejects.toMatchObject({
+      code: "COMMERCE_TARGETED_READ_UNAVAILABLE",
+      statusCode: 503,
+    });
+    expect(shadowClient.rpc).toHaveBeenCalledWith(
+      "roo_fetch_shadow_documents_targeted",
+      expect.objectContaining({ p_ids: ["referral.sensitive"] })
+    );
+    expect(shadowClient.rpc).not.toHaveBeenCalledWith(
+      "roo_fetch_shadow_documents",
+      expect.anything()
+    );
+  });
+
   test("enforces the 250 KB commerce database payload budget", async () => {
     const shadowClient = createRpcClient([
       {

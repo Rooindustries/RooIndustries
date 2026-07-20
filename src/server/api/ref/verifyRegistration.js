@@ -16,7 +16,15 @@ const client = createClient({
   apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
   token: process.env.SANITY_WRITE_TOKEN,
   useCdn: false,
-});
+}, { allowLegacyFallback: false });
+
+const isVerificationSourceConflict = (error) => {
+  if (String(error?.code || "") === "40001") return true;
+  return (
+    Number(error?.statusCode || error?.status || 0) === 409 &&
+    error?.code !== "CREATOR_ACCOUNT_INACTIVE"
+  );
+};
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -80,22 +88,9 @@ export default async function handler(req, res) {
       ])
       .commit({ visibility: "sync" });
 
-    const activeReferral = await client.fetch(`*[_id == $id][0]`, {
-      id: referral._id,
-    });
-    if (activeReferral) {
-      await createSupabaseCreatorAccount({
-        referral: activeReferral,
-        passwordHash: activeReferral.creatorPassword,
-        sourceRevision: activeReferral._rev || "",
-        sourceHash: hashShadowDocument(activeReferral),
-      }).catch((error) => {
-        logSafeError("Verified referral metadata resync failed", error);
-      });
-    }
-
     const browserSession = await createVerifiedSupabaseBrowserSession({
       userId: created.userId,
+      expectedLegacySanityId: referral._id,
     });
     await installLegacySupabaseSession({
       req,
@@ -117,10 +112,12 @@ export default async function handler(req, res) {
     res.setHeader("Cache-Control", "private, no-store");
     return res.status(200).json({ ok: true });
   } catch (error) {
-    if (Number(error?.statusCode || error?.status || 0) === 409) {
-      return res.status(400).json({
+    if (isVerificationSourceConflict(error)) {
+      logSafeError("Referral registration verification conflict", error);
+      return res.status(409).json({
         ok: false,
-        error: "Invalid or expired confirmation link.",
+        retryable: true,
+        error: "Account confirmation changed while processing. Please try again.",
       });
     }
     logSafeError("Referral registration verification failed", error);

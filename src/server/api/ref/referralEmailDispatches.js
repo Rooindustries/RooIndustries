@@ -13,12 +13,35 @@ const DISPATCH_KINDS = new Set([
 const sha256 = (value) =>
   crypto.createHash("sha256").update(String(value || "")).digest("hex");
 
+const SOURCE_STATE_RECOVERY_REASONS = new Set([
+  "source_document_missing",
+  "source_recipient_changed",
+  "source_registration_not_pending",
+  "source_registration_pending",
+  "source_token_changed",
+  "source_expiry_missing",
+  "source_expiry_invalid",
+  "source_expiry_changed",
+  "source_dispatch_kind_invalid",
+  "link_expired",
+]);
+
+export const isReferralEmailSourceStateConflict = (value) =>
+  value?.referralEmailSourceStateConflict === true ||
+  value?.sourceStateChanged === true ||
+  value?.source_state_changed === true ||
+  SOURCE_STATE_RECOVERY_REASONS.has(
+    String(value?.recovery_blocked_reason || "")
+  );
+
 const requireRpcData = ({ data, error }, operation) => {
   if (!error) return data;
   const failure = new Error(`Supabase ${operation} failed.`);
   failure.code = error.code || "REFERRAL_EMAIL_DISPATCH_FAILED";
   failure.status = error.status || 503;
   failure.statusCode = failure.status;
+  failure.referralEmailSourceStateConflict =
+    String(error.code || "") === "40001";
   throw failure;
 };
 
@@ -244,6 +267,7 @@ export const deliverReferralEmailDispatch = async ({
       sent: dispatch?.sent === true ? 1 : 0,
       pending: dispatch?.in_progress === true,
       deadLetter: dispatch?.dead_letter === true ? 1 : 0,
+      sourceStateChanged: dispatch?.source_state_changed === true,
     };
   }
   const summary = await sendClaimedDispatch({

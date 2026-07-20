@@ -312,6 +312,154 @@ if (!fs.existsSync(referralEmailFile)) {
   }
 }
 
+const referralIntegrityMigrations = [
+  "20260720090000_harden_referral_mutations_and_lifecycle.sql",
+  "20260720091000_harden_referral_email_dispatch_source_state.sql",
+  "20260720092000_add_referral_recovery_evidence.sql",
+  "20260720093000_ignore_namespaced_mirror_metadata.sql",
+];
+for (const file of referralIntegrityMigrations) {
+  const location = path.join(migrationsDirectory, file);
+  if (!fs.existsSync(location)) {
+    failures.push(`Referral integrity migration is missing: ${file}`);
+    continue;
+  }
+  const sql = fs.readFileSync(location, "utf8");
+  if (!hasBoundedMigrationPrefix(sql)) {
+    failures.push(`Referral integrity migration lacks bounded timeouts: ${file}`);
+  }
+}
+
+const referralLifecycleFile = path.join(
+  migrationsDirectory,
+  referralIntegrityMigrations[0]
+);
+if (fs.existsSync(referralLifecycleFile)) {
+  const sql = fs.readFileSync(referralLifecycleFile, "utf8");
+  for (const required of [
+    "v_current.payload",
+    "migration.referral_commerce_patch(v_payload)",
+    "native creator source state changed",
+    "coalesce(v_source.payload->>'registrationStatus', 'active')",
+    "public.profiles.status in ('disabled', 'deleted')",
+    "coalesce(creator.accounting_totals, '{}'::jsonb)",
+    "update accounts.login_aliases alias set",
+    "nullif(btrim(source.payload->>'emailVerifiedAt'), '') is not null",
+    "update accounts.identity_links identity set",
+    "'login_aliases', v_aliases",
+    "'identity_links', v_identities",
+  ]) {
+    if (!sql.includes(required)) {
+      failures.push(`Referral lifecycle hardening lacks: ${required}`);
+    }
+  }
+}
+
+const referralDispatchHardeningFile = path.join(
+  migrationsDirectory,
+  referralIntegrityMigrations[1]
+);
+if (fs.existsSync(referralDispatchHardeningFile)) {
+  const sql = fs.readFileSync(referralDispatchHardeningFile, "utf8");
+  for (const required of [
+    "accounts.referral_email_dispatch_source_error",
+    "source_recipient_changed",
+    "source_registration_not_pending",
+    "source_registration_pending",
+    "source_token_changed",
+    "source_expiry_changed",
+    "delivery_payload = delivery_payload - 'token'",
+    "source_state_changed",
+    "with eligible as (",
+    "for update skip locked",
+    "limit least(400, greatest(p_limit * 4, p_limit))",
+    "delivery_payload = dispatch.delivery_payload - 'token'",
+  ]) {
+    if (!sql.includes(required)) {
+      failures.push(`Referral dispatch source hardening lacks: ${required}`);
+    }
+  }
+  if (
+    /grant\s+execute\s+on\s+function\s+accounts\.referral_email_dispatch_source_error/i.test(
+      sql
+    )
+  ) {
+    failures.push("Referral dispatch source validator must remain private.");
+  }
+  if (
+    !hasServiceRoleOnlyGrant(
+      sql,
+      /^grant\s+execute\s+on\s+function\s+public\.roo_claim_referral_email_dispatches\s*\(/i
+    )
+  ) {
+    failures.push("Referral dispatch batch claim RPC is not service-role restricted.");
+  }
+}
+
+const referralRecoveryEvidenceFile = path.join(
+  migrationsDirectory,
+  referralIntegrityMigrations[2]
+);
+if (fs.existsSync(referralRecoveryEvidenceFile)) {
+  const sql = fs.readFileSync(referralRecoveryEvidenceFile, "utf8");
+  for (const required of [
+    "migration.referral_accounting_patch",
+    "public.roo_referral_recovery_snapshot",
+    "public.roo_referral_accounting_loss_candidates",
+    "public.roo_referral_mirror_domain_state",
+    "commerce_mirror_outbox_document_ids_gin",
+    "on migration.commerce_mirror_outbox using gin (document_ids)",
+    "with historical as materialized (",
+    "row_number() over (",
+    "snapshot.history_rank = 1",
+    "'sequence_no', p_sequence_no::text",
+    "'suggested_sequence_no', candidate.sequence_no::text",
+    "later_accounting_change_count",
+    "'unambiguous', candidate.later_accounting_change_count = 0",
+    "limit 501",
+    "referral mirror state exceeds the 500-document limit",
+    "using errcode = '54000'",
+    "source.legacy_sanity_id = any(v_ids)",
+    "'global_sequence', coalesce(global_event.sequence_no, 0)::text",
+    "'commerce_sequence', coalesce(commerce_event.sequence_no, 0)::text",
+  ]) {
+    if (!sql.includes(required)) {
+      failures.push(`Referral recovery evidence lacks: ${required}`);
+    }
+  }
+  if (
+    /grant\s+execute\s+on\s+function\s+migration\.referral_accounting_patch/i.test(
+      sql
+    )
+  ) {
+    failures.push("Referral accounting patch helper must remain private.");
+  }
+  for (const signature of [
+    "roo_referral_recovery_snapshot",
+    "roo_referral_accounting_loss_candidates",
+    "roo_referral_mirror_domain_state",
+  ]) {
+    const grantPattern = new RegExp(
+      `^grant\\s+execute\\s+on\\s+function\\s+public\\.${signature}\\s*\\(`,
+      "im"
+    );
+    if (!hasServiceRoleOnlyGrant(sql, grantPattern)) {
+      failures.push(`${signature} is not service-role restricted.`);
+    }
+  }
+}
+
+const namespacedMirrorMetadataFile = path.join(
+  migrationsDirectory,
+  referralIntegrityMigrations[3]
+);
+if (fs.existsSync(namespacedMirrorMetadataFile)) {
+  const sql = fs.readFileSync(namespacedMirrorMetadataFile, "utf8");
+  if (!sql.includes("'_supabaseSequences'")) {
+    failures.push("Canonical business documents still include namespaced mirror metadata.");
+  }
+}
+
 for (const file of [
   "20260715080000_add_referral_creator_terms_editor.sql",
   "20260715090000_add_document_mutation_mirror_outbox.sql",

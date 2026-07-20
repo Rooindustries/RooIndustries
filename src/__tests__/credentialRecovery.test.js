@@ -43,14 +43,48 @@ const createSanityClient = (initial) => {
     }),
     transaction: jest.fn(() => {
       let replacement = null;
+      let update = null;
       const transaction = {
         createOrReplace: jest.fn((document) => {
           replacement = { ...document };
           return transaction;
         }),
+        patch: jest.fn((id, mutate) => {
+          const changes = { id, set: {}, unset: [], expectedRevision: "" };
+          const patch = {
+            ifRevisionId: jest.fn((revision) => {
+              changes.expectedRevision = revision;
+              return patch;
+            }),
+            set: jest.fn((values) => {
+              Object.assign(changes.set, values);
+              return patch;
+            }),
+            unset: jest.fn((fields) => {
+              changes.unset.push(...fields);
+              return patch;
+            }),
+          };
+          mutate(patch);
+          update = changes;
+          return transaction;
+        }),
         delete: jest.fn(() => transaction),
         commit: jest.fn(async () => {
           if (replacement) state.document = replacement;
+          if (update) {
+            if (update.id !== state.document._id) {
+              throw new Error("patch target missing");
+            }
+            if (
+              update.expectedRevision &&
+              update.expectedRevision !== state.document._rev
+            ) {
+              throw new Error("revision conflict");
+            }
+            Object.assign(state.document, update.set);
+            update.unset.forEach((field) => delete state.document[field]);
+          }
           state.commits += 1;
           return { ok: true };
         }),

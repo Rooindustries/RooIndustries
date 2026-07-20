@@ -51,8 +51,14 @@ const loadForgotHandler = () => {
     requeued: true,
     sent: false,
   }));
+  const isReferralEmailSourceStateConflict = jest.fn(
+    (value) =>
+      value?.source_state_changed === true ||
+      value?.referralEmailSourceStateConflict === true
+  );
+  const createDataClient = jest.fn(() => ({ fetch, patch }));
   jest.doMock("../server/data/documentClient.js", () => ({
-    createDataClient: () => ({ fetch, patch }),
+    createDataClient,
   }));
   jest.doMock("../server/supabase/runtime.js", () => ({
     resolveSupabaseRuntimePolicy: () => ({ primaryBackend: "supabase" }),
@@ -64,6 +70,7 @@ const loadForgotHandler = () => {
   jest.doMock("../server/api/ref/referralEmailDispatches.js", () => ({
     enqueueReferralEmailMutation,
     deliverReferralEmailDispatch,
+    isReferralEmailSourceStateConflict,
     requeueReferralEmailDispatch,
     sendReferralEmailDirect: jest.fn(),
   }));
@@ -72,8 +79,10 @@ const loadForgotHandler = () => {
     handler: module.default || module,
     fetch,
     patch,
+    createDataClient,
     enqueueReferralEmailMutation,
     deliverReferralEmailDispatch,
+    isReferralEmailSourceStateConflict,
     requeueReferralEmailDispatch,
   };
 };
@@ -106,8 +115,14 @@ const loadRegisterHandler = () => {
     requeued: true,
     sent: false,
   }));
+  const isReferralEmailSourceStateConflict = jest.fn(
+    (value) =>
+      value?.source_state_changed === true ||
+      value?.referralEmailSourceStateConflict === true
+  );
+  const createDataClient = jest.fn(() => ({ fetch, transaction }));
   jest.doMock("../server/data/documentClient.js", () => ({
-    createDataClient: () => ({ fetch, transaction }),
+    createDataClient,
   }));
   jest.doMock("../server/supabase/runtime.js", () => ({
     resolveSupabaseRuntimePolicy: () => ({
@@ -135,6 +150,7 @@ const loadRegisterHandler = () => {
   jest.doMock("../server/api/ref/referralEmailDispatches.js", () => ({
     enqueueReferralEmailMutation,
     deliverReferralEmailDispatch,
+    isReferralEmailSourceStateConflict,
     requeueReferralEmailDispatch,
     sendReferralEmailDirect: jest.fn(),
   }));
@@ -142,10 +158,12 @@ const loadRegisterHandler = () => {
   return {
     handler: module.default || module,
     fetch,
+    createDataClient,
     transaction,
     transactionCommit,
     enqueueReferralEmailMutation,
     deliverReferralEmailDispatch,
+    isReferralEmailSourceStateConflict,
     requeueReferralEmailDispatch,
   };
 };
@@ -213,6 +231,7 @@ const loadSanityForgotHandler = () => {
   jest.doMock("../server/api/ref/referralEmailDispatches.js", () => ({
     enqueueReferralEmailMutation: jest.fn(),
     deliverReferralEmailDispatch: jest.fn(),
+    isReferralEmailSourceStateConflict: jest.fn(() => false),
     requeueReferralEmailDispatch: jest.fn(),
     sendReferralEmailDirect,
   }));
@@ -274,6 +293,10 @@ describe("Supabase-primary referral email routes", () => {
       })
     );
     expect(loaded.patch).not.toHaveBeenCalled();
+    expect(loaded.createDataClient).toHaveBeenCalledWith(
+      expect.any(Object),
+      { allowLegacyFallback: false }
+    );
     expect(loaded.deliverReferralEmailDispatch).toHaveBeenCalledWith({
       idempotencyKey: `referral-email-${"a".repeat(64)}`,
     });
@@ -339,6 +362,57 @@ describe("Supabase-primary referral email routes", () => {
       ok: true,
       message: "If email exists, link sent.",
     });
+  });
+
+  test("returns a retryable reset response when the dispatch source changes", async () => {
+    const loaded = loadForgotHandler();
+    loaded.deliverReferralEmailDispatch.mockResolvedValue({
+      claimed: false,
+      sent: 0,
+      deadLetter: 1,
+      pending: false,
+      source_state_changed: true,
+    });
+    const response = createResponse();
+
+    await loaded.handler(
+      {
+        method: "POST",
+        headers: { "x-forwarded-for": "203.0.113.1" },
+        body: { email: "creator@example.com" },
+      },
+      response
+    );
+
+    expect(response.statusCode).toBe(503);
+    expect(response.body).toEqual({
+      ok: false,
+      retryable: true,
+      error: "Password reset is temporarily unavailable. Please try again.",
+    });
+    expect(loaded.requeueReferralEmailDispatch).not.toHaveBeenCalled();
+  });
+
+  test("bounds reset retries after repeated source revision conflicts", async () => {
+    const loaded = loadForgotHandler();
+    loaded.enqueueReferralEmailMutation.mockRejectedValue(
+      Object.assign(new Error("source changed"), { code: "40001" })
+    );
+    const response = createResponse();
+
+    await loaded.handler(
+      {
+        method: "POST",
+        headers: { "x-forwarded-for": "203.0.113.1" },
+        body: { email: "creator@example.com" },
+      },
+      response
+    );
+
+    expect(response.statusCode).toBe(503);
+    expect(response.body).toMatchObject({ ok: false, retryable: true });
+    expect(loaded.enqueueReferralEmailMutation).toHaveBeenCalledTimes(3);
+    expect(loaded.deliverReferralEmailDispatch).not.toHaveBeenCalled();
   });
 
   test("reuses the Supabase source token while a credential reset is pending", async () => {
@@ -552,6 +626,10 @@ describe("Supabase-primary referral email routes", () => {
     ]);
     expect(loaded.transaction).not.toHaveBeenCalled();
     expect(loaded.transactionCommit).not.toHaveBeenCalled();
+    expect(loaded.createDataClient).toHaveBeenCalledWith(
+      expect.any(Object),
+      { allowLegacyFallback: false }
+    );
   });
 
   test("requeues a dead-lettered registration before returning success", async () => {
@@ -585,6 +663,41 @@ describe("Supabase-primary referral email routes", () => {
       referralId: expect.stringMatching(/^referral\./),
       dispatchKind: "registration_verification",
     });
+  });
+
+  test("returns a retryable registration conflict when dispatch source changes", async () => {
+    const loaded = loadRegisterHandler();
+    loaded.deliverReferralEmailDispatch.mockResolvedValue({
+      claimed: false,
+      sent: 0,
+      deadLetter: 1,
+      pending: false,
+      source_state_changed: true,
+    });
+    const response = createResponse();
+
+    await loaded.handler(
+      {
+        method: "POST",
+        headers: { "x-forwarded-for": "203.0.113.2" },
+        body: {
+          discordUsername: "Creator",
+          email: "creator@example.com",
+          paypalEmail: "creator-paypal@example.com",
+          slug: "creator-code",
+          password: testPassword,
+        },
+      },
+      response
+    );
+
+    expect(response.statusCode).toBe(409);
+    expect(response.body).toEqual({
+      ok: false,
+      retryable: true,
+      error: "Registration changed while processing. Please try again.",
+    });
+    expect(loaded.requeueReferralEmailDispatch).not.toHaveBeenCalled();
   });
 
   test("recovers an existing pending Supabase registration instead of returning a conflict", async () => {
@@ -639,8 +752,18 @@ describe("Supabase-primary referral email routes", () => {
       slug: { _type: "slug", current: "expired-code" },
       registrationStatus: "pending_email",
       registrationVerificationExpiresAt: "2020-01-01T00:00:00.000Z",
+      registrationVerificationTokenHash: "stale-registration-token",
+      creatorPassword: "stale-password",
+      paidTotal: 25,
+      customAgreement: { tier: "ambassador" },
+      _supabaseSequence: "99",
+      _supabaseSequences: { global: "99", commerce: "98" },
+      _supabaseRevision: "stale-source-revision",
+      _supabaseCanonicalHash: "a".repeat(64),
+      _commerceCutoverGeneration: 9,
     };
     loaded.fetch
+      .mockResolvedValueOnce(existing)
       .mockResolvedValueOnce(existing)
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(existing);
@@ -668,11 +791,66 @@ describe("Supabase-primary referral email routes", () => {
       expect.objectContaining({
         operation: "replace",
         expected_revision: "expired-revision",
-        document: expect.objectContaining({ _id: "referral.expired" }),
+        document: expect.objectContaining({
+          _id: "referral.expired",
+          paidTotal: 25,
+          customAgreement: { tier: "ambassador" },
+        }),
       }),
     ]);
+    const renewed = enqueue.mutations[0].document;
+    expect(renewed.creatorPassword).not.toBe("stale-password");
+    expect(renewed).not.toHaveProperty("_rev");
+    expect(renewed).not.toHaveProperty("_supabaseSequence");
+    expect(renewed).not.toHaveProperty("_supabaseSequences");
+    expect(renewed).not.toHaveProperty("_supabaseRevision");
+    expect(renewed).not.toHaveProperty("_supabaseCanonicalHash");
+    expect(renewed).not.toHaveProperty("_commerceCutoverGeneration");
     expect(loaded.transaction).not.toHaveBeenCalled();
     expect(loaded.transactionCommit).not.toHaveBeenCalled();
+  });
+
+  test("rejects renewal when the pending registration changes during re-read", async () => {
+    const loaded = loadRegisterHandler();
+    const expired = {
+      _id: "referral.expired",
+      _rev: "expired-revision",
+      _type: "referral",
+      creatorEmail: "expired@example.com",
+      slug: { _type: "slug", current: "expired-code" },
+      registrationStatus: "pending_email",
+      registrationVerificationExpiresAt: "2020-01-01T00:00:00.000Z",
+    };
+    loaded.fetch
+      .mockResolvedValueOnce(expired)
+      .mockResolvedValueOnce({
+        ...expired,
+        _rev: "activated-revision",
+        registrationStatus: "active",
+      });
+    const response = createResponse();
+
+    await loaded.handler(
+      {
+        method: "POST",
+        headers: { "x-forwarded-for": "203.0.113.4" },
+        body: {
+          discordUsername: "Renewed Creator",
+          email: "expired@example.com",
+          paypalEmail: "renewed-paypal@example.com",
+          slug: "expired-code",
+          password: testPassword,
+        },
+      },
+      response
+    );
+
+    expect(response.statusCode).toBe(409);
+    expect(response.body).toEqual({
+      ok: false,
+      error: "Email already registered",
+    });
+    expect(loaded.enqueueReferralEmailMutation).not.toHaveBeenCalled();
   });
 
   test("reuses a sealed reset token after an ambiguous Sanity delivery", async () => {
