@@ -15,6 +15,9 @@ export const argumentsFor = (name) =>
     value === name ? [String(process.argv[index + 1] || "").trim()] : []
   ).filter(Boolean);
 
+export const isValidSanityDocumentId = (value) =>
+  /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(String(value || ""));
+
 export const loadRepairEnvironment = (envPath) => {
   if (!envPath) throw new Error("--env must name the exact repair environment file.");
   const resolved = path.resolve(envPath);
