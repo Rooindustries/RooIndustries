@@ -37,6 +37,29 @@ export const COMMERCE_EPHEMERAL_DOCUMENT_TYPES = Object.freeze([
   "refRateLimitBucket",
 ]);
 
+export const REFERRAL_COMMERCE_FIELDS = Object.freeze([
+  "backendOwner",
+  "cutoverGeneration",
+  "successfulReferrals",
+  "currentCommissionPercent",
+  "currentDiscountPercent",
+  "maxCommissionPercent",
+  "bypassUnlock",
+  "isFirstTime",
+  "xocPayments",
+  "vertexPayments",
+  "earnedXoc",
+  "earnedVertex",
+  "earnedTotal",
+  "paidXoc",
+  "paidVertex",
+  "paidTotal",
+  "owedXoc",
+  "owedVertex",
+  "owedTotal",
+  "notes",
+]);
+
 export const COMMERCE_PARITY_EXCLUDED_DOCUMENT_KEYS = Object.freeze([
   "_rev",
   "_createdAt",
@@ -45,6 +68,7 @@ export const COMMERCE_PARITY_EXCLUDED_DOCUMENT_KEYS = Object.freeze([
   "_supabaseRevision",
   "_supabaseCanonicalHash",
   "_supabaseSequence",
+  "_supabaseSequences",
   "_commerceCutoverGeneration",
   "_supabaseMirroredAt",
 ]);
@@ -67,6 +91,23 @@ const referralParityExcludedKeys = new Set([
   ...COMMERCE_PARITY_EXCLUDED_DOCUMENT_KEYS,
   ...REFERRAL_PARITY_CREDENTIAL_KEYS,
 ]);
+const referralCommerceFieldSet = new Set(REFERRAL_COMMERCE_FIELDS);
+
+export const isReferralCommerceField = (key) =>
+  referralCommerceFieldSet.has(String(key || ""));
+
+export const pickReferralCommerceFields = (value) =>
+  Object.fromEntries(
+    Object.entries(value || {}).filter(([key]) => isReferralCommerceField(key))
+  );
+
+export const pickReferralGeneralFields = (value) =>
+  Object.fromEntries(
+    Object.entries(value || {}).filter(
+      ([key]) =>
+        !isReferralCommerceField(key) && key !== "_commerceCutoverGeneration"
+    )
+  );
 
 export const canonicalizeCommerceParityValue = (value) => {
   if (Array.isArray(value)) return value.map(canonicalizeCommerceParityValue);

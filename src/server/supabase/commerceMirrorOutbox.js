@@ -1,6 +1,17 @@
 import crypto from "node:crypto";
+import {
+  pickReferralCommerceFields,
+  REFERRAL_COMMERCE_FIELDS,
+} from "../commerce/documentTypes.js";
 import { getSafeErrorCode, logSafeError } from "../safeErrorLog.js";
+import {
+  buildMirrorMetadata,
+  MIRROR_METADATA_KEYS,
+  normalizeMirrorSequence,
+  readMirrorSequence,
+} from "./mirrorMetadata.js";
 import { logSanityMirrorEvent } from "./mirrorObservability.js";
+import { fetchShadowDocuments } from "./shadowStore.js";
 
 const normalizeDocuments = (value) =>
   (Array.isArray(value) ? value : [])
@@ -11,29 +22,6 @@ const normalizeDocuments = (value) =>
 
 const normalizeIds = (value) =>
   [...new Set((Array.isArray(value) ? value : []).map(String).filter(Boolean))].sort();
-
-const REFERRAL_COMMERCE_FIELDS = Object.freeze([
-  "backendOwner",
-  "cutoverGeneration",
-  "successfulReferrals",
-  "currentCommissionPercent",
-  "currentDiscountPercent",
-  "maxCommissionPercent",
-  "bypassUnlock",
-  "isFirstTime",
-  "xocPayments",
-  "vertexPayments",
-  "earnedXoc",
-  "earnedVertex",
-  "earnedTotal",
-  "paidXoc",
-  "paidVertex",
-  "paidTotal",
-  "owedXoc",
-  "owedVertex",
-  "owedTotal",
-  "notes",
-]);
 
 const isMissingRpc = (error) =>
   ["42883", "PGRST202"].includes(String(error?.code || ""));
@@ -47,50 +35,68 @@ const requireRpc = ({ data, error }, operation) => {
   throw failure;
 };
 
-const cleanForSanity = ({ document, event }) => {
-  const {
-    _rev: supabaseRevision,
-    _createdAt,
-    _updatedAt,
-    _supabaseCanonicalHash: documentCanonicalHash,
-    _supabaseSequence: documentSequence,
-    ...clean
-  } = document;
-  return {
-    ...clean,
-    _supabaseRevision: String(supabaseRevision || ""),
-    _supabaseCanonicalHash: String(
-      documentCanonicalHash || event?.canonical_hash || ""
-    ),
-    _commerceCutoverGeneration: Math.max(
-      0,
-      Number(event?.cutover_generation) || 0
-    ),
-    _supabaseMirroredAt: new Date().toISOString(),
-    _supabaseSequence: Math.max(
-      0,
-      Number(documentSequence || event?.sequence_no) || 0
-    ),
-  };
+const mirrorExcludedKeys = new Set([
+  "_rev",
+  "_createdAt",
+  "_updatedAt",
+  "_system",
+  "_commerceCutoverGeneration",
+  ...MIRROR_METADATA_KEYS,
+]);
+
+const sortValue = (value) => {
+  if (Array.isArray(value)) return value.map(sortValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, sortValue(value[key])])
+  );
 };
 
-const cleanReferralAccountingForSanity = ({ document, event }) => {
-  const clean = cleanForSanity({ document, event });
-  return REFERRAL_COMMERCE_FIELDS.reduce(
-    (result, field) => {
-      if (Object.prototype.hasOwnProperty.call(clean, field)) {
-        result[field] = clean[field];
-      }
-      return result;
-    },
-    {
-      _supabaseRevision: clean._supabaseRevision,
-      _supabaseCanonicalHash: clean._supabaseCanonicalHash,
-      _commerceCutoverGeneration: clean._commerceCutoverGeneration,
-      _supabaseMirroredAt: clean._supabaseMirroredAt,
-      _supabaseSequence: clean._supabaseSequence,
-    }
+const cleanSourceDocument = (document) =>
+  Object.fromEntries(
+    Object.entries(document || {}).filter(
+      ([key]) => !mirrorExcludedKeys.has(key)
+    )
   );
+
+const canonicalOwnedDocument = (document) => {
+  const business = cleanSourceDocument(document);
+  const owned =
+    business._type === "referral"
+      ? pickReferralCommerceFields(business)
+      : business;
+  return JSON.stringify(sortValue(owned));
+};
+
+const cleanForSanity = ({ document, current, event }) => ({
+  ...cleanSourceDocument(document),
+  ...buildMirrorMetadata({
+    current,
+    document,
+    domain: "commerce",
+    sequence: event?.sequence_no,
+    canonicalHash: document?._supabaseCanonicalHash || event?.canonical_hash,
+  }),
+  _commerceCutoverGeneration: Math.max(
+    0,
+    Number(event?.cutover_generation) || 0
+  ),
+});
+
+const cleanReferralAccountingForSanity = ({ document, current, event }) => {
+  const clean = cleanForSanity({ document, current, event });
+  return {
+    ...pickReferralCommerceFields(clean),
+    ...buildMirrorMetadata({
+      current,
+      document: clean,
+      domain: "commerce",
+      sequence: event?.sequence_no,
+    }),
+    _commerceCutoverGeneration: clean._commerceCutoverGeneration,
+  };
 };
 
 const guardedDeleteIds = async ({ sanityClient, event }) => {
@@ -108,7 +114,8 @@ const guardedDeleteIds = async ({ sanityClient, event }) => {
       _supabaseRevision,
       _supabaseCanonicalHash,
       _commerceCutoverGeneration,
-      _supabaseSequence
+      _supabaseSequence,
+      _supabaseSequences
     }`,
     { ids: deletedIds }
   );
@@ -121,7 +128,10 @@ const guardedDeleteIds = async ({ sanityClient, event }) => {
   return deletedIds.filter((id) => {
     const current = currentById.get(id);
     if (!current) return false;
-    if (Number(current._supabaseSequence || 0) > Number(event?.sequence_no || 0)) {
+    if (
+      readMirrorSequence(current, "commerce") >
+      normalizeMirrorSequence(event?.sequence_no)
+    ) {
       return false;
     }
     const guard = event?.delete_guards?.[id];
@@ -153,46 +163,163 @@ const guardedDeleteIds = async ({ sanityClient, event }) => {
   });
 };
 
-const mirrorEventToSanity = async ({ sanityClient, event }) => {
-  const documents = normalizeDocuments(event?.documents);
-  const documentIds = documents.map((document) => String(document?._id || "")).filter(Boolean);
-  const currentDocuments = documentIds.length > 0
-    ? await sanityClient.fetch(
-        `*[_id in $ids]{_id,_supabaseSequence,_supabaseCanonicalHash}`,
-        { ids: documentIds }
-      )
-    : [];
-  const currentById = new Map(
-    (Array.isArray(currentDocuments) ? currentDocuments : [])
-      .filter((document) => document?._id)
-      .map((document) => [String(document._id), document])
+const fetchMirrorDocuments = async ({ sanityClient, ids }) => {
+  if (ids.length < 1) return new Map();
+  const documents = await sanityClient.fetch(
+    `*[_id in $ids]`,
+    { ids },
+    { perspective: "raw" }
   );
-  const eligibleDocuments = documents.filter((document) => {
-    const current = currentById.get(String(document?._id || ""));
-    return Number(current?._supabaseSequence || 0) <= Number(event?.sequence_no || 0);
+  return new Map(
+    normalizeDocuments(documents).map((document) => [String(document._id), document])
+  );
+};
+
+const excludeDeletedReferralSources = async ({
+  supabaseClient,
+  currentById,
+  documents,
+}) => {
+  const missingReferralIds = normalizeIds(
+    documents
+      .filter(
+        (document) =>
+          document?._type === "referral" &&
+          !currentById.has(String(document?._id || ""))
+      )
+      .map((document) => document._id)
+  );
+  if (missingReferralIds.length < 1) return { documents, superseded: 0 };
+
+  const authoritative = await fetchShadowDocuments({
+    client: supabaseClient,
+    documentTypes: ["referral"],
+    ids: missingReferralIds,
+    limit: missingReferralIds.length,
+    allowLegacyFallback: false,
   });
-  const skippedDocuments = documents.length - eligibleDocuments.length;
+  const authoritativeIds = new Set(
+    normalizeDocuments(authoritative).map((document) => String(document._id))
+  );
+  const filtered = documents.filter(
+    (document) =>
+      document?._type !== "referral" ||
+      currentById.has(String(document?._id || "")) ||
+      authoritativeIds.has(String(document?._id || ""))
+  );
+  return {
+    documents: filtered,
+    superseded: documents.length - filtered.length,
+  };
+};
+
+const buildReferralAccountingPatch = ({ current, document, event }) => {
+  const set = cleanReferralAccountingForSanity({ current, document, event });
+  const unset = REFERRAL_COMMERCE_FIELDS.filter(
+    (field) =>
+      Object.prototype.hasOwnProperty.call(current || {}, field) &&
+      !Object.prototype.hasOwnProperty.call(set, field)
+  );
+  return { set, unset };
+};
+
+const applyReferralAccounting = ({ transaction, current, document, event }) => {
+  const update = buildReferralAccountingPatch({ current, document, event });
+  if (!current) {
+    return transaction.createIfNotExists({
+      _id: document._id,
+      _type: "referral",
+      ...update.set,
+    });
+  }
+  return transaction.patch(document._id, (patch) => {
+    const guarded =
+      current._rev && typeof patch.ifRevisionId === "function"
+        ? patch.ifRevisionId(current._rev)
+        : patch;
+    const setPatch = guarded.set(update.set);
+    return update.unset.length > 0 ? setPatch.unset(update.unset) : setPatch;
+  });
+};
+
+const verifyCommerceProjection = async ({ sanityClient, documents, deletedIds, event }) => {
+  const ids = normalizeIds([
+    ...documents.map((document) => document._id),
+    ...deletedIds,
+  ]);
+  const current = await fetchMirrorDocuments({ sanityClient, ids });
+  const eventSequence = normalizeMirrorSequence(event?.sequence_no);
+  for (const document of documents) {
+    const target = current.get(String(document._id));
+    if (!target) {
+      const error = new Error("The commerce mirror target is missing.");
+      error.code = "COMMERCE_MIRROR_VERIFICATION_FAILED";
+      throw error;
+    }
+    const targetSequence = readMirrorSequence(target, "commerce");
+    if (targetSequence > eventSequence) continue;
+    if (
+      targetSequence !== eventSequence ||
+      canonicalOwnedDocument(target) !== canonicalOwnedDocument(document)
+    ) {
+      const error = new Error("The commerce mirror projection did not match.");
+      error.code = "COMMERCE_MIRROR_VERIFICATION_FAILED";
+      throw error;
+    }
+  }
+  for (const id of deletedIds) {
+    if (current.has(String(id))) {
+      const error = new Error("The commerce mirror deletion was not visible.");
+      error.code = "COMMERCE_MIRROR_VERIFICATION_FAILED";
+      throw error;
+    }
+  }
+};
+
+const mirrorEventToSanity = async ({ supabaseClient, sanityClient, event }) => {
+  const documents = normalizeDocuments(event?.documents);
+  const documentIds = documents.map((document) => String(document?._id || ""));
+  const currentById = await fetchMirrorDocuments({
+    sanityClient,
+    ids: documentIds.filter(Boolean),
+  });
+  const sourceFiltered = await excludeDeletedReferralSources({
+    supabaseClient,
+    currentById,
+    documents,
+  });
+  const eventSequence = normalizeMirrorSequence(event?.sequence_no);
+  const eligibleDocuments = sourceFiltered.documents.filter(
+    (document) =>
+      readMirrorSequence(currentById.get(String(document?._id || "")), "commerce") <=
+      eventSequence
+  );
   const eligibleDeletes = await guardedDeleteIds({ sanityClient, event });
   let transaction = sanityClient.transaction();
-  for (const id of eligibleDeletes) {
-    transaction = transaction.delete(id);
-  }
+  for (const id of eligibleDeletes) transaction = transaction.delete(id);
   for (const document of eligibleDocuments) {
-    if (document?._type === "referral") {
-      const accounting = cleanReferralAccountingForSanity({ document, event });
-      transaction = transaction.patch(document._id, (patch) =>
-        patch.set(accounting)
-      );
-      continue;
-    }
-    transaction = transaction.createOrReplace(cleanForSanity({ document, event }));
+    const current = currentById.get(String(document._id));
+    transaction =
+      document?._type === "referral"
+        ? applyReferralAccounting({ transaction, current, document, event })
+        : transaction.createOrReplace(cleanForSanity({ document, current, event }));
   }
   const applied = eligibleDeletes.length + eligibleDocuments.length;
-  if (applied > 0) await transaction.commit();
+  if (applied > 0) {
+    await transaction.commit();
+    await verifyCommerceProjection({
+      sanityClient,
+      documents: eligibleDocuments,
+      deletedIds: eligibleDeletes,
+      event,
+    });
+  }
   return {
     applied,
     superseded:
-      skippedDocuments +
+      sourceFiltered.superseded +
+      sourceFiltered.documents.length -
+      eligibleDocuments.length +
       Math.max(0, normalizeIds(event?.deleted_ids).length - eligibleDeletes.length),
   };
 };
@@ -280,7 +407,11 @@ export const drainCommerceMirrorOutbox = async ({
     for (const event of events) {
       summary.attempted += 1;
       try {
-        const mirrored = await mirrorEventToSanity({ sanityClient, event });
+        const mirrored = await mirrorEventToSanity({
+          supabaseClient,
+          sanityClient,
+          event,
+        });
         const superseded = mirrored.applied < 1 && mirrored.superseded > 0;
         requireRpc(
           await supabaseClient.rpc("roo_complete_commerce_mirror_event", {

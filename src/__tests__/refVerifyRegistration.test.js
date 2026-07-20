@@ -166,7 +166,38 @@ describe("referral registration confirmation", () => {
       response
     );
 
-    expect(response.statusCode).toBe(400);
+    expect(response.statusCode).toBe(409);
+    expect(response.body).toEqual({
+      ok: false,
+      retryable: true,
+      error: "Account confirmation changed while processing. Please try again.",
+    });
+    expect(mockCreateVerifiedSupabaseBrowserSession).not.toHaveBeenCalled();
+    expect(mockSetReferralSessionCookie).not.toHaveBeenCalled();
+  });
+
+  test("does not create a session when account activation is incomplete", async () => {
+    mockFetch.mockResolvedValueOnce(pendingReferral);
+    mockCreateVerifiedSupabaseBrowserSession.mockRejectedValue(
+      Object.assign(new Error("inactive"), {
+        code: "CREATOR_ACCOUNT_INACTIVE",
+        status: 409,
+        statusCode: 409,
+      })
+    );
+    const response = createResponse();
+
+    await handler(
+      { method: "POST", body: { token: "C".repeat(43) }, headers: {} },
+      response
+    );
+
+    expect(response.statusCode).toBe(503);
+    expect(response.body).toEqual({
+      ok: false,
+      error: "Account confirmation is temporarily unavailable. Please try again.",
+    });
+    expect(mockInstallLegacySupabaseSession).not.toHaveBeenCalled();
     expect(mockSetReferralSessionCookie).not.toHaveBeenCalled();
   });
 });

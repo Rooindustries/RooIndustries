@@ -6,6 +6,7 @@ import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
 import {
   deliverReferralEmailDispatch,
   enqueueReferralEmailMutation,
+  isReferralEmailSourceStateConflict,
   requeueReferralEmailDispatch,
   sendReferralEmailDirect,
 } from "./referralEmailDispatches.js";
@@ -20,7 +21,7 @@ const client = createClient({
   apiVersion: "2023-10-01",
   token: process.env.SANITY_WRITE_TOKEN,
   useCdn: false,
-});
+}, { allowLegacyFallback: false });
 
 const recoverResetToken = (referral) => {
   try {
@@ -88,6 +89,13 @@ const ensureSanityResetToken = async (initialReferral) => {
 const isMutationConflict = (error) =>
   isRevisionConflict(error) ||
   ["23505", "40001"].includes(String(error?.code || ""));
+
+const respondToResetConflict = (res) =>
+  res.status(503).json({
+    ok: false,
+    retryable: true,
+    error: "Password reset is temporarily unavailable. Please try again.",
+  });
 
 const enqueueSupabaseReset = async ({ initialReferral, recipientEmail }) => {
   let referral = initialReferral;
@@ -200,6 +208,9 @@ export default async function handler(req, res) {
         const delivery = await deliverReferralEmailDispatch({
           idempotencyKey: dispatch?.idempotency_key,
         });
+        if (isReferralEmailSourceStateConflict(delivery)) {
+          return respondToResetConflict(res);
+        }
         if (delivery.deadLetter > 0) {
           let recovery;
           try {
@@ -208,11 +219,17 @@ export default async function handler(req, res) {
               dispatchKind: "password_reset",
             });
           } catch (error) {
+            if (isReferralEmailSourceStateConflict(error)) {
+              return respondToResetConflict(res);
+            }
             logSafeError("Referral reset email recovery failed", error);
             return res.status(200).json({
               ok: true,
               message: "If email exists, link sent.",
             });
+          }
+          if (isReferralEmailSourceStateConflict(recovery)) {
+            return respondToResetConflict(res);
           }
           if (recovery?.requeued !== true && recovery?.sent !== true) {
             logSafeError(
@@ -229,6 +246,9 @@ export default async function handler(req, res) {
         }
         syncPending = delivery.sent !== 1;
       } catch (error) {
+        if (isReferralEmailSourceStateConflict(error)) {
+          return respondToResetConflict(res);
+        }
         logSafeError("Referral reset email delivery remains pending", error);
         syncPending = true;
       }
@@ -256,6 +276,13 @@ export default async function handler(req, res) {
     }
     return res.status(200).json({ ok: true, message: "Reset link sent" });
   } catch (err) {
+    if (
+      err?.code === "RESET_TOKEN_CONFLICT" ||
+      isReferralEmailSourceStateConflict(err)
+    ) {
+      logSafeError("Referral reset source conflict", err);
+      return respondToResetConflict(res);
+    }
     logSafeError("Referral forgot-password failed", err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }

@@ -7,6 +7,7 @@ const mockResumeSupabaseCredentialOperation = jest.fn();
 const mockSendReferralEmailDirect = jest.fn();
 const mockEnqueueReferralEmailMutation = jest.fn();
 const mockDeliverReferralEmailDispatch = jest.fn();
+const mockDataClientOptions = [];
 const mockClient = {
   fetch: jest.fn(),
   patch: jest.fn(),
@@ -14,7 +15,10 @@ const mockClient = {
 };
 
 jest.mock("../server/data/documentClient.js", () => ({
-  createDataClient: () => mockClient,
+  createDataClient: (_config, options) => {
+    mockDataClientOptions.push(options);
+    return mockClient;
+  },
 }));
 
 jest.mock("../server/supabase/runtime.js", () => ({
@@ -85,6 +89,10 @@ describe("manual referral credential fallback", () => {
       resetTokenHash: tokenHash,
       resetTokenExpiresAt: "2099-01-01T00:00:00.000Z",
     };
+  });
+
+  test("disables broad Supabase fallback for reset credential reads", () => {
+    expect(mockDataClientOptions).toContainEqual({ allowLegacyFallback: false });
   });
 
   test("leaves an active reset link untouched while manual failover is selected", async () => {

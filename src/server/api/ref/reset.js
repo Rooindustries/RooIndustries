@@ -23,7 +23,7 @@ const client = createClient({
   apiVersion: "2023-10-01",
   token: process.env.SANITY_WRITE_TOKEN,
   useCdn: false,
-});
+}, { allowLegacyFallback: false });
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {

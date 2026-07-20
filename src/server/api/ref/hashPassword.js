@@ -27,7 +27,7 @@ const client = createClient({
   apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
   token: process.env.SANITY_WRITE_TOKEN,
   useCdn: false,
-});
+}, { allowLegacyFallback: false });
 
 const PASSWORD_PENDING_MESSAGE =
   "Your password change is saving. It will finish in a moment.";

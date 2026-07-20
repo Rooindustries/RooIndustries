@@ -1,5 +1,9 @@
 // ./api/ref/register.js
 import { createDataClient as createClient } from "../../data/documentClient.js";
+import {
+  COMMERCE_PARITY_EXCLUDED_DOCUMENT_KEYS,
+  REFERRAL_PARITY_CREDENTIAL_KEYS,
+} from "../../commerce/documentTypes.js";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { setReferralSessionCookie } from "./auth.js";
@@ -19,6 +23,7 @@ import { getLegacySupabaseUser } from "../../supabase/serverSession.js";
 import {
   deliverReferralEmailDispatch,
   enqueueReferralEmailMutation,
+  isReferralEmailSourceStateConflict,
   requeueReferralEmailDispatch,
   sendReferralEmailDirect,
 } from "./referralEmailDispatches.js";
@@ -33,7 +38,21 @@ const client = createClient({
   apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
   token: process.env.SANITY_WRITE_TOKEN,
   useCdn: false,
-});
+}, { allowLegacyFallback: false });
+
+const expiredRegistrationScrubFields = new Set([
+  ...COMMERCE_PARITY_EXCLUDED_DOCUMENT_KEYS,
+  ...REFERRAL_PARITY_CREDENTIAL_KEYS,
+  "_originalId",
+  "emailVerifiedAt",
+]);
+
+const preservedExpiredRegistration = (referral) =>
+  Object.fromEntries(
+    Object.entries(referral || {}).filter(
+      ([key]) => !expiredRegistrationScrubFields.has(key)
+    )
+  );
 
 const isExpiredPendingRegistration = (referral) =>
   referral?.registrationStatus === "pending_email" &&
@@ -78,6 +97,13 @@ const clearRegistrationDeliveryToken = async (referralId) => {
     logSafeError("Referral verification token cleanup failed", error);
   }
 };
+
+const respondToReferralSourceConflict = (res) =>
+  res.status(409).json({
+    ok: false,
+    retryable: true,
+    error: "Registration changed while processing. Please try again.",
+  });
 
 export default async function handler(req, res) {
   if (req.method !== "POST")
@@ -192,7 +218,16 @@ export default async function handler(req, res) {
             .status(409)
             .json({ ok: false, error: "Email already registered" });
         }
-        expiredSupabaseRegistration = existingByEmail;
+        const completeRegistration = await client.fetch(
+          `*[_type == "referral" && _id == $id][0]`,
+          { id: existingByEmail._id }
+        );
+        if (!isExpiredPendingRegistration(completeRegistration)) {
+          return res
+            .status(409)
+            .json({ ok: false, error: "Email already registered" });
+        }
+        expiredSupabaseRegistration = completeRegistration;
       } else {
         await removeExpiredPendingRegistration(existingByEmail);
       }
@@ -206,6 +241,9 @@ export default async function handler(req, res) {
             referralId: existingByEmail._id,
             dispatchKind: "registration_verification",
           });
+          if (isReferralEmailSourceStateConflict(recovery)) {
+            return respondToReferralSourceConflict(res);
+          }
           const recoverable =
             recovery?.sent === true ||
             recovery?.requeued === true ||
@@ -221,6 +259,9 @@ export default async function handler(req, res) {
             ...(recovery?.sent === true ? {} : { syncPending: true }),
           });
         } catch (error) {
+          if (isReferralEmailSourceStateConflict(error)) {
+            return respondToReferralSourceConflict(res);
+          }
           logSafeError("Referral verification email recovery failed", error);
           return res.status(503).json({
             ok: false,
@@ -311,6 +352,7 @@ export default async function handler(req, res) {
       ? new Date(Date.now() + 60 * 60 * 1000).toISOString()
       : "";
     const referral = {
+      ...preservedExpiredRegistration(expiredSupabaseRegistration),
       _id: referralId,
       _type: "referral",
       name: trimmedDiscordUsername,
@@ -319,27 +361,39 @@ export default async function handler(req, res) {
       creatorPassword: hash,
       paypalEmail: trimmedPaypalEmail,
       contactDiscord: trimmedDiscordUsername,
-      currentCommissionPercent: 10,
-      successfulReferrals: 0,
-      isFirstTime: true,
+      ...(!expiredSupabaseRegistration
+        ? {
+            currentCommissionPercent: 10,
+            successfulReferrals: 0,
+            isFirstTime: true,
+          }
+        : {}),
       passwordResetRequired: !socialUser,
       credentialVersion: 2,
       passwordChangedAt: createdAt,
       passwordLoginEnabled: Boolean(normalizedPassword),
       registrationStatus: socialUser ? "active" : "pending_email",
-      ...(verificationTokenHash
-        ? {
-            registrationVerificationTokenHash: verificationTokenHash,
-            registrationVerificationExpiresAt: verificationExpiresAt,
-            ...(policy.primaryBackend === "sanity"
-              ? {
-                  registrationVerificationDeliveryToken:
-                    sealReferralEmailToken(verificationToken),
-                }
-              : {}),
-          }
-        : {}),
     };
+    for (const field of [
+      "registrationVerificationTokenHash",
+      "registrationVerificationExpiresAt",
+      "registrationVerificationDeliveryToken",
+      "resetToken",
+      "resetTokenHash",
+      "resetTokenExpiresAt",
+      "resetDeliveryToken",
+      "emailVerifiedAt",
+    ]) {
+      delete referral[field];
+    }
+    if (verificationTokenHash) {
+      referral.registrationVerificationTokenHash = verificationTokenHash;
+      referral.registrationVerificationExpiresAt = verificationExpiresAt;
+      if (policy.primaryBackend === "sanity") {
+        referral.registrationVerificationDeliveryToken =
+          sealReferralEmailToken(verificationToken);
+      }
+    }
     const emailClaim = buildReferralIdentityClaim({
       kind: "email",
       value: trimmedEmail,
@@ -375,6 +429,8 @@ export default async function handler(req, res) {
         name: trimmedDiscordUsername,
         expiresAt: verificationExpiresAt,
       });
+    } else if (expiredSupabaseRegistration) {
+      await client.transaction().createOrReplace(referral).commit();
     } else {
       await client
         .transaction()
@@ -391,6 +447,9 @@ export default async function handler(req, res) {
           const delivery = await deliverReferralEmailDispatch({
             idempotencyKey: emailDispatch?.idempotency_key,
           });
+          if (isReferralEmailSourceStateConflict(delivery)) {
+            return respondToReferralSourceConflict(res);
+          }
           if (delivery.deadLetter > 0) {
             let recovery;
             try {
@@ -405,6 +464,9 @@ export default async function handler(req, res) {
                   : new Error("Verification email recovery failed.");
               terminalError.terminalDelivery = true;
               throw terminalError;
+            }
+            if (isReferralEmailSourceStateConflict(recovery)) {
+              return respondToReferralSourceConflict(res);
             }
             if (recovery?.requeued !== true && recovery?.sent !== true) {
               const error = new Error("Verification email recovery is blocked.");
@@ -426,6 +488,9 @@ export default async function handler(req, res) {
           await clearRegistrationDeliveryToken(referralId);
         }
       } catch (error) {
+        if (isReferralEmailSourceStateConflict(error)) {
+          return respondToReferralSourceConflict(res);
+        }
         logSafeError("Referral verification email failed", error);
         if (policy.primaryBackend === "supabase") {
           if (error?.terminalDelivery === true) {
@@ -477,13 +542,15 @@ export default async function handler(req, res) {
       } catch (error) {
         logSafeError("Supabase creator account projection failed", error);
         if (socialUser || policy.primaryBackend === "supabase") {
-          await client
-            .transaction()
-            .delete(referralId)
-            .delete(emailClaim._id)
-            .delete(slugClaim._id)
-            .commit()
-            .catch(() => {});
+          if (!expiredSupabaseRegistration) {
+            await client
+              .transaction()
+              .delete(referralId)
+              .delete(emailClaim._id)
+              .delete(slugClaim._id)
+              .commit()
+              .catch(() => {});
+          }
           return res.status(503).json({
             ok: false,
             error: "Registration is temporarily unavailable. Please try again.",
@@ -509,6 +576,9 @@ export default async function handler(req, res) {
 
     return res.status(201).json({ ok: true, referralId: referral._id });
   } catch (err) {
+    if (isReferralEmailSourceStateConflict(err)) {
+      return respondToReferralSourceConflict(res);
+    }
     if (Number(err?.statusCode || err?.status || 0) === 409) {
       return res.status(409).json({
         ok: false,

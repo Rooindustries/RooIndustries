@@ -1,5 +1,15 @@
 import crypto from "node:crypto";
+import {
+  isReferralCommerceField,
+  pickReferralGeneralFields,
+} from "../commerce/documentTypes.js";
 import { getSafeErrorCode, logSafeError } from "../safeErrorLog.js";
+import {
+  buildMirrorMetadata,
+  MIRROR_METADATA_KEYS,
+  normalizeMirrorSequence,
+  readMirrorSequence,
+} from "./mirrorMetadata.js";
 import { logSanityMirrorEvent } from "./mirrorObservability.js";
 
 const normalizeDocuments = (value) =>
@@ -35,47 +45,41 @@ const sortValue = (value) => {
     }, {});
 };
 
+const canonicalExcludedKeys = new Set([
+  "_rev",
+  "_createdAt",
+  "_updatedAt",
+  "_originalId",
+  "_system",
+  "_commerceCutoverGeneration",
+  ...MIRROR_METADATA_KEYS,
+]);
+
+const cleanSourceDocument = (document) =>
+  Object.fromEntries(
+    Object.entries(document || {}).filter(
+      ([key]) => !canonicalExcludedKeys.has(key)
+    )
+  );
+
 const canonicalDocument = (document) => {
-  const {
-    _rev,
-    _createdAt,
-    _updatedAt,
-    _originalId,
-    _system,
-    _supabaseRevision,
-    _supabaseCanonicalHash,
-    _supabaseMirroredAt,
-    _supabaseSequence,
-    ...business
-  } = document || {};
-  return JSON.stringify(sortValue(business));
+  const business = cleanSourceDocument(document);
+  const owned =
+    business._type === "referral"
+      ? pickReferralGeneralFields(business)
+      : business;
+  return JSON.stringify(sortValue(owned));
 };
 
-const sequenceOf = (value) => {
-  const normalized = String(value ?? "0").trim();
-  return /^\d+$/.test(normalized) ? BigInt(normalized) : 0n;
-};
-
-const cleanForSanity = (document) => {
-  const {
-    _rev,
-    _createdAt,
-    _updatedAt,
-    _originalId,
-    _system,
-    _supabaseCanonicalHash,
-    _supabaseRevision,
-    _supabaseSequence,
-    ...clean
-  } = document;
-  return {
-    ...clean,
-    _supabaseRevision: String(_supabaseRevision || _rev || ""),
-    _supabaseCanonicalHash: String(_supabaseCanonicalHash || ""),
-    _supabaseMirroredAt: new Date().toISOString(),
-    _supabaseSequence: String(_supabaseSequence || "0"),
-  };
-};
+const cleanForSanity = ({ document, current, eventSequence }) => ({
+  ...cleanSourceDocument(document),
+  ...buildMirrorMetadata({
+    current,
+    document,
+    domain: "global",
+    sequence: eventSequence,
+  }),
+});
 
 const conflict = (message) => {
   const error = new Error(message);
@@ -89,16 +93,21 @@ const verificationFailure = (message) => {
   return error;
 };
 
+const matchingCanonicalHash = (current, document) =>
+  document?._type === "referral" ||
+  String(current?._supabaseCanonicalHash || "") ===
+    String(document?._supabaseCanonicalHash || "");
+
 const planUpsert = ({ current, document, eventSequence }) => {
-  if (!current) return { operation: "upsert", value: cleanForSanity(document) };
-  const currentSequence = sequenceOf(current._supabaseSequence);
+  const value = cleanForSanity({ document, current, eventSequence });
+  if (!current) return { operation: "upsert", value, current: null };
+  const currentSequence = readMirrorSequence(current, "global");
   if (currentSequence > eventSequence) return { operation: "superseded" };
   if (currentSequence < eventSequence) {
-    return { operation: "upsert", value: cleanForSanity(document) };
+    return { operation: "upsert", value, current };
   }
   if (
-    String(current._supabaseCanonicalHash || "") ===
-      String(document._supabaseCanonicalHash || "") &&
+    matchingCanonicalHash(current, document) &&
     canonicalDocument(current) === canonicalDocument(document)
   ) {
     return { operation: "idempotent" };
@@ -108,7 +117,7 @@ const planUpsert = ({ current, document, eventSequence }) => {
 
 const planDelete = ({ current, document, eventSequence }) => {
   if (!current) return { operation: "idempotent" };
-  const currentSequence = sequenceOf(current._supabaseSequence);
+  const currentSequence = readMirrorSequence(current, "global");
   if (currentSequence > eventSequence) return { operation: "superseded" };
   if (currentSequence > 0n && currentSequence < eventSequence) {
     return { operation: "delete", id: document._id };
@@ -145,7 +154,7 @@ const planEvent = async ({ sanityClient, event }) => {
     ...deleted.map((document) => document._id),
   ]);
   const current = await fetchCurrentDocuments({ sanityClient, ids });
-  const eventSequence = sequenceOf(event?.sequence_no);
+  const eventSequence = normalizeMirrorSequence(event?.sequence_no);
   const operations = [
     ...deleted.map((document) =>
       planDelete({ current: current.get(document._id), document, eventSequence })
@@ -157,6 +166,43 @@ const planEvent = async ({ sanityClient, event }) => {
   return operations;
 };
 
+const immutableSanityKeys = new Set([
+  "_id",
+  "_type",
+  "_rev",
+  "_createdAt",
+  "_updatedAt",
+  "_originalId",
+  "_system",
+]);
+
+const buildReferralPatch = ({ current, value }) => {
+  const set = pickReferralGeneralFields(value);
+  delete set._id;
+  delete set._type;
+  const unset = Object.keys(current || {}).filter(
+    (key) =>
+      !immutableSanityKeys.has(key) &&
+      !isReferralCommerceField(key) &&
+      key !== "_commerceCutoverGeneration" &&
+      !Object.prototype.hasOwnProperty.call(set, key)
+  );
+  return { set, unset };
+};
+
+const applyReferralUpsert = ({ transaction, operation }) => {
+  if (!operation.current) return transaction.createIfNotExists(operation.value);
+  const update = buildReferralPatch(operation);
+  return transaction.patch(operation.value._id, (patch) => {
+    const guarded =
+      operation.current._rev && typeof patch.ifRevisionId === "function"
+        ? patch.ifRevisionId(operation.current._rev)
+        : patch;
+    const setPatch = guarded.set(update.set);
+    return update.unset.length > 0 ? setPatch.unset(update.unset) : setPatch;
+  });
+};
+
 const applyEvent = async ({ sanityClient, event }) => {
   const operations = await planEvent({ sanityClient, event });
   let transaction = sanityClient.transaction();
@@ -166,7 +212,10 @@ const applyEvent = async ({ sanityClient, event }) => {
       transaction = transaction.delete(operation.id);
       mutations += 1;
     } else if (operation.operation === "upsert") {
-      transaction = transaction.createOrReplace(operation.value);
+      transaction =
+        operation.value?._type === "referral"
+          ? applyReferralUpsert({ transaction, operation })
+          : transaction.createOrReplace(operation.value);
       mutations += 1;
     }
   }
@@ -186,19 +235,18 @@ const verifyEvent = async ({ sanityClient, event }) => {
     ...deleted.map((document) => document._id),
   ]);
   const current = await fetchCurrentDocuments({ sanityClient, ids });
-  const eventSequence = sequenceOf(event?.sequence_no);
+  const eventSequence = normalizeMirrorSequence(event?.sequence_no);
 
   for (const document of documents) {
     const target = current.get(String(document._id));
     if (!target) {
       throw verificationFailure("The mirrored Sanity document is missing after commit.");
     }
-    const targetSequence = sequenceOf(target._supabaseSequence);
+    const targetSequence = readMirrorSequence(target, "global");
     if (targetSequence > eventSequence) continue;
     if (
       targetSequence !== eventSequence ||
-      String(target._supabaseCanonicalHash || "") !==
-        String(document._supabaseCanonicalHash || "") ||
+      !matchingCanonicalHash(target, document) ||
       canonicalDocument(target) !== canonicalDocument(document)
     ) {
       throw verificationFailure(
@@ -210,7 +258,7 @@ const verifyEvent = async ({ sanityClient, event }) => {
   for (const document of deleted) {
     const target = current.get(String(document._id));
     if (!target) continue;
-    if (sequenceOf(target._supabaseSequence) > eventSequence) continue;
+    if (readMirrorSequence(target, "global") > eventSequence) continue;
     throw verificationFailure("The mirrored Sanity deletion was not visible after commit.");
   }
 };

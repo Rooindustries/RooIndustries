@@ -4,6 +4,7 @@ import {
   buildTourneyPlayerAuthEmail,
   completeSupabaseCredentialMirror,
   createSupabaseCreatorAccount,
+  createVerifiedSupabaseBrowserSession,
   requireSupabaseBearerUser,
   syncSupabaseTourneyAdminAccount,
   syncSupabaseTourneyPlayerAccount,
@@ -559,5 +560,156 @@ describe("Supabase account compatibility", () => {
     expect(update.app_metadata.roles).toEqual(
       expect.arrayContaining(["creator", "tourney_player"])
     );
+  });
+
+  test.each([
+    ["pending_email", "pending_email"],
+    [undefined, "active"],
+  ])(
+    "projects creator registration status %s as %s",
+    async (registrationStatus, expectedStatus) => {
+      const adminClient = {
+        rpc: jest.fn(async (name) => {
+          if (name === "roo_resolve_account_alias") {
+            return { data: null, error: null };
+          }
+          if (name === "roo_upsert_native_creator_account") {
+            return { data: { imported: true }, error: null };
+          }
+          if (name === "roo_reconcile_auth_identity_links") {
+            return { data: {}, error: null };
+          }
+          if (name === "roo_account_by_user_id") {
+            return { data: creatorAccount, error: null };
+          }
+          throw new Error(`Unexpected RPC: ${name}`);
+        }),
+        auth: {
+          admin: {
+            getUserById: jest.fn().mockResolvedValue({
+              data: { user: null },
+              error: { status: 404 },
+            }),
+            createUser: jest.fn().mockResolvedValue({
+              data: { user: { id: creatorAccount.user_id } },
+              error: null,
+            }),
+            deleteUser: jest.fn(),
+          },
+        },
+      };
+
+      await createSupabaseCreatorAccount({
+        adminClient,
+        passwordHash: `$2b$12$${"a".repeat(53)}`,
+        referral: {
+          _id: "referral.creator",
+          creatorEmail: "creator@example.com",
+          slug: { current: "creator" },
+          name: "Creator",
+          registrationStatus,
+        },
+      });
+
+      expect(adminClient.rpc).toHaveBeenCalledWith(
+        "roo_upsert_native_creator_account",
+        expect.objectContaining({
+          p_account: expect.objectContaining({
+            registration_status: expectedStatus,
+          }),
+        })
+      );
+    }
+  );
+
+  test.each([
+    ["pending principal", { status: "pending" }, "referral.creator"],
+    ["inactive creator", { creator_active: false }, "referral.creator"],
+    ["missing creator role", { roles: ["customer"] }, "referral.creator"],
+    [
+      "mismatched referral link",
+      { creator_legacy_sanity_id: "referral.other" },
+      "referral.creator",
+    ],
+  ])(
+    "refuses a verified browser session for a %s",
+    async (_label, accountOverrides, expectedLegacySanityId) => {
+      const generateLink = jest.fn();
+      const adminClient = {
+        rpc: jest.fn().mockResolvedValue({
+          data: {
+            ...creatorAccount,
+            creator_active: true,
+            creator_legacy_sanity_id: "referral.creator",
+            verified_real_email: "creator@example.com",
+            ...accountOverrides,
+          },
+          error: null,
+        }),
+        auth: { admin: { generateLink } },
+      };
+
+      await expect(
+        createVerifiedSupabaseBrowserSession({
+          userId: creatorAccount.user_id,
+          expectedLegacySanityId,
+          adminClient,
+          authClient: { auth: { verifyOtp: jest.fn() } },
+        })
+      ).rejects.toMatchObject({
+        code: "CREATOR_ACCOUNT_INACTIVE",
+        statusCode: 409,
+      });
+      expect(generateLink).not.toHaveBeenCalled();
+    }
+  );
+
+  test("creates a browser session only after the active creator projection is visible", async () => {
+    const session = { access_token: "access", refresh_token: "refresh" };
+    const account = {
+      ...creatorAccount,
+      creator_active: true,
+      creator_legacy_sanity_id: "referral.creator",
+      verified_real_email: "creator@example.com",
+    };
+    const adminClient = {
+      rpc: jest.fn().mockResolvedValue({ data: account, error: null }),
+      auth: {
+        admin: {
+          generateLink: jest.fn().mockResolvedValue({
+            data: { properties: { hashed_token: "hashed-token" } },
+            error: null,
+          }),
+        },
+      },
+    };
+    const authClient = {
+      auth: {
+        verifyOtp: jest.fn().mockResolvedValue({
+          data: {
+            user: { id: creatorAccount.user_id },
+            session,
+          },
+          error: null,
+        }),
+      },
+    };
+
+    await expect(
+      createVerifiedSupabaseBrowserSession({
+        userId: creatorAccount.user_id,
+        expectedLegacySanityId: "referral.creator",
+        adminClient,
+        authClient,
+      })
+    ).resolves.toEqual({ account, session });
+    expect(adminClient.auth.admin.generateLink).toHaveBeenCalledWith({
+      type: "magiclink",
+      email: "creator@example.com",
+    });
+    expect(authClient.auth.verifyOtp).toHaveBeenCalledWith({
+      token_hash: "hashed-token",
+      type: "magiclink",
+    });
   });
 });

@@ -244,11 +244,16 @@ export class SupabaseDocumentClient {
     shadowClient,
     documentTypes = null,
     commerceOnly = false,
+    allowLegacyFallback,
     cutoverGeneration = 0,
   } = {}) {
     this.shadowClient = shadowClient;
     this.backend = "supabase";
     this.commerceOnly = commerceOnly === true;
+    this.allowLegacyFallback =
+      allowLegacyFallback === undefined
+        ? !this.commerceOnly
+        : allowLegacyFallback === true;
     this.cutoverGeneration = Math.max(0, Number(cutoverGeneration) || 0);
     this.documentTypes =
       Array.isArray(documentTypes) && documentTypes.length > 0
@@ -275,7 +280,7 @@ export class SupabaseDocumentClient {
       ids: scope.ids,
       filters: scope.filters,
       limit: scope.limit,
-      allowLegacyFallback: !this.commerceOnly,
+      allowLegacyFallback: this.allowLegacyFallback,
     });
     if (
       this.commerceOnly &&

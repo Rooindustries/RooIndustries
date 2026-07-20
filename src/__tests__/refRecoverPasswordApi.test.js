@@ -10,13 +10,17 @@ const mockRequireRateLimit = jest.fn();
 const mockResolveAccountByUserId = jest.fn();
 const mockResumeCredentialOperation = jest.fn();
 const mockUpdatePassword = jest.fn();
+const mockDataClientOptions = [];
 
 jest.mock("bcryptjs", () => ({
   hash: (...args) => mockBcryptHash(...args),
 }));
 
 jest.mock("../server/data/documentClient.js", () => ({
-  createDataClient: () => ({ fetch: (...args) => mockClientFetch(...args) }),
+  createDataClient: (_config, options) => {
+    mockDataClientOptions.push(options);
+    return { fetch: (...args) => mockClientFetch(...args) };
+  },
 }));
 
 jest.mock("../server/api/ref/auth.js", () => ({
@@ -144,6 +148,10 @@ describe("referral authenticated recovery API", () => {
     });
     mockReconcileCredentialSource.mockResolvedValue({ applied: true });
     mockClearLegacySupabaseSession.mockResolvedValue(undefined);
+  });
+
+  test("disables broad Supabase fallback for recovery credential reads", () => {
+    expect(mockDataClientOptions).toContainEqual({ allowLegacyFallback: false });
   });
 
   test("updates both Auth and creator credential sources from a verified OTP session", async () => {
