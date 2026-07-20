@@ -10,6 +10,7 @@ import {
   buildConfirmationDigest,
   createRepairSanityClient,
   createRepairSupabaseClient,
+  isValidSanityDocumentId,
   loadRepairEnvironment,
   parseExpectedGeneration,
   requireRpc,
@@ -37,8 +38,8 @@ if (auditAll && (requestedReferralId || requestedDomain || requestedSequence)) {
   throw new Error("--audit-all cannot be combined with targeted snapshot flags.");
 }
 if (!auditAll) {
-  if (!/^referral[.][A-Za-z0-9_-]{1,120}$/.test(requestedReferralId)) {
-    throw new Error("--referral-id must identify one referral document.");
+  if (!isValidSanityDocumentId(requestedReferralId)) {
+    throw new Error("--referral-id must identify one Sanity referral document.");
   }
   if (!["global", "commerce"].includes(requestedDomain)) {
     throw new Error("--domain must be global or commerce.");
