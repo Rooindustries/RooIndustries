@@ -53,6 +53,11 @@ const NotFound = lazy(() => import("./legacyPages/NotFound"));
 
 const INTERCOM_DISABLED_ROUTES = ["/booking", "/payment"];
 
+const isReferralVerificationHash = (hash) => {
+  const params = new URLSearchParams(String(hash || "").replace(/^#/, ""));
+  return /^[A-Za-z0-9_-]{40,60}$/.test(String(params.get("token") || ""));
+};
+
 const isReferralResetHash = (hash) => {
   const params = new URLSearchParams(String(hash || "").replace(/^#/, ""));
   const legacyToken = String(params.get("token") || "");
@@ -417,9 +422,12 @@ export function AppContent({
     const keepHash =
       location.pathname === "/" && isHomeSectionHash(currentHash)
         ? currentHash
-        : location.pathname === "/referrals/reset" && isReferralResetHash(rawHash)
+        : location.pathname === "/referrals/verify" &&
+            isReferralVerificationHash(rawHash)
           ? rawHash
-        : "";
+          : location.pathname === "/referrals/reset" && isReferralResetHash(rawHash)
+            ? rawHash
+            : "";
     const sanitizedSearch = sanitizeBrowserSearch(
       location.pathname || "/",
       location.search || ""
