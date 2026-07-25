@@ -33,9 +33,19 @@ const CaptainSlot = ({ captain }) => {
   const profileImageUrl = String(
     captain.twitchProfileImageUrl || ""
   ).trim();
+  const displayName = captain.displayName || captain.twitchUsername;
+  const isLive = Boolean(captain.twitchLive);
+  const liveTitle = String(captain.twitchLiveTitle || "").trim();
+  const slotClassName = [
+    "tourney-team-slot",
+    "is-captain",
+    isLive ? "is-live" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <li className="tourney-team-slot is-captain">
+    <li className={slotClassName}>
       <span className="tourney-team-slot-avatar" aria-hidden="true">
         {profileImageUrl ? (
           <img alt="" loading="lazy" src={profileImageUrl} />
@@ -44,7 +54,19 @@ const CaptainSlot = ({ captain }) => {
         )}
       </span>
       <span className="tourney-team-slot-copy">
-        <strong>{captain.displayName || captain.twitchUsername}</strong>
+        <strong className="tourney-team-captain-name">
+          <span>{displayName}</span>
+          {isLive ? (
+            <span
+              aria-label={`${displayName} is live on Twitch`}
+              className="tourney-roster-live-badge"
+              title={liveTitle || `${displayName} is live on Twitch`}
+            >
+              <span aria-hidden="true" />
+              Live
+            </span>
+          ) : null}
+        </strong>
         <small>Team Captain · {captain.rolePlay}</small>
       </span>
       {twitchUrl ? (
