@@ -481,6 +481,35 @@ describe("tourney player store", () => {
     ).resolves.toBeNull();
   });
 
+  test("marks an approved linked Twitch identity as a captain publicly", async () => {
+    const store = loadStore();
+    store.resetMemoryTourneyPlayerStoreForTests();
+    const player = await store.createApprovedTourneyPlayer({
+      payload: {
+        ...basePayload,
+        email: "captain@example.com",
+        discord: "captain-account",
+        displayName: "Current Display Name",
+        battlenet: "Captain#9876",
+        twitchUsername: "cookies_ow",
+      },
+      actorUsername: "serviroo",
+      env,
+    });
+
+    await expect(store.listApprovedTourneyPlayers({ env })).resolves.toEqual([
+      {
+        id: player.id,
+        displayName: "Current Display Name",
+        rolePlay: "Support",
+        registrationPool: "main",
+        teamName: "",
+        twitchUsername: "cookies_ow",
+        isCaptain: true,
+      },
+    ]);
+  });
+
   test("approves a pending player as either submitted role", async () => {
     const store = loadStore();
     store.resetMemoryTourneyPlayerStoreForTests();

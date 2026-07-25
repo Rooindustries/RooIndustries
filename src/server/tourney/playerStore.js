@@ -7,6 +7,7 @@ import {
   getTwitchProfileImageMap,
   normalizeTwitchUsername,
 } from "./twitch.js";
+import { isTourneyCaptainPlayer } from "./captains.js";
 import {
   assertTourneySchemaVersion,
   getTourneySql as getSql,
@@ -367,6 +368,7 @@ const publicPlayer = (row) => {
     registrationPool: player.registrationPool,
     teamName: player.teamName,
     twitchUsername: player.twitchUsername,
+    ...(isTourneyCaptainPlayer(player) ? { isCaptain: true } : {}),
   };
 };
 
@@ -411,7 +413,9 @@ export const getTourneyTwitchRosterMetadataSnapshot = async ({
   usernames = [],
   env = process.env,
 } = {}) => {
-  const normalized = [...new Set(usernames.map(normalizeTwitchUsername).filter(Boolean))];
+  const normalized = [
+    ...new Set(usernames.map(extractTwitchLogin).filter(Boolean)),
+  ];
   const [profileImages, liveStatuses] = await Promise.all([
     getTwitchProfileImageMap(normalized, { env }).catch(() => new Map()),
     getTwitchLiveStatusMap(normalized, { env }).catch(() => new Map()),
@@ -1227,8 +1231,9 @@ export async function listApprovedTourneyPlayers({ env = process.env } = {}) {
   await ensureTourneyPlayerSchema(env);
   const sql = await getSql(env);
   const rows = await sql`
-    select id, display_name, discord, role_play, approved_role_play,
-      registration_pool, team_name, twitch_username
+    select id, display_name, discord, discord_oauth_username,
+      role_play, approved_role_play, registration_pool, team_name,
+      twitch_username
     from tourney_players
     where status = 'approved'
     order by lower(coalesce(nullif(display_name, ''), discord)) asc

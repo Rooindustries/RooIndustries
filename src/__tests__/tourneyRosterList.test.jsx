@@ -39,6 +39,37 @@ describe("TourneyRosterList", () => {
     ).not.toBeInTheDocument();
   });
 
+  test("shows captains in the standard roster row with Twitch identity and avatar", () => {
+    const profileImageUrl =
+      "https://static-cdn.jtvnw.net/jtv_user_pictures/skinzow-profile_image-300x300.png";
+    const { container } = render(
+      <TourneyRosterList
+        players={[
+          {
+            ...basePlayer,
+            isCaptain: true,
+            twitchUsername: "twitch.tv/skinzow",
+            twitchProfileImageUrl: profileImageUrl,
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByText("Team Captain")).toBeVisible();
+    expect(screen.queryByText("Player", { exact: true })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /skinzow/i })).toHaveAttribute(
+      "href",
+      "https://www.twitch.tv/skinzow"
+    );
+    expect(container.querySelector(".tourney-roster-player")).toHaveClass(
+      "is-captain"
+    );
+    expect(container.querySelector(".tourney-roster-avatar img")).toHaveAttribute(
+      "src",
+      profileImageUrl
+    );
+  });
+
   test("sorts live players above offline players in the roster", () => {
     render(
       <TourneyRosterList
