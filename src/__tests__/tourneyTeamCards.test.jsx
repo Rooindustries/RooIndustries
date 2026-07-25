@@ -10,6 +10,12 @@ const captains = Array.from({ length: 12 }, (_, index) => {
     rolePlay: captainSeed % 2 ? "Damage" : "Support",
     twitchUsername: `captain${captainSeed}`,
     twitchProfileImageUrl: `https://static-cdn.jtvnw.net/captain-${captainSeed}.png`,
+    ...(captainSeed === 1
+      ? {
+          twitchLive: true,
+          twitchLiveTitle: "Captain 1 live stream",
+        }
+      : {}),
   };
 });
 
@@ -48,5 +54,20 @@ describe("TourneyTeamCards", () => {
       "src",
       "https://static-cdn.jtvnw.net/captain-1.png"
     );
+  });
+
+  test("shows the established live badge on a live captain slot", () => {
+    const { container } = render(<TourneyTeamCards players={captains} />);
+
+    expect(
+      screen.getByLabelText("Captain 1 is live on Twitch")
+    ).toHaveAttribute("title", "Captain 1 live stream");
+    expect(
+      container.querySelectorAll(".tourney-team-slot.is-captain.is-live")
+    ).toHaveLength(1);
+    expect(screen.getAllByText("Live")).toHaveLength(1);
+    expect(
+      screen.queryByLabelText("Captain 2 is live on Twitch")
+    ).not.toBeInTheDocument();
   });
 });

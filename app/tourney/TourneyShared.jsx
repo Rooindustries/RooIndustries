@@ -2527,6 +2527,24 @@ export const TourneyStyles = () => (
       overflow-wrap: anywhere;
     }
 
+    .tourney-team-captain-name {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .tourney-team-captain-name .tourney-roster-live-badge {
+      gap: 4px;
+      padding: 2px 6px;
+      font-size: 0.58rem;
+    }
+
+    .tourney-team-captain-name .tourney-roster-live-badge > span {
+      width: 5px;
+      height: 5px;
+    }
+
     .tourney-team-slot-copy small {
       color: var(--tourney-text-muted);
       font-size: 0.7rem;
