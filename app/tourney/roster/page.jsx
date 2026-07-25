@@ -8,6 +8,7 @@ import {
   getTourneySession,
 } from "../TourneyShared";
 import TourneyRosterList from "../TourneyRosterList";
+import TourneyTeamCards from "../TourneyTeamCards";
 import { readPublicTourneyRoster } from "../../../src/server/tourney/readService";
 
 export const runtime = "nodejs";
@@ -29,6 +30,8 @@ export default async function TourneyRosterPage() {
     getTourneyHostsWithLiveStatus().catch(() => undefined),
     readPublicTourneyRoster().then((body) => body.players).catch(() => []),
   ]);
+  const captainPlayers = players.filter((player) => player.isCaptain);
+  const unassignedPlayers = players.filter((player) => !player.isCaptain);
 
   return (
     <TourneyShell session={session} activeHref="/tourney/roster">
@@ -44,12 +47,23 @@ export default async function TourneyRosterPage() {
       </div>
 
       <div className="tourney-grid">
-        <Section id="draft-pool" eyebrow="Roster" title="Draft Pool" wide>
-          {players.length > 0 ? (
-            <TourneyRosterList players={players} />
+        <Section id="teams" eyebrow="Roster" title="Teams 1–12" wide>
+          <TourneyTeamCards players={captainPlayers} />
+        </Section>
+      </div>
+
+      <div className="tourney-grid">
+        <Section
+          id="unassigned-players"
+          eyebrow="Roster"
+          title="Unassigned Players"
+          wide
+        >
+          {unassignedPlayers.length > 0 ? (
+            <TourneyRosterList players={unassignedPlayers} />
           ) : (
-            <StatusPanel label="Locked" title="No unassigned players">
-              Drafted players will appear under their teams after roster lock.
+            <StatusPanel label="Drafted" title="No unassigned players">
+              Every approved player has been assigned to a team.
             </StatusPanel>
           )}
         </Section>

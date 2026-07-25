@@ -2381,6 +2381,179 @@ export const TourneyStyles = () => (
       text-decoration: none;
     }
 
+    .tourney-team-board {
+      display: grid;
+      gap: 30px;
+    }
+
+    .tourney-team-group {
+      display: grid;
+      gap: 16px;
+      min-width: 0;
+    }
+
+    .tourney-team-group + .tourney-team-group {
+      border-top: 1px solid var(--tourney-border-accent);
+      padding-top: 28px;
+    }
+
+    .tourney-team-group-heading {
+      display: grid;
+      justify-items: center;
+      gap: 4px;
+      text-align: center;
+    }
+
+    .tourney-team-group-heading span,
+    .tourney-team-card-heading span {
+      color: var(--tourney-accent);
+      font-size: 0.7rem;
+      font-weight: 880;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .tourney-team-group-heading h3,
+    .tourney-team-card-heading h4 {
+      margin: 0;
+      color: var(--tourney-text);
+    }
+
+    .tourney-team-group-heading h3 {
+      font-size: clamp(1.15rem, 2vw, 1.45rem);
+    }
+
+    .tourney-team-card-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      align-items: start;
+    }
+
+    .tourney-team-card {
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid var(--tourney-border-accent);
+      border-radius: 0.9rem;
+      background:
+        linear-gradient(145deg, var(--tourney-surface), var(--tourney-surface-strong));
+      box-shadow: var(--tourney-card-shadow);
+    }
+
+    .tourney-team-card-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid var(--tourney-border);
+      padding: 14px 16px;
+    }
+
+    .tourney-team-card-heading h4 {
+      font-size: 1.05rem;
+    }
+
+    .tourney-team-slots {
+      display: grid;
+      gap: 0;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .tourney-team-slot {
+      display: grid;
+      grid-template-columns: 36px minmax(0, 1fr);
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      min-height: 58px;
+      border-bottom: 1px solid var(--tourney-border);
+      padding: 9px 12px;
+    }
+
+    .tourney-team-slot:last-child {
+      border-bottom: 0;
+    }
+
+    .tourney-team-slot.is-captain {
+      grid-template-columns: 42px minmax(0, 1fr);
+      border-bottom-color: rgba(250, 204, 21, 0.34);
+      background:
+        radial-gradient(circle at 8% 50%, rgba(250, 204, 21, 0.12), transparent 45%),
+        color-mix(in srgb, var(--tourney-surface-strong) 72%, transparent);
+    }
+
+    .tourney-team-slot-number,
+    .tourney-team-slot-avatar {
+      display: grid;
+      place-items: center;
+      width: 36px;
+      height: 36px;
+      border: 1px solid var(--tourney-border);
+      border-radius: 9999px;
+      color: var(--tourney-text-muted);
+      background: var(--tourney-surface-soft);
+      font-size: 0.7rem;
+      font-weight: 850;
+    }
+
+    .tourney-team-slot-avatar {
+      width: 42px;
+      height: 42px;
+      overflow: hidden;
+      border-color: rgba(250, 204, 21, 0.52);
+      color: #facc15;
+    }
+
+    .tourney-team-slot-avatar img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .tourney-team-slot-copy {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .tourney-team-slot-copy strong {
+      min-width: 0;
+      color: var(--tourney-text);
+      font-size: 0.86rem;
+      line-height: 1.2;
+      overflow-wrap: anywhere;
+    }
+
+    .tourney-team-slot-copy small {
+      color: var(--tourney-text-muted);
+      font-size: 0.7rem;
+      font-weight: 700;
+    }
+
+    .tourney-team-slot.is-captain .tourney-team-slot-copy small {
+      color: #facc15;
+    }
+
+    .tourney-team-slot-twitch {
+      grid-column: 2;
+      justify-self: start;
+      max-width: 100%;
+      color: #c084fc;
+      font-size: 0.7rem;
+      font-weight: 780;
+      line-height: 1.2;
+      overflow-wrap: anywhere;
+      text-decoration: none;
+    }
+
+    .tourney-team-slot-twitch:hover {
+      color: #e9d5ff;
+      text-decoration: underline;
+    }
+
     .tourney-roster-controls {
       display: flex;
       flex-wrap: wrap;
@@ -4147,6 +4320,10 @@ export const TourneyStyles = () => (
         width: 100%;
       }
 
+      .tourney-team-card-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
       .tourney-host-director {
         width: 100%;
       }
@@ -4365,6 +4542,18 @@ export const TourneyStyles = () => (
 
       .tourney-host-twitch {
         width: 100%;
+      }
+
+      .tourney-team-card-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .tourney-team-board {
+        gap: 24px;
+      }
+
+      .tourney-team-group + .tourney-team-group {
+        padding-top: 22px;
       }
 
       .tourney-info-list li,
