@@ -90,7 +90,7 @@ describe("tourney public page content", () => {
     expect(source).not.toContain("The tournament runs August 1-2, 2026");
   });
 
-  test("keeps captains in the draft pool using their linked identities", () => {
+  test("splits twelve captain-led teams above unassigned players", () => {
     const rosterSource = readTourneyRosterSource();
     const captainsSource = readTourneyCaptainsSource();
     const twitchLogins = [
@@ -111,8 +111,20 @@ describe("tourney public page content", () => {
     for (const twitchLogin of twitchLogins) {
       expect(captainsSource).toContain(`twitch: "${twitchLogin}"`);
     }
-    expect(rosterSource).toContain('title="Draft Pool"');
-    expect(rosterSource).toContain("<TourneyRosterList players={players} />");
+    expect(rosterSource).toContain('title="Teams 1–12"');
+    expect(rosterSource).toContain(
+      "<TourneyTeamCards players={captainPlayers} />"
+    );
+    expect(rosterSource).toContain('title="Unassigned Players"');
+    expect(rosterSource).toContain(
+      "<TourneyRosterList players={unassignedPlayers} />"
+    );
+    expect(rosterSource).toContain(
+      "const captainPlayers = players.filter((player) => player.isCaptain);"
+    );
+    expect(rosterSource).toContain(
+      "const unassignedPlayers = players.filter((player) => !player.isCaptain);"
+    );
     expect(rosterSource).toContain("July 26 at 19:00 UTC");
     expect(rosterSource).not.toContain("CaptainTeams");
     expect(rosterSource).not.toContain("captainTeams");

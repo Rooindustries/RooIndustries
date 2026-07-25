@@ -7,7 +7,7 @@ import {
   getTwitchProfileImageMap,
   normalizeTwitchUsername,
 } from "./twitch.js";
-import { isTourneyCaptainPlayer } from "./captains.js";
+import { getTourneyCaptainSeed } from "./captains.js";
 import {
   assertTourneySchemaVersion,
   getTourneySql as getSql,
@@ -361,6 +361,7 @@ const mapPlayer = (row = {}) => ({
 
 const publicPlayer = (row) => {
   const player = mapPlayer(row);
+  const captainSeed = getTourneyCaptainSeed(player);
   return {
     id: player.id,
     displayName: player.displayName,
@@ -368,7 +369,7 @@ const publicPlayer = (row) => {
     registrationPool: player.registrationPool,
     teamName: player.teamName,
     twitchUsername: player.twitchUsername,
-    ...(isTourneyCaptainPlayer(player) ? { isCaptain: true } : {}),
+    ...(captainSeed ? { isCaptain: true, captainSeed } : {}),
   };
 };
 

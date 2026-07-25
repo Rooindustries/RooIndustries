@@ -21,17 +21,21 @@ const normalizeDiscordIdentity = (value) =>
     .toLowerCase()
     .replace(/^@+/, "");
 
-const captainDiscordIdentities = new Set(
-  TOURNEY_CAPTAIN_IDENTITIES.map(({ discord }) =>
-    normalizeDiscordIdentity(discord)
-  )
+const captainDiscordSeeds = new Map(
+  TOURNEY_CAPTAIN_IDENTITIES.map(({ discord }, index) => [
+    normalizeDiscordIdentity(discord),
+    index + 1,
+  ])
 );
 
-const captainTwitchIdentities = new Set(
-  TOURNEY_CAPTAIN_IDENTITIES.map(({ twitch }) => extractTwitchLogin(twitch))
+const captainTwitchSeeds = new Map(
+  TOURNEY_CAPTAIN_IDENTITIES.map(({ twitch }, index) => [
+    extractTwitchLogin(twitch),
+    index + 1,
+  ])
 );
 
-export const isTourneyCaptainPlayer = (player = {}) => {
+export const getTourneyCaptainSeed = (player = {}) => {
   const discordIdentities = [
     player.discord,
     player.discordOauthUsername,
@@ -43,9 +47,13 @@ export const isTourneyCaptainPlayer = (player = {}) => {
     player.twitchUsername || player.twitch_username
   );
 
-  return (
-    discordIdentities.some((identity) =>
-      captainDiscordIdentities.has(identity)
-    ) || captainTwitchIdentities.has(twitchIdentity)
-  );
+  for (const identity of discordIdentities) {
+    const seed = captainDiscordSeeds.get(identity);
+    if (seed) return seed;
+  }
+
+  return captainTwitchSeeds.get(twitchIdentity) || 0;
 };
+
+export const isTourneyCaptainPlayer = (player = {}) =>
+  getTourneyCaptainSeed(player) > 0;
