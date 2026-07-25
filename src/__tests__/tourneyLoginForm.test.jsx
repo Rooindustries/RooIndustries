@@ -110,8 +110,8 @@ describe("Tourney login form", () => {
       expect(assign).toHaveBeenCalledWith("/tourney?notice=discord-linked");
     });
     expect(
-      screen.getByRole("link", { name: "Register for the tournament." })
-    ).toHaveAttribute("href", "/tourney/register");
+      screen.getByRole("link", { name: "View the roster." })
+    ).toHaveAttribute("href", "/tourney/roster");
   });
 
   test("keeps a wrong-password error visible without navigating", async () => {

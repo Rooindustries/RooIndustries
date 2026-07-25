@@ -7,7 +7,6 @@ import {
 } from "./TourneyShared";
 import JsonLd from "../../src/next/JsonLd";
 import seo from "../../src/lib/seo";
-import { canAccessTourneyRegistration } from "../../src/server/tourney/access";
 import ConnectedAccounts from "../../src/components/ConnectedAccounts";
 import TourneyLoginOutcome from "./TourneyLoginOutcome";
 
@@ -23,7 +22,7 @@ const competitiveRules = [
   },
   {
     title: "Teams",
-    body: "Captains draft their own teams from the approved player pool using a tier-based draft format. Rosters lock at 6 starters and 2 substitutes.",
+    body: "Twelve captains lead twelve teams. Each roster has seven players: 2 Tank, 2 Damage, 2 Support, and 1 Flex.",
   },
   {
     title: "Roles",
@@ -31,7 +30,7 @@ const competitiveRules = [
   },
   {
     title: "Subs",
-    body: "Only registered substitutes can play after roster lock. Subs enter between maps, never mid-map.",
+    body: "The Flex player can substitute between maps. Once substituted into a role for a match, that player stays role-locked for the match.",
   },
   {
     title: "Check-In",
@@ -67,8 +66,8 @@ const scheduleItems = [
   },
   {
     title: "Draft day",
-    dateLabel: "July 25, 2026",
-    body: "Captains will draft their own teams from the approved player pool using a tier-based format. Exact draft time is TBD.",
+    dateLabel: "July 26, 2026",
+    body: "The blind snake draft begins at 19:00 UTC. Captains see each player's rank and top three heroes.",
   },
   {
     title: "Event dates",
@@ -110,6 +109,14 @@ const infoItems = [
   {
     title: "Format",
     body: "6v6 Overwatch, double elimination, Best of 5 bracket matches, and a Best of 7 Grand Final.",
+  },
+  {
+    title: "Draft format",
+    body: "Twelve captains use a blind snake draft. Round 1 selects a Master player, Round 2 selects a Grandmaster player, and the remaining roster is filled from the approved pool.",
+  },
+  {
+    title: "Team composition",
+    body: "Each seven-player roster has 2 Tank, 2 Damage, 2 Support, and 1 Flex player.",
   },
   {
     title: "Prize pool",
@@ -180,16 +187,13 @@ const DashboardPage = ({ hosts, loginOutcome = "", session }) => (
           <span className="tourney-title-line">6v6 Legacy Series</span>
         </h1>
         <p>
-          Event information, rules, roster status, creator signups, and bracket
+          Event information, rules, roster status, draft updates, and bracket
           access for the Overwatch Creator Tournament.
         </p>
-        {canAccessTourneyRegistration(session) ? (
-          <div className="tourney-hero-actions">
-            <a className="tourney-register-button" href="/tourney/register">
-              <span>Register</span>
-            </a>
-          </div>
-        ) : null}
+        <div className="tourney-registration-status" role="status">
+          <strong>Registration closed</strong>
+          <span>Team draft: July 26, 2026 at 19:00 UTC</span>
+        </div>
       </div>
     </section>
 
@@ -208,12 +212,11 @@ const DashboardPage = ({ hosts, loginOutcome = "", session }) => (
     <div className="tourney-grid">
       <Section id="dates" eyebrow="Important Dates" title="Important Dates" wide>
         <div className="tourney-date-callout">
-          <strong>Drafts begin July 25, 2026</strong>
+          <strong>Draft begins July 26, 2026</strong>
           <span>
-            Captains start drafting their own teams from the approved player
-            pool on the already-posted draft date. The draft will be tier-based
-            to keep teams balanced, with exact timing and tier details posted
-            before draft day.
+            The twelve captains begin the blind snake draft at 19:00 UTC. Round
+            1 is a Master pick, Round 2 is a Grandmaster pick, and later rounds
+            complete each seven-player roster.
           </span>
         </div>
         <ul className="tourney-card-list tourney-date-list">

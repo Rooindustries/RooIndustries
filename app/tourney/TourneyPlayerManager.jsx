@@ -63,14 +63,18 @@ const emptyEditForm = {
 };
 
 const defaultCapacity = {
-  teamCount: 8,
+  teamCount: 12,
   roles: roleOptions.map((role) => ({
     role,
-    cap: 16,
+    cap: role === "Support" ? 23 : 24,
+    totalCap: 24,
     mainCount: 0,
     substituteCount: 0,
     pendingMainCount: 0,
     approvedMainCount: 0,
+    reservedFor: role === "Support" ? "Frogger" : "",
+    reservedCap: role === "Support" ? 1 : 0,
+    reservedCount: 0,
     isFull: false,
   })),
 };
@@ -107,7 +111,7 @@ export default function TourneyPlayerManager({
   const [players, setPlayers] = useState(initialPlayers);
   const [capacity, setCapacity] = useState(initialCapacity || defaultCapacity);
   const [capacityForm, setCapacityForm] = useState(
-    String(initialCapacity?.teamCount || 8)
+    String(initialCapacity?.teamCount || 12)
   );
   const [addForm, setAddForm] = useState(emptyAddForm);
   const [editingPlayerId, setEditingPlayerId] = useState("");
@@ -150,7 +154,7 @@ export default function TourneyPlayerManager({
       setPlayers(data.players || []);
       if (data.capacity) {
         setCapacity(data.capacity);
-        setCapacityForm(String(data.capacity.teamCount || 8));
+        setCapacityForm(String(data.capacity.teamCount || 12));
       }
       setMessage(tourneyMutationSuccessMessage(data, "Player list updated."));
       return true;

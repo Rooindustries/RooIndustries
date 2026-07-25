@@ -38,12 +38,12 @@ describe("Tourney login page", () => {
       screen.getByText(
         (_, element) =>
           element?.tagName === "P" &&
-          element.textContent === "New here? Register for the tournament."
+          element.textContent === "Registration is closed. View the roster."
       )
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: "Register for the tournament." })
-    ).toHaveAttribute("href", "/tourney/register");
+      screen.getByRole("link", { name: "View the roster." })
+    ).toHaveAttribute("href", "/tourney/roster");
     expect(
       screen.queryByRole("button", { name: "Continue with Discord" })
     ).not.toBeInTheDocument();

@@ -13,12 +13,12 @@ export default function TournamentAnnouncement() {
           Roo Industries Tournament
         </p>
         <h2 id="home-tourney-announcement-title">
-          Overwatch Creator Tournament signups are open.
+          Team captains are set. Registration is closed.
         </h2>
         <p className="home-tourney-announcement-body">
-          We're running the Overwatch 6v6 Legacy Series on August 15-16. Signups,
-          rules, roster updates, and the live bracket are all in one place for
-          approved creators.
+          The 12-team Overwatch 6v6 Legacy Series draft is July 26 at 19:00 UTC,
+          with the tournament running August 15-16. Captains, rosters, rules,
+          and the live bracket are all in one place.
         </p>
         <a className="home-tourney-announcement-button glow-button" href="/tourney">
           <span>Go to the tournament page</span>

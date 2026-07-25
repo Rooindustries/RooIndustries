@@ -850,12 +850,12 @@ describe("tourney player store", () => {
     store.resetMemoryTourneyPlayerStoreForTests();
 
     await expect(store.getTourneyRoleCapacitySnapshot({ env })).resolves.toMatchObject({
-      teamCount: 8,
+      teamCount: 12,
       roles: expect.arrayContaining([
         expect.objectContaining({
           role: "Support",
-          cap: 15,
-          totalCap: 16,
+          cap: 23,
+          totalCap: 24,
           mainCount: 0,
           reservedFor: "Frogger",
           reservedCap: 1,
