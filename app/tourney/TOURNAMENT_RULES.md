@@ -20,13 +20,13 @@ This tournament uses an OWCS-style map and hero-ban process. Map 1 is Control an
    6v6 Overwatch. Double elimination. Bracket matches are Best of 5 and Grand Final is Best of 7 with no bracket reset.
 
 2. **Teams**
-   Captains draft teams from the approved player pool. Rosters lock at 6 starters and 2 substitutes.
+   Twelve captains lead twelve teams. Each roster has seven players: 2 Tank, 2 Damage, 2 Support, and 1 Flex.
 
 3. **Roles**
    No role swaps. Players must play the role they registered, drafted, or were assigned for that series.
 
 4. **Subs**
-   Only registered substitutes can play after roster lock. Subs enter between maps, never mid-map.
+   The Flex player can substitute between maps. Once substituted into a role for a match, that player stays role-locked for the match.
 
 5. **Check-In**
    Teams must field 6 eligible players within 10 minutes of match time or admins may call a forfeit.

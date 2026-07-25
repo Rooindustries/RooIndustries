@@ -58,7 +58,7 @@ export default async function TourneyManagePage({ searchParams }) {
     readAdminTourneyPlayers().catch(() => ({
       ok: false,
       players: [],
-      capacity: { teamCount: 8, roles: [] },
+      capacity: { teamCount: 12, roles: [] },
     })),
     getTourneyBracketSnapshot({ includeAudit: true }).catch(() => ({
       ok: false,

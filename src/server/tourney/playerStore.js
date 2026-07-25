@@ -45,7 +45,7 @@ export const TOURNEY_REGISTRATION_POOLS = Object.freeze([
   "main",
   "substitute",
 ]);
-export const TOURNEY_DEFAULT_TEAM_COUNT = 8;
+export const TOURNEY_DEFAULT_TEAM_COUNT = 12;
 export const TOURNEY_REGISTRATION_CLOSES_AT_UTC =
   "2026-07-22T00:00:00.000Z";
 export const TOURNEY_FROGGER_RESERVED_ROLE = "Support";

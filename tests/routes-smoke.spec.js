@@ -76,15 +76,13 @@ test.describe("Route smoke", () => {
       if (route === "/") {
         await expect(
           page.getByRole("heading", {
-            name: "Overwatch Creator Tournament signups are open.",
+            name: "Team captains are set. Registration is closed.",
           })
         ).toBeVisible();
         await expect(
-          page.getByText(
-            "We're running the Overwatch 6v6 Legacy Series on August 15-16."
-          )
+          page.getByText("The 12-team Overwatch 6v6 Legacy Series draft is July 26")
         ).toBeVisible();
-        await expect(page.getByText("approved creators")).toBeVisible();
+        await expect(page.getByText("tournament running August 15-16")).toBeVisible();
         await expect(
           page.getByRole("link", { name: "Go to the tournament page" })
         ).toHaveAttribute("href", "/tourney");
@@ -127,8 +125,10 @@ test.describe("Route smoke", () => {
         ).toBeVisible();
         await expect(page.getByText("32 GB of RAM")).toBeVisible();
         await expect(
-          page.getByText("July 25, 2026", { exact: true })
+          page.getByText("July 26, 2026", { exact: true })
         ).toBeVisible();
+        await expect(page.getByText("Registration closed", { exact: true })).toBeVisible();
+        await expect(page.getByRole("link", { name: "Register" })).toHaveCount(0);
         await expect(
           page.getByText("By August 30, 2026")
         ).toBeVisible();
@@ -145,11 +145,6 @@ test.describe("Route smoke", () => {
         await expect(
           page.getByRole("link", { name: "Sign in", exact: true })
         ).toBeVisible();
-        await expect(
-          page
-            .locator(".tourney-hero")
-            .getByRole("link", { name: "Register", exact: true })
-        ).toBeVisible();
         await expect(page.getByRole("switch")).toBeVisible();
       }
 
@@ -165,31 +160,19 @@ test.describe("Route smoke", () => {
 
       if (route === "/tourney/register") {
         await expect(
-          page.getByRole("heading", { name: "Creator Registration" })
+          page.getByRole("heading", {
+            name: "Creator Registration",
+            exact: true,
+          })
         ).toBeVisible();
         await expect(
           page.getByText("This Overwatch tournament is for creators")
         ).toBeVisible();
-        await expect(page.getByLabel("Discord Username")).toBeVisible();
-        await expect(page.getByLabel("Display Name")).toBeVisible();
-        await expect(page.getByLabel("Timezone")).toBeVisible();
-        await expect(page.getByLabel("Extra notes")).toBeVisible();
         await expect(
-          page.getByRole("textbox", { name: "Twitch Username" })
+          page.getByRole("heading", { name: "Creator registration is closed" })
         ).toBeVisible();
-        await expect(
-          page.getByLabel(
-            "I understand this is a creator tournament and my Twitch username will be used for eligibility review."
-          )
-        ).toBeVisible();
-        await expect(page.getByText("twitch.tv/")).toBeVisible();
-        await expect(page.getByLabel("Username", { exact: true })).toHaveCount(0);
-        await page.getByLabel("Primary Role").selectOption("Support");
-        await expect(
-          page.getByRole("dialog", { name: "Support signups are crowded" })
-        ).toBeVisible();
-        await page.getByRole("button", { name: "Change role" }).click();
-        await expect(page.getByLabel("Primary Role")).toHaveValue("");
+        await expect(page.getByText("July 26, 2026 at 19:00 UTC")).toBeVisible();
+        await expect(page.getByRole("button", { name: "Submit Registration" })).toHaveCount(0);
       }
 
       if (route === "/booking" || route === "/payment") {
@@ -282,6 +265,11 @@ test.describe("Route smoke", () => {
       page
         .locator(".tourney-hero")
         .getByRole("link", { name: "Register", exact: true })
+    ).toHaveCount(0);
+    await expect(
+      page.locator(".tourney-hero").getByText("Registration closed", {
+        exact: true,
+      })
     ).toBeVisible();
 
     const navBox = await nav.boundingBox();

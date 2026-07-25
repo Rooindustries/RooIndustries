@@ -263,7 +263,7 @@ export default function TourneyRegistrationForm({
         <p>
           Registration closed on{" "}
           <time dateTime={registrationClosesAt}>July 22, 2026 at 00:00 UTC</time>.
-          Drafts are July 25, 2026 with the exact draft time still TBD.
+          The team draft is July 26, 2026 at 19:00 UTC.
         </p>
       </div>
     );
@@ -321,8 +321,8 @@ export default function TourneyRegistrationForm({
       <p className="tourney-form-note">
         Creator registration closes{" "}
         <time dateTime={registrationClosesAt}>July 22, 2026 at 00:00 UTC</time>.
-        Your Twitch username is required for eligibility review. Drafts happen
-        July 25, 2026 at a TBD time.
+        Your Twitch username is required for eligibility review. The team draft
+        is July 26, 2026 at 19:00 UTC.
       </p>
       <SupabaseSocialLogin
         action="signup"

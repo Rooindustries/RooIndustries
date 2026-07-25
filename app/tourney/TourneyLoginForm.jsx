@@ -133,7 +133,7 @@ export default function TourneyLoginForm({
       ) : null}
       {showRegistrationLink ? (
         <p className="cs-note cs-r5">
-          New here? <a href="/tourney/register">Register for the tournament.</a>
+          Registration is closed. <a href="/tourney/roster">View the roster.</a>
         </p>
       ) : null}
       <p className="cs-note cs-r5">

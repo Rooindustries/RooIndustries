@@ -64,7 +64,7 @@ const routeMeta = {
   "/tourney": {
     title: "Overwatch Creator Tournament | Roo Industries",
     description:
-      "Roo Industries Overwatch Creator Tournament event information, rules, roster status, creator signups, charity details, giveaways, and bracket access for the 6v6 Legacy Series.",
+      "Roo Industries Overwatch Creator Tournament event information, rules, roster and draft updates, charity details, giveaways, and bracket access for the 6v6 Legacy Series.",
     noindex: false,
   },
   "/booking": {
@@ -390,7 +390,7 @@ const buildTourneyEventJsonLd = () => ({
   "@id": `${siteUrl}/tourney#event`,
   name: "Overwatch Creator Tournament: 6v6 Legacy Series",
   description:
-    "Roo Industries Overwatch Creator Tournament with event information, rules, roster status, creator signups, charity details, giveaways, and bracket access.",
+    "Roo Industries Overwatch Creator Tournament with event information, rules, roster and draft updates, charity details, giveaways, and bracket access.",
   url: `${siteUrl}/tourney`,
   startDate: "2026-08-15",
   endDate: "2026-08-16",

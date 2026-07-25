@@ -10,6 +10,12 @@ const readTourneySharedSource = () =>
     "utf8"
   );
 
+const readTourneyRosterSource = () =>
+  fs.readFileSync(
+    path.join(__dirname, "../../app/tourney/roster/page.jsx"),
+    "utf8"
+  );
+
 describe("tourney public page content", () => {
   test("keeps internal Frogger reservation out of public copy", () => {
     const source = readTourneyPageSource();
@@ -28,27 +34,29 @@ describe("tourney public page content", () => {
     expect(source).not.toContain("drive.google.com/file/d/1XU-lcFOSV5svka6Qf8Dlyc3eNxARHgbz");
   });
 
-  test("places registration between hero copy and hosts", () => {
+  test("replaces registration with a closed-status notice before hosts", () => {
     const source = readTourneyPageSource();
     const copyIndex = source.indexOf("Event information, rules, roster status");
-    const registerIndex = source.indexOf('className="tourney-register-button"');
+    const closedIndex = source.indexOf('className="tourney-registration-status"');
     const hostsIndex = source.indexOf("<TourneyHosts hosts={hosts} />");
     const datesIndex = source.indexOf('id="dates"');
     const infoIndex = source.indexOf('id="info"');
 
     expect(copyIndex).toBeGreaterThan(-1);
-    expect(registerIndex).toBeGreaterThan(copyIndex);
+    expect(closedIndex).toBeGreaterThan(copyIndex);
     expect(hostsIndex).toBeGreaterThan(-1);
-    expect(hostsIndex).toBeGreaterThan(registerIndex);
+    expect(hostsIndex).toBeGreaterThan(closedIndex);
     expect(datesIndex).toBeGreaterThan(hostsIndex);
     expect(infoIndex).toBeGreaterThan(datesIndex);
+    expect(source).toContain("Registration closed");
+    expect(source).not.toContain('href="/tourney/register"');
   });
 
   test("presents the tournament as a creator event without changing giveaway eligibility", () => {
     const source = readTourneyPageSource();
 
     expect(source).toContain("Overwatch Creator Tournament");
-    expect(source).toContain("creator signups");
+    expect(source).toContain("draft updates");
     expect(source).toContain("Overwatch Creator Tournament");
     expect(source).toContain("Community Discord giveaway");
     expect(source).toContain("Client-only 9850X3D draw");
@@ -60,15 +68,12 @@ describe("tourney public page content", () => {
 
     expect(source).toContain('dateLabel: "July 22, 2026"');
     expect(source).toContain("Registration closes at 00:00 UTC.");
-    expect(source).toContain("Drafts begin July 25, 2026");
-    expect(source).toContain(
-      "Captains start drafting their own teams from the approved player"
-    );
-    expect(source).toContain("The draft will be tier-based");
-    expect(source).toContain("to keep teams balanced");
-    expect(source).toContain(
-      "Captains draft their own teams from the approved player pool using a tier-based draft format."
-    );
+    expect(source).toContain("Draft begins July 26, 2026");
+    expect(source).toContain("blind snake draft at 19:00 UTC");
+    expect(source).toContain("Round 1 selects a Master player");
+    expect(source).toContain("Round 2 selects a Grandmaster player");
+    expect(source).toContain("Twelve captains lead twelve teams");
+    expect(source).toContain("Each seven-player roster has 2 Tank");
     expect(source).toContain('dateLabel: "August 15-16, 2026"');
     expect(source).toContain('dateLabel: "By August 30, 2026"');
     expect(source).toContain('dateLabel: "By October 31, 2026"');
@@ -77,6 +82,33 @@ describe("tourney public page content", () => {
     expect(source).not.toContain("Registration closes July 15, 2026");
     expect(source).not.toContain("Teams will be picked in drafts on July 18, 2026");
     expect(source).not.toContain("The tournament runs August 1-2, 2026");
+  });
+
+  test("shows all current Discord captains as twelve teams", () => {
+    const source = readTourneyRosterSource();
+    const captains = [
+      "wsps",
+      "cookies",
+      "Tap",
+      "Wolfi",
+      "chosen",
+      "Herluf",
+      "Putter",
+      "mow the lawn or vanish",
+      "cheesenut",
+      "Mint",
+      "R3nzTU",
+      "skinz",
+    ];
+
+    for (const captain of captains) {
+      expect(source).toContain(`captain: "${captain}"`);
+    }
+    expect(source).toContain("12 captain-led teams");
+    expect(source).toContain('title="Captain Teams"');
+    expect(source).toContain('title="Draft Pool"');
+    expect(source).toContain("July 26 at 19:00 UTC");
+    expect(source).not.toContain("durpee");
   });
 
   test("shows charity window, approved GAWS logo, and updated giveaways", () => {
