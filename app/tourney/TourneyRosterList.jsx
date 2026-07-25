@@ -14,13 +14,22 @@ const twitchLoginPattern = /^[a-z0-9_]{3,25}$/;
 
 const getTeamLabel = (teamName) => String(teamName || "").trim() || "TBD";
 
+const getTwitchLogin = (value) => {
+  const normalized = normalizeSortValue(value)
+    .replace(/^https?:\/\/(www\.)?twitch\.tv\//, "")
+    .replace(/^(www\.)?twitch\.tv\//, "")
+    .split(/[/?#]/, 1)[0]
+    .replace(/^@+/, "");
+  return twitchLoginPattern.test(normalized) ? normalized : "";
+};
+
 const getTwitchButtonLabel = (player) => {
   const displayName = normalizeSortValue(player?.displayName);
-  const twitchUsername = normalizeSortValue(player?.twitchUsername);
+  const twitchUsername = getTwitchLogin(player?.twitchUsername);
   if (displayName === "val" && twitchUsername === "vaieia") {
     return "valeia";
   }
-  return String(player?.twitchUsername || "").trim();
+  return twitchUsername;
 };
 
 const getRosterInitial = (player) =>
@@ -68,8 +77,8 @@ const sortPlayers = (players, sortKey) =>
   });
 
 const twitchUrl = (username) => {
-  const login = normalizeSortValue(username);
-  return twitchLoginPattern.test(login) ? `https://www.twitch.tv/${login}` : "";
+  const login = getTwitchLogin(username);
+  return login ? `https://www.twitch.tv/${login}` : "";
 };
 
 const TwitchIcon = () => (
@@ -105,15 +114,18 @@ export default function TourneyRosterList({ players = [] }) {
         const displayName = player.displayName || "Player";
         const profileImageUrl = String(player.twitchProfileImageUrl || "").trim();
         const isLive = Boolean(player.twitchLive);
+        const isCaptain = Boolean(player.isCaptain);
         const liveTitle = String(player.twitchLiveTitle || "").trim();
+        const playerClassName = [
+          "tourney-roster-player",
+          isLive ? "is-live" : "",
+          isCaptain ? "is-captain" : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
 
         return (
-          <li
-            className={
-              isLive ? "tourney-roster-player is-live" : "tourney-roster-player"
-            }
-            key={player.id}
-          >
+          <li className={playerClassName} key={player.id}>
             <span className="tourney-roster-identity">
               <span className="tourney-roster-avatar" aria-hidden="true">
                 {profileImageUrl ? (
@@ -156,7 +168,15 @@ export default function TourneyRosterList({ players = [] }) {
                     </span>
                   ) : null}
                 </strong>
-                <span className="tourney-roster-label">Player</span>
+                <span
+                  className={
+                    isCaptain
+                      ? "tourney-roster-label is-captain"
+                      : "tourney-roster-label"
+                  }
+                >
+                  {isCaptain ? "Team Captain" : "Player"}
+                </span>
               </span>
             </span>
             <span className="tourney-roster-detail">

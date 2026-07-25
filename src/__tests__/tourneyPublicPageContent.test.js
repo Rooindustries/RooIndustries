@@ -16,6 +16,12 @@ const readTourneyRosterSource = () =>
     "utf8"
   );
 
+const readTourneyCaptainsSource = () =>
+  fs.readFileSync(
+    path.join(__dirname, "../server/tourney/captains.js"),
+    "utf8"
+  );
+
 describe("tourney public page content", () => {
   test("keeps internal Frogger reservation out of public copy", () => {
     const source = readTourneyPageSource();
@@ -84,31 +90,34 @@ describe("tourney public page content", () => {
     expect(source).not.toContain("The tournament runs August 1-2, 2026");
   });
 
-  test("shows all current Discord captains as twelve teams", () => {
-    const source = readTourneyRosterSource();
-    const captains = [
+  test("keeps captains in the draft pool using their linked identities", () => {
+    const rosterSource = readTourneyRosterSource();
+    const captainsSource = readTourneyCaptainsSource();
+    const twitchLogins = [
       "wsps",
-      "cookies",
-      "Tap",
-      "Wolfi",
-      "chosen",
-      "Herluf",
-      "Putter",
-      "mow the lawn or vanish",
-      "cheesenut",
-      "Mint",
-      "R3nzTU",
-      "skinz",
+      "cookies_ow",
+      "tapnocap",
+      "imwolfixd",
+      "chosen_ow",
+      "herloaf",
+      "putterow",
+      "hmp_ow",
+      "cheesenut16",
+      "mintthiefow",
+      "r3nztu",
+      "skinzow",
     ];
 
-    for (const captain of captains) {
-      expect(source).toContain(`captain: "${captain}"`);
+    for (const twitchLogin of twitchLogins) {
+      expect(captainsSource).toContain(`twitch: "${twitchLogin}"`);
     }
-    expect(source).toContain("12 captain-led teams");
-    expect(source).toContain('title="Captain Teams"');
-    expect(source).toContain('title="Draft Pool"');
-    expect(source).toContain("July 26 at 19:00 UTC");
-    expect(source).not.toContain("durpee");
+    expect(rosterSource).toContain('title="Draft Pool"');
+    expect(rosterSource).toContain("<TourneyRosterList players={players} />");
+    expect(rosterSource).toContain("July 26 at 19:00 UTC");
+    expect(rosterSource).not.toContain("CaptainTeams");
+    expect(rosterSource).not.toContain("captainTeams");
+    expect(rosterSource).not.toContain('title="Captain Teams"');
+    expect(rosterSource).not.toContain("12 captain-led teams");
   });
 
   test("shows charity window, approved GAWS logo, and updated giveaways", () => {

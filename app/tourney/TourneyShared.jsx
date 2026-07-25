@@ -2381,70 +2381,6 @@ export const TourneyStyles = () => (
       text-decoration: none;
     }
 
-    .tourney-captain-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 12px;
-    }
-
-    .tourney-captain-card {
-      display: grid;
-      grid-template-columns: 48px minmax(0, 1fr);
-      align-items: center;
-      gap: 12px;
-      min-width: 0;
-      border: 1px solid rgba(14, 165, 233, 0.3);
-      border-radius: 0.85rem;
-      background:
-        radial-gradient(circle at 8% 18%, rgba(56, 189, 248, 0.15), transparent 38%),
-        rgba(11, 17, 32, 0.64);
-      padding: 14px;
-      box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.055),
-        0 12px 28px rgba(2, 6, 23, 0.14);
-    }
-
-    .tourney-captain-avatar {
-      display: grid;
-      place-items: center;
-      width: 48px;
-      height: 48px;
-      border: 1px solid rgba(125, 211, 252, 0.44);
-      border-radius: 9999px;
-      color: #e0f2fe;
-      background:
-        linear-gradient(145deg, rgba(14, 165, 233, 0.32), rgba(37, 99, 235, 0.26)),
-        rgba(8, 47, 73, 0.76);
-      box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.12),
-        0 0 18px rgba(56, 189, 248, 0.2);
-      font-size: 1rem;
-      font-weight: 900;
-    }
-
-    .tourney-captain-copy {
-      display: grid;
-      gap: 3px;
-      min-width: 0;
-    }
-
-    .tourney-captain-copy .tourney-kicker {
-      color: #7dd3fc;
-      font-size: 0.66rem;
-    }
-
-    .tourney-captain-copy strong {
-      color: #fff;
-      line-height: 1.2;
-      overflow-wrap: anywhere;
-    }
-
-    .tourney-captain-copy small {
-      color: rgba(203, 213, 225, 0.76);
-      font-size: 0.78rem;
-      font-weight: 700;
-    }
-
     .tourney-roster-controls {
       display: flex;
       flex-wrap: wrap;
@@ -2521,6 +2457,14 @@ export const TourneyStyles = () => (
         rgba(11, 17, 32, 0.66);
     }
 
+    .tourney-roster-player.is-captain {
+      border-color: rgba(250, 204, 21, 0.36);
+    }
+
+    .tourney-roster-player.is-live.is-captain {
+      border-color: rgba(250, 204, 21, 0.48);
+    }
+
     .tourney-roster-host-row.is-featured {
       border-color: rgba(34, 211, 238, 0.34);
       background:
@@ -2544,6 +2488,13 @@ export const TourneyStyles = () => (
       color: rgba(203, 213, 225, 0.78);
       font-size: 0.86rem;
       line-height: 1.3;
+    }
+
+    .tourney-roster-label.is-captain {
+      color: #facc15;
+      font-weight: 860;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
     }
 
     .tourney-roster-player > span {
@@ -3740,7 +3691,6 @@ export const TourneyStyles = () => (
     .tourney-capacity-panel,
     .tourney-player-row,
     .tourney-host-card,
-    .tourney-captain-card,
     .tourney-roster-player,
     .tourney-match-card,
     .tourney-team-row,
@@ -4197,10 +4147,6 @@ export const TourneyStyles = () => (
         width: 100%;
       }
 
-      .tourney-captain-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-
       .tourney-host-director {
         width: 100%;
       }
@@ -4419,10 +4365,6 @@ export const TourneyStyles = () => (
 
       .tourney-host-twitch {
         width: 100%;
-      }
-
-      .tourney-captain-grid {
-        grid-template-columns: 1fr;
       }
 
       .tourney-info-list li,
