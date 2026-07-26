@@ -49,9 +49,20 @@ describe("runtime env validation after retirement", () => {
     );
   });
 
-  test("still refuses a mirror with nowhere to deliver", () => {
+  // Gating on a missing legacy URL was too weak: TOURNEY_DATABASE_URL is still set in
+  // production, so the flag alone would have been enough to put parity back on Neon.
+  test("refuses the mirror flag outright, not just when a URL is absent", () => {
     expect(validator).toContain(
+      "TOURNEY_MIRROR_ENABLED must be 0: the legacy Tourney mirror is retired"
+    );
+    expect(validator).not.toContain(
       "TOURNEY_MIRROR_ENABLED=1 requires a legacy Tourney database URL to mirror into."
+    );
+  });
+
+  test("refuses to re-stage the completed v4 activation", () => {
+    expect(validator).toContain(
+      "Tourney v4 activation is complete and cannot be re-staged"
     );
   });
 });

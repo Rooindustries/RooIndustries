@@ -525,9 +525,17 @@ if (tourneyV4ActivationStaged) {
       "The activation-ready v4 control tuple requires TOURNEY_V4_ACTIVATION_ENABLED=1."
     );
   }
-  if (
+  // Staging an activation once required the mirror to be live, because the cutover
+  // replicated into the legacy backend while writes were paused. That backend is
+  // retired and activation is complete (TOURNEY_HARDENING_V4_ENABLED=1), so the tuple
+  // is no longer satisfiable and must not be re-staged: it would ask for a mirror the
+  // rule above forbids. Say so once instead of emitting a contradictory pair.
+  if (!tourneyMirrorEnabled) {
+    supabaseConsistencyFailures.push(
+      "Tourney v4 activation is complete and cannot be re-staged: it required the retired legacy mirror. Set TOURNEY_V4_ACTIVATION_ENABLED=0."
+    );
+  } else if (
     tourneyDatabaseMode !== "supabase" ||
-    !tourneyMirrorEnabled ||
     !tourneyWritesPaused ||
     tourneyFailoverGeneration !== "1" ||
     tourneyHardeningV4Enabled
@@ -619,18 +627,16 @@ if (!/^[0-9]+$/.test(tourneyFailoverGeneration)) {
     "TOURNEY_FAILOVER_GENERATION must be a non-negative integer."
   );
 }
-// The legacy Neon fallback has been retired: its mirror triggers are detached and
-// its contracts disabled (20260726160000, 20260726160500). Supabase is the sole
-// backend, so requiring the mirror would now demand a delivery target that cannot
-// be written to. What still must hold is that the mirror is never enabled without
-// a legacy URL to deliver to -- checked below.
-if (
-  tourneyDatabaseMode === "supabase" &&
-  tourneyMirrorEnabled &&
-  !hasAny(["TOURNEY_DATABASE_URL", "POSTGRES_URL"])
-) {
+// The legacy Neon fallback is retired: its capture triggers are detached and its
+// contracts disabled (20260726160000, 20260726160500), so nothing writes the outbox
+// and the mirror has nothing to deliver. Turning the flag back on would not restore
+// replication -- it would only make parity reconnect to Neon on every reconciliation
+// run, which is exactly what exhausted its 5 GB monthly transfer allowance. Allowing
+// it whenever a legacy URL happened to be present was too weak a guard, because
+// TOURNEY_DATABASE_URL is still set in production: the flag alone was enough.
+if (tourneyMirrorEnabled) {
   supabaseConsistencyFailures.push(
-    "TOURNEY_MIRROR_ENABLED=1 requires a legacy Tourney database URL to mirror into."
+    "TOURNEY_MIRROR_ENABLED must be 0: the legacy Tourney mirror is retired, and re-enabling it restores Neon egress rather than replication."
   );
 }
 if (tourneyNeedsSupabase && !hasAny(["SUPABASE_DATABASE_URL"])) {
