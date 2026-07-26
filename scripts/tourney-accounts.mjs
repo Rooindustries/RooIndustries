@@ -97,12 +97,16 @@ const upsertAccount = async (accounts, flags) => {
   const existingIndex = accounts.findIndex((account) => account.username === username);
   const existing = existingIndex >= 0 ? accounts[existingIndex] : null;
   const password = await getPassword(flags);
+  // Matches buildUpdatedTourneyAccounts: an account with no address cannot use the
+  // self-serve reset at all, and the forgot endpoint reports success either way.
+  const email = normalizeEmail(flags.email) || normalizeEmail(existing?.email);
+  if (!email) {
+    throw new Error("Provide --email so the account can recover its password.");
+  }
   const passwordHash = await bcrypt.hash(password, 12);
   const account = {
     username,
-    ...(normalizeEmail(flags.email) || existing?.email
-      ? { email: normalizeEmail(flags.email) || existing.email }
-      : {}),
+    email,
     role,
     passwordHash,
     active: true,
