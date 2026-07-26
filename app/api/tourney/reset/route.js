@@ -10,6 +10,7 @@ import {
   readEffectiveTourneyAccounts,
   readTourneyPasswordReset,
   renderTourneyAccountsJson,
+  TOURNEY_ADMIN_ROLES,
 } from "../../../../src/server/tourney/auth";
 import {
   hashTourneyToken,
@@ -59,7 +60,10 @@ export async function POST(request) {
       token: payload.token,
       accounts,
     });
-    const nextAdminAccounts = adminAccount && ["owner", "caster"].includes(adminAccount.role)
+    // Must accept the same roles the forgot route mints tokens for, viewer included.
+    // A narrower list here would validate a viewer's token, decline the admin branch,
+    // then fall through to the player reset and reject a token it had just accepted.
+    const nextAdminAccounts = adminAccount && TOURNEY_ADMIN_ROLES.includes(adminAccount.role)
       ? await buildUpdatedTourneyAccounts({
           action: "change-password",
           username: adminAccount.username,

@@ -7,6 +7,7 @@ import {
   getTourneyAdminEmail,
   getClientAddressFromHeaders,
   readEffectiveTourneyAccounts,
+  TOURNEY_ADMIN_ROLES,
 } from "../../../../src/server/tourney/auth";
 import { enqueueTourneyEmailDispatch } from "../../../../src/server/tourney/emailDispatch";
 import { createTourneyResetToken } from "../../../../src/server/tourney/playerStore";
@@ -81,8 +82,13 @@ export async function POST(request) {
     const accounts = await readEffectiveTourneyAccounts();
     const adminAccount =
       findTourneyAccount(login, accounts) || findTourneyAccountByEmail(login, accounts);
+    // Every admin role that can sign in must be able to recover a password, viewer
+    // included. Listing only owner and caster made a viewer fall through to the player
+    // lookup, match nothing, and receive the generic success response with no email
+    // ever sent -- silently unrecoverable. TOURNEY_ADMIN_ROLES is the same list the
+    // login path authenticates against, so the two cannot drift apart again.
     const adminEmail =
-      adminAccount?.active && ["owner", "caster"].includes(adminAccount.role)
+      adminAccount?.active && TOURNEY_ADMIN_ROLES.includes(adminAccount.role)
         ? getTourneyAdminEmail(adminAccount)
         : "";
     const command = await executeTourneyCommand({

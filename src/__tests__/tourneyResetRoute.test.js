@@ -33,6 +33,8 @@ jest.mock("../server/tourney/auth", () => ({
   readEffectiveTourneyAccounts: jest.fn(async () => []),
   readTourneyPasswordReset: jest.fn(() => null),
   renderTourneyAccountsJson: jest.fn(() => "[]"),
+  // Mirrors the real export; the route gates the admin branch on this list.
+  TOURNEY_ADMIN_ROLES: ["viewer", "caster", "owner"],
 }));
 
 jest.mock("../server/tourney/playerStore", () => ({
@@ -97,5 +99,45 @@ describe("Tourney reset route", () => {
       request.text.mock.invocationCallOrder[0]
     );
     expect(mockExecuteTourneyCommand).not.toHaveBeenCalled();
+  });
+
+  // The reset route has to accept every role the forgot route mints tokens for. A
+  // narrower list here would validate a viewer's token, decline the admin branch, then
+  // fall through to the player reset and reject the token it had just accepted.
+  describe.each(["owner", "caster", "viewer"])("the %s role", (role) => {
+    test("takes the admin branch and carries the plaintext for the Auth write", async () => {
+      const auth = require("../server/tourney/auth");
+      const accountStore = require("../server/tourney/accountStore");
+      const playerStore = require("../server/tourney/playerStore");
+      const account = { username: `admin-${role}`, role, active: true, version: "2" };
+      auth.readTourneyPasswordReset.mockReturnValue(account);
+      auth.buildUpdatedTourneyAccounts.mockResolvedValue([
+        { ...account, passwordHash: "$2b$12$digest" },
+      ]);
+      mockExecuteTourneyCommand.mockImplementation(async ({ callback }) => {
+        const result = await callback();
+        return { status: 200, body: result.body };
+      });
+
+      const response = await POST(makeRequest());
+
+      expect(response.status).toBe(200);
+      expect(auth.buildUpdatedTourneyAccounts).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "change-password",
+          username: account.username,
+        })
+      );
+      // Auth discards a digest on update, so the snapshot write has to carry the
+      // submitted plaintext scoped to this one username.
+      expect(accountStore.writePersistedTourneyAccountsJson).toHaveBeenCalledWith(
+        expect.objectContaining({
+          credentialUsername: account.username,
+          credentialPassword: "new-password",
+        })
+      );
+      // The player fallback must not run for an admin token.
+      expect(playerStore.resetTourneyPlayerPassword).not.toHaveBeenCalled();
+    });
   });
 });
