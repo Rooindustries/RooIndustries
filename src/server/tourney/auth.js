@@ -472,12 +472,21 @@ export const buildUpdatedTourneyAccounts = async ({
       throw new Error("Owner accounts can only be changed from server env.");
     }
 
+    // Every owner-managed role can log in, and the only self-serve recovery path is
+    // an email. Creating one without an address produces an account that works right
+    // up until its holder forgets the password, at which point /api/tourney/forgot
+    // answers generically and nothing can be done from the UI. Refuse at creation
+    // rather than leaving another unrecoverable account behind; an existing address
+    // is still inherited, so a password-only update does not have to resend it.
+    const resolvedEmail = normalizedEmail || normalizeTourneyEmail(existing?.email);
+    if (!resolvedEmail) {
+      throw new Error("Owner-managed accounts need an email for password recovery.");
+    }
+
     const passwordHash = await bcrypt.hash(plainPassword, 12);
     const nextAccount = {
       username: normalizedUsername,
-      ...(normalizedEmail || existing?.email
-        ? { email: normalizedEmail || existing.email }
-        : {}),
+      email: resolvedEmail,
       role: normalizedRole,
       passwordHash,
       active: true,

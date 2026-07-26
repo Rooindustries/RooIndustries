@@ -118,10 +118,14 @@ export default function OwnerAccountManager({
           </label>
           <label>
             Email
+            {/* Required: an email is the only self-serve recovery path for a
+                login-capable account, and the forgot endpoint answers generically
+                whether or not one exists. The server enforces this too. */}
             <input
               name="email"
               type="email"
               autoComplete="email"
+              required
               placeholder="caster@example.com"
             />
           </label>

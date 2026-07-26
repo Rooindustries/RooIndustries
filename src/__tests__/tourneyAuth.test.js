@@ -245,6 +245,7 @@ describe("tourney auth", () => {
     const accounts = await auth.buildUpdatedTourneyAccounts({
       action: "upsert",
       username: "CasterOne",
+      email: "CasterOne@Example.com",
       role: "caster",
       password: "new-password",
       accounts: [owner],
@@ -257,18 +258,18 @@ describe("tourney auth", () => {
       version: "1",
     });
     await expect(bcrypt.compare("new-password", caster.passwordHash)).resolves.toBe(true);
-    // Both fixtures are created without an email, and neither matches one of the two
-    // legacy fallback usernames, so both are genuinely unrecoverable -- the state that
-    // three active production admins were in. The owner view has to say so rather than
-    // render a row that looks healthy.
+    // The owner fixture predates the email requirement and matches neither legacy
+    // fallback username, so it is genuinely unrecoverable -- the state three active
+    // production admins were in. The owner view has to say so rather than render a
+    // row that looks healthy. New accounts can no longer reach that state.
     expect(auth.summarizeTourneyAccounts(accounts)).toEqual([
       {
         username: "casterone",
-        email: "",
+        email: "casterone@example.com",
         role: "caster",
         active: true,
         version: "1",
-        canRecoverPassword: false,
+        canRecoverPassword: true,
       },
       {
         username: "owner1",
