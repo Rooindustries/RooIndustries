@@ -619,9 +619,18 @@ if (!/^[0-9]+$/.test(tourneyFailoverGeneration)) {
     "TOURNEY_FAILOVER_GENERATION must be a non-negative integer."
   );
 }
-if (tourneyDatabaseMode === "supabase" && !tourneyMirrorEnabled) {
+// The legacy Neon fallback has been retired: its mirror triggers are detached and
+// its contracts disabled (20260726160000, 20260726160500). Supabase is the sole
+// backend, so requiring the mirror would now demand a delivery target that cannot
+// be written to. What still must hold is that the mirror is never enabled without
+// a legacy URL to deliver to -- checked below.
+if (
+  tourneyDatabaseMode === "supabase" &&
+  tourneyMirrorEnabled &&
+  !hasAny(["TOURNEY_DATABASE_URL", "POSTGRES_URL"])
+) {
   supabaseConsistencyFailures.push(
-    "Supabase Tourney primary requires TOURNEY_MIRROR_ENABLED=1 while legacy fallback is retained."
+    "TOURNEY_MIRROR_ENABLED=1 requires a legacy Tourney database URL to mirror into."
   );
 }
 if (tourneyNeedsSupabase && !hasAny(["SUPABASE_DATABASE_URL"])) {
