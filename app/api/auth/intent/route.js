@@ -236,12 +236,23 @@ export async function POST(request) {
     const reauthToken = ["link", "reclaim"].includes(action)
       ? readReauthToken(request)
       : "";
-    if (["link", "reclaim"].includes(action) && !reauthToken) {
+    // A plain `link` no longer demands a separate password re-confirmation. The
+    // caller has already been proven above by resolveExactDomainIdentity, which
+    // requires a valid domain session cookie whose subject matches an active
+    // account -- for tourney, both tourney_username AND role must equal the
+    // session's. A signed-in player can therefore attach Google or Discord
+    // directly. The token is still forwarded when present so an existing
+    // reauth-backed link keeps its stronger proof recorded.
+    //
+    // `reclaim` keeps the requirement. That path releases a provider identity
+    // held by a different, orphaned account, so it can take something away from
+    // another principal rather than only adding a sign-in method to your own.
+    if (action === "reclaim" && !reauthToken) {
       return proofFailure({
         action,
         body: {
           ok: false,
-          error: "Reauthenticate before linking a provider.",
+          error: "Reauthenticate before reclaiming a provider.",
           reauthRequired: true,
         },
         status: 409,
