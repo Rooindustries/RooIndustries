@@ -288,3 +288,44 @@ describe("per-domain Discord link migration", () => {
     expect(migration).not.toMatch(/to\s+(anon|authenticated)\b/);
   });
 });
+
+describe("cross-domain link owner constraint", () => {
+  const migration = fs.readFileSync(
+    path.resolve(
+      "supabase/migrations/20260726143000_allow_cross_domain_link_owners.sql"
+    ),
+    "utf8"
+  );
+  const linkMigration = fs.readFileSync(
+    path.resolve(
+      "supabase/migrations/20260726120000_link_discord_identity_per_domain.sql"
+    ),
+    "utf8"
+  );
+
+  // The linker writes backend_owner = '<domain>_link'; the original check only
+  // admitted 'sanity' and 'supabase', so every cross-domain link aborted with
+  // accounts_identity_links_backend_owner_check.
+  test("admits the owner values the linker actually writes", () => {
+    expect(linkMigration).toContain("v_domain || '_link', v_domain");
+    for (const owner of ["tourney_link", "referral_link"]) {
+      expect(migration).toContain(`'${owner}'`);
+    }
+  });
+
+  test("keeps the original import owners", () => {
+    for (const owner of ["sanity", "supabase"]) {
+      expect(migration).toContain(`'${owner}'`);
+    }
+  });
+
+  test("replaces the constraint rather than leaving it dropped", () => {
+    expect(migration).toContain(
+      "drop constraint if exists accounts_identity_links_backend_owner_check"
+    );
+    expect(migration).toContain(
+      "add constraint accounts_identity_links_backend_owner_check"
+    );
+    expect(migration).toMatch(/check \(backend_owner in \(/);
+  });
+});
