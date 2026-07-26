@@ -198,10 +198,32 @@ const providersForUser = (user) =>
       .filter(Boolean)
   );
 
-const hasDomainAccount = (account) =>
-  (account?.roles || []).some(
-    (role) => role === "creator" || String(role).startsWith("tourney_")
-  ) || Boolean(account?.creator_legacy_sanity_id || account?.tourney_legacy_player_id);
+const hasReferralAccount = (account) =>
+  (account?.roles || []).includes("creator") ||
+  Boolean(account?.creator_legacy_sanity_id);
+
+const hasTourneyAccount = (account) =>
+  (account?.roles || []).some((role) => String(role).startsWith("tourney_")) ||
+  Boolean(account?.tourney_legacy_player_id);
+
+// Scoped to the domain being linked. A Discord account that already owns an
+// account in the *same* domain cannot be linked, because that would fold two real
+// accounts together. Owning an account in the *other* domain is expected -- that
+// is the referral-then-tourney case -- and is handled as a cross-domain link.
+const hasDomainAccount = (account, accountScope = "referral") =>
+  accountScope === "tourney"
+    ? hasTourneyAccount(account)
+    : hasReferralAccount(account);
+
+const hasOtherDomainAccount = (account, accountScope = "referral") =>
+  accountScope === "tourney"
+    ? hasReferralAccount(account)
+    : hasTourneyAccount(account);
+
+const discordIdentityOf = (user) =>
+  (user?.identities || []).find(
+    (identity) => String(identity?.provider || "").trim().toLowerCase() === "discord"
+  ) || null;
 
 const isActivePrimaryAccount = (account, accountScope) => {
   if (!account?.principal_id || account?.status === "deleted") return false;
@@ -265,9 +287,47 @@ export const linkPendingDiscordIdentity = async ({
   }
   if (
     !pendingAccount?.principal_id ||
-    hasDomainAccount(pendingAccount)
+    hasDomainAccount(pendingAccount, normalizedAccountScope)
   ) {
     return { linked: false, reason: "discord_account_not_linkable" };
+  }
+
+  // The Discord account belongs to this person's other domain (typically their
+  // referral account). Supabase allows one auth.identities row per Discord
+  // account, so the principals are never merged -- merging would soft-delete the
+  // other domain's principal. The tourney side records its own projected link
+  // instead, which is what its Discord role assignment resolves against.
+  if (hasOtherDomainAccount(pendingAccount, normalizedAccountScope)) {
+    if (normalizedAccountScope !== "tourney") {
+      return { linked: false, reason: "discord_account_not_linkable" };
+    }
+    const identity = discordIdentityOf(pendingUser);
+    const providerSubject = String(
+      identity?.provider_id || identity?.id || ""
+    ).trim();
+    if (!providerSubject) {
+      return { linked: false, reason: "discord_session_missing" };
+    }
+    const projected = await adminClient.rpc("roo_link_tourney_discord_identity", {
+      p_principal_id: resolvedPrimaryAccount.principal_id,
+      p_provider_subject: providerSubject,
+      p_provider_email:
+        String(identity?.identity_data?.email || pendingUser?.email || "")
+          .trim()
+          .toLowerCase() || null,
+      p_metadata: identity?.identity_data || {},
+    });
+    if (projected.error) {
+      throw Object.assign(new Error("Discord account could not be linked."), {
+        code: projected.error.code || "DISCORD_LINK_FAILED",
+      });
+    }
+    return {
+      linked: true,
+      account: resolvedPrimaryAccount,
+      crossDomain: true,
+      providerSubject,
+    };
   }
 
   const primaryGrant = crypto.randomBytes(32).toString("base64url");
