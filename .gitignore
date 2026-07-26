@@ -35,3 +35,6 @@ yarn-error.log*
 
 # Local worktree snapshots and parked dirty files.
 /dirty-archive/
+
+# Documentation stays local and is never published.
+*.md
