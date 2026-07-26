@@ -33,6 +33,11 @@ export const dynamic = "force-dynamic";
 const jsonError = (message, status = 400, extra = {}) =>
   NextResponse.json({ ok: false, error: message, ...extra }, { status });
 
+// The only two actions that set a password. Role edits, disables and removals must
+// not carry a credential signal, or the projection would demand a plaintext that
+// was never submitted.
+const CREDENTIAL_ACTIONS = new Set(["upsert", "change-password"]);
+
 const getOwnerSession = async (request) => {
   const token = request.cookies.get(TOURNEY_SESSION_COOKIE)?.value || "";
   const session = await readTourneySessionFromStore({ token });
@@ -121,6 +126,12 @@ export async function POST(request) {
       : null;
     const expectedCurrentHash = getTourneyAccountsCanonicalHash(currentAccounts);
     const commandId = readTourneyCommandId({ request });
+    // Supabase Auth ignores a bcrypt digest when updating an existing user, so the
+    // projection needs the submitted plaintext to actually change the credential.
+    // Scope it to this one username: the projection fans out over every account.
+    const changesCredential = CREDENTIAL_ACTIONS.has(
+      String(payload?.action || "").trim().toLowerCase()
+    );
     const command = await executeTourneyCommand({
       commandId,
       purpose: `accounts:${String(payload?.action || "update").toLowerCase()}`,
@@ -129,6 +140,12 @@ export async function POST(request) {
         const persisted = await writePersistedTourneyAccountsJson({
           accountsJson,
           actorUsername: session.username,
+          ...(changesCredential
+            ? {
+                credentialUsername: payload?.username,
+                credentialPassword: payload?.password,
+              }
+            : {}),
           expectedCurrentHash,
         });
         return { body: {

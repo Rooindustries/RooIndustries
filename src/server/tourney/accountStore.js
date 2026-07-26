@@ -145,9 +145,16 @@ export const projectTourneyAccountSnapshotToSanity = async ({
   return { ok: true, provider: "sanity", updatedAt, updatedBy };
 };
 
+// `credentialUsername` / `credentialPassword` name the ONE account whose password is
+// actually changing. The enqueue loop below fans out over every account in the
+// snapshot plus tombstones, so an unscoped password signal would make every other
+// account's projection demand a plaintext that never existed — the same regression
+// that broke approve/kick/withdraw for players earlier today.
 export const writePersistedTourneyAccountsJson = async ({
   accountsJson,
   actorUsername,
+  credentialUsername = "",
+  credentialPassword = "",
   expectedCurrentHash = "",
   env = process.env,
 } = {}) => {
@@ -229,8 +236,17 @@ export const writePersistedTourneyAccountsJson = async ({
       ))
       .map((account) => ({ ...account, active: false })),
   ];
+  const credentialTarget = String(credentialUsername || "").trim().toLowerCase();
+  const submittedPassword = String(credentialPassword || "");
   for (const account of authAccounts) {
-    await enqueueTourneyExternalOperation({
+    // Only the single named account carries a credential change. Everything else is
+    // a metadata/role re-projection and must not ask the worker for a plaintext.
+    const changesCredential = Boolean(
+      credentialTarget &&
+      submittedPassword &&
+      String(account.username || "").trim().toLowerCase() === credentialTarget
+    );
+    const operation = await enqueueTourneyExternalOperation({
       commandId: context.command_id,
       operationKind: "supabase_admin_auth",
       entityType: "account",
@@ -241,9 +257,28 @@ export const writePersistedTourneyAccountsJson = async ({
         snapshotId: rows[0].snapshot_id,
         snapshotVersion: Number(rows[0].version),
         snapshotHash: canonicalHash,
+        installPassword: changesCredential,
       },
       env,
     });
+    if (changesCredential) {
+      // Encrypted, TTL'd, service_role-only, keyed to this operation. The plaintext
+      // is never written into desired_state, which is stored as plain JSON.
+      const { saveTourneyAuthOperationPassword } = await import("./externalOperations.js");
+      const stored = await saveTourneyAuthOperationPassword({
+        operationKey: operation?.operation_key || operation?.operationKey || "",
+        password: submittedPassword,
+        env,
+      });
+      // Fail while the transaction is still open rather than committing an operation
+      // whose credential the worker will never be able to read.
+      if (!stored) {
+        throw Object.assign(
+          new Error("The Tourney password change could not be prepared."),
+          { code: "TOURNEY_AUTH_PASSWORD_CHANNEL_UNAVAILABLE", status: 503 }
+        );
+      }
+    }
   }
   await enqueueTourneyExternalOperation({
     commandId: context.command_id,

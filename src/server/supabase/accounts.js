@@ -5,6 +5,17 @@ import { createSupabaseAuthClient } from "./authClient.js";
 
 const normalizeIdentifier = (value) => String(value || "").trim().toLowerCase();
 const normalizePassword = (value) => String(value || "");
+
+// A digest of the bcrypt digest, recorded in app_metadata so a later run can tell
+// "this credential is already installed" from "this is a different credential".
+// app_metadata is readable by anyone holding the service key, so it stores a
+// non-reversible fingerprint rather than the digest itself -- a bcrypt hash is still
+// offline-attackable, and this value is not.
+const fingerprintPasswordHash = (passwordHash) => {
+  const digest = String(passwordHash || "").trim();
+  if (!digest) return "";
+  return crypto.createHash("sha256").update(`credential:v1:${digest}`).digest("hex");
+};
 const RESET_CREDENTIAL_FIELDS = [
   "resetToken",
   "resetTokenHash",
@@ -394,12 +405,16 @@ const upsertAuthUserWithHash = async ({
     throw new Error("Supabase Auth imports require bcrypt credentials.");
   }
   const plaintext = String(password || "");
+  const digestFingerprint = fingerprintPasswordHash(passwordHash);
   const attributes = {
     email,
     email_confirm: true,
     password_hash: passwordHash,
     user_metadata: { display_name: displayName },
-    app_metadata: appMetadata,
+    app_metadata: {
+      ...appMetadata,
+      credential_digest_fingerprint: digestFingerprint,
+    },
   };
   const existing = await adminClient.auth.admin.getUserById(userId);
   if (existing.error && Number(existing.error.status || 0) !== 404) {
@@ -430,17 +445,36 @@ const upsertAuthUserWithHash = async ({
       app_metadata: {
         ...(currentUser.app_metadata || {}),
         ...appMetadata,
+        // The fingerprint asserts "Auth is holding this credential". Only a write that
+        // actually carried a plaintext can assert that. Recording it after a metadata-
+        // only update would claim a digest was installed when Auth discarded it, and a
+        // later run would read that claim as "already installed" and skip the real work.
+        ...(plaintext && digestFingerprint
+          ? { credential_digest_fingerprint: digestFingerprint }
+          : {}),
         imported_from:
           currentUser.app_metadata?.imported_from || appMetadata?.imported_from,
         roles,
       },
     });
     if (updated.error) throw new Error("Supabase Auth synchronization failed.");
-    return { passwordApplied: Boolean(plaintext) };
+    // `digestAlreadyInstalled` reports that Auth is already holding this exact digest,
+    // recorded when it was installed via createUser. A caller re-running a projection
+    // needs that to distinguish "nothing to change" from "the change silently failed";
+    // without it the only safe reading of a missing plaintext is failure, which is what
+    // permanently blocked shadow-migration replay and creator verification retries.
+    return {
+      passwordApplied: Boolean(plaintext),
+      digestAlreadyInstalled: Boolean(
+        digestFingerprint &&
+        String(currentUser.app_metadata?.credential_digest_fingerprint || "") ===
+          digestFingerprint
+      ),
+    };
   }
   const created = await adminClient.auth.admin.createUser({ id: userId, ...attributes });
   if (created.error) throw new Error("Supabase Auth account creation failed.");
-  return { passwordApplied: true };
+  return { passwordApplied: true, digestAlreadyInstalled: true };
 };
 
 export const syncSupabaseTourneyPlayerAccount = async ({
@@ -510,6 +544,7 @@ export const syncSupabaseTourneyPlayerAccount = async ({
     // arrive as `password`. Without one, leave the credential untouched instead of
     // issuing a write that reports success and changes nothing.
     const applyPassword = installPassword && Boolean(String(password || ""));
+    const digestFingerprint = fingerprintPasswordHash(passwordHash);
     const updated = await adminClient.auth.admin.updateUserById(userId, {
       ...(applyPassword ? { password: String(password) } : {}),
       app_metadata: {
@@ -518,6 +553,12 @@ export const syncSupabaseTourneyPlayerAccount = async ({
           existingUser.app_metadata?.imported_from || "legacy-tourney-database",
         legacy_player_id: source.id,
         roles: [...roles],
+        // Only a write that carried a plaintext actually installed this digest. Every
+        // other projection re-sends metadata for a credential Auth already holds, and
+        // recording the fingerprint there would assert an install that did not happen.
+        ...(applyPassword && digestFingerprint
+          ? { credential_digest_fingerprint: digestFingerprint }
+          : {}),
       },
     });
     if (updated.error) throw new Error("Supabase Auth synchronization failed.");
@@ -575,6 +616,8 @@ export const syncSupabaseTourneyPlayerAccount = async ({
 
 export const syncSupabaseTourneyAdminAccount = async ({
   account,
+  password = "",
+  installPassword = false,
   env = process.env,
   adminClient = createSupabaseAdminClient(),
 } = {}) => {
@@ -621,9 +664,15 @@ export const syncSupabaseTourneyAdminAccount = async ({
     active: account.active !== false,
     version: String(account.version || "1"),
   });
-  await upsertAuthUserWithHash({
+  // The return value is load-bearing, not decoration. On an update Auth discards
+  // `password_hash`, so without the submitted plaintext this call changes metadata
+  // only — and the account row and credential_version below would still be written,
+  // leaving the roster claiming a new password while Auth kept the old one. That is
+  // exactly how admin resets reported success while doing nothing.
+  const authResult = await upsertAuthUserWithHash({
     userId,
     email: primaryEmail,
+    password,
     passwordHash: account.passwordHash || account.password_hash,
     displayName: username,
     appMetadata: {
@@ -633,6 +682,12 @@ export const syncSupabaseTourneyAdminAccount = async ({
     },
     adminClient,
   });
+  if (installPassword && authResult?.passwordApplied !== true) {
+    throw Object.assign(
+      new Error("Supabase Auth did not apply the Tourney administrator password."),
+      { code: "SUPABASE_AUTH_PASSWORD_PLAINTEXT_REQUIRED" }
+    );
+  }
   requireRpcData(
     await adminClient.rpc("roo_import_account_v2", {
       p_account: {
@@ -758,6 +813,7 @@ export const createSupabaseCreatorAccount = async ({
     if (importedHash && !/^\$2[aby]\$/.test(importedHash)) {
       throw new Error("Creator password import requires bcrypt.");
     }
+    const digestFingerprint = importedHash ? fingerprintPasswordHash(importedHash) : "";
     const authAttributes = {
       email,
       email_confirm: true,
@@ -768,6 +824,9 @@ export const createSupabaseCreatorAccount = async ({
         display_name: String(referral.name || code).trim(),
         migration_source: "roo-industries-website",
       },
+      ...(digestFingerprint
+        ? { app_metadata: { credential_digest_fingerprint: digestFingerprint } }
+        : {}),
     };
     const existingAuth = await adminClient.auth.admin.getUserById(userId);
     if (existingAuth.error && Number(existingAuth.error.status || 0) !== 404) {
@@ -780,9 +839,26 @@ export const createSupabaseCreatorAccount = async ({
       // silent failure that broke tourney password resets -- see
       // upsertAuthUserWithHash above. verifyRegistration.js passes passwordHash,
       // so this branch is reachable whenever the Auth user already exists.
+      const currentUser = existingAuth.data.user;
       const { password_hash: _ignoredOnUpdate, ...updatable } = authAttributes;
       const plaintext = normalizePassword(password);
-      if (importedHash && !plaintext) {
+      // A hash with no plaintext is not automatically an error. It is the normal shape
+      // of a retry: the Auth user was created on a previous attempt that then failed to
+      // patch Sanity to `active`, so re-running only needs to re-project metadata
+      // against a credential Auth already holds. Rejecting it unconditionally leaves
+      // verification permanently stuck, which is what the fail-closed guard did.
+      //
+      // The distinction has to be evidence, not assumption. createUser above records a
+      // fingerprint of the digest it installed, so a match here proves this exact
+      // credential is already live and nothing needs changing. No match means the digest
+      // differs from what Auth holds -- a real credential change that a digest cannot
+      // perform -- and that still fails closed.
+      const digestAlreadyInstalled = Boolean(
+        digestFingerprint &&
+        String(currentUser.app_metadata?.credential_digest_fingerprint || "") ===
+          digestFingerprint
+      );
+      if (importedHash && !plaintext && !digestAlreadyInstalled) {
         throw Object.assign(
           new Error(
             "Supabase creator password import cannot update an existing Auth user from a hash."
@@ -793,6 +869,13 @@ export const createSupabaseCreatorAccount = async ({
       const updated = await adminClient.auth.admin.updateUserById(userId, {
         ...updatable,
         ...(plaintext ? { password: plaintext } : {}),
+        app_metadata: {
+          ...(currentUser.app_metadata || {}),
+          // Claim the fingerprint only on a write that carried a plaintext; a metadata-
+          // only update installed no credential and must not say otherwise. On the
+          // already-installed retry path the value is already there and unchanged.
+          ...(plaintext ? (authAttributes.app_metadata || {}) : {}),
+        },
       });
       if (updated.error) throw new Error("Supabase creator Auth update failed.");
     } else {

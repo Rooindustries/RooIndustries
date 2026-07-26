@@ -176,6 +176,7 @@ const ensureAuthAccounts = async (accounts) => {
   let created = 0;
   let updated = 0;
   let pending = 0;
+  let credentialSkipped = 0;
 
   for (const account of accounts) {
     const existingById = byId.get(account.userId);
@@ -224,14 +225,21 @@ const ensureAuthAccounts = async (accounts) => {
       byId.set(data.user.id, data.user);
       byEmail.set(account.primaryEmail, data.user);
     } else {
+      // `password_hash` is honoured only by createUser. On updateUserById it is
+      // accepted and discarded -- HTTP 200, credential unchanged -- so reusing the
+      // same attributes object here would count the account as `updated` while its
+      // password stayed whatever Auth already held. Strip it and report the accounts
+      // whose digest could not be installed, rather than silently miscounting them.
+      const { password_hash: _honouredOnCreateOnly, ...updatable } = authAttributes;
       const { error } = await supabase.auth.admin.updateUserById(
         account.userId,
-        authAttributes
+        updatable
       );
       if (error) {
         throw new Error("A Supabase Auth account could not be synchronized.");
       }
       updated += 1;
+      if (account.passwordHash) credentialSkipped += 1;
     }
 
     if (!account.passwordHash) pending += 1;
@@ -254,7 +262,7 @@ const ensureAuthAccounts = async (accounts) => {
     }
   }
 
-  return { total: accounts.length, created, updated, pending };
+  return { total: accounts.length, created, updated, pending, credentialSkipped };
 };
 
 const contentType = (response) =>
