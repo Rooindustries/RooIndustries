@@ -257,6 +257,10 @@ describe("tourney auth", () => {
       version: "1",
     });
     await expect(bcrypt.compare("new-password", caster.passwordHash)).resolves.toBe(true);
+    // Both fixtures are created without an email, and neither matches one of the two
+    // legacy fallback usernames, so both are genuinely unrecoverable -- the state that
+    // three active production admins were in. The owner view has to say so rather than
+    // render a row that looks healthy.
     expect(auth.summarizeTourneyAccounts(accounts)).toEqual([
       {
         username: "casterone",
@@ -264,6 +268,7 @@ describe("tourney auth", () => {
         role: "caster",
         active: true,
         version: "1",
+        canRecoverPassword: false,
       },
       {
         username: "owner1",
@@ -271,6 +276,7 @@ describe("tourney auth", () => {
         role: "owner",
         active: true,
         version: "1",
+        canRecoverPassword: false,
       },
     ]);
     expect(auth.renderTourneyAccountsJson(accounts)).toContain("\"role\": \"owner\"");
@@ -282,6 +288,80 @@ describe("tourney auth", () => {
         accounts,
       })
     ).rejects.toThrow("Owner accounts can only be changed from server env.");
+  });
+
+  // The role list was the reported defect, but passing the role gate is not the same
+  // as being able to receive a reset link. An administrator with no configured email
+  // and no legacy fallback gets "" from getTourneyAdminEmail, and the forgot route
+  // then answers generically without sending anything.
+  describe("canTourneyAdminRecoverPassword", () => {
+    const account = (overrides) => ({
+      username: "someone",
+      role: "viewer",
+      active: true,
+      version: "1",
+      ...overrides,
+    });
+
+    test.each(["viewer", "caster", "owner"])(
+      "is true for an active %s with a configured email",
+      (role) => {
+        const auth = loadAuth();
+        expect(
+          auth.canTourneyAdminRecoverPassword(
+            account({ role, email: `${role}@rooindustries.com` }),
+            {}
+          )
+        ).toBe(true);
+      }
+    );
+
+    test.each(["viewer", "caster", "owner"])(
+      "is false for an active %s with no email and no fallback",
+      (role) => {
+        const auth = loadAuth();
+        expect(
+          auth.canTourneyAdminRecoverPassword(account({ role, email: "" }), {})
+        ).toBe(false);
+      }
+    );
+
+    test("honours the legacy owner and caster fallbacks", () => {
+      const auth = loadAuth();
+      expect(
+        auth.canTourneyAdminRecoverPassword(
+          account({ username: "serviroo", role: "owner", email: "" }),
+          {}
+        )
+      ).toBe(true);
+      expect(
+        auth.canTourneyAdminRecoverPassword(
+          account({ username: "yukari", role: "caster", email: "" }),
+          {}
+        )
+      ).toBe(true);
+    });
+
+    test("is false for a disabled account even with an email", () => {
+      // Disabling has to revoke recovery, or a removed caster could mint a token.
+      const auth = loadAuth();
+      expect(
+        auth.canTourneyAdminRecoverPassword(
+          account({ active: false, email: "gone@rooindustries.com" }),
+          {}
+        )
+      ).toBe(false);
+    });
+
+    test("is false for a role that cannot sign in", () => {
+      const auth = loadAuth();
+      expect(
+        auth.canTourneyAdminRecoverPassword(
+          account({ role: "player", email: "player@rooindustries.com" }),
+          {}
+        )
+      ).toBe(false);
+    });
   });
 
   test("changes existing managed account passwords with a new hash and version", async () => {

@@ -160,6 +160,18 @@ export default function OwnerAccountManager({
                   {account.role}
                   {account.email ? ` - ${account.email}` : ""}
                 </small>
+                {/* An active admin with no deliverable address passes the role gate
+                    but can never receive a reset link, and the forgot endpoint
+                    answers generically either way -- so without this the row looks
+                    perfectly healthy. Add an email to clear it. */}
+                {account.active && account.canRecoverPassword === false ? (
+                  <small
+                    className="tourney-owner-warning"
+                    title="No recovery email. This account cannot reset its own password."
+                  >
+                    No recovery email
+                  </small>
+                ) : null}
               </span>
               <span className={account.active ? "is-active" : "is-disabled"}>
                 {accountStatusLabel(account)}

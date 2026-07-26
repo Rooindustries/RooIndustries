@@ -2017,6 +2017,14 @@ export const TourneyStyles = () => (
       font-weight: 740;
     }
 
+    .tourney-owner-warning {
+      display: block;
+      margin-top: 0.15rem;
+      color: #fed7aa;
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+
     .tourney-owner-message {
       margin: 0;
       color: #fed7aa;
