@@ -6,6 +6,7 @@ const mockGetTourneyAdminEmail = jest.fn();
 const mockReadEffectiveTourneyAccounts = jest.fn();
 const mockEnqueueTourneyEmailDispatch = jest.fn();
 const mockCheckTourneyRateLimit = jest.fn();
+const mockCreateTourneyResetToken = jest.fn(async () => null);
 
 jest.mock("next/server", () => ({
   NextResponse: { json: (body, init = {}) => Response.json(body, init) },
@@ -19,13 +20,16 @@ jest.mock("../server/tourney/auth", () => ({
   getClientAddressFromHeaders: jest.fn(() => "127.0.0.1"),
   readEffectiveTourneyAccounts: (...args) =>
     mockReadEffectiveTourneyAccounts(...args),
+  // Mirrors the real export. The route gates recovery on this list, so a mock that
+  // omitted it would make every admin role look ineligible.
+  TOURNEY_ADMIN_ROLES: ["viewer", "caster", "owner"],
 }));
 jest.mock("../server/tourney/emailDispatch", () => ({
   enqueueTourneyEmailDispatch: (...args) =>
     mockEnqueueTourneyEmailDispatch(...args),
 }));
 jest.mock("../server/tourney/playerStore", () => ({
-  createTourneyResetToken: jest.fn(async () => null),
+  createTourneyResetToken: (...args) => mockCreateTourneyResetToken(...args),
 }));
 jest.mock("../server/safeErrorLog", () => ({ logSafeError: jest.fn() }));
 jest.mock("../server/tourney/store", () => ({
@@ -56,6 +60,8 @@ describe("Tourney forgot-password route", () => {
     mockReadEffectiveTourneyAccounts.mockResolvedValue([]);
     mockFindTourneyAccount.mockReturnValue(null);
     mockGetTourneyAdminEmail.mockReturnValue("");
+    // clearAllMocks drops the factory implementation, so restore it here.
+    mockCreateTourneyResetToken.mockResolvedValue(null);
     mockCreateTourneyPasswordReset.mockReturnValue({ token: "", expiresAt: "" });
     mockEnqueueTourneyEmailDispatch.mockResolvedValue({ id: "dispatch-1" });
   });
@@ -149,5 +155,73 @@ describe("Tourney forgot-password route", () => {
       message: "If that account exists, a reset link was sent.",
       syncPending: true,
     });
+  });
+
+  // A viewer is an owner-manageable admin role that can sign in. Gating recovery on
+  // owner/caster alone made it fall through to the player lookup, match nothing, and
+  // return the generic success response with no email sent -- a locked-out account that
+  // looked like a delivered reset. Every role that can log in must be recoverable.
+  test.each(["owner", "caster", "viewer"])(
+    "mints a reset token for the %s role",
+    async (role) => {
+      const account = {
+        username: `admin-${role}`,
+        email: `${role}@rooindustries.com`,
+        role,
+        active: true,
+        version: "1",
+      };
+      mockReadEffectiveTourneyAccounts.mockResolvedValue([account]);
+      mockFindTourneyAccount.mockReturnValue(account);
+      mockGetTourneyAdminEmail.mockReturnValue(account.email);
+      mockCreateTourneyPasswordReset.mockReturnValue({
+        token: `signed-${role}-token`,
+        expiresAt: "2026-07-14T01:00:00.000Z",
+      });
+      mockExecuteCommand.mockImplementation(async ({ callback }) => {
+        const result = await callback();
+        return { status: 200, body: result.body };
+      });
+
+      await POST(makeRequest());
+
+      expect(mockCreateTourneyPasswordReset).toHaveBeenCalledWith({ account });
+      expect(mockEnqueueTourneyEmailDispatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipient: account.email,
+          payload: expect.objectContaining({ token: `signed-${role}-token` }),
+        })
+      );
+      // The player fallback must not run for an admin account.
+      expect(mockCreateTourneyResetToken).not.toHaveBeenCalled();
+    }
+  );
+
+  test("an inactive admin account is not sent a reset link", async () => {
+    // Disabling an account has to revoke recovery too, or a removed caster could mint a
+    // token and walk back in.
+    const account = {
+      username: "retired-caster",
+      email: "retired@rooindustries.com",
+      role: "caster",
+      active: false,
+      version: "3",
+    };
+    mockReadEffectiveTourneyAccounts.mockResolvedValue([account]);
+    mockFindTourneyAccount.mockReturnValue(account);
+    mockGetTourneyAdminEmail.mockReturnValue(account.email);
+    mockExecuteCommand.mockImplementation(async ({ callback }) => {
+      const result = await callback();
+      return { status: 200, body: result.body };
+    });
+
+    const response = await POST(makeRequest());
+
+    expect(mockCreateTourneyPasswordReset).not.toHaveBeenCalled();
+    expect(mockEnqueueTourneyEmailDispatch).not.toHaveBeenCalled();
+    // Still the generic response: the caller learns nothing about the account.
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({ ok: true })
+    );
   });
 });
