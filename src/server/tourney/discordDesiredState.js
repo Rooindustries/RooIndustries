@@ -964,6 +964,54 @@ export const queueTourneyDiscordIdentityUnlinkProjection = async ({
   });
 };
 
+// Assign the Tourney Discord role when the Discord account is an auth identity of
+// the person's other domain. pendingSocialLink has already recorded the projected
+// tourney-domain identity link; this queues the guild role from it. Deliberately
+// separate from queueTourneyDiscordAuthProjection, whose account lookup requires
+// the Discord auth user to map to the tourney principal -- which never holds here.
+export const queueTourneyDiscordCrossDomainRoleProjection = async ({
+  commandId,
+  userId,
+  env = process.env,
+} = {}) => {
+  const normalizedUserId = normalize(userId);
+  const policy = resolveTourneyStorePolicy(env);
+  if (policy.primaryBackend !== "supabase") {
+    return { queued: false, reason: "oauth_temporarily_unavailable" };
+  }
+  const config = getTourneyDiscordRoleConfig(env);
+  if (!config.enabled) return { queued: false, reason: "not_configured" };
+  if (!normalizedUserId) return { queued: false, reason: "not_linked" };
+
+  return runTourneyTransaction({
+    env,
+    lockKey: `roo-tourney-discord-cross-domain:${normalizedUserId}`,
+    waitForLock: true,
+    callback: async (sql) => {
+      await setCommandContext({ sql, policy, commandId });
+      const rows = await sql`
+        select public.roo_refresh_discord_role_assignment(
+          ${normalizedUserId}::uuid,
+          ${config.guildId}
+        ) as assignment
+      `;
+      const assignment = rows[0]?.assignment;
+      if (assignment?.queued !== true) {
+        return { queued: false, reason: assignment?.reason || "not_linked" };
+      }
+      await enqueueTourneyExternalOperation({
+        commandId,
+        operationKind: "discord_role_reconcile",
+        entityType: "account",
+        entityId: normalizedUserId,
+        desiredState: { assignment: normalizeAssignment(assignment) },
+        env,
+      });
+      return { queued: true };
+    },
+  });
+};
+
 export const completeTourneyIdentityUnlinkProjection = async ({
   commandId,
   provider,

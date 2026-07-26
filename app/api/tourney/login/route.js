@@ -25,7 +25,10 @@ import {
   readPendingDiscordLink,
   resolvePendingDiscordUser,
 } from "../../../../src/server/supabase/pendingSocialLink";
-import { queueTourneyDiscordAuthProjection } from "../../../../src/server/tourney/discordDesiredState";
+import {
+  queueTourneyDiscordAuthProjection,
+  queueTourneyDiscordCrossDomainRoleProjection,
+} from "../../../../src/server/tourney/discordDesiredState";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -218,6 +221,19 @@ export async function POST(request) {
         });
         if (!linked.linked) {
           discordLinkError = DISCORD_LINK_FAILED_MESSAGE;
+        } else if (linked.crossDomain) {
+          // The Discord account signs in to this person's other domain, so the
+          // tourney-domain identity link is already projected. Queue the guild
+          // role from the tourney principal rather than the Discord auth user.
+          const projected = await queueTourneyDiscordCrossDomainRoleProjection({
+            commandId: `discord-cross-domain:${pendingLink.intentId}:${primaryUserId}`,
+            userId: primaryUserId,
+          });
+          if (projected.queued || projected.reason === "not_configured") {
+            discordLinked = true;
+          } else {
+            discordLinkError = DISCORD_LINK_FAILED_MESSAGE;
+          }
         } else {
           const resumed = await queueTourneyDiscordAuthProjection({
             accountUserId: pendingLink.userId,
