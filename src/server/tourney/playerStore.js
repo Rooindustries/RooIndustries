@@ -305,23 +305,29 @@ const syncTourneyPlayerAuth = async ({
   });
   if (!shouldSyncAuth) return;
   // A credential change is applied inline while the submitted password is still in
-  // scope. The queued operation below then reconciles roles, metadata and aliases
-  // with installPassword false, so the digest-only worker never attempts a
-  // password write it cannot make stick.
-  let passwordApplied = false;
-  if (installPassword && String(password || "")) {
+  // scope, because Supabase Auth ignores `password_hash` on an update and the
+  // queued worker only ever carries the digest.
+  //
+  // The queue is then always asked for installPassword: false. Most callers here
+  // are not changing a credential at all -- approve, deny, kick, withdraw, detail
+  // and role edits all re-project roles, metadata and aliases -- and
+  // `installPassword` defaults to true, so forwarding it would make those
+  // projections demand a plaintext that never existed and fail after the database
+  // mutation had already committed. A password write only ever happens on the
+  // inline branch above, where the plaintext is present.
+  const plaintext = String(password || "");
+  if (installPassword && plaintext) {
     const { syncSupabaseTourneyPlayerAccount } = await import(
       "../supabase/accounts.js"
     );
     await syncSupabaseTourneyPlayerAccount({
       player: playerRow,
-      password,
+      password: plaintext,
       passwordHash: playerRow.password_hash,
       authUserId,
       installPassword: true,
       env,
     });
-    passwordApplied = true;
   }
   await enqueueTourneyExternalOperation({
     commandId: context.command_id,
@@ -331,7 +337,7 @@ const syncTourneyPlayerAuth = async ({
     desiredState: {
       player: playerRow,
       authUserId,
-      installPassword: installPassword && !passwordApplied,
+      installPassword: false,
     },
     env,
   });

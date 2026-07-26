@@ -774,10 +774,26 @@ export const createSupabaseCreatorAccount = async ({
       throw new Error("Supabase creator Auth inventory failed.");
     }
     if (existingAuth.data?.user) {
-      const updated = await adminClient.auth.admin.updateUserById(
-        userId,
-        authAttributes
-      );
+      // Auth honours `password_hash` only on createUser; on an update it is
+      // accepted and discarded, so passing the imported digest here would report
+      // success while leaving the previous credential in place. That is the same
+      // silent failure that broke tourney password resets -- see
+      // upsertAuthUserWithHash above. verifyRegistration.js passes passwordHash,
+      // so this branch is reachable whenever the Auth user already exists.
+      const { password_hash: _ignoredOnUpdate, ...updatable } = authAttributes;
+      const plaintext = normalizePassword(password);
+      if (importedHash && !plaintext) {
+        throw Object.assign(
+          new Error(
+            "Supabase creator password import cannot update an existing Auth user from a hash."
+          ),
+          { code: "SUPABASE_AUTH_PASSWORD_PLAINTEXT_REQUIRED" }
+        );
+      }
+      const updated = await adminClient.auth.admin.updateUserById(userId, {
+        ...updatable,
+        ...(plaintext ? { password: plaintext } : {}),
+      });
       if (updated.error) throw new Error("Supabase creator Auth update failed.");
     } else {
       const created = await adminClient.auth.admin.createUser({
