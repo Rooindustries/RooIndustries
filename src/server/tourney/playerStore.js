@@ -81,7 +81,7 @@ export const TOURNEY_TIMEZONES = Object.freeze([
 
 const TOKEN_BYTES = 32;
 const APPROVAL_TOKEN_NO_EXPIRES_AT = "9999-12-31T23:59:59.999Z";
-const RESET_TOKEN_MAX_AGE_MS = 60 * 60 * 1000;
+export const RESET_TOKEN_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const DUMMY_PLAYER_HASH =
   // nosemgrep: generic.secrets.security.detected-bcrypt-hash.detected-bcrypt-hash
   "$2b$10$t6/bHTKT3hABxzcK8HIMauYsrY88CioIiiq0Cwci4RPXbOq30kAWy";
@@ -217,6 +217,35 @@ const compactInternalUsernameBase = (value) =>
 // else's account, or mail their reset link to a stranger. Statuses are limited to
 // the live registrations so a withdrawn name cannot shadow an active one.
 const DISPLAY_NAME_LOGIN_STATUSES = ["approved", "pending"];
+
+// The roster name is a login credential, and both lookups resolve it with
+// `limit 2` and accept the result only when exactly one row comes back. A
+// duplicate therefore does not hand one player the other's account -- it locks
+// BOTH of them out, silently, with a generic "invalid credentials". Reject the
+// collision at the write instead. Scoped to the statuses that can sign in, so a
+// denied or withdrawn entry never squats on a name a live player wants.
+const assertUniqueTourneyDisplayName = async ({
+  sql,
+  displayName,
+  excludePlayerId = "",
+}) => {
+  const normalized = normalizeTourneyUsername(displayName);
+  if (!normalized) return;
+  const clash = await sql`
+    select id
+    from tourney_players
+    where lower(btrim(coalesce(display_name, ''))) = ${normalized}
+      and status = any(${DISPLAY_NAME_LOGIN_STATUSES})
+      and id::text <> ${String(excludePlayerId || "")}
+    limit 1
+  `;
+  if (clash?.length) {
+    throw Object.assign(
+      new Error("That display name is already taken. Choose another."),
+      { status: 409, code: "TOURNEY_DISPLAY_NAME_TAKEN" }
+    );
+  }
+};
 
 const findMemoryPlayerByUniqueDisplayName = (displayName, statuses) => {
   if (!displayName) return null;
@@ -364,6 +393,15 @@ export const resetMemoryTourneyPlayerStoreForTests = () => {
     updatedAt: "",
     updatedBy: "",
   };
+};
+
+// Writes now reject a duplicate roster name, but rows that predate that rule can
+// still be ambiguous in production. This is the only way to reproduce one, so the
+// resolver's fail-closed behaviour stays covered.
+export const __setMemoryPlayerDisplayNameForTests = (playerId, displayName) => {
+  const player = MEMORY_STORE.players.find((entry) => entry.id === playerId);
+  if (!player) throw new Error(`No memory player ${playerId}`);
+  player.display_name = displayName;
 };
 
 const mapPlayer = (row = {}) => ({
@@ -997,18 +1035,35 @@ const assertNoDuplicatePlayer = async ({ value, env }) => {
         player.email === value.email ||
         getDiscordKey(player) === value.discordKey
     );
-    if (!existing) return;
-    if (getDiscordKey(existing) === value.discordKey) {
-      throw Object.assign(new Error("Discord is already registered."), {
-        status: 409,
-      });
+    // Identity collisions are reported first. They describe the account the caller
+    // already has; the display name is a field they can simply change.
+    if (existing) {
+      if (getDiscordKey(existing) === value.discordKey) {
+        throw Object.assign(new Error("Discord is already registered."), {
+          status: 409,
+        });
+      }
+      if (existing.username === value.username) {
+        throw Object.assign(new Error("Registration is already registered."), {
+          status: 409,
+        });
+      }
+      throw Object.assign(new Error("Email is already registered."), { status: 409 });
     }
-    if (existing.username === value.username) {
-      throw Object.assign(new Error("Registration is already registered."), {
-        status: 409,
-      });
+    const normalizedDisplayName = normalizeTourneyUsername(value.displayName);
+    if (
+      normalizedDisplayName &&
+      findMemoryPlayerByUniqueDisplayName(
+        normalizedDisplayName,
+        DISPLAY_NAME_LOGIN_STATUSES
+      )
+    ) {
+      throw Object.assign(
+        new Error("That display name is already taken. Choose another."),
+        { status: 409, code: "TOURNEY_DISPLAY_NAME_TAKEN" }
+      );
     }
-    throw Object.assign(new Error("Email is already registered."), { status: 409 });
+    return;
   }
 
   await ensureTourneyPlayerSchema(env);
@@ -1022,18 +1077,23 @@ const assertNoDuplicatePlayer = async ({ value, env }) => {
     limit 1
   `;
   const existing = rows?.[0];
-  if (!existing) return;
-  if (existing.discord_key === value.discordKey) {
-    throw Object.assign(new Error("Discord is already registered."), {
-      status: 409,
-    });
+  // Identity collisions are reported first, matching the memory branch: they tell
+  // the caller they already have an account, whereas a taken display name is a
+  // field they can change and retry.
+  if (existing) {
+    if (existing.discord_key === value.discordKey) {
+      throw Object.assign(new Error("Discord is already registered."), {
+        status: 409,
+      });
+    }
+    if (existing.username === value.username) {
+      throw Object.assign(new Error("Registration is already registered."), {
+        status: 409,
+      });
+    }
+    throw Object.assign(new Error("Email is already registered."), { status: 409 });
   }
-  if (existing.username === value.username) {
-    throw Object.assign(new Error("Registration is already registered."), {
-      status: 409,
-    });
-  }
-  throw Object.assign(new Error("Email is already registered."), { status: 409 });
+  await assertUniqueTourneyDisplayName({ sql, displayName: value.displayName });
 };
 
 export async function createPendingTourneyPlayer({
@@ -1547,6 +1607,11 @@ export async function updateTourneyPlayerDetails({
           throw roleCapacityError({ role, snapshot });
         }
       }
+      await assertUniqueTourneyDisplayName({
+        sql,
+        displayName: value.displayName,
+        excludePlayerId: playerId,
+      });
       const rows = await sql`
         update tourney_players
         set display_name = ${value.displayName},
