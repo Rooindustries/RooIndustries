@@ -130,9 +130,12 @@ const validate = (overrides = {}) => {
   };
 };
 
+// Matches the live post-retirement shape: Supabase primary with the legacy mirror off.
+// TOURNEY_DATABASE_URL stays set, as it is in production, so these cases also prove the
+// mirror rejection does not depend on the URL being absent.
 const supabaseTourneyEnv = {
   TOURNEY_DATABASE_MODE: "supabase",
-  TOURNEY_MIRROR_ENABLED: "1",
+  TOURNEY_MIRROR_ENABLED: "0",
   TOURNEY_DATABASE_URL:
     "postgresql://legacy_owner:placeholder@legacy.example.com/tourney?sslmode=require",
   SUPABASE_URL: "https://ntezmxzaibrrsgtujgxu.supabase.co",
@@ -704,13 +707,22 @@ describe("release runtime environment validation", () => {
     expect(result.output).not.toContain("ep-example.neon.tech");
   });
 
-  test("accepts configured Supabase primary with its required legacy mirror", () => {
+  test("accepts configured Supabase primary with the mirror retired", () => {
     const result = validate({
       ...supabaseTourneyEnv,
       TOURNEY_DATABASE_URL:
         "postgresql://owner:placeholder@ep-example.neon.tech/neondb?sslmode=require",
     });
     expect(result.status).toBe(0);
+  });
+
+  test("rejects the retired mirror even with a reachable legacy URL", () => {
+    const result = validate({
+      ...supabaseTourneyEnv,
+      TOURNEY_MIRROR_ENABLED: "1",
+    });
+    expect(result.status).toBe(1);
+    expect(result.output).toContain("TOURNEY_MIRROR_ENABLED must be 0");
   });
 
   test("blocks Supabase Tourney releases when social Auth is hidden", () => {
@@ -783,6 +795,10 @@ describe("release runtime environment validation", () => {
   test("rejects an activation-staged tuple when its explicit marker is missing", () => {
     const result = validate({
       ...supabaseTourneyEnv,
+      // The tuple is only recognised with mirroring on, which is itself now refused.
+      // Both failures are expected here: the point is that an implied staging still
+      // demands its explicit marker rather than being inferred from the controls.
+      TOURNEY_MIRROR_ENABLED: "1",
       TOURNEY_V4_ACTIVATION_ENABLED: "",
       TOURNEY_WRITES_PAUSED: "1",
       TOURNEY_FAILOVER_GENERATION: "1",
@@ -793,6 +809,7 @@ describe("release runtime environment validation", () => {
     expect(result.output).toContain(
       "The activation-ready v4 control tuple requires TOURNEY_V4_ACTIVATION_ENABLED=1"
     );
+    expect(result.output).toContain("TOURNEY_MIRROR_ENABLED must be 0");
   });
 
   test("does not classify legacy generation-zero maintenance as activation", () => {
@@ -807,14 +824,17 @@ describe("release runtime environment validation", () => {
     expect(result.status).toBe(0);
   });
 
+  // Staging an activation required the mirror to be live, because the cutover replicated
+  // into the legacy backend while writes were paused. That backend is retired, so no
+  // combination of the other controls can produce a valid staged release any more --
+  // whatever else is set, the answer is the same and it is not a contradictory pair.
   test.each([
     ["Supabase primary", { TOURNEY_DATABASE_MODE: "legacy" }],
-    ["mirroring", { TOURNEY_MIRROR_ENABLED: "0" }],
     ["paused writes", { TOURNEY_WRITES_PAUSED: "0" }],
     ["generation one", { TOURNEY_FAILOVER_GENERATION: "2" }],
     ["canonical generation one", { TOURNEY_FAILOVER_GENERATION: "01" }],
     ["v4 hardening remains disabled", { TOURNEY_HARDENING_V4_ENABLED: "1" }],
-  ])("requires %s for an activation-staged release", (_control, override) => {
+  ])("refuses to re-stage activation regardless of %s", (_control, override) => {
     const result = validate({
       ...supabaseTourneyEnv,
       TOURNEY_V4_ACTIVATION_ENABLED: "1",
@@ -830,6 +850,11 @@ describe("release runtime environment validation", () => {
 
     expect(result.status).toBe(1);
     expect(result.output).toContain(
+      "Tourney v4 activation is complete and cannot be re-staged"
+    );
+    // The two rules must not both fire: asking for the mirror and forbidding it at once
+    // would leave the operator with no satisfiable configuration to act on.
+    expect(result.output).not.toContain(
       "Supabase primary, mirroring enabled, writes paused, failover generation 1"
     );
   });
@@ -876,7 +901,7 @@ describe("release runtime environment validation", () => {
     expect(result.output).toContain("must use different role ids");
   });
 
-  test("accepts the exact activation tuple and keeps post-activation releases valid", () => {
+  test("keeps post-activation releases valid now that staging is closed", () => {
     const activationEnv = {
       ...supabaseTourneyEnv,
       TOURNEY_V4_ACTIVATION_ENABLED: "1",
@@ -888,7 +913,9 @@ describe("release runtime environment validation", () => {
       DISCORD_PARTICIPANT_ROLE_ID: "222222222222222222",
       DISCORD_HOST_ROLE_ID: "333333333333333333",
     };
-    expect(validate(activationEnv).status).toBe(0);
+    // The tuple that was valid before the retirement is now refused on purpose.
+    expect(validate(activationEnv).status).toBe(1);
+    // The shape production actually runs still passes.
     expect(validate({
       ...supabaseTourneyEnv,
       TOURNEY_HARDENING_V4_ENABLED: "1",
