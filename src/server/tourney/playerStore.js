@@ -269,14 +269,17 @@ const shouldSyncSupabasePlayerAuth = (env = process.env) =>
   isEnabledTourneyFlag(env.SUPABASE_SOCIAL_AUTH_ENABLED) ||
   isEnabledTourneyFlag(env.SUPABASE_SHADOW_WRITES);
 
-// `password` is the value the player just submitted. It is held in memory for the
-// duration of this call only: it is never written to a column, never placed in the
-// queued operation payload, and never logged. Every stored copy remains a bcrypt
-// digest. It has to be passed at all because Supabase Auth silently ignores
-// `password_hash` when updating an existing user, so a credential change applied
-// from the queue (which carries only the digest) would report success and leave
-// the old password in place -- see upsertAuthUserWithHash in
+// `password` is the value the player just submitted. It has to be passed at all
+// because Supabase Auth silently ignores `password_hash` when updating an existing
+// user, so a credential change carrying only the digest would report success and
+// leave the old password in place -- see upsertAuthUserWithHash in
 // src/server/supabase/accounts.js.
+//
+// It is never written to a column, never placed in the queued operation's
+// desired_state (which is stored as plain JSON), and never logged. Every durable copy
+// is either a bcrypt digest or an AES-256-GCM ciphertext in
+// tourney.external_operation_secrets, which is service_role-only, TTL'd, and deleted
+// as soon as the operation is applied.
 const syncTourneyPlayerAuth = async ({
   installPassword = true,
   password = "",
@@ -304,32 +307,20 @@ const syncTourneyPlayerAuth = async ({
     env,
   });
   if (!shouldSyncAuth) return;
-  // A credential change is applied inline while the submitted password is still in
-  // scope, because Supabase Auth ignores `password_hash` on an update and the
-  // queued worker only ever carries the digest.
+  // The Auth write is NOT performed here. This function runs inside the command
+  // transaction, so an inline call to Supabase would mutate Auth before the Postgres
+  // receipt commits: any later failure rolls back the database and leaves Auth holding
+  // a credential the roster never recorded. Instead both the digest and the plaintext
+  // travel to the post-commit worker.
   //
-  // The queue is then always asked for installPassword: false. Most callers here
-  // are not changing a credential at all -- approve, deny, kick, withdraw, detail
-  // and role edits all re-project roles, metadata and aliases -- and
-  // `installPassword` defaults to true, so forwarding it would make those
-  // projections demand a plaintext that never existed and fail after the database
-  // mutation had already committed. A password write only ever happens on the
-  // inline branch above, where the plaintext is present.
+  // `installPassword` must be forwarded exactly as given rather than defaulted. Most
+  // callers here are not changing a credential at all -- approve, deny, kick,
+  // withdraw, detail and role edits all re-project roles, metadata and aliases -- and
+  // the parameter defaults to true, so an unscoped signal would make those
+  // projections demand a plaintext that never existed.
   const plaintext = String(password || "");
-  if (installPassword && plaintext) {
-    const { syncSupabaseTourneyPlayerAccount } = await import(
-      "../supabase/accounts.js"
-    );
-    await syncSupabaseTourneyPlayerAccount({
-      player: playerRow,
-      password: plaintext,
-      passwordHash: playerRow.password_hash,
-      authUserId,
-      installPassword: true,
-      env,
-    });
-  }
-  await enqueueTourneyExternalOperation({
+  const changesCredential = Boolean(installPassword && plaintext);
+  const operation = await enqueueTourneyExternalOperation({
     commandId: context.command_id,
     operationKind: "supabase_player_auth",
     entityType: "player",
@@ -337,10 +328,30 @@ const syncTourneyPlayerAuth = async ({
     desiredState: {
       player: playerRow,
       authUserId,
-      installPassword: false,
+      installPassword: changesCredential,
     },
     env,
   });
+  if (changesCredential) {
+    // Enrolled in this transaction: getTourneySql returns the active client, so the
+    // ciphertext commits with the operation and rolls back with it. Never in
+    // desiredState, which is stored as readable JSON.
+    const { saveTourneyAuthOperationPassword } = await import("./externalOperations.js");
+    const stored = await saveTourneyAuthOperationPassword({
+      operationKey: operation?.operation_key || operation?.operationKey || "",
+      password: plaintext,
+      env,
+    });
+    // Fail while the transaction is still open. The operation now says it will install
+    // a password, so letting this commit would guarantee a worker error after the
+    // player was already told the reset succeeded.
+    if (!stored) {
+      throw Object.assign(
+        new Error("The Tourney password change could not be prepared."),
+        { code: "TOURNEY_AUTH_PASSWORD_CHANNEL_UNAVAILABLE", status: 503 }
+      );
+    }
+  }
 };
 
 export const hashTourneyToken = tokenHash;

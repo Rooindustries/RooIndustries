@@ -81,6 +81,11 @@ export async function POST(request) {
           await writePersistedTourneyAccountsJson({
             accountsJson: renderTourneyAccountsJson(nextAdminAccounts),
             actorUsername: adminAccount.username,
+            // buildUpdatedTourneyAccounts returns the bcrypt digest only, and Auth
+            // discards a digest when updating an existing user. Without the plaintext
+            // the reset would report success and leave the old password working.
+            credentialUsername: adminAccount.username,
+            credentialPassword: payload.password,
             expectedCurrentHash,
           });
         } else {

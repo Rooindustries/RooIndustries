@@ -278,6 +278,21 @@ export const isTourneyPlayerAuthStateCurrent = ({ current, desired } = {}) =>
     Number(current.version) === Number(desired.version)
   );
 
+// A metadata projection is safe to drop once the row moves on, because the newer row
+// enqueued its own operation. A credential install is not: the plaintext lives only in
+// this operation's secret, so dropping it would leave a password change that reported
+// success and never reached Auth. The digest is the correct test of ownership — while
+// the row still carries the digest this operation was built from, the plaintext we hold
+// is that row's credential and installing it is right regardless of version drift. A
+// different digest means a newer operation owns the credential and this one is stale.
+export const isTourneyPlayerCredentialCurrent = ({ current, desired } = {}) =>
+  Boolean(
+    current && desired &&
+    normalize(current.id) === normalize(desired.id) &&
+    normalize(current.password_hash) &&
+    normalize(current.password_hash) === normalize(desired.password_hash)
+  );
+
 const resolveCurrentAdminSnapshotState = async ({ state, env }) => {
   const {
     getTourneyAdminAuthCanonicalHash,
@@ -293,6 +308,8 @@ const resolveCurrentAdminSnapshotState = async ({ state, env }) => {
     normalize(candidate?.username).toLowerCase() === username
   );
   const effectiveAccount = account || { ...state.account, active: false };
+  const digestOf = (candidate) =>
+    normalize(candidate?.passwordHash || candidate?.password_hash);
   return {
     account: effectiveAccount,
     accountHash: getTourneyAdminAuthCanonicalHash(effectiveAccount),
@@ -302,6 +319,15 @@ const resolveCurrentAdminSnapshotState = async ({ state, env }) => {
       Number(state.snapshotVersion) > 0 &&
       normalize(state.snapshotHash) &&
       getTourneyAdminAuthCanonicalHash(effectiveAccount) === normalize(state.accountHash)
+    ),
+    // The account hash covers every field, so an unrelated metadata edit moves it and
+    // makes this operation look superseded. A credential install must not be dropped on
+    // that basis: while the live snapshot still carries the digest this operation was
+    // built from, the plaintext we hold is that account's credential. A changed digest
+    // means a newer operation owns it, and an absent account has nothing to install to.
+    credentialCurrent: Boolean(
+      account && digestOf(effectiveAccount) &&
+      digestOf(effectiveAccount) === digestOf(state.account)
     ),
     latest,
     present: Boolean(account),
@@ -410,16 +436,27 @@ const resolveOperationSecretExpiry = ({ expiresAt = "", ttlSeconds = 86_400 } = 
   return new Date(timestamp).toISOString();
 };
 
+// `payload` is an arbitrary object rather than a fixed `{accessToken}` shape:
+// encryptOperationSecret already accepts any serialisable value, and the admin
+// password path needs to carry `{password}` through the same encrypted, TTL'd,
+// service_role-only, cascade-deleted channel. `accessToken` is still accepted so
+// the existing Discord callers keep working unchanged.
 const insertTourneyExternalOperationSecret = async ({
   accessToken,
+  payload,
   expiresAt,
   operationKey,
   sql,
   env,
 }) => {
-  const normalizedAccessToken = normalize(accessToken);
   const normalizedOperationKey = normalize(operationKey);
-  if (!normalizedAccessToken || !normalizedOperationKey) {
+  const resolvedPayload = payload && typeof payload === "object"
+    ? payload
+    : { accessToken: normalize(accessToken) };
+  const hasSecretValue = Object.values(resolvedPayload).some(
+    (value) => normalize(value) !== ""
+  );
+  if (!hasSecretValue || !normalizedOperationKey) {
     throw new Error("A complete Tourney external-operation credential is required.");
   }
   await sql`
@@ -427,7 +464,7 @@ const insertTourneyExternalOperationSecret = async ({
       operation_key, encrypted_payload, expires_at
     ) values(
       ${normalizedOperationKey},
-      ${encryptOperationSecret({ payload: { accessToken: normalizedAccessToken }, env })},
+      ${encryptOperationSecret({ payload: resolvedPayload, env })},
       ${expiresAt}::timestamptz
     )
     on conflict (operation_key) do update set
@@ -435,6 +472,80 @@ const insertTourneyExternalOperationSecret = async ({
       expires_at = excluded.expires_at,
       created_at = now()
   `;
+};
+
+// Durable carrier for a password change, used by both the admin and player Auth
+// projections. The plaintext is the only form Supabase Auth honours on an update, and
+// both syncs run in a deferred worker that re-reads its state from Postgres — so an
+// in-memory channel would work on the happy path and silently skip the credential on
+// any retry.
+//
+// When called inside a command transaction getTourneySql returns the active client, so
+// the secret row commits atomically with the operation it belongs to: a rollback takes
+// the plaintext with it, and a commit guarantees the worker can find it. The row is
+// deleted the moment the operation reaches applied or dead_letter, cascade-deleted
+// with the operation, and swept on TTL. Short TTL: if the write has not succeeded
+// within the hour it will not succeed at all, and the operator can re-issue.
+export const saveTourneyAuthOperationPassword = async ({
+  operationKey,
+  password,
+  ttlSeconds = 3600,
+  env = process.env,
+} = {}) => {
+  const normalizedOperationKey = normalize(operationKey);
+  const normalizedPassword = String(password || "");
+  if (!normalizedOperationKey || !normalizedPassword) return false;
+  const expiresAt = resolveOperationSecretExpiry({ ttlSeconds });
+  if (env.NODE_ENV === "test" || env.TOURNEY_DATABASE_MODE === "memory") {
+    MEMORY_OPERATION_SECRETS.set(normalizedOperationKey, {
+      password: normalizedPassword,
+      expiresAt,
+    });
+    return true;
+  }
+  // tourney.external_operation_secrets exists only on the Supabase backend. Report the
+  // failure instead of returning true, so a caller cannot mistake "not stored" for
+  // "stored" and queue an operation whose credential can never be read back.
+  const policy = resolveTourneyStorePolicy(env);
+  if (policy.primaryBackend !== "supabase") return false;
+  const sql = await getTourneySql(env);
+  await insertTourneyExternalOperationSecret({
+    payload: { password: normalizedPassword },
+    expiresAt,
+    operationKey: normalizedOperationKey,
+    sql,
+    env,
+  });
+  return true;
+};
+
+const readTourneyAuthOperationPassword = async ({ operation, env }) => {
+  const operationKey = normalize(operation?.operation_key);
+  if (!operationKey) return "";
+  if (env.NODE_ENV === "test" || env.TOURNEY_DATABASE_MODE === "memory") {
+    const secret = MEMORY_OPERATION_SECRETS.get(operationKey);
+    if (!secret || Date.parse(secret.expiresAt) <= Date.now()) return "";
+    return String(secret.password || "");
+  }
+  const policy = resolveTourneyStorePolicy(env);
+  if (policy.primaryBackend !== "supabase") return "";
+  const sql = await getTourneySql(env);
+  const rows = await sql`
+    select encrypted_payload, expires_at
+    from tourney.external_operation_secrets
+    where operation_key = ${operationKey}
+  `;
+  const secret = rows[0];
+  if (!secret || Date.parse(secret.expires_at) <= Date.now()) return "";
+  try {
+    const decrypted = decryptOperationSecret({
+      encryptedPayload: secret.encrypted_payload,
+      env,
+    });
+    return String(decrypted?.password || "");
+  } catch {
+    return "";
+  }
 };
 
 export const saveTourneyDiscordOperationAccessToken = async ({
@@ -1142,24 +1253,58 @@ const executeSupabasePlayerAuthOperation = async ({
     where id = ${operation.entity_id}
     limit 1
   `;
-  if (!isTourneyPlayerAuthStateCurrent({ current: before, desired: state.player })) {
-    return { applied: true, superseded: true };
+  const carriesCredential = state.installPassword === true;
+  const stateCurrent = isTourneyPlayerAuthStateCurrent({
+    current: before,
+    desired: state.player,
+  });
+  if (!stateCurrent) {
+    // Only a credential-bearing operation is worth continuing against a moved row, and
+    // only while the row still holds the digest this operation was built from.
+    if (!carriesCredential ||
+      !isTourneyPlayerCredentialCurrent({ current: before, desired: state.player })) {
+      return { applied: true, superseded: true };
+    }
   }
 
   const { syncSupabaseTourneyPlayerAccount } = await import("../supabase/accounts.js");
   const { createSupabaseAdminClient } = await import("../supabase/adminClient.js");
-  let desiredPlayer = state.player;
+  // Auth discards `password_hash` when updating an existing user, so the digest in
+  // desired_state cannot change a credential. The plaintext arrives separately through
+  // the encrypted secret channel, keyed to this operation and therefore scoped to the
+  // one player whose password actually changed. `installPassword` is explicitly true
+  // only on that path; every other projection re-sends metadata and aliases alone.
+  const installPassword = state.installPassword === true;
+  const submittedPassword = installPassword
+    ? await readTourneyAuthOperationPassword({ operation, env })
+    : "";
+  if (installPassword && !submittedPassword) {
+    throw Object.assign(
+      new Error("The Tourney player password credential is unavailable."),
+      { code: "tourney_player_auth_password_unavailable" }
+    );
+  }
+  // When the row moved but still carries our digest, project the row as it now stands
+  // rather than the stale snapshot, so metadata does not regress alongside the install.
+  let desiredPlayer = stateCurrent ? state.player : before;
+  let retargeted = !stateCurrent;
   let authUserId = state.authUserId || "";
   let synced;
   let stable = false;
   for (let attempt = 0; attempt < 4; attempt += 1) {
+    // The loop retargets at the row the finalize transaction actually observed. Carry the
+    // plaintext forward only while that row still holds the digest it belongs to, so a
+    // concurrent password change is never overwritten by this operation's older secret.
+    const installNow = installPassword && (!retargeted ||
+      isTourneyPlayerCredentialCurrent({ current: desiredPlayer, desired: state.player }));
     synced = await runBeforeDeadline({
       deadlineAt,
       task: (signal) => syncSupabaseTourneyPlayerAccount({
         player: desiredPlayer,
+        password: installNow ? submittedPassword : "",
         passwordHash: desiredPlayer?.password_hash,
         authUserId,
-        installPassword: state.installPassword !== false,
+        installPassword: installNow,
         adminClient: createSupabaseAdminClient({ env, signal }),
         env,
       }),
@@ -1202,6 +1347,7 @@ const executeSupabasePlayerAuthOperation = async ({
     }
     if (!result.current) return { applied: true, superseded: true };
     desiredPlayer = result.current;
+    retargeted = true;
     authUserId = synced.userId || authUserId;
   }
   if (!stable) {
@@ -1483,15 +1629,39 @@ const executeOperation = async ({
       const { syncSupabaseTourneyAdminAccount } = await import("../supabase/accounts.js");
       const { createSupabaseAdminClient } = await import("../supabase/adminClient.js");
       const initial = await resolveCurrentAdminSnapshotState({ state, env });
-      if (!initial.current) return { applied: true, superseded: true };
+      const carriesCredential = state.installPassword === true;
+      if (!initial.current && !(carriesCredential && initial.credentialCurrent)) {
+        return { applied: true, superseded: true };
+      }
+      // Supabase Auth ignores `password_hash` when updating an existing user, and
+      // every current admin account takes that branch, so the digest in the snapshot
+      // cannot change a credential. The plaintext travels separately through the
+      // encrypted secret channel, scoped to this one operation key — and therefore to
+      // the single account whose password actually changed.
+      const submittedPassword = carriesCredential
+        ? await readTourneyAuthOperationPassword({ operation, env })
+        : "";
+      if (carriesCredential && !submittedPassword) {
+        throw Object.assign(
+          new Error("The Tourney administrator password credential is unavailable."),
+          { code: "tourney_admin_auth_password_unavailable" }
+        );
+      }
       let accountToSync = initial.account;
       let synced;
       let current = initial;
       for (let attempt = 0; attempt < 3; attempt += 1) {
+        // Install only while the account being synced still carries our digest, so a
+        // concurrent password change is never overwritten by this operation's secret.
+        const installNow = carriesCredential &&
+          normalize(accountToSync?.passwordHash || accountToSync?.password_hash) ===
+            normalize(state.account?.passwordHash || state.account?.password_hash);
         synced = await runBeforeDeadline({
           deadlineAt,
           task: (signal) => syncSupabaseTourneyAdminAccount({
             account: accountToSync,
+            password: installNow ? submittedPassword : "",
+            installPassword: installNow,
             adminClient: createSupabaseAdminClient({ env, signal }),
             env,
           }),
