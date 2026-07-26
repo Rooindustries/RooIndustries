@@ -23,9 +23,52 @@ const hashMutationFingerprint = (value) => {
     .padStart(8, "0")}`;
 };
 
+// Credential fields are dropped before fingerprinting. The key only has to
+// identify the operation well enough to dedupe a retry of the same submission, and
+// hashMutationFingerprint is two non-cryptographic 32-bit hashes -- fingerprinting
+// a password or reset token through it produces a cheap, unsalted, offline-testable
+// verifier that then sits in sessionStorage for up to 24 hours on any pending or
+// ambiguous command. Reset, owner-account and registration bodies all carry one.
+const CREDENTIAL_BODY_FIELDS = new Set([
+  "password",
+  "passwordConfirm",
+  "currentPassword",
+  "newPassword",
+  "token",
+  "resetToken",
+]);
+
+const fingerprintableBody = (body) => {
+  if (typeof body !== "string" || !body) return "";
+  let parsed;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    // Not JSON, so the fields cannot be identified individually. Fall back to the
+    // body's length, which distinguishes different submissions without carrying
+    // any of their content.
+    return `len:${body.length}`;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return `len:${body.length}`;
+  }
+  const safe = Object.keys(parsed)
+    .filter((key) => !CREDENTIAL_BODY_FIELDS.has(key))
+    .sort()
+    .map((key) => `${key}=${JSON.stringify(parsed[key])}`)
+    .join("&");
+  // Retain the credential keys' names, never their values, so two otherwise
+  // identical requests that differ only in shape still get distinct keys.
+  const redacted = Object.keys(parsed)
+    .filter((key) => CREDENTIAL_BODY_FIELDS.has(key))
+    .sort()
+    .join(",");
+  return redacted ? `${safe}|redacted:${redacted}` : safe;
+};
+
 const commandStorageKey = (url, options) => {
   const method = String(options.method || "GET").trim().toUpperCase();
-  const body = typeof options.body === "string" ? options.body : "";
+  const body = fingerprintableBody(options.body);
   return `roo:tourney:mutation:${hashMutationFingerprint(`${method}\n${url}\n${body}`)}`;
 };
 

@@ -23,6 +23,86 @@ const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex"
 const dispatchTable = (backend) =>
   backend === "supabase" ? "tourney.email_dispatches" : "tourney_email_dispatches";
 
+// A reset dispatch has to survive at least one commit boundary: the row is written
+// inside the command transaction and the send is deferred -- the post-commit drain
+// is best-effort under a 10s budget and otherwise the 5-minute cron picks it up,
+// retrying up to 12 times. So the worker must still be able to recover the token to
+// render the link, which rules out simply not storing it.
+//
+// Instead the token is sealed at rest and removed once the row reaches a terminal
+// state. `payload.token` previously held a plaintext one-hour bearer credential
+// indefinitely, including after `sent` and even after the code had detected its
+// expiry. For a player reset the dispatch row is the ONLY place the plaintext
+// exists -- `tourney_player_tokens` keeps only its SHA-256 -- so this is the whole
+// exposure surface.
+//
+// Key derivation matches encryptOperationSecret in ./externalOperations.js: same
+// subsystem, same secret, no new key domain. The referral equivalent in
+// src/server/api/ref/referralEmailTokenSeal.js is keyed off REF_SESSION_SECRET and
+// would cross those domains.
+const SEALED_TOKEN_PREFIX = "v1";
+const SEALED_TOKEN_AAD = Buffer.from("roo-tourney-email-token:v1", "utf8");
+
+const resolveTokenSealKey = (env = process.env) => {
+  const material = normalize(
+    env.TOURNEY_SESSION_SECRET || env.SUPABASE_SECRET_KEY ||
+    env.SUPABASE_SERVICE_ROLE_KEY
+  );
+  if (!material) {
+    throw new Error("Tourney email token sealing is not configured.");
+  }
+  return crypto.createHash("sha256").update(`roo-tourney-email-token:${material}`).digest();
+};
+
+export const sealTourneyEmailToken = (token, env = process.env) => {
+  const plaintext = normalize(token);
+  if (!plaintext) throw new Error("A Tourney email token is required to seal.");
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", resolveTokenSealKey(env), iv);
+  cipher.setAAD(SEALED_TOKEN_AAD);
+  const ciphertext = Buffer.concat([
+    cipher.update(plaintext, "utf8"),
+    cipher.final(),
+  ]);
+  return [SEALED_TOKEN_PREFIX, iv, ciphertext, cipher.getAuthTag()]
+    .map((value) => (typeof value === "string" ? value : value.toString("base64url")))
+    .join(".");
+};
+
+// Returns "" rather than throwing on any tampering or key mismatch, so a corrupt
+// row fails as a missing token (retry, then dead-letter) instead of crashing the
+// whole reconciliation batch and stalling every other queued email.
+export const unsealTourneyEmailToken = (sealed, env = process.env) => {
+  const parts = normalize(sealed).split(".");
+  if (parts.length !== 4 || parts[0] !== SEALED_TOKEN_PREFIX) return "";
+  try {
+    const iv = Buffer.from(parts[1], "base64url");
+    const ciphertext = Buffer.from(parts[2], "base64url");
+    const tag = Buffer.from(parts[3], "base64url");
+    if (iv.length !== 12 || tag.length !== 16) return "";
+    const decipher = crypto.createDecipheriv("aes-256-gcm", resolveTokenSealKey(env), iv);
+    decipher.setAAD(SEALED_TOKEN_AAD);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+  } catch {
+    return "";
+  }
+};
+
+// Seal on the way in. `tokenHash` is retained alongside so a row stays auditable
+// and verifiable after the sealed value is stripped -- the referral ledger carries
+// a first-class token_hash column for the same reason.
+const sealDispatchPayload = (payload, env) => {
+  const rawToken = normalize(payload?.token);
+  if (!rawToken) return payload || {};
+  const { token: _rawToken, ...rest } = payload;
+  return {
+    ...rest,
+    sealedToken: sealTourneyEmailToken(rawToken, env),
+    tokenHash: normalize(payload.tokenHash) || sha256(rawToken),
+  };
+};
+
 const reconciliationDeadlineError = () => Object.assign(
   new Error("Tournament reconciliation exceeded its runtime budget."),
   { code: "TOURNEY_RECONCILIATION_DEADLINE_EXCEEDED", status: 503 }
@@ -124,6 +204,7 @@ export const enqueueTourneyEmailDispatch = async ({
     return dispatch;
   }
   const sql = await getTourneySql(env);
+  const storedPayload = sealDispatchPayload(payload, env);
   const rows = await sql`
     insert into ${sql(table)} (
       idempotency_key, command_id, dispatch_kind, recipient,
@@ -131,7 +212,7 @@ export const enqueueTourneyEmailDispatch = async ({
     ) values (
       ${key}, ${normalize(commandId) || null}, ${normalize(dispatchKind)},
       ${normalizedRecipient}, ${recipientHash(normalizedRecipient)},
-      ${sql.json(payload || {})}, ${historical ? "historical_unknown" : "pending"}
+      ${sql.json(storedPayload)}, ${historical ? "historical_unknown" : "pending"}
     )
     on conflict (idempotency_key) do update
     set updated_at = now()
@@ -147,7 +228,18 @@ const sendDispatch = ({ dispatch, env, signal }) => {
     throw error;
   }
 
-  const payload = dispatch.payload || {};
+  const storedPayload = dispatch.payload || {};
+  // Unseal for rendering only. The plaintext lives in this local for the duration
+  // of the send and is never written back to the row.
+  const { sealedToken, ...visiblePayload } = storedPayload;
+  const payload = sealedToken
+    ? { ...visiblePayload, token: unsealTourneyEmailToken(sealedToken, env) }
+    : storedPayload;
+  if (sealedToken && !payload.token) {
+    const error = new Error("The Tourney reset token could not be unsealed.");
+    error.code = "TOURNEY_RESET_TOKEN_UNSEAL_FAILED";
+    throw error;
+  }
   const common = {
     ...payload,
     env,
@@ -283,7 +375,8 @@ export const reconcileTourneyEmailDispatches = async ({
             update ${sql(table)}
             set status = 'sent', provider_message_id = ${providerMessageId || null},
                 sent_at = now(), lease_id = null, lease_expires_at = null,
-                last_error_code = null, updated_at = now()
+                last_error_code = null, updated_at = now(),
+                payload = payload - 'sealedToken'
             where id = ${dispatch.id} and lease_id = ${dispatch.lease_id}
             returning id
           `;
@@ -301,6 +394,10 @@ export const reconcileTourneyEmailDispatches = async ({
         error?.code === "TOURNEY_RECONCILIATION_DEADLINE_EXCEEDED";
       if (deadlineExceeded) throw error;
       const terminal = Number(dispatch.attempt_count || 0) >= 12;
+      // The sealed token is stripped on every terminal state, not just success:
+      // "expired" is the case where the code has positively established the token is
+      // dead, and "dead_letter" has exhausted all 12 attempts. A "retry" row still
+      // needs the sealed value for its next attempt, so it keeps it.
       await runTourneyTransaction({
         env,
         lockKey: `roo-tourney-email-retry:${dispatch.id}`,
@@ -321,7 +418,11 @@ export const reconcileTourneyEmailDispatches = async ({
                 end,
                 lease_id = null, lease_expires_at = null,
                 last_error_code = ${normalize(error?.code || "TOURNEY_EMAIL_FAILED").slice(0, 128)},
-                updated_at = now()
+                updated_at = now(),
+                payload = case
+                  when ${resetExpired || terminal} then payload - 'sealedToken'
+                  else payload
+                end
             where id = ${dispatch.id} and lease_id = ${dispatch.lease_id}
           `;
         },
