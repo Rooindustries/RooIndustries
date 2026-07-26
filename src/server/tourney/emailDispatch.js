@@ -89,19 +89,81 @@ export const unsealTourneyEmailToken = (sealed, env = process.env) => {
   }
 };
 
+// A registration dispatch carries its credentials in a different shape: one
+// `payload.tokens[]` entry per approver purpose, each with its own `token`. Those
+// are approve/deny bearer tokens with expires_at 9999-12-31 -- they never expire,
+// so a retained plaintext stays redeemable for the life of the row, which is
+// strictly worse than the one-hour reset token this sealing was built for. Seal
+// each entry the same way and keep its `token_hash` so the row stays auditable.
+const sealDispatchTokenEntries = (tokens, env) => {
+  if (!Array.isArray(tokens)) return tokens;
+  return tokens.map((entry) => {
+    const rawToken = normalize(entry?.token);
+    if (!rawToken) return entry;
+    const { token: _rawToken, ...rest } = entry;
+    return {
+      ...rest,
+      sealedToken: sealTourneyEmailToken(rawToken, env),
+      token_hash: normalize(entry.token_hash) || sha256(rawToken),
+    };
+  });
+};
+
 // Seal on the way in. `tokenHash` is retained alongside so a row stays auditable
 // and verifiable after the sealed value is stripped -- the referral ledger carries
 // a first-class token_hash column for the same reason.
 const sealDispatchPayload = (payload, env) => {
-  const rawToken = normalize(payload?.token);
-  if (!rawToken) return payload || {};
-  const { token: _rawToken, ...rest } = payload;
+  const source = payload || {};
+  const rawToken = normalize(source.token);
+  const sealedTokens = sealDispatchTokenEntries(source.tokens, env);
+  const withTokens =
+    sealedTokens === source.tokens ? source : { ...source, tokens: sealedTokens };
+  if (!rawToken) return withTokens;
+  const { token: _rawToken, ...rest } = withTokens;
   return {
     ...rest,
     sealedToken: sealTourneyEmailToken(rawToken, env),
-    tokenHash: normalize(payload.tokenHash) || sha256(rawToken),
+    tokenHash: normalize(source.tokenHash) || sha256(rawToken),
   };
 };
+
+// Unseal for rendering only. Mirrors sealDispatchTokenEntries; the plaintext lives
+// in the returned local for the duration of the send and is never written back.
+const unsealDispatchTokenEntries = (tokens, env) => {
+  if (!Array.isArray(tokens)) return { tokens, failed: false };
+  let failed = false;
+  const unsealed = tokens.map((entry) => {
+    const sealed = normalize(entry?.sealedToken);
+    if (!sealed) return entry;
+    const { sealedToken: _sealed, ...rest } = entry;
+    const token = unsealTourneyEmailToken(sealed, env);
+    if (!token) failed = true;
+    return { ...rest, token };
+  });
+  return { tokens: unsealed, failed };
+};
+
+// The terminal scrub, as a fragment because both the success and the
+// retry/dead-letter/expired update need exactly the same expression. It removes the
+// top-level sealed reset token AND every sealed-or-legacy-plaintext token inside
+// `payload.tokens[]`, keeping each entry's `token_hash` so the row stays auditable.
+// `- 'token'` is deliberate even though nothing writes a nested plaintext any more:
+// 45 production rows predate the sealing and this is what clears them on the way
+// through. Reads `payload` as the pre-update row value, which is what we want.
+const scrubbedDispatchPayload = (sql) => sql`
+  case
+    when jsonb_typeof(payload -> 'tokens') = 'array' then
+      (payload - 'sealedToken') || jsonb_build_object('tokens', (
+        select coalesce(
+          jsonb_agg(entry - 'sealedToken' - 'token' order by ord),
+          '[]'::jsonb
+        )
+        from jsonb_array_elements(payload -> 'tokens')
+          with ordinality as elements(entry, ord)
+      ))
+    else payload - 'sealedToken'
+  end
+`;
 
 const reconciliationDeadlineError = () => Object.assign(
   new Error("Tournament reconciliation exceeded its runtime budget."),
@@ -232,10 +294,15 @@ const sendDispatch = ({ dispatch, env, signal }) => {
   // Unseal for rendering only. The plaintext lives in this local for the duration
   // of the send and is never written back to the row.
   const { sealedToken, ...visiblePayload } = storedPayload;
+  const nested = unsealDispatchTokenEntries(visiblePayload.tokens, env);
+  const basePayload =
+    nested.tokens === visiblePayload.tokens
+      ? visiblePayload
+      : { ...visiblePayload, tokens: nested.tokens };
   const payload = sealedToken
-    ? { ...visiblePayload, token: unsealTourneyEmailToken(sealedToken, env) }
-    : storedPayload;
-  if (sealedToken && !payload.token) {
+    ? { ...basePayload, token: unsealTourneyEmailToken(sealedToken, env) }
+    : basePayload;
+  if ((sealedToken && !payload.token) || nested.failed) {
     const error = new Error("The Tourney reset token could not be unsealed.");
     error.code = "TOURNEY_RESET_TOKEN_UNSEAL_FAILED";
     throw error;
@@ -376,7 +443,7 @@ export const reconcileTourneyEmailDispatches = async ({
             set status = 'sent', provider_message_id = ${providerMessageId || null},
                 sent_at = now(), lease_id = null, lease_expires_at = null,
                 last_error_code = null, updated_at = now(),
-                payload = payload - 'sealedToken'
+                payload = ${scrubbedDispatchPayload(sql)}
             where id = ${dispatch.id} and lease_id = ${dispatch.lease_id}
             returning id
           `;
@@ -420,7 +487,7 @@ export const reconcileTourneyEmailDispatches = async ({
                 last_error_code = ${normalize(error?.code || "TOURNEY_EMAIL_FAILED").slice(0, 128)},
                 updated_at = now(),
                 payload = case
-                  when ${resetExpired || terminal} then payload - 'sealedToken'
+                  when ${resetExpired || terminal} then ${scrubbedDispatchPayload(sql)}
                   else payload
                 end
             where id = ${dispatch.id} and lease_id = ${dispatch.lease_id}
