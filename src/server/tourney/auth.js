@@ -144,17 +144,60 @@ export const readEffectiveTourneyAccounts = async ({
   );
 };
 
-export const summarizeTourneyAccount = (account) => ({
+export const getTourneyAdminEmail = (account, env = process.env) => {
+  const email = normalizeTourneyEmail(account?.email);
+  if (email) return email;
+
+  const ownerEmail = normalizeTourneyEmail(
+    env.TOURNEY_OWNER_EMAIL || "serviroo@rooindustries.com"
+  );
+  if (account?.role === "owner" && account?.username === "serviroo") {
+    return ownerEmail;
+  }
+
+  if (account?.role === "caster" && account?.username === "yukari") {
+    return "yukariipoi@gmail.com";
+  }
+
+  return "";
+};
+
+// Adding `viewer` to TOURNEY_ADMIN_ROLES let every login-capable role past the role
+// gate, but the gate is not the only thing between an administrator and a recovery
+// email: getTourneyAdminEmail returns "" for anyone without a configured address
+// and without one of the two legacy fallbacks. Such an account passes the role
+// check, fails the `adminAccount && adminEmail` guard in the forgot route, falls
+// through to the player lookup, matches nothing, and receives the same generic
+// success response as a real send -- unrecoverable, and silently so.
+//
+// Exported so the owner-only accounts view can surface it and the forgot route can
+// log the real reason instead of pretending it sent something. Deliberately does
+// not change the public response, which stays generic so the endpoint does not
+// become an account-enumeration oracle.
+export const canTourneyAdminRecoverPassword = (account, env = process.env) =>
+  Boolean(
+    account?.active !== false &&
+      TOURNEY_ADMIN_ROLES.includes(account?.role) &&
+      getTourneyAdminEmail(account, env)
+  );
+
+export const summarizeTourneyAccount = (account, env = process.env) => ({
   username: account.username,
   email: account.email || "",
   role: account.role,
   active: account.active,
   version: account.version,
+  // Owner-only view, so this is safe to expose here: without it the manage screen
+  // shows an account that looks completely healthy while its password recovery is
+  // silently impossible.
+  canRecoverPassword: canTourneyAdminRecoverPassword(account, env),
 });
 
 export const summarizeTourneyAccounts = (accounts = readTourneyAccounts()) =>
   accounts
-    .map(summarizeTourneyAccount)
+    // Explicit arrow rather than a bare reference: Array.map passes the index as a
+    // second argument, which would land in this helper's `env` parameter.
+    .map((account) => summarizeTourneyAccount(account))
     .sort((left, right) => left.username.localeCompare(right.username));
 
 export const renderTourneyAccountsJson = (accounts = readTourneyAccounts()) =>
@@ -179,24 +222,6 @@ export const findTourneyAccountByEmail = (
   const normalizedEmail = normalizeTourneyEmail(email);
   if (!normalizedEmail) return null;
   return accounts.find((account) => normalizeTourneyEmail(account.email) === normalizedEmail) || null;
-};
-
-export const getTourneyAdminEmail = (account, env = process.env) => {
-  const email = normalizeTourneyEmail(account?.email);
-  if (email) return email;
-
-  const ownerEmail = normalizeTourneyEmail(
-    env.TOURNEY_OWNER_EMAIL || "serviroo@rooindustries.com"
-  );
-  if (account?.role === "owner" && account?.username === "serviroo") {
-    return ownerEmail;
-  }
-
-  if (account?.role === "caster" && account?.username === "yukari") {
-    return "yukariipoi@gmail.com";
-  }
-
-  return "";
 };
 
 export const getTourneyApprovalRecipients = async ({

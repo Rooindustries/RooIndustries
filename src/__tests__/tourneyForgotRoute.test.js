@@ -197,6 +197,42 @@ describe("Tourney forgot-password route", () => {
     }
   );
 
+  // Adding `viewer` to the role list was necessary but not sufficient: an admin with
+  // no configured email and no legacy fallback passes the role gate, gets "" from
+  // getTourneyAdminEmail, and used to fall through to the player lookup -- which can
+  // never match an admin username, so the caller got the generic success response and
+  // no email. Three active production admins were in exactly this state. The route
+  // must stop at the admin branch instead of pretending the player path might work.
+  test("an admin with no recovery email does not fall through to the player lookup", async () => {
+    const account = {
+      username: "viewer-demo",
+      email: "",
+      role: "viewer",
+      active: true,
+      version: "1",
+    };
+    mockReadEffectiveTourneyAccounts.mockResolvedValue([account]);
+    mockFindTourneyAccount.mockReturnValue(account);
+    mockGetTourneyAdminEmail.mockReturnValue("");
+    mockExecuteCommand.mockImplementation(async ({ callback }) => {
+      const result = await callback();
+      return { status: 200, body: result.body };
+    });
+
+    const response = await POST(makeRequest());
+
+    expect(mockCreateTourneyPasswordReset).not.toHaveBeenCalled();
+    expect(mockEnqueueTourneyEmailDispatch).not.toHaveBeenCalled();
+    // The regression: a player-token lookup keyed on an admin username.
+    expect(mockCreateTourneyResetToken).not.toHaveBeenCalled();
+    // The response stays generic so the endpoint cannot be used to enumerate which
+    // usernames exist or which of them are administrators.
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      message: "If that account exists, a reset link was sent.",
+    });
+  });
+
   test("an inactive admin account is not sent a reset link", async () => {
     // Disabling an account has to revoke recovery too, or a removed caster could mint a
     // token and walk back in.

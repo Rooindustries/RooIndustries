@@ -109,6 +109,27 @@ export async function POST(request) {
               baseUrl: new URL(request.url).origin,
             },
           });
+        } else if (
+          adminAccount?.active !== false &&
+          TOURNEY_ADMIN_ROLES.includes(adminAccount?.role)
+        ) {
+          // A recognised, login-capable administrator with no deliverable address.
+          // Falling through to createTourneyResetToken would look up a *player* by
+          // this login, match nothing, and return the generic success response, so
+          // the operator would never learn the account is unrecoverable. Log it and
+          // stop here instead. The response stays generic on purpose: telling the
+          // caller "that admin has no email" would confirm the username exists.
+          logSafeError(
+            "Tournament administrator cannot receive a password reset",
+            Object.assign(
+              new Error("Tourney administrator has no deliverable recovery email."),
+              {
+                code: "TOURNEY_ADMIN_RECOVERY_EMAIL_MISSING",
+                username: adminAccount.username,
+                role: adminAccount.role,
+              }
+            )
+          );
         } else {
           const reset = await createTourneyResetToken({ login });
           if (reset) {
