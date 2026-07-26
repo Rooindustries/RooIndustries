@@ -491,10 +491,27 @@ export async function sendTourneyDiscordInviteEmail({
   });
 }
 
+// The queue can deliver a reset long after it was minted, and the token's real
+// lifetime lives on the row, not here. Derive the wording from expiresAt so the
+// copy can never promise a window the token does not actually have.
+const describeResetWindow = (expiresAt) => {
+  const expiry = Date.parse(String(expiresAt || ""));
+  if (!Number.isFinite(expiry)) return "This link expires soon.";
+  const hours = Math.round((expiry - Date.now()) / (60 * 60 * 1000));
+  if (hours <= 0) return "This link has expired. Request a new one.";
+  if (hours === 1) return "This link expires in 1 hour.";
+  if (hours < 24) return `This link expires in ${hours} hours.`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? "This link expires in 24 hours." : `This link expires in ${days} days.`;
+};
+
+export const __describeResetWindowForTests = describeResetWindow;
+
 export async function sendTourneyResetEmail({
   player,
   token,
   baseUrl,
+  expiresAt = "",
   idempotencyKey = "",
   signal,
   env = process.env,
@@ -515,7 +532,7 @@ export async function sendTourneyResetEmail({
           player.discord || player.username
         )}</strong>.</p>
         <p><a href="${resetUrl.toString()}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#0891b2;color:#fff;text-decoration:none;font-weight:700">Reset password</a></p>
-        <p style="font-size:13px;color:#475569">This link expires in 1 hour.</p>
+        <p style="font-size:13px;color:#475569">${escapeHtml(describeResetWindow(expiresAt))}</p>
       </div>
     `,
   }, idempotencyKey, signal);

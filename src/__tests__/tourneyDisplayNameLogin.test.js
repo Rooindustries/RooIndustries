@@ -109,18 +109,49 @@ describe("tourney sign-in by roster display name", () => {
     ).resolves.toMatchObject({ ok: false, account: null });
   });
 
-  it("refuses a display name shared by two live players", async () => {
+  it("refuses to register a display name a live player already holds", async () => {
     const store = loadStore();
     await addApprovedPlayer(store, {
       discord: "vulture_one",
       displayName: "Vulture",
       email: "vulture-one@example.com",
     });
+
+    // Case and surrounding space must not buy a way around it: the login lookup
+    // compares lower(btrim(...)), so "vulture" and "Vulture" are one credential.
+    await expect(
+      addApprovedPlayer(store, {
+        discord: "vulture_two",
+        displayName: "  vulture ",
+        email: "vulture-two@example.com",
+      })
+    ).rejects.toMatchObject({ status: 409, code: "TOURNEY_DISPLAY_NAME_TAKEN" });
+
+    // The original holder still signs in by roster name.
+    await expect(
+      store.verifyTourneyPlayerCredentials({
+        login: "Vulture",
+        password: "player-password",
+        env,
+      })
+    ).resolves.toMatchObject({ ok: true });
+  });
+
+  it("still refuses to resolve a duplicate that predates the constraint", async () => {
+    const store = loadStore();
+    // Rows created before uniqueness was enforced can still be ambiguous, and the
+    // resolver must keep failing closed rather than picking one of them.
     await addApprovedPlayer(store, {
+      discord: "vulture_one",
+      displayName: "Vulture",
+      email: "vulture-one@example.com",
+    });
+    const second = await addApprovedPlayer(store, {
       discord: "vulture_two",
-      displayName: "vulture",
+      displayName: "Distinct Name",
       email: "vulture-two@example.com",
     });
+    store.__setMemoryPlayerDisplayNameForTests(second.id, "vulture");
 
     await expect(
       store.verifyTourneyPlayerCredentials({
@@ -147,15 +178,17 @@ describe("tourney sign-in by roster display name", () => {
       displayName: "Hydro",
       email: "hydro-old@example.com",
     });
-    const live = await addApprovedPlayer(store, {
-      discord: "hydro_new",
-      displayName: "Hydro",
-      email: "hydro-new@example.com",
-    });
     await store.withdrawTourneyPlayer({
       playerId: departed.id,
       actorUsername: "serviroo",
       env,
+    });
+    // Only valid once the first holder has left: a withdrawn row must free the
+    // name for the next player rather than reserving it forever.
+    const live = await addApprovedPlayer(store, {
+      discord: "hydro_new",
+      displayName: "Hydro",
+      email: "hydro-new@example.com",
     });
 
     await expect(
@@ -179,11 +212,12 @@ describe("tourney sign-in by roster display name", () => {
       store.createTourneyResetToken({ login: "Winton Prime", env })
     ).resolves.toMatchObject({ player: { id: solo.id } });
 
-    await addApprovedPlayer(store, {
+    const second = await addApprovedPlayer(store, {
       discord: "wint_b",
-      displayName: "winton prime",
+      displayName: "Winton Second",
       email: "winton-b@example.com",
     });
+    store.__setMemoryPlayerDisplayNameForTests(second.id, "winton prime");
 
     await expect(
       store.createTourneyResetToken({ login: "Winton Prime", env })
@@ -198,7 +232,9 @@ describe("tourney sign-in by roster display name", () => {
       email: "vaieia@example.com",
     });
     // A second player whose display name is the first player's Discord name must
-    // not take over that identifier.
+    // not take over that identifier. Uniqueness is enforced against other display
+    // names, not against discord handles, so this registration is allowed -- the
+    // primary lookup is what has to keep the identifier with its owner.
     await addApprovedPlayer(store, {
       discord: "impostor",
       displayName: "vaieia",
@@ -250,5 +286,61 @@ describe("display name sign-in migration", () => {
       "grant execute on function public.roo_resolve_tourney_account_alias(text)\n  to service_role;"
     );
     expect(migration).not.toMatch(/to\s+(anon|authenticated)\b/);
+  });
+});
+
+describe("reset link lifetime", () => {
+  const loadEmail = () => {
+    jest.resetModules();
+    return require("../server/tourney/email.js");
+  };
+
+  test("mints a reset token that lasts 24 hours", () => {
+    const store = loadStore();
+    expect(store.RESET_TOKEN_MAX_AGE_MS).toBe(24 * 60 * 60 * 1000);
+  });
+
+  test("the email states the window the token actually has", () => {
+    const source = fs.readFileSync(
+      path.resolve("src/server/tourney/email.js"),
+      "utf8"
+    );
+    // A hardcoded duration silently lies the moment the TTL changes, and the queue
+    // can deliver long after the token was minted.
+    expect(source).not.toContain("This link expires in 1 hour.</p>");
+    expect(source).toContain("describeResetWindow(expiresAt)");
+  });
+
+  test("describes a day-long window rather than promising an hour", () => {
+    const { __describeResetWindowForTests: describe_ } = loadEmail();
+    const inADay = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    expect(describe_(inADay)).toBe("This link expires in 24 hours.");
+    const inTwoHours = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+    expect(describe_(inTwoHours)).toBe("This link expires in 2 hours.");
+    const past = new Date(Date.now() - 60 * 1000).toISOString();
+    expect(describe_(past)).toBe("This link has expired. Request a new one.");
+    expect(describe_("")).toBe("This link expires soon.");
+  });
+});
+
+describe("roster name uniqueness migration", () => {
+  const migration = fs.readFileSync(
+    path.resolve(
+      "supabase/migrations/20260726193000_unique_tourney_display_name_for_login.sql"
+    ),
+    "utf8"
+  );
+
+  test("enforces uniqueness the same way the login lookup compares", () => {
+    expect(migration).toContain("lower(btrim(display_name))");
+    expect(migration).toContain("create unique index if not exists");
+  });
+
+  test("only constrains the statuses that can sign in", () => {
+    expect(migration).toContain("where status in ('approved', 'pending')");
+  });
+
+  test("leaves players without a roster name alone", () => {
+    expect(migration).toContain("btrim(display_name) <> ''");
   });
 });
