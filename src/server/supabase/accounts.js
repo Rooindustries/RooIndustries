@@ -370,9 +370,21 @@ const buildTourneyAdminAuthEmail = ({ username, email }) =>
   normalizeIdentifier(email) ||
   `tourney+${sha256(normalizeIdentifier(username)).slice(0, 24)}@auth.rooindustries.invalid`;
 
+// Supabase's admin API accepts `password_hash` when CREATING a user, which is how
+// the legacy bcrypt digests were imported without ever seeing a plaintext. On an
+// UPDATE to an existing user it silently ignores `password_hash`: the call returns
+// 200 and the stored credential is left untouched. Password changes therefore
+// have to send `password`, and the plaintext is the only form that works.
+//
+// That asymmetry is why every tourney password reset appeared to succeed while
+// sign-in kept failing -- the roster row got the new digest, Auth kept the old
+// one, and the two silently diverged. `updateSupabaseAccountPassword` in this
+// file already sends plaintext for the referral flow; the tourney player sync was
+// the remaining caller passing only a hash.
 const upsertAuthUserWithHash = async ({
   userId,
   email,
+  password = "",
   passwordHash,
   displayName,
   appMetadata,
@@ -381,6 +393,7 @@ const upsertAuthUserWithHash = async ({
   if (!/^\$2[aby]\$/.test(String(passwordHash || ""))) {
     throw new Error("Supabase Auth imports require bcrypt credentials.");
   }
+  const plaintext = String(password || "");
   const attributes = {
     email,
     email_confirm: true,
@@ -402,8 +415,14 @@ const upsertAuthUserWithHash = async ({
       ...existingRoles.filter((role) => !String(role).startsWith("tourney_")),
       ...desiredRoles,
     ])];
+    // Send `password` on the update path, never `password_hash`: the latter is
+    // accepted and discarded. With no plaintext available the credential is left
+    // alone rather than written with a value Auth will ignore, so the caller can
+    // tell the difference between "changed" and "not changed".
+    const { password_hash: _ignoredOnUpdate, ...updatable } = attributes;
     const updated = await adminClient.auth.admin.updateUserById(userId, {
-      ...attributes,
+      ...updatable,
+      ...(plaintext ? { password: plaintext } : {}),
       user_metadata: {
         ...(currentUser.user_metadata || {}),
         ...attributes.user_metadata,
@@ -417,14 +436,16 @@ const upsertAuthUserWithHash = async ({
       },
     });
     if (updated.error) throw new Error("Supabase Auth synchronization failed.");
-    return;
+    return { passwordApplied: Boolean(plaintext) };
   }
   const created = await adminClient.auth.admin.createUser({ id: userId, ...attributes });
   if (created.error) throw new Error("Supabase Auth account creation failed.");
+  return { passwordApplied: true };
 };
 
 export const syncSupabaseTourneyPlayerAccount = async ({
   player,
+  password = "",
   passwordHash,
   authUserId = "",
   env = process.env,
@@ -485,8 +506,12 @@ export const syncSupabaseTourneyPlayerAccount = async ({
         : []),
       "tourney_player",
     ]);
+    // Auth discards `password_hash` on an update, so a credential change has to
+    // arrive as `password`. Without one, leave the credential untouched instead of
+    // issuing a write that reports success and changes nothing.
+    const applyPassword = installPassword && Boolean(String(password || ""));
     const updated = await adminClient.auth.admin.updateUserById(userId, {
-      ...(installPassword ? { password_hash: passwordHash } : {}),
+      ...(applyPassword ? { password: String(password) } : {}),
       app_metadata: {
         ...existingUser.app_metadata,
         imported_from:
@@ -496,10 +521,17 @@ export const syncSupabaseTourneyPlayerAccount = async ({
       },
     });
     if (updated.error) throw new Error("Supabase Auth synchronization failed.");
+    if (installPassword && !applyPassword) {
+      throw Object.assign(
+        new Error("Supabase Auth password change requires the submitted password."),
+        { code: "SUPABASE_AUTH_PASSWORD_PLAINTEXT_REQUIRED" }
+      );
+    }
   } else {
     await upsertAuthUserWithHash({
       userId,
       email: fallbackEmail,
+      password,
       passwordHash,
       displayName: source.display_name,
       appMetadata: {

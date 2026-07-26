@@ -269,8 +269,17 @@ const shouldSyncSupabasePlayerAuth = (env = process.env) =>
   isEnabledTourneyFlag(env.SUPABASE_SOCIAL_AUTH_ENABLED) ||
   isEnabledTourneyFlag(env.SUPABASE_SHADOW_WRITES);
 
+// `password` is the value the player just submitted. It is held in memory for the
+// duration of this call only: it is never written to a column, never placed in the
+// queued operation payload, and never logged. Every stored copy remains a bcrypt
+// digest. It has to be passed at all because Supabase Auth silently ignores
+// `password_hash` when updating an existing user, so a credential change applied
+// from the queue (which carries only the digest) would report success and leave
+// the old password in place -- see upsertAuthUserWithHash in
+// src/server/supabase/accounts.js.
 const syncTourneyPlayerAuth = async ({
   installPassword = true,
+  password = "",
   playerRow,
   authUserId = "",
   env = process.env,
@@ -295,6 +304,25 @@ const syncTourneyPlayerAuth = async ({
     env,
   });
   if (!shouldSyncAuth) return;
+  // A credential change is applied inline while the submitted password is still in
+  // scope. The queued operation below then reconciles roles, metadata and aliases
+  // with installPassword false, so the digest-only worker never attempts a
+  // password write it cannot make stick.
+  let passwordApplied = false;
+  if (installPassword && String(password || "")) {
+    const { syncSupabaseTourneyPlayerAccount } = await import(
+      "../supabase/accounts.js"
+    );
+    await syncSupabaseTourneyPlayerAccount({
+      player: playerRow,
+      password,
+      passwordHash: playerRow.password_hash,
+      authUserId,
+      installPassword: true,
+      env,
+    });
+    passwordApplied = true;
+  }
   await enqueueTourneyExternalOperation({
     commandId: context.command_id,
     operationKind: "supabase_player_auth",
@@ -303,7 +331,7 @@ const syncTourneyPlayerAuth = async ({
     desiredState: {
       player: playerRow,
       authUserId,
-      installPassword,
+      installPassword: installPassword && !passwordApplied,
     },
     env,
   });
@@ -1113,6 +1141,7 @@ export async function createPendingTourneyPlayer({
     }
     await syncTourneyPlayerAuth({
       installPassword: Boolean(value.password),
+      password: value.password || "",
       playerRow,
       authUserId,
       env,
@@ -2230,7 +2259,7 @@ export async function resetTourneyPlayerPassword({
     });
     if (claimed.completed) return managePlayer(claimed.player);
     if (claimed.authApplied) {
-      await syncTourneyPlayerAuth({ playerRow: claimed.player, env });
+      await syncTourneyPlayerAuth({ playerRow: claimed.player, password, env });
       await completeSupabaseAuthOperation({
         operationKey: claimed.operation.key,
         env,
@@ -2242,7 +2271,7 @@ export async function resetTourneyPlayerPassword({
       operation: claimed.operation,
       env,
     });
-    await syncTourneyPlayerAuth({ playerRow: finalized, env });
+    await syncTourneyPlayerAuth({ playerRow: finalized, password, env });
     await completeSupabaseAuthOperation({
       operationKey: claimed.operation.key,
       env,
@@ -2294,6 +2323,7 @@ export async function resetTourneyPlayerPassword({
   });
   await syncTourneyPlayerAuth({
     playerRow: { ...updated, password_hash: passwordHash },
+    password,
     env,
   });
   return managePlayer(updated);
