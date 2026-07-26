@@ -80,23 +80,48 @@ describe("dispatch payload sealing and terminal scrub", () => {
   });
 
   test("sealing swaps token for sealedToken and keeps a hash for audit", () => {
-    expect(source).toContain("const { token: _rawToken, ...rest } = payload;");
+    // Destructured off `withTokens`, not the caller's payload, so a registration
+    // dispatch carrying both shapes keeps its already-sealed tokens[] entries.
+    expect(source).toContain("const { token: _rawToken, ...rest } = withTokens;");
     expect(source).toContain("sealedToken: sealTourneyEmailToken(rawToken, env)");
-    expect(source).toContain("tokenHash: normalize(payload.tokenHash) || sha256(rawToken)");
+    expect(source).toContain("tokenHash: normalize(source.tokenHash) || sha256(rawToken)");
   });
 
   test("a successful send strips the sealed token", () => {
-    expect(source).toContain("payload = payload - 'sealedToken'");
+    expect(source).toContain("payload = ${scrubbedDispatchPayload(sql)}");
   });
 
   test("expired and dead-letter strip it too, but a retry keeps it", () => {
     expect(source).toContain(
-      "when ${resetExpired || terminal} then payload - 'sealedToken'"
+      "when ${resetExpired || terminal} then ${scrubbedDispatchPayload(sql)}"
     );
     expect(source).toContain("else payload");
   });
 
+  // A registration dispatch keeps its credentials in payload.tokens[], one entry per
+  // approver purpose, so the top-level `- 'sealedToken'` never touched them. Those
+  // approve/deny tokens carry expires_at 9999-12-31 and so stay redeemable forever.
+  test("both terminal updates use the same nested-aware scrub", () => {
+    // A single shared fragment, so success and dead-letter cannot drift apart.
+    expect(source.match(/\$\{scrubbedDispatchPayload\(sql\)\}/g)).toHaveLength(2);
+    expect(source).toContain("entry - 'sealedToken' - 'token'");
+    // `token_hash` must survive so the row stays auditable after the scrub.
+    expect(source).not.toContain("entry - 'token_hash'");
+  });
+
+  test("sealing reaches inside payload.tokens", () => {
+    expect(source).toContain("const sealDispatchTokenEntries = (tokens, env) => {");
+    expect(source).toContain("sealedToken: sealTourneyEmailToken(rawToken, env)");
+    expect(source).toContain("token_hash: normalize(entry.token_hash) || sha256(rawToken)");
+  });
+
   test("an unsealable token fails the dispatch instead of sending a broken link", () => {
     expect(source).toContain("TOURNEY_RESET_TOKEN_UNSEAL_FAILED");
+  });
+
+  test("an unsealable nested token fails the dispatch too", () => {
+    // Sending a registration email whose approve link is broken would look like a
+    // successful send and burn the dispatch, so it has to fail like the reset path.
+    expect(source).toContain("if ((sealedToken && !payload.token) || nested.failed) {");
   });
 });
