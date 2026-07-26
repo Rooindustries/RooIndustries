@@ -251,7 +251,7 @@ describe("tourney login API route", () => {
 
     expect(response.status).toBe(401);
     expect(body.error).toBe(
-      "Invalid Discord username, email, or password. Wait for approval before trying to log in."
+      "Invalid roster name, email, or password. Wait for approval before trying to log in."
     );
     expect(mockReadPendingDiscordLink).not.toHaveBeenCalled();
     expect(mockLinkPendingDiscordIdentity).not.toHaveBeenCalled();

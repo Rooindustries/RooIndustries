@@ -25,7 +25,7 @@ export default async function TourneyForgotPage() {
   return (
     <TourneyShell session={session}>
       <RouteTitle eyebrow="Reset" title="Forgot" accent="Password">
-        Use your Discord username or email to get a reset link.
+        Use your roster name or email to get a reset link.
       </RouteTitle>
 
       <div className="tourney-grid">

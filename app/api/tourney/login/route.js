@@ -34,7 +34,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const INVALID_LOGIN_MESSAGE =
-  "Invalid Discord username, email, or password. Wait for approval before trying to log in.";
+  "Invalid roster name, email, or password. Wait for approval before trying to log in.";
 const SUSPENDED_LOGIN_MESSAGE =
   "You have been suspended from the tourney. Please contact serviroo through Discord or at serviroo@rooindustries.com for further queries.";
 const UNAVAILABLE_LOGIN_MESSAGE =

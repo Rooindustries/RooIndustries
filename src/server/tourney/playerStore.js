@@ -212,6 +212,22 @@ const compactInternalUsernameBase = (value) =>
     .replace(/[-_.]{2,}/g, "-")
     .replace(/^[-_.]+|[-_.]+$/g, "");
 
+// Roster display names are free text and are not unique, so a name shared by two
+// live players resolves to nobody. Picking one would sign a player into someone
+// else's account, or mail their reset link to a stranger. Statuses are limited to
+// the live registrations so a withdrawn name cannot shadow an active one.
+const DISPLAY_NAME_LOGIN_STATUSES = ["approved", "pending"];
+
+const findMemoryPlayerByUniqueDisplayName = (displayName, statuses) => {
+  if (!displayName) return null;
+  const matches = MEMORY_STORE.players.filter(
+    (player) =>
+      normalizeTourneyUsername(player.display_name || player.displayName) ===
+        displayName && statuses.includes(player.status)
+  );
+  return matches.length === 1 ? matches[0] : null;
+};
+
 const buildInternalTourneyUsername = (discord) => {
   const discordKey = normalizeDiscordKey(discord);
   const hash = crypto
@@ -1992,7 +2008,12 @@ export async function verifyTourneyPlayerCredentials({
           player.username === normalizedLogin ||
             player.email === normalizedEmail ||
             getDiscordKey(player) === normalizedDiscordKey
-      ) || null;
+      ) ||
+      findMemoryPlayerByUniqueDisplayName(
+        normalizedLogin,
+        DISPLAY_NAME_LOGIN_STATUSES
+      ) ||
+      null;
   } else if (getDatabaseUrl(env)) {
     await ensureTourneyPlayerSchema(env);
     const sql = await getSql(env);
@@ -2005,6 +2026,17 @@ export async function verifyTourneyPlayerCredentials({
       limit 1
     `;
     row = rows?.[0] || null;
+    if (!row && normalizedLogin) {
+      // Statuses mirror DISPLAY_NAME_LOGIN_STATUSES.
+      const named = await sql`
+        select id, principal_id, username, status, version, password_hash
+        from tourney_players
+        where lower(btrim(coalesce(display_name, ''))) = ${normalizedLogin}
+          and status in ('approved', 'pending')
+        limit 2
+      `;
+      row = named?.length === 1 ? named[0] : null;
+    }
   }
 
   const candidateHash = row?.password_hash || DUMMY_PLAYER_HASH;
@@ -2080,13 +2112,14 @@ export async function createTourneyResetToken({
 
   if (isMemoryMode(env)) {
     const getDiscordKey = (player) => player.discord_key || player.discordKey;
-    const player = MEMORY_STORE.players.find(
-      (entry) =>
-        entry.status === "approved" &&
-        (entry.username === normalizedLogin ||
-          entry.email === normalizedEmail ||
-          getDiscordKey(entry) === normalizedDiscordKey)
-    );
+    const player =
+      MEMORY_STORE.players.find(
+        (entry) =>
+          entry.status === "approved" &&
+          (entry.username === normalizedLogin ||
+            entry.email === normalizedEmail ||
+            getDiscordKey(entry) === normalizedDiscordKey)
+      ) || findMemoryPlayerByUniqueDisplayName(normalizedLogin, ["approved"]);
     if (!player) return null;
     MEMORY_STORE.tokens.push({
       id: crypto.randomUUID(),
@@ -2115,7 +2148,17 @@ export async function createTourneyResetToken({
       )
     limit 1
   `;
-  const player = players?.[0];
+  let player = players?.[0];
+  if (!player && normalizedLogin) {
+    const named = await sql`
+      select id, username, email, status, discord, display_name, version
+      from tourney_players
+      where status = 'approved'
+        and lower(btrim(coalesce(display_name, ''))) = ${normalizedLogin}
+      limit 2
+    `;
+    player = named?.length === 1 ? named[0] : undefined;
+  }
   if (!player) return null;
   await sql`
     insert into tourney_player_tokens (

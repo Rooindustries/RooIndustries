@@ -151,7 +151,7 @@ test.describe("Route smoke", () => {
       if (route === "/tourney/login") {
         await expect(page.getByRole("heading", { name: "Sign in." })).toBeVisible();
         await expect(
-          page.getByLabel("Discord username or email")
+          page.getByLabel("Roster name or email")
         ).toBeVisible();
         await expect(page.getByLabel("Password")).toBeVisible();
         await expect(page.getByLabel("Remember me")).toBeVisible();

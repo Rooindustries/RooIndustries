@@ -22,7 +22,7 @@ describe("Tourney login form", () => {
       <TourneyLoginForm navigate={assign} redirectTo="/tourney/manage" />
     );
 
-    fireEvent.change(screen.getByLabelText("Discord username or email"), {
+    fireEvent.change(screen.getByLabelText("Roster name or email"), {
       target: { value: "owner@example.com" },
     });
     fireEvent.change(screen.getByLabelText("Password"), {
@@ -55,7 +55,7 @@ describe("Tourney login form", () => {
     });
     render(<TourneyLoginForm navigate={assign} />);
 
-    fireEvent.change(screen.getByLabelText("Discord username or email"), {
+    fireEvent.change(screen.getByLabelText("Roster name or email"), {
       target: { value: "invalid" },
     });
     fireEvent.change(screen.getByLabelText("Password"), {
@@ -82,7 +82,7 @@ describe("Tourney login form", () => {
       />
     );
 
-    fireEvent.change(screen.getByLabelText("Discord username or email"), {
+    fireEvent.change(screen.getByLabelText("Roster name or email"), {
       target: { value: "player-one" },
     });
     fireEvent.change(screen.getByLabelText("Password"), {
@@ -119,7 +119,7 @@ describe("Tourney login form", () => {
       ok: false,
       json: async () => ({
         ok: false,
-        error: "Invalid Discord username, email, or password. Wait for approval before trying to log in.",
+        error: "Invalid roster name, email, or password. Wait for approval before trying to log in.",
       }),
     });
     render(
@@ -130,7 +130,7 @@ describe("Tourney login form", () => {
       />
     );
 
-    fireEvent.change(screen.getByLabelText("Discord username or email"), {
+    fireEvent.change(screen.getByLabelText("Roster name or email"), {
       target: { value: "player-one" },
     });
     fireEvent.change(screen.getByLabelText("Password"), {
@@ -141,7 +141,7 @@ describe("Tourney login form", () => {
     );
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Invalid Discord username, email, or password. Wait for approval before trying to log in."
+      "Invalid roster name, email, or password. Wait for approval before trying to log in."
     );
     expect(assign).not.toHaveBeenCalled();
   });
