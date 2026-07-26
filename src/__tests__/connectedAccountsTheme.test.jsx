@@ -9,7 +9,8 @@ jest.mock("../components/SupabaseSocialLogin", () =>
       <button
         aria-label={`mock-${action}`}
         data-testid="social-login"
-        disabled={["link", "reclaim"].includes(action) && !linkProof?.confirmed}
+        /* Mirrors SupabaseSocialLogin: only reclaim is proof-gated now. */
+        disabled={action === "reclaim" && !linkProof?.confirmed}
         type="button"
       />
     );
@@ -38,17 +39,38 @@ describe("Tourney connected accounts theme and layout", () => {
       <ConnectedAccounts flow="tourney" nextPath="/tourney" variant="tourney" />
     );
 
-    await waitFor(() => expect(screen.getByLabelText("Current password")).toBeVisible());
+    await waitFor(() =>
+      expect(screen.getByText("Connected accounts")).toBeVisible()
+    );
     expect(container.querySelector("section")).toHaveClass("tourney-connected-accounts");
-    expect(screen.getByLabelText("Current password")).toHaveClass(
-      "tourney-connected-input"
-    );
-    expect(screen.getByRole("button", { name: "Confirm identity" })).toHaveClass(
-      "tourney-connected-confirm"
-    );
+    // Being signed in is now sufficient to link, so the reauth box is absent
+    // unless a provider is held by an orphaned account and needs reclaiming.
+    expect(screen.queryByLabelText("Current password")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Confirm identity" })).toBeNull();
   });
 
-  test("keeps provider linking disabled until confirmation returns a valid expiry", async () => {
+  test("lets a signed-in account link a provider without confirming a password", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        domainAccount: true,
+        providers: ["email"],
+        unlinkableProviders: ["email"],
+        linkProof: null,
+      }),
+    });
+    render(<ConnectedAccounts flow="referral" nextPath="/referrals/dashboard" />);
+
+    const linkControl = await screen.findByRole("button", { name: "mock-link" });
+    expect(linkControl).toBeEnabled();
+    expect(screen.queryByLabelText("Current password")).toBeNull();
+    expect(
+      screen.getByText("You're signed in, so you can link an account below.")
+    ).toBeVisible();
+  });
+
+  test("keeps reclaim disabled until confirmation returns a valid expiry", async () => {
     global.fetch = jest
       .fn()
       .mockResolvedValueOnce({
@@ -70,18 +92,12 @@ describe("Tourney connected accounts theme and layout", () => {
       });
     render(<ConnectedAccounts flow="referral" nextPath="/referrals/dashboard" />);
 
+    // Adding a provider is open to any signed-in account, so the link control is
+    // enabled immediately and no confirmation box is offered for it.
     const linkControl = await screen.findByRole("button", { name: "mock-link" });
-    expect(linkControl).toBeDisabled();
-    expect(screen.getByText("Confirm your identity to enable provider linking.")).toBeVisible();
-
-    fireEvent.change(screen.getByLabelText("Current password"), {
-      target: { value: "correct password" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Confirm identity" }));
-
-    await waitFor(() => expect(linkControl).toBeEnabled());
-    expect(screen.getByText(/Link proof confirmed until/)).toBeVisible();
-    expect(screen.getByText(/This proof allows one link attempt/)).toBeVisible();
+    expect(linkControl).toBeEnabled();
+    expect(screen.queryByLabelText("Current password")).toBeNull();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
   test("styles the card and controls exclusively through active theme tokens", () => {

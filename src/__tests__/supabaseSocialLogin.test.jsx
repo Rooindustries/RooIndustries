@@ -120,10 +120,32 @@ describe("Supabase social login", () => {
     });
     expect(mockSignOut).not.toHaveBeenCalled();
     expect(mockSignInWithOAuth).not.toHaveBeenCalled();
-    expect(onProofConsumed).toHaveBeenCalledTimes(1);
+    // A link no longer spends a reauth proof, so a stale proof is left alone for
+    // the operations that still need one (unlink, reclaim).
+    expect(onProofConsumed).not.toHaveBeenCalled();
   });
 
-  test("keeps linkIdentity disabled until server-confirmed proof exists", () => {
+  test("keeps orphan reclaim disabled until server-confirmed proof exists", () => {
+    // Reclaim releases a provider identity held by a different orphaned account,
+    // so it still requires a fresh reauth proof. A plain link does not: the server
+    // proves the caller's session against an active account instead.
+    render(
+      <SupabaseSocialLogin
+        action="reclaim"
+        flow="referral"
+        nextPath="/referrals/dashboard"
+        providerIds={["discord"]}
+      />
+    );
+
+    const reclaim = screen.getByRole("button", { name: "Recover Discord" });
+    expect(reclaim).toBeDisabled();
+    fireEvent.click(reclaim);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(mockLinkIdentity).not.toHaveBeenCalled();
+  });
+
+  test("lets a signed-in account start a link without a reauth proof", () => {
     render(
       <SupabaseSocialLogin
         action="link"
@@ -133,11 +155,7 @@ describe("Supabase social login", () => {
       />
     );
 
-    const link = screen.getByRole("button", { name: "Link Discord" });
-    expect(link).toBeDisabled();
-    fireEvent.click(link);
-    expect(global.fetch).not.toHaveBeenCalled();
-    expect(mockLinkIdentity).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Link Discord" })).toBeEnabled();
   });
 
   test("uses provider sign-in for guarded orphan recovery without dropping the primary session", async () => {

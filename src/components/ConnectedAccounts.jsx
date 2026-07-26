@@ -290,7 +290,18 @@ export default function ConnectedAccounts({
           </span>
         ))}
       </div>
-      {linked.has("email") && (missing.length > 0 || connectedSocial.length > 0) ? (
+      {/* Adding a provider no longer needs a password re-confirmation: being
+          signed in is enough, and the server proves the session against an active
+          account before starting the OAuth intent.
+          The box is still shown for the two operations that can take something
+          away -- unlinking a provider from this account, and reclaiming one held
+          by a different orphaned account. Both remain reauth-gated. */}
+      {linked.has("email") &&
+      (recoveryProvider ||
+        (canUnlink &&
+          managedProviders.some(
+            (provider) => linked.has(provider) && unlinkable.has(provider)
+          ))) ? (
         <div className={isTourney ? "tourney-connected-reauth" : "mt-4 flex flex-col gap-2 sm:flex-row"}>
           <input
             aria-label="Current password"
@@ -340,7 +351,7 @@ export default function ConnectedAccounts({
         <p className={isTourney ? "tourney-form-message" : "mt-3 text-xs leading-5 text-ink-muted"}>
           {hasLinkProof
             ? `Link proof confirmed until ${proofExpiryLabel(linkProof.expiresAt)}. It will be used by the next link attempt.`
-            : "Confirm your identity to enable provider linking."}
+            : "You're signed in, so you can link an account below."}
         </p>
       ) : null}
       {recoveryProvider ? (
