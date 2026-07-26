@@ -280,7 +280,35 @@ describe("pending Discord referral linking", () => {
     expect(rpc).not.toHaveBeenCalled();
   });
 
-  test("does not merge another domain account into the creator", async () => {
+  test("projects a tourney-owned Discord into the creator without merging", async () => {
+    const rpc = jest
+      .fn()
+      .mockResolvedValue({ data: { linked: true, domain: "referral" }, error: null });
+    const result = await linkPendingDiscordIdentity({
+      adminClient: { rpc },
+      pendingUser: {
+        id: pendingUserId,
+        identities: [{ provider: "discord", provider_id: "224466880022446688" }],
+      },
+      primaryAccount,
+      primaryUserId,
+      resolveAccount: jest.fn().mockResolvedValue({
+        ...pendingAccount,
+        roles: ["tourney_player"],
+      }),
+    });
+
+    expect(result).toMatchObject({ linked: true, crossDomain: true });
+    expect(rpc).toHaveBeenCalledWith(
+      "roo_link_domain_discord_identity",
+      expect.objectContaining({ p_domain: "referral" })
+    );
+    expect(rpc.mock.calls.map(([name]) => name)).not.toContain(
+      "roo_merge_account_principals"
+    );
+  });
+
+  test("refuses a cross-domain link when the Discord subject is missing", async () => {
     const rpc = jest.fn();
     const result = await linkPendingDiscordIdentity({
       adminClient: { rpc },
@@ -298,7 +326,7 @@ describe("pending Discord referral linking", () => {
 
     expect(result).toEqual({
       linked: false,
-      reason: "discord_account_not_linkable",
+      reason: "discord_session_missing",
     });
     expect(rpc).not.toHaveBeenCalled();
   });
