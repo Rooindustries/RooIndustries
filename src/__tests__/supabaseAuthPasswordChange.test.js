@@ -133,6 +133,24 @@ describe("tourney player Auth password changes", () => {
     expect(attributes.app_metadata.roles).toContain("tourney_player");
   });
 
+  test("the creator path also refuses to update an existing user from a hash", async () => {
+    // src/server/api/ref/verifyRegistration.js passes passwordHash, which reaches
+    // updateUserById when the Auth user already exists. Auth discards it there, so
+    // without this guard the creator credential silently keeps its old value --
+    // the same defect that broke tourney resets.
+    const accounts = require("../server/supabase/accounts.js");
+    const source = require("node:fs").readFileSync(
+      require("node:path").resolve("src/server/supabase/accounts.js"),
+      "utf8"
+    );
+    const creatorStart = source.indexOf("export const createSupabaseCreatorAccount");
+    expect(creatorStart).toBeGreaterThan(-1);
+    const body = source.slice(creatorStart);
+    expect(body).toContain("const { password_hash: _ignoredOnUpdate, ...updatable } = authAttributes;");
+    expect(body).toContain("SUPABASE_AUTH_PASSWORD_PLAINTEXT_REQUIRED");
+    expect(typeof accounts.createSupabaseCreatorAccount).toBe("function");
+  });
+
   test("never puts the submitted password into any RPC argument", async () => {
     const adminClient = buildAdminClient({ existingUser: existingAuthUser });
     const secret = "must-not-be-persisted-8813";
