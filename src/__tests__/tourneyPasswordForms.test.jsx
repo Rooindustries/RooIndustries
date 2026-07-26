@@ -15,7 +15,7 @@ const {
 } = require("../../app/tourney/TourneyPasswordForms");
 
 const submitForgotForm = () => {
-  fireEvent.change(screen.getByLabelText("Discord username or email"), {
+  fireEvent.change(screen.getByLabelText("Roster name or email"), {
     target: { value: "player@example.com" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Send reset link" }));

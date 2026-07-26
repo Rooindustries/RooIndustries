@@ -23,9 +23,9 @@ const errorMessage = (error) => {
     "expired_intent",
     "invalid_intent",
   ].includes(error)) {
-    return "Social sign-in is temporarily unavailable. Use your username or email and password.";
+    return "Social sign-in is temporarily unavailable. Use your roster name or email and password.";
   }
-  return "Invalid Discord username, email, or password. Wait for approval before trying to log in.";
+  return "Invalid roster name, email, or password. Wait for approval before trying to log in.";
 };
 
 export default function TourneyLoginForm({
@@ -94,11 +94,11 @@ export default function TourneyLoginForm({
     <>
       <form className="cs-login cs-r5" onSubmit={handleSubmit}>
         <input
-          aria-label="Discord username or email"
+          aria-label="Roster name or email"
           autoComplete="username"
           className="cs-field"
           name="username"
-          placeholder="Discord username or email"
+          placeholder="Roster name or email"
           required
           type="text"
         />

@@ -41,7 +41,7 @@ export function TourneyForgotForm() {
   return (
     <form className="tourney-form tourney-form-narrow" onSubmit={handleSubmit}>
       <label>
-        Discord username or email
+        Roster name or email
         <input
           type="text"
           autoComplete="username"
