@@ -292,15 +292,13 @@ export const linkPendingDiscordIdentity = async ({
     return { linked: false, reason: "discord_account_not_linkable" };
   }
 
-  // The Discord account belongs to this person's other domain (typically their
-  // referral account). Supabase allows one auth.identities row per Discord
-  // account, so the principals are never merged -- merging would soft-delete the
-  // other domain's principal. The tourney side records its own projected link
-  // instead, which is what its Discord role assignment resolves against.
+  // The Discord account belongs to this person's other domain. Supabase allows
+  // one auth.identities row per Discord account, so the principals are never
+  // merged -- merging would soft-delete the other domain's principal. The domain
+  // being linked records its own projected link row instead, which is what its
+  // reads resolve against. Both directions are supported: a referral Discord can
+  // be linked into tourney and a tourney Discord into referral.
   if (hasOtherDomainAccount(pendingAccount, normalizedAccountScope)) {
-    if (normalizedAccountScope !== "tourney") {
-      return { linked: false, reason: "discord_account_not_linkable" };
-    }
     const identity = discordIdentityOf(pendingUser);
     const providerSubject = String(
       identity?.provider_id || identity?.id || ""
@@ -308,8 +306,9 @@ export const linkPendingDiscordIdentity = async ({
     if (!providerSubject) {
       return { linked: false, reason: "discord_session_missing" };
     }
-    const projected = await adminClient.rpc("roo_link_tourney_discord_identity", {
+    const projected = await adminClient.rpc("roo_link_domain_discord_identity", {
       p_principal_id: resolvedPrimaryAccount.principal_id,
+      p_domain: normalizedAccountScope,
       p_provider_subject: providerSubject,
       p_provider_email:
         String(identity?.identity_data?.email || pendingUser?.email || "")
@@ -321,6 +320,12 @@ export const linkPendingDiscordIdentity = async ({
       throw Object.assign(new Error("Discord account could not be linked."), {
         code: projected.error.code || "DISCORD_LINK_FAILED",
       });
+    }
+    if (projected.data?.linked === false) {
+      return {
+        linked: false,
+        reason: String(projected.data.reason || "discord_account_not_linkable"),
+      };
     }
     return {
       linked: true,

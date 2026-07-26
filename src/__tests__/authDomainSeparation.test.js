@@ -49,7 +49,9 @@ const discordUser = (overrides = {}) => ({
 
 describe("referral and tourney Discord linking are separate", () => {
   test("links a referral-owned Discord to a tourney account without merging principals", async () => {
-    const rpc = jest.fn().mockResolvedValue({ data: { domain: "tourney" }, error: null });
+    const rpc = jest
+      .fn()
+      .mockResolvedValue({ data: { linked: true, domain: "tourney" }, error: null });
 
     const result = await linkPendingDiscordIdentity({
       accountScope: "tourney",
@@ -69,9 +71,10 @@ describe("referral and tourney Discord linking are separate", () => {
     // The projected tourney-domain link is what the guild role resolves against.
     expect(rpc).toHaveBeenCalledTimes(1);
     expect(rpc).toHaveBeenCalledWith(
-      "roo_link_tourney_discord_identity",
+      "roo_link_domain_discord_identity",
       expect.objectContaining({
         p_principal_id: tourneyPrimaryAccount.principal_id,
+        p_domain: "tourney",
         p_provider_subject: discordSubject,
       })
     );
@@ -99,8 +102,10 @@ describe("referral and tourney Discord linking are separate", () => {
     expect(rpc).not.toHaveBeenCalled();
   });
 
-  test("does not cross-link a tourney-owned Discord into a referral account", async () => {
-    const rpc = jest.fn();
+  test("links a tourney-owned Discord into a referral account", async () => {
+    const rpc = jest
+      .fn()
+      .mockResolvedValue({ data: { linked: true, domain: "referral" }, error: null });
 
     await expect(
       linkPendingDiscordIdentity({
@@ -111,9 +116,47 @@ describe("referral and tourney Discord linking are separate", () => {
         primaryUserId,
         resolveAccount: jest.fn().mockResolvedValue(tourneyPendingAccount),
       })
-    ).resolves.toEqual({ linked: false, reason: "discord_account_not_linkable" });
+    ).resolves.toMatchObject({
+      linked: true,
+      crossDomain: true,
+      providerSubject: discordSubject,
+    });
 
-    expect(rpc).not.toHaveBeenCalled();
+    expect(rpc).toHaveBeenCalledWith(
+      "roo_link_domain_discord_identity",
+      expect.objectContaining({
+        p_principal_id: referralPrimaryAccount.principal_id,
+        p_domain: "referral",
+        p_provider_subject: discordSubject,
+      })
+    );
+    const calledRpcs = rpc.mock.calls.map(([name]) => name);
+    expect(calledRpcs).not.toContain("roo_merge_account_principals");
+  });
+
+  test("reports a refusal returned in the payload instead of reading it as linked", async () => {
+    const rpc = jest.fn().mockResolvedValue({
+      data: {
+        linked: false,
+        reason: "another_discord_already_linked",
+        domain: "referral",
+      },
+      error: null,
+    });
+
+    await expect(
+      linkPendingDiscordIdentity({
+        accountScope: "referral",
+        adminClient: { rpc },
+        pendingUser: discordUser(),
+        primaryAccount: referralPrimaryAccount,
+        primaryUserId,
+        resolveAccount: jest.fn().mockResolvedValue(tourneyPendingAccount),
+      })
+    ).resolves.toEqual({
+      linked: false,
+      reason: "another_discord_already_linked",
+    });
   });
 
   test("reports a missing Discord subject rather than linking a blank identity", async () => {
@@ -135,10 +178,10 @@ describe("referral and tourney Discord linking are separate", () => {
     expect(rpc).not.toHaveBeenCalled();
   });
 
-  test("surfaces a tourney Discord already claimed by another tourney account", async () => {
+  test("surfaces a database error rather than reporting a link", async () => {
     const rpc = jest.fn().mockResolvedValue({
       data: null,
-      error: { code: "23505", message: "Discord identity belongs to another tourney account" },
+      error: { code: "23505", message: "Discord identity belongs to another account" },
     });
 
     await expect(
@@ -196,6 +239,52 @@ describe("identity link domain migration", () => {
     ]) {
       expect(migration).toContain(required);
     }
+    expect(migration).not.toMatch(/to\s+(anon|authenticated)\b/);
+  });
+});
+
+describe("per-domain Discord link migration", () => {
+  const migration = fs.readFileSync(
+    path.resolve(
+      "supabase/migrations/20260726120000_link_discord_identity_per_domain.sql"
+    ),
+    "utf8"
+  );
+
+  test("resolves the owning account from the domain being linked", () => {
+    for (const required of [
+      "v_domain not in ('referral', 'tourney')",
+      "from accounts.tourney_accounts tourney",
+      "from accounts.creator_profiles creator",
+      "v_domain || '_link', v_domain",
+    ]) {
+      expect(migration).toContain(required);
+    }
+  });
+
+  test("reports an existing different Discord instead of hitting the unique index", () => {
+    expect(migration).toContain("and link.provider_subject <> v_subject");
+    expect(migration).toContain("'another_discord_already_linked'");
+  });
+
+  test("marks every outcome with an explicit linked flag", () => {
+    expect(migration).toContain("'linked', true");
+    expect(migration).toContain("'linked', false");
+  });
+
+  test("keeps the tourney signature working through a wrapper", () => {
+    expect(migration).toContain(
+      "create or replace function public.roo_link_tourney_discord_identity("
+    );
+    expect(migration).toContain(
+      "p_principal_id, 'tourney', p_provider_subject, p_provider_email, p_metadata"
+    );
+  });
+
+  test("grants the new function to service_role only", () => {
+    expect(migration).toContain(
+      "grant execute on function public.roo_link_domain_discord_identity(uuid, text, text, text, jsonb)\n  to service_role;"
+    );
     expect(migration).not.toMatch(/to\s+(anon|authenticated)\b/);
   });
 });
