@@ -190,7 +190,7 @@ export function buildTourneyDiscordInviteEmailTemplate({
          label: "Join Roo Industries Discord",
          marginRight: true,
        })}${ctaLink({ href: loginUrl, label: "Sign in", background: "#334155" })}</p>`
-    : `<p>You can sign in with your Discord username or email to view tournament details.</p>
+    : `<p>You can sign in with your roster name or email to view tournament details.</p>
        <p>${ctaLink({ href: loginUrl, label: "Sign in" })}</p>`;
 
   return {
@@ -424,7 +424,7 @@ export async function sendTourneyPlayerApprovedEmail({
          label: "Sign in",
          background: "#334155",
        })}</p>`
-    : `<p>You can sign in with your Discord username or email to view tournament details.</p>
+    : `<p>You can sign in with your roster name or email to view tournament details.</p>
        <p>${ctaLink({ href: loginUrl.toString(), label: "Sign in" })}</p>`;
 
   const { data, error } = await sendWithIdempotency(resend, {
