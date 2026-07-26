@@ -67,6 +67,7 @@
     "test:referral-authority:postgres17": "node scripts/test-referral-fallback-authority-postgres.mjs",
     "test:referral-email:postgres17": "node scripts/test-referral-email-dispatch-postgres.mjs",
     "test:referral-integrity:postgres17": "node scripts/test-referral-integrity-hardening-postgres.mjs",
+    "test:account-domain:postgres17": "node scripts/test-account-domain-identity-postgres.mjs",
     "repair:tourney:live-drift": "node scripts/tourney-live-drift-repair.mjs",
     "repair:supabase:commerce:dry-run": "node scripts/repair-supabase-commerce-integrity.mjs",
     "repair:supabase:commerce:apply": "node scripts/repair-supabase-commerce-integrity.mjs --apply",

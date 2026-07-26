@@ -14,8 +14,10 @@ const pgBin = String(process.env.PG_BIN || "").trim() || spawnSync(
   ["--bindir"],
   { encoding: "utf8" }
 ).stdout.trim();
-const temporaryBase = process.env.CLAUDE_JOB_DIR
-  ? path.join(process.env.CLAUDE_JOB_DIR, "tmp")
+// Honours a job-scoped scratch root when the runner sets one, so a sandboxed
+// build writes its throwaway cluster inside its own workspace instead of /tmp.
+const temporaryBase = process.env.ROO_JOB_DIR
+  ? path.join(process.env.ROO_JOB_DIR, "tmp")
   : os.tmpdir();
 const tempRoot = fs.mkdtempSync(
   path.join(temporaryBase, "roo-referral-integrity-")
