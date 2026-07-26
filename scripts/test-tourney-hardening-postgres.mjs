@@ -532,6 +532,18 @@ try {
     root,
     "supabase/migrations/20260715180000_finalize_noop_discord_and_readiness.sql"
   );
+  const supabaseRetireMirrorTriggers = path.join(
+    root,
+    "supabase/migrations/20260726160000_retire_legacy_mirror_triggers.sql"
+  );
+  const supabaseRetireMirrorContracts = path.join(
+    root,
+    "supabase/migrations/20260726160500_retire_legacy_mirror_contracts.sql"
+  );
+  const supabaseOptionalMirrorContracts = path.join(
+    root,
+    "supabase/migrations/20260726173000_readiness_green_without_mirror_contracts.sql"
+  );
   const legacyActivation = path.join(root, "scripts/tourney-schema-v4-activate-legacy.sql");
   const legacyRepair = path.join(root, "scripts/tourney-schema-v4-repair-legacy.sql");
   const legacyTriggerBindingRepair = path.join(
@@ -5642,6 +5654,51 @@ insert into accounts.discord_role_assignments(
     "fallback cutover operation history was not retained"
   );
 
+  // Neon retirement, applied last because it detaches the mirror triggers every check
+  // above depends on. The earlier assertions establish that the binding check still
+  // catches drift while contracts are enabled; these establish that the retired state
+  // -- what production actually runs -- is a valid green rather than a permanent red.
+  psql(
+    "supabase_fixture",
+    supabaseRetireMirrorTriggers,
+    supabaseRetireMirrorContracts,
+    supabaseOptionalMirrorContracts
+  );
+  await assertSql(
+    source,
+    `select
+      (status->>'ready')::boolean
+      and (status->>'enabled_contracts')::integer=0
+      and (status->>'correctly_bound')::integer=0
+      and jsonb_array_length(status->'drifted_tables')=0
+      and (status->>'contract_version')='v4-optional-contracts-20260726'
+      and (status->>'function_body_matches')::boolean ok
+     from (select tourney.mirror_trigger_binding_status_v4() status) binding`,
+    "retired mirror contracts did not produce a green readiness"
+  );
+  // Drift detection has to survive the relaxation: re-enable one contract without
+  // re-creating its trigger and the check must go red and name the table.
+  await source`
+    update tourney.mirror_contracts set enabled=true
+    where logical_table=(
+      select logical_table from tourney.mirror_contracts order by logical_table limit 1
+    )
+  `;
+  await assertSql(
+    source,
+    `select
+      not (status->>'ready')::boolean
+      and (status->>'enabled_contracts')::integer=1
+      and (status->>'correctly_bound')::integer=0
+      and jsonb_array_length(status->'drifted_tables')=1 ok
+     from (select tourney.mirror_trigger_binding_status_v4() status) binding`,
+    "an enabled contract with no trigger did not report drift"
+  );
+  await source`update tourney.mirror_contracts set enabled=false where enabled`;
+  process.stderr.write(
+    "[postgres17] mirror readiness green when retired, red on re-enabled drift\n"
+  );
+
   summary = {
     ok: true,
     postgres: version.trim(),
@@ -5701,6 +5758,7 @@ insert into accounts.discord_role_assignments(
       "connected database identity and independent legacy live-repair gates",
       "audited deterministic live-drift repair and canonical identity preservation",
       "zero pending and dead letters",
+      "green mirror readiness with contracts retired and drift still detected",
     ],
   };
 } finally {
