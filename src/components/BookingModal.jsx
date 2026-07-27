@@ -13,6 +13,10 @@ const FOCUSABLE_SELECTOR = [
 
 export default function BookingModal({ open, onClose, children }) {
   const contentRef = useRef(null);
+  // The unscaled dialog boundary. contentRef measures the design-width content
+  // for scaling, so it excludes the close button that sits outside the scaler;
+  // the focus trap and the click-outside guard need the whole dialog.
+  const wrapperRef = useRef(null);
   const closeButtonRef = useRef(null);
   const previousFocusRef = useRef(null);
   const layoutFrameRef = useRef(0);
@@ -173,14 +177,15 @@ export default function BookingModal({ open, onClose, children }) {
       }
       if (e.key !== "Tab") return;
 
+      const trapRoot = wrapperRef.current || contentRef.current;
       const focusableElements = Array.from(
-        contentRef.current?.querySelectorAll(FOCUSABLE_SELECTOR) || []
+        trapRoot?.querySelectorAll(FOCUSABLE_SELECTOR) || []
       ).filter((element) => element.getAttribute("aria-hidden") !== "true");
       if (focusableElements.length === 0) return;
 
       const firstElement = focusableElements[0];
       const lastElement = focusableElements[focusableElements.length - 1];
-      const focusIsOutside = !contentRef.current.contains(document.activeElement);
+      const focusIsOutside = !trapRoot.contains(document.activeElement);
       if (e.shiftKey && (document.activeElement === firstElement || focusIsOutside)) {
         e.preventDefault();
         lastElement.focus();
@@ -218,8 +223,9 @@ export default function BookingModal({ open, onClose, children }) {
   };
 
   const handleGlobalClick = (e) => {
-    if (contentRef.current && contentRef.current.contains(e.target)) {
-      return; 
+    const dialogRoot = wrapperRef.current || contentRef.current;
+    if (dialogRoot && dialogRoot.contains(e.target)) {
+      return;
     }
     onClose?.();
   };
@@ -268,10 +274,17 @@ export default function BookingModal({ open, onClose, children }) {
             }}
           >
             
-            {/* ANIMATED SIZE WRAPPER */}
-            <motion.div 
+            {/* ANIMATED SIZE WRAPPER — also the dialog boundary, so the close
+                button stays inside the aria-modal subtree a screen reader
+                confines its virtual cursor to. Its box tracks the visible
+                dialog; the scaler inside is a presentation-only transform. */}
+            <motion.div
+              ref={wrapperRef}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Schedule your session"
               className="m-auto relative"
-              initial={{ 
+              initial={{
                 width: wrapperSize.width, 
                 height: wrapperSize.height 
               }}
@@ -282,11 +295,31 @@ export default function BookingModal({ open, onClose, children }) {
               layout={!lowPerformanceMode}
               transition={springTransition}
             >
+              {/* CLOSE BUTTON (X)
+                  Lives on the unscaled wrapper rather than inside the content
+                  scaler: the scaler shrinks by dynamicScale, which shrank the
+                  control to a ~14px sliver and pinned it to the 1150px design
+                  width's left edge, far from the centred card. Anchoring it here
+                  keeps it beside the dialog's own top-right corner at a constant
+                  size, with a 44px touch target.
+              */}
+              <button
+                id="booking-modal-close"
+                aria-label="Close"
+                className="absolute right-1 top-1 z-50 flex h-11 w-11 items-center justify-center text-info-text hover:text-white transition text-3xl leading-none opacity-80 hover:opacity-100"
+                ref={closeButtonRef}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClose();
+                }}
+              >
+                <span aria-hidden="true">×</span>
+              </button>
+
               {/* CONTENT SCALER */}
               <motion.div
-                role="dialog"
-                aria-modal="true"
-                aria-label="Schedule your session"
+                data-booking-scaler="true"
                 className="shadow-none outline-none overflow-visible absolute top-0 left-0 origin-top-left cursor-default"
                 
                 initial={
@@ -307,29 +340,11 @@ export default function BookingModal({ open, onClose, children }) {
                 transition={lowPerformanceMode ? fadeTransition : springTransition}
               >
                 {/* CONTENT CONTAINER */}
-                <div 
-                  ref={contentRef} 
+                <div
+                  ref={contentRef}
                   id={isMobile ? "booking-mobile-override" : undefined}
                   style={{ width: renderWidth, position: 'relative' }}
                 >
-                  {/* CLOSE BUTTON (X) 
-                      - ml-4 md:ml-8: Responsive Left Margin (Relative Padding)
-                      - text-2xl md:text-4xl: Responsive Text Size (Relative Size)
-                  */}
-                  <button
-                    id="booking-modal-close"
-                    aria-label="Close"
-                    className="absolute left-0 top-0 z-50 ml-4 md:ml-8 text-info-text hover:text-white transition text-2xl md:text-4xl leading-none opacity-80 hover:opacity-100"
-                    ref={closeButtonRef}
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onClose();
-                    }}
-                  >
-                    <span aria-hidden="true">×</span>
-                  </button>
-
                   {/* CHILDREN */}
                   {React.Children.map(children, child => {
                     if (React.isValidElement(child)) {
