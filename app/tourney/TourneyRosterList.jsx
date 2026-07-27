@@ -219,14 +219,12 @@ export default function TourneyRosterList({ players = [] }) {
         ))}
       </div>
 
-      <div className="tourney-roster-group">
-        <p className="tourney-player-group-title">Main Pool</p>
-        {groupedPlayers.mainPlayers.length > 0 ? (
-          renderPlayerList(groupedPlayers.mainPlayers)
-        ) : (
-          <p className="tourney-empty">No main-pool players yet.</p>
-        )}
-      </div>
+      {groupedPlayers.mainPlayers.length > 0 ? (
+        <div className="tourney-roster-group">
+          <p className="tourney-player-group-title">Main Pool</p>
+          {renderPlayerList(groupedPlayers.mainPlayers)}
+        </div>
+      ) : null}
 
       {groupedPlayers.substitutePlayers.length > 0 ? (
         <div className="tourney-roster-group">

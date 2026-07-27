@@ -30,14 +30,15 @@ export default async function TourneyRosterPage() {
     getTourneyHostsWithLiveStatus().catch(() => undefined),
     readPublicTourneyRoster().then((body) => body.players).catch(() => []),
   ]);
-  const captainPlayers = players.filter((player) => player.isCaptain);
-  const unassignedPlayers = players.filter((player) => !player.isCaptain);
+  const substitutePlayers = players.filter(
+    (player) => player.registrationPool === "substitute"
+  );
 
   return (
     <TourneyShell session={session} activeHref="/tourney/roster">
       <RouteTitle eyebrow="Roster" title="Roo Industries" accent="Roster">
-        Team captains are set. The remaining approved players will be drafted on
-        July 26 at 19:00 UTC.
+        The twelve tournament rosters are set. Substitute players remain
+        available if a team needs a replacement.
       </RouteTitle>
 
       <div className="tourney-grid">
@@ -48,22 +49,22 @@ export default async function TourneyRosterPage() {
 
       <div className="tourney-grid">
         <Section id="teams" eyebrow="Roster" title="Teams 1–12" wide>
-          <TourneyTeamCards players={captainPlayers} />
+          <TourneyTeamCards players={players} />
         </Section>
       </div>
 
       <div className="tourney-grid">
         <Section
-          id="unassigned-players"
+          id="substitute-pool"
           eyebrow="Roster"
-          title="Unassigned Players"
+          title="Substitute Pool"
           wide
         >
-          {unassignedPlayers.length > 0 ? (
-            <TourneyRosterList players={unassignedPlayers} />
+          {substitutePlayers.length > 0 ? (
+            <TourneyRosterList players={substitutePlayers} />
           ) : (
-            <StatusPanel label="Drafted" title="No unassigned players">
-              Every approved player has been assigned to a team.
+            <StatusPanel label="Substitutes" title="No substitute players">
+              No approved substitute players are currently available.
             </StatusPanel>
           )}
         </Section>

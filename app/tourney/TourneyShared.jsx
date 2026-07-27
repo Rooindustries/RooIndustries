@@ -2484,8 +2484,18 @@ export const TourneyStyles = () => (
       border-bottom: 0;
     }
 
-    .tourney-team-slot.is-captain {
+    .tourney-team-slot.is-captain,
+    .tourney-team-slot.is-player {
       grid-template-columns: 42px minmax(0, 1fr);
+    }
+
+    .tourney-team-slot.is-player {
+      background:
+        radial-gradient(circle at 8% 50%, rgba(14, 165, 233, 0.08), transparent 45%),
+        color-mix(in srgb, var(--tourney-surface-strong) 62%, transparent);
+    }
+
+    .tourney-team-slot.is-captain {
       border-bottom-color: rgba(250, 204, 21, 0.34);
       background:
         radial-gradient(circle at 8% 50%, rgba(250, 204, 21, 0.12), transparent 45%),
@@ -2510,6 +2520,11 @@ export const TourneyStyles = () => (
       width: 42px;
       height: 42px;
       overflow: hidden;
+      border-color: rgba(125, 211, 252, 0.46);
+      color: var(--tourney-accent);
+    }
+
+    .tourney-team-slot.is-captain .tourney-team-slot-avatar {
       border-color: rgba(250, 204, 21, 0.52);
       color: #facc15;
     }
