@@ -5,34 +5,52 @@ import SiteDialog from "./SiteDialog";
 
 const PENDING_DISCORD_CHOICE_KEY = "refPendingDiscordChoice";
 const PENDING_DISCORD_CHOICE_MAX_AGE_MS = 15 * 60 * 1000;
-const DISCORD_LINK_SUCCESS_MESSAGE = "Discord linked to your account.";
-const DISCORD_LINK_FAILED_MESSAGE =
-  "Discord linking did not complete. Try the Discord login again.";
+const LINK_PROVIDERS = ["discord", "google"];
+const PROVIDER_LABELS = { discord: "Discord", google: "Google" };
 const PASSWORD_UPDATED_MESSAGE =
   "Password updated. Log in with your new password.";
+
+const normalizeProvider = (value) => {
+  const provider = String(value || "").trim().toLowerCase();
+  return LINK_PROVIDERS.includes(provider) ? provider : "discord";
+};
+
+const providerLabelOf = (value) => PROVIDER_LABELS[normalizeProvider(value)];
+
+const linkSuccessMessage = (provider) =>
+  `${providerLabelOf(provider)} linked to your account.`;
+
+const linkFailedMessage = (provider) => {
+  const label = providerLabelOf(provider);
+  return `${label} linking did not complete. Try the ${label} login again.`;
+};
 
 const clearPendingDiscordChoice = () => {
   try {
     window.sessionStorage.removeItem(PENDING_DISCORD_CHOICE_KEY);
   } catch {
-    console.error("Pending Discord choice could not be cleared");
+    console.error("Pending social link choice could not be cleared");
   }
 };
 
-const savePendingDiscordChoice = (state) => {
+const savePendingDiscordChoice = (state, provider = "discord") => {
   try {
     window.sessionStorage.setItem(
       PENDING_DISCORD_CHOICE_KEY,
       JSON.stringify({
         expiresAt: Date.now() + PENDING_DISCORD_CHOICE_MAX_AGE_MS,
+        provider: normalizeProvider(provider),
         state,
       })
     );
   } catch {
-    console.error("Pending Discord choice could not be saved");
+    console.error("Pending social link choice could not be saved");
   }
 };
 
+// Returns { provider, state } so a choice saved before a redirect still knows
+// which provider it belongs to. Choices written by an earlier deploy carry no
+// provider and read back as Discord, which is what they were.
 const readPendingDiscordChoice = () => {
   try {
     const value = JSON.parse(
@@ -43,12 +61,12 @@ const readPendingDiscordChoice = () => {
       Number(value?.expiresAt || 0) <= Date.now()
     ) {
       clearPendingDiscordChoice();
-      return "";
+      return { provider: "", state: "" };
     }
-    return value.state;
+    return { provider: normalizeProvider(value.provider), state: value.state };
   } catch {
     clearPendingDiscordChoice();
-    return "";
+    return { provider: "", state: "" };
   }
 };
 
@@ -63,18 +81,22 @@ export default function RefLogin() {
   const [outcome, setOutcome] = useState(null);
   const [showUnlinkedDiscord, setShowUnlinkedDiscord] = useState(false);
   const [linkDiscord, setLinkDiscord] = useState(false);
+  const [linkProvider, setLinkProvider] = useState("discord");
   const identifierInputRef = useRef(null);
 
   // Load saved referral code
   useEffect(() => {
     const query = new URLSearchParams(location.search);
     const oauthError = query.get("oauth");
-    const provider = query.get("provider");
-    let pendingDiscordChoice = readPendingDiscordChoice();
+    const provider = String(query.get("provider") || "").trim().toLowerCase();
+    let pendingChoice = readPendingDiscordChoice();
     if (oauthError) {
-      if (oauthError === "unlinked" && provider === "discord") {
-        savePendingDiscordChoice("choose");
-        pendingDiscordChoice = "choose";
+      // Both providers are offered on this page, so both need somewhere to go
+      // when the social account has no creator account linked yet.
+      if (oauthError === "unlinked" && LINK_PROVIDERS.includes(provider)) {
+        savePendingDiscordChoice("choose", provider);
+        pendingChoice = { provider, state: "choose" };
+        setLinkProvider(provider);
         setShowUnlinkedDiscord(true);
       } else {
         setOutcome({
@@ -87,9 +109,11 @@ export default function RefLogin() {
       }
       query.delete("oauth");
       query.delete("provider");
-    } else if (pendingDiscordChoice === "choose") {
+    } else if (pendingChoice.state === "choose") {
+      setLinkProvider(pendingChoice.provider);
       setShowUnlinkedDiscord(true);
-    } else if (pendingDiscordChoice === "link") {
+    } else if (pendingChoice.state === "link") {
+      setLinkProvider(pendingChoice.provider);
       setLinkDiscord(true);
     }
 
@@ -105,7 +129,7 @@ export default function RefLogin() {
     );
 
     const checkSession = async () => {
-      if (pendingDiscordChoice) return;
+      if (pendingChoice.state) return;
       try {
         const sessionRes = await fetch("/api/ref/sessionStatus");
         if (sessionRes.ok) {
@@ -136,14 +160,18 @@ export default function RefLogin() {
     setOutcome(null);
 
     try {
-      const shouldLinkDiscord =
-        linkDiscord || readPendingDiscordChoice() === "link";
+      const heldChoice = readPendingDiscordChoice();
+      const shouldLinkSocial = linkDiscord || heldChoice.state === "link";
+      const requestedProvider = normalizeProvider(
+        heldChoice.state === "link" ? heldChoice.provider : linkProvider
+      );
       const res = await fetch("/api/ref/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           code,
-          linkDiscord: shouldLinkDiscord,
+          linkDiscord: shouldLinkSocial,
+          ...(shouldLinkSocial ? { linkProvider: requestedProvider } : {}),
           password,
           rememberMe,
         }),
@@ -159,18 +187,23 @@ export default function RefLogin() {
       }
 
       sessionStorage.setItem("refLoginCode", data.code || code);
-      if (shouldLinkDiscord) {
+      if (shouldLinkSocial) {
         clearPendingDiscordChoice();
-        const discordLinked = data.discordLinked === true;
-        const message = discordLinked
-          ? DISCORD_LINK_SUCCESS_MESSAGE
-          : data.discordLinkError || DISCORD_LINK_FAILED_MESSAGE;
-        setOutcome({ type: discordLinked ? "success" : "error", message });
+        const socialLinked = data.discordLinked === true;
+        const linkedProvider = socialLinked
+          ? normalizeProvider(data.linkedProvider || requestedProvider)
+          : requestedProvider;
+        const message = socialLinked
+          ? linkSuccessMessage(linkedProvider)
+          : data.discordLinkError || linkFailedMessage(requestedProvider);
+        setOutcome({ type: socialLinked ? "success" : "error", message });
         setTimeout(
           () =>
             nav(
               `/referrals/dashboard?notice=${
-                discordLinked ? "discord-linked" : "discord-link-failed"
+                socialLinked
+                  ? `${linkedProvider}-linked`
+                  : `${requestedProvider}-link-failed`
               }`
             ),
           900
@@ -350,15 +383,16 @@ export default function RefLogin() {
           className="mt-3 text-sm leading-6 text-ink-secondary"
           id="unlinked-discord-description"
         >
-          This Discord isn&apos;t linked to a creator account yet. Already registered?
-          Log in and we&apos;ll link your Discord to it. New here? Create your account.
+          This {providerLabelOf(linkProvider)} isn&apos;t linked to a creator
+          account yet. Already registered? Log in and we&apos;ll link your{" "}
+          {providerLabelOf(linkProvider)} to it. New here? Create your account.
         </p>
         <div className="mt-6 flex flex-col gap-3">
           <button
             className="w-full rounded-xl bg-accent-strong px-5 py-3 text-sm font-semibold text-white shadow-glow-soft transition hover:bg-accent"
             data-autofocus
             onClick={() => {
-              savePendingDiscordChoice("link");
+              savePendingDiscordChoice("link", linkProvider);
               setLinkDiscord(true);
               setShowUnlinkedDiscord(false);
               requestAnimationFrame(() => identifierInputRef.current?.focus());
@@ -371,7 +405,11 @@ export default function RefLogin() {
             className="w-full rounded-xl border border-line-input bg-surface-input px-5 py-3 text-sm font-semibold text-ink-secondary transition hover:border-info-border hover:bg-surface-hover"
             onClick={() => {
               clearPendingDiscordChoice();
-              nav("/referrals/register?oauth=ready&provider=discord");
+              nav(
+                `/referrals/register?oauth=ready&provider=${normalizeProvider(
+                  linkProvider
+                )}`
+              );
             }}
             type="button"
           >

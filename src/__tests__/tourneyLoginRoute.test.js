@@ -7,9 +7,10 @@ const mockLogSafeError = jest.fn();
 const mockClearNextSupabaseSession = jest.fn();
 const mockInstallNextSupabaseSession = jest.fn();
 const mockLinkPendingDiscordIdentity = jest.fn();
-const mockReadPendingDiscordLink = jest.fn();
+const mockResolvePendingSocialLink = jest.fn();
 const mockResolvePendingDiscordUser = jest.fn();
 const mockQueueTourneyDiscordAuthProjection = jest.fn();
+const mockQueueTourneyDiscordCrossDomainRoleProjection = jest.fn();
 
 const createResponse = ({ body = null, status = 200, url = "" } = {}) => {
   const cookieValues = [];
@@ -57,19 +58,22 @@ jest.mock("../server/supabase/serverSession", () => ({
   installNextSupabaseSession: (...args) => mockInstallNextSupabaseSession(...args),
 }));
 jest.mock("../server/supabase/pendingSocialLink", () => ({
-  clearPendingDiscordLinkCookie: () => ({
-    name: "roo_pending_tourney_discord_link",
+  clearPendingDiscordLinkCookie: ({ provider = "discord" } = {}) => ({
+    name: `roo_pending_tourney_${provider}_link`,
     value: "",
     maxAge: 0,
   }),
   linkPendingDiscordIdentity: (...args) =>
     mockLinkPendingDiscordIdentity(...args),
-  readPendingDiscordLink: (...args) => mockReadPendingDiscordLink(...args),
+  PENDING_LINK_PROVIDERS: ["discord", "google"],
   resolvePendingDiscordUser: (...args) => mockResolvePendingDiscordUser(...args),
+  resolvePendingSocialLink: (...args) => mockResolvePendingSocialLink(...args),
 }));
 jest.mock("../server/tourney/discordDesiredState", () => ({
   queueTourneyDiscordAuthProjection: (...args) =>
     mockQueueTourneyDiscordAuthProjection(...args),
+  queueTourneyDiscordCrossDomainRoleProjection: (...args) =>
+    mockQueueTourneyDiscordCrossDomainRoleProjection(...args),
 }));
 
 const { POST } = require("../../app/api/tourney/login/route.js");
@@ -102,9 +106,10 @@ describe("tourney login API route", () => {
     mockClearNextSupabaseSession.mockReset();
     mockInstallNextSupabaseSession.mockReset();
     mockLinkPendingDiscordIdentity.mockReset();
-    mockReadPendingDiscordLink.mockReset();
+    mockResolvePendingSocialLink.mockReset();
     mockResolvePendingDiscordUser.mockReset();
     mockQueueTourneyDiscordAuthProjection.mockReset();
+    mockQueueTourneyDiscordCrossDomainRoleProjection.mockReset();
 
     mockCheckTourneyRateLimit.mockReturnValue({ ok: true });
     mockGetClientAddressFromHeaders.mockReturnValue("127.0.0.1");
@@ -120,6 +125,9 @@ describe("tourney login API route", () => {
     mockQueueTourneyDiscordAuthProjection.mockResolvedValue({
       applied: true,
       reason: "applied",
+    });
+    mockQueueTourneyDiscordCrossDomainRoleProjection.mockResolvedValue({
+      queued: true,
     });
   });
 
@@ -166,6 +174,7 @@ describe("tourney login API route", () => {
   test("links the proved Discord identity and resumes durable role reconciliation", async () => {
     const pendingLink = {
       intentId: "11111111-1111-4111-8111-111111111111",
+      provider: "discord",
       userId: "20000000-0000-4000-8000-000000000002",
     };
     const pendingUser = {
@@ -189,7 +198,7 @@ describe("tourney login API route", () => {
       },
       supabaseSession,
     });
-    mockReadPendingDiscordLink.mockReturnValue(pendingLink);
+    mockResolvePendingSocialLink.mockReturnValue(pendingLink);
     mockResolvePendingDiscordUser.mockResolvedValue(pendingUser);
 
     const response = await POST(
@@ -207,11 +216,13 @@ describe("tourney login API route", () => {
       role: "player",
       username: "player-one",
       discordLinked: true,
+      linkedProvider: "discord",
     });
     expect(mockLinkPendingDiscordIdentity).toHaveBeenCalledWith({
       accountScope: "tourney",
       pendingUser,
       primaryUserId,
+      provider: "discord",
     });
     expect(mockQueueTourneyDiscordAuthProjection).toHaveBeenCalledWith({
       accountUserId: pendingLink.userId,
@@ -253,7 +264,7 @@ describe("tourney login API route", () => {
     expect(body.error).toBe(
       "Invalid roster name, email, or password. Wait for approval before trying to log in."
     );
-    expect(mockReadPendingDiscordLink).not.toHaveBeenCalled();
+    expect(mockResolvePendingSocialLink).not.toHaveBeenCalled();
     expect(mockLinkPendingDiscordIdentity).not.toHaveBeenCalled();
     expect(mockQueueTourneyDiscordAuthProjection).not.toHaveBeenCalled();
     expect(response.cookies.values).toHaveLength(0);
@@ -275,7 +286,7 @@ describe("tourney login API route", () => {
       },
       supabaseSession,
     });
-    mockReadPendingDiscordLink.mockReturnValue(null);
+    mockResolvePendingSocialLink.mockReturnValue(null);
 
     const response = await POST(
       makeJsonRequest({
@@ -305,5 +316,114 @@ describe("tourney login API route", () => {
         maxAge: 0,
       })
     );
+  });
+
+  test("links a proved Google identity without queueing a guild role", async () => {
+    const pendingLink = {
+      intentId: "22222222-2222-4222-8222-222222222222",
+      provider: "google",
+      userId: "20000000-0000-4000-8000-000000000002",
+    };
+    const pendingUser = {
+      id: pendingLink.userId,
+      identities: [{ provider: "google" }],
+    };
+    const primaryUserId = "30000000-0000-4000-8000-000000000003";
+    mockVerifyTourneyCredentials.mockResolvedValue({
+      ok: true,
+      account: {
+        authBackend: "supabase",
+        role: "player",
+        username: "player-one",
+        version: "3",
+      },
+      supabaseSession: {
+        access_token: "primary-access-token",
+        refresh_token: "primary-refresh-token",
+        user: { id: primaryUserId },
+      },
+    });
+    mockResolvePendingSocialLink.mockReturnValue(pendingLink);
+    mockResolvePendingDiscordUser.mockResolvedValue(pendingUser);
+
+    const response = await POST(
+      makeJsonRequest({
+        linkDiscord: true,
+        linkProvider: "google",
+        password: "correct-password",
+        username: "player-one",
+      })
+    );
+    const body = await response.json();
+
+    expect(body).toEqual({
+      ok: true,
+      role: "player",
+      username: "player-one",
+      discordLinked: true,
+      linkedProvider: "google",
+    });
+    expect(mockLinkPendingDiscordIdentity).toHaveBeenCalledWith({
+      accountScope: "tourney",
+      pendingUser,
+      primaryUserId,
+      provider: "google",
+    });
+    // Google has no guild membership to project.
+    expect(mockQueueTourneyDiscordAuthProjection).not.toHaveBeenCalled();
+    expect(
+      mockQueueTourneyDiscordCrossDomainRoleProjection
+    ).not.toHaveBeenCalled();
+    expect(response.cookies.values).toContainEqual(
+      expect.objectContaining({
+        name: "roo_pending_tourney_google_link",
+        maxAge: 0,
+      })
+    );
+  });
+
+  test("spends the held Discord proof even when the body claims Google", async () => {
+    const pendingLink = {
+      intentId: "33333333-3333-4333-8333-333333333333",
+      provider: "discord",
+      userId: "20000000-0000-4000-8000-000000000002",
+    };
+    mockVerifyTourneyCredentials.mockResolvedValue({
+      ok: true,
+      account: {
+        authBackend: "supabase",
+        role: "player",
+        username: "player-one",
+        version: "3",
+      },
+      supabaseSession: {
+        access_token: "primary-access-token",
+        refresh_token: "primary-refresh-token",
+        user: { id: "30000000-0000-4000-8000-000000000003" },
+      },
+    });
+    mockResolvePendingSocialLink.mockReturnValue(pendingLink);
+    mockResolvePendingDiscordUser.mockResolvedValue({
+      id: pendingLink.userId,
+      identities: [{ provider: "discord" }],
+    });
+
+    const response = await POST(
+      makeJsonRequest({
+        linkDiscord: true,
+        linkProvider: "google",
+        password: "correct-password",
+        username: "player-one",
+      })
+    );
+    const body = await response.json();
+
+    // The proof is authoritative: the request body cannot turn a Discord proof
+    // into a Google link.
+    expect(body.linkedProvider).toBe("discord");
+    expect(mockLinkPendingDiscordIdentity).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "discord" })
+    );
+    expect(mockQueueTourneyDiscordAuthProjection).toHaveBeenCalled();
   });
 });

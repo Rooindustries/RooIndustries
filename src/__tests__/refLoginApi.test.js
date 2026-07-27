@@ -9,6 +9,7 @@ const mockInstallLegacySupabaseSession = jest.fn();
 const mockAppendPendingDiscordLinkCookie = jest.fn();
 const mockLinkPendingDiscordIdentity = jest.fn();
 const mockResolvePendingDiscordUser = jest.fn();
+const mockResolvePendingSocialLink = jest.fn();
 const originalBackend = process.env.DATA_PRIMARY_BACKEND;
 const originalCutover = process.env.SUPABASE_CUTOVER_ENABLED;
 const originalCanaries = process.env.SUPABASE_AUTH_CANARY_ACCOUNTS;
@@ -31,13 +32,15 @@ jest.mock("../server/supabase/serverSession.js", () => ({
 jest.mock("../server/supabase/pendingSocialLink.js", () => ({
   appendPendingDiscordLinkCookie: (...args) =>
     mockAppendPendingDiscordLinkCookie(...args),
-  clearPendingDiscordLinkCookie: () => ({
-    name: "roo_pending_discord_link",
+  clearPendingDiscordLinkCookie: ({ provider = "discord" } = {}) => ({
+    name: `roo_pending_${provider}_link`,
     value: "",
     maxAge: 0,
   }),
   linkPendingDiscordIdentity: (...args) => mockLinkPendingDiscordIdentity(...args),
+  PENDING_LINK_PROVIDERS: ["discord", "google"],
   resolvePendingDiscordUser: (...args) => mockResolvePendingDiscordUser(...args),
+  resolvePendingSocialLink: (...args) => mockResolvePendingSocialLink(...args),
 }));
 
 const mockFetch = jest.fn();
@@ -173,6 +176,7 @@ beforeEach(() => {
   mockInstallLegacySupabaseSession.mockResolvedValue(true);
   mockLinkPendingDiscordIdentity.mockResolvedValue({ linked: true });
   mockResolvePendingDiscordUser.mockResolvedValue(null);
+  mockResolvePendingSocialLink.mockReturnValue(null);
 });
 
 afterAll(() => {
@@ -213,7 +217,16 @@ describe("referral login API", () => {
     };
     const user = { id: "30000000-0000-4000-8000-000000000003" };
     const session = { access_token: "creator-access", refresh_token: "creator-refresh" };
+    mockResolvePendingSocialLink.mockReturnValue({
+      intentId: "11111111-1111-4111-8111-111111111111",
+      provider: "discord",
+      userId: pendingDiscordUser.id,
+    });
     mockResolvePendingDiscordUser.mockResolvedValue(pendingDiscordUser);
+    mockLinkPendingDiscordIdentity.mockResolvedValue({
+      linked: true,
+      provider: "discord",
+    });
     mockAuthenticateSupabaseAccount.mockResolvedValue({
       ok: true,
       account,
@@ -235,9 +248,11 @@ describe("referral login API", () => {
       pendingUser: pendingDiscordUser,
       primaryAccount: account,
       primaryUserId: user.id,
+      provider: "discord",
     });
     expect(mockClearLegacySupabaseSession).toHaveBeenCalledTimes(1);
     expect(mockResolvePendingDiscordUser).toHaveBeenCalledWith({
+      provider: "discord",
       request: expect.any(Object),
     });
     expect(mockInstallLegacySupabaseSession).toHaveBeenCalledWith(
@@ -248,7 +263,74 @@ describe("referral login API", () => {
       ok: true,
       code: "creator-code",
       discordLinked: true,
+      linkedProvider: "discord",
     });
+  });
+
+  test("links a pending Google identity after creator password authentication", async () => {
+    process.env.DATA_PRIMARY_BACKEND = "supabase";
+    const pendingGoogleUser = {
+      id: "20000000-0000-4000-8000-000000000002",
+      identities: [{ provider: "google" }],
+    };
+    const account = {
+      creator_legacy_sanity_id: "ref_creator_1",
+      display_name: "Creator",
+      legacy_sanity_id: "ref_creator_1",
+      principal_id: principalId,
+      referral_code: "creator-code",
+      session_version: 7,
+    };
+    const user = { id: "30000000-0000-4000-8000-000000000003" };
+    mockResolvePendingSocialLink.mockReturnValue({
+      intentId: "22222222-2222-4222-8222-222222222222",
+      provider: "google",
+      userId: pendingGoogleUser.id,
+    });
+    mockResolvePendingDiscordUser.mockResolvedValue(pendingGoogleUser);
+    mockLinkPendingDiscordIdentity.mockResolvedValue({
+      linked: true,
+      provider: "google",
+    });
+    mockAuthenticateSupabaseAccount.mockResolvedValue({
+      ok: true,
+      account,
+      user,
+      session: { access_token: "creator-access", refresh_token: "creator-refresh" },
+    });
+    const res = createRes();
+
+    await login(
+      createReq({
+        code: "creator@example.com",
+        linkDiscord: true,
+        linkProvider: "google",
+        password: "correct-password",
+      }),
+      res
+    );
+
+    expect(mockLinkPendingDiscordIdentity).toHaveBeenCalledWith({
+      pendingUser: pendingGoogleUser,
+      primaryAccount: account,
+      primaryUserId: user.id,
+      provider: "google",
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      ok: true,
+      discordLinked: true,
+      linkedProvider: "google",
+    });
+    // Both providers' proofs are retired so a stale one cannot be spent later.
+    expect(mockAppendPendingDiscordLinkCookie).toHaveBeenCalledWith(
+      res,
+      expect.objectContaining({ name: "roo_pending_google_link", maxAge: 0 })
+    );
+    expect(mockAppendPendingDiscordLinkCookie).toHaveBeenCalledWith(
+      res,
+      expect.objectContaining({ name: "roo_pending_discord_link", maxAge: 0 })
+    );
   });
 
   test("logs in and reports when the pending Discord identity was lost", async () => {

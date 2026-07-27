@@ -12,13 +12,16 @@ const resolveAuthNotice = (search) => {
     const label = linkedProvider[0].toUpperCase() + linkedProvider.slice(1);
     return { type: "success", message: `${label} linked to your account.` };
   }
-  if (query.get("notice") === "discord-linked") {
-    return { type: "success", message: "Discord linked to your account." };
-  }
-  if (query.get("notice") === "discord-link-failed") {
+  const notice = String(query.get("notice") || "");
+  const noticeProvider = notice.replace(/-linked$|-link-failed$/, "");
+  if (["google", "discord"].includes(noticeProvider)) {
+    const label = noticeProvider[0].toUpperCase() + noticeProvider.slice(1);
+    if (notice.endsWith("-linked")) {
+      return { type: "success", message: `${label} linked to your account.` };
+    }
     return {
       type: "error",
-      message: "Discord linking did not complete. Try the Discord login again.",
+      message: `${label} linking did not complete. Try the ${label} login again.`,
     };
   }
   const oauthError = query.get("oauth");

@@ -28,7 +28,7 @@ describe("Tourney login page", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "This Discord isn't linked to a tournament account yet. Enter your Tourney username and password once and we'll link it."
+        "This Discord account isn't linked to a tournament account yet. Enter your Tourney username and password once and we'll link it."
       )
     ).toHaveClass("is-wrapped");
     expect(
@@ -46,6 +46,47 @@ describe("Tourney login page", () => {
     ).toHaveAttribute("href", "/tourney/roster");
     expect(
       screen.queryByRole("button", { name: "Continue with Discord" })
+    ).not.toBeInTheDocument();
+  });
+
+  test("renders the same prompt for an unlinked Google sign-in", async () => {
+    render(
+      await TourneyLoginPage({
+        searchParams: Promise.resolve({
+          error: "unlinked",
+          provider: "google",
+        }),
+      })
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "No account linked yet" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This Google account isn't linked to a tournament account yet. Enter your Tourney username and password once and we'll link it."
+      )
+    ).toHaveClass("is-wrapped");
+    expect(
+      screen.getByRole("button", { name: "Log in and link Google" })
+    ).toBeInTheDocument();
+  });
+
+  test("shows the plain sign-in form for an unknown provider", async () => {
+    render(
+      await TourneyLoginPage({
+        searchParams: Promise.resolve({
+          error: "unlinked",
+          provider: "apple",
+        }),
+      })
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "Sign in." })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Log in and link/ })
     ).not.toBeInTheDocument();
   });
 });

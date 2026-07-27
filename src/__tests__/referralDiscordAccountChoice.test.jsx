@@ -139,6 +139,7 @@ describe("unlinked referral Discord account choice", () => {
         body: JSON.stringify({
           code: "creator@example.com",
           linkDiscord: true,
+          linkProvider: "discord",
           password: "correct-password",
           rememberMe: false,
         }),
@@ -147,6 +148,101 @@ describe("unlinked referral Discord account choice", () => {
     expect(
       await screen.findByText("Discord linked to your account.")
     ).toBeInTheDocument();
+  });
+
+  test("shows the same account choice after an unlinked Google sign-in", async () => {
+    renderReferralAuth("/referrals/login?oauth=unlinked&provider=google");
+
+    expect(await screen.findByRole("dialog")).toHaveTextContent(
+      "This Google isn't linked to a creator account yet. Already registered? Log in and we'll link your Google to it. New here? Create your account."
+    );
+  });
+
+  test("logs in and links the preserved Google identity", async () => {
+    global.fetch.mockImplementation((url) => {
+      if (String(url) === "/api/ref/login") {
+        return Promise.resolve(
+          response({
+            ok: true,
+            code: "creator",
+            discordLinked: true,
+            linkedProvider: "google",
+          })
+        );
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    renderReferralAuth("/referrals/login?oauth=unlinked&provider=google");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Log in and link" }));
+    fireEvent.change(screen.getByLabelText("Referral code or login email"), {
+      target: { value: "creator@example.com" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "correct-password" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Login" }));
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith("/api/ref/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: "creator@example.com",
+          linkDiscord: true,
+          linkProvider: "google",
+          password: "correct-password",
+          rememberMe: false,
+        }),
+      });
+    });
+    expect(
+      await screen.findByText("Google linked to your account.")
+    ).toBeInTheDocument();
+  });
+
+  test("carries the chosen provider into the saved link choice", async () => {
+    renderReferralAuth("/referrals/login?oauth=unlinked&provider=google");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Log in and link" }));
+
+    const saved = JSON.parse(
+      window.sessionStorage.getItem("refPendingDiscordChoice") || "null"
+    );
+    expect(saved).toMatchObject({ provider: "google", state: "link" });
+  });
+
+  test("reads a link choice saved before this deploy as Discord", async () => {
+    window.sessionStorage.setItem(
+      "refPendingDiscordChoice",
+      JSON.stringify({ expiresAt: Date.now() + 60_000, state: "link" })
+    );
+    global.fetch.mockImplementation((url) => {
+      if (String(url) === "/api/ref/login") {
+        return Promise.resolve(
+          response({ ok: true, code: "creator", discordLinked: true })
+        );
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    renderReferralAuth("/referrals/login");
+
+    fireEvent.change(await screen.findByLabelText("Referral code or login email"), {
+      target: { value: "creator@example.com" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "correct-password" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Login" }));
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        "/api/ref/login",
+        expect.objectContaining({
+          body: expect.stringContaining('"linkProvider":"discord"'),
+        })
+      );
+    });
   });
 
   test("keeps the account choice open instead of auto-redirecting an existing creator session", async () => {

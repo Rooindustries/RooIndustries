@@ -22,11 +22,33 @@ import {
   appendPendingDiscordLinkCookie,
   clearPendingDiscordLinkCookie,
   linkPendingDiscordIdentity,
+  PENDING_LINK_PROVIDERS,
   resolvePendingDiscordUser,
+  resolvePendingSocialLink,
 } from "../../supabase/pendingSocialLink.js";
 
-const DISCORD_LINK_FAILED_MESSAGE =
-  "Discord linking did not complete. Try the Discord login again.";
+const linkFailedMessage = (provider) => {
+  const label = provider === "google" ? "Google" : "Discord";
+  return `${label} linking did not complete. Try the ${label} login again.`;
+};
+
+const normalizeLinkProvider = (value) => {
+  const provider = String(value || "").trim().toLowerCase();
+  return PENDING_LINK_PROVIDERS.includes(provider) ? provider : "discord";
+};
+
+// The legacy OAuth session fallback has no proof naming a provider, so the
+// provider is read off the user's own identities. The requested one is preferred
+// when present; otherwise the single linkable identity on the user is used.
+const legacyIdentityProvider = (user, requested) => {
+  const held = new Set(
+    (user?.identities || [])
+      .map((identity) => String(identity?.provider || "").trim().toLowerCase())
+      .filter((provider) => PENDING_LINK_PROVIDERS.includes(provider))
+  );
+  if (held.has(requested)) return requested;
+  return held.size === 1 ? [...held][0] : requested;
+};
 
 const DUMMY_PASSWORD_HASH =
   // nosemgrep: generic.secrets.security.detected-bcrypt-hash.detected-bcrypt-hash
@@ -45,7 +67,14 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
 
   try {
-    const { code, linkDiscord = false, password, rememberMe = false } = req.body || {};
+    const {
+      code,
+      linkDiscord = false,
+      linkProvider = "",
+      password,
+      rememberMe = false,
+    } = req.body || {};
+    const requestedLinkProvider = normalizeLinkProvider(linkProvider);
     const normalizedIdentifier = String(code || "").trim().toLowerCase();
     const normalizedPassword = String(password || "");
     if (!normalizedIdentifier || normalizedIdentifier.length > 254 || normalizedPassword.length > 128) {
@@ -113,16 +142,32 @@ export default async function handler(req, res) {
 
       let discordLinked = false;
       let discordLinkError = "";
+      let linkedProvider = "";
       if (linkDiscord) {
-        let pendingDiscordUser = await resolvePendingDiscordUser({
+        // The proof names its own provider. When none is held the legacy OAuth
+        // session is the fallback, and there the provider comes from the identity
+        // actually on that user rather than from the request body.
+        const pendingLink = resolvePendingSocialLink({
+          provider: requestedLinkProvider,
           request: req,
-        }).catch((error) => {
-          logSafeError("Pending Discord link proof lookup failed", error);
-          return null;
         });
+        let resolvedProvider = pendingLink?.provider || requestedLinkProvider;
+        let pendingDiscordUser = pendingLink
+          ? await resolvePendingDiscordUser({
+              provider: pendingLink.provider,
+              request: req,
+            }).catch((error) => {
+              logSafeError("Pending social link proof lookup failed", error);
+              return null;
+            })
+          : null;
         if (!pendingDiscordUser) {
           pendingDiscordUser = await getLegacySupabaseUser({ req, res }).catch(
             () => null
+          );
+          resolvedProvider = legacyIdentityProvider(
+            pendingDiscordUser,
+            requestedLinkProvider
           );
         }
         try {
@@ -130,15 +175,17 @@ export default async function handler(req, res) {
             pendingUser: pendingDiscordUser,
             primaryAccount: result.account,
             primaryUserId: result.user.id,
+            provider: resolvedProvider,
           });
           if (!linked.linked) {
-            discordLinkError = DISCORD_LINK_FAILED_MESSAGE;
+            discordLinkError = linkFailedMessage(resolvedProvider);
           } else {
             discordLinked = true;
+            linkedProvider = linked.provider || resolvedProvider;
           }
         } catch (error) {
-          logSafeError("Referral Discord account linking failed", error);
-          discordLinkError = DISCORD_LINK_FAILED_MESSAGE;
+          logSafeError("Referral social account linking failed", error);
+          discordLinkError = linkFailedMessage(resolvedProvider);
         }
       }
 
@@ -149,7 +196,12 @@ export default async function handler(req, res) {
         session: result.session,
       });
       if (linkDiscord) {
-        appendPendingDiscordLinkCookie(res, clearPendingDiscordLinkCookie());
+        for (const provider of PENDING_LINK_PROVIDERS) {
+          appendPendingDiscordLinkCookie(
+            res,
+            clearPendingDiscordLinkCookie({ provider })
+          );
+        }
       }
 
       setReferralSessionCookie(
@@ -170,6 +222,7 @@ export default async function handler(req, res) {
         name: result.account.display_name,
         code: result.account.referral_code,
         ...(discordLinked ? { discordLinked: true } : {}),
+        ...(linkedProvider ? { linkedProvider } : {}),
         ...(discordLinkError ? { discordLinkError } : {}),
       });
     }
