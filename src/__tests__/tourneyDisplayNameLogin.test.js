@@ -344,3 +344,51 @@ describe("roster name uniqueness migration", () => {
     expect(migration).toContain("btrim(display_name) <> ''");
   });
 });
+
+describe("plain username sign-in migration", () => {
+  const migration = fs.readFileSync(
+    path.resolve(
+      "supabase/migrations/20260727120000_accept_base_tourney_username_at_login.sql"
+    ),
+    "utf8"
+  );
+
+  test("registers the plain username as a real alias rather than trimming at lookup", () => {
+    // Stripping the suffix inside the resolver would merge two identifier spaces and
+    // could match a player whose chosen name genuinely ends in eight hex characters.
+    expect(migration).toContain("v_base_username");
+    expect(migration).toContain("regexp_replace(v_username, '-[0-9a-f]{8}$', '')");
+    expect(migration).toContain("'tourney_username', v_base_username");
+  });
+
+  test("claims the plain username separately so a collision cannot abort the import", () => {
+    const pairInsert = migration.indexOf("'tourney_email', v_login_email");
+    const baseInsert = migration.indexOf("'tourney_username', v_base_username");
+    expect(pairInsert).toBeGreaterThan(-1);
+    expect(baseInsert).toBeGreaterThan(pairInsert);
+    expect(migration).toContain(
+      "if v_base_username is not null and v_base_username <> v_username then"
+    );
+  });
+
+  test("never hands one player another player's login", () => {
+    // (alias_type, normalized_value) is unique, and the guarded ON CONFLICT leaves a
+    // row owned by someone else untouched instead of stealing it.
+    expect(migration).toContain(
+      "where accounts.login_aliases.user_id = excluded.user_id"
+    );
+  });
+
+  test("still creates the role and profile rows sign-in is gated on", () => {
+    // A resolving alias is not enough: authenticateSupabaseAccount also requires a
+    // tourney_player role and an active profile, so an import missing either one
+    // produces an account that resolves and then fails to log in.
+    expect(migration).toContain("insert into accounts.account_roles");
+    expect(migration).toContain("'tourney_player'");
+    expect(migration).toContain("insert into public.profiles");
+  });
+
+  test("rejects a base value the alias column could not store", () => {
+    expect(migration).toContain("char_length(v_base_username) > 254");
+  });
+});
