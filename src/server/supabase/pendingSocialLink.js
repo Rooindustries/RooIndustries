@@ -3,21 +3,43 @@ import crypto from "node:crypto";
 import { resolveSupabaseAccountByUserId } from "./accounts.js";
 import { createSupabaseAdminClient } from "./adminClient.js";
 import { readRequestCookie } from "./reauth.js";
+import {
+  normalizePendingLinkProvider,
+  PENDING_LINK_PROVIDERS,
+} from "./socialLinkProviders.js";
+
+export { PENDING_LINK_PROVIDERS };
 
 export const PENDING_DISCORD_LINK_COOKIE = "roo_pending_discord_link";
 export const PENDING_TOURNEY_DISCORD_LINK_COOKIE =
   "roo_pending_tourney_discord_link";
 export const PENDING_DISCORD_LINK_MAX_AGE_SECONDS = 15 * 60;
 
+// Google joined Discord as a linkable provider, so the pending-link proof carries
+// which provider it is for. The cookie names stay Discord-branded: they are the
+// names already sitting in live browsers, and a rename would silently drop the
+// proof for anyone mid-link across the deploy. Google gets its own cookie so a
+// person holding one pending proof cannot have it consumed as the other provider.
+export const PENDING_GOOGLE_LINK_COOKIE = "roo_pending_google_link";
+export const PENDING_TOURNEY_GOOGLE_LINK_COOKIE =
+  "roo_pending_tourney_google_link";
+
 const normalizePendingLinkFlow = (value) =>
   String(value || "").trim().toLowerCase() === "tourney"
     ? "tourney"
     : "referral";
 
-const pendingLinkCookieName = (flow) =>
-  normalizePendingLinkFlow(flow) === "tourney"
+const pendingLinkCookieName = (flow, provider = "discord") => {
+  const tourney = normalizePendingLinkFlow(flow) === "tourney";
+  if (normalizePendingLinkProvider(provider) === "google") {
+    return tourney
+      ? PENDING_TOURNEY_GOOGLE_LINK_COOKIE
+      : PENDING_GOOGLE_LINK_COOKIE;
+  }
+  return tourney
     ? PENDING_TOURNEY_DISCORD_LINK_COOKIE
     : PENDING_DISCORD_LINK_COOKIE;
+};
 
 const pendingLinkSecret = (env = process.env, flow = "referral") => {
   const normalizedFlow = normalizePendingLinkFlow(flow);
@@ -87,13 +109,15 @@ export const createPendingDiscordLinkCookie = ({
   flow = "referral",
   intentId,
   now = Date.now(),
+  provider = "discord",
   userId,
 } = {}) => {
   const normalizedFlow = normalizePendingLinkFlow(flow);
+  const normalizedProvider = normalizePendingLinkProvider(provider);
   const normalizedUserId = String(userId || "").trim();
   const normalizedIntentId = String(intentId || "").trim();
   if (!normalizedUserId || !normalizedIntentId) {
-    throw new Error("Pending Discord link identity is incomplete.");
+    throw new Error("Pending social link identity is incomplete.");
   }
   const issuedAt = Math.floor(now / 1000);
   const payload = Buffer.from(
@@ -102,12 +126,13 @@ export const createPendingDiscordLinkCookie = ({
       flow: normalizedFlow,
       iat: issuedAt,
       intentId: normalizedIntentId,
+      provider: normalizedProvider,
       userId: normalizedUserId,
       v: 2,
     })
   ).toString("base64url");
   return {
-    name: pendingLinkCookieName(normalizedFlow),
+    name: pendingLinkCookieName(normalizedFlow, normalizedProvider),
     value: `${payload}.${signPendingLink(payload, env, normalizedFlow)}`,
     ...pendingLinkCookieOptions(env),
   };
@@ -116,8 +141,9 @@ export const createPendingDiscordLinkCookie = ({
 export const clearPendingDiscordLinkCookie = ({
   env = process.env,
   flow = "referral",
+  provider = "discord",
 } = {}) => ({
-  name: pendingLinkCookieName(flow),
+  name: pendingLinkCookieName(flow, provider),
   value: "",
   ...pendingLinkCookieOptions(env),
   maxAge: 0,
@@ -140,10 +166,15 @@ export const readPendingDiscordLink = ({
   env = process.env,
   flow = "referral",
   now = Date.now(),
+  provider = "discord",
   request,
 } = {}) => {
   const normalizedFlow = normalizePendingLinkFlow(flow);
-  const token = readRequestCookie(request, pendingLinkCookieName(normalizedFlow));
+  const normalizedProvider = normalizePendingLinkProvider(provider);
+  const token = readRequestCookie(
+    request,
+    pendingLinkCookieName(normalizedFlow, normalizedProvider)
+  );
   const [payload, signature, extra] = String(token || "").split(".");
   if (!payload || !signature || extra) return null;
   if (!safeEqual(signature, signPendingLink(payload, env, normalizedFlow))) {
@@ -155,8 +186,15 @@ export const readPendingDiscordLink = ({
     const validVersion =
       (parsed?.v === 2 && parsed.flow === normalizedFlow) ||
       (parsed?.v === 1 && normalizedFlow === "referral" && !parsed.flow);
+    // A v2 proof minted before Google was linkable carries no provider and is
+    // always a Discord proof. Anything newer must name the provider it was read
+    // as, so a Google proof can never be spent as a Discord link or vice versa.
+    const proofProvider = parsed?.provider
+      ? normalizePendingLinkProvider(parsed.provider)
+      : "discord";
     if (
       !validVersion ||
+      proofProvider !== normalizedProvider ||
       !parsed.userId ||
       !parsed.intentId ||
       Number(parsed.iat) > currentTime + 60 ||
@@ -166,6 +204,7 @@ export const readPendingDiscordLink = ({
     }
     return {
       intentId: String(parsed.intentId),
+      provider: proofProvider,
       userId: String(parsed.userId),
     };
   } catch {
@@ -173,19 +212,54 @@ export const readPendingDiscordLink = ({
   }
 };
 
+// Finds whichever pending proof the browser is actually holding. The caller may
+// name a provider, but a person can arrive with either, so the named one is tried
+// first and the remaining providers after it -- returning the provider found so
+// the link is completed against the identity that was really authenticated.
+export const resolvePendingSocialLink = ({
+  env = process.env,
+  flow = "referral",
+  now = Date.now(),
+  provider = "",
+  request,
+} = {}) => {
+  const preferred = String(provider || "").trim().toLowerCase();
+  const order = PENDING_LINK_PROVIDERS.includes(preferred)
+    ? [preferred, ...PENDING_LINK_PROVIDERS.filter((entry) => entry !== preferred)]
+    : PENDING_LINK_PROVIDERS;
+  for (const candidate of order) {
+    const pendingLink = readPendingDiscordLink({
+      env,
+      flow,
+      now,
+      provider: candidate,
+      request,
+    });
+    if (pendingLink) return pendingLink;
+  }
+  return null;
+};
+
 export const resolvePendingDiscordUser = async ({
   adminClient = createSupabaseAdminClient(),
   env = process.env,
   flow = "referral",
   now = Date.now(),
+  provider = "discord",
   request,
 } = {}) => {
-  const pendingLink = readPendingDiscordLink({ env, flow, now, request });
+  const pendingLink = resolvePendingSocialLink({
+    env,
+    flow,
+    now,
+    provider,
+    request,
+  });
   if (!pendingLink) return null;
   const result = await adminClient.auth.admin.getUserById(pendingLink.userId);
   if (result.error) throw result.error;
   const user = result.data?.user || null;
-  return providersForUser(user).has("discord") ? user : null;
+  return providersForUser(user).has(pendingLink.provider) ? user : null;
 };
 
 const sha256 = (value) =>
@@ -220,9 +294,11 @@ const hasOtherDomainAccount = (account, accountScope = "referral") =>
     ? hasReferralAccount(account)
     : hasTourneyAccount(account);
 
-const discordIdentityOf = (user) =>
+const socialIdentityOf = (user, provider = "discord") =>
   (user?.identities || []).find(
-    (identity) => String(identity?.provider || "").trim().toLowerCase() === "discord"
+    (identity) =>
+      String(identity?.provider || "").trim().toLowerCase() ===
+      normalizePendingLinkProvider(provider)
   ) || null;
 
 const isActivePrimaryAccount = (account, accountScope) => {
@@ -246,19 +322,30 @@ export const linkPendingDiscordIdentity = async ({
   pendingUser,
   primaryAccount,
   primaryUserId,
+  provider = "discord",
   resolveAccount = resolveSupabaseAccountByUserId,
 } = {}) => {
   const normalizedAccountScope =
     String(accountScope || "").trim().toLowerCase() === "tourney"
       ? "tourney"
       : "referral";
+  const normalizedProvider = normalizePendingLinkProvider(provider);
   const pendingUserId = String(pendingUser?.id || "").trim();
   const targetUserId = String(primaryUserId || "").trim();
-  if (!pendingUserId || !targetUserId || !providersForUser(pendingUser).has("discord")) {
+  if (
+    !pendingUserId ||
+    !targetUserId ||
+    !providersForUser(pendingUser).has(normalizedProvider)
+  ) {
     return { linked: false, reason: "discord_session_missing" };
   }
   if (pendingUserId === targetUserId) {
-    return { linked: true, account: primaryAccount, alreadyLinked: true };
+    return {
+      linked: true,
+      account: primaryAccount,
+      alreadyLinked: true,
+      provider: normalizedProvider,
+    };
   }
 
   const [pendingAccount, resolvedPrimaryAccount] = await Promise.all([
@@ -283,6 +370,7 @@ export const linkPendingDiscordIdentity = async ({
       linked: true,
       account: resolvedPrimaryAccount,
       alreadyLinked: true,
+      provider: normalizedProvider,
     };
   }
   if (
@@ -292,23 +380,24 @@ export const linkPendingDiscordIdentity = async ({
     return { linked: false, reason: "discord_account_not_linkable" };
   }
 
-  // The Discord account belongs to this person's other domain. Supabase allows
-  // one auth.identities row per Discord account, so the principals are never
+  // The social account belongs to this person's other domain. Supabase allows
+  // one auth.identities row per provider account, so the principals are never
   // merged -- merging would soft-delete the other domain's principal. The domain
   // being linked records its own projected link row instead, which is what its
-  // reads resolve against. Both directions are supported: a referral Discord can
-  // be linked into tourney and a tourney Discord into referral.
+  // reads resolve against. Both directions are supported: a referral identity can
+  // be linked into tourney and a tourney identity into referral.
   if (hasOtherDomainAccount(pendingAccount, normalizedAccountScope)) {
-    const identity = discordIdentityOf(pendingUser);
+    const identity = socialIdentityOf(pendingUser, normalizedProvider);
     const providerSubject = String(
       identity?.provider_id || identity?.id || ""
     ).trim();
     if (!providerSubject) {
       return { linked: false, reason: "discord_session_missing" };
     }
-    const projected = await adminClient.rpc("roo_link_domain_discord_identity", {
+    const projected = await adminClient.rpc("roo_link_domain_social_identity", {
       p_principal_id: resolvedPrimaryAccount.principal_id,
       p_domain: normalizedAccountScope,
+      p_provider: normalizedProvider,
       p_provider_subject: providerSubject,
       p_provider_email:
         String(identity?.identity_data?.email || pendingUser?.email || "")
@@ -331,6 +420,7 @@ export const linkPendingDiscordIdentity = async ({
       linked: true,
       account: resolvedPrimaryAccount,
       crossDomain: true,
+      provider: normalizedProvider,
       providerSubject,
     };
   }
@@ -366,5 +456,5 @@ export const linkPendingDiscordIdentity = async ({
       code: merged.error?.code || "DISCORD_LINK_FAILED",
     });
   }
-  return { linked: true, account: merged.data };
+  return { linked: true, account: merged.data, provider: normalizedProvider };
 };

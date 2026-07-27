@@ -71,10 +71,11 @@ describe("referral and tourney Discord linking are separate", () => {
     // The projected tourney-domain link is what the guild role resolves against.
     expect(rpc).toHaveBeenCalledTimes(1);
     expect(rpc).toHaveBeenCalledWith(
-      "roo_link_domain_discord_identity",
+      "roo_link_domain_social_identity",
       expect.objectContaining({
         p_principal_id: tourneyPrimaryAccount.principal_id,
         p_domain: "tourney",
+        p_provider: "discord",
         p_provider_subject: discordSubject,
       })
     );
@@ -123,10 +124,11 @@ describe("referral and tourney Discord linking are separate", () => {
     });
 
     expect(rpc).toHaveBeenCalledWith(
-      "roo_link_domain_discord_identity",
+      "roo_link_domain_social_identity",
       expect.objectContaining({
         p_principal_id: referralPrimaryAccount.principal_id,
         p_domain: "referral",
+        p_provider: "discord",
         p_provider_subject: discordSubject,
       })
     );

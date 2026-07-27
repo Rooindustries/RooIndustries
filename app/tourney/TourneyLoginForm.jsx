@@ -32,12 +32,15 @@ export default function TourneyLoginForm({
   buttonLabel = "Sign in",
   initialError = "",
   linkDiscord = false,
+  linkProvider = "discord",
   navigate,
   note = "Assigned accounts only.",
   redirectTo = "/tourney",
   showRegistrationLink = false,
   socialLogin = null,
 }) {
+  const provider = linkProvider === "google" ? "google" : "discord";
+  const providerLabel = provider === "google" ? "Google" : "Discord";
   const [message, setMessage] = useState(errorMessage(initialError));
   const [busy, setBusy] = useState(false);
 
@@ -61,7 +64,7 @@ export default function TourneyLoginForm({
           password: String(form.get("password") || ""),
           rememberMe: form.get("rememberMe") === "on",
           redirectTo,
-          ...(linkDiscord ? { linkDiscord: true } : {}),
+          ...(linkDiscord ? { linkDiscord: true, linkProvider: provider } : {}),
         }),
       });
       const result = await response.json().catch(() => ({}));
@@ -71,11 +74,13 @@ export default function TourneyLoginForm({
         );
         return;
       }
+      const linkedProvider =
+        result.linkedProvider === "google" ? "google" : provider;
       const destination = linkDiscord
         ? `/tourney?notice=${
             result.discordLinked === true
-              ? "discord-linked"
-              : "discord-link-failed"
+              ? `${linkedProvider}-linked`
+              : `${provider}-link-failed`
           }`
         : redirectTo;
       if (typeof navigate === "function") {
@@ -118,7 +123,7 @@ export default function TourneyLoginForm({
         <button className="cs-button" disabled={busy} type="submit">
           {busy
             ? linkDiscord
-              ? "Logging in and linking…"
+              ? `Logging in and linking ${providerLabel}…`
               : "Signing in…"
             : buttonLabel}
         </button>

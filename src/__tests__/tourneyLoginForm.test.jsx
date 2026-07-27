@@ -105,6 +105,7 @@ describe("Tourney login form", () => {
           rememberMe: false,
           redirectTo: "/tourney/manage",
           linkDiscord: true,
+          linkProvider: "discord",
         }),
       });
       expect(assign).toHaveBeenCalledWith("/tourney?notice=discord-linked");
@@ -112,6 +113,55 @@ describe("Tourney login form", () => {
     expect(
       screen.getByRole("link", { name: "View the roster." })
     ).toHaveAttribute("href", "/tourney/roster");
+  });
+
+  test("submits a pending Google proof choice and lands on the Google outcome", async () => {
+    global.fetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        discordLinked: true,
+        linkedProvider: "google",
+      }),
+    });
+    render(
+      <TourneyLoginForm
+        buttonLabel="Log in and link Google"
+        linkDiscord
+        linkProvider="google"
+        navigate={assign}
+        redirectTo="/tourney"
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Roster name or email"), {
+      target: { value: "player-one" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "correct-password" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Log in and link Google" })
+    );
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith("/api/tourney/login", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          username: "player-one",
+          password: "correct-password",
+          rememberMe: false,
+          redirectTo: "/tourney",
+          linkDiscord: true,
+          linkProvider: "google",
+        }),
+      });
+      expect(assign).toHaveBeenCalledWith("/tourney?notice=google-linked");
+    });
   });
 
   test("keeps a wrong-password error visible without navigating", async () => {

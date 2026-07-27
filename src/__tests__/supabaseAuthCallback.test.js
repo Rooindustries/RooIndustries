@@ -507,6 +507,50 @@ describe("Supabase Auth callback", () => {
     );
   });
 
+  test("routes an unlinked Tourney Google sign-in to the credential-link prompt", async () => {
+    mockReadOAuthIntent.mockResolvedValue({
+      id: intentId,
+      action: "signin",
+      flow: "tourney",
+      provider: "google",
+      return_path: "/tourney",
+      target_user_id: null,
+      status: "pending",
+      expires_at: "2099-01-01T00:00:00.000Z",
+    });
+    mockFinalizeOAuthIntent.mockResolvedValue({
+      action: "signin",
+      flow: "tourney",
+      provider: "google",
+      return_path: "/tourney",
+    });
+    mockResolveSupabaseAccountByUserId.mockResolvedValue(null);
+
+    const response = await GET(request(
+      `https://www.rooindustries.com/auth/callback?intent=${intentId}&code=one`,
+      `roo_oauth_intent.${intentId}=opaque-token`
+    ));
+
+    expect(response.url).toBe(
+      "https://www.rooindustries.com/tourney/login?error=unlinked&provider=google"
+    );
+    // The proof lands in Google's own cookie so it can never be spent as a
+    // Discord link.
+    expect(response.cookies.values).toContainEqual(
+      expect.objectContaining({
+        name: "roo_pending_tourney_google_link",
+        httpOnly: true,
+        maxAge: 15 * 60,
+        path: "/",
+        sameSite: "lax",
+        value: expect.any(String),
+      })
+    );
+    expect(response.cookies.values).not.toContainEqual(
+      expect.objectContaining({ name: "roo_pending_tourney_discord_link" })
+    );
+  });
+
   test("keeps a Tourney Discord signup deferred until its Auth projection exists", async () => {
     mockReadOAuthIntent.mockResolvedValue({
       id: intentId,
@@ -647,6 +691,45 @@ describe("Supabase Auth callback", () => {
     expect(response.cookies.values).toContainEqual(
       expect.objectContaining({
         name: "roo_pending_discord_link",
+        httpOnly: true,
+        maxAge: 15 * 60,
+        path: "/",
+        sameSite: "lax",
+        value: expect.any(String),
+      })
+    );
+  });
+
+  test("preserves an unlinked referral Google session for the account choice", async () => {
+    mockReadOAuthIntent.mockResolvedValue({
+      id: intentId,
+      action: "signin",
+      flow: "referral",
+      provider: "google",
+      return_path: "/referrals/dashboard",
+      target_user_id: null,
+      status: "pending",
+      expires_at: "2099-01-01T00:00:00.000Z",
+    });
+    mockFinalizeOAuthIntent.mockResolvedValue({
+      action: "signin",
+      flow: "referral",
+      provider: "google",
+      return_path: "/referrals/dashboard",
+    });
+    mockResolveSupabaseAccountByUserId.mockResolvedValue(null);
+
+    const response = await GET(request(
+      `https://www.rooindustries.com/auth/callback?intent=${intentId}&code=one`,
+      `roo_oauth_intent.${intentId}=opaque-token`
+    ));
+
+    expect(response.url).toBe(
+      "https://www.rooindustries.com/referrals/login?oauth=unlinked&provider=google"
+    );
+    expect(response.cookies.values).toContainEqual(
+      expect.objectContaining({
+        name: "roo_pending_google_link",
         httpOnly: true,
         maxAge: 15 * 60,
         path: "/",

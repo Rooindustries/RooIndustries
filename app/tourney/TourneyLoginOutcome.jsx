@@ -2,13 +2,16 @@ const OUTCOME_COPY = Object.freeze({
   "discord-linked": "Discord linked. You're signed in.",
   "discord-link-failed":
     "Discord linking did not complete. Try the Discord login again.",
+  "google-linked": "Google linked. You're signed in.",
+  "google-link-failed":
+    "Google linking did not complete. Try the Google login again.",
 });
 
 export default function TourneyLoginOutcome({ outcome = "" }) {
   const message = OUTCOME_COPY[String(outcome || "")];
   if (!message) return null;
 
-  const success = outcome === "discord-linked";
+  const success = String(outcome).endsWith("-linked");
   return (
     <section
       aria-label="Tournament sign-in outcome"

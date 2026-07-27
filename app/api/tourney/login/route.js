@@ -22,8 +22,9 @@ import { logSafeError } from "../../../../src/server/safeErrorLog";
 import {
   clearPendingDiscordLinkCookie,
   linkPendingDiscordIdentity,
-  readPendingDiscordLink,
+  PENDING_LINK_PROVIDERS,
   resolvePendingDiscordUser,
+  resolvePendingSocialLink,
 } from "../../../../src/server/supabase/pendingSocialLink";
 import {
   queueTourneyDiscordAuthProjection,
@@ -39,8 +40,15 @@ const SUSPENDED_LOGIN_MESSAGE =
   "You have been suspended from the tourney. Please contact serviroo through Discord or at serviroo@rooindustries.com for further queries.";
 const UNAVAILABLE_LOGIN_MESSAGE =
   "Tournament sign-in is temporarily unavailable. Please try again shortly.";
-const DISCORD_LINK_FAILED_MESSAGE =
-  "Discord linking did not complete. Try the Discord login again.";
+const linkFailedMessage = (provider) => {
+  const label = provider === "google" ? "Google" : "Discord";
+  return `${label} linking did not complete. Try the ${label} login again.`;
+};
+
+const normalizeLinkProvider = (value) => {
+  const provider = String(value || "").trim().toLowerCase();
+  return PENDING_LINK_PROVIDERS.includes(provider) ? provider : "discord";
+};
 
 const wantsJson = (request) =>
   String(request.headers.get("accept") || "").includes("application/json");
@@ -89,10 +97,11 @@ const readLoginPayload = async (request) => {
 
   const form = await readBoundedFormData(request, {
     maxBytes: 8 * 1024,
-    maxFields: 5,
+    maxFields: 6,
   });
   return {
     linkDiscord: form.get("linkDiscord"),
+    linkProvider: form.get("linkProvider"),
     username: form.get("username"),
     password: form.get("password"),
     rememberMe: form.get("rememberMe"),
@@ -197,30 +206,51 @@ export async function POST(request) {
   }
 
   const linkDiscord = isRememberMeEnabled(payload?.linkDiscord);
+  const requestedLinkProvider = normalizeLinkProvider(payload?.linkProvider);
   let discordLinked = false;
   let discordLinkError = "";
+  let linkedProvider = "";
+  // Named outside the attempt so the failure copy and the redirect notice still
+  // report the provider whose proof was actually spent, including from the catch.
+  let attemptedProvider = requestedLinkProvider;
   if (linkDiscord) {
     try {
-      const pendingLink = readPendingDiscordLink({
+      // Whichever pending proof the browser actually holds wins. The form reports
+      // which provider it came from, but the proof is authoritative: a stale
+      // Discord cookie must never be spent to satisfy a Google link.
+      const pendingLink = resolvePendingSocialLink({
         flow: "tourney",
+        provider: requestedLinkProvider,
         request,
       });
+      if (pendingLink) attemptedProvider = pendingLink.provider;
       const pendingUser = pendingLink
-        ? await resolvePendingDiscordUser({ flow: "tourney", request })
+        ? await resolvePendingDiscordUser({
+            flow: "tourney",
+            provider: pendingLink.provider,
+            request,
+          })
         : null;
       const primaryUserId = String(
         result.supabaseSession?.user?.id || ""
       ).trim();
       if (!pendingLink || !pendingUser || !primaryUserId) {
-        discordLinkError = DISCORD_LINK_FAILED_MESSAGE;
+        discordLinkError = linkFailedMessage(attemptedProvider);
       } else {
+        const provider = pendingLink.provider;
         const linked = await linkPendingDiscordIdentity({
           accountScope: "tourney",
           pendingUser,
           primaryUserId,
+          provider,
         });
         if (!linked.linked) {
-          discordLinkError = DISCORD_LINK_FAILED_MESSAGE;
+          discordLinkError = linkFailedMessage(provider);
+        } else if (provider !== "discord") {
+          // Only Discord carries a guild role to project. A Google link is
+          // complete once the identity row exists.
+          discordLinked = true;
+          linkedProvider = provider;
         } else if (linked.crossDomain) {
           // The Discord account signs in to this person's other domain, so the
           // tourney-domain identity link is already projected. Queue the guild
@@ -231,8 +261,9 @@ export async function POST(request) {
           });
           if (projected.queued || projected.reason === "not_configured") {
             discordLinked = true;
+            linkedProvider = provider;
           } else {
-            discordLinkError = DISCORD_LINK_FAILED_MESSAGE;
+            discordLinkError = linkFailedMessage(provider);
           }
         } else {
           const resumed = await queueTourneyDiscordAuthProjection({
@@ -245,31 +276,37 @@ export async function POST(request) {
             userId: pendingLink.userId,
           });
           if (!resumed.applied && resumed.reason !== "pending") {
-            discordLinkError = DISCORD_LINK_FAILED_MESSAGE;
+            discordLinkError = linkFailedMessage(provider);
           } else {
             discordLinked = true;
+            linkedProvider = provider;
           }
         }
       }
     } catch (error) {
-      logSafeError("Tournament pending Discord linking failed", error);
-      discordLinkError = DISCORD_LINK_FAILED_MESSAGE;
+      logSafeError("Tournament pending social linking failed", error);
+      discordLinkError = linkFailedMessage(attemptedProvider);
     }
   }
 
+  const noticeProvider = linkedProvider || attemptedProvider;
   const response = wantsJson(request)
     ? NextResponse.json({
         ok: true,
         role: result.account.role,
         username: result.account.username,
-        ...(discordLinked ? { discordLinked: true } : {}),
+        ...(discordLinked
+          ? { discordLinked: true, linkedProvider: noticeProvider }
+          : {}),
         ...(discordLinkError ? { discordLinkError } : {}),
       })
     : redirectToPath(
         request,
         linkDiscord
           ? `/tourney?notice=${
-              discordLinked ? "discord-linked" : "discord-link-failed"
+              discordLinked
+                ? `${noticeProvider}-linked`
+                : `${noticeProvider}-link-failed`
             }`
           : payload?.redirectTo
       );
@@ -288,10 +325,15 @@ export async function POST(request) {
       session: result.supabaseSession,
     }).catch(() => {});
   }
+  // Both proofs are cleared once a link attempt has run. Leaving the other
+  // provider's cookie behind would let a later sign-in silently spend a stale
+  // proof the person has already moved on from.
   if (linkDiscord) {
-    response.cookies.set(
-      clearPendingDiscordLinkCookie({ flow: "tourney" })
-    );
+    for (const provider of PENDING_LINK_PROVIDERS) {
+      response.cookies.set(
+        clearPendingDiscordLinkCookie({ flow: "tourney", provider })
+      );
+    }
   }
   response.headers.set("Cache-Control", "private, no-store");
   return response;

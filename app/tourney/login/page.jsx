@@ -1,6 +1,10 @@
 import { redirect } from "next/navigation";
 import { LockScreen, getTourneySession } from "../TourneyShared";
 import SupabaseSocialLogin from "../../../src/components/SupabaseSocialLogin";
+import {
+  PENDING_LINK_PROVIDERS,
+  pendingLinkProviderLabel,
+} from "../../../src/server/supabase/socialLinkProviders";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,9 +35,16 @@ const normalizeNextPath = (value) => {
 export default async function TourneyLoginPage({ searchParams }) {
   const resolvedSearchParams = await searchParams;
   const session = await getTourneySession();
-  const pendingDiscordLink =
+  const requestedProvider = String(resolvedSearchParams?.provider || "")
+    .trim()
+    .toLowerCase();
+  const pendingLinkProvider =
     String(resolvedSearchParams?.error || "") === "unlinked" &&
-    String(resolvedSearchParams?.provider || "") === "discord";
+    PENDING_LINK_PROVIDERS.includes(requestedProvider)
+      ? requestedProvider
+      : "";
+  const pendingSocialLink = Boolean(pendingLinkProvider);
+  const providerLabel = pendingLinkProviderLabel(pendingLinkProvider);
   const redirectTo = normalizeNextPath(resolvedSearchParams?.next);
 
   if (session) {
@@ -42,26 +53,29 @@ export default async function TourneyLoginPage({ searchParams }) {
 
   return (
     <LockScreen
-      error={pendingDiscordLink ? "" : resolvedSearchParams?.error || ""}
-      heading={pendingDiscordLink ? "No account linked yet" : "Sign in."}
+      error={pendingSocialLink ? "" : resolvedSearchParams?.error || ""}
+      heading={pendingSocialLink ? "No account linked yet" : "Sign in."}
       subtitle={
-        pendingDiscordLink
-          ? "This Discord isn't linked to a tournament account yet. Enter your Tourney username and password once and we'll link it."
+        pendingSocialLink
+          ? `This ${providerLabel} account isn't linked to a tournament account yet. Enter your Tourney username and password once and we'll link it.`
           : "Caster, player, and owner access."
       }
-      note={pendingDiscordLink ? "" : "Wait for approval before trying to log in."}
-      buttonLabel={pendingDiscordLink ? "Log in and link Discord" : "Sign in"}
-      linkDiscord={pendingDiscordLink}
+      note={pendingSocialLink ? "" : "Wait for approval before trying to log in."}
+      buttonLabel={
+        pendingSocialLink ? `Log in and link ${providerLabel}` : "Sign in"
+      }
+      linkDiscord={pendingSocialLink}
+      linkProvider={pendingLinkProvider}
       redirectTo={redirectTo}
-      showRegistrationLink={pendingDiscordLink}
-      socialLogin={pendingDiscordLink ? null : (
+      showRegistrationLink={pendingSocialLink}
+      socialLogin={pendingSocialLink ? null : (
         <SupabaseSocialLogin
           flow="tourney"
           nextPath={redirectTo}
           variant="tourney"
         />
       )}
-      wrapSubtitle={pendingDiscordLink}
+      wrapSubtitle={pendingSocialLink}
     />
   );
 }

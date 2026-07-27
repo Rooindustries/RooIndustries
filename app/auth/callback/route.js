@@ -39,6 +39,7 @@ import {
 import {
   clearPendingDiscordLinkCookie,
   createPendingDiscordLinkCookie,
+  PENDING_LINK_PROVIDERS,
 } from "@/src/server/supabase/pendingSocialLink";
 import {
   clearReferralOrphanReclaimCookie,
@@ -602,9 +603,14 @@ export async function GET(request) {
         userId: result.data.user.id,
       });
       if (!roleSession.cookie) {
+        // Link completion is offered for every linkable provider, not just
+        // Discord. Both sign-in pages show Google, so gating this on Discord left
+        // an unlinked Google sign-in with nowhere to go: it fell through to the
+        // generic failure and the person could not reach the password form that
+        // would have linked the account.
         if (
           finalized.action === "signin" &&
-          finalized.provider === "discord" &&
+          PENDING_LINK_PROVIDERS.includes(finalized.provider) &&
           ["referral", "tourney"].includes(finalized.flow) &&
           (roleSession.error || "unlinked") === "unlinked"
         ) {
@@ -616,7 +622,7 @@ export async function GET(request) {
             finalized.flow === "tourney" ? "error" : "oauth",
             "unlinked"
           );
-          unlinkedTarget.searchParams.set("provider", "discord");
+          unlinkedTarget.searchParams.set("provider", finalized.provider);
           if (finalized.flow === "tourney" && returnPath !== "/tourney") {
             unlinkedTarget.searchParams.set("next", returnPath);
           }
@@ -624,6 +630,7 @@ export async function GET(request) {
             createPendingDiscordLinkCookie({
               flow: finalized.flow,
               intentId: validIntentId,
+              provider: finalized.provider,
               userId: claimedUserId,
             })
           );
@@ -642,11 +649,14 @@ export async function GET(request) {
       setRoleCookie(response, roleSession.cookie);
       if (
         finalized.action === "signin" &&
-        finalized.provider === "discord" &&
+        PENDING_LINK_PROVIDERS.includes(finalized.provider) &&
         ["referral", "tourney"].includes(finalized.flow)
       ) {
         response.cookies.set(
-          clearPendingDiscordLinkCookie({ flow: finalized.flow })
+          clearPendingDiscordLinkCookie({
+            flow: finalized.flow,
+            provider: finalized.provider,
+          })
         );
       }
       if (finalized.action === "link") {
