@@ -70,6 +70,26 @@ describe("TourneyRosterList", () => {
     );
   });
 
+  test("shows only the substitute pool for substitute-only input", () => {
+    render(
+      <TourneyRosterList
+        players={[
+          {
+            ...basePlayer,
+            id: "substitute-1",
+            displayName: "SimplyXero",
+            registrationPool: "substitute",
+            twitchUsername: "simplyxero",
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByText("Substitute Pool")).toBeVisible();
+    expect(screen.queryByText("Main Pool")).not.toBeInTheDocument();
+    expect(screen.getByText("SimplyXero")).toBeVisible();
+  });
+
   test("sorts live players above offline players in the roster", () => {
     render(
       <TourneyRosterList

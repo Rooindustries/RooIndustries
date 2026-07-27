@@ -2,6 +2,14 @@ const TEAM_COUNT = 12;
 const TEAMS_PER_GROUP = 6;
 const ROSTER_SIZE = 7;
 const twitchLoginPattern = /^[a-z0-9_]{3,25}$/i;
+const roleOrder = Object.freeze({
+  Tank: 1,
+  Damage: 2,
+  Support: 3,
+  Flex: 4,
+});
+
+const normalizeTeamName = (value) => String(value || "").trim().toLowerCase();
 
 const getTwitchUrl = (value) => {
   const login = String(value || "").trim().toLowerCase();
@@ -11,63 +19,111 @@ const getTwitchUrl = (value) => {
 };
 
 const getRosterInitial = (player) =>
-  String(player?.displayName || player?.twitchUsername || "C")
+  String(player?.displayName || player?.twitchUsername || "P")
     .trim()
     .charAt(0)
-    .toUpperCase() || "C";
+    .toUpperCase() || "P";
 
-const CaptainSlot = ({ captain }) => {
-  if (!captain) {
-    return (
-      <li className="tourney-team-slot is-pending">
-        <span className="tourney-team-slot-number">01</span>
-        <span className="tourney-team-slot-copy">
-          <strong>Pending</strong>
-          <small>Captain slot</small>
-        </span>
-      </li>
-    );
+const compareRosterPlayers = (left, right) => {
+  const roleCompare =
+    (roleOrder[left?.rolePlay] || Number.MAX_SAFE_INTEGER) -
+    (roleOrder[right?.rolePlay] || Number.MAX_SAFE_INTEGER);
+  if (roleCompare) return roleCompare;
+  return String(left?.displayName || "").localeCompare(
+    String(right?.displayName || "")
+  );
+};
+
+const groupPlayersByTeam = (players) => {
+  const playersByTeam = new Map();
+  for (const player of players) {
+    const teamName = normalizeTeamName(player.teamName);
+    if (!teamName) continue;
+    const teamPlayers = playersByTeam.get(teamName) || [];
+    teamPlayers.push(player);
+    playersByTeam.set(teamName, teamPlayers);
   }
+  return playersByTeam;
+};
 
-  const twitchUrl = getTwitchUrl(captain.twitchUsername);
-  const profileImageUrl = String(
-    captain.twitchProfileImageUrl || ""
-  ).trim();
-  const displayName = captain.displayName || captain.twitchUsername;
-  const isLive = Boolean(captain.twitchLive);
-  const liveTitle = String(captain.twitchLiveTitle || "").trim();
+const buildTeamRoster = ({ captain, playersByTeam }) => {
+  if (!captain) return [];
+  const assignedPlayers = playersByTeam.get(normalizeTeamName(captain.teamName)) || [];
+  const assignedCaptain =
+    assignedPlayers.find((player) => player.id === captain.id) || captain;
+  const teammates = assignedPlayers
+    .filter((player) => player.id !== assignedCaptain.id)
+    .sort(compareRosterPlayers);
+  return [assignedCaptain, ...teammates].slice(0, ROSTER_SIZE);
+};
+
+const PlayerAvatar = ({ player }) => {
+  const profileImageUrl = String(player?.twitchProfileImageUrl || "").trim();
+  return (
+    <span className="tourney-team-slot-avatar" aria-hidden="true">
+      {profileImageUrl ? (
+        <img alt="" loading="lazy" src={profileImageUrl} />
+      ) : (
+        getRosterInitial(player)
+      )}
+    </span>
+  );
+};
+
+const PlayerName = ({ player }) => {
+  const displayName = player.displayName || player.twitchUsername || "Player";
+  const isLive = Boolean(player.twitchLive);
+  const liveTitle = String(player.twitchLiveTitle || "").trim();
+  return (
+    <strong className="tourney-team-captain-name">
+      <span>{displayName}</span>
+      {isLive ? (
+        <span
+          aria-label={`${displayName} is live on Twitch`}
+          className="tourney-roster-live-badge"
+          title={liveTitle || `${displayName} is live on Twitch`}
+        >
+          <span aria-hidden="true" />
+          Live
+        </span>
+      ) : null}
+    </strong>
+  );
+};
+
+const PendingSlot = ({ captainSlot, slotNumber }) => (
+  <li className="tourney-team-slot is-pending">
+    <span className="tourney-team-slot-number">
+      {String(slotNumber).padStart(2, "0")}
+    </span>
+    <span className="tourney-team-slot-copy">
+      <strong>Pending</strong>
+      <small>{captainSlot ? "Captain slot" : "Draft slot"}</small>
+    </span>
+  </li>
+);
+
+const PlayerSlot = ({ captainSlot, player, slotNumber }) => {
+  if (!player) {
+    return <PendingSlot captainSlot={captainSlot} slotNumber={slotNumber} />;
+  }
+  const twitchUrl = getTwitchUrl(player.twitchUsername);
   const slotClassName = [
     "tourney-team-slot",
-    "is-captain",
-    isLive ? "is-live" : "",
+    captainSlot ? "is-captain" : "is-player",
+    player.twitchLive ? "is-live" : "",
   ]
     .filter(Boolean)
     .join(" ");
 
   return (
     <li className={slotClassName}>
-      <span className="tourney-team-slot-avatar" aria-hidden="true">
-        {profileImageUrl ? (
-          <img alt="" loading="lazy" src={profileImageUrl} />
-        ) : (
-          getRosterInitial(captain)
-        )}
-      </span>
+      <PlayerAvatar player={player} />
       <span className="tourney-team-slot-copy">
-        <strong className="tourney-team-captain-name">
-          <span>{displayName}</span>
-          {isLive ? (
-            <span
-              aria-label={`${displayName} is live on Twitch`}
-              className="tourney-roster-live-badge"
-              title={liveTitle || `${displayName} is live on Twitch`}
-            >
-              <span aria-hidden="true" />
-              Live
-            </span>
-          ) : null}
-        </strong>
-        <small>Team Captain · {captain.rolePlay}</small>
+        <PlayerName player={player} />
+        <small>
+          {captainSlot ? "Team Captain" : "Roster Player"} · {player.rolePlay}
+        </small>
       </span>
       {twitchUrl ? (
         <a
@@ -76,24 +132,12 @@ const CaptainSlot = ({ captain }) => {
           rel="noopener noreferrer"
           target="_blank"
         >
-          {captain.twitchUsername}
+          {player.twitchUsername}
         </a>
       ) : null}
     </li>
   );
 };
-
-const PendingSlot = ({ slotNumber }) => (
-  <li className="tourney-team-slot is-pending">
-    <span className="tourney-team-slot-number">
-      {String(slotNumber).padStart(2, "0")}
-    </span>
-    <span className="tourney-team-slot-copy">
-      <strong>Pending</strong>
-      <small>Draft slot</small>
-    </span>
-  </li>
-);
 
 export default function TourneyTeamCards({ players = [] }) {
   const captainBySeed = new Map(
@@ -101,6 +145,7 @@ export default function TourneyTeamCards({ players = [] }) {
       .filter((player) => Number(player.captainSeed) > 0)
       .map((player) => [Number(player.captainSeed), player])
   );
+  const playersByTeam = groupPlayersByTeam(players);
   const teams = Array.from({ length: TEAM_COUNT }, (_, index) => index + 1);
   const groups = [
     teams.slice(0, TEAMS_PER_GROUP),
@@ -127,26 +172,29 @@ export default function TourneyTeamCards({ players = [] }) {
               </h3>
             </header>
             <div className="tourney-team-card-grid">
-              {teamNumbers.map((teamNumber) => (
-                <article className="tourney-team-card" key={teamNumber}>
-                  <header className="tourney-team-card-heading">
-                    <span>Roster</span>
-                    <h4>Team {teamNumber}</h4>
-                  </header>
-                  <ol className="tourney-team-slots">
-                    <CaptainSlot captain={captainBySeed.get(teamNumber)} />
-                    {Array.from(
-                      { length: ROSTER_SIZE - 1 },
-                      (_, index) => (
-                        <PendingSlot
-                          key={index + 2}
-                          slotNumber={index + 2}
+              {teamNumbers.map((teamNumber) => {
+                const captain = captainBySeed.get(teamNumber);
+                const roster = buildTeamRoster({ captain, playersByTeam });
+                const teamName = String(captain?.teamName || "").trim();
+                return (
+                  <article className="tourney-team-card" key={teamNumber}>
+                    <header className="tourney-team-card-heading">
+                      <span>Seed {teamNumber}</span>
+                      <h4>{teamName || `Team ${teamNumber}`}</h4>
+                    </header>
+                    <ol className="tourney-team-slots">
+                      {Array.from({ length: ROSTER_SIZE }, (_, index) => (
+                        <PlayerSlot
+                          captainSlot={index === 0}
+                          key={roster[index]?.id || `pending-${teamNumber}-${index + 1}`}
+                          player={roster[index]}
+                          slotNumber={index + 1}
                         />
-                      )
-                    )}
-                  </ol>
-                </article>
-              ))}
+                      ))}
+                    </ol>
+                  </article>
+                );
+              })}
             </div>
           </section>
         );

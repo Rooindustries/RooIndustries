@@ -90,7 +90,7 @@ describe("tourney public page content", () => {
     expect(source).not.toContain("The tournament runs August 1-2, 2026");
   });
 
-  test("splits twelve captain-led teams above unassigned players", () => {
+  test("shows twelve allocated teams above the substitute pool", () => {
     const rosterSource = readTourneyRosterSource();
     const captainsSource = readTourneyCaptainsSource();
     const twitchLogins = [
@@ -112,20 +112,18 @@ describe("tourney public page content", () => {
       expect(captainsSource).toContain(`twitch: "${twitchLogin}"`);
     }
     expect(rosterSource).toContain('title="Teams 1–12"');
+    expect(rosterSource).toContain("<TourneyTeamCards players={players} />");
+    expect(rosterSource).toContain('title="Substitute Pool"');
     expect(rosterSource).toContain(
-      "<TourneyTeamCards players={captainPlayers} />"
-    );
-    expect(rosterSource).toContain('title="Unassigned Players"');
-    expect(rosterSource).toContain(
-      "<TourneyRosterList players={unassignedPlayers} />"
+      "<TourneyRosterList players={substitutePlayers} />"
     );
     expect(rosterSource).toContain(
-      "const captainPlayers = players.filter((player) => player.isCaptain);"
+      '(player) => player.registrationPool === "substitute"'
     );
-    expect(rosterSource).toContain(
-      "const unassignedPlayers = players.filter((player) => !player.isCaptain);"
-    );
-    expect(rosterSource).toContain("July 26 at 19:00 UTC");
+    expect(rosterSource).not.toContain("captainPlayers");
+    expect(rosterSource).not.toContain("unassignedPlayers");
+    expect(rosterSource).not.toContain('title="Unassigned Players"');
+    expect(rosterSource).not.toContain("July 26 at 19:00 UTC");
     expect(rosterSource).not.toContain("CaptainTeams");
     expect(rosterSource).not.toContain("captainTeams");
     expect(rosterSource).not.toContain('title="Captain Teams"');
