@@ -103,7 +103,9 @@ export default function RefLogin() {
           type: "error",
           message:
             oauthError === "unlinked"
-            ? "That Google or Discord email is not linked to a creator account."
+            // Only reached for a provider we do not offer, so this cannot name
+            // one; the linkable providers get the choose-account flow above.
+            ? "That email is not linked to a creator account."
             : "Social sign-in is temporarily unavailable. Use your email or referral code.",
         });
       }

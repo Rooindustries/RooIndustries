@@ -88,6 +88,28 @@ describe("booking modal backdrop isolation", () => {
     trigger.remove();
   });
 
+  test("keeps the close control outside the scaled dialog content", () => {
+    render(
+      <BookingModal open onClose={jest.fn()}>
+        <BookingContent />
+      </BookingModal>
+    );
+
+    const closeButton = screen.getByRole("button", { name: "Close" });
+    const scaler = document.querySelector("[data-booking-scaler]");
+    const dialog = screen.getByRole("dialog");
+
+    // The scaler carries the dynamicScale transform. A close control inside it
+    // shrinks with the content and anchors to the 1150px design width instead of
+    // the visible card, which put it off to the side and clipped it on mobile.
+    expect(scaler).not.toContainElement(closeButton);
+    // It must still sit inside the aria-modal subtree, which is where a screen
+    // reader confines its virtual cursor.
+    expect(dialog).toContainElement(closeButton);
+    expect(closeButton.className).toContain("h-11");
+    expect(closeButton.className).toContain("w-11");
+  });
+
   test("marks excluded canonical package rows as not included", () => {
     render(
       <PackageDetailsModal

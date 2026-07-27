@@ -11,7 +11,9 @@ const errorMessage = (error) => {
     return "You have been suspended from the tourney. Please contact serviroo through Discord or at serviroo@rooindustries.com for further queries.";
   }
   if (error === "unlinked") {
-    return "That Google or Discord email is not linked to an approved Tourney account. Use your roster name or email and password.";
+    // Reached only when the provider was not one we offer, so the copy cannot
+    // name it. The provider-specific wording lives on the login page instead.
+    return "That email is not linked to an approved Tourney account. Use your roster name or email and password.";
   }
   if (error === "awaiting_approval") {
     return "Your Tourney registration is still waiting for approval.";
