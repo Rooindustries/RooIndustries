@@ -3095,7 +3095,7 @@ export const TourneyStyles = () => (
       grid-column: 1;
       grid-row: 2;
       justify-self: start;
-      width: max-content;
+      width: 100%;
       z-index: 3;
     }
 
@@ -3207,11 +3207,6 @@ export const TourneyStyles = () => (
       width: 100%;
       min-width: max-content;
       overflow: visible;
-    }
-
-    .tourney-bracket-band.is-winners .tourney-bracket-rounds {
-      justify-content: start;
-      width: max-content;
     }
 
     .tourney-bracket-connectors {

@@ -12,6 +12,8 @@ export default function TourneyOverlayLayout({ children }) {
       <style>{`
         html,
         body {
+          margin: 0;
+          padding: 0;
           background: transparent !important;
         }
       `}</style>
