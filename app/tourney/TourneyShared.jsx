@@ -319,6 +319,21 @@ export const TourneyStyles = () => (
       --tourney-accent-glow: #03e9f4;
       --tourney-accent-soft: rgba(103, 232, 249, 0.5);
       --tourney-focus: rgba(103, 232, 249, 0.7);
+      --tourney-side-win-border: rgba(56, 189, 248, 0.85);
+      --tourney-side-win-bg: linear-gradient(
+        90deg,
+        rgba(2, 132, 199, 0.52),
+        rgba(14, 165, 233, 0.3)
+      );
+      --tourney-side-win-bar: #38bdf8;
+      --tourney-side-win-glow: rgba(56, 189, 248, 0.3);
+      --tourney-side-win-text: #ffffff;
+      --tourney-side-win-score: #bae6fd;
+      --tourney-side-loss-border: rgba(239, 68, 68, 0.5);
+      --tourney-side-loss-bg: rgba(127, 29, 29, 0.22);
+      --tourney-side-loss-bar: #ef4444;
+      --tourney-side-loss-text: rgba(226, 232, 240, 0.52);
+      --tourney-side-loss-score: #fca5a5;
       --tourney-card-shadow: inset 0 1px 0 rgba(186, 230, 253, 0.08),
         0 12px 30px rgba(2, 6, 23, 0.28);
       min-height: 100vh;
@@ -3411,15 +3426,48 @@ export const TourneyStyles = () => (
     }
 
     .tourney-match-side.is-win {
-      border-color: rgba(34, 211, 238, 0.52);
-      background: rgba(8, 145, 178, 0.18);
-      box-shadow: inset 4px 0 0 rgba(34, 211, 238, 0.76);
+      border-color: var(--tourney-side-win-border);
+      background: var(--tourney-side-win-bg);
+      box-shadow:
+        inset 4px 0 0 var(--tourney-side-win-bar),
+        0 0 18px var(--tourney-side-win-glow);
+    }
+
+    .tourney-match-side.is-win strong {
+      color: var(--tourney-side-win-text);
+    }
+
+    .tourney-match-side.is-win b {
+      color: var(--tourney-side-win-score);
     }
 
     .tourney-match-side.is-loss {
-      border-color: rgba(251, 146, 60, 0.34);
-      background: rgba(124, 45, 18, 0.18);
-      box-shadow: inset 4px 0 0 rgba(251, 146, 60, 0.68);
+      border-color: var(--tourney-side-loss-border);
+      background: var(--tourney-side-loss-bg);
+      box-shadow: inset 4px 0 0 var(--tourney-side-loss-bar);
+    }
+
+    .tourney-match-side.is-loss strong {
+      color: var(--tourney-side-loss-text);
+    }
+
+    .tourney-match-side.is-loss b {
+      color: var(--tourney-side-loss-score);
+    }
+
+    .tourney-match-side small.tourney-match-bye {
+      display: inline-block;
+      margin-top: 4px;
+      border: 1px solid var(--tourney-border-accent);
+      border-radius: 9999px;
+      color: var(--tourney-accent);
+      background: rgba(8, 145, 178, 0.22);
+      padding: 2px 8px;
+      font-size: 0.62rem;
+      font-weight: 820;
+      letter-spacing: 0.09em;
+      line-height: 1.3;
+      text-transform: uppercase;
     }
 
     .tourney-match-side strong,
@@ -4135,8 +4183,7 @@ export const TourneyStyles = () => (
       background: var(--color-surface-hover-accent);
     }
 
-    .tourney-match-side,
-    .tourney-match-side.is-win {
+    .tourney-match-side {
       border-color: var(--tourney-border);
       background: var(--tourney-surface-soft);
       box-shadow: inset 4px 0 0 var(--tourney-accent-soft);
@@ -4222,6 +4269,21 @@ export const TourneyStyles = () => (
       --tourney-accent-soft: var(--color-accent-soft);
       --tourney-focus: var(--color-focus-ring);
       --tourney-card-shadow: var(--highlight-glass-top), var(--shadow-surface);
+      --tourney-side-win-border: rgba(251, 191, 36, 0.85);
+      --tourney-side-win-bg: linear-gradient(
+        90deg,
+        rgba(120, 53, 15, 0.58),
+        rgba(251, 191, 36, 0.2)
+      );
+      --tourney-side-win-bar: #fbbf24;
+      --tourney-side-win-glow: rgba(251, 191, 36, 0.3);
+      --tourney-side-win-text: #ffffff;
+      --tourney-side-win-score: #fde68a;
+      --tourney-side-loss-border: rgba(239, 68, 68, 0.55);
+      --tourney-side-loss-bg: rgba(127, 29, 29, 0.3);
+      --tourney-side-loss-bar: #ef4444;
+      --tourney-side-loss-text: rgba(226, 232, 240, 0.5);
+      --tourney-side-loss-score: #fca5a5;
     }
 
     html[data-theme="dark"] .tourney-page {
