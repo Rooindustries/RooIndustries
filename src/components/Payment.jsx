@@ -1943,7 +1943,19 @@ export default function Payment({ hideFooter = false }) {
                     </p>
                   </div>
 
-                  <div className="paypal-checkout-shell relative z-0 w-full overflow-hidden rounded-lg bg-transparent sm:w-48 [&_iframe]:!border-0 [&_iframe]:!bg-transparent [&_iframe]:!outline-none [&_iframe]:!shadow-none">
+                  {/* The light edge around the button comes from inside PayPal's
+                      iframe, not from us: their button is a 4px-radius rounded rect
+                      over their own light document background, so the corner
+                      crescents outside that arc leak near-white (measured
+                      rgb(251,253,254)). The shell's own rounded clip cannot cut
+                      them, because the shell is ~5px taller than the iframe and
+                      top-aligned, putting its bottom corners clear of the iframe's.
+                      Clipping the iframe at PayPal's own 4px radius removes them.
+                      outline-0 rather than outline-none: Tailwind v3 compiles
+                      outline-none to a 2px *transparent* outline at 2px offset,
+                      which forced-colors and high-contrast modes repaint as a real
+                      ring. */}
+                  <div className="paypal-checkout-shell relative z-0 w-full overflow-hidden rounded-lg bg-transparent sm:w-48 [&_iframe]:!rounded-[4px] [&_iframe]:!border-0 [&_iframe]:!bg-transparent [&_iframe]:!outline-0 [&_iframe]:!shadow-none">
                     {canDisplayPaypalMethod ? (
                       <PayPalScriptProvider
                         options={{
