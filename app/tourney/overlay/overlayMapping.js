@@ -55,3 +55,30 @@ export const toInternalSnapshot = (payload) => ({
   generated: Boolean(payload?.generated),
   matches: (payload?.matches || []).map(toInternalMatch),
 });
+
+export const OVERLAY_GROUP_FILTERS = Object.freeze({
+  winners: "Winners",
+  losers: "Losers",
+  "grand-final": "Grand Final",
+});
+
+// Lane sources (?group=) must filter even before the bracket is generated,
+// when the API has no matches and the view renders its TBD skeleton — so the
+// caller passes that skeleton in and we filter it like a real bracket.
+export const filterSnapshotByGroup = (
+  internal,
+  group,
+  skeletonMatches = []
+) => {
+  const groupName = OVERLAY_GROUP_FILTERS[group];
+  if (!groupName || !internal) return internal;
+  const base = internal.generated
+    ? internal.matches || []
+    : internal.matches?.length
+      ? internal.matches
+      : skeletonMatches;
+  return {
+    ...internal,
+    matches: base.filter((match) => match.groupName === groupName),
+  };
+};
