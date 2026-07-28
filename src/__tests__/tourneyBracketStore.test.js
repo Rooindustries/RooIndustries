@@ -59,20 +59,20 @@ describe("tourney bracket store", () => {
     });
   });
 
-  test("serves an isolated eight-team preview fixture without database mode", async () => {
+  test("serves an isolated twelve-team preview fixture without database mode", async () => {
     const store = loadStore();
     store.resetMemoryTourneyBracketStoreForTests();
 
     const snapshot = await store.getTourneyBracketSnapshot({
       includeAudit: true,
       env: {
-        TOURNEY_BRACKET_PREVIEW_FIXTURE: "8x6",
+        TOURNEY_BRACKET_PREVIEW_FIXTURE: "12x6",
         VERCEL_ENV: "preview",
       },
     });
 
     expect(snapshot.generated).toBe(true);
-    expect(snapshot.teams).toHaveLength(8);
+    expect(snapshot.teams).toHaveLength(12);
     expect(snapshot.teams.every((team) => team.memberCount === 6)).toBe(true);
     expect(snapshot.teams.every((team) => team.name === "TBD")).toBe(true);
     expect(
@@ -83,11 +83,12 @@ describe("tourney bracket store", () => {
     expect(snapshot.matches.filter((match) => match.groupName === "Grand Final")).toHaveLength(1);
     expect(snapshot.matches.map((match) => match.displayLabel)).toEqual(
       expect.arrayContaining([
+        "Winners Round 1 Match 1",
         "Winners Quarterfinal 1",
         "Winners Semifinal 1",
         "Winners Final",
         "Lower Round 1 Match 1",
-        "Lower Round 2 Match 1",
+        "Lower Round 4 Match 2",
         "Lower Semifinal",
         "Lower Final",
         "Grand Final",
@@ -95,7 +96,7 @@ describe("tourney bracket store", () => {
     );
     expect(snapshot.audit[0]).toMatchObject({
       action: "bracket.preview-fixture",
-      reason: "8 teams, 6 players each",
+      reason: "12 teams, 6 players each",
     });
   });
 
