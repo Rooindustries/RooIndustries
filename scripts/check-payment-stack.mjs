@@ -182,9 +182,8 @@ const main = async () => {
     report.productionProviders.ok &&
     report.productionProviders.body?.ok === true &&
     report.productionProviders.body?.providers?.paypal?.enabled === true &&
-    report.productionProviders.body?.providers?.razorpay?.enabled === false &&
-    report.productionProviders.body?.providers?.razorpay?.disabledReason ===
-      "merchant_profile_update";
+    report.productionProviders.body?.providers?.razorpay?.enabled === true &&
+    !report.productionProviders.body?.providers?.razorpay?.disabledReason;
   const envOk =
     report.productionEnv.ok === true &&
     report.productionEnv.missing.length === 0;

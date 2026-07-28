@@ -289,10 +289,21 @@ describe("payment session UI", () => {
 
     renderPayment(bookingFixture());
     await waitFor(() => expect(paypalButtonsProps?.disabled).toBe(false));
+    const razorpayButton = screen.getByRole("button", {
+      name: "Pay with Razorpay",
+    });
     const paypalShell = screen
       .getByRole("button", { name: "PayPal Buttons" })
       .closest(".paypal-checkout-shell");
-    expect(paypalShell).toHaveClass("overflow-hidden", "rounded-lg");
+    expect(razorpayButton).toHaveClass("h-10", "w-full", "sm:w-48");
+    expect(paypalShell).toHaveClass(
+      "h-10",
+      "w-full",
+      "sm:w-48",
+      "overflow-hidden",
+      "rounded-lg"
+    );
+    expect(paypalButtonsProps.style.height).toBe(40);
     expect(paypalShell.className).toContain("[&_iframe]:!border-0");
     // PayPal's button is a 4px-radius rounded rect over its own light document
     // background, so the corner crescents outside that arc leaked near-white
