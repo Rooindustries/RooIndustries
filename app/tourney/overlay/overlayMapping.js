@@ -17,6 +17,22 @@ const toInternalSide = (opponent, index) => ({
   status: "",
 });
 
+// On stream, only matches that need viewer attention get a status pill.
+// Finished brackets read from the winner/loser highlighting alone, so
+// Locked/Waiting/Completed/Archived all render without a pill.
+const OVERLAY_STATUS_LABELS = Object.freeze({
+  running: "LIVE",
+  ready: "Up Next",
+  "game cancelled": "Cancelled",
+});
+
+const toOverlayStatusLabel = (match) => {
+  const key = String(match?.statusLabel || match?.status || "")
+    .trim()
+    .toLowerCase();
+  return OVERLAY_STATUS_LABELS[key] || "";
+};
+
 const toInternalMatch = (match) => ({
   id: match.id,
   number: match.number,
@@ -26,7 +42,7 @@ const toInternalMatch = (match) => ({
   label: match.label,
   displayLabel: match.label,
   status: match.statusCode,
-  statusLabel: match.statusLabel,
+  statusLabel: toOverlayStatusLabel(match),
   bestOf: match.bestOf,
   targetScore: match.targetScore,
   opponent1: toInternalSide(match.opponents?.[0], 0),

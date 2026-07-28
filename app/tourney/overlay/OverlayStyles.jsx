@@ -34,8 +34,74 @@ export const OverlayStyles = () => (
     }
 
     .ov-bracket {
-      display: inline-block;
-      padding: 14px;
+      display: flex;
+      align-items: safe center;
+      justify-content: center;
+      box-sizing: border-box;
+      min-height: 100vh;
+      padding: 8px;
+    }
+
+    .ov-bracket-fit {
+      flex: 0 0 auto;
+      text-align: left;
+    }
+
+    /* The source auto-fits the whole tree into the browser-source viewport,
+       so the board renders at natural content size with no clipping or
+       scrollbars; the JS zoom then scales it onto the frame. The finals rail
+       stays wide: the Grand Final step connectors need horizontal room or
+       they double back on themselves. Round gaps stay roomy too — with tight
+       gaps the connector line before each arrowhead nearly disappears and
+       the lanes read as cluttered. */
+    .tourney-overlay .tourney-bracket-board {
+      --bracket-card-width: 12rem;
+      --bracket-slot-height: 7.5rem;
+      --bracket-slot-gap: 0.6rem;
+      --bracket-round-gap: 3.5rem;
+      --bracket-lane-gap: 1.5rem;
+      --bracket-final-lane-width: 28rem;
+      --bracket-band-padding: 8px;
+      width: max-content;
+      max-width: none;
+      overflow: visible;
+      padding: 0;
+    }
+
+    .tourney-overlay .tourney-bracket-tree {
+      padding-right: 16px;
+    }
+
+    .tourney-overlay .tourney-bracket-round-count {
+      display: none;
+    }
+
+    /* Denser cards for the source: the advancement text under each match is
+       redundant with the connector lines on stream, the per-card header
+       repeats the round label above the column, and tighter padding keeps
+       the full 12-team tree readable when it is fit onto one frame. */
+    .tourney-overlay .tourney-match-card {
+      gap: 6px;
+      padding: 8px;
+    }
+
+    .tourney-overlay .tourney-match-card header,
+    .tourney-overlay .tourney-match-card footer small {
+      display: none;
+    }
+
+    .tourney-overlay .tourney-match-sides {
+      gap: 5px;
+    }
+
+    .tourney-overlay .tourney-match-side {
+      padding: 6px 8px;
+    }
+
+    .tourney-overlay .tourney-match-side small.tourney-match-bye {
+      margin-top: 2px;
+      padding: 1px 6px;
+      font-size: 0.55rem;
     }
 
     .tourney-overlay .tourney-match-card.is-running {
