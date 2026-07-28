@@ -1,15 +1,11 @@
 "use client";
 
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
-import TourneyBracketView from "../../TourneyBracketView";
-import { toInternalSnapshot } from "../overlayMapping";
+import TourneyBracketView, {
+  buildTbdBracketMatches,
+} from "../../TourneyBracketView";
+import { filterSnapshotByGroup, toInternalSnapshot } from "../overlayMapping";
 import { useOverlayPoll } from "../useOverlayPoll";
-
-const GROUP_FILTERS = Object.freeze({
-  winners: "Winners",
-  losers: "Losers",
-  "grand-final": "Grand Final",
-});
 
 // Auto-fit shrinks the bracket into the browser-source viewport; ?scale= is
 // the creator's zoom multiplier on top of that fit. Fit is capped so a tiny
@@ -37,17 +33,15 @@ export default function BracketOverlayClient({
     onUpdate: setData,
   });
 
-  const snapshot = useMemo(() => {
-    const internal = toInternalSnapshot(data);
-    const groupName = GROUP_FILTERS[group];
-    if (!groupName || !internal.generated) return internal;
-    return {
-      ...internal,
-      matches: internal.matches.filter(
-        (match) => match.groupName === groupName
+  const snapshot = useMemo(
+    () =>
+      filterSnapshotByGroup(
+        toInternalSnapshot(data),
+        group,
+        buildTbdBracketMatches()
       ),
-    };
-  }, [data, group]);
+    [data, group]
+  );
 
   useLayoutEffect(() => {
     const content = contentRef.current;

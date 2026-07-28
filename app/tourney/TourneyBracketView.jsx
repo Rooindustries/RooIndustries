@@ -115,7 +115,8 @@ const createTbdMatch = ({
 // Skeleton shown before the bracket is generated. Mirrors the visible card
 // layout of the real 12-team double-elimination bracket: 4 first-round
 // winners matches with 4 bye slots hidden, and the full lower lane.
-const buildTbdBracketMatches = () => [
+// Exported so the OBS overlay can lane-filter the same skeleton.
+export const buildTbdBracketMatches = () => [
   ...[1, 2, 3, 4].map((number) =>
     createTbdMatch({
       id: `tbd-winners-r1-${number}`,
@@ -350,7 +351,15 @@ export default function TourneyBracketView({
 }) {
   const { matches, byeTeams } = useMemo(() => {
     const sourceMatches = snapshot?.matches || [];
-    if (!snapshot?.generated || sourceMatches.length === 0) {
+    if (!snapshot?.generated) {
+      // Callers (the OBS overlay lane sources) may pass a pre-filtered
+      // skeleton; only build the full skeleton when nothing was supplied.
+      return {
+        matches: sourceMatches.length > 0 ? sourceMatches : buildTbdBracketMatches(),
+        byeTeams: new Set(),
+      };
+    }
+    if (sourceMatches.length === 0) {
       return { matches: buildTbdBracketMatches(), byeTeams: new Set() };
     }
     const byeTeams = new Set();

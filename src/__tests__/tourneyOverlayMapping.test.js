@@ -1,4 +1,4 @@
-const { toInternalSnapshot } = require("../../app/tourney/overlay/overlayMapping.js");
+const { toInternalSnapshot, filterSnapshotByGroup } = require("../../app/tourney/overlay/overlayMapping.js");
 
 describe("tourney overlay mapping", () => {
   test("converts the public API shape back to the bracket view snapshot shape", () => {
@@ -83,5 +83,36 @@ describe("tourney overlay mapping", () => {
       matches: [],
     });
     expect(toInternalSnapshot({ ok: true }).matches).toEqual([]);
+  });
+
+  describe("filterSnapshotByGroup", () => {
+    const skeleton = [
+      { id: "w1", groupName: "Winners" },
+      { id: "l1", groupName: "Losers" },
+      { id: "gf", groupName: "Grand Final" },
+    ];
+
+    test("filters a generated bracket down to one lane", () => {
+      const internal = { ok: true, generated: true, matches: skeleton };
+      expect(
+        filterSnapshotByGroup(internal, "losers").matches.map((m) => m.id)
+      ).toEqual(["l1"]);
+      expect(
+        filterSnapshotByGroup(internal, "grand-final").matches.map((m) => m.id)
+      ).toEqual(["gf"]);
+    });
+
+    test("filters the TBD skeleton before the bracket is generated", () => {
+      const internal = { ok: true, generated: false, matches: [] };
+      const filtered = filterSnapshotByGroup(internal, "winners", skeleton);
+      expect(filtered.generated).toBe(false);
+      expect(filtered.matches.map((m) => m.id)).toEqual(["w1"]);
+    });
+
+    test("returns the snapshot untouched without a known group", () => {
+      const internal = { ok: true, generated: true, matches: skeleton };
+      expect(filterSnapshotByGroup(internal, "")).toBe(internal);
+      expect(filterSnapshotByGroup(internal, "nope")).toBe(internal);
+    });
   });
 });
