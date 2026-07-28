@@ -17,6 +17,15 @@ const slugClass = (value) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
 
+// A match with exactly one real team that already holds a win result is an
+// auto-advanced bye slot, not a playable pairing. Hiding it keeps odd-sized
+// brackets readable; the team still appears in the round it advances to.
+const isAutoAdvanceMatch = (match) => {
+  const sides = [match?.opponent1, match?.opponent2];
+  const filled = sides.filter((side) => side?.teamId);
+  return filled.length === 1 && filled[0].result === "win";
+};
+
 const sideClass = (side) => {
   if (side.result === "win") return "is-win";
   if (side.result === "loss") return "is-loss";
@@ -296,12 +305,41 @@ export default function TourneyBracketView({
   snapshot,
   renderControls,
 }) {
-  const matches = useMemo(() => {
+  const { matches, byeTeams } = useMemo(() => {
     const sourceMatches = snapshot?.matches || [];
-    if (snapshot?.generated && sourceMatches.length > 0) return sourceMatches;
-    return buildTbdBracketMatches();
+    if (!snapshot?.generated || sourceMatches.length === 0) {
+      return { matches: buildTbdBracketMatches(), byeTeams: new Set() };
+    }
+    const byeTeams = new Set();
+    const visible = sourceMatches.filter((match) => {
+      if (!isAutoAdvanceMatch(match)) return true;
+      const winner = [match.opponent1, match.opponent2].find(
+        (side) => side?.teamId
+      );
+      byeTeams.add(`${match.groupName}:${winner.teamId}`);
+      return false;
+    });
+    return { matches: visible, byeTeams };
   }, [snapshot?.generated, snapshot?.matches]);
   const grouped = useMemo(() => groupMatches(matches), [matches]);
+  const firstVisibleRounds = useMemo(() => {
+    const map = new Map();
+    for (const group of grouped) {
+      for (const round of group.rounds) {
+        for (const match of round.matches) {
+          for (const side of [match.opponent1, match.opponent2]) {
+            if (!side?.teamId) continue;
+            const key = `${group.groupName}:${side.teamId}`;
+            const current = map.get(key);
+            if (current === undefined || round.roundNumber < current) {
+              map.set(key, round.roundNumber);
+            }
+          }
+        }
+      }
+    }
+    return map;
+  }, [grouped]);
   const treeRef = useRef(null);
   const bandRefs = useRef(new Map());
   const matchRefs = useRef(new Map());
@@ -577,18 +615,28 @@ export default function TourneyBracketView({
         <strong>Best of {match.bestOf}</strong>
       </header>
       <div className="tourney-match-sides">
-        {[match.opponent1, match.opponent2].map((side) => (
-          <div
-            className={`tourney-match-side ${sideClass(side)}`}
-            key={side.side}
-          >
-            <span>
-              <strong>{side.name}</strong>
-              {side.forfeit ? <small>Forfeit</small> : null}
-            </span>
-            <b>{scoreText(side.score)}</b>
-          </div>
-        ))}
+        {[match.opponent1, match.opponent2].map((side) => {
+          const showByeBadge =
+            side.teamId &&
+            byeTeams.has(`${groupName}:${side.teamId}`) &&
+            firstVisibleRounds.get(`${groupName}:${side.teamId}`) ===
+              roundNumber;
+          return (
+            <div
+              className={`tourney-match-side ${sideClass(side)}`}
+              key={side.side}
+            >
+              <span>
+                <strong>{side.name}</strong>
+                {side.forfeit ? <small>Forfeit</small> : null}
+                {showByeBadge ? (
+                  <small className="tourney-match-bye">Bye</small>
+                ) : null}
+              </span>
+              <b>{scoreText(side.score)}</b>
+            </div>
+          );
+        })}
       </div>
       <footer>
         <span>{match.statusLabel}</span>

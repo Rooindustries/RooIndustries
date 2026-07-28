@@ -68,7 +68,7 @@ export const OverlayStyles = () => (
     }
 
     .tourney-overlay .tourney-match-side.is-win strong {
-      color: #a5f3fc;
+      color: var(--tourney-side-win-text);
     }
 
     @keyframes ov-card-glow {
