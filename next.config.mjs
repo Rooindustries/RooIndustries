@@ -39,6 +39,19 @@ const contentSecurityPolicy = [
   "worker-src 'self' blob:",
   ...(isProduction ? ["upgrade-insecure-requests"] : []),
 ].join("; ");
+const overlayContentSecurityPolicy = contentSecurityPolicy
+  .replace("frame-ancestors 'none'", "frame-ancestors 'self'")
+  .replace("frame-src https://", "frame-src 'self' https://");
+const overlayFrameHeaders = [
+  {
+    key: "Content-Security-Policy",
+    value: overlayContentSecurityPolicy,
+  },
+  {
+    key: "X-Frame-Options",
+    value: "SAMEORIGIN",
+  },
+];
 const globalSecurityHeaders = [
   {
     key: "Content-Security-Policy",
@@ -103,6 +116,10 @@ const nextConfig = {
       {
         source: '/:path*',
         headers: globalSecurityHeaders,
+      },
+      {
+        source: '/tourney/overlay/:path*',
+        headers: overlayFrameHeaders,
       },
       {
         source: '/_next/static/:path*',
