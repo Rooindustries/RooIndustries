@@ -1894,7 +1894,7 @@ export default function Payment({ hideFooter = false }) {
                     !canUseRazorpay ||
                     !providerIsAvailableForSession("razorpay")
                   }
-                  className="glow-button px-4 py-2 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60"
+                  className="glow-button h-10 w-full rounded-lg px-4 text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 sm:w-48"
                 >
                   {payingRzp || paymentStatusBusy
                     ? "Processing..."
@@ -1947,15 +1947,13 @@ export default function Payment({ hideFooter = false }) {
                       iframe, not from us: their button is a 4px-radius rounded rect
                       over their own light document background, so the corner
                       crescents outside that arc leak near-white (measured
-                      rgb(251,253,254)). The shell's own rounded clip cannot cut
-                      them, because the shell is ~5px taller than the iframe and
-                      top-aligned, putting its bottom corners clear of the iframe's.
-                      Clipping the iframe at PayPal's own 4px radius removes them.
+                      rgb(251,253,254)). Match the shell to the SDK's 40px button
+                      height, then clip the iframe at PayPal's own 4px radius.
                       outline-0 rather than outline-none: Tailwind v3 compiles
                       outline-none to a 2px *transparent* outline at 2px offset,
                       which forced-colors and high-contrast modes repaint as a real
                       ring. */}
-                  <div className="paypal-checkout-shell relative z-0 w-full overflow-hidden rounded-lg bg-transparent sm:w-48 [&_iframe]:!rounded-[4px] [&_iframe]:!border-0 [&_iframe]:!bg-transparent [&_iframe]:!outline-0 [&_iframe]:!shadow-none">
+                  <div className="paypal-checkout-shell relative z-0 h-10 w-full overflow-hidden rounded-lg bg-transparent sm:w-48 [&_iframe]:!rounded-[4px] [&_iframe]:!border-0 [&_iframe]:!bg-transparent [&_iframe]:!outline-0 [&_iframe]:!shadow-none">
                     {canDisplayPaypalMethod ? (
                       <PayPalScriptProvider
                         options={{
