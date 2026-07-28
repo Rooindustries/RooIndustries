@@ -21,7 +21,7 @@ const BRACKET_PARAMS = [
   },
   {
     name: "?scale=1",
-    text: "Zoom the whole overlay (0.6–2, default 1).",
+    text: "Zoom the whole overlay (0.35–2, default 1). The full 12-team bracket fits 1920×1080 at about 0.43; a single lane fits near 0.8.",
   },
   {
     name: "?group=winners",
@@ -67,7 +67,7 @@ export default async function TourneyOverlayIndexPage() {
             title="Full Bracket"
             description="The complete live bracket with winners, lower, and grand final lanes. Match cards glow while a series is being played."
             path="/tourney/overlay/bracket"
-            recommendedSize="1920×1080 for a full-screen bracket scene"
+            recommendedSize="1920×1080 with ?scale=0.43 for the full bracket, or 1920×1080 near scale 1 with ?group= for one lane"
             params={BRACKET_PARAMS}
             previewSrc="/tourney/overlay/bracket?bg=gradient&scale=0.5"
             previewHeight={560}

@@ -27,7 +27,7 @@ const MATCH_STATUSES = Object.freeze({
   5: "Archived",
   6: "Game Cancelled",
 });
-const PREVIEW_FIXTURE_KEY = "8x6";
+const PREVIEW_FIXTURE_KEY = "12x6";
 const PREVIEW_FIXTURE_TEAM_NAMES = Object.freeze([
   "Roo Alpha",
   "Roo Bravo",
@@ -35,8 +35,12 @@ const PREVIEW_FIXTURE_TEAM_NAMES = Object.freeze([
   "Roo Delta",
   "Roo Eclipse",
   "Roo Flux",
+  "Roo Glitch",
   "Roo Helix",
   "Roo Ion",
+  "Roo Jolt",
+  "Roo Karma",
+  "Roo Lynx",
 ]);
 
 const MEMORY_STORE =
@@ -379,11 +383,16 @@ const ensurePreviewFixtureLoaded = async (env = process.env) => {
     updatedBy: "preview-fixture",
   }));
 
+  const seeding = [...PREVIEW_FIXTURE_TEAM_NAMES];
+  while (seeding.length < nextPowerOfTwo(seeding.length)) {
+    seeding.push(null);
+  }
+
   await createManager(env).create.stage({
     tournamentId: TOURNEY_ID,
     name: "6v6 Legacy Series",
     type: "double_elimination",
-    seeding: PREVIEW_FIXTURE_TEAM_NAMES,
+    seeding,
     settings: {
       grandFinal: "simple",
     },
@@ -406,8 +415,8 @@ const ensurePreviewFixtureLoaded = async (env = process.env) => {
     actorUsername: "preview-fixture",
     matchId: null,
     teamId: "",
-    reason: "8 teams, 6 players each",
-    payload: { teamCount: 8, playersPerTeam: 6 },
+    reason: "12 teams, 6 players each",
+    payload: { teamCount: 12, playersPerTeam: 6 },
     createdAt: timestamp,
   });
   MEMORY_STORE.fixtureKey = PREVIEW_FIXTURE_KEY;
