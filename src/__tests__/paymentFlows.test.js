@@ -294,6 +294,17 @@ describe("payment session UI", () => {
       .closest(".paypal-checkout-shell");
     expect(paypalShell).toHaveClass("overflow-hidden", "rounded-lg");
     expect(paypalShell.className).toContain("[&_iframe]:!border-0");
+    // PayPal's button is a 4px-radius rounded rect over its own light document
+    // background, so the corner crescents outside that arc leaked near-white
+    // around the button. The shell's clip cannot cut them — it is ~5px taller than
+    // the iframe and top-aligned — so the iframe carries the matching radius.
+    expect(paypalShell.className).toContain("[&_iframe]:!rounded-[4px]");
+    // outline-none would not do: Tailwind v3 compiles it to a 2px *transparent*
+    // outline at 2px offset, which forced-colors mode repaints as a real ring.
+    // Assembled rather than written literally, because Tailwind scans this file and
+    // a literal would keep generating the very rule we removed.
+    expect(paypalShell.className).toContain("[&_iframe]:!outline-0");
+    expect(paypalShell.className).not.toContain(`[&_iframe]:!outline-${"none"}`);
     expect(
       screen.getByRole("link", { name: /back to booking/i }).closest("section")
     ).toHaveClass("py-4");
