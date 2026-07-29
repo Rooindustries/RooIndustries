@@ -55,6 +55,10 @@ describe("tourney player store", () => {
   afterEach(() => {
     const store = require("../server/tourney/playerStore.js");
     store.resetMemoryTourneyPlayerStoreForTests();
+    if (globalThis.__rooTourneyFreeSessionStore) {
+      globalThis.__rooTourneyFreeSessionStore.entitlements = [];
+      globalThis.__rooTourneyFreeSessionStore.bookingPlayers = new Set();
+    }
     global.fetch = originalFetch;
     jest.resetModules();
   });
@@ -389,6 +393,28 @@ describe("tourney player store", () => {
       primaryRolePlay: "Support",
       approvedRolePlay: "Support",
     });
+    const freeSessionStore = require("../server/tourney/freeSessionStore.js");
+    await expect(
+      freeSessionStore.getTourneyFreeSessionState({
+        playerId: approved.id,
+        env,
+      })
+    ).resolves.toMatchObject({
+      packageTitle: "Tourney Free Optimization",
+      entitlement: {
+        status: "available",
+        bookingId: "",
+        booking: null,
+      },
+    });
+    await expect(
+      freeSessionStore.grantTourneySessionEntitlement({
+        playerId: approved.id,
+        actorUsername: "yukari",
+        env,
+      })
+    ).resolves.toMatchObject({ status: "available" });
+    expect(globalThis.__rooTourneyFreeSessionStore.entitlements).toHaveLength(1);
     await expect(
       store.getRegistrationDecisionToken({
         token: approveToken.token,

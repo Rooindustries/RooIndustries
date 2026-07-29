@@ -46,6 +46,7 @@ export const TOURNEY_HOSTED_SNAPSHOT_RELATIONS = Object.freeze([
   "tourney.mirror_tombstones",
   "tourney.schema_metadata",
   "tourney.tourney_player_auth_operations",
+  "tourney.tourney_session_entitlements",
   "tourney.external_operation_secrets",
   "tourney.mirror_contracts",
   "tourney.parity_runs",
@@ -160,6 +161,7 @@ export const SUPABASE_FULL_REQUIRED_RELATIONS = Object.freeze([
   "tourney.tourney_player_tokens",
   "tourney.tourney_players",
   "tourney.tourney_registration_config",
+  "tourney.tourney_session_entitlements",
   "vault.tourney_snapshot_keys",
 ]);
 
@@ -175,7 +177,7 @@ export const SUPABASE_FULL_CAPTURE_REQUIRED_RELATIONS = Object.freeze(
 );
 
 export const SUPABASE_FULL_PRE_EXPAND_MIGRATION_VERSION = "20260714230345";
-export const SUPABASE_FULL_EXPANDED_MINIMUM_MIGRATION_VERSION = "20260715120000";
+export const SUPABASE_FULL_EXPANDED_MINIMUM_MIGRATION_VERSION = "20260729120000";
 export const SUPABASE_FULL_EXPANDED_MIGRATION_NAMES = Object.freeze([
   "add_referral_creator_terms_editor",
   "add_document_mutation_mirror_outbox",
@@ -183,6 +185,7 @@ export const SUPABASE_FULL_EXPANDED_MIGRATION_NAMES = Object.freeze([
   "add_referral_email_dispatch_ledger",
   "harden_commerce_readiness_evidence",
   "add_global_cms_publish_authority",
+  "add_tourney_session_entitlements",
 ]);
 export const SUPABASE_FULL_PRE_EXPAND_DEFERRED_RELATIONS = Object.freeze([
   "accounts.creator_fallback_authorities",
@@ -191,6 +194,7 @@ export const SUPABASE_FULL_PRE_EXPAND_DEFERRED_RELATIONS = Object.freeze([
   "migration.cms_publish_commands",
   "migration.document_mutation_mirror_actions",
   "migration.document_mutation_mirror_outbox",
+  "tourney.tourney_session_entitlements",
 ]);
 
 export const SUPABASE_FULL_PRE_EXPAND_PROFILE =
