@@ -20,9 +20,6 @@ create table tourney.tourney_session_entitlements (
   )
 );
 
-create index tourney_session_entitlements_status_created_idx
-  on tourney.tourney_session_entitlements (status, created_at);
-
 alter table tourney.tourney_session_entitlements enable row level security;
 revoke all on table tourney.tourney_session_entitlements
   from public, anon, authenticated;

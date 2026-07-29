@@ -457,6 +457,10 @@ export async function bookTourneyFreeSession({
             pg_catalog.hashtextextended(${playerLockKey}, 0)
           )
         `;
+        // The captured-booking call below round-trips a separate commerce
+        // backend while this transaction holds the player lock; bound the
+        // idle window so a hung downstream call cannot pin it indefinitely.
+        await sql`set local idle_in_transaction_session_timeout = '120s'`;
         const players = await sql`
           select id, status
           from tourney_players
