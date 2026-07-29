@@ -26,8 +26,8 @@ const DEMO_FEED = Object.freeze({
       bestOf: 5,
       targetScore: 3,
       opponents: [
-        { slot: 1, teamId: "demo-a", name: "Roo Alpha", score: 2, result: "", forfeit: false, winner: false },
-        { slot: 2, teamId: "demo-b", name: "Roo Bravo", score: 1, result: "", forfeit: false, winner: false },
+        { slot: 1, teamId: "demo-a", name: "Team Alpha", score: 2, result: "", forfeit: false, winner: false },
+        { slot: 2, teamId: "demo-b", name: "Team Bravo", score: 1, result: "", forfeit: false, winner: false },
       ],
       next: [],
     },
