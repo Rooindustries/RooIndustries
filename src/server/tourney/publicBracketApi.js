@@ -177,14 +177,36 @@ const compareFeedMatches = (left, right) => {
   return left.number - right.number;
 };
 
-export const buildPublicLiveResponse = (snapshot, { limit = 3 } = {}) => {
+// OBS strips pin to one table with ?match= / ?team=. A pinned strip only ever
+// shows that match (or that team's match) while it is ready or running — it
+// never falls back to someone else's game, it just goes idle.
+const normalizePin = (value) => String(value || "").trim().toLowerCase();
+
+const matchHasTeam = (match, pin) =>
+  match.opponents.some(
+    (opponent) =>
+      normalizePin(opponent.name) === pin ||
+      normalizePin(opponent.teamId) === pin
+  );
+
+export const buildPublicLiveResponse = (
+  snapshot,
+  { limit = 3, matchId = "", team = "" } = {}
+) => {
   const boundedLimit = clamp(Number(limit) || 3, 1, 10);
   const matches = (snapshot?.matches || []).map(mapPublicMatch);
+  const pinnedId = String(matchId || "").trim();
+  const pinnedTeam = normalizePin(team);
+  const isPinned = (match) => {
+    if (pinnedId) return String(match.id) === pinnedId;
+    if (pinnedTeam) return matchHasTeam(match, pinnedTeam);
+    return true;
+  };
   const live = matches
-    .filter((match) => match.status === "running")
+    .filter((match) => match.status === "running" && isPinned(match))
     .sort(compareFeedMatches);
   const upNext = matches
-    .filter((match) => match.status === "ready")
+    .filter((match) => match.status === "ready" && isPinned(match))
     .sort(compareFeedMatches)
     .slice(0, boundedLimit);
   return {

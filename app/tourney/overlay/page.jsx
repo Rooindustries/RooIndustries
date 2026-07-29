@@ -49,6 +49,14 @@ const STRIP_PARAMS = [
     name: "?demo=1",
     text: "Always show a sample match so you can place and size the source before the event.",
   },
+  {
+    name: "?team=Team Chosen",
+    text: "Follow one team all event: their live match, else their next one, else hidden. Exact team name, not case-sensitive.",
+  },
+  {
+    name: "?match=123",
+    text: "Pin one specific match by id. Shows while it is upcoming or live, hides after it completes. Ids are listed at /api/tourney/v1/matches.",
+  },
 ];
 
 const GuideSection = ({
@@ -391,6 +399,34 @@ export default async function TourneyOverlayIndexPage() {
                 mid-series.
               </li>
             </ul>
+            <h4>Several matches at once? Pin yours</h4>
+            <p>
+              The strip shows one match, and it has no way to know which game
+              is on your capture. By default it picks the earliest running
+              match in bracket order, so two streams would show the same
+              match. If your stream covers a different table, tell the strip
+              once in the URL:
+            </p>
+            <ul className="ov-guide-suggest">
+              <li>
+                <code>&amp;team=Team%20Chosen</code> follows one team through
+                the whole event. The strip shows their live match, or their
+                next one, and hides when they have neither. Use the exact
+                team name from the roster page; capitals don&rsquo;t matter,
+                spaces become <code>%20</code>.
+              </li>
+              <li>
+                <code>&amp;match=123</code> pins one specific match by its id.
+                It shows while that match is upcoming or live and hides after
+                it completes. Ids are listed at{" "}
+                <code>/api/tourney/v1/matches</code>.
+              </li>
+              <li>
+                A pinned strip never jumps to someone else&rsquo;s game. Worst
+                case it goes invisible for a bit, which beats showing the
+                wrong match on stream.
+              </li>
+            </ul>
             <GuidePreview
               src="/tourney/overlay/match?demo=1&bg=gradient"
               title="Live match strip"
@@ -449,6 +485,13 @@ export default async function TourneyOverlayIndexPage() {
               <li>
                 <strong>The strip is stuck showing a fake match.</strong> You
                 left <code>&amp;demo=1</code> in the URL. Remove it.
+              </li>
+              <li>
+                <strong>The strip shows a different match than the one on my
+                stream.</strong> With several matches running at once it picks
+                the earliest one in bracket order. Pin yours with{" "}
+                <code>&amp;team=</code> or <code>&amp;match=</code>; see the
+                match strip section above.
               </li>
               <li>
                 <strong>I&rsquo;m on Streamlabs or XSplit.</strong> Same URLs.
