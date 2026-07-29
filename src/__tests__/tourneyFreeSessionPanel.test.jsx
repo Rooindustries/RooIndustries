@@ -226,4 +226,45 @@ describe("TourneyFreeSession", () => {
     const postCalls = calls.filter((call) => call.options.method === "POST");
     expect(postCalls).toHaveLength(1);
   });
+
+  test("flips to the consumed view when booking reports already booked", async () => {
+    let stateFetches = 0;
+    mockFetchRouter({
+      "GET /api/tourney/free-session": () => {
+        stateFetches += 1;
+        return jsonResponse(
+          stateFetches > 1 ? consumedState() : availableState()
+        );
+      },
+      "POST /api/tourney/free-session": () =>
+        jsonResponse(
+          {
+            ok: false,
+            error: "Your free session has already been booked.",
+            code: "TOURNEY_FREE_SESSION_ALREADY_BOOKED",
+          },
+          409
+        ),
+    });
+    render(<TourneyFreeSession />);
+
+    const slotButton = await screen.findByRole("button", {
+      name: localTimeLabel(SLOT_230PM_UTC),
+    });
+    fireEvent.change(screen.getByPlaceholderText(/booking confirmation/i), {
+      target: { value: "player@example.com" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/discord username/i), {
+      target: { value: "player#1234" },
+    });
+    fireEvent.click(slotButton);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Book free session" })
+    );
+
+    expect(
+      await screen.findByText("Your free session is booked")
+    ).toBeInTheDocument();
+    expect(stateFetches).toBeGreaterThan(1);
+  });
 });

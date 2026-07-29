@@ -238,6 +238,15 @@ export default function TourneyFreeSession() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const idempotencyKeyRef = useRef("");
+  const mountedRef = useRef(true);
+  const availabilityFetchRef = useRef(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const userTimeZone = useMemo(() => {
     try {
@@ -266,33 +275,35 @@ export default function TourneyFreeSession() {
     setPhase("available");
   }, []);
 
-  useEffect(() => {
-    let active = true;
-    const loadState = async () => {
-      try {
-        const response = await fetch(FREE_SESSION_URL, { cache: "no-store" });
-        const data = await response.json().catch(() => null);
-        if (!active) return;
-        if (!response.ok || !data?.ok) {
-          setPhase("hidden");
-          return;
-        }
-        applyState(data);
-      } catch {
-        if (active) setPhase("hidden");
+  const loadState = useCallback(async () => {
+    try {
+      const response = await fetch(FREE_SESSION_URL, { cache: "no-store" });
+      const data = await response.json().catch(() => null);
+      if (!mountedRef.current) return;
+      if (!response.ok || !data?.ok) {
+        setPhase("hidden");
+        return;
       }
-    };
-    loadState();
-    return () => {
-      active = false;
-    };
+      applyState(data);
+    } catch {
+      if (mountedRef.current) setPhase("hidden");
+    }
   }, [applyState]);
 
+  useEffect(() => {
+    loadState();
+  }, [loadState]);
+
   const loadAvailability = useCallback(async () => {
+    const fetchId = availabilityFetchRef.current + 1;
+    availabilityFetchRef.current = fetchId;
     setAvailabilityError("");
     try {
       const response = await fetch(availabilityUrl, { cache: "no-store" });
       const data = await response.json().catch(() => null);
+      if (!mountedRef.current || availabilityFetchRef.current !== fetchId) {
+        return;
+      }
       if (!response.ok || !data?.settings) {
         throw new Error("Missing booking availability settings.");
       }
@@ -301,6 +312,9 @@ export default function TourneyFreeSession() {
         bookedSlots: Array.isArray(data.bookedSlots) ? data.bookedSlots : [],
       });
     } catch {
+      if (!mountedRef.current || availabilityFetchRef.current !== fetchId) {
+        return;
+      }
       setSettings(null);
       setAvailabilityError("Booking availability took too long to load.");
     }
@@ -391,13 +405,17 @@ export default function TourneyFreeSession() {
         return;
       }
 
+      // The server definitively rejected this attempt; the key must not be
+      // replayed against an edited payload or it 409s on the key itself.
+      idempotencyKeyRef.current = "";
       const message =
         data?.error || "Unable to book the free session. Please try again.";
       setError(message);
       if (data?.code === "TOURNEY_FREE_SESSION_SLOT_CONFLICT") {
-        idempotencyKeyRef.current = "";
         setSelectedSlot(null);
         loadAvailability();
+      } else if (data?.code === "TOURNEY_FREE_SESSION_ALREADY_BOOKED") {
+        await loadState();
       }
     } catch {
       setError("Unable to book the free session. Please try again.");
