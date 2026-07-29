@@ -313,6 +313,35 @@ describe("tourney public bracket API contract", () => {
     expect(api.buildPublicLiveResponse(snapshot, { team: "Nobody" }).live).toEqual([]);
   });
 
+  test("never reports a result on participant-less bye slots", async () => {
+    const api = loadApi();
+    const store = loadStore();
+    store.resetMemoryTourneyBracketStoreForTests();
+    await addTeams(store, [
+      "Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot",
+      "Golf", "Hotel", "India", "Juliett", "Kilo", "Lima",
+    ]);
+    await store.generateTourneyBracket({ actorUsername: "serviroo", env });
+    const snapshot = await store.getTourneyBracketSnapshot({ env });
+
+    // The engine pre-stamps result: "win" on lower-bracket R1 bye slots at
+    // creation time; empty slots must surface no result at either layer.
+    const emptySides = snapshot.matches
+      .flatMap((match) => [match.opponent1, match.opponent2])
+      .filter((side) => !side.teamId);
+    expect(emptySides.length).toBeGreaterThan(0);
+    expect(emptySides.every((side) => side.result === "")).toBe(true);
+
+    const body = api.buildPublicBracketResponse(snapshot);
+    const emptyApiSides = body.matches
+      .flatMap((match) => match.opponents)
+      .filter((side) => !side.teamId);
+    expect(emptyApiSides.length).toBeGreaterThan(0);
+    expect(
+      emptyApiSides.every((side) => side.result === "" && side.winner === false)
+    ).toBe(true);
+  });
+
   test("parses status filter slugs and codes, rejecting unknown values", () => {
     const api = loadApi();
     expect(api.parseStatusFilter("running,ready")).toEqual({
