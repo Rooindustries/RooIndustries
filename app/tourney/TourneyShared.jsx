@@ -2271,6 +2271,89 @@ export const TourneyStyles = () => (
       color: #a5f3fc;
     }
 
+    .tourney-free-session {
+      margin-bottom: 1.125rem;
+    }
+
+    .tourney-slot-picker {
+      display: grid;
+      gap: 12px;
+    }
+
+    .tourney-slot-label {
+      margin: 0;
+      color: #7dd3fc;
+      font-size: 0.76rem;
+      font-weight: 820;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    .tourney-slot-dates {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .tourney-slot-times {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(min(100%, 7.5rem), 1fr));
+      gap: 8px;
+    }
+
+    .tourney-slot-date,
+    .tourney-slot-time {
+      min-height: 40px;
+      border: 1px solid rgba(14, 165, 233, 0.4);
+      border-radius: 0.75rem;
+      color: rgba(226, 232, 240, 0.9);
+      background: rgba(12, 22, 42, 0.78);
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.88rem;
+      font-weight: 700;
+      transition: border-color 160ms ease, background 160ms ease,
+        box-shadow 160ms ease;
+    }
+
+    .tourney-slot-date {
+      padding: 0 14px;
+    }
+
+    .tourney-slot-date:hover,
+    .tourney-slot-time:hover {
+      border-color: rgba(56, 189, 248, 0.78);
+    }
+
+    .tourney-slot-date:focus-visible,
+    .tourney-slot-time:focus-visible {
+      outline: none;
+      border-color: rgba(56, 189, 248, 0.78);
+      box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.18);
+    }
+
+    .tourney-slot-date.is-active,
+    .tourney-slot-time.is-selected {
+      border-color: rgba(125, 211, 252, 0.7);
+      color: #fff;
+      background: linear-gradient(
+        120deg,
+        rgba(102, 185, 250, 1) 0%,
+        rgba(38, 145, 220, 1) 45%,
+        rgba(18, 95, 195, 1) 100%
+      );
+      box-shadow:
+        0 0 14px rgba(45, 212, 191, 0.28),
+        0 0 26px rgba(45, 212, 191, 0.2);
+    }
+
+    .tourney-slot-empty {
+      margin: 0;
+      color: rgba(148, 163, 184, 0.9);
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+
     .tourney-modal-backdrop {
       --tourney-text: #ffffff;
       --tourney-text-soft: rgba(226, 232, 240, 0.86);
