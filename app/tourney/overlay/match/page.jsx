@@ -35,6 +35,12 @@ export default async function MatchOverlayPage({ searchParams }) {
   const scale = clampNumber(params?.scale, 0.6, 2, 1);
   const demo = String(params?.demo || "") === "1";
   const demoBackground = String(params?.bg || "").toLowerCase() === "gradient";
+  const matchId = String(params?.match || "")
+    .trim()
+    .slice(0, 120);
+  const team = String(params?.team || "")
+    .trim()
+    .slice(0, 120);
 
   const snapshot = demo
     ? null
@@ -42,7 +48,7 @@ export default async function MatchOverlayPage({ searchParams }) {
   const initialFeed = demo
     ? EMPTY_FEED
     : snapshot
-      ? buildPublicLiveResponse(snapshot)
+      ? buildPublicLiveResponse(snapshot, { matchId, team })
       : EMPTY_FEED;
 
   return (
@@ -54,6 +60,8 @@ export default async function MatchOverlayPage({ searchParams }) {
         scale={scale}
         demo={demo}
         demoBackground={demoBackground}
+        matchId={matchId}
+        team={team}
       />
     </>
   );

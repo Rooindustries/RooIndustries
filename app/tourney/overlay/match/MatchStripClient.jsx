@@ -49,11 +49,21 @@ export default function MatchStripClient({
   scale,
   demo,
   demoBackground,
+  matchId = "",
+  team = "",
 }) {
   const [feed, setFeed] = useState(demo ? DEMO_FEED : initialFeed);
 
+  // A pinned strip asks the API for only its match/team so simultaneous
+  // matches on other tables never leak onto this stream.
+  const pinQuery = matchId
+    ? `?match=${encodeURIComponent(matchId)}`
+    : team
+      ? `?team=${encodeURIComponent(team)}`
+      : "";
+
   useOverlayPoll({
-    url: "/api/tourney/v1/matches/live",
+    url: `/api/tourney/v1/matches/live${pinQuery}`,
     intervalMs: pollSeconds * 1000,
     version: feed?.version,
     onUpdate: setFeed,
