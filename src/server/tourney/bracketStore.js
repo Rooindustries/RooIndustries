@@ -1310,13 +1310,17 @@ const buildDisplayMatches = ({ data, teams, maskParticipantNames = false }) => {
           participants,
           teams,
         });
+        // The engine pre-resolves bye outcomes at creation time and can stamp
+        // result: "win" on a slot that has no participant (lower-bracket R1 in
+        // brackets with byes). An empty slot must never report a result.
+        const hasParticipant = opponent?.id != null;
         return {
           side: key,
           participantId: opponent?.id ?? null,
           teamId: team?.id || "",
           name: maskParticipantNames ? "TBD" : participant?.name || "TBD",
           score: opponent?.score ?? "",
-          result: opponent?.result || (opponent?.forfeit ? "loss" : ""),
+          result: hasParticipant ? opponent?.result || (opponent?.forfeit ? "loss" : "") : "",
           forfeit: Boolean(opponent?.forfeit),
           status: team?.status || "",
         };

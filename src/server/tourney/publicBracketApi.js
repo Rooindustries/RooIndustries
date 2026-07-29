@@ -70,15 +70,21 @@ export const parseStatusFilter = (value) => {
   return { ok: true, codes: [...new Set(codes)] };
 };
 
-const mapPublicOpponent = (side = {}) => ({
-  slot: side.side === "opponent2" ? 2 : 1,
-  teamId: side.teamId || "",
-  name: side.name || "TBD",
-  score: side.score === "" || side.score === undefined ? null : Number(side.score),
-  result: side.result || "",
-  forfeit: Boolean(side.forfeit),
-  winner: side.result === "win",
-});
+const mapPublicOpponent = (side = {}) => {
+  // Slots with no participant (bye padding, lower-bracket R1) must never
+  // surface a result, even if the engine pre-stamped one at creation time.
+  const hasParticipant = side.participantId != null;
+  const result = hasParticipant ? side.result || "" : "";
+  return {
+    slot: side.side === "opponent2" ? 2 : 1,
+    teamId: side.teamId || "",
+    name: side.name || "TBD",
+    score: side.score === "" || side.score === undefined ? null : Number(side.score),
+    result,
+    forfeit: Boolean(side.forfeit),
+    winner: result === "win",
+  };
+};
 
 const mapPublicMatch = (match) => {
   const status = PUBLIC_MATCH_STATUSES[match.status] || "unknown";
