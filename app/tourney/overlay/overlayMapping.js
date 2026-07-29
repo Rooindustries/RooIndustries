@@ -43,6 +43,10 @@ const toInternalMatch = (match) => ({
   displayLabel: match.label,
   status: match.statusCode,
   statusLabel: toOverlayStatusLabel(match),
+  // The raw status slug ("running", "completed", ...) for the card status
+  // class: the overlay-mapped statusLabel only covers LIVE/Up Next/Cancelled,
+  // so without this the LIVE glow and completed dimming could never fire.
+  statusSlug: typeof match?.status === "string" ? match.status : "",
   bestOf: match.bestOf,
   targetScore: match.targetScore,
   opponent1: toInternalSide(match.opponents?.[0], 0),

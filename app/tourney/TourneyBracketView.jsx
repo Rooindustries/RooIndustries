@@ -33,9 +33,21 @@ const sideClass = (side) => {
   return "";
 };
 
-const matchStatusClass = (match) => `is-${slugClass(match.statusLabel) || "unknown"}`;
+// Overlay matches carry a raw statusSlug because their statusLabel is already
+// remapped (running -> "LIVE" etc.); the site bracket falls back to the label.
+const matchStatusClass = (match) =>
+  `is-${slugClass(match.statusSlug || match.statusLabel) || "unknown"}`;
 
 const scoreText = (score) => (score === "" || score === undefined ? "-" : score);
+
+// The full display label repeats the column's round label above every card
+// ("Winners Round 1 Match 2" under a "Winners Round 1" column). Trim that
+// prefix down to the match number; distinctive labels (finals) stay whole.
+const shortMatchLabel = (match) => {
+  const label = match.displayLabel || match.label || "";
+  const tail = label.match(/Match\s+(\d+)$/i);
+  return tail ? `Match ${tail[1]}` : label;
+};
 
 const maxRoundMatches = (group) =>
   Math.max(...group.rounds.map((round) => round.matches.length), 1);
@@ -689,8 +701,12 @@ export default function TourneyBracketView({
       }}
     >
       <header>
-        <span>{match.displayLabel || match.label}</span>
-        <strong>Best of {match.bestOf}</strong>
+        <span>{shortMatchLabel(match)}</span>
+        {/* Bo5 is the bracket-wide default and repeats on every card; only
+            the Grand Final's longer series is worth calling out. */}
+        {match.bestOf && match.bestOf !== 5 ? (
+          <strong>Best of {match.bestOf}</strong>
+        ) : null}
       </header>
       <div className="tourney-match-sides">
         {[match.opponent1, match.opponent2].map((side) => {
