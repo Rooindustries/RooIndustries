@@ -37,6 +37,7 @@ export default async function BracketOverlayPage({ searchParams }) {
   const scale = clampNumber(params?.scale, 0.35, 2, 1);
   const group = String(params?.group || "").trim().toLowerCase();
   const demoBackground = String(params?.bg || "").toLowerCase() === "gradient";
+  const fitDebug = String(params?.fitdebug || "") === "1";
 
   const snapshot = await readPublicBracketApiSnapshot().catch(() => null);
   const initialData = snapshot
@@ -53,6 +54,7 @@ export default async function BracketOverlayPage({ searchParams }) {
         scale={scale}
         group={group}
         demoBackground={demoBackground}
+        fitDebug={fitDebug}
       />
     </>
   );

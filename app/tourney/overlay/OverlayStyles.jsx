@@ -51,14 +51,24 @@ export const OverlayStyles = () => (
       padding: 8px;
     }
 
-    .ov-bracket-fit {
+    /* The fit box is sized explicitly to the scaled content so flex centering
+       works, while the content inside lays out at natural size and is scaled
+       visually with a transform (transforms never change layout, so the fit
+       measurement in OverlayFit stays stable in every engine, including the
+       CEF build inside OBS browser sources). */
+    .ov-fit {
       flex: 0 0 auto;
       text-align: left;
     }
 
+    .ov-fit-content {
+      width: max-content;
+      transform-origin: top left;
+    }
+
     /* The source auto-fits the whole tree into the browser-source viewport,
        so the board renders at natural content size with no clipping or
-       scrollbars; the JS zoom then scales it onto the frame. The finals rail
+       scrollbars; the JS transform then scales it onto the frame. The finals rail
        stays wide: the Grand Final step connectors need horizontal room or
        they double back on themselves. Round gaps stay roomy too — with tight
        gaps the connector line before each arrowhead nearly disappears and

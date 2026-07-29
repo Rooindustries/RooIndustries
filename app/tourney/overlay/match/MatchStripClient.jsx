@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import OverlayFit from "../OverlayFit";
 import { useOverlayPoll } from "../useOverlayPoll";
 
 const DEMO_FEED = Object.freeze({
@@ -51,6 +52,7 @@ export default function MatchStripClient({
   demoBackground,
   matchId = "",
   team = "",
+  fitDebug = false,
 }) {
   const [feed, setFeed] = useState(demo ? DEMO_FEED : initialFeed);
 
@@ -82,31 +84,32 @@ export default function MatchStripClient({
       }`}
       data-idle={mode === "idle" ? "true" : undefined}
       data-version={feed?.version || ""}
-      style={scale === 1 ? undefined : { zoom: scale }}
     >
       {match ? (
-        <div className={`ov-strip-card is-${mode}`} role="status">
-          <span className="ov-strip-badge">
-            {mode === "live" ? "Live" : "Up Next"}
-          </span>
-          <div className="ov-strip-teams">
-            <span className="ov-strip-team is-a">{opponentA?.name || "TBD"}</span>
-            {hasScores ? (
-              <span className="ov-strip-score">
-                {scoreText(opponentA?.score)}
-                <i>–</i>
-                {scoreText(opponentB?.score)}
-              </span>
-            ) : (
-              <span className="ov-strip-score is-vs">vs</span>
-            )}
-            <span className="ov-strip-team is-b">{opponentB?.name || "TBD"}</span>
+        <OverlayFit scale={scale} inset={10} debug={fitDebug}>
+          <div className={`ov-strip-card is-${mode}`} role="status">
+            <span className="ov-strip-badge">
+              {mode === "live" ? "Live" : "Up Next"}
+            </span>
+            <div className="ov-strip-teams">
+              <span className="ov-strip-team is-a">{opponentA?.name || "TBD"}</span>
+              {hasScores ? (
+                <span className="ov-strip-score">
+                  {scoreText(opponentA?.score)}
+                  <i>–</i>
+                  {scoreText(opponentB?.score)}
+                </span>
+              ) : (
+                <span className="ov-strip-score is-vs">vs</span>
+              )}
+              <span className="ov-strip-team is-b">{opponentB?.name || "TBD"}</span>
+            </div>
+            <span className="ov-strip-meta">
+              <b>{match.label}</b>
+              Best of {match.bestOf}
+            </span>
           </div>
-          <span className="ov-strip-meta">
-            <b>{match.label}</b>
-            Best of {match.bestOf}
-          </span>
-        </div>
+        </OverlayFit>
       ) : null}
     </div>
   );
