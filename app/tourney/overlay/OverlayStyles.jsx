@@ -536,5 +536,40 @@ export const OverlayStyles = () => (
     .ov-guide-quickref .ov-docs-card {
       margin-top: 12px;
     }
+
+    /* Blackout theme: the guide follows the site's gold palette. Borders
+       already remap through --tourney-border-accent; these rules swap the
+       hardcoded Roo Blue fills and text for dark gold tints. */
+    html[data-theme="dark"] .tourney-page .ov-figure {
+      --ov-figure-highlight: rgba(240, 195, 90, 0.16);
+      --ov-figure-url: var(--tourney-accent-glow);
+    }
+
+    html[data-theme="dark"] .tourney-page .ov-docs-url code,
+    html[data-theme="dark"] .tourney-page .ov-docs-params code {
+      color: var(--tourney-accent-glow);
+    }
+
+    html[data-theme="dark"] .tourney-page .ov-docs-url button {
+      background: rgba(240, 195, 90, 0.14);
+      color: var(--tourney-accent-glow);
+    }
+
+    html[data-theme="dark"] .tourney-page .ov-docs-url button:hover {
+      background: rgba(240, 195, 90, 0.24);
+    }
+
+    html[data-theme="dark"] .tourney-page .ov-guide-step {
+      background: rgba(240, 195, 90, 0.12);
+      color: var(--tourney-accent-glow);
+    }
+
+    html[data-theme="dark"] .tourney-page .ov-guide-toc a:hover {
+      color: var(--tourney-accent-glow);
+    }
+
+    html[data-theme="dark"] .tourney-page .ov-guide-suggest {
+      background: rgba(240, 195, 90, 0.06);
+    }
   `}</style>
 );
