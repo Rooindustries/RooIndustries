@@ -22,7 +22,12 @@ export const OverlayStyles = () => (
       scrollbar-width: none;
     }
 
-    .ov-demo-bg {
+    /* The preview gradient must outrank both the overlay reset above
+       (.tourney-page.tourney-overlay paints background: transparent, which
+       also zeroes min-height) and the Blackout page background
+       (html[data-theme="dark"] .tourney-page). The strip root is inline-block
+       so the source shrink-wraps in OBS; in preview it goes full-bleed. */
+    .tourney-page.tourney-overlay.ov-demo-bg {
       min-height: 100vh;
       background-image: linear-gradient(
         to top,
@@ -31,6 +36,10 @@ export const OverlayStyles = () => (
         #001f5a 65%,
         #000040 100%
       );
+    }
+
+    .tourney-page.tourney-overlay.ov-strip.ov-demo-bg {
+      display: block;
     }
 
     .ov-bracket {
@@ -100,7 +109,6 @@ export const OverlayStyles = () => (
 
     .tourney-overlay .tourney-match-side small.tourney-match-bye {
       margin-top: 2px;
-      padding: 1px 6px;
       font-size: 0.55rem;
     }
 
@@ -304,24 +312,6 @@ export const OverlayStyles = () => (
       gap: 16px;
     }
 
-    .ov-docs-card {
-      border: 1px solid var(--tourney-border);
-      border-radius: 0.85rem;
-      background: var(--tourney-surface);
-      padding: 16px;
-    }
-
-    .ov-docs-card h3 {
-      margin: 0 0 6px;
-      font-size: 1.05rem;
-    }
-
-    .ov-docs-card p {
-      margin: 0 0 12px;
-      color: var(--tourney-text-soft);
-      font-size: 0.9rem;
-    }
-
     .ov-docs-url {
       display: flex;
       flex-wrap: wrap;
@@ -361,15 +351,40 @@ export const OverlayStyles = () => (
 
     .ov-docs-params {
       margin: 0 0 12px;
-      padding-left: 1.1rem;
+      padding: 0;
+      display: grid;
+      gap: 7px;
+      list-style: none;
       color: var(--tourney-text-muted);
       font-size: 0.82rem;
       line-height: 1.6;
     }
 
+    .ov-docs-params li {
+      position: relative;
+      padding-left: 1.15rem;
+    }
+
+    .ov-docs-params li::before {
+      content: "";
+      position: absolute;
+      left: 0.1rem;
+      top: 0.56em;
+      width: 0.42rem;
+      height: 0.42rem;
+      background: var(--tourney-accent);
+      clip-path: polygon(0 0, 100% 50%, 0 100%);
+      opacity: 0.75;
+    }
+
     .ov-docs-params code {
       color: #a5f3fc;
       font-size: 0.78rem;
+    }
+
+    /* Endpoint rows (code directly followed by its description span). */
+    .ov-docs-params li > code:first-child {
+      margin-right: 0.55rem;
     }
 
     .ov-docs-preview {
@@ -393,26 +408,73 @@ export const OverlayStyles = () => (
       line-height: 1.65;
     }
 
-    .ov-guide-toc {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
+    /* TourneyShell puts overflow-hidden on .tourney-page, which makes it a
+       scroll container and silently disables sticky descendants. overflow:
+       clip keeps the same visual clipping without creating one, so the rail
+       follows the page. Scoped to this page only. */
+    .tourney-page:has(.ov-guide-layout) {
+      overflow: clip;
     }
 
-    .ov-guide-toc a {
-      border: 1px solid var(--tourney-border);
-      border-radius: 999px;
-      background: var(--tourney-surface);
-      color: var(--tourney-text-soft);
-      font-size: 0.82rem;
+    /* The global html, body { overflow-x: hidden } rule also turns body into
+       a scroll container (overflow-y computes to auto), which hijacks the
+       rail's sticky reference: body never scrolls, the viewport does, so the
+       rail scrolls away. clip removes the scrolling mechanism while keeping
+       the same visual clipping. Viewport scrolling still comes from html. */
+    body:has(.ov-guide-layout) {
+      overflow: clip;
+    }
+
+    .ov-guide-layout {
+      display: grid;
+      grid-template-columns: 180px minmax(0, 1fr);
+      gap: 32px;
+      align-items: start;
+    }
+
+    .ov-guide-rail {
+      position: sticky;
+      top: 90px;
+      display: grid;
+    }
+
+    .ov-guide-rail a {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      border-bottom: 1px solid var(--tourney-border);
+      color: var(--tourney-text-muted);
+      font-size: 0.84rem;
       font-weight: 700;
-      padding: 7px 14px;
+      padding: 9px 0;
       text-decoration: none;
     }
 
-    .ov-guide-toc a:hover {
-      border-color: var(--tourney-border-accent);
-      color: #cffafe;
+    .ov-guide-rail a b {
+      color: var(--tourney-accent);
+      font-size: 0.68rem;
+      font-weight: 820;
+      letter-spacing: 0.08em;
+    }
+
+    .ov-guide-rail a:hover {
+      color: var(--tourney-accent);
+    }
+
+    .ov-guide-main {
+      display: grid;
+      gap: 30px;
+      min-width: 0;
+    }
+
+    @media (max-width: 900px) {
+      .ov-guide-layout {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .ov-guide-rail {
+        display: none;
+      }
     }
 
     .ov-figures {
@@ -446,10 +508,8 @@ export const OverlayStyles = () => (
     .ov-guide-section {
       display: grid;
       gap: 12px;
-      border: 1px solid var(--tourney-border);
-      border-radius: 0.85rem;
-      background: var(--tourney-surface);
-      padding: 18px;
+      border-top: 1px solid var(--tourney-border);
+      padding: 22px 0 4px;
       scroll-margin-top: 90px;
     }
 
@@ -460,81 +520,137 @@ export const OverlayStyles = () => (
       line-height: 1.6;
     }
 
-    .ov-guide-section h4 {
-      margin: 6px 0 -4px;
-      color: var(--tourney-text-muted);
-      font-size: 0.78rem;
-      font-weight: 800;
-      letter-spacing: 0.09em;
-      text-transform: uppercase;
+    .ov-guide-section h3 {
+      margin: 0;
+      font-size: 1.2rem;
     }
 
     .ov-guide-header {
       display: flex;
-      align-items: center;
-      gap: 12px;
+      align-items: baseline;
+      gap: 14px;
     }
 
-    .ov-guide-header h3 {
-      margin: 0;
-      font-size: 1.12rem;
-    }
-
-    .ov-guide-step {
-      flex: 0 0 auto;
-      border: 1px solid var(--tourney-border-accent);
-      border-radius: 999px;
-      background: rgba(8, 145, 178, 0.2);
-      color: #a5f3fc;
-      font-size: 0.68rem;
-      font-weight: 800;
-      letter-spacing: 0.1em;
-      padding: 4px 10px;
-      text-transform: uppercase;
-    }
-
-    .ov-guide-steps {
-      margin: 0;
-      padding-left: 1.3rem;
-      color: var(--tourney-text-soft);
-      font-size: 0.9rem;
-      line-height: 1.7;
-      list-style: decimal outside;
-    }
-
-    .ov-guide-steps li + li {
-      margin-top: 2px;
+    .ov-guide-num {
+      color: var(--tourney-accent);
+      font-size: 1.5rem;
+      font-weight: 820;
+      letter-spacing: 0.04em;
+      line-height: 1;
+      opacity: 0.92;
     }
 
     .ov-guide-suggest {
       margin: 0;
-      padding: 12px 14px 12px 16px;
-      border-left: 3px solid var(--tourney-border-accent);
-      border-radius: 0 0.5rem 0.5rem 0;
-      background: rgba(8, 145, 178, 0.1);
+      padding: 0;
+      display: grid;
+      gap: 8px;
+      list-style: none;
       color: var(--tourney-text-soft);
       font-size: 0.88rem;
       line-height: 1.65;
-      list-style: disc;
-      padding-left: 2rem;
     }
 
-    .ov-guide-suggest li + li {
-      margin-top: 6px;
+    .ov-guide-suggest li {
+      position: relative;
+      padding-left: 1.15rem;
     }
 
-    .ov-guide-quickref summary {
+    .ov-guide-suggest li::before {
+      content: "";
+      position: absolute;
+      left: 0.1rem;
+      top: 0.58em;
+      width: 0.42rem;
+      height: 0.42rem;
+      background: var(--tourney-accent);
+      clip-path: polygon(0 0, 100% 50%, 0 100%);
+    }
+
+    .ov-guide-size {
+      color: var(--tourney-text-muted);
+      font-size: 0.85rem;
+    }
+
+    .ov-guide-size strong {
+      color: var(--tourney-text);
+      font-weight: 800;
+      letter-spacing: 0.02em;
+    }
+
+    /* Collapsed depth (walkthrough, pin-a-match, quick fixes). Looks like a
+       hairline-divided section row so it sits in the same rhythm as the open
+       sections; the triangle rotates open. */
+    .ov-guide-fold {
+      border-top: 1px solid var(--tourney-border);
+      padding: 16px 0 4px;
+      scroll-margin-top: 90px;
+    }
+
+    .ov-guide-fold summary {
       cursor: pointer;
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      list-style: none;
+      color: var(--tourney-text);
       font-size: 1.05rem;
       font-weight: 700;
+      line-height: 1.4;
     }
 
-    .ov-guide-quickref[open] summary {
-      margin-bottom: 14px;
+    .ov-guide-fold summary::-webkit-details-marker {
+      display: none;
     }
 
-    .ov-guide-quickref .ov-docs-card {
-      margin-top: 12px;
+    .ov-guide-fold summary::before {
+      content: "";
+      flex: none;
+      align-self: center;
+      width: 0.46rem;
+      height: 0.46rem;
+      background: var(--tourney-accent);
+      clip-path: polygon(0 0, 100% 50%, 0 100%);
+      opacity: 0.9;
+      transition: transform 160ms ease;
+    }
+
+    .ov-guide-fold[open] summary::before {
+      transform: rotate(90deg);
+    }
+
+    .ov-guide-fold summary:hover {
+      color: var(--tourney-accent);
+    }
+
+    .ov-guide-fold[open] summary {
+      margin-bottom: 12px;
+    }
+
+    .ov-guide-fold-body {
+      display: grid;
+      gap: 12px;
+      padding: 0 0 14px;
+    }
+
+    .ov-guide-fold-body p {
+      margin: 0;
+      color: var(--tourney-text-soft);
+      font-size: 0.92rem;
+      line-height: 1.6;
+    }
+
+    /* A fold nested inside a section (the strip's pin-yours block) drops a
+       step in the hierarchy. */
+    .ov-guide-section .ov-guide-fold {
+      border-top-color: transparent;
+      padding-top: 4px;
+    }
+
+    .ov-guide-section .ov-guide-fold summary {
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: var(--tourney-text-muted);
     }
 
     /* Blackout theme: the guide follows the site's gold palette. Borders
@@ -557,19 +673,6 @@ export const OverlayStyles = () => (
 
     html[data-theme="dark"] .tourney-page .ov-docs-url button:hover {
       background: rgba(240, 195, 90, 0.24);
-    }
-
-    html[data-theme="dark"] .tourney-page .ov-guide-step {
-      background: rgba(240, 195, 90, 0.12);
-      color: var(--tourney-accent-glow);
-    }
-
-    html[data-theme="dark"] .tourney-page .ov-guide-toc a:hover {
-      color: var(--tourney-accent-glow);
-    }
-
-    html[data-theme="dark"] .tourney-page .ov-guide-suggest {
-      background: rgba(240, 195, 90, 0.06);
     }
   `}</style>
 );
