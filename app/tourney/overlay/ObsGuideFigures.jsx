@@ -9,7 +9,8 @@ const ROW = "#2e343b";
 const TEXT = "#d6d9dd";
 const MUTED = "#9aa1a9";
 const ACCENT = "#fbbf24";
-const HIGHLIGHT = "rgba(34, 211, 238, 0.16)";
+const HIGHLIGHT = "var(--ov-figure-highlight, rgba(34, 211, 238, 0.16))";
+const URL_TEXT = "var(--ov-figure-url, #a5f3fc)";
 
 const Arrow = ({ from, to, label, labelX, labelY }) => (
   <g>
@@ -117,7 +118,7 @@ export const ObsFigureProperties = () => (
     <text x="76" y="34" fill={TEXT} fontSize="12.5" fontWeight="700">Properties for 'Live bracket'</text>
     <text x="78" y="66" fill={MUTED} fontSize="11">URL</text>
     <rect x="76" y="72" width="328" height="22" rx="4" fill="#14171b" stroke={ACCENT} strokeWidth="2" />
-    <text x="84" y="87" fill="#a5f3fc" fontSize="10.5">https://www.rooindustries.com/tourney/overlay/br…</text>
+    <text x="84" y="87" fill={URL_TEXT} fontSize="10.5">https://www.rooindustries.com/tourney/overlay/br…</text>
     <text x="78" y="122" fill={MUTED} fontSize="11">Width</text>
     <text x="200" y="122" fill={MUTED} fontSize="11">Height</text>
     <rect x="76" y="128" width="100" height="22" rx="4" fill="#14171b" stroke={ACCENT} strokeWidth="2" />
