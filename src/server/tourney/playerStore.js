@@ -110,6 +110,10 @@ const normalizeText = (value) => String(value || "").trim();
 const USERNAME_PATTERN = /^[a-z0-9_.-]{3,24}$/;
 
 const nowIso = () => new Date().toISOString();
+const grantFreeSessionEntitlement = async (options) => {
+  const { grantTourneySessionEntitlement } = await import("./freeSessionStore.js");
+  return grantTourneySessionEntitlement(options);
+};
 
 const getRegistrationCloseTime = (env = process.env) => {
   const configured = normalizeText(env.TOURNEY_REGISTRATION_CLOSES_AT_UTC);
@@ -1827,6 +1831,13 @@ export async function applyRegistrationDecision({
         token.used_by = actor;
       }
     }
+    if (status === "approved") {
+      await grantFreeSessionEntitlement({
+        playerId,
+        actorUsername: actor,
+        env,
+      });
+    }
     return managePlayer(player);
   }
 
@@ -1879,6 +1890,13 @@ export async function applyRegistrationDecision({
     });
 
     if (claimed.completed) {
+      if (claimed.player?.status === "approved") {
+        await grantFreeSessionEntitlement({
+          playerId: claimed.player.id,
+          actorUsername: actor,
+          env,
+        });
+      }
       return { ...managePlayer(claimed.player), decisionTransitioned: false };
     }
     if (claimed.authApplied) {
@@ -1887,6 +1905,13 @@ export async function applyRegistrationDecision({
         operationKey: claimed.operation.key,
         env,
       });
+      if (claimed.player?.status === "approved") {
+        await grantFreeSessionEntitlement({
+          playerId: claimed.player.id,
+          actorUsername: actor,
+          env,
+        });
+      }
       return { ...managePlayer(claimed.player), decisionTransitioned: false };
     }
 
@@ -1899,6 +1924,13 @@ export async function applyRegistrationDecision({
       operationKey: claimed.operation.key,
       env,
     });
+    if (finalized?.status === "approved") {
+      await grantFreeSessionEntitlement({
+        playerId: finalized.id,
+        actorUsername: actor,
+        env,
+      });
+    }
     return { ...managePlayer(finalized), decisionTransitioned: true };
   }
 
@@ -1999,6 +2031,13 @@ export async function applyRegistrationDecision({
         where token_hash = ${tokenHash}
           and used_at is null
       `;
+      if (status === "approved") {
+        await grantFreeSessionEntitlement({
+          playerId,
+          actorUsername: actor,
+          env,
+        });
+      }
 
       return managePlayer(player);
     },
