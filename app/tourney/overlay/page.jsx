@@ -73,7 +73,8 @@ export default async function TourneyOverlayIndexPage() {
         <div className="ov-docs-grid">
           <p className="ov-guide-lede">
             Everything on this page is a URL. Copy one, paste it into OBS as
-            a Browser source, set the size next to it. That is the whole job:
+            a Browser source, set the size next to it — the overlay scales
+            itself to fill whatever size you pick. That is the whole job:
             no accounts, no plugins, and it keeps itself updated while the
             event runs.
           </p>

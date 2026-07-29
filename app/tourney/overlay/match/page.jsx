@@ -35,6 +35,7 @@ export default async function MatchOverlayPage({ searchParams }) {
   const scale = clampNumber(params?.scale, 0.6, 2, 1);
   const demo = String(params?.demo || "") === "1";
   const demoBackground = String(params?.bg || "").toLowerCase() === "gradient";
+  const fitDebug = String(params?.fitdebug || "") === "1";
   const matchId = String(params?.match || "")
     .trim()
     .slice(0, 120);
@@ -62,6 +63,7 @@ export default async function MatchOverlayPage({ searchParams }) {
         demoBackground={demoBackground}
         matchId={matchId}
         team={team}
+        fitDebug={fitDebug}
       />
     </>
   );

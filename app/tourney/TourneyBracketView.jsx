@@ -268,11 +268,11 @@ const getConnectorTargetIndex = ({ sourceIndex, sourceCount, targetCount }) => {
   return Math.min(Math.floor(sourceIndex / (sourceCount / targetCount)), targetCount - 1);
 };
 
-// CSS `zoom` (used by the OBS overlay to fit the frame) scales rendered
-// output without changing layout sizes: getBoundingClientRect returns
-// zoom-scaled px while SVG path user units stay in unscaled layout px.
-// Dividing rect deltas by the tree's rendered scale converts measurements
-// into path space so connectors land on the cards at any zoom level.
+// The OBS overlay fits the frame by scaling an ancestor with a CSS
+// transform: getBoundingClientRect returns scale-adjusted px while SVG path
+// user units stay in unscaled layout px. Dividing rect deltas by the tree's
+// rendered scale converts measurements into path space so connectors land
+// on the cards at any zoom level.
 const getNodeCenter = ({ node, root, scale = 1 }) => {
   const nodeRect = node.getBoundingClientRect();
   const rootRect = root.getBoundingClientRect();
