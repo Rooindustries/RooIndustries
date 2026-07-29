@@ -3354,58 +3354,32 @@ export const TourneyStyles = () => (
 
     .tourney-match-card footer span {
       flex: 0 0 auto;
-      border: 1px solid rgba(148, 163, 184, 0.3);
-      border-radius: 9999px;
-      color: #cbd5e1;
-      background: rgba(15, 23, 42, 0.68);
-      padding: 5px 9px;
-      font-size: 0.7rem;
+      color: rgba(148, 163, 184, 0.85);
+      font-size: 0.68rem;
       font-weight: 820;
+      letter-spacing: 0.08em;
       line-height: 1;
+      text-transform: uppercase;
     }
 
     .tourney-match-card.is-ready footer span,
     .tourney-match-card.is-running footer span {
-      border-color: rgba(34, 211, 238, 0.58);
-      color: #cffafe;
-      background: rgba(8, 145, 178, 0.28);
-    }
-
-    .tourney-match-card.is-locked footer span,
-    .tourney-match-card.is-waiting footer span {
-      border-color: rgba(148, 163, 184, 0.28);
-      color: rgba(203, 213, 225, 0.78);
-      background: rgba(15, 23, 42, 0.46);
+      color: var(--tourney-accent);
     }
 
     .tourney-match-card.is-completed footer span {
-      border-color: rgba(52, 211, 153, 0.52);
-      color: #d1fae5;
-      background: rgba(6, 95, 70, 0.28);
+      color: var(--color-success-text);
     }
 
     .tourney-match-card header strong {
       flex: 0 0 auto;
-      border: 1px solid rgba(168, 85, 247, 0.4);
-      border-radius: 9999px;
-      color: #f5d0fe;
-      background: rgba(88, 28, 135, 0.36);
-      padding: 5px 9px;
-      font-size: 0.7rem;
+      color: rgba(148, 163, 184, 0.85);
+      font-size: 0.68rem;
+      font-weight: 760;
+      letter-spacing: 0.06em;
       line-height: 1;
+      text-transform: uppercase;
       white-space: nowrap;
-    }
-
-    .tourney-bracket-band.is-winners .tourney-match-card header strong {
-      border-color: rgba(34, 211, 238, 0.5);
-      color: #cffafe;
-      background: rgba(8, 145, 178, 0.28);
-    }
-
-    .tourney-bracket-band.is-losers .tourney-match-card header strong {
-      border-color: rgba(251, 146, 60, 0.58);
-      color: #fed7aa;
-      background: rgba(154, 52, 18, 0.34);
     }
 
     .tourney-match-sides {
@@ -3453,11 +3427,7 @@ export const TourneyStyles = () => (
     .tourney-match-side small.tourney-match-bye {
       display: inline-block;
       margin-top: 4px;
-      border: 1px solid var(--tourney-border-accent);
-      border-radius: 9999px;
       color: var(--tourney-accent);
-      background: rgba(8, 145, 178, 0.22);
-      padding: 2px 8px;
       font-size: 0.62rem;
       font-weight: 820;
       letter-spacing: 0.09em;
@@ -4119,8 +4089,7 @@ export const TourneyStyles = () => (
       color: var(--color-warning-text);
     }
 
-    .tourney-form-message.is-success,
-    .tourney-match-card.is-completed footer span {
+    .tourney-form-message.is-success {
       color: var(--color-success-text);
     }
 
@@ -4168,14 +4137,6 @@ export const TourneyStyles = () => (
       background:
         linear-gradient(145deg, var(--tourney-surface), var(--tourney-surface-strong));
       box-shadow: var(--tourney-card-shadow);
-    }
-
-    .tourney-match-card.is-ready footer span,
-    .tourney-match-card.is-running footer span,
-    .tourney-bracket-band.is-winners .tourney-match-card header strong {
-      border-color: var(--tourney-border-accent);
-      color: var(--tourney-accent);
-      background: var(--color-surface-hover-accent);
     }
 
     .tourney-match-side {
