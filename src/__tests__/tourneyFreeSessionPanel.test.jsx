@@ -142,6 +142,44 @@ describe("TourneyFreeSession", () => {
     expect(screen.getByText(/captured/)).toBeInTheDocument();
   });
 
+  test("renders the booking calendar with availability states", async () => {
+    mockFetchRouter();
+    render(<TourneyFreeSession />);
+
+    expect(
+      await screen.findByRole("button", { name: "Previous month" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Next month" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("Sun")).toBeInTheDocument();
+    expect(screen.getByText("Sat")).toBeInTheDocument();
+    expect(screen.getByText("Fully Available")).toBeInTheDocument();
+    expect(screen.getByText("Limited Slots")).toBeInTheDocument();
+    expect(screen.getByText("Fully Booked")).toBeInTheDocument();
+    expect(screen.getByText("Temporarily Reserved")).toBeInTheDocument();
+
+    const expectedDayLabel = new Intl.DateTimeFormat(undefined, {
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    }).format(new Date(SLOT_230PM_UTC));
+    const dayCell = await screen.findByRole("button", {
+      name: new RegExp(`${expectedDayLabel}, limited slots`),
+    });
+    expect(dayCell).toBeInTheDocument();
+
+    const earliest = screen.getByRole("button", {
+      name: /Earliest available:/,
+    });
+    fireEvent.click(earliest);
+    const slotButton = screen.getByRole("button", {
+      name: localTimeLabel(SLOT_230PM_UTC),
+    });
+    expect(slotButton).toHaveAttribute("aria-pressed", "true");
+  });
+
   test("lists only unbooked slots and books the selected time", async () => {
     const { calls } = mockFetchRouter({
       "POST /api/tourney/free-session": () => jsonResponse(consumedState()),

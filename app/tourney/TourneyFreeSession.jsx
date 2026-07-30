@@ -166,7 +166,31 @@ const createIdempotencyKey = () => {
   return `tourney-free-${random}`.slice(0, 128);
 };
 
-const buildLocalSlotMap = (settings, packageTitle, userTimeZone) => {
+// Mirrors the calendar availability states in src/components/BookingForm.jsx.
+const CALENDAR_AVAILABILITY_LABELS = Object.freeze({
+  green: "fully available",
+  yellow: "limited slots",
+  red: "fully booked",
+});
+
+const formatCalendarDateLabel = (date) => {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    }).format(date);
+  } catch {
+    return date.toDateString();
+  }
+};
+
+const isSameDay = (a, b) =>
+  a.getFullYear() === b.getFullYear() &&
+  a.getMonth() === b.getMonth() &&
+  a.getDate() === b.getDate();
+
+const buildSlotData = (settings, packageTitle, userTimeZone) => {
   const dateSlotMap = pickDateSlotMap(settings, packageTitle);
   if (!dateSlotMap) return null;
 
@@ -182,7 +206,8 @@ const buildLocalSlotMap = (settings, packageTitle, userTimeZone) => {
   });
 
   const now = new Date();
-  const map = {};
+  const bookable = {};
+  const dayStatus = {};
   Object.entries(dateSlotMap).forEach(([hostDateKey, minutesList]) => {
     const hostDate = new Date(hostDateKey);
     if (Number.isNaN(hostDate.getTime())) return;
@@ -197,27 +222,33 @@ const buildLocalSlotMap = (settings, packageTitle, userTimeZone) => {
       );
       if (Number.isNaN(utcStart.getTime())) return;
 
-      const slotId = utcStart.toISOString();
-      if (utcStart <= now || bookedSet.has(slotId) || heldSet.has(slotId)) {
-        return;
-      }
-
       const localDateKey = getLocalDateKey(utcStart, userTimeZone);
       if (!localDateKey) return;
-      const list = map[localDateKey] || [];
-      list.push({
-        slotId,
-        utcStart,
-        localLabel: formatLocalTime(utcStart, userTimeZone),
-      });
-      map[localDateKey] = list;
+
+      const slotId = utcStart.toISOString();
+      const isUnavailable =
+        utcStart <= now || bookedSet.has(slotId) || heldSet.has(slotId);
+
+      const status = dayStatus[localDateKey] || { total: 0, available: 0 };
+      status.total += 1;
+      if (!isUnavailable) {
+        status.available += 1;
+        const list = bookable[localDateKey] || [];
+        list.push({
+          slotId,
+          utcStart,
+          localLabel: formatLocalTime(utcStart, userTimeZone),
+        });
+        bookable[localDateKey] = list;
+      }
+      dayStatus[localDateKey] = status;
     });
   });
 
-  Object.values(map).forEach((list) =>
+  Object.values(bookable).forEach((list) =>
     list.sort((left, right) => left.utcStart - right.utcStart)
   );
-  return map;
+  return { bookable, dayStatus };
 };
 
 export default function TourneyFreeSession() {
@@ -227,7 +258,11 @@ export default function TourneyFreeSession() {
   const [booking, setBooking] = useState(null);
   const [settings, setSettings] = useState(null);
   const [availabilityError, setAvailabilityError] = useState("");
-  const [selectedDateKey, setSelectedDateKey] = useState("");
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [month, setMonth] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [form, setForm] = useState({
     email: "",
@@ -324,31 +359,86 @@ export default function TourneyFreeSession() {
     if (phase === "available") loadAvailability();
   }, [phase, loadAvailability]);
 
-  const localSlotMap = useMemo(
-    () => buildLocalSlotMap(settings, packageTitle, userTimeZone),
+  const slotData = useMemo(
+    () => buildSlotData(settings, packageTitle, userTimeZone),
     [settings, packageTitle, userTimeZone]
   );
 
-  const dateOptions = useMemo(() => {
-    if (!localSlotMap) return [];
-    return Object.keys(localSlotMap)
-      .map((dateKey) => {
-        const slots = localSlotMap[dateKey] || [];
-        if (!slots.length) return null;
-        return {
-          dateKey,
-          label: formatShortLocalDate(slots[0].utcStart, userTimeZone),
-          slots,
-        };
-      })
-      .filter(Boolean)
-      .sort((left, right) => left.slots[0].utcStart - right.slots[0].utcStart);
-  }, [localSlotMap, userTimeZone]);
+  const startOfToday = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return today;
+  }, []);
 
-  const activeDate =
-    dateOptions.find((option) => option.dateKey === selectedDateKey) ||
-    dateOptions[0] ||
-    null;
+  const earliestSlot = useMemo(() => {
+    if (!slotData) return null;
+    const all = Object.values(slotData.bookable)
+      .flat()
+      .sort((left, right) => left.utcStart - right.utcStart);
+    return all[0] || null;
+  }, [slotData]);
+
+  const hasBookableSlots = !!earliestSlot;
+
+  const getDayColor = (dateObj) => {
+    if (!slotData) return null;
+    const status = slotData.dayStatus[dateObj.toDateString()];
+    if (!status || !status.total) return null;
+    if (status.available === 0) return "red";
+    if (status.available <= 5) return "yellow";
+    return "green";
+  };
+
+  const isDateAllowed = (dateObj) => {
+    if (!slotData) return false;
+    const d = new Date(dateObj);
+    d.setHours(0, 0, 0, 0);
+    if (d < startOfToday) return false;
+    const slots = slotData.bookable[d.toDateString()];
+    return Array.isArray(slots) && slots.length > 0;
+  };
+
+  // Mirror BookingForm: auto-select the earliest day that has open slots.
+  useEffect(() => {
+    if (!slotData || selectedDate) return;
+    const nextDate = Object.keys(slotData.bookable)
+      .map((key) => new Date(key))
+      .filter((d) => !Number.isNaN(d.getTime()) && d >= startOfToday)
+      .sort((a, b) => a - b)[0];
+    if (!nextDate) return;
+    const initialDate = new Date(nextDate);
+    initialDate.setHours(0, 0, 0, 0);
+    setSelectedDate(initialDate);
+    setMonth(new Date(initialDate.getFullYear(), initialDate.getMonth(), 1));
+  }, [slotData, selectedDate, startOfToday]);
+
+  const selectedDaySlots =
+    selectedDate && slotData
+      ? slotData.bookable[selectedDate.toDateString()] || []
+      : [];
+
+  const handleDayClick = (day) => {
+    const date = new Date(month.getFullYear(), month.getMonth(), day);
+    date.setHours(0, 0, 0, 0);
+    if (!isDateAllowed(date)) return;
+    setSelectedDate(date);
+    setSelectedSlot(null);
+  };
+
+  const handleEarliestClick = () => {
+    if (!earliestSlot) return;
+    const dateKey = getLocalDateKey(earliestSlot.utcStart, userTimeZone);
+    const date = dateKey ? new Date(dateKey) : null;
+    if (!date || Number.isNaN(date.getTime())) return;
+    date.setHours(0, 0, 0, 0);
+    setMonth(new Date(date.getFullYear(), date.getMonth(), 1));
+    setSelectedDate(date);
+    selectSlot(earliestSlot);
+  };
+
+  const shiftMonth = (offset) => {
+    setMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + offset, 1));
+  };
 
   const selectSlot = (slot) => {
     idempotencyKeyRef.current = "";
@@ -476,47 +566,193 @@ export default function TourneyFreeSession() {
 
             {!availabilityError && settings ? (
               <div className="tourney-slot-picker">
-                <p className="tourney-slot-label">Date</p>
-                {dateOptions.length ? (
+                {hasBookableSlots ? (
                   <>
-                    <div className="tourney-slot-dates">
-                      {dateOptions.map((option) => (
-                        <button
-                          aria-pressed={
-                            activeDate?.dateKey === option.dateKey
-                          }
-                          className={
-                            activeDate?.dateKey === option.dateKey
-                              ? "tourney-slot-date is-active"
-                              : "tourney-slot-date"
-                          }
-                          key={option.dateKey}
-                          onClick={() => setSelectedDateKey(option.dateKey)}
-                          type="button"
-                        >
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="tourney-slot-label">Time</p>
-                    <div className="tourney-slot-times">
-                      {(activeDate?.slots || []).map((slot) => (
-                        <button
-                          aria-pressed={
-                            selectedSlot?.slotId === slot.slotId
-                          }
-                          className={
-                            selectedSlot?.slotId === slot.slotId
-                              ? "tourney-slot-time is-selected"
-                              : "tourney-slot-time"
-                          }
-                          key={slot.slotId}
-                          onClick={() => selectSlot(slot)}
-                          type="button"
-                        >
-                          {slot.localLabel}
-                        </button>
-                      ))}
+                    <button
+                      className="tourney-cal-earliest"
+                      onClick={handleEarliestClick}
+                      type="button"
+                    >
+                      Earliest available:{" "}
+                      {formatShortLocalDate(earliestSlot.utcStart, userTimeZone)}
+                      {" at "}
+                      {earliestSlot.localLabel}
+                    </button>
+
+                    <div className="tourney-cal">
+                      <div className="tourney-cal-month">
+                        <div className="tourney-cal-head">
+                          <button
+                            aria-label="Previous month"
+                            className="tourney-cal-nav"
+                            onClick={() => shiftMonth(-1)}
+                            type="button"
+                          >
+                            ‹
+                          </button>
+                          <p className="tourney-cal-title">
+                            {month.toLocaleString("default", {
+                              month: "long",
+                            })}{" "}
+                            {month.getFullYear()}
+                          </p>
+                          <button
+                            aria-label="Next month"
+                            className="tourney-cal-nav"
+                            onClick={() => shiftMonth(1)}
+                            type="button"
+                          >
+                            ›
+                          </button>
+                        </div>
+
+                        <div className="tourney-cal-weekdays">
+                          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
+                            (dayName) => (
+                              <span key={dayName}>{dayName}</span>
+                            )
+                          )}
+                        </div>
+
+                        <div className="tourney-cal-days">
+                          {Array(
+                            new Date(
+                              month.getFullYear(),
+                              month.getMonth(),
+                              1
+                            ).getDay()
+                          )
+                            .fill(null)
+                            .map((_, index) => (
+                              <span key={`empty-${index}`} />
+                            ))}
+                          {Array.from(
+                            {
+                              length: new Date(
+                                month.getFullYear(),
+                                month.getMonth() + 1,
+                                0
+                              ).getDate(),
+                            },
+                            (_, index) => index + 1
+                          ).map((day) => {
+                            const date = new Date(
+                              month.getFullYear(),
+                              month.getMonth(),
+                              day
+                            );
+                            date.setHours(0, 0, 0, 0);
+                            const disabled = !isDateAllowed(date);
+                            const isSelected =
+                              selectedDate && isSameDay(date, selectedDate);
+                            const color = getDayColor(date);
+                            const availabilityLabel = color
+                              ? CALENDAR_AVAILABILITY_LABELS[color]
+                              : "";
+                            const dateLabel = formatCalendarDateLabel(date);
+                            return (
+                              <button
+                                aria-label={
+                                  availabilityLabel
+                                    ? `${dateLabel}, ${availabilityLabel}`
+                                    : dateLabel
+                                }
+                                aria-pressed={isSelected ? true : undefined}
+                                className={
+                                  isSelected
+                                    ? "tourney-cal-day is-selected"
+                                    : "tourney-cal-day"
+                                }
+                                disabled={disabled}
+                                key={day}
+                                onClick={() => handleDayClick(day)}
+                                type="button"
+                              >
+                                <span>{day}</span>
+                                {color ? (
+                                  <span
+                                    aria-hidden="true"
+                                    className={`tourney-cal-dot is-${color}`}
+                                  />
+                                ) : null}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        <div className="tourney-cal-legend">
+                          <span className="tourney-cal-legend-item">
+                            <span
+                              aria-hidden="true"
+                              className="tourney-cal-dot is-green"
+                            />
+                            Fully Available
+                          </span>
+                          <span className="tourney-cal-legend-item">
+                            <span
+                              aria-hidden="true"
+                              className="tourney-cal-dot is-yellow"
+                            />
+                            Limited Slots
+                          </span>
+                          <span className="tourney-cal-legend-item">
+                            <span
+                              aria-hidden="true"
+                              className="tourney-cal-dot is-red"
+                            />
+                            Fully Booked
+                          </span>
+                          <span className="tourney-cal-legend-item">
+                            <span
+                              aria-hidden="true"
+                              className="tourney-cal-dot is-held"
+                            />
+                            Temporarily Reserved
+                          </span>
+                        </div>
+                        <p className="tourney-cal-tz">
+                          All times shown are in your local timezone (
+                          {userTimeZone.replace(/_/g, " ")})
+                        </p>
+                      </div>
+
+                      {selectedDate ? (
+                        <div className="tourney-cal-times">
+                          <p className="tourney-slot-label">
+                            Availability for{" "}
+                            {selectedDate.toLocaleDateString(undefined, {
+                              weekday: "long",
+                              month: "long",
+                              day: "numeric",
+                            })}
+                          </p>
+                          {selectedDaySlots.length ? (
+                            <div className="tourney-slot-times">
+                              {selectedDaySlots.map((slot) => (
+                                <button
+                                  aria-pressed={
+                                    selectedSlot?.slotId === slot.slotId
+                                  }
+                                  className={
+                                    selectedSlot?.slotId === slot.slotId
+                                      ? "tourney-slot-time is-selected"
+                                      : "tourney-slot-time"
+                                  }
+                                  key={slot.slotId}
+                                  onClick={() => selectSlot(slot)}
+                                  type="button"
+                                >
+                                  {slot.localLabel}
+                                </button>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="tourney-slot-empty">
+                              No open times left on this date.
+                            </p>
+                          )}
+                        </div>
+                      ) : null}
                     </div>
                   </>
                 ) : (
