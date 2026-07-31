@@ -798,6 +798,61 @@ describe("booking reservation API", () => {
     expect(second.body.message).toMatch(/reserved/i);
   });
 
+  test.each([
+    {
+      caseName: "missing PC specifications",
+      field: "specs",
+      value: undefined,
+      error: "PC specifications are required.",
+    },
+    {
+      caseName: "whitespace-only PC specifications",
+      field: "specs",
+      value: " \t ",
+      error: "PC specifications are required.",
+    },
+    {
+      caseName: "missing main game",
+      field: "mainGame",
+      value: undefined,
+      error: "Main game is required.",
+    },
+    {
+      caseName: "whitespace-only main game",
+      field: "mainGame",
+      value: " \t ",
+      error: "Main game is required.",
+    },
+  ])("Tourney free sessions reject $caseName", async ({ field, value, error }) => {
+    const payload = {
+      startTimeUTC: "2025-01-15T08:20:00.000Z",
+      email: "playerone@example.com",
+      discord: "PlayerOne#1234",
+      specs: "Ryzen 7 / RTX 4070",
+      mainGame: "Overwatch 2",
+      timezone: "Asia/Kolkata",
+      [field]: value,
+    };
+    if (value === undefined) Reflect.deleteProperty(payload, field);
+
+    await expect(
+      bookTourneyFreeSession({
+        session: {
+          username: "playerone",
+          role: "player",
+          playerId: "player-free-session-validation",
+        },
+        payload,
+        clientAddress: "127.0.0.1",
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      message: error,
+      errors: [error],
+    });
+    expect(store.bookings).toHaveLength(0);
+  });
+
   test("Tourney free sessions create one captured booking and occupy the slot", async () => {
     const playerId = "player-free-session-1";
     const startTimeUTC = "2025-01-15T08:20:00.000Z";
@@ -897,6 +952,8 @@ describe("booking reservation API", () => {
           startTimeUTC,
           email: "playertwo@example.com",
           discord: "PlayerTwo#1234",
+          specs: "Ryzen 7 / RTX 4070",
+          mainGame: "Overwatch 2",
           timezone: "Asia/Kolkata",
         },
         clientAddress: "127.0.0.2",
