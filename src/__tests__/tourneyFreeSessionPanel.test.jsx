@@ -199,6 +199,13 @@ describe("TourneyFreeSession", () => {
     fireEvent.change(screen.getByPlaceholderText(/discord username/i), {
       target: { value: "player#1234" },
     });
+    fireEvent.change(
+      screen.getByPlaceholderText(/cpu, gpu, ram, motherboard, cooling/i),
+      { target: { value: "5800X3D, 3080, 32GB, B550, AIO" } }
+    );
+    fireEvent.change(screen.getByPlaceholderText(/the game you play most/i), {
+      target: { value: "Valorant" },
+    });
     fireEvent.click(slotButton);
     fireEvent.click(
       screen.getByRole("button", { name: "Book my session" })
@@ -220,6 +227,8 @@ describe("TourneyFreeSession", () => {
       startTimeUTC: SLOT_230PM_UTC,
       email: "player@example.com",
       discord: "player#1234",
+      specs: "5800X3D, 3080, 32GB, B550, AIO",
+      mainGame: "Valorant",
     });
     expect(payload.timezone).toBeTruthy();
   });
@@ -251,6 +260,13 @@ describe("TourneyFreeSession", () => {
     });
     fireEvent.change(screen.getByPlaceholderText(/discord username/i), {
       target: { value: "player#1234" },
+    });
+    fireEvent.change(
+      screen.getByPlaceholderText(/cpu, gpu, ram, motherboard, cooling/i),
+      { target: { value: "5800X3D, 3080, 32GB, B550, AIO" } }
+    );
+    fireEvent.change(screen.getByPlaceholderText(/the game you play most/i), {
+      target: { value: "Valorant" },
     });
     fireEvent.click(slotButton);
     fireEvent.click(
@@ -295,6 +311,13 @@ describe("TourneyFreeSession", () => {
     fireEvent.change(screen.getByPlaceholderText(/discord username/i), {
       target: { value: "player#1234" },
     });
+    fireEvent.change(
+      screen.getByPlaceholderText(/cpu, gpu, ram, motherboard, cooling/i),
+      { target: { value: "5800X3D, 3080, 32GB, B550, AIO" } }
+    );
+    fireEvent.change(screen.getByPlaceholderText(/the game you play most/i), {
+      target: { value: "Valorant" },
+    });
     fireEvent.click(slotButton);
     fireEvent.click(
       screen.getByRole("button", { name: "Book my session" })
@@ -304,5 +327,75 @@ describe("TourneyFreeSession", () => {
       await screen.findByText("Your free session is booked")
     ).toBeInTheDocument();
     expect(stateFetches).toBeGreaterThan(1);
+  });
+
+  test("blocks booking when the PC specs are blank", async () => {
+    const { calls } = mockFetchRouter();
+    render(<TourneyFreeSession />);
+
+    const slotButton = await screen.findByRole("button", {
+      name: localTimeLabel(SLOT_230PM_UTC),
+    });
+    fireEvent.change(screen.getByPlaceholderText(/email for the confirmation/i), {
+      target: { value: "player@example.com" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/discord username/i), {
+      target: { value: "player#1234" },
+    });
+    fireEvent.change(
+      screen.getByPlaceholderText(/cpu, gpu, ram, motherboard, cooling/i),
+      { target: { value: "   " } }
+    );
+    fireEvent.change(screen.getByPlaceholderText(/the game you play most/i), {
+      target: { value: "Valorant" },
+    });
+    fireEvent.click(slotButton);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Book my session" })
+    );
+
+    expect(
+      await screen.findByText(
+        "Tell me your PC specs so I can prep for the session."
+      )
+    ).toBeInTheDocument();
+    expect(
+      calls.filter((call) => call.options.method === "POST")
+    ).toHaveLength(0);
+  });
+
+  test("blocks booking when the main game is blank", async () => {
+    const { calls } = mockFetchRouter();
+    render(<TourneyFreeSession />);
+
+    const slotButton = await screen.findByRole("button", {
+      name: localTimeLabel(SLOT_230PM_UTC),
+    });
+    fireEvent.change(screen.getByPlaceholderText(/email for the confirmation/i), {
+      target: { value: "player@example.com" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/discord username/i), {
+      target: { value: "player#1234" },
+    });
+    fireEvent.change(
+      screen.getByPlaceholderText(/cpu, gpu, ram, motherboard, cooling/i),
+      { target: { value: "5800X3D, 3080, 32GB, B550, AIO" } }
+    );
+    fireEvent.change(screen.getByPlaceholderText(/the game you play most/i), {
+      target: { value: "   " },
+    });
+    fireEvent.click(slotButton);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Book my session" })
+    );
+
+    expect(
+      await screen.findByText(
+        "Tell me your main game so I know what to tune for."
+      )
+    ).toBeInTheDocument();
+    expect(
+      calls.filter((call) => call.options.method === "POST")
+    ).toHaveLength(0);
   });
 });
