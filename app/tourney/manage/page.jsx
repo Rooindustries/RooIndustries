@@ -117,6 +117,18 @@ export default async function TourneyManagePage({ searchParams }) {
             />
           )}
         </Section>
+
+        <Section id="overlays" eyebrow="Stream" title="Stream Overlays" wide>
+          <p>
+            OBS browser sources for the live bracket and the current-match
+            strip are available with copy-ready URLs and setup notes.
+          </p>
+          <p>
+            <a className="tourney-owner-link" href="/tourney/overlay">
+              Open stream overlays
+            </a>
+          </p>
+        </Section>
       </div>
     </TourneyShell>
   );

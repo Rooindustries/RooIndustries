@@ -17,6 +17,15 @@ const slugClass = (value) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
 
+// A match with exactly one real team that already holds a win result is an
+// auto-advanced bye slot, not a playable pairing. Hiding it keeps odd-sized
+// brackets readable; the team still appears in the round it advances to.
+const isAutoAdvanceMatch = (match) => {
+  const sides = [match?.opponent1, match?.opponent2];
+  const filled = sides.filter((side) => side?.teamId);
+  return filled.length === 1 && filled[0].result === "win";
+};
+
 const sideClass = (side) => {
   if (side.result === "win") return "is-win";
   if (side.result === "loss") return "is-loss";
@@ -24,9 +33,21 @@ const sideClass = (side) => {
   return "";
 };
 
-const matchStatusClass = (match) => `is-${slugClass(match.statusLabel) || "unknown"}`;
+// Overlay matches carry a raw statusSlug because their statusLabel is already
+// remapped (running -> "LIVE" etc.); the site bracket falls back to the label.
+const matchStatusClass = (match) =>
+  `is-${slugClass(match.statusSlug || match.statusLabel) || "unknown"}`;
 
 const scoreText = (score) => (score === "" || score === undefined ? "-" : score);
+
+// The full display label repeats the column's round label above every card
+// ("Winners Round 1 Match 2" under a "Winners Round 1" column). Trim that
+// prefix down to the match number; distinctive labels (finals) stay whole.
+const shortMatchLabel = (match) => {
+  const label = match.displayLabel || match.label || "";
+  const tail = label.match(/Match\s+(\d+)$/i);
+  return tail ? `Match ${tail[1]}` : label;
+};
 
 const maxRoundMatches = (group) =>
   Math.max(...group.rounds.map((round) => round.matches.length), 1);
@@ -95,7 +116,7 @@ const createTbdMatch = ({
   label: displayLabel,
   displayLabel,
   status: 0,
-  statusLabel: "Locked",
+  statusLabel: "",
   bestOf,
   targetScore: bestOf === 7 ? 4 : 3,
   opponent1: tbdSide("opponent1"),
@@ -103,13 +124,27 @@ const createTbdMatch = ({
   nextLabels: [],
 });
 
-const buildTbdBracketMatches = () => [
+// Skeleton shown before the bracket is generated. Mirrors the visible card
+// layout of the real 12-team double-elimination bracket: 4 first-round
+// winners matches with 4 bye slots hidden, and the full lower lane.
+// Exported so the OBS overlay can lane-filter the same skeleton.
+export const buildTbdBracketMatches = () => [
+  ...[1, 2, 3, 4].map((number) =>
+    createTbdMatch({
+      id: `tbd-winners-r1-${number}`,
+      groupName: "Winners",
+      groupNumber: 1,
+      roundNumber: 1,
+      number,
+      displayLabel: `Winners Round 1 Match ${number}`,
+    })
+  ),
   ...[1, 2, 3, 4].map((number) =>
     createTbdMatch({
       id: `tbd-winners-qf-${number}`,
       groupName: "Winners",
       groupNumber: 1,
-      roundNumber: 1,
+      roundNumber: 2,
       number,
       displayLabel: `Winners Quarterfinal ${number}`,
     })
@@ -119,7 +154,7 @@ const buildTbdBracketMatches = () => [
       id: `tbd-winners-sf-${number}`,
       groupName: "Winners",
       groupNumber: 1,
-      roundNumber: 2,
+      roundNumber: 3,
       number,
       displayLabel: `Winners Semifinal ${number}`,
     })
@@ -128,11 +163,11 @@ const buildTbdBracketMatches = () => [
     id: "tbd-winners-final",
     groupName: "Winners",
     groupNumber: 1,
-    roundNumber: 3,
+    roundNumber: 4,
     number: 1,
     displayLabel: "Winners Final",
   }),
-  ...[1, 2].map((number) =>
+  ...[1, 2, 3, 4].map((number) =>
     createTbdMatch({
       id: `tbd-lower-r1-${number}`,
       groupName: "Losers",
@@ -142,7 +177,7 @@ const buildTbdBracketMatches = () => [
       displayLabel: `Lower Round 1 Match ${number}`,
     })
   ),
-  ...[1, 2].map((number) =>
+  ...[1, 2, 3, 4].map((number) =>
     createTbdMatch({
       id: `tbd-lower-r2-${number}`,
       groupName: "Losers",
@@ -152,11 +187,31 @@ const buildTbdBracketMatches = () => [
       displayLabel: `Lower Round 2 Match ${number}`,
     })
   ),
+  ...[1, 2].map((number) =>
+    createTbdMatch({
+      id: `tbd-lower-r3-${number}`,
+      groupName: "Losers",
+      groupNumber: 2,
+      roundNumber: 3,
+      number,
+      displayLabel: `Lower Round 3 Match ${number}`,
+    })
+  ),
+  ...[1, 2].map((number) =>
+    createTbdMatch({
+      id: `tbd-lower-r4-${number}`,
+      groupName: "Losers",
+      groupNumber: 2,
+      roundNumber: 4,
+      number,
+      displayLabel: `Lower Round 4 Match ${number}`,
+    })
+  ),
   createTbdMatch({
     id: "tbd-lower-semifinal",
     groupName: "Losers",
     groupNumber: 2,
-    roundNumber: 3,
+    roundNumber: 5,
     number: 1,
     displayLabel: "Lower Semifinal",
   }),
@@ -164,7 +219,7 @@ const buildTbdBracketMatches = () => [
     id: "tbd-lower-final",
     groupName: "Losers",
     groupNumber: 2,
-    roundNumber: 4,
+    roundNumber: 6,
     number: 1,
     displayLabel: "Lower Final",
   }),
@@ -213,14 +268,20 @@ const getConnectorTargetIndex = ({ sourceIndex, sourceCount, targetCount }) => {
   return Math.min(Math.floor(sourceIndex / (sourceCount / targetCount)), targetCount - 1);
 };
 
-const getNodeCenter = ({ node, root }) => {
+// The OBS overlay fits the frame by scaling an ancestor with a CSS
+// transform: getBoundingClientRect returns scale-adjusted px while SVG path
+// user units stay in unscaled layout px. Dividing rect deltas by the tree's
+// rendered scale converts measurements into path space so connectors land
+// on the cards at any zoom level.
+const getNodeCenter = ({ node, root, scale = 1 }) => {
   const nodeRect = node.getBoundingClientRect();
   const rootRect = root.getBoundingClientRect();
+  const unit = scale > 0 && Number.isFinite(scale) ? scale : 1;
 
   return {
-    left: nodeRect.left - rootRect.left,
-    right: nodeRect.right - rootRect.left,
-    y: nodeRect.top - rootRect.top + nodeRect.height / 2,
+    left: (nodeRect.left - rootRect.left) / unit,
+    right: (nodeRect.right - rootRect.left) / unit,
+    y: (nodeRect.top - rootRect.top + nodeRect.height / 2) / unit,
   };
 };
 
@@ -278,7 +339,11 @@ const buildGroupedConnector = ({ sources, targetX, targetY }) => {
 };
 
 const buildStepPath = ({ startX, startY, endX, endY, elbowX }) => {
-  const midX = elbowX ?? startX + Math.max(24, (endX - startX) * 0.55);
+  // Never let the elbow overshoot endX: tight finals-rail gaps would
+  // otherwise draw the line past its target and double back on itself.
+  const available = endX - startX;
+  const step = Math.min(24, Math.max(available * 0.55, Math.min(available, 6)));
+  const midX = elbowX ?? startX + step;
   return `M ${formatPoint(startX)} ${formatPoint(startY)} H ${formatPoint(
     midX
   )} V ${formatPoint(endY)} H ${formatPoint(endX)}`;
@@ -296,12 +361,49 @@ export default function TourneyBracketView({
   snapshot,
   renderControls,
 }) {
-  const matches = useMemo(() => {
+  const { matches, byeTeams } = useMemo(() => {
     const sourceMatches = snapshot?.matches || [];
-    if (snapshot?.generated && sourceMatches.length > 0) return sourceMatches;
-    return buildTbdBracketMatches();
+    if (!snapshot?.generated) {
+      // Callers (the OBS overlay lane sources) may pass a pre-filtered
+      // skeleton; only build the full skeleton when nothing was supplied.
+      return {
+        matches: sourceMatches.length > 0 ? sourceMatches : buildTbdBracketMatches(),
+        byeTeams: new Set(),
+      };
+    }
+    if (sourceMatches.length === 0) {
+      return { matches: buildTbdBracketMatches(), byeTeams: new Set() };
+    }
+    const byeTeams = new Set();
+    const visible = sourceMatches.filter((match) => {
+      if (!isAutoAdvanceMatch(match)) return true;
+      const winner = [match.opponent1, match.opponent2].find(
+        (side) => side?.teamId
+      );
+      byeTeams.add(`${match.groupName}:${winner.teamId}`);
+      return false;
+    });
+    return { matches: visible, byeTeams };
   }, [snapshot?.generated, snapshot?.matches]);
   const grouped = useMemo(() => groupMatches(matches), [matches]);
+  const firstVisibleRounds = useMemo(() => {
+    const map = new Map();
+    for (const group of grouped) {
+      for (const round of group.rounds) {
+        for (const match of round.matches) {
+          for (const side of [match.opponent1, match.opponent2]) {
+            if (!side?.teamId) continue;
+            const key = `${group.groupName}:${side.teamId}`;
+            const current = map.get(key);
+            if (current === undefined || round.roundNumber < current) {
+              map.set(key, round.roundNumber);
+            }
+          }
+        }
+      }
+    }
+    return map;
+  }, [grouped]);
   const treeRef = useRef(null);
   const bandRefs = useRef(new Map());
   const matchRefs = useRef(new Map());
@@ -332,6 +434,12 @@ export default function TourneyBracketView({
     const measure = () => {
       const nextBands = {};
       const nextMatchOffsets = {};
+      const treeNode = treeRef.current;
+      const treeRectWidth = treeNode?.getBoundingClientRect().width || 0;
+      const unitScale =
+        treeRectWidth > 0 && treeNode?.offsetWidth > 0
+          ? treeRectWidth / treeNode.offsetWidth
+          : 1;
 
       for (const group of grouped) {
         const groupKey = slugClass(group.groupName);
@@ -350,7 +458,8 @@ export default function TourneyBracketView({
 
             const currentOffset = matchOffsets[key] || 0;
             const baselineCenter =
-              getNodeCenter({ node, root: connectorNode }).y - currentOffset;
+              getNodeCenter({ node, root: connectorNode, scale: unitScale }).y -
+              currentOffset;
             baselineCenters.set(key, roundPixel(baselineCenter));
           });
         });
@@ -418,8 +527,16 @@ export default function TourneyBracketView({
             );
             if (!sourceNode || !targetNode) return;
 
-            const source = getNodeCenter({ node: sourceNode, root: connectorNode });
-            const target = getNodeCenter({ node: targetNode, root: connectorNode });
+            const source = getNodeCenter({
+              node: sourceNode,
+              root: connectorNode,
+              scale: unitScale,
+            });
+            const target = getNodeCenter({
+              node: targetNode,
+              root: connectorNode,
+              scale: unitScale,
+            });
             const targetKey = getMatchKey(
               group.groupName,
               nextRound.roundNumber,
@@ -453,7 +570,6 @@ export default function TourneyBracketView({
         });
       }
 
-      const treeNode = treeRef.current;
       const winners = grouped.find((group) => group.groupName === "Winners");
       const losers = grouped.find((group) => group.groupName === "Losers");
       const grandFinal = grouped.find((group) => group.groupName === "Grand Final");
@@ -495,13 +611,25 @@ export default function TourneyBracketView({
         finalSources.forEach(({ className, sideIndex, sourceMatch, sourceNode }) => {
           if (!sourceNode || !finalNode) return;
 
-          const source = getNodeCenter({ node: sourceNode, root: treeNode });
+          const source = getNodeCenter({
+            node: sourceNode,
+            root: treeNode,
+            scale: unitScale,
+          });
           const finalSideNode =
             finalNode.querySelectorAll(".tourney-match-side")[sideIndex] ||
             finalNode;
-          const targetSide = getNodeCenter({ node: finalSideNode, root: treeNode });
+          const targetSide = getNodeCenter({
+            node: finalSideNode,
+            root: treeNode,
+            scale: unitScale,
+          });
           const finalBand = finalBandNode
-            ? getNodeCenter({ node: finalBandNode, root: treeNode })
+            ? getNodeCenter({
+                node: finalBandNode,
+                root: treeNode,
+                scale: unitScale,
+              })
             : targetSide;
           const endX = finalBand.left - finalConnectorFloatGapPx;
           const startX = source.right + connectorCardGapPx;
@@ -573,29 +701,45 @@ export default function TourneyBracketView({
       }}
     >
       <header>
-        <span>{match.displayLabel || match.label}</span>
-        <strong>Best of {match.bestOf}</strong>
+        <span>{shortMatchLabel(match)}</span>
+        {/* Bo5 is the bracket-wide default and repeats on every card; only
+            the Grand Final's longer series is worth calling out. */}
+        {match.bestOf && match.bestOf !== 5 ? (
+          <strong>Best of {match.bestOf}</strong>
+        ) : null}
       </header>
       <div className="tourney-match-sides">
-        {[match.opponent1, match.opponent2].map((side) => (
-          <div
-            className={`tourney-match-side ${sideClass(side)}`}
-            key={side.side}
-          >
-            <span>
-              <strong>{side.name}</strong>
-              {side.forfeit ? <small>Forfeit</small> : null}
-            </span>
-            <b>{scoreText(side.score)}</b>
-          </div>
-        ))}
+        {[match.opponent1, match.opponent2].map((side) => {
+          const showByeBadge =
+            side.teamId &&
+            byeTeams.has(`${groupName}:${side.teamId}`) &&
+            firstVisibleRounds.get(`${groupName}:${side.teamId}`) ===
+              roundNumber;
+          return (
+            <div
+              className={`tourney-match-side ${sideClass(side)}`}
+              key={side.side}
+            >
+              <span>
+                <strong>{side.name}</strong>
+                {side.forfeit ? <small>Forfeit</small> : null}
+                {showByeBadge ? (
+                  <small className="tourney-match-bye">Bye</small>
+                ) : null}
+              </span>
+              <b>{scoreText(side.score)}</b>
+            </div>
+          );
+        })}
       </div>
-      <footer>
-        <span>{match.statusLabel}</span>
-        {match.nextLabels?.length > 0 ? (
-          <small>{match.nextLabels.join(" / ")}</small>
-        ) : null}
-      </footer>
+      {match.statusLabel || match.nextLabels?.length > 0 ? (
+        <footer>
+          {match.statusLabel ? <span>{match.statusLabel}</span> : null}
+          {match.nextLabels?.length > 0 ? (
+            <small>{match.nextLabels.join(" / ")}</small>
+          ) : null}
+        </footer>
+      ) : null}
       {renderControls ? renderControls(match) : null}
     </article>
   );
@@ -680,7 +824,15 @@ export default function TourneyBracketView({
 
   return (
     <div className="tourney-bracket-board" aria-label="Tournament bracket">
-      <div className="tourney-bracket-tree" ref={treeRef}>
+      <div
+        className="tourney-bracket-tree"
+        ref={treeRef}
+        style={
+          grandFinal
+            ? undefined
+            : { "--bracket-final-lane-width": "0px" }
+        }
+      >
         <svg
           className="tourney-bracket-stage-connectors"
           aria-hidden="true"
