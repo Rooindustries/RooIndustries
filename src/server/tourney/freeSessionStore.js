@@ -77,7 +77,9 @@ const normalizeBookingPayload = (payload = {}) => {
   }
   if (!discord) errors.push("Discord is required.");
   if (discord.length > 200) errors.push("Discord is too long.");
+  if (!specs) errors.push("PC specifications are required.");
   if (specs.length > 4000) errors.push("PC specifications are too long.");
+  if (!mainGame) errors.push("Main game is required.");
   if (mainGame.length > 200) errors.push("Main game is too long.");
   try {
     if (!timezone) throw new Error("missing");
