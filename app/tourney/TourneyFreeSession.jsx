@@ -462,6 +462,14 @@ export default function TourneyFreeSession() {
       setError("I need your email and Discord to confirm the booking.");
       return;
     }
+    if (!form.specs.trim()) {
+      setError("Tell me your PC specs so I can prep for the session.");
+      return;
+    }
+    if (!form.mainGame.trim()) {
+      setError("Tell me your main game so I know what to tune for.");
+      return;
+    }
 
     if (!idempotencyKeyRef.current) {
       idempotencyKeyRef.current = createIdempotencyKey();
@@ -788,19 +796,21 @@ export default function TourneyFreeSession() {
               </label>
             </div>
             <label>
-              PC specs (optional)
+              PC specs
               <textarea
                 onChange={updateForm("specs")}
                 placeholder="CPU, GPU, RAM, motherboard, cooling"
+                required
                 value={form.specs}
               />
             </label>
             <label>
-              Main game (optional)
+              Main game
               <input
                 autoComplete="off"
                 onChange={updateForm("mainGame")}
                 placeholder="The game you play most"
+                required
                 type="text"
                 value={form.mainGame}
               />
