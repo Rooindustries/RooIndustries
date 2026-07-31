@@ -168,9 +168,9 @@ const createIdempotencyKey = () => {
 
 // Mirrors the calendar availability states in src/components/BookingForm.jsx.
 const CALENDAR_AVAILABILITY_LABELS = Object.freeze({
-  green: "fully available",
-  yellow: "limited slots",
-  red: "fully booked",
+  green: "open",
+  yellow: "a few left",
+  red: "booked out",
 });
 
 const formatCalendarDateLabel = (date) => {
@@ -351,7 +351,7 @@ export default function TourneyFreeSession() {
         return;
       }
       setSettings(null);
-      setAvailabilityError("Booking availability took too long to load.");
+      setAvailabilityError("The schedule took too long to load.");
     }
   }, [availabilityUrl]);
 
@@ -455,11 +455,11 @@ export default function TourneyFreeSession() {
     if (busy) return;
 
     if (!selectedSlot) {
-      setError("Choose an available session time.");
+      setError("Choose an open time first.");
       return;
     }
     if (!form.email.trim() || !form.discord.trim()) {
-      setError("Enter your email and Discord so we can confirm the session.");
+      setError("I need your email and Discord to confirm the booking.");
       return;
     }
 
@@ -499,7 +499,7 @@ export default function TourneyFreeSession() {
       // replayed against an edited payload or it 409s on the key itself.
       idempotencyKeyRef.current = "";
       const message =
-        data?.error || "Unable to book the free session. Please try again.";
+        data?.error || "Couldn't book the session. Try again.";
       setError(message);
       if (data?.code === "TOURNEY_FREE_SESSION_SLOT_CONFLICT") {
         setSelectedSlot(null);
@@ -508,7 +508,7 @@ export default function TourneyFreeSession() {
         await loadState();
       }
     } catch {
-      setError("Unable to book the free session. Please try again.");
+      setError("Couldn't book the session. Try again.");
     } finally {
       setBusy(false);
     }
@@ -547,8 +547,8 @@ export default function TourneyFreeSession() {
         ) : (
           <form className="tourney-form" onSubmit={handleBook}>
             <p className="tourney-form-note">
-              Approved players get one free optimization session. Pick a time
-              below — all times are shown in your timezone ({userTimeZone}).
+              Approved players get one free optimization session. Pick a day,
+              then a time.
             </p>
 
             {availabilityError ? (
@@ -573,7 +573,7 @@ export default function TourneyFreeSession() {
                       onClick={handleEarliestClick}
                       type="button"
                     >
-                      Earliest available:{" "}
+                      First open slot:{" "}
                       {formatShortLocalDate(earliestSlot.utcStart, userTimeZone)}
                       {" at "}
                       {earliestSlot.localLabel}
@@ -686,32 +686,32 @@ export default function TourneyFreeSession() {
                               aria-hidden="true"
                               className="tourney-cal-dot is-green"
                             />
-                            Fully Available
+                            Open
                           </span>
                           <span className="tourney-cal-legend-item">
                             <span
                               aria-hidden="true"
                               className="tourney-cal-dot is-yellow"
                             />
-                            Limited Slots
+                            Few left
                           </span>
                           <span className="tourney-cal-legend-item">
                             <span
                               aria-hidden="true"
                               className="tourney-cal-dot is-red"
                             />
-                            Fully Booked
+                            Booked out
                           </span>
                           <span className="tourney-cal-legend-item">
                             <span
                               aria-hidden="true"
                               className="tourney-cal-dot is-held"
                             />
-                            Temporarily Reserved
+                            On hold
                           </span>
                         </div>
                         <p className="tourney-cal-tz">
-                          All times shown are in your local timezone (
+                          All times are in your timezone (
                           {userTimeZone.replace(/_/g, " ")})
                         </p>
                       </div>
@@ -719,7 +719,7 @@ export default function TourneyFreeSession() {
                       {selectedDate ? (
                         <div className="tourney-cal-times">
                           <p className="tourney-slot-label">
-                            Availability for{" "}
+                            Open times for{" "}
                             {selectedDate.toLocaleDateString(undefined, {
                               weekday: "long",
                               month: "long",
@@ -769,7 +769,7 @@ export default function TourneyFreeSession() {
                 <input
                   autoComplete="email"
                   onChange={updateForm("email")}
-                  placeholder="Email for the booking confirmation"
+                  placeholder="Email for the confirmation"
                   required
                   type="email"
                   value={form.email}
@@ -800,7 +800,7 @@ export default function TourneyFreeSession() {
               <input
                 autoComplete="off"
                 onChange={updateForm("mainGame")}
-                placeholder="The game you want tuned first"
+                placeholder="The game you play most"
                 type="text"
                 value={form.mainGame}
               />
@@ -817,7 +817,7 @@ export default function TourneyFreeSession() {
               disabled={busy || !settings || !!availabilityError}
               type="submit"
             >
-              {busy ? "Booking..." : "Book free session"}
+              {busy ? "Booking..." : "Book my session"}
             </button>
           </form>
         )}

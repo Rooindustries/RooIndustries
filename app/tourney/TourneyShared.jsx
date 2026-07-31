@@ -2282,7 +2282,7 @@ export const TourneyStyles = () => (
 
     .tourney-slot-label {
       margin: 0;
-      color: #7dd3fc;
+      color: var(--tourney-accent);
       font-size: 0.76rem;
       font-weight: 820;
       letter-spacing: 0;
@@ -2293,8 +2293,8 @@ export const TourneyStyles = () => (
       align-self: flex-start;
       border: 1px solid var(--tourney-border-accent);
       border-radius: 0.75rem;
-      background: rgba(56, 189, 248, 0.12);
-      color: #a5f3fc;
+      background: color-mix(in srgb, var(--tourney-accent) 12%, transparent);
+      color: var(--tourney-accent);
       padding: 8px 14px;
       font: inherit;
       font-size: 0.85rem;
@@ -2305,14 +2305,14 @@ export const TourneyStyles = () => (
     }
 
     .tourney-cal-earliest:hover {
-      border-color: rgba(56, 189, 248, 0.78);
-      background: rgba(56, 189, 248, 0.2);
+      border-color: var(--tourney-accent-soft);
+      background: color-mix(in srgb, var(--tourney-accent) 20%, transparent);
     }
 
     .tourney-cal-earliest:focus-visible {
       outline: none;
-      border-color: rgba(56, 189, 248, 0.78);
-      box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.18);
+      border-color: var(--tourney-focus);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--tourney-focus) 26%, transparent);
     }
 
     .tourney-cal {
@@ -2355,7 +2355,7 @@ export const TourneyStyles = () => (
       border: 1px solid var(--tourney-border);
       border-radius: 0.65rem;
       background: var(--tourney-surface-soft);
-      color: #7dd3fc;
+      color: var(--tourney-accent);
       font: inherit;
       font-size: 1.15rem;
       line-height: 1;
@@ -2365,13 +2365,13 @@ export const TourneyStyles = () => (
     }
 
     .tourney-cal-nav:hover {
-      border-color: rgba(56, 189, 248, 0.78);
+      border-color: var(--tourney-accent-soft);
     }
 
     .tourney-cal-nav:focus-visible {
       outline: none;
-      border-color: rgba(56, 189, 248, 0.78);
-      box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.18);
+      border-color: var(--tourney-focus);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--tourney-focus) 26%, transparent);
     }
 
     .tourney-cal-weekdays {
@@ -2383,7 +2383,7 @@ export const TourneyStyles = () => (
 
     .tourney-cal-weekdays span {
       text-align: center;
-      color: #7dd3fc;
+      color: var(--tourney-accent);
       font-size: 0.72rem;
       font-weight: 800;
       letter-spacing: 0.04em;
@@ -2407,7 +2407,7 @@ export const TourneyStyles = () => (
       border: 1px solid transparent;
       border-radius: 0.65rem;
       background: transparent;
-      color: rgba(226, 232, 240, 0.9);
+      color: var(--tourney-text-soft);
       font: inherit;
       font-size: 0.88rem;
       font-weight: 700;
@@ -2423,8 +2423,8 @@ export const TourneyStyles = () => (
 
     .tourney-cal-day:focus-visible {
       outline: none;
-      border-color: rgba(56, 189, 248, 0.78);
-      box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.18);
+      border-color: var(--tourney-focus);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--tourney-focus) 26%, transparent);
     }
 
     .tourney-cal-day:disabled {
@@ -2434,17 +2434,15 @@ export const TourneyStyles = () => (
     }
 
     .tourney-cal-day.is-selected {
-      border-color: rgba(125, 211, 252, 0.7);
-      color: #fff;
+      border-color: var(--tourney-accent-soft);
+      color: var(--color-accent-contrast);
       background: linear-gradient(
         120deg,
-        rgba(102, 185, 250, 1) 0%,
-        rgba(38, 145, 220, 1) 45%,
-        rgba(18, 95, 195, 1) 100%
+        var(--tourney-accent) 0%,
+        var(--tourney-accent-strong) 100%
       );
-      box-shadow:
-        0 0 14px rgba(45, 212, 191, 0.28),
-        0 0 26px rgba(45, 212, 191, 0.2);
+      box-shadow: 0 0 18px
+        color-mix(in srgb, var(--tourney-accent-soft) 45%, transparent);
     }
 
     .tourney-cal-dot {
@@ -2517,10 +2515,10 @@ export const TourneyStyles = () => (
 
     .tourney-slot-time {
       min-height: 40px;
-      border: 1px solid rgba(14, 165, 233, 0.4);
+      border: 1px solid var(--tourney-border-accent);
       border-radius: 0.75rem;
-      color: rgba(226, 232, 240, 0.9);
-      background: rgba(12, 22, 42, 0.78);
+      color: var(--tourney-text-soft);
+      background: var(--tourney-input);
       cursor: pointer;
       font: inherit;
       font-size: 0.88rem;
@@ -2530,32 +2528,30 @@ export const TourneyStyles = () => (
     }
 
     .tourney-slot-time:hover {
-      border-color: rgba(56, 189, 248, 0.78);
+      border-color: var(--tourney-accent-soft);
     }
 
     .tourney-slot-time:focus-visible {
       outline: none;
-      border-color: rgba(56, 189, 248, 0.78);
-      box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.18);
+      border-color: var(--tourney-focus);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--tourney-focus) 26%, transparent);
     }
 
     .tourney-slot-time.is-selected {
-      border-color: rgba(125, 211, 252, 0.7);
-      color: #fff;
+      border-color: var(--tourney-accent-soft);
+      color: var(--color-accent-contrast);
       background: linear-gradient(
         120deg,
-        rgba(102, 185, 250, 1) 0%,
-        rgba(38, 145, 220, 1) 45%,
-        rgba(18, 95, 195, 1) 100%
+        var(--tourney-accent) 0%,
+        var(--tourney-accent-strong) 100%
       );
-      box-shadow:
-        0 0 14px rgba(45, 212, 191, 0.28),
-        0 0 26px rgba(45, 212, 191, 0.2);
+      box-shadow: 0 0 18px
+        color-mix(in srgb, var(--tourney-accent-soft) 45%, transparent);
     }
 
     .tourney-slot-empty {
       margin: 0;
-      color: rgba(148, 163, 184, 0.9);
+      color: var(--tourney-text-muted);
       font-size: 0.9rem;
       line-height: 1.5;
     }
