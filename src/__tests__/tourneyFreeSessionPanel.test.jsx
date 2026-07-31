@@ -154,10 +154,10 @@ describe("TourneyFreeSession", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Sun")).toBeInTheDocument();
     expect(screen.getByText("Sat")).toBeInTheDocument();
-    expect(screen.getByText("Fully Available")).toBeInTheDocument();
-    expect(screen.getByText("Limited Slots")).toBeInTheDocument();
-    expect(screen.getByText("Fully Booked")).toBeInTheDocument();
-    expect(screen.getByText("Temporarily Reserved")).toBeInTheDocument();
+    expect(screen.getByText("Open")).toBeInTheDocument();
+    expect(screen.getByText("Few left")).toBeInTheDocument();
+    expect(screen.getByText("Booked out")).toBeInTheDocument();
+    expect(screen.getByText("On hold")).toBeInTheDocument();
 
     const expectedDayLabel = new Intl.DateTimeFormat(undefined, {
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
@@ -166,12 +166,12 @@ describe("TourneyFreeSession", () => {
       year: "numeric",
     }).format(new Date(SLOT_230PM_UTC));
     const dayCell = await screen.findByRole("button", {
-      name: new RegExp(`${expectedDayLabel}, limited slots`),
+      name: new RegExp(`${expectedDayLabel}, a few left`),
     });
     expect(dayCell).toBeInTheDocument();
 
     const earliest = screen.getByRole("button", {
-      name: /Earliest available:/,
+      name: /First open slot:/,
     });
     fireEvent.click(earliest);
     const slotButton = screen.getByRole("button", {
@@ -193,7 +193,7 @@ describe("TourneyFreeSession", () => {
       screen.queryByRole("button", { name: localTimeLabel(SLOT_10AM_UTC) })
     ).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByPlaceholderText(/booking confirmation/i), {
+    fireEvent.change(screen.getByPlaceholderText(/email for the confirmation/i), {
       target: { value: "player@example.com" },
     });
     fireEvent.change(screen.getByPlaceholderText(/discord username/i), {
@@ -201,7 +201,7 @@ describe("TourneyFreeSession", () => {
     });
     fireEvent.click(slotButton);
     fireEvent.click(
-      screen.getByRole("button", { name: "Book free session" })
+      screen.getByRole("button", { name: "Book my session" })
     );
 
     expect(
@@ -246,7 +246,7 @@ describe("TourneyFreeSession", () => {
     const slotButton = await screen.findByRole("button", {
       name: localTimeLabel(SLOT_230PM_UTC),
     });
-    fireEvent.change(screen.getByPlaceholderText(/booking confirmation/i), {
+    fireEvent.change(screen.getByPlaceholderText(/email for the confirmation/i), {
       target: { value: "player@example.com" },
     });
     fireEvent.change(screen.getByPlaceholderText(/discord username/i), {
@@ -254,7 +254,7 @@ describe("TourneyFreeSession", () => {
     });
     fireEvent.click(slotButton);
     fireEvent.click(
-      screen.getByRole("button", { name: "Book free session" })
+      screen.getByRole("button", { name: "Book my session" })
     );
 
     expect(
@@ -289,7 +289,7 @@ describe("TourneyFreeSession", () => {
     const slotButton = await screen.findByRole("button", {
       name: localTimeLabel(SLOT_230PM_UTC),
     });
-    fireEvent.change(screen.getByPlaceholderText(/booking confirmation/i), {
+    fireEvent.change(screen.getByPlaceholderText(/email for the confirmation/i), {
       target: { value: "player@example.com" },
     });
     fireEvent.change(screen.getByPlaceholderText(/discord username/i), {
@@ -297,7 +297,7 @@ describe("TourneyFreeSession", () => {
     });
     fireEvent.click(slotButton);
     fireEvent.click(
-      screen.getByRole("button", { name: "Book free session" })
+      screen.getByRole("button", { name: "Book my session" })
     );
 
     expect(
