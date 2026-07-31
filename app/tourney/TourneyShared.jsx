@@ -2416,7 +2416,7 @@ export const TourneyStyles = () => (
         box-shadow 160ms ease;
     }
 
-    .tourney-cal-day:hover:not(:disabled) {
+    .tourney-cal-day:hover:not(:disabled):not(.is-selected) {
       border-color: var(--tourney-border-accent);
       background: var(--tourney-surface-soft);
     }
@@ -2435,7 +2435,7 @@ export const TourneyStyles = () => (
 
     .tourney-cal-day.is-selected {
       border-color: var(--tourney-accent-soft);
-      color: var(--color-accent-contrast);
+      color: var(--tourney-text);
       background: linear-gradient(
         120deg,
         var(--tourney-accent) 0%,
@@ -2527,7 +2527,7 @@ export const TourneyStyles = () => (
         box-shadow 160ms ease;
     }
 
-    .tourney-slot-time:hover {
+    .tourney-slot-time:hover:not(.is-selected) {
       border-color: var(--tourney-accent-soft);
     }
 
@@ -2539,7 +2539,7 @@ export const TourneyStyles = () => (
 
     .tourney-slot-time.is-selected {
       border-color: var(--tourney-accent-soft);
-      color: var(--color-accent-contrast);
+      color: var(--tourney-text);
       background: linear-gradient(
         120deg,
         var(--tourney-accent) 0%,
