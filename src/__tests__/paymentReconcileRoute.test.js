@@ -397,59 +397,73 @@ describe("payment reconciliation route authorization", () => {
   });
 
   test("safely skips Tourney reconciliation while another worker holds the lease", async () => {
-    const loaded = await loadHandler();
-    loaded.runTourneyReconciliation.mockResolvedValue({
-      skipped: true,
-      reason: "already_running",
-      summary: {},
-    });
-    const { response, state } = createResponse();
+    const previousCronFlag = process.env.TOURNEY_RECONCILIATION_CRON_ENABLED;
+    process.env.TOURNEY_RECONCILIATION_CRON_ENABLED = "1";
+    try {
+      const loaded = await loadHandler();
+      loaded.runTourneyReconciliation.mockResolvedValue({
+        skipped: true,
+        reason: "already_running",
+        summary: {},
+      });
+      const { response, state } = createResponse();
 
-    await loaded.handler({ method: "GET", headers: {} }, response);
+      await loaded.handler({ method: "GET", headers: {} }, response);
 
-    expect(state.status).toBe(200);
-    expect(state.body.summary.tourneyReconciliation).toEqual({
-      skipped: true,
-      reason: "already_running",
-    });
-    expect(loaded.adminRpc).toHaveBeenCalledWith(
-      "roo_record_reconciliation_checkpoint",
-      expect.any(Object)
-    );
+      expect(state.status).toBe(200);
+      expect(state.body.summary.tourneyReconciliation).toEqual({
+        skipped: true,
+        reason: "already_running",
+      });
+      expect(loaded.adminRpc).toHaveBeenCalledWith(
+        "roo_record_reconciliation_checkpoint",
+        expect.any(Object)
+      );
+    } finally {
+      if (previousCronFlag === undefined) delete process.env.TOURNEY_RECONCILIATION_CRON_ENABLED;
+      else process.env.TOURNEY_RECONCILIATION_CRON_ENABLED = previousCronFlag;
+    }
   });
 
   test("keeps payment recovery successful when Tourney reconciliation is pending", async () => {
-    const loaded = await loadHandler();
-    loaded.runTourneyReconciliation.mockRejectedValue(Object.assign(
-      new Error("mirror unavailable"),
-      {
-        failedStage: "tourneyMirror",
-        partialSummary: {
-          tourneyExternalOperations: { claimed: 1, applied: 1 },
-        },
-      }
-    ));
-    const { response, state } = createResponse();
-
-    await loaded.handler({ method: "GET", headers: {} }, response);
-
-    expect(state.status).toBe(200);
-    expect(state.body).toMatchObject({
-      ok: true,
-      summary: {
-        tourneyReconciliation: {
-          pending: true,
+    const previousCronFlag = process.env.TOURNEY_RECONCILIATION_CRON_ENABLED;
+    process.env.TOURNEY_RECONCILIATION_CRON_ENABLED = "1";
+    try {
+      const loaded = await loadHandler();
+      loaded.runTourneyReconciliation.mockRejectedValue(Object.assign(
+        new Error("mirror unavailable"),
+        {
           failedStage: "tourneyMirror",
           partialSummary: {
             tourneyExternalOperations: { claimed: 1, applied: 1 },
           },
+        }
+      ));
+      const { response, state } = createResponse();
+
+      await loaded.handler({ method: "GET", headers: {} }, response);
+
+      expect(state.status).toBe(200);
+      expect(state.body).toMatchObject({
+        ok: true,
+        summary: {
+          tourneyReconciliation: {
+            pending: true,
+            failedStage: "tourneyMirror",
+            partialSummary: {
+              tourneyExternalOperations: { claimed: 1, applied: 1 },
+            },
+          },
         },
-      },
-    });
-    expect(loaded.adminRpc).toHaveBeenCalledWith(
-      "roo_record_reconciliation_checkpoint",
-      expect.any(Object)
-    );
+      });
+      expect(loaded.adminRpc).toHaveBeenCalledWith(
+        "roo_record_reconciliation_checkpoint",
+        expect.any(Object)
+      );
+    } finally {
+      if (previousCronFlag === undefined) delete process.env.TOURNEY_RECONCILIATION_CRON_ENABLED;
+      else process.env.TOURNEY_RECONCILIATION_CRON_ENABLED = previousCronFlag;
+    }
   });
 
   test("runs referral email recovery even when payment reconciliation fails", async () => {
@@ -488,9 +502,11 @@ describe("payment reconciliation route authorization", () => {
     const previous = process.env.SUPABASE_SOCIAL_AUTH_ENABLED;
     const previousHardening = process.env.TOURNEY_HARDENING_V4_ENABLED;
     const previousGuild = process.env.DISCORD_GUILD_ID;
+    const previousCronFlag = process.env.TOURNEY_RECONCILIATION_CRON_ENABLED;
     process.env.SUPABASE_SOCIAL_AUTH_ENABLED = "1";
     process.env.TOURNEY_HARDENING_V4_ENABLED = "1";
     process.env.DISCORD_GUILD_ID = "111111111111111111";
+    process.env.TOURNEY_RECONCILIATION_CRON_ENABLED = "1";
     try {
       const loaded = await loadHandler();
       const { response, state } = createResponse();
@@ -522,6 +538,29 @@ describe("payment reconciliation route authorization", () => {
       else process.env.TOURNEY_HARDENING_V4_ENABLED = previousHardening;
       if (previousGuild === undefined) delete process.env.DISCORD_GUILD_ID;
       else process.env.DISCORD_GUILD_ID = previousGuild;
+      if (previousCronFlag === undefined) delete process.env.TOURNEY_RECONCILIATION_CRON_ENABLED;
+      else process.env.TOURNEY_RECONCILIATION_CRON_ENABLED = previousCronFlag;
+    }
+  });
+
+  test("skips the Tourney worker on the shared schedule unless explicitly enabled", async () => {
+    const previousCronFlag = process.env.TOURNEY_RECONCILIATION_CRON_ENABLED;
+    delete process.env.TOURNEY_RECONCILIATION_CRON_ENABLED;
+    try {
+      const loaded = await loadHandler();
+      const { response, state } = createResponse();
+
+      await loaded.handler({ method: "GET", headers: {} }, response);
+
+      expect(state.status).toBe(200);
+      expect(loaded.runTourneyReconciliation).not.toHaveBeenCalled();
+      expect(state.body.summary.tourneyReconciliation).toEqual({
+        skipped: true,
+        reason: "reconciliation_cron_disabled",
+      });
+    } finally {
+      if (previousCronFlag === undefined) delete process.env.TOURNEY_RECONCILIATION_CRON_ENABLED;
+      else process.env.TOURNEY_RECONCILIATION_CRON_ENABLED = previousCronFlag;
     }
   });
 
