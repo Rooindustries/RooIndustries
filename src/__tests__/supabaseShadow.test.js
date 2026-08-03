@@ -22,12 +22,16 @@ const createRpcClient = (seed = []) => {
       if (name === "roo_fetch_shadow_documents_targeted") {
         const requested = args.p_document_types;
         const requestedIds = args.p_ids;
+        const limit = Math.max(1, Math.min(1000, Number(args.p_limit) || 500));
         return {
-          data: [...documents.values()].filter(
-            (document) =>
-              (!requested || requested.includes(document._type)) &&
-              (!requestedIds || requestedIds.includes(document._id))
-          ),
+          data: [...documents.values()]
+            .filter(
+              (document) =>
+                (!requested || requested.includes(document._type)) &&
+                (!requestedIds || requestedIds.includes(document._id))
+            )
+            .sort((a, b) => String(a._id).localeCompare(String(b._id)))
+            .slice(0, limit),
           error: null,
         };
       }
@@ -245,6 +249,51 @@ describe("Supabase document compatibility client", () => {
     await expect(
       client.fetch(`*[_type == "package"][0]{title}`)
     ).resolves.toEqual({ title: "One" });
+  });
+
+  test("resolves joined single-document queries without truncating the dataset", async () => {
+    const shadowClient = createRpcClient([
+      {
+        _id: "upgradeLink.aa-first",
+        _type: "upgradeLink",
+        title: "Other",
+        slug: { _type: "slug", current: "other" },
+        _rev: "a",
+      },
+      {
+        _id: "upgradeLink.zz-target",
+        _type: "upgradeLink",
+        title: "Target",
+        slug: { _type: "slug", current: "base-to-max" },
+        targetPackage: { _type: "reference", _ref: "package.max" },
+        _rev: "b",
+      },
+      {
+        _id: "package.max",
+        _type: "package",
+        title: "XOC",
+        price: "$179.95",
+        _rev: "c",
+      },
+    ]);
+    const client = new SupabaseDocumentClient({
+      shadowClient,
+      commerceOnly: true,
+    });
+    await expect(
+      client.fetch(
+        `*[_type == "upgradeLink" && lower(slug.current) == $slug][0]{
+          _id,
+          title,
+          targetPackage->{title, price}
+        }`,
+        { slug: "base-to-max" }
+      )
+    ).resolves.toEqual({
+      _id: "upgradeLink.zz-target",
+      title: "Target",
+      targetPackage: { title: "XOC", price: "$179.95" },
+    });
   });
 
   test("supports revision-guarded set, unset, and increments", async () => {

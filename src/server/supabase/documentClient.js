@@ -50,6 +50,21 @@ const inferQueryLimit = (query) => {
   return /\]\s*\[\s*0\s*\]/.test(String(query || "")) ? 1 : 500;
 };
 
+// When a query carries predicates that were not pushed down to the shadow
+// store (joins, ORs, literals), the local GROQ evaluator applies them — so
+// truncating the database read to the inferred limit could drop the matching
+// rows before evaluation. Only push the limit down alongside pushed filters.
+const hasUnpushedPredicates = ({ source, ids, filters }) => {
+  if (ids.length > 0 || filters.length > 0) return false;
+  const head = String(source || "").split("]")[0] || "";
+  const stripped = head
+    .replace(/_type\s*==\s*["'][^"']*["']/g, "")
+    .replace(/_type\s+in\s+\[[^\]]*\]/g, "")
+    .replace(/_id\s*==\s*(?:\$[A-Za-z_][A-Za-z0-9_]*|"[^"]*"|'[^']*')/g, "")
+    .replace(/_id\s+in\s+(?:\$[A-Za-z_][A-Za-z0-9_]*|\[[^\]]*\])/g, "");
+  return /==|!=|<=|>=|<|>|\bin\b/.test(stripped);
+};
+
 const inferShadowScope = ({ query, params = {}, configuredTypes = null }) => {
   const source = String(query || "");
   const literalTypes = inferLiteralTypes(source);
@@ -89,7 +104,9 @@ const inferShadowScope = ({ query, params = {}, configuredTypes = null }) => {
     documentTypes: documentTypes.length > 0 ? documentTypes : null,
     ids: uniqueStrings(ids),
     filters,
-    limit: inferQueryLimit(source),
+    limit: hasUnpushedPredicates({ source, ids, filters })
+      ? 500
+      : inferQueryLimit(source),
   };
 };
 
