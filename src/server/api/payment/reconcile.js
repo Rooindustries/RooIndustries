@@ -276,12 +276,23 @@ export default async function handler(req, res) {
         value: { skipped: true, reason: "supabase_unavailable" },
         error: null,
       });
-  const tourneyReconciliationPromise = runTourneyReconciliation({
-    budgetMs: 90_000,
-  }).then(
-    (value) => ({ value, error: null }),
-    (error) => ({ value: null, error })
-  );
+  // The 5-minute payment cron must not also run the heavy tourney
+  // reconciliation: under load it saturates the database and takes the whole
+  // site down. Set TOURNEY_RECONCILIATION_CRON_ENABLED to re-enable it here;
+  // the dedicated /api/tourney/reconcile route still runs it on demand.
+  const tourneyReconciliationPromise = isEnabledTourneyFlag(
+    process.env.TOURNEY_RECONCILIATION_CRON_ENABLED
+  )
+    ? runTourneyReconciliation({
+        budgetMs: 90_000,
+      }).then(
+        (value) => ({ value, error: null }),
+        (error) => ({ value: null, error })
+      )
+    : Promise.resolve({
+        value: { skipped: true, reason: "reconciliation_cron_disabled" },
+        error: null,
+      });
   const supabaseConfigured = isSupabaseAdminConfigured();
   const mirrorSkipReason = supabaseConfigured
     ? "sanity_unconfigured"
