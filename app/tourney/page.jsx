@@ -8,6 +8,7 @@ import {
 import JsonLd from "../../src/next/JsonLd";
 import seo from "../../src/lib/seo";
 import ConnectedAccounts from "../../src/components/ConnectedAccounts";
+import TourneyFreeSession from "./TourneyFreeSession";
 import TourneyLoginOutcome from "./TourneyLoginOutcome";
 
 export const runtime = "nodejs";
@@ -206,6 +207,8 @@ const DashboardPage = ({ hosts, loginOutcome = "", session }) => (
         variant="tourney"
       />
     ) : null}
+
+    {session?.role === "player" ? <TourneyFreeSession /> : null}
 
     <TourneyHosts hosts={hosts} />
 

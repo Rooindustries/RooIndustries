@@ -2286,6 +2286,291 @@ export const TourneyStyles = () => (
       color: #a5f3fc;
     }
 
+    .tourney-free-session {
+      margin-bottom: 1.125rem;
+    }
+
+    .tourney-slot-picker {
+      display: grid;
+      gap: 12px;
+    }
+
+    .tourney-slot-label {
+      margin: 0;
+      color: var(--tourney-accent);
+      font-size: 0.76rem;
+      font-weight: 820;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    .tourney-cal-earliest {
+      align-self: flex-start;
+      border: 1px solid var(--tourney-border-accent);
+      border-radius: 0.75rem;
+      background: color-mix(in srgb, var(--tourney-accent) 12%, transparent);
+      color: var(--tourney-accent);
+      padding: 8px 14px;
+      font: inherit;
+      font-size: 0.85rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: border-color 160ms ease, background 160ms ease,
+        box-shadow 160ms ease;
+    }
+
+    .tourney-cal-earliest:hover {
+      border-color: var(--tourney-accent-soft);
+      background: color-mix(in srgb, var(--tourney-accent) 20%, transparent);
+    }
+
+    .tourney-cal-earliest:focus-visible {
+      outline: none;
+      border-color: var(--tourney-focus);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--tourney-focus) 26%, transparent);
+    }
+
+    .tourney-cal {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    @media (min-width: 720px) {
+      .tourney-cal {
+        flex-direction: row;
+        align-items: flex-start;
+        gap: 28px;
+      }
+    }
+
+    .tourney-cal-month {
+      flex: 0 0 auto;
+      width: 100%;
+      max-width: 320px;
+    }
+
+    .tourney-cal-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .tourney-cal-title {
+      margin: 0;
+      color: var(--tourney-text);
+      font-size: 1.05rem;
+      font-weight: 800;
+    }
+
+    .tourney-cal-nav {
+      width: 34px;
+      height: 34px;
+      border: 1px solid var(--tourney-border);
+      border-radius: 0.65rem;
+      background: var(--tourney-surface-soft);
+      color: var(--tourney-accent);
+      font: inherit;
+      font-size: 1.15rem;
+      line-height: 1;
+      cursor: pointer;
+      transition: border-color 160ms ease, background 160ms ease,
+        box-shadow 160ms ease;
+    }
+
+    .tourney-cal-nav:hover {
+      border-color: var(--tourney-accent-soft);
+    }
+
+    .tourney-cal-nav:focus-visible {
+      outline: none;
+      border-color: var(--tourney-focus);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--tourney-focus) 26%, transparent);
+    }
+
+    .tourney-cal-weekdays {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 4px;
+      margin-bottom: 6px;
+    }
+
+    .tourney-cal-weekdays span {
+      text-align: center;
+      color: var(--tourney-accent);
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .tourney-cal-days {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 4px;
+    }
+
+    .tourney-cal-day {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      min-height: 40px;
+      padding: 6px 0;
+      border: 1px solid transparent;
+      border-radius: 0.65rem;
+      background: transparent;
+      color: var(--tourney-text-soft);
+      font: inherit;
+      font-size: 0.88rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: border-color 160ms ease, background 160ms ease,
+        box-shadow 160ms ease;
+    }
+
+    .tourney-cal-day:hover:not(:disabled):not(.is-selected) {
+      border-color: var(--tourney-border-accent);
+      background: var(--tourney-surface-soft);
+    }
+
+    .tourney-cal-day:focus-visible {
+      outline: none;
+      border-color: var(--tourney-focus);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--tourney-focus) 26%, transparent);
+    }
+
+    .tourney-cal-day:disabled {
+      color: var(--tourney-text-muted);
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .tourney-cal-day.is-selected {
+      border-color: var(--tourney-accent-soft);
+      color: var(--tourney-text);
+      background: linear-gradient(
+        120deg,
+        var(--tourney-accent) 0%,
+        var(--tourney-accent-strong) 100%
+      );
+      box-shadow: 0 0 18px
+        color-mix(in srgb, var(--tourney-accent-soft) 45%, transparent);
+    }
+
+    .tourney-cal-dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+    }
+
+    .tourney-cal-dot.is-green {
+      border-radius: 999px;
+      background: #34d399;
+      box-shadow: 0 0 6px rgba(52, 211, 153, 0.6);
+    }
+
+    .tourney-cal-dot.is-yellow {
+      border-radius: 1px;
+      transform: rotate(45deg);
+      background: #fbbf24;
+      box-shadow: 0 0 6px rgba(251, 191, 36, 0.55);
+    }
+
+    .tourney-cal-dot.is-red {
+      border-radius: 2px;
+      background: #f87171;
+      box-shadow: 0 0 6px rgba(248, 113, 113, 0.5);
+    }
+
+    .tourney-cal-dot.is-held {
+      border-radius: 999px;
+      background: #c084fc;
+      box-shadow: 0 0 6px rgba(192, 132, 252, 0.9);
+    }
+
+    .tourney-cal-legend {
+      margin-top: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 14px;
+      color: var(--tourney-text-muted);
+      font-size: 0.66rem;
+    }
+
+    .tourney-cal-legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+    }
+
+    .tourney-cal-tz {
+      margin: 8px 0 0;
+      color: var(--tourney-text-soft);
+      font-size: 0.66rem;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .tourney-cal-times {
+      flex: 1 1 auto;
+      display: grid;
+      gap: 12px;
+      align-content: start;
+    }
+
+    .tourney-slot-times {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(min(100%, 7.5rem), 1fr));
+      gap: 8px;
+    }
+
+    .tourney-slot-time {
+      min-height: 40px;
+      border: 1px solid var(--tourney-border-accent);
+      border-radius: 0.75rem;
+      color: var(--tourney-text-soft);
+      background: var(--tourney-input);
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.88rem;
+      font-weight: 700;
+      transition: border-color 160ms ease, background 160ms ease,
+        box-shadow 160ms ease;
+    }
+
+    .tourney-slot-time:hover:not(.is-selected) {
+      border-color: var(--tourney-accent-soft);
+    }
+
+    .tourney-slot-time:focus-visible {
+      outline: none;
+      border-color: var(--tourney-focus);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--tourney-focus) 26%, transparent);
+    }
+
+    .tourney-slot-time.is-selected {
+      border-color: var(--tourney-accent-soft);
+      color: var(--tourney-text);
+      background: linear-gradient(
+        120deg,
+        var(--tourney-accent) 0%,
+        var(--tourney-accent-strong) 100%
+      );
+      box-shadow: 0 0 18px
+        color-mix(in srgb, var(--tourney-accent-soft) 45%, transparent);
+    }
+
+    .tourney-slot-empty {
+      margin: 0;
+      color: var(--tourney-text-muted);
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+
     .tourney-modal-backdrop {
       --tourney-text: #ffffff;
       --tourney-text-soft: rgba(226, 232, 240, 0.86);

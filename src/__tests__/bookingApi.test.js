@@ -9,12 +9,19 @@ let formatRequestedTimeFields;
 let applyBookingRefund;
 let applyBookingStatusTransition;
 let createRequiresRescheduleBooking;
+let bookTourneyFreeSession;
+let getTourneyFreeSessionState;
+let grantTourneySessionEntitlement;
+let resetMemoryTourneyFreeSessionStoreForTests;
+let getBookingAvailability;
 
 const CLIENT_EMAIL = "vihaann2.0@gmail.com";
 const OWNER_EMAIL = "serviroo@rooindustries.com";
 const OWNER_TZ = "Asia/Kolkata";
 const previousDataPrimary = process.env.DATA_PRIMARY_BACKEND;
 const previousCommercePrimary = process.env.COMMERCE_PRIMARY_BACKEND;
+const previousFreeSessionStoreMode =
+  process.env.TOURNEY_FREE_SESSION_STORE_MODE;
 
 const mockSendEmail = jest.fn().mockResolvedValue({ error: null });
 const mockFlushCommerceMirror = jest.fn(async () => {
@@ -676,6 +683,7 @@ beforeAll(() => {
   process.env.RAZORPAY_KEY_SECRET = "";
   process.env.PAYPAL_CLIENT_ID = "";
   process.env.PAYPAL_CLIENT_SECRET = "";
+  process.env.TOURNEY_FREE_SESSION_STORE_MODE = "memory";
   const load = (path) => {
     const mod = require(path);
     return mod && mod.default ? mod.default : mod;
@@ -699,6 +707,15 @@ beforeAll(() => {
   ({ createRequiresRescheduleBooking } = require(
     "../../src/server/api/ref/bookingCommit"
   ));
+  ({
+    bookTourneyFreeSession,
+    getTourneyFreeSessionState,
+    grantTourneySessionEntitlement,
+    resetMemoryTourneyFreeSessionStoreForTests,
+  } = require("../../src/server/tourney/freeSessionStore"));
+  ({ getBookingAvailability } = require(
+    "../../src/server/booking/availability"
+  ));
 });
 
 afterAll(() => {
@@ -709,10 +726,16 @@ afterAll(() => {
   } else {
     process.env.COMMERCE_PRIMARY_BACKEND = previousCommercePrimary;
   }
+  if (previousFreeSessionStoreMode === undefined) {
+    delete process.env.TOURNEY_FREE_SESSION_STORE_MODE;
+  } else {
+    process.env.TOURNEY_FREE_SESSION_STORE_MODE = previousFreeSessionStoreMode;
+  }
 });
 
 beforeEach(() => {
   resetStore();
+  resetMemoryTourneyFreeSessionStoreForTests();
   mockSendEmail.mockReset();
   mockSendEmail.mockResolvedValue({ error: null });
   mockFlushCommerceMirror.mockClear();
@@ -773,6 +796,183 @@ describe("booking reservation API", () => {
     const second = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
     expect(second.res.statusCode).toBe(409);
     expect(second.body.message).toMatch(/reserved/i);
+  });
+
+  test.each([
+    {
+      caseName: "missing PC specifications",
+      field: "specs",
+      value: undefined,
+      error: "PC specifications are required.",
+    },
+    {
+      caseName: "whitespace-only PC specifications",
+      field: "specs",
+      value: " \t ",
+      error: "PC specifications are required.",
+    },
+    {
+      caseName: "missing main game",
+      field: "mainGame",
+      value: undefined,
+      error: "Main game is required.",
+    },
+    {
+      caseName: "whitespace-only main game",
+      field: "mainGame",
+      value: " \t ",
+      error: "Main game is required.",
+    },
+  ])("Tourney free sessions reject $caseName", async ({ field, value, error }) => {
+    const payload = {
+      startTimeUTC: "2025-01-15T08:20:00.000Z",
+      email: "playerone@example.com",
+      discord: "PlayerOne#1234",
+      specs: "Ryzen 7 / RTX 4070",
+      mainGame: "Overwatch 2",
+      timezone: "Asia/Kolkata",
+      [field]: value,
+    };
+    if (value === undefined) Reflect.deleteProperty(payload, field);
+
+    await expect(
+      bookTourneyFreeSession({
+        session: {
+          username: "playerone",
+          role: "player",
+          playerId: "player-free-session-validation",
+        },
+        payload,
+        clientAddress: "127.0.0.1",
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      message: error,
+      errors: [error],
+    });
+    expect(store.bookings).toHaveLength(0);
+  });
+
+  test("Tourney free sessions create one captured booking and occupy the slot", async () => {
+    const playerId = "player-free-session-1";
+    const startTimeUTC = "2025-01-15T08:20:00.000Z";
+    const session = {
+      username: "playerone",
+      role: "player",
+      playerId,
+    };
+    const payload = {
+      startTimeUTC,
+      email: "playerone@example.com",
+      discord: "PlayerOne#1234",
+      specs: "Ryzen 7 / RTX 4070",
+      mainGame: "Overwatch 2",
+      timezone: "Asia/Kolkata",
+    };
+    await grantTourneySessionEntitlement({
+      playerId,
+      actorUsername: "yukari",
+    });
+
+    const booked = await bookTourneyFreeSession({
+      session,
+      payload,
+      clientAddress: "127.0.0.1",
+    });
+
+    expect(booked.body).toMatchObject({
+      ok: true,
+      packageTitle: "Tourney Free Optimization",
+      entitlement: {
+        status: "consumed",
+        bookingId: expect.any(String),
+        booking: {
+          startTimeUTC,
+          status: "captured",
+        },
+      },
+    });
+    expect(store.bookings).toHaveLength(1);
+    expect(store.bookings[0]).toMatchObject({
+      packageTitle: "Tourney Free Optimization",
+      paymentProvider: "free",
+      status: "captured",
+      startTimeUTC,
+      netAmount: 0,
+    });
+    expect(mockSendEmail).toHaveBeenCalledTimes(2);
+
+    const availability = await getBookingAvailability({
+      client: {
+        ...mockSanityClient,
+        fetchAvailability: async () => ({
+          bookings: store.bookings,
+          holds: store.slotHolds,
+          slotLocks: store.bookingSlots,
+        }),
+      },
+    });
+    expect(availability.bookedSlots).toContainEqual({
+      startTimeUTC,
+      isHold: false,
+    });
+
+    await expect(
+      bookTourneyFreeSession({
+        session,
+        payload: { ...payload, startTimeUTC: "2025-01-15T08:25:00.000Z" },
+        clientAddress: "127.0.0.1",
+      })
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "TOURNEY_FREE_SESSION_ALREADY_BOOKED",
+    });
+    expect(store.bookings).toHaveLength(1);
+  });
+
+  test("Tourney slot conflicts do not consume the free-session entitlement", async () => {
+    const playerId = "player-free-session-conflict";
+    const startTimeUTC = "2025-01-15T09:00:00.000Z";
+    const session = {
+      username: "playertwo",
+      role: "player",
+      playerId,
+    };
+    await grantTourneySessionEntitlement({
+      playerId,
+      actorUsername: "yukari",
+    });
+    const existing = await reserveSlot(startTimeUTC, "Test Package");
+    expect(existing.res.statusCode).toBe(200);
+
+    await expect(
+      bookTourneyFreeSession({
+        session,
+        payload: {
+          startTimeUTC,
+          email: "playertwo@example.com",
+          discord: "PlayerTwo#1234",
+          specs: "Ryzen 7 / RTX 4070",
+          mainGame: "Overwatch 2",
+          timezone: "Asia/Kolkata",
+        },
+        clientAddress: "127.0.0.2",
+      })
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "TOURNEY_FREE_SESSION_SLOT_CONFLICT",
+    });
+
+    await expect(
+      getTourneyFreeSessionState({ playerId })
+    ).resolves.toMatchObject({
+      entitlement: {
+        status: "available",
+        bookingId: "",
+        booking: null,
+      },
+    });
+    expect(store.bookings).toHaveLength(0);
   });
 
   test("payment-pending holds cannot be refreshed, moved, or publicly released", async () => {

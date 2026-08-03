@@ -523,7 +523,7 @@ describe("encrypted export hardening", () => {
       missingRejected: true,
       hashRejected: true,
       preExpandProfile: "roo-supabase-pre-expand-20260714230345-v1",
-      preExpandDeferred: 6,
+      preExpandDeferred: 7,
       partialExpandRejected: true,
       unexpectedMissingRejected: true,
       oldProfileRejected: true,
