@@ -102,7 +102,7 @@ describe("tourney public page content", () => {
       "herloaf",
       "putterow",
       "hmp_ow",
-      "cheesenut16",
+      "apply",
       "mintthiefow",
       "r3nztu",
       "skinzow",

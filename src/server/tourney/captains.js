@@ -9,7 +9,7 @@ export const TOURNEY_CAPTAIN_IDENTITIES = Object.freeze([
   Object.freeze({ discord: "herloaf", twitch: "herloaf" }),
   Object.freeze({ discord: "putter", twitch: "putterow" }),
   Object.freeze({ discord: "hampesurf", twitch: "hmp_ow" }),
-  Object.freeze({ discord: "cheesenut.", twitch: "cheesenut16" }),
+  Object.freeze({ discord: "apply", twitch: "apply" }),
   Object.freeze({ discord: "loooky", twitch: "mintthiefow" }),
   Object.freeze({ discord: "r3nztu", twitch: "r3nztu" }),
   Object.freeze({ discord: "skinzow", twitch: "skinzow" }),
