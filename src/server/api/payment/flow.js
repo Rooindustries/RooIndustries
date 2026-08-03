@@ -2775,6 +2775,7 @@ export const startPaymentSession = async ({
   cutoverGeneration = 0,
   prepareCouponReservation = null,
   appendCouponReservation = null,
+  authorizedFreeCheckout = false,
 }) => {
   const serverSessionsEnabled = resolveServerPaymentSessionsEnabled();
   if (!serverSessionsEnabled) {
@@ -2841,14 +2842,33 @@ export const startPaymentSession = async ({
       });
     }
 
-    const quote = await resolvePaymentQuote({
-      packageTitle: bookingPayload.packageTitle,
-      originalOrderId: bookingPayload.originalOrderId || "",
-      referralId: bookingPayload.referralId || "",
-      referralCode: bookingPayload.referralCode || "",
-      couponCode: bookingPayload.couponCode || "",
-      client,
-    });
+    const quote = authorizedFreeCheckout
+      ? {
+          paymentProvider: "free",
+          effectiveGrossAmount: 0,
+          effectiveDiscountAmount: 0,
+          effectiveDiscountPercent: 0,
+          effectiveNetAmount: 0,
+          referralDiscountAmount: 0,
+          referralDiscountPercent: 0,
+          effectiveCommissionPercent: 0,
+          commissionAmount: 0,
+          couponDiscountAmount: 0,
+          couponDiscountPercent: 0,
+          couponDiscountType: "",
+          couponDiscountValue: 0,
+          canCombineWithReferral: false,
+          effectiveReferralCode: "",
+          effectiveReferralId: "",
+        }
+      : await resolvePaymentQuote({
+          packageTitle: bookingPayload.packageTitle,
+          originalOrderId: bookingPayload.originalOrderId || "",
+          referralId: bookingPayload.referralId || "",
+          referralCode: bookingPayload.referralCode || "",
+          couponCode: bookingPayload.couponCode || "",
+          client,
+        });
     const currentQuoteFingerprint = buildQuoteFingerprint({
       bookingPayload,
       quote,
@@ -2857,9 +2877,10 @@ export const startPaymentSession = async ({
       requestBody.quoteFingerprint || ""
     ).trim();
     if (
-      (!submittedQuoteFingerprint && !isLegacyCheckoutCompatibilityOpen()) ||
-      (submittedQuoteFingerprint &&
-        submittedQuoteFingerprint !== currentQuoteFingerprint)
+      !authorizedFreeCheckout &&
+      ((!submittedQuoteFingerprint && !isLegacyCheckoutCompatibilityOpen()) ||
+        (submittedQuoteFingerprint &&
+          submittedQuoteFingerprint !== currentQuoteFingerprint))
     ) {
       return {
         httpStatus: 409,
@@ -2954,7 +2975,9 @@ export const startPaymentSession = async ({
     const refreshed = record?._id
       ? record
       : await getPaymentRecordById(client, record._id);
-    const paymentAccessToken = issuePaymentAccessTokenForRecord(refreshed);
+    const paymentAccessToken = authorizedFreeCheckout
+      ? ""
+      : issuePaymentAccessTokenForRecord(refreshed);
     const refreshedStatus = String(refreshed.status || "").trim().toLowerCase();
     if (
       provider !== "free" &&
