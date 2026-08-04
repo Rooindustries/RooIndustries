@@ -3333,6 +3333,15 @@ export const TourneyStyles = () => (
         transform-origin: top left;
       }
 
+      .tourney-bracket-page .tourney-bracket-tree {
+        /* Tighten the finals lane on this page: the broadcast-width lane
+           (clamp(36rem, 46vw, 46rem) + 112px tree padding) leaves ~360px of
+           dead space right of the Grand Final card. Band width + a small
+           connector buffer is enough; the overlay keeps the wide lane. */
+        --bracket-final-lane-width: calc(var(--bracket-band-width) + 3rem);
+        padding-right: 0;
+      }
+
       .tourney-bracket-page .tourney-bracket-board {
         /* Natural geometry stays at the base --bracket-slot-* values:
            overriding them here desynced the stack rows from the JS slot

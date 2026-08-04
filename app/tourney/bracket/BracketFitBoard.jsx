@@ -9,9 +9,10 @@ import { useLayoutEffect, useRef, useState } from "react";
 // import) so the overlay surface stays untouched. The bracket renderer
 // already reads the rendered scale from the tree's rect-vs-layout ratio, so
 // scaling this ancestor keeps the connectors on the cards, exactly like the
-// overlay. The fit is WIDTH-DRIVEN only: the tree always fills the page
-// width (scaling up or down as needed) so horizontal scrolling is never
-// needed, while the page simply gets taller and scrolls vertically. Below
+// overlay. The fit is WIDTH-DRIVEN only and never upscales: screens wider
+// than the natural tree render it 1:1 (centered), narrower screens scale it
+// down so horizontal scrolling is never needed, and the page simply gets
+// taller and scrolls vertically. Below
 // the fit breakpoint the board keeps its natural width and the page scrolls
 // horizontally (see the matching media queries in TourneyShared.jsx);
 // matchMedia keeps this check in lockstep with the CSS.
@@ -45,7 +46,9 @@ export default function BracketFitBoard({ children }) {
       if (!baseWidth || !baseHeight) return;
       const availableWidth =
         stage.parentElement?.clientWidth || stage.clientWidth;
-      const nextFit = availableWidth / baseWidth;
+      // Never upscale: screens wider than the natural tree render it at
+      // 1:1, centered by the stage; narrower screens scale down to fit.
+      const nextFit = Math.min(availableWidth / baseWidth, 1);
       const rounded = Math.round(nextFit * 1000) / 1000;
       setBaseSize((previous) =>
         previous.width === baseWidth && previous.height === baseHeight
