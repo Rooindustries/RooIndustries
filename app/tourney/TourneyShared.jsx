@@ -3287,14 +3287,20 @@ export const TourneyStyles = () => (
       background: linear-gradient(90deg, rgba(34, 211, 238, 0.82), rgba(192, 132, 252, 0.86));
     }
 
-    /* Site bracket page only (BracketFitBoard): the whole tree fits the
-       viewport below a compact head with a transform scale, so this page
-       renders at natural content size with no board scrollbar and the JS
-       transform scales it into view — the same contract the OBS overlay
-       uses. Everything is scoped under .tourney-bracket-page (and >= 900px)
-       so the overlay and manage boards keep their native scrolling layout
-       and sizing untouched. */
+    /* Site bracket page only (BracketFitBoard): the tree scales to fill the
+       page width with a transform — horizontal scrolling is never needed,
+       the page just gets taller and scrolls vertically. The board renders at
+       natural content size so the JS measurement stays feedback-free, the
+       same contract the OBS overlay uses. The shell also goes full-bleed for
+       this page only, or the 96rem cap would letterbox the tree on wide
+       screens. Everything is scoped under .tourney-bracket-page (and
+       >= 900px) so the overlay and manage boards keep their native
+       scrolling layout and sizing untouched. */
     @media (min-width: 900px) {
+      .tourney-shell.is-wide:has(.tourney-bracket-page) {
+        width: 100%;
+      }
+
       .tourney-bracket-page {
         /* Keep the implicit column pinned to the shell width so the fit
            wrapper's max-content tree cannot stretch an auto track past the
