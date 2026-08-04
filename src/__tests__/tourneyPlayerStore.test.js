@@ -532,7 +532,7 @@ describe("tourney player store", () => {
         teamName: "",
         twitchUsername: "cookies_ow",
         isCaptain: true,
-        captainSeed: 2,
+        captainSeed: 12,
       },
     ]);
   });

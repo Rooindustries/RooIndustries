@@ -3,13 +3,9 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 const groupOrder = ["Winners", "Losers", "Grand Final"];
-const connectorSlotHeightRem = 8.65;
-const connectorSlotGapRem = 0.8;
-const connectorCardGapPx = 8;
-const connectorArrowSizePx = 14;
-const connectorArrowHalfPx = 7;
+const connectorSlotHeightRem = 10.5;
+const connectorSlotGapRem = 1;
 const connectorBranchMinPx = 8;
-const finalConnectorFloatGapPx = 28;
 
 const slugClass = (value) =>
   String(value || "")
@@ -287,28 +283,9 @@ const getNodeCenter = ({ node, root, scale = 1 }) => {
 
 const formatPoint = (value) => value.toFixed(1);
 
-const buildArrowPath = ({ direction = "right", x, y }) => {
-  const baseX =
-    direction === "left" ? x + connectorArrowSizePx : x - connectorArrowSizePx;
-  return [
-    `M ${formatPoint(baseX)} ${formatPoint(y)} L ${formatPoint(x)} ${formatPoint(
-      y
-    )}`,
-    `M ${formatPoint(baseX)} ${formatPoint(
-      y - connectorArrowHalfPx
-    )} L ${formatPoint(x)} ${formatPoint(y)} L ${formatPoint(baseX)} ${formatPoint(
-      y + connectorArrowHalfPx
-    )}`,
-  ].join(" ");
-};
-
 const buildGroupedConnector = ({ sources, targetX, targetY }) => {
   const primaryStartX = Math.max(...sources.map((source) => source.x));
-  const arrowBaseX =
-    targetX > primaryStartX
-      ? targetX - connectorArrowSizePx
-      : targetX + connectorArrowSizePx;
-  const branchEndX = Math.max(arrowBaseX, primaryStartX + connectorBranchMinPx);
+  const branchEndX = Math.max(targetX, primaryStartX + connectorBranchMinPx);
   const availableX = Math.max(0, branchEndX - primaryStartX);
   const joinX = primaryStartX + availableX * 0.5;
   const sourceYValues = sources.map((source) => source.y);
@@ -330,10 +307,6 @@ const buildGroupedConnector = ({ sources, targetX, targetY }) => {
         branchEndX
       )}`,
     ].join(" "),
-    arrowD: buildArrowPath({
-      x: targetX,
-      y: branchY,
-    }),
     branchY,
   };
 };
@@ -537,6 +510,29 @@ export default function TourneyBracketView({
               root: connectorNode,
               scale: unitScale,
             });
+            // A bye-fed card hides its other first-round source, so the card
+            // center is not the slot the visible source feeds. Aim at the
+            // side row that actually receives the winner instead.
+            const byeSideIndexes = [targetMatch?.opponent1, targetMatch?.opponent2]
+              .map((side, index) =>
+                side?.teamId && byeTeams.has(`${group.groupName}:${side.teamId}`)
+                  ? index
+                  : -1
+              )
+              .filter((index) => index !== -1);
+            const fedSideNode =
+              byeSideIndexes.length === 1
+                ? targetNode.querySelectorAll(".tourney-match-side")[
+                    1 - byeSideIndexes[0]
+                  ]
+                : null;
+            const targetY = fedSideNode
+              ? getNodeCenter({
+                  node: fedSideNode,
+                  root: connectorNode,
+                  scale: unitScale,
+                }).y
+              : target.y;
             const targetKey = getMatchKey(
               group.groupName,
               nextRound.roundNumber,
@@ -545,11 +541,11 @@ export default function TourneyBracketView({
             const connectorGroup = connectorGroups.get(targetKey) || {
               id: targetKey,
               sources: [],
-              targetX: target.left - connectorCardGapPx,
-              targetY: target.y,
+              targetX: target.left,
+              targetY,
             };
             connectorGroup.sources.push({
-              x: source.right + connectorCardGapPx,
+              x: source.right,
               y: source.y,
             });
             connectorGroups.set(targetKey, connectorGroup);
@@ -565,7 +561,6 @@ export default function TourneyBracketView({
           return {
             id: group.id,
             d: connector.d,
-            arrowD: connector.arrowD,
           };
         });
       }
@@ -577,7 +572,6 @@ export default function TourneyBracketView({
       const finalLinks = [];
 
       if (treeNode && finalMatch) {
-        const finalBandNode = bandRefs.current.get("grand-final");
         const finalNode = matchRefs.current.get(
           getMatchKey("Grand Final", grandFinal.rounds[0].roundNumber, finalMatch.id)
         );
@@ -624,29 +618,21 @@ export default function TourneyBracketView({
             root: treeNode,
             scale: unitScale,
           });
-          const finalBand = finalBandNode
-            ? getNodeCenter({
-                node: finalBandNode,
-                root: treeNode,
-                scale: unitScale,
-              })
-            : targetSide;
-          const endX = finalBand.left - finalConnectorFloatGapPx;
-          const startX = source.right + connectorCardGapPx;
-          const lineEndX = endX - connectorArrowSizePx;
+          const finalCard = getNodeCenter({
+            node: finalNode,
+            root: treeNode,
+            scale: unitScale,
+          });
+          const endX = finalCard.left;
+          const startX = source.right;
           finalLinks.push({
             id: `${className}-${sourceMatch.id}-${finalMatch.id}`,
             className,
             d: buildStepPath({
               startX,
               startY: source.y,
-              endX: lineEndX,
+              endX,
               endY: targetSide.y,
-            }),
-            arrowD: buildArrowPath({
-              direction: "right",
-              x: endX,
-              y: targetSide.y,
             }),
           });
         });
@@ -782,13 +768,6 @@ export default function TourneyBracketView({
               key={path.id}
             />
           ))}
-          {(connectors.bands[groupKey] || []).map((path) => (
-            <path
-              className="tourney-bracket-connector-arrow"
-              d={path.arrowD}
-              key={`${path.id}-head`}
-            />
-          ))}
         </svg>
         <div className="tourney-bracket-rounds">
           {group.rounds.map((round) => {
@@ -843,13 +822,6 @@ export default function TourneyBracketView({
               className={`tourney-bracket-stage-path ${path.className}`}
               d={path.d}
               key={path.id}
-            />
-          ))}
-          {connectors.finals.map((path) => (
-            <path
-              className={`tourney-bracket-stage-arrow ${path.className}`}
-              d={path.arrowD}
-              key={`${path.id}-head`}
             />
           ))}
         </svg>

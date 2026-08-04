@@ -3255,7 +3255,7 @@ export const TourneyStyles = () => (
       --bracket-card-width: clamp(13.4rem, 16vw, 15rem);
       --bracket-band-padding: 14px;
       --bracket-band-width: calc(var(--bracket-card-width) + (var(--bracket-band-padding) * 2));
-      --bracket-slot-height: 9.25rem;
+      --bracket-slot-height: 10.5rem;
       --bracket-slot-gap: 1rem;
       --bracket-lane-gap: clamp(2.25rem, 4vw, 3.5rem);
       --bracket-final-gap: clamp(5.25rem, 7vw, 7rem);
@@ -3342,26 +3342,6 @@ export const TourneyStyles = () => (
 
     .tourney-bracket-stage-path.is-losers {
       stroke: rgba(251, 146, 60, 0.72);
-    }
-
-    .tourney-bracket-stage-arrow {
-      fill: none;
-      stroke: rgba(192, 132, 252, 0.9);
-      stroke-width: 3;
-      stroke-linecap: round;
-      stroke-linejoin: round;
-      filter: drop-shadow(0 0 5px rgba(192, 132, 252, 0.42));
-      vector-effect: non-scaling-stroke;
-    }
-
-    .tourney-bracket-stage-arrow.is-winners {
-      stroke: rgba(34, 211, 238, 0.94);
-      filter: drop-shadow(0 0 5px rgba(34, 211, 238, 0.42));
-    }
-
-    .tourney-bracket-stage-arrow.is-losers {
-      stroke: rgba(251, 146, 60, 0.94);
-      filter: drop-shadow(0 0 5px rgba(251, 146, 60, 0.42));
     }
 
     .tourney-bracket-lanes {
@@ -3513,16 +3493,6 @@ export const TourneyStyles = () => (
       stroke-linejoin: round;
       opacity: 0.88;
       filter: drop-shadow(0 0 8px color-mix(in srgb, var(--bracket-flow) 38%, transparent));
-      vector-effect: non-scaling-stroke;
-    }
-
-    .tourney-bracket-connector-arrow {
-      fill: none;
-      stroke: var(--bracket-flow);
-      stroke-width: 3;
-      stroke-linecap: round;
-      stroke-linejoin: round;
-      filter: drop-shadow(0 0 5px color-mix(in srgb, var(--bracket-flow) 46%, transparent));
       vector-effect: non-scaling-stroke;
     }
 
@@ -4409,9 +4379,7 @@ export const TourneyStyles = () => (
     }
 
     .tourney-bracket-stage-path,
-    .tourney-bracket-stage-arrow,
-    .tourney-bracket-stage-path.is-winners,
-    .tourney-bracket-stage-arrow.is-winners {
+    .tourney-bracket-stage-path.is-winners {
       stroke: var(--tourney-accent-soft);
       filter: drop-shadow(0 0 8px color-mix(in srgb, var(--tourney-accent-glow) 32%, transparent));
     }
