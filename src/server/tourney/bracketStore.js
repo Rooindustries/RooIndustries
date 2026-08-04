@@ -1421,7 +1421,10 @@ export const getTourneyBracketSnapshot = async ({
         data: memoryData,
       }))
     : await readPersistedBracketSnapshotData(env);
-  const maskPreviewFixtureNames = isPreviewFixtureMode(env);
+  // Mask placeholder names only on public Vercel preview deploys; local dev
+  // has no VERCEL_ENV and should render the fixture's Roo * team names.
+  const maskPreviewFixtureNames =
+    isPreviewFixtureMode(env) && env.VERCEL_ENV === "preview";
   return {
     ok: true,
     meta,

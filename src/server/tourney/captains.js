@@ -1,18 +1,18 @@
 import { extractTwitchLogin } from "./twitch.js";
 
 export const TOURNEY_CAPTAIN_IDENTITIES = Object.freeze([
-  Object.freeze({ discord: "wsps", twitch: "wsps" }),
-  Object.freeze({ discord: "blxckouttttt", twitch: "cookies_ow" }),
-  Object.freeze({ discord: "heartonvenus", twitch: "tapnocap" }),
+  Object.freeze({ discord: "putter", twitch: "putterow" }),
+  Object.freeze({ discord: "herloaf", twitch: "herloaf" }),
   Object.freeze({ discord: "imawolf", twitch: "imwolfixd" }),
   Object.freeze({ discord: "chosenow", twitch: "chosen_ow" }),
-  Object.freeze({ discord: "herloaf", twitch: "herloaf" }),
-  Object.freeze({ discord: "putter", twitch: "putterow" }),
-  Object.freeze({ discord: "hampesurf", twitch: "hmp_ow" }),
-  Object.freeze({ discord: "apply", twitch: "apply" }),
-  Object.freeze({ discord: "loooky", twitch: "mintthiefow" }),
   Object.freeze({ discord: "r3nztu", twitch: "r3nztu" }),
+  Object.freeze({ discord: "heartonvenus", twitch: "tapnocap" }),
+  Object.freeze({ discord: "apply", twitch: "apply" }),
+  Object.freeze({ discord: "hampesurf", twitch: "hmp_ow" }),
+  Object.freeze({ discord: "wsps", twitch: "wsps" }),
+  Object.freeze({ discord: "loooky", twitch: "mintthiefow" }),
   Object.freeze({ discord: "skinzow", twitch: "skinzow" }),
+  Object.freeze({ discord: "blxckouttttt", twitch: "cookies_ow" }),
 ]);
 
 const normalizeDiscordIdentity = (value) =>

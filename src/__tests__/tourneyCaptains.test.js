@@ -26,12 +26,12 @@ describe("tourney captain identities", () => {
   });
 
   test("keeps the announced captain order as team seeds one through twelve", () => {
-    expect(getTourneyCaptainSeed({ twitchUsername: "wsps" })).toBe(1);
-    expect(getTourneyCaptainSeed({ twitchUsername: "cookies_ow" })).toBe(2);
+    expect(getTourneyCaptainSeed({ twitchUsername: "wsps" })).toBe(9);
+    expect(getTourneyCaptainSeed({ twitchUsername: "cookies_ow" })).toBe(12);
     expect(getTourneyCaptainSeed({ discordOauthUsername: "heartonvenus" })).toBe(
-      3
+      6
     );
-    expect(getTourneyCaptainSeed({ twitchUsername: "skinzow" })).toBe(12);
+    expect(getTourneyCaptainSeed({ twitchUsername: "skinzow" })).toBe(11);
   });
 
   test("does not infer a captain from a display name", () => {
