@@ -170,9 +170,9 @@ export default async function TourneyOverlayIndexPage() {
                   dim back.
                 </p>
                 <p className="ov-guide-size">
-                  Browser source size: <strong>1920 × 1080</strong>, on its
-                  own scene. Any size works; the tree fits the frame
-                  automatically.
+                  Browser source size: <strong>1920 × 1640</strong>, on its
+                  own scene, scaled to fit. Any size works; the tree fits
+                  the frame automatically.
                 </p>
                 <OverlayCopyUrl path="/tourney/overlay/bracket" />
                 <ul className="ov-guide-suggest">
@@ -200,9 +200,9 @@ export default async function TourneyOverlayIndexPage() {
                   layout needs.
                 </p>
                 <p className="ov-guide-size">
-                  Browser source size: <strong>960 × 1080</strong> when it
-                  shares the screen with the losers lane, or{" "}
-                  <strong>1280 × 720</strong> on its own.
+                  Browser source size: <strong>984 × 840</strong>. When it
+                  shares the screen with the losers lane, keep that size and
+                  scale both lane sources down together in the scene.
                 </p>
                 <OverlayCopyUrl path="/tourney/overlay/bracket?group=winners" />
                 <GuidePreview
@@ -219,8 +219,9 @@ export default async function TourneyOverlayIndexPage() {
                   of the tree once the event gets going.
                 </p>
                 <p className="ov-guide-size">
-                  Browser source size: <strong>960 × 1080</strong> for a
-                  side-by-side layout, or <strong>1280 × 720</strong> solo.
+                  Browser source size: <strong>1480 × 840</strong>. For a
+                  side-by-side layout, keep that size and scale both lane
+                  sources down together in the scene.
                 </p>
                 <OverlayCopyUrl path="/tourney/overlay/bracket?group=losers" />
                 <ul className="ov-guide-suggest">
@@ -243,7 +244,7 @@ export default async function TourneyOverlayIndexPage() {
                   final is set.
                 </p>
                 <p className="ov-guide-size">
-                  Browser source size: <strong>800 × 450</strong>, parked in
+                  Browser source size: <strong>480 × 264</strong>, parked in
                   a corner of your gameplay scene. Want the big moment
                   instead? <strong>1920 × 1080</strong> on its own scene for
                   the bracket reveal.
@@ -326,8 +327,9 @@ export default async function TourneyOverlayIndexPage() {
                   </li>
                   <li>
                     <strong>Side by side:</strong> winners lane and losers
-                    lane in one scene, 960×1080 each. The whole story without
-                    the full tree.
+                    lane in one scene, winners 984 × 840 beside losers
+                    1480 × 840, scaled to fit the canvas. The whole story
+                    without the full tree.
                   </li>
                   <li>
                     <strong>Finals:</strong> match strip over gameplay plus

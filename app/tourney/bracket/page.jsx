@@ -4,6 +4,7 @@ import {
   getTourneySession,
 } from "../TourneyShared";
 import TourneyBracketView from "../TourneyBracketView";
+import BracketFitBoard from "./BracketFitBoard";
 import { readTourneyService } from "../../../src/server/tourney/readService";
 
 export const runtime = "nodejs";
@@ -42,7 +43,9 @@ export default async function TourneyBracketPage() {
             The bracket placeholder remains visible. No matchup or result has been changed.
           </StatusPanel>
         ) : null}
-        <TourneyBracketView snapshot={snapshot} />
+        <BracketFitBoard>
+          <TourneyBracketView snapshot={snapshot} />
+        </BracketFitBoard>
       </section>
     </TourneyShell>
   );
