@@ -19,6 +19,9 @@ const getScoreValue = ({ scoreForms, match, side }) => {
 const activeTeams = (teams = []) =>
   teams.filter((team) => team.status !== "disqualified");
 
+const auditTimeLabel = (value) =>
+  value instanceof Date ? value.toISOString() : String(value || "");
+
 export default function TourneyBracketManager({
   initialSnapshot,
   currentRole = "caster",
@@ -382,7 +385,7 @@ export default function TourneyBracketManager({
             <div className="tourney-audit-row" key={event.id}>
               <strong>{event.action}</strong>
               <span>{event.actorUsername}</span>
-              <small>{event.reason || event.createdAt}</small>
+              <small>{event.reason || auditTimeLabel(event.createdAt)}</small>
             </div>
           ))}
         </div>
