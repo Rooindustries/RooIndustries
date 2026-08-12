@@ -73,11 +73,17 @@ const scheduleItems = [
   {
     title: "Event dates",
     dateLabel: "August 15-16, 2026",
-    body: "The tournament runs across both event days. Exact match times are TBD.",
+    body: "The tournament runs across both event days. All match times are official and listed in UTC.",
   },
   {
-    title: "Match windows",
-    body: "Round times, check-in windows, and stream blocks will be posted once teams are confirmed.",
+    title: "Day 1 schedule",
+    dateLabel: "Saturday, August 15, 2026",
+    body: "Winners Round 1 at 12:00 PM, Winners Round 2 at 1:45 PM, Winners Round 3 and Losers Round 1 at 3:30 PM, and Losers Round 2 at 5:15 PM UTC.",
+  },
+  {
+    title: "Day 2 schedule",
+    dateLabel: "Sunday, August 16, 2026",
+    body: "Losers Round 1 at 12:00 PM, Winners Semifinals and Losers Semifinals at 1:45 PM, Losers Finals at 3:30 PM, and the Grand Final at 5:15 PM UTC.",
   },
   {
     title: "Winner payouts",

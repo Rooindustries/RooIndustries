@@ -56,7 +56,10 @@ describe("tourney bracket store", () => {
     expect(snapshot.matches.find((match) => match.groupName === "Grand Final")).toMatchObject({
       bestOf: 7,
       targetScore: 4,
+      publicMatchNumber: null,
+      schedule: null,
     });
+    expect(snapshot.schedule).toBeNull();
   });
 
   test("serves an isolated twelve-team preview fixture without database mode", async () => {
@@ -98,6 +101,151 @@ describe("tourney bracket store", () => {
       action: "bracket.preview-fixture",
       reason: "12 teams, 6 players each",
     });
+  });
+
+  test("maps the official 22-match schedule onto the twelve-team engine bracket", async () => {
+    const store = loadStore();
+    store.resetMemoryTourneyBracketStoreForTests();
+
+    const snapshot = await store.getTourneyBracketSnapshot({
+      env: { TOURNEY_BRACKET_PREVIEW_FIXTURE: "12x6" },
+    });
+    const scheduled = snapshot.matches
+      .filter((match) => match.publicMatchNumber !== null)
+      .sort((left, right) => left.publicMatchNumber - right.publicMatchNumber);
+
+    expect(snapshot.schedule).toMatchObject({
+      timeZone: "UTC",
+      eventDates: ["2026-08-15", "2026-08-16"],
+      casters: [
+        { id: 1, label: "Yukari + SpankyCheeze" },
+        { id: 2, label: "Supa" },
+        { id: 3, label: "GMR" },
+        { id: 4, label: "KimchiBapBop" },
+        { id: 5, label: "LightOW" },
+        { id: 6, label: "TheLemonGeneral or To Be Determined" },
+      ],
+    });
+    expect(snapshot.schedule.rounds).toHaveLength(10);
+    expect(snapshot.schedule.rounds.map(({ key, dayLabel, timeLabel }) => ({
+      key,
+      dayLabel,
+      timeLabel,
+    }))).toEqual([
+      { key: "winners:1", dayLabel: "Day 1", timeLabel: "12:00 PM" },
+      { key: "winners:2", dayLabel: "Day 1", timeLabel: "1:45 PM" },
+      { key: "winners:3", dayLabel: "Day 1", timeLabel: "3:30 PM" },
+      { key: "losers:2", dayLabel: "Day 1", timeLabel: "3:30 PM" },
+      { key: "losers:3", dayLabel: "Day 1", timeLabel: "5:15 PM" },
+      { key: "winners:4", dayLabel: "Day 2", timeLabel: "1:45 PM" },
+      { key: "losers:4", dayLabel: "Day 2", timeLabel: "12:00 PM" },
+      { key: "losers:5", dayLabel: "Day 2", timeLabel: "1:45 PM" },
+      { key: "losers:6", dayLabel: "Day 2", timeLabel: "3:30 PM" },
+      { key: "grand-final:1", dayLabel: "Day 2", timeLabel: "5:15 PM" },
+    ]);
+    expect(scheduled).toHaveLength(22);
+    expect(scheduled.map((match) => match.publicMatchNumber)).toEqual(
+      Array.from({ length: 22 }, (_, index) => index + 1)
+    );
+    expect(snapshot.matches.filter((match) => match.autoAdvance)).toHaveLength(8);
+    expect(snapshot.matches.filter((match) => match.autoAdvance && match.schedule)).toHaveLength(0);
+    expect(scheduled.find((match) => match.publicMatchNumber === 1)).toMatchObject({
+      groupName: "Winners",
+      roundNumber: 1,
+      number: 2,
+      schedule: { dayLabel: "Day 1", timeLabel: "12:00 PM", casterIds: [3] },
+    });
+    expect(scheduled.find((match) => match.publicMatchNumber === 11)).toMatchObject({
+      groupName: "Losers",
+      roundNumber: 2,
+      number: 1,
+      slotLabels: { opponent1: "Loser of 5", opponent2: "Loser of 1" },
+    });
+    expect(scheduled.find((match) => match.publicMatchNumber === 21)).toMatchObject({
+      schedule: { dayLabel: "Day 2", timeLabel: "3:30 PM", casterIds: [1, 2] },
+      slotLabels: { opponent1: "Loser of 17", opponent2: "Winner of 20" },
+    });
+    expect(scheduled.find((match) => match.publicMatchNumber === 22)).toMatchObject({
+      groupName: "Grand Final",
+      schedule: { dayLabel: "Day 2", timeLabel: "5:15 PM", casterIds: [1, 2] },
+      slotLabels: { opponent1: "Winner of 17", opponent2: "Winner of 21" },
+    });
+  });
+
+  test("routes scored teams into the announced public match slots", async () => {
+    const store = loadStore();
+    store.resetMemoryTourneyBracketStoreForTests();
+    await addTeams(
+      store,
+      Array.from({ length: 12 }, (_, index) => `Team ${index + 1}`)
+    );
+    let snapshot = await store.generateTourneyBracket({
+      actorUsername: "serviroo",
+      env,
+    });
+    const outcomes = new Map();
+
+    const getPublicMatch = (matchNumber) => {
+      const current = snapshot.matches.find(
+        (match) => match.publicMatchNumber === matchNumber
+      );
+      expect(current).toBeDefined();
+      return current;
+    };
+    const expectSides = (matchNumber, opponent1, opponent2) => {
+      expect(getPublicMatch(matchNumber)).toMatchObject({
+        opponent1: { name: opponent1 },
+        opponent2: { name: opponent2 },
+      });
+    };
+    const score = async (matchNumber) => {
+      const current = getPublicMatch(matchNumber);
+      expect(current.statusLabel).toBe("Ready");
+      outcomes.set(matchNumber, {
+        winner: current.opponent1.name,
+        loser: current.opponent2.name,
+      });
+      snapshot = await store.scoreTourneyBracketMatch({
+        matchId: current.id,
+        opponent1Score: current.targetScore,
+        opponent2Score: 1,
+        actorUsername: "serviroo",
+        env,
+      });
+    };
+
+    for (const matchNumber of [1, 2, 3, 4, 5, 6, 7, 8]) {
+      await score(matchNumber);
+    }
+
+    expectSides(11, outcomes.get(5).loser, outcomes.get(1).loser);
+    expectSides(12, outcomes.get(6).loser, outcomes.get(2).loser);
+    expectSides(13, outcomes.get(7).loser, outcomes.get(3).loser);
+    expectSides(14, outcomes.get(8).loser, outcomes.get(4).loser);
+
+    for (const matchNumber of [9, 10, 11, 12, 13, 14]) {
+      await score(matchNumber);
+    }
+
+    expectSides(15, outcomes.get(11).winner, outcomes.get(12).winner);
+    expectSides(16, outcomes.get(13).winner, outcomes.get(14).winner);
+    expectSides(17, outcomes.get(9).winner, outcomes.get(10).winner);
+
+    await score(15);
+    await score(16);
+    expectSides(18, outcomes.get(9).loser, outcomes.get(15).winner);
+    expectSides(19, outcomes.get(10).loser, outcomes.get(16).winner);
+
+    await score(17);
+    await score(18);
+    await score(19);
+    expectSides(20, outcomes.get(18).winner, outcomes.get(19).winner);
+
+    await score(20);
+    expectSides(21, outcomes.get(17).loser, outcomes.get(20).winner);
+
+    await score(21);
+    expectSides(22, outcomes.get(17).winner, outcomes.get(21).winner);
   });
 
   test("scores Bo5 matches and auto-populates the next matchup", async () => {

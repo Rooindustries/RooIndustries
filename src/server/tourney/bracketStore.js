@@ -42,6 +42,232 @@ const PREVIEW_FIXTURE_TEAM_NAMES = Object.freeze([
   "Roo Karma",
   "Roo Lynx",
 ]);
+const TOURNEY_BRACKET_CASTERS = Object.freeze([
+  Object.freeze({ id: 1, label: "Yukari + SpankyCheeze" }),
+  Object.freeze({ id: 2, label: "Supa" }),
+  Object.freeze({ id: 3, label: "GMR" }),
+  Object.freeze({ id: 4, label: "KimchiBapBop" }),
+  Object.freeze({ id: 5, label: "LightOW" }),
+  Object.freeze({ id: 6, label: "TheLemonGeneral or To Be Determined" }),
+]);
+const TOURNEY_BRACKET_ROUNDS = Object.freeze([
+  Object.freeze({
+    key: "winners:1",
+    groupName: "Winners",
+    roundNumber: 1,
+    stageLabel: "Round 1",
+    dayNumber: 1,
+    dayLabel: "Day 1",
+    date: "2026-08-15",
+    dateLabel: "August 15, 2026",
+    timeLabel: "12:00 PM",
+    matchNumbers: Object.freeze([1, 2, 3, 4]),
+  }),
+  Object.freeze({
+    key: "winners:2",
+    groupName: "Winners",
+    roundNumber: 2,
+    stageLabel: "Round 2",
+    dayNumber: 1,
+    dayLabel: "Day 1",
+    date: "2026-08-15",
+    dateLabel: "August 15, 2026",
+    timeLabel: "1:45 PM",
+    matchNumbers: Object.freeze([5, 6, 7, 8]),
+  }),
+  Object.freeze({
+    key: "winners:3",
+    groupName: "Winners",
+    roundNumber: 3,
+    stageLabel: "Round 3",
+    dayNumber: 1,
+    dayLabel: "Day 1",
+    date: "2026-08-15",
+    dateLabel: "August 15, 2026",
+    timeLabel: "3:30 PM",
+    matchNumbers: Object.freeze([9, 10]),
+  }),
+  Object.freeze({
+    key: "losers:2",
+    groupName: "Losers",
+    roundNumber: 2,
+    stageLabel: "Losers Round 1",
+    dayNumber: 1,
+    dayLabel: "Day 1",
+    date: "2026-08-15",
+    dateLabel: "August 15, 2026",
+    timeLabel: "3:30 PM",
+    matchNumbers: Object.freeze([11, 12, 13, 14]),
+  }),
+  Object.freeze({
+    key: "losers:3",
+    groupName: "Losers",
+    roundNumber: 3,
+    stageLabel: "Losers Round 2",
+    dayNumber: 1,
+    dayLabel: "Day 1",
+    date: "2026-08-15",
+    dateLabel: "August 15, 2026",
+    timeLabel: "5:15 PM",
+    matchNumbers: Object.freeze([15, 16]),
+  }),
+  Object.freeze({
+    key: "winners:4",
+    groupName: "Winners",
+    roundNumber: 4,
+    stageLabel: "Winners Semifinals",
+    dayNumber: 2,
+    dayLabel: "Day 2",
+    date: "2026-08-16",
+    dateLabel: "August 16, 2026",
+    timeLabel: "1:45 PM",
+    matchNumbers: Object.freeze([17]),
+  }),
+  Object.freeze({
+    key: "losers:4",
+    groupName: "Losers",
+    roundNumber: 4,
+    stageLabel: "Losers Round 1",
+    dayNumber: 2,
+    dayLabel: "Day 2",
+    date: "2026-08-16",
+    dateLabel: "August 16, 2026",
+    timeLabel: "12:00 PM",
+    matchNumbers: Object.freeze([18, 19]),
+  }),
+  Object.freeze({
+    key: "losers:5",
+    groupName: "Losers",
+    roundNumber: 5,
+    stageLabel: "Losers Semifinals",
+    dayNumber: 2,
+    dayLabel: "Day 2",
+    date: "2026-08-16",
+    dateLabel: "August 16, 2026",
+    timeLabel: "1:45 PM",
+    matchNumbers: Object.freeze([20]),
+  }),
+  Object.freeze({
+    key: "losers:6",
+    groupName: "Losers",
+    roundNumber: 6,
+    stageLabel: "Losers Finals",
+    dayNumber: 2,
+    dayLabel: "Day 2",
+    date: "2026-08-16",
+    dateLabel: "August 16, 2026",
+    timeLabel: "3:30 PM",
+    matchNumbers: Object.freeze([21]),
+  }),
+  Object.freeze({
+    key: "grand-final:1",
+    groupName: "Grand Final",
+    roundNumber: 1,
+    stageLabel: "Finals",
+    dayNumber: 2,
+    dayLabel: "Day 2",
+    date: "2026-08-16",
+    dateLabel: "August 16, 2026",
+    timeLabel: "5:15 PM",
+    matchNumbers: Object.freeze([22]),
+  }),
+]);
+const TOURNEY_BRACKET_MATCH_SCHEDULE = Object.freeze({
+  "winners:1:2": Object.freeze({ matchNumber: 1, casterIds: Object.freeze([3]) }),
+  "winners:1:4": Object.freeze({ matchNumber: 2, casterIds: Object.freeze([1]) }),
+  "winners:1:6": Object.freeze({ matchNumber: 3, casterIds: Object.freeze([2]) }),
+  "winners:1:8": Object.freeze({ matchNumber: 4, casterIds: Object.freeze([4]) }),
+  "winners:2:1": Object.freeze({
+    matchNumber: 5,
+    casterIds: Object.freeze([3]),
+    slotLabels: Object.freeze({ opponent2: "Winner of 1" }),
+  }),
+  "winners:2:2": Object.freeze({
+    matchNumber: 6,
+    casterIds: Object.freeze([1]),
+    slotLabels: Object.freeze({ opponent2: "Winner of 2" }),
+  }),
+  "winners:2:3": Object.freeze({
+    matchNumber: 7,
+    casterIds: Object.freeze([2]),
+    slotLabels: Object.freeze({ opponent2: "Winner of 3" }),
+  }),
+  "winners:2:4": Object.freeze({
+    matchNumber: 8,
+    casterIds: Object.freeze([4]),
+    slotLabels: Object.freeze({ opponent2: "Winner of 4" }),
+  }),
+  "winners:3:1": Object.freeze({
+    matchNumber: 9,
+    casterIds: Object.freeze([1]),
+    slotLabels: Object.freeze({ opponent1: "Winner of 5", opponent2: "Winner of 6" }),
+  }),
+  "winners:3:2": Object.freeze({
+    matchNumber: 10,
+    casterIds: Object.freeze([2]),
+    slotLabels: Object.freeze({ opponent1: "Winner of 7", opponent2: "Winner of 8" }),
+  }),
+  "losers:2:1": Object.freeze({
+    matchNumber: 11,
+    casterIds: Object.freeze([3]),
+    slotLabels: Object.freeze({ opponent1: "Loser of 5", opponent2: "Loser of 1" }),
+  }),
+  "losers:2:2": Object.freeze({
+    matchNumber: 12,
+    casterIds: Object.freeze([5]),
+    slotLabels: Object.freeze({ opponent1: "Loser of 6", opponent2: "Loser of 2" }),
+  }),
+  "losers:2:3": Object.freeze({
+    matchNumber: 13,
+    casterIds: Object.freeze([6]),
+    slotLabels: Object.freeze({ opponent1: "Loser of 7", opponent2: "Loser of 3" }),
+  }),
+  "losers:2:4": Object.freeze({
+    matchNumber: 14,
+    casterIds: Object.freeze([4]),
+    slotLabels: Object.freeze({ opponent1: "Loser of 8", opponent2: "Loser of 4" }),
+  }),
+  "losers:3:1": Object.freeze({
+    matchNumber: 15,
+    casterIds: Object.freeze([5]),
+    slotLabels: Object.freeze({ opponent1: "Winner of 11", opponent2: "Winner of 12" }),
+  }),
+  "losers:3:2": Object.freeze({
+    matchNumber: 16,
+    casterIds: Object.freeze([6]),
+    slotLabels: Object.freeze({ opponent1: "Winner of 13", opponent2: "Winner of 14" }),
+  }),
+  "winners:4:1": Object.freeze({
+    matchNumber: 17,
+    casterIds: Object.freeze([1]),
+    slotLabels: Object.freeze({ opponent1: "Winner of 9", opponent2: "Winner of 10" }),
+  }),
+  "losers:4:1": Object.freeze({
+    matchNumber: 18,
+    casterIds: Object.freeze([1]),
+    slotLabels: Object.freeze({ opponent1: "Loser of 9", opponent2: "Winner of 15" }),
+  }),
+  "losers:4:2": Object.freeze({
+    matchNumber: 19,
+    casterIds: Object.freeze([2]),
+    slotLabels: Object.freeze({ opponent1: "Loser of 10", opponent2: "Winner of 16" }),
+  }),
+  "losers:5:1": Object.freeze({
+    matchNumber: 20,
+    casterIds: Object.freeze([2]),
+    slotLabels: Object.freeze({ opponent1: "Winner of 18", opponent2: "Winner of 19" }),
+  }),
+  "losers:6:1": Object.freeze({
+    matchNumber: 21,
+    casterIds: Object.freeze([1, 2]),
+    slotLabels: Object.freeze({ opponent1: "Loser of 17", opponent2: "Winner of 20" }),
+  }),
+  "grand-final:1:1": Object.freeze({
+    matchNumber: 22,
+    casterIds: Object.freeze([1, 2]),
+    slotLabels: Object.freeze({ opponent1: "Winner of 17", opponent2: "Winner of 21" }),
+  }),
+});
 
 const MEMORY_STORE =
   globalThis.__rooTourneyBracketStore ||
@@ -67,6 +293,66 @@ const nowIso = () => new Date().toISOString();
 
 const normalizeText = (value) => String(value || "").trim();
 const normalizeKey = (value) => normalizeText(value).toLowerCase();
+const scheduleGroupKey = (value) => normalizeKey(value).replace(/\s+/g, "-");
+const scheduleMatchKey = ({ groupName, roundNumber, number }) =>
+  `${scheduleGroupKey(groupName)}:${roundNumber}:${number}`;
+
+const getRoundSchedule = ({ groupName, roundNumber }) =>
+  TOURNEY_BRACKET_ROUNDS.find(
+    (round) =>
+      round.groupName === groupName && Number(round.roundNumber) === Number(roundNumber)
+  ) || null;
+
+const getMatchSchedule = ({ groupName, roundNumber, number }) => {
+  const assignment = TOURNEY_BRACKET_MATCH_SCHEDULE[
+    scheduleMatchKey({ groupName, roundNumber, number })
+  ];
+  const round = getRoundSchedule({ groupName, roundNumber });
+  if (!assignment || !round) return null;
+  const casters = assignment.casterIds
+    .map((casterId) => TOURNEY_BRACKET_CASTERS.find((caster) => caster.id === casterId))
+    .filter(Boolean);
+  return {
+    key: scheduleMatchKey({ groupName, roundNumber, number }),
+    publicMatchNumber: assignment.matchNumber,
+    stageLabel: round.stageLabel,
+    dayNumber: round.dayNumber,
+    dayLabel: round.dayLabel,
+    date: round.date,
+    dateLabel: round.dateLabel,
+    timeLabel: round.timeLabel,
+    casterIds: [...assignment.casterIds],
+    casters: casters.map((caster) => ({ ...caster })),
+    slotLabels: { ...(assignment.slotLabels || {}) },
+  };
+};
+
+export const getTourneyBracketSchedule = () => ({
+  casters: TOURNEY_BRACKET_CASTERS.map((caster) => ({ ...caster })),
+  rounds: TOURNEY_BRACKET_ROUNDS.map((round) => ({
+    ...round,
+    matchNumbers: [...round.matchNumbers],
+  })),
+  matches: Object.entries(TOURNEY_BRACKET_MATCH_SCHEDULE).map(
+    ([key, assignment]) => {
+      const [groupKey, roundNumber, number] = key.split(":");
+      const round = TOURNEY_BRACKET_ROUNDS.find(
+        (candidate) =>
+          scheduleGroupKey(candidate.groupName) === groupKey &&
+          Number(candidate.roundNumber) === Number(roundNumber)
+      );
+      return {
+        key,
+        groupName: round?.groupName || "",
+        roundNumber: Number(roundNumber),
+        number: Number(number),
+        publicMatchNumber: assignment.matchNumber,
+        casterIds: [...assignment.casterIds],
+        slotLabels: { ...(assignment.slotLabels || {}) },
+      };
+    }
+  ),
+});
 
 const isPreviewFixtureMode = (env = process.env) =>
   normalizeKey(env.TOURNEY_BRACKET_PREVIEW_FIXTURE) === PREVIEW_FIXTURE_KEY &&
@@ -395,6 +681,7 @@ const ensurePreviewFixtureLoaded = async (env = process.env) => {
     seeding,
     settings: {
       grandFinal: "simple",
+      seedOrdering: ["inner_outer", "natural", "natural", "natural", "natural"],
     },
   });
 
@@ -794,6 +1081,7 @@ export const generateTourneyBracket = async ({
         seeding,
         settings: {
           grandFinal: "simple",
+          seedOrdering: ["inner_outer", "natural", "natural", "natural", "natural"],
         },
       });
 
@@ -1297,11 +1585,20 @@ const buildDisplayMatches = ({ data, teams, maskParticipantNames = false }) => {
   const groups = data.group || [];
   const rounds = data.round || [];
   const matches = data.match || [];
+  const hasOfficialSchedule = teams.length === 12 && matches.length === 30;
 
   return matches
     .map((match) => {
       const group = groups.find((row) => row.id === match.group_id);
       const round = rounds.find((row) => row.id === match.round_id);
+      const groupName = getGroupName(group);
+      const schedule = hasOfficialSchedule
+        ? getMatchSchedule({
+            groupName,
+            roundNumber: round?.number || 0,
+            number: match.number,
+          })
+        : null;
       const side = (key) => {
         const opponent = match[key];
         const participant = participants.find((row) => row.id === opponent?.id);
@@ -1325,14 +1622,23 @@ const buildDisplayMatches = ({ data, teams, maskParticipantNames = false }) => {
           status: team?.status || "",
         };
       };
+      const engineSides = [match.opponent1, match.opponent2].filter(Boolean);
+      const autoAdvance =
+        engineSides.filter((candidate) => candidate?.id != null).length <= 1 &&
+        engineSides.some((candidate) => candidate?.result === "win");
       return {
         id: match.id,
         number: match.number,
         roundNumber: round?.number || 0,
         groupNumber: group?.number || 0,
-        groupName: getGroupName(group),
-        label: `${getGroupName(group)} R${round?.number || "?"} M${match.number}`,
+        groupName,
+        label: `${groupName} R${round?.number || "?"} M${match.number}`,
         displayLabel: getMatchDisplayLabel({ match, group, round, rounds, matches }),
+        publicMatchNumber: schedule?.publicMatchNumber ?? null,
+        schedule,
+        casters: schedule?.casters || [],
+        slotLabels: schedule?.slotLabels || {},
+        autoAdvance,
         status: match.status,
         statusLabel: MATCH_STATUSES[match.status] || "Unknown",
         bestOf: getMatchBestOf(match, group),
@@ -1425,17 +1731,27 @@ export const getTourneyBracketSnapshot = async ({
   // has no VERCEL_ENV and should render the fixture's Roo * team names.
   const maskPreviewFixtureNames =
     isPreviewFixtureMode(env) && env.VERCEL_ENV === "preview";
+  const matches = buildDisplayMatches({
+    data,
+    teams,
+    maskParticipantNames: maskPreviewFixtureNames,
+  });
+  const scheduled = matches.filter((match) => match.publicMatchNumber !== null);
   return {
     ok: true,
     meta,
     teams: maskPreviewFixtureNames
       ? teams.map((team) => ({ ...team, name: "TBD" }))
       : teams,
-    matches: buildDisplayMatches({
-      data,
-      teams,
-      maskParticipantNames: maskPreviewFixtureNames,
-    }),
+    schedule:
+      scheduled.length === 22
+        ? {
+            timeZone: "UTC",
+            eventDates: ["2026-08-15", "2026-08-16"],
+            ...getTourneyBracketSchedule(),
+          }
+        : null,
+    matches,
     groups: (data.group || []).map((group) => ({
       id: group.id,
       number: group.number,

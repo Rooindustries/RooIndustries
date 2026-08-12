@@ -115,6 +115,42 @@ describe("tourney public bracket API contract", () => {
     });
   });
 
+  test("publishes the official schedule and match annotations", async () => {
+    const api = loadApi();
+    const store = loadStore();
+    store.resetMemoryTourneyBracketStoreForTests();
+    const snapshot = await store.getTourneyBracketSnapshot({
+      env: { TOURNEY_BRACKET_PREVIEW_FIXTURE: "12x6" },
+    });
+
+    const body = api.buildPublicBracketResponse(snapshot);
+    const scheduled = body.matches.filter((match) => match.publicMatchNumber !== null);
+
+    expect(body.schedule).toMatchObject({
+      timeZone: "UTC",
+      eventDates: ["2026-08-15", "2026-08-16"],
+    });
+    expect(body.schedule.rounds).toHaveLength(10);
+    expect(scheduled).toHaveLength(22);
+    expect(scheduled.map((match) => match.publicMatchNumber).sort((a, b) => a - b)).toEqual(
+      Array.from({ length: 22 }, (_, index) => index + 1)
+    );
+    expect(body.matches.filter((match) => match.autoAdvance)).toHaveLength(8);
+    expect(scheduled.find((match) => match.publicMatchNumber === 9)).toMatchObject({
+      schedule: { stageLabel: "Round 3", dayLabel: "Day 1", timeLabel: "3:30 PM" },
+      casters: [{ id: 1, label: "Yukari + SpankyCheeze" }],
+      slotLabels: { opponent1: "Winner of 5", opponent2: "Winner of 6" },
+    });
+    expect(scheduled.find((match) => match.publicMatchNumber === 22)).toMatchObject({
+      group: "grand-final",
+      schedule: { stageLabel: "Finals", dayLabel: "Day 2", timeLabel: "5:15 PM" },
+      casters: [
+        { id: 1, label: "Yukari + SpankyCheeze" },
+        { id: 2, label: "Supa" },
+      ],
+    });
+  });
+
   test("version changes when a match is scored", async () => {
     const api = loadApi();
     const store = await generateFourTeamBracket();

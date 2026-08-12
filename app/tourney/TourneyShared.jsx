@@ -3251,6 +3251,59 @@ export const TourneyStyles = () => (
       line-height: 1.5;
     }
 
+    .tourney-caster-legend {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 10px 14px;
+      min-width: 0;
+      font-size: 0.82rem;
+      line-height: 1.35;
+    }
+
+    .tourney-caster-legend > strong {
+      color: #e0f2fe;
+      font-size: 0.72rem;
+      font-weight: 840;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .tourney-caster-legend ul {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 6px 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .tourney-caster-legend li {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 6px;
+      border: 1px solid rgba(56, 189, 248, 0.24);
+      border-radius: 9999px;
+      background: rgba(15, 23, 42, 0.5);
+      padding: 4px 10px;
+    }
+
+    .tourney-caster-legend li b {
+      color: #7dd3fc;
+      font-size: 0.68rem;
+      font-weight: 820;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .tourney-caster-legend li span {
+      color: rgba(226, 232, 240, 0.9);
+    }
+
     .tourney-bracket-board {
       --bracket-card-width: clamp(13.4rem, 16vw, 15rem);
       --bracket-band-padding: 14px;
@@ -3631,6 +3684,12 @@ export const TourneyStyles = () => (
       color: #bae6fd;
     }
 
+    .tourney-bracket-round > p.tourney-bracket-round-schedule {
+      color: rgba(148, 163, 184, 0.9);
+      font-weight: 760;
+      white-space: nowrap;
+    }
+
     .tourney-bracket-stack {
       position: relative;
       grid-template-rows: repeat(var(--round-size, 1), minmax(var(--bracket-slot-height), auto));
@@ -3827,6 +3886,24 @@ export const TourneyStyles = () => (
       color: #e0f2fe;
       font-size: 1.18rem;
       line-height: 1;
+    }
+
+    /* Scheduled public matches only: caster assignment under the sides. Wrap
+       freely so long caster names never clip inside the fixed card width. */
+    .tourney-match-schedule {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .tourney-match-schedule small {
+      display: block;
+      margin-top: 0;
+      color: rgba(186, 230, 253, 0.78);
+      font-size: 0.7rem;
+      font-weight: 700;
+      line-height: 1.3;
+      overflow-wrap: anywhere;
     }
 
     .tourney-bracket-manager {

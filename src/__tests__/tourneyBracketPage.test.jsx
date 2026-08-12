@@ -14,8 +14,10 @@ jest.mock("../../app/tourney/TourneyShared", () => ({
   getTourneySession: (...args) => mockGetTourneySession(...args),
 }));
 
-jest.mock("../../app/tourney/TourneyBracketView", () => ({ snapshot }) => (
-  <div data-testid="bracket-view">{JSON.stringify(snapshot)}</div>
+jest.mock("../../app/tourney/TourneyBracketView", () => ({ snapshot, showSchedule }) => (
+  <div data-testid="bracket-view" data-show-schedule={showSchedule ? "true" : "false"}>
+    {JSON.stringify(snapshot)}
+  </div>
 ));
 
 jest.mock("../server/tourney/readService", () => ({
@@ -56,5 +58,34 @@ describe("Tourney bracket page", () => {
 
     expect(screen.getByText("Live bracket data is reconnecting")).toBeInTheDocument();
     expect(screen.getByTestId("bracket-view")).toHaveTextContent("{}");
+  });
+
+  test("enables the schedule view and renders the caster legend", async () => {
+    mockReadTourneyService.mockResolvedValue({
+      status: 200,
+      ok: true,
+      body: {
+        generated: true,
+        matches: [],
+        schedule: {
+          timeZone: "UTC",
+          casters: [
+            { id: 1, label: "Yukari + SpankyCheeze" },
+            { id: 6, label: "TheLemonGeneral or To Be Determined" },
+          ],
+        },
+      },
+    });
+
+    render(await TourneyBracketPage());
+
+    expect(screen.getByTestId("bracket-view")).toHaveAttribute(
+      "data-show-schedule",
+      "true"
+    );
+    const legend = screen.getByLabelText("Caster legend");
+    expect(legend).toHaveTextContent("Caster 1");
+    expect(legend).toHaveTextContent("Yukari + SpankyCheeze");
+    expect(legend).toHaveTextContent("TheLemonGeneral or To Be Determined");
   });
 });
