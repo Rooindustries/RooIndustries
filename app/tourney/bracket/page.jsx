@@ -26,6 +26,9 @@ export default async function TourneyBracketPage() {
     readTourneyService({ route: "public_bracket" }),
   ]);
   const snapshot = bracketRead.body || {};
+  const casterLegend = Array.isArray(snapshot.schedule?.casters)
+    ? snapshot.schedule.casters
+    : [];
 
   return (
     <TourneyShell session={session} activeHref="/tourney/bracket" wide>
@@ -43,8 +46,21 @@ export default async function TourneyBracketPage() {
             The bracket placeholder remains visible. No matchup or result has been changed.
           </StatusPanel>
         ) : null}
+        {casterLegend.length > 0 ? (
+          <div className="tourney-caster-legend" aria-label="Caster legend">
+            <strong>Casters</strong>
+            <ul>
+              {casterLegend.map((caster) => (
+                <li key={caster.id}>
+                  <b>Caster {caster.id}</b>
+                  <span>{caster.label}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
         <BracketFitBoard>
-          <TourneyBracketView snapshot={snapshot} />
+          <TourneyBracketView snapshot={snapshot} showSchedule />
         </BracketFitBoard>
       </section>
     </TourneyShell>

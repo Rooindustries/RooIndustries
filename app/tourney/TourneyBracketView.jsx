@@ -22,6 +22,20 @@ const isAutoAdvanceMatch = (match) => {
   return filled.length === 1 && filled[0].result === "win";
 };
 
+// Scheduled matches carry advancement labels for unresolved slots
+// ("Winner of 5" / "Loser of 17"). Show them in place of a bare TBD, but
+// never overwrite a real populated team name.
+const scheduledSideName = ({ match, side }) => {
+  const hasTeam = Boolean(side?.teamId) || (side?.name && side.name !== "TBD");
+  if (hasTeam) return side?.name || "TBD";
+  return match?.slotLabels?.[side?.side] || side?.name || "TBD";
+};
+
+// Round headers stay one line inside the fixed card-width columns, so drop
+// the year from "August 15, 2026".
+const shortScheduleDate = (dateLabel) =>
+  String(dateLabel || "").replace(/,\s*\d{4}$/, "");
+
 const sideClass = (side) => {
   if (side.result === "win") return "is-win";
   if (side.result === "loss") return "is-loss";
@@ -333,6 +347,7 @@ const roundPixel = (value) => Math.round(value * 10) / 10;
 export default function TourneyBracketView({
   snapshot,
   renderControls,
+  showSchedule = false,
 }) {
   const { matches, byeTeams } = useMemo(() => {
     const sourceMatches = snapshot?.matches || [];
@@ -349,15 +364,17 @@ export default function TourneyBracketView({
     }
     const byeTeams = new Set();
     const visible = sourceMatches.filter((match) => {
-      if (!isAutoAdvanceMatch(match)) return true;
+      const hideMatch =
+        isAutoAdvanceMatch(match) || (showSchedule && match?.autoAdvance);
+      if (!hideMatch) return true;
       const winner = [match.opponent1, match.opponent2].find(
         (side) => side?.teamId
       );
-      byeTeams.add(`${match.groupName}:${winner.teamId}`);
+      if (winner) byeTeams.add(`${match.groupName}:${winner.teamId}`);
       return false;
     });
     return { matches: visible, byeTeams };
-  }, [snapshot?.generated, snapshot?.matches]);
+  }, [showSchedule, snapshot?.generated, snapshot?.matches]);
   const grouped = useMemo(() => groupMatches(matches), [matches]);
   const firstVisibleRounds = useMemo(() => {
     const map = new Map();
@@ -674,61 +691,81 @@ export default function TourneyBracketView({
   );
   const laneGroups = [winners, losers].filter(Boolean);
 
-  const renderMatch = ({ match, placement = {}, groupName, roundNumber }) => (
-    <article
-      className={`tourney-match-card ${matchStatusClass(match)}`}
-      key={match.id}
-      ref={registerMatch(groupName, roundNumber, match.id)}
-      style={{
-        ...placement,
-        "--match-y-adjust": `${
-          matchOffsets[getMatchKey(groupName, roundNumber, match.id)] || 0
-        }px`,
-      }}
-    >
-      <header>
-        <span>{shortMatchLabel(match)}</span>
-        {/* Bo5 is the bracket-wide default and repeats on every card; only
-            the Grand Final's longer series is worth calling out. */}
-        {match.bestOf && match.bestOf !== 5 ? (
-          <strong>Best of {match.bestOf}</strong>
-        ) : null}
-      </header>
-      <div className="tourney-match-sides">
-        {[match.opponent1, match.opponent2].map((side) => {
-          const showByeBadge =
-            side.teamId &&
-            byeTeams.has(`${groupName}:${side.teamId}`) &&
-            firstVisibleRounds.get(`${groupName}:${side.teamId}`) ===
-              roundNumber;
-          return (
-            <div
-              className={`tourney-match-side ${sideClass(side)}`}
-              key={side.side}
-            >
-              <span>
-                <strong>{side.name}</strong>
-                {side.forfeit ? <small>Forfeit</small> : null}
-                {showByeBadge ? (
-                  <small className="tourney-match-bye">Bye</small>
-                ) : null}
-              </span>
-              <b>{scoreText(side.score)}</b>
-            </div>
-          );
-        })}
-      </div>
-      {match.statusLabel || match.nextLabels?.length > 0 ? (
-        <footer>
-          {match.statusLabel ? <span>{match.statusLabel}</span> : null}
-          {match.nextLabels?.length > 0 ? (
-            <small>{match.nextLabels.join(" / ")}</small>
+  const renderMatch = ({ match, placement = {}, groupName, roundNumber }) => {
+    const scheduled = showSchedule && match.schedule;
+    const casterLine = scheduled
+      ? (match.casters || [])
+          .map((caster) => caster?.label)
+          .filter(Boolean)
+          .join(", ")
+      : "";
+    return (
+      <article
+        className={`tourney-match-card ${matchStatusClass(match)}`}
+        key={match.id}
+        ref={registerMatch(groupName, roundNumber, match.id)}
+        style={{
+          ...placement,
+          "--match-y-adjust": `${
+            matchOffsets[getMatchKey(groupName, roundNumber, match.id)] || 0
+          }px`,
+        }}
+      >
+        <header>
+          <span>
+            {scheduled && match.publicMatchNumber != null
+              ? `Match ${match.publicMatchNumber}`
+              : shortMatchLabel(match)}
+          </span>
+          {/* Bo5 is the bracket-wide default and repeats on every card; only
+              the Grand Final's longer series is worth calling out. */}
+          {match.bestOf && match.bestOf !== 5 ? (
+            <strong>Best of {match.bestOf}</strong>
           ) : null}
-        </footer>
-      ) : null}
-      {renderControls ? renderControls(match) : null}
-    </article>
-  );
+        </header>
+        <div className="tourney-match-sides">
+          {[match.opponent1, match.opponent2].map((side) => {
+            const showByeBadge =
+              side.teamId &&
+              byeTeams.has(`${groupName}:${side.teamId}`) &&
+              firstVisibleRounds.get(`${groupName}:${side.teamId}`) ===
+                roundNumber;
+            return (
+              <div
+                className={`tourney-match-side ${sideClass(side)}`}
+                key={side.side}
+              >
+                <span>
+                  <strong>
+                    {scheduled ? scheduledSideName({ match, side }) : side.name}
+                  </strong>
+                  {side.forfeit ? <small>Forfeit</small> : null}
+                  {showByeBadge ? (
+                    <small className="tourney-match-bye">Bye</small>
+                  ) : null}
+                </span>
+                <b>{scoreText(side.score)}</b>
+              </div>
+            );
+          })}
+        </div>
+        {scheduled && casterLine ? (
+          <div className="tourney-match-schedule">
+            <small>Cast: {casterLine}</small>
+          </div>
+        ) : null}
+        {match.statusLabel || match.nextLabels?.length > 0 ? (
+          <footer>
+            {match.statusLabel ? <span>{match.statusLabel}</span> : null}
+            {match.nextLabels?.length > 0 ? (
+              <small>{match.nextLabels.join(" / ")}</small>
+            ) : null}
+          </footer>
+        ) : null}
+        {renderControls ? renderControls(match) : null}
+      </article>
+    );
+  };
 
   const renderGroup = (group, { finals = false } = {}) => {
     const roundSize = maxRoundMatches(group);
@@ -771,14 +808,27 @@ export default function TourneyBracketView({
         </svg>
         <div className="tourney-bracket-rounds">
           {group.rounds.map((round) => {
+            const roundSchedule = showSchedule
+              ? round.matches.find((match) => match.schedule)?.schedule || null
+              : null;
             return (
               <div
                 className="tourney-bracket-round"
                 key={round.roundNumber}
               >
                 <p className="tourney-bracket-round-label">
-                  <span>{roundDisplayName({ group, round })}</span>
+                  <span>
+                    {roundSchedule?.stageLabel ||
+                      roundDisplayName({ group, round })}
+                  </span>
                 </p>
+                {roundSchedule ? (
+                  <p className="tourney-bracket-round-schedule">
+                    {roundSchedule.dayLabel} ·{" "}
+                    {shortScheduleDate(roundSchedule.dateLabel)} ·{" "}
+                    {roundSchedule.timeLabel} UTC
+                  </p>
+                ) : null}
                 <div className="tourney-bracket-stack">
                   {round.matches.map((match, matchIndex) =>
                     renderMatch({

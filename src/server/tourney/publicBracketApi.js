@@ -91,10 +91,15 @@ const mapPublicMatch = (match) => {
   return {
     id: match.id,
     label: match.displayLabel || match.label,
+    publicMatchNumber: match.publicMatchNumber ?? null,
     group: groupKeyFromName(match.groupName),
     groupName: match.groupName,
     round: match.roundNumber || 0,
     number: match.number || 0,
+    schedule: match.schedule || null,
+    casters: Array.isArray(match.casters) ? match.casters : [],
+    slotLabels: match.slotLabels || {},
+    autoAdvance: Boolean(match.autoAdvance),
     status,
     statusCode: match.status,
     statusLabel: match.statusLabel || "Unknown",
@@ -107,10 +112,10 @@ const mapPublicMatch = (match) => {
   };
 };
 
-const buildContentVersion = ({ generated, teams, matches }) =>
+const buildContentVersion = ({ generated, teams, matches, schedule }) =>
   crypto
     .createHash("sha1")
-    .update(JSON.stringify({ generated, teams, matches }))
+    .update(JSON.stringify({ generated, teams, matches, schedule }))
     .digest("hex")
     .slice(0, 16);
 
@@ -137,7 +142,9 @@ const baseEnvelope = (snapshot, matches) => ({
     generated: Boolean(snapshot?.generated),
     teams: snapshot?.teams || [],
     matches,
+    schedule: snapshot?.schedule || null,
   }),
+  schedule: snapshot?.schedule || null,
   updatedAt: snapshot?.meta?.updatedAt || "",
   generated: Boolean(snapshot?.generated),
   published: Boolean(snapshot?.meta?.published),
