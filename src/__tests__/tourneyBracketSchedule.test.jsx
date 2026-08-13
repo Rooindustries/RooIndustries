@@ -247,6 +247,183 @@ describe("TourneyBracketView official schedule", () => {
   });
 });
 
+describe("TourneyBracketView mobile card offsets", () => {
+  // Reproduces the phone-width ghost-border defect: scheduled quarterfinal
+  // cards are taller than the round-1 cards feeding them (bye badge, caster,
+  // and status lines), so pinning each card's center to its single visible
+  // source dragged each card further up than the last and neighbours
+  // overlapped. Geometry is mocked because jsdom has no layout.
+  const geometryByLabel = new Map([
+    ["Match 1", { top: 322, height: 172 }],
+    ["Match 2", { top: 510, height: 172 }],
+    ["Match 3", { top: 698, height: 172 }],
+    ["Match 4", { top: 886, height: 172 }],
+    ["Match 5", { top: 322, height: 193 }],
+    ["Match 6", { top: 530, height: 193 }],
+    ["Match 7", { top: 738, height: 193 }],
+    ["Match 8", { top: 946, height: 193 }],
+  ]);
+
+  const fullTreeRect = {
+    x: 0,
+    y: 0,
+    top: 0,
+    left: 0,
+    right: 1200,
+    bottom: 2000,
+    width: 1200,
+    height: 2000,
+    toJSON: () => ({}),
+  };
+
+  let rectSpy;
+  let heightSpy;
+  let widthSpy;
+
+  beforeAll(() => {
+    rectSpy = jest
+      .spyOn(Element.prototype, "getBoundingClientRect")
+      .mockImplementation(function rect() {
+        if (this.classList?.contains("tourney-match-card")) {
+          const label = this.querySelector("header span")?.textContent;
+          const geo = geometryByLabel.get(label);
+          if (geo) {
+            // Emulate translateY(var(--match-y-adjust)) the way a real
+            // browser moves the rendered box, or the measurement feedback
+            // loop cannot converge.
+            const adjust =
+              parseFloat(this.style.getPropertyValue("--match-y-adjust")) || 0;
+            const top = geo.top + adjust;
+            return {
+              ...fullTreeRect,
+              y: top,
+              top,
+              bottom: top + geo.height,
+              height: geo.height,
+              right: 214,
+              width: 214,
+            };
+          }
+        }
+        return fullTreeRect;
+      });
+    heightSpy = jest
+      .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+      .mockImplementation(function height() {
+        if (this.classList?.contains("tourney-match-card")) {
+          const label = this.querySelector("header span")?.textContent;
+          return geometryByLabel.get(label)?.height || 0;
+        }
+        return 0;
+      });
+    widthSpy = jest
+      .spyOn(HTMLElement.prototype, "offsetWidth", "get")
+      .mockImplementation(function width() {
+        return this.classList?.contains("tourney-bracket-tree") ? 1200 : 0;
+      });
+    // The connector-offset clamp reads the stack row gap via computed style.
+    const styleTag = document.createElement("style");
+    styleTag.textContent = ".tourney-bracket-stack { row-gap: 16px; }";
+    document.head.appendChild(styleTag);
+  });
+
+  afterAll(() => {
+    rectSpy.mockRestore();
+    heightSpy.mockRestore();
+    widthSpy.mockRestore();
+  });
+
+  const quarterfinalSnapshot = () => ({
+    generated: true,
+    matches: [
+      ...[1, 2, 3, 4].map((number) =>
+        match({
+          id: `w1r1m${number}`,
+          groupName: "Winners",
+          groupNumber: 1,
+          roundNumber: 1,
+          number,
+          publicMatchNumber: number,
+          schedule: dayOne("Round 1", "12:00 PM"),
+          casters: [{ id: 3, label: "GMR" }],
+          opponent1: side({
+            sideKey: "opponent1",
+            teamId: `r1a${number}`,
+            name: `RoundOneA${number}`,
+          }),
+          opponent2: side({
+            sideKey: "opponent2",
+            teamId: `r1b${number}`,
+            name: `RoundOneB${number}`,
+          }),
+        })
+      ),
+      ...[1, 2, 3, 4].map((number) =>
+        match({
+          id: `w1bye${number}`,
+          groupName: "Winners",
+          groupNumber: 1,
+          roundNumber: 1,
+          number: number + 4,
+          autoAdvance: true,
+          opponent1: side({
+            sideKey: "opponent1",
+            teamId: `bye${number}`,
+            name: `ByeTeam${number}`,
+            result: "win",
+          }),
+          opponent2: tbdSide("opponent2"),
+        })
+      ),
+      ...[1, 2, 3, 4].map((number) =>
+        match({
+          id: `w1r2m${number}`,
+          groupName: "Winners",
+          groupNumber: 1,
+          roundNumber: 2,
+          number,
+          publicMatchNumber: number + 4,
+          schedule: dayOne("Round 2", "1:45 PM"),
+          casters: [{ id: 3, label: "GMR" }],
+          slotLabels: { opponent2: `Winner of ${number}` },
+          opponent1: side({
+            sideKey: "opponent1",
+            teamId: `bye${number}`,
+            name: `ByeTeam${number}`,
+          }),
+          opponent2: tbdSide("opponent2"),
+        })
+      ),
+    ],
+  });
+
+  test("never overlaps neighbouring cards while keeping source alignment", () => {
+    render(<TourneyBracketView snapshot={quarterfinalSnapshot()} showSchedule />);
+
+    const cards = [5, 6, 7, 8].map((number) => {
+      const card = screen.getByText(`Match ${number}`).closest("article");
+      const offset = parseFloat(
+        card.style.getPropertyValue("--match-y-adjust")
+      );
+      const geo = geometryByLabel.get(`Match ${number}`);
+      return { number, offset, geo };
+    });
+
+    // The first card still leans toward its source round (the alignment
+    // feature stays on); each later card is clamped so its translated top
+    // clears the previous card's translated bottom plus the 16px stack gap.
+    expect(cards[0].offset).toBeLessThan(-5);
+    for (let index = 1; index < cards.length; index += 1) {
+      const previous = cards[index - 1];
+      const current = cards[index];
+      const previousBottom =
+        previous.geo.top + previous.offset + previous.geo.height;
+      const currentTop = current.geo.top + current.offset;
+      expect(currentTop).toBeGreaterThanOrEqual(previousBottom + 16);
+    }
+  });
+});
+
 describe("tourney page schedule copy", () => {
   const readPageSource = () =>
     fs.readFileSync(path.join(__dirname, "../../app/tourney/page.jsx"), "utf8");

@@ -462,6 +462,17 @@ export default function TourneyBracketView({
 
         group.rounds.slice(1).forEach((round, roundIndex) => {
           const previousRound = group.rounds[roundIndex];
+          // Cards are nudged toward their connector sources with a transform,
+          // which reserves no layout space: when a later round's cards are
+          // taller than the round feeding them (scheduled cards carrying
+          // caster, bye, and status lines), center-pinning compresses the
+          // visual pitch below the card height and neighbours overlap,
+          // ghosting rounded borders across the gaps on narrow screens.
+          // Clamp each offset so a card's translated top never crosses the
+          // previous card's translated bottom plus the stack gap; the next
+          // measure pass redraws the connectors to wherever the cards land.
+          let previousVisualBottom = null;
+          let stackGapPx = 0;
           round.matches.forEach((match, matchIndex) => {
             const sourceCenters = previousRound.matches
               .filter(
@@ -483,16 +494,30 @@ export default function TourneyBracketView({
               )
               .filter((center) => center !== undefined);
             const key = getMatchKey(group.groupName, round.roundNumber, match.id);
+            const node = matchRefs.current.get(key);
             const baselineCenter = baselineCenters.get(key);
-            if (baselineCenter === undefined) return;
+            if (!node || baselineCenter === undefined) return;
+            if (previousVisualBottom === null && node.parentElement) {
+              stackGapPx =
+                parseFloat(getComputedStyle(node.parentElement).rowGap) || 0;
+            }
 
             const desiredCenter =
               sourceCenters.length > 0
                 ? sourceCenters.reduce((sum, center) => sum + center, 0) /
                   sourceCenters.length
                 : baselineCenter;
-            const offset = roundPixel(desiredCenter - baselineCenter);
-            desiredCenters.set(key, roundPixel(desiredCenter));
+            const cardHeight = node.offsetHeight;
+            const naturalTop = baselineCenter - cardHeight / 2;
+            let offset = roundPixel(desiredCenter - baselineCenter);
+            if (previousVisualBottom !== null) {
+              const minTop = previousVisualBottom + stackGapPx;
+              if (naturalTop + offset < minTop) {
+                offset = roundPixel(minTop - naturalTop);
+              }
+            }
+            previousVisualBottom = naturalTop + offset + cardHeight;
+            desiredCenters.set(key, roundPixel(baselineCenter + offset));
             if (Math.abs(offset) >= 0.5) nextMatchOffsets[key] = offset;
           });
         });
