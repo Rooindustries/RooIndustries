@@ -4665,11 +4665,11 @@ export const TourneyStyles = () => (
       --tourney-side-win-glow: rgba(251, 191, 36, 0.3);
       --tourney-side-win-text: #ffffff;
       --tourney-side-win-score: #fde68a;
-      --tourney-side-loss-border: rgba(239, 68, 68, 0.55);
-      --tourney-side-loss-bg: rgba(127, 29, 29, 0.3);
-      --tourney-side-loss-bar: #ef4444;
-      --tourney-side-loss-text: rgba(226, 232, 240, 0.5);
-      --tourney-side-loss-score: #fca5a5;
+      --tourney-side-loss-border: rgba(255, 255, 255, 0.14);
+      --tourney-side-loss-bg: rgba(255, 255, 255, 0.03);
+      --tourney-side-loss-bar: #57534a;
+      --tourney-side-loss-text: rgba(222, 222, 215, 0.55);
+      --tourney-side-loss-score: #a8a294;
     }
 
     html[data-theme="dark"] .tourney-page {
@@ -4766,6 +4766,66 @@ export const TourneyStyles = () => (
     html[data-theme="dark"] .tourney-charity-logo {
       border-color: rgba(255, 244, 214, 0.58);
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34);
+    }
+
+    /* Blackout bracket chrome: the shared renderer's hardcoded cyan/orange/
+       purple legend and lane colors above are Roo Blue defaults, and most are
+       already re-mapped onto --tourney-* variables further down. Cover the
+       remaining hardcoded spots so the dark bracket stays strictly black,
+       neutral gray/white, and gold. */
+    html[data-theme="dark"] .tourney-caster-legend > strong {
+      color: var(--tourney-accent);
+    }
+
+    html[data-theme="dark"] .tourney-caster-legend li {
+      border-color: var(--tourney-border-accent);
+      background: color-mix(in srgb, var(--tourney-surface-strong) 72%, transparent);
+    }
+
+    html[data-theme="dark"] .tourney-caster-legend li b {
+      color: var(--tourney-accent);
+    }
+
+    html[data-theme="dark"] .tourney-caster-legend li span {
+      color: var(--tourney-text-soft);
+    }
+
+    html[data-theme="dark"] .tourney-bracket-round > p.tourney-bracket-round-schedule {
+      color: color-mix(in srgb, var(--tourney-text-muted) 84%, #ffffff);
+    }
+
+    html[data-theme="dark"] .tourney-match-card header strong {
+      color: var(--tourney-text-muted);
+    }
+
+    html[data-theme="dark"] .tourney-match-schedule small {
+      color: color-mix(in srgb, var(--tourney-text-soft) 88%, var(--tourney-accent-glow));
+    }
+
+    /* Losers lane: warm neutral gray instead of the Roo Blue orange so it
+       stays distinct from the gold winners/grand-final lanes. */
+    html[data-theme="dark"] .tourney-bracket-band.is-losers {
+      --bracket-flow: rgba(196, 190, 176, 0.66);
+      border-top-color: rgba(196, 190, 176, 0.55);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.006) 16rem);
+    }
+
+    html[data-theme="dark"] .tourney-bracket-band.is-losers h3 {
+      color: #e9e5da;
+      text-shadow: 0 0 14px rgba(230, 224, 210, 0.16);
+    }
+
+    html[data-theme="dark"] .tourney-bracket-band.is-losers .tourney-match-card {
+      border-color: rgba(196, 190, 176, 0.32);
+      background:
+        linear-gradient(145deg, var(--tourney-surface), var(--tourney-surface-strong));
+      box-shadow: var(--tourney-card-shadow);
+    }
+
+    html[data-theme="dark"] .tourney-bracket-stage-path.is-losers {
+      stroke: rgba(196, 190, 176, 0.6);
+      filter: drop-shadow(0 0 8px rgba(196, 190, 176, 0.22));
     }
 
     @media (max-width: 980px) {
