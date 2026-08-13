@@ -51,7 +51,19 @@ export default async function TourneyBracketPage() {
             <strong>Casters</strong>
             <ul>
               {casterLegend.map((caster) => (
-                <li key={caster.id}>
+                <li
+                  className={
+                    caster.color
+                      ? `is-caster-tinted${caster.color === "black" ? " is-caster-black" : ""}`
+                      : undefined
+                  }
+                  key={caster.id}
+                  style={
+                    caster.color
+                      ? { "--caster-color": `var(--caster-${caster.color})` }
+                      : undefined
+                  }
+                >
                   <b>Caster {caster.id}</b>
                   <span>{caster.label}</span>
                 </li>

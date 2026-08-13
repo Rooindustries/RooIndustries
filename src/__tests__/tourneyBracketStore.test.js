@@ -118,12 +118,12 @@ describe("tourney bracket store", () => {
       timeZone: "UTC",
       eventDates: ["2026-08-15", "2026-08-16"],
       casters: [
-        { id: 1, label: "Yukari + SpankyCheeze" },
-        { id: 2, label: "Supa" },
-        { id: 3, label: "GMR" },
-        { id: 4, label: "KimchiBapBop" },
-        { id: 5, label: "LightOW" },
-        { id: 6, label: "TheLemonGeneral or To Be Determined" },
+        { id: 1, label: "Yukari + SpankyCheeze", color: "purple" },
+        { id: 2, label: "Supa", color: "green" },
+        { id: 3, label: "GMR", color: "red" },
+        { id: 4, label: "KimchiBapBop", color: "pink" },
+        { id: 5, label: "LightOW", color: "black" },
+        { id: 6, label: "Lemon", color: "yellow" },
       ],
     });
     expect(snapshot.schedule.rounds).toHaveLength(10);
@@ -170,6 +170,13 @@ describe("tourney bracket store", () => {
       schedule: { dayLabel: "Day 2", timeLabel: "5:15 PM", casterIds: [1, 2] },
       slotLabels: { opponent1: "Winner of 17", opponent2: "Winner of 21" },
     });
+    // Match 13 is Lemon's solo slot: the resolved caster carries the Lemon-only
+    // label and the yellow highlight token, with no TBD fallback anywhere.
+    expect(scheduled.find((match) => match.publicMatchNumber === 13)).toMatchObject({
+      schedule: { casterIds: [6] },
+      casters: [{ id: 6, label: "Lemon", color: "yellow" }],
+    });
+    expect(JSON.stringify(snapshot.schedule)).not.toContain("To Be Determined");
   });
 
   test("routes scored teams into the announced public match slots", async () => {

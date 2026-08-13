@@ -724,13 +724,33 @@ export default function TourneyBracketView({
           .filter(Boolean)
           .join(", ")
       : "";
+    // Caster color-coding is a scheduled-view-only treatment: it tints the
+    // card shell behind the sides so the is-win/is-loss side semantics stay
+    // untouched. Two casters get a balanced duo gradient instead of dropping
+    // one color. The palette itself lives in CSS; the card only pins which
+    // named caster tokens it uses.
+    const casterColors = scheduled
+      ? (match.casters || []).map((caster) => caster?.color).filter(Boolean)
+      : [];
+    const casterHighlightClass = casterColors.length
+      ? ` has-caster-highlight${casterColors.length > 1 ? " has-caster-duo" : ""}${casterColors.includes("black") ? " has-caster-black" : ""}`
+      : "";
+    const casterHighlightStyle = casterColors.length
+      ? {
+          "--caster-1": `var(--caster-${casterColors[0]})`,
+          ...(casterColors.length > 1
+            ? { "--caster-2": `var(--caster-${casterColors[1]})` }
+            : {}),
+        }
+      : {};
     return (
       <article
-        className={`tourney-match-card ${matchStatusClass(match)}`}
+        className={`tourney-match-card ${matchStatusClass(match)}${casterHighlightClass}`}
         key={match.id}
         ref={registerMatch(groupName, roundNumber, match.id)}
         style={{
           ...placement,
+          ...casterHighlightStyle,
           "--match-y-adjust": `${
             matchOffsets[getMatchKey(groupName, roundNumber, match.id)] || 0
           }px`,

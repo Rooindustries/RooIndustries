@@ -70,8 +70,8 @@ describe("Tourney bracket page", () => {
         schedule: {
           timeZone: "UTC",
           casters: [
-            { id: 1, label: "Yukari + SpankyCheeze" },
-            { id: 6, label: "TheLemonGeneral or To Be Determined" },
+            { id: 1, label: "Yukari + SpankyCheeze", color: "purple" },
+            { id: 6, label: "Lemon", color: "yellow" },
           ],
         },
       },
@@ -86,6 +86,18 @@ describe("Tourney bracket page", () => {
     const legend = screen.getByLabelText("Caster legend");
     expect(legend).toHaveTextContent("Caster 1");
     expect(legend).toHaveTextContent("Yukari + SpankyCheeze");
-    expect(legend).toHaveTextContent("TheLemonGeneral or To Be Determined");
+    expect(legend).toHaveTextContent("Lemon");
+    expect(legend).not.toHaveTextContent("To Be Determined");
+
+    // Each legend chip wears its caster's highlight color so the mapping is
+    // readable without a separate key.
+    const chips = legend.querySelectorAll("li.is-caster-tinted");
+    expect(chips).toHaveLength(2);
+    expect(chips[0].style.getPropertyValue("--caster-color")).toBe(
+      "var(--caster-purple)"
+    );
+    expect(chips[1].style.getPropertyValue("--caster-color")).toBe(
+      "var(--caster-yellow)"
+    );
   });
 });
