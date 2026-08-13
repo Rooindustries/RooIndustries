@@ -440,3 +440,71 @@ describe("tourney page schedule copy", () => {
     expect(source).toContain("Grand Final at 5:15 PM UTC");
   });
 });
+
+describe("blackout bracket palette", () => {
+  const sharedSource = fs.readFileSync(
+    path.join(__dirname, "../../app/tourney/TourneyShared.jsx"),
+    "utf8"
+  );
+
+  test("dark theme re-skins every hardcoded blue bracket chrome selector", () => {
+    for (const selector of [
+      'html[data-theme="dark"] .tourney-caster-legend > strong',
+      'html[data-theme="dark"] .tourney-caster-legend li',
+      'html[data-theme="dark"] .tourney-caster-legend li b',
+      'html[data-theme="dark"] .tourney-caster-legend li span',
+      'html[data-theme="dark"] .tourney-bracket-round > p.tourney-bracket-round-schedule',
+      'html[data-theme="dark"] .tourney-match-card header strong',
+      'html[data-theme="dark"] .tourney-match-schedule small',
+      'html[data-theme="dark"] .tourney-bracket-band.is-losers',
+      'html[data-theme="dark"] .tourney-bracket-band.is-losers h3',
+      'html[data-theme="dark"] .tourney-bracket-band.is-losers .tourney-match-card',
+      'html[data-theme="dark"] .tourney-bracket-stage-path.is-losers',
+    ]) {
+      expect(sharedSource).toContain(selector);
+    }
+    expect(sharedSource).toContain("--tourney-side-loss-bar: #57534a;");
+    expect(sharedSource).toContain("--tourney-side-loss-score: #a8a294;");
+  });
+
+  test("blackout bracket overrides carry no blue, cyan, orange, purple, or red", () => {
+    const start = sharedSource.indexOf("Blackout bracket chrome");
+    const end = sharedSource.indexOf("@media (max-width: 980px)", start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const block = sharedSource.slice(start, end);
+    for (const value of [
+      "#7dd3fc",
+      "#bae6fd",
+      "#e0f2fe",
+      "#a5f3fc",
+      "#e9d5ff",
+      "#fca5a5",
+      "56, 189, 248",
+      "34, 211, 238",
+      "125, 211, 252",
+      "14, 165, 233",
+      "186, 230, 253",
+      "148, 163, 184",
+      "203, 213, 225",
+      "226, 232, 240",
+      "251, 146, 60",
+      "192, 132, 252",
+      "239, 68, 68",
+      "127, 29, 29",
+    ]) {
+      expect(block).not.toContain(value);
+    }
+  });
+
+  test("default Roo Blue bracket palette stays untouched", () => {
+    expect(sharedSource).toContain("--tourney-accent: #22d3ee;");
+    expect(sharedSource).toContain(
+      "border: 1px solid rgba(56, 189, 248, 0.24);"
+    );
+    expect(sharedSource).toContain("color: #7dd3fc;");
+    expect(sharedSource).toContain("color: rgba(186, 230, 253, 0.78);");
+    expect(sharedSource).toContain("--tourney-side-loss-bar: #ef4444;");
+    expect(sharedSource).toContain("--bracket-flow: rgba(251, 146, 60, 0.82);");
+  });
+});
