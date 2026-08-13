@@ -42,13 +42,16 @@ const PREVIEW_FIXTURE_TEAM_NAMES = Object.freeze([
   "Roo Karma",
   "Roo Lynx",
 ]);
+// Stable caster IDs with the public color-coding used to highlight scheduled
+// bracket cards and the caster legend. Colors are named tokens; the actual
+// palette lives in the tourney styles so each theme can tune it.
 const TOURNEY_BRACKET_CASTERS = Object.freeze([
-  Object.freeze({ id: 1, label: "Yukari + SpankyCheeze" }),
-  Object.freeze({ id: 2, label: "Supa" }),
-  Object.freeze({ id: 3, label: "GMR" }),
-  Object.freeze({ id: 4, label: "KimchiBapBop" }),
-  Object.freeze({ id: 5, label: "LightOW" }),
-  Object.freeze({ id: 6, label: "TheLemonGeneral or To Be Determined" }),
+  Object.freeze({ id: 1, label: "Yukari + SpankyCheeze", color: "purple" }),
+  Object.freeze({ id: 2, label: "Supa", color: "green" }),
+  Object.freeze({ id: 3, label: "GMR", color: "red" }),
+  Object.freeze({ id: 4, label: "KimchiBapBop", color: "pink" }),
+  Object.freeze({ id: 5, label: "LightOW", color: "black" }),
+  Object.freeze({ id: 6, label: "Lemon", color: "yellow" }),
 ]);
 const TOURNEY_BRACKET_ROUNDS = Object.freeze([
   Object.freeze({

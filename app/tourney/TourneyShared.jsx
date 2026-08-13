@@ -334,6 +334,12 @@ export const TourneyStyles = () => (
       --tourney-side-loss-bar: #ef4444;
       --tourney-side-loss-text: rgba(226, 232, 240, 0.52);
       --tourney-side-loss-score: #fca5a5;
+      --caster-pink: #f472b6;
+      --caster-purple: #c084fc;
+      --caster-green: #34d399;
+      --caster-black: #000000;
+      --caster-yellow: #facc15;
+      --caster-red: #f87171;
       --tourney-card-shadow: inset 0 1px 0 rgba(186, 230, 253, 0.08),
         0 12px 30px rgba(2, 6, 23, 0.28);
       min-height: 100vh;
@@ -3304,6 +3310,27 @@ export const TourneyStyles = () => (
       color: rgba(226, 232, 240, 0.9);
     }
 
+    /* Color-coded legend chips: each chip wears its caster's highlight color
+       so the bracket card tints map back to a name at a glance. */
+    .tourney-caster-legend li.is-caster-tinted {
+      border-color: color-mix(in srgb, var(--caster-color) 58%, transparent);
+    }
+
+    .tourney-caster-legend li.is-caster-tinted::before {
+      content: "";
+      align-self: center;
+      width: 8px;
+      height: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.38);
+      border-radius: 9999px;
+      background: var(--caster-color);
+      box-shadow: 0 0 8px color-mix(in srgb, var(--caster-color) 55%, transparent);
+    }
+
+    .tourney-caster-legend li.is-caster-tinted b {
+      color: var(--caster-color);
+    }
+
     .tourney-bracket-board {
       --bracket-card-width: clamp(13.4rem, 16vw, 15rem);
       --bracket-band-padding: 14px;
@@ -4575,6 +4602,46 @@ export const TourneyStyles = () => (
       box-shadow: inset 4px 0 0 var(--tourney-accent-soft);
     }
 
+    /* Scheduled caster color-coding: tints the card shell behind the sides.
+       The is-win/is-loss side colors are semantic and stay untouched. Duo
+       cards split the tint so both casters stay visible. The border stays
+       1px and every accent is inset, so card dimensions, connector geometry,
+       and the mobile offset clamp are all unaffected. These rules sit after
+       the lane re-skins above on purpose: a scheduled card keeps its caster
+       tint instead of the generic lane wash. */
+    .tourney-bracket-band .tourney-match-card.has-caster-highlight {
+      border-color: color-mix(in srgb, var(--caster-1) 62%, transparent);
+      background:
+        linear-gradient(
+          150deg,
+          color-mix(in srgb, var(--caster-1) 30%, transparent),
+          color-mix(in srgb, var(--caster-1) 10%, transparent) 72%
+        ),
+        linear-gradient(145deg, var(--tourney-surface), var(--tourney-surface-strong));
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        inset 4px 0 0 var(--caster-1),
+        0 18px 42px color-mix(in srgb, var(--caster-1) 20%, transparent);
+    }
+
+    .tourney-bracket-band .tourney-match-card.has-caster-duo {
+      border-color: color-mix(in srgb, var(--caster-1) 38%, var(--caster-2) 38%);
+      background:
+        linear-gradient(
+          125deg,
+          color-mix(in srgb, var(--caster-1) 32%, transparent),
+          color-mix(in srgb, var(--caster-1) 12%, transparent) 40%,
+          color-mix(in srgb, var(--caster-2) 12%, transparent) 60%,
+          color-mix(in srgb, var(--caster-2) 32%, transparent)
+        ),
+        linear-gradient(145deg, var(--tourney-surface), var(--tourney-surface-strong));
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        inset 4px 0 0 var(--caster-1),
+        inset -4px 0 0 var(--caster-2),
+        0 18px 42px rgba(2, 6, 23, 0.24);
+    }
+
     .tourney-footer {
       color: var(--tourney-text-soft);
     }
@@ -4665,11 +4732,11 @@ export const TourneyStyles = () => (
       --tourney-side-win-glow: rgba(251, 191, 36, 0.3);
       --tourney-side-win-text: #ffffff;
       --tourney-side-win-score: #fde68a;
-      --tourney-side-loss-border: rgba(255, 255, 255, 0.14);
-      --tourney-side-loss-bg: rgba(255, 255, 255, 0.03);
-      --tourney-side-loss-bar: #57534a;
-      --tourney-side-loss-text: rgba(222, 222, 215, 0.55);
-      --tourney-side-loss-score: #a8a294;
+      --tourney-side-loss-border: rgba(239, 68, 68, 0.5);
+      --tourney-side-loss-bg: rgba(127, 29, 29, 0.22);
+      --tourney-side-loss-bar: #ef4444;
+      --tourney-side-loss-text: rgba(226, 232, 240, 0.52);
+      --tourney-side-loss-score: #fca5a5;
     }
 
     html[data-theme="dark"] .tourney-page {
@@ -4826,6 +4893,73 @@ export const TourneyStyles = () => (
     html[data-theme="dark"] .tourney-bracket-stage-path.is-losers {
       stroke: rgba(196, 190, 176, 0.6);
       filter: drop-shadow(0 0 8px rgba(196, 190, 176, 0.22));
+    }
+
+    /* Caster color-coding is intentional in Blackout too: keep the scheduled
+       card tint and legend chips on top of the neutral chrome. Everything
+       references the --caster-* tokens so no Roo Blue chrome sneaks back. */
+    html[data-theme="dark"] .tourney-caster-legend li.is-caster-tinted {
+      border-color: color-mix(in srgb, var(--caster-color) 62%, transparent);
+    }
+
+    html[data-theme="dark"] .tourney-caster-legend li.is-caster-tinted b {
+      color: var(--caster-color);
+    }
+
+    html[data-theme="dark"] .tourney-bracket-band .tourney-match-card.has-caster-highlight {
+      border-color: color-mix(in srgb, var(--caster-1) 62%, transparent);
+      background:
+        linear-gradient(
+          150deg,
+          color-mix(in srgb, var(--caster-1) 26%, transparent),
+          color-mix(in srgb, var(--caster-1) 9%, transparent) 72%
+        ),
+        linear-gradient(145deg, var(--tourney-surface), var(--tourney-surface-strong));
+      box-shadow:
+        var(--highlight-glass-top),
+        inset 4px 0 0 var(--caster-1),
+        0 18px 42px color-mix(in srgb, var(--caster-1) 16%, transparent);
+    }
+
+    html[data-theme="dark"] .tourney-bracket-band .tourney-match-card.has-caster-duo {
+      border-color: color-mix(in srgb, var(--caster-1) 38%, var(--caster-2) 38%);
+      background:
+        linear-gradient(
+          125deg,
+          color-mix(in srgb, var(--caster-1) 28%, transparent),
+          color-mix(in srgb, var(--caster-1) 10%, transparent) 40%,
+          color-mix(in srgb, var(--caster-2) 10%, transparent) 60%,
+          color-mix(in srgb, var(--caster-2) 28%, transparent)
+        ),
+        linear-gradient(145deg, var(--tourney-surface), var(--tourney-surface-strong));
+      box-shadow:
+        var(--highlight-glass-top),
+        inset 4px 0 0 var(--caster-1),
+        inset -4px 0 0 var(--caster-2),
+        var(--shadow-surface);
+    }
+
+    /* LightOW's black stays pure black in Blackout too. A neutral ring is
+       what separates the black-tinted card and legend swatch from the black
+       surface without recoloring the highlight itself. The outline draws
+       outside the border box, so card dimensions and connector geometry are
+       untouched, and the ring stays neutral so win/loss side colors and the
+       no-blue chrome rule are unaffected. */
+    html[data-theme="dark"] .tourney-bracket-band .tourney-match-card.has-caster-black {
+      outline: 1px solid var(--tourney-border-strong);
+      outline-offset: 2px;
+    }
+
+    html[data-theme="dark"] .tourney-caster-legend li.is-caster-tinted.is-caster-black {
+      border-color: var(--tourney-border-strong);
+    }
+
+    html[data-theme="dark"] .tourney-caster-legend li.is-caster-tinted.is-caster-black::before {
+      border-color: rgba(255, 255, 255, 0.72);
+    }
+
+    html[data-theme="dark"] .tourney-caster-legend li.is-caster-tinted.is-caster-black b {
+      color: var(--tourney-text);
     }
 
     @media (max-width: 980px) {

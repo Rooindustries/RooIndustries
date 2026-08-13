@@ -138,15 +138,15 @@ describe("tourney public bracket API contract", () => {
     expect(body.matches.filter((match) => match.autoAdvance)).toHaveLength(8);
     expect(scheduled.find((match) => match.publicMatchNumber === 9)).toMatchObject({
       schedule: { stageLabel: "Round 3", dayLabel: "Day 1", timeLabel: "3:30 PM" },
-      casters: [{ id: 1, label: "Yukari + SpankyCheeze" }],
+      casters: [{ id: 1, label: "Yukari + SpankyCheeze", color: "purple" }],
       slotLabels: { opponent1: "Winner of 5", opponent2: "Winner of 6" },
     });
     expect(scheduled.find((match) => match.publicMatchNumber === 22)).toMatchObject({
       group: "grand-final",
       schedule: { stageLabel: "Finals", dayLabel: "Day 2", timeLabel: "5:15 PM" },
       casters: [
-        { id: 1, label: "Yukari + SpankyCheeze" },
-        { id: 2, label: "Supa" },
+        { id: 1, label: "Yukari + SpankyCheeze", color: "purple" },
+        { id: 2, label: "Supa", color: "green" },
       ],
     });
   });
