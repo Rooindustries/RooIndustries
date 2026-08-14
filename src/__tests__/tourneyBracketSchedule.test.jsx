@@ -709,8 +709,10 @@ describe("blackout bracket palette", () => {
       ".tourney-caster-legend li.is-caster-tinted.is-caster-black b"
     );
     expect(sharedSource).toContain(
-      'html[data-theme="dark"] .tourney-caster-legend li.is-caster-tinted.is-caster-black'
+      ".tourney-caster-legend li.is-caster-tinted.is-caster-black {\n      border-color: color-mix(in srgb, var(--tourney-text) 58%, transparent);\n      background: #000000;"
     );
-    expect(sharedSource).toContain("background: #000000;");
+    expect(sharedSource).toContain(
+      'html[data-theme="dark"] .tourney-caster-legend li.is-caster-tinted.is-caster-black {\n      border-color: color-mix(in srgb, var(--tourney-text) 62%, transparent);\n      background: #000000;'
+    );
   });
 });

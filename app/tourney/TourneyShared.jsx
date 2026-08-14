@@ -3333,6 +3333,7 @@ export const TourneyStyles = () => (
 
     .tourney-caster-legend li.is-caster-tinted.is-caster-black {
       border-color: color-mix(in srgb, var(--tourney-text) 58%, transparent);
+      background: #000000;
     }
 
     .tourney-caster-legend li.is-caster-tinted.is-caster-black::before {
@@ -4978,6 +4979,7 @@ export const TourneyStyles = () => (
 
     html[data-theme="dark"] .tourney-caster-legend li.is-caster-tinted.is-caster-black {
       border-color: color-mix(in srgb, var(--tourney-text) 62%, transparent);
+      background: #000000;
     }
 
     html[data-theme="dark"] .tourney-caster-legend li.is-caster-tinted.is-caster-black::before {
