@@ -263,11 +263,13 @@ const TOURNEY_BRACKET_MATCH_SCHEDULE = Object.freeze({
   "losers:6:1": Object.freeze({
     matchNumber: 21,
     casterIds: Object.freeze([1, 2]),
+    casterLabels: Object.freeze({ 1: "Yukari" }),
     slotLabels: Object.freeze({ opponent1: "Loser of 17", opponent2: "Winner of 20" }),
   }),
   "grand-final:1:1": Object.freeze({
     matchNumber: 22,
     casterIds: Object.freeze([1, 2]),
+    casterLabels: Object.freeze({ 1: "Yukari" }),
     slotLabels: Object.freeze({ opponent1: "Winner of 17", opponent2: "Winner of 21" }),
   }),
 });
@@ -325,7 +327,10 @@ const getMatchSchedule = ({ groupName, roundNumber, number }) => {
     dateLabel: round.dateLabel,
     timeLabel: round.timeLabel,
     casterIds: [...assignment.casterIds],
-    casters: casters.map((caster) => ({ ...caster })),
+    casters: casters.map((caster) => ({
+      ...caster,
+      label: assignment.casterLabels?.[caster.id] || caster.label,
+    })),
     slotLabels: { ...(assignment.slotLabels || {}) },
   };
 };

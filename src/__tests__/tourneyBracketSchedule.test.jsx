@@ -258,11 +258,11 @@ describe("TourneyBracketView caster color coding", () => {
       [12, [{ id: 5, label: "LightOW", color: "black" }]],
       [13, [{ id: 6, label: "Lemon", color: "yellow" }]],
       [21, [
-        { id: 1, label: "Yukari + SpankyCheeze", color: "purple" },
+        { id: 1, label: "Yukari", color: "purple" },
         { id: 2, label: "Supa", color: "green" },
       ]],
       [22, [
-        { id: 1, label: "Yukari + SpankyCheeze", color: "purple" },
+        { id: 1, label: "Yukari", color: "purple" },
         { id: 2, label: "Supa", color: "green" },
       ]],
     ].map(([publicMatchNumber, casters], index) =>
@@ -308,7 +308,7 @@ describe("TourneyBracketView caster color coding", () => {
     ).not.toContain("has-caster-black");
   });
 
-  test("keeps both caster colors as a duo highlight on matches 21 and 22", () => {
+  test("keeps Yukari and Supa's duo highlight on matches 21 and 22", () => {
     render(<TourneyBracketView snapshot={casterColorSnapshot()} showSchedule />);
 
     for (const label of ["Match 21", "Match 22"]) {
@@ -321,6 +321,8 @@ describe("TourneyBracketView caster color coding", () => {
       expect(card.style.getPropertyValue("--caster-2")).toBe(
         "var(--caster-green)"
       );
+      expect(within(card).getByText("Cast: Yukari, Supa")).toBeInTheDocument();
+      expect(within(card).queryByText(/SpankyCheeze/)).not.toBeInTheDocument();
     }
   });
 
@@ -687,15 +689,18 @@ describe("blackout bracket palette", () => {
     expect(sharedSource.match(/--caster-black:/g)).toHaveLength(1);
   });
 
-  test("blackout keeps LightOW's black identifiable with a neutral ring", () => {
+  test("both themes keep LightOW's black identifiable with a neutral ring", () => {
     expect(sharedSource).toContain(
-      'html[data-theme="dark"] .tourney-bracket-band .tourney-match-card.has-caster-black'
+      ".tourney-bracket-band .tourney-match-card.has-caster-black"
     );
     expect(sharedSource).toContain(
-      "outline: 1px solid var(--tourney-border-strong);"
+      "outline: 2px solid color-mix(in srgb, var(--tourney-text) 52%, transparent);"
     );
     expect(sharedSource).toContain(
-      'html[data-theme="dark"] .tourney-caster-legend li.is-caster-tinted.is-caster-black'
+      ".tourney-caster-legend li.is-caster-tinted.is-caster-black"
+    );
+    expect(sharedSource).toContain(
+      ".tourney-caster-legend li.is-caster-tinted.is-caster-black b"
     );
   });
 });

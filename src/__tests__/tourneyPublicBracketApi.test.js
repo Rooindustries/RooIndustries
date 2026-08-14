@@ -145,7 +145,7 @@ describe("tourney public bracket API contract", () => {
       group: "grand-final",
       schedule: { stageLabel: "Finals", dayLabel: "Day 2", timeLabel: "5:15 PM" },
       casters: [
-        { id: 1, label: "Yukari + SpankyCheeze", color: "purple" },
+        { id: 1, label: "Yukari", color: "purple" },
         { id: 2, label: "Supa", color: "green" },
       ],
     });

@@ -163,11 +163,19 @@ describe("tourney bracket store", () => {
     });
     expect(scheduled.find((match) => match.publicMatchNumber === 21)).toMatchObject({
       schedule: { dayLabel: "Day 2", timeLabel: "3:30 PM", casterIds: [1, 2] },
+      casters: [
+        { id: 1, label: "Yukari", color: "purple" },
+        { id: 2, label: "Supa", color: "green" },
+      ],
       slotLabels: { opponent1: "Loser of 17", opponent2: "Winner of 20" },
     });
     expect(scheduled.find((match) => match.publicMatchNumber === 22)).toMatchObject({
       groupName: "Grand Final",
       schedule: { dayLabel: "Day 2", timeLabel: "5:15 PM", casterIds: [1, 2] },
+      casters: [
+        { id: 1, label: "Yukari", color: "purple" },
+        { id: 2, label: "Supa", color: "green" },
+      ],
       slotLabels: { opponent1: "Winner of 17", opponent2: "Winner of 21" },
     });
     // Match 13 is Lemon's solo slot: the resolved caster carries the Lemon-only
