@@ -185,13 +185,13 @@ describe("TourneyBracketView official schedule", () => {
     expect(screen.getByText("Losers Round 1")).toBeInTheDocument();
     expect(screen.getByText("Finals")).toBeInTheDocument();
     expect(
-      screen.getByText("Day 1 · August 15 · 12:00 PM UTC")
+      screen.getByText("Day 1 · August 15 · 12:00 PM PST")
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Day 1 · August 15 · 3:30 PM UTC")
+      screen.getByText("Day 1 · August 15 · 3:30 PM PST")
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Day 2 · August 16 · 5:15 PM UTC")
+      screen.getByText("Day 2 · August 16 · 5:15 PM PST")
     ).toBeInTheDocument();
   });
 
@@ -237,7 +237,7 @@ describe("TourneyBracketView official schedule", () => {
     expect(screen.getByText("Championship Match")).toBeInTheDocument();
     expect(screen.queryByText("Finals")).not.toBeInTheDocument();
     expect(
-      screen.queryByText("Day 1 · August 15 · 12:00 PM UTC")
+      screen.queryByText("Day 1 · August 15 · 12:00 PM PST")
     ).not.toBeInTheDocument();
     expect(screen.queryByText(/Cast:/)).not.toBeInTheDocument();
     expect(screen.queryByText("Winner of 1")).not.toBeInTheDocument();
@@ -569,7 +569,7 @@ describe("tourney page schedule copy", () => {
   const readPageSource = () =>
     fs.readFileSync(path.join(__dirname, "../../app/tourney/page.jsx"), "utf8");
 
-  test("publishes the official August 15-16 UTC schedule instead of TBD times", () => {
+  test("publishes the official August 15-16 PST schedule instead of TBD times", () => {
     const source = readPageSource();
 
     expect(source).not.toContain("Exact match times are TBD");
@@ -577,8 +577,8 @@ describe("tourney page schedule copy", () => {
     expect(source).toContain("Saturday, August 15, 2026");
     expect(source).toContain("Sunday, August 16, 2026");
     expect(source).toContain("Winners Round 1 at 12:00 PM");
-    expect(source).toContain("Losers Round 2 at 5:15 PM UTC");
-    expect(source).toContain("Grand Final at 5:15 PM UTC");
+    expect(source).toContain("Losers Round 2 at 5:15 PM PST");
+    expect(source).toContain("Grand Final at 5:15 PM PST");
   });
 });
 
@@ -694,7 +694,13 @@ describe("blackout bracket palette", () => {
       ".tourney-bracket-band .tourney-match-card.has-caster-black"
     );
     expect(sharedSource).toContain(
-      "outline: 2px solid color-mix(in srgb, var(--tourney-text) 52%, transparent);"
+      "outline: 2px solid color-mix(in srgb, var(--tourney-text) 58%, transparent);"
+    );
+    expect(sharedSource).toContain(
+      'html[data-theme="dark"] .tourney-bracket-band .tourney-match-card.has-caster-black'
+    );
+    expect(sharedSource).toContain(
+      "linear-gradient(150deg, rgba(0, 0, 0, 0.96), rgba(0, 0, 0, 0.82))"
     );
     expect(sharedSource).toContain(
       ".tourney-caster-legend li.is-caster-tinted.is-caster-black"
@@ -702,5 +708,9 @@ describe("blackout bracket palette", () => {
     expect(sharedSource).toContain(
       ".tourney-caster-legend li.is-caster-tinted.is-caster-black b"
     );
+    expect(sharedSource).toContain(
+      'html[data-theme="dark"] .tourney-caster-legend li.is-caster-tinted.is-caster-black'
+    );
+    expect(sharedSource).toContain("background: #000000;");
   });
 });

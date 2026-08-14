@@ -68,7 +68,7 @@ describe("Tourney bracket page", () => {
         generated: true,
         matches: [],
         schedule: {
-          timeZone: "UTC",
+          timeZone: "PST",
           casters: [
             { id: 1, label: "Yukari + SpankyCheeze", color: "purple" },
             { id: 6, label: "Lemon", color: "yellow" },

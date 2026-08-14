@@ -1754,7 +1754,7 @@ export const getTourneyBracketSnapshot = async ({
     schedule:
       scheduled.length === 22
         ? {
-            timeZone: "UTC",
+            timeZone: "PST",
             eventDates: ["2026-08-15", "2026-08-16"],
             ...getTourneyBracketSchedule(),
           }

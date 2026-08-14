@@ -127,7 +127,7 @@ describe("tourney public bracket API contract", () => {
     const scheduled = body.matches.filter((match) => match.publicMatchNumber !== null);
 
     expect(body.schedule).toMatchObject({
-      timeZone: "UTC",
+      timeZone: "PST",
       eventDates: ["2026-08-15", "2026-08-16"],
     });
     expect(body.schedule.rounds).toHaveLength(10);
