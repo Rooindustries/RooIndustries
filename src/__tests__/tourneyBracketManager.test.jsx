@@ -41,6 +41,9 @@ test("renders an operations-only desk without owner setup controls", () => {
     "href",
     "/tourney/overlay"
   );
+  expect(screen.getByRole("link", { name: "Public bracket" }).parentElement).toHaveClass(
+    "is-control-links"
+  );
   expect(screen.queryByText("Add team")).not.toBeInTheDocument();
   expect(screen.queryByText("Generate bracket")).not.toBeInTheDocument();
   expect(screen.queryByText("Reset bracket")).not.toBeInTheDocument();

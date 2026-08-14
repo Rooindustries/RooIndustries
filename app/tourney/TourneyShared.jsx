@@ -4008,8 +4008,38 @@ export const TourneyStyles = () => (
 
     .tourney-match-controls form {
       display: grid;
-      grid-template-columns: 1fr 1fr auto;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 8px;
+    }
+
+    .tourney-match-controls form .tourney-owner-link {
+      grid-column: 1 / -1;
+    }
+
+    .tourney-match-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .tourney-match-actions .tourney-owner-link {
+      min-width: 0;
+      padding-inline: 8px;
+      white-space: nowrap;
+    }
+
+    .tourney-bracket-actions.is-control-links {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(9rem, 1fr));
+    }
+
+    .tourney-bracket-actions.is-control-links .tourney-owner-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 38px;
+      text-align: center;
+      text-decoration: none;
+      white-space: nowrap;
     }
 
     .tourney-match-controls input {

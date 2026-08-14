@@ -358,7 +358,7 @@ export default function TourneyBracketManager({
           </small>
         </span>
         {operationsOnly ? (
-          <div className="tourney-bracket-actions">
+          <div className="tourney-bracket-actions is-control-links">
             <a className="tourney-owner-link" href="/tourney/bracket">
               Public bracket
             </a>
