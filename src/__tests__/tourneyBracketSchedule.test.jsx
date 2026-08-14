@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import fs from "fs";
 import path from "path";
 
@@ -173,6 +173,102 @@ const scheduledSnapshot = () => ({
 });
 
 describe("TourneyBracketView official schedule", () => {
+  test("hides and disables both horizontal scrollers when the bracket fits", () => {
+    render(<TourneyBracketView snapshot={scheduledSnapshot()} showSchedule />);
+
+    const top = screen.getByLabelText(
+      "Scroll tournament bracket horizontally from the top"
+    );
+    const bottom = screen.getByLabelText(
+      "Scroll tournament bracket horizontally from the bottom"
+    );
+
+    expect(top.parentElement).toHaveClass("is-hidden");
+    expect(bottom.parentElement).toHaveClass("is-hidden");
+    expect(top).toBeDisabled();
+    expect(bottom).toBeDisabled();
+  });
+
+  test("shows both horizontal scrollers when the bracket overflows", () => {
+    const clientWidth = jest
+      .spyOn(HTMLElement.prototype, "clientWidth", "get")
+      .mockReturnValue(600);
+    const scrollWidth = jest
+      .spyOn(HTMLElement.prototype, "scrollWidth", "get")
+      .mockReturnValue(1400);
+    const boundingRect = jest
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function getBoundingClientRect() {
+        if (this.getAttribute("aria-label") === "Tournament bracket") {
+          return {
+            bottom: 1200,
+            height: 1100,
+            left: 200,
+            right: 800,
+            top: 100,
+            width: 600,
+            x: 200,
+            y: 100,
+            toJSON: () => ({}),
+          };
+        }
+        return {
+          bottom: 0,
+          height: 0,
+          left: 0,
+          right: 0,
+          top: 0,
+          width: 0,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        };
+      });
+
+    try {
+      render(<TourneyBracketView snapshot={scheduledSnapshot()} showSchedule />);
+
+      const top = screen.getByLabelText(
+        "Scroll tournament bracket horizontally from the top"
+      );
+      const bottom = screen.getByLabelText(
+        "Scroll tournament bracket horizontally from the bottom"
+      );
+
+      const board = screen.getByLabelText("Tournament bracket");
+
+      expect(top.parentElement).not.toHaveClass("is-hidden");
+      expect(bottom.parentElement).not.toHaveClass("is-hidden");
+      expect(top).toBeEnabled();
+      expect(bottom).toBeEnabled();
+      expect(top).toHaveAttribute("max", "800");
+      expect(bottom).toHaveAttribute("max", "800");
+      expect(top.parentElement).toHaveClass("is-pinned");
+      expect(bottom.parentElement).toHaveClass("is-pinned");
+      expect(top.parentElement).toHaveStyle({ left: "200px", width: "600px" });
+      expect(bottom.parentElement).toHaveStyle({ left: "200px", width: "600px" });
+
+      fireEvent.change(top, { target: { value: "180" } });
+      expect(board.scrollLeft).toBe(180);
+      expect(top).toHaveValue("180");
+      expect(bottom).toHaveValue("180");
+
+      board.scrollLeft = 360;
+      fireEvent.scroll(board);
+      expect(top).toHaveValue("360");
+      expect(bottom).toHaveValue("360");
+
+      fireEvent.change(bottom, { target: { value: "540" } });
+      expect(board.scrollLeft).toBe(540);
+      expect(top).toHaveValue("540");
+      expect(bottom).toHaveValue("540");
+    } finally {
+      clientWidth.mockRestore();
+      scrollWidth.mockRestore();
+      boundingRect.mockRestore();
+    }
+  });
+
   test("shows public match numbers, stage labels, and round day/date/time", () => {
     render(<TourneyBracketView snapshot={scheduledSnapshot()} showSchedule />);
 
@@ -579,6 +675,34 @@ describe("tourney page schedule copy", () => {
     expect(source).toContain("Winners Round 1 at 12:00 PM");
     expect(source).toContain("Losers Round 2 at 5:15 PM PST");
     expect(source).toContain("Grand Final at 5:15 PM PST");
+  });
+});
+
+describe("tourney bracket scroller styles", () => {
+  const sharedSource = fs.readFileSync(
+    path.join(__dirname, "../../app/tourney/TourneyShared.jsx"),
+    "utf8"
+  );
+
+  test("performance mode preserves sticky rails without clipping the page", () => {
+    expect(sharedSource).toContain(
+      ".tourney-page.is-performance-mode {\n      overflow: visible;\n    }"
+    );
+    expect(sharedSource).toContain("height: 30px;");
+    expect(sharedSource).toContain("::-webkit-slider-runnable-track");
+    expect(sharedSource).toContain("::-webkit-slider-thumb");
+    expect(sharedSource).toContain(
+      ".tourney-bracket-scrollbar.is-pinned {\n      position: fixed;"
+    );
+    expect(sharedSource).toContain(
+      ".tourney-page.is-performance-mode #match-control {\n      contain: none !important;"
+    );
+    expect(sharedSource).toContain(
+      "grid-template-columns: repeat(3, minmax(0, 1fr));"
+    );
+    expect(sharedSource).toContain(
+      ".tourney-audit-row > span {\n      text-align: center;"
+    );
   });
 });
 

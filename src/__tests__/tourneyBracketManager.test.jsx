@@ -50,9 +50,7 @@ test("renders an operations-only desk without owner setup controls", () => {
   expect(screen.queryByText("Add team")).not.toBeInTheDocument();
   expect(screen.queryByText("Generate bracket")).not.toBeInTheDocument();
   expect(screen.queryByText("Reset bracket")).not.toBeInTheDocument();
-  expect(screen.getByText("Recent Bracket Activity (1)").closest("details")).not.toHaveAttribute(
-    "open"
-  );
+  expect(screen.queryByText("Recent Bracket Activity (1)")).not.toBeInTheDocument();
 });
 
 test("renders controls only for the caster's assigned matches", () => {

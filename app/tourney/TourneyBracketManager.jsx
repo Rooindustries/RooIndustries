@@ -445,7 +445,7 @@ export default function TourneyBracketManager({
         </div>
       ) : null}
 
-      {snapshot?.audit?.length > 0 ? (
+      {!operationsOnly && snapshot?.audit?.length > 0 ? (
         <details className="tourney-bracket-audit" open={!operationsOnly}>
           <summary className="tourney-kicker">
             Recent Bracket Activity ({snapshot.audit.length})
