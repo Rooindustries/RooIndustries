@@ -10,6 +10,7 @@ const mockReopenTourneyBracketMatch = jest.fn();
 const mockResetTourneyBracket = jest.fn();
 const mockScoreTourneyBracketMatch = jest.fn();
 const mockSeedTourneyBracketTeams = jest.fn();
+const mockStartTourneyBracketMatch = jest.fn();
 const mockUpsertTourneyBracketTeam = jest.fn();
 
 jest.mock("next/server", () => ({
@@ -41,6 +42,7 @@ jest.mock("../server/tourney/bracketStore", () => ({
   resetTourneyBracket: (...args) => mockResetTourneyBracket(...args),
   scoreTourneyBracketMatch: (...args) => mockScoreTourneyBracketMatch(...args),
   seedTourneyBracketTeams: (...args) => mockSeedTourneyBracketTeams(...args),
+  startTourneyBracketMatch: (...args) => mockStartTourneyBracketMatch(...args),
   upsertTourneyBracketTeam: (...args) => mockUpsertTourneyBracketTeam(...args),
 }));
 
@@ -50,7 +52,18 @@ const snapshot = {
   ok: true,
   generated: true,
   teams: [{ id: "team_1", name: "Alpha" }],
-  matches: [],
+  matches: [
+    { id: 1, schedule: { casterIds: [1] } },
+    { id: 2, schedule: { casterIds: [3] } },
+    {
+      id: 22,
+      schedule: { casterIds: [1, 2] },
+      casters: [
+        { id: 1, label: "Yukari" },
+        { id: 2, label: "Supa" },
+      ],
+    },
+  ],
   groups: [],
   audit: [],
 };
@@ -87,6 +100,7 @@ describe("tourney bracket API route", () => {
       mockResetTourneyBracket,
       mockScoreTourneyBracketMatch,
       mockSeedTourneyBracketTeams,
+      mockStartTourneyBracketMatch,
       mockUpsertTourneyBracketTeam,
     ]) {
       mock.mockReset();
@@ -102,6 +116,7 @@ describe("tourney bracket API route", () => {
     mockScoreTourneyBracketMatch.mockResolvedValue(snapshot);
     mockGenerateTourneyBracket.mockResolvedValue(snapshot);
     mockReopenTourneyBracketMatch.mockResolvedValue(snapshot);
+    mockStartTourneyBracketMatch.mockResolvedValue(snapshot);
   });
 
   test("allows public read-only bracket access", async () => {
@@ -136,6 +151,62 @@ describe("tourney bracket API route", () => {
       opponent2Score: 1,
       actorUsername: "yukari",
     });
+  });
+
+  test("allows assigned casters to start a live match", async () => {
+    const response = await POST(
+      makeJsonRequest({ action: "start-match", matchId: 22 })
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockStartTourneyBracketMatch).toHaveBeenCalledWith({
+      matchId: 22,
+      actorUsername: "yukari",
+    });
+  });
+
+  test("blocks casters from matches outside their assignment", async () => {
+    const response = await POST(
+      makeJsonRequest({
+        action: "score-match",
+        matchId: 2,
+        opponent1Score: 1,
+        opponent2Score: 0,
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toBe("You are not assigned to this match.");
+    expect(mockScoreTourneyBracketMatch).not.toHaveBeenCalled();
+  });
+
+  test("blocks unmapped caster accounts from every match", async () => {
+    mockReadTourneySessionFromStore.mockResolvedValue({
+      username: "unknown-caster",
+      role: "caster",
+    });
+
+    const response = await POST(
+      makeJsonRequest({ action: "start-match", matchId: 1 })
+    );
+
+    expect(response.status).toBe(403);
+    expect(mockStartTourneyBracketMatch).not.toHaveBeenCalled();
+  });
+
+  test("blocks SpankyCheeze from Yukari-only finals", async () => {
+    mockReadTourneySessionFromStore.mockResolvedValue({
+      username: "spankycheeze",
+      role: "caster",
+    });
+
+    const response = await POST(
+      makeJsonRequest({ action: "start-match", matchId: 22 })
+    );
+
+    expect(response.status).toBe(403);
+    expect(mockStartTourneyBracketMatch).not.toHaveBeenCalled();
   });
 
   test("blocks casters from owner-only setup actions", async () => {

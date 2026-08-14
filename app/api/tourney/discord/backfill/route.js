@@ -37,7 +37,7 @@ const PLAYER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const getAdminSession = async (request) => {
   const token = request.cookies.get(TOURNEY_SESSION_COOKIE)?.value || "";
   const session = await readTourneySessionFromStore({ token });
-  return session && ["owner", "caster"].includes(session.role) ? session : null;
+  return session?.role === "owner" ? session : null;
 };
 
 const readMember = async ({ discordUserId, config, fetchImpl = fetch }) => {

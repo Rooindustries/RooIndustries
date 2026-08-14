@@ -21,13 +21,15 @@ export const navItems = [
 ];
 
 export const getNavItems = (session) => {
-  return isTourneyAdminSession(session)
-    ? [
-        ...navItems,
-        { href: "/tourney/control", label: "Control" },
-        { href: "/tourney/manage", label: "Manage" },
-      ]
-    : navItems;
+  if (!isTourneyAdminSession(session)) return navItems;
+
+  return [
+    ...navItems,
+    { href: "/tourney/control", label: "Control" },
+    ...(session?.role === "owner"
+      ? [{ href: "/tourney/manage", label: "Manage" }]
+      : []),
+  ];
 };
 
 export const getTourneySession = async () => {
@@ -4025,6 +4027,10 @@ export const TourneyStyles = () => (
       min-width: 0;
       padding-inline: 8px;
       white-space: nowrap;
+    }
+
+    .tourney-match-actions .tourney-owner-link:only-child {
+      grid-column: 1 / -1;
     }
 
     .tourney-bracket-actions.is-control-links {

@@ -77,6 +77,7 @@ export default async function TourneyControlPage({ searchParams }) {
           <TourneyBracketManager
             initialSnapshot={bracketSnapshot}
             currentRole={session.role}
+            currentUsername={session.username}
             operationsOnly
           />
         )}

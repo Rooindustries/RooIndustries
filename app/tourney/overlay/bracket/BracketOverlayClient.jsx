@@ -43,7 +43,7 @@ export default function BracketOverlayClient({
       data-version={data?.version || ""}
     >
       <OverlayFit scale={scale} inset={8} debug={fitDebug}>
-        <TourneyBracketView snapshot={snapshot} />
+        <TourneyBracketView snapshot={snapshot} showSchedule />
       </OverlayFit>
     </div>
   );

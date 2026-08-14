@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { canManageTourneyMatch } from "../../src/server/tourney/access";
 import TourneyBracketView from "./TourneyBracketView";
 import { tourneyMutationFetch, tourneyMutationSuccessMessage } from "./tourneyMutation";
 
@@ -25,6 +26,7 @@ const auditTimeLabel = (value) =>
 export default function TourneyBracketManager({
   initialSnapshot,
   currentRole = "caster",
+  currentUsername = "",
   operationsOnly = false,
 }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
@@ -129,39 +131,66 @@ export default function TourneyBracketManager({
   };
 
   const matchControls = (match) => {
-    const isOpen = ["Waiting", "Ready", "Running"].includes(match.statusLabel);
+    const canManage = canManageTourneyMatch({
+      session: { username: currentUsername, role: currentRole },
+      match,
+    });
+    if (!canManage) return null;
+
+    const isReady = match.statusLabel === "Ready";
+    const isRunning = match.statusLabel === "Running";
+    const isOpen = ["Ready", "Running"].includes(match.statusLabel);
     const isCompleted = ["Completed", "Archived"].includes(match.statusLabel);
     const reason = reasonForms[match.id] || "";
 
     return (
       <div className="tourney-match-controls">
+        {isReady ? (
+          <div className="tourney-match-actions">
+            <button
+              className="tourney-owner-link"
+              type="button"
+              disabled={isBusy}
+              onClick={() =>
+                postBracketAction({
+                  action: "start-match",
+                  matchId: match.id,
+                })
+              }
+            >
+              Start live
+            </button>
+          </div>
+        ) : null}
         {isOpen ? (
           <>
-            <form onSubmit={(event) => submitScore(event, match)}>
-              <input
-                type="number"
-                min={0}
-                max={match.targetScore}
-                aria-label={`${match.opponent1.name} score`}
-                value={getScoreValue({ scoreForms, match, side: "opponent1" })}
-                onChange={(event) =>
-                  updateScore(match.id, "opponent1Score", event.target.value)
-                }
-              />
-              <input
-                type="number"
-                min={0}
-                max={match.targetScore}
-                aria-label={`${match.opponent2.name} score`}
-                value={getScoreValue({ scoreForms, match, side: "opponent2" })}
-                onChange={(event) =>
-                  updateScore(match.id, "opponent2Score", event.target.value)
-                }
-              />
-              <button className="tourney-owner-link" type="submit" disabled={isBusy}>
-                Score
-              </button>
-            </form>
+            {isRunning ? (
+              <form onSubmit={(event) => submitScore(event, match)}>
+                <input
+                  type="number"
+                  min={0}
+                  max={match.targetScore}
+                  aria-label={`${match.opponent1.name} score`}
+                  value={getScoreValue({ scoreForms, match, side: "opponent1" })}
+                  onChange={(event) =>
+                    updateScore(match.id, "opponent1Score", event.target.value)
+                  }
+                />
+                <input
+                  type="number"
+                  min={0}
+                  max={match.targetScore}
+                  aria-label={`${match.opponent2.name} score`}
+                  value={getScoreValue({ scoreForms, match, side: "opponent2" })}
+                  onChange={(event) =>
+                    updateScore(match.id, "opponent2Score", event.target.value)
+                  }
+                />
+                <button className="tourney-owner-link" type="submit" disabled={isBusy}>
+                  Update score
+                </button>
+              </form>
+            ) : null}
             <input
               type="text"
               value={reason}
@@ -394,7 +423,11 @@ export default function TourneyBracketManager({
         </p>
       ) : null}
 
-      <TourneyBracketView snapshot={snapshot} renderControls={matchControls} />
+      <TourneyBracketView
+        snapshot={snapshot}
+        renderControls={matchControls}
+        showSchedule
+      />
 
       {snapshot?.teams?.some((team) => team.status === "disqualified") ? (
         <div className="tourney-team-list">

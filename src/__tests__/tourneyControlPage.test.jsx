@@ -30,6 +30,7 @@ jest.mock("../../app/tourney/TourneyBracketManager", () => (props) => (
   <div
     data-testid="bracket-manager"
     data-role={props.currentRole}
+    data-username={props.currentUsername}
     data-operations-only={props.operationsOnly ? "true" : "false"}
   />
 ));
@@ -74,6 +75,10 @@ describe("Tourney control page", () => {
     expect(screen.getByTestId("bracket-manager")).toHaveAttribute(
       "data-operations-only",
       "true"
+    );
+    expect(screen.getByTestId("bracket-manager")).toHaveAttribute(
+      "data-username",
+      "yukari"
     );
   });
 

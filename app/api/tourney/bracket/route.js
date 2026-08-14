@@ -15,8 +15,10 @@ import {
   resetTourneyBracket,
   scoreTourneyBracketMatch,
   seedTourneyBracketTeams,
+  startTourneyBracketMatch,
   upsertTourneyBracketTeam,
 } from "../../../../src/server/tourney/bracketStore";
+import { canManageTourneyMatch } from "../../../../src/server/tourney/access";
 import { buildTourneyPublicError } from "../../../../src/server/tourney/publicError";
 import { readPublicTourneyBracket } from "../../../../src/server/tourney/readService";
 import { isSameOriginMutation } from "../../../../src/server/request/sameOrigin";
@@ -41,6 +43,7 @@ const OWNER_ACTIONS = new Set([
 ]);
 
 const ADMIN_ACTIONS = new Set([
+  "start-match",
   "score-match",
   "forfeit-match",
   "disqualify-team",
@@ -103,6 +106,16 @@ export async function POST(request) {
     if (OWNER_ACTIONS.has(action) && session.role !== "owner") {
       return jsonError("Owner access required.", 403);
     }
+    if (ADMIN_ACTIONS.has(action)) {
+      const snapshot = await getTourneyBracketSnapshot();
+      const match = snapshot.matches?.find(
+        (candidate) => Number(candidate.id) === Number(payload.matchId)
+      );
+      if (!match) return jsonError("Match not found.", 404);
+      if (!canManageTourneyMatch({ session, match })) {
+        return jsonError("You are not assigned to this match.", 403);
+      }
+    }
     const commandId = readTourneyCommandId({ request });
     const command = await executeTourneyCommand({
       commandId,
@@ -143,6 +156,12 @@ export async function POST(request) {
         }
         if (action === "reset-bracket") {
           return { body: await resetTourneyBracket({ actorUsername: session.username }) };
+        }
+        if (action === "start-match") {
+          return { body: await startTourneyBracketMatch({
+            matchId: payload.matchId,
+            actorUsername: session.username,
+          }) };
         }
         if (action === "score-match") {
           return { body: await scoreTourneyBracketMatch({

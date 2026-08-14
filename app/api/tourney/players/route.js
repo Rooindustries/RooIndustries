@@ -37,7 +37,7 @@ const jsonError = (message, status = 400, extra = {}) =>
 const getAdminSession = async (request) => {
   const token = request.cookies.get(TOURNEY_SESSION_COOKIE)?.value || "";
   const session = await readTourneySessionFromStore({ token });
-  return session && ["owner", "caster"].includes(session.role) ? session : null;
+  return session?.role === "owner" ? session : null;
 };
 
 const readPayload = async (request) => {
