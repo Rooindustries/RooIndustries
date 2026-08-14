@@ -22,7 +22,11 @@ export const navItems = [
 
 export const getNavItems = (session) => {
   return isTourneyAdminSession(session)
-    ? [...navItems, { href: "/tourney/manage", label: "Manage" }]
+    ? [
+        ...navItems,
+        { href: "/tourney/control", label: "Control" },
+        { href: "/tourney/manage", label: "Manage" },
+      ]
     : navItems;
 };
 
