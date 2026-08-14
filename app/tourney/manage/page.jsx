@@ -7,13 +7,11 @@ import {
   getTourneySession,
 } from "../TourneyShared";
 import OwnerAccountManager from "../OwnerAccountManager";
-import TourneyBracketManager from "../TourneyBracketManager";
 import TourneyPlayerManager from "../TourneyPlayerManager";
 import {
   readEffectiveTourneyAccounts,
   summarizeTourneyAccounts,
 } from "../../../src/server/tourney/auth";
-import { getTourneyBracketSnapshot } from "../../../src/server/tourney/bracketStore";
 import { readAdminTourneyPlayers } from "../../../src/server/tourney/readService";
 
 export const runtime = "nodejs";
@@ -38,7 +36,7 @@ export default async function TourneyManagePage({ searchParams }) {
       <LockScreen
         error={resolvedSearchParams?.error || ""}
         heading="Sign in."
-        subtitle="Manage access requires an owner or caster account."
+        subtitle="Manage access requires the tournament owner account."
         note="Use your assigned Roo Industries admin account."
         buttonLabel="Sign in"
         redirectTo="/tourney/manage"
@@ -46,35 +44,27 @@ export default async function TourneyManagePage({ searchParams }) {
     );
   }
 
-  if (!["owner", "caster"].includes(session.role)) {
+  if (session.role !== "owner") {
     notFound();
   }
 
-  const accounts =
-    session.role === "owner"
-      ? summarizeTourneyAccounts(await readEffectiveTourneyAccounts())
-      : [];
-  const [adminPlayers, bracketSnapshot] = await Promise.all([
-    readAdminTourneyPlayers().catch(() => ({
-      ok: false,
-      players: [],
-      capacity: { teamCount: 12, roles: [] },
-    })),
-    getTourneyBracketSnapshot({ includeAudit: true }).catch(() => ({
-      ok: false,
-      meta: {},
-      teams: [],
-      matches: [],
-      groups: [],
-      generated: false,
-      audit: [],
-    })),
-  ]);
+  const accounts = summarizeTourneyAccounts(
+    await readEffectiveTourneyAccounts()
+  );
+  const adminPlayers = await readAdminTourneyPlayers().catch(() => ({
+    ok: false,
+    players: [],
+    capacity: { teamCount: 12, roles: [] },
+  }));
   const players = adminPlayers.players;
   const capacitySnapshot = adminPlayers.capacity;
 
   return (
-    <TourneyShell session={session} activeHref="/tourney/manage">
+    <TourneyShell
+      session={session}
+      activeHref="/tourney/manage"
+      performanceMode
+    >
       <RouteTitle eyebrow="Manage" title="Tournament" accent="Control">
         Review registrations, add approved players, and remove players when
         needed.
@@ -95,27 +85,11 @@ export default async function TourneyManagePage({ searchParams }) {
           )}
         </Section>
 
-        {session.role === "owner" ? (
-          <Section id="manage" eyebrow="Owner" title="Account Management" wide>
-            <OwnerAccountManager
-              initialAccounts={accounts}
-              currentUsername={session.username}
-            />
-          </Section>
-        ) : null}
-
-        <Section id="bracket" eyebrow="Bracket" title="Bracket Control" wide>
-          {!bracketSnapshot.ok ? (
-            <p className="cs-error" role="alert">
-              Bracket data is temporarily unavailable. Bracket controls are disabled
-              until this warning clears.
-            </p>
-          ) : (
-            <TourneyBracketManager
-              initialSnapshot={bracketSnapshot}
-              currentRole={session.role}
-            />
-          )}
+        <Section id="manage" eyebrow="Owner" title="Account Management" wide>
+          <OwnerAccountManager
+            initialAccounts={accounts}
+            currentUsername={session.username}
+          />
         </Section>
 
         <Section id="overlays" eyebrow="Stream" title="Stream Overlays" wide>

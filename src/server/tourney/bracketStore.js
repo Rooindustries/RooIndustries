@@ -1255,6 +1255,65 @@ const updateMatchResult = async ({
   return getTourneyBracketSnapshot({ includeAudit: true, env });
 };
 
+const validateRunningScores = ({ match, group, opponent1Score, opponent2Score }) => {
+  const leftScore = Number(opponent1Score);
+  const rightScore = Number(opponent2Score);
+  const target = getMatchTargetScore(match, group);
+  const bestOf = getMatchBestOf(match, group);
+
+  if (
+    !Number.isInteger(leftScore) ||
+    !Number.isInteger(rightScore) ||
+    leftScore < 0 ||
+    rightScore < 0 ||
+    leftScore > target ||
+    rightScore > target ||
+    (leftScore === target && rightScore === target)
+  ) {
+    throw Object.assign(
+      new Error(`Enter valid Best of ${bestOf} scores from 0 to ${target}.`),
+      { status: 400 }
+    );
+  }
+
+  return { leftScore, rightScore, target };
+};
+
+export const startTourneyBracketMatch = async ({
+  matchId,
+  actorUsername,
+  env = process.env,
+} = {}) =>
+  withBracketMutation({
+    actorUsername,
+    env,
+    callback: async () => {
+      const match = await findMatch({ matchId, env });
+      if (Number(match.status) !== 2) {
+        throw Object.assign(new Error("Only ready matches can be started."), {
+          status: 400,
+        });
+      }
+      getSide(match, "opponent1");
+      getSide(match, "opponent2");
+
+      await createManager(env).update.match({
+        id: Number(matchId),
+        status: 3,
+        opponent1: { score: Number(match.opponent1?.score) || 0 },
+        opponent2: { score: Number(match.opponent2?.score) || 0 },
+      });
+      await recordAudit({
+        action: "match.start",
+        actorUsername,
+        matchId: Number(matchId),
+        payload: { opponent1Score: 0, opponent2Score: 0 },
+        env,
+      });
+      return getTourneyBracketSnapshot({ includeAudit: true, env });
+    },
+  });
+
 export const scoreTourneyBracketMatch = async ({
   matchId,
   opponent1Score,
@@ -1265,15 +1324,52 @@ export const scoreTourneyBracketMatch = async ({
   withBracketMutation({
     actorUsername,
     env,
-    callback: () =>
-      updateMatchResult({
-        matchId,
+    callback: async () => {
+      const match = await findMatch({ matchId, env });
+      const group = await createStorage(env).select("group", match.group_id);
+      if (![2, 3].includes(Number(match.status))) {
+        throw Object.assign(new Error("Only ready or live matches can be scored."), {
+          status: 400,
+        });
+      }
+      getSide(match, "opponent1");
+      getSide(match, "opponent2");
+      const scores = validateRunningScores({
+        match,
+        group,
         opponent1Score,
         opponent2Score,
+      });
+
+      if (Math.max(scores.leftScore, scores.rightScore) === scores.target) {
+        return updateMatchResult({
+          matchId,
+          opponent1Score: scores.leftScore,
+          opponent2Score: scores.rightScore,
+          actorUsername,
+          action: "match.score",
+          env,
+        });
+      }
+
+      await createManager(env).update.match({
+        id: Number(matchId),
+        status: 3,
+        opponent1: { score: scores.leftScore },
+        opponent2: { score: scores.rightScore },
+      });
+      await recordAudit({
+        action: "match.score.update",
         actorUsername,
-        action: "match.score",
+        matchId: Number(matchId),
+        payload: {
+          opponent1Score: scores.leftScore,
+          opponent2Score: scores.rightScore,
+        },
         env,
-      }),
+      });
+      return getTourneyBracketSnapshot({ includeAudit: true, env });
+    },
   });
 
 export const forfeitTourneyBracketMatch = async ({

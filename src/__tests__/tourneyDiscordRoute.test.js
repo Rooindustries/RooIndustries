@@ -387,10 +387,26 @@ describe("tourney Discord OAuth routes", () => {
     expect(mockListManageTourneyPlayers).not.toHaveBeenCalled();
   });
 
-  test("rejects an oversized Discord backfill body before inventory", async () => {
+  test("rejects caster sessions for Discord backfills", async () => {
     mockReadTourneySessionFromStore.mockResolvedValue({
       username: "yukari",
       role: "caster",
+    });
+
+    const response = await backfillRoute.POST(
+      makeRequest({
+        url: "https://www.rooindustries.com/api/tourney/discord/backfill",
+      })
+    );
+
+    expect(response.status).toBe(404);
+    expect(mockListManageTourneyPlayers).not.toHaveBeenCalled();
+  });
+
+  test("rejects an oversized Discord backfill body before inventory", async () => {
+    mockReadTourneySessionFromStore.mockResolvedValue({
+      username: "serviroo",
+      role: "owner",
     });
     const response = await backfillRoute.POST(makeRequest({
       url: "https://www.rooindustries.com/api/tourney/discord/backfill",
@@ -402,8 +418,8 @@ describe("tourney Discord OAuth routes", () => {
 
   test("dry-runs linked Discord members without mutating roles", async () => {
     mockReadTourneySessionFromStore.mockResolvedValue({
-      username: "yukari",
-      role: "caster",
+      username: "serviroo",
+      role: "owner",
     });
     mockListManageTourneyPlayers.mockResolvedValue([
       {
@@ -468,7 +484,7 @@ describe("tourney Discord OAuth routes", () => {
   });
 
   test("reports unavailable Discord members without aborting inventory", async () => {
-    mockReadTourneySessionFromStore.mockResolvedValue({ username: "yukari", role: "caster" });
+    mockReadTourneySessionFromStore.mockResolvedValue({ username: "serviroo", role: "owner" });
     mockListManageTourneyPlayers.mockResolvedValue([
       { id: "player_1", status: "approved", discordUserId: "discord_user_1" },
     ]);
@@ -484,7 +500,7 @@ describe("tourney Discord OAuth routes", () => {
   });
 
   test("never targets a stale legacy Discord identity during inventory or apply", async () => {
-    mockReadTourneySessionFromStore.mockResolvedValue({ username: "yukari", role: "caster" });
+    mockReadTourneySessionFromStore.mockResolvedValue({ username: "serviroo", role: "owner" });
     mockListManageTourneyPlayers.mockResolvedValue([
       { id: "player_1", status: "approved", discordUserId: "stale_discord_user" },
     ]);
@@ -542,7 +558,7 @@ describe("tourney Discord OAuth routes", () => {
   });
 
   test("replays an identical unscoped repair inventory without duplicate work", async () => {
-    mockReadTourneySessionFromStore.mockResolvedValue({ username: "yukari", role: "caster" });
+    mockReadTourneySessionFromStore.mockResolvedValue({ username: "serviroo", role: "owner" });
     mockListManageTourneyPlayers.mockResolvedValue([
       { id: "player_1", status: "approved", discordUserId: "discord_user_1" },
     ]);
@@ -581,7 +597,7 @@ describe("tourney Discord OAuth routes", () => {
   });
 
   test("uses a new unscoped batch when the authoritative inventory changes", async () => {
-    mockReadTourneySessionFromStore.mockResolvedValue({ username: "yukari", role: "caster" });
+    mockReadTourneySessionFromStore.mockResolvedValue({ username: "serviroo", role: "owner" });
     mockListManageTourneyPlayers.mockResolvedValue([
       { id: "player_1", status: "approved", discordUserId: "discord_user_1" },
     ]);
@@ -637,7 +653,7 @@ describe("tourney Discord OAuth routes", () => {
   });
 
   test("allows a new unscoped idempotency key to start a fresh repair round", async () => {
-    mockReadTourneySessionFromStore.mockResolvedValue({ username: "yukari", role: "caster" });
+    mockReadTourneySessionFromStore.mockResolvedValue({ username: "serviroo", role: "owner" });
     mockListManageTourneyPlayers.mockResolvedValue([
       { id: "player_1", status: "approved", discordUserId: "discord_user_1" },
     ]);
@@ -661,7 +677,7 @@ describe("tourney Discord OAuth routes", () => {
 
   test("replays one authoritative principal-scoped repair for the same idempotency key", async () => {
     const principalId = "11111111-1111-4111-8111-111111111111";
-    mockReadTourneySessionFromStore.mockResolvedValue({ username: "yukari", role: "caster" });
+    mockReadTourneySessionFromStore.mockResolvedValue({ username: "serviroo", role: "owner" });
     mockListManageTourneyPlayers.mockResolvedValue([{
       id: "player_1",
       principalId,
@@ -728,7 +744,7 @@ describe("tourney Discord OAuth routes", () => {
   test("rejects the same idempotency key when its scoped player changes", async () => {
     const principalId = "55555555-5555-4555-8555-555555555555";
     const repairKey = "admin-repair-20260714-scope-conflict";
-    mockReadTourneySessionFromStore.mockResolvedValue({ username: "yukari", role: "caster" });
+    mockReadTourneySessionFromStore.mockResolvedValue({ username: "serviroo", role: "owner" });
     mockListManageTourneyPlayers.mockResolvedValue([{
       id: "player_1",
       principalId,
@@ -788,7 +804,7 @@ describe("tourney Discord OAuth routes", () => {
       syncPending: true,
       receiptStatus: "failed",
     });
-    mockReadTourneySessionFromStore.mockResolvedValue({ username: "yukari", role: "caster" });
+    mockReadTourneySessionFromStore.mockResolvedValue({ username: "serviroo", role: "owner" });
     const response = await backfillRoute.POST(makeRequest({
       url: "https://www.rooindustries.com/api/tourney/discord/backfill",
       payload: { action: "apply", playerId: "player_failed" },
@@ -811,7 +827,7 @@ describe("tourney Discord OAuth routes", () => {
 
   test("requires a valid idempotency key before resolving a scoped repair", async () => {
     const principalId = "33333333-3333-4333-8333-333333333333";
-    mockReadTourneySessionFromStore.mockResolvedValue({ username: "yukari", role: "caster" });
+    mockReadTourneySessionFromStore.mockResolvedValue({ username: "serviroo", role: "owner" });
 
     const missing = await backfillRoute.POST(makeRequest({
       url: "https://www.rooindustries.com/api/tourney/discord/backfill",
@@ -840,7 +856,7 @@ describe("tourney Discord OAuth routes", () => {
 
   test("queues a fresh scoped repair when the admin supplies a new idempotency key", async () => {
     const principalId = "44444444-4444-4444-8444-444444444444";
-    mockReadTourneySessionFromStore.mockResolvedValue({ username: "yukari", role: "caster" });
+    mockReadTourneySessionFromStore.mockResolvedValue({ username: "serviroo", role: "owner" });
     mockListManageTourneyPlayers.mockResolvedValue([{
       id: "player_4",
       principalId,
@@ -877,7 +893,7 @@ describe("tourney Discord OAuth routes", () => {
   });
 
   test("rejects an unknown scoped Discord repair target without enqueueing", async () => {
-    mockReadTourneySessionFromStore.mockResolvedValue({ username: "yukari", role: "caster" });
+    mockReadTourneySessionFromStore.mockResolvedValue({ username: "serviroo", role: "owner" });
     mockListManageTourneyPlayers.mockResolvedValue([]);
     mockIdentitySql.mockResolvedValue([]);
 
@@ -899,7 +915,7 @@ describe("tourney Discord OAuth routes", () => {
 
   test("rejects a scoped legacy identity mismatch without enqueueing", async () => {
     const principalId = "22222222-2222-4222-8222-222222222222";
-    mockReadTourneySessionFromStore.mockResolvedValue({ username: "yukari", role: "caster" });
+    mockReadTourneySessionFromStore.mockResolvedValue({ username: "serviroo", role: "owner" });
     mockListManageTourneyPlayers.mockResolvedValue([{
       id: "player_1",
       principalId,
@@ -933,7 +949,7 @@ describe("tourney Discord OAuth routes", () => {
 
   test("rejects a real production-shape player principal mismatch", async () => {
     const accountPrincipalId = "66666666-6666-4666-8666-666666666666";
-    mockReadTourneySessionFromStore.mockResolvedValue({ username: "yukari", role: "caster" });
+    mockReadTourneySessionFromStore.mockResolvedValue({ username: "serviroo", role: "owner" });
     mockListManageTourneyPlayers.mockResolvedValue([{
       id: "player_6",
       status: "approved",
@@ -965,7 +981,7 @@ describe("tourney Discord OAuth routes", () => {
   });
 
   test("queues the memory-store desired-state shape during repair", async () => {
-    mockReadTourneySessionFromStore.mockResolvedValue({ username: "yukari", role: "caster" });
+    mockReadTourneySessionFromStore.mockResolvedValue({ username: "serviroo", role: "owner" });
     mockListManageTourneyPlayers.mockResolvedValue([
       { id: "player_1", status: "approved", discordUserId: "discord_user_1" },
     ]);
@@ -999,7 +1015,7 @@ describe("tourney Discord OAuth routes", () => {
   });
 
   test("continues the desired-state batch after one player fails", async () => {
-    mockReadTourneySessionFromStore.mockResolvedValue({ username: "yukari", role: "caster" });
+    mockReadTourneySessionFromStore.mockResolvedValue({ username: "serviroo", role: "owner" });
     mockListManageTourneyPlayers.mockResolvedValue([
       { id: "player_1", status: "approved", discordUserId: "discord_user_1" },
       { id: "player_2", status: "approved", discordUserId: "discord_user_2" },

@@ -14,6 +14,52 @@ describe("tourney access helpers", () => {
     expect(access.canAccessTourneyRegistration({ role: "viewer" })).toBe(false);
   });
 
+  test("maps casters to scheduled matches while owners retain full control", () => {
+    const access = loadAccess();
+    const yukariMatch = { schedule: { casterIds: [1] } };
+    const supaMatch = { schedule: { casterIds: [2] } };
+    const sharedPurpleMatch = {
+      schedule: { casterIds: [1] },
+      casters: [{ id: 1, label: "Yukari + SpankyCheeze" }],
+    };
+    const finalMatch = {
+      schedule: { casterIds: [1, 2] },
+      casters: [
+        { id: 1, label: "Yukari" },
+        { id: 2, label: "Supa" },
+      ],
+    };
+
+    expect(access.canAccessTourneyManage({ role: "owner" })).toBe(true);
+    expect(access.canAccessTourneyManage({ role: "caster" })).toBe(false);
+    expect(access.getTourneyCasterIds({ username: "SpankyCheeze", role: "caster" })).toEqual([1]);
+    expect(access.getTourneyCasterIds({ username: "unknown", role: "caster" })).toEqual([]);
+    expect(access.canManageTourneyMatch({
+      session: { username: "yukari", role: "caster" },
+      match: yukariMatch,
+    })).toBe(true);
+    expect(access.canManageTourneyMatch({
+      session: { username: "supa", role: "caster" },
+      match: yukariMatch,
+    })).toBe(false);
+    expect(access.canManageTourneyMatch({
+      session: { username: "spankycheeze", role: "caster" },
+      match: sharedPurpleMatch,
+    })).toBe(true);
+    expect(access.canManageTourneyMatch({
+      session: { username: "spankycheeze", role: "caster" },
+      match: finalMatch,
+    })).toBe(false);
+    expect(access.canManageTourneyMatch({
+      session: { username: "supa", role: "caster" },
+      match: finalMatch,
+    })).toBe(true);
+    expect(access.canManageTourneyMatch({
+      session: { username: "serviroo", role: "owner" },
+      match: supaMatch,
+    })).toBe(true);
+  });
+
   test("requires decision links to match the active approver session", () => {
     const access = loadAccess();
     const approver = {

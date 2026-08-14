@@ -292,6 +292,109 @@ describe("tourney bracket store", () => {
     ).toBe(true);
   });
 
+  test("starts live, publishes partial scores, and completes at the Bo5 target", async () => {
+    const { store, snapshot } = await generateFourTeamBracket();
+    const first = snapshot.matches.find(
+      (match) => match.groupName === "Winners" && match.roundNumber === 1
+    );
+
+    let updated = await store.startTourneyBracketMatch({
+      matchId: first.id,
+      actorUsername: "yukari",
+      env,
+    });
+    expect(updated.matches.find((match) => match.id === first.id)).toMatchObject({
+      statusLabel: "Running",
+      opponent1: { score: 0, result: "" },
+      opponent2: { score: 0, result: "" },
+    });
+
+    updated = await store.scoreTourneyBracketMatch({
+      matchId: first.id,
+      opponent1Score: 1,
+      opponent2Score: 0,
+      actorUsername: "yukari",
+      env,
+    });
+    expect(updated.matches.find((match) => match.id === first.id)).toMatchObject({
+      statusLabel: "Running",
+      opponent1: { score: 1, result: "" },
+      opponent2: { score: 0, result: "" },
+    });
+
+    updated = await store.scoreTourneyBracketMatch({
+      matchId: first.id,
+      opponent1Score: 3,
+      opponent2Score: 2,
+      actorUsername: "yukari",
+      env,
+    });
+    expect(updated.matches.find((match) => match.id === first.id)).toMatchObject({
+      statusLabel: "Completed",
+      opponent1: { score: 3, result: "win" },
+      opponent2: { score: 2, result: "loss" },
+    });
+    expect(updated.audit.map((event) => event.action)).toEqual(
+      expect.arrayContaining(["match.start", "match.score.update", "match.score"])
+    );
+  });
+
+  test("keeps Grand Final live until one side reaches four wins", async () => {
+    const { store } = await generateFourTeamBracket();
+    let snapshot = await store.getTourneyBracketSnapshot({ env });
+
+    while (true) {
+      const grandFinal = snapshot.matches.find(
+        (match) => match.groupName === "Grand Final"
+      );
+      if (grandFinal?.statusLabel === "Ready") break;
+      const ready = snapshot.matches.find(
+        (match) => match.statusLabel === "Ready" && match.groupName !== "Grand Final"
+      );
+      expect(ready).toBeDefined();
+      snapshot = await store.scoreTourneyBracketMatch({
+        matchId: ready.id,
+        opponent1Score: ready.targetScore,
+        opponent2Score: 0,
+        actorUsername: "serviroo",
+        env,
+      });
+    }
+
+    const final = snapshot.matches.find(
+      (match) => match.groupName === "Grand Final"
+    );
+    expect(final.targetScore).toBe(4);
+    await store.startTourneyBracketMatch({
+      matchId: final.id,
+      actorUsername: "yukari",
+      env,
+    });
+    snapshot = await store.scoreTourneyBracketMatch({
+      matchId: final.id,
+      opponent1Score: 3,
+      opponent2Score: 2,
+      actorUsername: "yukari",
+      env,
+    });
+    expect(snapshot.matches.find((match) => match.id === final.id).statusLabel).toBe(
+      "Running"
+    );
+
+    snapshot = await store.scoreTourneyBracketMatch({
+      matchId: final.id,
+      opponent1Score: 4,
+      opponent2Score: 2,
+      actorUsername: "yukari",
+      env,
+    });
+    expect(snapshot.matches.find((match) => match.id === final.id)).toMatchObject({
+      statusLabel: "Completed",
+      opponent1: { score: 4, result: "win" },
+      opponent2: { score: 2, result: "loss" },
+    });
+  });
+
   test("disqualifies a team, advances the opponent, and keeps public data safe", async () => {
     const { store, snapshot } = await generateFourTeamBracket();
     const first = snapshot.matches.find(

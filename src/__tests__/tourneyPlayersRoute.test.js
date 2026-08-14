@@ -110,8 +110,8 @@ describe("tourney players API route", () => {
     mockWithdrawTourneyPlayer.mockReset();
 
     mockReadTourneySessionFromStore.mockResolvedValue({
-      username: "yukari",
-      role: "caster",
+      username: "serviroo",
+      role: "owner",
     });
     mockGetClientAddressFromHeaders.mockReturnValue("127.0.0.1");
     mockCheckTourneyRateLimit.mockReturnValue({ ok: true });
@@ -148,7 +148,7 @@ describe("tourney players API route", () => {
       tokenHash: "",
       playerId: "player_1",
       purpose: "approve",
-      actorUsername: "yukari",
+      actorUsername: "serviroo",
       approvedRolePlay: "Support",
     });
     expect(mockEnqueueTourneyEmailDispatch).toHaveBeenCalledWith({
@@ -186,7 +186,7 @@ describe("tourney players API route", () => {
     expect(mockApplyRegistrationDecision).not.toHaveBeenCalled();
   });
 
-  test("allows admins and casters to update public player details", async () => {
+  test("allows owners to update public player details", async () => {
     mockUpdateTourneyPlayerDetails.mockResolvedValue({
       id: "player_1",
       displayName: "Skinz",
@@ -227,7 +227,7 @@ describe("tourney players API route", () => {
         registrationPool: "substitute",
         twitchUsername: "skinz_ow",
       },
-      actorUsername: "yukari",
+      actorUsername: "serviroo",
     });
   });
 
@@ -258,7 +258,7 @@ describe("tourney players API route", () => {
     expect(mockUpdateTourneyPlayerApprovedRole).toHaveBeenCalledWith({
       playerId: "player_1",
       rolePlay: "Flex",
-      actorUsername: "yukari",
+      actorUsername: "serviroo",
     });
   });
 
@@ -266,13 +266,13 @@ describe("tourney players API route", () => {
     mockWithdrawTourneyPlayer.mockResolvedValue({
       id: "player_1",
       status: "withdrawn",
-      withdrawnBy: "yukari",
+      withdrawnBy: "serviroo",
     });
     mockListManageTourneyPlayers.mockResolvedValue([
       {
         id: "player_1",
         status: "withdrawn",
-        withdrawnBy: "yukari",
+        withdrawnBy: "serviroo",
       },
     ]);
 
@@ -287,7 +287,7 @@ describe("tourney players API route", () => {
     expect(mockListManageTourneyPlayers).toHaveBeenCalled();
     expect(mockWithdrawTourneyPlayer).toHaveBeenCalledWith({
       playerId: "player_1",
-      actorUsername: "yukari",
+      actorUsername: "serviroo",
     });
   });
 
@@ -308,12 +308,30 @@ describe("tourney players API route", () => {
     expect(response.status).toBe(200);
     expect(mockUpdateTourneyRegistrationConfig).toHaveBeenCalledWith({
       teamCount: 10,
-      actorUsername: "yukari",
+      actorUsername: "serviroo",
     });
     expect(body.capacity).toMatchObject({
       teamCount: 10,
       roles: [{ role: "Support", cap: 20, mainCount: 16 }],
     });
+  });
+
+  test("blocks casters from Manage player mutations", async () => {
+    mockReadTourneySessionFromStore.mockResolvedValue({
+      username: "yukari",
+      role: "caster",
+    });
+
+    const response = await POST(
+      makeJsonRequest({
+        action: "update-details",
+        playerId: "player_1",
+        displayName: "Skinz",
+      })
+    );
+
+    expect(response.status).toBe(404);
+    expect(mockUpdateTourneyPlayerDetails).not.toHaveBeenCalled();
   });
 
   test("blocks non-admin users from updating player details", async () => {

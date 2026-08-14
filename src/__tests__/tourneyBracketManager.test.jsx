@@ -1,9 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import TourneyBracketManager from "../../app/tourney/TourneyBracketManager";
 
-jest.mock("../../app/tourney/TourneyBracketView", () => () => (
-  <div data-testid="bracket-view" />
-));
+let mockRenderControls;
+
+jest.mock("../../app/tourney/TourneyBracketView", () => (props) => {
+  mockRenderControls = props.renderControls;
+  return <div data-testid="bracket-view" />;
+});
 
 test("renders an operations-only desk without owner setup controls", () => {
   render(
@@ -50,6 +53,38 @@ test("renders an operations-only desk without owner setup controls", () => {
   expect(screen.getByText("Recent Bracket Activity (1)").closest("details")).not.toHaveAttribute(
     "open"
   );
+});
+
+test("renders controls only for the caster's assigned matches", () => {
+  render(
+    <TourneyBracketManager
+      currentRole="caster"
+      currentUsername="yukari"
+      operationsOnly
+      initialSnapshot={{ generated: true, teams: [], matches: [], audit: [] }}
+    />
+  );
+
+  const match = {
+    id: 22,
+    displayLabel: "Grand Final",
+    statusLabel: "Ready",
+    targetScore: 4,
+    schedule: { casterIds: [1, 2] },
+    opponent1: { teamId: "team-1", name: "Alpha", score: "" },
+    opponent2: { teamId: "team-2", name: "Bravo", score: "" },
+  };
+  const { rerender } = render(mockRenderControls(match));
+  expect(screen.getByRole("button", { name: "Start live" })).toBeInTheDocument();
+
+  rerender(
+    mockRenderControls({
+      ...match,
+      id: 13,
+      schedule: { casterIds: [6] },
+    })
+  );
+  expect(screen.queryByRole("button", { name: "Start live" })).toBeNull();
 });
 
 test("renders database audit timestamps without treating Date objects as children", () => {
