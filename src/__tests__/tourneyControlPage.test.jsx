@@ -14,8 +14,12 @@ jest.mock("../../app/tourney/TourneyShared", () => ({
   ),
   RouteTitle: ({ children }) => <header>{children}</header>,
   Section: ({ children }) => <section>{children}</section>,
-  TourneyShell: ({ activeHref, children, wide }) => (
-    <main data-active-href={activeHref} data-wide={wide ? "true" : "false"}>
+  TourneyShell: ({ activeHref, children, performanceMode, wide }) => (
+    <main
+      data-active-href={activeHref}
+      data-performance-mode={performanceMode ? "true" : "false"}
+      data-wide={wide ? "true" : "false"}
+    >
       {children}
     </main>
   ),
@@ -59,6 +63,7 @@ describe("Tourney control page", () => {
     const shell = screen.getByRole("main");
     expect(shell).toHaveAttribute("data-active-href", "/tourney/control");
     expect(shell).toHaveAttribute("data-wide", "true");
+    expect(shell).toHaveAttribute("data-performance-mode", "true");
     expect(mockGetTourneyBracketSnapshot).toHaveBeenCalledWith({
       includeAudit: true,
     });
