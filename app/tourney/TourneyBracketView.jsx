@@ -395,10 +395,17 @@ export default function TourneyBracketView({
     return map;
   }, [grouped]);
   const treeRef = useRef(null);
+  const boardRef = useRef(null);
   const bandRefs = useRef(new Map());
   const matchRefs = useRef(new Map());
   const [connectors, setConnectors] = useState({ bands: {}, finals: [] });
   const [matchOffsets, setMatchOffsets] = useState({});
+  const [scrollMetrics, setScrollMetrics] = useState({
+    maxScroll: 0,
+    hasOverflow: false,
+  });
+  const [scrollLeft, setScrollLeft] = useState(0);
+  const [pinnedRailStyle, setPinnedRailStyle] = useState(null);
 
   const registerBand = useCallback(
     (groupName) => (node) => {
@@ -417,6 +424,102 @@ export default function TourneyBracketView({
     },
     []
   );
+
+  const syncHorizontalScroll = useCallback((event) => {
+    setScrollLeft(event.currentTarget.scrollLeft);
+  }, []);
+
+  const setHorizontalScroll = useCallback(
+    (value) => {
+      const nextScrollLeft = Math.min(
+        Math.max(Number(value) || 0, 0),
+        scrollMetrics.maxScroll
+      );
+      if (
+        boardRef.current &&
+        boardRef.current.scrollLeft !== nextScrollLeft
+      ) {
+        boardRef.current.scrollLeft = nextScrollLeft;
+      }
+      setScrollLeft(nextScrollLeft);
+    },
+    [scrollMetrics.maxScroll]
+  );
+
+  useLayoutEffect(() => {
+    const board = boardRef.current;
+    const tree = treeRef.current;
+    if (!board || !tree) return undefined;
+
+    const measureScroll = () => {
+      const contentWidth = Math.max(board.scrollWidth, tree.scrollWidth);
+      const maxScroll = Math.max(0, contentWidth - board.clientWidth);
+      const hasOverflow = maxScroll > 1;
+      setScrollMetrics((current) =>
+        current.maxScroll === maxScroll && current.hasOverflow === hasOverflow
+          ? current
+          : { maxScroll, hasOverflow }
+      );
+      if (board.scrollLeft > maxScroll) board.scrollLeft = maxScroll;
+      setScrollLeft((current) => Math.min(current, maxScroll));
+    };
+
+    measureScroll();
+    const resizeObserver = new ResizeObserver(measureScroll);
+    resizeObserver.observe(board);
+    resizeObserver.observe(tree);
+    window.addEventListener("resize", measureScroll);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", measureScroll);
+    };
+  }, [grouped]);
+
+  useLayoutEffect(() => {
+    const board = boardRef.current;
+    if (!board || !scrollMetrics.hasOverflow) {
+      setPinnedRailStyle(null);
+      return undefined;
+    }
+
+    let frameId = 0;
+    const measurePinnedRails = () => {
+      frameId = 0;
+      const rect = board.getBoundingClientRect();
+      const topOffset = 88;
+      const bottomOffset = 8;
+      const railHeight = 30;
+      const isVisible =
+        rect.bottom > topOffset + railHeight &&
+        rect.top < window.innerHeight - bottomOffset - railHeight;
+
+      setPinnedRailStyle((current) => {
+        if (!isVisible) return current === null ? current : null;
+        if (current?.left === rect.left && current?.width === rect.width) {
+          return current;
+        }
+        return { left: rect.left, width: rect.width };
+      });
+    };
+    const scheduleMeasure = () => {
+      if (frameId) cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(measurePinnedRails);
+    };
+
+    scheduleMeasure();
+    const resizeObserver = new ResizeObserver(scheduleMeasure);
+    resizeObserver.observe(board);
+    window.addEventListener("resize", scheduleMeasure);
+    window.addEventListener("scroll", scheduleMeasure, { passive: true });
+
+    return () => {
+      if (frameId) cancelAnimationFrame(frameId);
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", scheduleMeasure);
+      window.removeEventListener("scroll", scheduleMeasure);
+    };
+  }, [scrollMetrics.hasOverflow]);
 
   useLayoutEffect(() => {
     let frameId = 0;
@@ -896,38 +999,90 @@ export default function TourneyBracketView({
     );
   };
 
+  const scrollRailClass = `tourney-bracket-scrollbar${
+    scrollMetrics.hasOverflow ? "" : " is-hidden"
+  }`;
+  const scrollRangeValue = Math.min(scrollLeft, scrollMetrics.maxScroll);
+  const pinnedRailClass = pinnedRailStyle ? " is-pinned" : "";
+  const pinnedStyle = pinnedRailStyle
+    ? { left: `${pinnedRailStyle.left}px`, width: `${pinnedRailStyle.width}px` }
+    : undefined;
+
   return (
-    <div className="tourney-bracket-board" aria-label="Tournament bracket">
-      <div
-        className="tourney-bracket-tree"
-        ref={treeRef}
-        style={
-          grandFinal
-            ? undefined
-            : { "--bracket-final-lane-width": "0px" }
-        }
-      >
-        <svg
-          className="tourney-bracket-stage-connectors"
-          aria-hidden="true"
-          focusable="false"
+    <div className="tourney-bracket-scroll-shell">
+      <div className="tourney-bracket-scrollbar-slot is-top">
+        <div
+          className={`${scrollRailClass} is-top${pinnedRailClass}`}
+          style={pinnedStyle}
         >
-          {connectors.finals.map((path) => (
-            <path
-              className={`tourney-bracket-stage-path ${path.className}`}
-              d={path.d}
-              key={path.id}
-            />
-          ))}
-        </svg>
-        <div className="tourney-bracket-lanes">
-          {laneGroups.map((group) => renderGroup(group))}
+          <input
+            aria-label="Scroll tournament bracket horizontally from the top"
+            className="tourney-bracket-scrollbar-input"
+            disabled={!scrollMetrics.hasOverflow}
+            max={scrollMetrics.maxScroll}
+            min={0}
+            onChange={(event) => setHorizontalScroll(event.currentTarget.value)}
+            step={1}
+            type="range"
+            value={scrollRangeValue}
+          />
         </div>
-        {grandFinal ? (
-          <aside className="tourney-finals-rail">
-            {renderGroup(grandFinal, { finals: true })}
-          </aside>
-        ) : null}
+      </div>
+      <div
+        className="tourney-bracket-board"
+        aria-label="Tournament bracket"
+        onScroll={syncHorizontalScroll}
+        ref={boardRef}
+      >
+        <div
+          className="tourney-bracket-tree"
+          ref={treeRef}
+          style={
+            grandFinal
+              ? undefined
+              : { "--bracket-final-lane-width": "0px" }
+          }
+        >
+          <svg
+            className="tourney-bracket-stage-connectors"
+            aria-hidden="true"
+            focusable="false"
+          >
+            {connectors.finals.map((path) => (
+              <path
+                className={`tourney-bracket-stage-path ${path.className}`}
+                d={path.d}
+                key={path.id}
+              />
+            ))}
+          </svg>
+          <div className="tourney-bracket-lanes">
+            {laneGroups.map((group) => renderGroup(group))}
+          </div>
+          {grandFinal ? (
+            <aside className="tourney-finals-rail">
+              {renderGroup(grandFinal, { finals: true })}
+            </aside>
+          ) : null}
+        </div>
+      </div>
+      <div className="tourney-bracket-scrollbar-slot is-bottom">
+        <div
+          className={`${scrollRailClass} is-bottom${pinnedRailClass}`}
+          style={pinnedStyle}
+        >
+          <input
+            aria-label="Scroll tournament bracket horizontally from the bottom"
+            className="tourney-bracket-scrollbar-input"
+            disabled={!scrollMetrics.hasOverflow}
+            max={scrollMetrics.maxScroll}
+            min={0}
+            onChange={(event) => setHorizontalScroll(event.currentTarget.value)}
+            step={1}
+            type="range"
+            value={scrollRangeValue}
+          />
+        </div>
       </div>
     </div>
   );

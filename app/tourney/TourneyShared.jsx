@@ -3350,6 +3350,115 @@ export const TourneyStyles = () => (
       color: var(--tourney-text);
     }
 
+    .tourney-bracket-scroll-shell {
+      position: relative;
+      width: 100%;
+      min-width: 0;
+    }
+
+    .tourney-bracket-scrollbar-slot {
+      position: relative;
+      width: 100%;
+      height: 30px;
+    }
+
+    .tourney-bracket-scrollbar-slot.is-top {
+      margin-bottom: 8px;
+    }
+
+    .tourney-bracket-scrollbar-slot.is-bottom {
+      margin-top: 8px;
+    }
+
+    .tourney-bracket-scrollbar {
+      position: relative;
+      z-index: 18;
+      display: flex;
+      align-items: center;
+      box-sizing: border-box;
+      width: 100%;
+      max-width: 100%;
+      height: 30px;
+      border: 1px solid var(--tourney-border-accent);
+      border-radius: 9999px;
+      background: var(--tourney-surface-strong);
+      box-shadow: var(--shadow-button);
+      padding: 0 8px;
+    }
+
+    .tourney-bracket-scrollbar.is-pinned {
+      position: fixed;
+    }
+
+    .tourney-bracket-scrollbar.is-pinned.is-top {
+      top: calc(var(--tourney-nav-offset, 5rem) + 8px);
+    }
+
+    .tourney-bracket-scrollbar.is-pinned.is-bottom {
+      bottom: 8px;
+    }
+
+    .tourney-bracket-scrollbar.is-hidden,
+    .tourney-bracket-scrollbar-slot:has(.tourney-bracket-scrollbar.is-hidden),
+    .tourney-overlay .tourney-bracket-scrollbar,
+    .tourney-overlay .tourney-bracket-scrollbar-slot {
+      display: none;
+    }
+
+    .tourney-bracket-scrollbar-input {
+      width: 100%;
+      height: 22px;
+      margin: 0;
+      appearance: none;
+      -webkit-appearance: none;
+      cursor: grab;
+      background: transparent;
+    }
+
+    .tourney-bracket-scrollbar-input:active {
+      cursor: grabbing;
+    }
+
+    .tourney-bracket-scrollbar-input:focus-visible {
+      outline: 2px solid var(--tourney-focus);
+      outline-offset: 3px;
+    }
+
+    .tourney-bracket-scrollbar-input::-webkit-slider-runnable-track {
+      height: 12px;
+      border: 1px solid var(--tourney-border-accent);
+      border-radius: 9999px;
+      background: color-mix(in srgb, var(--tourney-surface-strong) 82%, var(--tourney-accent));
+    }
+
+    .tourney-bracket-scrollbar-input::-webkit-slider-thumb {
+      width: 54px;
+      height: 22px;
+      margin-top: -6px;
+      border: 3px solid var(--tourney-surface-strong);
+      border-radius: 9999px;
+      appearance: none;
+      -webkit-appearance: none;
+      background: linear-gradient(90deg, var(--tourney-accent), var(--tourney-accent-glow));
+      box-shadow: 0 0 12px color-mix(in srgb, var(--tourney-accent-glow) 48%, transparent);
+    }
+
+    .tourney-bracket-scrollbar-input::-moz-range-track {
+      height: 12px;
+      border: 1px solid var(--tourney-border-accent);
+      border-radius: 9999px;
+      background: color-mix(in srgb, var(--tourney-surface-strong) 82%, var(--tourney-accent));
+    }
+
+    .tourney-bracket-scrollbar-input::-moz-range-thumb {
+      width: 48px;
+      height: 16px;
+      border: 3px solid var(--tourney-surface-strong);
+      border-radius: 9999px;
+      background: linear-gradient(90deg, var(--tourney-accent), var(--tourney-accent-glow));
+      box-shadow: 0 0 12px color-mix(in srgb, var(--tourney-accent-glow) 48%, transparent);
+    }
+
     .tourney-bracket-board {
       --bracket-card-width: clamp(13.4rem, 16vw, 15rem);
       --bracket-band-padding: 14px;
@@ -3367,23 +3476,16 @@ export const TourneyStyles = () => (
       overflow-x: auto;
       overflow-y: visible;
       padding: 4px 12px 30px 0;
-      scrollbar-gutter: stable;
-      scrollbar-color: rgba(56, 189, 248, 0.55) rgba(15, 23, 42, 0.45);
+      scrollbar-width: none;
     }
 
     .tourney-bracket-board::-webkit-scrollbar {
-      height: 12px;
+      display: none;
     }
 
-    .tourney-bracket-board::-webkit-scrollbar-track {
-      border-radius: 9999px;
-      background: rgba(15, 23, 42, 0.56);
-    }
-
-    .tourney-bracket-board::-webkit-scrollbar-thumb {
-      border: 2px solid rgba(15, 23, 42, 0.56);
-      border-radius: 9999px;
-      background: linear-gradient(90deg, rgba(34, 211, 238, 0.82), rgba(192, 132, 252, 0.86));
+    .tourney-bracket-page .tourney-bracket-scrollbar,
+    .tourney-bracket-page .tourney-bracket-scrollbar-slot {
+      display: none;
     }
 
     /* Site bracket page only (BracketFitBoard): the tree scales to fill the
@@ -3925,6 +4027,24 @@ export const TourneyStyles = () => (
       color: rgba(148, 163, 184, 0.9);
       font-size: 0.76rem;
       line-height: 1.3;
+    }
+
+    .tourney-audit-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .tourney-audit-row > strong {
+      text-align: left;
+    }
+
+    .tourney-audit-row > span {
+      text-align: center;
+    }
+
+    .tourney-audit-row > small {
+      margin-top: 0;
+      text-align: right;
     }
 
     .tourney-match-side b {
@@ -4603,19 +4723,6 @@ export const TourneyStyles = () => (
 
     .tourney-form-message.is-success {
       color: var(--color-success-text);
-    }
-
-    .tourney-bracket-board {
-      scrollbar-color: var(--tourney-accent) var(--tourney-surface-strong);
-    }
-
-    .tourney-bracket-board::-webkit-scrollbar-track {
-      background: var(--tourney-surface-strong);
-    }
-
-    .tourney-bracket-board::-webkit-scrollbar-thumb {
-      border-color: var(--tourney-surface-strong);
-      background: linear-gradient(90deg, var(--tourney-accent), var(--tourney-accent-glow));
     }
 
     .tourney-bracket-band,
@@ -5440,6 +5547,14 @@ export const TourneyStyles = () => (
     html.low-performance-mode .tourney-page,
     .tourney-page.is-performance-mode {
       background-attachment: scroll !important;
+    }
+
+    .tourney-page.is-performance-mode {
+      overflow: visible;
+    }
+
+    .tourney-page.is-performance-mode #match-control {
+      contain: none !important;
     }
 
     html.low-performance-mode .tourney-nav,
