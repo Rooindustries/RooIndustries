@@ -871,7 +871,7 @@ export default function TourneyBracketView({
                   <p className="tourney-bracket-round-schedule">
                     {roundSchedule.dayLabel} ·{" "}
                     {shortScheduleDate(roundSchedule.dateLabel)} ·{" "}
-                    {roundSchedule.timeLabel} UTC
+                    {roundSchedule.timeLabel} {snapshot.schedule?.timeZone || "PST"}
                   </p>
                 ) : null}
                 <div className="tourney-bracket-stack">

@@ -3331,11 +3331,6 @@ export const TourneyStyles = () => (
       color: var(--caster-color);
     }
 
-    .tourney-bracket-band .tourney-match-card.has-caster-black {
-      outline: 2px solid color-mix(in srgb, var(--tourney-text) 52%, transparent);
-      outline-offset: 2px;
-    }
-
     .tourney-caster-legend li.is-caster-tinted.is-caster-black {
       border-color: color-mix(in srgb, var(--tourney-text) 58%, transparent);
     }
@@ -4659,6 +4654,19 @@ export const TourneyStyles = () => (
         0 18px 42px rgba(2, 6, 23, 0.24);
     }
 
+    .tourney-bracket-band .tourney-match-card.has-caster-black {
+      border-color: #000000;
+      background:
+        linear-gradient(150deg, rgba(0, 0, 0, 0.88), rgba(0, 0, 0, 0.7)),
+        linear-gradient(145deg, var(--tourney-surface), var(--tourney-surface-strong));
+      outline: 2px solid color-mix(in srgb, var(--tourney-text) 58%, transparent);
+      outline-offset: 2px;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        inset 4px 0 0 #000000,
+        0 18px 42px rgba(0, 0, 0, 0.34);
+    }
+
     .tourney-footer {
       color: var(--tourney-text-soft);
     }
@@ -4954,6 +4962,31 @@ export const TourneyStyles = () => (
         inset 4px 0 0 var(--caster-1),
         inset -4px 0 0 var(--caster-2),
         var(--shadow-surface);
+    }
+
+    html[data-theme="dark"] .tourney-bracket-band .tourney-match-card.has-caster-black {
+      border-color: #000000;
+      background:
+        linear-gradient(150deg, rgba(0, 0, 0, 0.96), rgba(0, 0, 0, 0.82)),
+        linear-gradient(145deg, var(--tourney-surface), var(--tourney-surface-strong));
+      outline-color: color-mix(in srgb, var(--tourney-text) 68%, transparent);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        inset 4px 0 0 #000000,
+        0 18px 42px rgba(0, 0, 0, 0.58);
+    }
+
+    html[data-theme="dark"] .tourney-caster-legend li.is-caster-tinted.is-caster-black {
+      border-color: color-mix(in srgb, var(--tourney-text) 62%, transparent);
+    }
+
+    html[data-theme="dark"] .tourney-caster-legend li.is-caster-tinted.is-caster-black::before {
+      border-color: color-mix(in srgb, var(--tourney-text) 86%, transparent);
+      background: #000000;
+    }
+
+    html[data-theme="dark"] .tourney-caster-legend li.is-caster-tinted.is-caster-black b {
+      color: var(--tourney-text);
     }
 
     @media (max-width: 980px) {

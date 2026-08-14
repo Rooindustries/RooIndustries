@@ -115,7 +115,7 @@ describe("tourney bracket store", () => {
       .sort((left, right) => left.publicMatchNumber - right.publicMatchNumber);
 
     expect(snapshot.schedule).toMatchObject({
-      timeZone: "UTC",
+      timeZone: "PST",
       eventDates: ["2026-08-15", "2026-08-16"],
       casters: [
         { id: 1, label: "Yukari + SpankyCheeze", color: "purple" },
