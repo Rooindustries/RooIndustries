@@ -22,6 +22,7 @@ const TELEMETRY_BLOCKED_PREFIXES = [
   "/tourney/forgot",
   "/tourney/reset",
   "/tourney/manage",
+  "/tourney/control",
   "/tourney/payouts",
 ];
 

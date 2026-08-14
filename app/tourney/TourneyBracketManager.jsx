@@ -25,6 +25,7 @@ const auditTimeLabel = (value) =>
 export default function TourneyBracketManager({
   initialSnapshot,
   currentRole = "caster",
+  operationsOnly = false,
 }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [teamForm, setTeamForm] = useState(emptyTeamForm);
@@ -35,6 +36,16 @@ export default function TourneyBracketManager({
 
   const canSetup = currentRole === "owner";
   const teams = snapshot?.teams || [];
+  const matches = (snapshot?.matches || []).filter((match) => !match.autoAdvance);
+  const matchCounts = matches.reduce(
+    (counts, match) => {
+      if (match.statusLabel === "Ready") counts.ready += 1;
+      if (match.statusLabel === "Running") counts.running += 1;
+      if (["Completed", "Archived"].includes(match.statusLabel)) counts.completed += 1;
+      return counts;
+    },
+    { ready: 0, running: 0, completed: 0 }
+  );
   const seededTeams = useMemo(
     () =>
       [...activeTeams(teams)].sort((left, right) => {
@@ -237,7 +248,7 @@ export default function TourneyBracketManager({
 
   return (
     <div className="tourney-bracket-manager">
-      {canSetup ? (
+      {canSetup && !operationsOnly ? (
         <div className="tourney-bracket-admin-grid">
           <form className="tourney-form" onSubmit={handleTeamSubmit}>
             <p className="tourney-kicker">Teams</p>
@@ -331,14 +342,31 @@ export default function TourneyBracketManager({
 
       <div className="tourney-bracket-toolbar">
         <span>
-          <strong>{snapshot?.generated ? "Live bracket" : "Draft bracket"}</strong>
+          <strong>
+            {operationsOnly
+              ? "Live match desk"
+              : snapshot?.generated
+                ? "Live bracket"
+                : "Draft bracket"}
+          </strong>
           <small>
-            {canSetup
-              ? "Owner controls setup and reset."
-              : "Casters can score, forfeit, DQ, and safe-reopen matches."}
+            {operationsOnly
+              ? `${matchCounts.running} live · ${matchCounts.ready} ready · ${matchCounts.completed} completed`
+              : canSetup
+                ? "Owner controls setup and reset."
+                : "Casters can score, forfeit, DQ, and safe-reopen matches."}
           </small>
         </span>
-        {canSetup ? (
+        {operationsOnly ? (
+          <div className="tourney-bracket-actions">
+            <a className="tourney-owner-link" href="/tourney/bracket">
+              Public bracket
+            </a>
+            <a className="tourney-owner-link" href="/tourney/overlay">
+              Stream overlays
+            </a>
+          </div>
+        ) : canSetup ? (
           <div className="tourney-bracket-actions">
             <button
               className="tourney-owner-button"
@@ -359,6 +387,12 @@ export default function TourneyBracketManager({
           </div>
         ) : null}
       </div>
+
+      {operationsOnly && message ? (
+        <p className="tourney-owner-message" aria-live="polite">
+          {message}
+        </p>
+      ) : null}
 
       <TourneyBracketView snapshot={snapshot} renderControls={matchControls} />
 
@@ -391,7 +425,11 @@ export default function TourneyBracketManager({
         </div>
       ) : null}
 
-      {message ? <p className="tourney-owner-message">{message}</p> : null}
+      {!operationsOnly && message ? (
+        <p className="tourney-owner-message" aria-live="polite">
+          {message}
+        </p>
+      ) : null}
     </div>
   );
 }
