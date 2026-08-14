@@ -18,7 +18,15 @@ test("renders an operations-only desk without owner setup controls", () => {
           { id: "running", statusLabel: "Running", autoAdvance: false },
           { id: "completed", statusLabel: "Completed", autoAdvance: false },
         ],
-        audit: [],
+        audit: [
+          {
+            id: "audit-1",
+            action: "bracket.generate",
+            actorUsername: "serviroo",
+            reason: "",
+            createdAt: "2026-08-04T21:50:29.870Z",
+          },
+        ],
       }}
     />
   );
@@ -36,6 +44,9 @@ test("renders an operations-only desk without owner setup controls", () => {
   expect(screen.queryByText("Add team")).not.toBeInTheDocument();
   expect(screen.queryByText("Generate bracket")).not.toBeInTheDocument();
   expect(screen.queryByText("Reset bracket")).not.toBeInTheDocument();
+  expect(screen.getByText("Recent Bracket Activity (1)").closest("details")).not.toHaveAttribute(
+    "open"
+  );
 });
 
 test("renders database audit timestamps without treating Date objects as children", () => {
