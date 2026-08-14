@@ -5401,11 +5401,14 @@ export const TourneyStyles = () => (
       }
     }
 
-    html.low-performance-mode .tourney-page {
+    html.low-performance-mode .tourney-page,
+    .tourney-page.is-performance-mode {
       background-attachment: scroll;
     }
 
     html.low-performance-mode .tourney-nav,
+    .tourney-page.is-performance-mode .tourney-nav,
+    .tourney-page.is-performance-mode .tourney-mobile-panel,
     html.low-performance-mode .tourney-mobile-panel {
       -webkit-backdrop-filter: none !important;
       backdrop-filter: none !important;
@@ -5417,8 +5420,20 @@ export const TourneyStyles = () => (
 
     html.low-performance-mode .tourney-mobile-panel::before,
     html.low-performance-mode .app-bg-grid-layer,
-    html.low-performance-mode .app-bg-radial-layer {
+    html.low-performance-mode .app-bg-radial-layer,
+    .tourney-page.is-performance-mode .tourney-mobile-panel::before,
+    .tourney-page.is-performance-mode .app-bg-grid-layer,
+    .tourney-page.is-performance-mode .app-bg-radial-layer {
       display: none !important;
+    }
+
+    .tourney-page.is-performance-mode .tourney-section {
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+
+    .tourney-page.is-performance-mode .tourney-bracket-stage-path {
+      filter: none;
     }
 
     html.low-performance-mode .tourney-brand-logo img,
@@ -5921,13 +5936,21 @@ export const RouteTitle = ({ eyebrow, title, accent, children }) => (
   </section>
 );
 
-export const TourneyShell = ({ session, activeHref = "", children, wide = false }) => (
+export const TourneyShell = ({
+  session,
+  activeHref = "",
+  children,
+  wide = false,
+  performanceMode = false,
+}) => (
   <>
     <TourneyTelemetry />
     <TourneyStyles />
     <div
       id="app-shell"
-      className="tourney-page relative min-h-screen flex flex-col overflow-hidden bg-scroll md:bg-fixed"
+      className={`tourney-page relative min-h-screen flex flex-col overflow-hidden bg-scroll${
+        performanceMode ? " is-performance-mode" : " md:bg-fixed"
+      }`}
     >
       <div className="app-bg-grid-layer absolute inset-0" />
       <div className="app-bg-radial-layer absolute inset-0" />

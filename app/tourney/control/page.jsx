@@ -56,7 +56,12 @@ export default async function TourneyControlPage({ searchParams }) {
   }));
 
   return (
-    <TourneyShell session={session} activeHref="/tourney/control" wide>
+    <TourneyShell
+      session={session}
+      activeHref="/tourney/control"
+      wide
+      performanceMode
+    >
       <RouteTitle eyebrow="Tournament operations" title="Match" accent="Control">
         Score matches, advance winners, handle forfeits or disqualifications, and
         safely reopen completed results from one focused desk.
