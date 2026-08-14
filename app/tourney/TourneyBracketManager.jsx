@@ -413,8 +413,10 @@ export default function TourneyBracketManager({
       ) : null}
 
       {snapshot?.audit?.length > 0 ? (
-        <div className="tourney-bracket-audit">
-          <p className="tourney-kicker">Recent Bracket Activity</p>
+        <details className="tourney-bracket-audit" open={!operationsOnly}>
+          <summary className="tourney-kicker">
+            Recent Bracket Activity ({snapshot.audit.length})
+          </summary>
           {snapshot.audit.map((event) => (
             <div className="tourney-audit-row" key={event.id}>
               <strong>{event.action}</strong>
@@ -422,7 +424,7 @@ export default function TourneyBracketManager({
               <small>{event.reason || auditTimeLabel(event.createdAt)}</small>
             </div>
           ))}
-        </div>
+        </details>
       ) : null}
 
       {!operationsOnly && message ? (
