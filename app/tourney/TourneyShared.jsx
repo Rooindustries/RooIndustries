@@ -3331,6 +3331,23 @@ export const TourneyStyles = () => (
       color: var(--caster-color);
     }
 
+    .tourney-bracket-band .tourney-match-card.has-caster-black {
+      outline: 2px solid color-mix(in srgb, var(--tourney-text) 52%, transparent);
+      outline-offset: 2px;
+    }
+
+    .tourney-caster-legend li.is-caster-tinted.is-caster-black {
+      border-color: color-mix(in srgb, var(--tourney-text) 58%, transparent);
+    }
+
+    .tourney-caster-legend li.is-caster-tinted.is-caster-black::before {
+      border-color: color-mix(in srgb, var(--tourney-text) 82%, transparent);
+    }
+
+    .tourney-caster-legend li.is-caster-tinted.is-caster-black b {
+      color: var(--tourney-text);
+    }
+
     .tourney-bracket-board {
       --bracket-card-width: clamp(13.4rem, 16vw, 15rem);
       --bracket-band-padding: 14px;
@@ -4937,29 +4954,6 @@ export const TourneyStyles = () => (
         inset 4px 0 0 var(--caster-1),
         inset -4px 0 0 var(--caster-2),
         var(--shadow-surface);
-    }
-
-    /* LightOW's black stays pure black in Blackout too. A neutral ring is
-       what separates the black-tinted card and legend swatch from the black
-       surface without recoloring the highlight itself. The outline draws
-       outside the border box, so card dimensions and connector geometry are
-       untouched, and the ring stays neutral so win/loss side colors and the
-       no-blue chrome rule are unaffected. */
-    html[data-theme="dark"] .tourney-bracket-band .tourney-match-card.has-caster-black {
-      outline: 1px solid var(--tourney-border-strong);
-      outline-offset: 2px;
-    }
-
-    html[data-theme="dark"] .tourney-caster-legend li.is-caster-tinted.is-caster-black {
-      border-color: var(--tourney-border-strong);
-    }
-
-    html[data-theme="dark"] .tourney-caster-legend li.is-caster-tinted.is-caster-black::before {
-      border-color: rgba(255, 255, 255, 0.72);
-    }
-
-    html[data-theme="dark"] .tourney-caster-legend li.is-caster-tinted.is-caster-black b {
-      color: var(--tourney-text);
     }
 
     @media (max-width: 980px) {
