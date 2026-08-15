@@ -816,58 +816,52 @@ export const TourneyStyles = () => (
     }
 
     .tourney-hero-cta {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      justify-content: center;
-      gap: clamp(1.5rem, 4vw, 3.5rem);
-      margin: clamp(1rem, 2vw, 1.5rem) auto 0;
-      padding-bottom: 1rem;
-      border-bottom: 1px solid color-mix(in srgb, var(--tourney-accent) 28%, transparent);
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem;
+      width: min(100%, 64rem);
+      margin: clamp(1rem, 2vw, 1.5rem) auto 1rem;
     }
 
     .tourney-hero-cta a {
-      position: relative;
-      display: inline-flex;
+      display: flex;
       align-items: center;
       justify-content: center;
-      gap: 0.65rem;
-      color: var(--tourney-accent);
-      padding: 0.4rem 0;
-      font-size: clamp(1rem, 1.35vw, 1.18rem);
-      font-weight: 850;
-      letter-spacing: 0.01em;
+      gap: 0.75rem;
+      min-height: 76px;
+      border: 1px solid var(--tourney-border-accent);
+      border-radius: 0.95rem;
+      color: var(--tourney-text);
+      background:
+        linear-gradient(145deg, var(--tourney-surface), var(--tourney-surface-strong)),
+        radial-gradient(circle at 0% 0%, var(--color-surface-hover-accent), transparent 42%);
+      padding: 1rem 1.25rem;
+      box-shadow:
+        inset 0 1px 0 color-mix(in srgb, var(--tourney-text) 8%, transparent),
+        0 0 24px color-mix(in srgb, var(--tourney-accent-glow) 12%, transparent);
+      font-size: clamp(1.05rem, 1.5vw, 1.28rem);
+      font-weight: 860;
+      line-height: 1.2;
+      text-align: center;
       text-decoration: none;
-      transition: color 160ms ease, text-shadow 160ms ease;
-    }
-
-    .tourney-hero-cta a::after {
-      position: absolute;
-      right: 0;
-      bottom: 0;
-      left: 0;
-      height: 2px;
-      background: var(--tourney-accent);
-      content: "";
-      transform: scaleX(0.28);
-      transition: transform 160ms ease;
+      transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
     }
 
     .tourney-hero-cta a:hover,
     .tourney-hero-cta a:focus-visible {
-      color: var(--tourney-accent-glow);
-      text-shadow: 0 0 16px color-mix(in srgb, var(--tourney-accent-glow) 36%, transparent);
-    }
-
-    .tourney-hero-cta a:hover::after,
-    .tourney-hero-cta a:focus-visible::after {
-      transform: scaleX(1);
+      border-color: var(--tourney-accent-soft);
+      color: var(--tourney-accent);
+      background:
+        linear-gradient(145deg, var(--tourney-surface), var(--tourney-surface-strong)),
+        radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--tourney-accent) 18%, transparent), transparent 48%);
+      transform: translateY(-2px);
     }
 
     .tourney-hero-cta svg {
-      width: 1.35rem;
-      height: 1.35rem;
+      width: 1.4rem;
+      height: 1.4rem;
       flex: 0 0 auto;
+      color: var(--tourney-accent);
     }
 
     .tourney-host-showcase {
@@ -5614,9 +5608,9 @@ export const TourneyStyles = () => (
       }
 
       .tourney-hero-cta {
-        display: grid;
+        grid-template-columns: 1fr;
         gap: 0.85rem;
-        width: min(100%, 22rem);
+        width: 100%;
       }
 
       .tourney-route-title {
