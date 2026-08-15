@@ -230,12 +230,12 @@ const TOURNEY_BRACKET_MATCH_SCHEDULE = Object.freeze({
   "losers:2:3": Object.freeze({
     matchNumber: 13,
     casterIds: Object.freeze([6, 7]),
-    slotLabels: Object.freeze({ opponent1: "Loser of 6", opponent2: "Loser of 3" }),
+    slotLabels: Object.freeze({ opponent1: "Loser of 3", opponent2: "Loser of 6" }),
   }),
   "losers:2:4": Object.freeze({
     matchNumber: 14,
     casterIds: Object.freeze([4]),
-    slotLabels: Object.freeze({ opponent1: "Loser of 5", opponent2: "Loser of 4" }),
+    slotLabels: Object.freeze({ opponent1: "Loser of 4", opponent2: "Loser of 5" }),
   }),
   "losers:3:1": Object.freeze({
     matchNumber: 15,
@@ -1195,6 +1195,63 @@ const summarizeLowerOpeningRound = (snapshot) =>
       status: match.statusLabel,
     }));
 
+const EXACT_LOWER_OPENING_ROUTES = Object.freeze([
+  Object.freeze({ matchNumber: 11, opponent1Source: 8, opponent2Source: 1 }),
+  Object.freeze({ matchNumber: 12, opponent1Source: 7, opponent2Source: 2 }),
+  Object.freeze({ matchNumber: 13, opponent1Source: 3, opponent2Source: 6 }),
+  Object.freeze({ matchNumber: 14, opponent1Source: 4, opponent2Source: 5 }),
+]);
+
+const losingTeamId = (match) =>
+  [match?.opponent1, match?.opponent2].find((side) => side?.result === "loss")
+    ?.teamId || "";
+
+const alignCompletedLowerOpeningSides = async (env = process.env) => {
+  const snapshot = await getTourneyBracketSnapshot({ env });
+  const byNumber = new Map(
+    snapshot.matches.map((match) => [match.publicMatchNumber, match])
+  );
+  const storage = createStorage(env);
+  const changed = [];
+
+  for (const route of EXACT_LOWER_OPENING_ROUTES) {
+    const target = byNumber.get(route.matchNumber);
+    const expectedOpponent1 = losingTeamId(byNumber.get(route.opponent1Source));
+    const expectedOpponent2 = losingTeamId(byNumber.get(route.opponent2Source));
+    if (!target || !expectedOpponent1 || !expectedOpponent2) continue;
+    if (
+      target.opponent1.teamId === expectedOpponent1 &&
+      target.opponent2.teamId === expectedOpponent2
+    ) continue;
+    if (
+      target.opponent1.teamId !== expectedOpponent2 ||
+      target.opponent2.teamId !== expectedOpponent1 ||
+      Number(target.status) > 2
+    ) continue;
+
+    const rawMatch = await storage.select("match", target.id);
+    const opponent1 = clone(rawMatch.opponent2);
+    const opponent2 = clone(rawMatch.opponent1);
+    if (rawMatch.opponent1?.position !== undefined) {
+      opponent1.position = rawMatch.opponent1.position;
+    } else {
+      delete opponent1.position;
+    }
+    if (rawMatch.opponent2?.position !== undefined) {
+      opponent2.position = rawMatch.opponent2.position;
+    } else {
+      delete opponent2.position;
+    }
+    await storage.update("match", target.id, {
+      ...rawMatch,
+      opponent1,
+      opponent2,
+    });
+    changed.push(route.matchNumber);
+  }
+  return changed;
+};
+
 export const repairTourneyLowerBracketRouting = async ({
   actorUsername,
   env = process.env,
@@ -1218,10 +1275,6 @@ export const repairTourneyLowerBracketRouting = async ({
       }
 
       const seedOrdering = [...(stage.settings?.seedOrdering || [])];
-      if (seedOrdering[2] === "reverse") {
-        return getTourneyBracketSnapshot({ includeAudit: true, env });
-      }
-
       const matches = data.match?.filter(
         (match) => match.round_id === targetRound.id
       ) || [];
@@ -1233,12 +1286,19 @@ export const repairTourneyLowerBracketRouting = async ({
       }
 
       const before = await getTourneyBracketSnapshot({ env });
-      await createManager(env).update.roundOrdering(targetRound.id, "reverse");
-      seedOrdering[2] = "reverse";
-      await storage.update("stage", stage.id, {
-        ...stage,
-        settings: { ...stage.settings, seedOrdering },
-      });
+      const orderingChanged = seedOrdering[2] !== "reverse";
+      if (orderingChanged) {
+        await createManager(env).update.roundOrdering(targetRound.id, "reverse");
+        seedOrdering[2] = "reverse";
+        await storage.update("stage", stage.id, {
+          ...stage,
+          settings: { ...stage.settings, seedOrdering },
+        });
+      }
+      const sideOrderChanges = await alignCompletedLowerOpeningSides(env);
+      if (!orderingChanged && sideOrderChanges.length === 0) {
+        return getTourneyBracketSnapshot({ includeAudit: true, env });
+      }
       const updatedAt = nowIso();
       const meta = await readMeta(env);
       await writeMeta({
@@ -1253,6 +1313,7 @@ export const repairTourneyLowerBracketRouting = async ({
         payload: {
           before: summarizeLowerOpeningRound(before),
           after: summarizeLowerOpeningRound(after),
+          sideOrderChanges,
         },
         env,
       });
@@ -1353,6 +1414,8 @@ const updateMatchResult = async ({
       ...(opponent2Forfeit ? { forfeit: true } : {}),
     },
   });
+
+  await alignCompletedLowerOpeningSides(env);
 
   await recordAudit({
     action,

@@ -166,10 +166,10 @@ describe("tourney bracket store", () => {
       slotLabels: { opponent1: "Loser of 7", opponent2: "Loser of 2" },
     });
     expect(scheduled.find((match) => match.publicMatchNumber === 13)).toMatchObject({
-      slotLabels: { opponent1: "Loser of 6", opponent2: "Loser of 3" },
+      slotLabels: { opponent1: "Loser of 3", opponent2: "Loser of 6" },
     });
     expect(scheduled.find((match) => match.publicMatchNumber === 14)).toMatchObject({
-      slotLabels: { opponent1: "Loser of 5", opponent2: "Loser of 4" },
+      slotLabels: { opponent1: "Loser of 4", opponent2: "Loser of 5" },
     });
     expect(scheduled.find((match) => match.publicMatchNumber === 21)).toMatchObject({
       schedule: { dayLabel: "Day 2", timeLabel: "3:30 PM", casterIds: [1, 2] },
@@ -251,8 +251,8 @@ describe("tourney bracket store", () => {
 
     expectSides(11, outcomes.get(8).loser, outcomes.get(1).loser);
     expectSides(12, outcomes.get(7).loser, outcomes.get(2).loser);
-    expectSides(13, outcomes.get(6).loser, outcomes.get(3).loser);
-    expectSides(14, outcomes.get(5).loser, outcomes.get(4).loser);
+    expectSides(13, outcomes.get(3).loser, outcomes.get(6).loser);
+    expectSides(14, outcomes.get(4).loser, outcomes.get(5).loser);
 
     for (const matchNumber of [9, 10, 11, 12, 13, 14]) {
       await score(matchNumber);
@@ -409,8 +409,14 @@ describe("tourney bracket store", () => {
     const matchSixLoser = getMatch(6).opponent2.name;
     await complete(5);
     await complete(6);
-    expect(getMatch(13).opponent1.name).toBe(matchSixLoser);
-    expect(getMatch(14).opponent1.name).toBe(matchFiveLoser);
+    expect(getMatch(13)).toMatchObject({
+      opponent1: { name: outcomes[3].loser },
+      opponent2: { name: matchSixLoser },
+    });
+    expect(getMatch(14)).toMatchObject({
+      opponent1: { name: outcomes[4].loser },
+      opponent2: { name: matchFiveLoser },
+    });
 
     memory.entities.stage[0].settings.seedOrdering[2] = "natural";
     snapshot = await store.startTourneyBracketMatch({
