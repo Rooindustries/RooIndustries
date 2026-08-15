@@ -24,14 +24,14 @@ export default function BracketFitBoard({ children }) {
     const stage = stageRef.current;
     const content = contentRef.current;
     if (!stage || !content) return undefined;
+    const parent = stage.parentElement;
 
     let frameId = 0;
     const measure = () => {
       const baseWidth = content.offsetWidth;
       const baseHeight = content.offsetHeight;
       if (!baseWidth || !baseHeight) return;
-      const parentWidth =
-        stage.parentElement?.clientWidth || stage.clientWidth;
+      const parentWidth = parent?.clientWidth || stage.clientWidth;
       const viewportWidth =
         window.visualViewport?.width ||
         window.innerWidth ||
@@ -65,7 +65,7 @@ export default function BracketFitBoard({ children }) {
       typeof ResizeObserver !== "undefined"
         ? new ResizeObserver(scheduleMeasure)
         : null;
-    resizeObserver?.observe(stage);
+    if (parent) resizeObserver?.observe(parent);
     resizeObserver?.observe(content);
     window.addEventListener("resize", scheduleMeasure);
     window.visualViewport?.addEventListener("resize", scheduleMeasure);
