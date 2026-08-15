@@ -39,6 +39,7 @@ describe("Tourney PostgreSQL connection targets", () => {
       password: "secret",
       ssl: "require",
       target_session_attrs: "read-write",
+      max: 1,
       connection: {
         search_path: "tourney,public",
       },
