@@ -1,4 +1,7 @@
-const { buildTbdBracketMatches } = require("../../app/tourney/TourneyBracketView.jsx");
+const {
+  buildTbdBracketMatches,
+  collapseLosersByeRoundMatches,
+} = require("../../app/tourney/TourneyBracketView.jsx");
 const { toInternalSnapshot, filterSnapshotByGroup } = require("../../app/tourney/overlay/overlayMapping.js");
 
 describe("tourney overlay mapping", () => {
@@ -94,15 +97,36 @@ describe("tourney overlay mapping", () => {
     expect(toInternalSnapshot({ ok: true }).matches).toEqual([]);
   });
 
-  test("matches the five-stage lower-bracket shape in the TBD skeleton", () => {
-    const lowerRounds = buildTbdBracketMatches()
+  test("matches the five-stage losers-bracket shape in the TBD skeleton", () => {
+    const losersRounds = buildTbdBracketMatches()
       .filter((match) => match.groupName === "Losers")
       .reduce((rounds, match) => {
         rounds[match.roundNumber - 1] = (rounds[match.roundNumber - 1] || 0) + 1;
         return rounds;
       }, []);
 
-    expect(lowerRounds).toEqual([4, 2, 2, 1, 1]);
+    expect(losersRounds).toEqual([4, 2, 2, 1, 1]);
+  });
+
+  test("removes the generated losers bye round from public displays", () => {
+    const generated = [4, 4, 2, 2, 1, 1].flatMap((count, roundIndex) =>
+      Array.from({ length: count }, (_, matchIndex) => ({
+        id: `r${roundIndex + 1}-m${matchIndex + 1}`,
+        groupName: "Losers",
+        roundNumber: roundIndex + 1,
+      }))
+    );
+    const visible = collapseLosersByeRoundMatches(generated);
+    const visibleRounds = visible.reduce((rounds, match) => {
+      rounds[match.roundNumber - 1] = (rounds[match.roundNumber - 1] || 0) + 1;
+      return rounds;
+    }, []);
+
+    expect(visibleRounds).toEqual([4, 2, 2, 1, 1]);
+    expect(visible.filter((match) => match.roundNumber === 2).map((match) => match.id)).toEqual([
+      "r3-m1",
+      "r3-m2",
+    ]);
   });
 
   describe("filterSnapshotByGroup", () => {

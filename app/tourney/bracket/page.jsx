@@ -77,7 +77,11 @@ export default async function TourneyBracketPage() {
           </div>
         ) : null}
         <BracketFitBoard>
-          <TourneyBracketView snapshot={snapshot} showSchedule />
+          <TourneyBracketView
+            snapshot={snapshot}
+            showSchedule
+            collapseLosersByeRound
+          />
         </BracketFitBoard>
       </section>
     </TourneyShell>
