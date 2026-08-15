@@ -54,7 +54,10 @@ const scoreText = (score) => (score === "" || score === undefined ? "-" : score)
 // ("Winners Round 1 Match 2" under a "Winners Round 1" column). Trim that
 // prefix down to the match number; distinctive labels (finals) stay whole.
 const shortMatchLabel = (match) => {
-  const label = match.displayLabel || match.label || "";
+  const label = (match.displayLabel || match.label || "").replace(
+    /^Lower\b/,
+    "Losers"
+  );
   const tail = label.match(/Match\s+(\d+)$/i);
   return tail ? `Match ${tail[1]}` : label;
 };
@@ -64,7 +67,7 @@ const maxRoundMatches = (group) =>
 
 const groupDisplayName = (groupName) => {
   if (groupName === "Winners") return "Winners Bracket";
-  if (groupName === "Losers") return "Lower Bracket";
+  if (groupName === "Losers") return "Losers Bracket";
   return groupName;
 };
 
@@ -84,9 +87,9 @@ const roundDisplayName = ({ group, round }) => {
   }
 
   if (group.groupName === "Losers") {
-    if (roundsFromFinal === 0) return "Lower Final";
-    if (roundsFromFinal === 1) return "Lower Semifinal";
-    return `Lower Round ${roundNumber}`;
+    if (roundsFromFinal === 0) return "Losers Final";
+    if (roundsFromFinal === 1) return "Losers Semifinals";
+    return `Losers Round ${roundNumber}`;
   }
 
   if (group.groupName === "Grand Final") return "Championship Match";
@@ -335,13 +338,29 @@ const getMatchKey = (groupName, roundNumber, matchId) =>
 
 const roundPixel = (value) => Math.round(value * 10) / 10;
 
+export const collapseLosersByeRoundMatches = (matches = []) =>
+  matches
+    .filter(
+      (match) => !(match.groupName === "Losers" && match.roundNumber === 2)
+    )
+    .map((match) =>
+      match.groupName === "Losers" && match.roundNumber > 2
+        ? { ...match, roundNumber: match.roundNumber - 1 }
+        : match
+    );
+
 export default function TourneyBracketView({
   snapshot,
   renderControls,
   showSchedule = false,
+  collapseLosersByeRound = false,
 }) {
   const { matches, byeTeams } = useMemo(() => {
-    const sourceMatches = snapshot?.matches || [];
+    const snapshotMatches = snapshot?.matches || [];
+    const sourceMatches =
+      snapshot?.generated && collapseLosersByeRound
+        ? collapseLosersByeRoundMatches(snapshotMatches)
+        : snapshotMatches;
     if (!snapshot?.generated) {
       // Callers (the OBS overlay lane sources) may pass a pre-filtered
       // skeleton; only build the full skeleton when nothing was supplied.
@@ -365,7 +384,12 @@ export default function TourneyBracketView({
       return false;
     });
     return { matches: visible, byeTeams };
-  }, [showSchedule, snapshot?.generated, snapshot?.matches]);
+  }, [
+    collapseLosersByeRound,
+    showSchedule,
+    snapshot?.generated,
+    snapshot?.matches,
+  ]);
   const grouped = useMemo(() => groupMatches(matches), [matches]);
   const firstVisibleRounds = useMemo(() => {
     const map = new Map();

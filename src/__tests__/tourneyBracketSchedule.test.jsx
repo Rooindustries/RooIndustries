@@ -308,7 +308,7 @@ describe("TourneyBracketView official schedule", () => {
     expect(screen.queryByText(/Cast:/)).not.toBeInTheDocument();
     expect(screen.queryByText("Winner of 1")).not.toBeInTheDocument();
     expect(screen.queryByText("Rents Due")).not.toBeInTheDocument();
-    expect(screen.getByText("Lower Semifinal")).toBeInTheDocument();
+    expect(screen.getByText("Losers Semifinals")).toBeInTheDocument();
     expect(screen.getAllByText("TBD").length).toBeGreaterThan(0);
   });
 });
