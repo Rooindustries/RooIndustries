@@ -17,7 +17,6 @@ const SpeedInsights = dynamic(
 );
 
 const TELEMETRY_BLOCKED_PREFIXES = [
-  "/tourney/register",
   "/tourney/login",
   "/tourney/forgot",
   "/tourney/reset",

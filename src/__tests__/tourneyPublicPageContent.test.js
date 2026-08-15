@@ -16,6 +16,12 @@ const readTourneyRosterSource = () =>
     "utf8"
   );
 
+const readTourneyRegisterSource = () =>
+  fs.readFileSync(
+    path.join(__dirname, "../../app/tourney/register/page.jsx"),
+    "utf8"
+  );
+
 const readTourneyCaptainsSource = () =>
   fs.readFileSync(
     path.join(__dirname, "../server/tourney/captains.js"),
@@ -56,6 +62,15 @@ describe("tourney public page content", () => {
     expect(infoIndex).toBeGreaterThan(datesIndex);
     expect(source).toContain("Registration closed");
     expect(source).not.toContain('href="/tourney/register"');
+  });
+
+  test("retires the closed public registration page", () => {
+    const source = readTourneyRegisterSource();
+
+    expect(source).toContain('import { notFound } from "next/navigation";');
+    expect(source).toContain("notFound();");
+    expect(source).not.toContain("TourneyRegistrationForm");
+    expect(source).not.toContain("TourneyShell");
   });
 
   test("presents the tournament as a creator event without changing giveaway eligibility", () => {
