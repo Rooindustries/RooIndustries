@@ -461,10 +461,10 @@ describe("TourneyBracketView mobile card offsets", () => {
   // source dragged each card further up than the last and neighbours
   // overlapped. Geometry is mocked because jsdom has no layout.
   const geometryByLabel = new Map([
-    ["Match 1", { top: 322, height: 172 }],
-    ["Match 2", { top: 510, height: 172 }],
-    ["Match 3", { top: 698, height: 172 }],
-    ["Match 4", { top: 886, height: 172 }],
+    ["Match 1", { top: 280, height: 172 }],
+    ["Match 2", { top: 468, height: 172 }],
+    ["Match 3", { top: 656, height: 172 }],
+    ["Match 4", { top: 844, height: 172 }],
     ["Match 5", { top: 322, height: 193 }],
     ["Match 6", { top: 530, height: 193 }],
     ["Match 7", { top: 738, height: 193 }],
@@ -491,6 +491,12 @@ describe("TourneyBracketView mobile card offsets", () => {
     rectSpy = jest
       .spyOn(Element.prototype, "getBoundingClientRect")
       .mockImplementation(function rect() {
+        if (
+          this.classList?.contains("tourney-bracket-stack") &&
+          this.querySelector("header span")?.textContent === "Match 5"
+        ) {
+          return { ...fullTreeRect, y: 300, top: 300 };
+        }
         if (this.classList?.contains("tourney-match-card")) {
           const label = this.querySelector("header span")?.textContent;
           const geo = geometryByLabel.get(label);
@@ -616,10 +622,11 @@ describe("TourneyBracketView mobile card offsets", () => {
       return { number, offset, geo };
     });
 
-    // The first card still leans toward its source round (the alignment
-    // feature stays on); each later card is clamped so its translated top
-    // clears the previous card's translated bottom plus the 16px stack gap.
+    // The first card still leans toward its source round, but cannot cross
+    // above its stack into the round label and schedule. Each later card is
+    // clamped below the previous card plus the 16px stack gap.
     expect(cards[0].offset).toBeLessThan(-5);
+    expect(cards[0].geo.top + cards[0].offset).toBeGreaterThanOrEqual(300);
     for (let index = 1; index < cards.length; index += 1) {
       const previous = cards[index - 1];
       const current = cards[index];
