@@ -3,8 +3,7 @@ import {
   TourneyShell,
   getTourneySession,
 } from "../TourneyShared";
-import TourneyBracketView from "../TourneyBracketView";
-import BracketFitBoard from "./BracketFitBoard";
+import LiveBracketBoard from "./LiveBracketBoard";
 import { readTourneyService } from "../../../src/server/tourney/readService";
 
 export const runtime = "nodejs";
@@ -26,9 +25,6 @@ export default async function TourneyBracketPage() {
     readTourneyService({ route: "public_bracket" }),
   ]);
   const snapshot = bracketRead.body || {};
-  const casterLegend = Array.isArray(snapshot.schedule?.casters)
-    ? snapshot.schedule.casters
-    : [];
 
   return (
     <TourneyShell
@@ -51,38 +47,7 @@ export default async function TourneyBracketPage() {
             The bracket placeholder remains visible. No matchup or result has been changed.
           </StatusPanel>
         ) : null}
-        {casterLegend.length > 0 ? (
-          <div className="tourney-caster-legend" aria-label="Caster legend">
-            <strong>Casters</strong>
-            <ul>
-              {casterLegend.map((caster) => (
-                <li
-                  className={
-                    caster.color
-                      ? `is-caster-tinted${caster.color === "black" ? " is-caster-black" : ""}`
-                      : undefined
-                  }
-                  key={caster.id}
-                  style={
-                    caster.color
-                      ? { "--caster-color": `var(--caster-${caster.color})` }
-                      : undefined
-                  }
-                >
-                  <b>Caster {caster.id}</b>
-                  <span>{caster.label}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-        <BracketFitBoard>
-          <TourneyBracketView
-            snapshot={snapshot}
-            showSchedule
-            collapseLosersByeRound
-          />
-        </BracketFitBoard>
+        <LiveBracketBoard initialSnapshot={snapshot} />
       </section>
     </TourneyShell>
   );

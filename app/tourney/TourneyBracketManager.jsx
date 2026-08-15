@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { canManageTourneyMatch } from "../../src/server/tourney/access";
 import TourneyBracketView from "./TourneyBracketView";
 import { tourneyMutationFetch, tourneyMutationSuccessMessage } from "./tourneyMutation";
+import { useBracketSnapshotPoll } from "./useBracketSnapshotPoll";
 
 const emptyTeamForm = {
   teamId: "",
@@ -29,7 +30,7 @@ export default function TourneyBracketManager({
   currentUsername = "",
   operationsOnly = false,
 }) {
-  const [snapshot, setSnapshot] = useState(initialSnapshot);
+  const [snapshot, setSnapshot] = useBracketSnapshotPoll(initialSnapshot);
   const [teamForm, setTeamForm] = useState(emptyTeamForm);
   const [scoreForms, setScoreForms] = useState({});
   const [reasonForms, setReasonForms] = useState({});

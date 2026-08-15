@@ -214,22 +214,22 @@ const TOURNEY_BRACKET_MATCH_SCHEDULE = Object.freeze({
   "losers:2:1": Object.freeze({
     matchNumber: 11,
     casterIds: Object.freeze([3]),
-    slotLabels: Object.freeze({ opponent1: "Loser of 5", opponent2: "Loser of 1" }),
+    slotLabels: Object.freeze({ opponent1: "Loser of 8", opponent2: "Loser of 1" }),
   }),
   "losers:2:2": Object.freeze({
     matchNumber: 12,
     casterIds: Object.freeze([5]),
-    slotLabels: Object.freeze({ opponent1: "Loser of 6", opponent2: "Loser of 2" }),
+    slotLabels: Object.freeze({ opponent1: "Loser of 7", opponent2: "Loser of 2" }),
   }),
   "losers:2:3": Object.freeze({
     matchNumber: 13,
     casterIds: Object.freeze([6, 7]),
-    slotLabels: Object.freeze({ opponent1: "Loser of 7", opponent2: "Loser of 3" }),
+    slotLabels: Object.freeze({ opponent1: "Loser of 6", opponent2: "Loser of 3" }),
   }),
   "losers:2:4": Object.freeze({
     matchNumber: 14,
     casterIds: Object.freeze([4]),
-    slotLabels: Object.freeze({ opponent1: "Loser of 8", opponent2: "Loser of 4" }),
+    slotLabels: Object.freeze({ opponent1: "Loser of 5", opponent2: "Loser of 4" }),
   }),
   "losers:3:1": Object.freeze({
     matchNumber: 15,

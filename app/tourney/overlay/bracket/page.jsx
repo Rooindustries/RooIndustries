@@ -33,7 +33,7 @@ const EMPTY_OVERLAY_DATA = Object.freeze({
 
 export default async function BracketOverlayPage({ searchParams }) {
   const params = await searchParams;
-  const pollSeconds = clampNumber(params?.poll, 3, 60, 10);
+  const pollSeconds = clampNumber(params?.poll, 3, 60, 5);
   const scale = clampNumber(params?.scale, 0.35, 2, 1);
   const group = String(params?.group || "").trim().toLowerCase();
   const demoBackground = String(params?.bg || "").toLowerCase() === "gradient";

@@ -160,7 +160,16 @@ describe("tourney bracket store", () => {
       groupName: "Losers",
       roundNumber: 2,
       number: 1,
-      slotLabels: { opponent1: "Loser of 5", opponent2: "Loser of 1" },
+      slotLabels: { opponent1: "Loser of 8", opponent2: "Loser of 1" },
+    });
+    expect(scheduled.find((match) => match.publicMatchNumber === 12)).toMatchObject({
+      slotLabels: { opponent1: "Loser of 7", opponent2: "Loser of 2" },
+    });
+    expect(scheduled.find((match) => match.publicMatchNumber === 13)).toMatchObject({
+      slotLabels: { opponent1: "Loser of 6", opponent2: "Loser of 3" },
+    });
+    expect(scheduled.find((match) => match.publicMatchNumber === 14)).toMatchObject({
+      slotLabels: { opponent1: "Loser of 5", opponent2: "Loser of 4" },
     });
     expect(scheduled.find((match) => match.publicMatchNumber === 21)).toMatchObject({
       schedule: { dayLabel: "Day 2", timeLabel: "3:30 PM", casterIds: [1, 2] },

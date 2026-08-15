@@ -18,14 +18,8 @@ jest.mock("../../app/tourney/TourneyShared", () => ({
   getTourneySession: (...args) => mockGetTourneySession(...args),
 }));
 
-jest.mock("../../app/tourney/TourneyBracketView", () => ({ snapshot, showSchedule }) => (
-  <div data-testid="bracket-view" data-show-schedule={showSchedule ? "true" : "false"}>
-    {JSON.stringify(snapshot)}
-  </div>
-));
-
-jest.mock("../../app/tourney/bracket/BracketFitBoard", () => ({ children }) => (
-  <div data-testid="bracket-fit-board">{children}</div>
+jest.mock("../../app/tourney/bracket/LiveBracketBoard", () => ({ initialSnapshot }) => (
+  <div data-testid="live-bracket-board">{JSON.stringify(initialSnapshot)}</div>
 ));
 
 jest.mock("../server/tourney/readService", () => ({
@@ -51,10 +45,7 @@ describe("Tourney bracket page", () => {
 
     expect(mockReadTourneyService).toHaveBeenCalledWith({ route: "public_bracket" });
     expect(screen.getByRole("main")).toHaveAttribute("data-performance-mode", "false");
-    expect(screen.getByTestId("bracket-fit-board")).toContainElement(
-      screen.getByTestId("bracket-view")
-    );
-    expect(screen.getByTestId("bracket-view")).toHaveTextContent("match-1");
+    expect(screen.getByTestId("live-bracket-board")).toHaveTextContent("match-1");
     expect(screen.queryByLabelText("Temporarily unavailable")).not.toBeInTheDocument();
   });
 
@@ -69,10 +60,10 @@ describe("Tourney bracket page", () => {
     render(await TourneyBracketPage());
 
     expect(screen.getByText("Live bracket data is reconnecting")).toBeInTheDocument();
-    expect(screen.getByTestId("bracket-view")).toHaveTextContent("{}");
+    expect(screen.getByTestId("live-bracket-board")).toHaveTextContent("{}");
   });
 
-  test("enables the schedule view and renders the caster legend", async () => {
+  test("passes the schedule and caster legend to the live board", async () => {
     mockReadTourneyService.mockResolvedValue({
       status: 200,
       ok: true,
@@ -91,25 +82,10 @@ describe("Tourney bracket page", () => {
 
     render(await TourneyBracketPage());
 
-    expect(screen.getByTestId("bracket-view")).toHaveAttribute(
-      "data-show-schedule",
-      "true"
-    );
-    const legend = screen.getByLabelText("Caster legend");
-    expect(legend).toHaveTextContent("Caster 1");
-    expect(legend).toHaveTextContent("Yukari + SpankyCheeze");
-    expect(legend).toHaveTextContent("Lemon");
-    expect(legend).not.toHaveTextContent("To Be Determined");
-
-    // Each legend chip wears its caster's highlight color so the mapping is
-    // readable without a separate key.
-    const chips = legend.querySelectorAll("li.is-caster-tinted");
-    expect(chips).toHaveLength(2);
-    expect(chips[0].style.getPropertyValue("--caster-color")).toBe(
-      "var(--caster-purple)"
-    );
-    expect(chips[1].style.getPropertyValue("--caster-color")).toBe(
-      "var(--caster-yellow)"
-    );
+    const liveBoard = screen.getByTestId("live-bracket-board");
+    expect(liveBoard).toHaveTextContent("PST");
+    expect(liveBoard).toHaveTextContent("Yukari + SpankyCheeze");
+    expect(liveBoard).toHaveTextContent("Lemon");
+    expect(liveBoard).not.toHaveTextContent("To Be Determined");
   });
 });
