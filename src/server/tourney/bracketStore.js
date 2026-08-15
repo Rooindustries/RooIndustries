@@ -19,6 +19,10 @@ const ENGINE_TABLES = Object.freeze([
   "match_game",
 ]);
 const BROADCAST_TABLE = "broadcast";
+const PERSISTED_SNAPSHOT_TABLES = Object.freeze([
+  ...ENGINE_TABLES,
+  BROADCAST_TABLE,
+]);
 const BROADCAST_DISPLAY_MODES = new Set(["score", "bans", "hidden"]);
 const MATCH_STATUSES = Object.freeze({
   0: "Locked",
@@ -1976,11 +1980,13 @@ const readPersistedBracketSnapshotData = async (env = process.env) => {
           order by entity_type, entity_id
         )
         from tourney_bracket_entities
-        where entity_type = any(${ENGINE_TABLES})
+        where entity_type = any(${PERSISTED_SNAPSHOT_TABLES})
       ), '[]'::jsonb) as entities
   `;
   const row = rows[0] || {};
-  const data = Object.fromEntries(ENGINE_TABLES.map((table) => [table, []]));
+  const data = Object.fromEntries(
+    PERSISTED_SNAPSHOT_TABLES.map((table) => [table, []])
+  );
   for (const entity of row.entities || []) {
     data[entity.entity_type]?.push(clone(entity.data));
   }
@@ -1988,6 +1994,7 @@ const readPersistedBracketSnapshotData = async (env = process.env) => {
     meta: mapMetaRow(row.meta || createDefaultMeta()),
     teams: (row.teams || []).map(mapTeamRow).sort(compareTeams),
     data,
+    broadcasts: data[BROADCAST_TABLE],
   };
 };
 
@@ -1997,22 +2004,23 @@ export const getTourneyBracketSnapshot = async ({
 } = {}) => {
   await ensurePreviewFixtureLoaded(env);
 
-  const { meta, teams, data } = isMemoryMode(env)
+  const { meta, teams, data, broadcasts } = isMemoryMode(env)
     ? await Promise.all([
         readMeta(env),
         listTourneyBracketTeams({ includeDisqualified: true, env }),
         readEngineData(env),
-      ]).then(([memoryMeta, memoryTeams, memoryData]) => ({
+        createStorage(env).select(BROADCAST_TABLE),
+      ]).then(([memoryMeta, memoryTeams, memoryData, memoryBroadcasts]) => ({
         meta: memoryMeta,
         teams: memoryTeams,
         data: memoryData,
+        broadcasts: memoryBroadcasts || [],
       }))
     : await readPersistedBracketSnapshotData(env);
   // Mask placeholder names only on public Vercel preview deploys; local dev
   // has no VERCEL_ENV and should render the fixture's Roo * team names.
   const maskPreviewFixtureNames =
     isPreviewFixtureMode(env) && env.VERCEL_ENV === "preview";
-  const broadcasts = (await createStorage(env).select(BROADCAST_TABLE)) || [];
   const matches = buildDisplayMatches({
     data,
     teams,
