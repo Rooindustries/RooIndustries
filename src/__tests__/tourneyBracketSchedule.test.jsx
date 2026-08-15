@@ -704,6 +704,10 @@ describe("tourney bracket scroller styles", () => {
     expect(fitSource).toContain("document.documentElement.clientWidth");
     expect(fitSource).toContain("const availableWidth = Math.min(");
     expect(fitSource).toContain("const nextFit = availableWidth / baseWidth;");
+    expect(fitSource).toContain("resizeObserver?.observe(stage);");
+    expect(fitSource).toContain(
+      'window.visualViewport?.addEventListener("resize", scheduleMeasure);'
+    );
     expect(fitSource).not.toContain("FIT_MEDIA_QUERY");
     expect(fitSource).not.toContain("matchMedia");
     expect(sharedSource).not.toContain(
