@@ -1237,6 +1237,18 @@ const queueSyncedDiscordDesiredState = async ({
   });
 };
 
+export const queueSyncedDiscordDesiredStateBestEffort = async ({
+  queue = queueSyncedDiscordDesiredState,
+  ...options
+} = {}) => {
+  try {
+    return await queue(options);
+  } catch (error) {
+    logSafeError("Tourney Discord role refresh deferred after Auth synchronization", error);
+    return null;
+  }
+};
+
 const executeSupabasePlayerAuthOperation = async ({
   operation,
   state,
@@ -1355,7 +1367,7 @@ const executeSupabasePlayerAuthOperation = async ({
       code: "tourney_player_auth_state_changed",
     });
   }
-  await queueSyncedDiscordDesiredState({ operation, synced, env });
+  await queueSyncedDiscordDesiredStateBestEffort({ operation, synced, env });
   return synced;
 };
 
@@ -1703,7 +1715,7 @@ const executeOperation = async ({
           }),
         });
       }
-      await queueSyncedDiscordDesiredState({ operation, synced, env });
+      await queueSyncedDiscordDesiredStateBestEffort({ operation, synced, env });
       return synced;
     }
     case "sanity_account_projection": {
