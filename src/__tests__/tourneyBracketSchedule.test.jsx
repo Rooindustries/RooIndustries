@@ -709,8 +709,18 @@ describe("tourney bracket scroller styles", () => {
     expect(fitSource).toContain(
       'window.visualViewport?.addEventListener("resize", scheduleMeasure);'
     );
-    expect(fitSource).not.toContain("FIT_MEDIA_QUERY");
-    expect(fitSource).not.toContain("matchMedia");
+    expect(fitSource).toContain(
+      'const FIT_MEDIA_QUERY = "(min-width: 900px)";'
+    );
+    expect(fitSource).toContain("window.matchMedia(FIT_MEDIA_QUERY)");
+    expect(fitSource).toContain("const fitted = enabled && baseSize.width > 0;");
+    expect(sharedSource).toContain("@media (max-width: 899px)");
+    expect(sharedSource).toContain(
+      ".tourney-bracket-page .tourney-bracket-fit-content {\n        width: 100%;\n        min-width: 0;"
+    );
+    expect(sharedSource).toContain(
+      ".tourney-bracket-page .tourney-bracket-board {\n        width: 100%;\n        max-width: 100%;\n        overflow-x: auto;"
+    );
     expect(sharedSource).not.toContain(
       ".tourney-page.is-performance-mode #match-control"
     );
