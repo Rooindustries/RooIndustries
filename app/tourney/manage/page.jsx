@@ -64,6 +64,7 @@ export default async function TourneyManagePage({ searchParams }) {
       session={session}
       activeHref="/tourney/manage"
       performanceMode
+      showPromotionLinks={false}
     >
       <RouteTitle eyebrow="Manage" title="Tournament" accent="Control">
         Review registrations, add approved players, and remove players when

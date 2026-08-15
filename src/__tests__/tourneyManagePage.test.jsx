@@ -14,8 +14,11 @@ jest.mock("../../app/tourney/TourneyShared", () => ({
   LockScreen: () => <div data-testid="lock-screen" />,
   RouteTitle: ({ children }) => <header>{children}</header>,
   Section: ({ children }) => <section>{children}</section>,
-  TourneyShell: ({ children, performanceMode }) => (
-    <main data-performance-mode={performanceMode ? "true" : "false"}>
+  TourneyShell: ({ children, performanceMode, showPromotionLinks }) => (
+    <main
+      data-performance-mode={performanceMode ? "true" : "false"}
+      data-promotion-links={showPromotionLinks === false ? "false" : "true"}
+    >
       {children}
     </main>
   ),
@@ -69,6 +72,10 @@ describe("Tourney manage page", () => {
     expect(screen.getByRole("main")).toHaveAttribute(
       "data-performance-mode",
       "true"
+    );
+    expect(screen.getByRole("main")).toHaveAttribute(
+      "data-promotion-links",
+      "false"
     );
   });
 

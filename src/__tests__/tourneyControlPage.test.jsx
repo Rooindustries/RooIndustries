@@ -6,6 +6,7 @@ const mockGetTourneyBracketSnapshot = jest.fn();
 
 jest.mock("next/navigation", () => ({
   notFound: jest.fn(),
+  useRouter: () => ({ refresh: jest.fn() }),
 }));
 
 jest.mock("../../app/tourney/TourneyShared", () => ({
@@ -14,10 +15,11 @@ jest.mock("../../app/tourney/TourneyShared", () => ({
   ),
   RouteTitle: ({ children }) => <header>{children}</header>,
   Section: ({ children }) => <section>{children}</section>,
-  TourneyShell: ({ activeHref, children, performanceMode, wide }) => (
+  TourneyShell: ({ activeHref, children, performanceMode, showPromotionLinks, wide }) => (
     <main
       data-active-href={activeHref}
       data-performance-mode={performanceMode ? "true" : "false"}
+      data-promotion-links={showPromotionLinks === false ? "false" : "true"}
       data-wide={wide ? "true" : "false"}
     >
       {children}
@@ -65,6 +67,7 @@ describe("Tourney control page", () => {
     expect(shell).toHaveAttribute("data-active-href", "/tourney/control");
     expect(shell).toHaveAttribute("data-wide", "true");
     expect(shell).toHaveAttribute("data-performance-mode", "true");
+    expect(shell).toHaveAttribute("data-promotion-links", "false");
     expect(mockGetTourneyBracketSnapshot).toHaveBeenCalledWith({
       includeAudit: true,
     });
@@ -99,7 +102,7 @@ describe("Tourney control page", () => {
     render(await TourneyControlPage({ searchParams: Promise.resolve({}) }));
 
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Match controls are disabled"
+      "Match controls will reconnect automatically"
     );
     expect(screen.queryByTestId("bracket-manager")).toBeNull();
   });

@@ -3,6 +3,7 @@ import TourneyFooter from "./TourneyFooter";
 import TourneyLoginForm from "./TourneyLoginForm";
 import TourneyTelemetry from "./TourneyTelemetry";
 import TourneyThemeToggle from "./TourneyThemeToggle";
+import { FaDiscord } from "react-icons/fa";
 import {
   TOURNEY_SESSION_COOKIE,
   readTourneySessionFromStore,
@@ -6320,6 +6321,7 @@ export const TourneyShell = ({
   children,
   wide = false,
   performanceMode = true,
+  showPromotionLinks = true,
 }) => (
   <>
     <TourneyTelemetry />
@@ -6339,6 +6341,19 @@ export const TourneyShell = ({
         className="relative z-10 flex flex-col flex-1"
       >
         <div className={wide ? "tourney-shell is-wide" : "tourney-shell"}>
+          {showPromotionLinks ? (
+            <div className="tourney-hero-cta">
+              <a href="/packages">Get Your PC Optimized Today</a>
+              <a
+                href="https://discord.com/invite/qs5HKNyazD"
+                rel="noopener noreferrer"
+                target="_blank"
+              >
+                <FaDiscord aria-hidden="true" />
+                <span>Join the giveaway at the Discord</span>
+              </a>
+            </div>
+          ) : null}
           {children}
         </div>
         <TourneyFooter />
