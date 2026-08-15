@@ -134,6 +134,80 @@ describe("tourney administrator Auth password changes", () => {
     expect(adminClient.calls.rpc.some((call) => call.name === "roo_import_account_v2")).toBe(true);
   });
 
+  test("adopts a confirmed Auth-only Discord user instead of creating a duplicate", async () => {
+    const discordUser = {
+      id: authUserId,
+      email: account.email,
+      email_confirmed_at: "2026-08-11T23:58:55.179Z",
+      app_metadata: { provider: "discord", roles: ["discord_member"] },
+      user_metadata: { display_name: "Kimchi" },
+    };
+    const updateUserById = jest.fn(async () => ({
+      data: { user: discordUser },
+      error: null,
+    }));
+    const createUser = jest.fn();
+    const rpc = jest.fn(async (name, args) => {
+      if (name === "roo_resolve_tourney_account_alias" || name === "roo_resolve_account_alias") {
+        return { data: null, error: null };
+      }
+      if (name === "roo_account_by_user_id") {
+        return {
+          data: {
+            user_id: authUserId,
+            principal_id: authUserId,
+            verified_real_email: account.email,
+          },
+          error: null,
+        };
+      }
+      return { data: { imported: true, args }, error: null };
+    });
+    const adminClient = {
+      auth: {
+        admin: {
+          listUsers: jest.fn(async () => ({
+            data: { users: [discordUser] },
+            error: null,
+          })),
+          getUserById: jest.fn(async () => ({
+            data: { user: discordUser },
+            error: null,
+          })),
+          updateUserById,
+          createUser,
+        },
+      },
+      rpc,
+    };
+
+    await syncSupabaseTourneyAdminAccount({
+      account: { ...account, role: "caster" },
+      password: "kimchi-new-password",
+      installPassword: true,
+      adminClient,
+      env: { NODE_ENV: "test" },
+    });
+
+    expect(updateUserById).toHaveBeenCalledWith(
+      authUserId,
+      expect.objectContaining({
+        password: "kimchi-new-password",
+        app_metadata: expect.objectContaining({
+          provider: "discord",
+          roles: expect.arrayContaining(["discord_member", "tourney_caster"]),
+        }),
+      })
+    );
+    expect(createUser).not.toHaveBeenCalled();
+    expect(rpc).toHaveBeenCalledWith(
+      "roo_import_account_v2",
+      expect.objectContaining({
+        p_account: expect.objectContaining({ user_id: authUserId }),
+      })
+    );
+  });
+
   test("never puts the plaintext into an RPC argument", async () => {
     const adminClient = buildAdminClient({ existingUser: existingAdminAuthUser });
     const secret = "admin-secret-must-not-persist-4417";
@@ -163,6 +237,10 @@ describe("the queued operation payload", () => {
     path.resolve("src/server/tourney/externalOperations.js"),
     "utf8"
   );
+  const registerRoute = fs.readFileSync(
+    path.resolve("app/api/tourney/register/route.js"),
+    "utf8"
+  );
 
   test("carries installPassword but never the password itself", () => {
     // desired_state is stored as plain JSON in Postgres. The plaintext goes through
@@ -178,6 +256,12 @@ describe("the queued operation payload", () => {
     // The enqueue loop fans out over every account in the snapshot plus tombstones.
     // An unscoped signal repeats the regression that broke approve/kick/withdraw.
     expect(accountStore).toContain("String(account.username || \"\").trim().toLowerCase() === credentialTarget");
+  });
+
+  test("requires player Auth projection before registration reports success", () => {
+    expect(registerRoute).toContain(
+      'requiredExternalOperationKinds: ["supabase_player_auth"]'
+    );
   });
 
   test("fails inside the transaction when the secret channel is unavailable", () => {

@@ -1923,20 +1923,45 @@ export const reconcileTourneyExternalOperations = async ({
   return { claimed: operations.length, applied, retried, deadLettered };
 };
 
-export const hasPendingTourneyExternalOperations = async ({
+export const getTourneyExternalCompletionState = async ({
   commandId,
+  operationKinds = [],
   env = process.env,
 } = {}) => {
-  if (env.NODE_ENV === "test" || env.TOURNEY_DATABASE_MODE === "memory") return false;
+  if (env.NODE_ENV === "test" || env.TOURNEY_DATABASE_MODE === "memory") {
+    return { pending: false, failed: false };
+  }
   const policy = resolveTourneyStorePolicy(env);
   const table = relation(policy.primaryBackend);
   const sql = await getTourneySql(env);
-  const [row] = await sql`
-    select exists(
-      select 1 from ${sql(table)}
-      where command_id = ${commandId}
-        and status in ('pending','processing','retry','dead_letter')
-    ) as pending
-  `;
-  return row?.pending === true;
+  const kinds = [...new Set(
+    (Array.isArray(operationKinds) ? operationKinds : [])
+      .map((value) => normalize(value))
+      .filter(Boolean)
+  )];
+  const rows = kinds.length > 0
+    ? await sql`
+        select
+          coalesce(bool_or(status in ('pending','processing','retry')),false) as pending,
+          coalesce(bool_or(status = 'dead_letter'),false) as failed
+        from ${sql(table)}
+        where command_id = ${commandId}
+          and operation_kind in ${sql(kinds)}
+      `
+    : await sql`
+        select
+          coalesce(bool_or(status in ('pending','processing','retry')),false) as pending,
+          coalesce(bool_or(status = 'dead_letter'),false) as failed
+        from ${sql(table)}
+        where command_id = ${commandId}
+      `;
+  return {
+    pending: rows[0]?.pending === true,
+    failed: rows[0]?.failed === true,
+  };
+};
+
+export const hasPendingTourneyExternalOperations = async (options = {}) => {
+  const state = await getTourneyExternalCompletionState(options);
+  return state.pending || state.failed;
 };

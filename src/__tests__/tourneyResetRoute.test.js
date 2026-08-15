@@ -87,6 +87,36 @@ describe("Tourney reset route", () => {
     expect(mockExecuteTourneyCommand).not.toHaveBeenCalled();
   });
 
+  test("does not report a password reset as complete while Auth projection is pending", async () => {
+    mockExecuteTourneyCommand.mockResolvedValue({
+      status: 503,
+      syncPending: true,
+      body: {
+        ok: false,
+        error: "Password setup is still finishing.",
+        code: "TOURNEY_EXTERNAL_COMPLETION_PENDING",
+        syncPending: true,
+      },
+    });
+
+    const response = await POST(makeRequest());
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      code: "TOURNEY_EXTERNAL_COMPLETION_PENDING",
+      syncPending: true,
+    });
+    expect(mockExecuteTourneyCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requiredExternalOperationKinds: [
+          "supabase_admin_auth",
+          "supabase_player_auth",
+        ],
+      })
+    );
+  });
+
   test("consumes the reset rate limit before parsing a malformed body", async () => {
     const request = makeRequest();
     request.text = jest.fn(async () => "{");
@@ -122,6 +152,14 @@ describe("Tourney reset route", () => {
       const response = await POST(makeRequest());
 
       expect(response.status).toBe(200);
+      expect(mockExecuteTourneyCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requiredExternalOperationKinds: [
+            "supabase_admin_auth",
+            "supabase_player_auth",
+          ],
+        })
+      );
       expect(auth.buildUpdatedTourneyAccounts).toHaveBeenCalledWith(
         expect.objectContaining({
           action: "change-password",

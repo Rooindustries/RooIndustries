@@ -114,4 +114,26 @@ describe("Tourney reset-password form", () => {
     expect(message.className).not.toContain("is-success");
     expect(screen.queryByRole("status")).toBeNull();
   });
+
+  test("keeps the password available when Auth setup still needs a retry", async () => {
+    mockTourneyMutationFetch.mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => ({
+        ok: false,
+        error: "Password setup is still finishing. Select Update password again shortly to confirm sign-in is ready.",
+        code: "TOURNEY_EXTERNAL_COMPLETION_PENDING",
+        syncPending: true,
+      }),
+    });
+    render(<TourneyResetForm />);
+
+    submitResetForm();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Password setup is still finishing"
+    );
+    expect(screen.getByLabelText("New password")).toHaveValue("updated-password");
+    expect(screen.queryByRole("status")).toBeNull();
+  });
 });
