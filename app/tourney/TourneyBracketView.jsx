@@ -291,6 +291,7 @@ const getNodeCenter = ({ node, root, scale = 1 }) => {
   return {
     left: (nodeRect.left - rootRect.left) / unit,
     right: (nodeRect.right - rootRect.left) / unit,
+    top: (nodeRect.top - rootRect.top) / unit,
     y: (nodeRect.top - rootRect.top + nodeRect.height / 2) / unit,
   };
 };
@@ -566,12 +567,20 @@ export default function TourneyBracketView({
                 : baselineCenter;
             const cardHeight = node.offsetHeight;
             const naturalTop = baselineCenter - cardHeight / 2;
+            const stackTop = node.parentElement
+              ? getNodeCenter({
+                  node: node.parentElement,
+                  root: connectorNode,
+                  scale: unitScale,
+                }).top
+              : naturalTop;
+            const minTop =
+              previousVisualBottom === null
+                ? stackTop
+                : previousVisualBottom + stackGapPx;
             let offset = roundPixel(desiredCenter - baselineCenter);
-            if (previousVisualBottom !== null) {
-              const minTop = previousVisualBottom + stackGapPx;
-              if (naturalTop + offset < minTop) {
-                offset = roundPixel(minTop - naturalTop);
-              }
+            if (naturalTop + offset < minTop) {
+              offset = roundPixel(minTop - naturalTop);
             }
             previousVisualBottom = naturalTop + offset + cardHeight;
             desiredCenters.set(key, roundPixel(baselineCenter + offset));
