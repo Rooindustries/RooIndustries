@@ -4,6 +4,7 @@ import {
   syncSupabaseTourneyAdminAccount,
   createSupabaseCreatorAccount,
 } from "../server/supabase/accounts.js";
+import { queueSyncedDiscordDesiredStateBestEffort } from "../server/tourney/externalOperations.js";
 
 // Supabase Auth honours `password_hash` on createUser and silently discards it on
 // updateUserById -- HTTP 200, credential unchanged. Every admin account already exists,
@@ -221,6 +222,35 @@ describe("tourney administrator Auth password changes", () => {
     });
 
     expect(JSON.stringify(adminClient.calls.rpc)).not.toContain(secret);
+  });
+});
+
+describe("post-Auth Discord role refresh", () => {
+  test("does not keep a completed credential projection pending", async () => {
+    const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+    const queue = jest.fn().mockRejectedValue(
+      Object.assign(new Error("Discord role assignment request is invalid"), {
+        code: "22023",
+      })
+    );
+
+    try {
+      await expect(
+        queueSyncedDiscordDesiredStateBestEffort({
+          operation: { command_id: "password-reset-command" },
+          synced: { userId: authUserId },
+          env: { NODE_ENV: "test" },
+          queue,
+        })
+      ).resolves.toBeNull();
+      expect(queue).toHaveBeenCalledTimes(1);
+      expect(consoleError).toHaveBeenCalledWith(
+        "Tourney Discord role refresh deferred after Auth synchronization",
+        expect.objectContaining({ code: "22023" })
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });
 
