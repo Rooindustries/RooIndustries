@@ -153,6 +153,30 @@ describe("tourney bracket API route", () => {
     });
   });
 
+  test("allows main hosts to score matches outside their assignment", async () => {
+    mockReadTourneySessionFromStore.mockResolvedValue({
+      username: "supa",
+      role: "caster",
+    });
+
+    const response = await POST(
+      makeJsonRequest({
+        action: "score-match",
+        matchId: 2,
+        opponent1Score: 1,
+        opponent2Score: 0,
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockScoreTourneyBracketMatch).toHaveBeenCalledWith({
+      matchId: 2,
+      opponent1Score: 1,
+      opponent2Score: 0,
+      actorUsername: "supa",
+    });
+  });
+
   test("allows assigned casters to start a live match", async () => {
     const response = await POST(
       makeJsonRequest({ action: "start-match", matchId: 22 })
@@ -165,11 +189,16 @@ describe("tourney bracket API route", () => {
     });
   });
 
-  test("blocks casters from matches outside their assignment", async () => {
+  test("blocks ordinary casters from matches outside their assignment", async () => {
+    mockReadTourneySessionFromStore.mockResolvedValue({
+      username: "gmr",
+      role: "caster",
+    });
+
     const response = await POST(
       makeJsonRequest({
         action: "score-match",
-        matchId: 2,
+        matchId: 1,
         opponent1Score: 1,
         opponent2Score: 0,
       })

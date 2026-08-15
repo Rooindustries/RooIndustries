@@ -10,6 +10,8 @@ export const canAccessTourneyManage = (session = null) =>
 const normalizeAccessUsername = (value) =>
   String(value || "").trim().toLowerCase();
 
+const TOURNEY_ALL_MATCH_HOSTS = new Set(["supa", "yukari"]);
+
 const TOURNEY_CASTER_IDS_BY_USERNAME = Object.freeze({
   yukari: Object.freeze([1]),
   spankycheeze: Object.freeze([1]),
@@ -33,6 +35,8 @@ export const canManageTourneyMatch = ({ session = null, match = null } = {}) => 
   if (session?.role !== "caster") return false;
 
   const username = normalizeAccessUsername(session?.username);
+  if (TOURNEY_ALL_MATCH_HOSTS.has(username)) return true;
+
   const casterIds = getTourneyCasterIds(session);
   const assignedIds = Array.isArray(match?.schedule?.casterIds)
     ? match.schedule.casterIds.map(Number)

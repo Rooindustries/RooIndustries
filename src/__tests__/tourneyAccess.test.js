@@ -49,7 +49,11 @@ describe("tourney access helpers", () => {
     expect(access.canManageTourneyMatch({
       session: { username: "supa", role: "caster" },
       match: yukariMatch,
-    })).toBe(false);
+    })).toBe(true);
+    expect(access.canManageTourneyMatch({
+      session: { username: "yukari", role: "caster" },
+      match: lemonAceMatch,
+    })).toBe(true);
     expect(access.canManageTourneyMatch({
       session: { username: "spankycheeze", role: "caster" },
       match: sharedPurpleMatch,
