@@ -3530,6 +3530,21 @@ export const TourneyStyles = () => (
       scrollbar-gutter: auto;
     }
 
+    @media (max-width: 899px) {
+      .tourney-bracket-page .tourney-bracket-fit-content {
+        width: 100%;
+        min-width: 0;
+      }
+
+      .tourney-bracket-page .tourney-bracket-board {
+        width: 100%;
+        max-width: 100%;
+        overflow-x: auto;
+        overflow-y: visible;
+        padding: 4px 0 30px;
+      }
+    }
+
     .tourney-bracket-tree,
     .tourney-bracket-lanes,
     .tourney-bracket-band,

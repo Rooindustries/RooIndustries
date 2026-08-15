@@ -9,16 +9,18 @@ import { useLayoutEffect, useRef, useState } from "react";
 // import) so the overlay surface stays untouched. The bracket renderer
 // already reads the rendered scale from the tree's rect-vs-layout ratio, so
 // scaling this ancestor keeps the connectors on the cards, exactly like the
-// overlay. The fit is WIDTH-DRIVEN only and upscales freely: the tree always
-// fills the page width (scaling up on wide screens, down on narrow ones) so
-// horizontal scrolling is never needed, and the page simply gets taller and
-// scrolls vertically at every viewport size.
+// overlay. The fit is WIDTH-DRIVEN only and upscales freely above the mobile
+// breakpoint, where the tree fills the page width and the page simply gets
+// taller. Mobile keeps the tree at its natural width for native horizontal
+// swiping; the matching public-page CSS still hides the Control-only bars.
+const FIT_MEDIA_QUERY = "(min-width: 900px)";
 
 export default function BracketFitBoard({ children }) {
   const stageRef = useRef(null);
   const contentRef = useRef(null);
   const [baseSize, setBaseSize] = useState({ width: 0, height: 0 });
   const [fit, setFit] = useState(1);
+  const [enabled, setEnabled] = useState(false);
 
   useLayoutEffect(() => {
     const stage = stageRef.current;
@@ -27,7 +29,14 @@ export default function BracketFitBoard({ children }) {
     const parent = stage.parentElement;
 
     let frameId = 0;
+    const fitMedia =
+      typeof window.matchMedia === "function"
+        ? window.matchMedia(FIT_MEDIA_QUERY)
+        : null;
     const measure = () => {
+      const active = fitMedia ? fitMedia.matches : window.innerWidth >= 900;
+      setEnabled((previous) => (previous === active ? previous : active));
+      if (!active) return;
       const baseWidth = content.offsetWidth;
       const baseHeight = content.offsetHeight;
       if (!baseWidth || !baseHeight) return;
@@ -79,7 +88,7 @@ export default function BracketFitBoard({ children }) {
     };
   }, []);
 
-  const fitted = baseSize.width > 0;
+  const fitted = enabled && baseSize.width > 0;
 
   return (
     <div
