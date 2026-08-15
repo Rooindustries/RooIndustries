@@ -1,3 +1,4 @@
+const { buildTbdBracketMatches } = require("../../app/tourney/TourneyBracketView.jsx");
 const { toInternalSnapshot, filterSnapshotByGroup } = require("../../app/tourney/overlay/overlayMapping.js");
 
 describe("tourney overlay mapping", () => {
@@ -91,6 +92,17 @@ describe("tourney overlay mapping", () => {
       matches: [],
     });
     expect(toInternalSnapshot({ ok: true }).matches).toEqual([]);
+  });
+
+  test("matches the five-stage lower-bracket shape in the TBD skeleton", () => {
+    const lowerRounds = buildTbdBracketMatches()
+      .filter((match) => match.groupName === "Losers")
+      .reduce((rounds, match) => {
+        rounds[match.roundNumber - 1] = (rounds[match.roundNumber - 1] || 0) + 1;
+        return rounds;
+      }, []);
+
+    expect(lowerRounds).toEqual([4, 2, 2, 1, 1]);
   });
 
   describe("filterSnapshotByGroup", () => {
