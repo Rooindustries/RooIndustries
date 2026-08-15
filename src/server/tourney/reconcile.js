@@ -1,9 +1,13 @@
 import crypto from "node:crypto";
 import { reconcileTourneyEmailDispatches } from "./emailDispatch.js";
-import { reconcileTourneyExternalOperations } from "./externalOperations.js";
+import {
+  enqueueTourneyExternalOperation,
+  reconcileTourneyExternalOperations,
+} from "./externalOperations.js";
 import { getTourneySql } from "./sqlClient.js";
 import {
   completeRecoveredTourneyCommandReceipts,
+  executeTourneyCommand,
   reconcileTourneyMirror,
   refreshTourneyCutoverClock,
   resolveTourneyStorePolicy,
@@ -115,6 +119,69 @@ const executeQueueStages = async ({ env, deadlineAt, limits, summary = {} }) => 
   return summary;
 };
 
+export const enqueueStaleTourneyPlayerAuthProjections = async ({
+  env = process.env,
+  deadlineAt = Number.POSITIVE_INFINITY,
+  limit = 25,
+} = {}) => {
+  const policy = resolveTourneyStorePolicy(env);
+  if (policy.primaryBackend !== "supabase") {
+    return { found: 0, queued: 0, skipped: true, reason: "legacy_primary" };
+  }
+  const sql = await getTourneySql(env);
+  const safeLimit = Math.max(1, Math.min(50, Number(limit) || 25));
+  const players = await sql`
+    select player.*
+    from tourney.tourney_players player
+    left join accounts.tourney_accounts account
+      on account.legacy_sanity_id = player.id
+    left join accounts.principal_auth_users mapping
+      on mapping.principal_id = account.principal_id and mapping.is_primary
+    left join auth.users auth_user on auth_user.id = mapping.user_id
+    where player.status = 'approved'
+      and (
+        player.principal_id is null
+        or account.principal_id is null
+        or player.principal_id is distinct from account.principal_id
+        or account.active is distinct from true
+        or account.credential_version is distinct from player.version::text
+        or mapping.user_id is null
+        or auth_user.id is null
+      )
+    order by player.updated_at, player.id
+    limit ${safeLimit}
+  `;
+  let queued = 0;
+  for (const player of players) {
+    assertBeforeDeadline(deadlineAt);
+    const commandId = `reconcile-player-auth:${player.id}:${player.version}`;
+    await executeTourneyCommand({
+      commandId,
+      purpose: "identity:reconcile-player-auth",
+      requestPayload: { playerId: player.id, version: Number(player.version) },
+      maintenanceWhilePaused: true,
+      attemptExternalWork: false,
+      env,
+      callback: async () => ({
+        body: await enqueueTourneyExternalOperation({
+          commandId,
+          operationKind: "supabase_player_auth",
+          entityType: "player",
+          entityId: player.id,
+          desiredState: {
+            player,
+            authUserId: "",
+            installPassword: false,
+          },
+          env,
+        }),
+      }),
+    });
+    queued += 1;
+  }
+  return { found: players.length, queued };
+};
+
 const executeFullReconciliation = async ({ env, deadlineAt }) => {
   const summary = {};
   const policy = await runStage({
@@ -122,6 +189,16 @@ const executeFullReconciliation = async ({ env, deadlineAt }) => {
     summary,
     deadlineAt,
     task: () => resolveTourneyStorePolicy(env),
+  });
+  await runStage({
+    failedStage: "tourneyPlayerAuthProjection",
+    summary,
+    deadlineAt,
+    task: () => enqueueStaleTourneyPlayerAuthProjections({
+      env,
+      deadlineAt,
+      limit: 25,
+    }),
   });
   await executeQueueStages({
     env,

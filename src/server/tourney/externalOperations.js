@@ -1290,12 +1290,6 @@ const executeSupabasePlayerAuthOperation = async ({
   const submittedPassword = installPassword
     ? await readTourneyAuthOperationPassword({ operation, env })
     : "";
-  if (installPassword && !submittedPassword) {
-    throw Object.assign(
-      new Error("The Tourney player password credential is unavailable."),
-      { code: "tourney_player_auth_password_unavailable" }
-    );
-  }
   // When the row moved but still carries our digest, project the row as it now stands
   // rather than the stale snapshot, so metadata does not regress alongside the install.
   let desiredPlayer = stateCurrent ? state.player : before;
@@ -1653,12 +1647,6 @@ const executeOperation = async ({
       const submittedPassword = carriesCredential
         ? await readTourneyAuthOperationPassword({ operation, env })
         : "";
-      if (carriesCredential && !submittedPassword) {
-        throw Object.assign(
-          new Error("The Tourney administrator password credential is unavailable."),
-          { code: "tourney_admin_auth_password_unavailable" }
-        );
-      }
       let accountToSync = initial.account;
       let synced;
       let current = initial;

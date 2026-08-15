@@ -114,7 +114,38 @@ describe("tourney administrator Auth password changes", () => {
         adminClient,
         env: { NODE_ENV: "test" },
       })
-    ).rejects.toMatchObject({ code: "SUPABASE_AUTH_PASSWORD_PLAINTEXT_REQUIRED" });
+    ).rejects.toMatchObject({
+      code: "SUPABASE_AUTH_PASSWORD_PLAINTEXT_REQUIRED",
+      nonRetryable: true,
+    });
+  });
+
+  test("accepts an expired operation secret when Auth holds the exact digest", async () => {
+    const credentialFingerprint = require("node:crypto")
+      .createHash("sha256")
+      .update(`credential:v1:${bcryptHash}`)
+      .digest("hex");
+    const adminClient = buildAdminClient({
+      existingUser: {
+        ...existingAdminAuthUser,
+        app_metadata: {
+          ...existingAdminAuthUser.app_metadata,
+          credential_digest_fingerprint: credentialFingerprint,
+        },
+      },
+    });
+
+    await expect(syncSupabaseTourneyAdminAccount({
+      account,
+      password: "",
+      installPassword: true,
+      adminClient,
+      env: { NODE_ENV: "test" },
+    })).resolves.toMatchObject({ userId: authUserId });
+
+    const [{ attributes }] = adminClient.calls.update;
+    expect(attributes).not.toHaveProperty("password");
+    expect(attributes).not.toHaveProperty("password_hash");
   });
 
   test("re-projects metadata without a plaintext when no credential is changing", async () => {
@@ -303,9 +334,10 @@ describe("the queued operation payload", () => {
     }
   });
 
-  test("both workers require the plaintext when installPassword is set", () => {
-    expect(externalOperations).toContain("tourney_admin_auth_password_unavailable");
-    expect(externalOperations).toContain("tourney_player_auth_password_unavailable");
+  test("both workers let Auth verify an already-installed credential", () => {
+    expect(externalOperations).not.toContain("tourney_admin_auth_password_unavailable");
+    expect(externalOperations).not.toContain("tourney_player_auth_password_unavailable");
+    expect(externalOperations).toContain("password: installNow ? submittedPassword : \"\"");
     // Strict equality, not truthiness: a legacy row without the key must read as
     // "no credential change", not as one.
     expect(externalOperations).toMatch(/state\.installPassword === true/);

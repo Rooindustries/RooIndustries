@@ -72,6 +72,11 @@ const existingAuthUser = {
   user_metadata: {},
 };
 
+const credentialFingerprint = require("node:crypto")
+  .createHash("sha256")
+  .update(`credential:v1:${bcryptHash}`)
+  .digest("hex");
+
 describe("tourney player Auth password changes", () => {
   test("sends the submitted password and never password_hash on update", async () => {
     const adminClient = buildAdminClient({ existingUser: existingAuthUser });
@@ -108,7 +113,34 @@ describe("tourney player Auth password changes", () => {
       })
     ).rejects.toMatchObject({
       code: "SUPABASE_AUTH_PASSWORD_PLAINTEXT_REQUIRED",
+      nonRetryable: true,
     });
+
+    const [{ attributes }] = adminClient.calls.update;
+    expect(attributes).not.toHaveProperty("password");
+    expect(attributes).not.toHaveProperty("password_hash");
+  });
+
+  test("accepts an expired operation secret when Auth holds the exact digest", async () => {
+    const adminClient = buildAdminClient({
+      existingUser: {
+        ...existingAuthUser,
+        app_metadata: {
+          ...existingAuthUser.app_metadata,
+          credential_digest_fingerprint: credentialFingerprint,
+        },
+      },
+    });
+
+    await expect(syncSupabaseTourneyPlayerAccount({
+      player,
+      password: "",
+      passwordHash: bcryptHash,
+      authUserId,
+      installPassword: true,
+      adminClient,
+      env: { NODE_ENV: "test" },
+    })).resolves.toMatchObject({ userId: authUserId });
 
     const [{ attributes }] = adminClient.calls.update;
     expect(attributes).not.toHaveProperty("password");

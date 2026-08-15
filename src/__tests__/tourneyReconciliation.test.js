@@ -1,4 +1,5 @@
 const mockGetTourneySql = jest.fn();
+const mockEnqueueExternal = jest.fn();
 const mockReconcileExternal = jest.fn();
 const mockReconcileEmails = jest.fn();
 const mockReconcileMirror = jest.fn();
@@ -7,11 +8,13 @@ const mockResolvePolicy = jest.fn();
 const mockRunParity = jest.fn();
 const mockRunShadowReads = jest.fn();
 const mockCompleteReceipts = jest.fn();
+const mockExecuteCommand = jest.fn();
 
 jest.mock("../server/tourney/sqlClient.js", () => ({
   getTourneySql: (...args) => mockGetTourneySql(...args),
 }));
 jest.mock("../server/tourney/externalOperations.js", () => ({
+  enqueueTourneyExternalOperation: (...args) => mockEnqueueExternal(...args),
   reconcileTourneyExternalOperations: (...args) => mockReconcileExternal(...args),
 }));
 jest.mock("../server/tourney/emailDispatch.js", () => ({
@@ -19,6 +22,7 @@ jest.mock("../server/tourney/emailDispatch.js", () => ({
 }));
 jest.mock("../server/tourney/store.js", () => ({
   completeRecoveredTourneyCommandReceipts: (...args) => mockCompleteReceipts(...args),
+  executeTourneyCommand: (...args) => mockExecuteCommand(...args),
   reconcileTourneyMirror: (...args) => mockReconcileMirror(...args),
   refreshTourneyCutoverClock: (...args) => mockRefreshCutoverClock(...args),
   resolveTourneyStorePolicy: (...args) => mockResolvePolicy(...args),
@@ -31,7 +35,7 @@ const {
   runTourneyReconciliation,
 } = require("../server/tourney/reconcile.js");
 
-const configureLease = ({ acquired = true } = {}) => {
+const configureLease = ({ acquired = true, stalePlayers = [] } = {}) => {
   let statementCount = 0;
   const root = jest.fn((input) => {
     if (typeof input === "string") return input;
@@ -39,6 +43,7 @@ const configureLease = ({ acquired = true } = {}) => {
     if (statementCount === 1) {
       return Promise.resolve(acquired ? [{ reconciliation_lease_id: "lease" }] : []);
     }
+    if (statementCount === 2) return Promise.resolve(stalePlayers);
     return Promise.resolve([]);
   });
   mockGetTourneySql.mockResolvedValue(root);
@@ -48,6 +53,8 @@ const configureLease = ({ acquired = true } = {}) => {
 describe("Tourney reconciliation orchestration", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockEnqueueExternal.mockResolvedValue({ status: "pending" });
+    mockExecuteCommand.mockImplementation(async ({ callback }) => callback());
     mockReconcileExternal.mockReset();
     configureLease();
     mockResolvePolicy.mockReturnValue({
@@ -120,6 +127,49 @@ describe("Tourney reconciliation orchestration", () => {
       deadlineAt: expect.any(Number),
     });
     expect(mockGetTourneySql.mock.results[0].value).toBeDefined();
+  });
+
+  test("queues stale approved player Auth projections before draining", async () => {
+    const stalePlayer = {
+      id: "player-1",
+      username: "stale-player",
+      email: "stale@example.com",
+      status: "approved",
+      version: 7,
+      password_hash: "$2b$12$existing-canonical-digest",
+    };
+    configureLease({ stalePlayers: [stalePlayer] });
+
+    const result = await runTourneyReconciliation({ budgetMs: 60_000 });
+
+    expect(result.summary.tourneyPlayerAuthProjection).toEqual({
+      found: 1,
+      queued: 1,
+    });
+    expect(mockExecuteCommand).toHaveBeenCalledWith(expect.objectContaining({
+      commandId: "reconcile-player-auth:player-1:7",
+      purpose: "identity:reconcile-player-auth",
+      requestPayload: { playerId: "player-1", version: 7 },
+      maintenanceWhilePaused: true,
+      attemptExternalWork: false,
+      env: process.env,
+      callback: expect.any(Function),
+    }));
+    expect(mockEnqueueExternal).toHaveBeenCalledWith({
+      commandId: "reconcile-player-auth:player-1:7",
+      operationKind: "supabase_player_auth",
+      entityType: "player",
+      entityId: "player-1",
+      desiredState: {
+        player: stalePlayer,
+        authUserId: "",
+        installPassword: false,
+      },
+      env: process.env,
+    });
+    expect(mockEnqueueExternal.mock.invocationCallOrder[0]).toBeLessThan(
+      mockReconcileExternal.mock.invocationCallOrder[0]
+    );
   });
 
   test("skips overlapping workers under the durable database lease", async () => {

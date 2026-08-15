@@ -567,6 +567,11 @@ export const syncSupabaseTourneyPlayerAccount = async ({
     // issuing a write that reports success and changes nothing.
     const applyPassword = installPassword && Boolean(String(password || ""));
     const digestFingerprint = fingerprintPasswordHash(passwordHash);
+    const digestAlreadyInstalled = Boolean(
+      digestFingerprint &&
+      String(existingUser.app_metadata?.credential_digest_fingerprint || "") ===
+        digestFingerprint
+    );
     const updated = await adminClient.auth.admin.updateUserById(userId, {
       ...(applyPassword ? { password: String(password) } : {}),
       app_metadata: {
@@ -584,10 +589,13 @@ export const syncSupabaseTourneyPlayerAccount = async ({
       },
     });
     if (updated.error) throw new Error("Supabase Auth synchronization failed.");
-    if (installPassword && !applyPassword) {
+    if (installPassword && !applyPassword && !digestAlreadyInstalled) {
       throw Object.assign(
         new Error("Supabase Auth password change requires the submitted password."),
-        { code: "SUPABASE_AUTH_PASSWORD_PLAINTEXT_REQUIRED" }
+        {
+          code: "SUPABASE_AUTH_PASSWORD_PLAINTEXT_REQUIRED",
+          nonRetryable: true,
+        }
       );
     }
   } else {
@@ -717,10 +725,17 @@ export const syncSupabaseTourneyAdminAccount = async ({
     },
     adminClient,
   });
-  if (installPassword && authResult?.passwordApplied !== true) {
+  if (
+    installPassword &&
+    authResult?.passwordApplied !== true &&
+    authResult?.digestAlreadyInstalled !== true
+  ) {
     throw Object.assign(
       new Error("Supabase Auth did not apply the Tourney administrator password."),
-      { code: "SUPABASE_AUTH_PASSWORD_PLAINTEXT_REQUIRED" }
+      {
+        code: "SUPABASE_AUTH_PASSWORD_PLAINTEXT_REQUIRED",
+        nonRetryable: true,
+      }
     );
   }
   requireRpcData(
