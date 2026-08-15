@@ -3,7 +3,7 @@ import TourneyFooter from "./TourneyFooter";
 import TourneyLoginForm from "./TourneyLoginForm";
 import TourneyTelemetry from "./TourneyTelemetry";
 import TourneyThemeToggle from "./TourneyThemeToggle";
-import { FaDiscord } from "react-icons/fa";
+import { FaBolt, FaDiscord } from "react-icons/fa";
 import {
   TOURNEY_SESSION_COOKIE,
   readTourneySessionFromStore,
@@ -818,9 +818,9 @@ export const TourneyStyles = () => (
     .tourney-hero-cta {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 1rem;
+      gap: 1.125rem;
       width: min(100%, 64rem);
-      margin: clamp(1rem, 2vw, 1.5rem) auto 1rem;
+      margin: 1.125rem auto;
     }
 
     .tourney-hero-cta a {
@@ -829,37 +829,57 @@ export const TourneyStyles = () => (
       justify-content: center;
       gap: 0.75rem;
       min-height: 76px;
-      border: 1px solid var(--tourney-border-accent);
-      border-radius: 0.95rem;
-      color: var(--tourney-text);
-      background:
-        linear-gradient(145deg, var(--tourney-surface), var(--tourney-surface-strong)),
-        radial-gradient(circle at 0% 0%, var(--color-surface-hover-accent), transparent 42%);
+      border: 1px solid var(--tourney-border);
+      border-radius: 1rem;
+      color: var(--tourney-text-soft);
+      background: linear-gradient(145deg, var(--tourney-surface), var(--tourney-surface-strong));
       padding: 1rem 1.25rem;
       box-shadow:
-        inset 0 1px 0 color-mix(in srgb, var(--tourney-text) 8%, transparent),
-        0 0 24px color-mix(in srgb, var(--tourney-accent-glow) 12%, transparent);
-      font-size: clamp(1.05rem, 1.5vw, 1.28rem);
-      font-weight: 860;
+        inset 0 1px 0 color-mix(in srgb, var(--tourney-text) 12%, transparent),
+        0 12px 30px rgba(0, 0, 0, 0.5);
+      font-size: 1.08rem;
+      font-weight: 780;
       line-height: 1.2;
       text-align: center;
       text-decoration: none;
-      transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+      transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
     }
 
-    .tourney-hero-cta a:hover,
+    .tourney-hero-cta a.is-primary {
+      border-color: var(--tourney-border-accent);
+    }
+
+    .tourney-hero-cta a.is-primary span {
+      color: #bae6fd;
+      background: linear-gradient(90deg, #e0f2fe, #38bdf8 52%, #0ea5e9);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    html[data-theme="dark"] .tourney-hero-cta a.is-primary span {
+      color: #ffd76e;
+      background: linear-gradient(90deg, #fff7d6, #ffd76e 52%, #c78b16);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .tourney-hero-cta a:hover {
+      border-color: var(--tourney-accent-soft);
+      color: var(--tourney-accent);
+    }
+
     .tourney-hero-cta a:focus-visible {
       border-color: var(--tourney-accent-soft);
       color: var(--tourney-accent);
-      background:
-        linear-gradient(145deg, var(--tourney-surface), var(--tourney-surface-strong)),
-        radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--tourney-accent) 18%, transparent), transparent 48%);
-      transform: translateY(-2px);
+      outline: none;
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--tourney-focus) 42%, transparent);
     }
 
     .tourney-hero-cta svg {
-      width: 1.4rem;
-      height: 1.4rem;
+      width: 1.25rem;
+      height: 1.25rem;
       flex: 0 0 auto;
       color: var(--tourney-accent);
     }
@@ -6326,13 +6346,30 @@ export const RouteTitle = ({ eyebrow, title, accent, children }) => (
   </section>
 );
 
+export const TourneyPromotionLinks = () => (
+  <div className="tourney-hero-cta">
+    <a className="is-primary" href="/packages">
+      <FaBolt aria-hidden="true" />
+      <span>Boost Your FPS</span>
+    </a>
+    <a
+      className="is-secondary"
+      href="https://discord.com/invite/qs5HKNyazD"
+      rel="noopener noreferrer"
+      target="_blank"
+    >
+      <FaDiscord aria-hidden="true" />
+      <span>Join the giveaway on Discord</span>
+    </a>
+  </div>
+);
+
 export const TourneyShell = ({
   session,
   activeHref = "",
   children,
   wide = false,
   performanceMode = true,
-  showPromotionLinks = true,
 }) => (
   <>
     <TourneyTelemetry />
@@ -6352,19 +6389,6 @@ export const TourneyShell = ({
         className="relative z-10 flex flex-col flex-1"
       >
         <div className={wide ? "tourney-shell is-wide" : "tourney-shell"}>
-          {showPromotionLinks ? (
-            <div className="tourney-hero-cta">
-              <a href="/packages">Get Your PC Optimized Today</a>
-              <a
-                href="https://discord.com/invite/qs5HKNyazD"
-                rel="noopener noreferrer"
-                target="_blank"
-              >
-                <FaDiscord aria-hidden="true" />
-                <span>Join the giveaway at the Discord</span>
-              </a>
-            </div>
-          ) : null}
           {children}
         </div>
         <TourneyFooter />

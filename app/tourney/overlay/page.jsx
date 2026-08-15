@@ -1,5 +1,6 @@
 import {
   Section,
+  TourneyPromotionLinks,
   TourneyShell,
   getTourneySession,
 } from "../TourneyShared";
@@ -70,6 +71,7 @@ export default async function TourneyOverlayIndexPage() {
         title="Stream Overlays"
         wide
       >
+        <TourneyPromotionLinks />
         <div className="ov-docs-grid">
           <p className="ov-guide-lede">
             Everything on this page is a URL. Copy one, paste it into OBS as

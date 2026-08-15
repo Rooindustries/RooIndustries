@@ -1,6 +1,7 @@
 import {
   Section,
   TourneyHosts,
+  TourneyPromotionLinks,
   TourneyShell,
   getTourneyHostsWithLiveStatus,
   getTourneySession,
@@ -201,6 +202,7 @@ const DashboardPage = ({ hosts, loginOutcome = "", session }) => (
           <strong>Registration closed</strong>
           <span>Team draft: July 26, 2026 at 19:00 UTC</span>
         </div>
+        <TourneyPromotionLinks />
       </div>
     </section>
 

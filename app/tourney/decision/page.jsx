@@ -1,4 +1,10 @@
-import { RouteTitle, Section, TourneyShell, getTourneySession } from "../TourneyShared";
+import {
+  RouteTitle,
+  Section,
+  TourneyPromotionLinks,
+  TourneyShell,
+  getTourneySession,
+} from "../TourneyShared";
 import TourneyDecisionPanel from "../TourneyDecisionPanel";
 
 export const runtime = "nodejs";
@@ -16,6 +22,7 @@ export default async function TourneyDecisionPage() {
       <RouteTitle eyebrow="Registration" title="Review" accent="Decision">
         Confirming the secure approval link from your email.
       </RouteTitle>
+      <TourneyPromotionLinks />
       <div className="tourney-grid">
         <Section id="registration-decision" eyebrow="Registration" title="Decision" wide>
           <TourneyDecisionPanel />

@@ -1,6 +1,7 @@
 import {
   RouteTitle,
   Section,
+  TourneyPromotionLinks,
   TourneyShell,
   getTourneySession,
 } from "../TourneyShared";
@@ -27,6 +28,7 @@ export default async function TourneyForgotPage() {
       <RouteTitle eyebrow="Reset" title="Forgot" accent="Password">
         Use your roster name or email to get a reset link.
       </RouteTitle>
+      <TourneyPromotionLinks />
 
       <div className="tourney-grid">
         <Section id="forgot-password" eyebrow="Reset" title="Request Reset" wide>

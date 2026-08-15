@@ -1,4 +1,8 @@
-import { TourneyShell, getTourneySession } from "../TourneyShared";
+import {
+  TourneyPromotionLinks,
+  TourneyShell,
+  getTourneySession,
+} from "../TourneyShared";
 import LiveBracketBoard from "./LiveBracketBoard";
 import {
   readPublicTourneyRoster,
@@ -43,6 +47,7 @@ export default async function TourneyBracketPage() {
           <h2 id="bracket-title">Matchups</h2>
           <p>Live matchups and results for the 6v6 Legacy Series.</p>
         </div>
+        <TourneyPromotionLinks />
         <LiveBracketBoard
           initialSnapshot={snapshot}
           rosterPlayers={rosterPlayers}
