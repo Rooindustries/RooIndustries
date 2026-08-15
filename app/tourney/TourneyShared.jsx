@@ -3472,109 +3472,23 @@ export const TourneyStyles = () => (
       display: none;
     }
 
-    .tourney-bracket-page .tourney-bracket-scrollbar,
-    .tourney-bracket-page .tourney-bracket-scrollbar-slot {
-      display: none;
+    .tourney-bracket-page {
+      grid-template-columns: minmax(0, 1fr);
+      width: 100%;
+      min-width: 0;
     }
 
-    /* Site bracket page only (BracketFitBoard): the tree scales to fill the
-       page width with a transform — horizontal scrolling is never needed,
-       the page just gets taller and scrolls vertically. The board renders at
-       natural content size so the JS measurement stays feedback-free, the
-       same contract the OBS overlay uses. The shell also goes full-bleed for
-       this page only, or the 96rem cap would letterbox the tree on wide
-       screens. Everything is scoped under .tourney-bracket-page (and
-       >= 900px) so the overlay and manage boards keep their native
-       scrolling layout and sizing untouched. */
-    @media (min-width: 900px) {
-      .tourney-shell.is-wide:has(.tourney-bracket-page) {
-        width: 100%;
-      }
-
-      .tourney-bracket-page {
-        /* Keep the implicit column pinned to the shell width so the fit
-           wrapper's max-content tree cannot stretch an auto track past the
-           page while it measures. */
-        grid-template-columns: minmax(0, 1fr);
-        gap: 12px;
-      }
-
-      .tourney-bracket-page .tourney-bracket-page-head {
-        gap: 4px;
-        padding-top: 0.5rem;
-      }
-
-      .tourney-bracket-page .tourney-bracket-page-head h2 {
-        font-size: clamp(1.3rem, 2vw, 1.7rem);
-      }
-
-      .tourney-bracket-page .tourney-bracket-page-head p {
-        font-size: 0.85rem;
-      }
-
-      .tourney-bracket-page .tourney-bracket-fit {
-        justify-self: center;
-        width: 100%;
-        min-width: 0;
-      }
-
-      .tourney-bracket-page .tourney-bracket-fit-content {
-        width: max-content;
-        transform-origin: top left;
-      }
-
-      .tourney-bracket-page .tourney-bracket-tree {
-        /* Tighten the finals lane on this page: the broadcast-width lane
-           (clamp(36rem, 46vw, 46rem) + 112px tree padding) leaves ~360px of
-           dead space right of the Grand Final card. Band width + a small
-           connector buffer is enough; the overlay keeps the wide lane. */
-        --bracket-final-lane-width: calc(var(--bracket-band-width) + 3rem);
-        padding-right: 0;
-      }
-
-      .tourney-bracket-page .tourney-bracket-board {
-        /* Natural geometry stays at the base --bracket-slot-* values:
-           overriding them here desynced the stack rows from the JS slot
-           constants and the match-placement transforms, overlapping cards. */
-        width: max-content;
-        max-width: none;
-        overflow: visible;
-        padding: 0;
-        scrollbar-gutter: auto;
-      }
+    .tourney-bracket-page .tourney-bracket-tree {
+      --bracket-final-lane-width: calc(var(--bracket-band-width) + 3rem);
+      padding-right: 0;
     }
 
-    /* Mobile fallback (site bracket page only): the tree is far wider than
-       a phone, and the global html/body overflow-x: hidden plus the shell's
-       overflow-hidden trap it inside an easy-to-miss in-board scroller.
-       Below the fit breakpoint, lay the page and board out at natural width
-       and hand horizontal scrolling to the whole document instead, so every
-       round stays reachable with a normal page swipe. The head stays pinned
-       to the viewport width so it does not drift into the overflow. */
-    @media (max-width: 899.98px) {
-      html:has(.tourney-bracket-page),
-      body:has(.tourney-bracket-page) {
-        overflow-x: visible;
-      }
-
-      .tourney-page:has(.tourney-bracket-page) {
-        overflow: visible;
-      }
-
-      .tourney-bracket-page {
-        width: max-content;
-      }
-
-      .tourney-bracket-page .tourney-bracket-page-head {
-        margin-left: 0;
-        width: min(56rem, calc(100vw - 2rem));
-      }
-
-      .tourney-bracket-page .tourney-bracket-board {
-        max-width: none;
-        overflow-x: visible;
-        width: max-content;
-      }
+    .tourney-bracket-page .tourney-bracket-board {
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      overflow-x: auto;
+      overflow-y: visible;
     }
 
     .tourney-bracket-tree,
@@ -5563,13 +5477,24 @@ export const TourneyStyles = () => (
       display: none !important;
     }
 
-    .tourney-page.is-performance-mode .tourney-section {
-      -webkit-backdrop-filter: none;
-      backdrop-filter: none;
+    .tourney-page.is-performance-mode .tourney-registration-status,
+    .tourney-page.is-performance-mode .tourney-host-showcase,
+    .tourney-page.is-performance-mode .tourney-section,
+    .tourney-page.is-performance-mode .tourney-info-list li::before,
+    .tourney-page.is-performance-mode .tourney-card-list li::before,
+    .tourney-page.is-performance-mode .tourney-rule::before,
+    .tourney-page.is-performance-mode .tourney-modal-backdrop {
+      -webkit-backdrop-filter: none !important;
+      backdrop-filter: none !important;
     }
 
+    .tourney-page.is-performance-mode .tourney-brand-logo img,
+    .tourney-page.is-performance-mode .tourney-title-accent,
+    .tourney-page.is-performance-mode .tourney-host-avatar,
+    .tourney-page.is-performance-mode .tourney-roster-avatar,
     .tourney-page.is-performance-mode .tourney-bracket-stage-path {
-      filter: none;
+      filter: none !important;
+      text-shadow: none !important;
     }
 
     html.low-performance-mode .tourney-brand-logo img,
@@ -6077,7 +6002,7 @@ export const TourneyShell = ({
   activeHref = "",
   children,
   wide = false,
-  performanceMode = false,
+  performanceMode = true,
 }) => (
   <>
     <TourneyTelemetry />

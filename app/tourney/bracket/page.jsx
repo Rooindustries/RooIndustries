@@ -4,7 +4,6 @@ import {
   getTourneySession,
 } from "../TourneyShared";
 import TourneyBracketView from "../TourneyBracketView";
-import BracketFitBoard from "./BracketFitBoard";
 import { readTourneyService } from "../../../src/server/tourney/readService";
 
 export const runtime = "nodejs";
@@ -31,7 +30,12 @@ export default async function TourneyBracketPage() {
     : [];
 
   return (
-    <TourneyShell session={session} activeHref="/tourney/bracket" wide>
+    <TourneyShell
+      session={session}
+      activeHref="/tourney/bracket"
+      performanceMode={false}
+      wide
+    >
       <section
         id="bracket"
         className="tourney-bracket-page"
@@ -71,9 +75,7 @@ export default async function TourneyBracketPage() {
             </ul>
           </div>
         ) : null}
-        <BracketFitBoard>
-          <TourneyBracketView snapshot={snapshot} showSchedule />
-        </BracketFitBoard>
+        <TourneyBracketView snapshot={snapshot} showSchedule />
       </section>
     </TourneyShell>
   );
