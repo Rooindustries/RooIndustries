@@ -10,7 +10,11 @@ jest.mock("../../app/tourney/TourneyShared", () => ({
       <p>{children}</p>
     </section>
   ),
-  TourneyShell: ({ children }) => <main>{children}</main>,
+  TourneyShell: ({ children, performanceMode }) => (
+    <main data-performance-mode={performanceMode === false ? "false" : "true"}>
+      {children}
+    </main>
+  ),
   getTourneySession: (...args) => mockGetTourneySession(...args),
 }));
 
@@ -42,6 +46,7 @@ describe("Tourney bracket page", () => {
     render(await TourneyBracketPage());
 
     expect(mockReadTourneyService).toHaveBeenCalledWith({ route: "public_bracket" });
+    expect(screen.getByRole("main")).toHaveAttribute("data-performance-mode", "false");
     expect(screen.getByTestId("bracket-view")).toHaveTextContent("match-1");
     expect(screen.queryByLabelText("Temporarily unavailable")).not.toBeInTheDocument();
   });

@@ -674,10 +674,20 @@ describe("tourney bracket scroller styles", () => {
     expect(sharedSource).toContain(
       ".tourney-page.is-performance-mode {\n      overflow: visible;\n    }"
     );
+    expect(sharedSource).toContain("performanceMode = true");
+    expect(sharedSource).toContain(".tourney-page.is-performance-mode .tourney-host-showcase");
+    expect(sharedSource).toContain(".tourney-page.is-performance-mode .tourney-rule::before");
     expect(sharedSource).toContain("height: 30px;");
     expect(sharedSource).toContain("::-webkit-slider-runnable-track");
     expect(sharedSource).toContain("::-webkit-slider-thumb");
     expect(sharedSource).not.toContain(".tourney-bracket-scrollbar.is-pinned");
+    expect(sharedSource).not.toContain(
+      ".tourney-bracket-page .tourney-bracket-scrollbar,"
+    );
+    expect(sharedSource).not.toContain("html:has(.tourney-bracket-page)");
+    expect(sharedSource).toContain(
+      ".tourney-bracket-page .tourney-bracket-board {\n      width: 100%;\n      max-width: 100%;\n      min-width: 0;\n      overflow-x: auto;"
+    );
     expect(sharedSource).not.toContain(
       ".tourney-page.is-performance-mode #match-control"
     );
