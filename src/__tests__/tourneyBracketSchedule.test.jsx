@@ -675,6 +675,9 @@ describe("tourney bracket scroller styles", () => {
       ".tourney-page.is-performance-mode {\n      overflow: visible;\n    }"
     );
     expect(sharedSource).toContain("performanceMode = true");
+    expect(sharedSource).toContain(
+      "html.low-performance-mode #app-shell.tourney-page.is-performance-mode"
+    );
     expect(sharedSource).toContain(".tourney-page.is-performance-mode .tourney-host-showcase");
     expect(sharedSource).toContain(".tourney-page.is-performance-mode .tourney-rule::before");
     expect(sharedSource).toContain("height: 30px;");

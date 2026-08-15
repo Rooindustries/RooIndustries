@@ -5448,6 +5448,7 @@ export const TourneyStyles = () => (
     }
 
     html.low-performance-mode .tourney-page,
+    html.low-performance-mode #app-shell.tourney-page.is-performance-mode,
     .tourney-page.is-performance-mode {
       background-attachment: scroll !important;
     }
