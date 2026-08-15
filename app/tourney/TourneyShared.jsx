@@ -3386,18 +3386,6 @@ export const TourneyStyles = () => (
       padding: 0 8px;
     }
 
-    .tourney-bracket-scrollbar.is-pinned {
-      position: fixed;
-    }
-
-    .tourney-bracket-scrollbar.is-pinned.is-top {
-      top: calc(var(--tourney-nav-offset, 5rem) + 8px);
-    }
-
-    .tourney-bracket-scrollbar.is-pinned.is-bottom {
-      bottom: 8px;
-    }
-
     .tourney-bracket-scrollbar.is-hidden,
     .tourney-bracket-scrollbar-slot:has(.tourney-bracket-scrollbar.is-hidden),
     .tourney-overlay .tourney-bracket-scrollbar,
@@ -5551,10 +5539,6 @@ export const TourneyStyles = () => (
 
     .tourney-page.is-performance-mode {
       overflow: visible;
-    }
-
-    .tourney-page.is-performance-mode #match-control {
-      contain: none !important;
     }
 
     html.low-performance-mode .tourney-nav,

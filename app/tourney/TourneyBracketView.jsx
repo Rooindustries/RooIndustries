@@ -405,7 +405,6 @@ export default function TourneyBracketView({
     hasOverflow: false,
   });
   const [scrollLeft, setScrollLeft] = useState(0);
-  const [pinnedRailStyle, setPinnedRailStyle] = useState(null);
 
   const registerBand = useCallback(
     (groupName) => (node) => {
@@ -475,51 +474,6 @@ export default function TourneyBracketView({
       window.removeEventListener("resize", measureScroll);
     };
   }, [grouped]);
-
-  useLayoutEffect(() => {
-    const board = boardRef.current;
-    if (!board || !scrollMetrics.hasOverflow) {
-      setPinnedRailStyle(null);
-      return undefined;
-    }
-
-    let frameId = 0;
-    const measurePinnedRails = () => {
-      frameId = 0;
-      const rect = board.getBoundingClientRect();
-      const topOffset = 88;
-      const bottomOffset = 8;
-      const railHeight = 30;
-      const isVisible =
-        rect.bottom > topOffset + railHeight &&
-        rect.top < window.innerHeight - bottomOffset - railHeight;
-
-      setPinnedRailStyle((current) => {
-        if (!isVisible) return current === null ? current : null;
-        if (current?.left === rect.left && current?.width === rect.width) {
-          return current;
-        }
-        return { left: rect.left, width: rect.width };
-      });
-    };
-    const scheduleMeasure = () => {
-      if (frameId) cancelAnimationFrame(frameId);
-      frameId = requestAnimationFrame(measurePinnedRails);
-    };
-
-    scheduleMeasure();
-    const resizeObserver = new ResizeObserver(scheduleMeasure);
-    resizeObserver.observe(board);
-    window.addEventListener("resize", scheduleMeasure);
-    window.addEventListener("scroll", scheduleMeasure, { passive: true });
-
-    return () => {
-      if (frameId) cancelAnimationFrame(frameId);
-      resizeObserver.disconnect();
-      window.removeEventListener("resize", scheduleMeasure);
-      window.removeEventListener("scroll", scheduleMeasure);
-    };
-  }, [scrollMetrics.hasOverflow]);
 
   useLayoutEffect(() => {
     let frameId = 0;
@@ -1003,18 +957,11 @@ export default function TourneyBracketView({
     scrollMetrics.hasOverflow ? "" : " is-hidden"
   }`;
   const scrollRangeValue = Math.min(scrollLeft, scrollMetrics.maxScroll);
-  const pinnedRailClass = pinnedRailStyle ? " is-pinned" : "";
-  const pinnedStyle = pinnedRailStyle
-    ? { left: `${pinnedRailStyle.left}px`, width: `${pinnedRailStyle.width}px` }
-    : undefined;
 
   return (
     <div className="tourney-bracket-scroll-shell">
       <div className="tourney-bracket-scrollbar-slot is-top">
-        <div
-          className={`${scrollRailClass} is-top${pinnedRailClass}`}
-          style={pinnedStyle}
-        >
+        <div className={`${scrollRailClass} is-top`}>
           <input
             aria-label="Scroll tournament bracket horizontally from the top"
             className="tourney-bracket-scrollbar-input"
@@ -1067,10 +1014,7 @@ export default function TourneyBracketView({
         </div>
       </div>
       <div className="tourney-bracket-scrollbar-slot is-bottom">
-        <div
-          className={`${scrollRailClass} is-bottom${pinnedRailClass}`}
-          style={pinnedStyle}
-        >
+        <div className={`${scrollRailClass} is-bottom`}>
           <input
             aria-label="Scroll tournament bracket horizontally from the bottom"
             className="tourney-bracket-scrollbar-input"
