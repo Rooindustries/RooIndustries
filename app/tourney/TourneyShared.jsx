@@ -3479,13 +3479,18 @@ export const TourneyStyles = () => (
 
     .tourney-shell.is-wide:has(.tourney-bracket-page) {
       width: 100%;
+      max-width: 100vw;
+      min-width: 0;
+      overflow-x: clip;
     }
 
     .tourney-bracket-page {
       grid-template-columns: minmax(0, 1fr);
       gap: 12px;
       width: 100%;
+      max-width: 100%;
       min-width: 0;
+      overflow-x: clip;
     }
 
     .tourney-bracket-page .tourney-bracket-page-head {
