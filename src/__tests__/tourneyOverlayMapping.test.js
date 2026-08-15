@@ -28,6 +28,7 @@ describe("tourney overlay mapping", () => {
           schedule: { casterIds: [1], dayLabel: "Day 2", timeLabel: "1:45 PM" },
           casters: [{ id: 1, label: "Yukari", color: "purple" }],
           slotLabels: { opponent1: "Winner of 9" },
+          autoAdvance: true,
           opponents: [
             { slot: 1, teamId: "team_1", name: "Alpha", score: 2, result: "", forfeit: false, winner: false },
             { slot: 2, teamId: "team_2", name: "Bravo", score: null, result: "", forfeit: false, winner: false },
@@ -53,6 +54,7 @@ describe("tourney overlay mapping", () => {
       schedule: { casterIds: [1], dayLabel: "Day 2", timeLabel: "1:45 PM" },
       casters: [{ id: 1, label: "Yukari", color: "purple" }],
       slotLabels: { opponent1: "Winner of 9" },
+      autoAdvance: true,
       opponent1: { side: "opponent1", name: "Alpha", score: 2 },
       opponent2: { side: "opponent2", name: "Bravo", score: "" },
       nextLabels: ["Winner to Winners Final"],
