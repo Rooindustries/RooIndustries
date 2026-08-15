@@ -3,6 +3,7 @@ import {
   Section,
   StatusPanel,
   TourneyRosterHosts,
+  TourneyPromotionLinks,
   TourneyShell,
   getTourneyHostsWithLiveStatus,
   getTourneySession,
@@ -40,6 +41,7 @@ export default async function TourneyRosterPage() {
         The twelve tournament rosters are set. Substitute players remain
         available if a team needs a replacement.
       </RouteTitle>
+      <TourneyPromotionLinks />
 
       <div className="tourney-grid">
         <Section id="hosts" eyebrow="Hosts" title="Roo Industries Hosts" wide>

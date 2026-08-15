@@ -1,4 +1,10 @@
-import { RouteTitle, Section, TourneyShell, getTourneySession } from "../TourneyShared";
+import {
+  RouteTitle,
+  Section,
+  TourneyPromotionLinks,
+  TourneyShell,
+  getTourneySession,
+} from "../TourneyShared";
 import TourneyDiscordPanel from "../TourneyDiscordPanel";
 
 export const runtime = "nodejs";
@@ -16,6 +22,7 @@ export default async function TourneyDiscordPage() {
       <RouteTitle eyebrow="Discord" title="Verify" accent="Access">
         Connecting your approved tournament registration to Discord.
       </RouteTitle>
+      <TourneyPromotionLinks />
       <div className="tourney-grid">
         <Section id="discord-verification" eyebrow="Discord" title="Verification" wide>
           <TourneyDiscordPanel signedIn={Boolean(session)} />

@@ -2,6 +2,7 @@ import {
   LockScreen,
   RouteTitle,
   Section,
+  TourneyPromotionLinks,
   TourneyShell,
   getTourneySession,
 } from "../TourneyShared";
@@ -51,6 +52,7 @@ export default async function TourneyPayoutsPage({ searchParams }) {
         Payouts are tracked per player for placements, MVPs, website proceeds,
         and manual adjustments.
       </RouteTitle>
+      <TourneyPromotionLinks />
 
       <div className="tourney-grid">
         <Section id="payouts" eyebrow="Hidden" title="Payouts" wide>

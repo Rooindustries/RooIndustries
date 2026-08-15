@@ -2,6 +2,7 @@ import {
   LockScreen,
   RouteTitle,
   Section,
+  TourneyPromotionLinks,
   TourneyShell,
   getTourneySession,
 } from "../TourneyShared";
@@ -48,6 +49,7 @@ export default async function TourneyAppealsPage({ searchParams }) {
         Captains can appeal for their team. Players can file a complaint against
         a captain.
       </RouteTitle>
+      <TourneyPromotionLinks />
 
       <div className="tourney-grid">
         <Section id="appeals" eyebrow="Hidden" title="Appeals" wide>

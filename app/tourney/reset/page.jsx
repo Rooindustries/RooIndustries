@@ -1,6 +1,7 @@
 import {
   RouteTitle,
   Section,
+  TourneyPromotionLinks,
   TourneyShell,
   getTourneySession,
 } from "../TourneyShared";
@@ -27,6 +28,7 @@ export default async function TourneyResetPage() {
       <RouteTitle eyebrow="Reset" title="Set New" accent="Password">
         Use the link from your email to rotate your player password.
       </RouteTitle>
+      <TourneyPromotionLinks />
 
       <div className="tourney-grid">
         <Section id="reset-password" eyebrow="Reset" title="New Password" wide>

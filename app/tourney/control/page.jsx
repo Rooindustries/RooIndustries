@@ -79,7 +79,6 @@ export default async function TourneyControlPage({ searchParams }) {
       activeHref="/tourney/control"
       wide
       performanceMode
-      showPromotionLinks={false}
     >
       <RouteTitle eyebrow="Tournament operations" title="Match" accent="Control">
         Score matches, advance winners, handle forfeits or disqualifications, and
