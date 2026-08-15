@@ -669,6 +669,10 @@ describe("tourney bracket scroller styles", () => {
     path.join(__dirname, "../../app/tourney/TourneyShared.jsx"),
     "utf8"
   );
+  const fitSource = fs.readFileSync(
+    path.join(__dirname, "../../app/tourney/bracket/BracketFitBoard.jsx"),
+    "utf8"
+  );
 
   test("keeps thick scrollers in flow at the bracket boundaries", () => {
     expect(sharedSource).toContain(
@@ -684,13 +688,18 @@ describe("tourney bracket scroller styles", () => {
     expect(sharedSource).toContain("::-webkit-slider-runnable-track");
     expect(sharedSource).toContain("::-webkit-slider-thumb");
     expect(sharedSource).not.toContain(".tourney-bracket-scrollbar.is-pinned");
-    expect(sharedSource).not.toContain(
+    expect(sharedSource).toContain(
       ".tourney-bracket-page .tourney-bracket-scrollbar,"
     );
-    expect(sharedSource).not.toContain("html:has(.tourney-bracket-page)");
     expect(sharedSource).toContain(
-      ".tourney-bracket-page .tourney-bracket-board {\n      width: 100%;\n      max-width: 100%;\n      min-width: 0;\n      overflow-x: auto;"
+      ".tourney-bracket-page .tourney-bracket-fit-content {\n      width: max-content;\n      transform-origin: top left;"
     );
+    expect(sharedSource).toContain(
+      ".tourney-bracket-page .tourney-bracket-board {\n      width: max-content;\n      max-width: none;\n      overflow: visible;"
+    );
+    expect(fitSource).toContain("const nextFit = availableWidth / baseWidth;");
+    expect(fitSource).not.toContain("FIT_MEDIA_QUERY");
+    expect(fitSource).not.toContain("matchMedia");
     expect(sharedSource).not.toContain(
       ".tourney-page.is-performance-mode #match-control"
     );
