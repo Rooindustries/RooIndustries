@@ -219,7 +219,7 @@ describe("TourneyBracketView official schedule", () => {
       expect(top.parentElement).not.toHaveAttribute("style");
       expect(bottom.parentElement).not.toHaveAttribute("style");
 
-      fireEvent.change(top, { target: { value: "180" } });
+      fireEvent.input(top, { target: { value: "180" } });
       expect(board.scrollLeft).toBe(180);
       expect(top).toHaveValue("180");
       expect(bottom).toHaveValue("180");
@@ -229,7 +229,7 @@ describe("TourneyBracketView official schedule", () => {
       expect(top).toHaveValue("360");
       expect(bottom).toHaveValue("360");
 
-      fireEvent.change(bottom, { target: { value: "540" } });
+      fireEvent.input(bottom, { target: { value: "540" } });
       expect(board.scrollLeft).toBe(540);
       expect(top).toHaveValue("540");
       expect(bottom).toHaveValue("540");
