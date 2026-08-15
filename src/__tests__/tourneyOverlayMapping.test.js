@@ -114,6 +114,8 @@ describe("tourney overlay mapping", () => {
         id: `r${roundIndex + 1}-m${matchIndex + 1}`,
         groupName: "Losers",
         roundNumber: roundIndex + 1,
+        publicMatchNumber: null,
+        autoAdvance: roundIndex === 1,
       }))
     );
     const visible = collapseLosersByeRoundMatches(generated);
