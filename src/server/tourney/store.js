@@ -202,6 +202,41 @@ const assertTourneyCommandWritesAllowed = async ({
   if (paused && maintenanceWhilePaused !== true) throw writesPausedError();
 };
 
+const enforceRequiredExternalCompletion = ({
+  result,
+  required,
+  terminal = false,
+  pending = result.syncPending,
+  pendingMessage,
+  failureMessage,
+}) => {
+  if (!required) return result;
+  if (terminal) {
+    return {
+      ...result,
+      status: 422,
+      body: {
+        ok: false,
+        error: failureMessage,
+        code: "TOURNEY_EXTERNAL_COMPLETION_FAILED",
+      },
+      syncPending: false,
+    };
+  }
+  if (!pending) return result;
+  return {
+    ...result,
+    status: 503,
+    body: {
+      ok: false,
+      error: pendingMessage,
+      code: "TOURNEY_EXTERNAL_COMPLETION_PENDING",
+      syncPending: true,
+    },
+    syncPending: true,
+  };
+};
+
 export const executeTourneyCommand = async ({
   commandId,
   purpose,
@@ -211,6 +246,12 @@ export const executeTourneyCommand = async ({
   postCommitContext = {},
   attemptExternalWork = true,
   maintenanceWhilePaused = false,
+  requireExternalCompletion = false,
+  requiredExternalOperationKinds = [],
+  externalCompletionPendingMessage =
+    "Account sign-in setup is still finishing. Submit the same update again shortly.",
+  externalCompletionFailureMessage =
+    "Account sign-in setup could not be completed. Submit the account update again.",
 } = {}) => {
   if (typeof callback !== "function") {
     throw new Error("A Tourney command callback is required.");
@@ -221,6 +262,15 @@ export const executeTourneyCommand = async ({
   }
   const id = normalizeCommandId(commandId);
   const normalizedPurpose = normalize(purpose).toLowerCase();
+  const requiredOperationKinds = [...new Set(
+    (Array.isArray(requiredExternalOperationKinds)
+      ? requiredExternalOperationKinds
+      : [])
+      .map((value) => normalize(value).toLowerCase())
+      .filter(Boolean)
+  )];
+  const externalCompletionRequired =
+    requireExternalCompletion || requiredOperationKinds.length > 0;
   if (!TOURNEY_STORE_DOMAINS.includes(normalizedPurpose.split(":")[0])) {
     throw new Error("Unsupported Tourney command domain.");
   }
@@ -347,26 +397,51 @@ export const executeTourneyCommand = async ({
             : {}),
         }
       : transactionResult.body;
-    return {
-      ...transactionResult,
-      body,
-      ...(transactionResult.receiptStatus === "failed"
-        ? { syncPending: true }
-        : {}),
-    };
+    const requiredState =
+      transactionResult.receiptStatus === "failed" && requiredOperationKinds.length > 0
+        ? await import("./externalOperations.js").then((operations) =>
+            operations.getTourneyExternalCompletionState({
+              commandId: id,
+              operationKinds: requiredOperationKinds,
+              env,
+            })
+          )
+        : null;
+    return enforceRequiredExternalCompletion({
+      result: {
+        ...transactionResult,
+        body,
+        ...(transactionResult.receiptStatus === "failed"
+          ? { syncPending: true }
+          : {}),
+      },
+      required: externalCompletionRequired,
+      terminal: requiredState
+        ? requiredState.failed
+        : transactionResult.receiptStatus === "failed",
+      pending: requiredState?.pending,
+      pendingMessage: externalCompletionPendingMessage,
+      failureMessage: externalCompletionFailureMessage,
+    });
   }
 
   const postCommitDeadlineAt = Date.now() + 10_000;
   let syncPending = !attemptExternalWork;
+  let requiredExternalState = requiredOperationKinds.length > 0
+    ? { pending: true, failed: false }
+    : null;
   try {
     if (!attemptExternalWork) throw Object.assign(new Error("Deferred by command."), {
       code: "TOURNEY_EXTERNAL_WORK_DEFERRED",
     });
-    const [{ reconcileTourneyExternalOperations, hasPendingTourneyExternalOperations }, email] =
-      await Promise.all([
-        import("./externalOperations.js"),
-        import("./emailDispatch.js"),
-      ]);
+    const [{
+      getTourneyExternalCompletionState,
+      reconcileTourneyExternalOperations,
+      hasPendingTourneyExternalOperations,
+    }, email] = await Promise.all([
+      import("./externalOperations.js"),
+      import("./emailDispatch.js"),
+    ]);
     for (let pass = 0; pass < 4 && Date.now() < postCommitDeadlineAt; pass += 1) {
       const external = await reconcileTourneyExternalOperations({
         env,
@@ -390,13 +465,24 @@ export const executeTourneyCommand = async ({
         deadlineAt: postCommitDeadlineAt,
       });
     }
-    const [externalPending, emailPending] = await Promise.all([
+    const [externalPending, emailPending, nextRequiredExternalState] = await Promise.all([
       hasPendingTourneyExternalOperations({ commandId: id, env }),
       email.hasPendingTourneyEmailDispatches({ commandId: id, env }),
+      requiredOperationKinds.length > 0
+        ? getTourneyExternalCompletionState({
+            commandId: id,
+            operationKinds: requiredOperationKinds,
+            env,
+          })
+        : null,
     ]);
+    requiredExternalState = nextRequiredExternalState;
     syncPending = externalPending || emailPending;
   } catch {
     syncPending = true;
+    if (requiredOperationKinds.length > 0) {
+      requiredExternalState = { pending: true, failed: false };
+    }
   }
 
   if (!syncPending) {
@@ -426,7 +512,14 @@ export const executeTourneyCommand = async ({
         ...(syncPending ? { syncPending: true } : {}),
       }
     : transactionResult.body;
-  return { ...transactionResult, body, syncPending };
+  return enforceRequiredExternalCompletion({
+    result: { ...transactionResult, body, syncPending },
+    required: externalCompletionRequired,
+    terminal: requiredExternalState?.failed === true,
+    pending: requiredExternalState?.pending,
+    pendingMessage: externalCompletionPendingMessage,
+    failureMessage: externalCompletionFailureMessage,
+  });
 };
 
 export const completeRecoveredTourneyCommandReceipts = async ({

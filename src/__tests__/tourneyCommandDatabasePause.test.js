@@ -116,4 +116,31 @@ describe("Tourney authoritative database write pause", () => {
     })).resolves.toMatchObject({ status: 200, syncPending: true });
     expect(callback).toHaveBeenCalledTimes(1);
   });
+
+  test("does not report success while required external work is pending", async () => {
+    const sql = createSql({ writesPaused: false });
+    const callback = jest.fn(async () => ({ body: { ok: true } }));
+    mockRunTransaction.mockImplementation(async ({ callback: transaction }) =>
+      transaction(sql)
+    );
+
+    await expect(executeTourneyCommand({
+      commandId: "command-required-external-work-0001",
+      purpose: "accounts:change-password",
+      requestPayload: {},
+      env,
+      attemptExternalWork: false,
+      requireExternalCompletion: true,
+      callback,
+    })).resolves.toMatchObject({
+      status: 503,
+      syncPending: true,
+      body: {
+        ok: false,
+        code: "TOURNEY_EXTERNAL_COMPLETION_PENDING",
+        syncPending: true,
+      },
+    });
+    expect(callback).toHaveBeenCalledTimes(1);
+  });
 });

@@ -121,65 +121,46 @@ describe("Tourney accounts route", () => {
     expect(mockExecuteTourneyCommand).not.toHaveBeenCalled();
   });
 
-  test("keeps the current Supabase owner cookie while password projection is pending", async () => {
-    mockReadTourneySessionFromStore
-      .mockResolvedValueOnce({
-        username: "serviroo",
-        role: "owner",
-        authBackend: "supabase",
-      })
-      .mockResolvedValueOnce(null);
-    mockExecuteTourneyCommand.mockImplementation(async ({ callback }) => {
-      const result = await callback();
-      return {
-        status: 200,
-        body: { ...result.body, syncPending: true },
+  test("does not report a password change as complete while Auth projection is pending", async () => {
+    mockExecuteTourneyCommand.mockResolvedValue({
+      status: 503,
+      syncPending: true,
+      body: {
+        ok: false,
+        error: "Account sign-in setup is still finishing.",
+        code: "TOURNEY_EXTERNAL_COMPLETION_PENDING",
         syncPending: true,
-      };
+      },
     });
 
     const response = await POST(makeRequest({
       action: "change-password",
       username: "serviroo",
       password: "new-password",
+    }));
+
+    expect(response.status).toBe(503);
+    expect(response.cookies.values).toHaveLength(0);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      code: "TOURNEY_EXTERNAL_COMPLETION_PENDING",
+    });
+    expect(mockExecuteTourneyCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requiredExternalOperationKinds: ["supabase_admin_auth"],
+      })
+    );
+  });
+
+  test("does not require synchronous Auth completion for metadata-only changes", async () => {
+    const response = await POST(makeRequest({
+      action: "disable",
+      username: "caster-one",
     }));
 
     expect(response.status).toBe(200);
-    expect(response.cookies.values).toHaveLength(0);
-    expect(mockReadTourneySessionFromStore).toHaveBeenLastCalledWith({
-      token: "n-plus-one-session",
-    });
-  });
-
-  test("uses the updated cookie when general session validation confirms projection", async () => {
-    mockReadTourneySessionFromStore
-      .mockResolvedValueOnce({
-        username: "serviroo",
-        role: "owner",
-        authBackend: "supabase",
-      })
-      .mockResolvedValueOnce({
-        username: "serviroo",
-        role: "owner",
-        authBackend: "supabase",
-      });
-    mockExecuteTourneyCommand.mockImplementation(async ({ callback }) => {
-      const result = await callback();
-      return {
-        status: 200,
-        body: { ...result.body, syncPending: true },
-        syncPending: true,
-      };
-    });
-
-    const response = await POST(makeRequest({
-      action: "change-password",
-      username: "serviroo",
-      password: "new-password",
-    }));
-
-    expect(response.cookies.values).toContainEqual(
-      expect.objectContaining({ value: "n-plus-one-session" })
+    expect(mockExecuteTourneyCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ requiredExternalOperationKinds: [] })
     );
   });
 
@@ -190,6 +171,11 @@ describe("Tourney accounts route", () => {
       password: "new-password",
     }));
 
+    expect(mockExecuteTourneyCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requiredExternalOperationKinds: ["supabase_admin_auth"],
+      })
+    );
     expect(response.cookies.values).toContainEqual(
       expect.objectContaining({
         name: "tourney_session",

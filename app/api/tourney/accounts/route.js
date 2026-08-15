@@ -136,6 +136,13 @@ export async function POST(request) {
       commandId,
       purpose: `accounts:${String(payload?.action || "update").toLowerCase()}`,
       requestPayload: payload,
+      requiredExternalOperationKinds: changesCredential
+        ? ["supabase_admin_auth"]
+        : [],
+      externalCompletionPendingMessage:
+        "Account sign-in setup is still finishing. Submit the same account update again shortly.",
+      externalCompletionFailureMessage:
+        "Account sign-in setup could not be completed. Submit the account update again.",
       callback: async () => {
         const persisted = await writePersistedTourneyAccountsJson({
           accountsJson,

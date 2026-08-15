@@ -80,6 +80,14 @@ export async function POST(request) {
       commandId: `token:${tokenHash}:reset`,
       purpose: "tokens:reset",
       requestPayload: { tokenHash, passwordHash: hashTourneyToken(payload.password) },
+      requiredExternalOperationKinds: [
+        "supabase_admin_auth",
+        "supabase_player_auth",
+      ],
+      externalCompletionPendingMessage:
+        "Password setup is still finishing. Select Update password again shortly to confirm sign-in is ready.",
+      externalCompletionFailureMessage:
+        "Password setup could not be completed. Request a new reset link and try again.",
       callback: async () => {
         if (nextAdminAccounts) {
           await writePersistedTourneyAccountsJson({

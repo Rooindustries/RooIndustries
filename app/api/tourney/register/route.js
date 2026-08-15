@@ -131,6 +131,11 @@ export async function POST(request) {
       commandId,
       purpose: "registration:create",
       requestPayload: payload,
+      requiredExternalOperationKinds: ["supabase_player_auth"],
+      externalCompletionPendingMessage:
+        "Account sign-in setup is still finishing. Submit the same registration again shortly.",
+      externalCompletionFailureMessage:
+        "Account sign-in setup could not be completed. Submit the registration again.",
       callback: async () => {
         const created = await createPendingTourneyPlayer({
           payload,

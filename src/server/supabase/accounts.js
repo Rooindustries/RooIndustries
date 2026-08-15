@@ -381,6 +381,28 @@ const buildTourneyAdminAuthEmail = ({ username, email }) =>
   normalizeIdentifier(email) ||
   `tourney+${sha256(normalizeIdentifier(username)).slice(0, 24)}@auth.rooindustries.invalid`;
 
+const findConfirmedSupabaseAuthUserByEmail = async ({ email, adminClient }) => {
+  const normalizedEmail = normalizeIdentifier(email);
+  const listUsers = adminClient?.auth?.admin?.listUsers;
+  if (!normalizedEmail || typeof listUsers !== "function") return null;
+
+  let page = 1;
+  const perPage = 1000;
+  while (true) {
+    const result = await listUsers.call(adminClient.auth.admin, { page, perPage });
+    if (result.error) throw new Error("Supabase Auth inventory failed.");
+    const users = Array.isArray(result.data?.users) ? result.data.users : [];
+    const match = users.find(
+      (user) =>
+        normalizeIdentifier(user?.email) === normalizedEmail &&
+        Boolean(user?.email_confirmed_at)
+    );
+    if (match) return match;
+    if (users.length < perPage) return null;
+    page += 1;
+  }
+};
+
 // Supabase's admin API accepts `password_hash` when CREATING a user, which is how
 // the legacy bcrypt digests were imported without ever seeing a plaintext. On an
 // UPDATE to an existing user it silently ignores `password_hash`: the call returns
@@ -653,11 +675,24 @@ export const syncSupabaseTourneyAdminAccount = async ({
       "Tourney administrator email is already linked to another account."
     );
   }
+  const legacyId = `tourneyAuthStore#${username}`;
+  const unlinkedAuthUser = !existing?.user_id && !existingEmailAccount?.user_id
+    ? await findConfirmedSupabaseAuthUserByEmail({
+        email: account?.email,
+        adminClient,
+      })
+    : null;
+  const unlinkedLegacyId = String(
+    unlinkedAuthUser?.app_metadata?.legacy_sanity_id || ""
+  ).trim();
+  if (unlinkedLegacyId && unlinkedLegacyId !== legacyId) {
+    throw new Error("Tourney administrator email is already linked to another account.");
+  }
   const userId =
     existing?.user_id ||
     existingEmailAccount?.user_id ||
+    unlinkedAuthUser?.id ||
     deterministicUuid(primaryEmail);
-  const legacyId = `tourneyAuthStore#${username}`;
   const sourceHash = sha256({
     username,
     role,
