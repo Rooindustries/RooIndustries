@@ -3472,10 +3472,44 @@ export const TourneyStyles = () => (
       display: none;
     }
 
+    .tourney-bracket-page .tourney-bracket-scrollbar,
+    .tourney-bracket-page .tourney-bracket-scrollbar-slot {
+      display: none;
+    }
+
+    .tourney-shell.is-wide:has(.tourney-bracket-page) {
+      width: 100%;
+    }
+
     .tourney-bracket-page {
       grid-template-columns: minmax(0, 1fr);
+      gap: 12px;
       width: 100%;
       min-width: 0;
+    }
+
+    .tourney-bracket-page .tourney-bracket-page-head {
+      gap: 4px;
+      padding-top: 0.5rem;
+    }
+
+    .tourney-bracket-page .tourney-bracket-page-head h2 {
+      font-size: clamp(1.3rem, 2vw, 1.7rem);
+    }
+
+    .tourney-bracket-page .tourney-bracket-page-head p {
+      font-size: 0.85rem;
+    }
+
+    .tourney-bracket-page .tourney-bracket-fit {
+      justify-self: center;
+      width: 100%;
+      min-width: 0;
+    }
+
+    .tourney-bracket-page .tourney-bracket-fit-content {
+      width: max-content;
+      transform-origin: top left;
     }
 
     .tourney-bracket-page .tourney-bracket-tree {
@@ -3484,11 +3518,11 @@ export const TourneyStyles = () => (
     }
 
     .tourney-bracket-page .tourney-bracket-board {
-      width: 100%;
-      max-width: 100%;
-      min-width: 0;
-      overflow-x: auto;
-      overflow-y: visible;
+      width: max-content;
+      max-width: none;
+      overflow: visible;
+      padding: 0;
+      scrollbar-gutter: auto;
     }
 
     .tourney-bracket-tree,

@@ -12,18 +12,13 @@ import { useLayoutEffect, useRef, useState } from "react";
 // overlay. The fit is WIDTH-DRIVEN only and upscales freely: the tree always
 // fills the page width (scaling up on wide screens, down on narrow ones) so
 // horizontal scrolling is never needed, and the page simply gets taller and
-// scrolls vertically. Below
-// the fit breakpoint the board keeps its natural width and the page scrolls
-// horizontally (see the matching media queries in TourneyShared.jsx);
-// matchMedia keeps this check in lockstep with the CSS.
-const FIT_MEDIA_QUERY = "(min-width: 900px)";
+// scrolls vertically at every viewport size.
 
 export default function BracketFitBoard({ children }) {
   const stageRef = useRef(null);
   const contentRef = useRef(null);
   const [baseSize, setBaseSize] = useState({ width: 0, height: 0 });
   const [fit, setFit] = useState(1);
-  const [enabled, setEnabled] = useState(false);
 
   useLayoutEffect(() => {
     const stage = stageRef.current;
@@ -31,16 +26,7 @@ export default function BracketFitBoard({ children }) {
     if (!stage || !content) return undefined;
 
     let frameId = 0;
-    // matchMedia keeps the breakpoint in lockstep with the CSS media query;
-    // fall back to innerWidth where matchMedia is unavailable (jsdom).
-    const fitMedia =
-      typeof window.matchMedia === "function"
-        ? window.matchMedia(FIT_MEDIA_QUERY)
-        : null;
     const measure = () => {
-      const active = fitMedia ? fitMedia.matches : window.innerWidth >= 900;
-      setEnabled((previous) => (previous === active ? previous : active));
-      if (!active) return;
       const baseWidth = content.offsetWidth;
       const baseHeight = content.offsetHeight;
       if (!baseWidth || !baseHeight) return;
@@ -78,7 +64,7 @@ export default function BracketFitBoard({ children }) {
     };
   }, []);
 
-  const fitted = enabled && baseSize.width > 0;
+  const fitted = baseSize.width > 0;
 
   return (
     <div

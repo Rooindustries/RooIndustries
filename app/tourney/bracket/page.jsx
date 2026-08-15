@@ -4,6 +4,7 @@ import {
   getTourneySession,
 } from "../TourneyShared";
 import TourneyBracketView from "../TourneyBracketView";
+import BracketFitBoard from "./BracketFitBoard";
 import { readTourneyService } from "../../../src/server/tourney/readService";
 
 export const runtime = "nodejs";
@@ -75,7 +76,9 @@ export default async function TourneyBracketPage() {
             </ul>
           </div>
         ) : null}
-        <TourneyBracketView snapshot={snapshot} showSchedule />
+        <BracketFitBoard>
+          <TourneyBracketView snapshot={snapshot} showSchedule />
+        </BracketFitBoard>
       </section>
     </TourneyShell>
   );

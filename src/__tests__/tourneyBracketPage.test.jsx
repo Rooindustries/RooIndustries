@@ -24,6 +24,10 @@ jest.mock("../../app/tourney/TourneyBracketView", () => ({ snapshot, showSchedul
   </div>
 ));
 
+jest.mock("../../app/tourney/bracket/BracketFitBoard", () => ({ children }) => (
+  <div data-testid="bracket-fit-board">{children}</div>
+));
+
 jest.mock("../server/tourney/readService", () => ({
   readTourneyService: (...args) => mockReadTourneyService(...args),
 }));
@@ -47,6 +51,9 @@ describe("Tourney bracket page", () => {
 
     expect(mockReadTourneyService).toHaveBeenCalledWith({ route: "public_bracket" });
     expect(screen.getByRole("main")).toHaveAttribute("data-performance-mode", "false");
+    expect(screen.getByTestId("bracket-fit-board")).toContainElement(
+      screen.getByTestId("bracket-view")
+    );
     expect(screen.getByTestId("bracket-view")).toHaveTextContent("match-1");
     expect(screen.queryByLabelText("Temporarily unavailable")).not.toBeInTheDocument();
   });
