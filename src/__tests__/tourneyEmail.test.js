@@ -258,6 +258,50 @@ describe("tourney emails", () => {
     );
   });
 
+  test("sends the approved caster access email with a fragment reset link", async () => {
+    mockSendEmail.mockResolvedValue({
+      data: { id: "email_caster_access" },
+      error: null,
+    });
+    const email = loadEmail();
+
+    await expect(
+      email.sendTourneyCasterAccessEmail({
+        casterName: "Ace",
+        username: "Ace",
+        email: "awwyaawwya@gmail.com",
+        token: "private-reset-token",
+        baseUrl: "https://www.rooindustries.com",
+        idempotencyKey: "caster-access:ace:v1",
+        env: {
+          RESEND_API_KEY: "re_test",
+          FROM_EMAIL: "Tourney <tourney@rooindustries.com>",
+        },
+      })
+    ).resolves.toEqual({ id: "email_caster_access" });
+
+    expect(mockSendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from: "Tourney <tourney@rooindustries.com>",
+        to: ["awwyaawwya@gmail.com"],
+        subject: "Your Roo Industries Tournament Caster Access",
+        html: expect.stringContaining("Username:</strong> Ace"),
+        text: expect.stringContaining("Username: Ace"),
+      }),
+      { idempotencyKey: "caster-access:ace:v1" }
+    );
+    const message = mockSendEmail.mock.calls[0][0];
+    expect(message.html).toContain(
+      "/tourney/reset#token=private-reset-token"
+    );
+    expect(message.text).toContain(
+      "You’ll only be able to update matches assigned to you."
+    );
+    expect(JSON.stringify(message)).not.toContain(
+      "/tourney/reset?token="
+    );
+  });
+
   test("builds appeal and payout email templates", () => {
     const email = loadEmail();
 

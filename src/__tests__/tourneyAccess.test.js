@@ -29,10 +29,18 @@ describe("tourney access helpers", () => {
         { id: 2, label: "Supa" },
       ],
     };
+    const lemonAceMatch = {
+      schedule: { casterIds: [6, 7] },
+      casters: [
+        { id: 6, label: "Lemon" },
+        { id: 7, label: "Ace" },
+      ],
+    };
 
     expect(access.canAccessTourneyManage({ role: "owner" })).toBe(true);
     expect(access.canAccessTourneyManage({ role: "caster" })).toBe(false);
     expect(access.getTourneyCasterIds({ username: "SpankyCheeze", role: "caster" })).toEqual([1]);
+    expect(access.getTourneyCasterIds({ username: "Ace", role: "caster" })).toEqual([7]);
     expect(access.getTourneyCasterIds({ username: "unknown", role: "caster" })).toEqual([]);
     expect(access.canManageTourneyMatch({
       session: { username: "yukari", role: "caster" },
@@ -54,6 +62,18 @@ describe("tourney access helpers", () => {
       session: { username: "supa", role: "caster" },
       match: finalMatch,
     })).toBe(true);
+    expect(access.canManageTourneyMatch({
+      session: { username: "ace", role: "caster" },
+      match: lemonAceMatch,
+    })).toBe(true);
+    expect(access.canManageTourneyMatch({
+      session: { username: "lemon", role: "caster" },
+      match: lemonAceMatch,
+    })).toBe(true);
+    expect(access.canManageTourneyMatch({
+      session: { username: "ace", role: "caster" },
+      match: finalMatch,
+    })).toBe(false);
     expect(access.canManageTourneyMatch({
       session: { username: "serviroo", role: "owner" },
       match: supaMatch,

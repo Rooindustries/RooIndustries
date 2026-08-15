@@ -124,6 +124,7 @@ describe("tourney bracket store", () => {
         { id: 4, label: "KimchiBapBop", color: "pink" },
         { id: 5, label: "LightOW", color: "black" },
         { id: 6, label: "Lemon", color: "yellow" },
+        { id: 7, label: "Ace", color: "blue" },
       ],
     });
     expect(snapshot.schedule.rounds).toHaveLength(10);
@@ -178,11 +179,17 @@ describe("tourney bracket store", () => {
       ],
       slotLabels: { opponent1: "Winner of 17", opponent2: "Winner of 21" },
     });
-    // Match 13 is Lemon's solo slot: the resolved caster carries the Lemon-only
-    // label and the yellow highlight token, with no TBD fallback anywhere.
+    // Ace shares Lemon's slots, so both resolved casters and highlight tokens
+    // stay attached to the public schedule with no TBD fallback.
     expect(scheduled.find((match) => match.publicMatchNumber === 13)).toMatchObject({
-      schedule: { casterIds: [6] },
-      casters: [{ id: 6, label: "Lemon", color: "yellow" }],
+      schedule: { casterIds: [6, 7] },
+      casters: [
+        { id: 6, label: "Lemon", color: "yellow" },
+        { id: 7, label: "Ace", color: "blue" },
+      ],
+    });
+    expect(scheduled.find((match) => match.publicMatchNumber === 16)).toMatchObject({
+      schedule: { casterIds: [6, 7] },
     });
     expect(JSON.stringify(snapshot.schedule)).not.toContain("To Be Determined");
   });

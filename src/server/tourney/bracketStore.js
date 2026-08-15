@@ -52,6 +52,7 @@ const TOURNEY_BRACKET_CASTERS = Object.freeze([
   Object.freeze({ id: 4, label: "KimchiBapBop", color: "pink" }),
   Object.freeze({ id: 5, label: "LightOW", color: "black" }),
   Object.freeze({ id: 6, label: "Lemon", color: "yellow" }),
+  Object.freeze({ id: 7, label: "Ace", color: "blue" }),
 ]);
 const TOURNEY_BRACKET_ROUNDS = Object.freeze([
   Object.freeze({
@@ -222,7 +223,7 @@ const TOURNEY_BRACKET_MATCH_SCHEDULE = Object.freeze({
   }),
   "losers:2:3": Object.freeze({
     matchNumber: 13,
-    casterIds: Object.freeze([6]),
+    casterIds: Object.freeze([6, 7]),
     slotLabels: Object.freeze({ opponent1: "Loser of 7", opponent2: "Loser of 3" }),
   }),
   "losers:2:4": Object.freeze({
@@ -237,7 +238,7 @@ const TOURNEY_BRACKET_MATCH_SCHEDULE = Object.freeze({
   }),
   "losers:3:2": Object.freeze({
     matchNumber: 16,
-    casterIds: Object.freeze([6]),
+    casterIds: Object.freeze([6, 7]),
     slotLabels: Object.freeze({ opponent1: "Winner of 13", opponent2: "Winner of 14" }),
   }),
   "winners:4:1": Object.freeze({

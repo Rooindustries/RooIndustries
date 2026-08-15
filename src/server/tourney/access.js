@@ -18,6 +18,7 @@ const TOURNEY_CASTER_IDS_BY_USERNAME = Object.freeze({
   kimchibapbop: Object.freeze([4]),
   lightow: Object.freeze([5]),
   lemon: Object.freeze([6]),
+  ace: Object.freeze([7]),
 });
 
 export const getTourneyCasterIds = (session = null) =>
