@@ -697,6 +697,8 @@ describe("tourney bracket scroller styles", () => {
     expect(sharedSource).toContain(
       ".tourney-bracket-page .tourney-bracket-board {\n      width: max-content;\n      max-width: none;\n      overflow: visible;"
     );
+    expect(fitSource).toContain("document.documentElement.clientWidth");
+    expect(fitSource).toContain("const availableWidth = Math.min(");
     expect(fitSource).toContain("const nextFit = availableWidth / baseWidth;");
     expect(fitSource).not.toContain("FIT_MEDIA_QUERY");
     expect(fitSource).not.toContain("matchMedia");
