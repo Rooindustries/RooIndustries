@@ -338,16 +338,37 @@ const getMatchKey = (groupName, roundNumber, matchId) =>
 
 const roundPixel = (value) => Math.round(value * 10) / 10;
 
-export const collapseLosersByeRoundMatches = (matches = []) =>
-  matches
+export const collapseLosersByeRoundMatches = (matches = []) => {
+  const losersMatches = matches.filter((match) => match.groupName === "Losers");
+  const roundNumbers = [...new Set(
+    losersMatches.map((match) => match.roundNumber)
+  )];
+  const autoAdvanceRound = roundNumbers.find((roundNumber) => {
+    const roundMatches = losersMatches.filter(
+      (match) => match.roundNumber === roundNumber
+    );
+    return (
+      roundMatches.length === 4 &&
+      roundMatches.every(
+        (match) =>
+          match.publicMatchNumber == null &&
+          (match.autoAdvance || isAutoAdvanceMatch(match))
+      )
+    );
+  });
+  const byeRoundNumber = autoAdvanceRound ?? 2;
+
+  return matches
     .filter(
-      (match) => !(match.groupName === "Losers" && match.roundNumber === 2)
+      (match) =>
+        !(match.groupName === "Losers" && match.roundNumber === byeRoundNumber)
     )
     .map((match) =>
-      match.groupName === "Losers" && match.roundNumber > 2
+      match.groupName === "Losers" && match.roundNumber > byeRoundNumber
         ? { ...match, roundNumber: match.roundNumber - 1 }
         : match
     );
+};
 
 export default function TourneyBracketView({
   snapshot,
