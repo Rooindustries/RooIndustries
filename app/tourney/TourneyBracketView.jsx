@@ -968,7 +968,7 @@ export default function TourneyBracketView({
             disabled={!scrollMetrics.hasOverflow}
             max={scrollMetrics.maxScroll}
             min={0}
-            onChange={(event) => setHorizontalScroll(event.currentTarget.value)}
+            onInput={(event) => setHorizontalScroll(event.currentTarget.value)}
             step={1}
             type="range"
             value={scrollRangeValue}
@@ -1021,7 +1021,7 @@ export default function TourneyBracketView({
             disabled={!scrollMetrics.hasOverflow}
             max={scrollMetrics.maxScroll}
             min={0}
-            onChange={(event) => setHorizontalScroll(event.currentTarget.value)}
+            onInput={(event) => setHorizontalScroll(event.currentTarget.value)}
             step={1}
             type="range"
             value={scrollRangeValue}
