@@ -308,7 +308,7 @@ describe("tourney public bracket API contract", () => {
     expect(api.buildPublicLiveResponse(snapshot, { limit: "x" }).upNext).toHaveLength(3);
   });
 
-  test("pins the live feed to one match or one team for parallel tables", () => {
+  test("pins the live feed by match, readable team slug, or legacy team id", () => {
     const api = loadApi();
     const withTeams = (a, b) => ({
       opponent1: { side: "opponent1", teamId: a[0], name: a[1], score: "", result: "", forfeit: false },
@@ -319,33 +319,56 @@ describe("tourney public bracket API contract", () => {
       generated: true,
       teams: [],
       matches: [
-        makeMatch({ id: 1, status: 3, number: 1, ...withTeams(["team_1", "Alpha"], ["team_2", "Bravo"]) }),
-        makeMatch({ id: 2, status: 3, number: 2, ...withTeams(["team_3", "Charlie"], ["team_4", "Delta"]) }),
-        makeMatch({ id: 3, status: 2, number: 3, ...withTeams(["team_3", "Charlie"], ["team_5", "Echo"]) }),
+        makeMatch({
+          id: 1,
+          status: 3,
+          number: 1,
+          ...withTeams(["team_1", "☠️ SayHiToUrDoom"], ["team_2", "💰 LFTRADE"]),
+        }),
+        makeMatch({
+          id: 2,
+          status: 3,
+          number: 2,
+          ...withTeams(["team_3", "🏠 Rents Due"], ["team_4", "👶 TheBabies"]),
+        }),
+        makeMatch({
+          id: 3,
+          status: 2,
+          number: 3,
+          ...withTeams(
+            ["team_5", "🦄 Friendship is Magic"],
+            ["team_6", "🗿 MintyMikus"]
+          ),
+        }),
       ],
     };
 
-    // Default: every running match, bracket order.
-    expect(api.buildPublicLiveResponse(snapshot).live.map((m) => m.id)).toEqual([1, 2]);
+    expect(api.buildPublicLiveResponse(snapshot).live.map((match) => match.id)).toEqual([1, 2]);
+    expect(
+      api.buildPublicLiveResponse(snapshot, { matchId: "2" }).live.map((match) => match.id)
+    ).toEqual([2]);
+    expect(
+      api.buildPublicLiveResponse(snapshot, { matchId: "3" }).upNext.map((match) => match.id)
+    ).toEqual([3]);
+    expect(api.buildPublicLiveResponse(snapshot, { matchId: "99" }).live).toEqual([]);
 
-    // Pin by match id: only that match, even while others run alongside it.
-    expect(api.buildPublicLiveResponse(snapshot, { matchId: "2" }).live.map((m) => m.id)).toEqual([2]);
-    expect(api.buildPublicLiveResponse(snapshot, { matchId: "2" }).upNext).toEqual([]);
+    const slugExpectations = [
+      ["sayhitourdoom", 1, "live"],
+      ["lftrade", 1, "live"],
+      ["rents-due", 2, "live"],
+      ["thebabies", 2, "live"],
+      ["friendship-is-magic", 3, "upNext"],
+      ["mintymikus", 3, "upNext"],
+    ];
+    for (const [team, matchId, bucket] of slugExpectations) {
+      expect(
+        api.buildPublicLiveResponse(snapshot, { team })[bucket].map((match) => match.id)
+      ).toEqual([matchId]);
+    }
 
-    // Pin to a ready match: shows as up-next instead of live.
-    const pinnedReady = api.buildPublicLiveResponse(snapshot, { matchId: "3" });
-    expect(pinnedReady.live).toEqual([]);
-    expect(pinnedReady.upNext.map((m) => m.id)).toEqual([3]);
-
-    // Unknown pin: the strip goes idle rather than showing another table.
-    const pinnedGone = api.buildPublicLiveResponse(snapshot, { matchId: "99" });
-    expect(pinnedGone.live).toEqual([]);
-    expect(pinnedGone.upNext).toEqual([]);
-
-    // Follow a team by name (case-insensitive) or by team id.
-    expect(api.buildPublicLiveResponse(snapshot, { team: "charlie" }).live.map((m) => m.id)).toEqual([2]);
-    expect(api.buildPublicLiveResponse(snapshot, { team: "charlie" }).upNext.map((m) => m.id)).toEqual([3]);
-    expect(api.buildPublicLiveResponse(snapshot, { team: "team_1" }).live.map((m) => m.id)).toEqual([1]);
+    expect(
+      api.buildPublicLiveResponse(snapshot, { team: "team_1" }).live.map((match) => match.id)
+    ).toEqual([1]);
     expect(api.buildPublicLiveResponse(snapshot, { team: "Nobody" }).live).toEqual([]);
   });
 

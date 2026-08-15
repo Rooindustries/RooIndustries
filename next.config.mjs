@@ -32,7 +32,7 @@ const contentSecurityPolicy = [
   `script-src 'self' 'unsafe-inline'${isProduction ? "" : " 'unsafe-eval'"} https://scripts.seorce.com https://widget.intercom.io https://js.intercomcdn.com https://www.googletagmanager.com https://www.paypal.com https://www.paypalobjects.com https://checkout.razorpay.com https://cdn.razorpay.com`,
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self' data: https://js.intercomcdn.com",
-  `img-src 'self' data: blob: https://cdn.sanity.io ${supabaseAssetOrigin} https://razorpay.com https://*.razorpay.com https://www.paypalobjects.com https://*.paypal.com https://static.intercomassets.com https://*.intercomcdn.com https://static-cdn.jtvnw.net`,
+  `img-src 'self' data: blob: https://cdn.sanity.io ${supabaseAssetOrigin} https://razorpay.com https://*.razorpay.com https://www.paypalobjects.com https://*.paypal.com https://static.intercomassets.com https://*.intercomcdn.com https://static-cdn.jtvnw.net https://d15f34w2p8l1cc.cloudfront.net https://overfast-api.tekrop.fr`,
   "media-src 'self' blob: https://cdn.sanity.io https://js.intercomcdn.com",
   `connect-src 'self' ${supabaseAuthOrigin} https://scripts.seorce.com https://fixes.seorce.com https://www.google-analytics.com https://www.paypal.com https://api.razorpay.com https://checkout.razorpay.com https://checkout-static-next.razorpay.com https://lumberjack.razorpay.com https://api-iam.intercom.io https://api-iam.eu.intercom.io wss://nexus-websocket-a.intercom.io`,
   "frame-src https://www.paypal.com https://checkout.razorpay.com https://api.razorpay.com",

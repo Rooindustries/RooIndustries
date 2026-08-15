@@ -11,6 +11,7 @@ const mockResetTourneyBracket = jest.fn();
 const mockScoreTourneyBracketMatch = jest.fn();
 const mockSeedTourneyBracketTeams = jest.fn();
 const mockStartTourneyBracketMatch = jest.fn();
+const mockUpdateTourneyMatchBroadcast = jest.fn();
 const mockUpsertTourneyBracketTeam = jest.fn();
 
 jest.mock("next/server", () => ({
@@ -43,6 +44,7 @@ jest.mock("../server/tourney/bracketStore", () => ({
   scoreTourneyBracketMatch: (...args) => mockScoreTourneyBracketMatch(...args),
   seedTourneyBracketTeams: (...args) => mockSeedTourneyBracketTeams(...args),
   startTourneyBracketMatch: (...args) => mockStartTourneyBracketMatch(...args),
+  updateTourneyMatchBroadcast: (...args) => mockUpdateTourneyMatchBroadcast(...args),
   upsertTourneyBracketTeam: (...args) => mockUpsertTourneyBracketTeam(...args),
 }));
 
@@ -101,6 +103,7 @@ describe("tourney bracket API route", () => {
       mockScoreTourneyBracketMatch,
       mockSeedTourneyBracketTeams,
       mockStartTourneyBracketMatch,
+      mockUpdateTourneyMatchBroadcast,
       mockUpsertTourneyBracketTeam,
     ]) {
       mock.mockReset();
@@ -117,6 +120,7 @@ describe("tourney bracket API route", () => {
     mockGenerateTourneyBracket.mockResolvedValue(snapshot);
     mockReopenTourneyBracketMatch.mockResolvedValue(snapshot);
     mockStartTourneyBracketMatch.mockResolvedValue(snapshot);
+    mockUpdateTourneyMatchBroadcast.mockResolvedValue(snapshot);
   });
 
   test("allows public read-only bracket access", async () => {
@@ -187,6 +191,51 @@ describe("tourney bracket API route", () => {
       matchId: 22,
       actorUsername: "yukari",
     });
+  });
+
+  test("allows assigned casters to update private broadcast graphics", async () => {
+    const response = await POST(
+      makeJsonRequest({
+        action: "update-broadcast",
+        matchId: 22,
+        mapName: "Ilios",
+        mapMode: "Control",
+        pickedBy: "opponent2",
+        opponent1Ban: "Ana",
+        opponent2Ban: "Tracer",
+        displayMode: "bans",
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockUpdateTourneyMatchBroadcast).toHaveBeenCalledWith({
+      matchId: 22,
+      mapName: "Ilios",
+      mapMode: "Control",
+      pickedBy: "opponent2",
+      opponent1Ban: "Ana",
+      opponent2Ban: "Tracer",
+      displayMode: "bans",
+      actorUsername: "yukari",
+    });
+  });
+
+  test("blocks unassigned casters from broadcast graphics", async () => {
+    mockReadTourneySessionFromStore.mockResolvedValue({
+      username: "gmr",
+      role: "caster",
+    });
+
+    const response = await POST(
+      makeJsonRequest({
+        action: "update-broadcast",
+        matchId: 1,
+        displayMode: "bans",
+      })
+    );
+
+    expect(response.status).toBe(403);
+    expect(mockUpdateTourneyMatchBroadcast).not.toHaveBeenCalled();
   });
 
   test("blocks ordinary casters from matches outside their assignment", async () => {
