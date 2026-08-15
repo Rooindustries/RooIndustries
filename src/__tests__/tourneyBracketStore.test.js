@@ -355,6 +355,52 @@ describe("tourney bracket store", () => {
     );
   });
 
+  test("persists per-match broadcast state without changing scores", async () => {
+    const { store, snapshot } = await generateFourTeamBracket();
+    const first = snapshot.matches.find((match) => match.statusLabel === "Ready");
+
+    const updated = await store.updateTourneyMatchBroadcast({
+      matchId: first.id,
+      mapName: "Ilios",
+      mapMode: "Control",
+      pickedBy: "opponent2",
+      opponent1Ban: "Ana",
+      opponent2Ban: "Tracer",
+      displayMode: "bans",
+      actorUsername: "yukari",
+      env,
+    });
+
+    expect(updated.matches.find((match) => match.id === first.id)).toMatchObject({
+      opponent1: { score: "" },
+      opponent2: { score: "" },
+      broadcast: {
+        matchId: first.id,
+        mapName: "Ilios",
+        mapMode: "Control",
+        pickedBy: "opponent2",
+        opponent1Ban: "Ana",
+        opponent2Ban: "Tracer",
+        displayMode: "bans",
+        updatedBy: "yukari",
+      },
+    });
+    expect(updated.audit[0]).toMatchObject({
+      action: "match.broadcast.update",
+      matchId: first.id,
+      actorUsername: "yukari",
+    });
+
+    await expect(
+      store.updateTourneyMatchBroadcast({
+        matchId: first.id,
+        displayMode: "fullscreen",
+        actorUsername: "yukari",
+        env,
+      })
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
   test("keeps Grand Final live until one side reaches four wins", async () => {
     const { store } = await generateFourTeamBracket();
     let snapshot = await store.getTourneyBracketSnapshot({ env });

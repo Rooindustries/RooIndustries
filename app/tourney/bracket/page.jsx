@@ -1,10 +1,9 @@
-import {
-  StatusPanel,
-  TourneyShell,
-  getTourneySession,
-} from "../TourneyShared";
+import { TourneyShell, getTourneySession } from "../TourneyShared";
 import LiveBracketBoard from "./LiveBracketBoard";
-import { readTourneyService } from "../../../src/server/tourney/readService";
+import {
+  readPublicTourneyRoster,
+  readTourneyService,
+} from "../../../src/server/tourney/readService";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,11 +19,13 @@ export const metadata = {
 };
 
 export default async function TourneyBracketPage() {
-  const [session, bracketRead] = await Promise.all([
+  const [session, bracketRead, rosterRead] = await Promise.all([
     getTourneySession(),
     readTourneyService({ route: "public_bracket" }),
+    readPublicTourneyRoster().catch(() => ({ players: [] })),
   ]);
   const snapshot = bracketRead.body || {};
+  const rosterPlayers = rosterRead.players || [];
 
   return (
     <TourneyShell
@@ -42,12 +43,10 @@ export default async function TourneyBracketPage() {
           <h2 id="bracket-title">Matchups</h2>
           <p>Live matchups and results for the 6v6 Legacy Series.</p>
         </div>
-        {bracketRead.status >= 400 ? (
-          <StatusPanel label="Temporarily unavailable" title="Live bracket data is reconnecting">
-            The bracket placeholder remains visible. No matchup or result has been changed.
-          </StatusPanel>
-        ) : null}
-        <LiveBracketBoard initialSnapshot={snapshot} />
+        <LiveBracketBoard
+          initialSnapshot={snapshot}
+          rosterPlayers={rosterPlayers}
+        />
       </section>
     </TourneyShell>
   );

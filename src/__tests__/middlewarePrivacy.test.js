@@ -25,4 +25,14 @@ describe("URL privacy middleware", () => {
     expect(response.headers.get("x-middleware-next")).toBe("1");
     expect(response.headers.get("location")).toBeNull();
   });
+
+  test("preserves signed caster overlay tokens", () => {
+    const request = new NextRequest(
+      "https://www.rooindustries.com/tourney/overlay/caster?token=signed-match-token&theme=dark"
+    );
+    const response = middleware(request);
+
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.headers.get("location")).toBeNull();
+  });
 });

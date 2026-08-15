@@ -3,7 +3,10 @@ import { NextResponse } from "next/server";
 export function middleware(req) {
   const { pathname } = req.nextUrl;
 
-  if (!pathname.startsWith("/api/")) {
+  if (
+    !pathname.startsWith("/api/") &&
+    pathname !== "/tourney/overlay/caster"
+  ) {
     const sensitiveKeys = new Set([
       "data",
       "email",

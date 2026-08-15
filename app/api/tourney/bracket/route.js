@@ -16,6 +16,7 @@ import {
   scoreTourneyBracketMatch,
   seedTourneyBracketTeams,
   startTourneyBracketMatch,
+  updateTourneyMatchBroadcast,
   upsertTourneyBracketTeam,
 } from "../../../../src/server/tourney/bracketStore";
 import { canManageTourneyMatch } from "../../../../src/server/tourney/access";
@@ -45,6 +46,7 @@ const OWNER_ACTIONS = new Set([
 const ADMIN_ACTIONS = new Set([
   "start-match",
   "score-match",
+  "update-broadcast",
   "forfeit-match",
   "disqualify-team",
   "reopen-match",
@@ -168,6 +170,18 @@ export async function POST(request) {
             matchId: payload.matchId,
             opponent1Score: payload.opponent1Score,
             opponent2Score: payload.opponent2Score,
+            actorUsername: session.username,
+          }) };
+        }
+        if (action === "update-broadcast") {
+          return { body: await updateTourneyMatchBroadcast({
+            matchId: payload.matchId,
+            mapName: payload.mapName,
+            mapMode: payload.mapMode,
+            pickedBy: payload.pickedBy,
+            opponent1Ban: payload.opponent1Ban,
+            opponent2Ban: payload.opponent2Ban,
+            displayMode: payload.displayMode,
             actorUsername: session.username,
           }) };
         }
