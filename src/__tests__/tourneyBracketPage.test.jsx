@@ -23,7 +23,6 @@ jest.mock("../../app/tourney/bracket/LiveBracketBoard", () => ({ initialSnapshot
 ));
 
 jest.mock("../server/tourney/readService", () => ({
-  readPublicTourneyRoster: jest.fn(async () => ({ players: [] })),
   readTourneyService: (...args) => mockReadTourneyService(...args),
 }));
 
@@ -60,6 +59,7 @@ describe("Tourney bracket page", () => {
 
     render(await TourneyBracketPage());
 
+    expect(screen.getByText("Live bracket data is reconnecting")).toBeInTheDocument();
     expect(screen.getByTestId("live-bracket-board")).toHaveTextContent("{}");
   });
 

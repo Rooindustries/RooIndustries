@@ -818,39 +818,55 @@ export const TourneyStyles = () => (
     .tourney-hero-cta {
       display: flex;
       flex-wrap: wrap;
+      align-items: center;
       justify-content: center;
-      gap: 0.7rem;
-      margin-top: 1rem;
+      gap: clamp(1.5rem, 4vw, 3.5rem);
+      margin: clamp(1rem, 2vw, 1.5rem) auto 0;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid color-mix(in srgb, var(--tourney-accent) 28%, transparent);
     }
 
     .tourney-hero-cta a {
+      position: relative;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 0.5rem;
-      min-height: 42px;
-      border: 1px solid rgba(240, 195, 90, 0.48);
-      border-radius: 999px;
-      color: #f0c35a;
-      background: rgba(18, 14, 5, 0.32);
-      padding: 0.65rem 1rem;
-      font-size: 0.86rem;
-      font-weight: 800;
+      gap: 0.65rem;
+      color: var(--tourney-accent);
+      padding: 0.4rem 0;
+      font-size: clamp(1rem, 1.35vw, 1.18rem);
+      font-weight: 850;
+      letter-spacing: 0.01em;
       text-decoration: none;
-      box-shadow: 0 0 18px rgba(240, 195, 90, 0.1);
-      transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+      transition: color 160ms ease, text-shadow 160ms ease;
+    }
+
+    .tourney-hero-cta a::after {
+      position: absolute;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      height: 2px;
+      background: var(--tourney-accent);
+      content: "";
+      transform: scaleX(0.28);
+      transition: transform 160ms ease;
     }
 
     .tourney-hero-cta a:hover,
     .tourney-hero-cta a:focus-visible {
-      border-color: rgba(240, 195, 90, 0.88);
-      background: rgba(240, 195, 90, 0.1);
-      box-shadow: 0 0 22px rgba(240, 195, 90, 0.2);
+      color: var(--tourney-accent-glow);
+      text-shadow: 0 0 16px color-mix(in srgb, var(--tourney-accent-glow) 36%, transparent);
+    }
+
+    .tourney-hero-cta a:hover::after,
+    .tourney-hero-cta a:focus-visible::after {
+      transform: scaleX(1);
     }
 
     .tourney-hero-cta svg {
-      width: 1.15rem;
-      height: 1.15rem;
+      width: 1.35rem;
+      height: 1.35rem;
       flex: 0 0 auto;
     }
 
@@ -5599,7 +5615,8 @@ export const TourneyStyles = () => (
 
       .tourney-hero-cta {
         display: grid;
-        width: min(100%, 17rem);
+        gap: 0.85rem;
+        width: min(100%, 22rem);
       }
 
       .tourney-route-title {
