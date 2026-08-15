@@ -10,6 +10,7 @@ import seo from "../../src/lib/seo";
 import ConnectedAccounts from "../../src/components/ConnectedAccounts";
 import TourneyFreeSession from "./TourneyFreeSession";
 import TourneyLoginOutcome from "./TourneyLoginOutcome";
+import { FaDiscord } from "react-icons/fa";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -200,6 +201,17 @@ const DashboardPage = ({ hosts, loginOutcome = "", session }) => (
         <div className="tourney-registration-status" role="status">
           <strong>Registration closed</strong>
           <span>Team draft: July 26, 2026 at 19:00 UTC</span>
+        </div>
+        <div className="tourney-hero-cta">
+          <a href="/packages">Get Your PC Optimized Today</a>
+          <a
+            href="https://discord.com/invite/qs5HKNyazD"
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            <FaDiscord aria-hidden="true" />
+            <span>Join the giveaway at the Discord</span>
+          </a>
         </div>
       </div>
     </section>
