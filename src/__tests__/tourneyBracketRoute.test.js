@@ -7,6 +7,7 @@ const mockForfeitTourneyBracketMatch = jest.fn();
 const mockGenerateTourneyBracket = jest.fn();
 const mockGetTourneyBracketSnapshot = jest.fn();
 const mockReopenTourneyBracketMatch = jest.fn();
+const mockRepairTourneyLowerBracketRouting = jest.fn();
 const mockResetTourneyBracket = jest.fn();
 const mockScoreTourneyBracketMatch = jest.fn();
 const mockSeedTourneyBracketTeams = jest.fn();
@@ -40,6 +41,8 @@ jest.mock("../server/tourney/bracketStore", () => ({
   generateTourneyBracket: (...args) => mockGenerateTourneyBracket(...args),
   getTourneyBracketSnapshot: (...args) => mockGetTourneyBracketSnapshot(...args),
   reopenTourneyBracketMatch: (...args) => mockReopenTourneyBracketMatch(...args),
+  repairTourneyLowerBracketRouting: (...args) =>
+    mockRepairTourneyLowerBracketRouting(...args),
   resetTourneyBracket: (...args) => mockResetTourneyBracket(...args),
   scoreTourneyBracketMatch: (...args) => mockScoreTourneyBracketMatch(...args),
   seedTourneyBracketTeams: (...args) => mockSeedTourneyBracketTeams(...args),
@@ -99,6 +102,7 @@ describe("tourney bracket API route", () => {
       mockGenerateTourneyBracket,
       mockGetTourneyBracketSnapshot,
       mockReopenTourneyBracketMatch,
+      mockRepairTourneyLowerBracketRouting,
       mockResetTourneyBracket,
       mockScoreTourneyBracketMatch,
       mockSeedTourneyBracketTeams,
@@ -119,6 +123,7 @@ describe("tourney bracket API route", () => {
     mockScoreTourneyBracketMatch.mockResolvedValue(snapshot);
     mockGenerateTourneyBracket.mockResolvedValue(snapshot);
     mockReopenTourneyBracketMatch.mockResolvedValue(snapshot);
+    mockRepairTourneyLowerBracketRouting.mockResolvedValue(snapshot);
     mockStartTourneyBracketMatch.mockResolvedValue(snapshot);
     mockUpdateTourneyMatchBroadcast.mockResolvedValue(snapshot);
   });
@@ -310,6 +315,31 @@ describe("tourney bracket API route", () => {
 
     expect(response.status).toBe(200);
     expect(mockGenerateTourneyBracket).toHaveBeenCalledWith({
+      actorUsername: "serviroo",
+    });
+  });
+
+  test("blocks casters from repairing lower bracket routing", async () => {
+    const response = await POST(
+      makeJsonRequest({ action: "repair-lower-routing" })
+    );
+
+    expect(response.status).toBe(403);
+    expect(mockRepairTourneyLowerBracketRouting).not.toHaveBeenCalled();
+  });
+
+  test("allows owners to repair lower bracket routing", async () => {
+    mockReadTourneySessionFromStore.mockResolvedValue({
+      username: "serviroo",
+      role: "owner",
+    });
+
+    const response = await POST(
+      makeJsonRequest({ action: "repair-lower-routing" })
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockRepairTourneyLowerBracketRouting).toHaveBeenCalledWith({
       actorUsername: "serviroo",
     });
   });

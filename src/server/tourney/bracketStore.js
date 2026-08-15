@@ -724,7 +724,7 @@ const ensurePreviewFixtureLoaded = async (env = process.env) => {
     seeding,
     settings: {
       grandFinal: "simple",
-      seedOrdering: ["inner_outer", "natural", "natural", "natural", "natural"],
+      seedOrdering: ["inner_outer", "natural", "reverse", "natural", "natural"],
     },
   });
 
@@ -1124,7 +1124,7 @@ export const generateTourneyBracket = async ({
         seeding,
         settings: {
           grandFinal: "simple",
-          seedOrdering: ["inner_outer", "natural", "natural", "natural", "natural"],
+          seedOrdering: ["inner_outer", "natural", "reverse", "natural", "natural"],
         },
       });
 
@@ -1179,6 +1179,82 @@ const getGroupName = (group) => {
   if (group?.number === 3) return "Grand Final";
   return "Bracket";
 };
+
+const summarizeLowerOpeningRound = (snapshot) =>
+  snapshot.matches
+    .filter((match) => [11, 12, 13, 14].includes(match.publicMatchNumber))
+    .sort((left, right) => left.publicMatchNumber - right.publicMatchNumber)
+    .map((match) => ({
+      matchNumber: match.publicMatchNumber,
+      opponent1: match.opponent1.name,
+      opponent2: match.opponent2.name,
+      status: match.statusLabel,
+    }));
+
+export const repairTourneyLowerBracketRouting = async ({
+  actorUsername,
+  env = process.env,
+} = {}) =>
+  withBracketMutation({
+    actorUsername,
+    env,
+    callback: async () => {
+      const storage = createStorage(env);
+      const data = await readEngineData(env);
+      const stage = data.stage?.[0];
+      const losersGroup = data.group?.find((group) => Number(group.number) === 2);
+      const targetRound = data.round?.find(
+        (round) =>
+          round.group_id === losersGroup?.id && Number(round.number) === 2
+      );
+      if (!stage || !losersGroup || !targetRound) {
+        throw Object.assign(new Error("The live lower bracket could not be found."), {
+          status: 409,
+        });
+      }
+
+      const seedOrdering = [...(stage.settings?.seedOrdering || [])];
+      if (seedOrdering[2] === "reverse") {
+        return getTourneyBracketSnapshot({ includeAudit: true, env });
+      }
+
+      const matches = data.match?.filter(
+        (match) => match.round_id === targetRound.id
+      ) || [];
+      if (matches.some((match) => Number(match.status) > 2)) {
+        throw Object.assign(
+          new Error("Match 11-14 routing cannot change after one of those matches starts."),
+          { status: 409 }
+        );
+      }
+
+      const before = await getTourneyBracketSnapshot({ env });
+      await createManager(env).update.roundOrdering(targetRound.id, "reverse");
+      seedOrdering[2] = "reverse";
+      await storage.update("stage", stage.id, {
+        ...stage,
+        settings: { ...stage.settings, seedOrdering },
+      });
+      const updatedAt = nowIso();
+      const meta = await readMeta(env);
+      await writeMeta({
+        meta: { ...meta, updatedAt, updatedBy: normalizeKey(actorUsername) },
+        env,
+      });
+      const after = await getTourneyBracketSnapshot({ env });
+      await recordAudit({
+        action: "bracket.lower-routing.repair",
+        actorUsername,
+        reason: "Correct Match 11-14 loser routing without regenerating results.",
+        payload: {
+          before: summarizeLowerOpeningRound(before),
+          after: summarizeLowerOpeningRound(after),
+        },
+        env,
+      });
+      return getTourneyBracketSnapshot({ includeAudit: true, env });
+    },
+  });
 
 const getMatchBestOf = (match, group) => (group?.number === 3 ? 7 : 5);
 
