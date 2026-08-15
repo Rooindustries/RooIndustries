@@ -61,7 +61,7 @@ export const buildTourneyPostgresOptions = ({
   databaseUrl,
 } = {}) => ({
   ...buildPostgresConnectionOptions(databaseUrl),
-  max: backend === "supabase" ? 3 : 2,
+  max: backend === "supabase" ? 1 : 2,
   idle_timeout: 20,
   connect_timeout: 10,
   prepare: false,
