@@ -3944,7 +3944,7 @@ export const TourneyStyles = () => (
     }
 
     .tourney-match-side small.tourney-match-bye {
-      display: inline-block;
+      display: block;
       margin-top: 4px;
       color: var(--tourney-accent);
       font-size: 0.62rem;
