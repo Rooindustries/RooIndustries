@@ -196,35 +196,6 @@ describe("TourneyBracketView official schedule", () => {
     const scrollWidth = jest
       .spyOn(HTMLElement.prototype, "scrollWidth", "get")
       .mockReturnValue(1400);
-    const boundingRect = jest
-      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
-      .mockImplementation(function getBoundingClientRect() {
-        if (this.getAttribute("aria-label") === "Tournament bracket") {
-          return {
-            bottom: 1200,
-            height: 1100,
-            left: 200,
-            right: 800,
-            top: 100,
-            width: 600,
-            x: 200,
-            y: 100,
-            toJSON: () => ({}),
-          };
-        }
-        return {
-          bottom: 0,
-          height: 0,
-          left: 0,
-          right: 0,
-          top: 0,
-          width: 0,
-          x: 0,
-          y: 0,
-          toJSON: () => ({}),
-        };
-      });
-
     try {
       render(<TourneyBracketView snapshot={scheduledSnapshot()} showSchedule />);
 
@@ -243,10 +214,10 @@ describe("TourneyBracketView official schedule", () => {
       expect(bottom).toBeEnabled();
       expect(top).toHaveAttribute("max", "800");
       expect(bottom).toHaveAttribute("max", "800");
-      expect(top.parentElement).toHaveClass("is-pinned");
-      expect(bottom.parentElement).toHaveClass("is-pinned");
-      expect(top.parentElement).toHaveStyle({ left: "200px", width: "600px" });
-      expect(bottom.parentElement).toHaveStyle({ left: "200px", width: "600px" });
+      expect(top.parentElement).not.toHaveClass("is-pinned");
+      expect(bottom.parentElement).not.toHaveClass("is-pinned");
+      expect(top.parentElement).not.toHaveAttribute("style");
+      expect(bottom.parentElement).not.toHaveAttribute("style");
 
       fireEvent.change(top, { target: { value: "180" } });
       expect(board.scrollLeft).toBe(180);
@@ -265,7 +236,6 @@ describe("TourneyBracketView official schedule", () => {
     } finally {
       clientWidth.mockRestore();
       scrollWidth.mockRestore();
-      boundingRect.mockRestore();
     }
   });
 
@@ -684,18 +654,16 @@ describe("tourney bracket scroller styles", () => {
     "utf8"
   );
 
-  test("performance mode preserves sticky rails without clipping the page", () => {
+  test("keeps thick scrollers in flow at the bracket boundaries", () => {
     expect(sharedSource).toContain(
       ".tourney-page.is-performance-mode {\n      overflow: visible;\n    }"
     );
     expect(sharedSource).toContain("height: 30px;");
     expect(sharedSource).toContain("::-webkit-slider-runnable-track");
     expect(sharedSource).toContain("::-webkit-slider-thumb");
-    expect(sharedSource).toContain(
-      ".tourney-bracket-scrollbar.is-pinned {\n      position: fixed;"
-    );
-    expect(sharedSource).toContain(
-      ".tourney-page.is-performance-mode #match-control {\n      contain: none !important;"
+    expect(sharedSource).not.toContain(".tourney-bracket-scrollbar.is-pinned");
+    expect(sharedSource).not.toContain(
+      ".tourney-page.is-performance-mode #match-control"
     );
     expect(sharedSource).toContain(
       "grid-template-columns: repeat(3, minmax(0, 1fr));"
