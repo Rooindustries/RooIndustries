@@ -53,6 +53,7 @@ const toInternalMatch = (match) => ({
   schedule: match.schedule || null,
   casters: Array.isArray(match.casters) ? match.casters : [],
   slotLabels: match.slotLabels || {},
+  autoAdvance: Boolean(match.autoAdvance),
   opponent1: toInternalSide(match.opponents?.[0], 0),
   opponent2: toInternalSide(match.opponents?.[1], 1),
   nextLabels: Array.isArray(match.next) ? match.next : [],
