@@ -65,14 +65,17 @@ export default function BracketFitBoard({ children }) {
       typeof ResizeObserver !== "undefined"
         ? new ResizeObserver(scheduleMeasure)
         : null;
+    resizeObserver?.observe(stage);
     resizeObserver?.observe(content);
     window.addEventListener("resize", scheduleMeasure);
+    window.visualViewport?.addEventListener("resize", scheduleMeasure);
     document.fonts?.ready?.then(scheduleMeasure).catch(() => {});
 
     return () => {
       cancelAnimationFrame(frameId);
       resizeObserver?.disconnect();
       window.removeEventListener("resize", scheduleMeasure);
+      window.visualViewport?.removeEventListener("resize", scheduleMeasure);
     };
   }, []);
 
