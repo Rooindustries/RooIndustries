@@ -129,6 +129,37 @@ describe("tourney overlay mapping", () => {
     ]);
   });
 
+  test("preserves scheduled losers matches when the real bye round is first", () => {
+    const generated = [
+      ...Array.from({ length: 4 }, (_, index) => ({
+        id: `bye-${index + 1}`,
+        groupName: "Losers",
+        roundNumber: 1,
+        publicMatchNumber: null,
+        autoAdvance: true,
+      })),
+      ...Array.from({ length: 4 }, (_, index) => ({
+        id: `match-${index + 11}`,
+        groupName: "Losers",
+        roundNumber: 2,
+        publicMatchNumber: index + 11,
+        autoAdvance: false,
+      })),
+      { id: "match-15", groupName: "Losers", roundNumber: 3, publicMatchNumber: 15 },
+    ];
+
+    const visible = collapseLosersByeRoundMatches(generated);
+
+    expect(visible.map((match) => match.id)).toEqual([
+      "match-11",
+      "match-12",
+      "match-13",
+      "match-14",
+      "match-15",
+    ]);
+    expect(visible.map((match) => match.roundNumber)).toEqual([1, 1, 1, 1, 2]);
+  });
+
   describe("filterSnapshotByGroup", () => {
     const skeleton = [
       { id: "w1", groupName: "Winners" },
