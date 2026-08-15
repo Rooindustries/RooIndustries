@@ -53,7 +53,7 @@ test("renders an operations-only desk without owner setup controls", () => {
   expect(screen.queryByText("Recent Bracket Activity (1)")).not.toBeInTheDocument();
 });
 
-test("renders controls only for the caster's assigned matches", () => {
+test("renders controls for main hosts on every match", () => {
   render(
     <TourneyBracketManager
       currentRole="caster"
@@ -82,6 +82,36 @@ test("renders controls only for the caster's assigned matches", () => {
       schedule: { casterIds: [6] },
     })
   );
+  expect(screen.getByRole("button", { name: "Start live" })).toBeInTheDocument();
+});
+
+test("keeps ordinary casters restricted to assigned matches", () => {
+  render(
+    <TourneyBracketManager
+      currentRole="caster"
+      currentUsername="gmr"
+      operationsOnly
+      initialSnapshot={{ generated: true, teams: [], matches: [], audit: [] }}
+    />
+  );
+
+  const match = {
+    id: 1,
+    displayLabel: "Match 1",
+    statusLabel: "Ready",
+    targetScore: 3,
+    schedule: { casterIds: [3] },
+    opponent1: { teamId: "team-1", name: "Alpha", score: "" },
+    opponent2: { teamId: "team-2", name: "Bravo", score: "" },
+  };
+  const { rerender } = render(mockRenderControls(match));
+  expect(screen.getByRole("button", { name: "Start live" })).toBeInTheDocument();
+
+  rerender(mockRenderControls({
+    ...match,
+    id: 13,
+    schedule: { casterIds: [6, 7] },
+  }));
   expect(screen.queryByRole("button", { name: "Start live" })).toBeNull();
 });
 
