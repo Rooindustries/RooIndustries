@@ -12,6 +12,12 @@ const emptyTeamForm = {
   seed: "",
 };
 
+const getBroadcastValue = ({ broadcastForms, match, field }) => {
+  const saved = broadcastForms[match.id]?.[field];
+  if (saved !== undefined) return saved;
+  return match.broadcast?.[field] || (field === "displayMode" ? "score" : "");
+};
+
 const getScoreValue = ({ scoreForms, match, side }) => {
   const saved = scoreForms[match.id]?.[`${side}Score`];
   if (saved !== undefined) return saved;
@@ -21,6 +27,17 @@ const getScoreValue = ({ scoreForms, match, side }) => {
 const activeTeams = (teams = []) =>
   teams.filter((team) => team.status !== "disqualified");
 
+const catalogNames = (records = []) =>
+  [...new Set(records.map((record) => String(record?.name || "").trim()).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right));
+
+const withCurrentOption = (options, currentValue) => {
+  const current = String(currentValue || "").trim();
+  return current && !options.includes(current)
+    ? [current, ...options]
+    : options;
+};
+
 const auditTimeLabel = (value) =>
   value instanceof Date ? value.toISOString() : String(value || "");
 
@@ -28,11 +45,14 @@ export default function TourneyBracketManager({
   initialSnapshot,
   currentRole = "caster",
   currentUsername = "",
+  broadcastMedia = { heroes: [], maps: [] },
+  broadcastSourcePaths = {},
   operationsOnly = false,
 }) {
   const [snapshot, setSnapshot] = useBracketSnapshotPoll(initialSnapshot);
   const [teamForm, setTeamForm] = useState(emptyTeamForm);
   const [scoreForms, setScoreForms] = useState({});
+  const [broadcastForms, setBroadcastForms] = useState({});
   const [reasonForms, setReasonForms] = useState({});
   const [message, setMessage] = useState("");
   const [isBusy, setIsBusy] = useState(false);
@@ -40,6 +60,14 @@ export default function TourneyBracketManager({
   const canSetup = currentRole === "owner";
   const teams = snapshot?.teams || [];
   const matches = (snapshot?.matches || []).filter((match) => !match.autoAdvance);
+  const mapNames = useMemo(
+    () => catalogNames(broadcastMedia.maps),
+    [broadcastMedia.maps]
+  );
+  const heroNames = useMemo(
+    () => catalogNames(broadcastMedia.heroes),
+    [broadcastMedia.heroes]
+  );
   const matchCounts = matches.reduce(
     (counts, match) => {
       if (match.statusLabel === "Ready") counts.ready += 1;
@@ -117,6 +145,61 @@ export default function TourneyBracketManager({
     }));
   };
 
+  const updateBroadcast = (matchId, field, value) => {
+    setBroadcastForms((current) => ({
+      ...current,
+      [matchId]: {
+        ...(current[matchId] || {}),
+        [field]: value,
+      },
+    }));
+  };
+
+  const submitBroadcast = async (event, match) => {
+    event.preventDefault();
+    const didUpdate = await postBracketAction({
+      action: "update-broadcast",
+      matchId: match.id,
+      mapName: getBroadcastValue({ broadcastForms, match, field: "mapName" }),
+      mapMode: getBroadcastValue({ broadcastForms, match, field: "mapMode" }),
+      pickedBy: getBroadcastValue({ broadcastForms, match, field: "pickedBy" }),
+      opponent1Ban: getBroadcastValue({
+        broadcastForms,
+        match,
+        field: "opponent1Ban",
+      }),
+      opponent2Ban: getBroadcastValue({
+        broadcastForms,
+        match,
+        field: "opponent2Ban",
+      }),
+      displayMode: getBroadcastValue({
+        broadcastForms,
+        match,
+        field: "displayMode",
+      }),
+    });
+    if (didUpdate) {
+      setBroadcastForms((current) => {
+        const next = { ...current };
+        delete next[match.id];
+        return next;
+      });
+    }
+  };
+
+  const copyBroadcastSource = async (sourcePath, theme) => {
+    if (!sourcePath || typeof window === "undefined") return;
+    try {
+      await navigator.clipboard.writeText(
+        `${window.location.origin}${sourcePath}&theme=${theme}`
+      );
+      setMessage(`${theme === "dark" ? "Blackout" : "Roo Blue"} OBS source copied.`);
+    } catch {
+      setMessage("Unable to copy the OBS source.");
+    }
+  };
+
   const updateReason = (matchId, value) => {
     setReasonForms((current) => ({ ...current, [matchId]: value }));
   };
@@ -143,6 +226,7 @@ export default function TourneyBracketManager({
     const isOpen = ["Ready", "Running"].includes(match.statusLabel);
     const isCompleted = ["Completed", "Archived"].includes(match.statusLabel);
     const reason = reasonForms[match.id] || "";
+    const sourcePath = broadcastSourcePaths[match.id] || "";
 
     return (
       <div className="tourney-match-controls">
@@ -272,6 +356,173 @@ export default function TourneyBracketManager({
             ) : null}
           </div>
         ) : null}
+        <details className="tourney-broadcast-panel">
+          <summary>
+            <span>Broadcast overlay</span>
+            <b>{match.broadcast?.displayMode || "score"}</b>
+          </summary>
+          <form
+            className="tourney-broadcast-form"
+            onSubmit={(event) => submitBroadcast(event, match)}
+          >
+            <label>
+              Current map
+              <select
+                value={getBroadcastValue({ broadcastForms, match, field: "mapName" })}
+                onChange={(event) =>
+                  updateBroadcast(match.id, "mapName", event.target.value)
+                }
+              >
+                <option value="">Not selected</option>
+                {withCurrentOption(
+                  mapNames,
+                  getBroadcastValue({ broadcastForms, match, field: "mapName" })
+                ).map((mapName) => (
+                  <option key={mapName} value={mapName}>
+                    {mapName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Map mode
+              <input
+                type="text"
+                maxLength={32}
+                placeholder="e.g. Control"
+                value={getBroadcastValue({ broadcastForms, match, field: "mapMode" })}
+                onChange={(event) =>
+                  updateBroadcast(match.id, "mapMode", event.target.value)
+                }
+              />
+            </label>
+            <label>
+              Map picked by
+              <select
+                value={getBroadcastValue({ broadcastForms, match, field: "pickedBy" })}
+                onChange={(event) =>
+                  updateBroadcast(match.id, "pickedBy", event.target.value)
+                }
+              >
+                <option value="">Not shown</option>
+                <option value="opponent1">{match.opponent1.name}</option>
+                <option value="opponent2">{match.opponent2.name}</option>
+              </select>
+            </label>
+            <label>
+              Graphic
+              <select
+                value={getBroadcastValue({
+                  broadcastForms,
+                  match,
+                  field: "displayMode",
+                })}
+                onChange={(event) =>
+                  updateBroadcast(match.id, "displayMode", event.target.value)
+                }
+              >
+                <option value="score">Score strip</option>
+                <option value="bans">Map and hero bans</option>
+                <option value="hidden">Hidden</option>
+              </select>
+            </label>
+            <label>
+              {match.opponent1.name} ban
+              <select
+                value={getBroadcastValue({
+                  broadcastForms,
+                  match,
+                  field: "opponent1Ban",
+                })}
+                onChange={(event) =>
+                  updateBroadcast(match.id, "opponent1Ban", event.target.value)
+                }
+              >
+                <option value="">No hero banned</option>
+                {withCurrentOption(
+                  heroNames,
+                  getBroadcastValue({
+                    broadcastForms,
+                    match,
+                    field: "opponent1Ban",
+                  })
+                ).map((heroName) => (
+                  <option key={heroName} value={heroName}>
+                    {heroName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              {match.opponent2.name} ban
+              <select
+                value={getBroadcastValue({
+                  broadcastForms,
+                  match,
+                  field: "opponent2Ban",
+                })}
+                onChange={(event) =>
+                  updateBroadcast(match.id, "opponent2Ban", event.target.value)
+                }
+              >
+                <option value="">No hero banned</option>
+                {withCurrentOption(
+                  heroNames,
+                  getBroadcastValue({
+                    broadcastForms,
+                    match,
+                    field: "opponent2Ban",
+                  })
+                ).map((heroName) => (
+                  <option key={heroName} value={heroName}>
+                    {heroName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="tourney-broadcast-actions">
+              <button className="tourney-owner-link" type="submit" disabled={isBusy}>
+                Save broadcast
+              </button>
+              <button
+                className="tourney-owner-link"
+                type="button"
+                disabled={!sourcePath}
+                onClick={() => copyBroadcastSource(sourcePath, "default")}
+              >
+                Copy Roo Blue
+              </button>
+              <button
+                className="tourney-owner-link"
+                type="button"
+                disabled={!sourcePath}
+                onClick={() => copyBroadcastSource(sourcePath, "dark")}
+              >
+                Copy Blackout
+              </button>
+              {sourcePath ? (
+                <>
+                  <a
+                    className="tourney-owner-link"
+                    href={sourcePath}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open source
+                  </a>
+                  <a
+                    className="tourney-owner-link"
+                    href={`${sourcePath}&demo=1`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Demo layout
+                  </a>
+                </>
+              ) : null}
+            </div>
+          </form>
+        </details>
       </div>
     );
   };

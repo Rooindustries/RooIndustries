@@ -3983,7 +3983,7 @@ export const TourneyStyles = () => (
     }
 
     .tourney-match-side small.tourney-match-bye {
-      display: inline-block;
+      display: block;
       margin-top: 4px;
       color: var(--tourney-accent);
       font-size: 0.62rem;
@@ -4048,6 +4048,138 @@ export const TourneyStyles = () => (
       color: #e0f2fe;
       font-size: 1.18rem;
       line-height: 1;
+    }
+
+    .tourney-bracket-team-roster {
+      position: relative;
+      display: inline-block;
+      max-width: 100%;
+      cursor: help;
+      outline: none;
+    }
+
+    .tourney-bracket-team-roster:focus-visible > strong {
+      outline: 2px solid var(--tourney-accent);
+      outline-offset: 3px;
+      border-radius: 0.2rem;
+    }
+
+    .tourney-bracket-roster-popover {
+      position: absolute;
+      z-index: 80;
+      left: 50%;
+      bottom: calc(100% + 10px);
+      display: grid;
+      gap: 8px;
+      width: min(18rem, 76vw);
+      border: 1px solid var(--tourney-border-accent);
+      border-radius: 0.8rem;
+      background: color-mix(in srgb, var(--tourney-surface-strong) 97%, #020617);
+      box-shadow: 0 20px 48px rgba(2, 6, 23, 0.58);
+      padding: 12px;
+      opacity: 0;
+      pointer-events: none;
+      transform: translate(-50%, 6px);
+      transition: opacity 120ms ease, transform 120ms ease;
+    }
+
+    .tourney-bracket-team-roster:hover .tourney-bracket-roster-popover,
+    .tourney-bracket-team-roster:focus .tourney-bracket-roster-popover,
+    .tourney-bracket-team-roster:focus-within .tourney-bracket-roster-popover {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+
+    .tourney-bracket-roster-popover > b {
+      color: var(--tourney-accent);
+      font-size: 0.78rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .tourney-bracket-roster-list {
+      display: grid;
+      gap: 6px;
+    }
+
+    .tourney-bracket-roster-player {
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr);
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--tourney-border);
+      border-radius: 0.55rem;
+      background: var(--tourney-surface-soft);
+      padding: 6px 8px;
+    }
+
+    .tourney-bracket-roster-avatar {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      overflow: hidden;
+      border: 1px solid var(--tourney-border-accent);
+      border-radius: 50%;
+      color: var(--tourney-accent);
+      background: var(--tourney-surface-strong);
+      font-size: 0.76rem;
+      font-weight: 850;
+    }
+
+    .tourney-bracket-roster-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .tourney-bracket-roster-player > span:last-child {
+      display: grid;
+      min-width: 0;
+    }
+
+    .tourney-bracket-roster-player strong {
+      color: var(--tourney-text);
+      font-size: 0.75rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tourney-bracket-roster-player small,
+    .tourney-bracket-roster-player em {
+      margin: 0;
+      color: var(--tourney-text-muted);
+      font-size: 0.64rem;
+      font-style: normal;
+      line-height: 1.3;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tourney-bracket-roster-player em {
+      color: var(--tourney-accent-glow);
+    }
+
+    .tourney-match-card footer .tourney-match-live-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      border: 1px solid rgba(248, 113, 113, 0.72);
+      border-radius: 999px;
+      color: #ffffff;
+      background: rgba(220, 38, 38, 0.86);
+      padding: 4px 8px;
+      box-shadow: 0 0 16px rgba(239, 68, 68, 0.34);
+    }
+
+    .tourney-match-card footer .tourney-match-live-status::before {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #ffffff;
+      content: "";
     }
 
     /* Scheduled public matches only: caster assignment under the sides. Wrap
@@ -4164,17 +4296,101 @@ export const TourneyStyles = () => (
       white-space: nowrap;
     }
 
-    .tourney-match-controls input {
+    .tourney-match-controls input,
+    .tourney-match-controls select {
       width: 100%;
       min-height: 38px;
-      border: 1px solid rgba(14, 165, 233, 0.34);
+      border: 1px solid var(--tourney-border-accent);
       border-radius: 0.62rem;
-      color: #fff;
-      background: rgba(15, 23, 42, 0.72);
+      color: var(--tourney-text);
+      background: var(--tourney-input);
       padding: 0 10px;
       font: inherit;
       font-size: 0.88rem;
       outline: none;
+    }
+
+    .tourney-broadcast-panel {
+      overflow: hidden;
+      border: 1px solid var(--tourney-border-accent);
+      border-radius: 0.72rem;
+      background: color-mix(in srgb, var(--tourney-surface-strong) 94%, transparent);
+    }
+
+    .tourney-broadcast-panel summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      cursor: pointer;
+      color: var(--tourney-text-soft);
+      font-size: 0.84rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      padding: 13px 15px;
+      text-transform: uppercase;
+    }
+
+    .tourney-broadcast-panel summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .tourney-broadcast-panel summary b {
+      border: 1px solid var(--tourney-border-accent);
+      border-radius: 999px;
+      color: var(--tourney-accent-glow);
+      font-size: 0.72rem;
+      padding: 5px 10px;
+    }
+
+    .tourney-match-controls .tourney-broadcast-form {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 14px;
+      border-top: 1px solid var(--tourney-border);
+      padding: 16px;
+    }
+
+    .tourney-broadcast-form label {
+      display: grid;
+      gap: 7px;
+      min-width: 0;
+      color: var(--tourney-text-muted);
+      font-size: 0.82rem;
+      font-weight: 750;
+      line-height: 1.35;
+    }
+
+    .tourney-broadcast-form input,
+    .tourney-broadcast-form select {
+      min-height: 48px;
+      border-radius: 0.7rem;
+      padding-inline: 13px;
+      font-size: 1rem;
+    }
+
+    .tourney-broadcast-actions {
+      display: grid;
+      grid-column: 1 / -1;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 2px;
+    }
+
+    .tourney-match-controls form .tourney-broadcast-actions .tourney-owner-link {
+      display: inline-flex;
+      grid-column: auto;
+      align-items: center;
+      justify-content: center;
+      min-width: 0;
+      min-height: 44px;
+      padding-inline: 10px;
+      font-size: 0.82rem;
+      text-align: center;
+      text-decoration: none;
+    }
+
+    .tourney-match-controls form .tourney-broadcast-actions .tourney-owner-link:first-child {
+      grid-column: 1 / -1;
     }
 
     .tourney-player-manager {
@@ -4634,6 +4850,7 @@ export const TourneyStyles = () => (
     .tourney-owner-actions input,
     .tourney-owner-json textarea,
     .tourney-match-controls input,
+    .tourney-match-controls select,
     .tourney-prefixed-input {
       border-color: var(--color-border-input);
       color: var(--tourney-text);
@@ -4664,6 +4881,7 @@ export const TourneyStyles = () => (
     .tourney-owner-actions input:focus,
     .tourney-owner-json textarea:focus,
     .tourney-match-controls input:focus,
+    .tourney-match-controls select:focus,
     .tourney-prefixed-input:focus-within {
       border-color: var(--tourney-focus);
       box-shadow: 0 0 0 3px color-mix(in srgb, var(--tourney-focus) 26%, transparent);

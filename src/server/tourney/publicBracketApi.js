@@ -107,6 +107,17 @@ const mapPublicMatch = (match) => {
     completed: status === "completed" || status === "archived",
     bestOf: match.bestOf,
     targetScore: match.targetScore,
+    broadcast: match.broadcast
+      ? {
+          mapName: match.broadcast.mapName || "",
+          mapMode: match.broadcast.mapMode || "",
+          pickedBy: match.broadcast.pickedBy || "",
+          opponent1Ban: match.broadcast.opponent1Ban || "",
+          opponent2Ban: match.broadcast.opponent2Ban || "",
+          displayMode: match.broadcast.displayMode || "score",
+          updatedAt: match.broadcast.updatedAt || "",
+        }
+      : null,
     opponents: [mapPublicOpponent(match.opponent1), mapPublicOpponent(match.opponent2)],
     next: Array.isArray(match.nextLabels) ? match.nextLabels : [],
   };
@@ -193,13 +204,20 @@ const compareFeedMatches = (left, right) => {
 // OBS strips pin to one table with ?match= / ?team=. A pinned strip only ever
 // shows that match (or that team's match) while it is ready or running — it
 // never falls back to someone else's game, it just goes idle.
-const normalizePin = (value) => String(value || "").trim().toLowerCase();
+const normalizeTeamPin = (value) =>
+  String(value || "")
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .replace(/['’]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 
 const matchHasTeam = (match, pin) =>
   match.opponents.some(
     (opponent) =>
-      normalizePin(opponent.name) === pin ||
-      normalizePin(opponent.teamId) === pin
+      normalizeTeamPin(opponent.name) === pin ||
+      normalizeTeamPin(opponent.teamId) === pin
   );
 
 export const buildPublicLiveResponse = (
@@ -209,7 +227,7 @@ export const buildPublicLiveResponse = (
   const boundedLimit = clamp(Number(limit) || 3, 1, 10);
   const matches = (snapshot?.matches || []).map(mapPublicMatch);
   const pinnedId = String(matchId || "").trim();
-  const pinnedTeam = normalizePin(team);
+  const pinnedTeam = normalizeTeamPin(team);
   const isPinned = (match) => {
     if (pinnedId) return String(match.id) === pinnedId;
     if (pinnedTeam) return matchHasTeam(match, pinnedTeam);

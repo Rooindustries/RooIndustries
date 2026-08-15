@@ -18,6 +18,8 @@ const ENGINE_TABLES = Object.freeze([
   "match",
   "match_game",
 ]);
+const BROADCAST_TABLE = "broadcast";
+const BROADCAST_DISPLAY_MODES = new Set(["score", "bans", "hidden"]);
 const MATCH_STATUSES = Object.freeze({
   0: "Locked",
   1: "Waiting",
@@ -280,8 +282,14 @@ const MEMORY_STORE =
   (globalThis.__rooTourneyBracketStore = {
     teams: [],
     audit: [],
-    entities: Object.fromEntries(ENGINE_TABLES.map((table) => [table, []])),
-    counters: Object.fromEntries(ENGINE_TABLES.map((table) => [table, 0])),
+    entities: {
+      ...Object.fromEntries(ENGINE_TABLES.map((table) => [table, []])),
+      [BROADCAST_TABLE]: [],
+    },
+    counters: {
+      ...Object.fromEntries(ENGINE_TABLES.map((table) => [table, 0])),
+      [BROADCAST_TABLE]: 0,
+    },
     meta: {
       id: TOURNEY_META_ID,
       stageId: null,
@@ -404,6 +412,26 @@ const sanitizeTeamName = (value) => {
   return name;
 };
 
+const sanitizeBroadcastText = (value, label, maxLength) => {
+  const text = normalizeText(value).replace(/\s+/g, " ");
+  if (text.length > maxLength) {
+    throw Object.assign(new Error(`${label} must be ${maxLength} characters or fewer.`), {
+      status: 400,
+    });
+  }
+  return text;
+};
+
+const normalizeBroadcastDisplayMode = (value) => {
+  const mode = normalizeKey(value) || "score";
+  if (!BROADCAST_DISPLAY_MODES.has(mode)) {
+    throw Object.assign(new Error("Choose a valid broadcast display mode."), {
+      status: 400,
+    });
+  }
+  return mode;
+};
+
 const normalizeSeed = (value) => {
   if (value === "" || value === null || value === undefined) return null;
   const seed = Number(value);
@@ -466,8 +494,14 @@ const mapAuditRow = (row = {}) => ({
 export const resetMemoryTourneyBracketStoreForTests = () => {
   MEMORY_STORE.teams = [];
   MEMORY_STORE.audit = [];
-  MEMORY_STORE.entities = Object.fromEntries(ENGINE_TABLES.map((table) => [table, []]));
-  MEMORY_STORE.counters = Object.fromEntries(ENGINE_TABLES.map((table) => [table, 0]));
+  MEMORY_STORE.entities = {
+    ...Object.fromEntries(ENGINE_TABLES.map((table) => [table, []])),
+    [BROADCAST_TABLE]: [],
+  };
+  MEMORY_STORE.counters = {
+    ...Object.fromEntries(ENGINE_TABLES.map((table) => [table, 0])),
+    [BROADCAST_TABLE]: 0,
+  };
   MEMORY_STORE.meta = createDefaultMeta();
   MEMORY_STORE.lock = false;
   MEMORY_STORE.fixtureKey = "";
@@ -1315,6 +1349,63 @@ export const startTourneyBracketMatch = async ({
     },
   });
 
+export const updateTourneyMatchBroadcast = async ({
+  matchId,
+  mapName = "",
+  mapMode = "",
+  pickedBy = "",
+  opponent1Ban = "",
+  opponent2Ban = "",
+  displayMode = "score",
+  actorUsername,
+  env = process.env,
+} = {}) =>
+  withBracketMutation({
+    actorUsername,
+    env,
+    callback: async () => {
+      const match = await findMatch({ matchId, env });
+      const storage = createStorage(env);
+      const updatedAt = nowIso();
+      const broadcast = {
+        id: Number(match.id),
+        matchId: Number(match.id),
+        mapName: sanitizeBroadcastText(mapName, "Map name", 48),
+        mapMode: sanitizeBroadcastText(mapMode, "Map mode", 32),
+        pickedBy: ["opponent1", "opponent2"].includes(String(pickedBy))
+          ? String(pickedBy)
+          : "",
+        opponent1Ban: sanitizeBroadcastText(opponent1Ban, "Top team hero ban", 32),
+        opponent2Ban: sanitizeBroadcastText(opponent2Ban, "Bottom team hero ban", 32),
+        displayMode: normalizeBroadcastDisplayMode(displayMode),
+        updatedAt,
+        updatedBy: normalizeKey(actorUsername),
+      };
+
+      await storage.insert(BROADCAST_TABLE, broadcast);
+      const meta = await readMeta(env);
+      await writeMeta({
+        meta: { ...meta, updatedAt, updatedBy: normalizeKey(actorUsername) },
+        env,
+      });
+      await recordAudit({
+        action: "match.broadcast.update",
+        actorUsername,
+        matchId: Number(match.id),
+        payload: {
+          mapName: broadcast.mapName,
+          mapMode: broadcast.mapMode,
+          pickedBy: broadcast.pickedBy,
+          opponent1Ban: broadcast.opponent1Ban,
+          opponent2Ban: broadcast.opponent2Ban,
+          displayMode: broadcast.displayMode,
+        },
+        env,
+      });
+      return getTourneyBracketSnapshot({ includeAudit: true, env });
+    },
+  });
+
 export const scoreTourneyBracketMatch = async ({
   matchId,
   opponent1Score,
@@ -1685,11 +1776,19 @@ const buildNextLabels = ({ match, matches, rounds, groups }) => {
   return labels;
 };
 
-const buildDisplayMatches = ({ data, teams, maskParticipantNames = false }) => {
+const buildDisplayMatches = ({
+  data,
+  teams,
+  broadcasts = [],
+  maskParticipantNames = false,
+}) => {
   const participants = data.participant || [];
   const groups = data.group || [];
   const rounds = data.round || [];
   const matches = data.match || [];
+  const broadcastByMatchId = new Map(
+    broadcasts.map((broadcast) => [Number(broadcast.matchId ?? broadcast.id), broadcast])
+  );
   const hasOfficialSchedule = teams.length === 12 && matches.length === 30;
 
   return matches
@@ -1750,6 +1849,7 @@ const buildDisplayMatches = ({ data, teams, maskParticipantNames = false }) => {
         targetScore: getMatchTargetScore(match, group),
         opponent1: side("opponent1"),
         opponent2: side("opponent2"),
+        broadcast: broadcastByMatchId.get(Number(match.id)) || null,
         nextLabels: buildNextLabels({ match, matches, rounds, groups }),
       };
     })
@@ -1836,9 +1936,11 @@ export const getTourneyBracketSnapshot = async ({
   // has no VERCEL_ENV and should render the fixture's Roo * team names.
   const maskPreviewFixtureNames =
     isPreviewFixtureMode(env) && env.VERCEL_ENV === "preview";
+  const broadcasts = (await createStorage(env).select(BROADCAST_TABLE)) || [];
   const matches = buildDisplayMatches({
     data,
     teams,
+    broadcasts,
     maskParticipantNames: maskPreviewFixtureNames,
   });
   const scheduled = matches.filter((match) => match.publicMatchNumber !== null);
