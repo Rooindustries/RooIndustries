@@ -30,8 +30,18 @@ export default function BracketFitBoard({ children }) {
       const baseWidth = content.offsetWidth;
       const baseHeight = content.offsetHeight;
       if (!baseWidth || !baseHeight) return;
-      const availableWidth =
+      const parentWidth =
         stage.parentElement?.clientWidth || stage.clientWidth;
+      const viewportWidth =
+        document.documentElement.clientWidth || window.innerWidth;
+      const horizontalInset = Math.max(
+        0,
+        stage.getBoundingClientRect().left * 2
+      );
+      const availableWidth = Math.min(
+        parentWidth,
+        Math.max(0, viewportWidth - horizontalInset) || parentWidth
+      );
       const nextFit = availableWidth / baseWidth;
       const rounded = Math.round(nextFit * 1000) / 1000;
       setBaseSize((previous) =>
