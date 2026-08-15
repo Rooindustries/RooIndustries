@@ -356,15 +356,15 @@ export const collapseLosersByeRoundMatches = (matches = []) => {
       )
     );
   });
-  const byeRoundNumber = autoAdvanceRound ?? 2;
+  if (autoAdvanceRound === undefined) return matches;
 
   return matches
     .filter(
       (match) =>
-        !(match.groupName === "Losers" && match.roundNumber === byeRoundNumber)
+        !(match.groupName === "Losers" && match.roundNumber === autoAdvanceRound)
     )
     .map((match) =>
-      match.groupName === "Losers" && match.roundNumber > byeRoundNumber
+      match.groupName === "Losers" && match.roundNumber > autoAdvanceRound
         ? { ...match, roundNumber: match.roundNumber - 1 }
         : match
     );
