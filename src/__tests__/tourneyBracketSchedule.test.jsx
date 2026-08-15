@@ -322,7 +322,10 @@ describe("TourneyBracketView caster color coding", () => {
       [1, [{ id: 3, label: "GMR", color: "red" }]],
       [4, [{ id: 4, label: "KimchiBapBop", color: "pink" }]],
       [12, [{ id: 5, label: "LightOW", color: "black" }]],
-      [13, [{ id: 6, label: "Lemon", color: "yellow" }]],
+      [13, [
+        { id: 6, label: "Lemon", color: "yellow" },
+        { id: 7, label: "Ace", color: "blue" },
+      ]],
       [21, [
         { id: 1, label: "Yukari", color: "purple" },
         { id: 2, label: "Supa", color: "green" },
@@ -356,7 +359,6 @@ describe("TourneyBracketView caster color coding", () => {
       ["Match 3", "var(--caster-green)"],
       ["Match 4", "var(--caster-pink)"],
       ["Match 12", "var(--caster-black)"],
-      ["Match 13", "var(--caster-yellow)"],
     ];
     for (const [label, token] of expectations) {
       const card = screen.getByText(label).closest("article");
@@ -392,11 +394,18 @@ describe("TourneyBracketView caster color coding", () => {
     }
   });
 
-  test("prints Lemon only, with no To Be Determined fallback in the cast line", () => {
+  test("gives Lemon and Ace a yellow-blue duo highlight", () => {
     render(<TourneyBracketView snapshot={casterColorSnapshot()} showSchedule />);
 
     const card = screen.getByText("Match 13").closest("article");
-    expect(within(card).getByText("Cast: Lemon")).toBeInTheDocument();
+    expect(card.className).toContain("has-caster-duo");
+    expect(card.style.getPropertyValue("--caster-1")).toBe(
+      "var(--caster-yellow)"
+    );
+    expect(card.style.getPropertyValue("--caster-2")).toBe(
+      "var(--caster-blue)"
+    );
+    expect(within(card).getByText("Cast: Lemon, Ace")).toBeInTheDocument();
     expect(within(card).queryByText(/To Be Determined/)).not.toBeInTheDocument();
   });
 
@@ -773,6 +782,7 @@ describe("blackout bracket palette", () => {
       "--caster-black: #000000;",
       "--caster-yellow: #facc15;",
       "--caster-red: #f87171;",
+      "--caster-blue: #38bdf8;",
     ]) {
       expect(sharedSource).toContain(token);
     }

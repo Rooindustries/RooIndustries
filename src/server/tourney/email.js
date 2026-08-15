@@ -507,6 +507,68 @@ const describeResetWindow = (expiresAt) => {
 
 export const __describeResetWindowForTests = describeResetWindow;
 
+export async function sendTourneyCasterAccessEmail({
+  casterName,
+  username,
+  email,
+  token,
+  baseUrl,
+  idempotencyKey = "",
+  signal,
+  env = process.env,
+} = {}) {
+  const resend = getResend(env);
+  const from = getFromAddress(env);
+  const resetUrl = new URL("/tourney/reset", baseUrl);
+  resetUrl.hash = `token=${encodeURIComponent(token)}`;
+  const name = String(casterName || username || "Caster").trim();
+  const login = String(username || "").trim();
+
+  const { data, error } = await sendWithIdempotency(resend, {
+    from,
+    to: [email],
+    subject: "Your Roo Industries Tournament Caster Access",
+    html: `
+      <div style="font-family:Arial,sans-serif;line-height:1.5;color:#0f172a">
+        <p>Hi ${escapeHtml(name)},</p>
+        <p>Your caster account for the Roo Industries tournament control panel is ready.</p>
+        <p><strong>Username:</strong> ${escapeHtml(login)}</p>
+        <p>Use the secure link below to create your password:</p>
+        <p><a href="${resetUrl.toString()}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#0891b2;color:#fff;text-decoration:none;font-weight:700">Set password</a></p>
+        <p>Once your password is set, sign in and open the Match Control page. You’ll only be able to update matches assigned to you.</p>
+        <p>Please don’t share your account or password with anyone else.</p>
+        <p>Thanks,<br>Roo Industries</p>
+      </div>
+    `,
+    text: [
+      `Hi ${name},`,
+      "",
+      "Your caster account for the Roo Industries tournament control panel is ready.",
+      "",
+      `Username: ${login}`,
+      "",
+      "Use the secure link below to create your password:",
+      "",
+      resetUrl.toString(),
+      "",
+      "Once your password is set, sign in and open the Match Control page. You’ll only be able to update matches assigned to you.",
+      "",
+      "Please don’t share your account or password with anyone else.",
+      "",
+      "Thanks,",
+      "Roo Industries",
+    ].join("\n"),
+  }, idempotencyKey, signal);
+
+  if (error) {
+    throw Object.assign(new Error("Unable to send caster access email."), {
+      code: "tourney_caster_access_email_failed",
+    });
+  }
+
+  return data;
+}
+
 export async function sendTourneyResetEmail({
   player,
   token,

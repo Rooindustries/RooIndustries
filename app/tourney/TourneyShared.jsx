@@ -346,6 +346,7 @@ export const TourneyStyles = () => (
       --caster-black: #000000;
       --caster-yellow: #facc15;
       --caster-red: #f87171;
+      --caster-blue: #38bdf8;
       --tourney-card-shadow: inset 0 1px 0 rgba(186, 230, 253, 0.08),
         0 12px 30px rgba(2, 6, 23, 0.28);
       min-height: 100vh;
