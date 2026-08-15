@@ -143,7 +143,7 @@ const scheduledSnapshot = () => ({
       publicMatchNumber: 11,
       schedule: dayOne("Losers Round 1", "3:30 PM"),
       casters: [{ id: 3, label: "GMR" }],
-      slotLabels: { opponent1: "Loser of 5", opponent2: "Loser of 1" },
+      slotLabels: { opponent1: "Loser of 8", opponent2: "Loser of 1" },
       opponent1: tbdSide("opponent1"),
       opponent2: tbdSide("opponent2"),
     }),
@@ -291,7 +291,7 @@ describe("TourneyBracketView official schedule", () => {
 
     const matchEleven = screen.getByText("Match 11").closest("article");
     expect(within(matchEleven).getByText("Loser of 1")).toBeInTheDocument();
-    expect(within(matchEleven).getByText("Loser of 5")).toBeInTheDocument();
+    expect(within(matchEleven).getByText("Loser of 8")).toBeInTheDocument();
   });
 
   test("keeps engine labels and hides schedule chrome without showSchedule", () => {
