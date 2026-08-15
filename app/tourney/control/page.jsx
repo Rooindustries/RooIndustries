@@ -7,6 +7,10 @@ import {
   getTourneySession,
 } from "../TourneyShared";
 import TourneyBracketManager from "../TourneyBracketManager";
+import TourneyControlRecovery from "./TourneyControlRecovery";
+import { canManageTourneyMatch } from "../../../src/server/tourney/access";
+import { readTourneyBroadcastMedia } from "../../../src/server/tourney/broadcastMedia";
+import { createTourneyBroadcastOverlayToken } from "../../../src/server/tourney/broadcastOverlayToken";
 import { getTourneyBracketSnapshot } from "../../../src/server/tourney/bracketStore";
 
 export const runtime = "nodejs";
@@ -43,17 +47,31 @@ export default async function TourneyControlPage({ searchParams }) {
     notFound();
   }
 
-  const bracketSnapshot = await getTourneyBracketSnapshot({
-    includeAudit: true,
-  }).catch(() => ({
-    ok: false,
-    meta: {},
-    teams: [],
-    matches: [],
-    groups: [],
-    generated: false,
-    audit: [],
-  }));
+  const [bracketSnapshot, broadcastMedia] = await Promise.all([
+    getTourneyBracketSnapshot({
+      includeAudit: true,
+    }).catch(() => ({
+      ok: false,
+      meta: {},
+      teams: [],
+      matches: [],
+      groups: [],
+      generated: false,
+      audit: [],
+    })),
+    readTourneyBroadcastMedia().catch(() => ({ heroes: [], maps: [] })),
+  ]);
+  const broadcastSourcePaths = Object.fromEntries(
+    (bracketSnapshot.matches || [])
+      .filter((match) => canManageTourneyMatch({ session, match }))
+      .map((match) => {
+        const token = createTourneyBroadcastOverlayToken({ matchId: match.id });
+        return [
+          match.id,
+          `/tourney/overlay/caster?token=${encodeURIComponent(token)}`,
+        ];
+      })
+  );
 
   return (
     <TourneyShell
@@ -69,15 +87,14 @@ export default async function TourneyControlPage({ searchParams }) {
 
       <Section id="match-control" eyebrow="Live desk" title="Bracket Operations" wide>
         {!bracketSnapshot.ok ? (
-          <p className="cs-error" role="alert">
-            Bracket data is temporarily unavailable. Match controls are disabled
-            until this warning clears.
-          </p>
+          <TourneyControlRecovery />
         ) : (
           <TourneyBracketManager
             initialSnapshot={bracketSnapshot}
             currentRole={session.role}
             currentUsername={session.username}
+            broadcastMedia={broadcastMedia}
+            broadcastSourcePaths={broadcastSourcePaths}
             operationsOnly
           />
         )}

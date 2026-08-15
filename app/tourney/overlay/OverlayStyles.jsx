@@ -663,6 +663,402 @@ export const OverlayStyles = () => (
       color: var(--tourney-text-muted);
     }
 
+    .ov-caster {
+      display: inline-block;
+      padding: 10px;
+      color: #fff;
+      font-family: "Manrope Variable", system-ui, sans-serif;
+    }
+
+    .ov-caster[data-idle="true"] {
+      padding: 0;
+    }
+
+    .ov-caster-card {
+      position: relative;
+      width: 1120px;
+      overflow: hidden;
+      border: 1px solid rgba(103, 232, 249, 0.42);
+      border-radius: 18px;
+      background:
+        linear-gradient(90deg, rgba(2, 132, 199, 0.16), transparent 26%, transparent 74%, rgba(14, 165, 233, 0.16)),
+        linear-gradient(180deg, rgba(6, 18, 38, 0.98), rgba(3, 11, 25, 0.96));
+      box-shadow: inset 0 1px 0 rgba(207, 250, 254, 0.12),
+        0 18px 44px rgba(2, 6, 23, 0.48),
+        0 0 30px rgba(34, 211, 238, 0.14);
+    }
+
+    .ov-caster-card::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 50%;
+      width: 1px;
+      background: linear-gradient(transparent, rgba(103, 232, 249, 0.25), transparent);
+    }
+
+    .ov-caster-kicker {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      gap: 18px;
+      border-bottom: 1px solid rgba(103, 232, 249, 0.16);
+      color: rgba(165, 243, 252, 0.78);
+      font-size: 0.68rem;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      padding: 8px 18px;
+      text-transform: uppercase;
+    }
+
+    .ov-caster-kicker span {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .ov-caster-kicker i {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--ov-live);
+      box-shadow: 0 0 12px rgba(244, 63, 94, 0.8);
+      animation: ov-pulse-dot 1.6s ease-out infinite;
+    }
+
+    .ov-caster-kicker b {
+      color: #fff;
+      text-align: center;
+    }
+
+    .ov-caster-kicker em {
+      font-style: normal;
+      text-align: right;
+    }
+
+    .ov-caster-scoreboard {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 270px minmax(0, 1fr);
+      align-items: stretch;
+      min-height: 96px;
+    }
+
+    .ov-caster-team {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 78px;
+      align-items: center;
+      gap: 16px;
+      min-width: 0;
+      padding: 15px 24px;
+    }
+
+    .ov-caster-team.is-a {
+      text-align: right;
+    }
+
+    .ov-caster-team.is-b {
+      grid-template-columns: 78px minmax(0, 1fr);
+      background: linear-gradient(90deg, transparent, rgba(14, 165, 233, 0.09));
+    }
+
+    .ov-caster-team strong {
+      overflow: hidden;
+      font-size: 1.34rem;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .ov-caster-team span {
+      display: grid;
+      place-items: center;
+      width: 68px;
+      height: 58px;
+      border: 1px solid rgba(103, 232, 249, 0.42);
+      border-radius: 12px;
+      background: rgba(8, 145, 178, 0.18);
+      color: #e0f2fe;
+      font-size: 2rem;
+      font-weight: 900;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+    }
+
+    .ov-caster-map {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      border-inline: 1px solid rgba(103, 232, 249, 0.18);
+      background: #020617;
+      padding: 12px;
+      text-align: center;
+    }
+
+    .ov-caster-map > img,
+    .ov-caster-map > span {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .ov-caster-map > img {
+      object-fit: cover;
+      object-position: center;
+    }
+
+    .ov-caster-map > span {
+      background: linear-gradient(180deg, rgba(2, 6, 23, 0.58), rgba(2, 6, 23, 0.86));
+    }
+
+    .ov-caster-map small,
+    .ov-caster-map b,
+    .ov-caster-map em {
+      position: relative;
+      z-index: 1;
+    }
+
+    .ov-caster-map small,
+    .ov-caster-map em {
+      color: rgba(186, 230, 253, 0.9);
+      font-size: 0.66rem;
+      font-style: normal;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .ov-caster-map b {
+      max-width: 100%;
+      overflow: hidden;
+      color: #cffafe;
+      font-size: 1.15rem;
+      font-weight: 900;
+      text-overflow: ellipsis;
+      text-shadow: 0 2px 12px rgba(0, 0, 0, 0.86);
+      white-space: nowrap;
+    }
+
+    .ov-caster-bans {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 138px minmax(0, 1fr);
+      align-items: stretch;
+      min-height: 92px;
+      border-top: 1px solid rgba(244, 63, 94, 0.28);
+      background: rgba(30, 7, 16, 0.36);
+    }
+
+    .ov-caster-ban {
+      display: grid;
+      align-content: center;
+      gap: 6px;
+      min-width: 0;
+      padding: 8px 14px 10px;
+    }
+
+    .ov-caster-ban.is-a {
+      text-align: right;
+    }
+
+    .ov-caster-ban > small {
+      overflow: hidden;
+      color: rgba(254, 205, 211, 0.7);
+      font-size: 0.58rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-overflow: ellipsis;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .ov-caster-ban-list {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+    }
+
+    .ov-caster-ban.is-a .ov-caster-ban-list {
+      justify-content: flex-end;
+    }
+
+    .ov-caster-ban-list > strong {
+      color: rgba(254, 205, 211, 0.68);
+      font-size: 0.76rem;
+      text-transform: uppercase;
+    }
+
+    .ov-caster-ban-hero {
+      position: relative;
+      display: grid;
+      flex: 0 1 58px;
+      place-items: end center;
+      width: 58px;
+      min-width: 0;
+      height: 62px;
+      overflow: hidden;
+      border: 1px solid rgba(251, 113, 133, 0.5);
+      border-radius: 9px;
+      background: linear-gradient(180deg, rgba(159, 18, 57, 0.22), rgba(30, 7, 16, 0.92));
+    }
+
+    .ov-caster-ban-hero img,
+    .ov-caster-ban-hero i {
+      position: absolute;
+      inset: 0 0 15px;
+      width: 100%;
+      height: calc(100% - 15px);
+    }
+
+    .ov-caster-ban-hero img {
+      object-fit: contain;
+      object-position: center bottom;
+    }
+
+    .ov-caster-ban-hero i {
+      display: grid;
+      place-items: center;
+      color: #fda4af;
+      font-size: 1.8rem;
+      font-style: normal;
+    }
+
+    .ov-caster-ban-hero b {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      overflow: hidden;
+      background: rgba(76, 5, 25, 0.88);
+      color: #fff1f2;
+      font-size: 0.48rem;
+      font-weight: 900;
+      line-height: 15px;
+      padding-inline: 3px;
+      text-align: center;
+      text-overflow: ellipsis;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .ov-caster-ban-title {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      border-inline: 1px solid rgba(244, 63, 94, 0.22);
+      background: rgba(76, 5, 25, 0.2);
+      text-align: center;
+      text-transform: uppercase;
+    }
+
+    .ov-caster-ban-title small {
+      color: rgba(254, 205, 211, 0.68);
+      font-size: 0.62rem;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+    }
+
+    .ov-caster-ban-title strong {
+      color: #fff1f2;
+      font-size: 0.82rem;
+      letter-spacing: 0.08em;
+    }
+
+    html[data-theme="dark"] .ov-caster-card {
+      border-color: rgba(240, 195, 90, 0.5);
+      background:
+        linear-gradient(90deg, rgba(240, 195, 90, 0.11), transparent 26%, transparent 74%, rgba(240, 195, 90, 0.11)),
+        linear-gradient(180deg, rgba(10, 9, 6, 0.98), rgba(3, 3, 2, 0.97));
+      box-shadow: inset 0 1px 0 rgba(255, 235, 173, 0.1),
+        0 18px 44px rgba(0, 0, 0, 0.58),
+        0 0 30px rgba(240, 195, 90, 0.12);
+    }
+
+    html[data-theme="dark"] .ov-caster-kicker,
+    html[data-theme="dark"] .ov-caster-map,
+    html[data-theme="dark"] .ov-caster-card::before {
+      border-color: rgba(240, 195, 90, 0.24);
+      color: rgba(255, 225, 143, 0.86);
+    }
+
+    html[data-theme="dark"] .ov-caster-kicker i {
+      background: #f0c35a;
+      box-shadow: 0 0 12px rgba(240, 195, 90, 0.72);
+    }
+
+    html[data-theme="dark"] .ov-caster-team.is-b {
+      background: linear-gradient(90deg, transparent, rgba(240, 195, 90, 0.08));
+    }
+
+    html[data-theme="dark"] .ov-caster-team span {
+      border-color: rgba(240, 195, 90, 0.42);
+      background: rgba(240, 195, 90, 0.1);
+      color: #ffeba8;
+    }
+
+    html[data-theme="dark"] .ov-caster-map {
+      background: #050402;
+    }
+
+    html[data-theme="dark"] .ov-caster-map > img {
+      filter: grayscale(1) sepia(0.72) brightness(0.58) contrast(1.12);
+    }
+
+    html[data-theme="dark"] .ov-caster-map > span {
+      background: linear-gradient(180deg, rgba(5, 4, 2, 0.48), rgba(5, 4, 2, 0.9));
+    }
+
+    html[data-theme="dark"] .ov-caster-map small,
+    html[data-theme="dark"] .ov-caster-map em {
+      color: rgba(255, 225, 143, 0.82);
+    }
+
+    html[data-theme="dark"] .ov-caster-map b {
+      color: #ffeba8;
+    }
+
+    html[data-theme="dark"] .ov-caster-bans {
+      border-top-color: rgba(240, 195, 90, 0.28);
+      background: rgba(10, 8, 3, 0.74);
+    }
+
+    html[data-theme="dark"] .ov-caster-ban > small,
+    html[data-theme="dark"] .ov-caster-ban-list > strong,
+    html[data-theme="dark"] .ov-caster-ban-title small {
+      color: rgba(255, 225, 143, 0.72);
+    }
+
+    html[data-theme="dark"] .ov-caster-ban-hero {
+      border-color: rgba(240, 195, 90, 0.46);
+      background: linear-gradient(180deg, rgba(240, 195, 90, 0.14), rgba(5, 4, 2, 0.94));
+    }
+
+    html[data-theme="dark"] .ov-caster-ban-hero img {
+      filter: grayscale(1) sepia(0.72) saturate(1.35);
+    }
+
+    html[data-theme="dark"] .ov-caster-ban-hero i {
+      color: #ffdf85;
+    }
+
+    html[data-theme="dark"] .ov-caster-ban-hero b {
+      background: rgba(24, 18, 5, 0.94);
+      color: #ffeba8;
+    }
+
+    html[data-theme="dark"] .ov-caster-ban-title {
+      border-color: rgba(240, 195, 90, 0.24);
+      background: rgba(35, 26, 7, 0.4);
+    }
+
+    html[data-theme="dark"] .ov-caster-ban-title strong {
+      color: #ffeba8;
+    }
+
     /* Blackout theme: the guide follows the site's gold palette. Borders
        already remap through --tourney-border-accent; these rules swap the
        hardcoded Roo Blue fills and text for dark gold tints. */

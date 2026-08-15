@@ -50,6 +50,56 @@ const matchStatusClass = (match) =>
 
 const scoreText = (score) => (score === "" || score === undefined ? "-" : score);
 
+const rosterTeamKey = (value) =>
+  String(value || "")
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+
+const rosterInitial = (player) =>
+  String(player?.displayName || player?.twitchUsername || "P")
+    .trim()
+    .charAt(0)
+    .toUpperCase() || "P";
+
+const TeamRosterPopover = ({ players = [], teamName }) => {
+  if (players.length === 0) return <strong>{teamName}</strong>;
+
+  return (
+    <span
+      aria-label={`View ${teamName} roster`}
+      className="tourney-bracket-team-roster"
+      tabIndex={0}
+    >
+      <strong>{teamName}</strong>
+      <span className="tourney-bracket-roster-popover" role="tooltip">
+        <b>{teamName}</b>
+        <span className="tourney-bracket-roster-list">
+          {players.slice(0, 7).map((player) => {
+            const imageUrl = String(player.twitchProfileImageUrl || "").trim();
+            const playerName = player.displayName || player.twitchUsername || "Player";
+            return (
+              <span className="tourney-bracket-roster-player" key={player.id}>
+                <span className="tourney-bracket-roster-avatar" aria-hidden="true">
+                  {imageUrl ? <img alt="" loading="lazy" src={imageUrl} /> : rosterInitial(player)}
+                </span>
+                <span>
+                  <strong>{playerName}</strong>
+                  <small>
+                    {player.isCaptain ? "Captain" : "Player"} · {player.rolePlay || "Flex"}
+                  </small>
+                  {player.twitchUsername ? <em>{player.twitchUsername}</em> : null}
+                </span>
+              </span>
+            );
+          })}
+        </span>
+      </span>
+    </span>
+  );
+};
+
 // The full display label repeats the column's round label above every card
 // ("Winners Round 1 Match 2" under a "Winners Round 1" column). Trim that
 // prefix down to the match number; distinctive labels (finals) stay whole.
@@ -373,7 +423,9 @@ export const collapseLosersByeRoundMatches = (matches = []) => {
 export default function TourneyBracketView({
   snapshot,
   renderControls,
+  rosterPlayers = [],
   showSchedule = false,
+  showTeamRosters = false,
   collapseLosersByeRound = false,
 }) {
   const { matches, byeTeams } = useMemo(() => {
@@ -430,6 +482,25 @@ export default function TourneyBracketView({
     }
     return map;
   }, [grouped]);
+  const rostersByTeam = useMemo(() => {
+    const map = new Map();
+    if (!showTeamRosters) return map;
+    for (const player of rosterPlayers) {
+      const key = rosterTeamKey(player.teamName);
+      if (!key) continue;
+      const roster = map.get(key) || [];
+      roster.push(player);
+      map.set(key, roster);
+    }
+    for (const roster of map.values()) {
+      roster.sort(
+        (left, right) =>
+          Number(Boolean(right.isCaptain)) - Number(Boolean(left.isCaptain)) ||
+          String(left.displayName || "").localeCompare(String(right.displayName || ""))
+      );
+    }
+    return map;
+  }, [rosterPlayers, showTeamRosters]);
   const treeRef = useRef(null);
   const boardRef = useRef(null);
   const bandRefs = useRef(new Map());
@@ -876,15 +947,23 @@ export default function TourneyBracketView({
               byeTeams.has(`${groupName}:${side.teamId}`) &&
               firstVisibleRounds.get(`${groupName}:${side.teamId}`) ===
                 roundNumber;
+            const sideName = scheduled
+              ? scheduledSideName({ match, side })
+              : side.name;
+            const roster = side.teamId
+              ? rostersByTeam.get(rosterTeamKey(sideName)) || []
+              : [];
             return (
               <div
                 className={`tourney-match-side ${sideClass(side)}`}
                 key={side.side}
               >
                 <span>
-                  <strong>
-                    {scheduled ? scheduledSideName({ match, side }) : side.name}
-                  </strong>
+                  {showTeamRosters ? (
+                    <TeamRosterPopover players={roster} teamName={sideName} />
+                  ) : (
+                    <strong>{sideName}</strong>
+                  )}
                   {side.forfeit ? <small>Forfeit</small> : null}
                   {showByeBadge ? (
                     <small className="tourney-match-bye">Bye</small>
@@ -902,7 +981,19 @@ export default function TourneyBracketView({
         ) : null}
         {match.statusLabel || match.nextLabels?.length > 0 ? (
           <footer>
-            {match.statusLabel ? <span>{match.statusLabel}</span> : null}
+            {match.statusLabel ? (
+              <span
+                className={
+                  scheduled && match.statusLabel === "Running"
+                    ? "tourney-match-live-status"
+                    : undefined
+                }
+              >
+                {scheduled && match.statusLabel === "Running"
+                  ? "Live"
+                  : match.statusLabel}
+              </span>
+            ) : null}
             {match.nextLabels?.length > 0 ? (
               <small>{match.nextLabels.join(" / ")}</small>
             ) : null}

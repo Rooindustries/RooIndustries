@@ -250,6 +250,8 @@ describe("public content privacy boundary", () => {
 
     expect(imagePolicy).toBeTruthy();
     expect(imagePolicy).toContain("https://ntezmxzaibrrsgtujgxu.supabase.co");
+    expect(imagePolicy).toContain("https://d15f34w2p8l1cc.cloudfront.net");
+    expect(imagePolicy).toContain("https://overfast-api.tekrop.fr");
     expect(imagePolicy).not.toContain("https://*.supabase.co");
   });
 
