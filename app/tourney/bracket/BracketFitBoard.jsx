@@ -33,7 +33,9 @@ export default function BracketFitBoard({ children }) {
       const parentWidth =
         stage.parentElement?.clientWidth || stage.clientWidth;
       const viewportWidth =
-        document.documentElement.clientWidth || window.innerWidth;
+        window.visualViewport?.width ||
+        window.innerWidth ||
+        document.documentElement.clientWidth;
       const horizontalInset = Math.max(
         0,
         stage.getBoundingClientRect().left * 2

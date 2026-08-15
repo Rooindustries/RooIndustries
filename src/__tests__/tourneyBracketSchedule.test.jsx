@@ -691,12 +691,16 @@ describe("tourney bracket scroller styles", () => {
     expect(sharedSource).toContain(
       ".tourney-bracket-page .tourney-bracket-scrollbar,"
     );
+    expect(sharedSource).toContain("max-width: 100vw;");
+    expect(sharedSource).toContain("overflow-x: clip;");
     expect(sharedSource).toContain(
       ".tourney-bracket-page .tourney-bracket-fit-content {\n      width: max-content;\n      transform-origin: top left;"
     );
     expect(sharedSource).toContain(
       ".tourney-bracket-page .tourney-bracket-board {\n      width: max-content;\n      max-width: none;\n      overflow: visible;"
     );
+    expect(fitSource).toContain("window.visualViewport?.width");
+    expect(fitSource).toContain("window.innerWidth");
     expect(fitSource).toContain("document.documentElement.clientWidth");
     expect(fitSource).toContain("const availableWidth = Math.min(");
     expect(fitSource).toContain("const nextFit = availableWidth / baseWidth;");
