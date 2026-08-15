@@ -136,7 +136,7 @@ const createTbdMatch = ({
 
 // Skeleton shown before the bracket is generated. Mirrors the visible card
 // layout of the real 12-team double-elimination bracket: 4 first-round
-// winners matches with 4 bye slots hidden, and the full lower lane.
+// winners matches with 4 bye slots hidden, plus the visible lower lane.
 // Exported so the OBS overlay can lane-filter the same skeleton.
 export const buildTbdBracketMatches = () => [
   ...[1, 2, 3, 4].map((number) =>
@@ -187,7 +187,7 @@ export const buildTbdBracketMatches = () => [
       displayLabel: `Lower Round 1 Match ${number}`,
     })
   ),
-  ...[1, 2, 3, 4].map((number) =>
+  ...[1, 2].map((number) =>
     createTbdMatch({
       id: `tbd-lower-r2-${number}`,
       groupName: "Losers",
@@ -207,21 +207,11 @@ export const buildTbdBracketMatches = () => [
       displayLabel: `Lower Round 3 Match ${number}`,
     })
   ),
-  ...[1, 2].map((number) =>
-    createTbdMatch({
-      id: `tbd-lower-r4-${number}`,
-      groupName: "Losers",
-      groupNumber: 2,
-      roundNumber: 4,
-      number,
-      displayLabel: `Lower Round 4 Match ${number}`,
-    })
-  ),
   createTbdMatch({
     id: "tbd-lower-semifinal",
     groupName: "Losers",
     groupNumber: 2,
-    roundNumber: 5,
+    roundNumber: 4,
     number: 1,
     displayLabel: "Lower Semifinal",
   }),
@@ -229,7 +219,7 @@ export const buildTbdBracketMatches = () => [
     id: "tbd-lower-final",
     groupName: "Losers",
     groupNumber: 2,
-    roundNumber: 6,
+    roundNumber: 5,
     number: 1,
     displayLabel: "Lower Final",
   }),
