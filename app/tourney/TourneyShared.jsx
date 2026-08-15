@@ -814,6 +814,45 @@ export const TourneyStyles = () => (
       font-weight: 700;
     }
 
+    .tourney-hero-cta {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 0.7rem;
+      margin-top: 1rem;
+    }
+
+    .tourney-hero-cta a {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      min-height: 42px;
+      border: 1px solid rgba(240, 195, 90, 0.48);
+      border-radius: 999px;
+      color: #f0c35a;
+      background: rgba(18, 14, 5, 0.32);
+      padding: 0.65rem 1rem;
+      font-size: 0.86rem;
+      font-weight: 800;
+      text-decoration: none;
+      box-shadow: 0 0 18px rgba(240, 195, 90, 0.1);
+      transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+    }
+
+    .tourney-hero-cta a:hover,
+    .tourney-hero-cta a:focus-visible {
+      border-color: rgba(240, 195, 90, 0.88);
+      background: rgba(240, 195, 90, 0.1);
+      box-shadow: 0 0 22px rgba(240, 195, 90, 0.2);
+    }
+
+    .tourney-hero-cta svg {
+      width: 1.15rem;
+      height: 1.15rem;
+      flex: 0 0 auto;
+    }
+
     .tourney-host-showcase {
       display: grid;
       gap: 18px;
@@ -5337,6 +5376,11 @@ export const TourneyStyles = () => (
         grid-template-columns: 1fr;
         width: min(100%, 17rem);
         margin-inline: auto;
+      }
+
+      .tourney-hero-cta {
+        display: grid;
+        width: min(100%, 17rem);
       }
 
       .tourney-route-title {
