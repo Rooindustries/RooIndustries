@@ -880,7 +880,7 @@ export const TourneyStyles = () => (
 
     html[data-theme="dark"] .tourney-hero-cta a.is-primary .tourney-hero-cta-label span {
       color: #ffd76e;
-      background: linear-gradient(90deg, #fff7d6, #ffd76e 52%, #c78b16);
+      background: linear-gradient(90deg, #fff8e7, #ffd76e 52%, #f6c84c);
       -webkit-background-clip: text;
       background-clip: text;
       -webkit-text-fill-color: transparent;
@@ -5147,7 +5147,7 @@ export const TourneyStyles = () => (
     html[data-theme="dark"] .tourney-modal-backdrop {
       --tourney-text: var(--color-text-primary);
       --tourney-text-soft: var(--color-text-secondary);
-      --tourney-text-muted: #9f9a8a;
+      --tourney-text-muted: #a3a3a0;
       --tourney-surface: var(--color-surface-card);
       --tourney-surface-strong: var(--color-surface-solid);
       --tourney-surface-soft: var(--color-surface-hover);
@@ -5164,8 +5164,8 @@ export const TourneyStyles = () => (
       --tourney-side-win-border: rgba(251, 191, 36, 0.85);
       --tourney-side-win-bg: linear-gradient(
         90deg,
-        rgba(120, 53, 15, 0.58),
-        rgba(251, 191, 36, 0.2)
+        rgba(27, 22, 10, 0.72),
+        rgba(255, 215, 110, 0.18)
       );
       --tourney-side-win-bar: #fbbf24;
       --tourney-side-win-glow: rgba(251, 191, 36, 0.3);
@@ -5200,7 +5200,7 @@ export const TourneyStyles = () => (
     html[data-theme="dark"] .tourney-charity-callout {
       border-color: rgba(255, 215, 110, 0.24);
       background:
-        linear-gradient(145deg, rgba(13, 13, 13, 0.88), rgba(24, 20, 12, 0.7)),
+        linear-gradient(145deg, rgba(15, 15, 15, 0.9), rgba(8, 8, 8, 0.78)),
         radial-gradient(circle at 0% 0%, rgba(255, 215, 110, 0.12), transparent 42%);
       box-shadow:
         inset 0 1px 0 rgba(255, 244, 214, 0.08),
@@ -5220,7 +5220,7 @@ export const TourneyStyles = () => (
     html[data-theme="dark"] .tourney-giveaway-callout {
       border-color: rgba(255, 215, 110, 0.26);
       background:
-        linear-gradient(145deg, rgba(13, 13, 13, 0.88), rgba(24, 20, 12, 0.7)),
+        linear-gradient(145deg, rgba(15, 15, 15, 0.9), rgba(8, 8, 8, 0.78)),
         radial-gradient(circle at 0% 0%, rgba(255, 215, 110, 0.13), transparent 42%);
       box-shadow:
         inset 0 1px 0 rgba(255, 244, 214, 0.08),
@@ -5238,7 +5238,7 @@ export const TourneyStyles = () => (
     }
 
     html[data-theme="dark"] .tourney-card-list .tourney-date-highlight {
-      background: linear-gradient(90deg, #fff7d6, #ffd76e 52%, #c78b16);
+      background: linear-gradient(90deg, #fff8e7, #ffd76e 52%, #f6c84c);
       -webkit-background-clip: text;
       background-clip: text;
       -webkit-text-fill-color: transparent;
@@ -5248,7 +5248,7 @@ export const TourneyStyles = () => (
     html[data-theme="dark"] .tourney-charity-card {
       border-color: rgba(255, 215, 110, 0.2);
       background:
-        linear-gradient(145deg, rgba(13, 13, 13, 0.84), rgba(22, 18, 9, 0.58));
+        linear-gradient(145deg, rgba(15, 15, 15, 0.86), rgba(8, 8, 8, 0.68));
       box-shadow:
         inset 0 1px 0 rgba(255, 244, 214, 0.08),
         0 16px 38px rgba(0, 0, 0, 0.26);
@@ -5257,7 +5257,7 @@ export const TourneyStyles = () => (
     html[data-theme="dark"] .tourney-charity-card:hover {
       border-color: rgba(255, 215, 110, 0.24);
       background:
-        linear-gradient(145deg, rgba(15, 15, 15, 0.86), rgba(24, 20, 12, 0.6));
+        linear-gradient(145deg, rgba(18, 18, 18, 0.88), rgba(9, 9, 9, 0.72));
       box-shadow:
         inset 0 1px 0 rgba(255, 244, 214, 0.08),
         0 16px 38px rgba(0, 0, 0, 0.28);

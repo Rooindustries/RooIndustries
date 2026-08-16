@@ -969,39 +969,39 @@ export const OverlayStyles = () => (
     }
 
     html[data-theme="dark"] .ov-caster-card {
-      border-color: rgba(240, 195, 90, 0.5);
+      border-color: rgba(255, 215, 110, 0.52);
       background:
-        linear-gradient(90deg, rgba(240, 195, 90, 0.11), transparent 26%, transparent 74%, rgba(240, 195, 90, 0.11)),
-        linear-gradient(180deg, rgba(10, 9, 6, 0.98), rgba(3, 3, 2, 0.97));
-      box-shadow: inset 0 1px 0 rgba(255, 235, 173, 0.1),
+        linear-gradient(90deg, rgba(255, 215, 110, 0.1), transparent 26%, transparent 74%, rgba(255, 215, 110, 0.1)),
+        linear-gradient(180deg, rgba(11, 11, 11, 0.98), rgba(3, 3, 3, 0.97));
+      box-shadow: inset 0 1px 0 rgba(255, 240, 189, 0.12),
         0 18px 44px rgba(0, 0, 0, 0.58),
-        0 0 30px rgba(240, 195, 90, 0.12);
+        0 0 30px rgba(255, 215, 110, 0.14);
     }
 
     html[data-theme="dark"] .ov-caster-kicker,
     html[data-theme="dark"] .ov-caster-map,
     html[data-theme="dark"] .ov-caster-card::before {
-      border-color: rgba(240, 195, 90, 0.24);
-      color: rgba(255, 225, 143, 0.86);
+      border-color: rgba(255, 215, 110, 0.26);
+      color: rgba(255, 232, 163, 0.9);
     }
 
     html[data-theme="dark"] .ov-caster-kicker i {
-      background: #f0c35a;
-      box-shadow: 0 0 12px rgba(240, 195, 90, 0.72);
+      background: #ffd76e;
+      box-shadow: 0 0 12px rgba(255, 215, 110, 0.74);
     }
 
     html[data-theme="dark"] .ov-caster-team.is-b {
-      background: linear-gradient(90deg, transparent, rgba(240, 195, 90, 0.08));
+      background: linear-gradient(90deg, transparent, rgba(255, 215, 110, 0.09));
     }
 
     html[data-theme="dark"] .ov-caster-team span {
-      border-color: rgba(240, 195, 90, 0.42);
-      background: rgba(240, 195, 90, 0.1);
-      color: #ffeba8;
+      border-color: rgba(255, 215, 110, 0.44);
+      background: rgba(255, 215, 110, 0.11);
+      color: #fff0bd;
     }
 
     html[data-theme="dark"] .ov-caster-map {
-      background: #050402;
+      background: #050505;
     }
 
     html[data-theme="dark"] .ov-caster-map > img {
@@ -1009,32 +1009,32 @@ export const OverlayStyles = () => (
     }
 
     html[data-theme="dark"] .ov-caster-map > span {
-      background: linear-gradient(180deg, rgba(5, 4, 2, 0.48), rgba(5, 4, 2, 0.9));
+      background: linear-gradient(180deg, rgba(5, 5, 5, 0.48), rgba(5, 5, 5, 0.9));
     }
 
     html[data-theme="dark"] .ov-caster-map small,
     html[data-theme="dark"] .ov-caster-map em {
-      color: rgba(255, 225, 143, 0.82);
+      color: rgba(255, 232, 163, 0.84);
     }
 
     html[data-theme="dark"] .ov-caster-map b {
-      color: #ffeba8;
+      color: #fff0bd;
     }
 
     html[data-theme="dark"] .ov-caster-bans {
-      border-top-color: rgba(240, 195, 90, 0.28);
-      background: rgba(10, 8, 3, 0.74);
+      border-top-color: rgba(255, 215, 110, 0.3);
+      background: rgba(9, 9, 9, 0.76);
     }
 
     html[data-theme="dark"] .ov-caster-ban > small,
     html[data-theme="dark"] .ov-caster-ban-list > strong,
     html[data-theme="dark"] .ov-caster-ban-title small {
-      color: rgba(255, 225, 143, 0.72);
+      color: rgba(255, 232, 163, 0.74);
     }
 
     html[data-theme="dark"] .ov-caster-ban-hero {
-      border-color: rgba(240, 195, 90, 0.46);
-      background: linear-gradient(180deg, rgba(240, 195, 90, 0.14), rgba(5, 4, 2, 0.94));
+      border-color: rgba(255, 215, 110, 0.48);
+      background: linear-gradient(180deg, rgba(255, 215, 110, 0.15), rgba(5, 5, 5, 0.94));
     }
 
     html[data-theme="dark"] .ov-caster-ban-hero img {
@@ -1042,28 +1042,28 @@ export const OverlayStyles = () => (
     }
 
     html[data-theme="dark"] .ov-caster-ban-hero i {
-      color: #ffdf85;
+      color: #ffe8a3;
     }
 
     html[data-theme="dark"] .ov-caster-ban-hero b {
-      background: rgba(24, 18, 5, 0.94);
-      color: #ffeba8;
+      background: rgba(10, 10, 10, 0.94);
+      color: #fff0bd;
     }
 
     html[data-theme="dark"] .ov-caster-ban-title {
-      border-color: rgba(240, 195, 90, 0.24);
-      background: rgba(35, 26, 7, 0.4);
+      border-color: rgba(255, 215, 110, 0.26);
+      background: rgba(15, 15, 15, 0.46);
     }
 
     html[data-theme="dark"] .ov-caster-ban-title strong {
-      color: #ffeba8;
+      color: #fff0bd;
     }
 
     /* Blackout theme: the guide follows the site's gold palette. Borders
        already remap through --tourney-border-accent; these rules swap the
        hardcoded Roo Blue fills and text for dark gold tints. */
     html[data-theme="dark"] .tourney-page .ov-figure {
-      --ov-figure-highlight: rgba(240, 195, 90, 0.16);
+      --ov-figure-highlight: rgba(255, 215, 110, 0.18);
       --ov-figure-url: var(--tourney-accent-glow);
     }
 
@@ -1073,12 +1073,12 @@ export const OverlayStyles = () => (
     }
 
     html[data-theme="dark"] .tourney-page .ov-docs-url button {
-      background: rgba(240, 195, 90, 0.14);
+      background: rgba(255, 215, 110, 0.15);
       color: var(--tourney-accent-glow);
     }
 
     html[data-theme="dark"] .tourney-page .ov-docs-url button:hover {
-      background: rgba(240, 195, 90, 0.24);
+      background: rgba(255, 215, 110, 0.26);
     }
   `}</style>
 );

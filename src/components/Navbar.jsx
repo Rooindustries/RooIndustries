@@ -26,16 +26,15 @@ const canAnimateLogo = () => {
     !navigator?.connection?.saveData;
 };
 
-// Two themes only: "default" (Roo Blue, the existing site) and "dark"
-// (Blackout). There is no light mode. Legacy stored values normalize
-// to "default".
+// Two themes only: "dark" (Blackout Gold, the site default) and "default"
+// (Roo Blue). There is no light mode. Legacy stored values normalize to dark.
 const THEME_STORAGE_KEY = "roo-theme";
 const THEME_LABELS = {
   default: "Roo Blue",
-  dark: "Blackout",
+  dark: "Blackout Gold",
 };
 
-const normalizeTheme = (value) => (value === "dark" ? "dark" : "default");
+const normalizeTheme = (value) => (value === "default" ? "default" : "dark");
 
 const updateThemeMeta = (theme) => {
   if (typeof document === "undefined") return;
@@ -48,11 +47,11 @@ const updateThemeMeta = (theme) => {
 };
 
 const readTheme = () => {
-  if (typeof window === "undefined") return "default";
+  if (typeof window === "undefined") return "dark";
   try {
     return normalizeTheme(window.localStorage.getItem(THEME_STORAGE_KEY));
   } catch {
-    return "default";
+    return "dark";
   }
 };
 
@@ -86,7 +85,7 @@ export default function Navbar({ routeShell = "browser" }) {
   const [proofOpen, setProofOpen] = useState(false);
   const [referralsOpen, setReferralsOpen] = useState(false);
   const [activeHomeHash, setActiveHomeHash] = useState("");
-  const [theme, setTheme] = useState("default");
+  const [theme, setTheme] = useState("dark");
   // Keep initial server/client markup identical, then upgrade to animated mode on mount.
   const [smallLogoMode, setSmallLogoMode] = useState("static");
   const proofDropdownRef = useRef(null);
@@ -494,8 +493,7 @@ export default function Navbar({ routeShell = "browser" }) {
   };
 
   const smallLogoSizeClassName = "h-14 w-14 rounded-xl";
-  const smallLogoGlowClassName =
-    "drop-shadow-none sm:drop-shadow-[0_0_18px_rgba(34,211,238,0.25)]";
+  const smallLogoGlowClassName = "roo-small-logo-glow";
   const smallLogoStaticClassName = `${smallLogoSizeClassName} object-contain ${smallLogoGlowClassName}`;
   const smallLogoAnimatedClassName = `${smallLogoSizeClassName} object-contain ${smallLogoGlowClassName} transition-opacity duration-500`;
 
