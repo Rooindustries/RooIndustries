@@ -271,7 +271,7 @@ describe("tourney public page content", () => {
       'html[data-theme="dark"] .tourney-charity-callout'
     );
     expect(source).toContain(
-      "linear-gradient(145deg, rgba(13, 13, 13, 0.88), rgba(24, 20, 12, 0.7))"
+      "linear-gradient(145deg, rgba(15, 15, 15, 0.9), rgba(8, 8, 8, 0.78))"
     );
     expect(source).not.toContain(`.tourney-rule::before {
       border-color: var(--tourney-border-accent);

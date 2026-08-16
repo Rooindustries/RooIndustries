@@ -82,7 +82,7 @@ export default function CasterOverlayClient({
     themeMeta?.setAttribute("content", theme === "dark" ? "#070707" : "#000040");
 
     return () => {
-      root.dataset.theme = previousTheme || "default";
+      root.dataset.theme = previousTheme || "dark";
       if (themeMeta && previousThemeColor) {
         themeMeta.setAttribute("content", previousThemeColor);
       }

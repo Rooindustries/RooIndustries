@@ -2,8 +2,7 @@ import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
 
-/*  Record card design tokens — single source of truth.
-    Two accents only: gold (title, via gold-flair-text CSS class) + cyan (everything else). */
+/* Record card design tokens — all theme accents derive from the active palette. */
 const RC = {
   "--rc-bg":          "var(--color-surface-solid)",
   "--rc-bg-mid":      "var(--color-surface-card)",
@@ -11,7 +10,7 @@ const RC = {
   "--rc-text":        "var(--color-text-primary)",
   "--rc-text-muted":  "var(--color-text-muted)",
   "--rc-accent":      "var(--color-accent)",
-  "--rc-accent-soft": "rgba(34, 211, 238, 0.12)",
+  "--rc-accent-soft": "color-mix(in srgb, var(--color-accent) 12%, transparent)",
   "--rc-border":      "var(--color-border-accent)",
   "--rc-border-sub":  "var(--color-border-soft)",
   "--rc-cta":         "var(--color-accent-strong)",

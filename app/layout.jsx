@@ -21,7 +21,7 @@ const themeInitScript = `
     var root = document.documentElement;
     var key = "roo-theme";
     var stored = window.localStorage ? window.localStorage.getItem(key) : null;
-    var theme = stored === "dark" ? "dark" : "default";
+    var theme = stored === "default" ? "default" : "dark";
     root.dataset.theme = theme;
     if (stored !== "dark" && stored !== "default" && stored !== null && window.localStorage) {
       window.localStorage.setItem(key, theme);
@@ -31,16 +31,16 @@ const themeInitScript = `
       themeMeta.setAttribute("content", theme === "dark" ? "#070707" : "#000040");
     }
   } catch (_) {
-    document.documentElement.dataset.theme = "default";
+    document.documentElement.dataset.theme = "dark";
   }
 })();
 `;
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" data-theme="dark" suppressHydrationWarning>
       <head>
-        <meta name="theme-color" content="#000040" />
+        <meta name="theme-color" content="#070707" />
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
         {shouldPreconnectSupabase ? (
           <>

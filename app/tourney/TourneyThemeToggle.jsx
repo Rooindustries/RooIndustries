@@ -6,10 +6,10 @@ import { Moon, Tv } from "lucide-react";
 const THEME_STORAGE_KEY = "roo-theme";
 const THEME_LABELS = {
   default: "Roo Blue",
-  dark: "Blackout",
+  dark: "Blackout Gold",
 };
 
-const normalizeTheme = (value) => (value === "dark" ? "dark" : "default");
+const normalizeTheme = (value) => (value === "default" ? "default" : "dark");
 
 const updateThemeMeta = (theme) => {
   const themeMeta = document.querySelector('meta[name="theme-color"]');
@@ -46,7 +46,7 @@ const applyTheme = (theme, { persist = true } = {}) => {
 };
 
 export default function TourneyThemeToggle() {
-  const [theme, setTheme] = useState("default");
+  const [theme, setTheme] = useState("dark");
 
   useEffect(() => {
     setTheme(applyTheme(readTheme(), { persist: false }));
