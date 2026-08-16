@@ -61,7 +61,7 @@ export default function About({ initialData = null, compact = false }) {
   const recordNote =
     aboutData.recordNote ||
     "Former #16 global CPU profile";
-  const compactRecordNote = "Official result · Independently verifiable";
+  const compactRecordNote = "Former #16";
   const recordDetailsFallback = [
     { label: "RANK", value: "#31", sub: "" },
     { label: "SCORE", value: "18829", sub: "" },
@@ -127,9 +127,9 @@ export default function About({ initialData = null, compact = false }) {
               {recordSubtitle}
             </p>
 
-            <div className="mt-5 grid grid-cols-[auto_1fr] items-start gap-4 text-left">
+            <div className="mt-5 grid grid-cols-[minmax(7.5rem,0.42fr)_1fr] items-stretch gap-4 text-left">
               {heroStat && (
-                <div className="rounded-xl bg-surface-veil px-4 py-3 text-center ring-1 ring-line-soft">
+                <div className="flex min-w-0 flex-col items-center justify-center px-2 text-center">
                   <p
                     className="text-[10px] font-semibold uppercase tracking-[0.25em]"
                     style={{ color: "var(--rc-accent)" }}
