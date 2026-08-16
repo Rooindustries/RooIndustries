@@ -3,7 +3,7 @@ import TourneyFooter from "./TourneyFooter";
 import TourneyLoginForm from "./TourneyLoginForm";
 import TourneyTelemetry from "./TourneyTelemetry";
 import TourneyThemeToggle from "./TourneyThemeToggle";
-import { FaBolt, FaDiscord } from "react-icons/fa";
+export { default as TourneyPromotionLinks } from "./TourneyPromotionLinks";
 import {
   TOURNEY_SESSION_COOKIE,
   readTourneySessionFromStore,
@@ -6374,30 +6374,6 @@ export const RouteTitle = ({ eyebrow, title, accent, children }) => (
     </h1>
     {children ? <p>{children}</p> : null}
   </section>
-);
-
-export const TourneyPromotionLinks = () => (
-  <div className="tourney-hero-cta">
-    <a className="is-primary" href="https://rooindustries.com/#packages">
-      <span className="tourney-hero-cta-label">
-        <FaBolt aria-hidden="true" />
-        <span>Boost Your FPS</span>
-      </span>
-      <small className="tourney-creator-proof">
-        Vouched for by your favorite content creators like Vulture, Wanted, and
-        more.
-      </small>
-    </a>
-    <a
-      className="is-secondary"
-      href="https://discord.com/invite/qs5HKNyazD"
-      rel="noopener noreferrer"
-      target="_blank"
-    >
-      <FaDiscord aria-hidden="true" />
-      <span>Stand a Chance to Win $1,500 in Prizes</span>
-    </a>
-  </div>
 );
 
 export const TourneyShell = ({

@@ -1,11 +1,11 @@
 import {
   Section,
   TourneyHosts,
-  TourneyPromotionLinks,
   TourneyShell,
   getTourneyHostsWithLiveStatus,
   getTourneySession,
 } from "./TourneyShared";
+import TourneyPromotionLinks from "./TourneyPromotionLinks";
 import JsonLd from "../../src/next/JsonLd";
 import seo from "../../src/lib/seo";
 import ConnectedAccounts from "../../src/components/ConnectedAccounts";

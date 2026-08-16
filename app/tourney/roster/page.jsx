@@ -3,11 +3,11 @@ import {
   Section,
   StatusPanel,
   TourneyRosterHosts,
-  TourneyPromotionLinks,
   TourneyShell,
   getTourneyHostsWithLiveStatus,
   getTourneySession,
 } from "../TourneyShared";
+import TourneyPromotionLinks from "../TourneyPromotionLinks";
 import TourneyRosterList from "../TourneyRosterList";
 import TourneyTeamCards from "../TourneyTeamCards";
 import { readPublicTourneyRoster } from "../../../src/server/tourney/readService";
