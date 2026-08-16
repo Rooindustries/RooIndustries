@@ -348,6 +348,56 @@ describe("tourney emails", () => {
     expect(payoutTemplate.subject).toContain("Ready");
   });
 
+  test("builds and sends the anonymous feedback notification to Roo Industries", async () => {
+    mockSendEmail.mockResolvedValue({
+      data: { id: "email_feedback" },
+      error: null,
+    });
+    const email = loadEmail();
+    const feedback = {
+      id: "feedback-1",
+      overallRating: 4,
+      organizationRating: 3,
+      communicationRating: 2,
+      formatRating: 5,
+      broadcastRating: null,
+      returnIntent: "maybe",
+      feedbackText: "Lobby details arrived late. <script>alert('no')</script>",
+      createdAt: "2026-08-17T12:00:00.000Z",
+    };
+    const template = email.buildTourneyFeedbackNotificationEmail({ feedback });
+
+    expect(template.subject).toBe("Anonymous Tourney feedback: 4/5");
+    expect(template.html).toContain("New anonymous Tourney feedback");
+    expect(template.html).toContain("Lobby details arrived late.");
+    expect(template.html).not.toContain("<script>");
+    expect(template.html).toContain("&lt;script&gt;");
+    expect(template.text).toContain("Would join again: Maybe");
+
+    await expect(
+      email.sendTourneyFeedbackNotificationEmail({
+        feedback,
+        to: "serviroo@rooindustries.com",
+        idempotencyKey: "feedback-dispatch-1",
+        env: {
+          RESEND_API_KEY: "re_test",
+          FROM_EMAIL: "Roo Industries <tourney@rooindustries.com>",
+        },
+      })
+    ).resolves.toEqual({ id: "email_feedback" });
+
+    expect(mockSendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from: "Roo Industries <tourney@rooindustries.com>",
+        to: ["serviroo@rooindustries.com"],
+        subject: "Anonymous Tourney feedback: 4/5",
+        html: template.html,
+        text: template.text,
+      }),
+      { idempotencyKey: "feedback-dispatch-1" }
+    );
+  });
+
   test("sends appeal and payout samples only to supplied recipients", async () => {
     mockSendEmail.mockResolvedValue({
       data: { id: "email_sample" },
