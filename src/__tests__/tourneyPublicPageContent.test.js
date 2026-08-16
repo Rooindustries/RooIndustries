@@ -10,6 +10,12 @@ const readTourneySharedSource = () =>
     "utf8"
   );
 
+const readTourneyPromotionSource = () =>
+  fs.readFileSync(
+    path.join(__dirname, "../../app/tourney/TourneyPromotionLinks.jsx"),
+    "utf8"
+  );
+
 const readTourneyRosterSource = () =>
   fs.readFileSync(
     path.join(__dirname, "../../app/tourney/roster/page.jsx"),
@@ -95,32 +101,31 @@ describe("tourney public page content", () => {
     const bracketSource = readTourneyBracketSource();
     const rosterSource = readTourneyRosterSource();
     const sharedSource = readTourneySharedSource();
+    const promotionSource = readTourneyPromotionSource();
 
-    expect(sharedSource).toContain("Stand a Chance to Win $1,500 in Prizes");
-    expect(sharedSource).toContain(
-      "Vouched for by your favorite content creators like Vulture, Wanted, and"
+    expect(promotionSource).toContain("Stand a Chance to Win $1,500 in Prizes");
+    expect(promotionSource).toMatch(
+      /Vouched for by your favorite content creators like Vulture, Wanted,\s+and more\./
     );
-    expect(sharedSource).toContain('className="tourney-creator-proof"');
-    const fpsLinkIndex = sharedSource.indexOf(
-      'className="is-primary" href="https://rooindustries.com/#packages"'
-    );
-    const fpsLinkCloseIndex = sharedSource.indexOf("</a>", fpsLinkIndex);
-    const creatorProofIndex = sharedSource.indexOf(
+    expect(promotionSource).toContain('className="tourney-creator-proof"');
+    const fpsLinkIndex = promotionSource.indexOf('className="is-primary"');
+    const fpsLinkCloseIndex = promotionSource.indexOf("</a>", fpsLinkIndex);
+    const creatorProofIndex = promotionSource.indexOf(
       'className="tourney-creator-proof"'
     );
     expect(creatorProofIndex).toBeGreaterThan(fpsLinkIndex);
     expect(creatorProofIndex).toBeLessThan(fpsLinkCloseIndex);
-    expect(sharedSource).toContain('className="tourney-hero-cta-label"');
-    expect(sharedSource).not.toContain("tourney-hero-cta-group");
+    expect(promotionSource).toContain('className="tourney-hero-cta-label"');
+    expect(promotionSource).not.toContain("tourney-hero-cta-group");
     expect(sharedSource).toContain("white-space: nowrap");
     expect(sharedSource).toContain(
       "font-size: clamp(0.54rem, 0.58vw, 0.64rem)"
     );
-    expect(sharedSource).toContain(
+    expect(promotionSource).toContain(
       'href="https://rooindustries.com/#packages"'
     );
-    expect(sharedSource).not.toContain('href="/packages"');
-    expect(sharedSource).toContain("https://discord.com/invite/qs5HKNyazD");
+    expect(promotionSource).not.toContain('href="/packages"');
+    expect(promotionSource).toContain("https://discord.com/invite/qs5HKNyazD");
     expect(pageSource).toContain("<TourneyPromotionLinks />");
     expect(bracketSource).toContain("<TourneyPromotionLinks />");
     expect(rosterSource).toContain("<TourneyPromotionLinks />");
