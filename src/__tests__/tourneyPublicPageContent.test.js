@@ -86,8 +86,8 @@ describe("tourney public page content", () => {
     expect(source).toContain("draft updates");
     expect(source).toContain("Overwatch Creator Tournament");
     expect(source).toContain("Community Discord giveaway");
-    expect(source).toContain("Client-only 9850X3D draw");
-    expect(source).not.toContain("Creator 9850X3D");
+    expect(source).toContain("Client-only AMD Ryzen 9 9900X3D draw");
+    expect(source).not.toContain("9850X3D");
   });
 
   test("promotes the prize and packages on the tournament, bracket, and roster pages", () => {
@@ -97,7 +97,10 @@ describe("tourney public page content", () => {
     const sharedSource = readTourneySharedSource();
 
     expect(sharedSource).toContain("Stand a Chance to Win $1,500 in Prizes");
-    expect(sharedSource).toContain('href="/packages"');
+    expect(sharedSource).toContain(
+      'href="https://rooindustries.com/#packages"'
+    );
+    expect(sharedSource).not.toContain('href="/packages"');
     expect(sharedSource).toContain("https://discord.com/invite/qs5HKNyazD");
     expect(pageSource).toContain("<TourneyPromotionLinks />");
     expect(bracketSource).toContain("<TourneyPromotionLinks />");
@@ -183,9 +186,9 @@ describe("tourney public page content", () => {
       "3 Logitech G PRO X2 SUPERSTRIKE wireless gaming mice"
     );
     expect(source).toContain("32 GB of RAM");
-    expect(source).toContain("Client-only 9850X3D draw");
+    expect(source).toContain("Client-only AMD Ryzen 9 9900X3D draw");
     expect(source).toContain(
-      "A qualifying Roo Industries purchase is required for the 9850X3D draw."
+      "A qualifying Roo Industries purchase is required for the Ryzen 9 9900X3D draw."
     );
     expect(source).toContain("The giveaway window will run for 30 days.");
     expect(source).toContain("U.S. pricing market");

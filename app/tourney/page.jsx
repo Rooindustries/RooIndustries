@@ -140,7 +140,7 @@ const infoItems = [
   },
   {
     title: "Giveaways",
-    body: "Community prizes and the client-only 9850X3D draw are listed in the giveaway section below. The 9850X3D draw requires a qualifying Roo Industries purchase.",
+    body: "Community prizes and the client-only AMD Ryzen 9 9900X3D draw are listed in the giveaway section below. The Ryzen 9 9900X3D draw requires a qualifying Roo Industries purchase.",
   },
 ];
 
@@ -150,8 +150,8 @@ const giveawayItems = [
     body: "3 Logitech G PRO X2 SUPERSTRIKE wireless gaming mice and 32 GB of RAM. Community entry requirements will be posted before entries open.",
   },
   {
-    title: "Client-only 9850X3D draw",
-    body: "A qualifying Roo Industries purchase is required for the 9850X3D draw. This draw is separate from the community giveaway.",
+    title: "Client-only AMD Ryzen 9 9900X3D draw",
+    body: "A qualifying Roo Industries purchase is required for the Ryzen 9 9900X3D draw. This draw is separate from the community giveaway.",
   },
   {
     title: "Giveaway window",
@@ -321,8 +321,8 @@ const DashboardPage = ({ hosts, loginOutcome = "", session }) => (
           <strong>Community prizes and a client-only draw</strong>
           <span>
             The public giveaway details will separate Discord community entries
-            from the client-only 9850X3D draw, which requires a qualifying Roo
-            Industries purchase.
+            from the client-only AMD Ryzen 9 9900X3D draw, which requires a
+            qualifying Roo Industries purchase.
           </span>
         </div>
         <ul className="tourney-card-list tourney-giveaway-list">
