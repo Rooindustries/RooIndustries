@@ -101,6 +101,17 @@ describe("tourney public page content", () => {
       "Vouched for by your favorite content creators like Vulture, Wanted, and"
     );
     expect(sharedSource).toContain('className="tourney-creator-proof"');
+    const fpsLinkIndex = sharedSource.indexOf(
+      'className="is-primary" href="https://rooindustries.com/#packages"'
+    );
+    const fpsLinkCloseIndex = sharedSource.indexOf("</a>", fpsLinkIndex);
+    const creatorProofIndex = sharedSource.indexOf(
+      'className="tourney-creator-proof"'
+    );
+    expect(creatorProofIndex).toBeGreaterThan(fpsLinkIndex);
+    expect(creatorProofIndex).toBeLessThan(fpsLinkCloseIndex);
+    expect(sharedSource).toContain('className="tourney-hero-cta-label"');
+    expect(sharedSource).not.toContain("tourney-hero-cta-group");
     expect(sharedSource).toContain(
       'href="https://rooindustries.com/#packages"'
     );
