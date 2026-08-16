@@ -1,6 +1,5 @@
 import React, { lazy, Suspense, useEffect, useRef, useState } from "react";
 import Hero from "../components/Hero";
-import TournamentAnnouncement from "../components/TournamentAnnouncement";
 import { Link, useLocation } from "react-router-dom";
 import {
   HOME_SECTION_PREFETCH_BY_HASH,
@@ -12,7 +11,6 @@ import {
   readPendingSectionTarget,
 } from "../lib/sectionNavigation";
 import { useLowPerformanceMode } from "../lib/performanceMode";
-import About from "../components/About";
 import StreamerYoutuberReviews from "../components/StreamerYoutuberReviews";
 import Footer from "../components/Footer";
 import HowItWorks from "../components/HowItWorks";
@@ -154,7 +152,6 @@ export default function Home({ initialData = null }) {
 
   return (
     <>
-      <TournamentAnnouncement />
       <Hero />
       <DeferredSection
         fallbackClassName="min-h-[510px]"
@@ -162,15 +159,6 @@ export default function Home({ initialData = null }) {
         eager={eagerAll}
       >
         <StreamerYoutuberReviews initialData={initialData?.reviews || null} />
-      </DeferredSection>
-      <DeferredSection
-        fallbackClassName="min-h-[260px]"
-        rootMargin="160px 0px"
-        eager={eagerAll}
-      >
-        <div className="deferred-section-content">
-          <About initialData={initialData?.about || null} />
-        </div>
       </DeferredSection>
       <section id="services" style={{ scrollMarginTop: "var(--section-nav-offset)" }}>
         <DeferredSection
@@ -180,7 +168,10 @@ export default function Home({ initialData = null }) {
         >
           <Suspense fallback={<div className="min-h-[520px]" />}>
             <div className="deferred-section-content">
-              <Services initialData={initialData?.services || null} />
+              <Services
+                initialData={initialData?.services || null}
+                initialAboutData={initialData?.about || null}
+              />
             </div>
           </Suspense>
         </DeferredSection>

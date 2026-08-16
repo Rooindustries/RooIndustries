@@ -22,6 +22,11 @@ const CACHED_SERVICES = {
   benchPages: [],
 };
 
+const CACHED_ABOUT = {
+  recordTitle: "3DMark Hall of Fame",
+  recordDetails: [{ label: "RANK", value: "#31" }],
+};
+
 describe("home section hydration", () => {
   let container;
   let root;
@@ -55,6 +60,10 @@ describe("home section hydration", () => {
     window.sessionStorage.setItem(
       "roo-home-data:services",
       JSON.stringify(CACHED_SERVICES)
+    );
+    window.sessionStorage.setItem(
+      "roo-home-data:about",
+      JSON.stringify(CACHED_ABOUT)
     );
     window.sessionStorage.setItem("roo-home-data:__ts", String(Date.now()));
     const errorSpy = jest.spyOn(console, "error");
