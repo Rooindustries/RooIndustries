@@ -6348,7 +6348,7 @@ export const RouteTitle = ({ eyebrow, title, accent, children }) => (
 
 export const TourneyPromotionLinks = () => (
   <div className="tourney-hero-cta">
-    <a className="is-primary" href="/packages">
+    <a className="is-primary" href="https://rooindustries.com/#packages">
       <FaBolt aria-hidden="true" />
       <span>Boost Your FPS</span>
     </a>
