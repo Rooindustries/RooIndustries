@@ -16,6 +16,12 @@ const readTourneyRosterSource = () =>
     "utf8"
   );
 
+const readTourneyBracketSource = () =>
+  fs.readFileSync(
+    path.join(__dirname, "../../app/tourney/bracket/page.jsx"),
+    "utf8"
+  );
+
 const readTourneyRegisterSource = () =>
   fs.readFileSync(
     path.join(__dirname, "../../app/tourney/register/page.jsx"),
@@ -82,6 +88,20 @@ describe("tourney public page content", () => {
     expect(source).toContain("Community Discord giveaway");
     expect(source).toContain("Client-only 9850X3D draw");
     expect(source).not.toContain("Creator 9850X3D");
+  });
+
+  test("promotes the prize and packages on the tournament, bracket, and roster pages", () => {
+    const pageSource = readTourneyPageSource();
+    const bracketSource = readTourneyBracketSource();
+    const rosterSource = readTourneyRosterSource();
+    const sharedSource = readTourneySharedSource();
+
+    expect(sharedSource).toContain("Stand a Chance to Win $1,500 in Prizes");
+    expect(sharedSource).toContain('href="/packages"');
+    expect(sharedSource).toContain("https://discord.com/invite/qs5HKNyazD");
+    expect(pageSource).toContain("<TourneyPromotionLinks />");
+    expect(bracketSource).toContain("<TourneyPromotionLinks />");
+    expect(rosterSource).toContain("<TourneyPromotionLinks />");
   });
 
   test("shows the current registration, draft, and event dates", () => {
