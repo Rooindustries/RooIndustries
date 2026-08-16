@@ -61,5 +61,12 @@ describe("homepage conversion content", () => {
     expect(homeSource).toContain("initialAboutData={initialData?.about || null}");
     expect(servicesSource).toContain("ri-performance-overview");
     expect(servicesSource).toContain("<About initialData={initialAboutData} compact />");
+    const aboutSource = fs.readFileSync(
+      path.join(__dirname, "../components/About.jsx"),
+      "utf8"
+    );
+    expect(aboutSource).toContain(
+      'const compactRecordNote = "Official result · Independently verifiable"'
+    );
   });
 });
