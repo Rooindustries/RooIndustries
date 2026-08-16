@@ -2251,6 +2251,333 @@ export const TourneyStyles = () => (
       font-weight: 760;
     }
 
+    .tourney-feedback-form {
+      width: min(100%, 58rem);
+      margin-inline: auto;
+      gap: 20px;
+      padding: clamp(18px, 3vw, 30px);
+    }
+
+    html[data-theme="dark"] .tourney-feedback-route {
+      --tourney-accent: #ffd76e;
+      --tourney-accent-strong: #f6c84c;
+      --tourney-accent-glow: #ffe8a3;
+      --tourney-accent-soft: rgba(255, 215, 110, 0.64);
+      --tourney-border-accent: rgba(255, 215, 110, 0.46);
+      --tourney-focus: rgba(255, 231, 163, 0.82);
+      --color-surface-hover-accent: rgba(255, 215, 110, 0.09);
+      --gradient-glint-text: linear-gradient(
+        94deg,
+        #fff8e7 0%,
+        #ffd76e 32%,
+        #fff0b0 51%,
+        #f6c84c 74%,
+        #fff4d6 100%
+      );
+      --text-shadow-glint: 0 0 10px rgba(255, 244, 214, 0.26),
+        0 0 24px rgba(255, 215, 110, 0.2);
+      --gradient-button-primary: linear-gradient(
+        180deg,
+        #ffecb2 0%,
+        #ffd76e 44%,
+        #f6c84c 100%
+      );
+      --shadow-button: inset 0 1px 0 rgba(255, 255, 255, 0.55),
+        inset 0 -1px 0 rgba(115, 75, 0, 0.3),
+        0 0 0 1px rgba(255, 215, 110, 0.24),
+        0 8px 24px rgba(246, 200, 76, 0.2);
+    }
+
+    html[data-theme="dark"] .tourney-feedback-route .tourney-section,
+    html[data-theme="dark"] .tourney-feedback-route .tourney-feedback-form {
+      border-color: rgba(255, 215, 110, 0.42);
+      background: linear-gradient(145deg, rgba(12, 12, 12, 0.9), rgba(5, 5, 5, 0.97));
+      box-shadow:
+        inset 0 1px 0 rgba(255, 248, 226, 0.08),
+        0 0 34px rgba(255, 215, 110, 0.07),
+        0 18px 46px rgba(0, 0, 0, 0.34);
+    }
+
+    html[data-theme="dark"] .tourney-feedback-route .tourney-feedback-preview-note {
+      border-color: rgba(255, 215, 110, 0.5);
+      background:
+        linear-gradient(135deg, rgba(255, 248, 226, 0.075), rgba(255, 215, 110, 0.02)),
+        #0b0b0b;
+      box-shadow: inset 0 1px 0 rgba(255, 248, 226, 0.08);
+    }
+
+    html[data-theme="dark"] .tourney-feedback-route .tourney-feedback-rating,
+    html[data-theme="dark"] .tourney-feedback-route .tourney-feedback-return {
+      border-color: rgba(255, 215, 110, 0.34);
+      background: rgba(255, 255, 255, 0.025);
+    }
+
+    html[data-theme="dark"] .tourney-feedback-route .tourney-rating-scale label.is-selected > span,
+    html[data-theme="dark"] .tourney-feedback-route .tourney-feedback-return label.is-selected > span {
+      border-color: #ffe8a3;
+      color: #171003;
+      background: linear-gradient(180deg, #ffecb2, #ffd76e 48%, #f6c84c);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.55),
+        0 0 18px rgba(255, 215, 110, 0.3);
+    }
+
+    html[data-theme="dark"] .tourney-feedback-route .tourney-owner-button {
+      border-color: #ffe8a3;
+      color: #171003;
+      text-shadow: 0 1px 0 rgba(255, 255, 255, 0.28);
+    }
+
+    .tourney-feedback-form-heading {
+      display: grid;
+      gap: 7px;
+      border-bottom: 1px solid var(--tourney-border);
+      padding-bottom: 18px;
+    }
+
+    .tourney-feedback-preview-note {
+      display: grid;
+      gap: 3px;
+      border: 1px solid var(--tourney-border-accent);
+      border-radius: 0.8rem;
+      color: var(--tourney-text-soft);
+      background: color-mix(in srgb, var(--tourney-accent) 11%, var(--tourney-surface-soft));
+      padding: 12px 14px;
+      font-size: 0.84rem;
+      line-height: 1.45;
+    }
+
+    .tourney-feedback-preview-note strong {
+      color: var(--tourney-accent);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+    }
+
+    .tourney-feedback-form-heading h3,
+    .tourney-feedback-form-heading p,
+    .tourney-feedback-results-heading h3,
+    .tourney-feedback-results-heading p,
+    .tourney-feedback-receipt h3,
+    .tourney-feedback-receipt p {
+      margin: 0;
+    }
+
+    .tourney-feedback-form-heading h3,
+    .tourney-feedback-results-heading h3,
+    .tourney-feedback-receipt h3 {
+      color: var(--tourney-text);
+      font-size: clamp(1.2rem, 2vw, 1.55rem);
+      line-height: 1.2;
+    }
+
+    .tourney-feedback-form-heading > p:last-child,
+    .tourney-feedback-receipt > p {
+      color: var(--tourney-text-soft);
+      line-height: 1.55;
+    }
+
+    .tourney-optional {
+      justify-self: start;
+      border: 1px solid var(--tourney-border);
+      border-radius: 999px;
+      color: var(--tourney-text-muted);
+      background: var(--tourney-surface-soft);
+      padding: 2px 7px;
+      font-size: 0.62rem;
+      font-weight: 760;
+      line-height: 1.2;
+    }
+
+    .tourney-feedback-ratings {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .tourney-feedback-rating,
+    .tourney-feedback-return {
+      min-width: 0;
+      margin: 0;
+      border: 1px solid var(--tourney-border-accent);
+      border-radius: 0.85rem;
+      background: var(--tourney-surface-soft);
+      padding: 14px;
+    }
+
+    .tourney-feedback-rating legend,
+    .tourney-feedback-return legend {
+      max-width: 100%;
+      color: var(--tourney-accent);
+      padding-inline: 4px;
+      font-size: 0.76rem;
+      font-weight: 820;
+      line-height: 1.35;
+      text-transform: uppercase;
+    }
+
+    .tourney-rating-scale,
+    .tourney-feedback-return > div {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 5px;
+    }
+
+    .tourney-feedback-return > div {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .tourney-rating-scale label,
+    .tourney-feedback-return label {
+      position: relative;
+      display: block;
+      color: var(--tourney-text-soft);
+      cursor: pointer;
+      font-size: 0.88rem;
+      font-weight: 800;
+      letter-spacing: 0;
+      text-align: center;
+      text-transform: none;
+    }
+
+    .tourney-rating-scale input,
+    .tourney-feedback-return input {
+      position: absolute;
+      width: 1px;
+      min-height: 0;
+      margin: 0;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .tourney-rating-scale label > span,
+    .tourney-feedback-return label > span {
+      display: grid;
+      place-items: center;
+      min-height: 42px;
+      border: 1px solid var(--tourney-border);
+      border-radius: 0.65rem;
+      background: var(--tourney-surface-strong);
+      transition: border-color 160ms ease, color 160ms ease, background 160ms ease,
+        box-shadow 160ms ease, transform 160ms ease;
+    }
+
+    .tourney-rating-scale label:hover > span,
+    .tourney-feedback-return label:hover > span {
+      border-color: var(--tourney-border-accent);
+      color: var(--tourney-accent);
+      transform: translateY(-1px);
+    }
+
+    .tourney-rating-scale label.is-selected > span,
+    .tourney-feedback-return label.is-selected > span {
+      border-color: var(--tourney-accent);
+      color: var(--tourney-text);
+      background: color-mix(in srgb, var(--tourney-accent) 24%, var(--tourney-surface-strong));
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--tourney-accent) 18%, transparent);
+    }
+
+    .tourney-rating-scale input:focus-visible + span,
+    .tourney-feedback-return input:focus-visible + span {
+      outline: 2px solid var(--tourney-focus);
+      outline-offset: 2px;
+    }
+
+    .tourney-rating-ends {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 7px;
+      color: var(--tourney-text-muted);
+      font-size: 0.68rem;
+      font-weight: 700;
+    }
+
+    .tourney-feedback-privacy {
+      margin: 0;
+      border-left: 3px solid var(--tourney-accent-soft);
+      color: var(--tourney-text-muted);
+      padding-left: 12px;
+      font-size: 0.84rem;
+      line-height: 1.5;
+    }
+
+    .tourney-feedback-receipt {
+      display: grid;
+      gap: 9px;
+      width: min(100%, 58rem);
+      margin-inline: auto;
+      border: 1px solid var(--tourney-border-accent);
+      border-radius: 1rem;
+      background:
+        radial-gradient(circle at 0% 0%, var(--color-surface-hover-accent), transparent 42%),
+        linear-gradient(145deg, var(--tourney-surface), var(--tourney-surface-strong));
+      box-shadow: var(--tourney-card-shadow);
+      padding: clamp(20px, 3vw, 30px);
+    }
+
+    .tourney-feedback-receipt dl,
+    .tourney-feedback-scores {
+      display: grid;
+      gap: 8px;
+      margin: 8px 0 0;
+    }
+
+    .tourney-feedback-receipt dl {
+      grid-template-columns: minmax(0, 1.6fr) minmax(100px, 0.55fr) minmax(180px, 1fr);
+    }
+
+    .tourney-feedback-receipt dl > div,
+    .tourney-feedback-scores > div {
+      min-width: 0;
+      border: 1px solid var(--tourney-border);
+      border-radius: 0.7rem;
+      background: var(--tourney-surface-soft);
+      padding: 10px 12px;
+    }
+
+    .tourney-feedback-receipt dt,
+    .tourney-feedback-scores dt {
+      color: var(--tourney-text-muted);
+      font-size: 0.65rem;
+      font-weight: 780;
+      text-transform: uppercase;
+    }
+
+    .tourney-feedback-receipt dd,
+    .tourney-feedback-scores dd {
+      overflow-wrap: anywhere;
+      margin: 3px 0 0;
+      color: var(--tourney-text);
+      font-size: 0.85rem;
+      font-weight: 760;
+    }
+
+    .tourney-feedback-results {
+      display: grid;
+      gap: 14px;
+      margin-top: 12px;
+      border-top: 1px solid var(--tourney-border);
+      padding-top: 24px;
+    }
+
+    .tourney-feedback-results-heading {
+      display: grid;
+      gap: 5px;
+    }
+
+    .tourney-feedback-record {
+      grid-template-columns: minmax(0, 1fr) minmax(220px, 0.38fr);
+    }
+
+    .tourney-feedback-record strong {
+      color: var(--tourney-text);
+    }
+
+    .tourney-feedback-scores {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      margin: 0;
+    }
+
     .tourney-inline-form {
       display: grid;
       gap: 10px;
@@ -5745,6 +6072,8 @@ export const TourneyStyles = () => (
       }
 
       .tourney-form-grid,
+      .tourney-feedback-ratings,
+      .tourney-feedback-receipt dl,
       .tourney-capacity-form,
       .tourney-roster-player,
       .tourney-player-row,

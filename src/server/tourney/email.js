@@ -11,6 +11,7 @@ const DEFAULT_FROM = "Roo Industries <onboarding@resend.dev>";
 const {
   buildTourneyAppealAdminEmail,
   buildTourneyAppealConfirmationEmail,
+  buildTourneyFeedbackNotificationEmail,
   buildTourneyPayoutNotificationEmail,
 } = tourneyEmailTemplates;
 
@@ -84,6 +85,7 @@ const getPoolLabel = (player = {}) =>
 export {
   buildTourneyAppealAdminEmail,
   buildTourneyAppealConfirmationEmail,
+  buildTourneyFeedbackNotificationEmail,
   buildTourneyPayoutNotificationEmail,
 };
 
@@ -284,6 +286,26 @@ export async function sendTourneyPayoutNotificationEmail({
     template: buildTourneyPayoutNotificationEmail({
       payout,
       baseUrl,
+      sampleMode,
+    }),
+  });
+}
+
+export async function sendTourneyFeedbackNotificationEmail({
+  feedback,
+  to,
+  sampleMode = false,
+  idempotencyKey = "",
+  signal,
+  env = process.env,
+} = {}) {
+  return sendTemplateEmail({
+    to,
+    idempotencyKey,
+    signal,
+    env,
+    template: buildTourneyFeedbackNotificationEmail({
+      feedback,
       sampleMode,
     }),
   });

@@ -3,6 +3,7 @@ import {
   sendTourneyAppealAdminEmail,
   sendTourneyAppealConfirmationEmail,
   sendTourneyDiscordInviteEmail,
+  sendTourneyFeedbackNotificationEmail,
   sendTourneyPayoutNotificationEmail,
   sendTourneyPlayerApprovedEmail,
   sendTourneyRegistrationApprovalEmails,
@@ -328,6 +329,8 @@ const sendDispatch = ({ dispatch, env, signal }) => {
         : sendTourneyAppealConfirmationEmail(common);
     case "payout":
       return sendTourneyPayoutNotificationEmail(common);
+    case "feedback":
+      return sendTourneyFeedbackNotificationEmail(common);
     default:
       throw new Error("Unsupported Tourney email dispatch.");
   }

@@ -1,10 +1,13 @@
 const mockSendTourneyResetEmail = jest.fn();
+const mockSendTourneyFeedbackNotificationEmail = jest.fn();
 const mockRunTourneyTransaction = jest.fn();
 
 jest.mock("../server/tourney/email.js", () => ({
   sendTourneyAppealAdminEmail: jest.fn(),
   sendTourneyAppealConfirmationEmail: jest.fn(),
   sendTourneyDiscordInviteEmail: jest.fn(),
+  sendTourneyFeedbackNotificationEmail: (...args) =>
+    mockSendTourneyFeedbackNotificationEmail(...args),
   sendTourneyPayoutNotificationEmail: jest.fn(),
   sendTourneyPlayerApprovedEmail: jest.fn(),
   sendTourneyRegistrationApprovalEmails: jest.fn(),
@@ -43,13 +46,14 @@ const expiredDispatch = {
   attempt_count: 0,
 };
 
-const createSql = () => {
+const createSql = (dispatch = expiredDispatch) => {
   const calls = [];
   const sql = (strings, ...values) => {
     if (typeof strings === "string") return strings;
     const query = strings.join(" ");
     calls.push({ query, values });
-    if (query.includes("select * from")) return Promise.resolve([expiredDispatch]);
+    if (query.includes("select * from")) return Promise.resolve([dispatch]);
+    if (query.includes("returning id")) return Promise.resolve([{ id: dispatch.id }]);
     return Promise.resolve([]);
   };
   sql.calls = calls;
@@ -81,5 +85,44 @@ describe("Tourney email dispatch expiry", () => {
 
     expect(mockSendTourneyResetEmail).not.toHaveBeenCalled();
     expect(result).toEqual({ claimed: 1, sent: 0, retried: 0, expired: 1 });
+  });
+
+  test("delivers queued anonymous feedback through the feedback email template", async () => {
+    const feedbackDispatch = {
+      id: "dispatch-feedback-1",
+      idempotency_key: "feedback-dispatch-1",
+      command_id: "feedback-command-1",
+      dispatch_kind: "feedback",
+      recipient: "serviroo@rooindustries.com",
+      payload: {
+        to: "serviroo@rooindustries.com",
+        feedback: {
+          id: "feedback-1",
+          overallRating: 4,
+          feedbackText: "Share schedules earlier.",
+        },
+      },
+      status: "pending",
+      attempt_count: 0,
+    };
+    const sql = createSql(feedbackDispatch);
+    mockRunTourneyTransaction.mockImplementation(({ callback }) => callback(sql));
+    mockSendTourneyFeedbackNotificationEmail.mockResolvedValue({
+      id: "resend-feedback-1",
+    });
+
+    const result = await reconcileTourneyEmailDispatches({
+      env: { NODE_ENV: "production", TOURNEY_DATABASE_MODE: "legacy" },
+      limit: 1,
+    });
+
+    expect(mockSendTourneyFeedbackNotificationEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "serviroo@rooindustries.com",
+        feedback: expect.objectContaining({ id: "feedback-1" }),
+        idempotencyKey: "feedback-dispatch-1",
+      })
+    );
+    expect(result).toEqual({ claimed: 1, sent: 1, retried: 0, expired: 0 });
   });
 });

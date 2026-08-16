@@ -181,8 +181,80 @@ function buildTourneyPayoutNotificationEmail({
   };
 }
 
+const feedbackRating = (value) => {
+  const rating = Number(value);
+  return Number.isInteger(rating) && rating >= 1 && rating <= 5
+    ? `${rating}/5`
+    : "Not rated";
+};
+
+const feedbackReturnIntent = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "yes") return "Yes";
+  if (normalized === "maybe") return "Maybe";
+  if (normalized === "no") return "No";
+  return "Not answered";
+};
+
+const feedbackTimestamp = (value) => {
+  const timestamp = new Date(String(value || ""));
+  if (!Number.isFinite(timestamp.getTime())) return "Just now";
+  return timestamp.toLocaleString("en-GB", {
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "short",
+    timeZone: "UTC",
+    timeZoneName: "short",
+    year: "numeric",
+  });
+};
+
+function buildTourneyFeedbackNotificationEmail({
+  feedback = {},
+  sampleMode = false,
+} = {}) {
+  return {
+    subject: prefixSubject({
+      subject: `Anonymous Tourney feedback: ${feedbackRating(feedback.overallRating)}`,
+      sampleMode,
+    }),
+    html: buildShell({
+      sampleMode,
+      title: "New anonymous Tourney feedback",
+      intro: "A Tourney participant submitted an anonymous response.",
+      rows: [
+        { label: "Overall experience", value: escapeHtml(feedbackRating(feedback.overallRating)) },
+        { label: "Organisation and flow", value: escapeHtml(feedbackRating(feedback.organizationRating)) },
+        { label: "Communication", value: escapeHtml(feedbackRating(feedback.communicationRating)) },
+        { label: "Competitive format", value: escapeHtml(feedbackRating(feedback.formatRating)) },
+        { label: "Broadcast and casting", value: escapeHtml(feedbackRating(feedback.broadcastRating)) },
+        { label: "Would join again", value: escapeHtml(feedbackReturnIntent(feedback.returnIntent)) },
+        { label: "Submitted", value: escapeHtml(feedbackTimestamp(feedback.createdAt)) },
+        { label: "Receipt", value: escapeHtml(feedback.id || "Pending") },
+      ],
+      details: feedback.feedbackText || "No written feedback was provided.",
+    }),
+    text: [
+      "New anonymous Tourney feedback",
+      `Overall experience: ${feedbackRating(feedback.overallRating)}`,
+      `Organisation and flow: ${feedbackRating(feedback.organizationRating)}`,
+      `Communication: ${feedbackRating(feedback.communicationRating)}`,
+      `Competitive format: ${feedbackRating(feedback.formatRating)}`,
+      `Broadcast and casting: ${feedbackRating(feedback.broadcastRating)}`,
+      `Would join again: ${feedbackReturnIntent(feedback.returnIntent)}`,
+      `Submitted: ${feedbackTimestamp(feedback.createdAt)}`,
+      `Receipt: ${feedback.id || "Pending"}`,
+      "",
+      "What was bad, or what should improve:",
+      String(feedback.feedbackText || "No written feedback was provided."),
+    ].join("\n"),
+  };
+}
+
 module.exports = {
   buildTourneyAppealAdminEmail,
   buildTourneyAppealConfirmationEmail,
+  buildTourneyFeedbackNotificationEmail,
   buildTourneyPayoutNotificationEmail,
 };
