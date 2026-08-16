@@ -845,6 +845,22 @@ export const TourneyStyles = () => (
       transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
     }
 
+    .tourney-hero-cta-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+      min-width: 0;
+    }
+
+    .tourney-creator-proof {
+      margin: 0;
+      color: var(--tourney-text-muted);
+      font-size: 0.78rem;
+      font-weight: 650;
+      line-height: 1.35;
+      text-align: center;
+    }
+
     .tourney-hero-cta a.is-primary {
       border-color: var(--tourney-border-accent);
     }
@@ -6348,19 +6364,27 @@ export const RouteTitle = ({ eyebrow, title, accent, children }) => (
 
 export const TourneyPromotionLinks = () => (
   <div className="tourney-hero-cta">
-    <a className="is-primary" href="https://rooindustries.com/#packages">
-      <FaBolt aria-hidden="true" />
-      <span>Boost Your FPS</span>
-    </a>
-    <a
-      className="is-secondary"
-      href="https://discord.com/invite/qs5HKNyazD"
-      rel="noopener noreferrer"
-      target="_blank"
-    >
-      <FaDiscord aria-hidden="true" />
-      <span>Stand a Chance to Win $1,500 in Prizes</span>
-    </a>
+    <div className="tourney-hero-cta-group">
+      <a className="is-primary" href="https://rooindustries.com/#packages">
+        <FaBolt aria-hidden="true" />
+        <span>Boost Your FPS</span>
+      </a>
+      <p className="tourney-creator-proof">
+        Vouched for by your favorite content creators like Vulture, Wanted, and
+        more.
+      </p>
+    </div>
+    <div className="tourney-hero-cta-group">
+      <a
+        className="is-secondary"
+        href="https://discord.com/invite/qs5HKNyazD"
+        rel="noopener noreferrer"
+        target="_blank"
+      >
+        <FaDiscord aria-hidden="true" />
+        <span>Stand a Chance to Win $1,500 in Prizes</span>
+      </a>
+    </div>
   </div>
 );
 
