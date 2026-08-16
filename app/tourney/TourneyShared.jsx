@@ -2259,33 +2259,10 @@ export const TourneyStyles = () => (
     }
 
     html[data-theme="dark"] .tourney-feedback-route {
-      --tourney-accent: #ffd76e;
-      --tourney-accent-strong: #f6c84c;
-      --tourney-accent-glow: #ffe8a3;
-      --tourney-accent-soft: rgba(255, 215, 110, 0.64);
-      --tourney-border-accent: rgba(255, 215, 110, 0.46);
-      --tourney-focus: rgba(255, 231, 163, 0.82);
-      --color-surface-hover-accent: rgba(255, 215, 110, 0.09);
-      --gradient-glint-text: linear-gradient(
-        94deg,
-        #fff8e7 0%,
-        #ffd76e 32%,
-        #fff0b0 51%,
-        #f6c84c 74%,
-        #fff4d6 100%
-      );
-      --text-shadow-glint: 0 0 10px rgba(255, 244, 214, 0.26),
-        0 0 24px rgba(255, 215, 110, 0.2);
-      --gradient-button-primary: linear-gradient(
-        180deg,
-        #ffecb2 0%,
-        #ffd76e 44%,
-        #f6c84c 100%
-      );
       --shadow-button: inset 0 1px 0 rgba(255, 255, 255, 0.55),
         inset 0 -1px 0 rgba(115, 75, 0, 0.3),
-        0 0 0 1px rgba(255, 215, 110, 0.24),
-        0 8px 24px rgba(246, 200, 76, 0.2);
+        0 0 0 1px color-mix(in srgb, var(--tourney-accent) 42%, transparent),
+        0 8px 24px color-mix(in srgb, var(--tourney-accent) 28%, transparent);
     }
 
     html[data-theme="dark"] .tourney-feedback-route .tourney-section,
@@ -2314,16 +2291,16 @@ export const TourneyStyles = () => (
 
     html[data-theme="dark"] .tourney-feedback-route .tourney-rating-scale label.is-selected > span,
     html[data-theme="dark"] .tourney-feedback-route .tourney-feedback-return label.is-selected > span {
-      border-color: #ffe8a3;
+      border-color: var(--tourney-accent-glow);
       color: #171003;
-      background: linear-gradient(180deg, #ffecb2, #ffd76e 48%, #f6c84c);
+      background: var(--gradient-button-primary);
       box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.55),
-        0 0 18px rgba(255, 215, 110, 0.3);
+        0 0 18px color-mix(in srgb, var(--tourney-accent) 38%, transparent);
     }
 
     html[data-theme="dark"] .tourney-feedback-route .tourney-owner-button {
-      border-color: #ffe8a3;
+      border-color: var(--tourney-accent-glow);
       color: #171003;
       text-shadow: 0 1px 0 rgba(255, 255, 255, 0.28);
     }

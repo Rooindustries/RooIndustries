@@ -184,6 +184,17 @@ describe("anonymous Tourney participant feedback route", () => {
     expect(mockCreateTourneyFeedback).not.toHaveBeenCalled();
   });
 
+  test("rejects any team-specific slug instead of creating alternate links", async () => {
+    const response = await feedbackRoute.POST(
+      makeJsonRequest(validPayload, "", `${feedbackSlug}-team-one`)
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(body.error).toBe("Not found.");
+    expect(mockCreateTourneyFeedback).not.toHaveBeenCalled();
+  });
+
   test("rate limits repeated anonymous feedback attempts by address", async () => {
     mockCheckTourneyRateLimit.mockResolvedValue({
       ok: false,
