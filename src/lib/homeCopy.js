@@ -4,13 +4,13 @@ const HOME_COPY = {
     headingLine1: "More FPS. Less Input Lag.",
     headingLine2: "Tuned For Ranked Games.",
     description:
-      "We tune BIOS, Windows, memory, GPU, and game settings around the games you actually play, so ranked feels smoother, FPS climbs, and the mouse does what your hand tells it to.",
+      "Your PC should feel as fast as you play. Get higher FPS, steadier 1% lows, and cleaner mouse response in the games you actually grind.",
     subtext:
-      "You bring the PC and the game list. We tune it, test it, and show the before and after.",
+      "One remote session. Real before-and-after results. No new hardware needed.",
     ctaPrimaryText: "Tune My PC",
     ctaSecondaryText: "How It Works",
     ctaNote:
-      "Former #16 3DMark HOF · Lifetime warranty",
+      "Same-day sessions available · Before-and-after results · Lifetime warranty",
     bullets: [
       "20-92% FPS gains shown in reviews",
       "Lower input lag for ranked games",
@@ -21,43 +21,43 @@ const HOME_COPY = {
   services: {
     heading: "Built For Ranked Games",
     subheading:
-      "Stock settings leave FPS sitting idle in hardware you already paid for. We put it back into your games: more FPS, lower delay, cleaner frametimes.",
+      "Everything that makes the game feel faster, smoother, and more consistent.",
     cards: [
       {
         iconType: "clock",
         title: "Lower delay",
         description:
-          "Polling, drivers, power, and game settings get lined up so the mouse tracks closer to your hand.",
+          "Cleaner mouse response when every flick matters.",
       },
       {
         iconType: "zap",
         title: "Stable frames",
         description:
-          "1% lows and frametimes get tightened so fights feel smooth and the FPS counter matches it.",
+          "Stronger 1% lows through fights and team pushes.",
       },
       {
         iconType: "shield",
         title: "More FPS",
         description:
-          "BIOS, Windows, GPU, RAM, and in-game settings tuned around the titles you play most.",
+          "Unlock performance from the hardware you already own.",
       },
       {
         iconType: "wrench",
         title: "Less junk running",
         description:
-          "Cleaner startup, lighter overlays, better storage, and power behavior that leaves more room for the game.",
+          "Cut background load that steals frames from your game.",
       },
       {
         iconType: "video",
-        title: "OBS setup",
+        title: "Stream-ready",
         description:
-          "OBS, encoder, and capture settings are built around the game first, so clips and streams feel clean.",
+          "Stream and record without wrecking game performance.",
       },
       {
         iconType: "cpu",
         title: "FPS stays up",
         description:
-          "Heat, boost, RAM, and stability get dialed in so the PC keeps pace deep into the session.",
+          "Stable performance through long ranked sessions.",
       },
     ],
   },
@@ -118,6 +118,35 @@ const HOME_COPY = {
   },
 };
 
+const OVERWATCH_CREATOR_BENCHMARK = Object.freeze({
+  gameTitle: "Overwatch 2",
+  beforeFps: 200,
+  afterFps: 450,
+  metricLabel: "Avg FPS",
+  details: [
+    { label: "CREATOR", value: "Vulture" },
+    { label: "USE CASE", value: "Stream + record" },
+    { label: "SOURCE", value: "Client review" },
+  ],
+});
+
+const withOverwatchCreatorBenchmark = (benchPages = []) => {
+  const games = Array.isArray(benchPages)
+    ? benchPages.flatMap((page) =>
+        Array.isArray(page?.games) ? page.games.filter(Boolean) : []
+      )
+    : [];
+  const remainingGames = games.filter(
+    (game) => !/^overwatch(?:\s+2)?$/i.test(String(game?.gameTitle || "").trim())
+  );
+  const featuredGames = [OVERWATCH_CREATOR_BENCHMARK, ...remainingGames];
+
+  return Array.from(
+    { length: Math.ceil(featuredGames.length / 3) },
+    (_, index) => ({ games: featuredGames.slice(index * 3, index * 3 + 3) })
+  );
+};
+
 const keyed = (sourceItems = [], canonicalItems = []) =>
   canonicalItems.map((item, index) => ({
     ...item,
@@ -145,6 +174,7 @@ const applyHomeSectionCopyOverride = (key, value) => {
       subheading: HOME_COPY.services.subheading,
       benchAfterLabel: "After Tune",
       cards: keyed(value?.cards, HOME_COPY.services.cards),
+      benchPages: withOverwatchCreatorBenchmark(value?.benchPages),
     };
   }
 
@@ -206,7 +236,9 @@ const applyHomePageCopyOverrides = (homeData = {}) => ({
 
 module.exports = {
   HOME_COPY,
+  OVERWATCH_CREATOR_BENCHMARK,
   applyHeroCopyOverride,
   applyHomePageCopyOverrides,
   applyHomeSectionCopyOverride,
+  withOverwatchCreatorBenchmark,
 };

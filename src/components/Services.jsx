@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { urlFor } from "../sanityClient";
+import About from "./About";
 import homeCopy from "../lib/homeCopy";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
 import {
@@ -44,7 +45,10 @@ function AnimatedNumber({ value, duration = 0.65 }) {
   return <span>{display}</span>;
 }
 
-export default function Services({ initialData = null }) {
+export default function Services({
+  initialData = null,
+  initialAboutData = null,
+}) {
   const [data, setData] = useState(() => initialData);
 
   useEffect(() => {
@@ -157,61 +161,64 @@ export default function Services({ initialData = null }) {
 
   return (
     <section className="mx-auto max-w-[92rem] pt-8 pb-16 px-4 sm:px-6">
-      <div className="text-center">
-        {data.heading && (
-          <h3 className="ri-services-heading text-4xl sm:text-5xl font-bold tracking-tight text-info-text">
-            {data.heading}
-          </h3>
-        )}
-        {data.subheading && (
-          <p className="ri-services-subheading mt-2 text-ink-secondary text-sm sm:text-[15px]">
-            {data.subheading}
-          </p>
-        )}
-      </div>
+      <div className="ri-performance-overview grid gap-6 xl:grid-cols-[minmax(300px,0.82fr)_minmax(0,2.18fr)] xl:items-stretch">
+        <About initialData={initialAboutData} compact />
 
-      <div className="h-10" />
-
-      {/* SERVICE CARDS */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-        {cards.map((card, i) => {
-          const canonical = CANONICAL_SERVICE_CARDS[i];
-          const title = canonical?.title ?? card.title;
-          const desc = canonical?.description ?? card.description;
-          const Icon = iconMap[canonical?.iconType ?? card.iconType] || HelpCircle;
-          return (
-            <motion.div
-              key={card._key || `svc-${i}`}
-              className="ri-service-card rounded-2xl border border-line-input bg-panel p-6 min-h-[220px]"
-              initial={{ opacity: 0, y: 14 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.35, delay: i * 0.04, ease: "easeOut" }}
-            >
-              <div className="ri-service-icon-shell w-12 h-12 rounded-xl grid place-items-center bg-surface-input border border-line-input">
-                {card.customIcon ? (
-                  <img
-                    src={urlFor(card.customIcon).width(64).url()}
-                    alt={title ? `${title} icon` : "Service icon"}
-                    width={22}
-                    height={22}
-                    loading="lazy"
-                    decoding="async"
-                    className="w-[22px] h-[22px] object-contain"
-                  />
-                ) : (
-                  <Icon className="ri-service-icon w-[22px] h-[22px] text-accent" />
-                )}
-              </div>
-              <h4 className="ri-service-title text-[21px] font-semibold tracking-[-0.01em] text-ink mt-5">
-                {title}
-              </h4>
-              <p className="ri-service-copy mt-3 text-[16px] leading-relaxed text-ink-secondary">
-                {desc}
+        <div className="ri-services-benefits flex min-w-0 flex-col">
+          <div className="text-center xl:text-left">
+            {data.heading && (
+              <h3 className="ri-services-heading text-3xl sm:text-4xl font-bold tracking-tight text-info-text">
+                {data.heading}
+              </h3>
+            )}
+            {data.subheading && (
+              <p className="ri-services-subheading mt-2 text-ink-secondary text-sm sm:text-[15px]">
+                {data.subheading}
               </p>
-            </motion.div>
-          );
-        })}
+            )}
+          </div>
+
+          <div className="mt-5 grid flex-1 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {cards.map((card, i) => {
+              const canonical = CANONICAL_SERVICE_CARDS[i];
+              const title = canonical?.title ?? card.title;
+              const desc = canonical?.description ?? card.description;
+              const Icon = iconMap[canonical?.iconType ?? card.iconType] || HelpCircle;
+              return (
+                <motion.div
+                  key={card._key || `svc-${i}`}
+                  className="ri-service-card rounded-2xl border border-line-input bg-panel p-4 min-h-[142px]"
+                  initial={{ opacity: 0, y: 14 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ duration: 0.35, delay: i * 0.04, ease: "easeOut" }}
+                >
+                  <div className="ri-service-icon-shell grid h-9 w-9 place-items-center rounded-lg border border-line-input bg-surface-input">
+                    {card.customIcon ? (
+                      <img
+                        src={urlFor(card.customIcon).width(56).url()}
+                        alt={title ? `${title} icon` : "Service icon"}
+                        width={18}
+                        height={18}
+                        loading="lazy"
+                        decoding="async"
+                        className="h-[18px] w-[18px] object-contain"
+                      />
+                    ) : (
+                      <Icon className="ri-service-icon h-[18px] w-[18px] text-accent" />
+                    )}
+                  </div>
+                  <h4 className="ri-service-title mt-3 text-[17px] font-semibold tracking-[-0.01em] text-ink">
+                    {title}
+                  </h4>
+                  <p className="ri-service-copy mt-1.5 text-[13px] leading-relaxed text-ink-secondary">
+                    {desc}
+                  </p>
+                </motion.div>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       {benchShouldRender && (
@@ -403,30 +410,23 @@ export default function Services({ initialData = null }) {
 
                             <div className="ri-bench-hardware mt-4 rounded-xl bg-surface-veil ring-1 ring-line-soft p-3">
                               <div className="ri-bench-hardware-grid grid grid-cols-3 gap-2 divide-x divide-line-soft text-center">
-                                <div className="flex flex-col px-1">
-                                  <span className="ri-bench-hardware-label text-[10px] font-bold uppercase tracking-wider text-ink-muted mb-1">
-                                    GPU
-                                  </span>
-                                  <span className="ri-bench-hardware-value text-[11px] font-medium text-ink-secondary leading-tight break-words">
-                                    {g?.gpu || "-"}
-                                  </span>
-                                </div>
-                                <div className="flex flex-col px-1">
-                                  <span className="ri-bench-hardware-label text-[10px] font-bold uppercase tracking-wider text-ink-muted mb-1">
-                                    CPU
-                                  </span>
-                                  <span className="ri-bench-hardware-value text-[11px] font-medium text-ink-secondary leading-tight break-words">
-                                    {g?.cpu || "-"}
-                                  </span>
-                                </div>
-                                <div className="flex flex-col px-1">
-                                  <span className="ri-bench-hardware-label text-[10px] font-bold uppercase tracking-wider text-ink-muted mb-1">
-                                    RAM
-                                  </span>
-                                  <span className="ri-bench-hardware-value text-[11px] font-medium text-ink-secondary leading-tight break-words">
-                                    {g?.ram || "-"}
-                                  </span>
-                                </div>
+                                {(Array.isArray(g?.details) && g.details.length === 3
+                                  ? g.details
+                                  : [
+                                      { label: "GPU", value: g?.gpu || "-" },
+                                      { label: "CPU", value: g?.cpu || "-" },
+                                      { label: "RAM", value: g?.ram || "-" },
+                                    ]
+                                ).map((detail) => (
+                                  <div key={detail.label} className="flex flex-col px-1">
+                                    <span className="ri-bench-hardware-label mb-1 text-[10px] font-bold uppercase tracking-wider text-ink-muted">
+                                      {detail.label}
+                                    </span>
+                                    <span className="ri-bench-hardware-value break-words text-[11px] font-medium leading-tight text-ink-secondary">
+                                      {detail.value}
+                                    </span>
+                                  </div>
+                                ))}
                               </div>
                             </div>
                           </motion.div>
