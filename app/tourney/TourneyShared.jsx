@@ -847,14 +847,15 @@ export const TourneyStyles = () => (
 
     .tourney-creator-proof {
       position: absolute;
-      right: 1rem;
+      right: 0.5rem;
       bottom: 0.45rem;
-      left: 1rem;
+      left: 0.5rem;
       color: var(--tourney-text-muted);
-      font-size: clamp(0.58rem, 0.7vw, 0.7rem);
+      font-size: clamp(0.54rem, 0.58vw, 0.64rem);
       font-weight: 620;
       line-height: 1.15;
       text-align: center;
+      white-space: nowrap;
     }
 
     .tourney-hero-cta a.is-primary {
@@ -5656,6 +5657,10 @@ export const TourneyStyles = () => (
       .tourney-hero-cta a.is-primary {
         min-height: 88px;
         padding-bottom: 1.8rem;
+      }
+
+      .tourney-creator-proof {
+        white-space: normal;
       }
 
       .tourney-route-title {
