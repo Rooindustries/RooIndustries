@@ -7,6 +7,9 @@ import { createSupabaseDocumentClient } from "../supabase/documentClient.js";
 import { enrichSupabaseContentAssets } from "../supabase/assets.js";
 import { resolveSupabaseRuntimePolicy } from "../supabase/runtime.js";
 import { resolveGlobalSanityReadConfig } from "../cms/globalSanityConfig.js";
+import policyContent from "../../lib/policyContent";
+
+const { applyPublicPolicyOverrides } = policyContent;
 
 const DEFAULT_API_VERSION = "2026-06-09";
 const SUPABASE_CONTENT_CACHE_TTL_MS = 60 * 1000;
@@ -189,10 +192,15 @@ export const fetchPublicContent = async ({
       ? backend
       : resolveSupabaseRuntimePolicy().primaryBackend;
   if (selectedBackend === "supabase") {
-    return loadSupabasePublicContent({ resource, query, params });
+    const data = await loadSupabasePublicContent({ resource, query, params });
+    return applyPublicPolicyOverrides(resource, data);
   }
-  return createPublicContentClient({ backend: selectedBackend, resource }).fetch(
+  const data = await createPublicContentClient({
+    backend: selectedBackend,
+    resource,
+  }).fetch(
     query,
     params
   );
+  return applyPublicPolicyOverrides(resource, data);
 };

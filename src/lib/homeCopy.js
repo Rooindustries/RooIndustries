@@ -10,7 +10,7 @@ const HOME_COPY = {
     ctaPrimaryText: "Tune My PC",
     ctaSecondaryText: "How It Works",
     ctaNote:
-      "Same-day sessions available · Before-and-after results · Lifetime warranty",
+      "Same-day sessions available · Money-back guarantee · Lifetime warranty",
     bullets: [
       "20-92% FPS gains shown in reviews",
       "Lower input lag for ranked games",

@@ -10,7 +10,7 @@ describe("homepage conversion content", () => {
     expect(HOME_COPY.hero.description).toContain("games you actually grind");
     expect(HOME_COPY.hero.subtext).toContain("No new hardware needed");
     expect(HOME_COPY.hero.ctaNote).toBe(
-      "Same-day sessions available · Before-and-after results · Lifetime warranty"
+      "Same-day sessions available · Money-back guarantee · Lifetime warranty"
     );
     expect(HOME_COPY.hero.ctaNote).not.toContain("Former #16");
   });
