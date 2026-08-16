@@ -58,6 +58,10 @@ describe("homepage conversion content", () => {
       path.join(__dirname, "../components/Services.jsx"),
       "utf8"
     );
+    const reviewsSource = fs.readFileSync(
+      path.join(__dirname, "../components/StreamerYoutuberReviews.jsx"),
+      "utf8"
+    );
 
     expect(homeSource).not.toContain("TournamentAnnouncement");
     expect(homeSource).toContain("initialAboutData={initialData?.about || null}");
@@ -68,7 +72,16 @@ describe("homepage conversion content", () => {
       "utf8"
     );
     expect(aboutSource).toContain(
-      'const compactRecordNote = "Official result · Independently verifiable"'
+      'const compactRecordNote = "Former #16"'
+    );
+    expect(aboutSource).toContain(
+      'grid-cols-[minmax(7.5rem,0.42fr)_1fr] items-stretch'
+    );
+    expect(aboutSource).not.toContain(
+      'rounded-xl bg-surface-veil px-4 py-3 text-center ring-1 ring-line-soft'
+    );
+    expect(reviewsSource).toContain(
+      '"pt-6 sm:pt-8 pb-16 text-center text-ink relative overflow-hidden"'
     );
   });
 });
