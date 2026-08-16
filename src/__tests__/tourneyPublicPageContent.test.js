@@ -98,6 +98,10 @@ describe("tourney public page content", () => {
 
     expect(sharedSource).toContain("Stand a Chance to Win $1,500 in Prizes");
     expect(sharedSource).toContain(
+      "Vouched for by your favorite content creators like Vulture, Wanted, and"
+    );
+    expect(sharedSource).toContain('className="tourney-creator-proof"');
+    expect(sharedSource).toContain(
       'href="https://rooindustries.com/#packages"'
     );
     expect(sharedSource).not.toContain('href="/packages"');
