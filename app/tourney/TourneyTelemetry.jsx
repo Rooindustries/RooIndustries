@@ -42,16 +42,16 @@ const runWhenIdle = (callback) => {
 
 export default function TourneyTelemetry() {
   const pathname = usePathname() || "";
-  const [enabled, setEnabled] = useState(false);
+  const [speedInsightsEnabled, setSpeedInsightsEnabled] = useState(false);
 
   useEffect(() => {
-    setEnabled(false);
+    setSpeedInsightsEnabled(false);
     if (isBlockedPath(pathname)) return undefined;
 
     let cancelled = false;
     const cleanup = runWhenIdle(() => {
       if (!cancelled) {
-        setEnabled(true);
+        setSpeedInsightsEnabled(true);
       }
     });
 
@@ -61,12 +61,12 @@ export default function TourneyTelemetry() {
     };
   }, [pathname]);
 
-  if (!enabled) return null;
+  if (isBlockedPath(pathname)) return null;
 
   return (
     <>
       <Analytics />
-      <SpeedInsights />
+      {speedInsightsEnabled ? <SpeedInsights /> : null}
     </>
   );
 }

@@ -11,7 +11,6 @@ jest.mock("../../app/tourney/TourneyShared", () => ({
       <p>{children}</p>
     </section>
   ),
-  TourneyPromotionLinks: () => <div data-testid="tourney-promotion-links" />,
   TourneyShell: ({ children, performanceMode }) => (
     <main data-performance-mode={performanceMode === false ? "false" : "true"}>
       {children}
@@ -19,6 +18,10 @@ jest.mock("../../app/tourney/TourneyShared", () => ({
   ),
   getTourneySession: (...args) => mockGetTourneySession(...args),
 }));
+
+jest.mock("../../app/tourney/TourneyPromotionLinks", () => () => (
+  <div data-testid="tourney-promotion-links" />
+));
 
 jest.mock("../../app/tourney/bracket/LiveBracketBoard", () => ({ initialSnapshot }) => (
   <div data-testid="live-bracket-board">{JSON.stringify(initialSnapshot)}</div>

@@ -1,8 +1,5 @@
-import {
-  TourneyPromotionLinks,
-  TourneyShell,
-  getTourneySession,
-} from "../TourneyShared";
+import { TourneyShell, getTourneySession } from "../TourneyShared";
+import TourneyPromotionLinks from "../TourneyPromotionLinks";
 import LiveBracketBoard from "./LiveBracketBoard";
 import {
   readPublicTourneyRoster,
