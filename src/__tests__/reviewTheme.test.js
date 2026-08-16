@@ -17,19 +17,22 @@ describe("review card theme styling", () => {
     expect(componentSource).not.toContain("highlightStyle");
   });
 
-  test("keeps light-theme accents but makes every dark-theme highlight pure white", () => {
+  test("keeps VIP highlights gold and makes regular dark-theme highlights white", () => {
     expect(stylesheet).toContain(".ri-review-highlight-standard {");
     expect(stylesheet).toContain("#38bdf8 30%");
     expect(stylesheet).toContain(".ri-review-highlight-vip {");
     expect(stylesheet).toContain("-webkit-text-fill-color: #facc15;");
 
     const darkRule = stylesheet.match(
-      /html\[data-theme="dark"\] \.ri-review-highlight \{([^}]+)\}/
+      /html\[data-theme="dark"\] \.ri-review-highlight-standard \{([^}]+)\}/
     )?.[1];
 
     expect(darkRule).toContain("-webkit-text-fill-color: #ffffff;");
     expect(darkRule).toContain("color: #ffffff;");
     expect(darkRule).toContain("filter: none;");
     expect(darkRule).toContain("text-shadow: none;");
+    expect(stylesheet).not.toContain(
+      'html[data-theme="dark"] .ri-review-highlight {'
+    );
   });
 });

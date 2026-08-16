@@ -2133,7 +2133,7 @@ html:not([data-theme="dark"]) .ri-hiw-trust-link:hover {
   text-shadow: 0 0 10px rgba(250, 204, 21, 0.5);
 }
 
-html[data-theme="dark"] .ri-review-highlight {
+html[data-theme="dark"] .ri-review-highlight-standard {
   background: none;
   -webkit-background-clip: border-box;
   background-clip: border-box;
