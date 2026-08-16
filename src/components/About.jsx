@@ -61,6 +61,7 @@ export default function About({ initialData = null, compact = false }) {
   const recordNote =
     aboutData.recordNote ||
     "Former #16 global CPU profile";
+  const compactRecordNote = "Official result · Independently verifiable";
   const recordDetailsFallback = [
     { label: "RANK", value: "#31", sub: "" },
     { label: "SCORE", value: "18829", sub: "" },
@@ -185,14 +186,12 @@ export default function About({ initialData = null, compact = false }) {
               </svg>
             </a>
 
-            {recordNote && (
-              <p
-                className="mt-auto pt-4 text-center text-[10px] font-semibold"
-                style={{ borderTop: "1px solid var(--rc-border-sub)" }}
-              >
-                <span className="blue-glint-text">{recordNote}</span>
-              </p>
-            )}
+            <p
+              className="mt-auto pt-4 text-center text-[10px] font-semibold"
+              style={{ borderTop: "1px solid var(--rc-border-sub)" }}
+            >
+              <span className="blue-glint-text">{compactRecordNote}</span>
+            </p>
           </div>
         </motion.div>
       </section>
