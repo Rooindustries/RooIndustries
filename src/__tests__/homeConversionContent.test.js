@@ -15,7 +15,7 @@ describe("homepage conversion content", () => {
     expect(HOME_COPY.hero.ctaNote).not.toContain("Former #16");
   });
 
-  test("features Vulture's Overwatch result without inventing hardware", () => {
+  test("features Vulture's Overwatch result with verified hardware", () => {
     const services = applyHomeSectionCopyOverride("services", {
       cards: [],
       benchPages: [
@@ -34,16 +34,18 @@ describe("homepage conversion content", () => {
 
     expect(services.benchPages[0].games[0]).toMatchObject({
       gameTitle: "Overwatch 2",
+      gameLogoUrl: "/overwatch-2-logo.svg",
       beforeFps: 200,
       afterFps: 450,
+      gpu: "NVIDIA GeForce RTX 4080",
+      cpu: "AMD Ryzen 9 7900X3D",
+      ram: "32GB 6000MHz DDR5",
       metricLabel: "Avg FPS",
-      details: [
-        { label: "CREATOR", value: "Vulture" },
-        { label: "USE CASE", value: "Stream + record" },
-        { label: "SOURCE", value: "Client review" },
-      ],
     });
-    expect(services.benchPages[0].games[0]).not.toHaveProperty("gpu");
+    expect(services.benchPages[0].games[0]).not.toHaveProperty("details");
+    expect(
+      fs.existsSync(path.join(__dirname, "../../public/overwatch-2-logo.svg"))
+    ).toBe(true);
     expect(services.benchPages[0].games[1].gameTitle).toBe("VALORANT");
   });
 

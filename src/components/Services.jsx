@@ -286,13 +286,17 @@ export default function Services({
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2 min-w-0">
-                                  {g?.gameLogo ? (
+                                  {g?.gameLogoUrl || g?.gameLogo ? (
                                     <img
-                                      src={urlFor(g.gameLogo)
-                                        .width(64)
-                                        .height(64)
-                                        .fit("max")
-                                        .url()}
+                                      src={
+                                        g?.gameLogoUrl
+                                          ? g.gameLogoUrl
+                                          : urlFor(g.gameLogo)
+                                              .width(64)
+                                              .height(64)
+                                              .fit("max")
+                                              .url()
+                                      }
                                       alt={
                                         g?.gameTitle
                                           ? `${g.gameTitle} logo`
@@ -302,7 +306,9 @@ export default function Services({
                                       height={24}
                                       loading="lazy"
                                       decoding="async"
-                                      className="h-5 w-5 sm:h-6 sm:w-6 shrink-0 rounded-sm object-contain"
+                                      className={`h-5 w-5 sm:h-6 sm:w-6 shrink-0 rounded-sm object-contain ${
+                                        g?.gameLogoUrl ? "bg-white p-0.5" : ""
+                                      }`}
                                     />
                                   ) : null}
                                   <div className="ri-bench-game-title truncate text-[16px] sm:text-[17px] font-extrabold tracking-tight text-ink">
@@ -410,14 +416,11 @@ export default function Services({
 
                             <div className="ri-bench-hardware mt-4 rounded-xl bg-surface-veil ring-1 ring-line-soft p-3">
                               <div className="ri-bench-hardware-grid grid grid-cols-3 gap-2 divide-x divide-line-soft text-center">
-                                {(Array.isArray(g?.details) && g.details.length === 3
-                                  ? g.details
-                                  : [
-                                      { label: "GPU", value: g?.gpu || "-" },
-                                      { label: "CPU", value: g?.cpu || "-" },
-                                      { label: "RAM", value: g?.ram || "-" },
-                                    ]
-                                ).map((detail) => (
+                                {[
+                                  { label: "GPU", value: g?.gpu || "-" },
+                                  { label: "CPU", value: g?.cpu || "-" },
+                                  { label: "RAM", value: g?.ram || "-" },
+                                ].map((detail) => (
                                   <div key={detail.label} className="flex flex-col px-1">
                                     <span className="ri-bench-hardware-label mb-1 text-[10px] font-bold uppercase tracking-wider text-ink-muted">
                                       {detail.label}
