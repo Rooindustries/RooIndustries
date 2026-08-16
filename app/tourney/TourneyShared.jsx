@@ -6359,7 +6359,7 @@ export const TourneyPromotionLinks = () => (
       target="_blank"
     >
       <FaDiscord aria-hidden="true" />
-      <span>Join the giveaway on Discord</span>
+      <span>Stand a Chance to Win $1,500 in Prizes</span>
     </a>
   </div>
 );
