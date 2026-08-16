@@ -12,6 +12,7 @@ import {
   generateTourneyBracket,
   getTourneyBracketSnapshot,
   reopenTourneyBracketMatch,
+  repairTourneyLowerBracketRouting,
   resetTourneyBracket,
   scoreTourneyBracketMatch,
   seedTourneyBracketTeams,
@@ -40,6 +41,7 @@ const OWNER_ACTIONS = new Set([
   "delete-team",
   "seed-teams",
   "generate",
+  "repair-lower-routing",
   "reset-bracket",
 ]);
 
@@ -155,6 +157,11 @@ export async function POST(request) {
         }
         if (action === "generate") {
           return { body: await generateTourneyBracket({ actorUsername: session.username }) };
+        }
+        if (action === "repair-lower-routing") {
+          return { body: await repairTourneyLowerBracketRouting({
+            actorUsername: session.username,
+          }) };
         }
         if (action === "reset-bracket") {
           return { body: await resetTourneyBracket({ actorUsername: session.username }) };

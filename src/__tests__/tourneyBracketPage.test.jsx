@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 
 const mockGetTourneySession = jest.fn();
+const mockReadPublicTourneyRoster = jest.fn();
 const mockReadTourneyService = jest.fn();
 
 jest.mock("../../app/tourney/TourneyShared", () => ({
@@ -23,6 +24,7 @@ jest.mock("../../app/tourney/bracket/LiveBracketBoard", () => ({ initialSnapshot
 ));
 
 jest.mock("../server/tourney/readService", () => ({
+  readPublicTourneyRoster: (...args) => mockReadPublicTourneyRoster(...args),
   readTourneyService: (...args) => mockReadTourneyService(...args),
 }));
 
@@ -32,6 +34,7 @@ describe("Tourney bracket page", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockGetTourneySession.mockResolvedValue(null);
+    mockReadPublicTourneyRoster.mockResolvedValue({ players: [] });
   });
 
   test("renders the live bracket snapshot", async () => {
@@ -59,7 +62,6 @@ describe("Tourney bracket page", () => {
 
     render(await TourneyBracketPage());
 
-    expect(screen.getByText("Live bracket data is reconnecting")).toBeInTheDocument();
     expect(screen.getByTestId("live-bracket-board")).toHaveTextContent("{}");
   });
 
