@@ -120,14 +120,13 @@ const HOME_COPY = {
 
 const OVERWATCH_CREATOR_BENCHMARK = Object.freeze({
   gameTitle: "Overwatch 2",
+  gameLogoUrl: "/overwatch-2-logo.svg",
   beforeFps: 200,
   afterFps: 450,
+  gpu: "NVIDIA GeForce RTX 4080",
+  cpu: "AMD Ryzen 9 7900X3D",
+  ram: "32GB 6000MHz DDR5",
   metricLabel: "Avg FPS",
-  details: [
-    { label: "CREATOR", value: "Vulture" },
-    { label: "USE CASE", value: "Stream + record" },
-    { label: "SOURCE", value: "Client review" },
-  ],
 });
 
 const withOverwatchCreatorBenchmark = (benchPages = []) => {
