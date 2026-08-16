@@ -2112,6 +2112,37 @@ html:not([data-theme="dark"]) .ri-hiw-trust-link:hover {
   filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.8));
 }
 
+.ri-review-highlight-standard {
+  background: linear-gradient(
+    90deg,
+    #7dd3fc 0%,
+    #38bdf8 30%,
+    #22d3ee 70%,
+    #67e8f9 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.5));
+}
+
+.ri-review-highlight-vip {
+  -webkit-text-fill-color: #facc15;
+  color: #facc15;
+  text-shadow: 0 0 10px rgba(250, 204, 21, 0.5);
+}
+
+html[data-theme="dark"] .ri-review-highlight {
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  -webkit-text-fill-color: #ffffff;
+  color: #ffffff;
+  filter: none;
+  text-shadow: none;
+}
+
 html[data-theme="dark"] .bg-clip-text[class*="from-sky-"] {
   background-image: linear-gradient(90deg, #f4f4f0, #b9bdc0);
 }

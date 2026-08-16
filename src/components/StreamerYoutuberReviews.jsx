@@ -173,17 +173,9 @@ function CompactStarRating({ rating = 5 }) {
 
 function ReviewCard({ review }) {
   const isVip = review.isVip;
-  const highlightStyle = {
-    background: isVip
-      ? "none"
-      : "linear-gradient(90deg, #7dd3fc 0%, #38bdf8 30%, #22d3ee 70%, #67e8f9 100%)",
-    WebkitBackgroundClip: isVip ? "border-box" : "text",
-    backgroundClip: isVip ? "border-box" : "text",
-    WebkitTextFillColor: isVip ? "#facc15" : "transparent",
-    color: isVip ? "#facc15" : "transparent",
-    textShadow: isVip ? "0 0 10px rgba(250, 204, 21, 0.5)" : "none",
-    filter: isVip ? "none" : "drop-shadow(0 0 8px rgba(56,189,248,0.5))",
-  };
+  const highlightClass = `ri-review-highlight ${
+    isVip ? "ri-review-highlight-vip" : "ri-review-highlight-standard"
+  }`;
 
   return (
     <div
@@ -244,8 +236,7 @@ function ReviewCard({ review }) {
         <div className="flex flex-col text-left w-full flex-1 min-h-0 relative z-10">
           {review.optimizationResult && (
             <h3
-              className="text-xl sm:text-2xl font-bold leading-snug flex-shrink-0 mb-1"
-              style={highlightStyle}
+              className={`${highlightClass} text-xl sm:text-2xl font-bold leading-snug flex-shrink-0 mb-1`}
             >
               {review.optimizationResult}
             </h3>
@@ -253,8 +244,7 @@ function ReviewCard({ review }) {
 
           {review.game && (
             <p
-              className="text-sm sm:text-base font-semibold leading-snug flex-shrink-0 mb-1"
-              style={highlightStyle}
+              className={`${highlightClass} text-sm sm:text-base font-semibold leading-snug flex-shrink-0 mb-1`}
             >
               {review.game}
             </p>
