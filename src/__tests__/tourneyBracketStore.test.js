@@ -166,10 +166,10 @@ describe("tourney bracket store", () => {
       slotLabels: { opponent1: "Loser of 7", opponent2: "Loser of 2" },
     });
     expect(scheduled.find((match) => match.publicMatchNumber === 13)).toMatchObject({
-      slotLabels: { opponent1: "Loser of 6", opponent2: "Loser of 3" },
+      slotLabels: { opponent1: "Loser of 3", opponent2: "Loser of 6" },
     });
     expect(scheduled.find((match) => match.publicMatchNumber === 14)).toMatchObject({
-      slotLabels: { opponent1: "Loser of 5", opponent2: "Loser of 4" },
+      slotLabels: { opponent1: "Loser of 4", opponent2: "Loser of 5" },
     });
     expect(scheduled.find((match) => match.publicMatchNumber === 21)).toMatchObject({
       schedule: { dayLabel: "Day 2", timeLabel: "3:30 PM", casterIds: [1, 2] },
@@ -249,10 +249,10 @@ describe("tourney bracket store", () => {
       await score(matchNumber);
     }
 
-    expectSides(11, outcomes.get(5).loser, outcomes.get(1).loser);
-    expectSides(12, outcomes.get(6).loser, outcomes.get(2).loser);
-    expectSides(13, outcomes.get(7).loser, outcomes.get(3).loser);
-    expectSides(14, outcomes.get(8).loser, outcomes.get(4).loser);
+    expectSides(11, outcomes.get(8).loser, outcomes.get(1).loser);
+    expectSides(12, outcomes.get(7).loser, outcomes.get(2).loser);
+    expectSides(13, outcomes.get(3).loser, outcomes.get(6).loser);
+    expectSides(14, outcomes.get(4).loser, outcomes.get(5).loser);
 
     for (const matchNumber of [9, 10, 11, 12, 13, 14]) {
       await score(matchNumber);
@@ -277,6 +277,159 @@ describe("tourney bracket store", () => {
 
     await score(21);
     expectSides(22, outcomes.get(17).winner, outcomes.get(21).winner);
+  });
+
+  test("repairs the live lower routing without resetting upstream results", async () => {
+    const store = loadStore();
+    store.resetMemoryTourneyBracketStoreForTests();
+    await addTeams(
+      store,
+      Array.from({ length: 12 }, (_, index) => `Team ${index + 1}`)
+    );
+    let snapshot = await store.generateTourneyBracket({
+      actorUsername: "serviroo",
+      env,
+    });
+    const getMatch = (matchNumber) =>
+      snapshot.matches.find((match) => match.publicMatchNumber === matchNumber);
+    const complete = async (matchNumber) => {
+      const match = getMatch(matchNumber);
+      snapshot = await store.scoreTourneyBracketMatch({
+        matchId: match.id,
+        opponent1Score: match.targetScore,
+        opponent2Score: 1,
+        actorUsername: "serviroo",
+        env,
+      });
+    };
+
+    for (const matchNumber of [1, 2, 3, 4, 7, 8]) {
+      await complete(matchNumber);
+    }
+    for (const [matchNumber, scores] of [[5, [2, 1]], [6, [2, 2]]]) {
+      const match = getMatch(matchNumber);
+      snapshot = await store.startTourneyBracketMatch({
+        matchId: match.id,
+        actorUsername: "yukari",
+        env,
+      });
+      snapshot = await store.scoreTourneyBracketMatch({
+        matchId: match.id,
+        opponent1Score: scores[0],
+        opponent2Score: scores[1],
+        actorUsername: "yukari",
+        env,
+      });
+    }
+
+    const outcomes = Object.fromEntries(
+      [1, 2, 3, 4, 7, 8].map((matchNumber) => {
+        const match = getMatch(matchNumber);
+        return [matchNumber, {
+          winner: match.opponent1.name,
+          loser: match.opponent2.name,
+        }];
+      })
+    );
+    const liveScores = [5, 6].map((matchNumber) => {
+      const match = getMatch(matchNumber);
+      return {
+        matchNumber,
+        status: match.statusLabel,
+        opponent1Score: match.opponent1.score,
+        opponent2Score: match.opponent2.score,
+      };
+    });
+
+    const memory = globalThis.__rooTourneyBracketStore;
+    const lower = [11, 12, 13, 14].map((matchNumber) => {
+      const publicMatch = getMatch(matchNumber);
+      return memory.entities.match.find((match) => match.id === publicMatch.id);
+    });
+    const desiredOpponent1 = lower.map((match) =>
+      JSON.parse(JSON.stringify(match.opponent1))
+    );
+    [3, 2, 0, 1].forEach((sourceIndex, index) => {
+      lower[index].opponent1 = JSON.parse(
+        JSON.stringify(desiredOpponent1[sourceIndex])
+      );
+    });
+    memory.entities.stage[0].settings.seedOrdering[2] = "natural";
+    snapshot = await store.getTourneyBracketSnapshot({ env });
+
+    expect(getMatch(11)).toMatchObject({
+      opponent1: { name: "TBD" },
+      opponent2: { name: outcomes[1].loser },
+    });
+    expect(getMatch(12)).toMatchObject({
+      opponent1: { name: "TBD" },
+      opponent2: { name: outcomes[2].loser },
+    });
+    expect(getMatch(13)).toMatchObject({
+      opponent1: { name: outcomes[8].loser },
+      opponent2: { name: outcomes[3].loser },
+    });
+    expect(getMatch(14)).toMatchObject({
+      opponent1: { name: outcomes[7].loser },
+      opponent2: { name: outcomes[4].loser },
+    });
+
+    snapshot = await store.repairTourneyLowerBracketRouting({
+      actorUsername: "serviroo",
+      env,
+    });
+    expect(getMatch(11)).toMatchObject({
+      opponent1: { name: outcomes[8].loser },
+      opponent2: { name: outcomes[1].loser },
+    });
+    expect(getMatch(12)).toMatchObject({
+      opponent1: { name: outcomes[7].loser },
+      opponent2: { name: outcomes[2].loser },
+    });
+    expect(getMatch(13)).toMatchObject({
+      opponent1: { name: "TBD" },
+      opponent2: { name: outcomes[3].loser },
+    });
+    expect(getMatch(14)).toMatchObject({
+      opponent1: { name: "TBD" },
+      opponent2: { name: outcomes[4].loser },
+    });
+    expect([5, 6].map((matchNumber) => {
+      const match = getMatch(matchNumber);
+      return {
+        matchNumber,
+        status: match.statusLabel,
+        opponent1Score: match.opponent1.score,
+        opponent2Score: match.opponent2.score,
+      };
+    })).toEqual(liveScores);
+    expect(snapshot.audit[0].action).toBe("bracket.lower-routing.repair");
+
+    const matchFiveLoser = getMatch(5).opponent2.name;
+    const matchSixLoser = getMatch(6).opponent2.name;
+    await complete(5);
+    await complete(6);
+    expect(getMatch(13)).toMatchObject({
+      opponent1: { name: outcomes[3].loser },
+      opponent2: { name: matchSixLoser },
+    });
+    expect(getMatch(14)).toMatchObject({
+      opponent1: { name: outcomes[4].loser },
+      opponent2: { name: matchFiveLoser },
+    });
+
+    memory.entities.stage[0].settings.seedOrdering[2] = "natural";
+    snapshot = await store.startTourneyBracketMatch({
+      matchId: getMatch(11).id,
+      actorUsername: "yukari",
+      env,
+    });
+    await expect(
+      store.repairTourneyLowerBracketRouting({
+        actorUsername: "serviroo",
+        env,
+      })
+    ).rejects.toMatchObject({ status: 409 });
   });
 
   test("scores Bo5 matches and auto-populates the next matchup", async () => {

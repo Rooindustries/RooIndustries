@@ -3,9 +3,11 @@ import { render, screen } from "@testing-library/react";
 
 const mockGetTourneySession = jest.fn();
 const mockGetTourneyBracketSnapshot = jest.fn();
+const mockRefresh = jest.fn();
 
 jest.mock("next/navigation", () => ({
   notFound: jest.fn(),
+  useRouter: () => ({ refresh: mockRefresh }),
 }));
 
 jest.mock("../../app/tourney/TourneyShared", () => ({
@@ -99,7 +101,7 @@ describe("Tourney control page", () => {
     render(await TourneyControlPage({ searchParams: Promise.resolve({}) }));
 
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Match controls are disabled"
+      "Match controls will reconnect automatically"
     );
     expect(screen.queryByTestId("bracket-manager")).toBeNull();
   });
