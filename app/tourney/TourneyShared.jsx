@@ -845,27 +845,31 @@ export const TourneyStyles = () => (
       transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
     }
 
-    .tourney-hero-cta-group {
-      display: flex;
-      flex-direction: column;
-      gap: 0.55rem;
-      min-width: 0;
-    }
-
     .tourney-creator-proof {
-      margin: 0;
+      position: absolute;
+      right: 1rem;
+      bottom: 0.45rem;
+      left: 1rem;
       color: var(--tourney-text-muted);
-      font-size: 0.78rem;
-      font-weight: 650;
-      line-height: 1.35;
+      font-size: clamp(0.58rem, 0.7vw, 0.7rem);
+      font-weight: 620;
+      line-height: 1.15;
       text-align: center;
     }
 
     .tourney-hero-cta a.is-primary {
+      position: relative;
       border-color: var(--tourney-border-accent);
     }
 
-    .tourney-hero-cta a.is-primary span {
+    .tourney-hero-cta-label {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.75rem;
+    }
+
+    .tourney-hero-cta a.is-primary .tourney-hero-cta-label span {
       color: #bae6fd;
       background: linear-gradient(90deg, #e0f2fe, #38bdf8 52%, #0ea5e9);
       -webkit-background-clip: text;
@@ -873,7 +877,7 @@ export const TourneyStyles = () => (
       -webkit-text-fill-color: transparent;
     }
 
-    html[data-theme="dark"] .tourney-hero-cta a.is-primary span {
+    html[data-theme="dark"] .tourney-hero-cta a.is-primary .tourney-hero-cta-label span {
       color: #ffd76e;
       background: linear-gradient(90deg, #fff7d6, #ffd76e 52%, #c78b16);
       -webkit-background-clip: text;
@@ -5649,6 +5653,11 @@ export const TourneyStyles = () => (
         width: 100%;
       }
 
+      .tourney-hero-cta a.is-primary {
+        min-height: 88px;
+        padding-bottom: 1.8rem;
+      }
+
       .tourney-route-title {
         padding-top: 0.85rem;
         padding-bottom: 1.1rem;
@@ -6364,27 +6373,25 @@ export const RouteTitle = ({ eyebrow, title, accent, children }) => (
 
 export const TourneyPromotionLinks = () => (
   <div className="tourney-hero-cta">
-    <div className="tourney-hero-cta-group">
-      <a className="is-primary" href="https://rooindustries.com/#packages">
+    <a className="is-primary" href="https://rooindustries.com/#packages">
+      <span className="tourney-hero-cta-label">
         <FaBolt aria-hidden="true" />
         <span>Boost Your FPS</span>
-      </a>
-      <p className="tourney-creator-proof">
+      </span>
+      <small className="tourney-creator-proof">
         Vouched for by your favorite content creators like Vulture, Wanted, and
         more.
-      </p>
-    </div>
-    <div className="tourney-hero-cta-group">
-      <a
-        className="is-secondary"
-        href="https://discord.com/invite/qs5HKNyazD"
-        rel="noopener noreferrer"
-        target="_blank"
-      >
-        <FaDiscord aria-hidden="true" />
-        <span>Stand a Chance to Win $1,500 in Prizes</span>
-      </a>
-    </div>
+      </small>
+    </a>
+    <a
+      className="is-secondary"
+      href="https://discord.com/invite/qs5HKNyazD"
+      rel="noopener noreferrer"
+      target="_blank"
+    >
+      <FaDiscord aria-hidden="true" />
+      <span>Stand a Chance to Win $1,500 in Prizes</span>
+    </a>
   </div>
 );
 
