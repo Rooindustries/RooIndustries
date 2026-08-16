@@ -112,6 +112,10 @@ describe("tourney public page content", () => {
     expect(creatorProofIndex).toBeLessThan(fpsLinkCloseIndex);
     expect(sharedSource).toContain('className="tourney-hero-cta-label"');
     expect(sharedSource).not.toContain("tourney-hero-cta-group");
+    expect(sharedSource).toContain("white-space: nowrap");
+    expect(sharedSource).toContain(
+      "font-size: clamp(0.54rem, 0.58vw, 0.64rem)"
+    );
     expect(sharedSource).toContain(
       'href="https://rooindustries.com/#packages"'
     );
