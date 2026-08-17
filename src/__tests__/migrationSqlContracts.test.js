@@ -168,4 +168,17 @@ describe("migration SQL release contracts", () => {
       "metadata.clock_last_reset_reason = 'shadow_acceptance_gate_failed'"
     );
   });
+
+  test("allows anonymous feedback jobs in the Tourney email ledger", () => {
+    const migration = fs.readFileSync(
+      path.resolve(
+        "supabase/migrations/20260817080000_allow_tourney_feedback_email_dispatch.sql"
+      ),
+      "utf8"
+    );
+
+    expect(hasBoundedMigrationPrefix(migration)).toBe(true);
+    expect(migration).toContain("email_dispatches_dispatch_kind_check");
+    expect(migration).toContain("'feedback'");
+  });
 });
