@@ -77,14 +77,14 @@ const normalizeDownloadSlug = (value) =>
 const validateUtilitiesDownloadCatalog = (rawValue) => {
   const raw = String(rawValue || "").trim();
   if (!raw) {
-    return "Blob-backed production downloads require DOWNLOAD_CATALOG_JSON with a pinned utilities entry.";
+    return "Remote-backed production downloads require DOWNLOAD_CATALOG_JSON with a pinned utilities entry.";
   }
 
   let parsed;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return "DOWNLOAD_CATALOG_JSON must contain valid JSON for Blob-backed production downloads.";
+    return "DOWNLOAD_CATALOG_JSON must contain valid JSON for remote-backed production downloads.";
   }
 
   const entries = Array.isArray(parsed)
@@ -110,7 +110,7 @@ const validateUtilitiesDownloadCatalog = (rawValue) => {
     (entry) => normalizeDownloadSlug(entry.slug) === "utilities"
   );
   if (utilitiesEntries.length !== 1) {
-    return "DOWNLOAD_CATALOG_JSON must contain exactly one utilities entry for Blob-backed production downloads.";
+    return "DOWNLOAD_CATALOG_JSON must contain exactly one utilities entry for remote-backed production downloads.";
   }
 
   const utilities = utilitiesEntries[0];
@@ -141,11 +141,32 @@ const validateUtilitiesDownloadCatalog = (rawValue) => {
   const size = Number(utilities.sizeBytes ?? utilities.size);
   const sha256 = String(utilities.sha256 || "").trim().toLowerCase();
   const blobEtag = String(utilities.blobEtag ?? utilities.etag ?? "").trim();
+  const storageBackend = String(
+    utilities.storageBackend || utilities.backend || ""
+  )
+    .trim()
+    .toLowerCase();
+  const storageBucket = String(utilities.storageBucket || "").trim();
   const missingPins = [];
   if (!Number.isSafeInteger(size) || size <= 0) missingPins.push("sizeBytes");
   if (!/^[a-f0-9]{64}$/.test(sha256)) missingPins.push("sha256");
   if (!blobEtag || blobEtag.length > 256 || /[\x00-\x1f\x7f]/.test(blobEtag)) {
     missingPins.push("blobEtag");
+  }
+  if (
+    storageBackend &&
+    !["blob", "local", "supabase"].includes(storageBackend)
+  ) {
+    return "The utilities DOWNLOAD_CATALOG_JSON entry has an invalid storageBackend.";
+  }
+  if (
+    storageBucket &&
+    !/^[A-Za-z0-9_!.*'() &$@=;:+,?-]{1,100}$/.test(storageBucket)
+  ) {
+    return "The utilities DOWNLOAD_CATALOG_JSON entry has an invalid storageBucket.";
+  }
+  if (storageBackend === "supabase" && !storageBucket) {
+    missingPins.push("storageBucket");
   }
 
   return missingPins.length > 0
@@ -153,6 +174,28 @@ const validateUtilitiesDownloadCatalog = (rawValue) => {
         ", "
       )} integrity pins.`
     : "";
+};
+
+const getUtilitiesDownloadBackend = (rawValue) => {
+  try {
+    const parsed = JSON.parse(String(rawValue || ""));
+    const entries = Array.isArray(parsed)
+      ? parsed
+      : Object.entries(parsed || {}).map(([slug, value]) => ({
+          slug,
+          ...(value && typeof value === "object" && !Array.isArray(value)
+            ? value
+            : {}),
+        }));
+    const utilities = entries.find(
+      (entry) => normalizeDownloadSlug(entry?.slug) === "utilities"
+    );
+    return String(utilities?.storageBackend || utilities?.backend || "")
+      .trim()
+      .toLowerCase();
+  } catch {
+    return "";
+  }
 };
 
 const sessionSecretKeys = ["REF_SESSION_SECRET"];
@@ -428,14 +471,40 @@ const publicSocialAuthEnabled = isEnabled(
 const downloadStorageBackend = getFirstValue([
   "DOWNLOAD_STORAGE_BACKEND",
 ]).toLowerCase();
+const downloadCatalogValue = readEnvValue(
+  process.env,
+  "DOWNLOAD_CATALOG_JSON"
+);
+const catalogDownloadBackend = getUtilitiesDownloadBackend(
+  downloadCatalogValue
+);
+const validDownloadBackends = ["blob", "local", "supabase"];
+const hasInvalidCatalogDownloadBackend =
+  Boolean(catalogDownloadBackend) &&
+  !validDownloadBackends.includes(catalogDownloadBackend);
 const hasBlobCredentials = hasAny([
   "BLOB_READ_WRITE_TOKEN",
   "BLOB_STORE_ID",
   "VERCEL_OIDC_TOKEN",
 ]);
-const blobDownloadsEnabled =
-  downloadStorageBackend === "blob" ||
-  (downloadStorageBackend !== "local" && hasBlobCredentials);
+const effectiveDownloadBackend =
+  (validDownloadBackends.includes(catalogDownloadBackend)
+    ? catalogDownloadBackend
+    : "") ||
+  downloadStorageBackend ||
+  (hasBlobCredentials ? "blob" : "local");
+const remoteDownloadsEnabled = ["blob", "supabase"].includes(
+  effectiveDownloadBackend
+);
+const supabaseDownloadsEnabled = effectiveDownloadBackend === "supabase";
+if (
+  downloadStorageBackend &&
+  !validDownloadBackends.includes(downloadStorageBackend)
+) {
+  downloadConsistencyFailures.push(
+    "DOWNLOAD_STORAGE_BACKEND must be blob, local, or supabase."
+  );
+}
 const sanityPrimaryRequired =
   primaryBackend === "sanity" || commercePrimaryBackend === "sanity";
 const sanityConfiguration = inspectSanityConfiguration(process.env);
@@ -492,9 +561,12 @@ const missing = [...requiredChecks, ...sanityRequiredChecks]
   .filter((check) => !hasAny(check.keys))
   .map((check) => check.label);
 
-if (isProdBuild && blobDownloadsEnabled) {
+if (
+  isProdBuild &&
+  (remoteDownloadsEnabled || hasInvalidCatalogDownloadBackend)
+) {
   const catalogFailure = validateUtilitiesDownloadCatalog(
-    readEnvValue(process.env, "DOWNLOAD_CATALOG_JSON")
+    downloadCatalogValue
   );
   if (catalogFailure) downloadConsistencyFailures.push(catalogFailure);
 }
@@ -559,6 +631,7 @@ const anySupabaseRuntimeEnabled =
   shadowWritesEnabled ||
   socialAuthEnabled ||
   licensingEnabled ||
+  supabaseDownloadsEnabled ||
   tourneyMirrorEnabled;
 const tourneyNeedsSupabase = tourneyDatabaseMode === "supabase" || tourneyMirrorEnabled;
 

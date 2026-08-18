@@ -44,6 +44,32 @@ describe("download catalog normalization", () => {
     );
   });
 
+  test("keeps a private Supabase bucket selection", () => {
+    const env = catalogEnv({
+      slug: "utilities",
+      fileName: "utilities.zip",
+      blobPath: "downloads/utilities.zip",
+      storageBackend: "supabase",
+      storageBucket: "optimization-builds-private",
+    });
+
+    expect(getDownloadBySlug("utilities", env)).toMatchObject({
+      storageBackend: "supabase",
+      storageBucket: "optimization-builds-private",
+    });
+  });
+
+  test("rejects a Supabase catalog without an explicit private bucket", () => {
+    const env = catalogEnv({
+      slug: "utilities",
+      fileName: "utilities.zip",
+      blobPath: "downloads/utilities.zip",
+      storageBackend: "supabase",
+    });
+
+    expect(getDownloadBySlug("utilities", env)).toBeNull();
+  });
+
   test("rejects a configured filename and Blob basename mismatch", () => {
     const env = catalogEnv({
       slug: "utilities",
