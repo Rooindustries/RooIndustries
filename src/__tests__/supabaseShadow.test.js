@@ -364,6 +364,21 @@ describe("Supabase document compatibility client", () => {
     );
   });
 
+  test("reports a non-retryable stale-generation response as a conflict", async () => {
+    const shadowClient = {
+      rpc: jest.fn(async () => ({ data: null, error: { code: "PT409" } })),
+    };
+    const client = new SupabaseDocumentClient({
+      shadowClient,
+      commerceOnly: true,
+      cutoverGeneration: 0,
+    });
+
+    await expect(
+      client.create({ _id: "payment.stale", _type: "paymentRecord" })
+    ).rejects.toMatchObject({ code: "PT409", status: 409, statusCode: 409 });
+  });
+
   test("forwards an explicit business command ID through a transaction", async () => {
     const shadowClient = createRpcClient([]);
     const client = new SupabaseDocumentClient({
