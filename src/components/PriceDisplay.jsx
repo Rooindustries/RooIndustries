@@ -51,18 +51,18 @@ export default function PriceDisplay({
     >
       <span
         aria-hidden="true"
-        className={`${classes.current} font-extrabold leading-none text-accent drop-shadow-[0_0_18px_rgba(56,189,248,0.35)]`}
+        className={`ri-price-current ${classes.current} font-extrabold leading-none text-accent drop-shadow-[0_0_18px_rgba(56,189,248,0.35)]`}
       >
         {currentPrice}
       </span>
       {oldPrice && oldPrice !== currentPrice && (
         <span
           aria-hidden="true"
-          className={`${classes.compare} relative inline-flex -translate-y-1 items-center font-bold leading-none text-ink-muted`}
+          className={`ri-price-compare ${classes.compare} relative inline-flex -translate-y-1 items-center font-bold leading-none text-ink-muted`}
         >
           <span>{oldPrice}</span>
           <span
-            className={`pointer-events-none absolute left-[-0.18em] right-[-0.18em] top-1/2 ${classes.slash} -translate-y-1/2 -rotate-12 rounded-full bg-gradient-to-r from-cyan-300/60 via-sky-300 to-indigo-300/80 shadow-[0_0_8px_rgba(56,189,248,0.75)]`}
+            className={`ri-price-slash pointer-events-none absolute left-[-0.18em] right-[-0.18em] top-1/2 ${classes.slash} -translate-y-1/2 -rotate-12 rounded-full bg-gradient-to-r from-cyan-300/60 via-sky-300 to-indigo-300/80 shadow-[0_0_8px_rgba(56,189,248,0.75)]`}
           />
         </span>
       )}

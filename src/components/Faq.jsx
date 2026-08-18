@@ -272,10 +272,10 @@ export default function FaqSection({
     >
       <div className="relative max-w-6xl mx-auto">
         <div className="text-center">
-          <span className="inline-flex items-center gap-2 px-4 py-1 rounded-full bg-info-soft border border-info-border text-xs sm:text-sm font-semibold uppercase tracking-wide text-info-text shadow-info-soft">
+          <span className="ri-faq-eyebrow inline-flex items-center gap-2 px-4 py-1 rounded-full bg-info-soft border border-info-border text-xs sm:text-sm font-semibold uppercase tracking-wide text-info-text shadow-info-soft">
             {eyebrowText}
           </span>
-          <h2 className="mt-4 text-4xl sm:text-5xl font-extrabold tracking-tight text-info-text drop-shadow-[0_0_20px_rgba(56,189,248,0.35)]">
+          <h2 className="ri-faq-heading mt-4 text-4xl sm:text-5xl font-extrabold tracking-tight text-info-text drop-shadow-[0_0_20px_rgba(56,189,248,0.35)]">
             {headingText}
           </h2>
           <p className="mt-3 text-ink-secondary text-sm sm:text-base">
@@ -338,7 +338,7 @@ export default function FaqSection({
                           aria-expanded={isAnswerOpen}
                         >
                           <div className="flex-1 text-[15px] sm:text-[16px] font-semibold text-ink">
-                            <span className="mr-2 text-info-text font-semibold">
+                            <span className="ri-faq-number mr-2 text-info-text font-semibold">
                               {questionNumber})
                             </span>
                             {q.question}
@@ -346,7 +346,7 @@ export default function FaqSection({
                           <motion.span
                             animate={{ rotate: isAnswerOpen ? 180 : 0 }}
                             transition={{ duration: 0.2 }}
-                            className="ml-2 text-info-text"
+                            className="ri-faq-chevron ml-2 text-info-text"
                           >
                             <ChevronDown className="h-4 w-4" />
                           </motion.span>

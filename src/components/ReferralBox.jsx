@@ -62,10 +62,10 @@ export default function ReferralBox() {
   const isValid = !!email && email.includes("@");
 
   return (
-    <div className="mt-12 mb-8 bg-surface-card border border-line-accent rounded-2xl p-6 shadow-[var(--shadow-referral-glow)] backdrop-blur-md max-w-4xl mx-auto md:flex md:items-center md:justify-between md:gap-8">
+    <div className="ri-referral-card mt-12 mb-8 bg-surface-card border border-line-accent rounded-2xl p-6 shadow-[var(--shadow-referral-glow)] backdrop-blur-md max-w-4xl mx-auto md:flex md:items-center md:justify-between md:gap-8">
       {/* Left Side: Text Content */}
       <div className="text-left mb-5 md:mb-0 md:flex-1">
-        <h3 className="text-2xl font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-accent to-accent-strong drop-shadow-sm">
+        <h3 className="ri-referral-heading text-2xl font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-accent to-accent-strong drop-shadow-sm">
           {content.heading}
         </h3>
         <p className="text-sm text-ink-secondary leading-relaxed">
@@ -118,6 +118,7 @@ export default function ReferralBox() {
         <button
           onClick={handleLogin}
           className="
+            ri-referral-login
             inline-flex items-center justify-center
             rounded-xl
             px-4 sm:px-5 py-3
