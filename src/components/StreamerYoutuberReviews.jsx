@@ -98,7 +98,7 @@ export default function StreamerYoutuberReviews({ initialData = null }) {
   return (
     <section ref={sectionRef} className={sectionClass}>
       <div className="px-4 sm:px-6 mb-8">
-        <h2 className={`${titleClass} mb-3`}>{data?.title || defaultTitle}</h2>
+        <h2 className={`ri-reviews-heading ${titleClass} mb-3`}>{data?.title || defaultTitle}</h2>
         <p className="text-ink-secondary text-base sm:text-lg">
           {data?.subtitle || defaultSubtitle}
         </p>
@@ -179,7 +179,7 @@ function ReviewCard({ review }) {
 
   return (
     <div
-      className="flex-shrink-0 w-[420px] sm:w-[520px] h-[260px] sm:h-[290px] rounded-2xl select-none pointer-events-none flex flex-col transition-all duration-300"
+      className={`ri-review-card ${isVip ? "ri-review-card-vip" : "ri-review-card-standard"} flex-shrink-0 w-[420px] sm:w-[520px] h-[260px] sm:h-[290px] rounded-2xl select-none pointer-events-none flex flex-col transition-all duration-300`}
       style={{
         background: "var(--color-surface-solid)",
         boxShadow: "none",
@@ -225,7 +225,7 @@ function ReviewCard({ review }) {
 
           <span
             className={`font-semibold text-lg sm:text-xl truncate ${
-              isVip ? "text-yellow-300" : "text-accent"
+              isVip ? "text-yellow-300" : "ri-review-name-standard text-accent"
             }`}
           >
             {review.name}
@@ -259,7 +259,7 @@ function ReviewCard({ review }) {
           {review.profession && (
             <p
               className={`font-medium text-sm sm:text-base flex-shrink-0 mt-auto pt-1 ${
-                isVip ? "text-yellow-300" : "text-accent"
+                isVip ? "text-yellow-300" : "ri-review-profession-standard text-accent"
               }`}
             >
               {review.profession}
