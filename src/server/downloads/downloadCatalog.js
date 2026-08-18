@@ -21,7 +21,15 @@ const asArray = (value) => {
 
 const normalizeStorageBackend = (value) => {
   const normalized = String(value || "").trim().toLowerCase();
-  return normalized === "blob" || normalized === "local" ? normalized : "";
+  return ["blob", "local", "supabase"].includes(normalized) ? normalized : "";
+};
+
+const normalizeStorageBucket = (value) => {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "";
+  return /^[A-Za-z0-9_!.*'() &$@=;:+,?-]{1,100}$/.test(normalized)
+    ? normalized
+    : null;
 };
 
 export const normalizeDownloadSlug = (value) => {
@@ -124,7 +132,19 @@ const normalizeCatalogEntry = (entry = {}, { requireIntegrity = true } = {}) => 
   const sizeBytes = normalizeExpectedSize(entry);
   const sha256 = normalizeSha256(entry.sha256);
   const blobEtag = normalizeEtag(entry.blobEtag ?? entry.etag);
-  if (sizeBytes < 0 || sha256 === null || blobEtag === null) return null;
+  const storageBackend = normalizeStorageBackend(
+    entry.storageBackend || entry.backend
+  );
+  const storageBucket = normalizeStorageBucket(entry.storageBucket);
+  if (
+    sizeBytes < 0 ||
+    sha256 === null ||
+    blobEtag === null ||
+    storageBucket === null ||
+    (storageBackend === "supabase" && !storageBucket)
+  ) {
+    return null;
+  }
   if (requireIntegrity && (sizeBytes <= 0 || !sha256 || !blobEtag)) return null;
 
   const title = String(entry.title || "").trim() || `${titleFromSlug(slug)} Download`;
@@ -138,9 +158,8 @@ const normalizeCatalogEntry = (entry = {}, { requireIntegrity = true } = {}) => 
     description,
     fileName,
     blobPath,
-    storageBackend: normalizeStorageBackend(
-      entry.storageBackend || entry.backend
-    ),
+    storageBucket,
+    storageBackend,
     contentType:
       String(entry.contentType || "").trim() || DEFAULT_DOWNLOAD_CONTENT_TYPE,
     sizeBytes,

@@ -6,7 +6,9 @@ import {
 import {
   canRedirectToSignedBlobDownload,
   createSignedBlobDownloadUrl,
+  createSignedSupabaseDownloadUrl,
   DOWNLOAD_STORAGE_BLOB,
+  DOWNLOAD_STORAGE_SUPABASE,
   getDownloadStorageBackend,
   streamDownload,
 } from "@/src/server/downloads/downloadStorage";
@@ -115,12 +117,18 @@ export async function GET(request) {
     return textResponse(access.error, access.status);
   }
 
+  const storageBackend = getDownloadStorageBackend(download);
   if (
-    getDownloadStorageBackend(download) === DOWNLOAD_STORAGE_BLOB &&
+    [DOWNLOAD_STORAGE_BLOB, DOWNLOAD_STORAGE_SUPABASE].includes(
+      storageBackend
+    ) &&
     canRedirectToSignedBlobDownload(download)
   ) {
     try {
-      const signedUrl = await createSignedBlobDownloadUrl(download);
+      const signedUrl =
+        storageBackend === DOWNLOAD_STORAGE_SUPABASE
+          ? await createSignedSupabaseDownloadUrl(download)
+          : await createSignedBlobDownloadUrl(download);
       return new Response(null, {
         status: 307,
         headers: {

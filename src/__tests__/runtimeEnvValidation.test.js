@@ -554,6 +554,61 @@ describe("release runtime environment validation", () => {
     expect(result.output).toContain("Runtime secret validation passed");
   });
 
+  test("accepts a production Supabase download without Blob credentials", () => {
+    const result = validate({
+      VERCEL_ENV: "production",
+      DOWNLOAD_STORAGE_BACKEND: "supabase",
+      BLOB_READ_WRITE_TOKEN: "",
+      DOWNLOAD_CATALOG_JSON: validUtilitiesCatalog({
+        storageBackend: "supabase",
+        storageBucket: "optimization-builds-private",
+      }),
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.output).toContain("Runtime secret validation passed");
+  });
+
+  test("blocks a production Supabase download without a pinned catalog", () => {
+    const result = validate({
+      VERCEL_ENV: "production",
+      DOWNLOAD_STORAGE_BACKEND: "supabase",
+      BLOB_READ_WRITE_TOKEN: "",
+      DOWNLOAD_CATALOG_JSON: "",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain("require DOWNLOAD_CATALOG_JSON");
+  });
+
+  test("blocks a production Supabase download without a pinned bucket", () => {
+    const result = validate({
+      VERCEL_ENV: "production",
+      DOWNLOAD_STORAGE_BACKEND: "supabase",
+      BLOB_READ_WRITE_TOKEN: "",
+      DOWNLOAD_CATALOG_JSON: validUtilitiesCatalog({
+        storageBackend: "supabase",
+        storageBucket: "",
+      }),
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain("valid storageBucket");
+  });
+
+  test("blocks an invalid catalog storage backend even with no Blob token", () => {
+    const result = validate({
+      VERCEL_ENV: "production",
+      BLOB_READ_WRITE_TOKEN: "",
+      DOWNLOAD_CATALOG_JSON: validUtilitiesCatalog({
+        storageBackend: "unexpected-provider",
+      }),
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain("invalid storageBackend");
+  });
+
   test.each([
     ["missing", "", "require DOWNLOAD_CATALOG_JSON"],
     ["malformed", "{not-json", "must contain valid JSON"],

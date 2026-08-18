@@ -1,5 +1,6 @@
 const mockCanRedirectToSignedBlobDownload = jest.fn();
-const mockCreateSignedUrl = jest.fn();
+const mockCreateSignedBlobUrl = jest.fn();
+const mockCreateSignedSupabaseUrl = jest.fn();
 const mockGetDocument = jest.fn();
 const mockGetDownloadBySlug = jest.fn();
 const mockGetStorageBackend = jest.fn();
@@ -18,8 +19,11 @@ jest.mock("../server/downloads/downloadCatalog", () => ({
 jest.mock("../server/downloads/downloadStorage", () => ({
   canRedirectToSignedBlobDownload: (...args) =>
     mockCanRedirectToSignedBlobDownload(...args),
-  createSignedBlobDownloadUrl: (...args) => mockCreateSignedUrl(...args),
+  createSignedBlobDownloadUrl: (...args) => mockCreateSignedBlobUrl(...args),
+  createSignedSupabaseDownloadUrl: (...args) =>
+    mockCreateSignedSupabaseUrl(...args),
   DOWNLOAD_STORAGE_BLOB: "blob",
+  DOWNLOAD_STORAGE_SUPABASE: "supabase",
   getDownloadStorageBackend: (...args) => mockGetStorageBackend(...args),
   streamDownload: (...args) => mockStreamDownload(...args),
 }));
@@ -63,7 +67,7 @@ describe("download file route", () => {
     mockValidateBooking.mockReturnValue({ ok: true });
     mockGetStorageBackend.mockReturnValue("blob");
     mockCanRedirectToSignedBlobDownload.mockReturnValue(true);
-    mockCreateSignedUrl.mockResolvedValue(
+    mockCreateSignedBlobUrl.mockResolvedValue(
       "https://store.private.blob.vercel-storage.com/downloads/utilities.zip" +
         "?vercel-blob-delegation=delegation&vercel-blob-signature=signed&download=1"
     );
@@ -87,7 +91,38 @@ describe("download file route", () => {
     expect(response.headers.get("location")).not.toContain(
       "temporary-cookie-token"
     );
-    expect(mockCreateSignedUrl).toHaveBeenCalledWith(catalogDownload);
+    expect(mockCreateSignedBlobUrl).toHaveBeenCalledWith(catalogDownload);
+    expect(mockCreateSignedSupabaseUrl).not.toHaveBeenCalled();
+    expect(mockStreamDownload).not.toHaveBeenCalled();
+  });
+
+  test("redirects an authorized Supabase download through the same gate", async () => {
+    const supabaseDownload = {
+      ...catalogDownload,
+      storageBackend: "supabase",
+      storageBucket: "optimization-builds-private",
+    };
+    mockGetDownloadBySlug.mockReturnValue(supabaseDownload);
+    mockGetStorageBackend.mockReturnValue("supabase");
+    mockCreateSignedSupabaseUrl.mockResolvedValue(
+      "https://storage.test/storage/v1/object/sign/" +
+        "optimization-builds-private/downloads/utilities.zip" +
+        "?token=signed&download=utilities.zip"
+    );
+
+    const response = await GET(request());
+    const location = new URL(response.headers.get("location"));
+
+    expect(response.status).toBe(307);
+    expect(location.pathname).toBe(
+      "/storage/v1/object/sign/optimization-builds-private/" +
+        "downloads/utilities.zip"
+    );
+    expect(location.searchParams.get("download")).toBe("utilities.zip");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+    expect(mockCreateSignedSupabaseUrl).toHaveBeenCalledWith(supabaseDownload);
+    expect(mockCreateSignedBlobUrl).not.toHaveBeenCalled();
     expect(mockStreamDownload).not.toHaveBeenCalled();
   });
 
@@ -120,7 +155,8 @@ describe("download file route", () => {
     );
     expect(response.headers.get("content-length")).toBe("2");
     expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
-    expect(mockCreateSignedUrl).not.toHaveBeenCalled();
+    expect(mockCreateSignedBlobUrl).not.toHaveBeenCalled();
+    expect(mockCreateSignedSupabaseUrl).not.toHaveBeenCalled();
     expect(mockStreamDownload).toHaveBeenCalledWith(mismatchedDownload);
   });
 
@@ -135,7 +171,8 @@ describe("download file route", () => {
     expect(response.status).toBe(403);
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(mockGetDocument).not.toHaveBeenCalled();
-    expect(mockCreateSignedUrl).not.toHaveBeenCalled();
+    expect(mockCreateSignedBlobUrl).not.toHaveBeenCalled();
+    expect(mockCreateSignedSupabaseUrl).not.toHaveBeenCalled();
     expect(mockStreamDownload).not.toHaveBeenCalled();
   });
 
@@ -149,7 +186,8 @@ describe("download file route", () => {
     const response = await GET(request());
 
     expect(response.status).toBe(403);
-    expect(mockCreateSignedUrl).not.toHaveBeenCalled();
+    expect(mockCreateSignedBlobUrl).not.toHaveBeenCalled();
+    expect(mockCreateSignedSupabaseUrl).not.toHaveBeenCalled();
     expect(mockStreamDownload).not.toHaveBeenCalled();
   });
 
@@ -167,7 +205,8 @@ describe("download file route", () => {
       lookupError
     );
     expect(mockValidateBooking).not.toHaveBeenCalled();
-    expect(mockCreateSignedUrl).not.toHaveBeenCalled();
+    expect(mockCreateSignedBlobUrl).not.toHaveBeenCalled();
+    expect(mockCreateSignedSupabaseUrl).not.toHaveBeenCalled();
     expect(mockStreamDownload).not.toHaveBeenCalled();
   });
 
@@ -189,6 +228,7 @@ describe("download file route", () => {
       "attachment; filename=\"utilities.zip\"; filename*=UTF-8''utilities.zip"
     );
     expect(mockStreamDownload).toHaveBeenCalledTimes(1);
-    expect(mockCreateSignedUrl).not.toHaveBeenCalled();
+    expect(mockCreateSignedBlobUrl).not.toHaveBeenCalled();
+    expect(mockCreateSignedSupabaseUrl).not.toHaveBeenCalled();
   });
 });
