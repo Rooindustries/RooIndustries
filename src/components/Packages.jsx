@@ -248,6 +248,10 @@ export default function Packages({
                 <div
                   key={p._id || i}
                   className={`ri-package-card relative w-full sm:w-[500px] border rounded-xl px-5 sm:px-7 py-6 sm:py-7 transition-all duration-500 flex flex-col bg-panel text-base sm:text-lg ${
+                    p.tagGoldGlow
+                      ? "ri-package-card-featured"
+                      : "ri-package-card-secondary"
+                  } ${
                     p.isHighlighted
                       ? "ri-package-card-highlighted border-info-border shadow-glow-strong hover:shadow-glow-strong"
                       : "ri-package-card-standard border-line-input shadow-glow-soft hover:shadow-glow-strong"

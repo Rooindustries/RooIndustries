@@ -30,7 +30,7 @@ export default function DiscordGuideBanner({ hidden = false }) {
 
   return (
     <div
-      className={`w-full overflow-hidden bg-glass backdrop-blur-md shadow-[inset_0_-1px_0_var(--color-border-accent)] transition-all duration-500 ease-in-out ${
+      className={`ri-discord-guide-banner w-full overflow-hidden bg-glass backdrop-blur-md shadow-[inset_0_-1px_0_var(--color-border-accent)] transition-all duration-500 ease-in-out ${
         hidden
           ? "max-h-0 opacity-0 -translate-y-2 border-transparent"
           : "max-h-24 opacity-100 translate-y-0 border-b border-transparent"
@@ -41,7 +41,7 @@ export default function DiscordGuideBanner({ hidden = false }) {
         href={banner.link || DEFAULT_BANNER.link}
         target="_blank"
         rel="noopener noreferrer"
-        className={`group flex w-full items-center justify-center gap-2 px-4 py-2.5 sm:py-3 text-sm sm:text-base font-semibold text-info-text transition hover:bg-surface-hover-accent hover:text-[color:var(--color-link-hover)] ${
+        className={`ri-discord-guide-link group flex w-full items-center justify-center gap-2 px-4 py-2.5 sm:py-3 text-sm sm:text-base font-semibold text-info-text transition hover:bg-surface-hover-accent hover:text-[color:var(--color-link-hover)] ${
           hidden ? "pointer-events-none" : "pointer-events-auto"
         }`}
         tabIndex={hidden ? -1 : 0}
