@@ -130,7 +130,7 @@ export default function SupportedGames({ initialData = null }) {
           {/* Header - matching Packages style */}
           <div className="text-center mb-10 sm:mb-12">
             {data.title && (
-              <h2 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+              <h2 className="ri-supported-games-heading text-4xl sm:text-5xl font-extrabold tracking-tight text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
                 {data.title}
               </h2>
             )}
@@ -198,7 +198,7 @@ export default function SupportedGames({ initialData = null }) {
                 onClick={() => setShowAll((prev) => !prev)}
                 aria-expanded={showAll}
                 aria-controls="supported-games-more"
-                className="glow-button relative inline-flex items-center justify-center gap-2 rounded-md px-5 sm:px-6 py-2.5 sm:py-3 text-sm sm:text-base font-semibold text-white ring-1 ring-line-accent hover:text-white active:translate-y-px transition-all duration-300 shadow-[var(--shadow-button-accent)]"
+                className="ri-supported-games-toggle glow-button relative inline-flex items-center justify-center gap-2 rounded-md px-5 sm:px-6 py-2.5 sm:py-3 text-sm sm:text-base font-semibold text-white ring-1 ring-line-accent hover:text-white active:translate-y-px transition-all duration-300 shadow-[var(--shadow-button-accent)]"
               >
                 {buttonLabel}
                 <span

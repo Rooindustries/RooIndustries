@@ -70,7 +70,7 @@ function CtaNoteBalanced({ icon, text }) {
   if (!fullText) return null;
 
   return (
-    <div className="mt-3 sm:mt-5 text-center">
+    <div className="ri-hero-cta-note mt-3 sm:mt-5 text-center">
       {!isSplit || !line2Text ? (
         <p ref={singleRef} className="flex items-center justify-center gap-2 text-sm sm:text-base font-extrabold tracking-wide whitespace-nowrap overflow-hidden">
           {icon && <span className="text-ink" aria-hidden="true">{icon}</span>}
