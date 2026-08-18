@@ -888,6 +888,29 @@ if (files.includes(credentialV1RemovalName)) {
   }
 }
 
+const portReadinessDriftFile = path.join(
+  migrationsDirectory,
+  "20260819033000_fix_port_readiness_false_drift.sql",
+);
+if (!fs.existsSync(portReadinessDriftFile)) {
+  failures.push("Port readiness false-drift migration is missing.");
+} else {
+  const sql = fs.readFileSync(portReadinessDriftFile, "utf8");
+  if (!hasBoundedMigrationPrefix(sql)) {
+    failures.push("Port readiness false-drift migration lacks bounded timeouts.");
+  }
+  for (const required of [
+    "projected.backend_owner = 'supabase'",
+    "coalesce(source.payload->>'registrationStatus', 'active') <> 'pending_email'",
+    "revoke all on function public.roo_supabase_port_readiness()",
+    "grant execute on function public.roo_supabase_port_readiness()",
+  ]) {
+    if (!sql.includes(required)) {
+      failures.push(`Port readiness false-drift migration lacks: ${required}`);
+    }
+  }
+}
+
 if (failures.length > 0) {
   console.error(JSON.stringify({ ok: false, failures }, null, 2));
   process.exit(1);
