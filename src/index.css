@@ -2348,14 +2348,24 @@ html[data-theme="dark"]
 }
 
 html[data-theme="dark"] .ri-proof-card {
-  --rc-accent: #c8c8c3 !important;
+  --rc-accent: #bda45f !important;
   --rc-border: rgba(255, 255, 255, 0.2) !important;
   --rc-border-sub: rgba(255, 255, 255, 0.13) !important;
   --rc-cta: #2a2a2d !important;
   --rc-cta-end: #121214 !important;
 }
 
-html[data-theme="dark"] :is(.ri-proof-title, .ri-proof-note) {
+html[data-theme="dark"] .ri-proof-title {
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  -webkit-text-fill-color: #dfca86;
+  color: #dfca86;
+  filter: none;
+  text-shadow: 0 0 10px rgba(212, 175, 55, 0.1);
+}
+
+html[data-theme="dark"] .ri-proof-note {
   background: none;
   -webkit-background-clip: border-box;
   background-clip: border-box;
@@ -2366,6 +2376,7 @@ html[data-theme="dark"] :is(.ri-proof-title, .ri-proof-note) {
 }
 
 html[data-theme="dark"] .ri-proof-cta {
+  border-color: rgba(212, 175, 55, 0.38) !important;
   color: #f5f5f2 !important;
   text-shadow: none;
 }
@@ -2380,8 +2391,8 @@ html[data-theme="dark"] .ri-service-icon-shell {
 }
 
 html[data-theme="dark"] .ri-service-icon {
-  color: #d9d9d4 !important;
-  filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.08));
+  color: #cbb46c !important;
+  filter: drop-shadow(0 0 5px rgba(212, 175, 55, 0.1));
 }
 
 html[data-theme="dark"] .ri-bench-card-rail {
