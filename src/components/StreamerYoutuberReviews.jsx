@@ -143,8 +143,9 @@ function ReviewerAvatar({ review, isCreator }) {
 
 function parseFpsResult(value) {
   const text = String(value || "").trim();
+  if (!text) return null;
   const match = text.match(/^(.*?):?\s*(\d[\d,.]*)\s*(?:→|->|to)\s*(\d[\d,.]*)$/i);
-  if (!match) return { label: "Result", before: "", after: text || "Tuned" };
+  if (!match) return null;
   return {
     label: match[1].replace(/:$/, "").trim() || "Average FPS",
     before: match[2],
@@ -177,8 +178,9 @@ function ReviewCard({ review }) {
         <p className="text-white">{review.game || "PC performance"}</p>
       </div>
 
-      <div className="mt-1 flex items-end justify-between gap-3">
-        <p className="font-black leading-none tracking-[-0.04em] tabular-nums whitespace-nowrap">
+      <div className={`mt-1 flex items-end gap-3 ${result ? "justify-between" : "justify-end"}`}>
+        {result && (
+          <p className="font-black leading-none tracking-[-0.04em] tabular-nums whitespace-nowrap">
             <span className="mr-2 text-[10px] uppercase tracking-[0.12em] text-white">
               {result.label}
             </span>
@@ -199,7 +201,8 @@ function ReviewCard({ review }) {
             >
               {result.after}
             </span>
-        </p>
+          </p>
+        )}
         <p
           className="text-xs font-bold tracking-[0.08em] flex-shrink-0"
           style={{ color: isCreator ? "var(--color-accent)" : "#ffffff" }}
