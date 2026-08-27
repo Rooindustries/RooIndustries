@@ -1,11 +1,11 @@
 import { resolveReferralCodeAvailability } from "../components/RefRegister";
 
 describe("referral registration code availability", () => {
-  test("treats only the quiet not_found contract as available", () => {
+  test("treats only the registration availability contract as available", () => {
     expect(
       resolveReferralCodeAvailability(
         { ok: true, status: 200 },
-        { ok: false, error: "Not found", reason: "not_found" }
+        { ok: false, error: "Not found", reason: "available" }
       )
     ).toBe(true);
     expect(
@@ -14,6 +14,18 @@ describe("referral registration code availability", () => {
         { ok: true, referral: { code: "taken" } }
       )
     ).toBe(false);
+    expect(
+      resolveReferralCodeAvailability(
+        { ok: true, status: 200 },
+        { ok: false, error: "Referral code already taken", reason: "reserved" }
+      )
+    ).toBe(false);
+    expect(
+      resolveReferralCodeAvailability(
+        { ok: true, status: 200 },
+        { ok: false, error: "Not found", reason: "not_found" }
+      )
+    ).toBeNull();
   });
 
   test("keeps malformed and server failures indeterminate", () => {
