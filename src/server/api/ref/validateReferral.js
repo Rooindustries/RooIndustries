@@ -1,15 +1,22 @@
 import { createDataClient as createClient } from "../../data/documentClient.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import { logSafeError } from "../../safeErrorLog.js";
+import { resolveSupabaseCreatorRegistrationConflicts } from "../../supabase/accounts.js";
+import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
 
-const readClient = createClient({
+const sanityConfig = {
   projectId: process.env.SANITY_PROJECT_ID,
   dataset: process.env.SANITY_DATASET || "production",
   apiVersion: process.env.SANITY_API_VERSION || "2023-10-01",
   token: process.env.SANITY_READ_TOKEN || process.env.SANITY_WRITE_TOKEN,
   useCdn: false,
   perspective: "published",
-}, { domain: "commerce" });
+};
+const readClient = createClient(sanityConfig, { domain: "commerce" });
+const registrationReadClient = createClient(sanityConfig, {
+  domain: "global",
+  allowLegacyFallback: false,
+});
 
 export default async function handler(req, res) {
   if (String(req?.method || "").toUpperCase() !== "GET") {
@@ -42,6 +49,61 @@ export default async function handler(req, res) {
 
     if (!code)
       return res.status(400).json({ ok: false, error: "Missing code" });
+
+    if (req.query.purpose === "registration") {
+      if (!/^[a-z0-9](?:[a-z0-9-]{1,48}[a-z0-9])$/.test(code)) {
+        return res.status(400).json({
+          ok: false,
+          error: "Invalid referral code",
+        });
+      }
+      const policy = resolveSupabaseRuntimePolicy();
+      const supabaseConflicts =
+        policy.shadowWritesEnabled || policy.primaryBackend === "supabase"
+          ? resolveSupabaseCreatorRegistrationConflicts({ referralCode: code })
+          : Promise.resolve({ referralCodeReserved: false });
+      let existingReferral;
+      let existingCoupon;
+      let conflicts;
+      try {
+        [existingReferral, existingCoupon, conflicts] = await Promise.all([
+          registrationReadClient.fetch(
+            `*[_type == "referral" && lower(slug.current) == $code][0]{_id,registrationStatus}`,
+            { code }
+          ),
+          readClient.fetch(
+            `*[_type == "coupon" && lower(code) == $code][0]{_id}`,
+            { code }
+          ),
+          supabaseConflicts,
+        ]);
+      } catch (error) {
+        logSafeError("Referral registration availability lookup failed", error);
+        return res.status(503).json({
+          ok: false,
+          error: "Referral code availability is temporarily unavailable.",
+          reason: "unavailable",
+        });
+      }
+      const pendingRegistration =
+        existingReferral?.registrationStatus === "pending_email";
+      if (
+        (existingReferral?._id && !pendingRegistration) ||
+        existingCoupon?._id ||
+        (conflicts.referralCodeReserved && !pendingRegistration)
+      ) {
+        return res.status(200).json({
+          ok: false,
+          error: "Referral code already taken",
+          reason: "reserved",
+        });
+      }
+      return res.status(200).json({
+        ok: false,
+        error: "Not found",
+        reason: "available",
+      });
+    }
 
     // Public checkout projection. Creator details stay behind authenticated routes.
     const ref = await readClient.fetch(

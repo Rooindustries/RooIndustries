@@ -6,8 +6,9 @@ const REFERRAL_SIGNUP_DRAFT = "referral_signup_draft";
 
 export const resolveReferralCodeAvailability = (response, data) => {
   if (!response?.ok) return null;
-  if (data?.ok) return false;
-  return data?.reason === "not_found" ? true : null;
+  if (data?.reason === "available") return true;
+  if (data?.ok || data?.reason === "reserved") return false;
+  return null;
 };
 
 export default function RefRegister() {
@@ -70,7 +71,7 @@ export default function RefRegister() {
         const res = await fetch(
           `/api/ref/validateReferral?code=${encodeURIComponent(
             slug.toLowerCase()
-          )}`
+          )}&purpose=registration`
         );
         const data = await res.json();
         setSlugAvailable(resolveReferralCodeAvailability(res, data));
@@ -131,7 +132,9 @@ export default function RefRegister() {
     if (slugAvailable === null) {
       try {
         const resCheck = await fetch(
-          `/api/ref/validateReferral?code=${encodeURIComponent(trimmedSlug)}`
+          `/api/ref/validateReferral?code=${encodeURIComponent(
+            trimmedSlug
+          )}&purpose=registration`
         );
         const dataCheck = await resCheck.json();
         const availability = resolveReferralCodeAvailability(
