@@ -87,7 +87,10 @@ const loadForgotHandler = () => {
   };
 };
 
-const loadRegisterHandler = () => {
+const loadRegisterHandler = ({
+  primaryBackend = "supabase",
+  shadowWritesEnabled = true,
+} = {}) => {
   jest.resetModules();
   const fetch = jest.fn(async () => null);
   const transactionCommit = jest.fn();
@@ -115,6 +118,10 @@ const loadRegisterHandler = () => {
     requeued: true,
     sent: false,
   }));
+  const resolveSupabaseCreatorRegistrationConflicts = jest.fn(async () => ({
+    emailReserved: false,
+    referralCodeReserved: false,
+  }));
   const isReferralEmailSourceStateConflict = jest.fn(
     (value) =>
       value?.source_state_changed === true ||
@@ -126,8 +133,8 @@ const loadRegisterHandler = () => {
   }));
   jest.doMock("../server/supabase/runtime.js", () => ({
     resolveSupabaseRuntimePolicy: () => ({
-      primaryBackend: "supabase",
-      shadowWritesEnabled: true,
+      primaryBackend,
+      shadowWritesEnabled,
     }),
   }));
   jest.doMock("../server/supabase/serverSession.js", () => ({
@@ -136,6 +143,7 @@ const loadRegisterHandler = () => {
   jest.doMock("../server/supabase/accounts.js", () => ({
     createSupabaseCreatorAccount: jest.fn(),
     resolveSupabaseAccountByUserId: jest.fn(),
+    resolveSupabaseCreatorRegistrationConflicts,
   }));
   jest.doMock("../server/supabase/shadowStore.js", () => ({
     hashShadowDocument: jest.fn(() => "a".repeat(64)),
@@ -165,6 +173,7 @@ const loadRegisterHandler = () => {
     deliverReferralEmailDispatch,
     isReferralEmailSourceStateConflict,
     requeueReferralEmailDispatch,
+    resolveSupabaseCreatorRegistrationConflicts,
   };
 };
 
@@ -630,6 +639,178 @@ describe("Supabase-primary referral email routes", () => {
       expect.any(Object),
       { allowLegacyFallback: false }
     );
+  });
+
+  test("rejects a code reserved by an inactive creator projection", async () => {
+    const loaded = loadRegisterHandler();
+    loaded.resolveSupabaseCreatorRegistrationConflicts.mockResolvedValue({
+      emailReserved: false,
+      referralCodeReserved: true,
+    });
+    const response = createResponse();
+
+    await loaded.handler(
+      {
+        method: "POST",
+        headers: { "x-forwarded-for": "203.0.113.2" },
+        body: {
+          discordUsername: "Creator",
+          email: "creator@example.com",
+          paypalEmail: "creator-paypal@example.com",
+          slug: "reserved-code",
+          password: testPassword,
+        },
+      },
+      response
+    );
+
+    expect(response.statusCode).toBe(409);
+    expect(response.body).toEqual({
+      ok: false,
+      error: "Referral code already taken",
+    });
+    expect(loaded.enqueueReferralEmailMutation).not.toHaveBeenCalled();
+  });
+
+  test("explains how to recover when another account owns the email", async () => {
+    const loaded = loadRegisterHandler();
+    loaded.resolveSupabaseCreatorRegistrationConflicts.mockResolvedValue({
+      emailReserved: true,
+      referralCodeReserved: false,
+    });
+    const response = createResponse();
+
+    await loaded.handler(
+      {
+        method: "POST",
+        headers: { "x-forwarded-for": "203.0.113.2" },
+        body: {
+          discordUsername: "Creator",
+          email: "creator@example.com",
+          paypalEmail: "creator-paypal@example.com",
+          slug: "creator-code",
+          password: testPassword,
+        },
+      },
+      response
+    );
+
+    expect(response.statusCode).toBe(409);
+    expect(response.body).toEqual({
+      ok: false,
+      error:
+        "That email already belongs to another Roo Industries account. Sign in to that account, then return here to register.",
+    });
+    expect(loaded.enqueueReferralEmailMutation).not.toHaveBeenCalled();
+  });
+
+  test("excludes an expired Sanity registration from its own shadow conflict", async () => {
+    const loaded = loadRegisterHandler({ primaryBackend: "sanity" });
+    const expired = {
+      _id: "referral.expired-shadow",
+      _rev: "expired-shadow-revision",
+      creatorEmail: "expired-shadow@example.com",
+      slug: { current: "expired-shadow" },
+      registrationStatus: "pending_email",
+      registrationVerificationExpiresAt: "2020-01-01T00:00:00.000Z",
+    };
+    loaded.fetch
+      .mockResolvedValueOnce(expired)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null);
+    const response = createResponse();
+
+    await loaded.handler(
+      {
+        method: "POST",
+        headers: { "x-forwarded-for": "203.0.113.2" },
+        body: {
+          discordUsername: "Creator",
+          email: "expired-shadow@example.com",
+          paypalEmail: "creator-paypal@example.com",
+          slug: "expired-shadow",
+          password: testPassword,
+        },
+      },
+      response
+    );
+
+    expect(response.statusCode).toBe(202);
+    expect(loaded.resolveSupabaseCreatorRegistrationConflicts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        legacySanityIds: ["referral.expired-shadow"],
+      })
+    );
+  });
+
+  test("preserves expired Sanity retries when a later code check rejects", async () => {
+    const loaded = loadRegisterHandler({ primaryBackend: "sanity" });
+    const expired = {
+      _id: "referral.expired-email",
+      creatorEmail: "expired@example.com",
+      slug: { current: "old-code" },
+      registrationStatus: "pending_email",
+      registrationVerificationExpiresAt: "2020-01-01T00:00:00.000Z",
+    };
+    loaded.fetch
+      .mockResolvedValueOnce(expired)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        _id: "referral.active-code",
+        creatorEmail: "other@example.com",
+        slug: { current: "new-code" },
+        registrationStatus: "active",
+      });
+    const response = createResponse();
+
+    await loaded.handler(
+      {
+        method: "POST",
+        headers: { "x-forwarded-for": "203.0.113.2" },
+        body: {
+          discordUsername: "Creator",
+          email: "expired@example.com",
+          paypalEmail: "creator-paypal@example.com",
+          slug: "new-code",
+          password: testPassword,
+        },
+      },
+      response
+    );
+
+    expect(response.statusCode).toBe(409);
+    expect(loaded.transaction).not.toHaveBeenCalled();
+  });
+
+  test("fails closed before a Sanity-primary registration when the shadow lookup is unavailable", async () => {
+    const loaded = loadRegisterHandler({ primaryBackend: "sanity" });
+    loaded.resolveSupabaseCreatorRegistrationConflicts.mockRejectedValue(
+      new Error("shadow unavailable")
+    );
+    const response = createResponse();
+
+    await loaded.handler(
+      {
+        method: "POST",
+        headers: { "x-forwarded-for": "203.0.113.2" },
+        body: {
+          discordUsername: "Creator",
+          email: "creator@example.com",
+          paypalEmail: "creator-paypal@example.com",
+          slug: "creator-code",
+          password: testPassword,
+        },
+      },
+      response
+    );
+
+    expect(response.statusCode).toBe(503);
+    expect(response.body).toEqual({
+      ok: false,
+      retryable: true,
+      error: "Registration availability is temporarily unavailable. Please try again.",
+    });
+    expect(loaded.transaction).not.toHaveBeenCalled();
   });
 
   test("requeues a dead-lettered registration before returning success", async () => {

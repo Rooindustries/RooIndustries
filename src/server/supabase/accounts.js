@@ -86,6 +86,50 @@ export const resolveSupabaseAccountByUserId = async ({
   );
 };
 
+export const resolveSupabaseCreatorRegistrationConflicts = async ({
+  email,
+  referralCode,
+  userId = "",
+  legacySanityIds = [],
+  adminClient = createSupabaseAdminClient(),
+} = {}) => {
+  const normalizedEmail = normalizeIdentifier(email);
+  const normalizedCode = normalizeIdentifier(referralCode);
+  const normalizedUserId = String(userId || "").trim();
+  const normalizedLegacySanityIds = [
+    ...new Set(
+      (Array.isArray(legacySanityIds) ? legacySanityIds : [legacySanityIds])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    ),
+  ];
+  if (!normalizedCode) {
+    throw new Error("Creator registration code is required.");
+  }
+  if (
+    normalizedUserId &&
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      normalizedUserId
+    )
+  ) {
+    throw new Error("Creator registration user id is invalid.");
+  }
+
+  const result = requireRpcData(
+    await adminClient.rpc("roo_creator_registration_conflicts", {
+      p_email: normalizedEmail,
+      p_referral_code: normalizedCode,
+      p_user_id: normalizedUserId || null,
+      p_legacy_sanity_ids: normalizedLegacySanityIds,
+    }),
+    "creator registration conflict lookup"
+  );
+  return {
+    emailReserved: Boolean(result?.email_reserved),
+    referralCodeReserved: Boolean(result?.referral_code_reserved),
+  };
+};
+
 const resolveAuthenticationFailure = (error) => {
   const status = Number(error?.status || 0);
   if (status === 400 || status === 401) return "invalid_credentials";

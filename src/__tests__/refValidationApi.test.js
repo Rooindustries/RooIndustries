@@ -1,13 +1,20 @@
 const mockFetch = jest.fn();
-const mockCreateClient = jest.fn(() => ({
+const mockCreateDataClient = jest.fn(() => ({
   config: () => ({ projectId: "test-project", dataset: "production" }),
   fetch: (...args) => mockFetch(...args),
 }));
+const mockResolveRegistrationConflicts = jest.fn();
 const previousDataPrimary = process.env.DATA_PRIMARY_BACKEND;
 const previousCommercePrimary = process.env.COMMERCE_PRIMARY_BACKEND;
+const previousShadowWrites = process.env.SUPABASE_SHADOW_WRITES;
 
-jest.mock("@sanity/client", () => ({
-  createClient: (...args) => mockCreateClient(...args),
+jest.mock("../server/data/documentClient", () => ({
+  createDataClient: (...args) => mockCreateDataClient(...args),
+}));
+
+jest.mock("../server/supabase/accounts", () => ({
+  resolveSupabaseCreatorRegistrationConflicts: (...args) =>
+    mockResolveRegistrationConflicts(...args),
 }));
 
 beforeAll(() => {
@@ -23,6 +30,8 @@ afterAll(() => {
   } else {
     process.env.COMMERCE_PRIMARY_BACKEND = previousCommercePrimary;
   }
+  if (previousShadowWrites === undefined) delete process.env.SUPABASE_SHADOW_WRITES;
+  else process.env.SUPABASE_SHADOW_WRITES = previousShadowWrites;
 });
 
 const createRes = () => ({
@@ -45,7 +54,17 @@ const createRes = () => ({
 
 describe("referral validation API", () => {
   beforeEach(() => {
+    jest.resetModules();
+    process.env.DATA_PRIMARY_BACKEND = "sanity";
+    process.env.COMMERCE_PRIMARY_BACKEND = "sanity";
+    delete process.env.SUPABASE_SHADOW_WRITES;
     mockFetch.mockReset();
+    mockCreateDataClient.mockClear();
+    mockResolveRegistrationConflicts.mockReset();
+    mockResolveRegistrationConflicts.mockResolvedValue({
+      emailReserved: false,
+      referralCodeReserved: false,
+    });
     globalThis.__rooRateLimitBuckets?.clear?.();
   });
 
@@ -129,6 +148,127 @@ describe("referral validation API", () => {
     });
   });
 
+  test("uses the full creator namespace for registration availability", async () => {
+    process.env.DATA_PRIMARY_BACKEND = "supabase";
+    mockFetch.mockResolvedValue(null);
+    mockResolveRegistrationConflicts.mockResolvedValue({
+      emailReserved: false,
+      referralCodeReserved: true,
+    });
+    const module = require("../server/api/ref/validateReferral");
+    const handler = module.default || module;
+    const res = createRes();
+
+    await handler(
+      {
+        method: "GET",
+        query: { code: "reserved-code", purpose: "registration" },
+        headers: { "x-forwarded-for": "203.0.113.46" },
+      },
+      res
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      ok: false,
+      error: "Referral code already taken",
+      reason: "reserved",
+    });
+    expect(mockResolveRegistrationConflicts).toHaveBeenCalledWith({
+      referralCode: "reserved-code",
+    });
+    expect(mockCreateDataClient).toHaveBeenNthCalledWith(
+      2,
+      expect.any(Object),
+      { domain: "global", allowLegacyFallback: false }
+    );
+  });
+
+  test("defers pending registration ownership to the authoritative POST", async () => {
+    process.env.DATA_PRIMARY_BACKEND = "supabase";
+    mockFetch
+      .mockResolvedValueOnce({
+        _id: "referral.pending",
+        registrationStatus: "pending_email",
+      })
+      .mockResolvedValueOnce(null);
+    mockResolveRegistrationConflicts.mockResolvedValue({
+      emailReserved: false,
+      referralCodeReserved: true,
+    });
+    const module = require("../server/api/ref/validateReferral");
+    const handler = module.default || module;
+    const res = createRes();
+
+    await handler(
+      {
+        method: "GET",
+        query: { code: "pending-code", purpose: "registration" },
+        headers: { "x-forwarded-for": "203.0.113.48" },
+      },
+      res
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      ok: false,
+      error: "Not found",
+      reason: "available",
+    });
+  });
+
+  test("returns an explicit registration availability result in Sanity-only mode", async () => {
+    mockFetch.mockResolvedValue(null);
+    const module = require("../server/api/ref/validateReferral");
+    const handler = module.default || module;
+    const res = createRes();
+
+    await handler(
+      {
+        method: "GET",
+        query: { code: "available-code", purpose: "registration" },
+        headers: { "x-forwarded-for": "203.0.113.47" },
+      },
+      res
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      ok: false,
+      error: "Not found",
+      reason: "available",
+    });
+    expect(String(mockFetch.mock.calls[0][0])).toContain("registrationStatus");
+    expect(mockResolveRegistrationConflicts).not.toHaveBeenCalled();
+  });
+
+  test("fails closed when the shadow reservation lookup is unavailable", async () => {
+    process.env.SUPABASE_SHADOW_WRITES = "1";
+    mockFetch.mockResolvedValue(null);
+    mockResolveRegistrationConflicts.mockRejectedValue(
+      new Error("shadow unavailable")
+    );
+    const module = require("../server/api/ref/validateReferral");
+    const handler = module.default || module;
+    const res = createRes();
+
+    await handler(
+      {
+        method: "GET",
+        query: { code: "available-code", purpose: "registration" },
+        headers: { "x-forwarded-for": "203.0.113.49" },
+      },
+      res
+    );
+
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toEqual({
+      ok: false,
+      error: "Referral code availability is temporarily unavailable.",
+      reason: "unavailable",
+    });
+  });
+
   test("keeps missing referral code validation at 400", async () => {
     const module = require("../server/api/ref/validateReferral");
     const handler = module.default || module;
@@ -150,7 +290,9 @@ describe("referral validation API", () => {
 
 describe("coupon validation API", () => {
   beforeEach(() => {
+    jest.resetModules();
     mockFetch.mockReset();
+    mockCreateDataClient.mockClear();
     globalThis.__rooRateLimitBuckets?.clear?.();
   });
 
