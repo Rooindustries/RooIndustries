@@ -2917,3 +2917,11 @@ html.perf-reduced-effects-mode .scroll-blur-lite {
 html.perf-reduced-motion-mode {
   scroll-behavior: auto;
 }
+.ri-reviews-viewport {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.ri-reviews-viewport::-webkit-scrollbar {
+  display: none;
+}

@@ -312,10 +312,9 @@ export default function Packages({
                             {mainDesc}
                           </p>
                           {bestFor && (
-                            <div className="mt-3 flex flex-col items-center gap-1.5">
-                              <span className="ri-package-suitable-label text-xs font-bold text-ink">Suitable for:</span>
-                              <span className="ri-package-suitable-pill inline-flex items-center gap-1.5 rounded-full border border-info-border bg-info-soft px-3 py-1 text-xs font-semibold text-info-text">
-                                <span className="ri-package-suitable-dot h-1.5 w-1.5 rounded-full bg-info" />
+                            <div className="mt-3 flex items-baseline justify-center gap-1.5 whitespace-nowrap text-xs sm:text-sm">
+                              <span className="ri-package-suitable-label font-bold text-white">Suitable for:</span>
+                              <span className="ri-package-suitable-value text-gradient-display font-semibold">
                                 {toTitleCase(bestFor)}
                               </span>
                             </div>

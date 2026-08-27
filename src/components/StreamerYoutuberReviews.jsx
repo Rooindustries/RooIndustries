@@ -1,17 +1,15 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Star } from "lucide-react";
 import { urlFor } from "../sanityClient";
 import {
-  PERF_TOGGLE_KEYS,
-  getPerfToggleEnabled,
-  subscribePerfDebugChanges,
-} from "../lib/perfDebug";
-import { useScrollRuntime } from "../lib/scrollRuntime";
-import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS, readHomeSectionData } from "../lib/homeSectionData";
+  fetchHomeSectionData,
+  HOME_SECTION_DATA_KEYS,
+  readHomeSectionData,
+} from "../lib/homeSectionData";
 
 const titleClass =
-  "text-3xl sm:text-[40px] md:text-[48px] leading-tight font-extrabold text-center tracking-tight " +
+  "text-[28px] sm:text-[32px] md:text-[36px] leading-tight font-extrabold text-center tracking-tight " +
   "text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]";
+const AUTO_SCROLL_PIXELS_PER_SECOND = 20;
 
 const getReviewAvatarUrl = (pfp) => {
   const optimized = urlFor(pfp)
@@ -22,7 +20,6 @@ const getReviewAvatarUrl = (pfp) => {
     .quality(55)
     .url();
 
-  // For GIF-backed sources, force a still frame to avoid heavy animated payloads.
   return `${optimized}${optimized.includes("?") ? "&" : "?"}frame=1`;
 };
 
@@ -42,9 +39,6 @@ export default function StreamerYoutuberReviews({ initialData = null }) {
       setShouldLoad(true);
     }
   }, [initialData]);
-
-  const sectionClass =
-    "pt-6 sm:pt-8 pb-16 text-center text-ink relative overflow-hidden";
 
   useEffect(() => {
     if (typeof IntersectionObserver === "undefined" || !sectionRef.current) {
@@ -74,15 +68,13 @@ export default function StreamerYoutuberReviews({ initialData = null }) {
     const fetchData = async () => {
       try {
         const res = await fetchHomeSectionData(HOME_SECTION_DATA_KEYS.reviews);
-        if (cancelled) return;
-        setData(res);
+        if (!cancelled) setData(res);
       } catch (error) {
         console.error("Could not fetch reviews:", error);
       }
     };
 
     fetchData();
-
     return () => {
       cancelled = true;
     };
@@ -92,471 +84,284 @@ export default function StreamerYoutuberReviews({ initialData = null }) {
   const defaultSubtitle =
     "The FPS graph matters. The real test is whether ranked feels cleaner after the tune.";
   const reviews = data?.reviews || [];
-
   const isLoading = shouldLoad && !data;
 
   return (
-    <section ref={sectionRef} className={sectionClass}>
-      <div className="px-4 sm:px-6 mb-8">
-        <h2 className={`ri-reviews-heading ${titleClass} mb-3`}>{data?.title || defaultTitle}</h2>
-        <p className="text-ink-secondary text-base sm:text-lg">
+    <section
+      ref={sectionRef}
+      className="pt-4 sm:pt-5 pb-4 text-center text-ink relative overflow-hidden"
+    >
+      <div className="px-4 sm:px-6 mb-3">
+        <h2 className={`ri-reviews-heading ${titleClass} mb-2`}>
+          {data?.title || defaultTitle}
+        </h2>
+        <p className="text-ink-secondary text-sm sm:text-base">
           {data?.subtitle || defaultSubtitle}
         </p>
       </div>
 
       {isLoading ? (
-        <div className="px-4 flex gap-5 overflow-hidden justify-center">
-          <div className="w-[420px] sm:w-[520px] h-[260px] sm:h-[290px] rounded-2xl bg-skeleton border border-line-input animate-pulse" />
-          <div className="hidden sm:block w-[520px] h-[290px] rounded-2xl bg-skeleton border border-line-input animate-pulse" />
+        <div className="px-4 flex gap-4 overflow-hidden">
+          <div className="w-[320px] sm:w-[360px] h-[184px] rounded-xl bg-skeleton animate-pulse flex-shrink-0" />
+          <div className="w-[320px] sm:w-[360px] h-[184px] rounded-xl bg-skeleton animate-pulse flex-shrink-0" />
+          <div className="hidden lg:block w-[360px] h-[184px] rounded-xl bg-skeleton animate-pulse flex-shrink-0" />
         </div>
       ) : (
-        <InfiniteDraggableCarousel reviews={reviews} />
+        <AutoReviewCarousel reviews={reviews} />
       )}
     </section>
   );
 }
 
-function CompactStarRating({ rating = 5 }) {
-  const fullStars = Math.floor(rating);
-  const hasHalfStar = rating % 1 !== 0;
-  const totalStars = 5;
-
-  return (
-    <div className="flex items-center gap-0.5">
-      {[...Array(totalStars)].map((_, i) => {
-        const isFull = i < fullStars;
-        const isHalf = i === fullStars && hasHalfStar;
-        const isEmpty = i >= fullStars && !isHalf;
-
-        return (
-          <div key={i} className="relative">
-            {!isEmpty && (
-              <div
-                className="absolute inset-0 blur-sm rounded-full opacity-70"
-                style={{
-                  background:
-                    "radial-gradient(circle, rgba(250,204,21,0.8) 0%, rgba(251,146,60,0.4) 50%, transparent 70%)",
-                  transform: "scale(1.8)",
-                }}
-              />
-            )}
-            {isHalf ? (
-              <div className="relative">
-                <Star className="w-4 h-4 text-ink-muted absolute" />
-                <div className="overflow-hidden w-[50%]">
-                  <Star
-                    className="w-4 h-4 text-yellow-400 fill-yellow-400"
-                    style={{
-                      filter: "drop-shadow(0 0 3px rgba(250,204,21,0.9))",
-                    }}
-                  />
-                </div>
-              </div>
-            ) : (
-              <Star
-                className={`w-4 h-4 relative ${
-                  isEmpty ? "text-ink-muted" : "text-yellow-400 fill-yellow-400"
-                }`}
-                style={{
-                  filter: isEmpty
-                    ? undefined
-                    : "drop-shadow(0 0 3px rgba(250,204,21,0.9))",
-                }}
-              />
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function ReviewCard({ review }) {
-  const isVip = review.isVip;
-  const highlightClass = `ri-review-highlight ${
-    isVip ? "ri-review-highlight-vip" : "ri-review-highlight-standard"
-  }`;
-
-  return (
-    <div
-      className={`ri-review-card ${isVip ? "ri-review-card-vip" : "ri-review-card-standard"} flex-shrink-0 w-[420px] sm:w-[520px] h-[260px] sm:h-[290px] rounded-2xl select-none pointer-events-none flex flex-col transition-all duration-300`}
-      style={{
-        background: "var(--color-surface-solid)",
-        boxShadow: "none",
-        border: isVip ? "2px solid #fbbf24" : "1px solid var(--color-border-soft)",
-      }}
-    >
-      <div className="relative px-4 py-5 sm:px-6 sm:py-6 flex flex-col h-full overflow-hidden">
-        {/* Internal background glow */}
-        {isVip && (
-          <div className="absolute top-0 right-0 w-32 h-32 bg-yellow-500/20 blur-[50px] rounded-full pointer-events-none -mr-10 -mt-10"></div>
-        )}
-
-        <div className="absolute top-4 right-4 z-10">
-          <CompactStarRating rating={review.rating || 5} />
-        </div>
-
-        {/* Header Section */}
-        <div className="flex items-center gap-3 pr-24 mb-3 flex-shrink-0 relative z-10">
-          {review.pfp ? (
-            <img
-              src={getReviewAvatarUrl(review.pfp)}
-              alt={review.name}
-              className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full object-cover flex-shrink-0 ${
-                isVip
-                  ? "border-2 border-yellow-300"
-                  : "border-2 border-info-border"
-              }`}
-              loading="lazy"
-              decoding="async"
-              draggable={false}
-            />
-          ) : (
-            <div
-              className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0 ${
-                isVip
-                  ? "bg-gradient-to-br from-yellow-400 to-orange-500"
-                  : "bg-gradient-to-br from-sky-500 to-cyan-400"
-              }`}
-            >
-              {review.name?.charAt(0)?.toUpperCase() || "?"}
-            </div>
-          )}
-
-          <span
-            className={`font-semibold text-lg sm:text-xl truncate ${
-              isVip ? "text-yellow-300" : "ri-review-name-standard text-accent"
-            }`}
-          >
-            {review.name}
-          </span>
-        </div>
-
-        {/* Content Body */}
-        <div className="flex flex-col text-left w-full flex-1 min-h-0 relative z-10">
-          {review.optimizationResult && (
-            <h3
-              className={`${highlightClass} text-xl sm:text-2xl font-bold leading-snug flex-shrink-0 mb-1`}
-            >
-              {review.optimizationResult}
-            </h3>
-          )}
-
-          {review.game && (
-            <p
-              className={`${highlightClass} text-sm sm:text-base font-semibold leading-snug flex-shrink-0 mb-1`}
-            >
-              {review.game}
-            </p>
-          )}
-
-          {/* Review Text - Quotes removed here */}
-          <p className="text-ink-secondary text-sm sm:text-base leading-relaxed italic break-words overflow-hidden line-clamp-3 mb-1">
-            {review.text}
-          </p>
-
-          {/* Profession - Pushed to bottom with mt-auto */}
-          {review.profession && (
-            <p
-              className={`font-medium text-sm sm:text-base flex-shrink-0 mt-auto pt-1 ${
-                isVip ? "text-yellow-300" : "ri-review-profession-standard text-accent"
-              }`}
-            >
-              {review.profession}
-            </p>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function InfiniteDraggableCarousel({ reviews }) {
-  const containerRef = useRef(null);
-  const trackRef = useRef(null);
-  const isDraggingRef = useRef(false);
-  const xPos = useRef(0);
-  const animationFrameId = useRef(null);
-  const startTime = useRef(null);
-  const lastFrameTime = useRef(0);
-  const sectionVisibleRef = useRef(true);
-  const pageVisibleRef = useRef(true);
-  const dragStart = useRef(0);
-  const lastDragPos = useRef(0);
-  const velocity = useRef(0);
-  const positionHistory = useRef([]);
-  const scrollPausedRef = useRef(false);
-  const perfPausedRef = useRef(false);
-  const scrollIdleTimerRef = useRef(null);
-  const { isScrolling } = useScrollRuntime();
-  const SPEED = 0.5;
-  const LOW_PERF_SPEED = 1.05;
-  const NORMAL_FRAME_DELTA_MS = 22;
-  const LOW_PERF_FRAME_DELTA_MS = 28;
-
-  const displayReviews =
-    reviews.length > 0 ? [...reviews, ...reviews, ...reviews, ...reviews] : [];
-
-  const stopAnimation = () => {
-    if (animationFrameId.current) {
-      cancelAnimationFrame(animationFrameId.current);
-      animationFrameId.current = null;
-    }
-  };
-
-  const isLowPerformanceMode = () =>
-    typeof document !== "undefined" &&
-    document.documentElement.classList.contains("low-performance-mode");
-
-  const isAutoplayPaused = () =>
-    perfPausedRef.current || scrollPausedRef.current;
-
-  const startAnimation = () => {
-    if (animationFrameId.current) return;
-    if (!pageVisibleRef.current || !sectionVisibleRef.current) return;
-    if (!isDraggingRef.current && isAutoplayPaused()) return;
-    animationFrameId.current = requestAnimationFrame(animate);
-  };
-
-  const animate = (timestamp) => {
-    if (!pageVisibleRef.current || !sectionVisibleRef.current) {
-      stopAnimation();
-      return;
-    }
-
-    if (!isDraggingRef.current && isAutoplayPaused()) {
-      stopAnimation();
-      return;
-    }
-
-    const lowPerfMode = isLowPerformanceMode();
-
-    // Skip frame throttling during drag — commit transforms at full refresh rate.
-    if (!isDraggingRef.current) {
-      const minFrameDelta = lowPerfMode
-        ? LOW_PERF_FRAME_DELTA_MS
-        : NORMAL_FRAME_DELTA_MS;
-      if (lastFrameTime.current && timestamp - lastFrameTime.current < minFrameDelta) {
-        animationFrameId.current = requestAnimationFrame(animate);
-        return;
-      }
-    }
-    lastFrameTime.current = timestamp;
-
-    if (!startTime.current) startTime.current = timestamp;
-    if (!isDraggingRef.current) {
-      if (Math.abs(velocity.current) > 0.1) {
-        velocity.current *= 0.95;
-        xPos.current -= velocity.current;
-      } else {
-        xPos.current -= lowPerfMode ? LOW_PERF_SPEED : SPEED;
-      }
-    }
-    if (trackRef.current) {
-      const trackWidth = trackRef.current.scrollWidth;
-      const singleSetWidth = trackWidth / 4;
-      if (xPos.current <= -singleSetWidth) {
-        xPos.current += singleSetWidth;
-      } else if (xPos.current > 0) {
-        xPos.current -= singleSetWidth;
-      }
-      trackRef.current.style.transform = `translate3d(${xPos.current}px, 0, 0)`;
-    }
-    animationFrameId.current = requestAnimationFrame(animate);
-  };
-
-  useEffect(() => {
-    if (reviews.length === 0) return;
-    startAnimation();
-    return () => stopAnimation();
-  }, [reviews.length]);
-
-  useEffect(() => {
-    const syncPerfPause = () => {
-      perfPausedRef.current = getPerfToggleEnabled(
-        PERF_TOGGLE_KEYS.PAUSE_REVIEWS_AUTOPLAY
-      );
-      if (perfPausedRef.current && !isDraggingRef.current) {
-        stopAnimation();
-      } else {
-        startAnimation();
-      }
-    };
-
-    syncPerfPause();
-    const unsubscribePerf = subscribePerfDebugChanges(syncPerfPause);
-    const onPerfModeChange = () => syncPerfPause();
-    window.addEventListener("roo-performance-mode-change", onPerfModeChange);
-
-    return () => {
-      unsubscribePerf();
-      window.removeEventListener("roo-performance-mode-change", onPerfModeChange);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!containerRef.current || typeof IntersectionObserver === "undefined") {
-      sectionVisibleRef.current = true;
-      startAnimation();
-      return undefined;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        sectionVisibleRef.current = entries[0]?.isIntersecting ?? true;
-        if (sectionVisibleRef.current) {
-          startAnimation();
-        } else {
-          stopAnimation();
-        }
-      },
-      { rootMargin: "220px 0px" }
-    );
-
-    observer.observe(containerRef.current);
-    return () => observer.disconnect();
-  }, [reviews.length]);
-
-  useEffect(() => {
-    const onVisibilityChange = () => {
-      pageVisibleRef.current = !document.hidden;
-      if (pageVisibleRef.current) {
-        startAnimation();
-      } else {
-        stopAnimation();
-      }
-    };
-
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
-  }, [reviews.length]);
-
-  useEffect(() => {
-    scrollPausedRef.current = isScrolling;
-
-    if (scrollIdleTimerRef.current) {
-      clearTimeout(scrollIdleTimerRef.current);
-      scrollIdleTimerRef.current = null;
-    }
-
-    if (isScrolling) {
-      if (!isDraggingRef.current) {
-        stopAnimation();
-      }
-      return undefined;
-    }
-
-    scrollIdleTimerRef.current = setTimeout(() => {
-      scrollPausedRef.current = false;
-      startAnimation();
-      scrollIdleTimerRef.current = null;
-    }, 150);
-
-    return () => {
-      if (scrollIdleTimerRef.current) {
-        clearTimeout(scrollIdleTimerRef.current);
-        scrollIdleTimerRef.current = null;
-      }
-    };
-  }, [isScrolling, reviews.length]);
-
-  const handleDragStart = (clientX) => {
-    isDraggingRef.current = true;
-    dragStart.current = clientX;
-    lastDragPos.current = clientX;
-    velocity.current = 0;
-    positionHistory.current = [{ x: clientX, time: performance.now() }];
-    if (trackRef.current) {
-      trackRef.current.style.cursor = "grabbing";
-    }
-  };
-
-  const handleDragMove = (clientX) => {
-    if (!isDraggingRef.current) return;
-    const delta = clientX - lastDragPos.current;
-    xPos.current += delta;
-    lastDragPos.current = clientX;
-    const now = performance.now();
-    const history = positionHistory.current;
-
-    // On direction reversal, flush old history so velocity only reflects
-    // the current swipe direction — prevents momentum fighting on mid-drag swap.
-    if (history.length > 0) {
-      const lastDelta = clientX - history[history.length - 1].x;
-      if ((lastDelta > 0 && delta < 0) || (lastDelta < 0 && delta > 0)) {
-        positionHistory.current = [];
-      }
-    }
-
-    positionHistory.current.push({ x: clientX, time: now });
-    positionHistory.current = positionHistory.current.filter(
-      (p) => now - p.time < 150
-    );
-  };
-
-  const handleDragEnd = () => {
-    isDraggingRef.current = false;
-    if (trackRef.current) {
-      trackRef.current.style.cursor = "grab";
-    }
-    const now = performance.now();
-    const history = positionHistory.current;
-    if (history.length >= 2) {
-      const latest = history[history.length - 1];
-      const oldest = history.find((p) => now - p.time > 50) || history[0];
-      const dist = latest.x - oldest.x;
-      const time = latest.time - oldest.time;
-      if (time > 0) {
-        velocity.current = -(dist / time) * 15;
-      }
-    } else {
-      velocity.current = 0;
-    }
-  };
-
-  const onMouseDown = (e) => {
-    e.preventDefault();
-    handleDragStart(e.clientX);
-  };
-  const onMouseMove = (e) => {
-    if (isDraggingRef.current) e.preventDefault();
-    handleDragMove(e.clientX);
-  };
-  const onMouseUp = () => handleDragEnd();
-  const onMouseLeave = () => {
-    if (isDraggingRef.current) handleDragEnd();
-  };
-  const onTouchStart = (e) => handleDragStart(e.touches[0].clientX);
-  const onTouchMove = (e) => handleDragMove(e.touches[0].clientX);
-  const onTouchEnd = () => handleDragEnd();
-
-  if (reviews.length === 0) {
+function ReviewerAvatar({ review, isCreator }) {
+  if (review.pfp) {
     return (
-      <div className="text-ink-muted text-center py-12">No reviews yet</div>
+      <img
+        src={getReviewAvatarUrl(review.pfp)}
+        alt={review.name}
+        className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+        style={{
+          boxShadow: isCreator ? "0 0 0 2px var(--color-accent)" : "none",
+        }}
+        loading="lazy"
+        decoding="async"
+        draggable={false}
+      />
     );
   }
 
   return (
     <div
-      className="relative w-full overflow-hidden select-none"
-      ref={containerRef}
+      className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-black flex-shrink-0 bg-surface-hover"
+      style={{ color: "var(--color-accent)" }}
+      aria-hidden="true"
     >
-      <div
-        ref={trackRef}
-        className="flex gap-5 pr-5 w-max px-4 cursor-grab items-stretch"
-        onMouseDown={onMouseDown}
-        onMouseMove={onMouseMove}
-        onMouseUp={onMouseUp}
-        onMouseLeave={onMouseLeave}
-        onTouchStart={onTouchStart}
-        onTouchMove={onTouchMove}
-        onTouchEnd={onTouchEnd}
-        style={{ willChange: "transform" }}
-      >
-        {displayReviews.map((review, i) => (
-          <ReviewCard key={`review-${i}`} review={review} />
-        ))}
+      {review.name?.charAt(0)?.toUpperCase() || "?"}
+    </div>
+  );
+}
+
+function parseFpsResult(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^(.*?):?\s*(\d[\d,.]*)\s*(?:→|->|to)\s*(\d[\d,.]*)$/i);
+  if (!match) return { label: "Result", before: "", after: text || "Tuned" };
+  return {
+    label: match[1].replace(/:$/, "").trim() || "Average FPS",
+    before: match[2],
+    after: match[3],
+  };
+}
+
+function ReviewCard({ review }) {
+  const isCreator = Boolean(review.isVip);
+  const result = parseFpsResult(review.optimizationResult);
+
+  return (
+    <article
+      className={`ri-review-card ${
+        isCreator ? "ri-review-card-creator" : "ri-review-card-standard"
+      } flex flex-col w-[320px] sm:w-[360px] min-h-[184px] p-3 rounded-xl text-left flex-shrink-0`}
+      style={{
+        background: isCreator
+          ? "linear-gradient(145deg, rgba(212, 175, 55, 0.12), var(--color-surface-solid) 52%)"
+          : "var(--color-surface-solid)",
+        boxShadow: isCreator
+          ? "inset 0 0 0 1px rgba(212, 175, 55, 0.58), 0 16px 40px rgba(0, 0, 0, 0.25)"
+          : "inset 0 0 0 1px var(--color-border-soft), 0 16px 40px rgba(0, 0, 0, 0.18)",
+      }}
+    >
+      <div className="flex items-center justify-between gap-3 text-[10px] font-bold uppercase tracking-[0.14em]">
+        <p style={{ color: isCreator ? "var(--color-accent)" : "#ffffff" }}>
+          {isCreator ? "Creator review" : "Player review"}
+        </p>
+        <p className="text-white">{review.game || "PC performance"}</p>
       </div>
+
+      <div className="mt-1 flex items-end justify-between gap-3">
+        <p className="font-black leading-none tracking-[-0.04em] tabular-nums whitespace-nowrap">
+            <span className="mr-2 text-[10px] uppercase tracking-[0.12em] text-white">
+              {result.label}
+            </span>
+          {result.before && (
+              <span className="text-lg text-white">{result.before}</span>
+          )}
+            {result.before && (
+              <span
+                className="mx-1.5 text-base"
+                style={{ color: "var(--color-accent-strong)" }}
+              >
+                →
+              </span>
+            )}
+            <span
+              className="text-[28px]"
+              style={{ color: isCreator ? "var(--color-accent)" : "var(--color-text-primary)" }}
+            >
+              {result.after}
+            </span>
+        </p>
+        <p
+          className="text-xs font-bold tracking-[0.08em] flex-shrink-0"
+          style={{ color: isCreator ? "var(--color-accent)" : "#ffffff" }}
+          aria-label={`${review.rating || 5} out of 5 stars`}
+        >
+          ★★★★★
+        </p>
+      </div>
+
+      <blockquote className="mt-2 flex-1">
+        <p className="text-white text-[11px] sm:text-[12px] leading-[1.35] break-words whitespace-normal">
+          “{review.text}”
+        </p>
+      </blockquote>
+
+      <footer className="mt-2 flex items-center gap-2">
+        <ReviewerAvatar review={review} isCreator={isCreator} />
+        <div className="min-w-0">
+          <p
+            className="font-extrabold text-[13px] leading-tight text-ink truncate"
+            style={{ color: isCreator ? "var(--color-accent)" : undefined }}
+          >
+            {review.name}
+          </p>
+          {review.profession && (
+            <p className="mt-0.5 text-[9px] leading-snug text-white">
+              {review.profession}
+            </p>
+          )}
+        </div>
+      </footer>
+    </article>
+  );
+}
+
+function AutoReviewCarousel({ reviews }) {
+  const viewportRef = useRef(null);
+  const firstGroupRef = useRef(null);
+  const pauseUntilRef = useRef(0);
+  const dragRef = useRef(null);
+
+  useEffect(() => {
+    let previousTime = performance.now();
+
+    const tick = () => {
+      const time = performance.now();
+      const viewport = viewportRef.current;
+      const firstGroup = firstGroupRef.current;
+      if (viewport && firstGroup) {
+        const elapsed = Math.min(time - previousTime, 1000);
+        previousTime = time;
+        const loopWidth = firstGroup.scrollWidth;
+        if (time >= pauseUntilRef.current && loopWidth > 0) {
+          viewport.scrollLeft +=
+            (AUTO_SCROLL_PIXELS_PER_SECOND * elapsed) / 1000;
+          if (viewport.scrollLeft >= loopWidth) {
+            viewport.scrollLeft -= loopWidth;
+          }
+        }
+      }
+    };
+
+    const intervalId = window.setInterval(tick, 50);
+    return () => window.clearInterval(intervalId);
+  }, [reviews.length]);
+
+  if (!reviews.length) return null;
+
+  const orderedReviews = [
+    ...reviews.filter((review) => review.isVip),
+    ...reviews.filter((review) => !review.isVip),
+  ];
+
+  const pauseAutoScroll = (milliseconds = 2400) => {
+    pauseUntilRef.current = performance.now() + milliseconds;
+  };
+
+  const scrollReviews = (direction) => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    pauseAutoScroll();
+    viewport.scrollBy({
+      left: direction * Math.min(376, viewport.clientWidth * 0.8),
+      behavior: "auto",
+    });
+  };
+
+  const onPointerDown = (event) => {
+    if (event.pointerType !== "mouse" || !viewportRef.current) return;
+    pauseAutoScroll(10000);
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startScrollLeft: viewportRef.current.scrollLeft,
+    };
+    viewportRef.current.setPointerCapture(event.pointerId);
+  };
+
+  const onPointerMove = (event) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !viewportRef.current) return;
+    viewportRef.current.scrollLeft =
+      drag.startScrollLeft - (event.clientX - drag.startX);
+  };
+
+  const onPointerUp = (event) => {
+    if (dragRef.current?.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    pauseAutoScroll();
+    viewportRef.current?.releasePointerCapture(event.pointerId);
+  };
+
+  return (
+    <div className="relative">
+      <div
+        ref={viewportRef}
+        className="ri-reviews-viewport w-full overflow-x-auto overflow-y-hidden cursor-grab active:cursor-grabbing select-none"
+        role="region"
+        aria-label="Player reviews"
+        onWheel={() => pauseAutoScroll()}
+        onTouchStart={() => pauseAutoScroll(10000)}
+        onTouchEnd={() => pauseAutoScroll()}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+      >
+        <div className="ri-reviews-auto-track flex w-max items-stretch">
+        {[0, 1].map((groupIndex) => (
+          <div
+            key={groupIndex}
+            ref={groupIndex === 0 ? firstGroupRef : undefined}
+            className="flex items-stretch gap-4 pr-4"
+            aria-hidden={groupIndex === 1 ? "true" : undefined}
+          >
+            {orderedReviews.map((review, reviewIndex) => (
+              <ReviewCard
+                key={`${review._id || review.name || "review"}-${reviewIndex}`}
+                review={review}
+              />
+            ))}
+          </div>
+        ))}
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => scrollReviews(-1)}
+        className="absolute left-1 sm:left-3 top-1/2 -translate-y-1/2 z-10 w-9 h-12 text-2xl leading-none text-ink-muted hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-accent)]"
+        aria-label="Scroll reviews left"
+      >
+        ←
+      </button>
+      <button
+        type="button"
+        onClick={() => scrollReviews(1)}
+        className="absolute right-1 sm:right-3 top-1/2 -translate-y-1/2 z-10 w-9 h-12 text-2xl leading-none text-ink-muted hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-accent)]"
+        aria-label="Scroll reviews right"
+      >
+        →
+      </button>
     </div>
   );
 }
