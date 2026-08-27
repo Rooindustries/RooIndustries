@@ -17,6 +17,7 @@ import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
 import {
   createSupabaseCreatorAccount,
   resolveSupabaseAccountByUserId,
+  resolveSupabaseCreatorRegistrationConflicts,
 } from "../../supabase/accounts.js";
 import { hashShadowDocument } from "../../supabase/shadowStore.js";
 import { getLegacySupabaseUser } from "../../supabase/serverSession.js";
@@ -211,6 +212,7 @@ export default async function handler(req, res) {
       { email: trimmedEmail }
     );
     let expiredSupabaseRegistration = null;
+    const expiredSanityRegistrations = new Map();
     if (existingByEmail && isExpiredPendingRegistration(existingByEmail)) {
       if (policy.primaryBackend === "supabase") {
         if (existingByEmail.slug?.current !== trimmedSlug) {
@@ -229,7 +231,7 @@ export default async function handler(req, res) {
         }
         expiredSupabaseRegistration = completeRegistration;
       } else {
-        await removeExpiredPendingRegistration(existingByEmail);
+        expiredSanityRegistrations.set(existingByEmail._id, existingByEmail);
       }
     } else if (existingByEmail) {
       if (
@@ -323,14 +325,60 @@ export default async function handler(req, res) {
       existingBySlug &&
       existingBySlug._id !== expiredSupabaseRegistration?._id
     ) {
-      const removed =
+      if (
         policy.primaryBackend === "sanity" &&
-        (await removeExpiredPendingRegistration(existingBySlug));
-      if (!removed) {
+        isExpiredPendingRegistration(existingBySlug)
+      ) {
+        expiredSanityRegistrations.set(existingBySlug._id, existingBySlug);
+      } else {
         return res
           .status(409)
           .json({ ok: false, error: "Referral code already taken" });
       }
+    }
+
+    if (
+      socialUser ||
+      policy.shadowWritesEnabled ||
+      policy.primaryBackend === "supabase"
+    ) {
+      let conflicts;
+      try {
+        conflicts = await resolveSupabaseCreatorRegistrationConflicts({
+          email: trimmedEmail,
+          referralCode: trimmedSlug,
+          userId: socialUser?.id || "",
+          legacySanityIds: [
+            expiredSupabaseRegistration?._id,
+            ...expiredSanityRegistrations.keys(),
+          ].filter(Boolean),
+        });
+      } catch (error) {
+        logSafeError("Supabase creator reservation lookup failed", error);
+        return res.status(503).json({
+          ok: false,
+          retryable: true,
+          error: "Registration availability is temporarily unavailable. Please try again.",
+        });
+      }
+      if (conflicts.emailReserved) {
+        return res
+          .status(409)
+          .json({
+            ok: false,
+            error:
+              "That email already belongs to another Roo Industries account. Sign in to that account, then return here to register.",
+          });
+      }
+      if (conflicts.referralCodeReserved) {
+        return res
+          .status(409)
+          .json({ ok: false, error: "Referral code already taken" });
+      }
+    }
+
+    for (const registration of expiredSanityRegistrations.values()) {
+      await removeExpiredPendingRegistration(registration);
     }
 
     // Hash password
@@ -550,6 +598,13 @@ export default async function handler(req, res) {
               .delete(slugClaim._id)
               .commit()
               .catch(() => {});
+          }
+          if (String(error?.code || "") === "23505") {
+            return res.status(409).json({
+              ok: false,
+              error:
+                "That email or referral code is already in use. Sign in to the existing account or choose a different code.",
+            });
           }
           return res.status(503).json({
             ok: false,

@@ -6,6 +6,7 @@ import {
   createSupabaseCreatorAccount,
   createVerifiedSupabaseBrowserSession,
   requireSupabaseBearerUser,
+  resolveSupabaseCreatorRegistrationConflicts,
   syncSupabaseTourneyAdminAccount,
   syncSupabaseTourneyPlayerAccount,
   updateSupabaseAccountPassword,
@@ -23,6 +24,37 @@ const creatorAccount = {
 };
 
 describe("Supabase account compatibility", () => {
+  test("checks creator registration reservations without exposing account data", async () => {
+    const adminClient = {
+      rpc: jest.fn().mockResolvedValue({
+        data: { email_reserved: false, referral_code_reserved: true },
+        error: null,
+      }),
+    };
+
+    await expect(
+      resolveSupabaseCreatorRegistrationConflicts({
+        adminClient,
+        email: " Creator@Example.com ",
+        referralCode: " Reserved-Code ",
+        userId: creatorAccount.user_id,
+        legacySanityIds: [" referral.creator ", "referral.creator"],
+      })
+    ).resolves.toEqual({
+      emailReserved: false,
+      referralCodeReserved: true,
+    });
+    expect(adminClient.rpc).toHaveBeenCalledWith(
+      "roo_creator_registration_conflicts",
+      {
+        p_email: "creator@example.com",
+        p_referral_code: "reserved-code",
+        p_user_id: creatorAccount.user_id,
+        p_legacy_sanity_ids: ["referral.creator"],
+      }
+    );
+  });
+
   test("updates an existing Auth password with plaintext and stores only its hash", async () => {
     const passwordHash = `$2b$12$${"a".repeat(53)}`;
     const updateUserById = jest.fn().mockResolvedValue({

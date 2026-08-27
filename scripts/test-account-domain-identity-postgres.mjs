@@ -310,6 +310,135 @@ try {
   assert.equal(creatorLinks[0].count, 1, "the creator retry inserted a duplicate link");
   process.stderr.write("[account-domain] creator upsert is idempotent across retries\n");
 
+  psql([
+    "-f",
+    path.join(
+      root,
+      "supabase/migrations/20260819043000_add_creator_registration_conflict_lookup.sql"
+    ),
+  ]);
+  const [reservedRegistration] = await sql`
+    select public.roo_creator_registration_conflicts(
+      ${creatorEmail}, 'native1', null, '{}'::text[]
+    ) as result
+  `;
+  assert.deepEqual(reservedRegistration.result, {
+    email_reserved: true,
+    referral_code_reserved: true,
+  });
+  const [sameAccountRegistration] = await sql`
+    select public.roo_creator_registration_conflicts(
+      ${creatorEmail}, 'native1', ${creatorUser}::uuid, '{}'::text[]
+    ) as result
+  `;
+  assert.deepEqual(sameAccountRegistration.result, {
+    email_reserved: false,
+    referral_code_reserved: false,
+  });
+  const [{ principal_id: creatorPrincipal }] = await sql`
+    select principal_id
+    from accounts.creator_profiles
+    where user_id = ${creatorUser}
+  `;
+  const secondaryCreatorUser = newId();
+  await sql`
+    insert into auth.users(id, email)
+    values (${secondaryCreatorUser}, 'creator-secondary@example.com')
+  `;
+  await sql`
+    insert into accounts.principal_auth_users(
+      principal_id, user_id, is_primary, source
+    ) values (${creatorPrincipal}, ${secondaryCreatorUser}, false, 'merge')
+  `;
+  const [samePrincipalRegistration] = await sql`
+    select public.roo_creator_registration_conflicts(
+      ${creatorEmail}, 'native1', ${secondaryCreatorUser}::uuid, '{}'::text[]
+    ) as result
+  `;
+  assert.deepEqual(samePrincipalRegistration.result, {
+    email_reserved: false,
+    referral_code_reserved: false,
+  });
+  const [codeOnlyRegistration] = await sql`
+    select public.roo_creator_registration_conflicts(
+      '', 'native1', null, '{}'::text[]
+    ) as result
+  `;
+  assert.deepEqual(codeOnlyRegistration.result, {
+    email_reserved: false,
+    referral_code_reserved: true,
+  });
+  const [unrelatedLegacyRegistration] = await sql`
+    select public.roo_creator_registration_conflicts(
+      ${creatorEmail}, 'native1', null, array['referral.expired-registration']
+    ) as result
+  `;
+  assert.deepEqual(unrelatedLegacyRegistration.result, {
+    email_reserved: true,
+    referral_code_reserved: true,
+  });
+  await sql`
+    update accounts.creator_profiles
+    set legacy_sanity_id = 'referral.native1'
+    where user_id = ${creatorUser}
+  `;
+  const [sameLegacyRegistration] = await sql`
+    select public.roo_creator_registration_conflicts(
+      ${creatorEmail}, 'native1', null, array['referral.native1']
+    ) as result
+  `;
+  assert.deepEqual(sameLegacyRegistration.result, {
+    email_reserved: false,
+    referral_code_reserved: false,
+  });
+  await sql`
+    update accounts.creator_profiles
+    set referral_code = 'native2'
+    where user_id = ${creatorUser}
+  `;
+  const [historicalAliasRegistration] = await sql`
+    select public.roo_creator_registration_conflicts(
+      '', 'native1', null, '{}'::text[]
+    ) as result
+  `;
+  assert.deepEqual(historicalAliasRegistration.result, {
+    email_reserved: false,
+    referral_code_reserved: true,
+  });
+  await sql`
+    update public.profiles
+    set primary_email = 'creator-current@example.com'
+    where user_id = ${creatorUser}
+  `;
+  const [historicalEmailRegistration] = await sql`
+    select public.roo_creator_registration_conflicts(
+      ${creatorEmail}, 'unused-code', null, '{}'::text[]
+    ) as result
+  `;
+  assert.deepEqual(historicalEmailRegistration.result, {
+    email_reserved: true,
+    referral_code_reserved: false,
+  });
+  const [samePrincipalHistoricalEmail] = await sql`
+    select public.roo_creator_registration_conflicts(
+      ${creatorEmail}, 'unused-code', ${secondaryCreatorUser}::uuid, '{}'::text[]
+    ) as result
+  `;
+  assert.deepEqual(samePrincipalHistoricalEmail.result, {
+    email_reserved: false,
+    referral_code_reserved: false,
+  });
+  const [sameLegacyHistoricalEmail] = await sql`
+    select public.roo_creator_registration_conflicts(
+      ${creatorEmail}, 'unused-code', null, array['referral.native1']
+    ) as result
+  `;
+  assert.deepEqual(sameLegacyHistoricalEmail.result, {
+    email_reserved: false,
+    referral_code_reserved: false,
+  });
+  process.stderr.write("[account-domain] creator registration reservations are NULL-safe across retries\n");
+
   // 3. Why the index was scoped at all. Both functions derive provider_subject
   //    from the user id, so they can never collide with each other -- the real
   //    cross-domain subject is a Discord id, which one person legitimately holds
@@ -379,32 +508,38 @@ try {
     select p.proname, has_function_privilege('service_role', p.oid, 'execute') as granted
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
-      and p.proname in (
-        'roo_finalize_imported_account_metadata', 'roo_upsert_native_creator_account'
-      )
+       and p.proname in (
+         'roo_creator_registration_conflicts',
+         'roo_finalize_imported_account_metadata',
+         'roo_upsert_native_creator_account'
+       )
     order by p.proname
   `;
-  assert.equal(grants.length, 2, "both rewritten functions should be present");
+  assert.equal(grants.length, 3, "all account functions should be present");
   for (const grant of grants) {
     assert.equal(grant.granted, true, `${grant.proname} lost its service_role execute grant`);
   }
-  process.stderr.write("[account-domain] both functions retain service_role execute\n");
+  process.stderr.write("[account-domain] account functions retain service_role execute\n");
 
   process.stdout.write(
     `${JSON.stringify(
       {
         ok: true,
         postgres: (await sql`show server_version`)[0].server_version,
-        migration: "20260726185500_scope_account_import_identity_link_conflict_by_domain",
+        migrations: [
+          "20260726185500_scope_account_import_identity_link_conflict_by_domain",
+          "20260819043000_add_creator_registration_conflict_lookup",
+        ],
         verified: [
           "production-dumped domain-scoped unique index, dropped global index absent",
           "imported tourney admin metadata resolves to the tourney domain",
           "native creator signup resolves to the referral domain",
           "both functions idempotent across the retry that used to raise 42P10",
+          "registration reservations are NULL-safe and exclude retry targets",
           "one provider_subject coexists in both domains",
           "same-domain duplicates still rejected",
           "no function retains the dropped conflict target",
-          "service_role execute preserved on both rewritten functions",
+          "service_role execute preserved on all account functions",
         ],
       },
       null,
