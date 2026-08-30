@@ -121,7 +121,7 @@ function ReviewerAvatar({ review, isCreator }) {
         alt={review.name}
         className="w-8 h-8 rounded-full object-cover flex-shrink-0"
         style={{
-          boxShadow: isCreator ? "0 0 0 2px var(--color-accent)" : "none",
+          boxShadow: isCreator ? "0 0 0 2px #d9c292" : "none",
         }}
         loading="lazy"
         decoding="async"
@@ -164,15 +164,15 @@ function ReviewCard({ review }) {
       } flex flex-col w-[320px] sm:w-[360px] min-h-[184px] p-3 rounded-xl text-left flex-shrink-0`}
       style={{
         background: isCreator
-          ? "linear-gradient(145deg, rgba(212, 175, 55, 0.12), var(--color-surface-solid) 52%)"
+          ? "linear-gradient(145deg, rgba(228, 211, 176, 0.12), var(--color-surface-solid) 52%)"
           : "var(--color-surface-solid)",
         boxShadow: isCreator
-          ? "inset 0 0 0 1px rgba(212, 175, 55, 0.58), 0 16px 40px rgba(0, 0, 0, 0.25)"
+          ? "inset 0 0 0 1px rgba(221, 197, 151, 0.58), 0 16px 40px rgba(0, 0, 0, 0.25)"
           : "inset 0 0 0 1px var(--color-border-soft), 0 16px 40px rgba(0, 0, 0, 0.18)",
       }}
     >
       <div className="flex items-center justify-between gap-3 text-[10px] font-bold uppercase tracking-[0.14em]">
-        <p style={{ color: isCreator ? "var(--color-accent)" : "#ffffff" }}>
+        <p className={isCreator ? "ri-review-champagne-text" : "text-white"}>
           {isCreator ? "Creator review" : "Player review"}
         </p>
         <p className="text-white">{review.game || "PC performance"}</p>
@@ -190,22 +190,20 @@ function ReviewCard({ review }) {
             {result.before && (
               <span
                 className="mx-1.5 text-base"
-                style={{ color: "var(--color-accent-strong)" }}
+                style={{ color: "#d9c292" }}
               >
                 →
               </span>
             )}
             <span
-              className="text-[28px]"
-              style={{ color: isCreator ? "var(--color-accent)" : "var(--color-text-primary)" }}
+              className="ri-review-champagne-text text-[28px]"
             >
               {result.after}
             </span>
           </p>
         )}
         <p
-          className="text-xs font-bold tracking-[0.08em] flex-shrink-0"
-          style={{ color: isCreator ? "var(--color-accent)" : "#ffffff" }}
+          className="ri-review-champagne-text text-xs font-bold tracking-[0.08em] flex-shrink-0"
           aria-label={`${review.rating || 5} out of 5 stars`}
         >
           ★★★★★
@@ -222,8 +220,9 @@ function ReviewCard({ review }) {
         <ReviewerAvatar review={review} isCreator={isCreator} />
         <div className="min-w-0">
           <p
-            className="font-extrabold text-[13px] leading-tight text-ink truncate"
-            style={{ color: isCreator ? "var(--color-accent)" : undefined }}
+            className={`font-extrabold text-[13px] leading-tight text-ink truncate ${
+              isCreator ? "ri-review-champagne-text" : ""
+            }`}
           >
             {review.name}
           </p>
