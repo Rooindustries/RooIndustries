@@ -156,6 +156,32 @@ const getLinkProps = (url) => {
   return {};
 };
 
+const normalizeTeamCards = (cards) => {
+  const normalized = cards.map((card) => {
+    const name = String(card?.name || "").trim().toLowerCase();
+    if (name === "wanted") {
+      return { ...card, bio: "Number one Cassidy player." };
+    }
+    if (name === "candi") {
+      return { ...card, bio: "Champion support player." };
+    }
+    return card;
+  });
+  const wantedIndex = normalized.findIndex(
+    (card) => String(card?.name || "").trim().toLowerCase() === "wanted"
+  );
+  const skinzIndex = normalized.findIndex(
+    (card) => String(card?.name || "").trim().toLowerCase() === "skinzow"
+  );
+  if (wantedIndex >= 0 && skinzIndex >= 0) {
+    [normalized[wantedIndex], normalized[skinzIndex]] = [
+      normalized[skinzIndex],
+      normalized[wantedIndex],
+    ];
+  }
+  return normalized;
+};
+
 const SocialIcon = ({ type }) => {
   switch (type) {
     case "twitch":
@@ -342,7 +368,9 @@ export default function MeetTheTeam({ onSeoData }) {
     return resolved.sections
       .map((section) => {
         const cards = Array.isArray(section.cards)
-          ? section.cards.filter((card) => card?.name || card?.title || card?.bio)
+          ? normalizeTeamCards(
+              section.cards.filter((card) => card?.name || card?.title || card?.bio)
+            )
           : [];
         return {
           ...section,
