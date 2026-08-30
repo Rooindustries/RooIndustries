@@ -121,7 +121,7 @@ function ReviewerAvatar({ review, isCreator }) {
         alt={review.name}
         className="w-8 h-8 rounded-full object-cover flex-shrink-0"
         style={{
-          boxShadow: isCreator ? "0 0 0 2px #d9c292" : "none",
+          boxShadow: isCreator ? "0 0 0 2px #f5c954" : "none",
         }}
         loading="lazy"
         decoding="async"
@@ -164,10 +164,10 @@ function ReviewCard({ review }) {
       } flex flex-col w-[320px] sm:w-[360px] min-h-[184px] p-3 rounded-xl text-left flex-shrink-0`}
       style={{
         background: isCreator
-          ? "linear-gradient(145deg, rgba(228, 211, 176, 0.12), var(--color-surface-solid) 52%)"
+          ? "linear-gradient(145deg, rgba(250, 219, 120, 0.12), var(--color-surface-solid) 52%)"
           : "var(--color-surface-solid)",
         boxShadow: isCreator
-          ? "inset 0 0 0 1px rgba(221, 197, 151, 0.58), 0 16px 40px rgba(0, 0, 0, 0.25)"
+          ? "inset 0 0 0 1px rgba(245, 201, 84, 0.58), 0 16px 40px rgba(0, 0, 0, 0.25)"
           : "inset 0 0 0 1px var(--color-border-soft), 0 16px 40px rgba(0, 0, 0, 0.18)",
       }}
     >
@@ -190,7 +190,7 @@ function ReviewCard({ review }) {
             {result.before && (
               <span
                 className="mx-1.5 text-base"
-                style={{ color: "#d9c292" }}
+                style={{ color: "#f5c954" }}
               >
                 →
               </span>
