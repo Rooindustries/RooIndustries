@@ -47,7 +47,7 @@ describe("review carousel design", () => {
     );
     expect(componentSource).toContain("const isCreator = Boolean(review.isVip);");
     expect(componentSource).toContain("ri-review-card-creator");
-    expect(componentSource).toContain("rgba(221, 197, 151, 0.58)");
+    expect(componentSource).toContain("rgba(245, 201, 84, 0.58)");
     expect(componentSource).toContain(
       'className="ri-review-champagne-text text-[28px]"'
     );
@@ -55,7 +55,7 @@ describe("review carousel design", () => {
       'className="ri-review-champagne-text text-xs font-bold'
     );
     expect(stylesheet).toContain(".ri-review-champagne-text");
-    expect(stylesheet).toContain("#fff9ed 49%");
+    expect(stylesheet).toContain("#fadb78 52%");
     expect(componentSource).not.toContain("rgba(212, 175, 55");
     expect(componentSource).toContain('isCreator ? "Creator review" : "Player review"');
     expect(componentSource).not.toContain(" · ");
