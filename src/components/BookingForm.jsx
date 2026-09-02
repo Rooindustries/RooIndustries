@@ -28,6 +28,7 @@ import {
   sanitizeReferralForCheckout,
   toMoney,
 } from "../lib/checkoutCodes";
+import { trackEvent } from "../lib/analytics";
 
 const { applyPackageContentOverrides, getPackageFeatureItems } = packageContent;
 const {
@@ -2111,6 +2112,12 @@ export default function BookingForm({ isMobile }) {
       if (Number.isFinite(expiresIn)) {
         setHoldCountdownMs(Math.max(0, expiresIn));
       }
+      trackEvent("booking_slot_reserved", {
+        package: selectedPackage.title,
+        lead_time_hours: Number(
+          Math.max(0, (new Date(selectedSlotId).getTime() - Date.now()) / 3_600_000).toFixed(1)
+        ),
+      });
       setStep(2);
     } catch {
       console.error("Failed to reserve slot");
@@ -2216,6 +2223,8 @@ export default function BookingForm({ isMobile }) {
       console.error("Failed to persist checkout state");
     }
 
+    trackEvent("checkout_started", { package: selectedPackage.title });
+
     navigate("/payment", {
       state: {
         bookingData: payload,
@@ -2232,6 +2241,9 @@ export default function BookingForm({ isMobile }) {
     }
     setErrorStep2("");
     setPaymentReleaseStatus("");
+    trackEvent("booking_details_completed", {
+      package: selectedPackage.title,
+    });
     setStep(3);
   };
 

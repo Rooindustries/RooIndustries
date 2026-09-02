@@ -2794,7 +2794,7 @@ html.low-performance-mode #how-it-works .deferred-section-content {
   content-visibility: visible;
 }
 
-html.low-performance-mode *:not(.glow-line) {
+html.low-performance-mode *:not(.glow-line):not(.ri-engineer-status-pulse) {
   animation: none !important;
   filter: none !important;
   -webkit-filter: none !important;
@@ -2943,4 +2943,21 @@ html.perf-reduced-motion-mode {
 
 .ri-reviews-viewport::-webkit-scrollbar {
   display: none;
+}
+
+@keyframes riEngineerStatusPulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  75%,
+  100% {
+    transform: scale(2.1);
+    opacity: 0;
+  }
+}
+
+.ri-engineer-status-pulse {
+  animation: riEngineerStatusPulse 1.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+  transform-origin: center;
 }

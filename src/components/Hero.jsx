@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { getPublicContent } from "../lib/publicContentClient";
 import homeCopy from "../lib/homeCopy";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
+import { trackEvent } from "../lib/analytics";
 
 const { HOME_COPY, applyHeroCopyOverride } = homeCopy;
 const fallbackHeroData = HOME_COPY.hero;
@@ -95,6 +96,11 @@ function CtaNoteBalanced({ icon, text }) {
 export default function Hero() {
   const [heroData, setHeroData] = useState(fallbackHeroData);
   const handleHomeSectionLink = useHomeSectionLinkHandler();
+
+  const handleHeroCta = (event, hash, cta) => {
+    trackEvent("home_cta_click", { cta, surface: "hero" });
+    handleHomeSectionLink(event, hash);
+  };
 
   useEffect(() => {
     if (!enableLiveHeroContent) return;
@@ -281,10 +287,12 @@ export default function Hero() {
           )}
         </div>
 
-        <div className="mt-5 sm:mt-7 flex items-center justify-center gap-3 sm:gap-4 flex-wrap min-h-[56px]">
+        <div className="mt-5 sm:mt-6 flex items-center justify-center gap-3 sm:gap-4 flex-wrap min-h-[56px]">
           <Link
             to="/#packages"
-            onClick={(event) => handleHomeSectionLink(event, "#packages")}
+            onClick={(event) =>
+              handleHeroCta(event, "#packages", "packages")
+            }
             className="glow-button book-optimization-button relative inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-white ring-2 ring-line-accent hover:text-white active:translate-y-px transition-all duration-300"
           >
             {renderWithGlow110(primaryCtaText)}
@@ -297,7 +305,7 @@ export default function Hero() {
           <Link
             to="/#how-it-works"
             onClick={(event) =>
-              handleHomeSectionLink(event, "#how-it-works")
+              handleHeroCta(event, "#how-it-works", "how_it_works")
             }
             className="glow-button fps-boosts-button inline-flex items-center justify-center gap-2 rounded-md px-4 sm:px-6 py-2.5 sm:py-3.5 text-sm sm:text-base font-semibold text-ink ring-1 ring-line-accent active:translate-y-px transition-all duration-300"
           >
