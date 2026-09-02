@@ -1,9 +1,32 @@
-import React from "react";
-import { Link } from "react-router-dom";
+import React, { useEffect } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
 import BookingEmailDispatchEffect from "./BookingEmailDispatchEffect";
+import { readStoredCheckoutBooking } from "../lib/checkoutStorage";
+import { trackEvent } from "../lib/analytics";
 
 export default function PaymentSuccess() {
+  const location = useLocation();
+  const bookingId = String(
+    location.state?.bookingConfirmation?.bookingId || ""
+  ).trim();
+
+  useEffect(() => {
+    if (!bookingId) return;
+    const key = `booking_completion_tracked:${bookingId}`;
+    try {
+      if (sessionStorage.getItem(key)) return;
+      const booking = readStoredCheckoutBooking();
+      trackEvent("booking_completed", {
+        package: String(booking?.packageTitle || "unknown"),
+        payment_type: "paid",
+      });
+      sessionStorage.setItem(key, "1");
+    } catch {
+      return;
+    }
+  }, [bookingId]);
+
   const containerVariants = {
     hidden: { opacity: 0, y: 20 },
     visible: {

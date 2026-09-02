@@ -13,8 +13,11 @@ import packageContent from "../lib/packageContent";
 import packagePricing from "../lib/packagePricing";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import { persistBookingPackageSelection } from "../lib/checkoutStorage";
+import { trackEvent } from "../lib/analytics";
+import { getSessionAvailability } from "../lib/sessionAvailability";
 
 const REFERRAL_STORAGE_KEY = "referral_session";
+const AVAILABILITY_REFRESH_INTERVAL_MS = 60_000;
 const { applyPackagesContentOverrides } = packageContent;
 const { applyPackagesPricing, isTopPackageTitle } = packagePricing;
 const { HOME_COPY } = homeCopy;
@@ -62,6 +65,7 @@ export default function Packages({
       : []
   );
   const [sectionCopy, setSectionCopy] = useState(() => initialSectionCopy);
+  const [sessionAvailability, setSessionAvailability] = useState(null);
 
   useEffect(() => {
     if (initialPackages !== null) {
@@ -180,8 +184,34 @@ export default function Packages({
     }
   }, [packages.length, sectionCopy]);
 
+  useEffect(() => {
+    let active = true;
+
+    const loadAvailability = async () => {
+      try {
+        const response = await fetch("/api/bookingAvailability", {
+          cache: "no-store",
+        });
+        const data = await response.json();
+        if (!response.ok || data?.ok === false) throw new Error();
+        if (active) setSessionAvailability(getSessionAvailability(data));
+      } catch {
+        if (active) setSessionAvailability(null);
+      }
+    };
+
+    loadAvailability();
+    const intervalId = window.setInterval(
+      loadAvailability,
+      AVAILABILITY_REFRESH_INTERVAL_MS
+    );
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
   const headingText = sectionCopy?.heading ?? HOME_COPY.packagesSettings.heading;
-  const badgeText = sectionCopy?.badgeText ?? HOME_COPY.packagesSettings.badgeText;
   const subheadingText =
     sectionCopy?.subheading ?? HOME_COPY.packagesSettings.subheading;
   const dividerText = sectionCopy?.dividerText;
@@ -205,11 +235,28 @@ export default function Packages({
         </h2>
       )}
 
-      {badgeText && (
-        <div className="mt-4 flex items-center justify-center gap-2">
-          <span className="ri-packages-badge-dot h-2 w-2 rounded-full bg-success shadow-success-soft" />
+      {sessionAvailability && (
+        <div
+          className="mt-4 flex items-center justify-center gap-2"
+          role="status"
+          aria-live="polite"
+        >
+          <span className="relative flex h-3 w-3" aria-hidden="true">
+            <span
+              className={`ri-engineer-status-pulse absolute inline-flex h-full w-full rounded-full opacity-80 ${
+                sessionAvailability.isOnline ? "bg-success" : "bg-danger"
+              }`}
+            />
+            <span
+              className={`relative inline-flex h-3 w-3 rounded-full ${
+                sessionAvailability.isOnline
+                  ? "bg-success shadow-success-soft"
+                  : "bg-danger shadow-danger-soft"
+              }`}
+            />
+          </span>
           <span className="ri-packages-badge text-sm sm:text-[0.95rem] font-semibold tracking-wide text-info-text">
-            {badgeText}
+            {sessionAvailability.label}
           </span>
         </div>
       )}
@@ -381,7 +428,13 @@ export default function Packages({
                           tag: p.tag || "",
                         },
                       }}
-                      onClick={() => persistBookingPackageSelection(p)}
+                      onClick={() => {
+                        persistBookingPackageSelection(p);
+                        trackEvent("package_selected", {
+                          package: p.title,
+                          surface: "packages",
+                        });
+                      }}
                       className="ri-package-book-button glow-button w-full sm:w-1/2 text-white text-lg py-3 rounded-md font-semibold shadow-[var(--shadow-button-accent)] transition-all duration-300 text-center inline-flex items-center justify-center gap-2"
                     >
                       {p.buttonText || "Book Now"}
