@@ -1,7 +1,7 @@
 const packagePricing = require("./packagePricing");
 
 const WINDOWS_REOPTIMIZATION_LABEL = "Windows reoptimization every 6 months";
-const { isTopPackageTitle } = packagePricing;
+const { applyPackagePricing, isTopPackageTitle } = packagePricing;
 
 const ESSENTIALS_TITLE_PATTERN = /^vertex essentials$/i;
 const OVERHAUL_TITLE_PATTERN = /^performance vertex overhaul$/i;
@@ -19,7 +19,7 @@ const OVERHAUL_EXTRA_BULLETS = [
 ];
 const MAX_ONLY_BULLETS = [
   "Extensive hardware tuning",
-  "SQM router setup",
+  "Home Network Optimization",
   "6-month Windows reoptimization",
 ];
 
@@ -42,16 +42,6 @@ const PACKAGE_CONTENT_OVERRIDES = [
       ...MAX_ONLY_BULLETS,
     ],
     uncheckedBullets: [],
-    features: [
-      "Everything in Performance Vertex Overhaul",
-      "Maximum CPU, GPU, and RAM tuning for the best stable performance",
-      "Compatible SQM router configuration",
-      "Flexible session timing for working clients",
-      "Choice between raw performance and part-lifespan-focused tuning",
-      `${WINDOWS_REOPTIMIZATION_LABEL} for Windows-side settings and cleanup`,
-      "Learn what changed so you can solve smaller issues on your own",
-      "Lifetime warranty with a 24-hour response target",
-    ],
   },
 ];
 
@@ -168,6 +158,81 @@ const getPackageFeatureItems = (pkg = {}) => {
   return toFeatureItems(normalizedPackage?.featureChecklist);
 };
 
+const MINOR_WORDS = new Set([
+  "a", "an", "and", "as", "at", "but", "by", "for", "if", "in", "nor",
+  "of", "on", "or", "so", "that", "the", "to", "up", "via", "yet",
+]);
+
+const toTitleCase = (value = "") =>
+  String(value).replace(/\S+/g, (word, index) => {
+    if (index > 0 && MINOR_WORDS.has(word.toLowerCase())) {
+      return word.toLowerCase();
+    }
+    return word
+      .split("-")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join("-");
+  });
+
+const getPackageWarranty = (pkg = {}) => {
+  const isLifetime = isTopPackageTitle(pkg.title || pkg.sourceTitle);
+  return {
+    className: isLifetime
+      ? "ri-package-warranty-callout-max"
+      : "ri-package-warranty-callout-standard",
+    title: isLifetime
+      ? "Lifetime warranty included"
+      : "90-day warranty included",
+    note: isLifetime
+      ? "Priority support for long-term tuning issues."
+      : "Support coverage after your session.",
+    ariaLabel: isLifetime
+      ? "Performance Vertex Max includes lifetime warranty support"
+      : `${pkg.title || "This package"} includes 90-day warranty support`,
+  };
+};
+
+const splitPackageDescription = (description = "") => {
+  const text = String(description || "").trim();
+  const bestForMatch = text.match(/Best for:\s*(.+)/i);
+  return {
+    descriptionText: bestForMatch
+      ? text.slice(0, bestForMatch.index).trim()
+      : text,
+    suitableFor: bestForMatch
+      ? toTitleCase(bestForMatch[1].trim().replace(/\.+$/, ""))
+      : "",
+  };
+};
+
+const buildPackageOffer = (pkg = {}) => {
+  const normalized = applyPackageContentOverrides(applyPackagePricing(pkg));
+  const { descriptionText, suitableFor } = splitPackageDescription(
+    normalized.description
+  );
+
+  return {
+    ...normalized,
+    isTopPackage: isTopPackageTitle(normalized.title || normalized.sourceTitle),
+    warranty: getPackageWarranty(normalized),
+    descriptionText,
+    suitableFor,
+    checklistItems: [
+      ...toFeatureItems(normalized.checkedBullets),
+      ...toFeatureItems(normalized.uncheckedBullets, false),
+    ],
+    detailItems: getPackageFeatureItems(normalized),
+    bookingSelection: {
+      title: normalized.title,
+      price: normalized.price,
+      tag: normalized.tag || "",
+    },
+  };
+};
+
+const buildPackageOffers = (packages = []) =>
+  Array.isArray(packages) ? packages.map(buildPackageOffer) : [];
+
 const normalizeFaqQuestion = (item = {}) => {
   if (!item || typeof item !== "object") return item;
   const question = String(item.question || "");
@@ -216,9 +281,12 @@ const normalizeFaqQuestions = (items = []) =>
 const api = {
   WINDOWS_REOPTIMIZATION_LABEL,
   PACKAGE_CONTENT_OVERRIDES,
+  buildPackageOffer,
+  buildPackageOffers,
   applyPackageContentOverrides,
   applyPackagesContentOverrides,
   getPackageFeatureItems,
+  getPackageWarranty,
   normalizeFaqQuestion,
   normalizeFaqQuestions,
   normalizePackageText,

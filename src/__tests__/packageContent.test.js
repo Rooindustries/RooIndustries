@@ -5,6 +5,8 @@ const {
   WINDOWS_REOPTIMIZATION_LABEL,
   applyPackageContentOverrides,
   applyPackagesContentOverrides,
+  buildPackageOffer,
+  buildPackageOffers,
   getPackageFeatureItems,
   normalizeFaqQuestions,
 } = packageContent;
@@ -63,8 +65,7 @@ describe("top package normalization", () => {
 
 describe("package content normalization", () => {
   test("applies canonical checklist rows across all package cards", () => {
-    const packages = applyPackagesContentOverrides(
-      applyPackagesPricing([
+    const packages = buildPackageOffers([
         {
           title: "Vertex Essentials",
           price: "$49.95",
@@ -83,10 +84,13 @@ describe("package content normalization", () => {
           buttonText: "Book XOC",
           checkedBullets: ["Free Reoptimization"],
           uncheckedBullets: [],
-          features: ["Future upgrade path - free reoptimizations"],
+          features: [
+            "Future upgrade path - free reoptimizations",
+            "Home Network Optimization",
+            "Lifetime warranty with guaranteed 24 hour response",
+          ],
         },
-      ])
-    );
+      ]);
 
     const essentials = packages[0];
     const overhaul = packages[1];
@@ -119,7 +123,7 @@ describe("package content normalization", () => {
         "Fan curve tuning",
         "Driver latency tuning",
         "Extensive hardware tuning",
-        "SQM router setup",
+        "Home Network Optimization",
         "6-month Windows reoptimization",
       ])
     );
@@ -139,7 +143,7 @@ describe("package content normalization", () => {
     expect(overhaul.uncheckedBullets).toEqual(
       expect.arrayContaining([
         "Extensive hardware tuning",
-        "SQM router setup",
+        "Home Network Optimization",
         "6-month Windows reoptimization",
       ])
     );
@@ -155,7 +159,7 @@ describe("package content normalization", () => {
         "Fan curve tuning",
         "Driver latency tuning",
         "Extensive hardware tuning",
-        "SQM router setup",
+        "Home Network Optimization",
         "6-month Windows reoptimization",
       ])
     );
@@ -163,7 +167,11 @@ describe("package content normalization", () => {
     expect(max.checkedBullets).not.toContain("Lifetime warranty support");
     expect(max.uncheckedBullets).toEqual([]);
     expect(max.features.join(" ")).toContain("Lifetime warranty");
-    expect(max.features.join(" ")).toContain("24-hour response target");
+    expect(max.features.join(" ")).toContain("24 hour response");
+    expect(max.detailItems).toContainEqual({
+      label: "Home Network Optimization",
+      included: true,
+    });
   });
 
   test("replaces free reoptimization with Windows reoptimization", () => {
@@ -209,10 +217,43 @@ describe("package content normalization", () => {
       included: true,
     });
     expect(overhaulItems).toContainEqual({
-      label: "SQM router setup",
+      label: "Home Network Optimization",
       included: false,
     });
     expect(JSON.stringify(essentialsItems)).not.toMatch(/30-day|90-day/i);
+  });
+
+  test("builds one render-ready offer for cards, details, and booking", () => {
+    const offer = buildPackageOffer({
+      title: "Performance Vertex Max",
+      price: "$149.95",
+      tag: "Best value",
+      description:
+        "Maximum tuning. Best for: competitive players and creators.",
+      checkedBullets: ["Home Network Optimization"],
+      features: ["Home Network Optimization"],
+    });
+
+    expect(offer).toMatchObject({
+      title: "Performance Vertex Max",
+      price: "$99.95",
+      suitableFor: "Competitive Players and Creators",
+      isTopPackage: true,
+      warranty: { title: "Lifetime warranty included" },
+      bookingSelection: {
+        title: "Performance Vertex Max",
+        price: "$99.95",
+        tag: "Best value",
+      },
+    });
+    expect(offer.checklistItems).toContainEqual({
+      label: "Home Network Optimization",
+      included: true,
+    });
+    expect(offer.detailItems).toContainEqual({
+      label: "Home Network Optimization",
+      included: true,
+    });
   });
 
   test("rewrites FAQ rows that mention free reoptimization or reXOC", () => {

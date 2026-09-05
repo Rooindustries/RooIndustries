@@ -1,9 +1,5 @@
 const { applyHomePageCopyOverrides } = require("./homeCopy");
-const {
-  applyPackagesContentOverrides,
-  normalizeFaqQuestions,
-} = require("./packageContent");
-const { applyPackagesPricing } = require("./packagePricing");
+const { buildPackageOffers, normalizeFaqQuestions } = require("./packageContent");
 
 const createPublicContentFetcher = async () => {
   const [{ fetchPublicContent }, { resolveSupabaseRuntimePolicy }] =
@@ -83,9 +79,7 @@ async function fetchHomePageData() {
     reviews,
     about,
     services,
-    packagesList: applyPackagesContentOverrides(
-      applyPackagesPricing(Array.isArray(packagesList) ? packagesList : [])
-    ),
+    packagesList: buildPackageOffers(packagesList),
     packagesSettings,
     howItWorks,
     supportedGames,

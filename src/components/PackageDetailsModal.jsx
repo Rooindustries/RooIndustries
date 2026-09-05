@@ -4,7 +4,7 @@ import PriceDisplay from "./PriceDisplay";
 import SiteDialog from "./SiteDialog";
 import packageContent from "../lib/packageContent";
 
-const { getPackageFeatureItems } = packageContent;
+const { buildPackageOffer } = packageContent;
 
 const itemVariants = {
   hidden: { opacity: 0, y: 15 },
@@ -21,7 +21,7 @@ export default function PackageDetailsModal({
   pkg,
   renderFeature,
 }) {
-  const featureItems = getPackageFeatureItems(pkg);
+  const featureItems = pkg?.detailItems || buildPackageOffer(pkg || {}).detailItems;
   const tagText = pkg?.tag || "Roo Industries Package";
 
   return (
@@ -48,7 +48,7 @@ export default function PackageDetailsModal({
         <PriceDisplay pkg={pkg} size="modal" />
       </motion.div>
 
-      <motion.ul className="mt-4 space-y-2 text-sm text-info-text text-left">
+      <motion.ul className="mt-4 space-y-2 text-sm text-white text-left">
         {featureItems.map((item, i) => (
           <motion.li
             key={`${item.label}-${i}`}

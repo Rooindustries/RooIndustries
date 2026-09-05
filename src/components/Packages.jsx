@@ -10,7 +10,6 @@ import {
 } from "../lib/homeSectionData";
 import homeCopy from "../lib/homeCopy";
 import packageContent from "../lib/packageContent";
-import packagePricing from "../lib/packagePricing";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import { persistBookingPackageSelection } from "../lib/checkoutStorage";
 import { trackEvent } from "../lib/analytics";
@@ -18,37 +17,14 @@ import { getSessionAvailability } from "../lib/sessionAvailability";
 
 const REFERRAL_STORAGE_KEY = "referral_session";
 const AVAILABILITY_REFRESH_INTERVAL_MS = 60_000;
-const { applyPackagesContentOverrides } = packageContent;
-const { applyPackagesPricing, isTopPackageTitle } = packagePricing;
+const { buildPackageOffer, buildPackageOffers } = packageContent;
 const { HOME_COPY } = homeCopy;
 
-const MINOR_WORDS = new Set([
-  "a","an","and","as","at","but","by","for","if","in","nor","of","on","or","so","that","the","to","up","via","yet",
-]);
-
-const capitalizeWord = (w) => w.charAt(0).toUpperCase() + w.slice(1);
-
-const toTitleCase = (str) =>
-  str.replace(/\S+/g, (word, idx) => {
-    if (idx > 0 && MINOR_WORDS.has(word.toLowerCase())) return word.toLowerCase();
-    return word.split("-").map(capitalizeWord).join("-");
-  });
-
 export const getWarrantyCallout = (pkg) => {
-  const isMax = isTopPackageTitle(pkg?.title || pkg?.sourceTitle);
-
+  const offer = pkg?.warranty ? pkg : buildPackageOffer(pkg);
   return {
-    Icon: isMax ? ShieldCheck : Shield,
-    className: isMax
-      ? "ri-package-warranty-callout-max"
-      : "ri-package-warranty-callout-standard",
-    title: isMax ? "Lifetime warranty included" : "90-day warranty included",
-    note: isMax
-      ? "Priority support for long-term tuning issues."
-      : "Support coverage after your session.",
-    ariaLabel: isMax
-      ? "Performance Vertex Max includes lifetime warranty support"
-      : `${pkg?.title || "This package"} includes 90-day warranty support`,
+    ...offer.warranty,
+    Icon: offer.isTopPackage ? ShieldCheck : Shield,
   };
 };
 
@@ -59,9 +35,7 @@ export default function Packages({
   const handleHomeSectionLink = useHomeSectionLinkHandler();
   const [packages, setPackages] = useState(() =>
     initialPackages !== null
-      ? applyPackagesContentOverrides(
-          applyPackagesPricing(Array.isArray(initialPackages) ? initialPackages : [])
-        )
+      ? buildPackageOffers(initialPackages)
       : []
   );
   const [sectionCopy, setSectionCopy] = useState(() => initialSectionCopy);
@@ -69,11 +43,7 @@ export default function Packages({
 
   useEffect(() => {
     if (initialPackages !== null) {
-      setPackages(
-        applyPackagesContentOverrides(
-          applyPackagesPricing(Array.isArray(initialPackages) ? initialPackages : [])
-        )
-      );
+      setPackages(buildPackageOffers(initialPackages));
     }
 
     if (initialSectionCopy !== null) {
@@ -134,13 +104,6 @@ export default function Packages({
     });
   };
 
-  const normalizeBullets = (items) =>
-    Array.isArray(items)
-      ? items
-          .map((item) => (typeof item === "string" ? item.trim() : ""))
-          .filter(Boolean)
-      : [];
-
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const ref = params.get("ref");
@@ -156,15 +119,11 @@ export default function Packages({
     if (packages.length === 0) {
       const cachedPackages = readHomeSectionData(HOME_SECTION_DATA_KEYS.packagesList);
       if (Array.isArray(cachedPackages)) {
-        setPackages(applyPackagesContentOverrides(applyPackagesPricing(cachedPackages)));
+        setPackages(buildPackageOffers(cachedPackages));
       } else {
         fetchHomeSectionData(HOME_SECTION_DATA_KEYS.packagesList)
           .then((pkgs) => {
-            setPackages(
-              applyPackagesContentOverrides(
-                applyPackagesPricing(Array.isArray(pkgs) ? pkgs : [])
-              )
-            );
+            setPackages(buildPackageOffers(pkgs));
           })
           .catch(console.error);
       }
@@ -279,16 +238,13 @@ export default function Packages({
         <div className="mx-auto w-fit max-w-full">
           <div className="flex flex-col sm:flex-row justify-center gap-6 sm:gap-10 flex-wrap">
             {packages.map((p, i) => {
-              const isXoc = isTopPackageTitle(p.title || p.sourceTitle);
               const warranty = getWarrantyCallout(p);
               const WarrantyIcon = warranty.Icon;
 
-              const checkedBullets = normalizeBullets(p.checkedBullets);
-              const uncheckedBullets = normalizeBullets(p.uncheckedBullets);
-              const orderedBullets = [
-                ...checkedBullets.map((label) => ({ label, checked: true })),
-                ...uncheckedBullets.map((label) => ({ label, checked: false })),
-              ];
+              const orderedBullets = p.checklistItems.map((item) => ({
+                label: item.label,
+                checked: item.included !== false,
+              }));
               const hasBullets = orderedBullets.length > 0;
 
               return (
@@ -347,28 +303,19 @@ export default function Packages({
                       </div>
                     )}
 
-                    {p.description && (() => {
-                      const bestForMatch = p.description.match(/Best for:\s*(.+)/i);
-                      const mainDesc = bestForMatch
-                        ? p.description.slice(0, bestForMatch.index).trim()
-                        : p.description;
-                      const bestFor = bestForMatch ? bestForMatch[1].trim().replace(/\.+$/, "") : null;
-                      return (
-                        <>
-                          <p className="ri-package-description mt-4 text-center text-base sm:text-lg leading-relaxed text-ink-secondary">
-                            {mainDesc}
-                          </p>
-                          {bestFor && (
-                            <div className="mt-3 flex items-baseline justify-center gap-1.5 whitespace-nowrap text-xs sm:text-sm">
-                              <span className="ri-package-suitable-label font-bold text-white">Suitable for:</span>
-                              <span className="ri-package-suitable-value text-gradient-display font-semibold">
-                                {toTitleCase(bestFor)}
-                              </span>
-                            </div>
-                          )}
-                        </>
-                      );
-                    })()}
+                    {p.descriptionText && (
+                      <p className="ri-package-description mt-4 text-center text-base sm:text-lg leading-relaxed text-ink-secondary">
+                        {p.descriptionText}
+                      </p>
+                    )}
+                    {p.suitableFor && (
+                      <div className="mt-3 flex items-baseline justify-center gap-1.5 whitespace-nowrap text-xs sm:text-sm">
+                        <span className="ri-package-suitable-label font-bold text-white">Suitable for:</span>
+                        <span className="ri-package-suitable-value text-gradient-display font-semibold">
+                          {p.suitableFor}
+                        </span>
+                      </div>
+                    )}
 
                     <div className="ri-package-divider mt-5 border-t border-line-soft" />
 
