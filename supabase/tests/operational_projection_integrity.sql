@@ -26,7 +26,7 @@ begin
   perform migration.reconcile_slot_claims_for_times(
     array['2098-02-03T00:00:00Z', '2098-02-04T00:00:00Z']::timestamptz[]
   );
-  select jsonb_agg(to_jsonb(claim) order by start_time_utc)
+  select coalesce(jsonb_agg(to_jsonb(claim) order by start_time_utc), '[]'::jsonb)
   into v_native_claims
   from commerce.slot_claims claim
   where start_time_utc in ('2098-02-03T00:00:00Z', '2098-02-04T00:00:00Z');
@@ -68,7 +68,7 @@ begin
     raise exception 'legacy booking no longer acquires its claim';
   end if;
   if v_native_claims is distinct from (
-    select jsonb_agg(to_jsonb(claim) order by start_time_utc)
+    select coalesce(jsonb_agg(to_jsonb(claim) order by start_time_utc), '[]'::jsonb)
     from commerce.slot_claims claim
     where start_time_utc in ('2098-02-03T00:00:00Z', '2098-02-04T00:00:00Z')
   ) then
@@ -103,7 +103,7 @@ begin
   exception when unique_violation then null;
   end;
   if v_native_claims is distinct from (
-    select jsonb_agg(to_jsonb(claim) order by start_time_utc)
+    select coalesce(jsonb_agg(to_jsonb(claim) order by start_time_utc), '[]'::jsonb)
     from commerce.slot_claims claim
     where start_time_utc in ('2098-02-03T00:00:00Z', '2098-02-04T00:00:00Z')
   ) then

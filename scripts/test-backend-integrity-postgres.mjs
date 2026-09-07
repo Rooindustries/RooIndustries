@@ -184,7 +184,10 @@ try {
   applyMigration("20260718011000_bound_commerce_mutations.sql");
   applyMigration("20260718012000_require_active_licensing_principals.sql");
 
-  sql = postgres(`postgres://${postgresHost}:${port}/postgres`, {
+  sql = postgres({
+    host: [postgresHost],
+    port: [port],
+    database: "postgres",
     max: 8,
     prepare: false,
   });
@@ -381,7 +384,10 @@ try {
     `,
   ]);
   applyMigration("20260718013000_refresh_tourney_shadow_acceptance.sql");
-  const tourneySql = postgres(`postgres://${postgresHost}:${port}/postgres`, {
+  const tourneySql = postgres({
+    host: [postgresHost],
+    port: [port],
+    database: "postgres",
     max: 1,
     prepare: false,
   });

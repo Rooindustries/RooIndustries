@@ -146,7 +146,13 @@ try {
   psql(["-f", path.join(root, "scripts/fixtures/account-domain-schema.sql")]);
   psql(["-c", principalDomain]);
 
-  sql = postgres(`postgres://${postgresHost}:${port}/postgres`, { max: 4, prepare: false });
+  sql = postgres({
+    host: [postgresHost],
+    port: [port],
+    database: "postgres",
+    max: 4,
+    prepare: false,
+  });
 
   // The dumped index is the whole point: if the fixture had the old global unique
   // index instead, both functions would pass while production still failed.

@@ -355,7 +355,10 @@ try {
     "-v", "ON_ERROR_STOP=1", "-f", bootstrap, "-f", migration,
   ]);
 
-  sql = postgres(`postgres://${postgresHost}:${port}/referral_reclaim_fixture`, {
+  sql = postgres({
+    host: [postgresHost],
+    port: [port],
+    database: "referral_reclaim_fixture",
     max: 1,
     prepare: false,
   });

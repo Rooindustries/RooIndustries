@@ -153,7 +153,10 @@ try {
     ),
   ]);
 
-  sql = postgres(`postgres://${postgresHost}:${port}/postgres`, {
+  sql = postgres({
+    host: [postgresHost],
+    port: [port],
+    database: "postgres",
     max: 2,
     prepare: false,
   });
