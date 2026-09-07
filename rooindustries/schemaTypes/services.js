@@ -24,7 +24,6 @@ export default {
           fields: [
             {name: 'title', title: 'Title', type: 'string'},
             {name: 'description', title: 'Description', type: 'text'},
-            // 1. Existing Dropdown
             {
               name: 'iconType',
               title: 'Icon (Preset)',

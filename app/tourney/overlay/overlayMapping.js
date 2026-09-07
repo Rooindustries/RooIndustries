@@ -17,9 +17,7 @@ const toInternalSide = (opponent, index) => ({
   status: "",
 });
 
-// On stream, only matches that need viewer attention get a status pill.
-// Finished brackets read from the winner/loser highlighting alone, so
-// Locked/Waiting/Completed/Archived all render without a pill.
+// Completed matches use win/loss highlighting; reserve pills for actionable statuses.
 const OVERLAY_STATUS_LABELS = Object.freeze({
   running: "LIVE",
   ready: "Up Next",
@@ -43,9 +41,7 @@ const toInternalMatch = (match) => ({
   displayLabel: match.label,
   status: match.statusCode,
   statusLabel: toOverlayStatusLabel(match),
-  // The raw status slug ("running", "completed", ...) for the card status
-  // class: the overlay-mapped statusLabel only covers LIVE/Up Next/Cancelled,
-  // so without this the LIVE glow and completed dimming could never fire.
+  // Keep the raw status for card classes; overlay labels omit completed states.
   statusSlug: typeof match?.status === "string" ? match.status : "",
   bestOf: match.bestOf,
   targetScore: match.targetScore,
@@ -71,9 +67,7 @@ export const OVERLAY_GROUP_FILTERS = Object.freeze({
   "grand-final": "Grand Final",
 });
 
-// Lane sources (?group=) must filter even before the bracket is generated,
-// when the API has no matches and the view renders its TBD skeleton — so the
-// caller passes that skeleton in and we filter it like a real bracket.
+// Filter the TBD skeleton by lane before the API has generated matches.
 export const filterSnapshotByGroup = (
   internal,
   group,

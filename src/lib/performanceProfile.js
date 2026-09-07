@@ -22,31 +22,6 @@ export const DEVICE_CLASSES = Object.freeze({
   TABLET: "tablet",
 });
 
-const STORAGE_VERSION = 1;
-const AUTO_DECISION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const PROBE_DURATION_MS = 5000;
-const MIN_PROBE_FRAMES = 60;
-const INTERACTION_IDLE_MS = 220;
-const INTERACTION_IDLE_MAX_WAIT_MS = 1500;
-
-const REDUCED_THRESHOLDS = Object.freeze({
-  longFrameRatio: 18,
-  severeFrames: 6,
-  longTaskTotalMs: 250,
-});
-
-const LITE_THRESHOLDS = Object.freeze({
-  longFrameRatio: 22,
-  severeFrames: 10,
-  longTaskTotalMs: 400,
-});
-
-const DIRECT_LITE_THRESHOLDS = Object.freeze({
-  longFrameRatio: 30,
-  severeFrames: 12,
-  longTaskTotalMs: 650,
-});
-
 const SOFTWARE_RENDERER_PATTERNS = [
   /swiftshader/i,
   /software/i,
@@ -72,17 +47,6 @@ const HIGH_END_RENDERER_PATTERNS = [
   /xclipse/i,
 ];
 
-const HARD_WEAK_BAND_SIGNALS = new Set([
-  "low-device-memory",
-  "save-data",
-  "entry-tier-mobile-gpu",
-]);
-
-const PROXY_WEAK_BAND_SIGNALS = new Set([
-  "low-cpu-core-count",
-  "high-dpr-memory-pressure",
-]);
-
 const DEFAULT_DECISION = Object.freeze({
   profile: PERFORMANCE_PROFILES.FULL,
   source: "default",
@@ -98,24 +62,11 @@ const SERVER_PERFORMANCE_PROFILE_SNAPSHOT = Object.freeze({
   prefersReducedMotion: false,
 });
 
-const PROBE_EVENTS = ["pointerdown", "keydown", "touchstart", "scroll"];
-const IDLE_EVENTS = [
-  "scroll",
-  "wheel",
-  "pointermove",
-  "touchmove",
-  "keydown",
-];
-
 let currentDecision = { ...DEFAULT_DECISION };
 let subscribers = new Set();
 let bootstrapComplete = false;
-let initializationStarted = false;
 let reducedMotionPreferred = false;
 let reducedMotionCleanup = null;
-let runtimeProbeCleanup = null;
-let runtimeProbeStage = 0;
-let runtimeProbeLocked = false;
 let currentSnapshot = {
   ...DEFAULT_DECISION,
   prefersReducedMotion: false,
@@ -368,150 +319,6 @@ export const collectPerformanceSnapshot = ({
   };
 };
 
-export const getPerformanceBand = (snapshot) => {
-  const weakSignals = [];
-  const strongSignals = [];
-
-  if (snapshot.deviceClass === DEVICE_CLASSES.DESKTOP) {
-    return { band: "unknown", weakSignals, strongSignals };
-  }
-
-  if (snapshot.hardwareConcurrency !== null && snapshot.hardwareConcurrency <= 4) {
-    weakSignals.push("low-cpu-core-count");
-  }
-
-  if (snapshot.deviceMemory !== null && snapshot.deviceMemory <= 3) {
-    weakSignals.push("low-device-memory");
-  }
-
-  if (snapshot.saveData) {
-    weakSignals.push("save-data");
-  }
-
-  if (
-    snapshot.dpr >= 3 &&
-    snapshot.deviceMemory !== null &&
-    snapshot.deviceMemory <= 4
-  ) {
-    weakSignals.push("high-dpr-memory-pressure");
-  }
-
-  if (snapshot.rendererInfo?.family === "low") {
-    weakSignals.push("entry-tier-mobile-gpu");
-  }
-
-  if (snapshot.deviceMemory !== null && snapshot.deviceMemory >= 6) {
-    strongSignals.push("high-device-memory");
-  }
-
-  if (snapshot.hardwareConcurrency !== null && snapshot.hardwareConcurrency >= 8) {
-    strongSignals.push("high-cpu-core-count");
-  }
-
-  if (snapshot.rendererInfo?.family === "high") {
-    strongSignals.push("high-tier-mobile-gpu");
-  }
-
-  const hasHardWeakSignal = weakSignals.some((signal) =>
-    HARD_WEAK_BAND_SIGNALS.has(signal)
-  );
-  const hasHighTierGpu = strongSignals.includes("high-tier-mobile-gpu");
-  const nonProxyWeakSignals = weakSignals.filter(
-    (signal) => !PROXY_WEAK_BAND_SIGNALS.has(signal)
-  );
-
-  // Treat high-tier mobile GPUs as more trustworthy than privacy-bucketed
-  // CPU/DPR proxy signals. This prevents premium Android devices from falling
-  // into low-end mode just because Chromium reported conservative buckets.
-  if (hasHighTierGpu && !hasHardWeakSignal) {
-    if (strongSignals.length >= 2 && nonProxyWeakSignals.length === 0) {
-      return { band: "high", weakSignals, strongSignals };
-    }
-
-    if (nonProxyWeakSignals.length === 0) {
-      return { band: "mid", weakSignals, strongSignals };
-    }
-  }
-
-  if (weakSignals.length >= 2) {
-    return { band: "low", weakSignals, strongSignals };
-  }
-
-  if (strongSignals.length >= 2 && weakSignals.length === 0) {
-    return { band: "high", weakSignals, strongSignals };
-  }
-
-  return { band: "mid", weakSignals, strongSignals };
-};
-
-export const resolveHardFailDecision = (snapshot) => {
-  const deviceClass = snapshot.deviceClass;
-  const rendererInfo = snapshot.rendererInfo || {};
-
-  if (deviceClass === DEVICE_CLASSES.DESKTOP && rendererInfo.checked) {
-    if (rendererInfo.hasWebgl === false) {
-      return {
-        profile: PERFORMANCE_PROFILES.LITE,
-        source: "auto",
-        reason: "desktop-webgl-unavailable",
-        deviceClass,
-        band: "unknown",
-        renderer: rendererInfo.renderer,
-      };
-    }
-    if (rendererInfo.likelySoftware) {
-      return {
-        profile: PERFORMANCE_PROFILES.LITE,
-        source: "auto",
-        reason: "desktop-software-renderer",
-        deviceClass,
-        band: "unknown",
-        renderer: rendererInfo.renderer,
-      };
-    }
-  }
-
-  if (
-    deviceClass !== DEVICE_CLASSES.DESKTOP &&
-    snapshot.deviceMemory !== null &&
-    snapshot.deviceMemory <= 2
-  ) {
-    return {
-      profile: PERFORMANCE_PROFILES.LITE,
-      source: "auto",
-      reason: "mobile-low-memory",
-      deviceClass,
-      band: "low",
-      renderer: rendererInfo.renderer || "",
-    };
-  }
-
-  if (deviceClass !== DEVICE_CLASSES.DESKTOP && rendererInfo.checked) {
-    if (rendererInfo.hasWebgl === false) {
-      return {
-        profile: PERFORMANCE_PROFILES.LITE,
-        source: "auto",
-        reason: "mobile-webgl-unavailable",
-        deviceClass,
-        band: "low",
-        renderer: rendererInfo.renderer,
-      };
-    }
-    if (rendererInfo.likelySoftware) {
-      return {
-        profile: PERFORMANCE_PROFILES.LITE,
-        source: "auto",
-        reason: "mobile-software-renderer",
-        deviceClass,
-        band: "low",
-        renderer: rendererInfo.renderer,
-      };
-    }
-  }
-
-  return null;
-};
-
 export const resolveInitialPerformanceDecision = (snapshot) => {
   return {
     profile: PERFORMANCE_PROFILES.LITE,
@@ -523,61 +330,10 @@ export const resolveInitialPerformanceDecision = (snapshot) => {
   };
 };
 
-export const buildDeviceSignature = (snapshot) => {
-  const dprToken = snapshot.dpr ? Number(snapshot.dpr).toFixed(1) : "u";
-  const gpuToken =
-    snapshot.deviceClass === DEVICE_CLASSES.DESKTOP
-      ? snapshot.rendererInfo?.checked
-        ? snapshot.rendererInfo.hasWebgl === false
-          ? "no-webgl"
-          : snapshot.rendererInfo.likelySoftware
-          ? "software"
-          : "hardware"
-        : "unknown"
-      : "deferred";
-
-  return [
-    snapshot.deviceClass,
-    snapshot.hardwareConcurrency ?? "u",
-    snapshot.deviceMemory ?? "u",
-    snapshot.saveData ? "sd1" : "sd0",
-    dprToken,
-    gpuToken,
-  ].join("|");
-};
-
 const removeStorageKey = (storage, key) => {
   try {
     storage?.removeItem(key);
   } catch {}
-};
-
-const persistAutoDecision = (decision, snapshot) => {
-  if (!isBrowser()) return;
-  if (
-    decision.source === "manual" ||
-    decision.source === "stored" ||
-    decision.profile === PERFORMANCE_PROFILES.FULL
-  ) {
-    return;
-  }
-
-  const expiresAt = Date.now() + AUTO_DECISION_TTL_MS;
-  try {
-    window.localStorage.setItem(
-      PERFORMANCE_PROFILE_STORAGE_KEY,
-      JSON.stringify({
-        version: STORAGE_VERSION,
-        profile: decision.profile,
-        source: "auto",
-        reason: decision.reason,
-        deviceSignature: buildDeviceSignature(snapshot),
-        expiresAt,
-      })
-    );
-  } catch {}
-
-  setCurrentDecision({ ...decision, expiresAt });
 };
 
 const clearStoredAutoDecision = () => {
@@ -671,301 +427,10 @@ export const bootstrapPerformanceProfile = () => {
   return getPerformanceProfileSnapshot();
 };
 
-const scheduleIdleEvaluation = (callback) => {
-  if (!isBrowser()) return;
-  if ("requestIdleCallback" in window) {
-    window.requestIdleCallback(callback, { timeout: 1200 });
-    return;
-  }
-  window.setTimeout(callback, 300);
-};
-
-const thresholdMultiplierForBand = (band) => (band === "high" ? 1.15 : 1);
-
-export const evaluateRuntimeMetrics = ({
-  metrics,
-  decision,
-  stage = 0,
-} = {}) => {
-  if (!metrics || !decision) return null;
-  if (decision.deviceClass === DEVICE_CLASSES.DESKTOP) return null;
-  if (metrics.frames < MIN_PROBE_FRAMES) return null;
-
-  const multiplier = thresholdMultiplierForBand(decision.band);
-  const reducedThresholds = {
-    longFrameRatio: REDUCED_THRESHOLDS.longFrameRatio * multiplier,
-    severeFrames: REDUCED_THRESHOLDS.severeFrames * multiplier,
-    longTaskTotalMs: REDUCED_THRESHOLDS.longTaskTotalMs * multiplier,
-  };
-  const liteThresholds = {
-    longFrameRatio: LITE_THRESHOLDS.longFrameRatio * multiplier,
-    severeFrames: LITE_THRESHOLDS.severeFrames * multiplier,
-    longTaskTotalMs: LITE_THRESHOLDS.longTaskTotalMs * multiplier,
-  };
-  const directLiteThresholds = {
-    longFrameRatio: DIRECT_LITE_THRESHOLDS.longFrameRatio * multiplier,
-    severeFrames: DIRECT_LITE_THRESHOLDS.severeFrames * multiplier,
-    longTaskTotalMs: DIRECT_LITE_THRESHOLDS.longTaskTotalMs * multiplier,
-  };
-
-  const breachesAny = (thresholds) =>
-    metrics.longFrameRatio >= thresholds.longFrameRatio ||
-    metrics.severeFrames >= thresholds.severeFrames ||
-    metrics.longTaskTotalMs >= thresholds.longTaskTotalMs;
-
-  const isHighBandMobile = decision.band === "high";
-
-  if (
-    stage === 0 &&
-    !isHighBandMobile &&
-    breachesAny(directLiteThresholds)
-  ) {
-    return {
-      profile: PERFORMANCE_PROFILES.LITE,
-      source: "auto",
-      reason: "runtime-severe-degradation",
-      deviceClass: decision.deviceClass,
-      band: decision.band,
-      renderer: decision.renderer || "",
-    };
-  }
-
-  if (
-    decision.profile === PERFORMANCE_PROFILES.FULL &&
-    breachesAny(reducedThresholds)
-  ) {
-    return {
-      profile: PERFORMANCE_PROFILES.REDUCED,
-      source: "auto",
-      reason: "runtime-degraded",
-      deviceClass: decision.deviceClass,
-      band: decision.band,
-      renderer: decision.renderer || "",
-    };
-  }
-
-  if (
-    decision.profile === PERFORMANCE_PROFILES.REDUCED &&
-    breachesAny(liteThresholds)
-  ) {
-    return {
-      profile: PERFORMANCE_PROFILES.LITE,
-      source: "auto",
-      reason: "runtime-persistently-degraded",
-      deviceClass: decision.deviceClass,
-      band: decision.band,
-      renderer: decision.renderer || "",
-    };
-  }
-
-  return null;
-};
-
-const waitForInteractionIdle = (callback) => {
-  if (!isBrowser()) {
-    callback();
-    return () => {};
-  }
-
-  let idleTimer = 0;
-  let maxWaitTimer = 0;
-  let complete = false;
-
-  const cleanup = () => {
-    IDLE_EVENTS.forEach((eventName) =>
-      window.removeEventListener(eventName, schedule, true)
-    );
-    window.clearTimeout(idleTimer);
-    window.clearTimeout(maxWaitTimer);
-  };
-
-  const finish = () => {
-    if (complete) return;
-    complete = true;
-    cleanup();
-    callback();
-  };
-
-  function schedule() {
-    window.clearTimeout(idleTimer);
-    idleTimer = window.setTimeout(finish, INTERACTION_IDLE_MS);
-  }
-
-  IDLE_EVENTS.forEach((eventName) =>
-    window.addEventListener(eventName, schedule, {
-      passive: true,
-      capture: true,
-    })
-  );
-
-  maxWaitTimer = window.setTimeout(finish, INTERACTION_IDLE_MAX_WAIT_MS);
-  schedule();
-
-  return cleanup;
-};
-
-const collectRuntimeProbeMetrics = () =>
-  new Promise((resolve) => {
-    if (!isBrowser()) {
-      resolve({
-        frames: 0,
-        longFrameRatio: 0,
-        severeFrames: 0,
-        longTaskTotalMs: 0,
-      });
-      return;
-    }
-
-    const frameDeltas = [];
-    let longTaskTotalMs = 0;
-    let lastFrameTs = performance.now();
-    let rafId = 0;
-    let longTaskObserver = null;
-
-    const sampleFrame = (ts) => {
-      const delta = ts - lastFrameTs;
-      lastFrameTs = ts;
-      if (delta > 0 && delta < 250) {
-        frameDeltas.push(delta);
-      }
-      rafId = window.requestAnimationFrame(sampleFrame);
-    };
-
-    const finish = () => {
-      if (rafId) {
-        window.cancelAnimationFrame(rafId);
-      }
-      if (longTaskObserver) {
-        longTaskObserver.disconnect();
-      }
-
-      const longFrames = frameDeltas.filter((delta) => delta > 24).length;
-      const severeFrames = frameDeltas.filter((delta) => delta > 50).length;
-
-      resolve({
-        frames: frameDeltas.length,
-        longFrameRatio: frameDeltas.length
-          ? (longFrames / frameDeltas.length) * 100
-          : 0,
-        severeFrames,
-        longTaskTotalMs,
-      });
-    };
-
-    rafId = window.requestAnimationFrame(sampleFrame);
-
-    if ("PerformanceObserver" in window) {
-      try {
-        longTaskObserver = new PerformanceObserver((list) => {
-          list.getEntries().forEach((entry) => {
-            longTaskTotalMs += entry.duration || 0;
-          });
-        });
-        longTaskObserver.observe({ type: "longtask", buffered: true });
-      } catch {}
-    }
-
-    window.setTimeout(finish, PROBE_DURATION_MS);
-  });
-
-const stopRuntimeProbe = () => {
-  if (runtimeProbeCleanup) {
-    runtimeProbeCleanup();
-    runtimeProbeCleanup = null;
-  }
-};
-
-const finalizeAutoDecision = (decision, snapshot, onCommit) => {
-  waitForInteractionIdle(() => {
-    persistAutoDecision(decision, snapshot);
-    onCommit?.();
-  });
-};
-
-const startRuntimeProbeCycle = (baseDecision) => {
-  if (!isBrowser() || runtimeProbeLocked) return;
-  stopRuntimeProbe();
-
-  const triggerProbe = async () => {
-    stopRuntimeProbe();
-    const refinedSnapshot = collectPerformanceSnapshot({ includeRenderer: true });
-    const refinedDecision = resolveInitialPerformanceDecision(refinedSnapshot);
-
-    if (refinedDecision.profile === PERFORMANCE_PROFILES.LITE) {
-      runtimeProbeLocked = true;
-      finalizeAutoDecision(refinedDecision, refinedSnapshot);
-      return;
-    }
-
-    const effectiveDecision = {
-      ...baseDecision,
-      ...refinedDecision,
-      renderer: refinedSnapshot.rendererInfo?.renderer || baseDecision.renderer,
-      expiresAt: null,
-    };
-    setCurrentDecision(effectiveDecision);
-
-    const metrics = await collectRuntimeProbeMetrics();
-    const nextDecision = evaluateRuntimeMetrics({
-      metrics,
-      decision: effectiveDecision,
-      stage: runtimeProbeStage,
-    });
-
-    if (!nextDecision) {
-      runtimeProbeLocked = true;
-      return;
-    }
-
-    if (nextDecision.profile === PERFORMANCE_PROFILES.REDUCED) {
-      finalizeAutoDecision(nextDecision, refinedSnapshot, () => {
-        runtimeProbeStage = 1;
-        startRuntimeProbeCycle(nextDecision);
-      });
-      return;
-    }
-
-    runtimeProbeLocked = true;
-    finalizeAutoDecision(nextDecision, refinedSnapshot);
-  };
-
-  PROBE_EVENTS.forEach((eventName) =>
-    window.addEventListener(eventName, triggerProbe, {
-      once: true,
-      passive: true,
-      capture: true,
-    })
-  );
-
-  runtimeProbeCleanup = () => {
-    PROBE_EVENTS.forEach((eventName) =>
-      window.removeEventListener(eventName, triggerProbe, true)
-    );
-  };
-};
-
-const maybeStartRuntimeProbe = (decision) => {
-  if (
-    !isBrowser() ||
-    runtimeProbeLocked ||
-    decision.profile === PERFORMANCE_PROFILES.LITE ||
-    decision.deviceClass === DEVICE_CLASSES.DESKTOP ||
-    decision.source === "manual" ||
-    decision.source === "stored"
-  ) {
-    return;
-  }
-
-  runtimeProbeStage = 0;
-  startRuntimeProbeCycle(decision);
-};
-
 export const initializePerformanceProfile = () => {
   if (!isBrowser()) return getPerformanceProfileSnapshot();
   attachReducedMotionListener();
   bootstrapPerformanceProfile();
-  initializationStarted = true;
-  runtimeProbeLocked = true;
   return getPerformanceProfileSnapshot();
 };
 
@@ -974,11 +439,7 @@ export const __applyPerformanceDecisionForTests = (decision) => {
 };
 
 export const __resetPerformanceProfileForTests = () => {
-  stopRuntimeProbe();
-  runtimeProbeStage = 0;
-  runtimeProbeLocked = false;
   bootstrapComplete = false;
-  initializationStarted = false;
   reducedMotionPreferred = false;
   subscribers = new Set();
   if (reducedMotionCleanup) {

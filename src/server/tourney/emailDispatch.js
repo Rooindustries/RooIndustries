@@ -24,23 +24,10 @@ const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex"
 const dispatchTable = (backend) =>
   backend === "supabase" ? "tourney.email_dispatches" : "tourney_email_dispatches";
 
-// A reset dispatch has to survive at least one commit boundary: the row is written
-// inside the command transaction and the send is deferred -- the post-commit drain
-// is best-effort under a 10s budget and otherwise the 5-minute cron picks it up,
-// retrying up to 12 times. So the worker must still be able to recover the token to
-// render the link, which rules out simply not storing it.
-//
-// Instead the token is sealed at rest and removed once the row reaches a terminal
-// state. `payload.token` previously held a plaintext one-hour bearer credential
-// indefinitely, including after `sent` and even after the code had detected its
-// expiry. For a player reset the dispatch row is the ONLY place the plaintext
-// exists -- `tourney_player_tokens` keeps only its SHA-256 -- so this is the whole
-// exposure surface.
-//
-// Key derivation matches encryptOperationSecret in ./externalOperations.js: same
-// subsystem, same secret, no new key domain. The referral equivalent in
-// src/server/api/ref/referralEmailTokenSeal.js is keyed off REF_SESSION_SECRET and
-// would cross those domains.
+// Post-commit delivery and cron retries need a recoverable token; the token table
+// stores only its SHA-256. Seal the dispatch copy until it reaches a terminal state.
+// Use the tournament secret domain shared with externalOperations.js, not the
+// referral seal keyed by REF_SESSION_SECRET.
 const SEALED_TOKEN_PREFIX = "v1";
 const SEALED_TOKEN_AAD = Buffer.from("roo-tourney-email-token:v1", "utf8");
 
@@ -70,9 +57,8 @@ export const sealTourneyEmailToken = (token, env = process.env) => {
     .join(".");
 };
 
-// Returns "" rather than throwing on any tampering or key mismatch, so a corrupt
-// row fails as a missing token (retry, then dead-letter) instead of crashing the
-// whole reconciliation batch and stalling every other queued email.
+// Treat corrupt tokens or key mismatches as missing tokens so one bad row retries
+// and dead-letters without stalling the rest of the reconciliation batch.
 export const unsealTourneyEmailToken = (sealed, env = process.env) => {
   const parts = normalize(sealed).split(".");
   if (parts.length !== 4 || parts[0] !== SEALED_TOKEN_PREFIX) return "";
@@ -90,12 +76,8 @@ export const unsealTourneyEmailToken = (sealed, env = process.env) => {
   }
 };
 
-// A registration dispatch carries its credentials in a different shape: one
-// `payload.tokens[]` entry per approver purpose, each with its own `token`. Those
-// are approve/deny bearer tokens with expires_at 9999-12-31 -- they never expire,
-// so a retained plaintext stays redeemable for the life of the row, which is
-// strictly worse than the one-hour reset token this sealing was built for. Seal
-// each entry the same way and keep its `token_hash` so the row stays auditable.
+// Approval/denial tokens in payload.tokens[] do not expire. Seal each entry and
+// retain token_hash for auditing; durable plaintext would remain redeemable.
 const sealDispatchTokenEntries = (tokens, env) => {
   if (!Array.isArray(tokens)) return tokens;
   return tokens.map((entry) => {
@@ -110,9 +92,7 @@ const sealDispatchTokenEntries = (tokens, env) => {
   });
 };
 
-// Seal on the way in. `tokenHash` is retained alongside so a row stays auditable
-// and verifiable after the sealed value is stripped -- the referral ledger carries
-// a first-class token_hash column for the same reason.
+// Retain tokenHash for auditing after the sealed value is stripped.
 const sealDispatchPayload = (payload, env) => {
   const source = payload || {};
   const rawToken = normalize(source.token);
@@ -128,8 +108,7 @@ const sealDispatchPayload = (payload, env) => {
   };
 };
 
-// Unseal for rendering only. Mirrors sealDispatchTokenEntries; the plaintext lives
-// in the returned local for the duration of the send and is never written back.
+// Unseal only for rendering; never persist the returned plaintext.
 const unsealDispatchTokenEntries = (tokens, env) => {
   if (!Array.isArray(tokens)) return { tokens, failed: false };
   let failed = false;
@@ -144,13 +123,9 @@ const unsealDispatchTokenEntries = (tokens, env) => {
   return { tokens: unsealed, failed };
 };
 
-// The terminal scrub, as a fragment because both the success and the
-// retry/dead-letter/expired update need exactly the same expression. It removes the
-// top-level sealed reset token AND every sealed-or-legacy-plaintext token inside
-// `payload.tokens[]`, keeping each entry's `token_hash` so the row stays auditable.
-// `- 'token'` is deliberate even though nothing writes a nested plaintext any more:
-// 45 production rows predate the sealing and this is what clears them on the way
-// through. Reads `payload` as the pre-update row value, which is what we want.
+// Terminal updates scrub sealed tokens and legacy plaintext in payload.tokens[],
+// retaining token_hash for auditing. This shared fragment reads the pre-update
+// payload; legacy plaintext removal remains necessary for older dispatch rows.
 const scrubbedDispatchPayload = (sql) => sql`
   case
     when jsonb_typeof(payload -> 'tokens') = 'array' then
@@ -292,8 +267,7 @@ const sendDispatch = ({ dispatch, env, signal }) => {
   }
 
   const storedPayload = dispatch.payload || {};
-  // Unseal for rendering only. The plaintext lives in this local for the duration
-  // of the send and is never written back to the row.
+  // Unseal only for this send; never write plaintext back to the row.
   const { sealedToken, ...visiblePayload } = storedPayload;
   const nested = unsealDispatchTokenEntries(visiblePayload.tokens, env);
   const basePayload =
@@ -464,10 +438,8 @@ export const reconcileTourneyEmailDispatches = async ({
         error?.code === "TOURNEY_RECONCILIATION_DEADLINE_EXCEEDED";
       if (deadlineExceeded) throw error;
       const terminal = Number(dispatch.attempt_count || 0) >= 12;
-      // The sealed token is stripped on every terminal state, not just success:
-      // "expired" is the case where the code has positively established the token is
-      // dead, and "dead_letter" has exhausted all 12 attempts. A "retry" row still
-      // needs the sealed value for its next attempt, so it keeps it.
+      // Keep sealed tokens for retries; scrub every terminal state, including
+      // expired and dead-letter dispatches.
       await runTourneyTransaction({
         env,
         lockKey: `roo-tourney-email-retry:${dispatch.id}`,

@@ -388,7 +388,6 @@ export default function MeetTheTeam({ onSeoData }) {
   return (
     <section className="w-full text-ink">
       <div className="w-full bg-panel">
-        {/* Hero */}
         <div className="px-5">
           <div className="mx-auto max-w-6xl text-center pt-20 pb-16 relative">
             <h1 className="text-4xl sm:text-5xl font-bold bg-gradient-to-br from-ink to-accent bg-clip-text text-transparent">
@@ -402,7 +401,6 @@ export default function MeetTheTeam({ onSeoData }) {
           </div>
         </div>
 
-        {/* Founder */}
         {resolved.showFounder && resolved.founder?.name && (
           <div className="px-5">
             <div className="mx-auto max-w-6xl py-10">
@@ -487,7 +485,6 @@ export default function MeetTheTeam({ onSeoData }) {
           </div>
         )}
 
-        {/* Sections */}
         {renderedSections.map((section, sectionIndex) => {
           const isAmbassador = section.variant === "ambassador";
           return (
@@ -602,7 +599,6 @@ export default function MeetTheTeam({ onSeoData }) {
           );
         })}
 
-        {/* Footer CTA */}
         {hasFooterCta && (
           <div className="px-5">
             <div className="mx-auto max-w-6xl py-16 text-center">

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useLocation, Link, useNavigate } from "react-router-dom";
-import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
+import { PayPalScriptProvider, PayPalButtons, usePayPalScriptReducer } from "@paypal/react-paypal-js";
 import { motion } from "framer-motion";
 import packagePricing from "../lib/packagePricing";
 import {
@@ -63,6 +63,41 @@ const paymentSessionMatchesCheckout = (storedFingerprint, currentFingerprint) =>
     (key) => String(stored[key] || "") === String(current[key] || "")
   );
 };
+
+function PayPalCheckout({ children }) {
+  const [{ isResolved, isRejected, options }, dispatch] = usePayPalScriptReducer();
+
+  if (isRejected) {
+    return (
+      <div className="space-y-2 text-center">
+        <p role="alert" className="text-xs text-warning-text">
+          PayPal couldn’t load. Please try again.
+        </p>
+        <button
+          type="button"
+          className="glow-button h-10 w-full rounded-lg px-4 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info-border"
+          onClick={() => dispatch({ type: "resetOptions", value: options })}
+        >
+          Retry PayPal
+        </button>
+      </div>
+    );
+  }
+
+  if (!isResolved) {
+    return (
+      <p role="status" className="flex h-10 items-center justify-center text-xs text-ink-secondary">
+        Loading PayPal…
+      </p>
+    );
+  }
+
+  return (
+    <div className="paypal-checkout-shell relative z-0 h-10 w-full overflow-hidden rounded-lg bg-transparent sm:w-48 [&_iframe]:!rounded-[4px] [&_iframe]:!border-0 [&_iframe]:!bg-transparent [&_iframe]:!outline-0 [&_iframe]:!shadow-none">
+      {children}
+    </div>
+  );
+}
 
 export default function Payment({ hideFooter = false }) {
   const location = useLocation();
@@ -1943,17 +1978,8 @@ export default function Payment({ hideFooter = false }) {
                     </p>
                   </div>
 
-                  {/* The light edge around the button comes from inside PayPal's
-                      iframe, not from us: their button is a 4px-radius rounded rect
-                      over their own light document background, so the corner
-                      crescents outside that arc leak near-white (measured
-                      rgb(251,253,254)). Match the shell to the SDK's 40px button
-                      height, then clip the iframe at PayPal's own 4px radius.
-                      outline-0 rather than outline-none: Tailwind v3 compiles
-                      outline-none to a 2px *transparent* outline at 2px offset,
-                      which forced-colors and high-contrast modes repaint as a real
-                      ring. */}
-                  <div className="paypal-checkout-shell relative z-0 h-10 w-full overflow-hidden rounded-lg bg-transparent sm:w-48 [&_iframe]:!rounded-[4px] [&_iframe]:!border-0 [&_iframe]:!bg-transparent [&_iframe]:!outline-0 [&_iframe]:!shadow-none">
+                  {/* Clip the SDK’s 40px button at its 4px radius to hide the iframe’s light corners. Use outline-0: Tailwind v3’s outline-none leaves a transparent outline that forced-colors modes can repaint. */}
+                  <div className="w-full sm:w-48">
                     {canDisplayPaypalMethod ? (
                       <PayPalScriptProvider
                         options={{
@@ -1962,7 +1988,8 @@ export default function Payment({ hideFooter = false }) {
                           intent: "capture",
                         }}
                       >
-                        <PayPalButtons
+                        <PayPalCheckout>
+                          <PayPalButtons
                           fundingSource="paypal"
                           disabled={
                             paymentStatusBusy ||
@@ -2030,7 +2057,8 @@ export default function Payment({ hideFooter = false }) {
                               "Checkout closed. Your payment session is still reserved for PayPal."
                             );
                           }}
-                        />
+                          />
+                        </PayPalCheckout>
                       </PayPalScriptProvider>
                     ) : (
                       <p className="text-xs text-warning-text text-center">

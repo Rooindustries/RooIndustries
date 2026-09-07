@@ -14,11 +14,11 @@ const pgBin = String(
 );
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "roo-document-outbox-"));
 const dataDir = path.join(tempRoot, "pgdata");
-const socketDir = path.join(tempRoot, "socket");
+const postgresHost = process.env.ROO_TEST_POSTGRES_HOST || "127.0.0.1";
 const port = 56000 + Math.floor(Math.random() * 900);
 const database = "document_outbox_test";
 const username = os.userInfo().username;
-const databaseUrl = `postgresql://${username}@127.0.0.1:${port}/${database}`;
+const databaseUrl = `postgresql://${username}@${postgresHost}:${port}/${database}`;
 let started = false;
 
 const run = (command, args, options = {}) => {
@@ -485,22 +485,22 @@ const credentialV1Catalog = (sql) => sql`
 let sql;
 let summary;
 try {
-  fs.mkdirSync(socketDir);
   run(path.join(pgBin, "initdb"), [
     "-D",
     dataDir,
     "--no-locale",
     "--encoding=UTF8",
   ]);
+  fs.appendFileSync(path.join(dataDir, "pg_hba.conf"), "\nhost all all samehost trust\n");
   run(
     path.join(pgBin, "pg_ctl"),
-    ["-D", dataDir, "-o", `-p ${port} -k ${socketDir}`, "-w", "start"],
+    ["-D", dataDir, "-o", `-p ${port} -h ${postgresHost} -k ''`, "-w", "start"],
     { stdio: "ignore" },
   );
   started = true;
   run(path.join(pgBin, "createdb"), [
     "-h",
-    "127.0.0.1",
+    postgresHost,
     "-p",
     String(port),
     database,
@@ -508,7 +508,7 @@ try {
   const bootstrapFile = writeTemp("bootstrap.sql", bootstrap);
   run(path.join(pgBin, "psql"), [
     "-h",
-    "127.0.0.1",
+    postgresHost,
     "-p",
     String(port),
     "-d",
@@ -520,7 +520,7 @@ try {
   ]);
   run(path.join(pgBin, "psql"), [
     "-h",
-    "127.0.0.1",
+    postgresHost,
     "-p",
     String(port),
     "-d",
@@ -535,7 +535,7 @@ try {
   ]);
   run(path.join(pgBin, "psql"), [
     "-h",
-    "127.0.0.1",
+    postgresHost,
     "-p",
     String(port),
     "-d",
@@ -549,12 +549,12 @@ try {
     ),
   ]);
   run(path.join(pgBin, "psql"), [
-    "-h", "127.0.0.1", "-p", String(port), "-d", database,
+    "-h", postgresHost, "-p", String(port), "-d", database,
     "-v", "ON_ERROR_STOP=1", "-f",
     path.join(root, "supabase/migrations/20260715130000_harden_credential_recovery_saga.sql"),
   ]);
   run(path.join(pgBin, "psql"), [
-    "-h", "127.0.0.1", "-p", String(port), "-d", database,
+    "-h", postgresHost, "-p", String(port), "-d", database,
     "-v", "ON_ERROR_STOP=1", "-f",
     path.join(root, "supabase/migrations/20260715130100_add_credential_recovery_queue_index.sql"),
   ]);
@@ -562,7 +562,7 @@ try {
   const credentialV1Before = await credentialV1Catalog(sql);
   assert.equal(credentialV1Before.length, 7);
   run(path.join(pgBin, "psql"), [
-    "-h", "127.0.0.1", "-p", String(port), "-d", database,
+    "-h", postgresHost, "-p", String(port), "-d", database,
     "-v", "ON_ERROR_STOP=1", "-f",
     path.join(
       root,
@@ -572,7 +572,7 @@ try {
   const credentialV1After = await credentialV1Catalog(sql);
   assert.deepEqual(credentialV1After, credentialV1Before);
   run(path.join(pgBin, "psql"), [
-    "-h", "127.0.0.1", "-p", String(port), "-d", database,
+    "-h", postgresHost, "-p", String(port), "-d", database,
     "-v", "ON_ERROR_STOP=1", "-f",
     path.join(
       root,
@@ -678,7 +678,7 @@ try {
   const triggerFile = writeTemp("reject-outbox.sql", triggerFailure);
   run(path.join(pgBin, "psql"), [
     "-h",
-    "127.0.0.1",
+    postgresHost,
     "-p",
     String(port),
     "-d",
@@ -2540,7 +2540,7 @@ try {
   assert.equal(readiness.result.documentMutationMirror.ready, true);
 
   run(path.join(pgBin, "psql"), [
-    "-h", "127.0.0.1", "-p", String(port), "-d", database,
+    "-h", postgresHost, "-p", String(port), "-d", database,
     "-v", "ON_ERROR_STOP=1", "-f",
     path.join(
       root,

@@ -714,6 +714,11 @@ export default async function handler(req, res) {
       const recordSet = { ...doc };
       delete recordSet._id;
       delete recordSet._type;
+      if (isInternalPaymentFinalization) {
+        // Access tokens and recovery bind to the original checkout pricing.
+        delete recordSet.pricingFingerprint;
+        delete recordSet.pricingSnapshot;
+      }
 
       if (existingRecord?._id) {
         if (existingRecord.status === PAYMENT_STATUS_REFUNDED) {

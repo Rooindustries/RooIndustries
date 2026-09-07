@@ -10,7 +10,7 @@ const loadLegacyRoutePage = () => {
   jest.doMock("react-router-dom", () => ({
     __esModule: true,
     MemoryRouter,
-  }), { virtual: true });
+  }));
   jest.doMock("../App.jsx", () => ({
     __esModule: true,
     AppContent,

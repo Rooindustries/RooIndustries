@@ -1,35 +1,71 @@
 const fs = require("fs");
 const path = require("path");
 
-const maxInitialJsBytes = 250 * 1024;
+const { gzipSync } = require("zlib");
+
+// Compressed modern JS per initial route or lazy import, with each shared file
+// counted once per group. Legacy nomodule polyfills are excluded. These are
+// build-byte budgets, not measured page-load timings.
+const maxJsGzipBytes = 250 * 1024;
 const maxMediaBytes = 25 * 1024 * 1024;
-
 const errors = [];
-const warnings = [];
+const buildDir = path.resolve(process.env.NEXT_DIST_DIR || ".next");
+const chunkSizes = new Map();
 
-const isProductionNextBuild = () =>
-  fs.existsSync(path.join(process.cwd(), ".next", "BUILD_ID")) &&
-  fs.existsSync(path.join(process.cwd(), ".next", "build-manifest.json"));
-
-const nextChunkDir = path.join(process.cwd(), ".next", "static", "chunks");
-if (fs.existsSync(nextChunkDir) && isProductionNextBuild()) {
-  const chunkFiles = fs
-    .readdirSync(nextChunkDir)
-    .filter((name) => name.endsWith(".js"));
-
-  const appChunk = chunkFiles.find((name) => name.startsWith("main-app"));
-  if (appChunk) {
-    const size = fs.statSync(path.join(nextChunkDir, appChunk)).size;
-    if (size > maxInitialJsBytes) {
-      errors.push(
-        `Initial app JS chunk is ${size} bytes (budget ${maxInitialJsBytes}).`
-      );
+const measureJs = (files) => {
+  let rawBytes = 0;
+  let gzipBytes = 0;
+  const uniqueFiles = [...new Set(files.filter((file) => file.endsWith(".js")))];
+  for (const file of uniqueFiles) {
+    if (!chunkSizes.has(file)) {
+      const contents = fs.readFileSync(path.join(buildDir, file));
+      chunkSizes.set(file, {
+        rawBytes: contents.length,
+        gzipBytes: gzipSync(contents).length,
+      });
     }
+    const size = chunkSizes.get(file);
+    rawBytes += size.rawBytes;
+    gzipBytes += size.gzipBytes;
   }
-} else if (fs.existsSync(nextChunkDir)) {
-  warnings.push(
-    "Skipping initial JS chunk budget because .next is not a production build. Run npm run build before checking release bundle size."
+  return { rawBytes, gzipBytes, fileCount: uniqueFiles.length };
+};
+
+const checkJsGroup = (label, files) => {
+  const { rawBytes, gzipBytes, fileCount } = measureJs(files);
+  console.log(`${label}: ${gzipBytes} gzip bytes, ${rawBytes} raw bytes, ${fileCount} JS files.`);
+  if (gzipBytes > maxJsGzipBytes) {
+    errors.push(`${label} is ${gzipBytes} gzip bytes (budget ${maxJsGzipBytes}).`);
+  }
+};
+
+try {
+  if (!fs.existsSync(path.join(buildDir, "BUILD_ID"))) {
+    throw new Error("A production build is required. Run npm run build before checking release budgets.");
+  }
+  const readManifest = (name) => JSON.parse(fs.readFileSync(path.join(buildDir, name), "utf8"));
+  const buildManifest = readManifest("build-manifest.json");
+  const appManifest = readManifest("app-build-manifest.json");
+  const lazyManifest = readManifest("react-loadable-manifest.json");
+  const pages = Object.entries(appManifest.pages).filter(([name]) =>
+    name.endsWith("/page") || name === "/not-found"
   );
+  if (!pages.length) throw new Error("Production app manifest contains no pages.");
+
+  for (const [name, files] of pages) {
+    const ancestors = name.split("/").slice(0, -1);
+    const ancestorFiles = ancestors.flatMap((_, index) =>
+      ["layout", "error"].flatMap((entry) =>
+        appManifest.pages[`${ancestors.slice(0, index + 1).join("/")}/${entry}`] || []
+      )
+    );
+    checkJsGroup(`Modern initial ${name}`, [...buildManifest.rootMainFiles, ...ancestorFiles, ...files]);
+  }
+  for (const [name, entry] of Object.entries(lazyManifest)) {
+    checkJsGroup(`Lazy ${name}`, entry.files);
+  }
+} catch (error) {
+  errors.push(`Cannot verify production build JS: ${error.message}`);
 }
 
 const publicDir = path.join(process.cwd(), "public");
@@ -62,5 +98,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-warnings.forEach((warning) => console.warn(`Performance budget warning: ${warning}`));
 console.log("Performance budgets passed.");

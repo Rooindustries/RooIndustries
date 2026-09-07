@@ -23,12 +23,8 @@ const hashMutationFingerprint = (value) => {
     .padStart(8, "0")}`;
 };
 
-// Credential fields are dropped before fingerprinting. The key only has to
-// identify the operation well enough to dedupe a retry of the same submission, and
-// hashMutationFingerprint is two non-cryptographic 32-bit hashes -- fingerprinting
-// a password or reset token through it produces a cheap, unsalted, offline-testable
-// verifier that then sits in sessionStorage for up to 24 hours on any pending or
-// ambiguous command. Reset, owner-account and registration bodies all carry one.
+// Exclude credentials: this non-cryptographic fingerprint is stored in
+// sessionStorage and would expose an offline password/token verifier.
 const CREDENTIAL_BODY_FIELDS = new Set([
   "password",
   "passwordConfirm",
@@ -44,9 +40,7 @@ const fingerprintableBody = (body) => {
   try {
     parsed = JSON.parse(body);
   } catch {
-    // Not JSON, so the fields cannot be identified individually. Fall back to the
-    // body's length, which distinguishes different submissions without carrying
-    // any of their content.
+    // Use only length when fields cannot be parsed and redacted.
     return `len:${body.length}`;
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {

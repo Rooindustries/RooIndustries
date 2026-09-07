@@ -276,10 +276,8 @@ export default async function handler(req, res) {
         value: { skipped: true, reason: "supabase_unavailable" },
         error: null,
       });
-  // The 5-minute payment cron must not also run the heavy tourney
-  // reconciliation: under load it saturates the database and takes the whole
-  // site down. Set TOURNEY_RECONCILIATION_CRON_ENABLED to re-enable it here;
-  // the dedicated /api/tourney/reconcile route still runs it on demand.
+  // Keep heavy tourney reconciliation out of the payment cron unless explicitly
+  // enabled; /api/tourney/reconcile remains available for on-demand runs.
   const tourneyReconciliationPromise = isEnabledTourneyFlag(
     process.env.TOURNEY_RECONCILIATION_CRON_ENABLED
   )

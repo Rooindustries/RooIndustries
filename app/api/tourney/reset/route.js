@@ -60,9 +60,7 @@ export async function POST(request) {
       token: payload.token,
       accounts,
     });
-    // Must accept the same roles the forgot route mints tokens for, viewer included.
-    // A narrower list here would validate a viewer's token, decline the admin branch,
-    // then fall through to the player reset and reject a token it had just accepted.
+    // Accept the same admin roles as forgot, including viewer.
     const nextAdminAccounts = adminAccount && TOURNEY_ADMIN_ROLES.includes(adminAccount.role)
       ? await buildUpdatedTourneyAccounts({
           action: "change-password",
@@ -93,9 +91,8 @@ export async function POST(request) {
           await writePersistedTourneyAccountsJson({
             accountsJson: renderTourneyAccountsJson(nextAdminAccounts),
             actorUsername: adminAccount.username,
-            // buildUpdatedTourneyAccounts returns the bcrypt digest only, and Auth
-            // discards a digest when updating an existing user. Without the plaintext
-            // the reset would report success and leave the old password working.
+            // Auth needs plaintext to update an existing password;
+            // buildUpdatedTourneyAccounts returns only its bcrypt digest.
             credentialUsername: adminAccount.username,
             credentialPassword: payload.password,
             expectedCurrentHash,

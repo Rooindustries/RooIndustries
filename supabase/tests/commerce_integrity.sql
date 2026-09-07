@@ -338,7 +338,7 @@ begin
   begin
     perform public.roo_cleanup_expired_supabase_holds(v_generation + 1, 10);
     raise exception 'expired Supabase hold cleanup accepted a stale generation';
-  exception when sqlstate '40001' then null;
+  exception when sqlstate 'PT409' then null;
   end;
 
   -- Exact response replay must succeed even if a pause begins after commit.
@@ -494,7 +494,7 @@ begin
       v_generation + 1
     );
     raise exception 'stale referral generation was accepted';
-  exception when sqlstate '40001' then null;
+  exception when sqlstate 'PT409' then null;
   end;
 
   update migration.commerce_control

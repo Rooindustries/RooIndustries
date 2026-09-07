@@ -1,8 +1,4 @@
-// Annotated OBS interface mockups for the overlay setup guide. Hand-drawn
-// SVG so the guide never hotlinks stock screenshots and the arrows always
-// point at exactly the right control. Drawn against the real OBS 32.2.1
-// macOS dialogs (verified on-screen); every step label sits outside the
-// dialog frames so labels and inputs can never collide.
+// OBS 32.2.1 macOS dialogs, with guide labels outside the frames.
 
 const PANEL = "#262b31";
 const PANEL_DARK = "#1d2126";
@@ -57,7 +53,6 @@ const ArrowDefs = () => (
   </defs>
 );
 
-// Step 1: the Sources dock with the + menu open and Add Source highlighted.
 export const ObsFigureAddSource = () => (
   <svg viewBox="0 0 480 300" role="img" aria-label="OBS Sources dock with the plus menu open and Add Source highlighted">
     <ArrowDefs />
@@ -69,7 +64,6 @@ export const ObsFigureAddSource = () => (
         <text x="38" y={61 + i * 30} fill={MUTED} fontSize="11.5">{name}</text>
       </g>
     ))}
-    {/* bottom toolbar: +, remove, properties, move up, move down */}
     <rect x="22" y="252" width="180" height="28" rx="5" fill={PANEL_DARK} stroke={BORDER} />
     <circle cx="40" cy="266" r="9" fill={ROW} stroke={ACCENT} strokeWidth="2.5" />
     <text x="36.5" y="270" fill={TEXT} fontSize="12" fontWeight="700">+</text>
@@ -78,7 +72,6 @@ export const ObsFigureAddSource = () => (
     <text x="84" y="270" fill={MUTED} fontSize="12">⚙</text>
     <polyline points="108,269 113,262 118,269" fill="none" stroke={MUTED} strokeWidth="1.8" />
     <polyline points="132,263 137,270 142,263" fill="none" stroke={MUTED} strokeWidth="1.8" />
-    {/* the + menu: Add Source is the top entry in OBS 32.2 */}
     <rect x="34" y="94" width="176" height="148" rx="6" fill={PANEL_DARK} stroke={BORDER} />
     <rect x="38" y="98" width="168" height="26" rx="4" fill={HIGHLIGHT} stroke={ACCENT} strokeWidth="1.5" />
     <text x="50" y="115" fill={TEXT} fontSize="11.5" fontWeight="700">Add Source</text>
@@ -91,10 +84,7 @@ export const ObsFigureAddSource = () => (
   </svg>
 );
 
-// Step 2: the OBS 32.2 Add Source dialog — pick Browser in the type list,
-// then the dashed "+ Add a new Browser" button. There is no name field in
-// 32.2; the source is created with a default name and renamed afterwards.
-// Sidebar order matches the real macOS dialog.
+// OBS 32.2 creates Browser sources with a default name; renaming happens later.
 export const ObsFigureNameSource = () => (
   <svg viewBox="0 0 480 330" role="img" aria-label="OBS Add Source dialog with Browser selected and the Add a new Browser button highlighted">
     <ArrowDefs />
@@ -154,17 +144,13 @@ export const ObsFigureNameSource = () => (
   </svg>
 );
 
-// Steps 3–5: the Browser source properties dialog. The full field inventory
-// of the real 32.2.1 macOS dialog, including the one-time welcome banner
-// first-time users see. Only URL, Width and Height need values; step labels
-// sit in the left gutter, outside the frame.
+// Browser properties in OBS 32.2.1 macOS field order, including the first-use banner.
 export const ObsFigureProperties = () => (
   <svg viewBox="0 0 480 500" role="img" aria-label="OBS browser source properties with URL, width and height highlighted">
     <ArrowDefs />
     <rect x="110" y="8" width="362" height="484" rx="8" fill={PANEL} stroke={BORDER} />
     <rect x="110" y="8" width="362" height="26" rx="8" fill={PANEL_DARK} stroke={BORDER} />
     <text x="124" y="26" fill={TEXT} fontSize="12" fontWeight="700">Properties for &apos;Browser&apos;</text>
-    {/* one-time welcome banner shown the first time a browser source is added */}
     <rect x="126" y="40" width="330" height="76" rx="5" fill="#1e2a52" stroke={BORDER} />
     <circle cx="152" cy="70" r="13" fill="none" stroke="#e5e7eb" strokeWidth="2.5" />
     <path d="M152 60 a10 10 0 0 1 9 13 M145 79 a10 10 0 0 1 -2 -14 M159 76 a10 10 0 0 1 -12 -3" fill="none" stroke="#e5e7eb" strokeWidth="2" />
@@ -172,7 +158,6 @@ export const ObsFigureProperties = () => (
     <text x="176" y="76" fill={MUTED} fontSize="8">Browser sources display a webpage and are</text>
     <text x="176" y="87" fill={MUTED} fontSize="8">commonly used for widgets and alerts.</text>
     <text x="176" y="103" fill={MUTED} fontSize="8" fontStyle="italic">Set the URL to the page you&apos;d like to display.</text>
-    {/* fields, in the real dialog order */}
     <rect x="124" y="128" width="11" height="11" rx="2" fill={FIELD} stroke={BORDER} />
     <text x="142" y="137" fill={MUTED} fontSize="9.5">Local file</text>
     <text x="124" y="158" fill={MUTED} fontSize="10">URL</text>
@@ -205,7 +190,6 @@ export const ObsFigureProperties = () => (
     <text x="450" y="437" fill={DIM} fontSize="8">▾</text>
     <rect x="122" y="448" width="140" height="18" rx="4" fill={ROW} stroke={BORDER} />
     <text x="192" y="461" fill={MUTED} fontSize="9" textAnchor="middle">Refresh cache of current page</text>
-    {/* bottom bar */}
     <rect x="122" y="472" width="0" height="0" />
     <rect x="124" y="470" width="70" height="20" rx="5" fill={ROW} stroke={BORDER} />
     <text x="159" y="484" fill={MUTED} fontSize="10" textAnchor="middle">Defaults</text>

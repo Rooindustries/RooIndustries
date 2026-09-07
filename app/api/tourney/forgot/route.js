@@ -82,11 +82,7 @@ export async function POST(request) {
     const accounts = await readEffectiveTourneyAccounts();
     const adminAccount =
       findTourneyAccount(login, accounts) || findTourneyAccountByEmail(login, accounts);
-    // Every admin role that can sign in must be able to recover a password, viewer
-    // included. Listing only owner and caster made a viewer fall through to the player
-    // lookup, match nothing, and receive the generic success response with no email
-    // ever sent -- silently unrecoverable. TOURNEY_ADMIN_ROLES is the same list the
-    // login path authenticates against, so the two cannot drift apart again.
+    // Recovery must accept the same admin roles as login, including viewer.
     const adminEmail =
       adminAccount?.active && TOURNEY_ADMIN_ROLES.includes(adminAccount.role)
         ? getTourneyAdminEmail(adminAccount)
@@ -113,12 +109,8 @@ export async function POST(request) {
           adminAccount?.active !== false &&
           TOURNEY_ADMIN_ROLES.includes(adminAccount?.role)
         ) {
-          // A recognised, login-capable administrator with no deliverable address.
-          // Falling through to createTourneyResetToken would look up a *player* by
-          // this login, match nothing, and return the generic success response, so
-          // the operator would never learn the account is unrecoverable. Log it and
-          // stop here instead. The response stays generic on purpose: telling the
-          // caller "that admin has no email" would confirm the username exists.
+          // Do not fall through to player recovery for an admin without email.
+          // Log the missing address, but keep the response generic to prevent enumeration.
           logSafeError(
             "Tournament administrator cannot receive a password reset",
             Object.assign(

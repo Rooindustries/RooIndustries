@@ -603,11 +603,7 @@ export async function GET(request) {
         userId: result.data.user.id,
       });
       if (!roleSession.cookie) {
-        // Link completion is offered for every linkable provider, not just
-        // Discord. Both sign-in pages show Google, so gating this on Discord left
-        // an unlinked Google sign-in with nowhere to go: it fell through to the
-        // generic failure and the person could not reach the password form that
-        // would have linked the account.
+        // Unlinked sign-ins from either provider must reach password-based linking.
         if (
           finalized.action === "signin" &&
           PENDING_LINK_PROVIDERS.includes(finalized.provider) &&

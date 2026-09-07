@@ -1,12 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 
-// commandStorageKey used to fingerprint `method\nurl\nbody` where the body carries a
-// plaintext password (reset, owner-account, registration) or a reset token. The hash
-// is two non-cryptographic 32-bit functions, so the resulting sessionStorage key was
-// an unsalted, cheaply reproducible password-derived verifier -- testable offline by
-// any same-origin reader once the other body fields are known -- and it persisted for
-// up to 24 hours on any pending or ambiguous command.
+// Idempotency keys persist in sessionStorage for up to 24 hours. Including raw
+// credentials in their non-cryptographic hash would expose an offline password
+// verifier to same-origin readers, so credential values must be excluded.
 
 const source = fs.readFileSync(
   path.resolve("app/tourney/tourneyMutation.js"),

@@ -10,7 +10,6 @@ const FOCUSABLE_SELECTOR = [
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
 
-// Category label is now just the text from Sanity, or "Tool" if empty
 const categoryLabel = (cat) => cat || "Tool";
 
 const optimizeIconUrl = (url) => {
@@ -189,7 +188,6 @@ export default function Tools() {
         ...(loading ? { minHeight: "1840px" } : {}),
       }}
     >
-      {/* Heading */}
       <header className="text-center mb-10">
         <p className="text-xs tracking-[0.3em] uppercase text-accent mb-2">
           Tools I Use
@@ -240,7 +238,6 @@ export default function Tools() {
               fileUrl,
             } = tool;
 
-            // Decide final download href
             const href =
               downloadMode === "hosted" && fileUrl ? fileUrl : downloadUrl;
 
@@ -259,14 +256,11 @@ export default function Tools() {
                 key={_id}
                 className="group relative rounded-2xl border border-line-input bg-[color:var(--color-surface-solid)] shadow-[0_0_25px_rgba(15,23,42,0.9)] hover:shadow-[var(--shadow-card-glow)] overflow-hidden transition-all duration-300"
               >
-                {/* subtle gradient glow background */}
                 <div className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.18),transparent_55%),radial-gradient(circle_at_bottom,_rgba(8,47,73,0.7),transparent_55%)]" />
 
                 <div className="relative p-5 sm:p-6 flex flex-col h-full">
-                  {/* top row: icon + tag */}
                   <div className="flex items-start justify-between gap-3 mb-5">
                     <div className="w-9 h-9 rounded-xl bg-surface-input border border-line-input flex items-center justify-center overflow-hidden shrink-0">
-                      {/* SEO: ensure tool icons are crawlable with descriptive alt text. */}
                       {iconUrl ? (
                         <img
                           src={iconUrl}
@@ -289,7 +283,6 @@ export default function Tools() {
                     )}
                   </div>
 
-                  {/* title + desc */}
                   <div className="flex-1">
                     <h2 className="text-lg sm:text-xl font-semibold text-info-text">
                       {title}
@@ -300,7 +293,6 @@ export default function Tools() {
                       </p>
                     )}
 
-                    {/* editable note about where it downloads from */}
                     <p className="mt-2 text-[10px] text-ink-muted">
                       {downloadNote
                         ? downloadNote
@@ -310,7 +302,6 @@ export default function Tools() {
                     </p>
                   </div>
 
-                  {/* buttons */}
                   <div className="mt-5 flex flex-col sm:flex-row gap-3">
                     {officialSite && (
                       <a
@@ -378,7 +369,6 @@ export default function Tools() {
             </button>
 
             <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-surface-input border border-line-input flex items-center justify-center shadow-info-soft">
-              {/* SEO: keep the modal icon descriptive for screen readers. */}
               {pendingDownload.iconUrl ? (
                 <img
                   src={pendingDownload.iconUrl}

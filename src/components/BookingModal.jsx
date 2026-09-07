@@ -13,9 +13,7 @@ const FOCUSABLE_SELECTOR = [
 
 export default function BookingModal({ open, onClose, children }) {
   const contentRef = useRef(null);
-  // The unscaled dialog boundary. contentRef measures the design-width content
-  // for scaling, so it excludes the close button that sits outside the scaler;
-  // the focus trap and the click-outside guard need the whole dialog.
+  // Focus trapping and outside-click detection need the unscaled dialog boundary, including the close button.
   const wrapperRef = useRef(null);
   const closeButtonRef = useRef(null);
   const previousFocusRef = useRef(null);
@@ -35,7 +33,6 @@ export default function BookingModal({ open, onClose, children }) {
   const MOBILE_PADDING_Y = 80;
   const DESKTOP_PADDING_Y = 36;
 
-  // 1. STRICT 780px BREAKPOINT
   useLayoutEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 780px)");
     setIsMobile(mediaQuery.matches);
@@ -45,7 +42,6 @@ export default function BookingModal({ open, onClose, children }) {
     return () => mediaQuery.removeEventListener("change", handler);
   }, []);
 
-  // 2. SCALING LOGIC
   useLayoutEffect(() => {
     if (!open) return; 
 
@@ -56,9 +52,7 @@ export default function BookingModal({ open, onClose, children }) {
 
       const paddingY = currentIsMobile ? MOBILE_PADDING_Y : DESKTOP_PADDING_Y;
       const DESKTOP_SCALE_BOOST = 1.03;
-      // The reservation banner floats over the modal; shrink the height
-      // budget by its published footprint so content scales to the space
-      // above it instead of underneath it.
+      // Reserve the floating banner’s footprint so the modal scales into the space above it.
       const bannerClearance =
         parseFloat(
           getComputedStyle(document.documentElement).getPropertyValue(
@@ -70,12 +64,10 @@ export default function BookingModal({ open, onClose, children }) {
       let baseWidth = 0;
 
       if (currentIsMobile) {
-        // Mobile Mode
         baseWidth = Math.max(width, 550);
         scale = width / baseWidth;
         scale = Math.min(scale, 1.0);
       } else {
-        // Desktop Mode
         baseWidth = 1150; 
         const widthScale = (width * 0.95) / baseWidth;
 
@@ -131,8 +123,7 @@ export default function BookingModal({ open, onClose, children }) {
     const observer = new ResizeObserver(() => scheduleLayout());
     if (contentRef.current) observer.observe(contentRef.current);
 
-    // The banner publishes its footprint on the root element's style;
-    // re-run layout when it appears, resizes, or goes away.
+    // Recalculate layout when the banner changes its published footprint.
     const clearanceObserver = new MutationObserver(scheduleLayout);
     clearanceObserver.observe(document.documentElement, {
       attributes: true,
@@ -148,7 +139,6 @@ export default function BookingModal({ open, onClose, children }) {
     };
   }, [isMobile, children, open]);
 
-  // 3. SCROLL LOCK
   useEffect(() => {
     if (!open) return;
     const originalStyleBody = window.getComputedStyle(document.body).overflow;
@@ -163,7 +153,6 @@ export default function BookingModal({ open, onClose, children }) {
     };
   }, [open]);
 
-  // Keyboard focus management
   useEffect(() => {
     if (!open || !contentRef.current) return;
     previousFocusRef.current = document.activeElement;
@@ -205,7 +194,6 @@ export default function BookingModal({ open, onClose, children }) {
     };
   }, [open, onClose]);
 
-  // -- ANIMATION CONFIG --
   const springTransition = {
     ...(lowPerformanceMode
       ? { duration: 0.16, ease: [0.2, 0, 0, 1] }
@@ -259,13 +247,11 @@ export default function BookingModal({ open, onClose, children }) {
             `}</style>
           )}
 
-          {/* BACKDROP */}
           <div 
             className="booking-modal-overlay glass-overlay low-perf-overlay fixed inset-0"
             style={{ pointerEvents: "none" }}
           />
 
-          {/* SCROLL CONTAINER */}
           <div 
             className="min-h-full w-full flex flex-col cursor-pointer"
             style={{
@@ -274,10 +260,7 @@ export default function BookingModal({ open, onClose, children }) {
             }}
           >
             
-            {/* ANIMATED SIZE WRAPPER — also the dialog boundary, so the close
-                button stays inside the aria-modal subtree a screen reader
-                confines its virtual cursor to. Its box tracks the visible
-                dialog; the scaler inside is a presentation-only transform. */}
+            {/* Keep the close button inside the aria-modal subtree. This wrapper tracks the visible dialog; the inner scaler only transforms its contents. */}
             <motion.div
               ref={wrapperRef}
               role="dialog"
@@ -295,14 +278,7 @@ export default function BookingModal({ open, onClose, children }) {
               layout={!lowPerformanceMode}
               transition={springTransition}
             >
-              {/* CLOSE BUTTON (X)
-                  Lives on the unscaled wrapper rather than inside the content
-                  scaler: the scaler shrinks by dynamicScale, which shrank the
-                  control to a ~14px sliver and pinned it to the 1150px design
-                  width's left edge, far from the centred card. Anchoring it here
-                  keeps it beside the dialog's own top-right corner at a constant
-                  size, with a 44px touch target.
-              */}
+              {/* Anchor the close button to the unscaled dialog so it stays aligned and retains its 44px touch target. */}
               <button
                 id="booking-modal-close"
                 aria-label="Close"
@@ -317,7 +293,6 @@ export default function BookingModal({ open, onClose, children }) {
                 <span aria-hidden="true">×</span>
               </button>
 
-              {/* CONTENT SCALER */}
               <motion.div
                 data-booking-scaler="true"
                 className="shadow-none outline-none overflow-visible absolute top-0 left-0 origin-top-left cursor-default"
@@ -339,13 +314,11 @@ export default function BookingModal({ open, onClose, children }) {
                 }
                 transition={lowPerformanceMode ? fadeTransition : springTransition}
               >
-                {/* CONTENT CONTAINER */}
                 <div
                   ref={contentRef}
                   id={isMobile ? "booking-mobile-override" : undefined}
                   style={{ width: renderWidth, position: 'relative' }}
                 >
-                  {/* CHILDREN */}
                   {React.Children.map(children, child => {
                     if (React.isValidElement(child)) {
                       return React.cloneElement(child, { isMobile });

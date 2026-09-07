@@ -59,7 +59,6 @@ export default function RefRegister() {
       JSON.stringify({ discordUsername, email, paypalEmail, slug })
     );
   };
-  // Debounced slug availability check
   useEffect(() => {
     if (!slug) {
       setSlugAvailable(null);
@@ -94,7 +93,6 @@ export default function RefRegister() {
     const trimmedPassword = password.trim();
     const trimmedConfirm = confirm.trim();
 
-    // Basic validation
     if (
       !trimmedDiscordUsername ||
       !trimmedEmail ||
@@ -107,7 +105,6 @@ export default function RefRegister() {
       return;
     }
 
-    // basic email format check
     const emailRegex = /\S+@\S+\.\S+/;
     if (!emailRegex.test(trimmedEmail)) {
       showToast("error", "Please enter a valid login email address.");
@@ -124,7 +121,6 @@ export default function RefRegister() {
       return;
     }
 
-    // Ensure slug availability checked (force-check if null)
     if (slugAvailable === false) {
       showToast("error", "Referral code is already taken.");
       return;
@@ -146,7 +142,7 @@ export default function RefRegister() {
           showToast("error", "Referral code is already taken.");
           return;
         } else if (availability === true) {
-          setSlugAvailable(true); // available
+          setSlugAvailable(true);
         } else {
           showToast("error", "Could not validate referral code. Try again.");
           return;
@@ -233,7 +229,6 @@ export default function RefRegister() {
           variant="referral"
         />
 
-        {/* Discord Username */}
         <div>
           <label htmlFor="ref-register-discord" className="text-accent text-sm font-semibold">
             Discord Username
@@ -251,7 +246,6 @@ export default function RefRegister() {
           </p>
         </div>
 
-        {/* Email */}
         <div>
           <label htmlFor="ref-register-email" className="text-accent text-sm font-semibold">
             Login Email
@@ -274,7 +268,6 @@ export default function RefRegister() {
           </p>
         ) : null}
 
-        {/* PayPal Email */}
         <div>
           <label htmlFor="ref-register-paypal" className="text-accent text-sm font-semibold">
             PayPal Email (for payouts)
@@ -293,7 +286,6 @@ export default function RefRegister() {
           </p>
         </div>
 
-        {/* Referral Code */}
         <div>
           <label htmlFor="ref-register-slug" className="text-accent text-sm font-semibold">
             Referral Code
@@ -320,7 +312,6 @@ export default function RefRegister() {
           )}
         </div>
 
-        {/* Password */}
         {!socialIdentity ? <div>
           <label htmlFor="ref-register-password" className="text-accent text-sm font-semibold">Password</label>
           <input
@@ -335,7 +326,6 @@ export default function RefRegister() {
           />
         </div> : null}
 
-        {/* Confirm Password */}
         {!socialIdentity ? <div>
           <label htmlFor="ref-register-confirm" className="text-accent text-sm font-semibold">
             Confirm Password
@@ -351,7 +341,6 @@ export default function RefRegister() {
           />
         </div> : null}
 
-        {/* Submit */}
         <button
           type="submit"
           disabled={loading}
@@ -367,7 +356,6 @@ export default function RefRegister() {
         </button>
       </form>
 
-      {/* Toast */}
       {toast && (
         <div
           role={toast.type === "error" ? "alert" : "status"}

@@ -11,6 +11,7 @@ jest.mock("framer-motion", () => ({
 }));
 
 jest.mock("@paypal/react-paypal-js", () => ({
+  usePayPalScriptReducer: () => [{ isResolved: true, isRejected: false }],
   PayPalButtons: () => <button type="button">PayPal</button>,
   PayPalScriptProvider: ({ children }) => <>{children}</>,
 }));

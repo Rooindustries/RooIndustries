@@ -82,7 +82,7 @@ export default function UpgradeXoc() {
 
     const { booking, xoc, upgradePrice } = upgradeInfo;
 
-    // Safety: if for any reason upgradePrice <= 0, don't let them pay.
+    // Upgrades must have a positive price.
     if (!upgradePrice || upgradePrice <= 0) {
       alert(
         "This order does not require an upgrade payment. Please contact support on Discord."
@@ -101,8 +101,6 @@ export default function UpgradeXoc() {
       booking.displayTime ||
       (utcStart ? formatLocalTime(utcStart, clientTimeZone) : "");
 
-    // Build bookingData exactly like your normal Booking → Payment flow,
-    // but as an upgrade with the new price.
       const bookingData = {
         discord: booking.discord || "",
         email: orderEmail.trim(),
@@ -110,7 +108,6 @@ export default function UpgradeXoc() {
         mainGame: booking.mainGame || "",
         message: booking.message || "",
 
-      // UPGRADE package metadata
       packageTitle: `${xoc.title} (Upgrade)`,
       packagePrice: `$${upgradePrice.toFixed(2)}`,
       status: "pending",
@@ -120,7 +117,6 @@ export default function UpgradeXoc() {
       localTimeZone: clientTimeZone,
       startTimeUTC: booking.startTimeUTC || "",
 
-      // NEW: link this upgrade back to original booking in emails / DB
       originalOrderId: booking._id,
       upgradeIntentToken: String(upgradeInfo.upgradeIntentToken || "").trim(),
     };
@@ -152,7 +148,6 @@ export default function UpgradeXoc() {
         customers who want to upgrade to Performance Vertex Max.
       </p>
 
-      {/* Order ID input */}
       <div className="mt-8 rounded-2xl border border-line-input bg-surface-card shadow-[var(--shadow-card-glow-info)] backdrop-blur-md p-6 sm:p-7">
         <label
           className="block text-sm font-semibold mb-2"
@@ -217,7 +212,6 @@ export default function UpgradeXoc() {
         )}
       </div>
 
-      {/* Upgrade summary */}
       {upgradeInfo && (
         <div className="mt-8 rounded-2xl border border-success-border bg-success-soft shadow-success-soft backdrop-blur-lg p-6 sm:p-7">
           <h3 className="text-[20px] font-bold text-ink">

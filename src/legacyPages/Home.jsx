@@ -18,9 +18,7 @@ import ReferralBox from "../components/ReferralBox";
 import SupportedGames from "../components/SupportedGames";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 
-// Lazy-load framer-motion-heavy sections to keep them out of the initial bundle.
-// DeferredSection already defers rendering until near-viewport; lazy() defers
-// the JS download/parse too — saving ~52 KB (gzipped) from first-load.
+// DeferredSection delays rendering; lazy() also delays downloading and parsing these motion-heavy sections.
 const loadServices = () => import("../components/Services");
 const loadPackages = () => import("../components/Packages");
 const loadFaq = () => import("../components/Faq");
@@ -89,8 +87,7 @@ export default function Home({ initialData = null }) {
     isHomeSectionHash(resolveSectionIntentHash()) ||
     isHomeSectionHash(readPendingSectionTarget())
   );
-  // In low-perf mode, render all sections eagerly — CSS content-visibility: auto
-  // handles lazy painting. This avoids 250-471ms React render burst stalls.
+  // Render sections eagerly in low-perf mode to avoid React render bursts; content-visibility defers painting.
   const eagerAll = forceEagerSections || isLowPerf;
 
   useEffect(() => {

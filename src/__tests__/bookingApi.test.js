@@ -2929,12 +2929,39 @@ describe("booking reservation API", () => {
     nowSpy.mockRestore();
   });
 
-  test("atomically consumes the internal proof claim and finalization lease", async () => {
+  test.each([false, true])("atomically consumes the internal proof claim and finalization lease with referral=%s", async (withReferral) => {
     const startTimeUTC = "2025-01-15T10:00:00.000Z";
     const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
     const paymentRecordId = "paymentRecord.paypal.order.internal_order";
     const claimId = "paymentProofClaim.paypal.internal_order";
     const leaseId = "lease_internal_order";
+    const { buildPricingFingerprint } = require("../server/api/payment/paymentRecord");
+    const { hashPaymentFingerprint, isPaymentAccessTokenRecordMatch } = require("../server/api/payment/accessToken");
+    const pricingSnapshot = {
+      grossAmount: 84.99,
+      netAmount: withReferral ? 80.74 : 84.99,
+      discountAmount: withReferral ? 4.25 : 0,
+      discountPercent: withReferral ? 5 : 0,
+      referralDiscountAmount: withReferral ? 4.25 : 0,
+      referralDiscountPercent: withReferral ? 5 : 0,
+      commissionPercent: withReferral ? 10 : 0,
+      commissionAmount: withReferral ? 8.5 : 0,
+      effectiveReferralId: withReferral ? "ref_frozen" : "",
+      effectiveReferralCode: withReferral ? "frozen-code" : "",
+    };
+    if (withReferral) store.referrals.push({ _id: "ref_frozen", _type: "referral", successfulReferrals: 0 });
+    const pricingFingerprint = buildPricingFingerprint({
+      provider: "paypal", packageTitle: "Performance Vertex Overhaul",
+      startTimeUTC, email: CLIENT_EMAIL, currency: "USD",
+      grossAmount: pricingSnapshot.grossAmount, netAmount: pricingSnapshot.netAmount,
+      discountAmount: pricingSnapshot.discountAmount,
+      referralId: pricingSnapshot.effectiveReferralId,
+      referralCode: pricingSnapshot.effectiveReferralCode,
+    });
+    const tokenClaims = {
+      paymentRecordId, provider: "paypal", backend: "sanity", cutoverGeneration: 0,
+      pricingFingerprintHash: hashPaymentFingerprint(pricingFingerprint),
+    };
     store.paymentRecords.push({
       _id: paymentRecordId,
       _rev: "payment_record_rev",
@@ -2945,7 +2972,8 @@ describe("booking reservation API", () => {
       paymentProofClaimId: claimId,
       finalizationLeaseId: leaseId,
       finalizationLeaseExpiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-      pricingSnapshot: { grossAmount: 84.99, netAmount: 84.99 },
+      pricingSnapshot: { ...pricingSnapshot },
+      pricingFingerprint,
     });
     store.paymentProofClaims.push({
       _id: claimId,
@@ -2970,6 +2998,7 @@ describe("booking reservation API", () => {
           paymentProvider: "paypal",
           paypalOrderId: "internal_order",
           paymentRecordId,
+          referralCode: pricingSnapshot.effectiveReferralCode,
           startTimeUTC,
           localTimeZone: "America/Los_Angeles",
           displayDate: formatClientDate(utcDate, "America/Los_Angeles"),
@@ -2994,11 +3023,13 @@ describe("booking reservation API", () => {
       bookingId: res.body.bookingId,
       finalizationLeaseId: "",
     });
+    expect(isPaymentAccessTokenRecordMatch({ payload: tokenClaims, record: store.paymentRecords[0] })).toBe(true);
+    expect(store.paymentRecords[0].pricingSnapshot).toEqual(pricingSnapshot);
     expect(store.bookings).toHaveLength(1);
     expect(store.bookings[0]).toMatchObject({
       packagePrice: "$84.99",
       grossAmount: 84.99,
-      netAmount: 84.99,
+      netAmount: pricingSnapshot.netAmount,
     });
   });
 

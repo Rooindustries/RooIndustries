@@ -15,11 +15,8 @@ export const PENDING_TOURNEY_DISCORD_LINK_COOKIE =
   "roo_pending_tourney_discord_link";
 export const PENDING_DISCORD_LINK_MAX_AGE_SECONDS = 15 * 60;
 
-// Google joined Discord as a linkable provider, so the pending-link proof carries
-// which provider it is for. The cookie names stay Discord-branded: they are the
-// names already sitting in live browsers, and a rename would silently drop the
-// proof for anyone mid-link across the deploy. Google gets its own cookie so a
-// person holding one pending proof cannot have it consumed as the other provider.
+// Keep Discord's existing cookie names so deployments preserve pending proofs.
+// Google uses a separate cookie; proofs must remain bound to their provider.
 export const PENDING_GOOGLE_LINK_COOKIE = "roo_pending_google_link";
 export const PENDING_TOURNEY_GOOGLE_LINK_COOKIE =
   "roo_pending_tourney_google_link";
@@ -186,9 +183,8 @@ export const readPendingDiscordLink = ({
     const validVersion =
       (parsed?.v === 2 && parsed.flow === normalizedFlow) ||
       (parsed?.v === 1 && normalizedFlow === "referral" && !parsed.flow);
-    // A v2 proof minted before Google was linkable carries no provider and is
-    // always a Discord proof. Anything newer must name the provider it was read
-    // as, so a Google proof can never be spent as a Discord link or vice versa.
+    // Legacy v2 proofs without a provider are Discord-only. New proofs must name
+    // the requested provider to prevent cross-provider reuse.
     const proofProvider = parsed?.provider
       ? normalizePendingLinkProvider(parsed.provider)
       : "discord";
@@ -212,10 +208,8 @@ export const readPendingDiscordLink = ({
   }
 };
 
-// Finds whichever pending proof the browser is actually holding. The caller may
-// name a provider, but a person can arrive with either, so the named one is tried
-// first and the remaining providers after it -- returning the provider found so
-// the link is completed against the identity that was really authenticated.
+// Prefer the requested provider, then inspect other pending proofs. Return the
+// proof's provider so linking uses the identity that actually authenticated.
 export const resolvePendingSocialLink = ({
   env = process.env,
   flow = "referral",
@@ -280,10 +274,8 @@ const hasTourneyAccount = (account) =>
   (account?.roles || []).some((role) => String(role).startsWith("tourney_")) ||
   Boolean(account?.tourney_legacy_player_id);
 
-// Scoped to the domain being linked. A Discord account that already owns an
-// account in the *same* domain cannot be linked, because that would fold two real
-// accounts together. Owning an account in the *other* domain is expected -- that
-// is the referral-then-tourney case -- and is handled as a cross-domain link.
+// Refuse same-domain account collisions to avoid merging accounts. An identity
+// owned by the other domain is eligible for a cross-domain link.
 const hasDomainAccount = (account, accountScope = "referral") =>
   accountScope === "tourney"
     ? hasTourneyAccount(account)
@@ -380,12 +372,9 @@ export const linkPendingDiscordIdentity = async ({
     return { linked: false, reason: "discord_account_not_linkable" };
   }
 
-  // The social account belongs to this person's other domain. Supabase allows
-  // one auth.identities row per provider account, so the principals are never
-  // merged -- merging would soft-delete the other domain's principal. The domain
-  // being linked records its own projected link row instead, which is what its
-  // reads resolve against. Both directions are supported: a referral identity can
-  // be linked into tourney and a tourney identity into referral.
+  // Supabase allows one auth.identities row per provider account. Project a link
+  // into the requested domain without merging or soft-deleting either principal;
+  // this supports both referral-to-tourney and tourney-to-referral linking.
   if (hasOtherDomainAccount(pendingAccount, normalizedAccountScope)) {
     const identity = socialIdentityOf(pendingUser, normalizedProvider);
     const providerSubject = String(
