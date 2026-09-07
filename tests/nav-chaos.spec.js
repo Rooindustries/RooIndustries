@@ -6,8 +6,14 @@ const BASE_URL = process.env.BASE_URL;
 if (!BASE_URL) {
   throw new Error("BASE_URL is required for nav-chaos tests.");
 }
-const testUrl = new URL(BASE_URL);
+let testUrl;
+try {
+  testUrl = new URL(BASE_URL);
+} catch {
+  testUrl = null;
+}
 if (
+  !testUrl ||
   !["http:", "https:"].includes(testUrl.protocol) ||
   !["localhost", "127.0.0.1", "[::1]", "100.127.48.111"].includes(testUrl.hostname)
 ) {

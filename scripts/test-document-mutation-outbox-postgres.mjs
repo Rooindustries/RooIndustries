@@ -18,7 +18,13 @@ const postgresHost = process.env.ROO_TEST_POSTGRES_HOST || "127.0.0.1";
 const port = 56000 + Math.floor(Math.random() * 900);
 const database = "document_outbox_test";
 const username = os.userInfo().username;
-const databaseUrl = `postgresql://${username}@${postgresHost}:${port}/${database}`;
+// Host/port arrays preserve IPv6 literals in the client's multi-host parser.
+const databaseOptions = {
+  host: [postgresHost],
+  port: [port],
+  database,
+  username,
+};
 let started = false;
 
 const run = (command, args, options = {}) => {
@@ -558,7 +564,7 @@ try {
     "-v", "ON_ERROR_STOP=1", "-f",
     path.join(root, "supabase/migrations/20260715130100_add_credential_recovery_queue_index.sql"),
   ]);
-  sql = postgres(databaseUrl, { max: 8 });
+  sql = postgres({ ...databaseOptions, max: 8 });
   const credentialV1Before = await credentialV1Catalog(sql);
   assert.equal(credentialV1Before.length, 7);
   run(path.join(pgBin, "psql"), [
@@ -1882,7 +1888,7 @@ try {
     false,
   );
 
-  const lockSql = postgres(databaseUrl, { max: 1 });
+  const lockSql = postgres({ ...databaseOptions, max: 1 });
   let releaseSourceLock;
   let sourceLockReady;
   const sourceLockStarted = new Promise((resolve) => {
