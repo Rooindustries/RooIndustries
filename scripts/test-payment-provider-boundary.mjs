@@ -63,6 +63,8 @@ const server = http.createServer(async (req, res) => {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
 });
+// Operator requirement: this synthetic HTTP fixture must be reachable from
+// the Mac over Tailscale. It contains no real provider credentials or payments.
 server.listen(0, "100.127.48.111");
 await once(server, "listening");
 const localOrigin = `http://100.127.48.111:${server.address().port}`;

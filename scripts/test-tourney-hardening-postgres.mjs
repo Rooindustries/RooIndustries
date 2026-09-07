@@ -704,10 +704,13 @@ insert into tourney_external_operations(
     supabaseFinalReadinessRepair
   );
   psql("supabase_unsafe", supabasePostInstallOldWriter);
-  const unsafeSupabase = postgres(
-    `postgres://${postgresHost}:${port}/supabase_unsafe`,
-    { max: 1, prepare: false }
-  );
+  const unsafeSupabase = postgres({
+    host: [postgresHost],
+    port: [port],
+    database: "supabase_unsafe",
+    max: 1,
+    prepare: false,
+  });
   await assertSql(
     unsafeSupabase,
     `select to_regclass('tourney.cutover_control_operations') is not null
@@ -1095,10 +1098,13 @@ insert into tourney_external_operations(
     path.join(root, "scripts/tourney-schema-v4-expand-legacy.sql")
   );
   psql("legacy_unsafe", legacyOldWriter);
-  const unsafeLegacy = postgres(
-    `postgres://${postgresHost}:${port}/legacy_unsafe`,
-    { max: 1, prepare: false }
-  );
+  const unsafeLegacy = postgres({
+    host: [postgresHost],
+    port: [port],
+    database: "legacy_unsafe",
+    max: 1,
+    prepare: false,
+  });
   await assertSql(
     unsafeLegacy,
     `select to_regclass('public.tourney_cutover_control_operations') is not null
