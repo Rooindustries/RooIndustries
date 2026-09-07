@@ -10,7 +10,7 @@ export default function Book({ hideFooter = false, compact = false }) {
   return (
     <>
       <section
-        className={`relative z-10 ${padY} px-6 text-ink text-center`}
+        className={`ri-booking relative z-10 ${padY} px-6 text-ink text-center`}
         style={{ margin: 0 }}
       >
         <h2

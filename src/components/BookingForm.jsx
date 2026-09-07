@@ -205,7 +205,7 @@ const formatCalendarDateLabel = (date) => {
 
 function BookingStepTracker({ step }) {
   return (
-    <div className="mb-6" data-testid="booking-step-tracker">
+    <div className="ri-booking-progress mb-6" data-testid="booking-step-tracker">
       <ol
         aria-label="Booking progress"
         className="grid grid-cols-3 gap-2 text-center"
@@ -2312,7 +2312,7 @@ export default function BookingForm({ isMobile }) {
   return (
     <>
       <div
-        className={`text-ink transition-opacity duration-300 ${
+        className={`ri-booking text-ink transition-opacity duration-300 ${
           pageFadeIn ? "opacity-100" : "opacity-0"
         }`}
       >
@@ -2337,12 +2337,12 @@ export default function BookingForm({ isMobile }) {
               <div className="mb-8 max-w-lg mx-auto bg-surface-card border border-line-input rounded-xl p-6 text-center shadow-[0_0_15px_rgba(14,165,233,0.25)]">
                 {selectedPackage.tag && (
                   <div className="mb-2">
-                    <span className="bg-info text-accent-contrast text-xs font-semibold px-3 py-1 rounded-full shadow-info-soft">
+                    <span className="ri-booking-package-tag bg-info text-accent-contrast text-xs font-semibold px-3 py-1 rounded-full shadow-info-soft">
                       {selectedPackage.tag}
                     </span>
                   </div>
                 )}
-                <h3 className="text-2xl font-bold text-accent">
+                <h3 className="ri-booking-package-title text-2xl font-bold text-accent">
                   {selectedPackage.title}
                 </h3>
                 <PriceDisplay pkg={selectedPackage} size="summary" className="mt-3" />
@@ -2620,7 +2620,7 @@ export default function BookingForm({ isMobile }) {
                         setModalPackage(planPackage || selectedPackage);
                         setShowVertexModal(true);
                       }}
-                      className={`glow-button w-full sm:w-64 py-3 rounded-lg font-semibold text-lg transition-all duration-300 inline-flex items-center justify-center gap-2 ${
+                      className={`ri-booking-secondary glow-button w-full sm:w-64 py-3 rounded-lg font-semibold text-lg transition-all duration-300 inline-flex items-center justify-center gap-2 ${
                         isMobile ? "" : ""
                       }`}
                     >
@@ -2636,7 +2636,7 @@ export default function BookingForm({ isMobile }) {
                       aria-disabled={
                         !selectedDate || !selectedSlot || lockingSlot
                       }
-                      className={`glow-button w-full sm:w-64 py-3 rounded-lg font-semibold text-lg transition-all duration-300 ${
+                      className={`ri-booking-primary glow-button w-full sm:w-64 py-3 rounded-lg font-semibold text-lg transition-all duration-300 ${
                         !selectedDate || !selectedSlot || lockingSlot
                           ? "opacity-60"
                           : ""
@@ -2751,7 +2751,7 @@ export default function BookingForm({ isMobile }) {
                     <button
                       type="button"
                       onClick={handleReviewBeforePayment}
-                      className={`glow-button w-full min-w-0 py-3 rounded-lg font-semibold transition inline-flex items-center justify-center gap-2 ${
+                      className={`ri-booking-primary glow-button w-full min-w-0 py-3 rounded-lg font-semibold transition inline-flex items-center justify-center gap-2 ${
                         !isStep2Complete ? "opacity-60 cursor-not-allowed" : ""
                       }`}
                     >
@@ -3001,7 +3001,7 @@ export default function BookingForm({ isMobile }) {
                         <button
                           type="button"
                           onClick={returnToPayment}
-                          className="glow-button inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-lg py-3 font-semibold transition"
+                          className="ri-booking-primary glow-button inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-lg py-3 font-semibold transition"
                         >
                           Return to payment
                           <span className="glow-line glow-line-top" />
@@ -3025,7 +3025,7 @@ export default function BookingForm({ isMobile }) {
                           disabled={
                             validatingCode || !!restoredCodeCandidates
                           }
-                          className={`glow-button inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-lg py-3 font-semibold transition ${
+                          className={`ri-booking-primary glow-button inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-lg py-3 font-semibold transition ${
                             loading || validatingCode || restoredCodeCandidates
                               ? "cursor-wait opacity-60"
                               : ""
@@ -3070,7 +3070,7 @@ export default function BookingForm({ isMobile }) {
           <AnimatePresence>
             {showVertexModal && (
               <motion.div
-                className={`fixed inset-0 z-[100] ${
+                className={`ri-booking fixed inset-0 z-[100] ${
                   modalMode === "view" ? "bg-transparent" : "bg-black/60"
                 } backdrop-blur-lg flex items-center justify-center px-4`}
                 variants={overlayVariants}
@@ -3210,7 +3210,7 @@ export default function BookingForm({ isMobile }) {
                                 }
                           );
                         }}
-                        className="glow-button w-full mt-6 py-3 rounded-lg font-semibold text-white shadow-[0_0_20px_rgba(56,189,248,0.4)] inline-flex items-center justify-center gap-2 opacity-90 hover:opacity-100"
+                        className="ri-booking-primary glow-button w-full mt-6 py-3 rounded-lg font-semibold text-white shadow-[0_0_20px_rgba(56,189,248,0.4)] inline-flex items-center justify-center gap-2 opacity-90 hover:opacity-100"
                         style={{ transition: "opacity 0.9s ease-in-out" }}
                       >
                         {displayPackage?.buttonText || "Book Now"}
