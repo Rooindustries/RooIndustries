@@ -15,6 +15,7 @@ const pgBin = String(process.env.PG_BIN || "").trim() || spawnSync(
 ).stdout.trim();
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "roo-backend-integrity-"));
 const dataDir = path.join(tempRoot, "pgdata");
+const postgresHost = process.env.ROO_TEST_POSTGRES_HOST || "127.0.0.1";
 const port = 57300 + Math.floor(Math.random() * 500);
 
 const run = (command, args, options = {}) => {
@@ -31,7 +32,7 @@ const run = (command, args, options = {}) => {
 };
 
 const applyMigration = (name) => run(path.join(pgBin, "psql"), [
-  "-h", "127.0.0.1",
+  "-h", postgresHost,
   "-p", String(port),
   "-d", "postgres",
   "-v", "ON_ERROR_STOP=1",
@@ -164,14 +165,15 @@ let started = false;
 let sql = null;
 try {
   run(path.join(pgBin, "initdb"), ["-D", dataDir, "--auth=trust", "--no-locale"]);
+  fs.appendFileSync(path.join(dataDir, "pg_hba.conf"), "\nhost all all samehost trust\n");
   run(path.join(pgBin, "pg_ctl"), [
     "-D", dataDir,
-    "-o", `-p ${port} -h 127.0.0.1`,
+    "-o", `-p ${port} -h ${postgresHost} -k ''`,
     "-w", "start",
   ], { stdio: "ignore" });
   started = true;
   run(path.join(pgBin, "psql"), [
-    "-h", "127.0.0.1",
+    "-h", postgresHost,
     "-p", String(port),
     "-d", "postgres",
     "-v", "ON_ERROR_STOP=1",
@@ -182,7 +184,7 @@ try {
   applyMigration("20260718011000_bound_commerce_mutations.sql");
   applyMigration("20260718012000_require_active_licensing_principals.sql");
 
-  sql = postgres(`postgres://127.0.0.1:${port}/postgres`, {
+  sql = postgres(`postgres://${postgresHost}:${port}/postgres`, {
     max: 8,
     prepare: false,
   });
@@ -357,7 +359,7 @@ try {
   sql = null;
 
   run(path.join(pgBin, "psql"), [
-    "-h", "127.0.0.1",
+    "-h", postgresHost,
     "-p", String(port),
     "-d", "postgres",
     "-v", "ON_ERROR_STOP=1",
@@ -379,7 +381,7 @@ try {
     `,
   ]);
   applyMigration("20260718013000_refresh_tourney_shadow_acceptance.sql");
-  const tourneySql = postgres(`postgres://127.0.0.1:${port}/postgres`, {
+  const tourneySql = postgres(`postgres://${postgresHost}:${port}/postgres`, {
     max: 1,
     prepare: false,
   });

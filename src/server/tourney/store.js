@@ -1213,12 +1213,8 @@ export const runTourneyParity = async ({
   const policy = resolveTourneyStorePolicy(env);
   const sourceBackend = policy.primaryBackend;
   const targetBackend = sourceBackend === "supabase" ? "legacy" : "supabase";
-  // Parity compares both backends by reading every mirrored table in full and
-  // hashing the result. With the mirror retired there is no second backend to
-  // compare against, and connecting to it anyway is what exhausted the legacy
-  // project's 5 GB monthly transfer allowance: ~286 runs a day over a 4.4 MB
-  // working set is roughly 37 GB a month of egress to verify data nothing reads.
-  // Bail out before opening the target connection.
+  // Parity reads every mirrored table from both backends. When mirroring is
+  // disabled, skip the target connection to avoid unnecessary database egress.
   if (!policy.mirrorEnabled) {
     return {
       sourceBackend,

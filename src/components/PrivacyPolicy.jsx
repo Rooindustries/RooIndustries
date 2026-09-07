@@ -5,22 +5,18 @@ import { getPublicContent } from "../lib/publicContentClient";
 export default function PrivacyPolicy() {
   const [data, setData] = useState(null);
 
-  // Helper function to process text strings within paragraphs, converting the specific email to a link
   const renderTextWithLinks = (text) => {
     if (typeof text !== "string") return text;
 
-    // 1. Clean up markdown artifacts like [email](mailto:...) -> email
-    // This addresses the issue where the link is displayed twice due to bad formatting in Sanity.
+    // Normalize CMS markdown emails before adding a single mailto link.
     let cleanText = text.replace(
       /\[(serviroo@rooindustries\.com)\]\(.*?\)/gi,
       "$1"
     );
 
-    // 2. Split text to isolate the email
     const parts = cleanText.split(/(serviroo@rooindustries\.com)/gi);
 
     return parts.map((part, i) => {
-      // 3. If this part is the email, apply the mailto link and style
       if (part.toLowerCase() === "serviroo@rooindustries.com") {
         return (
           <a
@@ -36,7 +32,6 @@ export default function PrivacyPolicy() {
     });
   };
 
-  // Fetch from Sanity
   useEffect(() => {
     getPublicContent("privacy-policy")
       .then(setData)
@@ -47,10 +42,8 @@ export default function PrivacyPolicy() {
 
   return (
     <div className="py-20 max-w-3xl mx-auto p-6 text-ink">
-      {/* Title */}
       {data.title && <h1 className="text-3xl font-bold mb-6">{data.title}</h1>}
 
-      {/* Render Sections */}
       {data.sections?.map((section, i) => (
         <div key={i} className="mb-8">
           {section.heading && (
@@ -105,7 +98,6 @@ export default function PrivacyPolicy() {
                 block: {
                   normal: ({ children }) => (
                     <p className="mb-4 leading-relaxed text-ink-secondary">
-                      {/* Use the helper function here to process plain text children */}
                       {React.Children.map(children, (child) =>
                         renderTextWithLinks(child)
                       )}
@@ -125,7 +117,6 @@ export default function PrivacyPolicy() {
         </div>
       ))}
 
-      {/* Last updated */}
       {data.lastUpdated && (
         <p className="mt-8 text-sm text-ink-muted">
           Last updated: {data.lastUpdated}

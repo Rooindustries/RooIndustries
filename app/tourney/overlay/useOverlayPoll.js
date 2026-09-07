@@ -11,7 +11,10 @@ export const useOverlayPoll = ({ url, intervalMs, version, onUpdate, enabled = t
   useEffect(() => {
     if (!enabled || !url || !intervalMs) return undefined;
     let active = true;
+    let pending = false;
     const tick = async () => {
+      if (pending) return;
+      pending = true;
       try {
         const response = await fetch(url, { cache: "no-store" });
         if (!response.ok) return;
@@ -22,6 +25,8 @@ export const useOverlayPoll = ({ url, intervalMs, version, onUpdate, enabled = t
         }
       } catch {
         // Keep the last good render on stream; retry next tick.
+      } finally {
+        pending = false;
       }
     };
     const id = setInterval(tick, intervalMs);

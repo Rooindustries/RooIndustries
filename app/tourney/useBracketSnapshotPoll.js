@@ -12,16 +12,31 @@ export const useBracketSnapshotPoll = (initialSnapshot, intervalMs = 5000) => {
 
   useEffect(() => {
     let active = true;
+    let pending = false;
     const tick = async () => {
+      if (pending) return;
+      pending = true;
+      const versionAtStart = versionRef.current;
       try {
         const response = await fetch("/api/tourney/bracket", { cache: "no-store" });
         if (!response.ok) return;
         const body = await response.json();
         if (!active || body?.ok !== true) return;
         const nextVersion = snapshotVersion(body);
-        if (nextVersion && nextVersion !== versionRef.current) setSnapshot(body);
+        if (nextVersion) {
+          // A successful command may have installed a newer snapshot while
+          // this read was pending. Preserve that command result.
+          setSnapshot((current) =>
+            snapshotVersion(current) === versionAtStart &&
+            nextVersion !== versionAtStart
+              ? body
+              : current
+          );
+        }
       } catch {
         // Keep the last good bracket visible and retry on the next interval.
+      } finally {
+        pending = false;
       }
     };
 

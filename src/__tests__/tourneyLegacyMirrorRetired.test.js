@@ -1,11 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
-// The legacy Neon project exhausted its 5 GB monthly transfer allowance because
-// parity opened a connection to it on every reconciliation run -- roughly 286 runs
-// a day, each full-scanning a 4.4 MB working set on both backends, about 37 GB a
-// month spent verifying data that no user-facing route reads. These tests pin the
-// retirement so a later change cannot quietly reconnect to it.
+// Retired-mirror checks must stop before connecting to Neon; otherwise recurring
+// parity scans spend egress on data that no user-facing route reads.
 
 const readSource = (relative) =>
   fs.readFileSync(path.resolve(relative), "utf8");

@@ -51,18 +51,19 @@ export default async function handler(req, res) {
     }
 
     const code = (referral?.slug?.current || '').toLowerCase();
-    const earnings = await fetchReferralEarnings({
-      client: readClient,
-      referralId,
-      referralCode: code,
-    });
-
-    const packages = await readClient.fetch(
-      `*[_type == "package"] | order(coalesce(order, 999) asc, title asc){
-        title,
-        order
-      }`
-    );
+    const [earnings, packages] = await Promise.all([
+      fetchReferralEarnings({
+        client: readClient,
+        referralId,
+        referralCode: code,
+      }),
+      readClient.fetch(
+        `*[_type == "package"] | order(coalesce(order, 999) asc, title asc){
+          title,
+          order
+        }`
+      ),
+    ]);
 
     const earningsByPackage = earnings.byPackage || {};
     const packageBreakdown = (Array.isArray(packages) ? packages : []).map(

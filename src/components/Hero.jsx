@@ -49,7 +49,6 @@ function CtaNoteBalanced({ icon, text }) {
     const match = () => {
       const p2 = line2PRef.current;
       if (!p2) return;
-      // Reset to base
       p2.style.fontSize = "";
       // Wait for layout
       requestAnimationFrame(() => {

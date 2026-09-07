@@ -82,7 +82,7 @@ const pgBin = configuredPgBin || (pgConfig.status === 0
   : "/opt/homebrew/bin");
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "roo-tourney-v4-"));
 const dataDir = path.join(tempRoot, "pgdata");
-const socketDir = path.join(tempRoot, "socket");
+const postgresHost = process.env.ROO_TEST_POSTGRES_HOST || "127.0.0.1";
 const port = 55432 + Math.floor(Math.random() * 900);
 
 const run = (command, args, options = {}) => {
@@ -109,13 +109,13 @@ const writeTemp = (name, contents) => {
 };
 
 const psql = (database, ...files) => {
-  const args = ["-h", "127.0.0.1", "-p", String(port), "-d", database, "-v", "ON_ERROR_STOP=1"];
+  const args = ["-h", postgresHost, "-p", String(port), "-d", database, "-v", "ON_ERROR_STOP=1"];
   for (const file of files) args.push("-f", file);
   run(path.join(pgBin, "psql"), args);
 };
 
 const psqlFails = (database, file) => spawnSync(path.join(pgBin, "psql"), [
-  "-h", "127.0.0.1", "-p", String(port), "-d", database,
+  "-h", postgresHost, "-p", String(port), "-d", database,
   "-v", "ON_ERROR_STOP=1", "-f", file,
 ], { cwd: root, encoding: "utf8", env: process.env });
 
@@ -166,6 +166,8 @@ create schema if not exists accounts;
 create schema if not exists migration;
 create schema if not exists extensions;
 create schema if not exists vault;
+create schema if not exists commerce;
+create table commerce.bookings(id uuid primary key);
 create extension if not exists pgcrypto with schema extensions;
 create table vault.secrets(
   id uuid primary key,
@@ -388,24 +390,24 @@ let summary = null;
 try {
   const version = run(path.join(pgBin, "postgres"), ["--version"]);
   assert.match(version, /PostgreSQL\) 17\./, "PostgreSQL 17 is required");
-  fs.mkdirSync(socketDir, { mode: 0o700 });
   run(path.join(pgBin, "initdb"), ["-D", dataDir, "--auth=trust", "--no-locale"]);
+  fs.appendFileSync(path.join(dataDir, "pg_hba.conf"), "\nhost all all samehost trust\n");
   run(path.join(pgBin, "pg_ctl"), [
-    "-D", dataDir, "-o", `-p ${port} -h 127.0.0.1 -k ${socketDir}`, "-w", "start",
+    "-D", dataDir, "-o", `-p ${port} -h ${postgresHost === "127.0.0.1" ? postgresHost : `127.0.0.1,${postgresHost}`} -k ''`, "-w", "start",
   ], { stdio: "ignore" });
   started = true;
   for (const database of [
     "supabase_unsafe", "legacy_unsafe", "supabase_fixture", "legacy_fixture",
   ]) {
     run(path.join(pgBin, "createdb"), [
-      "-h", "127.0.0.1", "-p", String(port), database,
+      "-h", postgresHost, "-p", String(port), database,
     ]);
   }
 
   const databaseUser = os.userInfo().username;
   const quotedDatabaseUser = databaseUser.replaceAll('"', '""');
   run(path.join(pgBin, "psql"), [
-    "-h", "127.0.0.1", "-p", String(port), "-d", "postgres",
+    "-h", postgresHost, "-p", String(port), "-d", "postgres",
     "-v", "ON_ERROR_STOP=1", "-c",
     `alter role "${quotedDatabaseUser}" in database legacy_fixture set search_path=attacker`,
   ]);
@@ -460,14 +462,15 @@ try {
     process.env.PATH = previousPath;
   }
   run(path.join(pgBin, "psql"), [
-    "-h", "127.0.0.1", "-p", String(port), "-d", "postgres",
+    "-h", postgresHost, "-p", String(port), "-d", "postgres",
     "-v", "ON_ERROR_STOP=1", "-c",
     `alter role "${quotedDatabaseUser}" in database legacy_fixture reset search_path`,
   ]);
 
   const supabaseBootstrap = writeTemp(
     "supabase-bootstrap.sql",
-    commonBootstrap + extractSupabaseBusinessBase() + extractSupabaseControlBase() + authOperations + seedSql
+    commonBootstrap + extractSupabaseBusinessBase() + extractSupabaseControlBase() + authOperations +
+      fs.readFileSync(path.join(root, "supabase/migrations/20260729120000_add_tourney_session_entitlements.sql"), "utf8") + seedSql
   );
   const legacyBootstrap = writeTemp("legacy-bootstrap.sql", legacyBusinessBase());
   const supabaseControls = writeTemp("supabase-activation-controls.sql", supabaseActivationControls);
@@ -702,7 +705,7 @@ insert into tourney_external_operations(
   );
   psql("supabase_unsafe", supabasePostInstallOldWriter);
   const unsafeSupabase = postgres(
-    `postgres://127.0.0.1:${port}/supabase_unsafe`,
+    `postgres://${postgresHost}:${port}/supabase_unsafe`,
     { max: 1, prepare: false }
   );
   await assertSql(
@@ -1039,7 +1042,8 @@ insert into tourney_external_operations(
       ('20260715110000','add_referral_email_dispatch_ledger'),
       ('20260715115000','harden_commerce_readiness_evidence'),
       ('20260715120000','add_global_cms_publish_authority'),
-      ('20260715130100','add_credential_recovery_queue_index')
+      ('20260715130100','add_credential_recovery_queue_index'),
+      ('20260729120000','add_tourney_session_entitlements')
   `);
   const fullCapture = await unsafeSupabase.begin((transaction) =>
     captureFullLogicalSnapshotTransaction({
@@ -1092,7 +1096,7 @@ insert into tourney_external_operations(
   );
   psql("legacy_unsafe", legacyOldWriter);
   const unsafeLegacy = postgres(
-    `postgres://127.0.0.1:${port}/legacy_unsafe`,
+    `postgres://${postgresHost}:${port}/legacy_unsafe`,
     { max: 1, prepare: false }
   );
   await assertSql(
@@ -1545,7 +1549,7 @@ insert into accounts.discord_role_assignments(
       format: "roo-supabase-full-logical-snapshot-v1",
       capturedAt: "2026-07-15T00:00:00.000Z",
       sourceSnapshotId: "91000000-0000-4000-8000-000000000001",
-      sourceMigrationVersion: "20260715130100",
+      sourceMigrationVersion: "20260729120000",
       sourceMigrationNames: [...SUPABASE_FULL_EXPANDED_MIGRATION_NAMES],
       contractProfile: SUPABASE_FULL_EXPANDED_PROFILE,
       schemas: [...SUPABASE_FULL_SNAPSHOT_SCHEMAS],
@@ -2581,7 +2585,7 @@ insert into accounts.discord_role_assignments(
     capacityApproval,
     capacityReduction,
   ]);
-  assert.equal(approvalResult.status, "fulfilled", "concurrent approval did not settle safely");
+  assert.equal(approvalResult.status, "fulfilled", `concurrent approval did not settle safely: ${approvalResult.reason?.stack || ""}`);
   if (reductionResult.status === "rejected") {
     assert.equal(reductionResult.reason?.code, "TOURNEY_ROLE_CAPACITY_FULL");
   }

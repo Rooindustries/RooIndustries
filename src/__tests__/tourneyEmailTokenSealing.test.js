@@ -3,13 +3,9 @@ import {
   unsealTourneyEmailToken,
 } from "../server/tourney/emailDispatch.js";
 
-// `tourney.email_dispatches.payload` previously retained a plaintext one-hour reset
-// token forever: the success update never touched `payload`, and neither did the
-// retry/dead-letter/expired path -- including `expired`, the one case where the code
-// had positively established the token was dead. Production held 24 such rows (3
-// still live) plus 63 more copies captured into `tourney.mirror_outbox.record_data`
-// by the mirror trigger. For a player reset the dispatch row is the ONLY place the
-// plaintext exists, because `tourney_player_tokens` stores only its SHA-256.
+// Dispatch payloads need recoverable reset tokens; tourney_player_tokens stores
+// only their hashes. Seal queued credentials and scrub every terminal dispatch
+// path so completed or expired rows cannot retain usable tokens.
 
 const env = { TOURNEY_SESSION_SECRET: "test_tourney_session_secret_for_sealing" };
 
@@ -75,7 +71,6 @@ describe("dispatch payload sealing and terminal scrub", () => {
   test("the enqueue writes the sealed payload, never the raw one", () => {
     expect(source).toContain("const storedPayload = sealDispatchPayload(payload, env);");
     expect(source).toContain("${sql.json(storedPayload)}");
-    // The old insert bound the caller's payload object directly.
     expect(source).not.toContain("${sql.json(payload || {})}");
   });
 

@@ -1,26 +1,15 @@
 #!/usr/bin/env node
 
-// Executable regression for migration
+// Regression for migration
 // 20260726185500_scope_account_import_identity_link_conflict_by_domain.sql.
 //
-// Migration 20260726051500 replaced the global unique index on
-// accounts.identity_links -- (provider, provider_subject) -- with a domain-scoped
-// (domain, provider, provider_subject), and rewrote the two functions it defines.
-// It missed two older ones that still named the dropped target, so every tourney
-// admin credential sync and every native creator signup raised 42P10
-// (invalid_column_reference) on its trailing metadata write. The Supabase Auth
-// write had already landed by then, so the operation could never be marked
-// applied and kept reissuing a credential change that had already taken effect.
+// Both account write paths must target the domain-scoped identity index. A stale
+// conflict target raises 42P10 after Auth commits, leaving credential operations
+// unapplied and repeating password changes on retry.
 //
-// Production proved the imported-admin half drains, but the tourney hardening
-// harness stops at 20260726173000 and has neither accounts.creator_profiles nor
-// accounts.principal_domain, so roo_upsert_native_creator_account had no
-// executable coverage anywhere. This runs both against the real domain-scoped
-// index on a throwaway PostgreSQL 17 cluster.
-//
-// The schema comes from scripts/fixtures/account-domain-schema.sql, dumped
-// straight out of production with pg_dump --schema-only, so the fixture cannot
-// quietly drift from the constraint the functions actually run against.
+// Exercises imported admins and native creators on a throwaway PostgreSQL 17
+// cluster. scripts/fixtures/account-domain-schema.sql is a schema-only production
+// dump that supplies the domain-scoped constraints.
 
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
@@ -43,6 +32,7 @@ const temporaryBase = process.env.ROO_JOB_DIR
   : os.tmpdir();
 const tempRoot = fs.mkdtempSync(path.join(temporaryBase, "roo-account-domain-"));
 const dataDir = path.join(tempRoot, "pgdata");
+const postgresHost = process.env.ROO_TEST_POSTGRES_HOST || "127.0.0.1";
 const port = 57832 + Math.floor(Math.random() * 300);
 
 // LC_ALL is pinned because a macOS shell inheriting an unset/UTF-8-only locale
@@ -138,16 +128,17 @@ let started = false;
 let sql = null;
 try {
   run(path.join(pgBin, "initdb"), ["-D", dataDir, "--auth=trust", "--no-locale"]);
+  fs.appendFileSync(path.join(dataDir, "pg_hba.conf"), "\nhost all all samehost trust\n");
   run(
     path.join(pgBin, "pg_ctl"),
-    ["-D", dataDir, "-o", `-p ${port} -h 127.0.0.1`, "-w", "start"],
+    ["-D", dataDir, "-o", `-p ${port} -h ${postgresHost} -k ''`, "-w", "start"],
     { stdio: "ignore" }
   );
   started = true;
 
   const psql = (args) =>
     run(path.join(pgBin, "psql"), [
-      "-h", "127.0.0.1", "-p", String(port), "-d", "postgres",
+      "-h", postgresHost, "-p", String(port), "-d", "postgres",
       "-v", "ON_ERROR_STOP=1", ...args,
     ]);
 
@@ -155,7 +146,7 @@ try {
   psql(["-f", path.join(root, "scripts/fixtures/account-domain-schema.sql")]);
   psql(["-c", principalDomain]);
 
-  sql = postgres(`postgres://127.0.0.1:${port}/postgres`, { max: 4, prepare: false });
+  sql = postgres(`postgres://${postgresHost}:${port}/postgres`, { max: 4, prepare: false });
 
   // The dumped index is the whole point: if the fixture had the old global unique
   // index instead, both functions would pass while production still failed.
@@ -235,9 +226,8 @@ try {
     "a function still targets the dropped unique index"
   );
 
-  // 1. Imported tourney admin. This is the exact call that raised 42P10 on every
-  //    admin credential sync, and the domain must resolve to 'tourney' from the
-  //    tourney_accounts row rather than the column's 'referral' default.
+  // Resolve the imported admin's domain from tourney_accounts, not the column's
+  // 'referral' default.
   await sql`select public.roo_finalize_imported_account_metadata(
     ${importedUser}::uuid, 'rev-1', ${digest("hash-1")}, true
   )`;
@@ -249,8 +239,6 @@ try {
   assert.equal(imported.provider, "email");
   process.stderr.write("[account-domain] imported admin metadata resolves to the tourney domain\n");
 
-  // Idempotent: the retry that used to fail must now update in place, because the
-  // whole defect was an operation that could never be marked applied.
   await sql`select public.roo_finalize_imported_account_metadata(
     ${importedUser}::uuid, 'rev-2', ${digest("hash-2")}, true
   )`;
@@ -261,7 +249,6 @@ try {
   assert.equal(importedLinks[0].count, 1, "the retry inserted a duplicate instead of updating");
   process.stderr.write("[account-domain] finalize is idempotent across retries\n");
 
-  // 2. Native creator signup -- the half with no coverage anywhere until now.
   const creatorEmail = "creator-native@example.com";
   // The function takes an already-minted auth user and reads `primary_email`, not
   // `email`; both are enforced, so a wrong key surfaces as 'account is incomplete'.
@@ -439,12 +426,8 @@ try {
   });
   process.stderr.write("[account-domain] creator registration reservations are NULL-safe across retries\n");
 
-  // 3. Why the index was scoped at all. Both functions derive provider_subject
-  //    from the user id, so they can never collide with each other -- the real
-  //    cross-domain subject is a Discord id, which one person legitimately holds
-  //    on both the referral and the tourney side. Under the dropped global unique
-  //    index the second link was rejected; it must now coexist. This is the shape
-  //    commit 13d8b3c7 depends on, so it is asserted directly on the index.
+  // Email subjects derive from user IDs and cannot exercise cross-domain clashes.
+  // A shared Discord ID must coexist in referral and tourney identity links.
   const discordSubject = "discord-subject-4471";
   const tourneyUser = newId();
   await sql`insert into auth.users(id, email) values (${tourneyUser}, 'dual-domain@example.com')`;
@@ -477,8 +460,7 @@ try {
   );
   process.stderr.write("[account-domain] one subject coexists across both domains\n");
 
-  // 4. Within a single domain the uniqueness still has to bite, or the scoping
-  //    would have traded a false failure for a silent duplicate.
+  // Domain scoping must still reject duplicates within one domain.
   await assert.rejects(
     () => sql`
       insert into accounts.identity_links(user_id, provider, provider_subject, domain)

@@ -2,17 +2,9 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 
-// Site-page counterpart of the OBS overlay's OverlayFit, using the same
-// measurement technique: a transform never affects layout, so the inner
-// wrapper's offsetWidth/offsetHeight stay natural sizes in every engine and
-// the fit cannot feed back. Kept as a small local copy (not an OverlayFit
-// import) so the overlay surface stays untouched. The bracket renderer
-// already reads the rendered scale from the tree's rect-vs-layout ratio, so
-// scaling this ancestor keeps the connectors on the cards, exactly like the
-// overlay. The fit is WIDTH-DRIVEN only and upscales freely above the mobile
-// breakpoint, where the tree fills the page width and the page simply gets
-// taller. Mobile keeps the tree at its natural width for native horizontal
-// swiping; the matching public-page CSS still hides the Control-only bars.
+// Transforms leave offsetWidth/offsetHeight unscaled, preventing fit feedback.
+// Desktop fits width and can upscale; mobile keeps natural width for swiping.
+// The bracket renderer accounts for this scale when positioning connectors.
 const FIT_MEDIA_QUERY = "(min-width: 900px)";
 
 export default function BracketFitBoard({ children }) {

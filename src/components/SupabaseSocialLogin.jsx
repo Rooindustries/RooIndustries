@@ -75,11 +75,7 @@ export default function SupabaseSocialLogin({
     signup: { button: "Sign up with", divider: "or sign up with", error: "Sign-up" },
     signin: { button: "Continue with", divider: "or continue with", error: "Sign-in" },
   }[action] || { button: "Continue with", divider: "or continue with", error: "Sign-in" };
-  // Only `reclaim` needs a reauth proof. It releases a provider identity held by a
-  // different orphaned account, so it can take something from another principal.
-  // A plain `link` only adds a sign-in method to the account you are already
-  // signed in as, and the server proves that session against an active account
-  // before it issues the OAuth intent -- see app/api/auth/intent/route.js.
+  // Reclaiming an identity from another account requires reauthentication. Linking only requires the active session verified by app/api/auth/intent/route.js.
   const requiresLinkProof = action === "reclaim";
   const proofExpiresAt = Date.parse(String(linkProof?.expiresAt || ""));
   const hasLinkProof =

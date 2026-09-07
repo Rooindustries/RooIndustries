@@ -145,11 +145,8 @@ export const projectTourneyAccountSnapshotToSanity = async ({
   return { ok: true, provider: "sanity", updatedAt, updatedBy };
 };
 
-// `credentialUsername` / `credentialPassword` name the ONE account whose password is
-// actually changing. The enqueue loop below fans out over every account in the
-// snapshot plus tombstones, so an unscoped password signal would make every other
-// account's projection demand a plaintext that never existed — the same regression
-// that broke approve/kick/withdraw for players earlier today.
+// Scope credentialUsername/credentialPassword to the changed account. The enqueue
+// loop also projects other accounts and tombstones, which need no plaintext.
 export const writePersistedTourneyAccountsJson = async ({
   accountsJson,
   actorUsername,

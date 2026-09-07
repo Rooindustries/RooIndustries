@@ -58,6 +58,22 @@ describe("unlinked referral Discord account choice", () => {
     });
   });
 
+  test("scrubbing login notices preserves browser routing state", async () => {
+    const state = { __NA: true, __rooLegacy: true, usr: { source: "fixture" } };
+    window.history.replaceState(state, "", "/referrals/login?notice=password-updated");
+    renderReferralAuth("/referrals/login?notice=password-updated");
+    await screen.findByLabelText("Password");
+    expect(window.location.search).toBe("");
+    expect(window.history.state).toEqual(state);
+  });
+
+  test("a login page behind a booking modal cannot rewrite the booking URL", async () => {
+    window.history.replaceState({ __rooLegacy: true }, "", "/booking");
+    renderReferralAuth("/referrals/login");
+    await screen.findByLabelText("Password");
+    expect(window.location.pathname).toBe("/booking");
+  });
+
   test("keeps Remember me keyboard reachable and operable", async () => {
     renderReferralAuth("/referrals/login");
 

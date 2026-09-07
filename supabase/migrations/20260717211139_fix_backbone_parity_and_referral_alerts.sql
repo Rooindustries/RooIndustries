@@ -482,6 +482,9 @@ revoke all on function public.roo_resolve_referral_email_dispatch(text, text)
 grant execute on function public.roo_resolve_referral_email_dispatch(text, text)
   to service_role;
 
+create schema if not exists ops;
+grant usage on schema ops to service_role;
+
 -- Keep the ops view security-invoker while exposing only safe referral fields.
 create or replace function ops.referral_email_failure_rows()
 returns table (

@@ -11,7 +11,6 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
   const [selectedImage, setSelectedImage] = useState(null);
   const [selectedAlt, setSelectedAlt] = useState("");
 
-  // SEO/a11y: preserve the correct alt text when opening the zoom modal.
   const handleOpenZoom = (src, altText) => {
     setSelectedImage(src);
     setSelectedAlt(altText);
@@ -86,12 +85,10 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
               )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Before */}
                 <div className="border-2 border-danger-border rounded-lg p-2">
                   <div className="bg-danger text-white text-xs font-bold px-2 py-1 inline-block rounded mb-2">
                     BEFORE
                   </div>
-                  {/* SEO/CLS: keep benchmark images in semantic figures with intrinsic sizing. */}
                   <figure className="m-0">
                     <button
                       type="button"
@@ -121,12 +118,10 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
                   </figure>
                 </div>
 
-                {/* After */}
                 <div className="border-2 border-success-border rounded-lg p-2">
                   <div className="bg-success text-black text-xs font-bold px-2 py-1 inline-block rounded mb-2">
                     AFTER
                   </div>
-                  {/* SEO/CLS: keep benchmark images in semantic figures with intrinsic sizing. */}
                   <figure className="m-0">
                     <button
                       type="button"
@@ -157,10 +152,8 @@ export default function Benchmarks({ setIsModalOpen = () => {} }) {
                 </div>
               </div>
 
-              {/* Review */}
               {b.reviewImage && (
                 <div className="mt-6 text-center">
-                  {/* SEO/CLS: include review images in a semantic figure with intrinsic sizing. */}
                   <figure className="m-0">
                     <button
                       type="button"

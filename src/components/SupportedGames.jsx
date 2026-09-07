@@ -19,9 +19,7 @@ function GameCard({ game, index }) {
         animationDelay: `${index * 80}ms`,
       }}
     >
-      {/* Card container */}
       <div className="relative h-full w-full rounded-xl overflow-hidden bg-surface-solid ring-1 ring-line-soft group-hover:ring-line-accent transition-all duration-500">
-        {/* Slightly wider portrait aspect ratio (3:4) */}
         <div className="aspect-[3/4] relative">
           {imageUrl ? (
             <>
@@ -35,10 +33,8 @@ function GameCard({ game, index }) {
                 className="absolute inset-0 h-full w-full object-cover transition-all duration-500 ease-out group-hover:scale-105"
                 sizes="(min-width: 1280px) 14vw, (min-width: 1024px) 18vw, (min-width: 640px) 26vw, 30vw"
               />
-              {/* Subtle overlay on hover */}
               <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
 
-              {/* Bottom glow line on hover */}
               <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-accent-strong via-accent to-accent-strong opacity-0 group-hover:opacity-100 transition-opacity duration-500 shadow-[var(--shadow-divider-extra)]" />
             </>
           ) : (
@@ -98,7 +94,6 @@ export default function SupportedGames({ initialData = null }) {
 
   return (
     <>
-      {/* Component styles */}
       <style>{`
         @keyframes fadeInUp {
           from {
@@ -127,7 +122,6 @@ export default function SupportedGames({ initialData = null }) {
         className="relative z-10 py-16 sm:py-20 px-4 sm:px-6 text-center text-ink"
       >
         <div className="max-w-6xl mx-auto">
-          {/* Header - matching Packages style */}
           <div className="text-center mb-10 sm:mb-12">
             {data.title && (
               <h2 className="ri-supported-games-heading text-4xl sm:text-5xl font-extrabold tracking-tight text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
@@ -141,10 +135,8 @@ export default function SupportedGames({ initialData = null }) {
             )}
           </div>
 
-          {/* Games grid */}
           {featuredGames.length > 0 && (
             <div className="scroll-blur-lite rounded-2xl bg-surface-card ring-1 ring-line-soft backdrop-blur-sm p-4 sm:p-5 shadow-surface">
-              {/* Featured games grid - 3 on mobile, 6 on large screens */}
               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2 sm:gap-3 md:gap-4">
                 {featuredGames.map((game, index) => (
                   <GameCard
@@ -155,7 +147,6 @@ export default function SupportedGames({ initialData = null }) {
                 ))}
               </div>
 
-              {/* Expandable more games section */}
               {hasMore && (
                 <div
                   id="supported-games-more"
@@ -167,7 +158,6 @@ export default function SupportedGames({ initialData = null }) {
                   }
                   aria-hidden={!showAll}
                 >
-                  {/* Divider */}
                   <div className="flex items-center gap-4 mb-4">
                     <div className="flex-1 h-px bg-gradient-to-r from-transparent via-[color:var(--color-accent-soft)] to-transparent" />
                     <span className="text-xs font-medium text-ink-muted uppercase tracking-widest">
@@ -190,7 +180,6 @@ export default function SupportedGames({ initialData = null }) {
             </div>
           )}
 
-          {/* CTA Button */}
           {hasMore && (
             <div className="mt-8 sm:mt-10 flex items-center justify-center">
               <button

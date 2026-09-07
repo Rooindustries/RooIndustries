@@ -32,7 +32,10 @@ export default function RefVerifyRegistration() {
     if (started.current) return;
     started.current = true;
     const token = readVerificationToken(verificationLocation);
-    if (verificationLocation.hash || verificationLocation.search) {
+    if (
+      window.location.pathname === verificationLocation.pathname &&
+      (verificationLocation.hash || verificationLocation.search)
+    ) {
       window.history.replaceState(
         window.history.state,
         "",

@@ -278,7 +278,6 @@ export default function Packages({
                     </div>
                   )}
 
-                  {/* Top content */}
                   <div>
                     <h3 className="text-3xl font-semibold">{p.title}</h3>
 
@@ -355,7 +354,6 @@ export default function Packages({
                     </div>
                   </div>
 
-                  {/* Bottom buttons pinned to bottom */}
                   <div className="mt-auto pt-7 flex flex-col sm:flex-row gap-3">
                     <button
                       type="button"

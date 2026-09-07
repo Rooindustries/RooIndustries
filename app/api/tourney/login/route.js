@@ -210,14 +210,11 @@ export async function POST(request) {
   let discordLinked = false;
   let discordLinkError = "";
   let linkedProvider = "";
-  // Named outside the attempt so the failure copy and the redirect notice still
-  // report the provider whose proof was actually spent, including from the catch.
+  // Keep the spent provider available to failure handling.
   let attemptedProvider = requestedLinkProvider;
   if (linkDiscord) {
     try {
-      // Whichever pending proof the browser actually holds wins. The form reports
-      // which provider it came from, but the proof is authoritative: a stale
-      // Discord cookie must never be spent to satisfy a Google link.
+      // The pending proof, not the form value, determines which provider is linked.
       const pendingLink = resolvePendingSocialLink({
         flow: "tourney",
         provider: requestedLinkProvider,
@@ -325,9 +322,7 @@ export async function POST(request) {
       session: result.supabaseSession,
     }).catch(() => {});
   }
-  // Both proofs are cleared once a link attempt has run. Leaving the other
-  // provider's cookie behind would let a later sign-in silently spend a stale
-  // proof the person has already moved on from.
+  // Clear both cookies so a later sign-in cannot spend stale provider proof.
   if (linkDiscord) {
     for (const provider of PENDING_LINK_PROVIDERS) {
       response.cookies.set(

@@ -6,16 +6,12 @@ import {
 } from "../server/supabase/accounts.js";
 import { queueSyncedDiscordDesiredStateBestEffort } from "../server/tourney/externalOperations.js";
 
-// Supabase Auth honours `password_hash` on createUser and silently discards it on
-// updateUserById -- HTTP 200, credential unchanged. Every admin account already exists,
-// so admin password changes reported success while leaving the old password working.
-// The digest cannot travel to the deferred worker and change anything; the submitted
-// plaintext has to, through the encrypted operation-secret channel.
+// Supabase Auth honours password_hash on createUser but discards it on
+// updateUserById. Updates require the submitted password through the encrypted
+// operation-secret channel.
 //
-// These tests cover the three properties that a mocked admin client can actually
-// establish: the plaintext reaches updateUserById, a caller that claims to be changing
-// a credential without one fails instead of reporting success, and the plaintext is
-// never written into the queued operation's readable desired_state.
+// Mocked-client coverage verifies password delivery, rejection of credential
+// changes without a password, and exclusion from readable desired_state.
 
 const authUserId = "b1a17dc8-25dc-4e1e-8a12-3a3ab6bd25a0";
 const bcryptHash = "$2b$12$l.tnAOrcYqG8QeK9OEJkYe0loikD0aohUP3vkp7PLCdZAWLsxmfjm";
@@ -104,8 +100,7 @@ describe("tourney administrator Auth password changes", () => {
   test("refuses to report a credential change it could not apply", async () => {
     const adminClient = buildAdminClient({ existingUser: existingAdminAuthUser });
 
-    // This is the exact shape that used to succeed: installPassword with only a
-    // digest available. Auth returned 200 and kept the previous password.
+    // A digest-only update must fail even though Auth would return 200.
     await expect(
       syncSupabaseTourneyAdminAccount({
         account,
@@ -485,8 +480,7 @@ describe("creator verification retries", () => {
     // The fingerprint means "Auth is holding this digest". createUser honours
     // password_hash, so it may claim that; an update only installs a credential when it
     // carries a plaintext. Claiming it after a metadata-only update would make a later
-    // run read "already installed" and skip a real password change -- the same class of
-    // silent no-op this whole commit exists to remove.
+    // run read "already installed" and skip a real password change.
     const source = fs.readFileSync(
       path.resolve("src/server/supabase/accounts.js"),
       "utf8"

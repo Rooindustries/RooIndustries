@@ -23,6 +23,7 @@ const tempRoot = fs.mkdtempSync(
   path.join(temporaryBase, "roo-referral-integrity-")
 );
 const dataDir = path.join(tempRoot, "pgdata");
+const postgresHost = process.env.ROO_TEST_POSTGRES_HOST || "127.0.0.1";
 const port = 57232 + Math.floor(Math.random() * 300);
 
 const run = (command, args, options = {}) => {
@@ -499,16 +500,17 @@ try {
     "--auth=trust",
     "--no-locale",
   ]);
+  fs.appendFileSync(path.join(dataDir, "pg_hba.conf"), "\nhost all all samehost trust\n");
   run(
     path.join(pgBin, "pg_ctl"),
-    ["-D", dataDir, "-o", `-p ${port} -h 127.0.0.1`, "-w", "start"],
+    ["-D", dataDir, "-o", `-p ${port} -h ${postgresHost} -k ''`, "-w", "start"],
     { stdio: "ignore" }
   );
   started = true;
   const psql = (args) =>
     run(path.join(pgBin, "psql"), [
       "-h",
-      "127.0.0.1",
+      postgresHost,
       "-p",
       String(port),
       "-d",
@@ -531,7 +533,7 @@ try {
     psql(["-f", path.join(root, "supabase/migrations", file)]);
   }
 
-  sql = postgres(`postgres://127.0.0.1:${port}/postgres`, {
+  sql = postgres(`postgres://${postgresHost}:${port}/postgres`, {
     max: 8,
     prepare: false,
   });

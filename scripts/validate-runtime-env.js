@@ -597,11 +597,8 @@ if (tourneyV4ActivationStaged) {
       "The activation-ready v4 control tuple requires TOURNEY_V4_ACTIVATION_ENABLED=1."
     );
   }
-  // Staging an activation once required the mirror to be live, because the cutover
-  // replicated into the legacy backend while writes were paused. That backend is
-  // retired and activation is complete (TOURNEY_HARDENING_V4_ENABLED=1), so the tuple
-  // is no longer satisfiable and must not be re-staged: it would ask for a mirror the
-  // rule above forbids. Say so once instead of emitting a contradictory pair.
+  // Activation staging requires the retired mirror. Reject re-staging without
+  // also telling the operator to enable a mirror that the retirement rule forbids.
   if (!tourneyMirrorEnabled) {
     supabaseConsistencyFailures.push(
       "Tourney v4 activation is complete and cannot be re-staged: it required the retired legacy mirror. Set TOURNEY_V4_ACTIVATION_ENABLED=0."
@@ -700,13 +697,9 @@ if (!/^[0-9]+$/.test(tourneyFailoverGeneration)) {
     "TOURNEY_FAILOVER_GENERATION must be a non-negative integer."
   );
 }
-// The legacy Neon fallback is retired: its capture triggers are detached and its
-// contracts disabled (20260726160000, 20260726160500), so nothing writes the outbox
-// and the mirror has nothing to deliver. Turning the flag back on would not restore
-// replication -- it would only make parity reconnect to Neon on every reconciliation
-// run, which is exactly what exhausted its 5 GB monthly transfer allowance. Allowing
-// it whenever a legacy URL happened to be present was too weak a guard, because
-// TOURNEY_DATABASE_URL is still set in production: the flag alone was enough.
+// Migrations 20260726160000 and 20260726160500 retired Neon's capture triggers and
+// contracts. Re-enabling the mirror restores parity connections and egress, not
+// replication; reject it even when a legacy database URL remains configured.
 if (tourneyMirrorEnabled) {
   supabaseConsistencyFailures.push(
     "TOURNEY_MIRROR_ENABLED must be 0: the legacy Tourney mirror is retired, and re-enabling it restores Neon egress rather than replication."

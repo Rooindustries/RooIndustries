@@ -13,26 +13,21 @@ const slugClass = (value) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
 
-// A match with exactly one real team that already holds a win result is an
-// auto-advanced bye slot, not a playable pairing. Hiding it keeps odd-sized
-// brackets readable; the team still appears in the round it advances to.
+// Hide auto-advanced byes; the team appears in its next round.
 const isAutoAdvanceMatch = (match) => {
   const sides = [match?.opponent1, match?.opponent2];
   const filled = sides.filter((side) => side?.teamId);
   return filled.length === 1 && filled[0].result === "win";
 };
 
-// Scheduled matches carry advancement labels for unresolved slots
-// ("Winner of 5" / "Loser of 17"). Show them in place of a bare TBD, but
-// never overwrite a real populated team name.
+// Show advancement labels for unresolved slots without replacing real team names.
 const scheduledSideName = ({ match, side }) => {
   const hasTeam = Boolean(side?.teamId) || (side?.name && side.name !== "TBD");
   if (hasTeam) return side?.name || "TBD";
   return match?.slotLabels?.[side?.side] || side?.name || "TBD";
 };
 
-// Round headers stay one line inside the fixed card-width columns, so drop
-// the year from "August 15, 2026".
+// Omit the year to fit round dates on one line.
 const shortScheduleDate = (dateLabel) =>
   String(dateLabel || "").replace(/,\s*\d{4}$/, "");
 
@@ -43,8 +38,7 @@ const sideClass = (side) => {
   return "";
 };
 
-// Overlay matches carry a raw statusSlug because their statusLabel is already
-// remapped (running -> "LIVE" etc.); the site bracket falls back to the label.
+// Overlay labels are remapped; use their raw statusSlug for status classes.
 const matchStatusClass = (match) =>
   `is-${slugClass(match.statusSlug || match.statusLabel) || "unknown"}`;
 
@@ -100,9 +94,7 @@ const TeamRosterPopover = ({ players = [], teamName }) => {
   );
 };
 
-// The full display label repeats the column's round label above every card
-// ("Winners Round 1 Match 2" under a "Winners Round 1" column). Trim that
-// prefix down to the match number; distinctive labels (finals) stay whole.
+// Drop the repeated round prefix; keep distinctive labels such as finals.
 const shortMatchLabel = (match) => {
   const label = (match.displayLabel || match.label || "").replace(
     /^Lower\b/,
@@ -187,10 +179,8 @@ const createTbdMatch = ({
   nextLabels: [],
 });
 
-// Skeleton shown before the bracket is generated. Mirrors the visible card
-// layout of the real 12-team double-elimination bracket: 4 first-round
-// winners matches with 4 bye slots hidden, plus the visible lower lane.
-// Exported so the OBS overlay can lane-filter the same skeleton.
+// Match the 12-team double-elimination layout: four first-round matches,
+// four hidden byes and the lower lane. OBS lane sources share this skeleton.
 export const buildTbdBracketMatches = () => [
   ...[1, 2, 3, 4].map((number) =>
     createTbdMatch({
@@ -321,11 +311,8 @@ const getConnectorTargetIndex = ({ sourceIndex, sourceCount, targetCount }) => {
   return Math.min(Math.floor(sourceIndex / (sourceCount / targetCount)), targetCount - 1);
 };
 
-// The OBS overlay fits the frame by scaling an ancestor with a CSS
-// transform: getBoundingClientRect returns scale-adjusted px while SVG path
-// user units stay in unscaled layout px. Dividing rect deltas by the tree's
-// rendered scale converts measurements into path space so connectors land
-// on the cards at any zoom level.
+// Convert scaled DOM rectangles to unscaled SVG units so connectors
+// stay aligned when the OBS ancestor is transformed.
 const getNodeCenter = ({ node, root, scale = 1 }) => {
   const nodeRect = node.getBoundingClientRect();
   const rootRect = root.getBoundingClientRect();
@@ -435,8 +422,7 @@ export default function TourneyBracketView({
         ? collapseLosersByeRoundMatches(snapshotMatches)
         : snapshotMatches;
     if (!snapshot?.generated) {
-      // Callers (the OBS overlay lane sources) may pass a pre-filtered
-      // skeleton; only build the full skeleton when nothing was supplied.
+      // OBS lane sources can supply a pre-filtered skeleton.
       return {
         matches: sourceMatches.length > 0 ? sourceMatches : buildTbdBracketMatches(),
         byeTeams: new Set(),
@@ -626,15 +612,9 @@ export default function TourneyBracketView({
 
         group.rounds.slice(1).forEach((round, roundIndex) => {
           const previousRound = group.rounds[roundIndex];
-          // Cards are nudged toward their connector sources with a transform,
-          // which reserves no layout space: when a later round's cards are
-          // taller than the round feeding them (scheduled cards carrying
-          // caster, bye, and status lines), center-pinning compresses the
-          // visual pitch below the card height and neighbours overlap,
-          // ghosting rounded borders across the gaps on narrow screens.
-          // Clamp each offset so a card's translated top never crosses the
-          // previous card's translated bottom plus the stack gap; the next
-          // measure pass redraws the connectors to wherever the cards land.
+          // Transforms reserve no layout space. Clamp translated cards below their
+          // predecessors plus the stack gap so taller later-round cards cannot overlap.
+          // The next measurement pass realigns connectors.
           let previousVisualBottom = null;
           let stackGapPx = 0;
           round.matches.forEach((match, matchIndex) => {
@@ -724,9 +704,7 @@ export default function TourneyBracketView({
               root: connectorNode,
               scale: unitScale,
             });
-            // A bye-fed card hides its other first-round source, so the card
-            // center is not the slot the visible source feeds. Aim at the
-            // side row that actually receives the winner instead.
+            // A bye-fed card hides one source; aim at the receiving row, not the card center.
             const byeSideIndexes = [targetMatch?.opponent1, targetMatch?.opponent2]
               .map((side, index) =>
                 side?.teamId && byeTeams.has(`${group.groupName}:${side.teamId}`)
@@ -896,11 +874,8 @@ export default function TourneyBracketView({
           .filter(Boolean)
           .join(", ")
       : "";
-    // Caster color-coding is a scheduled-view-only treatment: it tints the
-    // card shell behind the sides so the is-win/is-loss side semantics stay
-    // untouched. Two casters get a balanced duo gradient instead of dropping
-    // one color. The palette itself lives in CSS; the card only pins which
-    // named caster tokens it uses.
+    // Scheduled caster colors tint the shell, preserving win/loss side colors.
+    // Two casters share a gradient; CSS owns the palette.
     const casterColors = scheduled
       ? (match.casters || []).map((caster) => caster?.color).filter(Boolean)
       : [];

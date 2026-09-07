@@ -216,18 +216,12 @@ const compactInternalUsernameBase = (value) =>
     .replace(/[-_.]{2,}/g, "-")
     .replace(/^[-_.]+|[-_.]+$/g, "");
 
-// Roster display names are free text and are not unique, so a name shared by two
-// live players resolves to nobody. Picking one would sign a player into someone
-// else's account, or mail their reset link to a stranger. Statuses are limited to
-// the live registrations so a withdrawn name cannot shadow an active one.
+// Ambiguous roster names resolve to nobody to prevent cross-account login or
+// recovery. Only live registrations participate; withdrawn names cannot shadow them.
 const DISPLAY_NAME_LOGIN_STATUSES = ["approved", "pending"];
 
-// The roster name is a login credential, and both lookups resolve it with
-// `limit 2` and accept the result only when exactly one row comes back. A
-// duplicate therefore does not hand one player the other's account -- it locks
-// BOTH of them out, silently, with a generic "invalid credentials". Reject the
-// collision at the write instead. Scoped to the statuses that can sign in, so a
-// denied or withdrawn entry never squats on a name a live player wants.
+// Both login lookups accept exactly one result (limit 2). Reject name collisions
+// among login-capable registrations at write time so duplicates do not lock both out.
 const assertUniqueTourneyDisplayName = async ({
   sql,
   displayName,
@@ -302,17 +296,10 @@ const shouldSyncSupabasePlayerAuth = (env = process.env) =>
   isEnabledTourneyFlag(env.SUPABASE_SOCIAL_AUTH_ENABLED) ||
   isEnabledTourneyFlag(env.SUPABASE_SHADOW_WRITES);
 
-// `password` is the value the player just submitted. It has to be passed at all
-// because Supabase Auth silently ignores `password_hash` when updating an existing
-// user, so a credential change carrying only the digest would report success and
-// leave the old password in place -- see upsertAuthUserWithHash in
-// src/server/supabase/accounts.js.
-//
-// It is never written to a column, never placed in the queued operation's
-// desired_state (which is stored as plain JSON), and never logged. Every durable copy
-// is either a bcrypt digest or an AES-256-GCM ciphertext in
-// tourney.external_operation_secrets, which is service_role-only, TTL'd, and deleted
-// as soon as the operation is applied.
+// Auth updates need plaintext; see upsertAuthUserWithHash in supabase/accounts.js.
+// Never log it or persist it in desired_state. Durable copies must be bcrypt digests
+// or AES-256-GCM ciphertext in service-role-only, TTL-bound operation secrets,
+// deleted when the operation is applied.
 const syncTourneyPlayerAuth = async ({
   installPassword = true,
   password = "",
@@ -340,17 +327,9 @@ const syncTourneyPlayerAuth = async ({
     env,
   });
   if (!shouldSyncAuth) return;
-  // The Auth write is NOT performed here. This function runs inside the command
-  // transaction, so an inline call to Supabase would mutate Auth before the Postgres
-  // receipt commits: any later failure rolls back the database and leaves Auth holding
-  // a credential the roster never recorded. Instead both the digest and the plaintext
-  // travel to the post-commit worker.
-  //
-  // `installPassword` must be forwarded exactly as given rather than defaulted. Most
-  // callers here are not changing a credential at all -- approve, deny, kick,
-  // withdraw, detail and role edits all re-project roles, metadata and aliases -- and
-  // the parameter defaults to true, so an unscoped signal would make those
-  // projections demand a plaintext that never existed.
+  // Defer Auth writes until the command transaction commits; a rollback must not
+  // leave Auth with a credential the roster never recorded. Forward installPassword
+  // explicitly: its default is true, but metadata/role projections have no plaintext.
   const plaintext = String(password || "");
   const changesCredential = Boolean(installPassword && plaintext);
   const operation = await enqueueTourneyExternalOperation({
@@ -399,9 +378,7 @@ export const resetMemoryTourneyPlayerStoreForTests = () => {
   };
 };
 
-// Writes now reject a duplicate roster name, but rows that predate that rule can
-// still be ambiguous in production. This is the only way to reproduce one, so the
-// resolver's fail-closed behaviour stays covered.
+// Retain a fixture path for legacy duplicate names to test fail-closed resolution.
 export const __setMemoryPlayerDisplayNameForTests = (playerId, displayName) => {
   const player = MEMORY_STORE.players.find((entry) => entry.id === playerId);
   if (!player) throw new Error(`No memory player ${playerId}`);

@@ -63,7 +63,6 @@ export default function ReferralBox() {
 
   return (
     <div className="ri-referral-card mt-12 mb-8 bg-surface-card border border-line-accent rounded-2xl p-6 shadow-[var(--shadow-referral-glow)] backdrop-blur-md max-w-4xl mx-auto md:flex md:items-center md:justify-between md:gap-8">
-      {/* Left Side: Text Content */}
       <div className="text-left mb-5 md:mb-0 md:flex-1">
         <h3 className="ri-referral-heading text-2xl font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-accent to-accent-strong drop-shadow-sm">
           {content.heading}
@@ -73,7 +72,6 @@ export default function ReferralBox() {
         </p>
       </div>
 
-      {/* Right Side: Input and Buttons */}
       <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto md:flex-initial sm:items-stretch">
         <input
           type="email"

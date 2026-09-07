@@ -278,13 +278,9 @@ export const isTourneyPlayerAuthStateCurrent = ({ current, desired } = {}) =>
     Number(current.version) === Number(desired.version)
   );
 
-// A metadata projection is safe to drop once the row moves on, because the newer row
-// enqueued its own operation. A credential install is not: the plaintext lives only in
-// this operation's secret, so dropping it would leave a password change that reported
-// success and never reached Auth. The digest is the correct test of ownership — while
-// the row still carries the digest this operation was built from, the plaintext we hold
-// is that row's credential and installing it is right regardless of version drift. A
-// different digest means a newer operation owns the credential and this one is stale.
+// Newer rows supersede metadata projections, but a credential install owns the
+// only sealed plaintext for its digest. Preserve it across version drift while
+// that digest still matches; a different digest belongs to a newer operation.
 export const isTourneyPlayerCredentialCurrent = ({ current, desired } = {}) =>
   Boolean(
     current && desired &&
@@ -320,11 +316,8 @@ const resolveCurrentAdminSnapshotState = async ({ state, env }) => {
       normalize(state.snapshotHash) &&
       getTourneyAdminAuthCanonicalHash(effectiveAccount) === normalize(state.accountHash)
     ),
-    // The account hash covers every field, so an unrelated metadata edit moves it and
-    // makes this operation look superseded. A credential install must not be dropped on
-    // that basis: while the live snapshot still carries the digest this operation was
-    // built from, the plaintext we hold is that account's credential. A changed digest
-    // means a newer operation owns it, and an absent account has nothing to install to.
+    // Metadata edits change the account hash without replacing its credential.
+    // Continue installation only if the account exists and its digest still matches.
     credentialCurrent: Boolean(
       account && digestOf(effectiveAccount) &&
       digestOf(effectiveAccount) === digestOf(state.account)
@@ -436,11 +429,8 @@ const resolveOperationSecretExpiry = ({ expiresAt = "", ttlSeconds = 86_400 } = 
   return new Date(timestamp).toISOString();
 };
 
-// `payload` is an arbitrary object rather than a fixed `{accessToken}` shape:
-// encryptOperationSecret already accepts any serialisable value, and the admin
-// password path needs to carry `{password}` through the same encrypted, TTL'd,
-// service_role-only, cascade-deleted channel. `accessToken` is still accepted so
-// the existing Discord callers keep working unchanged.
+// Accept password payloads and legacy Discord accessToken callers through the
+// same encrypted, TTL-bound, service-role-only, cascade-deleted secret channel.
 const insertTourneyExternalOperationSecret = async ({
   accessToken,
   payload,
@@ -474,18 +464,10 @@ const insertTourneyExternalOperationSecret = async ({
   `;
 };
 
-// Durable carrier for a password change, used by both the admin and player Auth
-// projections. The plaintext is the only form Supabase Auth honours on an update, and
-// both syncs run in a deferred worker that re-reads its state from Postgres — so an
-// in-memory channel would work on the happy path and silently skip the credential on
-// any retry.
-//
-// When called inside a command transaction getTourneySql returns the active client, so
-// the secret row commits atomically with the operation it belongs to: a rollback takes
-// the plaintext with it, and a commit guarantees the worker can find it. The row is
-// deleted the moment the operation reaches applied or dead_letter, cascade-deleted
-// with the operation, and swept on TTL. Short TTL: if the write has not succeeded
-// within the hour it will not succeed at all, and the operator can re-issue.
+// Deferred Auth updates and retries require durable encrypted plaintext. Inside a
+// command transaction, getTourneySql commits or rolls back the secret with its
+// operation. Delete it on applied/dead_letter, operation deletion, or TTL expiry;
+// expired credential work requires re-issuing the operation.
 export const saveTourneyAuthOperationPassword = async ({
   operationKey,
   password,
@@ -503,9 +485,8 @@ export const saveTourneyAuthOperationPassword = async ({
     });
     return true;
   }
-  // tourney.external_operation_secrets exists only on the Supabase backend. Report the
-  // failure instead of returning true, so a caller cannot mistake "not stored" for
-  // "stored" and queue an operation whose credential can never be read back.
+  // Only Supabase stores operation secrets. Report failure rather than enqueueing
+  // credential work whose plaintext cannot be recovered.
   const policy = resolveTourneyStorePolicy(env);
   if (policy.primaryBackend !== "supabase") return false;
   const sql = await getTourneySql(env);
@@ -1281,11 +1262,9 @@ const executeSupabasePlayerAuthOperation = async ({
 
   const { syncSupabaseTourneyPlayerAccount } = await import("../supabase/accounts.js");
   const { createSupabaseAdminClient } = await import("../supabase/adminClient.js");
-  // Auth discards `password_hash` when updating an existing user, so the digest in
-  // desired_state cannot change a credential. The plaintext arrives separately through
-  // the encrypted secret channel, keyed to this operation and therefore scoped to the
-  // one player whose password actually changed. `installPassword` is explicitly true
-  // only on that path; every other projection re-sends metadata and aliases alone.
+  // Auth updates require plaintext from this operation's encrypted secret, never
+  // the digest in desired_state. Only the changed player gets installPassword;
+  // other projections update metadata and aliases without a credential write.
   const installPassword = state.installPassword === true;
   const submittedPassword = installPassword
     ? await readTourneyAuthOperationPassword({ operation, env })
@@ -1639,11 +1618,8 @@ const executeOperation = async ({
       if (!initial.current && !(carriesCredential && initial.credentialCurrent)) {
         return { applied: true, superseded: true };
       }
-      // Supabase Auth ignores `password_hash` when updating an existing user, and
-      // every current admin account takes that branch, so the digest in the snapshot
-      // cannot change a credential. The plaintext travels separately through the
-      // encrypted secret channel, scoped to this one operation key — and therefore to
-      // the single account whose password actually changed.
+      // Auth ignores password_hash on updates. Use the encrypted plaintext scoped
+      // to this operation and the single account whose password changed.
       const submittedPassword = carriesCredential
         ? await readTourneyAuthOperationPassword({ operation, env })
         : "";
