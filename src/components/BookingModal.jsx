@@ -283,7 +283,7 @@ export default function BookingModal({ open, onClose, children }) {
               role="dialog"
               aria-modal="true"
               aria-label="Schedule your session"
-              className="m-auto relative"
+              className="ri-booking m-auto relative"
               initial={{
                 width: wrapperSize.width, 
                 height: wrapperSize.height 
