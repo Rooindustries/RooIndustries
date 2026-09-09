@@ -1,3 +1,16 @@
+let handleDodoWebhook;
+const mockCreateDodoCheckout = jest.fn();
+const mockInspectDodoCheckout = jest.fn();
+const mockRetrieveDodoPayment = jest.fn();
+const mockVerifyDodoCapture = jest.fn();
+jest.mock("../server/api/payment/dodoProvider", () => ({
+  ...jest.requireActual("../server/api/payment/dodoProvider"),
+  createDodoCheckout: (...args) => mockCreateDodoCheckout(...args),
+  inspectDodoCheckout: (...args) => mockInspectDodoCheckout(...args),
+  retrieveDodoPayment: (...args) => mockRetrieveDodoPayment(...args),
+  verifyDodoCapture: (...args) => mockVerifyDodoCapture(...args),
+  unwrapDodoWebhook: ({rawBody}) => JSON.parse(rawBody),
+}));
 let startPaymentSession;
 let quotePaymentSession;
 let finalizePaymentSession;
@@ -586,6 +599,7 @@ beforeAll(() => {
   reconcilePaymentSessions = flow.reconcilePaymentSessions;
   handlePayPalWebhook = flow.handlePayPalWebhook;
   handleRazorpayWebhook = flow.handleRazorpayWebhook;
+  handleDodoWebhook = flow.handleDodoWebhook;
 
   verifyPaymentAccessToken = require("../server/api/payment/accessToken").verifyPaymentAccessToken;
   paymentRecordConstants = require("../server/api/payment/paymentRecord");
@@ -4306,5 +4320,128 @@ describe("payment session flow", () => {
       status: paymentRecordConstants.PAYMENT_STATUS_REFUNDED,
       refundState: "full",
     });
+  });
+});
+
+describe('Dodo checkout lifecycle',()=>{
+  let latest;
+  const notify = (type='payment.succeeded',eventId='evt_dodo',applyBookingRefund=null) => {
+    const body={type,data:{payment_id:latest.payment_id,metadata:latest.metadata}};
+    return handleDodoWebhook({req:{method:'POST',headers:{'webhook-id':eventId},rawBody:JSON.stringify(body),body},client:mockClient,applyBookingRefund});
+  };
+  const startDodo = async()=>{
+    const hold=createHold();
+    const result=await startPaymentSession({body:{provider:'dodo',bookingPayload:baseBookingPayload({slotHoldToken:issueTokenForHold(hold)})},client:mockClient});
+    expect(result.httpStatus).toBe(200);
+    const record=getOnlyPaymentRecord();
+    latest={payment_id:'pay_dodo',checkout_session_id:record.providerOrderId,metadata:{paymentRecordId:record._id},status:'succeeded',total_amount:Math.round(record.pricingSnapshot.netAmount*100),currency:'USD',product_cart:[{product_id:'pdt_dodo',quantity:1}],refunds:[],customer:{email:'client@example.com'}};
+    return result;
+  };
+  beforeEach(()=>{
+    process.env.DODO_PAYMENTS_PRODUCT_ID='pdt_dodo';process.env.DODO_PAYMENTS_ENVIRONMENT='test_mode';
+    mockResolvePaymentProviders.mockReturnValue({...mockResolvePaymentProviders(),dodo:{enabled:true,mode:'test'}});
+    mockCreateDodoCheckout.mockResolvedValue({orderId:'cks_dodo',checkoutUrl:'https://test.checkout.dodopayments.com/cks_dodo',currency:'USD',productId:'pdt_dodo',environment:'test_mode'});
+    mockRetrieveDodoPayment.mockImplementation(async()=>latest);
+    mockInspectDodoCheckout.mockImplementation(async()=>({state:latest?.status==='succeeded'?'captured':'unpaid',payment:latest,providerPaymentId:latest?.payment_id}));
+    mockVerifyDodoCapture.mockImplementation(async({record,payment})=>{
+      const proof=payment||latest;
+      const validation=jest.requireActual('../server/api/payment/dodoProvider').validateDodoPayment({record,payment:proof});
+      return validation.ok?{ok:true,trustedCapture:true,providerOrderId:proof.checkout_session_id,providerPaymentId:proof.payment_id,payerEmail:proof.customer.email}:validation;
+    });
+  });
+  afterEach(()=>{delete process.env.DODO_PAYMENTS_PRODUCT_ID;delete process.env.DODO_PAYMENTS_ENVIRONMENT;});
+  test('repeated and concurrent success creates one booking and one payment proof',async()=>{
+    await startDodo();
+    const first=await notify();expect(first.httpStatus).toBe(200);expect(first.body.status).toBe('booked');
+    const results=await Promise.all([notify(),notify('payment.succeeded','evt_dodo_second')]);
+    expect(results.every(r=>r.httpStatus===200)).toBe(true);
+    expect(store.bookings).toHaveLength(1);expect(store.paymentProofClaims).toHaveLength(1);
+    expect(mockCreateBooking).toHaveBeenCalledTimes(1);
+  });
+  test('wrong amount/currency cannot create a booking; the same delivery can be retried after repair',async()=>{
+    await startDodo();const amount=latest.total_amount;latest.total_amount-=1;
+    expect((await notify()).httpStatus).toBe(409);expect(store.bookings).toHaveLength(0);
+    latest.total_amount=amount;latest.currency='EUR';expect((await notify()).httpStatus).toBe(409);
+    latest.currency='USD';expect((await notify()).body.status).toBe('booked');expect(store.bookings).toHaveLength(1);
+  });
+  test('pending is retryable and does not fulfill; reordered failed notification reads current succeeded payment',async()=>{
+    await startDodo();latest.status='processing';
+    expect((await notify('payment.processing')).httpStatus).toBe(503);expect(store.bookings).toHaveLength(0);
+    latest.status='succeeded';expect((await notify('payment.failed')).body.status).toBe('booked');
+    expect(mockCreateBooking).toHaveBeenCalledTimes(1);
+  });
+  test('a fully refunded payment arriving before success never creates a booking',async()=>{
+    await startDodo();latest.refunds=[{refund_id:'ref_dodo',payment_id:latest.payment_id,status:'succeeded',amount:latest.total_amount,currency:'USD'}];
+    expect((await notify('refund.succeeded')).body.status).toBe('refunded');
+    expect((await notify('payment.succeeded','evt_success_late')).body.status).toBe('refunded');
+    expect(store.bookings).toHaveLength(0);
+  });
+  test('full refund side effects run once across duplicates and out-of-order refund failure',async()=>{
+    await startDodo();await notify();
+    latest.refunds=[{refund_id:'ref_dodo',payment_id:latest.payment_id,status:'succeeded',amount:latest.total_amount,currency:'USD'}];
+    const refund=jest.fn(async()=>({bookingId:store.bookings[0]._id}));
+    expect((await notify('refund.succeeded','evt_refund',refund)).body.status).toBe('refunded');
+    await notify('refund.succeeded','evt_refund',refund);await notify('refund.failed','evt_refund_old',refund);
+    expect(refund).toHaveBeenCalledTimes(1);expect(store.bookings).toHaveLength(1);
+  });
+  test('unrelated merchant payments are ignored without writing receipts or bookings',async()=>{
+    latest={payment_id:'pay_other',metadata:{paymentRecordId:'other_copy'}};
+    expect((await notify()).body.ignored).toBe(true);expect(store.bookings).toHaveLength(0);
+  });
+  test('abandoned Dodo checks are scheduled and expired watches close without starving other providers',async()=>{
+    await startDodo();latest.status='failed';await notify('payment.failed');
+    let record=getOnlyPaymentRecord();record.nextRecoveryAt='2000-01-01T00:00:00Z';
+    mockInspectDodoCheckout.mockResolvedValue({state:'unpaid'});mockInspectDodoCheckout.mockClear();
+    await reconcilePaymentSessions({req:createReq({}, {authorization:'Bearer cron-secret'}),client:mockClient});
+    expect(new Date(getOnlyPaymentRecord().nextRecoveryAt).getTime()).toBeGreaterThan(Date.now());
+    expect(mockInspectDodoCheckout).toHaveBeenCalledTimes(1);
+    record=getOnlyPaymentRecord();record.lateCaptureWatchUntil='2000-01-01T00:00:00Z';record.nextRecoveryAt='2000-01-01T00:00:00Z';
+    await reconcilePaymentSessions({req:createReq({}, {authorization:'Bearer cron-secret'}),client:mockClient});
+    expect(getOnlyPaymentRecord()).toMatchObject({lateCaptureWatchUntil:'',nextRecoveryAt:'',providerRecoveryTerminal:true});
+  });
+  test.each(['pending', 'review', 'failed'])('a %s refund with no settled amount does not block paid fulfillment', async status => {
+    await startDodo();
+    latest.refunds = [{ refund_id: 'ref_unsettled', payment_id: latest.payment_id, status, amount: null, currency: null }];
+    const result = await notify('refund.failed', 'evt_unsettled_refund');
+    expect(result.httpStatus).toBe(200);
+    expect(result.body.status).toBe('booked');
+    expect(store.bookings).toHaveLength(1);
+    expect(getOnlyPaymentRecord().refundProcessedAmountInSubunits || 0).toBe(0);
+  });
+  test('ambiguous Dodo creation is released after expiry without creating a second checkout',async()=>{
+    await startDodo();const record=getOnlyPaymentRecord();
+    Object.assign(record,{providerOrderId:'',status:'needs_recovery',createdAt:'2000-01-01T00:00:00Z',updatedAt:'2000-01-01T00:00:00Z',lastAttemptAt:'2000-01-01T00:00:00Z',nextRecoveryAt:'2000-01-01T00:00:00Z'});
+    mockCreateDodoCheckout.mockClear();
+    await reconcilePaymentSessions({req:createReq({}, {authorization:'Bearer cron-secret'}),client:mockClient});
+    expect(getOnlyPaymentRecord().status).toBe('abandoned');expect(mockCreateDodoCheckout).not.toHaveBeenCalled();
+  });
+  test('Dodo booking conflicts use shared rescheduling and retry only the failed notification',async()=>{
+    await startDodo();Object.assign(getOnlyPaymentRecord(),{createdAt:'2000-01-01T00:00:00Z',updatedAt:'2000-01-01T00:00:00Z',lastAttemptAt:'2000-01-01T00:00:00Z',nextRecoveryAt:'2000-01-01T00:00:00Z'});
+    mockCreateBooking.mockImplementation(async(req,res)=>res.status(409).json({error:'Slot unavailable'}));
+    const createRequiresRescheduleBooking=jest.fn().mockResolvedValue({bookingId:'booking_dodo_reschedule',recoveryCaseId:'bookingRecoveryCase.dodo',notificationRequired:true});
+    const dispatchRescheduleNotifications=jest.fn().mockResolvedValueOnce({ok:false,notificationRequired:true,status:'partial'}).mockResolvedValueOnce({ok:true,notificationRequired:false,status:'sent'});
+    const options={req:createReq({}, {authorization:'Bearer cron-secret'}),client:mockClient,createRequiresRescheduleBooking,dispatchRescheduleNotifications};
+    await reconcilePaymentSessions(options);expect(getOnlyPaymentRecord().status).toBe('email_partial');
+    getOnlyPaymentRecord().nextRecoveryAt='2000-01-01T00:00:00Z';await reconcilePaymentSessions(options);
+    expect(getOnlyPaymentRecord().status).toBe('booked');expect(createRequiresRescheduleBooking).toHaveBeenCalledTimes(1);expect(dispatchRescheduleNotifications).toHaveBeenCalledTimes(2);
+  });
+  test('several partial refunds pass their cumulative full amount to booking accounting',async()=>{
+    await startDodo();await notify();const total=latest.total_amount;
+    latest.refunds=[{refund_id:'ref_part_a',payment_id:latest.payment_id,status:'succeeded',amount:500,currency:'USD'},{refund_id:'ref_part_b',payment_id:latest.payment_id,status:'succeeded',amount:total-500,currency:'USD'}];
+    const applyBookingRefund=jest.fn(async()=>({bookingId:store.bookings[0]._id}));
+    await notify('refund.succeeded','evt_cumulative_refund',applyBookingRefund);
+    const full=applyBookingRefund.mock.calls.find(([args])=>args.refund.full===true)?.[0];
+    expect(full.refund).toMatchObject({amount:total/100,processedAmountInSubunits:total});
+    expect(getOnlyPaymentRecord().refundProcessedAmountInSubunits).toBe(total);
+  });
+  test.each(['failed','cancelled'])('%s releases the hold and keeps late payment recovery possible',async status=>{
+    await startDodo();latest.status=status;
+    const result=await notify(`payment.${status}`);
+    expect(result.httpStatus).toBe(200);expect(store.bookings).toHaveLength(0);
+    expect(getOnlyPaymentRecord().status).toBe('abandoned');
+    expect(getOnlyPaymentRecord().lateCaptureWatchUntil).toBeTruthy();
+    latest.status='succeeded';const late=await notify('payment.succeeded','evt_late_capture');
+    expect(['booked','email_partial']).toContain(late.body.status);
+    expect(store.bookings).toHaveLength(1);
   });
 });

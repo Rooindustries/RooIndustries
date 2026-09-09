@@ -23,6 +23,7 @@
     "brackets-manager": "^1.11.0",
     "brackets-model": "^1.7.0",
     "dayjs": "^1.11.19",
+    "dodopayments": "2.48.0",
     "dotenv": "^17.2.3",
     "framer-motion": "^12.23.25",
     "groq-js": "1.30.3",

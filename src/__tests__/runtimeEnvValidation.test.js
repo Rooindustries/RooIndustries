@@ -200,6 +200,24 @@ const previewMigrationEnv = (overrides = {}) => {
 };
 
 describe("release runtime environment validation", () => {
+  test("rejects partially configured Dodo live credentials", () => {
+    const result = validate({ DODO_PAYMENTS_API_KEY: "synthetic-live-key", DODO_PAYMENTS_ENVIRONMENT: "live_mode" });
+    expect(result.status).toBe(1);
+    expect(result.output).toContain("DODO_PAYMENTS_PRODUCT_ID is required");
+    expect(result.output).toContain("DODO_PAYMENTS_WEBHOOK_KEY is required");
+  });
+
+  test("accepts complete Dodo live configuration on an explicitly enabled preview", () => {
+    const result = validate({
+      DODO_PAYMENTS_API_KEY: "synthetic-live-key",
+      DODO_PAYMENTS_ENVIRONMENT: "live_mode",
+      DODO_PAYMENTS_PRODUCT_ID: "pdt_fixture",
+      DODO_PAYMENTS_WEBHOOK_KEY: "synthetic-webhook-key",
+      DODO_PAYMENTS_RETURN_URL: "https://preview.example.com/payment",
+      ALLOW_LIVE_PAYMENTS_IN_PREVIEW: "1",
+    });
+    expect(result.status).toBe(0);
+  });
   test("accepts a complete preview environment without provider keys", () => {
     const result = validate();
     expect(result.status).toBe(0);

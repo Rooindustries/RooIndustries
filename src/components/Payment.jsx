@@ -491,7 +491,10 @@ export default function Payment({ hideFooter = false }) {
 
   const [rzpReady, setRzpReady] = useState(false);
   const [payingRzp, setPayingRzp] = useState(false);
+  const [payingDodo, setPayingDodo] = useState(false);
+  const dodoReturnHandled = useRef("");
   const [providerConfig, setProviderConfig] = useState({
+    dodo: { enabled: false, mode: "missing" },
     razorpay: { enabled: false, mode: "unknown", disabledReason: "" },
     paypal: { enabled: false, mode: "unknown", clientId: "" },
   });
@@ -784,6 +787,7 @@ export default function Payment({ hideFooter = false }) {
       .then((data) => {
         if (!active || !data?.ok || !data?.providers) return;
         setProviderConfig({
+          dodo: { enabled: !!data.providers?.dodo?.enabled, mode: data.providers?.dodo?.mode || "missing" },
           razorpay: {
             enabled: !!data.providers?.razorpay?.enabled,
             mode: data.providers?.razorpay?.mode || "unknown",
@@ -959,7 +963,7 @@ export default function Payment({ hideFooter = false }) {
         window.dispatchEvent(new CustomEvent("hold-state", { detail: holdState }));
       }
       clearPaymentSession();
-      showBanner("success", "Payment method released. Choose PayPal or Razorpay below.");
+      showBanner("success", "Payment method released. Choose a payment method below.");
     } catch (error) {
       showBanner("error", error.message || "The payment method could not be changed.");
     } finally {
@@ -1256,6 +1260,33 @@ export default function Payment({ hideFooter = false }) {
       setPaymentStatusBusy(false);
     }
   };
+
+  const handleDodoCheckout = async () => {
+    if (payingDodo || paymentStatusBusy) return;
+    setPayingDodo(true);
+    try {
+      const session = await startSessionCheckout("dodo");
+      if (session?.terminal) return;
+      if (!session?.providerPayload?.checkoutUrl) throw new Error("Checkout is being recovered. Check the payment status shortly.");
+      window.location.assign(session.providerPayload.checkoutUrl);
+    } catch (error) {
+      showBanner("error", error.message || "Unable to open Dodo Payments.");
+    } finally {
+      setPayingDodo(false);
+    }
+  };
+
+  useEffect(() => {
+    const query = new URLSearchParams(location.search);
+    const session = readStoredPaymentSession();
+    if (!paymentSession || session?.provider !== "dodo" || !session.paymentAccessToken ||
+        (!query.has("dodo_return") && !query.has("dodo_cancel")) ||
+        dodoReturnHandled.current === session.paymentAccessToken) return;
+    dodoReturnHandled.current = session.paymentAccessToken;
+    const action = query.has("dodo_cancel") ? handleChangePaymentMethod()
+      : finalizeSessionCheckout({ paymentAccessToken: session.paymentAccessToken, providerData: {} });
+    Promise.resolve(action).catch((error) => showBanner("error", error.message || "Payment confirmation is pending. Check again shortly."));
+  }, [location.search, paymentSession]);
 
   async function validateReferral(code) {
     const normalizedCode = String(code || "").trim();
@@ -1836,7 +1867,7 @@ export default function Payment({ hideFooter = false }) {
             {!!lockedProvider && (
               <div className="mt-4 flex flex-col items-start justify-between gap-3 rounded-lg border border-info-border bg-info-soft px-4 py-3 sm:flex-row sm:items-center">
                 <p className="text-xs text-info-text">
-                  This checkout is reserved with {lockedProvider === "paypal" ? "PayPal" : "Razorpay"}. Pricing and provider selection are locked for this session. Finish it or safely release this payment method before choosing another.
+                  This checkout is reserved with {lockedProvider === "dodo" ? "Dodo Payments" : lockedProvider === "paypal" ? "PayPal" : "Razorpay"}. Pricing and provider selection are locked for this session. Finish it or safely release this payment method before choosing another.
                 </p>
                 <button
                   type="button"
@@ -1888,6 +1919,28 @@ export default function Payment({ hideFooter = false }) {
             </div>
           ) : (
             <>
+              {providerConfig.dodo?.enabled && (
+                <div className="low-perf-surface glass-premium glass-card-surface mt-6 flex flex-col items-center justify-between gap-4 rounded-xl border border-line-input px-5 py-4 sm:flex-row">
+                  <div>
+                    <p className="text-base font-semibold text-ink">Dodo Payments</p>
+                    <p className="text-sm text-ink-muted">Pay securely by card and supported local payment methods.</p>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <button type="button" onClick={handleDodoCheckout}
+                      disabled={payingDodo || paymentStatusBusy || cancellingPayment || quoteLoading || !quoteFingerprint || !providerIsAvailableForSession("dodo")}
+                      className="glow-button rounded-lg px-5 py-3 text-sm font-semibold disabled:opacity-60">
+                      {payingDodo ? "Opening checkout..." : "Pay with Dodo Payments"}
+                    </button>
+                    {lockedProvider === "dodo" && (
+                      <button type="button" disabled={paymentStatusBusy || cancellingPayment}
+                        className="rounded-md px-3 py-2 text-xs font-semibold text-ink-muted hover:text-ink disabled:opacity-60"
+                        onClick={() => finalizeSessionCheckout({ paymentAccessToken: paymentSession.paymentAccessToken, providerData: {} }).catch((error) => showBanner("error", error.message))}>
+                        {paymentStatusBusy ? "Checking payment..." : "Check payment status"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div
                 className={`low-perf-surface glass-premium glass-card-surface mt-6 flex flex-col items-center justify-between gap-4 rounded-xl border px-5 py-4 sm:flex-row ${

@@ -169,7 +169,7 @@ export const buildPaymentProofClaimId = ({
 }) => {
   const normalizedProvider = normalizeLowerTrim(provider) || "unknown";
   const proofId =
-    normalizedProvider === "razorpay"
+    ["razorpay", "dodo"].includes(normalizedProvider)
       ? String(providerPaymentId || "").trim()
       : String(providerOrderId || providerPaymentId || "").trim();
   return proofId
@@ -187,7 +187,7 @@ export const buildWebhookReceiptId = ({
   rawBody = "",
 }) =>
   `paymentWebhookReceipt.${normalizeLowerTrim(provider) || "unknown"}.${stableHash(
-    `${eventId || ""}:${eventType || ""}:${rawBody || ""}`,
+    provider === "dodo" && eventId ? eventId : `${eventId || ""}:${eventType || ""}:${rawBody || ""}`,
     40
   )}`;
 

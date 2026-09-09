@@ -163,7 +163,13 @@ const resolvePaymentProviders = () => {
     !!paypalClientSecret &&
     allowProviderModeInRuntime(paypalMode, runtimePolicy);
 
+  const dodoEnvironment = String(process.env.DODO_PAYMENTS_ENVIRONMENT || "").trim();
+  const dodoMode = dodoEnvironment === "test_mode" ? "test" : dodoEnvironment === "live_mode" ? "live" : "missing";
+  const dodoEnabled = ["DODO_PAYMENTS_API_KEY", "DODO_PAYMENTS_PRODUCT_ID", "DODO_PAYMENTS_WEBHOOK_KEY", "DODO_PAYMENTS_RETURN_URL"]
+    .every((key) => !!String(process.env[key] || "").trim()) && allowProviderModeInRuntime(dodoMode, runtimePolicy);
+
   return {
+    dodo: { enabled: dodoEnabled, mode: dodoMode },
     runtime: runtimePolicy.runtime,
     previewPaymentsEnabled: runtimePolicy.previewPaymentsEnabled,
     livePaymentsEnabled: runtimePolicy.livePaymentsEnabled,

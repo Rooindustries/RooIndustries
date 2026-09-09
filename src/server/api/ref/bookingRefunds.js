@@ -111,6 +111,20 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
   const full = isFullRefund(refund);
   const now = new Date().toISOString();
   const refundId = String(refund.id || refund.refundId || refund.eventId || "").trim();
+  if (!full && paymentRecord.provider === "dodo") {
+    const refundedAmount = Number(refund.totalRefundedAmount || 0);
+    if (booking.refundAccountingAppliedAt || refundedAmount <= Number(booking.refundedAmount || 0)) {
+      return { bookingId: booking._id, idempotent: true };
+    }
+    const originalCommission = Number(booking.dodoOriginalCommissionAmount ?? booking.commissionAmount ?? 0);
+    const remaining = Math.max(0, 1 - refundedAmount / Number(booking.netAmount || 1));
+    let patch = client.patch(booking._id);
+    if (booking._rev) patch = patch.ifRevisionId(booking._rev);
+    await patch.set({ refundedAmount, refundStatus: "partial", lastRefundAt: now,
+      dodoOriginalCommissionAmount: originalCommission,
+      commissionAmount: Math.round(originalCommission * remaining * 100) / 100 }).commit();
+    return { bookingId: booking._id, idempotent: false, reopenedSlot: false, couponRestored: false };
+  }
   if (!full) {
     const processedRefundIds = Array.isArray(booking.processedRefundIds)
       ? booking.processedRefundIds.filter(Boolean)

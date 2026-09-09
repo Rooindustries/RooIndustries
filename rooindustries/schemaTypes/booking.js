@@ -106,6 +106,8 @@ export default {
     {name: 'couponRedemptionId', title: 'Coupon Redemption ID', type: 'string', readOnly: true},
     {name: 'couponRestoredAfterRefund', title: 'Coupon Restored After Refund', type: 'boolean', readOnly: true},
 
+    {name: 'dodoCheckoutSessionId', title: 'Dodo Checkout Session ID', type: 'string'},
+    {name: 'dodoPaymentId', title: 'Dodo Payment ID', type: 'string'},
     {name: 'paypalOrderId', title: 'PayPal Order ID', type: 'string'},
     {name: 'payerEmail', title: 'Payer Email', type: 'string'},
 

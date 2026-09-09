@@ -1,3 +1,4 @@
+import { createDodoCheckout, inspectDodoCheckout, retrieveDodoPayment, validateDodoPayment, verifyDodoCapture, unwrapDodoWebhook } from "./dodoProvider.js";
 import crypto from "crypto";
 import { getSafeErrorCode } from "../../safeErrorLog.js";
 import { authorizeCronRequest } from "../cronAuth.js";
@@ -73,7 +74,7 @@ import {
   PAYMENT_STATUS_REFUNDED,
   PAYMENT_STATUS_STARTED,
 } from "./paymentRecord.js";
-import { selectPaymentAuthority } from "./backend.js";
+import { selectPaymentAuthority, resolveWebhookBackend, createPaymentBackendClient } from "./backend.js";
 import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
 
 export { authorizeCronRequest };
@@ -103,7 +104,7 @@ const isFutureIso = (value) => {
 
 const isDefinitiveMissingProviderOrder = (inspection = {}) =>
   inspection.state === "unavailable" &&
-  /^(paypal|razorpay)_lookup_failed_404$/.test(
+  /^(paypal|razorpay|dodo)_lookup_failed_404$/.test(
     String(inspection.reason || "").trim().toLowerCase()
   );
 
@@ -247,6 +248,8 @@ const sanitizeBookingPayload = (payload = {}) => {
 const sanitizeProviderFinalizeData = (payload = {}) => {
   const normalized = normalizeObject(payload);
   return {
+    dodoCheckoutSessionId: String(normalized.dodoCheckoutSessionId || "").trim(),
+    dodoPaymentId: String(normalized.dodoPaymentId || "").trim(),
     paypalOrderId: String(normalized.paypalOrderId || "").trim(),
     paypalPaymentId: String(normalized.paypalPaymentId || "").trim(),
     payerEmail: String(normalized.payerEmail || "").trim(),
@@ -539,6 +542,7 @@ const buildQuotePayload = (quote = {}) => ({
 
 const buildProviderPayloadFromRecord = (record = {}) => {
   const provider = String(record.provider || "").trim().toLowerCase();
+  if (provider === "dodo") return { ...record.providerPublicData, orderId: record.providerOrderId };
   if (provider === "razorpay") {
     return {
       orderId: String(record.providerOrderId || "").trim(),
@@ -837,6 +841,7 @@ const resolveRecordFromAccessToken = async ({
 };
 
 const getSubmittedProviderIdentifiers = ({ record = {}, providerData = {} }) => {
+  if (record.provider === "dodo") return { providerOrderId: String(providerData.dodoCheckoutSessionId || "").trim(), providerPaymentId: String(providerData.dodoPaymentId || "").trim() };
   const provider = String(record.provider || "").trim().toLowerCase();
   if (provider === "razorpay") {
     return {
@@ -889,6 +894,8 @@ const verifyProviderCapture = async ({
   if (!binding.ok) {
     return { ok: false, retryable: false, reason: binding.reason };
   }
+
+  if (provider === "dodo") return verifyDodoCapture({ record, payment: source !== "client" ? providerData.verifiedDodoPayment : undefined });
 
   if (provider === "razorpay") {
     const orderId = String(record.providerOrderId || binding.providerOrderId || "").trim();
@@ -1113,7 +1120,7 @@ const attachImmutableProviderOrder = async ({ client, record, providerPayload })
         bookingFinalizationKey:
           record.provider === "paypal"
             ? `paypal:${providerOrderId}`
-            : `razorpay-order:${providerOrderId}`,
+            : record.provider === "dodo" ? `dodo:${providerOrderId}` : `razorpay-order:${providerOrderId}`,
         orderState: "created",
         orderCreationLeaseId: "",
         orderCreationLeaseExpiresAt: "",
@@ -1628,18 +1635,20 @@ const buildLegacyBookingPayload = ({
   return {
     ...bookingPayload,
     paymentProvider: record.provider,
+    dodoCheckoutSessionId: record.provider === "dodo" ? record.providerOrderId : "",
+    dodoPaymentId: record.provider === "dodo" ? record.providerPaymentId : "",
     status: "captured",
     deferEmailsUntilConfirmation:
       normalizedSource === "client" &&
       String(record.provider || "").trim().toLowerCase() !== "free",
     paypalOrderId:
-      String(record.providerOrderId || providerData.paypalOrderId || "").trim(),
+      record.provider === "dodo" ? "" : String(record.providerOrderId || providerData.paypalOrderId || "").trim(),
     payerEmail:
       String(providerData.payerEmail || record.payerEmail || "").trim(),
     razorpayOrderId:
-      String(record.providerOrderId || providerData.razorpayOrderId || "").trim(),
+      record.provider === "dodo" ? "" : String(record.providerOrderId || providerData.razorpayOrderId || "").trim(),
     razorpayPaymentId:
-      String(record.providerPaymentId || providerData.razorpayPaymentId || "").trim(),
+      record.provider === "dodo" ? "" : String(record.providerPaymentId || providerData.razorpayPaymentId || "").trim(),
     razorpaySignature:
       String(providerData.razorpaySignature || record.providerSignature || "").trim(),
     slotHoldId:
@@ -2481,6 +2490,8 @@ const createProviderOrderForRecord = async (
   const amount = Number(pricing.netAmount || 0);
   const idempotencyKey = String(record.providerIdempotencyKey || "").trim();
 
+  if (provider === "dodo") return createDodoCheckout({ record, lookupOnly: !allowProviderCreate });
+
   if (provider === "razorpay") {
     return createRazorpayOrder({
       amount,
@@ -2649,7 +2660,7 @@ const createOrReusePaymentRecordForStart = async ({
     attemptCount: 0,
     lastAttemptAt: "",
     source: "start",
-    providerPublicData: {},
+    providerPublicData: provider === "dodo" ? { currency: "USD", productId: String(process.env.DODO_PAYMENTS_PRODUCT_ID || "").trim(), environment: String(process.env.DODO_PAYMENTS_ENVIRONMENT || "").trim() } : {},
     orderState: provider === "free" ? "not_required" : "creating",
     orderCreationLeaseId,
     orderCreationLeaseExpiresAt:
@@ -2934,7 +2945,7 @@ export const startPaymentSession = async ({
       };
     }
 
-    if (provider !== "free" && provider !== "paypal" && provider !== "razorpay") {
+    if (provider !== "free" && provider !== "paypal" && provider !== "razorpay" && provider !== "dodo") {
       return {
         httpStatus: 400,
         body: { ok: false, error: "Unsupported payment provider." },
@@ -2956,6 +2967,10 @@ export const startPaymentSession = async ({
         httpStatus: 400,
         body: { ok: false, error: "Razorpay is not available in this environment." },
       };
+    }
+
+    if (provider === "dodo" && !providers?.dodo?.enabled) {
+      return { httpStatus: 400, body: { ok: false, error: "Dodo Payments is not available in this environment." } };
     }
 
     const { holdDoc } = await assertStartableHold({ client, bookingPayload });
@@ -3096,6 +3111,12 @@ export const finalizePaymentSession = async ({
   }
 
   const record = resolved?.record;
+  if (record.provider === "dodo") {
+    const binding = validateImmutableProviderBinding({ record, providerData: sanitizeProviderFinalizeData(body?.providerData) });
+    if (!binding.ok) return { httpStatus: 409, body: { ok: false, code: binding.reason } };
+    return refreshDodoPayment({ client, record, source: "reconcile" });
+  }
+
   const terminalStatus = String(record?.status || "").trim().toLowerCase();
   if (
     isPaymentTerminalStatus(record?.status) &&
@@ -3495,6 +3516,10 @@ const inspectProviderOrderForRecovery = async (record = {}) => {
   const provider = String(record.provider || "").trim().toLowerCase();
   const providerOrderId = String(record.providerOrderId || "").trim();
   if (provider === "free") return { state: "captured", providerData: {} };
+  if (provider === "dodo") {
+    const inspection = await inspectDodoCheckout({ record });
+    return { ...inspection, providerData: { dodoCheckoutSessionId: record.providerOrderId, dodoPaymentId: inspection.providerPaymentId || "" } };
+  }
   if (!providerOrderId) {
     return { state: "unavailable", reason: "provider_order_id_missing" };
   }
@@ -3903,6 +3928,7 @@ export const getPaymentStatus = async ({
       fallbackMessage: "Payment status is temporarily unavailable.",
     });
   }
+  if (resolved.record.provider === "dodo") return refreshDodoPayment({ client, record: resolved.record, source: "reconcile" });
   return {
     httpStatus: 200,
     body: buildPublicStatusBody(resolved.record),
@@ -3995,6 +4021,22 @@ export const reconcilePaymentSessions = async ({
 
   for (const record of Array.isArray(records) ? records : []) {
     summary.scanned += 1;
+    let dodoInspection = null;
+    if (record.provider === "dodo" && record.providerOrderId) {
+      dodoInspection = await inspectDodoCheckout({ record });
+      if (dodoInspection.payment) {
+        const result = await refreshDodoPayment({ client, record, payment: dodoInspection.payment,
+          source: "reconcile", applyBookingRefund, deferFinalization: true });
+        Object.assign(record, await getPaymentRecordById(client, record._id));
+        dodoInspection = result.httpStatus >= 400
+          ? { state: "unavailable", reason: result.body?.code || "dodo_refund_reconciliation_failed" }
+          : { ...dodoInspection, providerData: {
+              dodoCheckoutSessionId: record.providerOrderId,
+              dodoPaymentId: dodoInspection.payment.payment_id,
+              verifiedDodoPayment: dodoInspection.payment,
+            } };
+      }
+    }
     const ageMinutes = getPaymentAgeMinutes(record);
     const createdAgeMinutes = getPaymentCreatedAgeMinutes(record);
     const status = String(record.status || "").trim().toLowerCase();
@@ -4077,7 +4119,7 @@ export const reconcilePaymentSessions = async ({
     }
 
     if (status === PAYMENT_STATUS_ABANDONED) {
-      const inspection = await inspectProviderOrderForRecovery(record);
+      const inspection = dodoInspection || await inspectProviderOrderForRecovery(record);
       if (inspection.state === "captured") {
         const recovered = await finalizePaymentRecordInternal({
           client,
@@ -4098,7 +4140,8 @@ export const reconcilePaymentSessions = async ({
           summary.recovery += 1;
         }
       } else if (
-        isDefinitiveMissingProviderOrder(inspection) &&
+        (isDefinitiveMissingProviderOrder(inspection) ||
+          (record.provider === "dodo" && inspection.state === "unpaid")) &&
         !isFutureIso(record.lateCaptureWatchUntil)
       ) {
         await closeExpiredLateCaptureWatch({ client, record });
@@ -4168,7 +4211,7 @@ export const reconcilePaymentSessions = async ({
       continue;
     }
 
-    let providerData = {};
+    let providerData = dodoInspection?.providerData || {};
     if (
       String(record.provider || "").trim().toLowerCase() !== "free" &&
       (status === PAYMENT_STATUS_STARTED ||
@@ -4217,7 +4260,7 @@ export const reconcilePaymentSessions = async ({
           continue;
         }
       }
-      const inspection = await inspectProviderOrderForRecovery(record);
+      const inspection = dodoInspection || await inspectProviderOrderForRecovery(record);
       if (inspection.state === "captured") {
         providerData = inspection.providerData || {};
         if (!hasRecoverableBookingPayload(record)) {
@@ -4476,7 +4519,7 @@ const findOrCreateWebhookRecoveryRecord = async ({
 
 const normalizeRefundStatus = (value = "") => {
   const status = String(value || "").trim().toLowerCase();
-  if (["processed", "completed", "refunded", "reversed"].includes(status)) {
+  if (["processed", "completed", "refunded", "reversed", "succeeded"].includes(status)) {
     return "processed";
   }
   if (["failed", "denied", "cancelled", "canceled"].includes(status)) {
@@ -4548,7 +4591,7 @@ const buildRefundMutation = ({
   const processedAmount = refunds
     .filter((entry) => entry.status === "processed")
     .reduce((sum, entry) => {
-      if (provider === "razorpay" && Number(entry.amountInSubunits || 0) > 0) {
+      if (["razorpay", "dodo"].includes(provider) && Number(entry.amountInSubunits || 0) > 0) {
         return sum + Number(entry.amountInSubunits || 0);
       }
       return sum + toSubunits(entry.amount || 0, resolvedExpectedCurrency);
@@ -4865,12 +4908,20 @@ const processPaymentRefund = async ({
     refundState,
   } = mutation;
 
+  if (provider === "dodo" && !isFullRefund && refundState === "partial" && nextRecord.bookingId) {
+    if (typeof applyBookingRefund !== "function") throw new Error("Dodo partial refund handler unavailable");
+    await applyBookingRefund({ client, paymentRecord: nextRecord, refund: {
+      type: "partial", full: false, totalRefundedAmount: processedAmount / 100,
+    } });
+  }
+
   if (isFullRefund && nextRecord.refundRequiresBookingSync === true) {
     const sideEffects = await applyFullRefundEffects({
       client,
       record: nextRecord,
       refund: {
         ...nextRefund,
+        ...(provider === "dodo" ? { amount: processedAmount / 100 } : {}),
         state: refundState,
         type: reversed ? "reversal" : refundState,
         full: isFullRefund,
@@ -5133,4 +5184,107 @@ export const handlePayPalWebhook = async ({
     await completeWebhookReceipt({ client, receipt: receiptClaim.receipt, result });
   }
   return result;
+};
+
+export const refreshDodoPayment = async ({ client, record, payment = null, source = "reconcile", applyBookingRefund = null, deferFinalization = false }) => {
+  const inspection = payment ? { payment } : await inspectDodoCheckout({ record });
+  payment = inspection.payment;
+  if (!payment) {
+    if (inspection.state === "unpaid" && !isFutureIso(record.sessionExpiresAt)) {
+      const result = await abandonStartedPaymentRecord({ client, record, reason: "dodo_checkout_expired" });
+      return { httpStatus: 200, body: buildPublicStatusBody(result.paymentRecord || record) };
+    }
+    return { httpStatus: inspection.state === "unavailable" ? 503 : 202,
+      body: { ...buildPublicStatusBody(record), ...(inspection.state === "unavailable" ? { ok: false, error: "Dodo payment status is temporarily unavailable." } : {}) } };
+  }
+  const validation = validateDodoPayment({ record, payment });
+  if (!validation.ok) return { httpStatus: 409, body: { ok: false, code: validation.reason, error: "The payment does not match this checkout." } };
+
+  const refundHandler = applyBookingRefund || (await loadBookingRefundHandler());
+  for (const refund of payment.refunds || []) {
+    if (refund.status !== "succeeded") continue;
+    if (refund.payment_id !== payment.payment_id || !Number.isSafeInteger(refund.amount) || refund.amount <= 0 ||
+        refund.amount > payment.total_amount || refund.currency !== payment.currency) {
+      return { httpStatus: 409, body: { ok: false, code: "dodo_refund_mismatch", error: "The refund does not match this payment." } };
+    }
+    const result = await processPaymentRefund({
+      client, provider: "dodo", providerOrderId: record.providerOrderId,
+      providerPaymentId: payment.payment_id, providerRefundId: refund.refund_id,
+      eventType: `refund.${refund.status}`, refundStatus: refund.status,
+      amountInSubunits: refund.amount, amount: refund.amount / 100, currency: refund.currency,
+      applyBookingRefund: refundHandler, backendOwner: record.backendOwner,
+    });
+    if (result.httpStatus >= 400) return result;
+    record = await getPaymentRecordById(client, record._id);
+  }
+  if (record.status === PAYMENT_STATUS_REFUNDED) {
+    return { httpStatus: record.refundRequiresBookingSync ? 503 : 200, body: buildPublicStatusBody(record) };
+  }
+  if (payment.status === "succeeded") {
+    if (deferFinalization) return { httpStatus: 200, body: buildPublicStatusBody(record) };
+    const finalized = await finalizePaymentRecordInternal({ client, record, source,
+      providerData: { dodoCheckoutSessionId: payment.checkout_session_id,
+        dodoPaymentId: payment.payment_id, verifiedDodoPayment: payment } });
+    return { httpStatus: finalized.httpStatus, body: finalized.response };
+  }
+  if ([PAYMENT_STATUS_BOOKED, PAYMENT_STATUS_EMAIL_PARTIAL, PAYMENT_STATUS_REFUNDED].includes(record.status)) {
+    return { httpStatus: 200, body: buildPublicStatusBody(record) };
+  }
+  if (["failed", "cancelled"].includes(payment.status)) {
+    const result = await abandonStartedPaymentRecord({ client, record, reason: `dodo_payment_${payment.status}` });
+    return { httpStatus: 200, body: { ...buildPublicStatusBody(result.paymentRecord || record),
+      providerPaymentState: payment.status, status: payment.status === "failed" ? "failed" : "abandoned" } };
+  }
+  return { httpStatus: 202, body: { ...buildPublicStatusBody(record), providerPaymentState: payment.status } };
+};
+
+export const handleDodoWebhook = async ({ req, client = null, applyBookingRefund = null }) => {
+  let event;
+  try {
+    event = unwrapDodoWebhook({ rawBody: String(req?.rawBody || ""), headers: req?.headers || {} });
+  } catch (error) {
+    return { httpStatus: error.status === 503 ? 503 : 401, body: { ok: false, error: "Dodo webhook verification failed." } };
+  }
+  const eventId = String(req?.headers?.["webhook-id"] || "").trim();
+  if (!eventId) return { httpStatus: 401, body: { ok: false, error: "Missing webhook ID." } };
+  if (!["payment.succeeded", "payment.failed", "payment.processing", "payment.cancelled", "refund.succeeded", "refund.failed"].includes(event.type) && !String(event.type).startsWith("dispute.")) {
+    return { httpStatus: 200, body: { ok: true, ignored: true } };
+  }
+  const backend = client?.backend || await resolveWebhookBackend({ provider: "dodo", body: event });
+  client ||= createPaymentBackendClient(backend);
+  const paymentId = String(event.data?.payment_id || "");
+  if (!paymentId) return { httpStatus: 400, body: { ok: false, error: "Missing payment ID." } };
+  let payment;
+  let record;
+  try {
+    payment = await retrieveDodoPayment(paymentId);
+    record = await getPaymentRecordById(client, String(payment.metadata?.paymentRecordId || ""));
+  } catch {
+    return { httpStatus: 503, body: { ok: false, error: "Payment lookup is temporarily unavailable." } };
+  }
+  if (!record?._id || record.provider !== "dodo") return { httpStatus: 200, body: { ok: true, ignored: true } };
+  if (!record.providerOrderId && payment.checkout_session_id) {
+    const validation = validateDodoPayment({ record: { ...record, providerOrderId: payment.checkout_session_id }, payment });
+    if (!validation.ok) return { httpStatus: 409, body: { ok: false, code: validation.reason } };
+    record = await attachImmutableProviderOrder({ client, record,
+      providerPayload: { ...record.providerPublicData, orderId: payment.checkout_session_id } });
+  }
+  const claim = await claimWebhookReceipt({ client, provider: "dodo", eventId,
+    eventType: event.type, rawBody: req.rawBody, backendOwner: record.backendOwner });
+  if (!claim.acquired) return { httpStatus: claim.processed ? 200 : 503,
+    body: { ok: claim.processed, duplicate: true, processing: !claim.processed } };
+  let result;
+  try {
+    result = await refreshDodoPayment({ client, record, payment, source: "webhook", applyBookingRefund });
+    if (result.httpStatus !== 200) {
+      await releaseWebhookReceiptForRetry({ client, receipt: claim.receipt, result });
+      return { ...result, httpStatus: result.httpStatus === 202 ? 503 : result.httpStatus };
+    }
+    await completeWebhookReceipt({ client, receipt: claim.receipt, result });
+    return result;
+  } catch {
+    result = { httpStatus: 503, body: { ok: false, error: "Dodo webhook processing will be retried." } };
+    await releaseWebhookReceiptForRetry({ client, receipt: claim.receipt, result });
+    return result;
+  }
 };
