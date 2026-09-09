@@ -18,7 +18,6 @@ export default {
       validation: (Rule) => Rule.required(),
     },
 
-    // ✅ NEW
     {
       name: 'description',
       title: 'Short Description (shows under price)',
@@ -48,7 +47,6 @@ export default {
       description: 'Uses the gold glow styling for the highlight tag.',
       initialValue: false,
     },
-    // Per-package bullet lists
     {
       name: 'checkedBullets',
       title: 'Checked Bullet Points',

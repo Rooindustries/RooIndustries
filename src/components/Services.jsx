@@ -101,7 +101,6 @@ export default function Services({
     return enabled && totalPages > 0;
   }, [data, totalPages]);
 
-  // 1. GRID COLUMNS logic
   const gridClass = useMemo(() => {
     const count = pageGames.length;
     if (count === 1) return "grid grid-cols-1 gap-5";
@@ -225,7 +224,6 @@ export default function Services({
         <>
           <div className="h-10" />
 
-          {/* CONTAINER BOX */}
           <motion.div
             layout
             className={`ri-bench-shell relative rounded-[28px] ring-1 ring-line-soft bg-panel shadow-surface-deep overflow-hidden mx-auto ${containerClass}`}

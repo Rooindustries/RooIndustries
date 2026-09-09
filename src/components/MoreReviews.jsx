@@ -43,7 +43,6 @@ export default function Reviews() {
     ? [...localDiscordReviews, ...reviews]
     : [];
 
-  // SEO/a11y: keep the alt text aligned with the zoomed review image.
   const handleOpenZoom = (src, altText) => {
     setSelectedImage(src);
     setSelectedAlt(altText);
@@ -109,7 +108,6 @@ export default function Reviews() {
               key={i}
               className="break-inside-avoid overflow-hidden rounded-xl"
             >
-              {/* SEO/CLS: wrap each review image with a semantic figure/caption and intrinsic size. */}
               <figure className="m-0">
                 <button
                   type="button"

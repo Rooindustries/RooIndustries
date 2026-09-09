@@ -373,7 +373,6 @@ export default function Navbar({ routeShell = "browser" }) {
     }
   }, [location.pathname]);
 
-  // Close dropdowns when clicking outside (desktop only)
   useEffect(() => {
     if ((!proofOpen && !referralsOpen) || typeof window === "undefined") return;
     if (!window.matchMedia("(min-width: 768px)").matches) return;
@@ -508,7 +507,6 @@ export default function Navbar({ routeShell = "browser" }) {
         navMenuOpen ? "nav-menu-open" : ""
       }`}
     >
-      {/* subtle grid overlay */}
       <div
         className="pointer-events-none absolute inset-0 opacity-[0.14] z-0"
         style={{
@@ -518,7 +516,6 @@ export default function Navbar({ routeShell = "browser" }) {
         }}
       />
 
-      {/* cyan glow line */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-[color:var(--color-accent-soft)] to-transparent z-0" />
 
       <div className="relative z-10 hidden md:block">
@@ -527,7 +524,6 @@ export default function Navbar({ routeShell = "browser" }) {
 
       <div className="relative z-10 mx-auto max-w-7xl overflow-visible px-4 sm:px-6">
         <div ref={navRowRef} className="flex h-20 items-center overflow-visible sm:h-24">
-          {/* Left: Logo / Back */}
           <div className="hidden min-w-0 flex-1 items-center gap-4 md:flex">
             {location.pathname !== "/" ? (
               <BackButton hidden={false} inline={true} />
@@ -572,7 +568,6 @@ export default function Navbar({ routeShell = "browser" }) {
             </Link>
           </div>
 
-          {/* Right: Links + CTA + Mobile */}
           <div className="ml-0 flex w-full min-w-0 items-center gap-2 md:ml-auto md:w-auto md:justify-end md:gap-3">
             <Link
               to="/"
@@ -799,7 +794,6 @@ export default function Navbar({ routeShell = "browser" }) {
               Packages
             </a>
 
-            {/* Mobile menu button */}
             <button
               type="button"
               onClick={() =>
@@ -831,9 +825,7 @@ export default function Navbar({ routeShell = "browser" }) {
               </div>
             </button>
 
-            {/* Theme switch: CRT/retro-PC side = Roo Blue, moon side =
-                Blackout. Last child + extra margin keeps it pinned to the
-                far right, clear of the primary buttons. */}
+            {/* CRT selects Roo Blue; moon selects Blackout. Keep the switch clear of the primary buttons. */}
             <button
               type="button"
               role="switch"
@@ -858,7 +850,6 @@ export default function Navbar({ routeShell = "browser" }) {
           </div>
         </div>
 
-        {/* Mobile dropdown */}
         <div
           id="mobile-site-menu"
           className={`md:hidden overflow-hidden transition-all duration-300 ease-out ${

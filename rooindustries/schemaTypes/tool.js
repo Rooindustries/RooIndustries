@@ -40,7 +40,6 @@ export default {
       description: 'Small square logo for the card.',
     },
 
-    // ---- DOWNLOAD MODE + CONDITIONAL FIELDS ----
     {
       name: 'downloadMode',
       title: 'Download Mode',

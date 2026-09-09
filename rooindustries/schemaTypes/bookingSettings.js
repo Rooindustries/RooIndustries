@@ -8,7 +8,6 @@ export default {
   title: 'Booking Settings',
   type: 'document',
   fields: [
-    // =====VERTEX SCHEDULE =====
     {
       name: 'maxDaysAheadBooking',
       title: 'Maximum Days Ahead Booking',
@@ -112,7 +111,6 @@ export default {
       ],
     },
 
-    // ===== XOC SCHEDULE (separate fields) =====
     {
       name: 'xocDateSlots',
       title: 'Date-Based Time Slots (XOC / Extreme Overclocking)',

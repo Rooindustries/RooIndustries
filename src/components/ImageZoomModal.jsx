@@ -48,7 +48,6 @@ export default function ImageZoomModal({
     return () => cancelAnimationFrame(animationRef.current);
   }, [lowPerformanceMode, targetOffset]);
 
-  // Hide logo + disable scroll when open
   useEffect(() => {
     setIsModalOpen(true);
     const body = document.body;
