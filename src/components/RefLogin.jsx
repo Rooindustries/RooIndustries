@@ -48,9 +48,7 @@ const savePendingDiscordChoice = (state, provider = "discord") => {
   }
 };
 
-// Returns { provider, state } so a choice saved before a redirect still knows
-// which provider it belongs to. Choices written by an earlier deploy carry no
-// provider and read back as Discord, which is what they were.
+// Legacy saved choices omitted the provider and always referred to Discord.
 const readPendingDiscordChoice = () => {
   try {
     const value = JSON.parse(
@@ -84,15 +82,13 @@ export default function RefLogin() {
   const [linkProvider, setLinkProvider] = useState("discord");
   const identifierInputRef = useRef(null);
 
-  // Load saved referral code
   useEffect(() => {
     const query = new URLSearchParams(location.search);
     const oauthError = query.get("oauth");
     const provider = String(query.get("provider") || "").trim().toLowerCase();
     let pendingChoice = readPendingDiscordChoice();
     if (oauthError) {
-      // Both providers are offered on this page, so both need somewhere to go
-      // when the social account has no creator account linked yet.
+      // Unlinked social accounts need to choose or create a creator account.
       if (oauthError === "unlinked" && LINK_PROVIDERS.includes(provider)) {
         savePendingDiscordChoice("choose", provider);
         pendingChoice = { provider, state: "choose" };
@@ -103,8 +99,7 @@ export default function RefLogin() {
           type: "error",
           message:
             oauthError === "unlinked"
-            // Only reached for a provider we do not offer, so this cannot name
-            // one; the linkable providers get the choose-account flow above.
+            // Unsupported providers cannot use the choose-account flow.
             ? "That email is not linked to a creator account."
             : "Social sign-in is temporarily unavailable. Use your email or referral code.",
         });
@@ -124,11 +119,13 @@ export default function RefLogin() {
       query.delete("notice");
     }
     const cleanSearch = query.toString();
-    window.history.replaceState(
-      null,
-      "",
-      `${location.pathname}${cleanSearch ? `?${cleanSearch}` : ""}`
-    );
+    if (window.location.pathname === location.pathname) {
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${location.pathname}${cleanSearch ? `?${cleanSearch}` : ""}`
+      );
+    }
 
     const checkSession = async () => {
       if (pendingChoice.state) return;
@@ -237,7 +234,6 @@ export default function RefLogin() {
         settings.
       </p>
 
-      {/* Bigger Form Card */}
       <form
         onSubmit={handleLogin}
         className="mt-12 w-full max-w-md
@@ -246,7 +242,6 @@ export default function RefLogin() {
                   shadow-[var(--shadow-card-glow)]
                   rounded-2xl p-8 space-y-7"
       >
-        {/* Referral Code or Email */}
         <div>
           <label htmlFor="ref-login-identifier" className="text-accent text-sm font-semibold">
             Referral code or login email
@@ -263,7 +258,6 @@ export default function RefLogin() {
           />
         </div>
 
-        {/* Password */}
         <div>
           <label htmlFor="ref-login-password" className="text-accent text-sm font-semibold">Password</label>
           <input
@@ -278,7 +272,6 @@ export default function RefLogin() {
           />
         </div>
 
-        {/* Remember Me */}
         <div className="flex items-center justify-between mt-1">
           <label
             htmlFor="ref-login-remember"
@@ -318,7 +311,6 @@ export default function RefLogin() {
           </button>
         </div>
 
-        {/* Submit Button */}
         {outcome ? (
           <div
             aria-live="polite"
@@ -354,7 +346,6 @@ export default function RefLogin() {
         />
       </form>
 
-      {/* Register Button */}
       <div className="mt-4 flex flex-col items-center gap-2">
         <p className="text-xs text-ink-muted">
           Don&apos;t have a creator account yet?

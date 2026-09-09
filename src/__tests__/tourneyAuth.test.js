@@ -258,10 +258,8 @@ describe("tourney auth", () => {
       version: "1",
     });
     await expect(bcrypt.compare("new-password", caster.passwordHash)).resolves.toBe(true);
-    // The owner fixture predates the email requirement and matches neither legacy
-    // fallback username, so it is genuinely unrecoverable -- the state three active
-    // production admins were in. The owner view has to say so rather than render a
-    // row that looks healthy. New accounts can no longer reach that state.
+    // This legacy owner has neither an email nor a fallback username. The owner
+    // view must expose that recovery is unavailable.
     expect(auth.summarizeTourneyAccounts(accounts)).toEqual([
       {
         username: "casterone",
@@ -291,10 +289,8 @@ describe("tourney auth", () => {
     ).rejects.toThrow("Owner accounts can only be changed from server env.");
   });
 
-  // The role list was the reported defect, but passing the role gate is not the same
-  // as being able to receive a reset link. An administrator with no configured email
-  // and no legacy fallback gets "" from getTourneyAdminEmail, and the forgot route
-  // then answers generically without sending anything.
+  // An eligible admin role still needs an email or legacy fallback to receive a
+  // reset link; otherwise the forgot route returns generic success without sending.
   describe("canTourneyAdminRecoverPassword", () => {
     const account = (overrides) => ({
       username: "someone",

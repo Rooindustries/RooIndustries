@@ -118,9 +118,7 @@ export default function OwnerAccountManager({
           </label>
           <label>
             Email
-            {/* Required: an email is the only self-serve recovery path for a
-                login-capable account, and the forgot endpoint answers generically
-                whether or not one exists. The server enforces this too. */}
+            {/* Email is required for self-service recovery; the server enforces this too. */}
             <input
               name="email"
               type="email"
@@ -164,10 +162,7 @@ export default function OwnerAccountManager({
                   {account.role}
                   {account.email ? ` - ${account.email}` : ""}
                 </small>
-                {/* An active admin with no deliverable address passes the role gate
-                    but can never receive a reset link, and the forgot endpoint
-                    answers generically either way -- so without this the row looks
-                    perfectly healthy. Add an email to clear it. */}
+                {/* Expose missing recovery email here; the forgot endpoint cannot disclose it. */}
                 {account.active && account.canRecoverPassword === false ? (
                   <small
                     className="tourney-owner-warning"

@@ -43,6 +43,25 @@ describe("referral Supabase recovery", () => {
     jest.restoreAllMocks();
   });
 
+  test.each([
+    `token=${"a".repeat(64)}`,
+    "access_token=recovery-access&refresh_token=recovery-refresh&type=recovery",
+  ])("scrubbing recovery fragment preserves routing state: %s", async (fragment) => {
+    const state = { __NA: true, __rooLegacy: true, usr: { source: "fixture" } };
+    window.history.replaceState(state, "", `/referrals/reset#${fragment}`);
+    renderReset(`/referrals/reset#${fragment}`);
+    await screen.findByRole("heading", { name: "Reset Password" });
+    expect(window.location.hash).toBe("");
+    expect(window.history.state).toEqual(state);
+  });
+
+  test("a reset page behind a booking modal cannot rewrite the booking URL", async () => {
+    window.history.replaceState({ __rooLegacy: true }, "", "/booking");
+    renderReset("/referrals/reset");
+    await screen.findByText("This recovery link is invalid or expired. Request a new link.");
+    expect(window.location.pathname).toBe("/booking");
+  });
+
   test("establishes the recovery session before removing the link fragment", async () => {
     renderReset(
       "/referrals/reset#access_token=recovery-access&refresh_token=recovery-refresh&type=recovery"

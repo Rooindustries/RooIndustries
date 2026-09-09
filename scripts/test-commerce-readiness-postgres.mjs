@@ -15,6 +15,7 @@ const pgBin = String(process.env.PG_BIN || "").trim() || spawnSync(
 ).stdout.trim();
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "roo-commerce-readiness-"));
 const dataDir = path.join(tempRoot, "pgdata");
+const postgresHost = process.env.ROO_TEST_POSTGRES_HOST || "127.0.0.1";
 const port = 56800 + Math.floor(Math.random() * 500);
 
 const run = (command, args, options = {}) => {
@@ -91,14 +92,15 @@ let started = false;
 let sql = null;
 try {
   run(path.join(pgBin, "initdb"), ["-D", dataDir, "--auth=trust", "--no-locale"]);
+  fs.appendFileSync(path.join(dataDir, "pg_hba.conf"), "\nhost all all samehost trust\n");
   run(path.join(pgBin, "pg_ctl"), [
     "-D", dataDir,
-    "-o", `-p ${port} -h 127.0.0.1`,
+    "-o", `-p ${port} -h ${postgresHost} -k ''`,
     "-w", "start",
   ], { stdio: "ignore" });
   started = true;
   run(path.join(pgBin, "psql"), [
-    "-h", "127.0.0.1",
+    "-h", postgresHost,
     "-p", String(port),
     "-d", "postgres",
     "-v", "ON_ERROR_STOP=1",
@@ -110,7 +112,7 @@ try {
     "20260715180100_filter_commerce_traffic_metrics.sql",
   ]) {
     run(path.join(pgBin, "psql"), [
-      "-h", "127.0.0.1",
+      "-h", postgresHost,
       "-p", String(port),
       "-d", "postgres",
       "-v", "ON_ERROR_STOP=1",
@@ -118,7 +120,10 @@ try {
     ]);
   }
 
-  sql = postgres(`postgres://127.0.0.1:${port}/postgres`, {
+  sql = postgres({
+    host: [postgresHost],
+    port: [port],
+    database: "postgres",
     max: 2,
     prepare: false,
   });

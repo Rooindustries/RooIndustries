@@ -107,7 +107,14 @@ const isSessionCacheExpired = () => {
 export const readHomeSectionData = (key) => {
   if (isSessionCacheExpired()) {
     memoryCache.clear();
-    try { sessionStorage.removeItem(STORAGE_TS_KEY); } catch {}
+    try {
+      // Every section shares this timestamp. Drop the whole expired generation
+      // before a refreshed section starts a new one.
+      homeSectionResources.forEach((resource) => {
+        sessionStorage.removeItem(getStorageKey(resource));
+      });
+      sessionStorage.removeItem(STORAGE_TS_KEY);
+    } catch {}
     return null;
   }
   if (memoryCache.has(key)) {

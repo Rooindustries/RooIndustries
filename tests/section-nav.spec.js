@@ -6,7 +6,17 @@ const BASE_URL = process.env.BASE_URL;
 if (!BASE_URL) {
   throw new Error("BASE_URL is required for section-nav reliability tests.");
 }
-if (BASE_URL !== "http://127.0.0.1:3001") {
+let testUrl;
+try {
+  testUrl = new URL(BASE_URL);
+} catch {
+  testUrl = null;
+}
+if (
+  !testUrl ||
+  !["http:", "https:"].includes(testUrl.protocol) ||
+  !["localhost", "127.0.0.1", "[::1]", "100.127.48.111"].includes(testUrl.hostname)
+) {
   throw new Error(
     `Unexpected BASE_URL for mission-critical nav suite: ${BASE_URL}`
   );

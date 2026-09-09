@@ -162,18 +162,9 @@ export const getTourneyAdminEmail = (account, env = process.env) => {
   return "";
 };
 
-// Adding `viewer` to TOURNEY_ADMIN_ROLES let every login-capable role past the role
-// gate, but the gate is not the only thing between an administrator and a recovery
-// email: getTourneyAdminEmail returns "" for anyone without a configured address
-// and without one of the two legacy fallbacks. Such an account passes the role
-// check, fails the `adminAccount && adminEmail` guard in the forgot route, falls
-// through to the player lookup, matches nothing, and receives the same generic
-// success response as a real send -- unrecoverable, and silently so.
-//
-// Exported so the owner-only accounts view can surface it and the forgot route can
-// log the real reason instead of pretending it sent something. Deliberately does
-// not change the public response, which stays generic so the endpoint does not
-// become an account-enumeration oracle.
+// Recovery requires a configured email or legacy fallback, not just an allowed
+// role. Expose failures to the owner view and internal logs; keep the public
+// forgot-password response generic to prevent account enumeration.
 export const canTourneyAdminRecoverPassword = (account, env = process.env) =>
   Boolean(
     account?.active !== false &&
@@ -187,9 +178,7 @@ export const summarizeTourneyAccount = (account, env = process.env) => ({
   role: account.role,
   active: account.active,
   version: account.version,
-  // Owner-only view, so this is safe to expose here: without it the manage screen
-  // shows an account that looks completely healthy while its password recovery is
-  // silently impossible.
+  // Recovery diagnostics are restricted to the owner-only view.
   canRecoverPassword: canTourneyAdminRecoverPassword(account, env),
 });
 
@@ -472,12 +461,8 @@ export const buildUpdatedTourneyAccounts = async ({
       throw new Error("Owner accounts can only be changed from server env.");
     }
 
-    // Every owner-managed role can log in, and the only self-serve recovery path is
-    // an email. Creating one without an address produces an account that works right
-    // up until its holder forgets the password, at which point /api/tourney/forgot
-    // answers generically and nothing can be done from the UI. Refuse at creation
-    // rather than leaving another unrecoverable account behind; an existing address
-    // is still inherited, so a password-only update does not have to resend it.
+    // Email is the only self-serve recovery path. Require it for new accounts,
+    // while retaining the existing address on password-only updates.
     const resolvedEmail = normalizedEmail || normalizeTourneyEmail(existing?.email);
     if (!resolvedEmail) {
       throw new Error("Owner-managed accounts need an email for password recovery.");

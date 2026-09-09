@@ -64,7 +64,8 @@ jest.mock("react-router-dom", () => ({
   Navigate: () => null,
   useLocation: () => mockLocation,
   useNavigate: () => mockNavigate,
-}), { virtual: true });
+    useNavigationType: () => "POP",
+}));
 
 const { AppContent } = require("../App.jsx");
 

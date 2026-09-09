@@ -204,7 +204,7 @@ begin
   exception when unique_violation then null;
   end;
 
-  v_intent := public.roo_create_oauth_intent(jsonb_build_object(
+  v_intent := jsonb_build_object(
     'flow', 'tourney',
     'action', 'link',
     'provider', 'discord',
@@ -213,7 +213,18 @@ begin
     'return_path', '/tourney',
     'expires_at', now() + interval '10 minutes',
     'token_hash', repeat('c', 64)
-  ));
+  );
+  begin
+    perform public.roo_create_oauth_intent(v_intent);
+    raise exception 'identity linking accepted missing recent authentication';
+  exception when insufficient_privilege then null;
+  end;
+  perform public.roo_create_reauth_grant(
+    v_user_id, repeat('b', 64), 'link_identity', 'discord'
+  );
+  v_intent := public.roo_create_oauth_intent(
+    v_intent || jsonb_build_object('reauth_token_hash', repeat('b', 64))
+  );
   if nullif(v_intent->>'id', '') is null then
     raise exception 'OAuth intent id was not returned';
   end if;

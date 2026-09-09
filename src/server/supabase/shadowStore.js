@@ -370,7 +370,14 @@ export const applyShadowMutations = async ({
     }),
     "document mutation"
   );
-  await projectOperationalShadow({ client });
+  // These buckets have no operational projection (unlike refRateLimitBucket).
+  // Keep their durable counts independent of unrelated commerce projections.
+  const onlyRateLimitBuckets = mutations.every(
+    (mutation) =>
+      ["create", "create_if_missing", "replace"].includes(mutation.operation) &&
+      mutation.document?._type === "rateLimitBucket"
+  );
+  if (!onlyRateLimitBuckets) await projectOperationalShadow({ client });
   return Array.isArray(data) ? data : [];
 };
 

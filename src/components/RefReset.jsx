@@ -86,7 +86,9 @@ export default function RefReset() {
           setMode("legacy");
           setTokenReady(true);
         }
-        window.history.replaceState(null, "", recoveryLocation.pathname);
+        if (window.location.pathname === recoveryLocation.pathname) {
+          window.history.replaceState(window.history.state, "", recoveryLocation.pathname);
+        }
         return;
       }
 
@@ -101,7 +103,9 @@ export default function RefReset() {
           setLinkError("This recovery link is invalid or expired. Request a new link.");
         }
       } finally {
-        window.history.replaceState(null, "", recoveryLocation.pathname);
+        if (window.location.pathname === recoveryLocation.pathname) {
+          window.history.replaceState(window.history.state, "", recoveryLocation.pathname);
+        }
         if (!cancelled) setTokenReady(true);
       }
     };

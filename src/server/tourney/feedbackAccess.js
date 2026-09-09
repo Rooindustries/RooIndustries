@@ -12,5 +12,8 @@ export const isTourneyFeedbackSlugValid = ({
   const candidate = normalizeSlug(slug);
   if (configured.length < 24 || candidate.length !== configured.length) return false;
 
-  return timingSafeEqual(Buffer.from(candidate), Buffer.from(configured));
+  const candidateBytes = Buffer.from(candidate);
+  const configuredBytes = Buffer.from(configured);
+  return candidateBytes.length === configuredBytes.length &&
+    timingSafeEqual(candidateBytes, configuredBytes);
 };

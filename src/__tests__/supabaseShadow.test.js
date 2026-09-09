@@ -12,6 +12,7 @@ import {
 } from "../server/supabase/shadowStore";
 import { SupabaseDocumentClient } from "../server/supabase/documentClient";
 import { createSupabaseAdminFetch } from "../server/supabase/adminClient";
+import { requireRateLimit } from "../server/api/ref/rateLimit";
 
 const createRpcClient = (seed = []) => {
   const documents = new Map(seed.map((document) => [document._id, document]));
@@ -28,7 +29,13 @@ const createRpcClient = (seed = []) => {
             .filter(
               (document) =>
                 (!requested || requested.includes(document._type)) &&
-                (!requestedIds || requestedIds.includes(document._id))
+                (!requestedIds || requestedIds.includes(document._id)) &&
+                (args.p_filters || []).every(({ path, op, value }) => {
+                  const actual = path.split(".").reduce((entry, key) => entry?.[key], document);
+                  if (op === "ieq") return String(actual || "").toLowerCase() === String(value || "").toLowerCase();
+                  if (op === "eq") return actual === value;
+                  throw new Error(`Unsupported fixture filter: ${op}`);
+                })
             )
             .sort((a, b) => String(a._id).localeCompare(String(b._id)))
             .slice(0, limit),
@@ -240,6 +247,58 @@ describe("Supabase shadow document utilities", () => {
 });
 
 describe("Supabase document compatibility client", () => {
+  test("preserves durable limiter counts when commerce projection is unavailable", async () => {
+    const shadowClient = createRpcClient();
+    const rpc = shadowClient.rpc.getMockImplementation();
+    shadowClient.rpc.mockImplementation((name, args) =>
+      name === "roo_refresh_operational_shadow"
+        ? Promise.resolve({ data: null, error: { code: "23505" } })
+        : rpc(name, args)
+    );
+    const client = new SupabaseDocumentClient({ shadowClient });
+    const res = {
+      setHeader: jest.fn(),
+      status: jest.fn().mockReturnThis(),
+      json: jest.fn(),
+    };
+    const options = {
+      key: "ref-login:existing-window",
+      windowMs: 60_000,
+      max: 2,
+      now: Date.parse("2026-09-06T00:00:30Z"),
+      client,
+    };
+    expect(await requireRateLimit(res, options)).toBe(true);
+    const initial = [...shadowClient.documents.values()][0];
+    expect(initial).toMatchObject({ _type: "rateLimitBucket", count: 1 });
+    expect(await requireRateLimit(res, options)).toBe(true);
+    expect(shadowClient.documents.get(initial._id)).toMatchObject({ count: 2 });
+    const blockedRevision = shadowClient.documents.get(initial._id)._rev;
+    expect(await requireRateLimit(res, options)).toBe(false);
+    expect(res.status).toHaveBeenLastCalledWith(429);
+    expect(res.setHeader).toHaveBeenCalledWith("Retry-After", "30");
+    expect(shadowClient.documents.get(initial._id)).toMatchObject({
+      count: 2,
+      _rev: blockedRevision,
+    });
+    await expect(
+      client.patch(initial._id).ifRevisionId(initial._rev).inc({ count: 1 }).commit()
+    ).rejects.toMatchObject({ code: "40001" });
+  });
+
+  test.each(["refRateLimitBucket", "booking"])(
+    "still refreshes projected %s mutations, including mixed batches",
+    async (type) => {
+      const shadowClient = createRpcClient();
+      const client = new SupabaseDocumentClient({ shadowClient });
+      await client.transaction()
+        .create({ _id: "rateLimitBucket.one", _type: "rateLimitBucket", count: 1 })
+        .create({ _id: "projected.one", _type: type })
+        .commit();
+      expect(shadowClient.rpc).toHaveBeenCalledWith("roo_refresh_operational_shadow");
+    }
+  );
+
   test("evaluates GROQ against Supabase-backed documents", async () => {
     const shadowClient = createRpcClient([
       { _id: "package.one", _type: "package", title: "One", _rev: "a" },
@@ -294,6 +353,49 @@ describe("Supabase document compatibility client", () => {
       title: "Target",
       targetPackage: { title: "XOC", price: "$179.95" },
     });
+  });
+
+  test.each([500, 501, 1001])("resolves an upgrade and its package beyond %i unrelated links", async (count) => {
+    const documents = Array.from({ length: count }, (_, index) => ({
+      _id: `upgradeLink.a${String(index).padStart(5, "0")}`,
+      _type: "upgradeLink",
+      slug: { current: `other-${index}` },
+    }));
+    documents.push(
+      { _id: "upgradeLink.zz-target", _type: "upgradeLink", title: "Chosen", slug: { current: "base-to-max" }, targetPackage: { _ref: "package.zz-target" } },
+      { _id: "upgradeLink.zzz-duplicate", _type: "upgradeLink", title: "Later duplicate", slug: { current: "BASE-TO-MAX" }, targetPackage: { _ref: "package.missing" } },
+      { _id: "package.zz-target", _type: "package", title: "XOC", price: "$179.95" }
+    );
+    const client = new SupabaseDocumentClient({ shadowClient: createRpcClient(documents), commerceOnly: true });
+    const query = `*[_type == "upgradeLink" && lower(slug.current) == $slug][0]{title,targetPackage->{title,price}}`;
+    await expect(client.fetch(query, { slug: "base-to-max" })).resolves.toEqual({
+      title: "Chosen", targetPackage: { title: "XOC", price: "$179.95" },
+    });
+    await expect(client.fetch(query, { slug: "absent" })).resolves.toBeNull();
+  });
+
+  test("preserves upgrade selection when the legacy RPC returns an unfiltered dataset", async () => {
+    const shadowClient = createRpcClient([
+      { _id: "upgradeLink.first", _type: "upgradeLink", slug: { current: "other" }, targetPackage: { _ref: "package.missing" } },
+      { _id: "upgradeLink.target", _type: "upgradeLink", slug: { current: "target" }, targetPackage: { _ref: "package.target" } },
+      { _id: "package.target", _type: "package", title: "Selected" },
+    ]);
+    const rpc = shadowClient.rpc;
+    shadowClient.rpc = jest.fn((name, args) => name === "roo_fetch_shadow_documents_targeted"
+      ? Promise.resolve({ data: null, error: { code: "PGRST202" } }) : rpc(name, args));
+    const client = new SupabaseDocumentClient({ shadowClient });
+    await expect(client.fetch(`*[_type == "upgradeLink" && lower(slug.current) == $slug][0]{targetPackage->{title}}`, { slug: "target" }))
+      .resolves.toEqual({ targetPackage: { title: "Selected" } });
+  });
+
+  test("keeps missing upgrade references null and enforces the combined commerce budget", async () => {
+    const link = { _id: "upgradeLink.one", _type: "upgradeLink", slug: { current: "one" }, targetPackage: { _ref: "package.one" }, intro: "x".repeat(140000) };
+    const shadowClient = createRpcClient([link]);
+    const client = new SupabaseDocumentClient({ shadowClient, commerceOnly: true });
+    const query = `*[_type == "upgradeLink" && lower(slug.current) == $slug][0]{targetPackage->{title}}`;
+    await expect(client.fetch(query, { slug: "one" })).resolves.toEqual({ targetPackage: null });
+    shadowClient.documents.set("package.one", { _id: "package.one", _type: "package", title: "x".repeat(140000) });
+    await expect(client.fetch(query, { slug: "one" })).rejects.toMatchObject({ code: "COMMERCE_PAYLOAD_BUDGET_EXCEEDED" });
   });
 
   test("supports revision-guarded set, unset, and increments", async () => {

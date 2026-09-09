@@ -291,6 +291,56 @@ describe("booking calendar UI", () => {
     }
   });
 
+  test.each([
+    ["America/Los_Angeles", "2099-01-05", "2099-01-05T05:00:00.000Z"],
+    ["America/Los_Angeles", "2099-07-05", "2099-07-05T05:00:00.000Z"],
+    ["Asia/Kathmandu", "2099-01-05", "2099-01-05T05:00:00.000Z"],
+  ])("preserves configured slot minutes in %s on %s", async (timeZone, date, halfHourUtc) => {
+    resolvedOptionsSpy.mockReturnValue({ timeZone });
+    const settings = {
+      dateSlots: [{ date, times: ["10:00", "10:30", "10:45", "10:30"] }],
+    };
+    installDefaultFetch({ settings });
+    const defaultFetch = global.fetch.getMockImplementation();
+    global.fetch.mockImplementation(async (url, options = {}) => {
+      if (url === "/api/holdSlot") {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            holdId: "hold_minute_precision",
+            holdToken: "hold_token_minute_precision",
+            expiresAt: "2099-12-31T23:59:00.000Z",
+          }),
+        };
+      }
+      return defaultFetch(url, options);
+    });
+    setBookingLocation();
+    render(<BookingForm />);
+
+    const halfHourDate = new Date(halfHourUtc);
+    for (const offsetMinutes of [-30, 0, 15]) {
+      const utcStart = new Date(halfHourDate.getTime() + offsetMinutes * 60_000);
+      const button = await screen.findByRole("button", {
+        name: formatLocalTime(utcStart, timeZone),
+      });
+      expect(button).toBeEnabled();
+    }
+    await userEvent.click(screen.getByRole("button", {
+      name: formatLocalTime(halfHourDate, timeZone),
+    }));
+    await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
+    await screen.findByLabelText("Discord username");
+
+    const holdCalls = global.fetch.mock.calls.filter(([url]) => url === "/api/holdSlot");
+    expect(holdCalls).toHaveLength(1);
+    expect(JSON.parse(holdCalls[0][1].body)).toMatchObject({
+      startTimeUTC: halfHourUtc,
+      packageTitle: OVERHAUL_PACKAGE.title,
+    });
+  });
+
   test("refreshes visible step-1 availability on focus and every 60 seconds", async () => {
     jest.useFakeTimers();
     installDefaultFetch();

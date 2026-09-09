@@ -2,16 +2,11 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 
-// Auto-fit shrinks the content into the browser-source viewport; `scale` is
-// the creator's zoom multiplier on top of that fit. Fit is capped so a tiny
-// source (e.g. only the Grand Final) does not blow up to an absurd size.
+// Cap auto-fit so small sources are not excessively enlarged; `scale` applies afterward.
 const MAX_AUTO_FIT_ZOOM = 2.5;
 
-// The fit used to rely on CSS `zoom` + getBoundingClientRect feedback, but
-// OBS browser sources (CEF 127) do not scale a shrink-to-fit box's rect with
-// `zoom`, which made the measure loop diverge to a tiny or huge render. The
-// transform below never affects layout, so offsetWidth/offsetHeight are
-// stable natural sizes in every engine and the fit cannot feed back.
+// OBS CEF 127 does not scale shrink-to-fit rectangles with CSS zoom.
+// Use transforms and natural offset sizes to avoid measurement feedback.
 export default function OverlayFit({ scale = 1, inset = 8, debug = false, children }) {
   const contentRef = useRef(null);
   const [baseSize, setBaseSize] = useState({ width: 0, height: 0 });

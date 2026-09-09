@@ -17,7 +17,7 @@ const pgBin = String(process.env.PG_BIN || "").trim() ||
   (pgConfig.status === 0 ? pgConfig.stdout.trim() : "/opt/homebrew/bin");
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "roo-referral-reclaim-"));
 const dataDir = path.join(tempRoot, "pgdata");
-const socketDir = path.join(tempRoot, "socket");
+const postgresHost = process.env.ROO_TEST_POSTGRES_HOST || "127.0.0.1";
 const port = 56332 + Math.floor(Math.random() * 600);
 const migration = path.join(
   root,
@@ -340,22 +340,25 @@ let sql;
 try {
   const version = run(path.join(pgBin, "postgres"), ["--version"]);
   assert.match(version, /PostgreSQL\) 17\./, "PostgreSQL 17 is required");
-  fs.mkdirSync(socketDir, { mode: 0o700 });
   run(path.join(pgBin, "initdb"), ["-D", dataDir, "--auth=trust", "--no-locale"]);
+  fs.appendFileSync(path.join(dataDir, "pg_hba.conf"), "\nhost all all samehost trust\n");
   run(path.join(pgBin, "pg_ctl"), [
-    "-D", dataDir, "-o", `-p ${port} -h 127.0.0.1 -k ${socketDir}`, "-w", "start",
+    "-D", dataDir, "-o", `-p ${port} -h ${postgresHost} -k ''`, "-w", "start",
   ], { stdio: "ignore" });
   started = true;
   run(path.join(pgBin, "createdb"), [
-    "-h", "127.0.0.1", "-p", String(port), "referral_reclaim_fixture",
+    "-h", postgresHost, "-p", String(port), "referral_reclaim_fixture",
   ]);
   const bootstrap = writeTemp("bootstrap.sql", bootstrapSql);
   run(path.join(pgBin, "psql"), [
-    "-h", "127.0.0.1", "-p", String(port), "-d", "referral_reclaim_fixture",
+    "-h", postgresHost, "-p", String(port), "-d", "referral_reclaim_fixture",
     "-v", "ON_ERROR_STOP=1", "-f", bootstrap, "-f", migration,
   ]);
 
-  sql = postgres(`postgres://127.0.0.1:${port}/referral_reclaim_fixture`, {
+  sql = postgres({
+    host: [postgresHost],
+    port: [port],
+    database: "referral_reclaim_fixture",
     max: 1,
     prepare: false,
   });

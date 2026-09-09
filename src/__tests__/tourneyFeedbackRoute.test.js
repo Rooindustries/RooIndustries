@@ -195,6 +195,18 @@ describe("anonymous Tourney participant feedback route", () => {
     expect(mockCreateTourneyFeedback).not.toHaveBeenCalled();
   });
 
+  test("rejects a Unicode slug with the same character count without throwing", async () => {
+    const response = await feedbackRoute.POST(
+      makeJsonRequest(validPayload, "", "é".repeat(feedbackSlug.length))
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ ok: false, error: "Not found." });
+    expect(mockCheckTourneyRateLimit).not.toHaveBeenCalled();
+    expect(mockExecuteTourneyCommand).not.toHaveBeenCalled();
+    expect(mockCreateTourneyFeedback).not.toHaveBeenCalled();
+  });
+
   test("rate limits repeated anonymous feedback attempts by address", async () => {
     mockCheckTourneyRateLimit.mockResolvedValue({
       ok: false,

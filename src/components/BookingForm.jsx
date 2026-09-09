@@ -109,21 +109,38 @@ const isSameDay = (a, b) =>
 
 const UPGRADE_FAQ_HASH = "upgrade-path";
 
-const getUtcFromHostLocal = (year, monthIndex, day, hostHour) => {
+const getUtcFromHostLocal = (year, monthIndex, day, hostMinutes) => {
   const utcMs =
-    Date.UTC(year, monthIndex, day, hostHour, 0) -
+    Date.UTC(year, monthIndex, day, 0, hostMinutes) -
     IST_OFFSET_MINUTES * 60 * 1000;
   return new Date(utcMs);
 };
 
-// Format a UTC Date into the user's local time string
-const formatLocalTime = (utcDate, timeZone) => {
+// Reuse the calendar formatters until the user's time zone changes.
+const createLocalSlotFormatters = (timeZone) => {
   try {
-    return new Intl.DateTimeFormat(undefined, {
-      ...(timeZone ? { timeZone } : {}),
-      hour: "numeric",
-      minute: "2-digit",
-    }).format(utcDate);
+    const options = timeZone ? { timeZone } : {};
+    return {
+      time: new Intl.DateTimeFormat(undefined, {
+        ...options,
+        hour: "numeric",
+        minute: "2-digit",
+      }),
+      date: new Intl.DateTimeFormat("en-US", {
+        ...options,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }),
+    };
+  } catch {
+    return {};
+  }
+};
+
+const formatLocalTime = (utcDate, formatter) => {
+  try {
+    return formatter.format(utcDate);
   } catch {
     return utcDate.toISOString();
   }
@@ -143,14 +160,9 @@ const formatLocalDate = (utcDate, timeZone) => {
   }
 };
 
-const getLocalDateKey = (utcDate, timeZone) => {
+const getLocalDateKey = (utcDate, formatter) => {
   try {
-    const parts = new Intl.DateTimeFormat("en-US", {
-      ...(timeZone ? { timeZone } : {}),
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    })
+    const parts = formatter
       .formatToParts(utcDate)
       .reduce((acc, cur) => {
         acc[cur.type] = cur.value;
@@ -205,7 +217,7 @@ const formatCalendarDateLabel = (date) => {
 
 function BookingStepTracker({ step }) {
   return (
-    <div className="mb-6" data-testid="booking-step-tracker">
+    <div className="ri-booking-progress mb-6" data-testid="booking-step-tracker">
       <ol
         aria-label="Booking progress"
         className="grid grid-cols-3 gap-2 text-center"
@@ -362,16 +374,16 @@ const parseDateKey = (value) => {
   return date.toDateString();
 };
 
-const parseHourValue = (value) => {
+const parseMinuteValue = (value) => {
   if (value === null || value === undefined) return null;
-  if (typeof value === "number" && Number.isFinite(value)) return value;
   const raw = String(value).trim();
   if (!raw) return null;
-  const match = raw.match(/^(\d{1,2})(?::\d{2})?$/);
+  const match = raw.match(/^(\d{1,2})(?::(\d{2}))?$/);
   if (!match) return null;
   const hour = Number(match[1]);
-  if (!Number.isFinite(hour) || hour < 0 || hour > 23) return null;
-  return hour;
+  const minute = Number(match[2] || 0);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return hour * 60 + minute;
 };
 
 const normalizeDateSlots = (slots) => {
@@ -380,10 +392,10 @@ const normalizeDateSlots = (slots) => {
     const dateKey = parseDateKey(slot?.date);
     if (!dateKey) return;
     const timesRaw = Array.isArray(slot?.times) ? slot.times : [];
-    const hours = timesRaw
-      .map((time) => parseHourValue(time))
+    const minutes = timesRaw
+      .map((time) => parseMinuteValue(time))
       .filter((time) => Number.isFinite(time));
-    const unique = Array.from(new Set(hours)).sort((a, b) => a - b);
+    const unique = Array.from(new Set(minutes)).sort((a, b) => a - b);
     if (!unique.length) return;
     map[dateKey] = unique;
   });
@@ -418,7 +430,6 @@ const getUtcDateFromHold = (hold) => {
   return Number.isNaN(fromStart.getTime()) ? null : fromStart;
 };
 
-// Accepts isMobile prop from BookingModal to force layout styles
 export default function BookingForm({ isMobile }) {
   const handleHomeSectionLink = useHomeSectionLinkHandler();
   const location = useLocation();
@@ -448,6 +459,10 @@ export default function BookingForm({ isMobile }) {
   const [errorStep2, setErrorStep2] = useState("");
 
   const [userTimeZone, setUserTimeZone] = useState("UTC");
+  const localSlotFormatters = useMemo(
+    () => createLocalSlotFormatters(userTimeZone),
+    [userTimeZone]
+  );
 
   useEffect(() => {
     try {
@@ -495,7 +510,6 @@ export default function BookingForm({ isMobile }) {
     };
   }, [location.state]);
 
-  // Package selection comes from navigation state or tab-scoped storage.
   const selectedPackage = useMemo(() => {
     if (navigationPackage?.title) return preparePackage(navigationPackage);
     if (persistedPackage) return preparePackage(persistedPackage);
@@ -588,7 +602,6 @@ export default function BookingForm({ isMobile }) {
     prevPackageDataRef.current = selectedPackage;
   }, [selectedPackage.title]);
 
-  // Restore modal session state if present
   useEffect(() => {
     if (!selectedPackage.title) return;
     try {
@@ -634,7 +647,6 @@ export default function BookingForm({ isMobile }) {
     }
   }, [selectedPackage.title]);
 
-  // Persist modal session state
   useEffect(() => {
     if (restoredSessionPackageTitle !== selectedPackage.title) return;
     try {
@@ -686,13 +698,11 @@ export default function BookingForm({ isMobile }) {
     }
   }, [draftLoading, myHold, selectedPackage]);
 
-  // Load the tab-scoped hold on mount.
   useEffect(() => {
     try {
       const stored = sessionStorage.getItem(HOLD_STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
-        // check if expired
         if (new Date(parsed.expiresAt) > new Date()) {
           const normalizedHold = {
             holdId: parsed.holdId,
@@ -722,7 +732,6 @@ export default function BookingForm({ isMobile }) {
     }
   }, []);
 
-  // Align UI with any active hold (including persisted)
   useEffect(() => {
     if (!myHold) return;
     if (restoredSessionPackageTitle !== selectedPackage.title) return;
@@ -741,7 +750,7 @@ export default function BookingForm({ isMobile }) {
     const utcDate = getUtcDateFromHold(myHold);
 
     if (utcDate && !isNaN(utcDate.getTime())) {
-      const localDateKey = getLocalDateKey(utcDate, userTimeZone);
+      const localDateKey = getLocalDateKey(utcDate, localSlotFormatters.date);
       const localDate = localDateKey ? new Date(localDateKey) : null;
       if (localDate && !Number.isNaN(localDate.getTime())) {
         localDate.setHours(0, 0, 0, 0);
@@ -751,7 +760,7 @@ export default function BookingForm({ isMobile }) {
 
     if (samePackage && utcDate) {
       const slotId = utcDate.toISOString();
-      const localLabel = formatLocalTime(utcDate, userTimeZone);
+      const localLabel = formatLocalTime(utcDate, localSlotFormatters.time);
       setSelectedSlot((prev) => {
         if (prev?.slotId === slotId && prev.localLabel === localLabel) {
           return prev;
@@ -772,10 +781,9 @@ export default function BookingForm({ isMobile }) {
     selectedPackage.title,
     preventHoldAutoload,
     restoredSessionPackageTitle,
-    userTimeZone,
+    localSlotFormatters,
   ]);
 
-  // Countdown + expiry handling for holds
   useEffect(() => {
     if (!myHold?.expiresAt) {
       setHoldCountdownMs(null);
@@ -909,25 +917,25 @@ export default function BookingForm({ isMobile }) {
   const localSlotMap = useMemo(() => {
     if (!dateSlotMap) return null;
     const map = {};
-    Object.entries(dateSlotMap).forEach(([hostDateKey, hours]) => {
+    Object.entries(dateSlotMap).forEach(([hostDateKey, minutes]) => {
       const hostDate = new Date(hostDateKey);
       if (Number.isNaN(hostDate.getTime())) return;
 
-      (hours || []).forEach((h) => {
-        if (!Number.isFinite(h)) return;
+      (minutes || []).forEach((minute) => {
+        if (!Number.isFinite(minute)) return;
         const utcStart = getUtcFromHostLocal(
           hostDate.getFullYear(),
           hostDate.getMonth(),
           hostDate.getDate(),
-          h
+          minute
         );
         if (Number.isNaN(utcStart.getTime())) return;
 
-        const localDateKey = getLocalDateKey(utcStart, userTimeZone);
+        const localDateKey = getLocalDateKey(utcStart, localSlotFormatters.date);
         if (!localDateKey) return;
 
         const slotId = utcStart.toISOString();
-        const localLabel = formatLocalTime(utcStart, userTimeZone);
+        const localLabel = formatLocalTime(utcStart, localSlotFormatters.time);
 
         const list = map[localDateKey] || [];
         list.push({ slotId, utcStart, localLabel });
@@ -940,7 +948,7 @@ export default function BookingForm({ isMobile }) {
     );
 
     return map;
-  }, [dateSlotMap, userTimeZone]);
+  }, [dateSlotMap, localSlotFormatters]);
 
   const earliestAvailableSlot = useMemo(() => {
     if (!settings || !localSlotMap) return null;
@@ -973,12 +981,12 @@ export default function BookingForm({ isMobile }) {
 
     const earliest = available[0];
     if (!earliest) return null;
-    const localDateKey = getLocalDateKey(earliest.utcStart, userTimeZone);
+    const localDateKey = getLocalDateKey(earliest.utcStart, localSlotFormatters.date);
     const localDate = localDateKey ? new Date(localDateKey) : null;
     if (!localDate || Number.isNaN(localDate.getTime())) return null;
     localDate.setHours(0, 0, 0, 0);
     return { ...earliest, localDate };
-  }, [localSlotMap, myHold?.holdId, settings, userTimeZone]);
+  }, [localSlotMap, myHold?.holdId, settings, localSlotFormatters]);
 
   const isDateAllowed = (dateObj) => {
     if (!settings) return false;
@@ -994,7 +1002,6 @@ export default function BookingForm({ isMobile }) {
     return Array.isArray(slots) && slots.length > 0;
   };
 
-  // ---------- FETCH SETTINGS + ACTIVE HOLDS ----------
   useEffect(() => {
     availabilityFetchMountedRef.current = true;
     return () => {
@@ -1071,7 +1078,6 @@ export default function BookingForm({ isMobile }) {
     };
   }, [step]);
 
-  // page fade-in on route change
   useEffect(() => {
     setPageFadeIn(false);
     const t = setTimeout(() => setPageFadeIn(true), 50);
@@ -1096,7 +1102,6 @@ export default function BookingForm({ isMobile }) {
   }, [location.search]);
 
   // Load persisted booking draft (keeps form + package when returning)
-  // Load drafts (per-package)
   useEffect(() => {
     try {
       setAppliedReferral(null);
@@ -1206,7 +1211,6 @@ export default function BookingForm({ isMobile }) {
     }
   };
 
-  // Lock body scroll when modal is open
   useEffect(() => {
     if (showVertexModal) {
       const body = document.body;
@@ -1246,7 +1250,6 @@ export default function BookingForm({ isMobile }) {
     body.classList.remove("view-plan-open");
   }, [showVertexModal, modalMode]);
 
-  // ---------- FETCH PERFORMANCE VERTEX PACKAGE (for modal) ----------
   useEffect(() => {
     const fetchVertex = async () => {
       try {
@@ -1275,7 +1278,6 @@ export default function BookingForm({ isMobile }) {
     fetchVertexEssentials();
   }, []);
 
-  // ---------- FETCH CURRENT PLAN PACKAGE (for view plan modal) ----------
   useEffect(() => {
     if (!selectedPackage.title) return;
     let active = true;
@@ -1316,7 +1318,6 @@ export default function BookingForm({ isMobile }) {
       }
     });
 
-    // Build available slots with status
     const availableSlots = daySlots.map((slot) => {
       const isBooked = bookedSet.has(slot.slotId);
       const holdId = heldMap.get(slot.slotId);
@@ -1336,31 +1337,30 @@ export default function BookingForm({ isMobile }) {
       };
     });
 
-    // Build set of available slotIds for lookup
     const availableSlotIds = new Set(daySlots.map((s) => s.slotId));
 
     // Generate unavailable hours from all IST hours (0-23) for each host date
     const unavailableSlots = [];
     if (dateSlotMap) {
-      Object.entries(dateSlotMap).forEach(([hostDateKey, availableHours]) => {
+      Object.entries(dateSlotMap).forEach(([hostDateKey, availableMinutes]) => {
         const hostDate = new Date(hostDateKey);
         if (Number.isNaN(hostDate.getTime())) return;
-        const availSet = new Set(availableHours || []);
+        const availSet = new Set(availableMinutes || []);
 
         for (let h = 0; h < 24; h++) {
-          if (availSet.has(h)) continue;
+          if (availSet.has(h * 60)) continue;
           const utcStart = getUtcFromHostLocal(
             hostDate.getFullYear(),
             hostDate.getMonth(),
             hostDate.getDate(),
-            h
+            h * 60
           );
           if (Number.isNaN(utcStart.getTime())) continue;
-          const localDateKey = getLocalDateKey(utcStart, userTimeZone);
+          const localDateKey = getLocalDateKey(utcStart, localSlotFormatters.date);
           if (localDateKey !== dateKey) continue;
           const slotId = `unavail-${hostDateKey}-${h}`;
           if (availableSlotIds.has(slotId)) continue;
-          const localLabel = formatLocalTime(utcStart, userTimeZone);
+          const localLabel = formatLocalTime(utcStart, localSlotFormatters.time);
           unavailableSlots.push({
             slotId,
             utcStart,
@@ -1379,7 +1379,7 @@ export default function BookingForm({ isMobile }) {
     const allSlots = [...availableSlots, ...unavailableSlots];
     allSlots.sort((a, b) => a.utcStart - b.utcStart);
     return allSlots;
-  }, [settings, selectedDate, localSlotMap, dateSlotMap, myHold, userTimeZone]);
+  }, [settings, selectedDate, localSlotMap, dateSlotMap, myHold, localSlotFormatters]);
 
   const getDaySlotInfo = (dateObj) => {
     if (!settings || !localSlotMap) return null;
@@ -1432,7 +1432,6 @@ export default function BookingForm({ isMobile }) {
     return null;
   };
 
-  // ---------- INITIAL DATE ----------
   useEffect(() => {
     if (settings && !selectedDate) {
       if (!localSlotMap) return;
@@ -1448,7 +1447,6 @@ export default function BookingForm({ isMobile }) {
     }
   }, [settings, selectedDate, localSlotMap, startOfToday]);
 
-  // ---------- HELPERS ----------
   const handleChange = (e) => {
     if (isPaymentPendingHold) return;
     const { name, value } = e.target;
@@ -1511,8 +1509,8 @@ export default function BookingForm({ isMobile }) {
     if (!myHold) return "";
     const utcDate = getUtcDateFromHold(myHold);
     if (!utcDate) return "";
-    return formatLocalTime(utcDate, userTimeZone);
-  }, [myHold, userTimeZone]);
+    return formatLocalTime(utcDate, localSlotFormatters.time);
+  }, [myHold, localSlotFormatters]);
   const hasActiveHold =
     !!myHold &&
     holdCountdownMs !== null &&
@@ -1524,9 +1522,9 @@ export default function BookingForm({ isMobile }) {
     if (Number.isNaN(utcStart.getTime())) return "";
     const dateLabel = formatShortLocalDate(utcStart, userTimeZone);
     const timeLabel =
-      formatLocalTime(utcStart, userTimeZone) || selectedSlot.localLabel;
+      formatLocalTime(utcStart, localSlotFormatters.time) || selectedSlot.localLabel;
     return `${dateLabel} · ${timeLabel} (${userTimeZone})`;
-  }, [selectedSlot, userTimeZone]);
+  }, [selectedSlot, userTimeZone, localSlotFormatters]);
   const reviewBaseAmount = Math.max(0, toMoney(selectedPackage.price));
   const reviewDiscounts = useMemo(
     () =>
@@ -1931,7 +1929,7 @@ export default function BookingForm({ isMobile }) {
     broadcastHold(updated);
   };
 
-  // ---------- RELEASE HOLD (Optimistic Update) ----------
+  // Release the hold optimistically.
   const releaseHold = async (resetStep = true) => {
     if (!myHold) return;
     if (isPaymentPendingHold) {
@@ -2028,7 +2026,6 @@ export default function BookingForm({ isMobile }) {
     }
   };
 
-  // ---------- LOCK SLOT + GO TO STEP 2 ----------
   const handleLockAndGoNext = async () => {
     if (isPaymentPendingHold) {
       setErrorStep1("Your payment session is already in progress. Return to payment to finish it.");
@@ -2129,7 +2126,6 @@ export default function BookingForm({ isMobile }) {
     }
   };
 
-  // ---------- SUBMIT ----------
   const handleSubmit = () => {
     const validationError = getStep2Error();
     if (validationError) {
@@ -2162,7 +2158,7 @@ export default function BookingForm({ isMobile }) {
       });
 
     const displayTime =
-      formatLocalTime(selectedSlot.utcStart, userTimeZone) ||
+      formatLocalTime(selectedSlot.utcStart, localSlotFormatters.time) ||
       selectedSlot.localLabel;
 
     const finalReferralCode = String(appliedReferral?.code || "").trim();
@@ -2188,7 +2184,6 @@ export default function BookingForm({ isMobile }) {
 
       status: "pending",
 
-      // NEW: pass hold info to Payment -> createBooking
       slotHoldId: myHold?.holdId || null,
       slotHoldToken: myHold?.holdToken || null,
       slotHoldExpiresAt: myHold?.expiresAt || null,
@@ -2256,7 +2251,6 @@ export default function BookingForm({ isMobile }) {
 
   const warrantyCallout = getWarrantyCallout(selectedPackage);
 
-  // ---------- CALENDAR DATA ----------
   const startOfMonth = new Date(month.getFullYear(), month.getMonth(), 1);
   const endOfMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0);
   const daysInMonth = Array.from(
@@ -2264,7 +2258,6 @@ export default function BookingForm({ isMobile }) {
     (_, i) => i + 1
   );
 
-  // --- ANIMATION VARIANTS FOR SLEEK MODAL ---
   const overlayVariants = {
     hidden: { opacity: 0 },
     visible: {
@@ -2288,7 +2281,7 @@ export default function BookingForm({ isMobile }) {
         damping: 25,
         stiffness: 300,
         mass: 0.8,
-        staggerChildren: 0.08, // This creates the sleek cascade effect
+        staggerChildren: 0.08,
         delayChildren: 0.1,
       },
     },
@@ -2312,7 +2305,7 @@ export default function BookingForm({ isMobile }) {
   return (
     <>
       <div
-        className={`text-ink transition-opacity duration-300 ${
+        className={`ri-booking text-ink transition-opacity duration-300 ${
           pageFadeIn ? "opacity-100" : "opacity-0"
         }`}
       >
@@ -2337,12 +2330,12 @@ export default function BookingForm({ isMobile }) {
               <div className="mb-8 max-w-lg mx-auto bg-surface-card border border-line-input rounded-xl p-6 text-center shadow-[0_0_15px_rgba(14,165,233,0.25)]">
                 {selectedPackage.tag && (
                   <div className="mb-2">
-                    <span className="bg-info text-accent-contrast text-xs font-semibold px-3 py-1 rounded-full shadow-info-soft">
+                    <span className="ri-booking-package-tag bg-info text-accent-contrast text-xs font-semibold px-3 py-1 rounded-full shadow-info-soft">
                       {selectedPackage.tag}
                     </span>
                   </div>
                 )}
-                <h3 className="text-2xl font-bold text-accent">
+                <h3 className="ri-booking-package-title text-2xl font-bold text-accent">
                   {selectedPackage.title}
                 </h3>
                 <PriceDisplay pkg={selectedPackage} size="summary" className="mt-3" />
@@ -2620,7 +2613,7 @@ export default function BookingForm({ isMobile }) {
                         setModalPackage(planPackage || selectedPackage);
                         setShowVertexModal(true);
                       }}
-                      className={`glow-button w-full sm:w-64 py-3 rounded-lg font-semibold text-lg transition-all duration-300 inline-flex items-center justify-center gap-2 ${
+                      className={`ri-booking-secondary glow-button w-full sm:w-64 py-3 rounded-lg font-semibold text-lg transition-all duration-300 inline-flex items-center justify-center gap-2 ${
                         isMobile ? "" : ""
                       }`}
                     >
@@ -2636,7 +2629,7 @@ export default function BookingForm({ isMobile }) {
                       aria-disabled={
                         !selectedDate || !selectedSlot || lockingSlot
                       }
-                      className={`glow-button w-full sm:w-64 py-3 rounded-lg font-semibold text-lg transition-all duration-300 ${
+                      className={`ri-booking-primary glow-button w-full sm:w-64 py-3 rounded-lg font-semibold text-lg transition-all duration-300 ${
                         !selectedDate || !selectedSlot || lockingSlot
                           ? "opacity-60"
                           : ""
@@ -2751,7 +2744,7 @@ export default function BookingForm({ isMobile }) {
                     <button
                       type="button"
                       onClick={handleReviewBeforePayment}
-                      className={`glow-button w-full min-w-0 py-3 rounded-lg font-semibold transition inline-flex items-center justify-center gap-2 ${
+                      className={`ri-booking-primary glow-button w-full min-w-0 py-3 rounded-lg font-semibold transition inline-flex items-center justify-center gap-2 ${
                         !isStep2Complete ? "opacity-60 cursor-not-allowed" : ""
                       }`}
                     >
@@ -3001,7 +2994,7 @@ export default function BookingForm({ isMobile }) {
                         <button
                           type="button"
                           onClick={returnToPayment}
-                          className="glow-button inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-lg py-3 font-semibold transition"
+                          className="ri-booking-primary glow-button inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-lg py-3 font-semibold transition"
                         >
                           Return to payment
                           <span className="glow-line glow-line-top" />
@@ -3025,7 +3018,7 @@ export default function BookingForm({ isMobile }) {
                           disabled={
                             validatingCode || !!restoredCodeCandidates
                           }
-                          className={`glow-button inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-lg py-3 font-semibold transition ${
+                          className={`ri-booking-primary glow-button inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-lg py-3 font-semibold transition ${
                             loading || validatingCode || restoredCodeCandidates
                               ? "cursor-wait opacity-60"
                               : ""
@@ -3070,7 +3063,7 @@ export default function BookingForm({ isMobile }) {
           <AnimatePresence>
             {showVertexModal && (
               <motion.div
-                className={`fixed inset-0 z-[100] ${
+                className={`ri-booking fixed inset-0 z-[100] ${
                   modalMode === "view" ? "bg-transparent" : "bg-black/60"
                 } backdrop-blur-lg flex items-center justify-center px-4`}
                 variants={overlayVariants}
@@ -3084,8 +3077,7 @@ export default function BookingForm({ isMobile }) {
               >
                 <motion.div
                   variants={modalContainerVariants}
-                  // We don't set initial/animate here because they inherit from the parent,
-                  // but since we defined specific variants for the children, it works automatically.
+                  // Inherit initial/animate from the parent.
                   className="relative w-full max-w-md bg-panel border border-info-border rounded-2xl shadow-glow-strong p-6 text-center transition-all duration-500 ease-in-out hover:shadow-glow-strong"
                   onClick={(e) => e.stopPropagation()}
                 >
@@ -3210,7 +3202,7 @@ export default function BookingForm({ isMobile }) {
                                 }
                           );
                         }}
-                        className="glow-button w-full mt-6 py-3 rounded-lg font-semibold text-white shadow-[0_0_20px_rgba(56,189,248,0.4)] inline-flex items-center justify-center gap-2 opacity-90 hover:opacity-100"
+                        className="ri-booking-primary glow-button w-full mt-6 py-3 rounded-lg font-semibold text-white shadow-[0_0_20px_rgba(56,189,248,0.4)] inline-flex items-center justify-center gap-2 opacity-90 hover:opacity-100"
                         style={{ transition: "opacity 0.9s ease-in-out" }}
                       >
                         {displayPackage?.buttonText || "Book Now"}

@@ -5,6 +5,7 @@ import {
   Route,
   useLocation,
   useNavigate,
+  useNavigationType,
   Navigate,
 } from "react-router-dom";
 import Navbar from "./components/Navbar";
@@ -24,15 +25,15 @@ import { sanitizeBrowserSearch } from "./lib/browserSearch";
 import { prefetchHomeSectionData } from "./lib/homeSectionData";
 import { migrateCheckoutStorageToSession } from "./lib/checkoutStorage";
 
-import Reviews from "./legacyPages/Reviews";
-import Tools from "./legacyPages/Tools";
-import RefLogin from "./legacyPages/RefLogin";
-import RefDashboard from "./legacyPages/RefDashboard";
-import RefChangePassword from "./legacyPages/RefChangePassword";
-import RefForgot from "./legacyPages/RefForgot";
-import RefReset from "./legacyPages/RefReset";
-import RefRegister from "./legacyPages/RefRegister";
-import RefVerifyRegistration from "./legacyPages/RefVerifyRegistration";
+const Reviews = lazy(() => import("./legacyPages/Reviews"));
+const Tools = lazy(() => import("./legacyPages/Tools"));
+const RefLogin = lazy(() => import("./legacyPages/RefLogin"));
+const RefDashboard = lazy(() => import("./legacyPages/RefDashboard"));
+const RefChangePassword = lazy(() => import("./legacyPages/RefChangePassword"));
+const RefForgot = lazy(() => import("./legacyPages/RefForgot"));
+const RefReset = lazy(() => import("./legacyPages/RefReset"));
+const RefRegister = lazy(() => import("./legacyPages/RefRegister"));
+const RefVerifyRegistration = lazy(() => import("./legacyPages/RefVerifyRegistration"));
 const Benchmarks = lazy(() => import("./legacyPages/Benchmarks"));
 const Terms = lazy(() => import("./legacyPages/Terms"));
 const Privacy = lazy(() => import("./legacyPages/PrivacyPolicy"));
@@ -167,7 +168,7 @@ function AnimatedRoutes({
           <Route path="/terms" element={withRouteSuspense(<Terms />)} />
           <Route
             path="/reviews"
-            element={<Reviews setIsModalOpen={setIsModalOpen} />}
+            element={withRouteSuspense(<Reviews setIsModalOpen={setIsModalOpen} />)}
           />
           <Route path="/booking" element={withRouteSuspense(<Book />)} />
           <Route path="/contact" element={withRouteSuspense(<Contact />)} />
@@ -186,7 +187,9 @@ function AnimatedRoutes({
           <Route path="/thank-you" element={withRouteSuspense(<Thankyou />)} />
           <Route
             path="/tools"
-            element={<Tools initialData={initialRouteData?.tools || null} />}
+            element={withRouteSuspense(
+              <Tools initialData={initialRouteData?.tools || null} />
+            )}
           />
           <Route
             path="/meet-the-team"
@@ -207,7 +210,6 @@ function AnimatedRoutes({
             element={withRouteSuspense(<Download />)}
           />
 
-          {/* Referral system routes */}
           <Route
             path="/referrals/login"
             element={withRouteSuspense(<RefLogin />)}
@@ -257,6 +259,8 @@ export function AppContent({
 
   const location = useLocation();
   const navigate = useNavigate();
+  const navigationType = useNavigationType();
+  const historyInitializedRef = useRef(false);
   const lastRouteKeyRef = useRef("");
   const pathName = location.pathname || "";
   const FLOW_BACKGROUND_KEY = "flow_background_location";
@@ -415,9 +419,27 @@ export function AppContent({
   }, []);
 
   useEffect(() => {
+    if (routeShell !== "memory" || typeof window === "undefined") return;
+    const restoreBrowserEntry = (event) => {
+      if (!event.state?.__rooLegacy) return;
+      navigate(
+        `${window.location.pathname}${sanitizeBrowserSearch(
+          window.location.pathname,
+          window.location.search
+        )}${window.location.hash}`,
+        { replace: true, state: event.state.usr || null }
+      );
+    };
+    window.addEventListener("popstate", restoreBrowserEntry);
+    return () => window.removeEventListener("popstate", restoreBrowserEntry);
+  }, [navigate, routeShell]);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const rawHash = window.location.hash || "";
+    const rawHash = location.hash || (
+      window.location.pathname === location.pathname ? window.location.hash : ""
+    );
     const currentHash = normalizeSectionHash(rawHash);
     const keepHash =
       location.pathname === "/" && isHomeSectionHash(currentHash)
@@ -435,10 +457,25 @@ export function AppContent({
     const nextUrl = `${location.pathname || "/"}${sanitizedSearch}${keepHash}`;
     const currentUrl = `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`;
 
-    if (currentUrl !== nextUrl && window.history?.replaceState) {
+    if (routeShell === "memory") {
+      const initial = !historyInitializedRef.current;
+      historyInitializedRef.current = true;
+      const state = {
+        ...window.history.state,
+        // Retain Next's router tree and any checkout state on first hydration.
+        usr: initial ? window.history.state?.usr ?? null : location.state,
+        __rooLegacy: true,
+      };
+      // Navbar section links may already have pushed their browser entry.
+      if (!initial && navigationType === "PUSH" && currentUrl !== nextUrl) {
+        window.history.pushState(state, "", nextUrl);
+      } else {
+        window.history.replaceState(state, "", nextUrl);
+      }
+    } else if (currentUrl !== nextUrl && window.history?.replaceState) {
       window.history.replaceState(window.history.state, "", nextUrl);
     }
-  }, [location.pathname, location.search]);
+  }, [location.pathname, location.search, location.hash, location.key, location.state, navigationType, routeShell]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -531,7 +568,6 @@ export function AppContent({
           }`}
           aria-hidden="true"
         />
-        {/* Background layers */}
         <div className="app-bg-grid-layer absolute inset-0"></div>
         <div className="app-bg-radial-layer absolute inset-0"></div>
 

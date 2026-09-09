@@ -2,8 +2,7 @@ import { useSyncExternalStore } from "react";
 
 const SCROLL_IDLE_MS = 160;
 
-// Zone thresholds matching consumer usage:
-// Navbar: scrollY > 8, scrollY > 12  |  BackButton: scrollY > 50
+// Thresholds match Navbar (8/12px) and BackButton (50px).
 const getZone = (y) => {
   if (y <= 8) return 0;
   if (y <= 12) return 1;
@@ -72,7 +71,7 @@ const flushScrollFrame = () => {
   rafId = null;
   const nextScrollY = pendingScrollY;
 
-  // Compute direction from actual previous position (not stale snapshot)
+  // Emitted snapshots can skip positions; direction uses the last real position.
   const nextDirection =
     nextScrollY > lastRealScrollY
       ? "down"
@@ -82,8 +81,7 @@ const flushScrollFrame = () => {
 
   lastRealScrollY = nextScrollY;
 
-  // In low-perf mode, skip emit if zone + direction unchanged
-  // (consumers only check boolean thresholds, not exact scrollY)
+  // Low-performance consumers use thresholds, not exact scroll positions.
   if (isLowPerf()) {
     const prevZone = getZone(snapshot.scrollY);
     const nextZone = getZone(nextScrollY);
@@ -92,7 +90,7 @@ const flushScrollFrame = () => {
       nextDirection === snapshot.direction &&
       snapshot.isScrolling
     ) {
-      return; // No consumer state would change — skip React reconciliation
+      return;
     }
   }
 

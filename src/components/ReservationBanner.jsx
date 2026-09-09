@@ -240,9 +240,7 @@ export default function ReservationBanner() {
         "--reservation-banner-clearance",
         `${clearance}px`
       );
-      // Also extend the document itself: overlaid screens scroll against the
-      // page behind them, so the scroll range must grow by the banner's
-      // footprint or the tail of the content can never clear it.
+      // Extend the page’s scroll range so overlaid content can clear the banner.
       document.body.style.paddingBottom = `${clearance}px`;
     };
     update();
@@ -390,7 +388,6 @@ export default function ReservationBanner() {
               reservation-banner-surface
             `}
       >
-        {/* Text Block */}
         <div
           className={`min-w-0 z-10 ${textAlignmentClass} lg:flex lg:items-baseline lg:gap-2.5`}
         >
@@ -405,10 +402,8 @@ export default function ReservationBanner() {
           </p>
         </div>
 
-        {/* Buttons Block */}
         <div className={`flex items-center ${buttonWrapClass} z-10 lg:flex-none ${buttonGapClass} ${buttonJustifyClass}`}>
 
-          {/* Release Button */}
           {hold?.phase !== "payment_pending" && (
             <button
               type="button"
@@ -419,7 +414,6 @@ export default function ReservationBanner() {
             </button>
           )}
 
-          {/* Continue button (Hidden on payment screen) */}
           {!isPaymentScreen && (
               <button
                 type="button"

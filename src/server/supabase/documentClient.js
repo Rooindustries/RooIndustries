@@ -313,6 +313,27 @@ export class SupabaseDocumentClient {
     return documents;
   }
 
+  async fetchUpgradeLinkDataset(slug, selector, params) {
+    const links = await this.dataset({
+      documentTypes: ["upgradeLink"],
+      filters: [{ path: "slug.current", op: "ieq", value: slug }],
+      limit: 1,
+    });
+    // Legacy RPC fallback may return an unfiltered dataset. Preserve the GROQ
+    // selector before choosing which reference to load.
+    const selection = await evaluate(selector, { dataset: links, params });
+    const link = await selection.get();
+    if (!link) return [];
+    const targetId = link.targetPackage?._ref;
+    if (!targetId || targetId === link._id) return [link];
+    const targets = await this.dataset({
+      documentTypes: ["upgradeLink", "package"],
+      ids: [targetId],
+      limit: 1,
+    });
+    return [link, ...targets];
+  }
+
   async fetch(query, params = {}) {
     const tree = parse(String(query || ""));
     const scope = inferShadowScope({
@@ -325,7 +346,14 @@ export class SupabaseDocumentClient {
       String(query || "").includes("refundRequiresBookingSync") &&
       String(query || "").includes("nextRecoveryAt") &&
       Array.isArray(params?.statuses);
-    const dataset = recoveryQuery
+    // Both upgrade routes use this root selector. Fetch its referenced package
+    // independently so unrelated links cannot consume the bounded dataset.
+    const upgradeLinkQuery = String(query || "").match(
+      /^\s*\*\[\s*_type\s*==\s*["']upgradeLink["']\s*&&\s*lower\(slug\.current\)\s*==\s*\$([A-Za-z_][A-Za-z0-9_]*)\s*\]\s*\[\s*0\s*\]\s*\{/
+    );
+    const dataset = upgradeLinkQuery
+      ? await this.fetchUpgradeLinkDataset(params[upgradeLinkQuery[1]], tree.base, params)
+      : recoveryQuery
       ? await fetchRecoveryPaymentDocuments({
           client: this.shadowClient,
           backend: params.backend,

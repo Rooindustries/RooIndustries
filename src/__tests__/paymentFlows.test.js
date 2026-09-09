@@ -32,6 +32,7 @@ jest.mock("react-router-dom", () => ({
 const { __setMockLocation } = require("react-router-dom");
 
 jest.mock("@paypal/react-paypal-js", () => ({
+  usePayPalScriptReducer: () => [{ isResolved: true, isRejected: false }],
   PayPalScriptProvider: ({ children }) => (
     <div data-testid="paypal-provider">{children}</div>
   ),
