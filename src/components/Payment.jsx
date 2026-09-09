@@ -357,6 +357,12 @@ export default function Payment({ hideFooter = false }) {
     bookingData?.slotHoldExpiresAt;
   const holdExpired =
     holdExpiresAt && new Date(holdExpiresAt).getTime() <= Date.now();
+  const dodoRedirect = new URLSearchParams(location.search);
+  const dodoReturnHandled = useRef("");
+  const storedDodoReturn = dodoRedirect.has("dodo_return") || dodoRedirect.has("dodo_cancel")
+    ? readStoredPaymentSession() : null;
+  const processingDodoReturn = (dodoRedirect.has("dodo_return") || dodoRedirect.has("dodo_cancel")) &&
+    ((storedDodoReturn?.provider === "dodo" && !!storedDodoReturn.paymentAccessToken) || !!dodoReturnHandled.current);
   const hasSlotHold =
     !!(sessionHold?.slotHoldId || bookingData?.slotHoldId) &&
     !!(sessionHold?.slotHoldToken || bookingData?.slotHoldToken) &&
@@ -433,7 +439,7 @@ export default function Payment({ hideFooter = false }) {
   };
 
   useEffect(() => {
-    if (!holdExpiresAt) return;
+    if (!holdExpiresAt || processingDodoReturn) return;
     const expiresAtMs = new Date(holdExpiresAt).getTime();
     if (!Number.isFinite(expiresAtMs)) return;
 
@@ -470,7 +476,7 @@ export default function Payment({ hideFooter = false }) {
 
     scheduleExpiry();
     return () => clearTimeout(timeoutId);
-  }, [holdExpiresAt, navigate, navState, location]);
+  }, [holdExpiresAt, processingDodoReturn, navigate, navState, location]);
 
   const {
     referralPercent,
@@ -492,7 +498,6 @@ export default function Payment({ hideFooter = false }) {
   const [rzpReady, setRzpReady] = useState(false);
   const [payingRzp, setPayingRzp] = useState(false);
   const [payingDodo, setPayingDodo] = useState(false);
-  const dodoReturnHandled = useRef("");
   const [providerConfig, setProviderConfig] = useState({
     dodo: { enabled: false, mode: "missing" },
     razorpay: { enabled: false, mode: "unknown", disabledReason: "" },
@@ -1263,6 +1268,7 @@ export default function Payment({ hideFooter = false }) {
 
   const handleDodoCheckout = async () => {
     if (payingDodo || paymentStatusBusy) return;
+    if (!ensureSlotBeforeAction()) return;
     setPayingDodo(true);
     try {
       const session = await startSessionCheckout("dodo");
@@ -1279,14 +1285,14 @@ export default function Payment({ hideFooter = false }) {
   useEffect(() => {
     const query = new URLSearchParams(location.search);
     const session = readStoredPaymentSession();
-    if (!paymentSession || session?.provider !== "dodo" || !session.paymentAccessToken ||
+    if (!hydrated || session?.provider !== "dodo" || !session.paymentAccessToken ||
         (!query.has("dodo_return") && !query.has("dodo_cancel")) ||
         dodoReturnHandled.current === session.paymentAccessToken) return;
     dodoReturnHandled.current = session.paymentAccessToken;
     const action = query.has("dodo_cancel") ? handleChangePaymentMethod()
       : finalizeSessionCheckout({ paymentAccessToken: session.paymentAccessToken, providerData: {} });
     Promise.resolve(action).catch((error) => showBanner("error", error.message || "Payment confirmation is pending. Check again shortly."));
-  }, [location.search, paymentSession]);
+  }, [hydrated, location.search, paymentSession]);
 
   async function validateReferral(code) {
     const normalizedCode = String(code || "").trim();
@@ -1934,7 +1940,7 @@ export default function Payment({ hideFooter = false }) {
                     {lockedProvider === "dodo" && (
                       <button type="button" disabled={paymentStatusBusy || cancellingPayment}
                         className="rounded-md px-3 py-2 text-xs font-semibold text-ink-muted hover:text-ink disabled:opacity-60"
-                        onClick={() => finalizeSessionCheckout({ paymentAccessToken: paymentSession.paymentAccessToken, providerData: {} }).catch((error) => showBanner("error", error.message))}>
+                        onClick={() => finalizeSessionCheckout({ paymentAccessToken: paymentSession.paymentAccessToken, providerData: {} }).catch((error) => showBanner("error", error?.message || "Unable to load payment status. Please try again."))}>
                         {paymentStatusBusy ? "Checking payment..." : "Check payment status"}
                       </button>
                     )}

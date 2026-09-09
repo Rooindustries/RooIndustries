@@ -4364,6 +4364,46 @@ describe('Dodo checkout lifecycle',()=>{
     latest.total_amount=amount;latest.currency='EUR';expect((await notify()).httpStatus).toBe(409);
     latest.currency='USD';expect((await notify()).body.status).toBe('booked');expect(store.bookings).toHaveLength(1);
   });
+  test('Dodo status polling reads persisted state without provider calls or fulfillment', async () => {
+    const started = await startDodo();
+    mockInspectDodoCheckout.mockClear();
+    const status = await getPaymentStatus({ paymentAccessToken: started.body.paymentAccessToken, allowLegacyTokenFallback: false, client: mockClient });
+    expect(status.body.status).toBe('started');
+    expect(mockInspectDodoCheckout).not.toHaveBeenCalled();
+    expect(store.bookings).toHaveLength(0);
+  });
+  test('an immutable Dodo binding mismatch is acknowledged without fulfillment or redelivery', async () => {
+    await startDodo();
+    latest.checkout_session_id = 'cks_wrong_binding';
+    const rejected = await notify('payment.succeeded', 'evt_wrong_binding');
+    expect(rejected.httpStatus).toBe(200);
+    expect(rejected.body.rejected).toBe(true);
+    expect((await notify('payment.succeeded', 'evt_wrong_binding')).body.duplicate).toBe(true);
+    expect(store.bookings).toHaveLength(0);
+  });
+  test('disabled Dodo configuration leaves recovery records untouched', async () => {
+    await startDodo();
+    mockResolvePaymentProviders.mockReturnValue({ ...mockResolvePaymentProviders(), dodo: { enabled: false, mode: 'missing' } });
+    mockInspectDodoCheckout.mockClear();
+    await reconcilePaymentSessions({ req: createReq({}, { authorization: 'Bearer cron-secret' }), client: mockClient });
+    expect(mockInspectDodoCheckout).not.toHaveBeenCalled();
+    expect(getOnlyPaymentRecord().status).toBe('started');
+    expect(store.bookings).toHaveLength(0);
+  });
+  test.each(['dispute_opened', 'dispute_lost'])('a disputed booking is held without paid commission for %s', async disputeStatus => {
+    await startDodo(); await notify();
+    Object.assign(store.bookings[0], { status: 'captured', commissionAmount: 5, netAmount: latest.total_amount / 100 });
+    latest.disputes = [{ dispute_id: 'dis_existing', dispute_status: disputeStatus }];
+    const held = await notify('dispute.opened', 'evt_disputed_booking');
+    expect(held.body.status).toBe('needs_recovery');
+    expect(store.bookings[0]).toMatchObject({ status: 'pending', commissionAmount: 0, paymentVerificationState: 'disputed' });
+    expect(getOnlyPaymentRecord().dodoDisputeActive).toBe(true);
+    latest.disputes[0].dispute_status = 'dispute_won';
+    const restored = await notify('dispute.won', 'evt_disputed_booking_won');
+    expect(restored.body.status).toBe('booked');
+    expect(store.bookings[0]).toMatchObject({ status: 'captured', commissionAmount: 5, paymentVerificationState: 'server_verified' });
+    expect(mockCreateBooking).toHaveBeenCalledTimes(1);
+  });
   test('pending is retryable and does not fulfill; reordered failed notification reads current succeeded payment',async()=>{
     await startDodo();latest.status='processing';
     expect((await notify('payment.processing')).httpStatus).toBe(503);expect(store.bookings).toHaveLength(0);

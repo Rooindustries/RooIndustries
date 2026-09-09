@@ -3,15 +3,15 @@ import providerConfig from "./providerConfig.js";
 
 export const DODO_CURRENCY = "USD";
 const read = (key) => String(process.env[key] || "").trim();
-const failure = (code, status = 503) => Object.assign(new Error(code), { code, status });
+const failure = (code, status = 503) => Object.assign(new Error(code), { code, status, retryable: status >= 500 });
 
 export const createDodoClient = () => {
   const environment = read("DODO_PAYMENTS_ENVIRONMENT");
   if (!["test_mode", "live_mode"].includes(environment) || !read("DODO_PAYMENTS_API_KEY")) {
-    throw failure("dodo_credentials_missing");
+    throw failure("dodo_credentials_missing", 409);
   }
   const mode = environment === "test_mode" ? "test" : "live";
-  if (!providerConfig.allowProviderModeInRuntime(mode)) throw failure("dodo_environment_disabled");
+  if (!providerConfig.allowProviderModeInRuntime(mode)) throw failure("dodo_environment_disabled", 409);
   return new DodoPayments({
     bearerToken: read("DODO_PAYMENTS_API_KEY"),
     environment,
@@ -114,6 +114,7 @@ export const inspectDodoCheckout = async ({ record }) => {
       : ["failed", "cancelled"].includes(payment.status) ? "unpaid" : "pending";
     return { state, payment, providerPaymentId: payment.payment_id };
   } catch (error) {
+    if (error.retryable === false) return { state: "disabled", retryable: false, reason: error.code };
     return { state: "unavailable", reason: error.status === 404 ? "dodo_lookup_failed_404" : error.code || `dodo_lookup_failed_${error.status || "exception"}` };
   }
 };
@@ -121,7 +122,7 @@ export const inspectDodoCheckout = async ({ record }) => {
 export const verifyDodoCapture = async ({ record, payment: suppliedPayment }) => {
   const inspection = suppliedPayment ? { payment: suppliedPayment } : await inspectDodoCheckout({ record });
   const payment = inspection.payment;
-  if (!payment) return { ok: false, retryable: true, reason: inspection.reason || "dodo_payment_pending" };
+  if (!payment) return { ok: false, retryable: inspection.retryable !== false, reason: inspection.reason || "dodo_payment_pending" };
   const validation = validateDodoPayment({ record, payment });
   if (!validation.ok) return validation;
   if (payment.status !== "succeeded") return { ok: false, retryable: true, reason: `dodo_payment_${payment.status || "pending"}` };
@@ -141,6 +142,6 @@ export const verifyDodoCapture = async ({ record, payment: suppliedPayment }) =>
 
 export const unwrapDodoWebhook = ({ rawBody, headers }) => {
   const secret = read("DODO_PAYMENTS_WEBHOOK_KEY");
-  if (!secret) throw failure("dodo_webhook_key_missing");
+  if (!secret) throw failure("dodo_webhook_key_missing", 409);
   return createDodoClient().webhooks.unwrap(rawBody, { headers, key: secret });
 };

@@ -100,6 +100,13 @@ test('provider outages remain unavailable and cannot authorize a payment', async
   expect(await verifyDodoCapture({record: record()})).toMatchObject({ok: false, retryable: true});
 });
 
+test('missing Dodo configuration is non-retryable and makes no provider requests', async () => {
+  delete process.env.DODO_PAYMENTS_API_KEY;
+  expect(await inspectDodoCheckout({record: record()})).toMatchObject({state: 'disabled', retryable: false});
+  expect(await verifyDodoCapture({record: record()})).toMatchObject({ok: false, retryable: false});
+  expect(global.fetch).not.toHaveBeenCalled();
+});
+
 test.each(['opened', 'challenged', 'lost', 'accepted', 'expired', 'cancelled'])('a disputed payment cannot authorize fulfillment after dispute.%s', async status => {
   const proof = {...payment(), disputes: [{dispute_status: `dispute_${status}`} ]};
   expect(await verifyDodoCapture({record: record(), payment: proof})).toMatchObject({ok: false, captured: true, reason: 'dodo_payment_disputed'});

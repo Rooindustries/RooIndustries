@@ -243,7 +243,9 @@ export const createRequiresRescheduleBooking = async ({
           dodoOriginalCommissionAmount: Number(pricing.commissionAmount || 0),
           refundedAmount: Number(paymentRecord.refundProcessedAmountInSubunits || 0) / 100,
           refundStatus: "partial",
-          commissionAmount: Math.round(Number(pricing.commissionAmount || 0) * Math.max(0, 1 - Number(paymentRecord.refundProcessedAmountInSubunits || 0) / (Number(pricing.netAmount) * 100)) * 100) / 100,
+          commissionAmount: Number(pricing.netAmount) > 0
+            ? Math.round(Number(pricing.commissionAmount || 0) * Math.max(0, 1 - Number(paymentRecord.refundProcessedAmountInSubunits || 0) / (Number(pricing.netAmount) * 100)) * 100) / 100
+            : 0,
         } : {}),
       } : {}),
       paypalOrderId:

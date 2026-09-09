@@ -1,6 +1,6 @@
 import React from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import Payment from "../components/Payment";
 
 let mockPayPalButtonProps = null;
@@ -134,6 +134,37 @@ describe("payment client request and accessibility behavior", () => {
         "focus-visible:ring-info-border"
       );
     }
+  });
+
+  test("reconciles a Dodo return before an expired hold can redirect the customer", async () => {
+    const booking = { ...checkout, slotHoldExpiresAt: "2000-01-01T00:00:00.000Z" };
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify(booking));
+    sessionStorage.setItem("payment_session_state", JSON.stringify({
+      provider: "dodo",
+      paymentAccessToken: "dodo-return-token",
+      providerPayload: { orderId: "cks_return" },
+      fingerprint: JSON.stringify({ packageTitle: booking.packageTitle, originalOrderId: "", startTimeUTC: booking.startTimeUTC, email: booking.email, referralCode: "", couponCode: "" }),
+    }));
+    let finishFinalization;
+    global.fetch = jest.fn(async (url) => {
+      if (url === "/api/payment/finalize") return new Promise(resolve => {
+        finishFinalization = () => resolve(response({ ok: true, status: "booked", bookingId: "booking_return" }));
+      });
+      if (url === "/api/payment/providers") return response({ ...providerPayload, providers: { ...providerPayload.providers, dodo: { enabled: true, mode: "live" } } });
+      return standardFetch(url);
+    });
+    render(<MemoryRouter initialEntries={[{ pathname: "/payment", search: "?dodo_return=1" }]}>
+      <Routes>
+        <Route path="/payment" element={<Payment hideFooter />} />
+        <Route path="/booking" element={<div>Expired checkout</div>} />
+        <Route path="/payment-success" element={<div>Confirmed Dodo booking</div>} />
+      </Routes>
+    </MemoryRouter>);
+    await waitFor(() => expect(finishFinalization).toEqual(expect.any(Function)));
+    expect(screen.queryByText("Expired checkout")).not.toBeInTheDocument();
+    await act(async () => { finishFinalization(); });
+    expect(await screen.findByText("Confirmed Dodo booking")).toBeInTheDocument();
+    expect(global.fetch).toHaveBeenCalledWith("/api/payment/finalize", expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer dodo-return-token" }) }));
   });
 
   test("aborts a stalled quote and exposes an assertive retry message", async () => {

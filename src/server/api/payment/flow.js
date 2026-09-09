@@ -413,6 +413,9 @@ const buildRecordPricingFingerprint = ({
 
 const getPublicRecoveryMessage = (record = {}) => {
   const status = String(record.status || "").trim().toLowerCase();
+  if (record.dodoDisputeActive === true) {
+    return "This payment is under dispute. Please contact Roo Industries before proceeding.";
+  }
   if (record.requiresReschedule === true) {
     return "Your payment is safe, but the original time needs to be rescheduled. Roo Industries will contact you.";
   }
@@ -3928,7 +3931,6 @@ export const getPaymentStatus = async ({
       fallbackMessage: "Payment status is temporarily unavailable.",
     });
   }
-  if (resolved.record.provider === "dodo") return refreshDodoPayment({ client, record: resolved.record, source: "reconcile" });
   return {
     httpStatus: 200,
     body: buildPublicStatusBody(resolved.record),
@@ -3960,8 +3962,10 @@ export const reconcilePaymentSessions = async ({
   );
   const primaryBackend =
     policy.commercePrimaryBackend === "sanity" ? "sanity" : "supabase";
+  const dodoEnabled = resolvePaymentProviders()?.dodo?.enabled === true;
   const records = await client.fetch(
     `*[_type == $type
+      && (provider != "dodo" || $dodoEnabled)
       && (
         (
           coalesce(cutoverGeneration, 0) < $currentGeneration
@@ -3992,6 +3996,7 @@ export const reconcilePaymentSessions = async ({
     {
       type: PAYMENT_RECORD_TYPE,
       backend: backend === "supabase" ? "supabase" : "sanity",
+      dodoEnabled,
       primaryBackend,
       currentGeneration,
       statuses: [
@@ -4020,6 +4025,7 @@ export const reconcilePaymentSessions = async ({
   };
 
   for (const record of Array.isArray(records) ? records : []) {
+    if (record.provider === "dodo" && !dodoEnabled) continue;
     summary.scanned += 1;
     let dodoInspection = null;
     if (record.provider === "dodo" && record.providerOrderId) {
@@ -5190,6 +5196,9 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
   const inspection = payment ? { payment } : await inspectDodoCheckout({ record });
   payment = inspection.payment;
   if (!payment) {
+    if (inspection.state === "disabled") {
+      return { httpStatus: 409, body: { ok: false, code: "dodo_configuration_unavailable", error: "Dodo Payments is not available in this environment." } };
+    }
     if (inspection.state === "unpaid" && !isFutureIso(record.sessionExpiresAt)) {
       const result = await abandonStartedPaymentRecord({ client, record, reason: "dodo_checkout_expired" });
       return { httpStatus: 200, body: buildPublicStatusBody(result.paymentRecord || record) };
@@ -5216,9 +5225,61 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
     });
     if (result.httpStatus >= 400) return result;
     record = await getPaymentRecordById(client, record._id);
+    if (!record) return { httpStatus: 503, body: { ok: false, code: "payment_record_unavailable", error: "Payment details are temporarily unavailable." } };
   }
   if (record.status === PAYMENT_STATUS_REFUNDED) {
     return { httpStatus: record.refundRequiresBookingSync ? 503 : 200, body: buildPublicStatusBody(record) };
+  }
+  const disputes = Array.isArray(payment.disputes) ? payment.disputes : [];
+  const disputed = disputes.some((dispute) => dispute.dispute_status !== "dispute_won") ||
+    (record.dodoDisputeActive === true && disputes.length === 0);
+  if (disputed || record.dodoDisputeActive === true) {
+    const booking = record.bookingId
+      ? await client.fetch(`*[_type == "booking" && _id == $id][0]{...}`, { id: record.bookingId })
+      : null;
+    const transaction = client.transaction();
+    if (booking && booking.status !== "refunded" && !booking.refundAccountingAppliedAt) {
+      const originalStatus = booking.dodoDisputeActive
+        ? booking.dodoDisputeBookingStatus : booking.status;
+      const originalCommission = Number(booking.dodoOriginalCommissionAmount ?? booking.commissionAmount ?? 0);
+      const retainedFraction = Math.max(0, 1 - Number(booking.refundedAmount || 0) / Number(booking.netAmount || 1));
+      transaction.patch(booking._id, (patch) => {
+        const guarded = booking._rev ? patch.ifRevisionId(booking._rev) : patch;
+        return guarded.set({
+          status: disputed && ["captured", "completed"].includes(booking.status)
+            ? "pending"
+            : !disputed && booking.dodoDisputeActive && booking.status === "pending"
+              ? originalStatus : booking.status,
+          dodoDisputeActive: disputed,
+          dodoDisputeBookingStatus: originalStatus,
+          dodoOriginalCommissionAmount: originalCommission,
+          commissionAmount: disputed ? 0 : Math.round(originalCommission * retainedFraction * 100) / 100,
+          paymentVerificationState: disputed ? "disputed" : "server_verified",
+        });
+      });
+    }
+    transaction.patch(record._id, (patch) => {
+      const guarded = record._rev ? patch.ifRevisionId(record._rev) : patch;
+      return guarded.set({
+        dodoDisputeActive: disputed,
+        verificationState: disputed ? "disputed" : "server_verified",
+        status: disputed || !record.bookingId ? PAYMENT_STATUS_NEEDS_RECOVERY
+          : record.emailDispatchRequired || record.recoveryNotificationRequired ? PAYMENT_STATUS_EMAIL_PARTIAL : PAYMENT_STATUS_BOOKED,
+        recoveryReason: disputed ? "dodo_payment_disputed" : "",
+        nextRecoveryAt: disputed ? getNextPaymentRecoveryAt(record.attemptCount || 0) : "",
+        updatedAt: nowIso(),
+      });
+    });
+    await transaction.commit();
+    record = await getPaymentRecordById(client, record._id);
+    if (!record) return { httpStatus: 503, body: { ok: false, code: "payment_record_unavailable", error: "Payment details are temporarily unavailable." } };
+    if (disputed) {
+      const webhook = source === "webhook";
+      return { httpStatus: webhook ? 200 : 409, body: {
+        ...buildPublicStatusBody(record), ok: webhook,
+        code: "dodo_payment_disputed", error: getPublicRecoveryMessage(record),
+      } };
+    }
   }
   if (payment.status === "succeeded") {
     if (deferFinalization) return { httpStatus: 200, body: buildPublicStatusBody(record) };
@@ -5243,7 +5304,8 @@ export const handleDodoWebhook = async ({ req, client = null, applyBookingRefund
   try {
     event = unwrapDodoWebhook({ rawBody: String(req?.rawBody || ""), headers: req?.headers || {} });
   } catch (error) {
-    return { httpStatus: error.status === 503 ? 503 : 401, body: { ok: false, error: "Dodo webhook verification failed." } };
+    return { httpStatus: error.retryable === false ? 409 : error.status === 503 ? 503 : 401,
+      body: { ok: false, error: error.retryable === false ? "Dodo webhook is not configured." : "Dodo webhook verification failed." } };
   }
   const eventId = String(req?.headers?.["webhook-id"] || "").trim();
   if (!eventId) return { httpStatus: 401, body: { ok: false, error: "Missing webhook ID." } };
@@ -5259,7 +5321,8 @@ export const handleDodoWebhook = async ({ req, client = null, applyBookingRefund
   try {
     payment = await retrieveDodoPayment(paymentId);
     record = await getPaymentRecordById(client, String(payment.metadata?.paymentRecordId || ""));
-  } catch {
+  } catch (error) {
+    if (error.retryable === false) return { httpStatus: 409, body: { ok: false, code: "dodo_configuration_unavailable", error: "Dodo Payments is not available in this environment." } };
     return { httpStatus: 503, body: { ok: false, error: "Payment lookup is temporarily unavailable." } };
   }
   if (!record?._id || record.provider !== "dodo") return { httpStatus: 200, body: { ok: true, ignored: true } };
@@ -5276,6 +5339,11 @@ export const handleDodoWebhook = async ({ req, client = null, applyBookingRefund
   let result;
   try {
     result = await refreshDodoPayment({ client, record, payment, source: "webhook", applyBookingRefund });
+    if (result.httpStatus === 409 && result.body?.code === "dodo_payment_binding_mismatch") {
+      result = { httpStatus: 200, body: { ok: true, rejected: true, code: "dodo_payment_binding_mismatch" } };
+      await completeWebhookReceipt({ client, receipt: claim.receipt, result });
+      return result;
+    }
     if (result.httpStatus !== 200) {
       await releaseWebhookReceiptForRetry({ client, receipt: claim.receipt, result });
       return { ...result, httpStatus: result.httpStatus === 202 ? 503 : result.httpStatus };
