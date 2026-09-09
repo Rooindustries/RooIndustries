@@ -413,6 +413,9 @@ const buildRecordPricingFingerprint = ({
 
 const getPublicRecoveryMessage = (record = {}) => {
   const status = String(record.status || "").trim().toLowerCase();
+  if (status === PAYMENT_STATUS_REFUNDED) {
+    return "This payment has been refunded.";
+  }
   if (record.dodoDisputeActive === true) {
     return "This payment is under dispute. Please contact Roo Industries before proceeding.";
   }
@@ -424,9 +427,6 @@ const getPublicRecoveryMessage = (record = {}) => {
   }
   if (status === PAYMENT_STATUS_ABANDONED) {
     return "This payment session was released and is no longer payable.";
-  }
-  if (status === PAYMENT_STATUS_REFUNDED) {
-    return "This payment has been refunded.";
   }
   if (status === PAYMENT_STATUS_FAILED) {
     return "Payment could not be completed.";

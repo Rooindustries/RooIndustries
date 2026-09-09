@@ -4410,6 +4410,17 @@ describe('Dodo checkout lifecycle',()=>{
     latest.status='succeeded';expect((await notify('payment.failed')).body.status).toBe('booked');
     expect(mockCreateBooking).toHaveBeenCalledTimes(1);
   });
+  test.each([false, true])('full refund status overrides an earlier dispute and reschedule flag %s', async requiresReschedule => {
+    await startDodo(); await notify();
+    Object.assign(store.bookings[0], { status: 'captured', netAmount: latest.total_amount / 100 });
+    getOnlyPaymentRecord().requiresReschedule = requiresReschedule;
+    latest.disputes = [{ dispute_status: 'dispute_opened' }];
+    await notify('dispute.opened', 'evt_before_refund');
+    latest.refunds = [{ refund_id: 'ref_after_dispute', payment_id: latest.payment_id, status: 'succeeded', amount: latest.total_amount, currency: 'USD' }];
+    const result = await notify('refund.succeeded', 'evt_refund_after_dispute', async () => ({ bookingId: store.bookings[0]._id }));
+    expect(result.body.status).toBe('refunded');
+    expect(result.body.recoveryReason).toBe('This payment has been refunded.');
+  });
   test('a fully refunded payment arriving before success never creates a booking',async()=>{
     await startDodo();latest.refunds=[{refund_id:'ref_dodo',payment_id:latest.payment_id,status:'succeeded',amount:latest.total_amount,currency:'USD'}];
     expect((await notify('refund.succeeded')).body.status).toBe('refunded');
