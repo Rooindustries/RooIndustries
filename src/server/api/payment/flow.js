@@ -4033,7 +4033,7 @@ export const reconcilePaymentSessions = async ({
     let dodoInspection = null;
     if (record.provider === "dodo" && record.providerOrderId) {
       dodoInspection = await inspectDodoCheckout({ record });
-      if (dodoInspection.state === "unavailable" && dodoInspection.retryable === false) {
+      if (dodoInspection.retryable === false) {
         await patchPaymentRecord({ client, record, revisionGuard: true, set: {
           status: PAYMENT_STATUS_NEEDS_RECOVERY,
           recoveryReason: dodoInspection.reason,

@@ -4390,9 +4390,12 @@ describe('Dodo checkout lifecycle',()=>{
     expect(getOnlyPaymentRecord().status).toBe('started');
     expect(store.bookings).toHaveLength(0);
   });
-  test('permanent Dodo mismatches stop automatic recovery until fresh matching proof arrives', async () => {
+  test.each([
+    ['unavailable', 'dodo_payment_binding_mismatch'],
+    ['disabled', 'dodo_environment_disabled'],
+  ])('%s Dodo inspections stop automatic recovery until fresh matching proof arrives', async (state, reason) => {
     await startDodo();
-    mockInspectDodoCheckout.mockResolvedValue({state: 'unavailable', retryable: false, reason: 'dodo_payment_binding_mismatch'});
+    mockInspectDodoCheckout.mockResolvedValue({state, retryable: false, reason});
     const options = { req: createReq({}, { authorization: 'Bearer cron-secret' }), client: mockClient };
     await reconcilePaymentSessions(options);
     expect(getOnlyPaymentRecord()).toMatchObject({status: 'needs_recovery', providerRecoveryTerminal: true});
