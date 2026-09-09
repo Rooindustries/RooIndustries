@@ -152,6 +152,7 @@ describe("performanceProfile", () => {
 
     reducedMotion = false;
     onChange();
+    expect(handler).toHaveBeenCalledTimes(2);
 
     expect(getPerformanceProfileSnapshot().prefersReducedMotion).toBe(false);
     expect(document.documentElement).not.toHaveClass(REDUCED_MOTION_CLASS);

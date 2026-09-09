@@ -1,6 +1,8 @@
 set lock_timeout = '5s';
 set statement_timeout = '120s';
 
+-- Run this transactional index build during a write-free maintenance window.
+-- It holds a SHARE lock while building; the timeouts do not prevent write blocking.
 create index if not exists source_documents_booking_paypal_order_idx
   on migration.source_documents ((payload->'paypalOrderId'), legacy_sanity_id)
   where document_type = 'booking' and not tombstoned;
