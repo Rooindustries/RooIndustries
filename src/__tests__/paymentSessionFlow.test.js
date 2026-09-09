@@ -4390,6 +4390,20 @@ describe('Dodo checkout lifecycle',()=>{
     expect(getOnlyPaymentRecord().status).toBe('started');
     expect(store.bookings).toHaveLength(0);
   });
+  test('permanent Dodo mismatches stop automatic recovery until fresh matching proof arrives', async () => {
+    await startDodo();
+    mockInspectDodoCheckout.mockResolvedValue({state: 'unavailable', retryable: false, reason: 'dodo_payment_binding_mismatch'});
+    const options = { req: createReq({}, { authorization: 'Bearer cron-secret' }), client: mockClient };
+    await reconcilePaymentSessions(options);
+    expect(getOnlyPaymentRecord()).toMatchObject({status: 'needs_recovery', providerRecoveryTerminal: true});
+    mockInspectDodoCheckout.mockClear();
+    await reconcilePaymentSessions(options);
+    expect(mockInspectDodoCheckout).not.toHaveBeenCalled();
+    expect(store.bookings).toHaveLength(0);
+    expect((await notify('payment.succeeded', 'evt_matching_proof')).body.status).toBe('booked');
+    expect(getOnlyPaymentRecord().providerRecoveryTerminal).toBe(false);
+    expect(store.bookings).toHaveLength(1);
+  });
   test.each(['dispute_opened', 'dispute_lost'])('a disputed booking is held without paid commission for %s', async disputeStatus => {
     await startDodo(); await notify();
     Object.assign(store.bookings[0], { status: 'captured', commissionAmount: 5, netAmount: latest.total_amount / 100 });

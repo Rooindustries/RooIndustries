@@ -107,6 +107,19 @@ test('missing Dodo configuration is non-retryable and makes no provider requests
   expect(global.fetch).not.toHaveBeenCalled();
 });
 
+test.each(['session', 'binding'])('a permanent %s mismatch is non-retryable', async kind => {
+  global.fetch.mockImplementation(async input => {
+    const path = new URL(typeof input === 'string' ? input : input.url).pathname;
+    const data = path.startsWith('/checkouts/')
+      ? {id: kind === 'session' ? 'cks_wrong' : 'cks_offline', payment_id: 'pay_offline'}
+      : {...payment(), metadata: {paymentRecordId: 'another_record'}};
+    return new Response(JSON.stringify(data), {status: 200, headers: {'content-type': 'application/json'}});
+  });
+  const reason = kind === 'session' ? 'dodo_session_mismatch' : 'dodo_payment_binding_mismatch';
+  expect(await inspectDodoCheckout({record: record()})).toMatchObject({retryable: false, reason});
+  expect(await verifyDodoCapture({record: record()})).toMatchObject({ok: false, retryable: false, reason});
+});
+
 test.each(['opened', 'challenged', 'lost', 'accepted', 'expired', 'cancelled'])('a disputed payment cannot authorize fulfillment after dispute.%s', async status => {
   const proof = {...payment(), disputes: [{dispute_status: `dispute_${status}`} ]};
   expect(await verifyDodoCapture({record: record(), payment: proof})).toMatchObject({ok: false, captured: true, reason: 'dodo_payment_disputed'});

@@ -416,6 +416,9 @@ const getPublicRecoveryMessage = (record = {}) => {
   if (status === PAYMENT_STATUS_REFUNDED) {
     return "This payment has been refunded.";
   }
+  if (record.provider === "dodo" && record.providerRecoveryTerminal === true && status === PAYMENT_STATUS_NEEDS_RECOVERY) {
+    return "This payment requires manual review. Please contact Roo Industries.";
+  }
   if (record.dodoDisputeActive === true) {
     return "This payment is under dispute. Please contact Roo Industries before proceeding.";
   }
@@ -3965,7 +3968,7 @@ export const reconcilePaymentSessions = async ({
   const dodoEnabled = resolvePaymentProviders()?.dodo?.enabled === true;
   const records = await client.fetch(
     `*[_type == $type
-      && (provider != "dodo" || $dodoEnabled)
+      && (provider != "dodo" || ($dodoEnabled && coalesce(providerRecoveryTerminal, false) == false))
       && (
         (
           coalesce(cutoverGeneration, 0) < $currentGeneration
@@ -4025,11 +4028,22 @@ export const reconcilePaymentSessions = async ({
   };
 
   for (const record of Array.isArray(records) ? records : []) {
-    if (record.provider === "dodo" && !dodoEnabled) continue;
+    if (record.provider === "dodo" && (!dodoEnabled || record.providerRecoveryTerminal === true)) continue;
     summary.scanned += 1;
     let dodoInspection = null;
     if (record.provider === "dodo" && record.providerOrderId) {
       dodoInspection = await inspectDodoCheckout({ record });
+      if (dodoInspection.state === "unavailable" && dodoInspection.retryable === false) {
+        await patchPaymentRecord({ client, record, revisionGuard: true, set: {
+          status: PAYMENT_STATUS_NEEDS_RECOVERY,
+          recoveryReason: dodoInspection.reason,
+          providerRecoveryTerminal: true,
+          providerRecoveryTerminalReason: dodoInspection.reason,
+          nextRecoveryAt: "",
+        } });
+        summary.recovery += 1;
+        continue;
+      }
       if (dodoInspection.payment) {
         const result = await refreshDodoPayment({ client, record, payment: dodoInspection.payment,
           source: "reconcile", applyBookingRefund, deferFinalization: true });
@@ -5199,6 +5213,9 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
     if (inspection.state === "disabled") {
       return { httpStatus: 409, body: { ok: false, code: "dodo_configuration_unavailable", error: "Dodo Payments is not available in this environment." } };
     }
+    if (inspection.retryable === false) {
+      return { httpStatus: 409, body: { ok: false, code: inspection.reason, error: "The payment does not match this checkout." } };
+    }
     if (inspection.state === "unpaid" && !isFutureIso(record.sessionExpiresAt)) {
       const result = await abandonStartedPaymentRecord({ client, record, reason: "dodo_checkout_expired" });
       return { httpStatus: 200, body: buildPublicStatusBody(result.paymentRecord || record) };
@@ -5208,6 +5225,9 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
   }
   const validation = validateDodoPayment({ record, payment });
   if (!validation.ok) return { httpStatus: 409, body: { ok: false, code: validation.reason, error: "The payment does not match this checkout." } };
+  if (record.providerRecoveryTerminal === true && payment.status === "succeeded") {
+    record = await patchPaymentRecord({ client, record, revisionGuard: true, set: { providerRecoveryTerminal: false } });
+  }
 
   const refundHandler = applyBookingRefund || (await loadBookingRefundHandler());
   for (const refund of payment.refunds || []) {

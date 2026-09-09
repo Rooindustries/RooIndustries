@@ -78,7 +78,7 @@ export const createDodoCheckout = async ({ record, lookupOnly = false }) => {
 };
 
 export const validateDodoPayment = ({ record, payment }) => {
-  const fail = (reason) => ({ ok: false, captured: payment?.status === "succeeded", reason });
+  const fail = (reason) => ({ ok: false, captured: payment?.status === "succeeded", retryable: false, reason });
   if (!payment?.payment_id || payment.checkout_session_id !== record.providerOrderId ||
       payment.metadata?.paymentRecordId !== record._id ||
       (record.providerPaymentId && record.providerPaymentId !== payment.payment_id)) {
@@ -105,7 +105,7 @@ export const inspectDodoCheckout = async ({ record }) => {
   try {
     const client = createDodoClient();
     const session = await client.checkoutSessions.retrieve(record.providerOrderId);
-    if (session.id !== record.providerOrderId) return { state: "unavailable", reason: "dodo_session_mismatch" };
+    if (session.id !== record.providerOrderId) return { state: "unavailable", retryable: false, reason: "dodo_session_mismatch" };
     if (!session.payment_id) return { state: "unpaid" };
     const payment = await client.payments.retrieve(session.payment_id);
     const validation = validateDodoPayment({ record, payment });
@@ -115,7 +115,7 @@ export const inspectDodoCheckout = async ({ record }) => {
     return { state, payment, providerPaymentId: payment.payment_id };
   } catch (error) {
     if (error.retryable === false) return { state: "disabled", retryable: false, reason: error.code };
-    return { state: "unavailable", reason: error.status === 404 ? "dodo_lookup_failed_404" : error.code || `dodo_lookup_failed_${error.status || "exception"}` };
+    return { state: "unavailable", retryable: true, reason: error.status === 404 ? "dodo_lookup_failed_404" : error.code || `dodo_lookup_failed_${error.status || "exception"}` };
   }
 };
 
