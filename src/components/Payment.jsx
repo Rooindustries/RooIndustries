@@ -1940,10 +1940,10 @@ export default function Payment({ hideFooter = false }) {
                     <p className="text-base font-semibold text-ink">Dodo Payments</p>
                     <p className="text-sm text-ink-muted">Pay securely by card and supported local payment methods.</p>
                   </div>
-                  <div className="flex flex-col gap-2">
+                  <div className="flex w-full shrink-0 flex-col gap-2 sm:w-48">
                     <button type="button" onClick={handleDodoCheckout}
                       disabled={payingDodo || paymentStatusBusy || cancellingPayment || quoteLoading || !quoteFingerprint || !providerIsAvailableForSession("dodo")}
-                      className="glow-button rounded-lg px-5 py-3 text-sm font-semibold disabled:opacity-60">
+                      className="glow-button inline-flex h-10 w-full items-center justify-center rounded-lg px-4 text-sm font-semibold disabled:opacity-60">
                       {payingDodo ? "Opening checkout..." : "Pay with Dodo Payments"}
                     </button>
                     {lockedProvider === "dodo" && (
@@ -1997,7 +1997,7 @@ export default function Payment({ hideFooter = false }) {
                     !canUseRazorpay ||
                     !providerIsAvailableForSession("razorpay")
                   }
-                  className="glow-button h-10 w-full rounded-lg px-4 text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 sm:w-48"
+                  className="glow-button h-10 w-full shrink-0 rounded-lg px-4 text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 sm:w-48"
                 >
                   {payingRzp || paymentStatusBusy
                     ? "Processing..."
@@ -2047,7 +2047,7 @@ export default function Payment({ hideFooter = false }) {
                   </div>
 
                   {/* Clip the SDK’s 40px button at its 4px radius to hide the iframe’s light corners. Use outline-0: Tailwind v3’s outline-none leaves a transparent outline that forced-colors modes can repaint. */}
-                  <div className="w-full sm:w-48">
+                  <div className="w-full shrink-0 sm:w-48">
                     {canDisplayPaypalMethod ? (
                       <PayPalScriptProvider
                         options={{
