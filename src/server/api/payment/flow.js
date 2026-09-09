@@ -3968,7 +3968,12 @@ export const reconcilePaymentSessions = async ({
   const dodoEnabled = resolvePaymentProviders()?.dodo?.enabled === true;
   const records = await client.fetch(
     `*[_type == $type
-      && (provider != "dodo" || ($dodoEnabled && coalesce(providerRecoveryTerminal, false) == false))
+      && (
+        provider != "dodo" || ($dodoEnabled && coalesce(providerRecoveryTerminal, false) == false)
+        || (lower(status) == $refundedStatus && refundRequiresBookingSync == true)
+        || resourceReleasePending == true
+        || (lower(status) == $emailPartialStatus && requiresReschedule == true)
+      )
       && (
         (
           coalesce(cutoverGeneration, 0) < $currentGeneration
@@ -4011,6 +4016,7 @@ export const reconcilePaymentSessions = async ({
         PAYMENT_STATUS_NEEDS_RECOVERY,
       ],
       refundedStatus: PAYMENT_STATUS_REFUNDED,
+      emailPartialStatus: PAYMENT_STATUS_EMAIL_PARTIAL,
       bookedStatus: PAYMENT_STATUS_BOOKED,
       abandonedStatus: PAYMENT_STATUS_ABANDONED,
       now: nowIso(),
@@ -4028,10 +4034,15 @@ export const reconcilePaymentSessions = async ({
   };
 
   for (const record of Array.isArray(records) ? records : []) {
-    if (record.provider === "dodo" && (!dodoEnabled || record.providerRecoveryTerminal === true)) continue;
+    const localStatus = String(record.status || "").trim().toLowerCase();
+    const localRecovery =
+      (localStatus === PAYMENT_STATUS_REFUNDED && record.refundRequiresBookingSync === true) ||
+      record.resourceReleasePending === true ||
+      (localStatus === PAYMENT_STATUS_EMAIL_PARTIAL && record.requiresReschedule === true);
+    if (record.provider === "dodo" && !localRecovery && (!dodoEnabled || record.providerRecoveryTerminal === true)) continue;
     summary.scanned += 1;
     let dodoInspection = null;
-    if (record.provider === "dodo" && record.providerOrderId) {
+    if (record.provider === "dodo" && record.providerOrderId && !localRecovery) {
       dodoInspection = await inspectDodoCheckout({ record });
       if (dodoInspection.retryable === false) {
         await patchPaymentRecord({ client, record, revisionGuard: true, set: {

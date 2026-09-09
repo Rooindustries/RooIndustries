@@ -4390,6 +4390,33 @@ describe('Dodo checkout lifecycle',()=>{
     expect(getOnlyPaymentRecord().status).toBe('started');
     expect(store.bookings).toHaveLength(0);
   });
+  test.each(['refunded', 'abandoned'])('local Dodo cleanup remains eligible for %s when disabled', async status => {
+    await startDodo();
+    if (status === 'refunded') await notify();
+    const record = getOnlyPaymentRecord();
+    Object.assign(record, { status, nextRecoveryAt: '', ...(status === 'refunded' ? {
+      refundState: 'full', refundRequiresBookingSync: true,
+      refundProcessedAmountInSubunits: latest.total_amount,
+    } : { resourceReleasePending: true, resourceReleaseTargetStatus: 'abandoned' }) });
+    const pendingRecord = { ...record };
+    mockResolvePaymentProviders.mockReturnValue({ ...mockResolvePaymentProviders(), dodo: { enabled: false, mode: 'missing' } });
+    mockInspectDodoCheckout.mockClear();
+    mockClient.fetch.mockClear();
+    const applyBookingRefund = jest.fn().mockResolvedValue({ bookingId: record.bookingId });
+    const result = await reconcilePaymentSessions({
+      req: createReq({}, { authorization: 'Bearer cron-secret' }), client: mockClient, applyBookingRefund,
+    });
+    const [query, params] = mockClient.fetch.mock.calls.find(([query]) => query.includes('lower(status) in $statuses'));
+    const { parse, evaluate } = require('groq-js');
+    const selected = await (await evaluate(parse(query), { dataset: [pendingRecord], params })).get();
+    expect(selected).toHaveLength(1);
+    expect(result.httpStatus).toBe(200);
+    expect(mockInspectDodoCheckout).not.toHaveBeenCalled();
+    expect(getOnlyPaymentRecord()).toMatchObject(status === 'refunded'
+      ? { status, refundRequiresBookingSync: false }
+      : { status, resourceReleasePending: false });
+    if (status === 'refunded') expect(applyBookingRefund).toHaveBeenCalledTimes(1);
+  });
   test.each([
     ['unavailable', 'dodo_payment_binding_mismatch'],
     ['disabled', 'dodo_environment_disabled'],
@@ -4483,15 +4510,18 @@ describe('Dodo checkout lifecycle',()=>{
     await reconcilePaymentSessions({req:createReq({}, {authorization:'Bearer cron-secret'}),client:mockClient});
     expect(getOnlyPaymentRecord().status).toBe('abandoned');expect(mockCreateDodoCheckout).not.toHaveBeenCalled();
   });
-  test('Dodo booking conflicts use shared rescheduling and retry only the failed notification',async()=>{
+  test.each([true, false])('Dodo booking conflicts retry the failed notification with provider enabled %s',async enabled=>{
     await startDodo();Object.assign(getOnlyPaymentRecord(),{createdAt:'2000-01-01T00:00:00Z',updatedAt:'2000-01-01T00:00:00Z',lastAttemptAt:'2000-01-01T00:00:00Z',nextRecoveryAt:'2000-01-01T00:00:00Z'});
     mockCreateBooking.mockImplementation(async(req,res)=>res.status(409).json({error:'Slot unavailable'}));
     const createRequiresRescheduleBooking=jest.fn().mockResolvedValue({bookingId:'booking_dodo_reschedule',recoveryCaseId:'bookingRecoveryCase.dodo',notificationRequired:true});
     const dispatchRescheduleNotifications=jest.fn().mockResolvedValueOnce({ok:false,notificationRequired:true,status:'partial'}).mockResolvedValueOnce({ok:true,notificationRequired:false,status:'sent'});
     const options={req:createReq({}, {authorization:'Bearer cron-secret'}),client:mockClient,createRequiresRescheduleBooking,dispatchRescheduleNotifications};
     await reconcilePaymentSessions(options);expect(getOnlyPaymentRecord().status).toBe('email_partial');
+    mockResolvePaymentProviders.mockReturnValue({ ...mockResolvePaymentProviders(), dodo: { enabled, mode: enabled ? 'live' : 'missing' } });
+    mockInspectDodoCheckout.mockClear();
     getOnlyPaymentRecord().nextRecoveryAt='2000-01-01T00:00:00Z';await reconcilePaymentSessions(options);
     expect(getOnlyPaymentRecord().status).toBe('booked');expect(createRequiresRescheduleBooking).toHaveBeenCalledTimes(1);expect(dispatchRescheduleNotifications).toHaveBeenCalledTimes(2);
+    expect(mockInspectDodoCheckout).not.toHaveBeenCalled();
   });
   test('several partial refunds pass their cumulative full amount to booking accounting',async()=>{
     await startDodo();await notify();const total=latest.total_amount;
