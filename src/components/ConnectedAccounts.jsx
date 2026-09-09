@@ -290,12 +290,7 @@ export default function ConnectedAccounts({
           </span>
         ))}
       </div>
-      {/* Adding a provider no longer needs a password re-confirmation: being
-          signed in is enough, and the server proves the session against an active
-          account before starting the OAuth intent.
-          The box is still shown for the two operations that can take something
-          away -- unlinking a provider from this account, and reclaiming one held
-          by a different orphaned account. Both remain reauth-gated. */}
+      {/* Linking requires an active session. Unlinking and reclaiming identities require reauthentication because they remove access from an account. */}
       {linked.has("email") &&
       (recoveryProvider ||
         (canUnlink &&

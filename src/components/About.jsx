@@ -203,7 +203,6 @@ export default function About({ initialData = null, compact = false }) {
       className="mx-auto max-w-6xl pt-4 sm:pt-6 pb-16 px-4 sm:px-6 text-center"
     >
       <div className="mt-6">
-        {/* Motion 1/3: Entrance — fade-up on scroll, 400ms */}
         <motion.div
           className="ri-proof-card relative mx-auto max-w-6xl overflow-hidden rounded-2xl"
           style={{
@@ -216,17 +215,14 @@ export default function About({ initialData = null, compact = false }) {
           viewport={{ once: true, margin: "-80px" }}
           transition={{ duration: 0.4, ease: "easeOut" }}
         >
-          {/* Top edge line — structural, marks card boundary */}
           <div
             className="absolute inset-x-0 top-0 h-px"
             style={{ background: "linear-gradient(to right, transparent, var(--rc-accent), transparent)", opacity: 0.35 }}
           />
 
           <div className="relative px-5 sm:px-8 py-5 sm:py-7">
-            {/* Header: Label + Title + CTA */}
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="space-y-1.5 text-center lg:text-left">
-                {/* Badge as plain uppercase label — no pill, no border, no bg */}
                 <p className="text-[11px] font-bold uppercase tracking-[0.3em]" style={{ color: "var(--rc-accent)" }}>
                   {recordBadgeText}
                 </p>
@@ -238,7 +234,6 @@ export default function About({ initialData = null, compact = false }) {
                 </p>
               </div>
 
-              {/* Motion 3/3: Hover — brightness lift + press-down */}
               <a
                 href={leaderboardHref}
                 target="_blank"
@@ -261,9 +256,7 @@ export default function About({ initialData = null, compact = false }) {
               </a>
             </div>
 
-            {/* Stats: Pure typography hero + spec list */}
             <div className="mt-6 flex flex-col lg:flex-row gap-4 lg:gap-8 items-center lg:items-start">
-              {/* Hero stat — pure type, no card treatment */}
               {heroStat && (
                 <div className="flex flex-col items-center justify-center px-6 sm:px-10 py-3 lg:min-w-[160px]">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.3em]" style={{ color: "var(--rc-accent)" }}>
@@ -275,7 +268,6 @@ export default function About({ initialData = null, compact = false }) {
                 </div>
               )}
 
-              {/* Motion 2/3: Spec rows — staggered slide-in, 300ms each */}
               {specStats.length > 0 && (
                 <div className="flex-1 flex flex-col items-center justify-center lg:items-stretch">
                   {specStats.map((detail, index) => (
@@ -300,7 +292,6 @@ export default function About({ initialData = null, compact = false }) {
               )}
             </div>
 
-            {/* Note */}
             {recordNote && (
               <p
                 className="mt-5 text-center text-[11px] sm:text-xs pt-4 font-semibold lg:text-left"

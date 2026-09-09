@@ -53,7 +53,6 @@ export default function Contact() {
 
   return (
     <section className="text-ink px-4 py-28 flex flex-col items-center">
-      {/* Heading */}
       <div className="text-center mb-10">
         <h2 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)] mb-2">
           {contactData?.title || "Get In Touch"}
@@ -64,7 +63,6 @@ export default function Contact() {
         </p>
       </div>
 
-      {/* Email block */}
       <div className="p-4 rounded-lg flex items-center justify-between w-full max-w-xl mb-8 border border-line-input bg-surface-card backdrop-blur-sm">
         <div className="flex items-center space-x-3">
           <svg
@@ -101,7 +99,6 @@ export default function Contact() {
         </p>
       ) : null}
 
-      {/* Contact Form */}
       {state.succeeded ? (
         <div className="w-full max-w-xl p-6 rounded-lg border border-success-border bg-success-soft backdrop-blur-sm text-center text-success-text font-semibold">
           Thank you! Your message has been sent.

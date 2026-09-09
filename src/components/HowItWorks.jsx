@@ -160,7 +160,6 @@ export default function HowItWorks({ initialData = null }) {
                          shadow-[var(--shadow-card-glow-info)] hover:shadow-[var(--shadow-card-glow)]
                          transition-all duration-300"
             >
-              {/* Video stacked on top of the text content */}
               <div className="flex flex-col items-center gap-5 text-center">
                 <div className="w-full flex justify-center">
                   <VideoBadge

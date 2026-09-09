@@ -1,4 +1,3 @@
-// ./api/ref/register.js
 import { createDataClient as createClient } from "../../data/documentClient.js";
 import {
   COMMERCE_PARITY_EXCLUDED_DOCUMENT_KEYS,
@@ -132,7 +131,6 @@ export default async function handler(req, res) {
       return;
     }
 
-    // Basic presence validation
     const trimmedDiscordUsername = String(
       discordUsername || contactDiscord || name || ""
     ).trim();
@@ -202,7 +200,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // Check email uniqueness (login email)
     const existingByEmail = await client.fetch(
       `*[_type == "referral" && lower(creatorEmail) == $email][0]{
         _id,_rev,name,creatorEmail,slug,registrationStatus,
@@ -314,7 +311,6 @@ export default async function handler(req, res) {
         .json({ ok: false, error: "Referral code already taken" });
     }
 
-    // Check slug uniqueness
     const existingBySlug = await client.fetch(
       `*[_type == "referral" && lower(slug.current) == $slug][0]{
         _id,_rev,creatorEmail,slug,registrationStatus,registrationVerificationExpiresAt
@@ -381,7 +377,6 @@ export default async function handler(req, res) {
       await removeExpiredPendingRegistration(registration);
     }
 
-    // Hash password
     const passwordMaterial =
       normalizedPassword || crypto.randomBytes(32).toString("base64url");
     const hash = await bcrypt.hash(passwordMaterial, 12);

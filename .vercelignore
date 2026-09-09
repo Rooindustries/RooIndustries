@@ -42,6 +42,8 @@ yarn-error.log*
 # Local-only tooling: probe scripts and bytecode caches.
 .local-probes/
 __pycache__/
+.pg
+.swc
 
 # Local Supabase CLI state.
 /supabase/.temp/

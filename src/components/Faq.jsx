@@ -7,7 +7,6 @@ import packageContent from "../lib/packageContent";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
 import { alignToHashTarget, getCssHeaderOffsetPx } from "../lib/scrollCoordinator";
 
-// --- HELPERS ---
 
 const slugify = (text = "") =>
   text
@@ -45,8 +44,6 @@ const getQuestionId = (question = "", answer = "") => {
 const isFaqIntentHash = (hash = "") =>
   hash === "faq" || hash === UPGRADE_HASH || hash === TRUST_HASH;
 
-// --- CUSTOM HOOK FOR AUTO-HEIGHT ANIMATION ---
-// This allows us to animate height without installing extra libraries like react-use-measure
 function useElementSize() {
   const ref = useRef(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -70,7 +67,6 @@ function useElementSize() {
   return [ref, size];
 }
 
-// --- ANIMATION VARIANTS ---
 const variants = {
   enter: (direction) => ({
     x: direction > 0 ? 30 : -30,
@@ -159,10 +155,8 @@ export default function FaqSection({
     };
   }, [location.hash]);
   
-  // Pagination State
   const [[page, direction], setPage] = useState([0, 0]);
 
-  // Height Measurement for smooth container resizing
   const [containerRef, { height }] = useElementSize();
 
   const scrollWithOffset = (id, behavior = "smooth") => {
@@ -294,17 +288,11 @@ export default function FaqSection({
             </div>
           )}
 
-          {/* HEIGHT ANIMATION WRAPPER
-            This motion.div reads the height from the hook and animates to it.
-          */}
           <motion.div
             animate={{ height: height || "auto" }}
             transition={{ type: "spring", stiffness: 180, damping: 20 }}
             className="relative overflow-hidden"
           >
-            {/* MEASUREMENT DIV
-              The ref attaches here. ResizeObserver watches this div.
-            */}
             <div ref={containerRef}>
               <AnimatePresence initial={false} mode="wait" custom={direction}>
                 <motion.div
@@ -382,7 +370,6 @@ export default function FaqSection({
             </div>
           </motion.div>
 
-          {/* Pagination Controls */}
           {totalPages > 1 && (
             <div className="pt-6 flex items-center justify-center gap-2 sm:gap-3 text-sm text-ink-secondary">
               <button
