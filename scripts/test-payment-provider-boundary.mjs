@@ -16,58 +16,68 @@ delete process.env.ALLOW_LIVE_PAYMENTS_IN_DEVELOPMENT;
 
 const upstreamFetch = globalThis.fetch;
 const requests = [];
+const fixtureFailures = [];
 let rejectToken = false;
 let rejectOrder = false;
 let captureStatus = "COMPLETED";
 let tokenNumber = 0;
 const delayMs = 10;
 const server = http.createServer(async (req, res) => {
-  let text = "";
-  for await (const chunk of req) text += chunk;
-  requests.push({ method: req.method, path: req.url });
-  await new Promise((resolve) => setTimeout(resolve, delayMs));
-  let status = 200;
-  let body;
-  if (req.url === "/v1/oauth2/token") {
-    assert.equal(req.headers.authorization, `Basic ${Buffer.from("isolated-provider-client:isolated-provider-secret").toString("base64")}`);
-    assert.equal(text, "grant_type=client_credentials");
-    status = rejectToken ? 401 : 200;
-    body = rejectToken ? { error: "invalid_client" } : {
-      access_token: `isolated-token-${++tokenNumber}`, token_type: "Bearer", expires_in: 3600,
-    };
-  } else {
-    assert.match(req.headers.authorization || "", /^Bearer isolated-token-\d+$/);
-    if (req.url === "/v2/checkout/orders" && req.method === "POST") {
-      const order = JSON.parse(text);
-      assert.equal(order.intent, "CAPTURE");
-      assert.equal(order.purchase_units[0].amount.value, "79.95");
-      assert.equal(req.headers["paypal-request-id"], "isolated-order-command");
-      body = { id: "isolated-order", status: "CREATED" };
-    } else if (req.url === "/v2/checkout/orders/isolated-order") {
-      status = rejectOrder ? 401 : 200;
-      body = rejectOrder ? { error: "invalid_token" } : {
-        id: "isolated-order", status: "COMPLETED",
-        payer: { email_address: "customer@example.invalid", payer_id: "isolated-payer" },
-        purchase_units: [{ payments: { captures: [{ id: "isolated-capture", status: captureStatus, amount: { value: "79.95", currency_code: "USD" } }] } }],
+  try {
+    let text = "";
+    for await (const chunk of req) text += chunk;
+    requests.push({ method: req.method, path: req.url });
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    let status = 200;
+    let body;
+    if (req.url === "/v1/oauth2/token") {
+      assert.equal(req.headers.authorization, `Basic ${Buffer.from("isolated-provider-client:isolated-provider-secret").toString("base64")}`);
+      assert.equal(text, "grant_type=client_credentials");
+      status = rejectToken ? 401 : 200;
+      body = rejectToken ? { error: "invalid_client" } : {
+        access_token: `isolated-token-${++tokenNumber}`, token_type: "Bearer", expires_in: 3600,
       };
-    } else if (req.url === "/v1/notifications/verify-webhook-signature") {
-      const event = JSON.parse(text);
-      assert.equal(event.webhook_id, "isolated-provider-webhook");
-      assert.equal(event.webhook_event.id, "isolated-event");
-      body = { verification_status: "SUCCESS" };
     } else {
-      status = 404;
-      body = { error: "unexpected_fixture_request" };
+      assert.match(req.headers.authorization || "", /^Bearer isolated-token-\d+$/);
+      if (req.url === "/v2/checkout/orders" && req.method === "POST") {
+        const order = JSON.parse(text);
+        assert.equal(order.intent, "CAPTURE");
+        assert.equal(order.purchase_units[0].amount.value, "79.95");
+        assert.equal(req.headers["paypal-request-id"], "isolated-order-command");
+        body = { id: "isolated-order", status: "CREATED" };
+      } else if (req.url === "/v2/checkout/orders/isolated-order") {
+        status = rejectOrder ? 401 : 200;
+        body = rejectOrder ? { error: "invalid_token" } : {
+          id: "isolated-order", status: "COMPLETED",
+          payer: { email_address: "customer@example.invalid", payer_id: "isolated-payer" },
+          purchase_units: [{ payments: { captures: [{ id: "isolated-capture", status: captureStatus, amount: { value: "79.95", currency_code: "USD" } }] } }],
+        };
+      } else if (req.url === "/v1/notifications/verify-webhook-signature") {
+        const event = JSON.parse(text);
+        assert.equal(event.webhook_id, "isolated-provider-webhook");
+        assert.equal(event.webhook_event.id, "isolated-event");
+        body = { verification_status: "SUCCESS" };
+      } else {
+        status = 404;
+        body = { error: "unexpected_fixture_request" };
+      }
+    }
+    res.writeHead(status, { "content-type": "application/json" });
+    res.end(JSON.stringify(body));
+  } catch (error) {
+    fixtureFailures.push(error);
+    if (!res.destroyed) {
+      if (!res.headersSent) res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: String(error?.message || error) }));
     }
   }
-  res.writeHead(status, { "content-type": "application/json" });
-  res.end(JSON.stringify(body));
 });
-// Operator requirement: this synthetic HTTP fixture must be reachable from
-// the Mac over Tailscale. It contains no real provider credentials or payments.
-server.listen(0, "100.127.48.111");
+const fixtureHost = process.env.ROO_TEST_FIXTURE_HOST || "127.0.0.1";
+server.listen(0, fixtureHost);
 await once(server, "listening");
-const localOrigin = `http://100.127.48.111:${server.address().port}`;
+const address = server.address();
+const localHost = address.family === "IPv6" ? `[${address.address}]` : address.address;
+const localOrigin = `http://${localHost}:${address.port}`;
 let rejectedExternalRequests = 0;
 globalThis.fetch = (input, init) => {
   const url = new URL(String(input));
@@ -79,6 +89,11 @@ globalThis.fetch = (input, init) => {
 };
 
 try {
+  const invalidRequest = await upstreamFetch(`${localOrigin}/v1/oauth2/token`, { method: "POST" });
+  assert.equal(invalidRequest.status, 500, "fixture assertion failures return an HTTP response");
+  assert.equal(typeof (await invalidRequest.json()).error, "string");
+  assert.equal(fixtureFailures.length, 1, "fixture assertion failures are recorded");
+  assert.equal(fixtureFailures.pop().code, "ERR_ASSERTION");
   const providers = await import("../src/server/api/payment/providerClients.js");
   const results = [];
   const check = async (name, exercise, expectedOAuth, expectedOrders) => {
@@ -137,7 +152,6 @@ try {
       },
     }), { ok: true });
   }, 1, 0);
-  assert.equal(rejectedExternalRequests, 0);
   console.log(JSON.stringify({
     ok: true, integration: "real provider-client fetches to isolated HTTP contract fixture", fixtureDelayPerRequestMs: delayMs,
     providerContacted: false, productionCodeChanged: false, results,
@@ -146,4 +160,6 @@ try {
 } finally {
   globalThis.fetch = upstreamFetch;
   await new Promise((resolve) => server.close(resolve));
+  assert.equal(fixtureFailures.length, 0, fixtureFailures.map((error) => String(error?.message || error)).join("\n"));
+  assert.equal(rejectedExternalRequests, 0);
 }

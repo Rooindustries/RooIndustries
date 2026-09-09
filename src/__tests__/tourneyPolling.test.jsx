@@ -102,3 +102,39 @@ test("disabled overlays never poll and unmounted overlays ignore pending respons
   await act(async () => { pending.resolve(respond({ ok: true, version: "v2" })); });
   expect(onUpdate).not.toHaveBeenCalled();
 });
+
+describe.each([
+  ["bracket", () => useBracketSnapshotPoll(snapshot("v1"), 1000)],
+  ["overlay", () => useOverlayPoll({ url: "/feed", intervalMs: 1000, version: "v1", onUpdate: jest.fn() })],
+])("%s polling cancellation", (_name, usePoll) => {
+  test.each(["fetch", "body"])("aborts a stalled %s and resumes polling", async (phase) => {
+    let requestSignal;
+    global.fetch.mockImplementationOnce((_url, { signal }) => {
+      requestSignal = signal;
+      const stalled = new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          reject(new DOMException("The request was aborted", "AbortError"));
+        }, { once: true });
+      });
+      return phase === "fetch" ? stalled : Promise.resolve({ ok: true, json: () => stalled });
+    }).mockResolvedValue(respond({ ...snapshot("v2"), version: "v2" }));
+    renderHook(usePoll);
+    await tick();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    await tick(10000);
+    expect(requestSignal.aborted).toBe(true);
+    await tick();
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  test("unmount aborts the pending request and clears scheduled work", async () => {
+    global.fetch.mockReturnValue(new Promise(() => {}));
+    const { unmount } = renderHook(usePoll);
+    await tick();
+    const signal = global.fetch.mock.calls[0][1].signal;
+    unmount();
+    expect(signal.aborted).toBe(true);
+    jest.runAllTicks();
+    expect(jest.getTimerCount()).toBe(0);
+  });
+});

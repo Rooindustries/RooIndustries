@@ -59,6 +59,7 @@ describe("LiveBracketBoard", () => {
 
     expect(global.fetch).toHaveBeenCalledWith("/api/tourney/bracket", {
       cache: "no-store",
+      signal: expect.any(AbortSignal),
     });
     expect(screen.getByTestId("bracket-view")).toHaveTextContent("match-after");
     expect(screen.getByLabelText("Caster legend")).toHaveTextContent(
