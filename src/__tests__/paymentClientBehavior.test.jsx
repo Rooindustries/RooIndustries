@@ -167,6 +167,36 @@ describe("payment client request and accessibility behavior", () => {
     expect(global.fetch).toHaveBeenCalledWith("/api/payment/finalize", expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer dodo-return-token" }) }));
   });
 
+  test("expires the refreshed hold after a canceled Dodo return", async () => {
+    jest.useFakeTimers();
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
+    sessionStorage.setItem("payment_session_state", JSON.stringify({
+      provider: "dodo", paymentAccessToken: "dodo-cancel-token",
+      providerPayload: { orderId: "cks_cancel" },
+      fingerprint: JSON.stringify({ packageTitle: checkout.packageTitle, originalOrderId: "", startTimeUTC: checkout.startTimeUTC, email: checkout.email, referralCode: "", couponCode: "" }),
+    }));
+    global.fetch = jest.fn(async (url) => {
+      if (url === "/api/payment/cancel") return response({
+        ok: true, cancelled: true,
+        refreshedHold: {
+          slotHoldId: checkout.slotHoldId,
+          slotHoldToken: "refreshed-token",
+          slotHoldExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+        },
+      });
+      return standardFetch(url);
+    });
+    render(<MemoryRouter initialEntries={[{ pathname: "/payment", search: "?dodo_cancel=1" }]}>
+      <Routes>
+        <Route path="/payment" element={<Payment hideFooter />} />
+        <Route path="/booking" element={<div>Expired checkout</div>} />
+      </Routes>
+    </MemoryRouter>);
+    await screen.findByText("Payment method released. Choose a payment method below.");
+    await act(async () => { jest.advanceTimersByTime(60_001); await flushMicrotasks(); });
+    expect(screen.getByText("Expired checkout")).toBeInTheDocument();
+  });
+
   test("aborts a stalled quote and exposes an assertive retry message", async () => {
     jest.useFakeTimers();
     let quoteSignal;

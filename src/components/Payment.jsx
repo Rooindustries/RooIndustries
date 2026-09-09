@@ -968,6 +968,15 @@ export default function Payment({ hideFooter = false }) {
         window.dispatchEvent(new CustomEvent("hold-state", { detail: holdState }));
       }
       clearPaymentSession();
+      if (activeSession.provider === "dodo") {
+        dodoReturnHandled.current = "";
+        const query = new URLSearchParams(location.search);
+        query.delete("dodo_return");
+        query.delete("dodo_cancel");
+        navigate({ pathname: location.pathname, search: query.toString(), hash: location.hash }, {
+          replace: true, state: location.state,
+        });
+      }
       showBanner("success", "Payment method released. Choose a payment method below.");
     } catch (error) {
       showBanner("error", error.message || "The payment method could not be changed.");
