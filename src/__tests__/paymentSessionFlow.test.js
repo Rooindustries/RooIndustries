@@ -41,6 +41,7 @@ const mockVerifyRazorpayPayment = jest.fn();
 const mockVerifyRazorpaySignature = jest.fn();
 const mockVerifyRazorpayWebhookSignature = jest.fn();
 const mockDispatchRescheduleNotifications = jest.fn();
+const mockSendBookingEmails = jest.fn();
 const mockFlushCommerceMirror = jest.fn(async () => {
   throw new Error("Sanity mirror unavailable");
 });
@@ -101,6 +102,7 @@ jest.mock("../server/api/payment/providerClients", () => ({
 
 jest.mock("../server/api/ref/bookingEmails", () => ({
   __esModule: true,
+  sendBookingEmailsForBooking: (...args) => mockSendBookingEmails(...args),
   dispatchRescheduleNotifications: (...args) =>
     mockDispatchRescheduleNotifications(...args),
 }));
@@ -4417,6 +4419,30 @@ describe('Dodo checkout lifecycle',()=>{
       : { status, resourceReleasePending: false });
     if (status === 'refunded') expect(applyBookingRefund).toHaveBeenCalledTimes(1);
   });
+  test.each([['email_partial', true], ['booked', true], ['email_partial', false]])(
+    'disabled Dodo retries %s booking email locally with completion %s', async (status, allSent) => {
+      await startDodo(); await notify();
+      const record = getOnlyPaymentRecord();
+      const emailDispatch = { deliveryEnabled: true, client: { sent: true }, owner: { sent: allSent }, allSent };
+      Object.assign(record, { status, emailDispatchRequired: true, nextRecoveryAt: '',
+        emailDispatch: { ...emailDispatch, owner: { sent: false }, allSent: false } });
+      const pendingRecord = { ...record };
+      mockResolvePaymentProviders.mockReturnValue({ ...mockResolvePaymentProviders(), dodo: { enabled: false, mode: 'missing' } });
+      mockSendBookingEmails.mockResolvedValue({ httpStatus: allSent ? 200 : 503, body: { ok: allSent, emailDispatch } });
+      mockClient.fetch.mockClear(); mockInspectDodoCheckout.mockClear(); mockVerifyDodoCapture.mockClear(); mockCreateBooking.mockClear();
+      await reconcilePaymentSessions({ req: createReq({}, { authorization: 'Bearer cron-secret' }), client: mockClient });
+      const [query, params] = mockClient.fetch.mock.calls.find(([query]) => query.includes('lower(status) in $statuses'));
+      const { parse, evaluate } = require('groq-js');
+      expect(await (await evaluate(parse(query), { dataset: [pendingRecord], params })).get()).toHaveLength(1);
+      expect(mockSendBookingEmails).toHaveBeenCalledWith({ bookingId: record.bookingId, client: mockClient });
+      expect(mockInspectDodoCheckout).not.toHaveBeenCalled();
+      expect(mockVerifyDodoCapture).not.toHaveBeenCalled();
+      expect(mockCreateBooking).not.toHaveBeenCalled();
+      expect(store.bookings).toHaveLength(1);
+      expect(getOnlyPaymentRecord()).toMatchObject({ status: allSent ? 'booked' : 'email_partial', emailDispatchRequired: !allSent, emailDispatch });
+      expect(!!getOnlyPaymentRecord().nextRecoveryAt).toBe(!allSent);
+    }
+  );
   test.each([
     ['unavailable', 'dodo_payment_binding_mismatch'],
     ['disabled', 'dodo_environment_disabled'],

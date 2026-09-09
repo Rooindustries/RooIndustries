@@ -3973,6 +3973,7 @@ export const reconcilePaymentSessions = async ({
         || (lower(status) == $refundedStatus && refundRequiresBookingSync == true)
         || resourceReleasePending == true
         || (lower(status) == $emailPartialStatus && requiresReschedule == true)
+        || (lower(status) in [$emailPartialStatus, $bookedStatus] && emailDispatchRequired == true)
       )
       && (
         (
@@ -4038,7 +4039,8 @@ export const reconcilePaymentSessions = async ({
     const localRecovery =
       (localStatus === PAYMENT_STATUS_REFUNDED && record.refundRequiresBookingSync === true) ||
       record.resourceReleasePending === true ||
-      (localStatus === PAYMENT_STATUS_EMAIL_PARTIAL && record.requiresReschedule === true);
+      (localStatus === PAYMENT_STATUS_EMAIL_PARTIAL && record.requiresReschedule === true) ||
+      shouldRetryEmailPartialDispatch({ record, source: "reconcile" });
     if (record.provider === "dodo" && !localRecovery && (!dodoEnabled || record.providerRecoveryTerminal === true)) continue;
     summary.scanned += 1;
     let dodoInspection = null;
@@ -4230,6 +4232,25 @@ export const reconcilePaymentSessions = async ({
       } else {
         summary.recovery += 1;
       }
+      continue;
+    }
+
+    if (record.provider === "dodo" && shouldRetryEmailDispatch) {
+      const { sendBookingEmailsForBooking } = await import("../ref/bookingEmails.js");
+      const emailed = await sendBookingEmailsForBooking({ bookingId: record.bookingId, client });
+      const complete = isEmailDispatchComplete(emailed.body?.emailDispatch);
+      const recoveryAttemptCount = complete ? 0 : Number(record.recoveryAttemptCount || 0) + 1;
+      await patchPaymentRecord({ client, record, revisionGuard: true, set: {
+        status: complete ? PAYMENT_STATUS_BOOKED : PAYMENT_STATUS_EMAIL_PARTIAL,
+        emailDispatchRequired: !complete,
+        emailDispatchToken: complete ? "" : record.emailDispatchToken || "",
+        ...(emailed.body?.emailDispatch ? { emailDispatch: emailed.body.emailDispatch } : {}),
+        recoveryAttemptCount,
+        recoveryReason: complete ? "" : "booking_email_retry_pending",
+        nextRecoveryAt: complete ? "" : getNextPaymentRecoveryAt(recoveryAttemptCount),
+      } });
+      if (complete) summary.finalized += 1;
+      else summary.recovery += 1;
       continue;
     }
 
