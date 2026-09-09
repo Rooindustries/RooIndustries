@@ -19,5 +19,11 @@ begin
     E'when ''razorpay'' then ''razorpay''\n      when ''dodo'' then ''dodo''');
   if patched = definition then raise exception 'Dodo migration: expected provider mapping was not found'; end if;
   execute patched;
+  definition := pg_get_functiondef('public.roo_referral_earnings_summary(text,text)'::regprocedure);
+  patched := replace(definition,
+    'and (booking.booking_payload->>''commissionAmount'')::numeric <> 0',
+    'and ((booking.booking_payload->>''commissionAmount'')::numeric <> 0 or booking.booking_payload ? ''dodoOriginalCommissionAmount'')');
+  if patched = definition then raise exception 'Dodo migration: expected commission calculation was not found'; end if;
+  execute patched;
 end;
 $migration$;

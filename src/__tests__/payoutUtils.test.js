@@ -53,6 +53,20 @@ describe("referral payout utilities", () => {
     expect(earnings.total).toBe(15);
   });
 
+  test("keeps a refunded Dodo commission at zero", () => {
+    const earnings = computeEarningsFromBookings([{
+      packageTitle: "Performance Vertex Overhaul",
+      commissionAmount: 0,
+      dodoOriginalCommissionAmount: 10,
+      commissionPercent: 10,
+      netAmount: 100,
+      refundedAmount: 99.99,
+      refundStatus: "partial",
+    }]);
+
+    expect(earnings.total).toBe(0);
+  });
+
   test("uses the typed aggregate instead of downloading referral bookings", async () => {
     const client = {
       fetch: jest.fn(),

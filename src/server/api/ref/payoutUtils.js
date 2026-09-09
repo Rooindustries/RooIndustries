@@ -45,8 +45,9 @@ export function computeEarningsFromBookings(bookings = []) {
       normalizeNumber(booking?.grossAmount);
 
     const earned =
-      commissionAmount ||
-      +(base * ((commissionPercent || 0) / 100 || 0)).toFixed(2);
+      commissionAmount || booking?.dodoOriginalCommissionAmount != null
+        ? commissionAmount
+        : +(base * ((commissionPercent || 0) / 100 || 0)).toFixed(2);
 
     if (packageTitle) {
       byPackage[packageTitle] =
@@ -93,6 +94,7 @@ export async function fetchReferralEarnings({ client, referralId, referralCode }
       ]{
         packageTitle,
         commissionAmount,
+        dodoOriginalCommissionAmount,
         commissionPercent,
         netAmount,
         grossAmount
