@@ -756,10 +756,10 @@ if (anySupabaseRuntimeEnabled) {
       parsed.pathname === "/" &&
       !parsed.search &&
       !parsed.hash &&
-      [
+      ((isPreviewBuild && /^[a-z]{20}\.supabase\.co$/.test(parsed.hostname)) || [
         "ntezmxzaibrrsgtujgxu.supabase.co",
         "authenticate.rooindustries.com",
-      ].includes(parsed.hostname.toLowerCase());
+      ].includes(parsed.hostname.toLowerCase()));
   } catch {
     validSupabaseUrl = false;
   }

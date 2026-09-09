@@ -780,6 +780,18 @@ describe("release runtime environment validation", () => {
     expect(result.output).not.toContain("ep-example.neon.tech");
   });
 
+  test.each([["preview", 0], ["production", 1]])(
+    "%s enforces the correct Supabase project boundary",
+    (runtime, status) => {
+      const result = validate({
+        VERCEL_ENV: runtime,
+        SUPABASE_URL: "https://abcdefghijklmnopqrst.supabase.co",
+      });
+      expect(result.status).toBe(status);
+      if (status) expect(result.output).toContain("require the Roo Industries Supabase");
+    }
+  );
+
   test("accepts configured Supabase primary with the mirror retired", () => {
     const result = validate({
       ...supabaseTourneyEnv,
