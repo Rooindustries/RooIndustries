@@ -2210,7 +2210,11 @@ const finalizePaymentRecordInternal = async ({
       workingRecord.historicalBookingReconstruction === true,
   });
 
-  if (result.status >= 200 && result.status < 300 && result.body?.bookingId) {
+  if (result.body?.bookingId && (
+    (result.status >= 200 && result.status < 300) ||
+    (workingRecord.provider === "dodo" && result.status === 503 &&
+      result.body.emailDispatch?.allSent === false)
+  )) {
     const nextStatus = getLegacySuccessStatus(result.body?.emailDispatch);
     const bookingId = String(result.body.bookingId || "").trim();
     const bookingDoc = await client.fetch(

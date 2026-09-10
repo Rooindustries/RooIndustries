@@ -938,6 +938,21 @@ export default async function handler(req, res) {
       }
     }
 
+    if (paymentProvider === "dodo" && dodoPaymentId) {
+      const existingByDodo = await writeClient.fetch(
+        `*[_type == "booking" && paymentProvider == "dodo"
+          && dodoPaymentId == $dodoPaymentId
+          && dodoCheckoutSessionId == $dodoCheckoutSessionId][0]{_id}`,
+        { dodoPaymentId, dodoCheckoutSessionId }
+      );
+      if (existingByDodo?._id) {
+        return respondWithStoredBooking({
+          bookingId: existingByDodo._id,
+          idempotent: true,
+        });
+      }
+    }
+
     const utcDate = parseUtcDate(resolvedStartTimeUTC);
     if (!utcDate) {
       return res.status(400).json({

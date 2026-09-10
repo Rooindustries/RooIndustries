@@ -4360,6 +4360,39 @@ describe('Dodo checkout lifecycle',()=>{
     expect(store.bookings).toHaveLength(1);expect(store.paymentProofClaims).toHaveLength(1);
     expect(mockCreateBooking).toHaveBeenCalledTimes(1);
   });
+  test('Dodo preserves a committed booking when email delivery returns 503', async () => {
+    await startDodo();
+    const original = JSON.parse(JSON.stringify(getOnlyPaymentRecord()));
+    mockCreateBooking.mockImplementationOnce(async (req, res) => {
+      store.bookings.push({
+        ...req.body,
+        _id: 'booking_dodo_email',
+        _type: 'booking',
+        paymentVerificationState: 'server_verified',
+      });
+      return res.status(503).json({
+        bookingId: 'booking_dodo_email',
+        emailDispatch: { allSent: false, clientSent: false, ownerSent: false },
+      });
+    });
+
+    const result = await notify();
+
+    expect(result.httpStatus).toBe(200);
+    expect(result.body.status).toBe('email_partial');
+    expect(getOnlyPaymentRecord()).toMatchObject({
+      status: 'email_partial',
+      bookingId: 'booking_dodo_email',
+      emailDispatchRequired: true,
+      providerOrderId: original.providerOrderId,
+      providerPaymentId: latest.payment_id,
+      providerPublicData: original.providerPublicData,
+      pricingSnapshot: original.pricingSnapshot,
+      pricingFingerprint: original.pricingFingerprint,
+    });
+    expect(store.bookings).toHaveLength(1);
+    expect(mockCreateBooking).toHaveBeenCalledTimes(1);
+  });
   test('wrong amount/currency cannot create a booking; the same delivery can be retried after repair',async()=>{
     await startDodo();const amount=latest.total_amount;latest.total_amount-=1;
     expect((await notify()).httpStatus).toBe(409);expect(store.bookings).toHaveLength(0);

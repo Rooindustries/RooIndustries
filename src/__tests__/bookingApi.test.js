@@ -345,6 +345,13 @@ const mockSanityClient = {
         ) || null
       );
     }
+    if (q.includes('_type == "booking"') && q.includes("dodoPaymentId")) {
+      return store.bookings.find((booking) =>
+        booking.paymentProvider === "dodo" &&
+        booking.dodoPaymentId === params.dodoPaymentId &&
+        booking.dodoCheckoutSessionId === params.dodoCheckoutSessionId
+      ) || null;
+    }
     if (q.includes('_type == "slotHold"') && q.includes("_id == $id")) {
       return store.slotHolds.find((h) => h._id === params.id) || null;
     }
@@ -1713,6 +1720,51 @@ describe("booking reservation API", () => {
     expect(duplicate.res.statusCode).toBe(200);
     expect(duplicate.res.body.idempotent).toBe(true);
     expect(store.bookings).toHaveLength(1);
+    expect(mockSendEmail).toHaveBeenCalledTimes(2);
+  });
+
+  test.each([true, false])("Dodo reuses its existing booking when emails succeed: %s", async (emailsSucceed) => {
+    const booking = {
+      _id: "booking_dodo_existing",
+      _type: "booking",
+      status: "captured",
+      paymentProvider: "dodo",
+      dodoPaymentId: "pay_dodo_existing",
+      dodoCheckoutSessionId: "cks_dodo_existing",
+      paymentRecordId: "paymentRecord.dodo_existing",
+      email: CLIENT_EMAIL,
+      packageTitle: "Performance Vertex Overhaul",
+      packagePrice: "$84.99",
+      startTimeUTC: "2025-01-15T08:00:00.000Z",
+      localTimeZone: OWNER_TZ,
+      displayDate: "Wednesday, January 15, 2025",
+      displayTime: "1:30 PM",
+    };
+    store.bookings.push(booking);
+    store.paymentRecords.push({
+      _id: booking.paymentRecordId,
+      _type: "paymentRecord",
+      provider: "dodo",
+      status: "finalizing",
+      verificationState: "server_verified",
+      providerOrderId: booking.dodoCheckoutSessionId,
+      providerPaymentId: booking.dodoPaymentId,
+    });
+    mockSendEmail.mockResolvedValue({ error: emailsSucceed ? null : { message: "Unavailable" } });
+    const req = createReq(booking);
+    req.internalContext = { paymentFinalizeSource: "reconcile" };
+    const res = createRes();
+
+    await createBooking(req, res);
+
+    expect(res.statusCode).toBe(emailsSucceed ? 200 : 503);
+    expect(res.body).toMatchObject({
+      bookingId: booking._id,
+      idempotent: true,
+      emailDispatch: { allSent: emailsSucceed },
+    });
+    expect(store.bookings).toHaveLength(1);
+    expect(store.slotHolds).toHaveLength(0);
     expect(mockSendEmail).toHaveBeenCalledTimes(2);
   });
 
