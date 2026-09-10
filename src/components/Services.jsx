@@ -135,7 +135,7 @@ export default function Services({
       className="ri-services-section mx-auto max-w-[92rem] px-4 pt-6 pb-8 sm:px-6 sm:pb-10"
       aria-labelledby="services-heading"
     >
-      <div className="ri-performance-overview grid w-full gap-6 lg:grid-cols-[300px_minmax(0,1fr)] lg:items-stretch">
+      <div className="ri-performance-overview grid w-full gap-6 lg:grid-cols-[336px_minmax(0,1fr)] lg:items-stretch">
         <About initialData={initialAboutData} compact />
         <div className="ri-services-benefit-column flex min-w-0 flex-col">
           <div className="text-center">
