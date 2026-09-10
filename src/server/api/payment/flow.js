@@ -3979,7 +3979,7 @@ export const reconcilePaymentSessions = async ({
     `*[_type == $type
       && (
         provider != "dodo" || ($dodoEnabled && coalesce(providerRecoveryTerminal, false) == false)
-        || (lower(status) == $refundedStatus && refundRequiresBookingSync == true)
+        || refundRequiresBookingSync == true
         || resourceReleasePending == true
         || (lower(status) == $emailPartialStatus && requiresReschedule == true)
         || (lower(status) in [$emailPartialStatus, $bookedStatus] && emailDispatchRequired == true)
@@ -3996,7 +3996,7 @@ export const reconcilePaymentSessions = async ({
       )
       && (
         lower(status) in $statuses
-        || (lower(status) == $refundedStatus && refundRequiresBookingSync == true)
+        || refundRequiresBookingSync == true
         || (lower(status) == $bookedStatus && emailDispatchRequired == true)
         || (lower(status) == $abandonedStatus && resourceReleasePending == true)
         || (
@@ -4046,7 +4046,7 @@ export const reconcilePaymentSessions = async ({
   for (const record of Array.isArray(records) ? records : []) {
     const localStatus = String(record.status || "").trim().toLowerCase();
     const localRecovery =
-      (localStatus === PAYMENT_STATUS_REFUNDED && record.refundRequiresBookingSync === true) ||
+      record.refundRequiresBookingSync === true ||
       record.resourceReleasePending === true ||
       (localStatus === PAYMENT_STATUS_EMAIL_PARTIAL && record.requiresReschedule === true) ||
       shouldRetryEmailPartialDispatch({ record, source: "reconcile" });
@@ -4083,15 +4083,17 @@ export const reconcilePaymentSessions = async ({
     const createdAgeMinutes = getPaymentCreatedAgeMinutes(record);
     const status = String(record.status || "").trim().toLowerCase();
 
-    if (status === PAYMENT_STATUS_REFUNDED && record.refundRequiresBookingSync) {
+    const partialRefund = record.provider === "dodo" && record.refundState === "partial";
+    if (record.refundRequiresBookingSync && (status === PAYMENT_STATUS_REFUNDED || partialRefund)) {
       const refundHandler = applyBookingRefund || (await loadBookingRefundHandler());
-      const sideEffects = await applyFullRefundEffects({
+      const sideEffects = await applyRefundEffects({
         client,
         record,
         refund: {
-          full: true,
-          type: record.refundState === "reversal" ? "reversal" : "full",
+          full: !partialRefund,
+          type: partialRefund ? "partial" : record.refundState === "reversal" ? "reversal" : "full",
           state: record.refundState || "full",
+          ...(partialRefund ? { totalRefundedAmount: Number(record.refundProcessedAmountInSubunits || 0) / 100 } : {}),
           processedAmountInSubunits: Number(
             record.refundProcessedAmountInSubunits || 0
           ),
@@ -4099,16 +4101,23 @@ export const reconcilePaymentSessions = async ({
         applyBookingRefund: refundHandler,
       });
       if (sideEffects.ok) {
-        await patchPaymentRecord({
-          client,
-          record,
-          set: {
-            refundRequiresBookingSync: false,
-            recoveryReason: "",
-            nextRecoveryAt: "",
-            refundBookingSync: normalizeObject(sideEffects.sync),
-          },
-        });
+        try {
+          await patchPaymentRecord({
+            client,
+            record,
+            revisionGuard: partialRefund,
+            set: {
+              refundRequiresBookingSync: false,
+              recoveryReason: "",
+              nextRecoveryAt: "",
+              refundBookingSync: normalizeObject(sideEffects.sync),
+            },
+          });
+        } catch (error) {
+          if (!partialRefund || !isConflictError(error)) throw error;
+          summary.recovery += 1;
+          continue;
+        }
         summary.refundsSynced += 1;
       } else {
         const recoveryAttemptCount = Number(record.recoveryAttemptCount || 0) + 1;
@@ -4708,7 +4717,7 @@ const buildRefundMutation = ({
         ? wasFullRefund
           ? record.refundRequiresBookingSync === true
           : true
-        : false,
+        : provider === "dodo" && refundState === "partial" && !!record.bookingId,
       ...(isFullRefund
         ? {
             status: PAYMENT_STATUS_REFUNDED,
@@ -4719,7 +4728,7 @@ const buildRefundMutation = ({
   };
 };
 
-const applyFullRefundEffects = async ({
+const applyRefundEffects = async ({
   client,
   record,
   refund,
@@ -4740,6 +4749,7 @@ const applyFullRefundEffects = async ({
         : { ok: false, reason: "booking_refund_sync_incomplete", sync };
     }
 
+    if (refund.full === false) return { ok: false, reason: "booking_refund_sync_incomplete" };
     const release = await releasePaymentResources({
       client,
       record,
@@ -4983,10 +4993,12 @@ const processPaymentRefund = async ({
     await applyBookingRefund({ client, paymentRecord: nextRecord, refund: {
       type: "partial", full: false, totalRefundedAmount: processedAmount / 100,
     } });
+    nextRecord = await patchPaymentRecord({ client, record: nextRecord, revisionGuard: true,
+      set: { refundRequiresBookingSync: false } });
   }
 
   if (isFullRefund && nextRecord.refundRequiresBookingSync === true) {
-    const sideEffects = await applyFullRefundEffects({
+    const sideEffects = await applyRefundEffects({
       client,
       record: nextRecord,
       refund: {

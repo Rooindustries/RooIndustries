@@ -4721,6 +4721,76 @@ describe('Dodo checkout lifecycle',()=>{
     expect(store.bookings).toHaveLength(1);
     expect(getOnlyPaymentRecord().providerPublicData.totalAmount).toBe(latest.total_amount);
   });
+  test.each([false, true])('cron repairs a failed partial refund booking update while Dodo is disabled and dispute active is %s', async disputeActive => {
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+    const originalFetch = mockClient.fetch.getMockImplementation();
+    try {
+      const { parse, evaluate } = jest.requireActual('groq-js');
+      mockClient.fetch.mockImplementation(async (query, params = {}) => {
+        if (query.includes('lower(status) in $statuses')) {
+          return (await evaluate(parse(query), {
+            dataset: store.paymentRecords,
+            params,
+          })).get();
+        }
+        return originalFetch(query, params);
+      });
+      await startDodo();
+      latest.tax = 1700;
+      latest.total_amount += latest.tax;
+      await notify();
+      const booking = store.bookings[0];
+      Object.assign(booking, {
+        _rev: nextRevision(), status: disputeActive ? 'pending' : 'captured', netAmount: 84.99,
+        dodoTotalAmount: 101.99, commissionAmount: disputeActive ? 0 : 8.5,
+        dodoOriginalCommissionAmount: 8.5, dodoDisputeActive: disputeActive,
+      });
+      if (disputeActive) Object.assign(getOnlyPaymentRecord(), {
+        status: 'needs_recovery', dodoDisputeActive: true,
+      });
+      const actualRefund = jest.requireActual('../server/api/ref/bookingRefunds').applyBookingRefund;
+      const applyBookingRefund = jest.fn(actualRefund)
+        .mockRejectedValueOnce(new Error('Booking storage temporarily unavailable'));
+      latest.refunds = [{
+        refund_id: 'ref_partial_sync', payment_id: latest.payment_id,
+        status: 'succeeded', amount: 5000, currency: 'USD',
+      }];
+      const webhook = await notify('refund.succeeded', 'evt_partial_sync', applyBookingRefund);
+      expect(webhook.httpStatus).toBe(503);
+      expect(getOnlyPaymentRecord()).toMatchObject({
+        status: disputeActive ? 'needs_recovery' : 'booked', refundState: 'partial', refundProcessedAmountInSubunits: 5000,
+      });
+      expect(booking.refundedAmount).toBeUndefined();
+      mockResolvePaymentProviders.mockReturnValue({
+        ...mockResolvePaymentProviders(), dodo: { enabled: false, mode: 'test' },
+      });
+      mockInspectDodoCheckout.mockClear();
+      mockRetrieveDodoPayment.mockClear();
+      jest.setSystemTime(Date.now() + 24 * 60 * 60 * 1000);
+      for (let pass = 0; pass < 2; pass += 1) {
+        const result = await reconcilePaymentSessions({
+          req: createReq({}, { authorization: 'Bearer cron-secret' }),
+          client: mockClient, applyBookingRefund,
+        });
+        expect(result.httpStatus).toBe(200);
+      }
+      expect(booking).toMatchObject({
+        status: disputeActive ? 'pending' : 'captured', refundStatus: 'partial', refundedAmount: 50,
+        dodoTotalAmount: 101.99, commissionAmount: disputeActive ? 0 : 4.33,
+      });
+      expect(getOnlyPaymentRecord()).toMatchObject({
+        status: disputeActive ? 'needs_recovery' : 'booked', refundState: 'partial', refundRequiresBookingSync: false,
+      });
+      expect(applyBookingRefund).toHaveBeenCalledTimes(2);
+      expect(mockInspectDodoCheckout).not.toHaveBeenCalled();
+      expect(mockRetrieveDodoPayment).not.toHaveBeenCalled();
+      expect(store.bookings).toHaveLength(1);
+      expect(mockCreateBooking).toHaveBeenCalledTimes(1);
+    } finally {
+      mockClient.fetch.mockImplementation(originalFetch);
+      jest.useRealTimers();
+    }
+  });
   test('a resolved dispute restores tax-exclusive commission after a partial refund', async () => {
     await startDodo();
     latest.tax = 1700;
