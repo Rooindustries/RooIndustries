@@ -39,7 +39,7 @@ export default function About({ initialData = null, compact = false }) {
         id="about"
         className={
           compact
-            ? "h-full text-center"
+            ? "mx-auto h-full w-full max-w-sm text-center"
             : "mx-auto max-w-6xl pt-4 sm:pt-6 pb-16 px-4 sm:px-6 text-center"
         }
         aria-hidden="true"
@@ -87,11 +87,12 @@ export default function About({ initialData = null, compact = false }) {
   const specStats = recordDetails.slice(1);
 
   if (compact) {
-    const summaryStats = [heroStat, ...specStats.slice(0, 2)].filter(Boolean);
-    const hardwareStats = specStats.slice(2);
+    const summaryStats = recordDetails.filter(
+      (detail) => !/^(cpu|gpu)$/i.test(String(detail.label || "").trim())
+    );
 
     return (
-      <section id="about" className="h-full text-center">
+      <section id="about" className="mx-auto h-full w-full max-w-sm text-center">
         <motion.div
           className="ri-proof-card relative flex h-full flex-col overflow-hidden rounded-xl p-3"
           style={{
@@ -112,25 +113,14 @@ export default function About({ initialData = null, compact = false }) {
           </h3>
           <p className="mt-0.5 text-[11px] leading-4 text-ink-secondary">{recordSubtitle}</p>
 
-          <dl className="ri-proof-summary mt-2 grid grid-flow-col auto-cols-fr gap-2 border-t border-line-soft pt-1.5">
+          <dl className="ri-proof-summary my-3 grid grid-flow-col auto-cols-fr gap-2 border-y border-line-soft py-2">
             {summaryStats.map((detail, index) => (
               <div key={detail?._key || `${detail.label}-${index}`} className="min-w-0">
                 <dt className="text-[10px] uppercase leading-3 tracking-wider text-ink-muted">{detail.label}</dt>
-                <dd className={`mt-0.5 break-words font-semibold tabular-nums text-ink ${index === 0 ? "text-2xl leading-7" : "text-xs leading-4"}`}>{detail.value}</dd>
+                <dd className={`mt-0.5 break-words font-semibold tabular-nums text-ink ${/^(rank|score)$/i.test(String(detail.label || "").trim()) ? "text-2xl leading-7" : "text-xs leading-4"}`}>{detail.value}</dd>
               </div>
             ))}
           </dl>
-
-          {hardwareStats.length > 0 && (
-            <dl className="ri-proof-hardware mt-1.5 space-y-1 text-left text-xs leading-4">
-              {hardwareStats.map((detail, index) => (
-                <div key={detail?._key || `${detail.label}-${index}`} className="flex items-baseline gap-2">
-                  <dt className="w-8 shrink-0 text-[10px] uppercase tracking-wider text-ink-muted">{detail.label}</dt>
-                  <dd className="min-w-0 break-words font-semibold text-ink">{detail.value}</dd>
-                </div>
-              ))}
-            </dl>
-          )}
 
           <div className="mt-auto flex items-center justify-between gap-2 pt-2">
             <a
