@@ -159,30 +159,31 @@ export default function Services({
               return (
                 <li
                   key={card.iconType}
-                  className="ri-service-card flex items-center gap-2.5 rounded-xl border border-line-input bg-panel p-3 sm:p-2.5"
+                  className="ri-service-card flex items-center gap-2.5 rounded-[10px] border border-transparent p-3 sm:p-2.5 xl:justify-center"
                 >
-                  <span className="ri-service-icon-shell grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-line-input bg-surface-input">
+                  <span className="ri-service-icon-shell grid h-7 w-7 shrink-0 place-items-center">
                     {customIcon ? (
                       <img
-                        src={urlFor(customIcon).width(32).url()}
+                        src={urlFor(customIcon).width(40).url()}
                         alt=""
-                        width={16}
-                        height={16}
+                        width={20}
+                        height={20}
                         loading="lazy"
                         decoding="async"
                       />
                     ) : (
                       <Icon
-                        className="ri-service-icon h-4 w-4 text-accent"
+                        className="ri-service-icon h-5 w-5 text-accent"
                         aria-hidden="true"
                       />
                     )}
                   </span>
-                  <div className="min-w-0 xl:flex xl:flex-1 xl:items-center xl:justify-between xl:gap-3">
+                  <div className="min-w-0 xl:flex xl:items-center xl:gap-2">
                     <h3 className="ri-service-title text-[13px] font-semibold leading-5 text-ink sm:text-sm xl:shrink-0">
                       {card.title}
                     </h3>
-                    <p className="ri-service-copy mt-0.5 hidden text-xs leading-[1.45] text-ink-secondary sm:block xl:mt-0 xl:text-right">
+                    <span aria-hidden="true" className="hidden text-ink-muted xl:inline">·</span>
+                    <p className="ri-service-copy mt-0.5 hidden text-xs leading-[1.45] text-ink-secondary sm:block xl:mt-0 xl:text-left">
                       {card.description}
                     </p>
                   </div>
