@@ -38,6 +38,8 @@ describe("Markdown content negotiation", () => {
       expect(response.headers.get("x-middleware-rewrite")).toBe("https://www.rooindustries.com/markdown?path=%2F");
     } else {
       expect(response.headers.get("x-middleware-next")).toBe("1");
+      expect(response.headers.get("cdn-cache-control")).toBe("no-store");
+      expect(response.headers.get("vercel-cdn-cache-control")).toBe("no-store");
     }
   });
 
@@ -79,6 +81,12 @@ describe("Markdown content negotiation", () => {
     expect(response.headers.get("x-middleware-request-x-roo-missing-format")).toBe("markdown");
     const browser = middleware(request("/missing", "text/html", { headers: { "x-roo-missing-format": "markdown" } }));
     expect(browser.headers.get("x-middleware-request-x-roo-missing-format")).toBeNull();
+  });
+
+  test.each(["/benchmarks", "/reviews", "/packages", "/BIOSGuide", "/robots.txt"])("preserves shared caching on %s", (path) => {
+    const response = middleware(request(path, "text/html"));
+    expect(response.headers.get("cdn-cache-control")).toBeNull();
+    expect(response.headers.get("vercel-cdn-cache-control")).toBeNull();
   });
 });
 

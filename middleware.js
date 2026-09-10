@@ -10,8 +10,6 @@ export function middleware(req) {
 
   if (
     !pathname.startsWith("/api/") &&
-    !ASSET_EXTENSION.test(pathname) &&
-    pathname !== "/favicon.ico" &&
     pathname !== "/tourney/overlay/caster"
   ) {
     const sensitiveKeys = new Set([
@@ -89,8 +87,10 @@ export function middleware(req) {
     headers.set("x-roo-missing-format", "markdown");
   }
   const response = NextResponse.next({ request: { headers } });
-  response.headers.set("Vary", MARKDOWN_VARY);
   if (!ASSET_EXTENSION.test(pathname)) {
+    response.headers.set("Vary", MARKDOWN_VARY);
+  }
+  if (MARKDOWN_PATHS.includes(pathname)) {
     response.headers.set("CDN-Cache-Control", "no-store");
     response.headers.set("Vercel-CDN-Cache-Control", "no-store");
   }
@@ -99,6 +99,6 @@ export function middleware(req) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|otf|webm|mp4|css|js|map)$).*)",
+    "/((?!_next/static|_next/image).*)",
   ],
 };

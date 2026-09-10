@@ -10,6 +10,7 @@ import seo from "../lib/seo";
 import routes from "../lib/routes";
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 
 jest.mock("@formspree/react", () => ({
   useForm: () => [{ succeeded: false, submitting: false, errors: null }, jest.fn()],
@@ -17,6 +18,19 @@ jest.mock("@formspree/react", () => ({
 }));
 
 describe("Public company content", () => {
+  test("requires an explicit target before making endpoint requests", () => {
+    const env = { ...process.env };
+    delete env.BASE_URL;
+    const result = spawnSync(process.execPath, ["--test", "tests/agent-readiness.test.mjs"], {
+      cwd: path.join(__dirname, "../.."),
+      env,
+      encoding: "utf8",
+      timeout: 5000,
+    });
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}${result.stderr}`).toContain("BASE_URL is required");
+  });
+
   test("renders an About page with a heading, substantial content, and working route metadata", () => {
     const html = renderToStaticMarkup(<MemoryRouter><About /></MemoryRouter>);
     const document = new DOMParser().parseFromString(html, "text/html");

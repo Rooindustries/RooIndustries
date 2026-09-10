@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
 import routes from "../src/lib/routes.js";
 
-const baseUrl = process.env.BASE_URL || "http://100.127.48.111:3107";
+const baseUrl = process.env.BASE_URL;
+if (!baseUrl) throw new Error("BASE_URL is required for agent-readiness checks");
 const get = (path, accept = "text/html", method = "GET") => fetch(new URL(path, baseUrl), {
   method,
   headers: { Accept: accept },
@@ -71,7 +73,7 @@ test("Accept quality, exclusion, and unsupported media types", async () => {
 });
 
 test("missing paths keep 404 status and offer recovery in Markdown", async () => {
-  for (const path of ["/agent-readiness-nonexistent", "/nested/agent-readiness-nonexistent", "/agent-readiness-nonexistent.txt"]) {
+  for (const path of ["/agent-readiness-nonexistent", "/nested/agent-readiness-nonexistent", "/agent-readiness-nonexistent.txt", "/agent-readiness-nonexistent.png"]) {
     for (const accept of ["*/*", "text/markdown", "text/html"]) {
       const response = await get(path, accept);
       assert.equal(response.status, 404, path);
@@ -87,6 +89,26 @@ test("missing paths keep 404 status and offer recovery in Markdown", async () =>
     const head = await get(path, "text/markdown", "HEAD");
     assert.equal(head.status, 404);
     assert.equal(await head.text(), "");
+  }
+});
+
+test("asset URLs remove sensitive parameters and retain their bytes and content type", async () => {
+  const path = "/favicon-96x96.png";
+  const response = await fetch(new URL(`${path}?paymenttoken=example&email=example&v=1`, baseUrl), {
+    redirect: "manual",
+    headers: { Accept: "text/markdown" },
+    signal: AbortSignal.timeout(30000),
+  });
+  assert.equal(response.status, 307);
+  const location = new URL(response.headers.get("location"), baseUrl);
+  assert.equal(location.pathname, path);
+  assert.equal(location.search, "?v=1");
+  for (const accept of ["image/png", "text/markdown"]) {
+    const image = await get(path, accept);
+    assert.equal(image.status, 200);
+    assert.ok(image.headers.get("content-type").startsWith("image/png"));
+    assert.ok(!image.headers.get("vary")?.toLowerCase().split(/,\s*/).includes("accept"));
+    assert.deepEqual(Buffer.from(await image.arrayBuffer()), readFileSync(new URL(`../public${path}`, import.meta.url)));
   }
 });
 
