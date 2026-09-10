@@ -182,7 +182,6 @@ export default function Services({
                     <h3 className="ri-service-title text-[13px] font-semibold leading-5 text-ink sm:text-sm xl:shrink-0">
                       {card.title}
                     </h3>
-                    <span aria-hidden="true" className="hidden text-ink-muted xl:inline">·</span>
                     <p className="ri-service-copy mt-0.5 hidden text-xs leading-[1.45] text-ink-secondary sm:block xl:mt-0 xl:text-left">
                       {card.description}
                     </p>
