@@ -2017,6 +2017,32 @@ describe("booking reservation API", () => {
     });
   });
 
+  test.each([true, false])("Dodo full refunds retain tax in recovery amount %s", async recovery => {
+    store.bookings.push({ _id: "booking_tax_full", _type: "booking", status: "captured", netAmount: 99.95, dodoTotalAmount: 125.44 });
+    await applyBookingRefund({ client: mockSanityClient, paymentRecord: { bookingId: "booking_tax_full", ...(recovery ? { provider: "dodo" } : {}) },
+      refund: { full: true, ...(recovery ? { processedAmountInSubunits: 12544 } : {}) } });
+    expect(store.bookings[0]).toMatchObject({ status: "refunded", refundedAmount: 125.44 });
+  });
+
+  test("Dodo partial refunds reduce commission against the tax-inclusive customer charge", async () => {
+    store.bookings.push({ _id: "booking_tax_refund", _type: "booking", status: "captured", netAmount: 99.95, commissionAmount: 10 });
+    await applyBookingRefund({ client: mockSanityClient, paymentRecord: {
+      provider: "dodo", bookingId: "booking_tax_refund", providerPublicData: { taxInclusive: false, totalAmount: 12544 },
+    }, refund: { full: false, totalRefundedAmount: 62.72 } });
+    expect(store.bookings[0]).toMatchObject({ status: "captured", refundedAmount: 62.72, dodoTotalAmount: 125.44, commissionAmount: 5 });
+  });
+
+  test("Dodo reschedule recovery preserves the taxable charge and adjusted commission", async () => {
+    const paymentRecord = {
+      _id: "paymentRecord.dodo.tax_recovery", _type: "paymentRecord", provider: "dodo", providerOrderId: "cks_tax", providerPaymentId: "pay_tax", verificationState: "server_verified",
+      bookingPayload: { email: CLIENT_EMAIL, packageTitle: "Performance Vertex Max" },
+      pricingSnapshot: { grossAmount: 99.95, netAmount: 99.95, commissionAmount: 10, commissionPercent: 10 },
+      providerPublicData: { taxInclusive: false, totalAmount: 12544 }, refundState: "partial", refundProcessedAmountInSubunits: 6272,
+    };
+    const result = await createRequiresRescheduleBooking({ client: mockSanityClient, paymentRecord, notify: false });
+    expect(result.booking).toMatchObject({ netAmount: 99.95, dodoTotalAmount: 125.44, refundedAmount: 62.72, commissionAmount: 5 });
+  });
+
   test("full refunds reopen the slot and reverse coupon and referral accounting once", async () => {
     store.referrals.push({
       _id: "ref_refund",
@@ -2261,7 +2287,7 @@ describe("booking reservation API", () => {
     expect(mockSendEmail.mock.calls[1][1].idempotencyKey).toMatch(/-owner$/);
   });
 
-  test("reschedule recovery notifies both sides once with stable keys", async () => {
+  test.each([undefined, 101.99])("reschedule recovery notifies both sides once with paid total %s", async dodoTotalAmount => {
     store.bookings.push({
       _id: "booking.recovery-notify",
       _rev: "recovery_notify_rev",
@@ -2273,6 +2299,7 @@ describe("booking reservation API", () => {
       email: CLIENT_EMAIL,
       packageTitle: "Performance Vertex Overhaul",
       netAmount: 84.99,
+      ...(dodoTotalAmount ? { dodoTotalAmount } : {}),
       originalRequestedStartTimeUTC: "2025-01-15T08:00:00.000Z",
       localTimeZone: "America/Los_Angeles",
       displayDate: "Wednesday, January 15, 2025",
@@ -2298,6 +2325,7 @@ describe("booking reservation API", () => {
       /-reschedule-owner$/
     );
     const clientEmail = mockSendEmail.mock.calls[0][0];
+    expect(clientEmail.html).toContain(`$${dodoTotalAmount || 84.99}`);
     expect(clientEmail.subject).toBe(
       "We need to reschedule your Roo Industries booking"
     );

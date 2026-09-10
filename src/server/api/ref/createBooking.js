@@ -1388,6 +1388,7 @@ export default async function handler(req, res) {
       }
     }
 
+    const dodoTotalAmount = Number(internalPaymentRecord?.providerPublicData?.totalAmount || effectiveNetAmount * 100) / 100;
     const bookingDocument = {
       _id: bookingDocId,
       _type: "booking",
@@ -1407,7 +1408,7 @@ export default async function handler(req, res) {
       packagePrice: resolvedPackagePrice,
       status: normalizedStatus,
       paymentProvider,
-      ...(paymentProvider === "dodo" ? { paymentVerificationState: internalPaymentRecord.verificationState } : {}),
+      ...(paymentProvider === "dodo" ? { paymentVerificationState: internalPaymentRecord.verificationState, dodoTotalAmount } : {}),
       dodoCheckoutSessionId,
       dodoPaymentId,
       paypalOrderId,
@@ -1425,7 +1426,7 @@ export default async function handler(req, res) {
         dodoOriginalCommissionAmount: commissionAmount,
         refundedAmount: Number(internalPaymentRecord.refundProcessedAmountInSubunits || 0) / 100,
         refundStatus: "partial",
-        commissionAmount: Math.round(commissionAmount * Math.max(0, 1 - Number(internalPaymentRecord.refundProcessedAmountInSubunits || 0) / (effectiveNetAmount * 100)) * 100) / 100,
+        commissionAmount: Math.round(commissionAmount * Math.max(0, 1 - Number(internalPaymentRecord.refundProcessedAmountInSubunits || 0) / (dodoTotalAmount * 100)) * 100) / 100,
       } : {}),
       hostDate: bookingDate,
       hostTime: bookingTime,

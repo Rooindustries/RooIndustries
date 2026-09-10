@@ -510,6 +510,9 @@ export default function Payment({ hideFooter = false }) {
   const [cancellingPayment, setCancellingPayment] = useState(false);
   const sessionStartRef = useRef(null);
   const lockedProvider = String(paymentSession?.provider || "").trim();
+  const dodoTaxExclusive = lockedProvider === "dodo"
+    ? paymentSession?.providerPayload?.taxInclusive === false
+    : !lockedProvider && providerConfig.dodo?.enabled;
   const providerIsAvailableForSession = (provider) =>
     !lockedProvider || lockedProvider === provider;
   const paypalClientIdFromEnv = (
@@ -1747,7 +1750,7 @@ export default function Payment({ hideFooter = false }) {
                 </div>
               )}
               <div className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr] sm:items-baseline">
-                <dt className="font-semibold text-ink">Total</dt>
+                <dt className="font-semibold text-ink">{dodoTaxExclusive ? "Subtotal" : "Total"}</dt>
                 <dd className="sm:text-right">
                   {(referralPercent > 0 || couponDiscountAmount > 0) && (
                     <span className="mr-2 text-sm text-ink-secondary line-through">
@@ -1965,6 +1968,7 @@ export default function Payment({ hideFooter = false }) {
           ) : (
             <>
               {providerConfig.dodo?.enabled && (
+                <div>
                 <div className="low-perf-surface glass-premium glass-card-surface mt-6 flex flex-col items-center justify-between gap-4 rounded-xl border border-line-input px-4 py-4 md:flex-row">
                   <div className="grid w-full min-w-0 grid-cols-[5rem_minmax(0,1fr)] items-center gap-3">
                     <div className="flex h-8 w-20 items-center justify-center text-ink" aria-hidden="true">
@@ -1988,6 +1992,8 @@ export default function Payment({ hideFooter = false }) {
                       </button>
                     )}
                   </div>
+                </div>
+                {dodoTaxExclusive && <p className="mt-2 text-xs text-ink-muted">Applicable tax is added at checkout.</p>}
                 </div>
               )}
 

@@ -2103,6 +2103,9 @@ const finalizePaymentRecordInternal = async ({
             : "server_verified",
         verificationWarning: "",
         paymentProofClaimId: String(proofClaim?._id || "").trim(),
+        ...(workingRecord.provider === "dodo" && Number.isSafeInteger(verification.totalAmount) ? {
+          providerPublicData: { ...workingRecord.providerPublicData, totalAmount: verification.totalAmount },
+        } : {}),
       },
       event: buildPaymentRecordEvent({
         status: captureStatus,
@@ -2670,7 +2673,7 @@ const createOrReusePaymentRecordForStart = async ({
     attemptCount: 0,
     lastAttemptAt: "",
     source: "start",
-    providerPublicData: provider === "dodo" ? { currency: "USD", productId: resolveDodoProductId(bookingPayload.packageTitle), environment: String(process.env.DODO_PAYMENTS_ENVIRONMENT || "").trim() } : {},
+    providerPublicData: provider === "dodo" ? { currency: "USD", productId: resolveDodoProductId(bookingPayload.packageTitle), taxInclusive: false, environment: String(process.env.DODO_PAYMENTS_ENVIRONMENT || "").trim() } : {},
     orderState: provider === "free" ? "not_required" : "creating",
     orderCreationLeaseId,
     orderCreationLeaseExpiresAt:
@@ -4662,7 +4665,9 @@ const buildRefundMutation = ({
       return sum + toSubunits(entry.amount || 0, resolvedExpectedCurrency);
     }, 0);
   const expectedSubunits =
-    storedExpectedAmount > 0
+    provider === "dodo" && Number(record.providerPublicData?.totalAmount) > 0
+      ? Number(record.providerPublicData.totalAmount)
+      : storedExpectedAmount > 0
       ? toSubunits(storedExpectedAmount, resolvedExpectedCurrency)
       : Number(expectedAmountInSubunits || 0);
   const wasFullRefund =
@@ -5270,6 +5275,26 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
   }
   const validation = validateDodoPayment({ record, payment });
   if (!validation.ok) return { httpStatus: 409, body: { ok: false, code: validation.reason, error: "The payment does not match this checkout." } };
+  if (payment.status === "succeeded" && record.providerPublicData?.taxInclusive === false &&
+      record.providerPublicData.totalAmount !== payment.total_amount) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        record = await patchPaymentRecord({ client, record, revisionGuard: true, set: {
+          providerPublicData: { ...record.providerPublicData, totalAmount: payment.total_amount },
+        } });
+        break;
+      } catch (error) {
+        if (!isConflictError(error)) throw error;
+        const current = await getPaymentRecordById(client, record._id);
+        if (!current) throw error;
+        record = current;
+        const currentValidation = validateDodoPayment({ record, payment });
+        if (!currentValidation.ok) return { httpStatus: 409, body: { ok: false, code: currentValidation.reason } };
+        if (record.providerPublicData?.totalAmount === payment.total_amount) break;
+        if (attempt === 2) return { httpStatus: 202, body: buildPublicStatusBody(record) };
+      }
+    }
+  }
   if (record.providerRecoveryTerminal === true && payment.status === "succeeded") {
     record = await patchPaymentRecord({ client, record, revisionGuard: true, set: { providerRecoveryTerminal: false } });
   }
@@ -5307,7 +5332,7 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
       const originalStatus = booking.dodoDisputeActive
         ? booking.dodoDisputeBookingStatus : booking.status;
       const originalCommission = Number(booking.dodoOriginalCommissionAmount ?? booking.commissionAmount ?? 0);
-      const retainedFraction = Math.max(0, 1 - Number(booking.refundedAmount || 0) / Number(booking.netAmount || 1));
+      const retainedFraction = Math.max(0, 1 - Number(booking.refundedAmount || 0) / Number(booking.dodoTotalAmount || booking.netAmount || 1));
       transaction.patch(booking._id, (patch) => {
         const guarded = booking._rev ? patch.ifRevisionId(booking._rev) : patch;
         return guarded.set({

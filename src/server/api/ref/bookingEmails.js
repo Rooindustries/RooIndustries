@@ -970,7 +970,7 @@ export const dispatchRescheduleNotifications = async ({
   const from = String(process.env.FROM_EMAIL || "").trim();
   const deliveryEnabled = !!from && !!resend;
   const amount = formatMoney(
-    recoveryBooking.netAmount || recoveryBooking.grossAmount || 0
+    recoveryBooking.dodoTotalAmount || recoveryBooking.netAmount || recoveryBooking.grossAmount || 0
   );
   const fields = [
     { label: "Order ID", value: recoveryBooking._id },

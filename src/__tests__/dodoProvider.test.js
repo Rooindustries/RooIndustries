@@ -81,6 +81,41 @@ test('preserves frozen product identity after the configured catalog changes', a
   expect(await verifyDodoCapture({record: record(), payment: payment()})).toMatchObject({ok: true, trustedCapture: true});
 });
 
+test('creates tax-exclusive checkout without changing the quoted package price', async () => {
+  const frozen = record();
+  frozen.providerPublicData.taxInclusive = false;
+  global.fetch.mockImplementation(async input => {
+    const path = new URL(typeof input === 'string' ? input : input.url).pathname;
+    const data = path.startsWith('/products/')
+      ? { price: { type: 'one_time_price', currency: 'USD', price: 50, discount: 0, pay_what_you_want: true, tax_inclusive: false, purchasing_power_parity: false } }
+      : { session_id: 'cks_offline', checkout_url: 'https://test.checkout.dodopayments.com/session/cks_offline' };
+    return new Response(JSON.stringify(data), { status: 200, headers: { 'content-type': 'application/json' } });
+  });
+  expect(await createDodoCheckout({ record: frozen })).toMatchObject({ amount: 8499, taxInclusive: false });
+  const [, request] = global.fetch.mock.calls.find(([input]) => new URL(typeof input === 'string' ? input : input.url).pathname === '/checkouts');
+  expect(JSON.parse(request.body).product_cart[0].amount).toBe(8499);
+});
+
+test.each([0, 1700])('verifies the quoted price plus %s tax', async tax => {
+  const frozen = record();
+  frozen.providerPublicData.taxInclusive = false;
+  const proof = { ...payment(), total_amount: 8499 + tax, tax };
+  expect(await verifyDodoCapture({ record: frozen, payment: proof })).toMatchObject({ ok: true, totalAmount: 8499 + tax });
+});
+
+test.each([-1, 1.5, '1700', NaN, Infinity])('rejects invalid added tax %s', tax => {
+  const frozen = record();
+  frozen.providerPublicData.taxInclusive = false;
+  expect(validateDodoPayment({ record: frozen, payment: { ...payment(), tax } }).ok).toBe(false);
+});
+
+test('rejects an incorrect pre-tax price and preserves legacy inclusive captures', () => {
+  const frozen = record();
+  frozen.providerPublicData.taxInclusive = false;
+  expect(validateDodoPayment({ record: frozen, payment: { ...payment(), total_amount: 10198, tax: 1700 } }).ok).toBe(false);
+  expect(validateDodoPayment({ record: record(), payment: { ...payment(), tax: 1700 } }).ok).toBe(true);
+});
+
 test('does not repeat ambiguous checkout creation',async()=>{
   await expect(createDodoCheckout({record:record(),lookupOnly:true})).rejects.toMatchObject({code:'dodo_order_creation_requires_recovery'});
   expect(global.fetch).not.toHaveBeenCalled();

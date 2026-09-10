@@ -29,9 +29,10 @@ export const createDodoCheckout = async ({ record, lookupOnly = false }) => {
   if (!productId) throw failure("dodo_package_product_missing", 400);
   const product = await client.products.retrieve(productId);
   const price = product.price;
+  const taxInclusive = record.providerPublicData?.taxInclusive !== false;
   if (product.is_recurring || price?.type !== "one_time_price" ||
       price.currency !== DODO_CURRENCY || price.pay_what_you_want !== true ||
-      price.tax_inclusive !== true || price.purchasing_power_parity === true ||
+      price.tax_inclusive !== taxInclusive || price.purchasing_power_parity === true ||
       Number(price.discount) !== 0 || Number(price.price) > amount) {
     throw failure("dodo_product_configuration_invalid");
   }
@@ -75,6 +76,7 @@ export const createDodoCheckout = async ({ record, lookupOnly = false }) => {
     currency: DODO_CURRENCY,
     amount,
     productId,
+    taxInclusive,
     environment: read("DODO_PAYMENTS_ENVIRONMENT"),
   };
 };
@@ -91,8 +93,10 @@ export const validateDodoPayment = ({ record, payment }) => {
   }
   if (payment.currency !== DODO_CURRENCY ||
       payment.currency !== record.providerPublicData?.currency) return fail("dodo_currency_mismatch");
-  if (!Number.isSafeInteger(payment.total_amount) || payment.total_amount <= 0 ||
-      payment.total_amount !== Math.round(Number(record.pricingSnapshot?.netAmount) * 100)) {
+  const addedTax = record.providerPublicData?.taxInclusive === false ? payment.tax ?? 0 : 0;
+  if (!Number.isSafeInteger(addedTax) || addedTax < 0 ||
+      !Number.isSafeInteger(payment.total_amount) || payment.total_amount <= 0 ||
+      payment.total_amount - addedTax !== Math.round(Number(record.pricingSnapshot?.netAmount) * 100)) {
     return fail("dodo_amount_mismatch");
   }
   const cart = payment.product_cart;
@@ -138,6 +142,7 @@ export const verifyDodoCapture = async ({ record, payment: suppliedPayment }) =>
     ok: true, trustedCapture: true,
     providerOrderId: payment.checkout_session_id,
     providerPaymentId: payment.payment_id,
+    totalAmount: payment.total_amount,
     payerEmail: String(payment.customer?.email || ""),
   };
 };

@@ -224,6 +224,7 @@ export const createRequiresRescheduleBooking = async ({
   }
   const payload = paymentRecord.bookingPayload || {};
   const pricing = paymentRecord.pricingSnapshot || {};
+  const dodoTotalAmount = Number(paymentRecord.providerPublicData?.totalAmount || Number(pricing.netAmount) * 100) / 100;
   const resolvedReferralId = preserveHistoricalAccounting
     ? ""
     : normalize(referralId || pricing.effectiveReferralId || "");
@@ -236,6 +237,7 @@ export const createRequiresRescheduleBooking = async ({
       ...(paymentRecord.provider === "dodo" ? {
         dodoCheckoutSessionId: paymentRecord.providerOrderId,
         dodoPaymentId: paymentRecord.providerPaymentId,
+        dodoTotalAmount,
         commissionPercent: Number(pricing.commissionPercent || 0),
         commissionAmount: Number(pricing.commissionAmount || 0),
         paymentVerificationState: paymentRecord.verificationState || "",
@@ -243,8 +245,8 @@ export const createRequiresRescheduleBooking = async ({
           dodoOriginalCommissionAmount: Number(pricing.commissionAmount || 0),
           refundedAmount: Number(paymentRecord.refundProcessedAmountInSubunits || 0) / 100,
           refundStatus: "partial",
-          commissionAmount: Number(pricing.netAmount) > 0
-            ? Math.round(Number(pricing.commissionAmount || 0) * Math.max(0, 1 - Number(paymentRecord.refundProcessedAmountInSubunits || 0) / (Number(pricing.netAmount) * 100)) * 100) / 100
+          commissionAmount: dodoTotalAmount > 0
+            ? Math.round(Number(pricing.commissionAmount || 0) * Math.max(0, 1 - Number(paymentRecord.refundProcessedAmountInSubunits || 0) / (dodoTotalAmount * 100)) * 100) / 100
             : 0,
         } : {}),
       } : {}),
