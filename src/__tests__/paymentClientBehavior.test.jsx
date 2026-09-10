@@ -167,6 +167,86 @@ describe("payment client request and accessibility behavior", () => {
     expect(global.fetch).toHaveBeenCalledWith("/api/payment/finalize", expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer dodo-return-token" }) }));
   });
 
+  test.each(["failed", "abandoned", "refunded", "poll-failed", "manual-failed", "resume-failed"])("clears a released Dodo hold after %s", async (outcome) => {
+    jest.useFakeTimers();
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
+    sessionStorage.setItem("my_slot_hold", JSON.stringify({
+      holdId: checkout.slotHoldId,
+      holdToken: checkout.slotHoldToken,
+      expiresAt: checkout.slotHoldExpiresAt,
+      phase: "payment_pending",
+    }));
+    sessionStorage.setItem("payment_session_state", JSON.stringify({
+      provider: "dodo",
+      paymentAccessToken: "dodo-failed-token",
+      providerPayload: { orderId: "cks_failed" },
+      fingerprint: JSON.stringify({ packageTitle: checkout.packageTitle, originalOrderId: "", startTimeUTC: checkout.startTimeUTC, email: checkout.email, referralCode: "", couponCode: "" }),
+    }));
+    global.fetch = jest.fn(async (url) => {
+      if (url === "/api/payment/finalize") return response({ ok: true, status: outcome === "poll-failed" ? "finalizing" : outcome.endsWith("-failed") ? "failed" : outcome });
+      if (url === "/api/payment/status") return response({ ok: true, status: "failed" });
+      if (url === "/api/payment/providers") return response({ ...providerPayload, providers: { ...providerPayload.providers, dodo: { enabled: true, mode: "live" } } });
+      return standardFetch(url);
+    });
+    const manualCheck = outcome === "manual-failed" || outcome === "resume-failed";
+    render(<MemoryRouter initialEntries={[{ pathname: "/payment", search: manualCheck ? "" : "?dodo_return=1" }]}>
+      <Payment hideFooter />
+    </MemoryRouter>);
+
+    if (manualCheck) {
+      const name = outcome === "manual-failed" ? "Check payment status" : "Pay with Dodo Payments";
+      const button = await screen.findByRole("button", { name });
+      await waitFor(() => expect(button).toBeEnabled());
+      fireEvent.click(button);
+    }
+    await screen.findByText(/Go back to booking to choose a time/);
+    expect(sessionStorage.getItem("my_slot_hold")).toBeNull();
+    expect(sessionStorage.getItem("payment_session_state")).toBeNull();
+    expect(JSON.parse(sessionStorage.getItem("checkout_booking_state"))).toMatchObject({
+      email: checkout.email,
+      slotHoldId: "",
+      slotHoldToken: "",
+      slotHoldExpiresAt: "",
+    });
+    expect(screen.getByRole("button", { name: "Pay with Dodo Payments" })).toBeDisabled();
+    expect(global.fetch).not.toHaveBeenCalledWith("/api/payment/start", expect.anything());
+    await act(async () => { jest.advanceTimersByTime(5000); await flushMicrotasks(); });
+    expect(screen.getByRole("alert")).toHaveTextContent(/Go back to booking to choose a time/);
+  });
+
+  test.each([null, { provider: "paypal", paymentAccessToken: "new-payment-token" }])("ignores a terminal response after its session was replaced: %s", async (replacement) => {
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
+    sessionStorage.setItem("payment_session_state", JSON.stringify({
+      provider: "dodo",
+      paymentAccessToken: "old-payment-token",
+      providerPayload: { orderId: "cks_old" },
+      fingerprint: JSON.stringify({ packageTitle: checkout.packageTitle, originalOrderId: "", startTimeUTC: checkout.startTimeUTC, email: checkout.email, referralCode: "", couponCode: "" }),
+    }));
+    let finishFinalization;
+    global.fetch = jest.fn(async (url) => {
+      if (url === "/api/payment/finalize") return new Promise(resolve => {
+        finishFinalization = () => resolve(response({ ok: true, status: "abandoned" }));
+      });
+      return standardFetch(url);
+    });
+    render(<MemoryRouter initialEntries={[{ pathname: "/payment", search: "?dodo_return=1" }]}>
+      <Payment hideFooter />
+    </MemoryRouter>);
+    await waitFor(() => expect(finishFinalization).toEqual(expect.any(Function)));
+    const refreshedHold = { holdId: checkout.slotHoldId, holdToken: "refreshed-hold-token", expiresAt: checkout.slotHoldExpiresAt };
+    sessionStorage.setItem("my_slot_hold", JSON.stringify(refreshedHold));
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify({ ...checkout, slotHoldToken: refreshedHold.holdToken }));
+    if (replacement) sessionStorage.setItem("payment_session_state", JSON.stringify(replacement));
+    else sessionStorage.removeItem("payment_session_state");
+
+    await act(async () => { finishFinalization(); await flushMicrotasks(); });
+
+    expect(JSON.parse(sessionStorage.getItem("my_slot_hold"))).toEqual(refreshedHold);
+    expect(JSON.parse(sessionStorage.getItem("checkout_booking_state")).slotHoldToken).toBe(refreshedHold.holdToken);
+    expect(JSON.parse(sessionStorage.getItem("payment_session_state"))).toEqual(replacement);
+    expect(screen.queryByText(/Go back to booking to choose a time/)).not.toBeInTheDocument();
+  });
+
   test("expires the refreshed hold after a canceled Dodo return", async () => {
     jest.useFakeTimers();
     sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));

@@ -909,10 +909,37 @@ export default function Payment({ hideFooter = false }) {
     return null;
   };
 
-  const clearPaymentSession = () => {
+  const clearPaymentSession = (terminalStatus = "", expectedToken = "") => {
+    const storedSession = readStoredPaymentSession();
+    if (terminalStatus && expectedToken && storedSession?.paymentAccessToken !== expectedToken) return true;
+    const activeSession = storedSession || paymentSession;
     sessionStartRef.current = null;
     setPaymentSession(null);
     clearStoredPaymentSession();
+    if (activeSession?.provider !== "dodo" || isUpgrade ||
+        !["failed", "abandoned", "refunded"].includes(terminalStatus)) return false;
+    const nextCheckout = {
+      ...bookingData,
+      slotHoldId: "",
+      slotHoldToken: "",
+      slotHoldExpiresAt: "",
+    };
+    setSessionHold(null);
+    writeStoredCheckout(nextCheckout);
+    sessionStorage.removeItem("my_slot_hold");
+    window.dispatchEvent(new CustomEvent("hold-state", { detail: null }));
+    dodoReturnHandled.current = "";
+    const query = new URLSearchParams(location.search);
+    query.delete("dodo_return");
+    query.delete("dodo_cancel");
+    navigate({ pathname: location.pathname, search: query.toString(), hash: location.hash }, {
+      replace: true, state: { ...navState, bookingData: nextCheckout },
+    });
+    showBanner("error", terminalStatus === "refunded"
+      ? "This payment was refunded. Go back to booking to choose a time."
+      : "Payment was not completed and the slot was released. Go back to booking to choose a time.",
+    { persistent: true });
+    return true;
   };
 
   const handleChangePaymentMethod = async () => {
@@ -1101,7 +1128,9 @@ export default function Payment({ hideFooter = false }) {
         response.ok &&
         ["refunded", "failed", "abandoned"].includes(resumedStatus)
       ) {
-        clearPaymentSession();
+        if (clearPaymentSession(resumedStatus, paymentSession.paymentAccessToken)) {
+          return { ...paymentSession, result: data, terminal: true };
+        }
         throw new Error(
           data?.recoveryReason || "This payment session is no longer payable."
         );
@@ -1258,7 +1287,7 @@ export default function Payment({ hideFooter = false }) {
           return settled;
         }
 
-        clearPaymentSession();
+        if (clearPaymentSession(settledStatus, paymentAccessToken)) return settled;
         throw new Error(
           settled?.recoveryReason ||
             settled?.error ||
@@ -1266,7 +1295,7 @@ export default function Payment({ hideFooter = false }) {
         );
       }
 
-      clearPaymentSession();
+      if (clearPaymentSession(status, paymentAccessToken)) return data;
       throw new Error(
         data?.recoveryReason || data?.error || "Payment finalization failed."
       );
@@ -1942,7 +1971,7 @@ export default function Payment({ hideFooter = false }) {
                   </div>
                   <div className="flex w-full shrink-0 flex-col gap-2 sm:w-48">
                     <button type="button" onClick={handleDodoCheckout}
-                      disabled={payingDodo || paymentStatusBusy || cancellingPayment || quoteLoading || !quoteFingerprint || !providerIsAvailableForSession("dodo")}
+                      disabled={!canSubmitBooking || payingDodo || paymentStatusBusy || cancellingPayment || quoteLoading || !quoteFingerprint || !providerIsAvailableForSession("dodo")}
                       className="glow-button inline-flex h-10 w-full items-center justify-center rounded-lg px-4 text-sm font-semibold disabled:opacity-60">
                       {payingDodo ? "Opening checkout..." : "Pay with Dodo Payments"}
                     </button>
