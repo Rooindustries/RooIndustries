@@ -1,5 +1,11 @@
 import React from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import Services from "../components/Services";
@@ -20,6 +26,8 @@ const game = (overrides = {}) => ({
   beforeFps: 200,
   afterFps: 450,
   gpu: "RTX 4080",
+  cpu: "7900X3D",
+  ram: "32GB 6000MT/s CL30",
   ...overrides,
 });
 
@@ -37,8 +45,11 @@ it("includes real benchmark values and benefits in server-rendered HTML", () => 
   expect(within(page).getByRole("article")).toHaveTextContent("450");
   expect(within(page).getByRole("article")).toHaveTextContent("+125%");
   expect(page.querySelector(".ri-service-card").style.opacity).not.toBe("0");
-  expect(page.querySelector("details").hasAttribute("open")).toBe(false);
-  expect(page.querySelector("details")).toHaveTextContent("RTX 4080");
+  const hardware = page.querySelector(".ri-bench-hardware");
+  expect(hardware.closest("details")).toBeNull();
+  expect(hardware).toHaveTextContent("RTX 4080");
+  expect(hardware).toHaveTextContent("7900X3D");
+  expect(hardware).toHaveTextContent("32GB 6000MT/s CL30");
 });
 
 it.each([null, undefined, "", " ", "not a number", Infinity, -1, 0, true, []])(
@@ -46,7 +57,7 @@ it.each([null, undefined, "", " ", "not a number", Infinity, -1, 0, true, []])(
   (beforeFps) => {
     render(wrap({ benchPages: [{ games: [game({ beforeFps })] }] }));
     const result = screen.getByRole("article");
-    expect(result).toHaveTextContent("—");
+    expect(result.querySelector(".ri-bench-number")).toHaveTextContent("-");
     expect(result).not.toHaveTextContent("%");
     expect(result).not.toHaveTextContent(/NaN|Infinity/);
   },
@@ -58,7 +69,7 @@ it("shows a negative result without a misleading plus sign", () => {
   expect(screen.getByRole("article")).not.toHaveTextContent("+-50%");
 });
 
-it("skips empty pages and keeps page controls within the available results", () => {
+it("skips empty pages and keeps page controls within the available results", async () => {
   const { rerender } = render(
     wrap({
       benchPages: [
@@ -73,17 +84,21 @@ it("skips empty pages and keeps page controls within the available results", () 
     screen.getByRole("button", { name: "Previous benchmark page" }),
   ).toBeDisabled();
   fireEvent.click(screen.getByRole("button", { name: "Next benchmark page" }));
-  expect(screen.getByRole("heading", { name: "VALORANT" })).toBeInTheDocument();
+  await waitFor(() =>
+    expect(screen.getByText("VALORANT", { exact: true })).toBeInTheDocument(),
+  );
   expect(
     screen.getByRole("button", { name: "Next benchmark page" }),
   ).toBeDisabled();
   rerender(wrap({ benchPages: [{ games: [game()] }] }));
+  await waitFor(() =>
+    expect(
+      screen.getByText("Overwatch 2", { exact: true }),
+    ).toBeInTheDocument(),
+  );
   expect(
-    screen.getByRole("heading", { name: "Overwatch 2" }),
-  ).toBeInTheDocument();
-  expect(
-    screen.queryByRole("button", { name: "Next benchmark page" }),
-  ).not.toBeInTheDocument();
+    screen.getByRole("button", { name: "Next benchmark page" }),
+  ).toBeDisabled();
 });
 
 it("respects the benchmark visibility setting", () => {
