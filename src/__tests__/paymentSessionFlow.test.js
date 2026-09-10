@@ -74,6 +74,7 @@ jest.mock("../server/api/payment/providerConfig", () => ({
   resolveServerPaymentSessionsEnabled: (...args) =>
     mockResolveServerPaymentSessionsEnabled(...args),
   default: {
+    allowProviderModeInRuntime: (...args) => jest.requireActual("../server/api/payment/providerConfig").allowProviderModeInRuntime(...args),
     resolveDodoProductId: (...args) => jest.requireActual("../server/api/payment/providerConfig").resolveDodoProductId(...args),
     resolvePaymentProviders: (...args) => mockResolvePaymentProviders(...args),
     resolveServerPaymentSessionsEnabled: (...args) =>
@@ -4344,16 +4345,39 @@ describe('Dodo checkout lifecycle',()=>{
   beforeEach(()=>{
     process.env.DODO_PAYMENTS_PRODUCT_ID='pdt_dodo';process.env.DODO_PAYMENTS_ENVIRONMENT='test_mode';
     mockResolvePaymentProviders.mockReturnValue({...mockResolvePaymentProviders(),dodo:{enabled:true,mode:'test'}});
-    mockCreateDodoCheckout.mockResolvedValue({orderId:'cks_dodo',checkoutUrl:'https://test.checkout.dodopayments.com/cks_dodo',currency:'USD',productId:'pdt_dodo',environment:'test_mode'});
+    mockCreateDodoCheckout.mockResolvedValue({orderId:'cks_dodo',checkoutUrl:'https://test.checkout.dodopayments.com/cks_dodo',currency:'USD',productId:'pdt_dodo',taxInclusive:false,environment:'test_mode'});
     mockRetrieveDodoPayment.mockImplementation(async()=>latest);
     mockInspectDodoCheckout.mockImplementation(async()=>({state:latest?.status==='succeeded'?'captured':'unpaid',payment:latest,providerPaymentId:latest?.payment_id}));
     mockVerifyDodoCapture.mockImplementation(async({record,payment})=>{
       const proof=payment||latest;
       const validation=jest.requireActual('../server/api/payment/dodoProvider').validateDodoPayment({record,payment:proof});
-      return validation.ok?{ok:true,trustedCapture:true,providerOrderId:proof.checkout_session_id,providerPaymentId:proof.payment_id,payerEmail:proof.customer.email}:validation;
+      return validation.ok?{ok:true,trustedCapture:true,providerOrderId:proof.checkout_session_id,providerPaymentId:proof.payment_id,totalAmount:proof.total_amount,payerEmail:proof.customer.email}:validation;
     });
   });
   afterEach(()=>{delete process.env.DODO_PAYMENTS_PRODUCT_ID;delete process.env.DODO_PAYMENTS_ENVIRONMENT;delete process.env.DODO_PAYMENTS_PRODUCT_IDS;});
+  test('an unpaid Dodo checkout releases its payment lock for another method', async () => {
+    const started = await startDodo();
+    latest.status = 'requires_payment_method';
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn(async input => {
+      const path = new URL(typeof input === 'string' ? input : input.url).pathname;
+      const data = path.startsWith('/checkouts/') ? { id: 'cks_dodo', payment_id: latest.payment_id } : latest;
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    mockInspectDodoCheckout.mockImplementationOnce(({ record }) => jest.requireActual('../server/api/payment/dodoProvider').inspectDodoCheckout({ record }));
+    try {
+      await withRuntimeEnv({ DODO_PAYMENTS_API_KEY: 'offline-key', VERCEL_ENV: 'development' }, async () => {
+        const result = await cancelPaymentSession({ paymentAccessToken: started.body.paymentAccessToken, client: mockClient });
+        expect(result).toMatchObject({ httpStatus: 200, body: { cancelled: true, refreshedHold: { phase: 'holding' } } });
+        expect(store.slotHolds[0]).toMatchObject({ phase: 'holding', paymentRecordId: '', paymentProvider: '' });
+        expect(getOnlyPaymentRecord()).toMatchObject({ status: 'abandoned', resourceReleasePending: false });
+        expect(store.paymentStartClaims).toHaveLength(0);
+        expect(mockCreateBooking).not.toHaveBeenCalled();
+      });
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
   test('freezes the package product before provider creation and recovers a missing checkout ID', async () => {
     process.env.DODO_PAYMENTS_PRODUCT_IDS = JSON.stringify({
       'Vertex Essentials': 'pdt_essentials',
@@ -4665,6 +4689,83 @@ describe('Dodo checkout lifecycle',()=>{
     const full=applyBookingRefund.mock.calls.find(([args])=>args.refund.full===true)?.[0];
     expect(full.refund).toMatchObject({amount:total/100,processedAmountInSubunits:total});
     expect(getOnlyPaymentRecord().refundProcessedAmountInSubunits).toBe(total);
+  });
+  test('tax-exclusive refunds use the full customer charge as their baseline', async () => {
+    await startDodo();
+    const price = latest.total_amount;
+    latest.tax = 1700;
+    latest.total_amount += latest.tax;
+    await notify();
+    expect(getOnlyPaymentRecord().providerPublicData.totalAmount).toBe(latest.total_amount);
+    latest.refunds = [{ refund_id: 'ref_price', payment_id: latest.payment_id, status: 'succeeded', amount: price, currency: 'USD' }];
+    const applyBookingRefund = jest.fn(async () => ({ bookingId: store.bookings[0]._id }));
+    await notify('refund.succeeded', 'evt_price_refund', applyBookingRefund);
+    expect(getOnlyPaymentRecord()).toMatchObject({ status: 'booked', refundState: 'partial' });
+    expect(applyBookingRefund.mock.calls[0][0].refund.full).toBe(false);
+    latest.refunds.push({ refund_id: 'ref_tax', payment_id: latest.payment_id, status: 'succeeded', amount: latest.tax, currency: 'USD' });
+    await notify('refund.succeeded', 'evt_tax_refund', applyBookingRefund);
+    expect(getOnlyPaymentRecord()).toMatchObject({ status: 'refunded', refundProcessedAmountInSubunits: latest.total_amount });
+    expect(applyBookingRefund.mock.calls.at(-1)[0].refund).toMatchObject({ full: true, amount: latest.total_amount / 100 });
+  });
+  test('a tax-exclusive browser return preserves a concurrent webhook booking', async () => {
+    clonePaymentReads = true;
+    const started = await startDodo();
+    latest.tax = 1700;
+    latest.total_amount += latest.tax;
+    mockInspectDodoCheckout.mockImplementationOnce(async () => {
+      await notify('payment.succeeded', 'evt_concurrent_tax_capture');
+      return { state: 'captured', payment: latest, providerPaymentId: latest.payment_id };
+    });
+    const result = await finalizePaymentSession({ body: { providerData: {} }, paymentAccessToken: started.body.paymentAccessToken, client: mockClient });
+    expect(result.body.status).toBe('booked');
+    expect(store.bookings).toHaveLength(1);
+    expect(getOnlyPaymentRecord().providerPublicData.totalAmount).toBe(latest.total_amount);
+  });
+  test('a resolved dispute restores tax-exclusive commission after a partial refund', async () => {
+    await startDodo();
+    latest.tax = 1700;
+    latest.total_amount += latest.tax;
+    await notify();
+    Object.assign(store.bookings[0], { status: 'captured', netAmount: 84.99, dodoTotalAmount: 101.99, commissionAmount: 8.5, refundedAmount: 50 });
+    latest.disputes = [{ dispute_status: 'dispute_opened' }];
+    await notify('dispute.opened', 'evt_dispute_tax');
+    expect(store.bookings[0].commissionAmount).toBe(0);
+    latest.disputes = [{ dispute_status: 'dispute_won' }];
+    await notify('dispute.won', 'evt_dispute_tax_won');
+    expect(store.bookings[0]).toMatchObject({ status: 'captured', commissionAmount: 4.33 });
+  });
+  test.each(['failed', 'cancelled'])('triage: stale %s response preserves a concurrently booked checkout', async paymentStatus => {
+    clonePaymentReads = true;
+    const started = await startDodo();
+    const declinedPayment = { ...latest, payment_id: 'pay_earlier_decline', status: paymentStatus };
+    mockInspectDodoCheckout.mockImplementationOnce(async () => {
+      await notify('payment.succeeded', 'evt_before_stale_decline');
+      return { state: 'unpaid', payment: declinedPayment, providerPaymentId: declinedPayment.payment_id };
+    });
+    const result = await finalizePaymentSession({body:{providerData:{}},paymentAccessToken:started.body.paymentAccessToken,client:mockClient});
+    expect(getOnlyPaymentRecord().status).toBe('booked');
+    expect(result.body.status).toBe('booked');
+  });
+  test.each([0, 500])('triage: repeated cron finalizes an aged captured payment with refund amount %s', async refundAmount => {
+    jest.useFakeTimers({doNotFake:['nextTick','setImmediate']});
+    const baseTime = Date.now();
+    try {
+      await startDodo();
+      Object.assign(getOnlyPaymentRecord(), { createdAt: new Date(baseTime - 600000).toISOString(), updatedAt: new Date(baseTime - 600000).toISOString(), lastAttemptAt: '', nextRecoveryAt: '' });
+      if (refundAmount) latest.refunds = [{ refund_id: 'ref_prebooking_partial', payment_id: latest.payment_id, status: 'succeeded', amount: refundAmount, currency: 'USD' }];
+      const states = [];
+      for (let pass = 0; pass < 3; pass += 1) {
+        jest.setSystemTime(baseTime + pass * 120000);
+        const result = await reconcilePaymentSessions({req:createReq({}, {authorization:'Bearer cron-secret'}),client:mockClient});
+        expect(result.httpStatus).toBe(200);
+        states.push(getOnlyPaymentRecord().status);
+      }
+      if (refundAmount) expect(getOnlyPaymentRecord().refundState).toBe('partial');
+      expect(states).toEqual(['booked', 'booked', 'booked']);
+      expect(mockCreateBooking).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
   });
   test.each(['failed','cancelled'])('%s releases the hold and keeps late payment recovery possible',async status=>{
     await startDodo();latest.status=status;

@@ -117,11 +117,13 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
       return { bookingId: booking._id, idempotent: true };
     }
     const originalCommission = Number(booking.dodoOriginalCommissionAmount ?? booking.commissionAmount ?? 0);
-    const remaining = Math.max(0, 1 - refundedAmount / Number(booking.netAmount || 1));
+    const totalAmount = Number(paymentRecord.providerPublicData?.totalAmount || 0) / 100 || Number(booking.dodoTotalAmount || booking.netAmount || 1);
+    const remaining = Math.max(0, 1 - refundedAmount / totalAmount);
     let patch = client.patch(booking._id);
     if (booking._rev) patch = patch.ifRevisionId(booking._rev);
     await patch.set({ refundedAmount, refundStatus: "partial", lastRefundAt: now,
       dodoOriginalCommissionAmount: originalCommission,
+      dodoTotalAmount: totalAmount,
       commissionAmount: Math.round(originalCommission * remaining * 100) / 100 }).commit();
     return { bookingId: booking._id, idempotent: false, reopenedSlot: false, couponRestored: false };
   }
@@ -225,7 +227,9 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
       refundStatus: "full",
       lastRefundId: refundId,
       lastRefundAt: refund.refundedAt || now,
-      refundedAmount: Number(refund.amount || booking.netAmount || 0),
+      refundedAmount: Number(refund.amount ||
+        (paymentRecord.provider === "dodo" ? Number(refund.processedAmountInSubunits || 0) / 100 : 0) ||
+        booking.dodoTotalAmount || booking.netAmount || 0),
       refundAccountingAppliedAt: now,
       slotReleasedAfterRefund: ownsSlot,
       couponRestoredAfterRefund: canRestoreCoupon,
