@@ -87,6 +87,7 @@ export default function About({ initialData = null, compact = false }) {
   const specStats = recordDetails.slice(1);
 
   if (compact) {
+    const compactRecordSubtitle = recordSubtitle.replace(/\s*[-–—]\s*Official Entry\s*$/i, "");
     const summaryStats = recordDetails.filter(
       (detail) => !/^(cpu|gpu)$/i.test(String(detail.label || "").trim())
     );
@@ -111,13 +112,13 @@ export default function About({ initialData = null, compact = false }) {
           <h3 className="mt-0.5 text-[17px] font-bold leading-5 tracking-tight">
             <span className="ri-proof-title gold-flair-text">{recordTitle}</span>
           </h3>
-          <p className="mt-0.5 text-[11px] leading-4 text-ink-secondary">{recordSubtitle}</p>
+          <p className="mt-0.5 text-[11px] leading-4 text-ink-secondary">{compactRecordSubtitle}</p>
 
-          <dl className="ri-proof-summary my-3 grid grid-flow-col auto-cols-fr gap-2 border-y border-line-soft py-2">
+          <dl className="ri-proof-summary my-3 grid grid-flow-col auto-cols-auto justify-between gap-3 border-y border-line-soft py-2">
             {summaryStats.map((detail, index) => (
               <div key={detail?._key || `${detail.label}-${index}`} className="min-w-0">
                 <dt className="text-[10px] uppercase leading-3 tracking-wider text-ink-muted">{detail.label}</dt>
-                <dd className={`mt-0.5 break-words font-semibold tabular-nums text-ink ${/^(rank|score)$/i.test(String(detail.label || "").trim()) ? "text-2xl leading-7" : "text-xs leading-4"}`}>{detail.value}</dd>
+                <dd className="mt-0.5 break-words text-xl font-semibold leading-7 tabular-nums text-ink min-[350px]:text-2xl">{detail.value}</dd>
               </div>
             ))}
           </dl>
