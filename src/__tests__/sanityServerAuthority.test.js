@@ -8,7 +8,7 @@ jest.mock("../server/supabase/runtime.js", () => ({
   resolveSupabaseRuntimePolicy: () => ({ primaryBackend: "supabase" }),
 }));
 
-const { fetchFaqQuestions, fetchHomePageData } = require("../lib/sanityServer.js");
+const { fetchFaqQuestions, fetchHomePageData, fetchPrivacyPolicy } = require("../lib/sanityServer.js");
 
 describe("server-rendered public content authority", () => {
   beforeEach(() => {
@@ -74,6 +74,14 @@ describe("server-rendered public content authority", () => {
     );
   });
 
+  test("returns the privacy fallback when the content request rejects", async () => {
+    mockFetchPublicContent.mockRejectedValueOnce(new Error("content unavailable"));
+    await expect(fetchPrivacyPolicy()).resolves.toBeNull();
+    expect(mockFetchPublicContent).toHaveBeenCalledWith(
+      expect.objectContaining({ resource: "privacy-policy", backend: "supabase" })
+    );
+  });
+
   test("returns the home fallbacks when backend initialization fails", async () => {
     jest.resetModules();
     jest.doMock("../server/supabase/runtime.js", () => ({
@@ -86,5 +94,6 @@ describe("server-rendered public content authority", () => {
     await expect(isolated.fetchHomePageData()).resolves.toMatchObject({
       packagesList: [],
     });
+    await expect(isolated.fetchPrivacyPolicy()).resolves.toBeNull();
   });
 });

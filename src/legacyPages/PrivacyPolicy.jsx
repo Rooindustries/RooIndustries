@@ -1,10 +1,10 @@
 import Privacy from "../components/PrivacyPolicy";
 import Footer from "../components/Footer";
 
-export default function PrivacyPolicy() {
+export default function PrivacyPolicy({ initialData = null }) {
   return (
     <>
-      <Privacy />
+      <Privacy initialData={initialData} />
       <Footer />
     </>
   );

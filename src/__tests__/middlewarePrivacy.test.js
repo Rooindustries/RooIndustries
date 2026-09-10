@@ -26,6 +26,18 @@ describe("URL privacy middleware", () => {
     expect(response.headers.get("location")).toBeNull();
   });
 
+  test.each(["/image.png", "/logo.svg", "/styles.css", "/script.js", "/robots.txt", "/sitemap.xml", "/favicon.ico"])("removes sensitive parameters from %s", (pathname) => {
+    const response = middleware(new NextRequest(
+      `https://www.rooindustries.com${pathname}?paymenttoken=private&EMAIL=private&v=1`
+    ));
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(`https://www.rooindustries.com${pathname}?v=1`);
+    const clean = middleware(new NextRequest(`https://www.rooindustries.com${pathname}?v=1`));
+    expect(clean.headers.get("x-middleware-next")).toBe("1");
+    expect(clean.headers.get("vary")).toBeNull();
+    expect(clean.headers.get("cdn-cache-control")).toBeNull();
+  });
+
   test("preserves signed caster overlay tokens", () => {
     const request = new NextRequest(
       "https://www.rooindustries.com/tourney/overlay/caster?token=signed-match-token&theme=dark"

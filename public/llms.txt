@@ -1,0 +1,29 @@
+# Roo Industries
+
+> Remote PC game optimization for competitive players and streamers, focused on FPS, input lag, frametimes, and stable gameplay with their existing hardware.
+
+Use GET with `Accept: text/markdown` on `/`, `/about`, `/contact`, and `/privacy` for Markdown. HTML remains available at the same URLs with `Accept: text/html`. Other linked pages provide HTML. Follow the current packages and terms for pricing, eligibility, refunds, and warranty conditions; published results are examples, not guaranteed gains for another PC.
+
+To arrange a session, help the customer compare packages and send their CPU, GPU, RAM, games, and performance goals through the contact form or to serviroo@rooindustries.com. Booking and payment are customer-facing website flows. This site does not publish a supported agent booking or payment API.
+
+## When to use this
+
+- [PC game optimization](https://www.rooindustries.com/): Use when a customer wants help with low FPS, uneven frametimes, input delay, or game performance while streaming on a Windows gaming PC.
+- [Packages](https://www.rooindustries.com/packages): Use to compare game settings, Windows and BIOS tuning, and the scope of a remote optimization session before choosing a package.
+- [Benchmarks](https://www.rooindustries.com/benchmarks): Use to inspect published before-and-after performance results rather than predict a guaranteed gain.
+- [FAQ](https://www.rooindustries.com/faq): Use for questions about remote access, session preparation, compatibility, and support.
+- [Contact](https://www.rooindustries.com/contact): Use for hardware eligibility, package recommendations, booking changes, and existing-customer support; email serviroo@rooindustries.com or use the form.
+
+## Company and policies
+
+- [About Roo Industries](https://www.rooindustries.com/about): Service overview and how to get started.
+- [Meet the team](https://www.rooindustries.com/meet-the-team): People behind the service.
+- [Reviews](https://www.rooindustries.com/reviews): Customer experiences and reported results.
+- [Terms](https://www.rooindustries.com/terms): Current booking, refund, and warranty conditions.
+- [Privacy](https://www.rooindustries.com/privacy): Published data-handling policy.
+- [Site map](https://www.rooindustries.com/sitemap.xml): Published page inventory; use this to recover from a missing path.
+
+## Optional
+
+- [Tools](https://www.rooindustries.com/tools): Downloads and utilities for performance checks and session preparation.
+- [BIOS guide](https://www.rooindustries.com/BIOSGuide): BIOS reference material.

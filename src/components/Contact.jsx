@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useForm, ValidationError } from "@formspree/react";
 import { getPublicContent } from "../lib/publicContentClient";
+import companyContent from "../lib/companyContent";
+
+const { CONTACT_GUIDANCE } = companyContent;
 
 export default function Contact() {
   const [contactData, setContactData] = useState(null);
@@ -54,9 +57,9 @@ export default function Contact() {
   return (
     <section className="text-ink px-4 py-28 flex flex-col items-center">
       <div className="text-center mb-10">
-        <h2 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)] mb-2">
+        <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-info-text drop-shadow-[0_0_15px_rgba(56,189,248,0.5)] mb-2">
           {contactData?.title || "Get In Touch"}
-        </h2>
+        </h1>
         <p className="text-ink-secondary text-lg">
           {contactData?.subtitle ||
             "Ready to optimize your PC? Let's discuss how I can help improve your system's performance."}
@@ -171,6 +174,11 @@ export default function Contact() {
       )}
 
       <div className="h-3" />
+      <div className="w-full max-w-xl text-sm text-ink-secondary leading-relaxed">
+        {CONTACT_GUIDANCE.map((paragraph) => (
+          <p key={paragraph} className="mt-4">{paragraph}</p>
+        ))}
+      </div>
 
       {/* Designed by Nerky */}
       <p className="mt-4 text-xs text-ink-muted">

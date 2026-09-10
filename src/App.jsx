@@ -16,6 +16,7 @@ import IntercomMessenger from "./components/IntercomMessenger";
 import PerfDebugOverlay from "./components/PerfDebugOverlay";
 import { initializePerformanceProfile } from "./lib/performanceProfile";
 import Home from "./legacyPages/Home";
+import AboutPage from "./legacyPages/About";
 import {
   consumeRouteTransitionIntent,
   isHomeSectionHash,
@@ -164,7 +165,8 @@ function AnimatedRoutes({
               />
             )}
           />
-          <Route path="/privacy" element={withRouteSuspense(<Privacy />)} />
+          <Route path="/about" element={<AboutPage />} />
+          <Route path="/privacy" element={withRouteSuspense(<Privacy initialData={initialRouteData?.privacy || null} />)} />
           <Route path="/terms" element={withRouteSuspense(<Terms />)} />
           <Route
             path="/reviews"
