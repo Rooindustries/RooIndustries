@@ -25,7 +25,8 @@ export const createDodoCheckout = async ({ record, lookupOnly = false }) => {
   const client = createDodoClient();
   const amount = Math.round(Number(record.pricingSnapshot?.netAmount) * 100);
   if (!Number.isSafeInteger(amount) || amount <= 0) throw failure("dodo_amount_invalid", 400);
-  const productId = read("DODO_PAYMENTS_PRODUCT_ID");
+  const productId = String(record.providerPublicData?.productId || "").trim();
+  if (!productId) throw failure("dodo_package_product_missing", 400);
   const product = await client.products.retrieve(productId);
   const price = product.price;
   if (product.is_recurring || price?.type !== "one_time_price" ||
@@ -46,7 +47,7 @@ export const createDodoCheckout = async ({ record, lookupOnly = false }) => {
   const session = await client.checkoutSessions.create({
     product_cart: [{ product_id: productId, quantity: 1, amount }],
     billing_currency: DODO_CURRENCY,
-    customer: { email: record.bookingPayload.email, name: "Roo Industries customer" },
+    customer: { email: record.bookingPayload.email },
     metadata: { paymentRecordId: record._id },
     return_url: returnUrl.toString(),
     cancel_url: cancelUrl.toString(),
@@ -55,6 +56,7 @@ export const createDodoCheckout = async ({ record, lookupOnly = false }) => {
       allow_discount_code: false,
       allow_customer_editing_email: false,
       allow_customer_editing_name: true,
+      always_create_new_customer: true,
       allow_tax_id: false,
       redirect_immediately: true,
     },

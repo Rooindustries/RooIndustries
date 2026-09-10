@@ -79,7 +79,7 @@ import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
 
 export { authorizeCronRequest };
 
-const { resolvePaymentProviders, resolveServerPaymentSessionsEnabled } =
+const { resolveDodoProductId, resolvePaymentProviders, resolveServerPaymentSessionsEnabled } =
   providerConfig;
 
 const FINALIZATION_LEASE_SECONDS = 90;
@@ -2670,7 +2670,7 @@ const createOrReusePaymentRecordForStart = async ({
     attemptCount: 0,
     lastAttemptAt: "",
     source: "start",
-    providerPublicData: provider === "dodo" ? { currency: "USD", productId: String(process.env.DODO_PAYMENTS_PRODUCT_ID || "").trim(), environment: String(process.env.DODO_PAYMENTS_ENVIRONMENT || "").trim() } : {},
+    providerPublicData: provider === "dodo" ? { currency: "USD", productId: resolveDodoProductId(bookingPayload.packageTitle), environment: String(process.env.DODO_PAYMENTS_ENVIRONMENT || "").trim() } : {},
     orderState: provider === "free" ? "not_required" : "creating",
     orderCreationLeaseId,
     orderCreationLeaseExpiresAt:

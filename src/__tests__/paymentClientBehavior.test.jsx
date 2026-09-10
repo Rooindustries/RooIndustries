@@ -194,7 +194,7 @@ describe("payment client request and accessibility behavior", () => {
     </MemoryRouter>);
 
     if (manualCheck) {
-      const name = outcome === "manual-failed" ? "Check payment status" : "Pay with Dodo Payments";
+      const name = outcome === "manual-failed" ? "Check payment status" : "Pay your way";
       const button = await screen.findByRole("button", { name });
       await waitFor(() => expect(button).toBeEnabled());
       fireEvent.click(button);
@@ -208,7 +208,7 @@ describe("payment client request and accessibility behavior", () => {
       slotHoldToken: "",
       slotHoldExpiresAt: "",
     });
-    expect(screen.getByRole("button", { name: "Pay with Dodo Payments" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Pay your way" })).toBeDisabled();
     expect(global.fetch).not.toHaveBeenCalledWith("/api/payment/start", expect.anything());
     await act(async () => { jest.advanceTimersByTime(5000); await flushMicrotasks(); });
     expect(screen.getByRole("alert")).toHaveTextContent(/Go back to booking to choose a time/);

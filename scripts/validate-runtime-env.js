@@ -299,13 +299,15 @@ const providerConsistencyWarnings = [];
 const dodoKeys = [
   "DODO_PAYMENTS_API_KEY",
   "DODO_PAYMENTS_ENVIRONMENT",
-  "DODO_PAYMENTS_PRODUCT_ID",
   "DODO_PAYMENTS_WEBHOOK_KEY",
   "DODO_PAYMENTS_RETURN_URL",
 ];
-if (dodoKeys.some((key) => getFirstValue([key]))) {
+if ([...dodoKeys, "DODO_PAYMENTS_PRODUCT_ID", "DODO_PAYMENTS_PRODUCT_IDS"].some((key) => getFirstValue([key]))) {
   for (const key of dodoKeys) {
     if (!getFirstValue([key])) providerConsistencyFailures.push(`${key} is required when Dodo Payments is configured.`);
+  }
+  if (!getFirstValue(["DODO_PAYMENTS_PRODUCT_ID", "DODO_PAYMENTS_PRODUCT_IDS"])) {
+    providerConsistencyFailures.push("DODO_PAYMENTS_PRODUCT_ID is required when no package product map is configured.");
   }
   const dodoEnvironment = getFirstValue(["DODO_PAYMENTS_ENVIRONMENT"]);
   if (!["live_mode", "test_mode"].includes(dodoEnvironment)) {

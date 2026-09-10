@@ -74,6 +74,7 @@ jest.mock("../server/api/payment/providerConfig", () => ({
   resolveServerPaymentSessionsEnabled: (...args) =>
     mockResolveServerPaymentSessionsEnabled(...args),
   default: {
+    resolveDodoProductId: (...args) => jest.requireActual("../server/api/payment/providerConfig").resolveDodoProductId(...args),
     resolvePaymentProviders: (...args) => mockResolvePaymentProviders(...args),
     resolveServerPaymentSessionsEnabled: (...args) =>
       mockResolveServerPaymentSessionsEnabled(...args),
@@ -4352,7 +4353,26 @@ describe('Dodo checkout lifecycle',()=>{
       return validation.ok?{ok:true,trustedCapture:true,providerOrderId:proof.checkout_session_id,providerPaymentId:proof.payment_id,payerEmail:proof.customer.email}:validation;
     });
   });
-  afterEach(()=>{delete process.env.DODO_PAYMENTS_PRODUCT_ID;delete process.env.DODO_PAYMENTS_ENVIRONMENT;});
+  afterEach(()=>{delete process.env.DODO_PAYMENTS_PRODUCT_ID;delete process.env.DODO_PAYMENTS_ENVIRONMENT;delete process.env.DODO_PAYMENTS_PRODUCT_IDS;});
+  test('freezes the package product before provider creation and recovers a missing checkout ID', async () => {
+    process.env.DODO_PAYMENTS_PRODUCT_IDS = JSON.stringify({
+      'Vertex Essentials': 'pdt_essentials',
+      'Performance Vertex Overhaul': 'pdt_overhaul',
+      'Performance Vertex Max': 'pdt_max',
+    });
+    mockCreateDodoCheckout.mockImplementationOnce(async ({record}) => {
+      expect(record.providerOrderId).toBe('');
+      expect(record.providerPublicData.productId).toBe('pdt_overhaul');
+      return {orderId:'cks_dodo',checkoutUrl:'https://test.checkout.dodopayments.com/cks_dodo',currency:'USD',productId:'pdt_overhaul',environment:'test_mode'};
+    });
+    await startDodo();
+    latest.product_cart[0].product_id = 'pdt_overhaul';
+    getOnlyPaymentRecord().providerOrderId = '';
+    const result = await notify();
+    expect(result.body.status).toBe('booked');
+    expect(getOnlyPaymentRecord()).toMatchObject({providerOrderId:'cks_dodo',providerPublicData:{productId:'pdt_overhaul'}});
+    expect(mockCreateBooking).toHaveBeenCalledTimes(1);
+  });
   test('repeated and concurrent success creates one booking and one payment proof',async()=>{
     await startDodo();
     const first=await notify();expect(first.httpStatus).toBe(200);expect(first.body.status).toBe('booked');

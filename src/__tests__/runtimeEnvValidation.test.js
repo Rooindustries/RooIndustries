@@ -223,6 +223,21 @@ describe("release runtime environment validation", () => {
     expect(result.status).toBe(0);
     expect(result.output).toContain("Runtime secret validation passed");
   });
+  test("accepts named Dodo package products without a generic product", () => {
+    const result = validate({
+      DODO_PAYMENTS_API_KEY: "synthetic-live-key",
+      DODO_PAYMENTS_ENVIRONMENT: "live_mode",
+      DODO_PAYMENTS_PRODUCT_IDS: JSON.stringify({
+        "Vertex Essentials": "pdt_essentials",
+        "Performance Vertex Overhaul": "pdt_overhaul",
+        "Performance Vertex Max": "pdt_max",
+      }),
+      DODO_PAYMENTS_WEBHOOK_KEY: "synthetic-webhook-key",
+      DODO_PAYMENTS_RETURN_URL: "https://preview.example.com/payment",
+      ALLOW_LIVE_PAYMENTS_IN_PREVIEW: "1",
+    });
+    expect(result.status).toBe(0);
+  });
 
   test.each(["", "  "])(
     "defaults %j selectors to Supabase with no Sanity configuration",
