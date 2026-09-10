@@ -265,6 +265,8 @@ export default async function handler(req, res) {
       slotHoldToken = "",
       slotHoldExpiresAt = "",
       paymentProvider = "",
+      dodoCheckoutSessionId = "",
+      dodoPaymentId = "",
       paymentRecordId = "",
       bookingRequestId = "",
       upgradeIntentToken = "",
@@ -345,6 +347,12 @@ export default async function handler(req, res) {
       return res.status(409).json({
         error: "Payment finalization record is no longer valid.",
       });
+    }
+    if (paymentProvider === "dodo" && (!isInternalPaymentFinalization || !trustedPaymentFinalizeSource ||
+        internalPaymentRecord?.verificationState !== "server_verified" ||
+        internalPaymentRecord?.providerOrderId !== dodoCheckoutSessionId ||
+        internalPaymentRecord?.providerPaymentId !== dodoPaymentId || !dodoPaymentId)) {
+      return res.status(403).json({ error: "Dodo bookings require a server-verified payment session." });
     }
     const clientAddress = getClientAddress(req);
     if (
@@ -464,7 +472,8 @@ export default async function handler(req, res) {
     if (
       paymentProvider !== "free" &&
       paymentProvider !== "paypal" &&
-      paymentProvider !== "razorpay"
+      paymentProvider !== "razorpay" &&
+      paymentProvider !== "dodo"
     ) {
       return res.status(400).json({ error: "Unsupported payment provider." });
     }
@@ -883,7 +892,7 @@ export default async function handler(req, res) {
       }
     }
 
-    if (paymentProvider === "paypal" || paymentProvider === "razorpay") {
+    if (paymentProvider === "paypal" || paymentProvider === "razorpay" || paymentProvider === "dodo") {
       if (normalizedStatus !== "captured") {
         return res.status(400).json({
           error: "Only captured payments can create bookings.",
@@ -895,7 +904,7 @@ export default async function handler(req, res) {
       const hasPaypalProof = !!paypalOrderId;
       const hasRazorpayProof = !!razorpayPaymentId;
 
-      if (!hasPaypalProof && !hasRazorpayProof) {
+      if (!hasPaypalProof && !hasRazorpayProof && !(paymentProvider === "dodo" && dodoPaymentId)) {
         return res.status(400).json({
           error:
             "Payment verification missing. Cannot mark booking as paid without a transaction ID.",
@@ -929,6 +938,21 @@ export default async function handler(req, res) {
       }
     }
 
+    if (paymentProvider === "dodo" && dodoPaymentId) {
+      const existingByDodo = await writeClient.fetch(
+        `*[_type == "booking" && paymentProvider == "dodo"
+          && dodoPaymentId == $dodoPaymentId
+          && dodoCheckoutSessionId == $dodoCheckoutSessionId][0]{_id}`,
+        { dodoPaymentId, dodoCheckoutSessionId }
+      );
+      if (existingByDodo?._id) {
+        return respondWithStoredBooking({
+          bookingId: existingByDodo._id,
+          idempotent: true,
+        });
+      }
+    }
+
     const utcDate = parseUtcDate(resolvedStartTimeUTC);
     if (!utcDate) {
       return res.status(400).json({
@@ -945,8 +969,8 @@ export default async function handler(req, res) {
     const bookingDocId = buildDeterministicBookingId({
       paymentRecordId,
       paymentProvider,
-      providerOrderId: paypalOrderId || razorpayOrderId,
-      providerPaymentId: razorpayPaymentId,
+      providerOrderId: paypalOrderId || razorpayOrderId || dodoCheckoutSessionId,
+      providerPaymentId: razorpayPaymentId || dodoPaymentId,
       idempotencyKey: bookingRequestId,
       originalOrderId,
       startTimeUTC: normalizedStartTimeUTC,
@@ -1002,7 +1026,7 @@ export default async function handler(req, res) {
     let slotReservationState = isUpgrade ? "upgrade" : "hold_active";
     const isCapturedPaidPayment =
       normalizedStatus === "captured" &&
-      (paymentProvider === "paypal" || paymentProvider === "razorpay");
+      (paymentProvider === "paypal" || paymentProvider === "razorpay" || paymentProvider === "dodo");
 
     if (!isUpgrade) {
       const existingBookings = await writeClient.fetch(
@@ -1303,7 +1327,7 @@ export default async function handler(req, res) {
           : null,
         Promise.resolve(internalPaymentRecord),
       ]);
-      const expectedOrderId = paypalOrderId || razorpayOrderId;
+      const expectedOrderId = paypalOrderId || razorpayOrderId || dodoCheckoutSessionId;
       const leaseExpiresAt = new Date(
         paymentRecordForLease?.finalizationLeaseExpiresAt || ""
       ).getTime();
@@ -1312,8 +1336,8 @@ export default async function handler(req, res) {
         paymentProofClaim.paymentRecordId !== paymentRecordId ||
         paymentProofClaim.provider !== paymentProvider ||
         paymentProofClaim.providerOrderId !== expectedOrderId ||
-        (razorpayPaymentId &&
-          paymentProofClaim.providerPaymentId !== razorpayPaymentId) ||
+        ((razorpayPaymentId || dodoPaymentId) &&
+          paymentProofClaim.providerPaymentId !== (razorpayPaymentId || dodoPaymentId)) ||
         (paymentProofClaim.bookingId && paymentProofClaim.bookingId !== bookingDocId)
       );
       const invalidLease =
@@ -1383,6 +1407,9 @@ export default async function handler(req, res) {
       packagePrice: resolvedPackagePrice,
       status: normalizedStatus,
       paymentProvider,
+      ...(paymentProvider === "dodo" ? { paymentVerificationState: internalPaymentRecord.verificationState } : {}),
+      dodoCheckoutSessionId,
+      dodoPaymentId,
       paypalOrderId,
       payerEmail: verifiedPayerEmail,
       razorpayOrderId,
@@ -1394,6 +1421,12 @@ export default async function handler(req, res) {
       netAmount: effectiveNetAmount,
       commissionPercent: effectiveCommissionPercent,
       commissionAmount,
+      ...(paymentProvider === "dodo" && internalPaymentRecord.refundState === "partial" ? {
+        dodoOriginalCommissionAmount: commissionAmount,
+        refundedAmount: Number(internalPaymentRecord.refundProcessedAmountInSubunits || 0) / 100,
+        refundStatus: "partial",
+        commissionAmount: Math.round(commissionAmount * Math.max(0, 1 - Number(internalPaymentRecord.refundProcessedAmountInSubunits || 0) / (effectiveNetAmount * 100)) * 100) / 100,
+      } : {}),
       hostDate: bookingDate,
       hostTime: bookingTime,
       hostTimeZone: OWNER_TZ_NAME,

@@ -25,6 +25,10 @@ export default async function handler(req, res) {
   return res.status(200).json({
     ok: true,
     providers: {
+      dodo: {
+        enabled: !!providers?.dodo?.enabled,
+        mode: providers?.dodo?.mode || "missing",
+      },
       razorpay: {
         enabled: !!providers?.razorpay?.enabled,
         mode: providers?.razorpay?.mode || "unknown",

@@ -125,6 +125,18 @@ beforeEach(() => {
 });
 
 describe("getUpgradeInfo API", () => {
+  test.each(["dodoCheckoutSessionId", "dodoPaymentId"])("resolves a Dodo %s for the booking owner", async (field) => {
+    const booking = paidBooking({ paymentProvider: "dodo", [field]: "dodo_order_1" });
+    mockGetDocument.mockResolvedValue(null);
+    setupFetch({
+      booking,
+      extraFetch: (query, params) => query.includes(`${field} == $id`) && params.id === "dodo_order_1" ? booking : undefined,
+    });
+    const res = createRes();
+    await getUpgradeInfo(createReq({ id: "dodo_order_1", email: booking.email }), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.ok).toBe(true);
+  });
   test("requires the booking email for upgrade lookup", async () => {
     const req = createReq({ id: "booking_1" });
     const res = createRes();

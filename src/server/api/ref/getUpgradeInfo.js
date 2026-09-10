@@ -69,6 +69,15 @@ const resolveBookingFromPaymentRecord = async ({ record, client }) => {
   const providerOrderId = normalizeSubmittedOrderId(record.providerOrderId);
   const providerPaymentId = normalizeSubmittedOrderId(record.providerPaymentId);
 
+  if (provider === "dodo" && (providerPaymentId || providerOrderId)) {
+    const booking = await fetchBookingByField({
+      client,
+      field: providerPaymentId ? "dodoPaymentId" : "dodoCheckoutSessionId",
+      id: providerPaymentId || providerOrderId,
+    });
+    if (isBookingDocument(booking)) return booking;
+  }
+
   if (provider === "paypal" && providerOrderId) {
     const booking = await fetchBookingByField({
       client,
@@ -108,6 +117,8 @@ export const resolveBookingFromSubmittedOrderId = async ({ id, client }) => {
 
   for (const field of [
     "orderId",
+    "dodoCheckoutSessionId",
+    "dodoPaymentId",
     "paypalOrderId",
     "razorpayOrderId",
     "razorpayPaymentId",

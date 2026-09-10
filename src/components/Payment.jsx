@@ -357,6 +357,12 @@ export default function Payment({ hideFooter = false }) {
     bookingData?.slotHoldExpiresAt;
   const holdExpired =
     holdExpiresAt && new Date(holdExpiresAt).getTime() <= Date.now();
+  const dodoRedirect = new URLSearchParams(location.search);
+  const dodoReturnHandled = useRef("");
+  const storedDodoReturn = dodoRedirect.has("dodo_return") || dodoRedirect.has("dodo_cancel")
+    ? readStoredPaymentSession() : null;
+  const processingDodoReturn = (dodoRedirect.has("dodo_return") || dodoRedirect.has("dodo_cancel")) &&
+    ((storedDodoReturn?.provider === "dodo" && !!storedDodoReturn.paymentAccessToken) || !!dodoReturnHandled.current);
   const hasSlotHold =
     !!(sessionHold?.slotHoldId || bookingData?.slotHoldId) &&
     !!(sessionHold?.slotHoldToken || bookingData?.slotHoldToken) &&
@@ -433,7 +439,7 @@ export default function Payment({ hideFooter = false }) {
   };
 
   useEffect(() => {
-    if (!holdExpiresAt) return;
+    if (!holdExpiresAt || processingDodoReturn) return;
     const expiresAtMs = new Date(holdExpiresAt).getTime();
     if (!Number.isFinite(expiresAtMs)) return;
 
@@ -470,7 +476,7 @@ export default function Payment({ hideFooter = false }) {
 
     scheduleExpiry();
     return () => clearTimeout(timeoutId);
-  }, [holdExpiresAt, navigate, navState, location]);
+  }, [holdExpiresAt, processingDodoReturn, navigate, navState, location]);
 
   const {
     referralPercent,
@@ -491,7 +497,9 @@ export default function Payment({ hideFooter = false }) {
 
   const [rzpReady, setRzpReady] = useState(false);
   const [payingRzp, setPayingRzp] = useState(false);
+  const [payingDodo, setPayingDodo] = useState(false);
   const [providerConfig, setProviderConfig] = useState({
+    dodo: { enabled: false, mode: "missing" },
     razorpay: { enabled: false, mode: "unknown", disabledReason: "" },
     paypal: { enabled: false, mode: "unknown", clientId: "" },
   });
@@ -784,6 +792,7 @@ export default function Payment({ hideFooter = false }) {
       .then((data) => {
         if (!active || !data?.ok || !data?.providers) return;
         setProviderConfig({
+          dodo: { enabled: !!data.providers?.dodo?.enabled, mode: data.providers?.dodo?.mode || "missing" },
           razorpay: {
             enabled: !!data.providers?.razorpay?.enabled,
             mode: data.providers?.razorpay?.mode || "unknown",
@@ -900,10 +909,37 @@ export default function Payment({ hideFooter = false }) {
     return null;
   };
 
-  const clearPaymentSession = () => {
+  const clearPaymentSession = (terminalStatus = "", expectedToken = "") => {
+    const storedSession = readStoredPaymentSession();
+    if (terminalStatus && expectedToken && storedSession?.paymentAccessToken !== expectedToken) return true;
+    const activeSession = storedSession || paymentSession;
     sessionStartRef.current = null;
     setPaymentSession(null);
     clearStoredPaymentSession();
+    if (activeSession?.provider !== "dodo" || isUpgrade ||
+        !["failed", "abandoned", "refunded"].includes(terminalStatus)) return false;
+    const nextCheckout = {
+      ...bookingData,
+      slotHoldId: "",
+      slotHoldToken: "",
+      slotHoldExpiresAt: "",
+    };
+    setSessionHold(null);
+    writeStoredCheckout(nextCheckout);
+    sessionStorage.removeItem("my_slot_hold");
+    window.dispatchEvent(new CustomEvent("hold-state", { detail: null }));
+    dodoReturnHandled.current = "";
+    const query = new URLSearchParams(location.search);
+    query.delete("dodo_return");
+    query.delete("dodo_cancel");
+    navigate({ pathname: location.pathname, search: query.toString(), hash: location.hash }, {
+      replace: true, state: { ...navState, bookingData: nextCheckout },
+    });
+    showBanner("error", terminalStatus === "refunded"
+      ? "This payment was refunded. Go back to booking to choose a time."
+      : "Payment was not completed and the slot was released. Go back to booking to choose a time.",
+    { persistent: true });
+    return true;
   };
 
   const handleChangePaymentMethod = async () => {
@@ -959,7 +995,16 @@ export default function Payment({ hideFooter = false }) {
         window.dispatchEvent(new CustomEvent("hold-state", { detail: holdState }));
       }
       clearPaymentSession();
-      showBanner("success", "Payment method released. Choose PayPal or Razorpay below.");
+      if (activeSession.provider === "dodo") {
+        dodoReturnHandled.current = "";
+        const query = new URLSearchParams(location.search);
+        query.delete("dodo_return");
+        query.delete("dodo_cancel");
+        navigate({ pathname: location.pathname, search: query.toString(), hash: location.hash }, {
+          replace: true, state: location.state,
+        });
+      }
+      showBanner("success", "Payment method released. Choose a payment method below.");
     } catch (error) {
       showBanner("error", error.message || "The payment method could not be changed.");
     } finally {
@@ -1083,7 +1128,9 @@ export default function Payment({ hideFooter = false }) {
         response.ok &&
         ["refunded", "failed", "abandoned"].includes(resumedStatus)
       ) {
-        clearPaymentSession();
+        if (clearPaymentSession(resumedStatus, paymentSession.paymentAccessToken)) {
+          return { ...paymentSession, result: data, terminal: true };
+        }
         throw new Error(
           data?.recoveryReason || "This payment session is no longer payable."
         );
@@ -1240,7 +1287,7 @@ export default function Payment({ hideFooter = false }) {
           return settled;
         }
 
-        clearPaymentSession();
+        if (clearPaymentSession(settledStatus, paymentAccessToken)) return settled;
         throw new Error(
           settled?.recoveryReason ||
             settled?.error ||
@@ -1248,7 +1295,7 @@ export default function Payment({ hideFooter = false }) {
         );
       }
 
-      clearPaymentSession();
+      if (clearPaymentSession(status, paymentAccessToken)) return data;
       throw new Error(
         data?.recoveryReason || data?.error || "Payment finalization failed."
       );
@@ -1256,6 +1303,34 @@ export default function Payment({ hideFooter = false }) {
       setPaymentStatusBusy(false);
     }
   };
+
+  const handleDodoCheckout = async () => {
+    if (payingDodo || paymentStatusBusy) return;
+    if (!ensureSlotBeforeAction()) return;
+    setPayingDodo(true);
+    try {
+      const session = await startSessionCheckout("dodo");
+      if (session?.terminal) return;
+      if (!session?.providerPayload?.checkoutUrl) throw new Error("Checkout is being recovered. Check the payment status shortly.");
+      window.location.assign(session.providerPayload.checkoutUrl);
+    } catch (error) {
+      showBanner("error", error.message || "Unable to open Dodo Payments.");
+    } finally {
+      setPayingDodo(false);
+    }
+  };
+
+  useEffect(() => {
+    const query = new URLSearchParams(location.search);
+    const session = readStoredPaymentSession();
+    if (!hydrated || session?.provider !== "dodo" || !session.paymentAccessToken ||
+        (!query.has("dodo_return") && !query.has("dodo_cancel")) ||
+        dodoReturnHandled.current === session.paymentAccessToken) return;
+    dodoReturnHandled.current = session.paymentAccessToken;
+    const action = query.has("dodo_cancel") ? handleChangePaymentMethod()
+      : finalizeSessionCheckout({ paymentAccessToken: session.paymentAccessToken, providerData: {} });
+    Promise.resolve(action).catch((error) => showBanner("error", error.message || "Payment confirmation is pending. Check again shortly."));
+  }, [hydrated, location.search, paymentSession]);
 
   async function validateReferral(code) {
     const normalizedCode = String(code || "").trim();
@@ -1836,7 +1911,7 @@ export default function Payment({ hideFooter = false }) {
             {!!lockedProvider && (
               <div className="mt-4 flex flex-col items-start justify-between gap-3 rounded-lg border border-info-border bg-info-soft px-4 py-3 sm:flex-row sm:items-center">
                 <p className="text-xs text-info-text">
-                  This checkout is reserved with {lockedProvider === "paypal" ? "PayPal" : "Razorpay"}. Pricing and provider selection are locked for this session. Finish it or safely release this payment method before choosing another.
+                  This checkout is reserved with {lockedProvider === "dodo" ? "Dodo Payments" : lockedProvider === "paypal" ? "PayPal" : "Razorpay"}. Pricing and provider selection are locked for this session. Finish it or safely release this payment method before choosing another.
                 </p>
                 <button
                   type="button"
@@ -1888,6 +1963,28 @@ export default function Payment({ hideFooter = false }) {
             </div>
           ) : (
             <>
+              {providerConfig.dodo?.enabled && (
+                <div className="low-perf-surface glass-premium glass-card-surface mt-6 flex flex-col items-center justify-between gap-4 rounded-xl border border-line-input px-5 py-4 sm:flex-row">
+                  <div>
+                    <p className="text-base font-semibold text-ink">Dodo Payments</p>
+                    <p className="text-sm text-ink-muted">Pay securely by card and supported local payment methods.</p>
+                  </div>
+                  <div className="flex w-full shrink-0 flex-col gap-2 sm:w-48">
+                    <button type="button" onClick={handleDodoCheckout}
+                      disabled={!canSubmitBooking || payingDodo || paymentStatusBusy || cancellingPayment || quoteLoading || !quoteFingerprint || !providerIsAvailableForSession("dodo")}
+                      className="glow-button inline-flex h-10 w-full items-center justify-center rounded-lg px-4 text-sm font-semibold disabled:opacity-60">
+                      {payingDodo ? "Opening checkout..." : "Pay with Dodo Payments"}
+                    </button>
+                    {lockedProvider === "dodo" && (
+                      <button type="button" disabled={paymentStatusBusy || cancellingPayment}
+                        className="rounded-md px-3 py-2 text-xs font-semibold text-ink-muted hover:text-ink disabled:opacity-60"
+                        onClick={() => finalizeSessionCheckout({ paymentAccessToken: paymentSession.paymentAccessToken, providerData: {} }).catch((error) => showBanner("error", error?.message || "Unable to load payment status. Please try again."))}>
+                        {paymentStatusBusy ? "Checking payment..." : "Check payment status"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div
                 className={`low-perf-surface glass-premium glass-card-surface mt-6 flex flex-col items-center justify-between gap-4 rounded-xl border px-5 py-4 sm:flex-row ${
@@ -1929,7 +2026,7 @@ export default function Payment({ hideFooter = false }) {
                     !canUseRazorpay ||
                     !providerIsAvailableForSession("razorpay")
                   }
-                  className="glow-button h-10 w-full rounded-lg px-4 text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 sm:w-48"
+                  className="glow-button h-10 w-full shrink-0 rounded-lg px-4 text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 sm:w-48"
                 >
                   {payingRzp || paymentStatusBusy
                     ? "Processing..."
@@ -1979,7 +2076,7 @@ export default function Payment({ hideFooter = false }) {
                   </div>
 
                   {/* Clip the SDK’s 40px button at its 4px radius to hide the iframe’s light corners. Use outline-0: Tailwind v3’s outline-none leaves a transparent outline that forced-colors modes can repaint. */}
-                  <div className="w-full sm:w-48">
+                  <div className="w-full shrink-0 sm:w-48">
                     {canDisplayPaypalMethod ? (
                       <PayPalScriptProvider
                         options={{

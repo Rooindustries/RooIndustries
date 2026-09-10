@@ -296,6 +296,31 @@ const explicitPayPalEnv = getFirstValue([
 
 const providerConsistencyFailures = [];
 const providerConsistencyWarnings = [];
+const dodoKeys = [
+  "DODO_PAYMENTS_API_KEY",
+  "DODO_PAYMENTS_ENVIRONMENT",
+  "DODO_PAYMENTS_PRODUCT_ID",
+  "DODO_PAYMENTS_WEBHOOK_KEY",
+  "DODO_PAYMENTS_RETURN_URL",
+];
+if (dodoKeys.some((key) => getFirstValue([key]))) {
+  for (const key of dodoKeys) {
+    if (!getFirstValue([key])) providerConsistencyFailures.push(`${key} is required when Dodo Payments is configured.`);
+  }
+  const dodoEnvironment = getFirstValue(["DODO_PAYMENTS_ENVIRONMENT"]);
+  if (!["live_mode", "test_mode"].includes(dodoEnvironment)) {
+    providerConsistencyFailures.push("DODO_PAYMENTS_ENVIRONMENT must be live_mode or test_mode.");
+  } else if (!paymentProviders.dodo.enabled) {
+    providerConsistencyFailures.push("Dodo Payments is disabled by the current payment runtime policy or incomplete configuration.");
+  }
+  try {
+    const returnUrl = new URL(getFirstValue(["DODO_PAYMENTS_RETURN_URL"]));
+    if (!["https:", "http:"].includes(returnUrl.protocol) || returnUrl.username || returnUrl.password ||
+        (dodoEnvironment === "live_mode" && returnUrl.protocol !== "https:")) throw new Error();
+  } catch {
+    providerConsistencyFailures.push("DODO_PAYMENTS_RETURN_URL must be a valid URL, using HTTPS for live payments.");
+  }
+}
 const supabaseConsistencyFailures = [];
 const downloadConsistencyFailures = [];
 const cmsWritePause = readExplicitBoolean("CMS_WRITES_PAUSED");
@@ -731,10 +756,10 @@ if (anySupabaseRuntimeEnabled) {
       parsed.pathname === "/" &&
       !parsed.search &&
       !parsed.hash &&
-      [
+      ((isPreviewBuild && /^[a-z]{20}\.supabase\.co$/.test(parsed.hostname)) || [
         "ntezmxzaibrrsgtujgxu.supabase.co",
         "authenticate.rooindustries.com",
-      ].includes(parsed.hostname.toLowerCase());
+      ].includes(parsed.hostname.toLowerCase()));
   } catch {
     validSupabaseUrl = false;
   }

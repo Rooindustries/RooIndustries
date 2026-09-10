@@ -26,6 +26,12 @@ const report = {
       String(process.env.ALLOW_LIVE_PAYMENTS_IN_PREVIEW || "").trim() !== "",
   },
   providers: {
+    dodo: {
+      enabled: providers?.dodo?.enabled === true,
+      mode: providers?.dodo?.mode || "missing",
+      credentialsPresent: !!String(process.env.DODO_PAYMENTS_API_KEY || "").trim(),
+      webhookKeyPresent: !!String(process.env.DODO_PAYMENTS_WEBHOOK_KEY || "").trim(),
+    },
     razorpay: {
       enabled: providers?.razorpay?.enabled === true,
       mode: providers?.razorpay?.mode || "unknown",

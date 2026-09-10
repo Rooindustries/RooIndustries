@@ -99,6 +99,7 @@ export const createPaymentBackendClientOverride = (
     : createPaymentBackendClient(backend);
 
 const webhookProviderData = ({ provider, body = {} }) => {
+  if (provider === "dodo") return { providerOrderId: String(body?.data?.checkout_session_id || ""), providerPaymentId: String(body?.data?.payment_id || "") };
   if (provider === "razorpay") {
     const payment = body?.payload?.payment?.entity || {};
     const refund = body?.payload?.refund?.entity || {};

@@ -233,11 +233,26 @@ export const createRequiresRescheduleBooking = async ({
       backendOwner:
         paymentRecord.backendOwner === "supabase" ? "supabase" : "sanity",
       paymentProvider: paymentRecord.provider,
+      ...(paymentRecord.provider === "dodo" ? {
+        dodoCheckoutSessionId: paymentRecord.providerOrderId,
+        dodoPaymentId: paymentRecord.providerPaymentId,
+        commissionPercent: Number(pricing.commissionPercent || 0),
+        commissionAmount: Number(pricing.commissionAmount || 0),
+        paymentVerificationState: paymentRecord.verificationState || "",
+        ...(paymentRecord.refundState === "partial" ? {
+          dodoOriginalCommissionAmount: Number(pricing.commissionAmount || 0),
+          refundedAmount: Number(paymentRecord.refundProcessedAmountInSubunits || 0) / 100,
+          refundStatus: "partial",
+          commissionAmount: Number(pricing.netAmount) > 0
+            ? Math.round(Number(pricing.commissionAmount || 0) * Math.max(0, 1 - Number(paymentRecord.refundProcessedAmountInSubunits || 0) / (Number(pricing.netAmount) * 100)) * 100) / 100
+            : 0,
+        } : {}),
+      } : {}),
       paypalOrderId:
         paymentRecord.provider === "paypal" ? paymentRecord.providerOrderId : "",
       razorpayOrderId:
         paymentRecord.provider === "razorpay" ? paymentRecord.providerOrderId : "",
-      razorpayPaymentId: paymentRecord.providerPaymentId || "",
+      razorpayPaymentId: paymentRecord.provider === "dodo" ? "" : paymentRecord.providerPaymentId || "",
       email: payload.email || paymentRecord.payerEmail || "",
       discord: payload.discord || "",
       specs: payload.specs || "",
