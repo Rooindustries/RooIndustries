@@ -80,6 +80,7 @@ test("missing paths keep 404 status and offer recovery in Markdown", async () =>
       hasSafeCache(response);
       const body = await response.text();
       if (accept !== "text/html") {
+        assert.match(response.headers.get("cache-control") || "", /no-store/);
         assert.ok(response.headers.get("content-type").startsWith("text/markdown"));
         for (const link of ["/sitemap.xml", "/llms.txt", "/contact"]) assert.ok(body.includes(link));
       } else {
@@ -90,6 +91,21 @@ test("missing paths keep 404 status and offer recovery in Markdown", async () =>
     assert.equal(head.status, 404);
     assert.equal(await head.text(), "");
   }
+});
+
+test("framework assets keep their cache policy without caching missing chunks", async () => {
+  const home = await get("/");
+  const html = await home.text();
+  const source = html.match(/<script[^>]*src="(\/_next\/static\/[^\"]+\.js(?:\?[^\"]*)?)"/)[1];
+  const script = await get(source, "*/*", "HEAD");
+  assert.equal(script.status, 200);
+  if (process.env.VERCEL_ENV === "preview" || process.env.VERCEL_ENV === "production") {
+    assert.match(script.headers.get("cache-control") || "", /max-age=31536000/);
+  }
+  const missing = await get("/_next/static/agent-readiness-nonexistent.js", "*/*");
+  assert.equal(missing.status, 404);
+  assert.match(missing.headers.get("cache-control") || "", /no-store|no-cache|max-age=0/);
+  await missing.text();
 });
 
 test("asset URLs remove sensitive parameters and retain their bytes and content type", async () => {
@@ -107,6 +123,9 @@ test("asset URLs remove sensitive parameters and retain their bytes and content 
     const image = await get(path, accept);
     assert.equal(image.status, 200);
     assert.ok(image.headers.get("content-type").startsWith("image/png"));
+    if (process.env.VERCEL_ENV === "preview" || process.env.VERCEL_ENV === "production") {
+      assert.match(image.headers.get("cache-control") || "", /max-age=31536000/);
+    }
     assert.ok(!image.headers.get("vary")?.toLowerCase().split(/,\s*/).includes("accept"));
     assert.deepEqual(Buffer.from(await image.arrayBuffer()), readFileSync(new URL(`../public${path}`, import.meta.url)));
   }

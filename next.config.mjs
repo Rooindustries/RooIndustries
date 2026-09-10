@@ -1,3 +1,7 @@
+import { readdirSync } from "node:fs";
+import { join, relative, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+
 /** @type {import('next').NextConfig} */
 const isProduction = process.env.NODE_ENV === "production";
 const DEFAULT_SUPABASE_ASSET_ORIGIN =
@@ -122,6 +126,11 @@ const nextConfig = {
     };
   },
   async headers() {
+    const publicRoot = fileURLToPath(new URL("./public/", import.meta.url));
+    const assets = readdirSync(publicRoot, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => relative(publicRoot, join(entry.parentPath ?? entry.path, entry.name)).split(sep).join("/"))
+      .filter((asset) => /\.(png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|otf|webm|mp4)$/.test(asset) || asset.startsWith("static/"));
     return [
       {
         source: '/:path*',
@@ -131,14 +140,10 @@ const nextConfig = {
         source: '/tourney/overlay/:path*',
         headers: overlayFrameHeaders,
       },
-      {
-        source: '/_next/static/:path*',
+      ...assets.map((asset) => ({
+        source: `/${asset.replace(/[.*+?^${}()|[\]\\:]/g, "\\$&")}`,
         headers: assetCacheHeaders,
-      },
-      {
-        source: '/:path*.:ext(png|jpg|jpeg|gif|webp|avif|svg|ico|woff2|woff|ttf|otf|webm|mp4)',
-        headers: assetCacheHeaders,
-      },
+      })),
     ];
   },
   images: {
