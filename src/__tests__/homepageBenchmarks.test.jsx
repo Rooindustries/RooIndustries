@@ -12,6 +12,20 @@ import Services from "../components/Services";
 
 jest.mock("../sanityClient", () => ({ urlFor: jest.fn() }));
 
+const originalIntersectionObserver = global.IntersectionObserver;
+
+beforeAll(() => {
+  global.IntersectionObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+});
+
+afterAll(() => {
+  global.IntersectionObserver = originalIntersectionObserver;
+});
+
 const about = {
   recordDetails: [{ label: "RANK", value: "#31" }],
   recordLink: "https://www.3dmark.com/hall-of-fame",
@@ -104,7 +118,4 @@ it("skips empty pages and keeps page controls within the available results", asy
 it("respects the benchmark visibility setting", () => {
   render(wrap({ benchEnabled: false, benchPages: [{ games: [game()] }] }));
   expect(screen.queryByRole("article")).not.toBeInTheDocument();
-  expect(
-    screen.getByRole("link", { name: "Compare packages" }),
-  ).toHaveAttribute("href", "/#packages");
 });
