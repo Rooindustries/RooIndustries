@@ -21,43 +21,43 @@ const HOME_COPY = {
   services: {
     heading: "Built For Ranked Games",
     subheading:
-      "Everything that makes the game feel faster, smoother, and more consistent.",
+      "Less delay. Smoother games. No new hardware.",
     cards: [
       {
         iconType: "clock",
         title: "Lower delay",
         description:
-          "Cleaner mouse response when every flick matters.",
+          "Faster mouse response.",
       },
       {
         iconType: "zap",
         title: "Stable frames",
         description:
-          "Stronger 1% lows through fights and team pushes.",
+          "Stronger 1% lows.",
       },
       {
         iconType: "shield",
         title: "More FPS",
         description:
-          "Unlock performance from the hardware you already own.",
+          "More from your hardware.",
       },
       {
         iconType: "wrench",
-        title: "Less junk running",
+        title: "Less bloat",
         description:
-          "Cut background load that steals frames from your game.",
+          "Keep resources for games.",
       },
       {
         iconType: "video",
         title: "Stream-ready",
         description:
-          "Stream and record without wrecking game performance.",
+          "Play, stream, and record.",
       },
       {
         iconType: "cpu",
-        title: "FPS stays up",
+        title: "Stable sessions",
         description:
-          "Stable performance through long ranked sessions.",
+          "Stay smooth for longer.",
       },
     ],
   },

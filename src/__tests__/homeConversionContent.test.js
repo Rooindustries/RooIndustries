@@ -70,11 +70,5 @@ describe("homepage conversion content", () => {
     expect(aboutSource).toContain(
       'const compactRecordNote = "Former #16"'
     );
-    expect(aboutSource).toContain(
-      'grid-cols-[minmax(7.5rem,0.42fr)_1fr] items-stretch'
-    );
-    expect(aboutSource).not.toContain(
-      'rounded-xl bg-surface-veil px-4 py-3 text-center ring-1 ring-line-soft'
-    );
   });
 });

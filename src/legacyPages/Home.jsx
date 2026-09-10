@@ -1,5 +1,6 @@
 import React, { lazy, Suspense, useEffect, useRef, useState } from "react";
 import Hero from "../components/Hero";
+import Services from "../components/Services";
 import { Link, useLocation } from "react-router-dom";
 import {
   HOME_SECTION_PREFETCH_BY_HASH,
@@ -19,10 +20,8 @@ import SupportedGames from "../components/SupportedGames";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 
 // DeferredSection delays rendering; lazy() also delays downloading and parsing these motion-heavy sections.
-const loadServices = () => import("../components/Services");
 const loadPackages = () => import("../components/Packages");
 const loadFaq = () => import("../components/Faq");
-const Services = lazy(loadServices);
 const Packages = lazy(loadPackages);
 const Faq = lazy(loadFaq);
 
@@ -138,7 +137,6 @@ export default function Home({ initialData = null }) {
           ...(HOME_SECTION_PREFETCH_BY_HASH["#how-it-works"] || []),
         ])
       );
-      loadServices().catch(() => {});
       loadPackages().catch(() => {});
       prefetchHomeSectionData(warmKeys).catch(() => {});
     };
@@ -158,20 +156,10 @@ export default function Home({ initialData = null }) {
         <StreamerYoutuberReviews initialData={initialData?.reviews || null} />
       </DeferredSection>
       <section id="services" style={{ scrollMarginTop: "var(--section-nav-offset)" }}>
-        <DeferredSection
-          fallbackClassName="min-h-[3100px] sm:min-h-[520px]"
-          rootMargin="240px 0px"
-          eager={eagerAll}
-        >
-          <Suspense fallback={<div className="min-h-[520px]" />}>
-            <div className="deferred-section-content">
-              <Services
-                initialData={initialData?.services || null}
-                initialAboutData={initialData?.about || null}
-              />
-            </div>
-          </Suspense>
-        </DeferredSection>
+        <Services
+          initialData={initialData?.services || null}
+          initialAboutData={initialData?.about || null}
+        />
       </section>
       <section id="packages" style={{ scrollMarginTop: "var(--section-nav-offset)" }}>
         <DeferredSection
