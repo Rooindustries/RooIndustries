@@ -124,7 +124,7 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
     await patch.set({ refundedAmount, refundStatus: "partial", lastRefundAt: now,
       dodoOriginalCommissionAmount: originalCommission,
       dodoTotalAmount: totalAmount,
-      commissionAmount: Math.round(originalCommission * remaining * 100) / 100 }).commit();
+      commissionAmount: booking.dodoDisputeActive === true ? 0 : Math.round(originalCommission * remaining * 100) / 100 }).commit();
     return { bookingId: booking._id, idempotent: false, reopenedSlot: false, couponRestored: false };
   }
   if (!full) {
