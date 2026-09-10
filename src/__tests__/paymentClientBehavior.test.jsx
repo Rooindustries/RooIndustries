@@ -214,7 +214,19 @@ describe("payment client request and accessibility behavior", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(/Go back to booking to choose a time/);
   });
 
-  test.each([null, { provider: "paypal", paymentAccessToken: "new-payment-token" }])("ignores a terminal response after its session was replaced: %s", async (replacement) => {
+  test.each([null, {
+    provider: "paypal",
+    paymentAccessToken: "new-payment-token",
+    providerPayload: { orderId: "paypal-new-order" },
+    fingerprint: JSON.stringify({
+      packageTitle: checkout.packageTitle,
+      originalOrderId: "",
+      startTimeUTC: checkout.startTimeUTC,
+      email: checkout.email,
+      referralCode: "",
+      couponCode: "",
+    }),
+  }])("ignores a terminal response after its session was replaced: %s", async (replacement) => {
     sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
     sessionStorage.setItem("payment_session_state", JSON.stringify({
       provider: "dodo",

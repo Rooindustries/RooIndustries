@@ -333,7 +333,8 @@ const mockClient = {
         .sort((left, right) =>
           String(left.updatedAt || "").localeCompare(String(right.updatedAt || ""))
         )
-        .slice(0, 50);
+        .slice(0, 50)
+        .map(maybeClonePayment);
     }
 
     return null;
@@ -4476,6 +4477,42 @@ describe('Dodo checkout lifecycle',()=>{
       expect(!!getOnlyPaymentRecord().nextRecoveryAt).toBe(!allSent);
     }
   );
+  test('Dodo email recovery preserves a concurrent refund and continues the batch', async () => {
+    clonePaymentReads = true;
+    const emailDispatch = { deliveryEnabled: true, client: { sent: true }, owner: { sent: true }, allSent: true };
+    for (const name of ['first', 'second']) {
+      store.paymentRecords.push({
+        _id: `paymentRecord.dodo.${name}`,
+        _rev: nextRevision(),
+        _type: 'paymentRecord',
+        provider: 'dodo',
+        status: 'email_partial',
+        bookingId: `booking_${name}`,
+        emailDispatchRequired: true,
+        emailDispatch: { ...emailDispatch, owner: { sent: false }, allSent: false },
+        nextRecoveryAt: '',
+      });
+    }
+    const [first, second] = store.paymentRecords;
+    let refundedRecord;
+    mockSendBookingEmails.mockImplementation(async ({ bookingId }) => {
+      if (bookingId === first.bookingId) {
+        await mockClient.patch(first._id).set({ status: 'refunded', emailDispatchRequired: false }).commit();
+        refundedRecord = JSON.parse(JSON.stringify(first));
+      }
+      return { httpStatus: 200, body: { ok: true, emailDispatch } };
+    });
+
+    const result = await reconcilePaymentSessions({
+      req: createReq({}, { authorization: 'Bearer cron-secret' }), client: mockClient,
+    });
+
+    expect(result.httpStatus).toBe(200);
+    expect(result.body.summary).toMatchObject({ scanned: 2, finalized: 1 });
+    expect(first).toEqual(refundedRecord);
+    expect(second).toMatchObject({ status: 'booked', emailDispatchRequired: false, emailDispatch });
+    expect(mockSendBookingEmails).toHaveBeenCalledTimes(2);
+  });
   test.each([
     ['unavailable', 'dodo_payment_binding_mismatch'],
     ['disabled', 'dodo_environment_disabled'],
@@ -4493,7 +4530,11 @@ describe('Dodo checkout lifecycle',()=>{
     expect(getOnlyPaymentRecord().providerRecoveryTerminal).toBe(false);
     expect(store.bookings).toHaveLength(1);
   });
-  test.each(['dispute_opened', 'dispute_lost'])('a disputed booking is held without paid commission for %s', async disputeStatus => {
+  test.each([
+    ['dispute_opened', 'dispute_won'],
+    ['dispute_lost', 'dispute_won'],
+    ['dispute_opened', 'dispute_cancelled'],
+  ])('a booking held for %s recovers after %s', async (disputeStatus, resolvedStatus) => {
     await startDodo(); await notify();
     Object.assign(store.bookings[0], { status: 'captured', commissionAmount: 5, netAmount: latest.total_amount / 100 });
     latest.disputes = [{ dispute_id: 'dis_existing', dispute_status: disputeStatus }];
@@ -4501,10 +4542,24 @@ describe('Dodo checkout lifecycle',()=>{
     expect(held.body.status).toBe('needs_recovery');
     expect(store.bookings[0]).toMatchObject({ status: 'pending', commissionAmount: 0, paymentVerificationState: 'disputed' });
     expect(getOnlyPaymentRecord().dodoDisputeActive).toBe(true);
-    latest.disputes[0].dispute_status = 'dispute_won';
-    const restored = await notify('dispute.won', 'evt_disputed_booking_won');
+    latest.disputes[0].dispute_status = resolvedStatus;
+    const restored = await notify(resolvedStatus.replace('_', '.'), 'evt_disputed_booking_resolved');
     expect(restored.body.status).toBe('booked');
     expect(store.bookings[0]).toMatchObject({ status: 'captured', commissionAmount: 5, paymentVerificationState: 'server_verified' });
+    expect(mockCreateBooking).toHaveBeenCalledTimes(1);
+  });
+  test('a canceled dispute does not reopen a booking with another unresolved dispute', async () => {
+    await startDodo(); await notify();
+    Object.assign(store.bookings[0], { status: 'captured', commissionAmount: 5, netAmount: latest.total_amount / 100 });
+    latest.disputes = [{ dispute_status: 'dispute_opened' }, { dispute_status: 'dispute_lost' }];
+    await notify('dispute.opened', 'evt_multiple_disputes');
+    latest.disputes[0].dispute_status = 'dispute_cancelled';
+
+    const result = await notify('dispute.cancelled', 'evt_one_dispute_cancelled');
+
+    expect(result.body.status).toBe('needs_recovery');
+    expect(getOnlyPaymentRecord().dodoDisputeActive).toBe(true);
+    expect(store.bookings[0]).toMatchObject({ status: 'pending', commissionAmount: 0, paymentVerificationState: 'disputed' });
     expect(mockCreateBooking).toHaveBeenCalledTimes(1);
   });
   test('pending is retryable and does not fulfill; reordered failed notification reads current succeeded payment',async()=>{

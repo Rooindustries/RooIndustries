@@ -4244,15 +4244,22 @@ export const reconcilePaymentSessions = async ({
       const emailed = await sendBookingEmailsForBooking({ bookingId: record.bookingId, client });
       const complete = isEmailDispatchComplete(emailed.body?.emailDispatch);
       const recoveryAttemptCount = complete ? 0 : Number(record.recoveryAttemptCount || 0) + 1;
-      await patchPaymentRecord({ client, record, revisionGuard: true, set: {
-        status: complete ? PAYMENT_STATUS_BOOKED : PAYMENT_STATUS_EMAIL_PARTIAL,
-        emailDispatchRequired: !complete,
-        emailDispatchToken: complete ? "" : record.emailDispatchToken || "",
-        ...(emailed.body?.emailDispatch ? { emailDispatch: emailed.body.emailDispatch } : {}),
-        recoveryAttemptCount,
-        recoveryReason: complete ? "" : "booking_email_retry_pending",
-        nextRecoveryAt: complete ? "" : getNextPaymentRecoveryAt(recoveryAttemptCount),
-      } });
+      try {
+        await patchPaymentRecord({ client, record, revisionGuard: true, set: {
+          status: complete ? PAYMENT_STATUS_BOOKED : PAYMENT_STATUS_EMAIL_PARTIAL,
+          emailDispatchRequired: !complete,
+          emailDispatchToken: complete ? "" : record.emailDispatchToken || "",
+          ...(emailed.body?.emailDispatch ? { emailDispatch: emailed.body.emailDispatch } : {}),
+          recoveryAttemptCount,
+          recoveryReason: complete ? "" : "booking_email_retry_pending",
+          nextRecoveryAt: complete ? "" : getNextPaymentRecoveryAt(recoveryAttemptCount),
+        } });
+      } catch (error) {
+        if (!isConflictError(error)) throw error;
+        const current = await getPaymentRecordById(client, record._id);
+        if (shouldRetryEmailPartialDispatch({ record: current, source: "reconcile" })) summary.recovery += 1;
+        continue;
+      }
       if (complete) summary.finalized += 1;
       else summary.recovery += 1;
       continue;
@@ -5287,7 +5294,7 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
     return { httpStatus: record.refundRequiresBookingSync ? 503 : 200, body: buildPublicStatusBody(record) };
   }
   const disputes = Array.isArray(payment.disputes) ? payment.disputes : [];
-  const disputed = disputes.some((dispute) => dispute.dispute_status !== "dispute_won") ||
+  const disputed = disputes.some((dispute) => !["dispute_won", "dispute_cancelled"].includes(dispute.dispute_status)) ||
     (record.dodoDisputeActive === true && disputes.length === 0);
   if (disputed || record.dodoDisputeActive === true) {
     const booking = record.bookingId

@@ -126,7 +126,7 @@ export const verifyDodoCapture = async ({ record, payment: suppliedPayment }) =>
   const validation = validateDodoPayment({ record, payment });
   if (!validation.ok) return validation;
   if (payment.status !== "succeeded") return { ok: false, retryable: true, reason: `dodo_payment_${payment.status || "pending"}` };
-  if ((payment.disputes || []).some((dispute) => dispute.dispute_status !== "dispute_won")) {
+  if ((payment.disputes || []).some((dispute) => !["dispute_won", "dispute_cancelled"].includes(dispute.dispute_status))) {
     return { ok: false, captured: true, retryable: false, reason: "dodo_payment_disputed" };
   }
   if ((payment.refunds || []).some((r) => r.status === "succeeded") && !suppliedPayment) {

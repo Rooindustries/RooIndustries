@@ -120,9 +120,22 @@ test.each(['session', 'binding'])('a permanent %s mismatch is non-retryable', as
   expect(await verifyDodoCapture({record: record()})).toMatchObject({ok: false, retryable: false, reason});
 });
 
-test.each(['opened', 'challenged', 'lost', 'accepted', 'expired', 'cancelled'])('a disputed payment cannot authorize fulfillment after dispute.%s', async status => {
+test.each(['opened', 'challenged', 'lost', 'accepted', 'expired', 'unknown'])('a disputed payment cannot authorize fulfillment after dispute.%s', async status => {
   const proof = {...payment(), disputes: [{dispute_status: `dispute_${status}`} ]};
   expect(await verifyDodoCapture({record: record(), payment: proof})).toMatchObject({ok: false, captured: true, reason: 'dodo_payment_disputed'});
+});
+
+test.each(['won', 'cancelled'])('a resolved dispute allows fulfillment after dispute.%s', async status => {
+  const proof = {...payment(), disputes: [{dispute_status: `dispute_${status}`}]};
+  expect(await verifyDodoCapture({record: record(), payment: proof})).toMatchObject({ok: true, trustedCapture: true});
+});
+
+test('a canceled dispute does not clear another active dispute', async () => {
+  const proof = {...payment(), disputes: [
+    {dispute_status: 'dispute_cancelled'},
+    {dispute_status: 'dispute_opened'},
+  ]};
+  expect(await verifyDodoCapture({record: record(), payment: proof})).toMatchObject({ok: false, reason: 'dodo_payment_disputed'});
 });
 
 test('successful refunds require accounting before capture verification', async () => {
