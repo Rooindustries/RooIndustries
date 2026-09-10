@@ -1416,14 +1416,9 @@ html:not([data-theme="dark"]) .ri-services-subheading {
   color: rgba(203, 213, 225, 0.9);
 }
 
-html:not([data-theme="dark"]) .ri-service-card {
-  border-color: rgba(3, 105, 161, 0.35);
-  background-image: linear-gradient(180deg, #0a1830, #091427);
-}
-
-html:not([data-theme="dark"]) .ri-service-icon-shell {
-  background-color: #0b2642;
-  border-color: rgba(2, 132, 199, 0.35);
+.ri-service-card {
+  background-color: color-mix(in srgb, var(--color-text-primary) 4%, var(--color-surface-elevated));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-text-primary) 5%, transparent);
 }
 
 html:not([data-theme="dark"]) .ri-service-icon {
@@ -2382,18 +2377,8 @@ html[data-theme="dark"] .ri-proof-cta {
   text-shadow: none;
 }
 
-html[data-theme="dark"] .ri-service-card {
-  border-color: rgba(255, 255, 255, 0.15);
-}
-
-html[data-theme="dark"] .ri-service-icon-shell {
-  border-color: rgba(255, 255, 255, 0.17);
-  background-color: rgba(255, 255, 255, 0.035);
-}
-
 html[data-theme="dark"] .ri-service-icon {
   color: #cbb46c !important;
-  filter: drop-shadow(0 0 5px rgba(212, 175, 55, 0.1));
 }
 
 html[data-theme="dark"] .ri-bench-card-rail {
