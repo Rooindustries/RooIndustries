@@ -3235,6 +3235,8 @@ export const cancelPaymentSession = async ({
         error:
           inspection.state === "unavailable"
             ? "The payment provider could not confirm the order status. Please try again."
+            : record.provider === "dodo"
+              ? "Payment is still processing. Check its status before changing methods."
             : "Payment approval is already in progress. Close the provider checkout before changing methods.",
       },
     };
@@ -4047,6 +4049,7 @@ export const reconcilePaymentSessions = async ({
       shouldRetryEmailPartialDispatch({ record, source: "reconcile" });
     if (record.provider === "dodo" && !localRecovery && (!dodoEnabled || record.providerRecoveryTerminal === true)) continue;
     summary.scanned += 1;
+    const ageMinutes = getPaymentAgeMinutes(record);
     let dodoInspection = null;
     if (record.provider === "dodo" && record.providerOrderId && !localRecovery) {
       dodoInspection = await inspectDodoCheckout({ record });
@@ -4074,7 +4077,6 @@ export const reconcilePaymentSessions = async ({
             } };
       }
     }
-    const ageMinutes = getPaymentAgeMinutes(record);
     const createdAgeMinutes = getPaymentCreatedAgeMinutes(record);
     const status = String(record.status || "").trim().toLowerCase();
 
@@ -5356,8 +5358,11 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
   }
   if (["failed", "cancelled"].includes(payment.status)) {
     const result = await abandonStartedPaymentRecord({ client, record, reason: `dodo_payment_${payment.status}` });
-    return { httpStatus: 200, body: { ...buildPublicStatusBody(result.paymentRecord || record),
-      providerPaymentState: payment.status, status: payment.status === "failed" ? "failed" : "abandoned" } };
+    const current = result.paymentRecord || record;
+    return { httpStatus: result.httpStatus, body: { ...buildPublicStatusBody(current),
+      ...(current.status === PAYMENT_STATUS_ABANDONED ? {
+        providerPaymentState: payment.status, status: payment.status === "failed" ? "failed" : "abandoned",
+      } : {}) } };
   }
   return { httpStatus: 202, body: { ...buildPublicStatusBody(record), providerPaymentState: payment.status } };
 };

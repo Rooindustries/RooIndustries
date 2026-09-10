@@ -102,6 +102,21 @@ test('checks checkout-session and payment resources rather than a success redire
   expect(await inspectDodoCheckout({record:record()})).toMatchObject({state:'captured',providerPaymentId:'pay_offline'});
   expect(global.fetch).toHaveBeenCalledTimes(2);
 });
+test.each([
+  ['requires_payment_method', 'unpaid'],
+  ['processing', 'pending'],
+  ['requires_customer_action', 'pending'],
+  ['requires_capture', 'pending'],
+])('classifies %s checkout as %s', async (status, state) => {
+  global.fetch.mockImplementation(async input => {
+    const path = new URL(typeof input === 'string' ? input : input.url).pathname;
+    const data = path.startsWith('/checkouts/')
+      ? { id: 'cks_offline', payment_id: 'pay_offline' }
+      : { ...payment(), status };
+    return new Response(JSON.stringify(data), { status: 200, headers: { 'content-type': 'application/json' } });
+  });
+  expect(await inspectDodoCheckout({ record: record() })).toMatchObject({ state });
+});
 test('accepts an actual Standard Webhooks signature without network access',()=>{
   const raw=JSON.stringify({type:'payment.succeeded',data:payment()});
   expect(unwrapDodoWebhook({rawBody:raw,headers:sign(raw)}).type).toBe('payment.succeeded');

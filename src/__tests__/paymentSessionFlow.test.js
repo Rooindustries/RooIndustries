@@ -74,6 +74,7 @@ jest.mock("../server/api/payment/providerConfig", () => ({
   resolveServerPaymentSessionsEnabled: (...args) =>
     mockResolveServerPaymentSessionsEnabled(...args),
   default: {
+    allowProviderModeInRuntime: (...args) => jest.requireActual("../server/api/payment/providerConfig").allowProviderModeInRuntime(...args),
     resolveDodoProductId: (...args) => jest.requireActual("../server/api/payment/providerConfig").resolveDodoProductId(...args),
     resolvePaymentProviders: (...args) => mockResolvePaymentProviders(...args),
     resolveServerPaymentSessionsEnabled: (...args) =>
@@ -4354,6 +4355,29 @@ describe('Dodo checkout lifecycle',()=>{
     });
   });
   afterEach(()=>{delete process.env.DODO_PAYMENTS_PRODUCT_ID;delete process.env.DODO_PAYMENTS_ENVIRONMENT;delete process.env.DODO_PAYMENTS_PRODUCT_IDS;});
+  test('an unpaid Dodo checkout releases its payment lock for another method', async () => {
+    const started = await startDodo();
+    latest.status = 'requires_payment_method';
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn(async input => {
+      const path = new URL(typeof input === 'string' ? input : input.url).pathname;
+      const data = path.startsWith('/checkouts/') ? { id: 'cks_dodo', payment_id: latest.payment_id } : latest;
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    mockInspectDodoCheckout.mockImplementationOnce(({ record }) => jest.requireActual('../server/api/payment/dodoProvider').inspectDodoCheckout({ record }));
+    try {
+      await withRuntimeEnv({ DODO_PAYMENTS_API_KEY: 'offline-key', VERCEL_ENV: 'development' }, async () => {
+        const result = await cancelPaymentSession({ paymentAccessToken: started.body.paymentAccessToken, client: mockClient });
+        expect(result).toMatchObject({ httpStatus: 200, body: { cancelled: true, refreshedHold: { phase: 'holding' } } });
+        expect(store.slotHolds[0]).toMatchObject({ phase: 'holding', paymentRecordId: '', paymentProvider: '' });
+        expect(getOnlyPaymentRecord()).toMatchObject({ status: 'abandoned', resourceReleasePending: false });
+        expect(store.paymentStartClaims).toHaveLength(0);
+        expect(mockCreateBooking).not.toHaveBeenCalled();
+      });
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
   test('freezes the package product before provider creation and recovers a missing checkout ID', async () => {
     process.env.DODO_PAYMENTS_PRODUCT_IDS = JSON.stringify({
       'Vertex Essentials': 'pdt_essentials',
@@ -4665,6 +4689,39 @@ describe('Dodo checkout lifecycle',()=>{
     const full=applyBookingRefund.mock.calls.find(([args])=>args.refund.full===true)?.[0];
     expect(full.refund).toMatchObject({amount:total/100,processedAmountInSubunits:total});
     expect(getOnlyPaymentRecord().refundProcessedAmountInSubunits).toBe(total);
+  });
+  test.each(['failed', 'cancelled'])('triage: stale %s response preserves a concurrently booked checkout', async paymentStatus => {
+    clonePaymentReads = true;
+    const started = await startDodo();
+    const declinedPayment = { ...latest, payment_id: 'pay_earlier_decline', status: paymentStatus };
+    mockInspectDodoCheckout.mockImplementationOnce(async () => {
+      await notify('payment.succeeded', 'evt_before_stale_decline');
+      return { state: 'unpaid', payment: declinedPayment, providerPaymentId: declinedPayment.payment_id };
+    });
+    const result = await finalizePaymentSession({body:{providerData:{}},paymentAccessToken:started.body.paymentAccessToken,client:mockClient});
+    expect(getOnlyPaymentRecord().status).toBe('booked');
+    expect(result.body.status).toBe('booked');
+  });
+  test.each([0, 500])('triage: repeated cron finalizes an aged captured payment with refund amount %s', async refundAmount => {
+    jest.useFakeTimers({doNotFake:['nextTick','setImmediate']});
+    const baseTime = Date.now();
+    try {
+      await startDodo();
+      Object.assign(getOnlyPaymentRecord(), { createdAt: new Date(baseTime - 600000).toISOString(), updatedAt: new Date(baseTime - 600000).toISOString(), lastAttemptAt: '', nextRecoveryAt: '' });
+      if (refundAmount) latest.refunds = [{ refund_id: 'ref_prebooking_partial', payment_id: latest.payment_id, status: 'succeeded', amount: refundAmount, currency: 'USD' }];
+      const states = [];
+      for (let pass = 0; pass < 3; pass += 1) {
+        jest.setSystemTime(baseTime + pass * 120000);
+        const result = await reconcilePaymentSessions({req:createReq({}, {authorization:'Bearer cron-secret'}),client:mockClient});
+        expect(result.httpStatus).toBe(200);
+        states.push(getOnlyPaymentRecord().status);
+      }
+      if (refundAmount) expect(getOnlyPaymentRecord().refundState).toBe('partial');
+      expect(states).toEqual(['booked', 'booked', 'booked']);
+      expect(mockCreateBooking).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
   });
   test.each(['failed','cancelled'])('%s releases the hold and keeps late payment recovery possible',async status=>{
     await startDodo();latest.status=status;

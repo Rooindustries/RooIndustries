@@ -1978,7 +1978,7 @@ export default function Payment({ hideFooter = false }) {
                     <button type="button" onClick={handleDodoCheckout}
                       disabled={!canSubmitBooking || payingDodo || paymentStatusBusy || cancellingPayment || quoteLoading || !quoteFingerprint || !providerIsAvailableForSession("dodo")}
                       className="glow-button inline-flex h-10 w-full items-center justify-center whitespace-nowrap rounded-lg px-4 text-sm font-semibold disabled:opacity-60">
-                      {payingDodo ? "Opening checkout..." : "Pay your way"}
+                      {payingDodo ? "Opening checkout..." : lockedProvider === "dodo" ? "Resume checkout" : "Pay your way"}
                     </button>
                     {lockedProvider === "dodo" && (
                       <button type="button" disabled={paymentStatusBusy || cancellingPayment}
@@ -2011,7 +2011,7 @@ export default function Payment({ hideFooter = false }) {
                     <p className="whitespace-nowrap text-xs font-medium text-ink-secondary sm:text-sm">
                       {razorpayTemporarilyDisabled
                         ? "Temporarily unavailable"
-                        : "Cards, UPI & wallets"}
+                        : "Razorpay"}
                     </p>
                   </div>
                 </div>

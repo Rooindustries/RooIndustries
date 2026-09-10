@@ -194,7 +194,7 @@ describe("payment client request and accessibility behavior", () => {
     </MemoryRouter>);
 
     if (manualCheck) {
-      const name = outcome === "manual-failed" ? "Check payment status" : "Pay your way";
+      const name = outcome === "manual-failed" ? "Check payment status" : "Resume checkout";
       const button = await screen.findByRole("button", { name });
       await waitFor(() => expect(button).toBeEnabled());
       fireEvent.click(button);
@@ -287,6 +287,31 @@ describe("payment client request and accessibility behavior", () => {
     await screen.findByText("Payment method released. Choose a payment method below.");
     await act(async () => { jest.advanceTimersByTime(60_001); await flushMicrotasks(); });
     expect(screen.getByText("Expired checkout")).toBeInTheDocument();
+  });
+
+  test("offers Dodo checkout resumption and restores method selection after release", async () => {
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
+    sessionStorage.setItem("payment_session_state", JSON.stringify({
+      provider: "dodo", paymentAccessToken: "dodo-cancel-token",
+      providerPayload: { orderId: "cks_cancel", checkoutUrl: "https://checkout.dodopayments.com/session/cks_cancel" },
+      fingerprint: JSON.stringify({ packageTitle: checkout.packageTitle, originalOrderId: "", startTimeUTC: checkout.startTimeUTC, email: checkout.email }),
+    }));
+    global.fetch = jest.fn(async url => {
+      if (url === "/api/payment/providers") return response({ ...providerPayload, providers: { ...providerPayload.providers, dodo: { enabled: true, mode: "live" } } });
+      if (url === "/api/payment/cancel") return response({ ok: true, cancelled: true, refreshedHold: {
+        slotHoldId: checkout.slotHoldId, slotHoldToken: "refreshed-token", slotHoldExpiresAt: checkout.slotHoldExpiresAt,
+      } });
+      return standardFetch(url);
+    });
+    renderPayment();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Resume checkout" })).toBeEnabled());
+    expect(screen.getByText("Razorpay", { exact: true })).toBeInTheDocument();
+    expect(screen.queryByText(/UPI|wallets/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Change payment method" }));
+    await screen.findByText("Payment method released. Choose a payment method below.");
+    expect(sessionStorage.getItem("payment_session_state")).toBeNull();
+    expect(JSON.parse(sessionStorage.getItem("my_slot_hold"))).toMatchObject({ phase: "holding", holdToken: "refreshed-token" });
+    expect(screen.getByRole("button", { name: "Pay your way" })).toBeEnabled();
   });
 
   test("aborts a stalled quote and exposes an assertive retry message", async () => {

@@ -113,7 +113,7 @@ export const inspectDodoCheckout = async ({ record }) => {
     const validation = validateDodoPayment({ record, payment });
     if (!validation.ok) return { state: "unavailable", ...validation };
     const state = payment.status === "succeeded" ? "captured"
-      : ["failed", "cancelled"].includes(payment.status) ? "unpaid" : "pending";
+      : ["failed", "cancelled", "requires_payment_method"].includes(payment.status) ? "unpaid" : "pending";
     return { state, payment, providerPaymentId: payment.payment_id };
   } catch (error) {
     if (error.retryable === false) return { state: "disabled", retryable: false, reason: error.code };

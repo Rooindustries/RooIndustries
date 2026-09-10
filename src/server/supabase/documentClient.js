@@ -361,6 +361,7 @@ export class SupabaseDocumentClient {
           refundedStatus: params.refundedStatus,
           bookedStatus: params.bookedStatus,
           abandonedStatus: params.abandonedStatus,
+          dodoEnabled: params.dodoEnabled,
           now: params.now,
           limit: 50,
         })
