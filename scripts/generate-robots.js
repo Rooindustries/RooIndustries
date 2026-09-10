@@ -1,10 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-
-const siteUrl = (process.env.SITE_URL ||
-  process.env.NEXT_PUBLIC_SITE_URL ||
-  process.env.REACT_APP_SITE_URL ||
-  "https://www.rooindustries.com").replace(/\/$/, "");
+const { SITE_URL } = require("../src/lib/seo");
 
 const vercelEnv =
   process.env.VERCEL_ENV ||
@@ -18,7 +14,7 @@ const isNonProdEnv =
 const isProduction = !isNonProdEnv;
 
 const lines = isProduction
-  ? ["User-agent: *", "Allow: /", `Sitemap: ${siteUrl}/sitemap.xml`, ""]
+  ? ["User-agent: *", "Allow: /", `Sitemap: ${SITE_URL}/sitemap.xml`, ""]
   : ["User-agent: *", "Disallow: /", ""];
 
 const targetPath = path.join(process.cwd(), "public", "robots.txt");

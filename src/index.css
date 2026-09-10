@@ -1376,7 +1376,7 @@ html[data-theme="dark"] .text-gradient-display {
 
 html[data-theme="dark"] h1.text-info-text,
 html[data-theme="dark"] h2.text-info-text,
-html[data-theme="dark"] h3.ri-services-heading {
+html[data-theme="dark"] .ri-services-heading {
   background-image: var(--gradient-display-text);
   -webkit-background-clip: text;
   background-clip: text;
@@ -2320,7 +2320,7 @@ html[data-theme="dark"] .ri-hero-cta-note .gold-flair-text {
 html[data-theme="dark"]
   :is(
     .ri-reviews-heading,
-    h3.ri-services-heading,
+    h2.ri-services-heading,
     .ri-hiw-heading,
     .ri-supported-games-heading,
     .ri-faq-heading
