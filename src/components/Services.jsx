@@ -135,7 +135,7 @@ export default function Services({
       className="ri-services-section mx-auto max-w-[92rem] px-4 pt-6 pb-8 sm:px-6 sm:pb-10"
       aria-labelledby="services-heading"
     >
-      <div className="ri-performance-overview grid gap-6 xl:grid-cols-[minmax(300px,0.82fr)_minmax(0,2.18fr)] xl:items-stretch">
+      <div className="ri-performance-overview mx-auto grid max-w-[60rem] gap-6 lg:grid-cols-[300px_minmax(0,1fr)] lg:items-stretch">
         <About initialData={initialAboutData} compact />
         <div className="ri-services-benefit-column flex min-w-0 flex-col">
           <div className="text-center">
@@ -152,7 +152,7 @@ export default function Services({
             </div>
           </div>
 
-          <ul className="ri-services-benefits mt-3 grid auto-rows-fr grid-cols-2 gap-2 sm:grid-cols-3 xl:mt-auto xl:pt-3">
+          <ul className="ri-services-benefits mt-3 grid auto-rows-fr grid-cols-2 gap-2 sm:grid-cols-3 lg:mt-auto lg:pt-3">
             {HOME_COPY.services.cards.map((card, index) => {
               const Icon = ICONS[card.iconType];
               const customIcon = data.cards?.[index]?.customIcon;
