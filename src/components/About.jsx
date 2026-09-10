@@ -118,7 +118,7 @@ export default function About({ initialData = null, compact = false }) {
             {summaryStats.map((detail, index) => (
               <div key={detail?._key || `${detail.label}-${index}`} className="min-w-0">
                 <dt className="text-[10px] uppercase leading-3 tracking-wider text-ink-muted">{detail.label}</dt>
-                <dd className="mt-0.5 break-words text-xl font-semibold leading-7 tabular-nums text-ink min-[350px]:text-2xl">{detail.value}</dd>
+                <dd className="mt-0.5 break-words text-lg font-semibold leading-6 tabular-nums text-ink">{detail.value}</dd>
               </div>
             ))}
           </dl>
