@@ -14,7 +14,10 @@ begin
         table_name, table_name || '_provider_check', 'paypal','razorpay','free','dodo');
     end if;
   end loop;
-  definition := pg_get_functiondef('migration.project_commerce_document_ids_unserialized(text[])'::regprocedure);
+  definition := pg_get_functiondef(coalesce(
+    to_regprocedure('migration.project_commerce_document_ids_unserialized(text[])'),
+    to_regprocedure('migration.project_commerce_document_ids(text[])')
+  ));
   patched := replace(definition, 'when ''razorpay'' then ''razorpay''',
     E'when ''razorpay'' then ''razorpay''\n      when ''dodo'' then ''dodo''');
   if patched = definition then raise exception 'Dodo migration: expected provider mapping was not found'; end if;
