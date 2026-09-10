@@ -135,9 +135,9 @@ export default function Services({
       className="ri-services-section mx-auto max-w-[92rem] px-4 pt-6 pb-8 sm:px-6 sm:pb-10"
       aria-labelledby="services-heading"
     >
-      <div className="ri-performance-overview grid gap-6 xl:grid-cols-[minmax(300px,0.82fr)_minmax(0,2.18fr)] xl:items-start">
+      <div className="ri-performance-overview grid gap-6 xl:grid-cols-[minmax(300px,0.82fr)_minmax(0,2.18fr)] xl:items-stretch">
         <About initialData={initialAboutData} compact />
-        <div className="ri-services-benefit-column min-w-0">
+        <div className="ri-services-benefit-column flex min-w-0 flex-col">
           <div className="text-center">
             <div>
               <h2
@@ -152,14 +152,14 @@ export default function Services({
             </div>
           </div>
 
-          <ul className="ri-services-benefits mt-5 grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <ul className="ri-services-benefits mt-5 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:flex-1 xl:grid-rows-2 xl:gap-3">
             {HOME_COPY.services.cards.map((card, index) => {
               const Icon = ICONS[card.iconType];
               const customIcon = data.cards?.[index]?.customIcon;
               return (
                 <li
                   key={card.iconType}
-                  className="ri-service-card flex items-center gap-2.5 rounded-xl border border-line-input bg-panel p-3 sm:items-start sm:p-3.5"
+                  className="ri-service-card flex items-center gap-2.5 rounded-xl border border-line-input bg-panel p-3 sm:items-start sm:p-3.5 xl:items-center"
                 >
                   <span className="ri-service-icon-shell grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-line-input bg-surface-input">
                     {customIcon ? (

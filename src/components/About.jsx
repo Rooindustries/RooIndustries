@@ -109,7 +109,7 @@ export default function About({ initialData = null, compact = false }) {
             }}
           />
 
-          <div className="relative flex h-full flex-col px-5 py-5">
+          <div className="relative flex h-full flex-col px-5 py-5 xl:px-4 xl:py-4">
             <p
               className="text-[10px] font-bold uppercase tracking-[0.28em]"
               style={{ color: "var(--rc-accent)" }}
@@ -126,7 +126,7 @@ export default function About({ initialData = null, compact = false }) {
               {recordSubtitle}
             </p>
 
-            <div className="mt-5 grid grid-cols-[minmax(7.5rem,0.42fr)_1fr] items-stretch gap-4 text-left">
+            <div className="mt-5 grid grid-cols-[minmax(7.5rem,0.42fr)_1fr] items-stretch gap-4 text-left xl:mt-3">
               {heroStat && (
                 <div className="flex min-w-0 flex-col items-center justify-center px-2 text-center">
                   <p
@@ -148,7 +148,7 @@ export default function About({ initialData = null, compact = false }) {
                 {specStats.map((detail, index) => (
                   <div
                     key={detail?._key || `${detail?.label || "detail"}-${index}`}
-                    className="py-1.5 first:pt-0"
+                    className="py-1.5 first:pt-0 xl:py-0.5"
                     style={index > 0 ? { borderTop: "1px solid var(--rc-border-sub)" } : undefined}
                   >
                     <p
@@ -173,7 +173,7 @@ export default function About({ initialData = null, compact = false }) {
               href={leaderboardHref}
               target="_blank"
               rel="noopener noreferrer"
-              className="ri-proof-cta glow-button relative mt-5 inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-xs font-semibold text-white hover:brightness-110 active:translate-y-px"
+              className="ri-proof-cta glow-button relative mt-5 inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-xs font-semibold text-white hover:brightness-110 active:translate-y-px xl:mt-3"
               style={{
                 background: "linear-gradient(135deg, var(--rc-cta), var(--rc-cta-end))",
                 border: "1px solid var(--rc-border)",
@@ -186,7 +186,7 @@ export default function About({ initialData = null, compact = false }) {
             </a>
 
             <p
-              className="mt-auto pt-4 text-center text-[10px] font-semibold"
+              className="mt-auto pt-4 text-center text-[10px] font-semibold xl:pt-2"
               style={{ borderTop: "1px solid var(--rc-border-sub)" }}
             >
               <span className="ri-proof-note blue-glint-text">{compactRecordNote}</span>
