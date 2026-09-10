@@ -1,34 +1,34 @@
 const fs = require("fs");
 const path = require("path");
 const { INDEXABLE_ROUTES } = require("../src/lib/routes");
+const { SITE_URL } = require("../src/lib/seo");
 
 const EXTRA_INDEXABLE_ROUTES = ["/BIOSGuide"];
 
-const siteUrl = (process.env.SITE_URL ||
-  process.env.NEXT_PUBLIC_SITE_URL ||
-  process.env.REACT_APP_SITE_URL ||
-  "https://www.rooindustries.com").replace(/\/$/, "");
+const escapeXml = (value) =>
+  value.replace(
+    /[&<>"']/g,
+    (character) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&apos;",
+      })[character],
+  );
 
-const buildEntry = (route, now) => {
-  const loc = route === "/" ? siteUrl : `${siteUrl}${route}`;
-  const isHome = route === "/";
+const buildEntry = (route) => {
+  const loc = route === "/" ? SITE_URL : `${SITE_URL}${route}`;
 
-  return [
-    "  <url>",
-    `    <loc>${loc}</loc>`,
-    `    <lastmod>${now}</lastmod>`,
-    `    <changefreq>${isHome ? "daily" : "weekly"}</changefreq>`,
-    `    <priority>${isHome ? "1.0" : "0.7"}</priority>`,
-    "  </url>",
-  ].join("\n");
+  return ["  <url>", `    <loc>${escapeXml(loc)}</loc>`, "  </url>"].join("\n");
 };
 
 function run() {
-  const routes = [...new Set([...INDEXABLE_ROUTES, ...EXTRA_INDEXABLE_ROUTES])].sort(
-    (a, b) => a.localeCompare(b)
-  );
-  const now = new Date().toISOString();
-  const urlEntries = routes.map((route) => buildEntry(route, now)).join("\n");
+  const routes = [
+    ...new Set([...INDEXABLE_ROUTES, ...EXTRA_INDEXABLE_ROUTES]),
+  ].sort((a, b) => a.localeCompare(b));
+  const urlEntries = routes.map(buildEntry).join("\n");
 
   const sitemap = [
     '<?xml version="1.0" encoding="UTF-8"?>',
