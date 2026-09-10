@@ -152,14 +152,14 @@ export default function Services({
             </div>
           </div>
 
-          <ul className="ri-services-benefits mt-5 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:flex-1 xl:grid-rows-2 xl:gap-3">
+          <ul className="ri-services-benefits mt-3 grid auto-rows-fr grid-cols-2 gap-2 sm:grid-cols-3 xl:mt-auto xl:pt-3">
             {HOME_COPY.services.cards.map((card, index) => {
               const Icon = ICONS[card.iconType];
               const customIcon = data.cards?.[index]?.customIcon;
               return (
                 <li
                   key={card.iconType}
-                  className="ri-service-card flex items-center gap-2.5 rounded-xl border border-line-input bg-panel p-3 sm:items-start sm:p-3.5 xl:items-center"
+                  className="ri-service-card flex items-center gap-2.5 rounded-xl border border-line-input bg-panel p-3 sm:p-2.5"
                 >
                   <span className="ri-service-icon-shell grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-line-input bg-surface-input">
                     {customIcon ? (
