@@ -2,8 +2,8 @@
 
 import { NextRequest } from "next/server";
 import { middleware } from "../../middleware";
-import { GET as getMarkdown } from "../../app/content.md/route";
-import { GET as getMissing } from "../../app/not-found.md/route";
+import { GET as getMarkdown } from "../../app/markdown/route";
+import { GET as getMissing } from "../../app/markdown-not-found/route";
 import sanityServer from "../lib/sanityServer";
 
 jest.mock("../lib/sanityServer", () => ({ fetchPrivacyPolicy: jest.fn() }));
@@ -35,7 +35,7 @@ describe("Markdown content negotiation", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("vary")).toBe("Accept, Accept-Encoding");
     if (expected === "markdown") {
-      expect(response.headers.get("x-middleware-rewrite")).toBe("https://www.rooindustries.com/content.md?path=%2F");
+      expect(response.headers.get("x-middleware-rewrite")).toBe("https://www.rooindustries.com/markdown?path=%2F");
     } else {
       expect(response.headers.get("x-middleware-next")).toBe("1");
     }
@@ -49,7 +49,7 @@ describe("Markdown content negotiation", () => {
   });
 
   test.each(["/", "/about", "/contact", "/privacy"])("negotiates HEAD for %s", async (path) => {
-    expect(middleware(request(path, "text/markdown", { method: "HEAD" })).headers.get("x-middleware-rewrite")).toContain("/content.md?");
+    expect(middleware(request(path, "text/markdown", { method: "HEAD" })).headers.get("x-middleware-rewrite")).toContain("/markdown?");
     const response = middleware(request(path, "application/json", { method: "HEAD" }));
     expect(response.status).toBe(406);
     expect(await response.text()).toBe("");
@@ -84,7 +84,7 @@ describe("Markdown content negotiation", () => {
 
 describe("Markdown responses", () => {
   test.each(["/", "/about", "/contact"])("returns readable content at %s", async (path) => {
-    const response = await getMarkdown(request(`/content.md?path=${encodeURIComponent(path)}`));
+    const response = await getMarkdown(request(`/markdown?path=${encodeURIComponent(path)}`));
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
     expect(response.headers.get("vary")).toBe("Accept, Accept-Encoding");
@@ -100,17 +100,17 @@ describe("Markdown responses", () => {
       title: "Privacy Policy",
       sections: [{ heading: "Collection", content: [{ _type: "block", children: [{ text: "We collect contact details." }] }] }],
     });
-    const response = await getMarkdown(request("/content.md?path=/privacy"));
+    const response = await getMarkdown(request("/markdown?path=/privacy"));
     expect(response.status).toBe(200);
     expect(await response.text()).toContain("We collect contact details\\.");
     sanityServer.fetchPrivacyPolicy.mockRejectedValueOnce(new Error("unavailable"));
-    expect((await getMarkdown(request("/content.md?path=/privacy"))).status).toBe(503);
+    expect((await getMarkdown(request("/markdown?path=/privacy"))).status).toBe(503);
     sanityServer.fetchPrivacyPolicy.mockResolvedValueOnce(null);
-    expect((await getMarkdown(request("/content.md?path=/privacy"))).status).toBe(503);
+    expect((await getMarkdown(request("/markdown?path=/privacy"))).status).toBe(503);
   });
 
   test("returns a real 404 with recovery links, including for unlisted content", async () => {
-    for (const response of [getMissing(), await getMarkdown(request("/content.md?path=/payment"))]) {
+    for (const response of [getMissing(), await getMarkdown(request("/markdown?path=/payment"))]) {
       expect(response.status).toBe(404);
       const text = await response.text();
       expect(text).toMatch(/^# 404/);

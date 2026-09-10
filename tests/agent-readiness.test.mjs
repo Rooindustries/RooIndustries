@@ -103,12 +103,17 @@ test("published public routes, discovery files, and their local links resolve", 
   assert.match(xml, /<urlset xmlns="http:\/\/www.sitemaps.org\/schemas\/sitemap\/0.9">/);
   const robots = await get("/robots.txt", "text/plain");
   assert.equal(robots.status, 200);
-  assert.match(await robots.text(), /Sitemap: https:\/\/www.rooindustries.com\/sitemap.xml/);
+  const robotsText = await robots.text();
+  if (process.env.VERCEL_ENV === "preview") {
+    assert.match(robotsText, /User-agent: \*\nDisallow: \//);
+  } else {
+    assert.match(robotsText, /Sitemap: https:\/\/www.rooindustries.com\/sitemap.xml/);
+  }
   const linkedPaths = [
     ...instructions.matchAll(/\]\((https:\/\/www\.rooindustries\.com[^)]+)\)/g),
     ...xml.matchAll(/<loc>([^<]+)<\/loc>/g),
   ].map((match) => new URL(match[1]).pathname);
-  const paths = new Set([...routes.ALL_PUBLIC_ROUTES, "/BIOSGuide", "/content.md", ...linkedPaths]);
+  const paths = new Set([...routes.ALL_PUBLIC_ROUTES, "/BIOSGuide", "/markdown", ...linkedPaths]);
   assert.ok(linkedPaths.includes("/about"));
   for (const path of paths) {
     const response = await get(path);

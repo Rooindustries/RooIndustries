@@ -76,7 +76,7 @@ export function middleware(req) {
     }
     if (type === "text/markdown; charset=utf-8") {
       const url = req.nextUrl.clone();
-      url.pathname = "/content.md";
+      url.pathname = "/markdown";
       url.search = "";
       url.searchParams.set("path", pathname);
       const response = NextResponse.rewrite(url, { request: { headers } });

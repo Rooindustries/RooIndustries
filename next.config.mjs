@@ -116,7 +116,7 @@ const nextConfig = {
         {
           source: '/:path*',
           has: [{ type: 'header', key: 'x-roo-missing-format', value: 'markdown' }],
-          destination: '/not-found.md',
+          destination: '/markdown-not-found',
         },
       ],
     };
