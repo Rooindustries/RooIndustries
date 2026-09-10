@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { AnimatePresence, motion } from "framer-motion";
 import { urlFor } from "../sanityClient";
 import About from "./About";
 import homeCopy from "../lib/homeCopy";
@@ -97,6 +98,41 @@ export default function Services({
   const beforeLabel = data.benchBeforeLabel || "Before";
   const afterLabel = data.benchAfterLabel || "After Tune";
   const showBenchmarks = data.benchEnabled !== false && games.length > 0;
+  const totalPages = pages.length;
+  const canPrev = safePage > 0;
+  const canNext = safePage < totalPages - 1;
+  const badgeSuffix = data.benchBadgeSuffix || "FPS";
+  const pagePrefix = data.benchPagePrefix || "Page";
+  const gridClass =
+    games.length === 1
+      ? "grid grid-cols-1 gap-5"
+      : games.length === 2
+        ? "grid grid-cols-1 md:grid-cols-2 gap-5"
+        : "grid grid-cols-1 md:grid-cols-3 gap-5";
+  const containerClass =
+    games.length === 1
+      ? "max-w-xl"
+      : games.length === 2
+        ? "max-w-5xl"
+        : "w-full";
+  const calcPct = (before, after) => {
+    const b = positiveNumber(before);
+    const a = positiveNumber(after);
+    if (b === null || a === null) return null;
+    const percent = ((a - b) / b) * 100;
+    return Number.isFinite(percent) ? Math.round(percent) : null;
+  };
+  const calcFill = (before, after) => {
+    const b = positiveNumber(before) || 0;
+    const a = positiveNumber(after) || 0;
+    const maximum = Math.max(b, a, 1);
+    return { bf: (b / maximum) * 100, af: (a / maximum) * 100 };
+  };
+  const contentSwap = {
+    animate: { opacity: 1, scale: 1 },
+    exit: { opacity: 0, scale: 0.98 },
+    transition: { duration: 0.25, ease: "easeOut" },
+  };
 
   return (
     <section
@@ -104,15 +140,15 @@ export default function Services({
       aria-labelledby="services-heading"
     >
       <div className="ri-performance-overview">
-        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+        <div className="text-center">
           <div>
             <h2
               id="services-heading"
-              className="ri-services-heading text-2xl font-bold tracking-tight text-info-text sm:text-3xl"
+              className="ri-services-heading text-3xl font-bold tracking-tight text-info-text sm:text-4xl"
             >
               {data.heading || HOME_COPY.services.heading}
             </h2>
-            <p className="ri-services-subheading mt-1 text-sm text-ink-secondary">
+            <p className="ri-services-subheading mt-2 text-sm text-ink-secondary sm:text-[15px]">
               {HOME_COPY.services.subheading}
             </p>
           </div>
@@ -166,194 +202,257 @@ export default function Services({
       </div>
 
       {showBenchmarks && (
-        <section
-          className="ri-bench-section mt-5"
-          aria-labelledby="benchmark-heading"
-        >
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4">
-            <div>
-              <h3
-                id="benchmark-heading"
-                className="text-base font-semibold text-ink"
-              >
-                Real game results
-              </h3>
-              <p className="text-xs text-ink-secondary">
-                {beforeLabel} → {afterLabel} · FPS
-              </p>
-            </div>
-            <Link
-              to="/benchmarks"
-              className="inline-flex min-h-11 items-center gap-1 text-xs font-semibold text-ink-secondary hover:text-ink"
-            >
-              More results <ArrowUpRight size={14} aria-hidden="true" />
-            </Link>
-          </div>
-          <div
-            className="ri-bench-shell grid gap-2 md:grid-cols-3"
-            key={safePage}
+        <>
+          <div className="h-10" />
+
+          <motion.div
+            layout
+            className={`ri-bench-shell relative rounded-[28px] ring-1 ring-line-soft bg-panel shadow-surface-deep overflow-hidden mx-auto ${containerClass}`}
           >
-            {games.map((game, index) => {
-              const before = positiveNumber(game.beforeFps);
-              const after = positiveNumber(game.afterFps);
-              const change =
-                before !== null && after !== null
-                  ? ((after - before) / before) * 100
-                  : null;
-              const percent =
-                change !== null && Number.isFinite(change)
-                  ? Math.round(change)
-                  : null;
-              const maximum = Math.max(before || 0, after || 0, 1);
-              const logo =
-                game.gameLogoUrl ||
-                (game.gameLogo
-                  ? urlFor(game.gameLogo).width(48).height(48).fit("max").url()
-                  : null);
-              return (
-                <article
-                  key={game._key || `${game.gameTitle}-${index}`}
-                  className="ri-bench-card rounded-xl border border-line-input bg-surface-card px-3 py-3 sm:p-4"
-                >
-                  <div className="ri-bench-summary flex items-center justify-between gap-3 md:block">
-                    <div className="flex min-w-0 items-center gap-2">
-                      {logo && (
-                        <img
-                          src={logo}
-                          alt=""
-                          width={24}
-                          height={24}
-                          loading="lazy"
-                          decoding="async"
-                          className={`h-6 w-6 shrink-0 rounded-sm object-contain ${game.gameLogoUrl ? "bg-white p-0.5" : ""}`}
-                        />
-                      )}
-                      <div className="min-w-0">
-                        <h4 className="ri-bench-game-title text-sm font-bold leading-tight text-ink sm:text-base">
-                          {game.gameTitle}
-                        </h4>
-                        <p className="mt-1 text-[11px] text-ink-secondary">
-                          {game.metricLabel ||
-                            data.benchMetricLabel ||
-                            "Avg FPS"}
-                        </p>
+            <div className="pointer-events-none absolute inset-0">
+              <div className="ri-bench-radial absolute inset-0 opacity-[0.35] bg-[radial-gradient(80%_60%_at_50%_0%,var(--color-surface-hover-accent),transparent_65%)]" />
+              <div className="absolute inset-0 opacity-[0.28] bg-[linear-gradient(to_bottom,transparent,rgba(0,0,0,.22))]" />
+              <div className="ri-bench-top-glow absolute -top-56 left-1/2 -translate-x-1/2 h-[32rem] w-[52rem] rounded-full bg-surface-hover blur-3xl hidden sm:block" />
+              <div className="ri-bench-left-glow absolute -bottom-48 left-0 h-[30rem] w-[30rem] rounded-full bg-surface-hover-accent blur-3xl hidden sm:block" />
+              <div className="ri-bench-right-glow absolute -bottom-48 right-0 h-[30rem] w-[30rem] rounded-full bg-surface-hover-accent blur-3xl hidden sm:block" />
+            </div>
+
+            <div className="relative p-5 sm:p-6">
+              <div className={gridClass}>
+                {games.map((g, idx) => {
+                  const pct = g ? calcPct(g?.beforeFps, g?.afterFps) : null;
+                  const { bf, af } = g
+                    ? calcFill(g?.beforeFps, g?.afterFps)
+                    : { bf: 0, af: 0 };
+
+                  const beforeNum = positiveNumber(g?.beforeFps);
+                  const afterNum = positiveNumber(g?.afterFps);
+
+                  const metricText =
+                    g?.metricLabel || data?.benchMetricLabel || "Avg FPS";
+
+                  return (
+                    <motion.div
+                      role="article"
+                      aria-label={`${g.gameTitle} benchmark`}
+                      layout
+                      key={idx}
+                      className={
+                        "ri-bench-card relative overflow-hidden rounded-2xl " +
+                        "bg-surface-card ring-1 ring-line-soft shadow-surface-deep"
+                      }
+                    >
+                      <div className="pointer-events-none absolute inset-0">
+                        <div className="ri-bench-card-top-glow absolute -top-16 -right-16 h-44 w-44 rounded-full bg-surface-hover-accent blur-2xl hidden sm:block" />
+                        <div className="ri-bench-card-bottom-glow absolute -bottom-16 -left-16 h-44 w-44 rounded-full bg-surface-hover-accent blur-2xl hidden sm:block" />
+                        <div className="ri-bench-card-rail absolute left-0 top-0 h-full w-[3px] bg-gradient-to-b from-accent via-accent-soft to-transparent opacity-60" />
                       </div>
-                    </div>
-                    <div className="shrink-0 text-right md:mt-4 md:flex md:items-end md:justify-between md:gap-2 md:text-left">
-                      <p className="ri-bench-number flex items-center justify-end gap-2 text-xl font-bold tabular-nums text-ink md:justify-start sm:text-2xl">
-                        <span>
-                          <span className="sr-only">{beforeLabel}: </span>
-                          {before ?? "—"}
-                        </span>
-                        <span
-                          className="text-sm font-normal text-ink-muted"
-                          aria-hidden="true"
-                        >
-                          →
-                        </span>
-                        <span className="text-accent">
-                          <span className="sr-only">{afterLabel}: </span>
-                          {after ?? "—"}
-                        </span>
-                      </p>
-                      {percent !== null && (
-                        <p
-                          className={`mt-1 text-xs font-semibold tabular-nums ${percent > 0 ? "text-accent" : "text-ink-secondary"}`}
-                        >
-                          {percent > 0 ? "+" : ""}
-                          {percent}%
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  <div
-                    className="mt-3 hidden space-y-1.5 md:block"
-                    aria-hidden="true"
-                  >
-                    <div className="h-1 rounded-full bg-surface-hover">
-                      <div
-                        className="ri-bench-before-fill h-full rounded-full bg-ink-muted"
-                        style={{ width: `${((before || 0) / maximum) * 100}%` }}
-                      />
-                    </div>
-                    <div className="h-1 rounded-full bg-surface-hover">
-                      <div
-                        className="ri-bench-after-fill h-full rounded-full bg-accent"
-                        style={{ width: `${((after || 0) / maximum) * 100}%` }}
-                      />
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-          <div className="mt-2 flex flex-wrap items-start justify-between gap-x-6 gap-y-1">
-            <details
-              key={safePage}
-              className="ri-bench-specs min-w-0 flex-1 text-xs text-ink-secondary"
-            >
-              <summary className="min-h-11 cursor-pointer py-3.5 hover:text-ink">
-                PC specs for these results
-              </summary>
-              <div className="grid gap-3 pb-3 md:grid-cols-3">
-                {games.map((game, index) => (
-                  <div key={game._key || `${game.gameTitle}-${index}`}>
-                    <p className="mb-1 font-semibold text-ink">
-                      {game.gameTitle}
-                    </p>
-                    <dl className="space-y-1">
-                      {[
-                        { label: "GPU", value: game.gpu },
-                        { label: "CPU", value: game.cpu },
-                        { label: "RAM", value: game.ram },
-                      ].map((detail) => (
-                        <div key={detail.label} className="flex gap-2">
-                          <dt className="w-8 shrink-0">{detail.label}</dt>
-                          <dd>{detail.value || "Not provided"}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  </div>
-                ))}
+
+                      <div className="relative p-5">
+                        <AnimatePresence mode="wait">
+                          <motion.div
+                            key={`${safePage}-${idx}`}
+                            initial={false}
+                            animate={contentSwap.animate}
+                            exit={contentSwap.exit}
+                            transition={contentSwap.transition}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  {g?.gameLogoUrl || g?.gameLogo ? (
+                                    <img
+                                      src={
+                                        g?.gameLogoUrl
+                                          ? g.gameLogoUrl
+                                          : urlFor(g.gameLogo)
+                                              .width(64)
+                                              .height(64)
+                                              .fit("max")
+                                              .url()
+                                      }
+                                      alt={
+                                        g?.gameTitle
+                                          ? `${g.gameTitle} logo`
+                                          : "Game logo"
+                                      }
+                                      width={24}
+                                      height={24}
+                                      loading="lazy"
+                                      decoding="async"
+                                      className={`h-5 w-5 sm:h-6 sm:w-6 shrink-0 rounded-sm object-contain ${
+                                        g?.gameLogoUrl ? "bg-white p-0.5" : ""
+                                      }`}
+                                    />
+                                  ) : null}
+                                  <div className="ri-bench-game-title truncate text-[16px] sm:text-[17px] font-extrabold tracking-tight text-ink">
+                                    {g?.gameTitle || "-"}
+                                  </div>
+                                </div>
+                                <div className="ri-bench-game-rule mt-1 h-[2px] w-14 rounded-full bg-gradient-to-r from-accent to-transparent opacity-70" />
+                                {metricText ? (
+                                  <div className="mt-3">
+                                    <span
+                                      className={
+                                        "ri-bench-metric-pill inline-flex items-center rounded-full px-2.5 py-1 text-[13px] font-semibold " +
+                                        "bg-surface-hover text-ink-secondary ring-1 ring-line-soft " +
+                                        "shadow-[0_8px_22px_rgba(0,0,0,.3)]"
+                                      }
+                                    >
+                                      {metricText}
+                                    </span>
+                                  </div>
+                                ) : null}
+                              </div>
+
+                              <span
+                                className={
+                                  "ri-bench-boost-pill inline-flex items-center rounded-full px-3 py-1 text-[12px] font-extrabold " +
+                                  "bg-surface-hover-accent text-accent ring-1 ring-line-accent shadow-glow-soft"
+                                }
+                              >
+                                {pct === null
+                                  ? "-"
+                                  : `${pct > 0 ? "+" : ""}${pct}% ${badgeSuffix}`}
+                              </span>
+                            </div>
+
+                            <div className="ri-bench-bars mt-4 rounded-2xl bg-surface-input ring-1 ring-line-input p-3">
+                              <div className="space-y-3">
+                                <div>
+                                  <div className="flex items-center justify-between text-[12px]">
+                                    <span className="ri-bench-before-label text-ink-secondary">
+                                      {beforeLabel}
+                                    </span>
+                                    <span className="ri-bench-number font-extrabold text-ink">
+                                      {beforeNum === null ? "-" : beforeNum}
+                                    </span>
+                                  </div>
+
+                                  <div className="ri-bench-before-track mt-2 h-[10px] rounded-full bg-surface-hover ring-1 ring-line-soft overflow-hidden">
+                                    <motion.div
+                                      className="ri-bench-before-fill h-full rounded-full bg-gradient-to-r from-ink-muted via-line-soft to-transparent"
+                                      initial={{ width: 0 }}
+                                      animate={{
+                                        width: `${beforeNum ? bf : 0}%`,
+                                      }}
+                                      transition={{
+                                        duration: 0.8,
+                                        ease: "easeOut",
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <div className="flex items-center justify-between text-[12px]">
+                                    <span className="ri-bench-after-label text-accent">
+                                      {afterLabel}
+                                    </span>
+                                    <span className="ri-bench-number font-extrabold text-ink">
+                                      {afterNum === null ? "-" : afterNum}
+                                    </span>
+                                  </div>
+
+                                  <div className="ri-bench-after-track mt-2 h-[10px] rounded-full bg-surface-hover-accent ring-1 ring-line-accent overflow-hidden">
+                                    <motion.div
+                                      className="ri-bench-after-fill h-full rounded-full bg-gradient-to-r from-accent via-accent-soft to-transparent"
+                                      initial={{ width: 0 }}
+                                      animate={{
+                                        width: `${afterNum ? af : 0}%`,
+                                      }}
+                                      transition={{
+                                        duration: 0.8,
+                                        ease: "easeOut",
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="ri-bench-legend mt-3 flex items-center gap-5 text-[12px] text-ink-secondary">
+                                <div className="flex items-center gap-2">
+                                  <span className="ri-bench-before-dot h-2 w-2 rounded-full bg-ink-muted" />
+                                  <span>{beforeLabel}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="ri-bench-after-dot h-2 w-2 rounded-full bg-accent shadow-glow-soft" />
+                                  <span>{afterLabel}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="ri-bench-hardware mt-4 rounded-xl bg-surface-veil ring-1 ring-line-soft p-3">
+                              <div className="ri-bench-hardware-grid grid grid-cols-3 gap-2 divide-x divide-line-soft text-center">
+                                {[
+                                  { label: "GPU", value: g?.gpu || "-" },
+                                  { label: "CPU", value: g?.cpu || "-" },
+                                  { label: "RAM", value: g?.ram || "-" },
+                                ].map((detail) => (
+                                  <div
+                                    key={detail.label}
+                                    className="flex flex-col px-1"
+                                  >
+                                    <span className="ri-bench-hardware-label mb-1 text-[10px] font-bold uppercase tracking-wider text-ink-muted">
+                                      {detail.label}
+                                    </span>
+                                    <span className="ri-bench-hardware-value break-words text-[11px] font-medium leading-tight text-ink-secondary">
+                                      {detail.value}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </motion.div>
+                        </AnimatePresence>
+                      </div>
+                    </motion.div>
+                  );
+                })}
               </div>
-            </details>
-            {pages.length > 1 && (
-              <div className="ri-bench-pager flex items-center gap-1">
-                <button
-                  type="button"
-                  aria-label="Previous benchmark page"
-                  disabled={safePage === 0}
-                  onClick={() => setPage(Math.max(0, safePage - 1))}
-                  className="ri-bench-page-button grid h-11 w-11 place-items-center rounded-full bg-surface-card text-ink-secondary hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <ChevronLeft size={18} aria-hidden="true" />
-                </button>
-                <p
-                  className="min-w-16 text-center text-xs text-ink-secondary"
-                  aria-live="polite"
-                  aria-atomic="true"
-                >
-                  {data.benchPagePrefix || "Page"} {safePage + 1} /{" "}
-                  {pages.length}
-                </p>
-                <button
-                  type="button"
-                  aria-label="Next benchmark page"
-                  disabled={safePage === pages.length - 1}
-                  onClick={() =>
-                    setPage(Math.min(pages.length - 1, safePage + 1))
-                  }
-                  className="ri-bench-page-button grid h-11 w-11 place-items-center rounded-full bg-surface-card text-ink-secondary hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <ChevronRight size={18} aria-hidden="true" />
-                </button>
+            </div>
+          </motion.div>
+
+          <div className="mt-4 flex items-center justify-center">
+            <div className="ri-bench-pager inline-flex items-center gap-3 rounded-full bg-surface-card ring-1 ring-line-soft px-3 py-2 shadow-surface">
+              <button
+                type="button"
+                onClick={() => canPrev && setPage((p) => Math.max(0, p - 1))}
+                disabled={!canPrev}
+                className={
+                  "h-9 w-9 rounded-full grid place-items-center " +
+                  "ri-bench-page-button bg-surface-hover ring-1 ring-line-soft " +
+                  "transition hover:bg-surface-hover-accent active:scale-95 " +
+                  (canPrev ? "" : "opacity-40 cursor-not-allowed")
+                }
+                aria-label="Previous benchmark page"
+              >
+                <ChevronLeft className="ri-bench-page-icon h-5 w-5 text-ink-secondary" />
+              </button>
+
+              <div className="ri-bench-page-label min-w-[92px] text-center text-[13px] font-extrabold text-ink-secondary">
+                {pagePrefix} {safePage + 1}
               </div>
-            )}
+
+              <button
+                type="button"
+                onClick={() =>
+                  canNext && setPage((p) => Math.min(totalPages - 1, p + 1))
+                }
+                disabled={!canNext}
+                className={
+                  "h-9 w-9 rounded-full grid place-items-center " +
+                  "ri-bench-page-button bg-surface-hover ring-1 ring-line-soft " +
+                  "transition hover:bg-surface-hover-accent active:scale-95 " +
+                  (canNext ? "" : "opacity-40 cursor-not-allowed")
+                }
+                aria-label="Next benchmark page"
+              >
+                <ChevronRight className="ri-bench-page-icon h-5 w-5 text-ink-secondary" />
+              </button>
+            </div>
           </div>
-          <p className="text-[11px] leading-relaxed text-ink-muted">
-            Results vary by hardware, game, and settings.
-          </p>
-        </section>
+        </>
       )}
       <div className="mt-4">
         <About initialData={initialAboutData} compact />
