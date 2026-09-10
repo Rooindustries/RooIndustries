@@ -1,3 +1,5 @@
+const { normalizePackageTitleForMatch } = require("../../../lib/packagePricing");
+
 const TRUTHY_ENV_VALUES = ["1", "true", "yes", "on"];
 const KNOWN_RUNTIMES = new Set(["production", "preview", "development"]);
 
@@ -115,6 +117,30 @@ const allowProviderModeInRuntime = (
   return mode === "test" || mode === "sandbox";
 };
 
+const resolveDodoProductIds = () => {
+  const raw = String(process.env.DODO_PAYMENTS_PRODUCT_IDS || "").trim();
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const products = Object.fromEntries(Object.entries(parsed).map(([title, id]) => [
+      normalizePackageTitleForMatch(title), typeof id === "string" ? id.trim() : "",
+    ]));
+    return ["vertex essentials", "performance vertex overhaul", "performance vertex max"]
+      .every((title) => /^pdt_[A-Za-z0-9]+$/.test(products[title] || "")) ? products : null;
+  } catch {
+    return null;
+  }
+};
+
+const resolveDodoProductId = (packageTitle) => {
+  const products = resolveDodoProductIds();
+  if (!products) return "";
+  return Object.keys(products).length
+    ? products[normalizePackageTitleForMatch(packageTitle)] || ""
+    : String(process.env.DODO_PAYMENTS_PRODUCT_ID || "").trim();
+};
+
 const resolvePayPalMode = (runtimePolicy = resolvePaymentRuntimePolicy()) => {
   const policy = normalizeRuntimePolicy(runtimePolicy);
   const explicit = String(
@@ -165,8 +191,11 @@ const resolvePaymentProviders = () => {
 
   const dodoEnvironment = String(process.env.DODO_PAYMENTS_ENVIRONMENT || "").trim();
   const dodoMode = dodoEnvironment === "test_mode" ? "test" : dodoEnvironment === "live_mode" ? "live" : "missing";
-  const dodoEnabled = ["DODO_PAYMENTS_API_KEY", "DODO_PAYMENTS_PRODUCT_ID", "DODO_PAYMENTS_WEBHOOK_KEY", "DODO_PAYMENTS_RETURN_URL"]
-    .every((key) => !!String(process.env[key] || "").trim()) && allowProviderModeInRuntime(dodoMode, runtimePolicy);
+  const dodoProducts = resolveDodoProductIds();
+  const dodoEnabled = dodoProducts !== null &&
+    (Object.keys(dodoProducts).length > 0 || !!String(process.env.DODO_PAYMENTS_PRODUCT_ID || "").trim()) &&
+    ["DODO_PAYMENTS_API_KEY", "DODO_PAYMENTS_WEBHOOK_KEY", "DODO_PAYMENTS_RETURN_URL"]
+      .every((key) => !!String(process.env[key] || "").trim()) && allowProviderModeInRuntime(dodoMode, runtimePolicy);
 
   return {
     dodo: { enabled: dodoEnabled, mode: dodoMode },
@@ -204,6 +233,8 @@ module.exports = {
   normalizeRuntimePolicy,
   resolveIsProdLike,
   resolveLivePaymentsEnabled,
+  resolveDodoProductId,
+  resolveDodoProductIds,
   resolvePayPalMode,
   resolvePaymentProviders,
   resolvePaymentRuntimePolicy,

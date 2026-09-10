@@ -7,6 +7,11 @@ const originalFetch = global.fetch;
 const secret = 'whsec_' + Buffer.from('offline-dodo-signature-secret-32bytes').toString('base64');
 const record = () => ({ _id:'paymentRecord.dodo.offline', provider:'dodo', providerOrderId:'cks_offline', pricingSnapshot:{netAmount:84.99}, bookingPayload:{email:'test@example.com'}, providerPublicData:{currency:'USD',productId:'pdt_offline',environment:'test_mode'} });
 const payment = () => ({payment_id:'pay_offline',checkout_session_id:'cks_offline',metadata:{paymentRecordId:record()._id},status:'succeeded',total_amount:8499,currency:'USD',product_cart:[{product_id:'pdt_offline',quantity:1}],refunds:[],customer:{email:'test@example.com'}});
+const packageProducts = {
+  'Vertex Essentials': 'pdt_essentials',
+  'Performance Vertex Overhaul': 'pdt_overhaul',
+  'Performance Vertex Max': 'pdt_max',
+};
 const sign = (raw, timestamp = Math.floor(Date.now()/1000)) => {
   const id='evt_offline';
   const signature=crypto.createHmac('sha256',Buffer.from(secret.slice(6),'base64')).update(`${id}.${timestamp}.${raw}`).digest('base64');
@@ -14,6 +19,7 @@ const sign = (raw, timestamp = Math.floor(Date.now()/1000)) => {
 };
 beforeEach(()=>{
   process.env={...originalEnv,VERCEL_ENV:'development',DODO_PAYMENTS_ENVIRONMENT:'test_mode',DODO_PAYMENTS_API_KEY:'offline-test-key',DODO_PAYMENTS_PRODUCT_ID:'pdt_offline',DODO_PAYMENTS_WEBHOOK_KEY:secret,DODO_PAYMENTS_RETURN_URL:'http://100.127.48.111:3188/payment?dodo_return=1'};
+  delete process.env.DODO_PAYMENTS_PRODUCT_IDS;
   global.fetch=jest.fn(async(input)=>{
     const path=new URL(typeof input==='string'?input:input.url).pathname;
     const body=path.startsWith('/products/')?{price:{type:'one_time_price',currency:'USD',price:50,discount:0,pay_what_you_want:true,tax_inclusive:true,purchasing_power_parity:false}}:
@@ -30,11 +36,51 @@ test('creates a server-priced USD checkout using only the configured product and
   const [input,init]=global.fetch.mock.calls.find(([input])=>new URL(typeof input==='string'?input:input.url).pathname==='/checkouts');
   const body=JSON.parse(init.body);
   expect(body.product_cart).toEqual([{product_id:'pdt_offline',quantity:1,amount:8499}]);
-  expect(body.feature_flags).toMatchObject({allow_currency_selection:false,allow_discount_code:false,allow_customer_editing_name:true});
+  expect(body.customer).toEqual({email: record().bookingPayload.email});
+  expect(body.feature_flags).toMatchObject({allow_currency_selection:false,allow_discount_code:false,allow_customer_editing_name:true,always_create_new_customer:true});
   expect(body.metadata.paymentRecordId).toBe(record()._id);
   expect(body.cancel_url).toContain('dodo_cancel=1');
   expect(String(input)).toContain('test.dodopayments.com');
 });
+test.each([
+  ['Vertex Essentials', 'pdt_essentials', 29.95],
+  ['Performance Vertex Overhaul', 'pdt_overhaul', 54.95],
+  ['Performance Vertex Max', 'pdt_max', 99.95],
+  ['XOC (Upgrade)', 'pdt_max', 45],
+  ['Vertex Essentials', 'pdt_essentials', 24.95],
+])('uses the named product and quoted amount for %s at %s', async (packageTitle, productId, netAmount) => {
+  process.env.DODO_PAYMENTS_PRODUCT_IDS = JSON.stringify(packageProducts);
+  const frozen = record();
+  frozen.bookingPayload.packageTitle = packageTitle;
+  frozen.pricingSnapshot.netAmount = netAmount;
+  frozen.providerPublicData.productId = providerConfig.resolveDodoProductId(packageTitle);
+  expect(frozen.providerPublicData.productId).toBe(productId);
+  const result = await createDodoCheckout({record: frozen});
+  const [, request] = global.fetch.mock.calls.find(([input]) => new URL(typeof input === 'string' ? input : input.url).pathname === '/checkouts');
+  expect(JSON.parse(request.body).product_cart).toEqual([{product_id: productId, quantity: 1, amount: Math.round(netAmount * 100)}]);
+  expect(result.productId).toBe(productId);
+});
+
+test.each(['not-json', '{}', '[]', '{"Vertex Essentials":"pdt_essentials"}'])('disables an invalid package map: %s', raw => {
+  process.env.DODO_PAYMENTS_PRODUCT_IDS = raw;
+  expect(providerConfig.resolvePaymentProviders().dodo.enabled).toBe(false);
+  expect(providerConfig.resolveDodoProductId('Vertex Essentials')).toBe('');
+});
+
+test('does not fall back to the generic product for an unmapped package', async () => {
+  process.env.DODO_PAYMENTS_PRODUCT_IDS = JSON.stringify(packageProducts);
+  const frozen = record();
+  frozen.providerPublicData.productId = providerConfig.resolveDodoProductId('Unknown package');
+  await expect(createDodoCheckout({record: frozen})).rejects.toMatchObject({code: 'dodo_package_product_missing'});
+  expect(global.fetch).not.toHaveBeenCalled();
+});
+
+test('preserves frozen product identity after the configured catalog changes', async () => {
+  process.env.DODO_PAYMENTS_PRODUCT_IDS = JSON.stringify(packageProducts);
+  expect((await createDodoCheckout({record: record()})).productId).toBe('pdt_offline');
+  expect(await verifyDodoCapture({record: record(), payment: payment()})).toMatchObject({ok: true, trustedCapture: true});
+});
+
 test('does not repeat ambiguous checkout creation',async()=>{
   await expect(createDodoCheckout({record:record(),lookupOnly:true})).rejects.toMatchObject({code:'dodo_order_creation_requires_recovery'});
   expect(global.fetch).not.toHaveBeenCalled();

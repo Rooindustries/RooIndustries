@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useLocation, Link, useNavigate } from "react-router-dom";
 import { PayPalScriptProvider, PayPalButtons, usePayPalScriptReducer } from "@paypal/react-paypal-js";
 import { motion } from "framer-motion";
+import { WalletCards } from "lucide-react";
 import packagePricing from "../lib/packagePricing";
 import {
   calculateCheckoutDiscounts,
@@ -93,7 +94,7 @@ function PayPalCheckout({ children }) {
   }
 
   return (
-    <div className="paypal-checkout-shell relative z-0 h-10 w-full overflow-hidden rounded-lg bg-transparent sm:w-48 [&_iframe]:!rounded-[4px] [&_iframe]:!border-0 [&_iframe]:!bg-transparent [&_iframe]:!outline-0 [&_iframe]:!shadow-none">
+    <div className="paypal-checkout-shell relative z-0 h-10 w-full overflow-hidden rounded-lg bg-transparent [&_iframe]:!rounded-[4px] [&_iframe]:!border-0 [&_iframe]:!bg-transparent [&_iframe]:!outline-0 [&_iframe]:!shadow-none">
       {children}
     </div>
   );
@@ -1314,7 +1315,7 @@ export default function Payment({ hideFooter = false }) {
       if (!session?.providerPayload?.checkoutUrl) throw new Error("Checkout is being recovered. Check the payment status shortly.");
       window.location.assign(session.providerPayload.checkoutUrl);
     } catch (error) {
-      showBanner("error", error.message || "Unable to open Dodo Payments.");
+      showBanner("error", error.message || "Unable to open checkout.");
     } finally {
       setPayingDodo(false);
     }
@@ -1911,7 +1912,7 @@ export default function Payment({ hideFooter = false }) {
             {!!lockedProvider && (
               <div className="mt-4 flex flex-col items-start justify-between gap-3 rounded-lg border border-info-border bg-info-soft px-4 py-3 sm:flex-row sm:items-center">
                 <p className="text-xs text-info-text">
-                  This checkout is reserved with {lockedProvider === "dodo" ? "Dodo Payments" : lockedProvider === "paypal" ? "PayPal" : "Razorpay"}. Pricing and provider selection are locked for this session. Finish it or safely release this payment method before choosing another.
+                  This checkout is reserved with {lockedProvider === "dodo" ? "your selected payment option" : lockedProvider === "paypal" ? "PayPal" : "Razorpay"}. Pricing and provider selection are locked for this session. Finish it or safely release this payment method before choosing another.
                 </p>
                 <button
                   type="button"
@@ -1939,7 +1940,7 @@ export default function Payment({ hideFooter = false }) {
           <p className="text-ink-muted text-sm mt-1">
             {isFree
               ? "This booking is fully discounted. Confirm below to finalize it."
-              : "Secure online payment checkout"}
+              : "Available payment options depend on your country and order total."}
           </p>
 
 
@@ -1964,16 +1965,20 @@ export default function Payment({ hideFooter = false }) {
           ) : (
             <>
               {providerConfig.dodo?.enabled && (
-                <div className="low-perf-surface glass-premium glass-card-surface mt-6 flex flex-col items-center justify-between gap-4 rounded-xl border border-line-input px-5 py-4 sm:flex-row">
-                  <div>
-                    <p className="text-base font-semibold text-ink">Dodo Payments</p>
-                    <p className="text-sm text-ink-muted">Pay securely by card and supported local payment methods.</p>
+                <div className="low-perf-surface glass-premium glass-card-surface mt-6 flex flex-col items-center justify-between gap-4 rounded-xl border border-line-input px-4 py-4 md:flex-row">
+                  <div className="grid w-full min-w-0 grid-cols-[5rem_minmax(0,1fr)] items-center gap-3">
+                    <div className="flex h-8 w-20 items-center justify-center text-ink" aria-hidden="true">
+                      <WalletCards size={36} strokeWidth={1.5} />
+                    </div>
+                    <p className="whitespace-nowrap text-xs font-medium text-ink-secondary sm:text-sm">
+                      {finalAmount >= 50.01 ? "Cards, crypto & Klarna" : "Cards & crypto"}
+                    </p>
                   </div>
-                  <div className="flex w-full shrink-0 flex-col gap-2 sm:w-48">
+                  <div className="flex w-full shrink-0 flex-col gap-2 md:w-52">
                     <button type="button" onClick={handleDodoCheckout}
                       disabled={!canSubmitBooking || payingDodo || paymentStatusBusy || cancellingPayment || quoteLoading || !quoteFingerprint || !providerIsAvailableForSession("dodo")}
-                      className="glow-button inline-flex h-10 w-full items-center justify-center rounded-lg px-4 text-sm font-semibold disabled:opacity-60">
-                      {payingDodo ? "Opening checkout..." : "Pay with Dodo Payments"}
+                      className="glow-button inline-flex h-10 w-full items-center justify-center whitespace-nowrap rounded-lg px-4 text-sm font-semibold disabled:opacity-60">
+                      {payingDodo ? "Opening checkout..." : "Pay your way"}
                     </button>
                     {lockedProvider === "dodo" && (
                       <button type="button" disabled={paymentStatusBusy || cancellingPayment}
@@ -1987,31 +1992,26 @@ export default function Payment({ hideFooter = false }) {
               )}
 
               <div
-                className={`low-perf-surface glass-premium glass-card-surface mt-6 flex flex-col items-center justify-between gap-4 rounded-xl border px-5 py-4 sm:flex-row ${
+                className={`low-perf-surface glass-premium glass-card-surface mt-4 flex flex-col items-center justify-between gap-4 rounded-xl border px-4 py-4 md:flex-row ${
                   razorpayTemporarilyDisabled
                     ? "border-warning-border bg-warning-soft"
                     : "border-line-input"
                 }`}
               >
-                <div className="flex items-center gap-4">
+                <div className="grid w-full min-w-0 grid-cols-[5rem_minmax(0,1fr)] items-center gap-3">
                   <img
                     src="https://razorpay.com/assets/razorpay-logo.svg"
                     alt="Razorpay payment logo"
                     width={120}
                     height={24}
                     decoding="async"
-                    className="h-5 w-auto"
+                    className="h-8 w-20 object-contain"
                   />
                   <div>
-                    <p className="text-ink-secondary text-sm font-medium">
+                    <p className="whitespace-nowrap text-xs font-medium text-ink-secondary sm:text-sm">
                       {razorpayTemporarilyDisabled
-                        ? "Razorpay temporarily unavailable"
-                        : "Razorpay Secure Checkout"}
-                    </p>
-                    <p className="text-ink-muted text-xs">
-                      {razorpayTemporarilyDisabled
-                        ? "Please use PayPal while we update the merchant display name."
-                        : "Cards, UPI, wallets, and local methods"}
+                        ? "Temporarily unavailable"
+                        : "Cards, UPI & wallets"}
                     </p>
                   </div>
                 </div>
@@ -2026,7 +2026,7 @@ export default function Payment({ hideFooter = false }) {
                     !canUseRazorpay ||
                     !providerIsAvailableForSession("razorpay")
                   }
-                  className="glow-button h-10 w-full shrink-0 rounded-lg px-4 text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 sm:w-48"
+                  className="glow-button h-10 w-full shrink-0 whitespace-nowrap rounded-lg px-4 text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 md:w-52"
                 >
                   {payingRzp || paymentStatusBusy
                     ? "Processing..."
@@ -2060,23 +2060,23 @@ export default function Payment({ hideFooter = false }) {
 
 
               {shouldRenderPaypalBlock && (
-                <div className="low-perf-surface glass-premium glass-card-surface mt-4 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-xl border border-line-input px-5 py-4">
-                  <div className="flex items-center gap-4">
+                <div className="low-perf-surface glass-premium glass-card-surface mt-4 flex flex-col md:flex-row items-center justify-between gap-4 rounded-xl border border-line-input px-4 py-4">
+                  <div className="grid w-full min-w-0 grid-cols-[5rem_minmax(0,1fr)] items-center gap-3">
                     <img
                       src="https://www.paypalobjects.com/webstatic/mktg/Logo/pp-logo-100px.png"
                       alt="PayPal payment logo"
                       width={100}
                       height={26}
                       decoding="async"
-                      className="w-20"
+                      className="h-8 w-20 object-contain"
                     />
-                    <p className="text-ink-secondary text-sm font-medium hidden sm:block">
-                      Secure global payment
+                    <p className="whitespace-nowrap text-xs font-medium text-ink-secondary sm:text-sm">
+                      Secure global payments
                     </p>
                   </div>
 
                   {/* Clip the SDK’s 40px button at its 4px radius to hide the iframe’s light corners. Use outline-0: Tailwind v3’s outline-none leaves a transparent outline that forced-colors modes can repaint. */}
-                  <div className="w-full shrink-0 sm:w-48">
+                  <div className="w-full shrink-0 md:w-52">
                     {canDisplayPaypalMethod ? (
                       <PayPalScriptProvider
                         options={{
