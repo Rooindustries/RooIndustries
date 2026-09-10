@@ -94,7 +94,7 @@ function PayPalCheckout({ children }) {
   }
 
   return (
-    <div className="paypal-checkout-shell relative z-0 h-10 w-full overflow-hidden rounded-lg bg-transparent sm:w-48 [&_iframe]:!rounded-[4px] [&_iframe]:!border-0 [&_iframe]:!bg-transparent [&_iframe]:!outline-0 [&_iframe]:!shadow-none">
+    <div className="paypal-checkout-shell relative z-0 h-10 w-full overflow-hidden rounded-lg bg-transparent [&_iframe]:!rounded-[4px] [&_iframe]:!border-0 [&_iframe]:!bg-transparent [&_iframe]:!outline-0 [&_iframe]:!shadow-none">
       {children}
     </div>
   );
