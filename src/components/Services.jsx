@@ -135,7 +135,7 @@ export default function Services({
       className="ri-services-section mx-auto max-w-[92rem] px-4 pt-6 pb-8 sm:px-6 sm:pb-10"
       aria-labelledby="services-heading"
     >
-      <div className="ri-performance-overview mx-auto grid max-w-[60rem] gap-6 lg:grid-cols-[300px_minmax(0,1fr)] lg:items-stretch">
+      <div className="ri-performance-overview grid w-full gap-6 lg:grid-cols-[300px_minmax(0,1fr)] lg:items-stretch">
         <About initialData={initialAboutData} compact />
         <div className="ri-services-benefit-column flex min-w-0 flex-col">
           <div className="text-center">
@@ -178,11 +178,11 @@ export default function Services({
                       />
                     )}
                   </span>
-                  <div className="min-w-0">
-                    <h3 className="ri-service-title text-[13px] font-semibold leading-5 text-ink sm:text-sm">
+                  <div className="min-w-0 xl:flex xl:flex-1 xl:items-center xl:justify-between xl:gap-3">
+                    <h3 className="ri-service-title text-[13px] font-semibold leading-5 text-ink sm:text-sm xl:shrink-0">
                       {card.title}
                     </h3>
-                    <p className="ri-service-copy mt-0.5 hidden text-xs leading-[1.45] text-ink-secondary sm:block">
+                    <p className="ri-service-copy mt-0.5 hidden text-xs leading-[1.45] text-ink-secondary sm:block xl:mt-0 xl:text-right">
                       {card.description}
                     </p>
                   </div>
