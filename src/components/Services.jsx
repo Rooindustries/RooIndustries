@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { urlFor } from "../sanityClient";
 import About from "./About";
@@ -8,7 +7,6 @@ import {
   fetchHomeSectionData,
   HOME_SECTION_DATA_KEYS,
 } from "../lib/homeSectionData";
-import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import {
   Clock,
   Shield,
@@ -18,7 +16,6 @@ import {
   Cpu,
   ChevronLeft,
   ChevronRight,
-  ArrowUpRight,
 } from "lucide-react";
 
 const { HOME_COPY } = homeCopy;
@@ -44,7 +41,6 @@ export default function Services({
 }) {
   const [data, setData] = useState(initialData);
   const [page, setPage] = useState(0);
-  const handleHomeSectionLink = useHomeSectionLinkHandler();
 
   useEffect(() => {
     if (initialData !== null) setData(initialData);
@@ -139,66 +135,62 @@ export default function Services({
       className="ri-services-section mx-auto max-w-[92rem] px-4 pt-6 pb-8 sm:px-6 sm:pb-10"
       aria-labelledby="services-heading"
     >
-      <div className="ri-performance-overview">
-        <div className="text-center">
-          <div>
-            <h2
-              id="services-heading"
-              className="ri-services-heading text-3xl font-bold tracking-tight text-info-text sm:text-4xl"
-            >
-              {data.heading || HOME_COPY.services.heading}
-            </h2>
-            <p className="ri-services-subheading mt-2 text-sm text-ink-secondary sm:text-[15px]">
-              {HOME_COPY.services.subheading}
-            </p>
-          </div>
-          <Link
-            to="/#packages"
-            onClick={(event) => handleHomeSectionLink(event, "#packages")}
-            className="inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-ink underline decoration-line-accent underline-offset-4 hover:text-accent"
-          >
-            Compare packages <ArrowUpRight size={16} aria-hidden="true" />
-          </Link>
-        </div>
-
-        <ul className="ri-services-benefits mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
-          {HOME_COPY.services.cards.map((card, index) => {
-            const Icon = ICONS[card.iconType];
-            const customIcon = data.cards?.[index]?.customIcon;
-            return (
-              <li
-                key={card.iconType}
-                className="ri-service-card flex items-center gap-2.5 rounded-xl border border-line-input bg-panel p-3 sm:items-start sm:p-3.5"
+      <div className="ri-performance-overview grid gap-6 xl:grid-cols-[minmax(300px,0.82fr)_minmax(0,2.18fr)] xl:items-start">
+        <About initialData={initialAboutData} compact />
+        <div className="ri-services-benefit-column min-w-0">
+          <div className="text-center">
+            <div>
+              <h2
+                id="services-heading"
+                className="ri-services-heading text-3xl font-bold tracking-tight text-info-text sm:text-4xl"
               >
-                <span className="ri-service-icon-shell grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-line-input bg-surface-input">
-                  {customIcon ? (
-                    <img
-                      src={urlFor(customIcon).width(32).url()}
-                      alt=""
-                      width={16}
-                      height={16}
-                      loading="lazy"
-                      decoding="async"
-                    />
-                  ) : (
-                    <Icon
-                      className="ri-service-icon h-4 w-4 text-accent"
-                      aria-hidden="true"
-                    />
-                  )}
-                </span>
-                <div className="min-w-0">
-                  <h3 className="ri-service-title text-[13px] font-semibold leading-5 text-ink sm:text-sm">
-                    {card.title}
-                  </h3>
-                  <p className="ri-service-copy mt-0.5 hidden text-xs leading-[1.45] text-ink-secondary sm:block">
-                    {card.description}
-                  </p>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+                {data.heading || HOME_COPY.services.heading}
+              </h2>
+              <p className="ri-services-subheading mt-2 text-sm text-ink-secondary sm:text-[15px]">
+                {HOME_COPY.services.subheading}
+              </p>
+            </div>
+          </div>
+
+          <ul className="ri-services-benefits mt-5 grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {HOME_COPY.services.cards.map((card, index) => {
+              const Icon = ICONS[card.iconType];
+              const customIcon = data.cards?.[index]?.customIcon;
+              return (
+                <li
+                  key={card.iconType}
+                  className="ri-service-card flex items-center gap-2.5 rounded-xl border border-line-input bg-panel p-3 sm:items-start sm:p-3.5"
+                >
+                  <span className="ri-service-icon-shell grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-line-input bg-surface-input">
+                    {customIcon ? (
+                      <img
+                        src={urlFor(customIcon).width(32).url()}
+                        alt=""
+                        width={16}
+                        height={16}
+                        loading="lazy"
+                        decoding="async"
+                      />
+                    ) : (
+                      <Icon
+                        className="ri-service-icon h-4 w-4 text-accent"
+                        aria-hidden="true"
+                      />
+                    )}
+                  </span>
+                  <div className="min-w-0">
+                    <h3 className="ri-service-title text-[13px] font-semibold leading-5 text-ink sm:text-sm">
+                      {card.title}
+                    </h3>
+                    <p className="ri-service-copy mt-0.5 hidden text-xs leading-[1.45] text-ink-secondary sm:block">
+                      {card.description}
+                    </p>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       </div>
 
       {showBenchmarks && (
@@ -454,9 +446,6 @@ export default function Services({
           </div>
         </>
       )}
-      <div className="mt-4">
-        <About initialData={initialAboutData} compact />
-      </div>
     </section>
   );
 }
