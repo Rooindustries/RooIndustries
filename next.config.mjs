@@ -104,12 +104,22 @@ const nextConfig = {
     ];
   },
   async rewrites() {
-    return [
-      {
-        source: '/BIOSGuide',
-        destination: '/BIOSGuide/index.html',
-      },
-    ];
+    return {
+      beforeFiles: [],
+      afterFiles: [
+        {
+          source: '/BIOSGuide',
+          destination: '/BIOSGuide/index.html',
+        },
+      ],
+      fallback: [
+        {
+          source: '/:path*',
+          has: [{ type: 'header', key: 'x-roo-missing-format', value: 'markdown' }],
+          destination: '/not-found.md',
+        },
+      ],
+    };
   },
   async headers() {
     return [

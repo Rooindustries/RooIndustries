@@ -1,5 +1,7 @@
 const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || "https://www.rooindustries.com").replace(/\/$/, "");
 
+const { CONTACT_EMAIL } = require("./companyContent");
+
 const SITE_NAME = "Roo Industries";
 const DEFAULT_OG_IMAGE = "/embed_logo.png";
 const DEFAULT_DESCRIPTION =
@@ -31,6 +33,11 @@ const routeMeta = {
   "/contact": {
     title: "Contact | Roo Industries",
     description: "Send your PC details, ask what package fits, or start a remote game tuning session.",
+    noindex: false,
+  },
+  "/about": {
+    title: "About Roo Industries | Remote PC Game Optimization",
+    description: "Learn about Roo Industries remote PC optimization, how sessions work, and where to find results, service terms, and support.",
     noindex: false,
   },
   "/terms": {
@@ -254,6 +261,12 @@ const buildOrganizationJsonLd = () => ({
   logo: `${siteUrl}${DEFAULT_OG_IMAGE}`,
   sameAs: ["https://discord.com/invite/qs5HKNyazD"],
   areaServed: "Worldwide",
+  contactPoint: {
+    "@type": "ContactPoint",
+    email: CONTACT_EMAIL,
+    contactType: "customer support",
+    url: `${siteUrl}/contact`,
+  },
 });
 
 const buildHomePageJsonLd = () => ({

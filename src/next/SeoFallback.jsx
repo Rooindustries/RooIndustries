@@ -1,8 +1,4 @@
 const routeCopy = {
-  "/": {
-    title: "More FPS. Less Input Lag. Tuned For Ranked Games.",
-    body: "Roo Industries tunes BIOS, Windows, memory, GPU, and game settings around the games you actually play, so ranked feels smoother, FPS climbs, and the mouse does what your hand tells it to.",
-  },
   "/benchmarks": {
     title: "Benchmark Results",
     body: "Review before and after FPS numbers from real Roo Industries sessions.",
@@ -11,17 +7,9 @@ const routeCopy = {
     title: "Client Reviews & Results",
     body: "Read what players say after their FPS climbs, input lag drops, and games feel smoother.",
   },
-  "/contact": {
-    title: "Contact Roo Industries",
-    body: "Send your PC details, ask what package fits, or start a remote game tuning session.",
-  },
   "/terms": {
     title: "Terms & Conditions",
     body: "Read service terms, booking policy, and limitations.",
-  },
-  "/privacy": {
-    title: "Privacy Policy",
-    body: "Understand how Roo Industries handles and protects your personal information.",
   },
   "/meet-the-team": {
     title: "Meet The Team",

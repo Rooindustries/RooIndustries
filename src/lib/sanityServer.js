@@ -90,7 +90,17 @@ async function fetchHomePageData() {
   });
 }
 
+async function fetchPrivacyPolicy() {
+  try {
+    const fetchContent = await createPublicContentFetcher();
+    return await fetchContent("privacy-policy");
+  } catch {
+    return null;
+  }
+}
+
 module.exports = {
+  fetchPrivacyPolicy,
   fetchFaqQuestions,
   fetchHomePageData,
 };

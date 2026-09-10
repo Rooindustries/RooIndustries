@@ -5,6 +5,7 @@ export default async function RouteRenderer({
   pathname,
   searchParams,
   initialHomeData = null,
+  initialRouteData = null,
 }) {
   const resolvedSearchParams = await searchParams;
 
@@ -15,6 +16,7 @@ export default async function RouteRenderer({
         pathname={pathname}
         searchParams={resolvedSearchParams}
         initialHomeData={initialHomeData}
+        initialRouteData={initialRouteData}
       />
     </>
   );

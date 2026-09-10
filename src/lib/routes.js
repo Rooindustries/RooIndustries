@@ -5,6 +5,7 @@ const INDEXABLE_ROUTES = [
   "/reviews",
   "/faq",
   "/contact",
+  "/about",
   "/terms",
   "/privacy",
   "/meet-the-team",

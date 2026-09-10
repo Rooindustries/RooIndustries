@@ -2,8 +2,8 @@ import React, { useEffect, useState } from "react";
 import { PortableText } from "@portabletext/react";
 import { getPublicContent } from "../lib/publicContentClient";
 
-export default function PrivacyPolicy() {
-  const [data, setData] = useState(null);
+export default function PrivacyPolicy({ initialData = null }) {
+  const [data, setData] = useState(initialData);
 
   const renderTextWithLinks = (text) => {
     if (typeof text !== "string") return text;
