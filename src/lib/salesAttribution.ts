@@ -45,25 +45,29 @@ export function sanitizeSalesAttribution(value: unknown): SalesAttribution | nul
 }
 
 export function captureSalesAttribution(): SalesAttribution | null {
-  if (typeof window === "undefined" || !salesPath(window.location.pathname)) return null;
-  let current = fallback;
-  try { current = sanitizeSalesAttribution(JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "null")) || current; } catch {}
-  const params = new URLSearchParams(window.location.search);
-  const campaign = { creatorCode: label(params.get("ref")), source: label(params.get("utm_source")), medium: label(params.get("utm_medium")), campaign: label(params.get("utm_campaign")), content: label(params.get("utm_content")) };
-  const explicit = Object.values(campaign).some(Boolean);
-  const changed = current && explicit && Object.entries(campaign).some(([key,value]) => value && value !== (current?.[key as keyof SalesAttribution] || ""));
-  if (!current || changed) {
-    const journeyId = newJourneyId();
-    if (!journeyId) return null;
-    let referrerHost = "";
-    try { const referrer = new URL(document.referrer); if (referrer.origin !== window.location.origin) referrerHost = referrer.hostname; } catch {}
-    let creatorCode = campaign.creatorCode;
-    if (!creatorCode) { try { creatorCode = label(sessionStorage.getItem("referral_session")); } catch {} }
-    current = sanitizeSalesAttribution({ version: 1, journeyId, capturedAt: new Date().toISOString(), landingPath: salesPath(window.location.pathname), referrerHost, ...campaign, creatorCode });
+  try {
+    if (typeof window === "undefined" || !salesPath(window.location.pathname)) return null;
+    let current = fallback;
+    try { current = sanitizeSalesAttribution(JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "null")) || current; } catch {}
+    const params = new URLSearchParams(window.location.search);
+    const campaign = { creatorCode: label(params.get("ref")), source: label(params.get("utm_source")), medium: label(params.get("utm_medium")), campaign: label(params.get("utm_campaign")), content: label(params.get("utm_content")) };
+    const explicit = Object.values(campaign).some(Boolean);
+    const changed = current && explicit && Object.entries(campaign).some(([key,value]) => value && value !== (current?.[key as keyof SalesAttribution] || ""));
+    if (!current || changed) {
+      const journeyId = newJourneyId();
+      if (!journeyId) return null;
+      let referrerHost = "";
+      try { const referrer = new URL(document.referrer); if (referrer.origin !== window.location.origin) referrerHost = referrer.hostname; } catch {}
+      let creatorCode = campaign.creatorCode;
+      if (!creatorCode) { try { creatorCode = label(sessionStorage.getItem("referral_session")); } catch {} }
+      current = sanitizeSalesAttribution({ version: 1, journeyId, capturedAt: new Date().toISOString(), landingPath: salesPath(window.location.pathname), referrerHost, ...campaign, creatorCode });
+    }
+    fallback = current;
+    try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(current)); } catch {}
+    return current;
+  } catch {
+    return null;
   }
-  fallback = current;
-  try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(current)); } catch {}
-  return current;
 }
 
 export function salesEventProperties(attribution: unknown = captureSalesAttribution()) {

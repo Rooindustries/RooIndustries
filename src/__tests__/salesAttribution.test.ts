@@ -60,6 +60,19 @@ describe("sales attribution", () => {
     expect(second.journeyId).not.toBe(first.journeyId);
     expect(second.campaign).toBe("second");
   });
+
+  test("does not block checkout when browser randomness is unavailable", () => {
+    const { captureSalesAttribution } = require("../lib/salesAttribution");
+    const original = Object.getOwnPropertyDescriptor(window.crypto, "randomUUID");
+    Object.defineProperty(window.crypto, "randomUUID", { configurable: true, value: () => { throw new Error("Browser randomness unavailable"); } });
+    try {
+      expect(captureSalesAttribution).not.toThrow();
+      expect(captureSalesAttribution()).toBeNull();
+    } finally {
+      if (original) Object.defineProperty(window.crypto, "randomUUID", original);
+      else delete (window.crypto as any).randomUUID;
+    }
+  });
 });
 
 describe("confirmed purchase receipts", () => {
@@ -94,5 +107,12 @@ describe("confirmed purchase receipts", () => {
   test("reports free bookings distinctly without inventing paid revenue", () => {
     const { buildSalesReceipt } = require("../server/api/payment/salesReceipt");
     expect(buildSalesReceipt({ ...record, provider: "free", verificationState: "", providerPublicData: {}, pricingSnapshot: { netAmount: 0 } })).toEqual(expect.objectContaining({ paymentType: "free", amount: 0, currency: "USD" }));
+  });
+
+  test("does not break a payment status response for malformed optional analytics input", () => {
+    const { buildSalesReceipt } = require("../server/api/payment/salesReceipt");
+    const malformed = { ...record, pricingSnapshot: { netAmount: { valueOf: null, toString: null } } };
+    expect(() => buildSalesReceipt(malformed)).not.toThrow();
+    expect(buildSalesReceipt(malformed)).toBeNull();
   });
 });
