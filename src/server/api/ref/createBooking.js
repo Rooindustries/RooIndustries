@@ -1,4 +1,5 @@
 import { createDataClient as createClient } from "../../data/documentClient.js";
+import { sanitizeSalesAttribution } from "../../../lib/salesAttribution";
 import { verifyHoldToken } from "../../booking/holdToken.js";
 import { resolveBookingPricing, resolveUpgradeContext } from "./pricing.js";
 import {
@@ -634,6 +635,7 @@ export default async function handler(req, res) {
             ? `paypal:${providerOrderId}`
             : `razorpay-order:${providerOrderId}`,
         bookingPayload: {
+          salesAttribution: sanitizeSalesAttribution(bookingDoc.salesAttribution),
           packageTitle: String(
             bookingDoc.packageTitle || packageTitle || ""
           ).trim(),
@@ -1395,6 +1397,7 @@ export default async function handler(req, res) {
       backendOwner,
       cutoverGeneration,
       paymentRecordId,
+      salesAttribution: sanitizeSalesAttribution(internalPaymentRecord?.bookingPayload?.salesAttribution || req.body?.salesAttribution),
       paymentProofClaimId,
       paymentFinalizationLeaseId,
       date: bookingDate,

@@ -4,6 +4,7 @@ import {
   normalizeStartTimeUTC,
 } from "../../booking/slotIdentity.js";
 import { normalizeBookingStatus } from "../../booking/bookingStatus.js";
+import { sanitizeSalesAttribution } from "../../../lib/salesAttribution";
 import { appendCouponConsumption } from "./couponReservations.js";
 import { dispatchRescheduleNotifications } from "./bookingEmails.js";
 import { getSafeErrorCode } from "../../safeErrorLog.js";
@@ -231,6 +232,7 @@ export const createRequiresRescheduleBooking = async ({
   const booking = prepareDeterministicBooking({
     booking: {
       paymentRecordId: paymentRecord._id,
+      salesAttribution: sanitizeSalesAttribution(payload.salesAttribution),
       backendOwner:
         paymentRecord.backendOwner === "supabase" ? "supabase" : "sanity",
       paymentProvider: paymentRecord.provider,

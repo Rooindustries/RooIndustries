@@ -4,6 +4,8 @@ import { PayPalScriptProvider, PayPalButtons, usePayPalScriptReducer } from "@pa
 import { motion } from "framer-motion";
 import { WalletCards } from "lucide-react";
 import packagePricing from "../lib/packagePricing";
+import { captureSalesAttribution, sanitizeSalesAttribution } from "../lib/salesAttribution";
+import { trackConfirmedPurchase } from "../lib/analytics";
 import {
   calculateCheckoutDiscounts,
   formatCouponValue,
@@ -238,6 +240,7 @@ export default function Payment({ hideFooter = false }) {
   };
 
   const buildConfirmationNavigationState = (responseBody = {}) => {
+    trackConfirmedPurchase(responseBody.analyticsReceipt);
     const baseState = getModalFlowState();
     const bookingId = String(responseBody?.bookingId || "").trim();
     const emailDispatchToken = String(
@@ -539,6 +542,7 @@ export default function Payment({ hideFooter = false }) {
 
   const buildCheckoutPayload = () => ({
     ...bookingData,
+    salesAttribution: sanitizeSalesAttribution(bookingData.salesAttribution) || captureSalesAttribution(),
     packageTitle,
     packagePrice,
     email: bookingData.email || "",

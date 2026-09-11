@@ -1,5 +1,7 @@
 import { createDodoCheckout, inspectDodoCheckout, retrieveDodoPayment, validateDodoPayment, verifyDodoCapture, unwrapDodoWebhook } from "./dodoProvider.js";
 import crypto from "crypto";
+import { sanitizeSalesAttribution } from "../../../lib/salesAttribution";
+import { buildSalesReceipt } from "./salesReceipt";
 import { getSafeErrorCode } from "../../safeErrorLog.js";
 import { authorizeCronRequest } from "../cronAuth.js";
 import createBookingHandler from "../ref/createBooking.js";
@@ -229,6 +231,7 @@ const sanitizeBookingPayload = (payload = {}) => {
   const normalized = normalizeObject(payload);
   return {
     ...normalized,
+    salesAttribution: sanitizeSalesAttribution(normalized.salesAttribution),
     packageTitle: String(normalized.packageTitle || "").trim(),
     originalOrderId: String(normalized.originalOrderId || "").trim(),
     startTimeUTC: String(normalized.startTimeUTC || "").trim(),
@@ -487,6 +490,7 @@ const buildPublicStatusBody = (record = {}) => ({
   refundRequiresBookingSync: record.refundRequiresBookingSync === true,
   emailDispatch: buildPublicEmailDispatch(record.emailDispatch),
   emailDispatchToken: String(record.emailDispatchToken || "").trim(),
+  analyticsReceipt: buildSalesReceipt(record),
 });
 
 const resolvePaymentRecordSuccessStatus = (emailDispatch = {}) =>
@@ -719,6 +723,7 @@ const mirrorLegacyBookingToPaymentRecord = async ({
         : `razorpay-order:${providerOrderId || booking.razorpayOrderId || ""}`,
     bookingPayload: {
       packageTitle: String(booking.packageTitle || "").trim(),
+      salesAttribution: sanitizeSalesAttribution(booking.salesAttribution),
       originalOrderId: String(booking.originalOrderId || "").trim(),
       startTimeUTC: String(booking.startTimeUTC || "").trim(),
       email: String(booking.email || booking.payerEmail || "").trim(),
@@ -2262,7 +2267,7 @@ const finalizePaymentRecordInternal = async ({
             ).trim(),
             emailDispatchRequired: nextStatus === PAYMENT_STATUS_EMAIL_PARTIAL,
             verificationState: String(
-              bookingDoc?.paymentVerificationState || ""
+              bookingDoc?.paymentVerificationState || workingRecord.verificationState || ""
             ).trim(),
             verificationWarning: String(
               bookingDoc?.paymentVerificationWarning || ""
