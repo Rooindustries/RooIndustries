@@ -36,6 +36,16 @@ describe("sales attribution", () => {
     expect(sessionStorage.getItem("referral_session")).toBe("winton");
   });
 
+  test("preserves creator attribution from legacy upgrade entry through payment", () => {
+    const { captureSalesAttribution, sanitizeAnalyticsEvent } = require("../lib/salesAttribution");
+    window.history.replaceState({}, "", "/upgrade-xoc?ref=winton&utm_campaign=upgrade");
+    const initial = captureSalesAttribution();
+    expect(initial).toEqual(expect.objectContaining({ creatorCode: "winton", campaign: "upgrade", landingPath: "/upgrade" }));
+    window.history.replaceState({}, "", "/payment");
+    expect(captureSalesAttribution()).toEqual(initial);
+    expect(sanitizeAnalyticsEvent({ type: "pageview", url: "https://www.rooindustries.com/upgrade-xoc?ref=winton" }).url).toBe("https://www.rooindustries.com/upgrade");
+  });
+
   test("discards arbitrary customer data, URLs, and invalid identifiers", () => {
     const { sanitizeSalesAttribution } = require("../lib/salesAttribution");
     expect(sanitizeSalesAttribution({ ...sample, email: "buyer@example.invalid", source: "buyer@example.invalid", campaign: "https://example.invalid/?token=secret", landingPath: "/download/private-token", referrerHost: "https://example.invalid" })).toEqual({ version: 1, journeyId: sample.journeyId, capturedAt: sample.capturedAt, landingPath: "/", creatorCode: "winton" });

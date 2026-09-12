@@ -1,7 +1,7 @@
 import { createDodoCheckout, inspectDodoCheckout, retrieveDodoPayment, validateDodoPayment, verifyDodoCapture, unwrapDodoWebhook } from "./dodoProvider.js";
 import crypto from "crypto";
-import { sanitizeSalesAttribution } from "../../../lib/salesAttribution";
-import { buildSalesReceipt } from "./salesReceipt";
+import { sanitizeSalesAttribution } from "../../../lib/salesAttribution.ts";
+import { buildSalesReceipt } from "./salesReceipt.ts";
 import { getSafeErrorCode } from "../../safeErrorLog.js";
 import { authorizeCronRequest } from "../cronAuth.js";
 import createBookingHandler from "../ref/createBooking.js";

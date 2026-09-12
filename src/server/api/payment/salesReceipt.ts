@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { sanitizeSalesAttribution } from "../../../lib/salesAttribution";
+import { sanitizeSalesAttribution } from "../../../lib/salesAttribution.ts";
 
 export function buildSalesReceipt(record: Record<string, any> = {}) {
   try {

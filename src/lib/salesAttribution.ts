@@ -27,7 +27,7 @@ const newJourneyId = () => {
   return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
 };
 
-export const salesPath = (pathname: string) => PUBLIC_PATHS.has(pathname) ? pathname : pathname.startsWith("/upgrade/") ? "/upgrade" : "";
+export const salesPath = (pathname: string) => PUBLIC_PATHS.has(pathname) ? pathname : pathname === "/upgrade-xoc" || pathname.startsWith("/upgrade/") ? "/upgrade" : "";
 
 export function sanitizeSalesAttribution(value: unknown): SalesAttribution | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;

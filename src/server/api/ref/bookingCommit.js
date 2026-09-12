@@ -4,7 +4,7 @@ import {
   normalizeStartTimeUTC,
 } from "../../booking/slotIdentity.js";
 import { normalizeBookingStatus } from "../../booking/bookingStatus.js";
-import { sanitizeSalesAttribution } from "../../../lib/salesAttribution";
+import { sanitizeSalesAttribution } from "../../../lib/salesAttribution.ts";
 import { appendCouponConsumption } from "./couponReservations.js";
 import { dispatchRescheduleNotifications } from "./bookingEmails.js";
 import { getSafeErrorCode } from "../../safeErrorLog.js";

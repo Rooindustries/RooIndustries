@@ -1,5 +1,5 @@
 import { createDataClient as createClient } from "../../data/documentClient.js";
-import { sanitizeSalesAttribution } from "../../../lib/salesAttribution";
+import { sanitizeSalesAttribution } from "../../../lib/salesAttribution.ts";
 import { verifyHoldToken } from "../../booking/holdToken.js";
 import { resolveBookingPricing, resolveUpgradeContext } from "./pricing.js";
 import {
