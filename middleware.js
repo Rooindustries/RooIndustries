@@ -8,6 +8,13 @@ const ASSET_EXTENSION = /\.(?:png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|otf|web
 export function middleware(req) {
   const { pathname } = req.nextUrl;
 
+  if (process.env.SALES_PREVIEW_READ_ONLY === "1" && process.env.VERCEL_ENV !== "production") {
+    const readableApi = /^\/api\/content\/[a-z-]+$/.test(pathname) || pathname === "/api/bookingAvailability";
+    if (!["GET", "HEAD"].includes(req.method) || (pathname.startsWith("/api/") && !readableApi)) {
+      return NextResponse.json({ ok: false, error: "This preview does not create bookings or accept payments." }, { status: 503 });
+    }
+  }
+
   if (
     !pathname.startsWith("/api/") &&
     pathname !== "/tourney/overlay/caster"

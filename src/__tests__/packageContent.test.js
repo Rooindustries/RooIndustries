@@ -237,7 +237,7 @@ describe("package content normalization", () => {
     expect(offer).toMatchObject({
       title: "Performance Vertex Max",
       price: "$99.95",
-      suitableFor: "Competitive Players and Creators",
+      suitableFor: "Enthusiasts Seeking Deeper Tuning",
       isTopPackage: true,
       warranty: { title: "Lifetime warranty included" },
       bookingSelection: {

@@ -36,6 +36,8 @@ const PACKAGE_CONTENT_OVERRIDES = [
   },
   {
     matches: (title) => isTopPackageTitle(title),
+    description:
+      "Extensive hardware and home network tuning, with lifetime warranty support and Windows reoptimization every 6 months. Best for: Enthusiasts seeking deeper tuning.",
     checkedBullets: [
       ...BASE_CHECKED_BULLETS,
       ...OVERHAUL_EXTRA_BULLETS,
@@ -106,6 +108,7 @@ const applyPackageContentOverrides = (pkg) => {
 
   return {
     ...normalized,
+    description: override.description || normalized.description,
     checkedBullets: override.checkedBullets
       ? normalizeStringList(override.checkedBullets)
       : normalized.checkedBullets,

@@ -85,6 +85,28 @@ describe("payment quote pricing inputs", () => {
     });
   });
 
+  test.each([
+    [{ discountType: "percent", discountPercent: 100 }, 0, 0, "free"],
+    [{ discountType: "fixed", discountAmount: 29.95 }, 0, 0, "free"],
+    [{ discountType: "percent", discountPercent: 10 }, 25.6, 2.7, "paid"],
+  ])("freezes commission against the payable quote for %j", async (discount, netAmount, commissionAmount, paymentProvider) => {
+    await expect(resolvePaymentQuote({
+      packageTitle: "Vertex Essentials",
+      referralCode: "creator",
+      couponCode: "PROMOTION",
+      pricingInputs: {
+        packageDoc: { _id: "package.essentials", title: "Vertex Essentials", price: "$29.95" },
+        referralDoc: { _id: "referral.creator", slug: { current: "creator" }, maxCommissionPercent: 15, currentCommissionPercent: 10, currentDiscountPercent: 5 },
+        couponDoc: { _id: "coupon.promotion", code: "PROMOTION", isActive: true, canCombineWithReferral: true, ...discount },
+      },
+    })).resolves.toMatchObject({
+      effectiveNetAmount: netAmount,
+      effectiveCommissionPercent: paymentProvider === "free" ? 0 : 10,
+      commissionAmount,
+      paymentProvider,
+    });
+  });
+
   test("clamps hostile fixed coupon input so it cannot raise the quote", async () => {
     await expect(
       resolvePaymentQuote({

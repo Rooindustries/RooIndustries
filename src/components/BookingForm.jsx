@@ -29,6 +29,7 @@ import {
   toMoney,
 } from "../lib/checkoutCodes";
 import { trackEvent } from "../lib/analytics";
+import { captureSalesAttribution } from "../lib/salesAttribution";
 
 const { applyPackageContentOverrides, getPackageFeatureItems } = packageContent;
 const {
@@ -2165,6 +2166,7 @@ export default function BookingForm({ isMobile }) {
     const finalCouponCode = String(appliedCoupon?.code || "").trim();
 
     const payload = {
+      salesAttribution: captureSalesAttribution(),
       displayDate,
       displayTime,
 

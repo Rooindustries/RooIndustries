@@ -9,7 +9,7 @@ import {
   Navigate,
 } from "react-router-dom";
 import Navbar from "./components/Navbar";
-import { Analytics } from "@vercel/analytics/react";
+import SalesTelemetry from "./components/SalesTelemetry";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 import ReservationBanner from "./components/ReservationBanner";
 import IntercomMessenger from "./components/IntercomMessenger";
@@ -108,7 +108,6 @@ const DeferredTelemetry = () => {
 
   return (
     <>
-      <Analytics />
       <SpeedInsights />
     </>
   );
@@ -555,6 +554,7 @@ export function AppContent({
   return (
     <>
       <DeferredTelemetry />
+      <SalesTelemetry />
       <IntercomRuntime
         disabledRoutes={INTERCOM_DISABLED_ROUTES}
         disabled={isFlowRoute}
