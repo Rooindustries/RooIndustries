@@ -506,6 +506,7 @@ export async function resolvePaymentQuote({
 
   return {
     ...quote,
+    ...(quote.effectiveNetAmount <= 0 ? { effectiveCommissionPercent: 0, commissionAmount: 0 } : {}),
     paymentProvider: quote.effectiveNetAmount <= 0 ? "free" : "paid",
   };
 }
