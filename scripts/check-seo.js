@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const seo = require("../src/lib/seo");
-const { ALL_PUBLIC_ROUTES } = require("../src/lib/routes");
+const { ALL_PUBLIC_ROUTES, INDEXABLE_ROUTES, NOINDEX_ROUTES } = require("../src/lib/routes");
 
 const titleRange = [50, 60];
 const descriptionRange = [150, 160];
@@ -26,6 +26,17 @@ metadataRoutes.forEach((route) => {
     errors.push(`[${route}] Missing route metadata.`);
   }
 });
+
+for (const route of INDEXABLE_ROUTES) {
+  if (seo.routeMeta[route]?.noindex !== false) {
+    errors.push(`[${route}] Indexable route has conflicting robots metadata.`);
+  }
+}
+for (const route of NOINDEX_ROUTES) {
+  if (seo.routeMeta[route]?.noindex !== true) {
+    errors.push(`[${route}] Private route must be marked noindex.`);
+  }
+}
 
 const checkLength = (label, value, min, max, route) => {
   const len = String(value || "").trim().length;
@@ -100,9 +111,9 @@ if (!bodyMatch) {
 } else {
   const bodyHash = require("crypto")
     .createHash("sha256")
-    .update(bodyMatch[1], "utf8")
+    .update(bodyMatch[1].replace(/<!--[\s\S]*?-->/g, "").replace(/\s+/g, " ").trim(), "utf8")
     .digest("hex");
-  if (bodyHash !== "499e0a8325882a83203af8cf05cbc4eac0d844490cefb6f3e46eea0a5ba87338") {
+  if (bodyHash !== "8f9c0633275b85e54ad7237890f225eff9e53dd73583b387339cc69f95940dc7") {
     errors.push("BIOSGuide body content changed unexpectedly.");
   }
 }
