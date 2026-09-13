@@ -114,11 +114,11 @@ export default function About({ initialData = null, compact = false }) {
           </h3>
           <p className="mt-0.5 text-[11px] leading-4 text-ink-secondary">{compactRecordSubtitle}</p>
 
-          <dl className="ri-proof-summary my-3 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-2 border-y border-line-soft px-2 py-2">
+          <dl className="ri-proof-summary my-3 grid grid-cols-3 gap-2 border-y border-line-soft px-2 py-2">
             {summaryStats.map((detail, index) => (
-              <div key={detail?._key || `${detail.label}-${index}`} className="min-w-0 first:justify-self-start last:justify-self-end">
+              <div key={detail?._key || `${detail.label}-${index}`} className="flex min-w-0 flex-col items-center text-center">
                 <dt className="text-[10px] uppercase leading-3 tracking-wider text-ink-muted">{detail.label}</dt>
-                <dd className="mt-0.5 break-words text-base font-semibold leading-6 tabular-nums text-ink min-[350px]:text-lg">{detail.value}</dd>
+                <dd className="mt-0.5 whitespace-nowrap text-base font-semibold leading-6 tabular-nums text-ink min-[350px]:text-lg">{detail.value}</dd>
               </div>
             ))}
           </dl>
