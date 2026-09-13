@@ -41,7 +41,7 @@ describe("Public company content", () => {
     expect(document.querySelector('footer a[href="/about"]')).not.toBeNull();
     expect(routes.INDEXABLE_ROUTES).toContain("/about");
     expect(seo.getMetadataForPath("/about").alternates.canonical).toBe("https://www.rooindustries.com/about");
-    expect(seo.getMetadataForPath("/about").robots.index).toBe(true);
+    expect(seo.routeMeta["/about"].noindex).toBe(false);
   });
 
   test("renders contact guidance and its existing form before effects run", () => {
