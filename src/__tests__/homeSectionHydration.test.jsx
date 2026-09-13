@@ -2,6 +2,7 @@ import React from "react";
 import { act } from "@testing-library/react";
 import { hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
+import { MemoryRouter } from "react-router-dom";
 import Services from "../components/Services";
 
 jest.mock("../sanityClient", () => ({
@@ -56,7 +57,8 @@ describe("home section hydration", () => {
   });
 
   test("defers cached client data until after the server fallback hydrates", async () => {
-    container.innerHTML = renderToString(<Services initialData={null} />);
+    const page = <MemoryRouter><Services initialData={null} /></MemoryRouter>;
+    container.innerHTML = renderToString(page);
     window.sessionStorage.setItem(
       "roo-home-data:services",
       JSON.stringify(CACHED_SERVICES)
@@ -70,7 +72,7 @@ describe("home section hydration", () => {
 
     try {
       await act(async () => {
-        root = hydrateRoot(container, <Services initialData={null} />);
+        root = hydrateRoot(container, page);
         await Promise.resolve();
       });
     } catch (error) {

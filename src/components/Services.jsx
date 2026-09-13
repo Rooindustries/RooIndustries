@@ -1,8 +1,12 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { urlFor } from "../sanityClient";
 import About from "./About";
 import homeCopy from "../lib/homeCopy";
-import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
+import {
+  fetchHomeSectionData,
+  HOME_SECTION_DATA_KEYS,
+} from "../lib/homeSectionData";
 import {
   Clock,
   Shield,
@@ -12,215 +16,184 @@ import {
   Cpu,
   ChevronLeft,
   ChevronRight,
-  HelpCircle,
 } from "lucide-react";
-import {
-  AnimatePresence,
-  motion,
-  animate,
-  useMotionValue,
-} from "framer-motion";
 
 const { HOME_COPY } = homeCopy;
-const CANONICAL_SERVICE_CARDS = HOME_COPY.services.cards;
+const ICONS = {
+  clock: Clock,
+  shield: Shield,
+  wrench: Wrench,
+  zap: Zap,
+  video: Video,
+  cpu: Cpu,
+};
 
-function AnimatedNumber({ value, duration = 0.65 }) {
-  const mv = useMotionValue(0);
-  const [display, setDisplay] = useState(0);
-
-  useEffect(() => {
-    const v = Number.isFinite(Number(value)) ? Number(value) : 0;
-    setDisplay(0);
-    mv.set(0);
-
-    const controls = animate(mv, v, { duration, ease: "easeOut" });
-    const unsub = mv.on("change", (latest) => setDisplay(Math.round(latest)));
-
-    return () => {
-      controls.stop();
-      unsub();
-    };
-  }, [value, duration, mv]);
-
-  return <span>{display}</span>;
-}
+const positiveNumber = (value) => {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "string" && !value.trim()) return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+};
 
 export default function Services({
   initialData = null,
   initialAboutData = null,
 }) {
-  const [data, setData] = useState(() => initialData);
-
-  useEffect(() => {
-    if (initialData !== null) {
-      setData(initialData);
-    }
-  }, [initialData]);
+  const [data, setData] = useState(initialData);
   const [page, setPage] = useState(0);
 
   useEffect(() => {
+    if (initialData !== null) setData(initialData);
+  }, [initialData]);
+
+  useEffect(() => {
     if (data !== null) return;
+    let active = true;
     fetchHomeSectionData(HOME_SECTION_DATA_KEYS.services)
-      .then(setData)
+      .then((value) => {
+        if (active) setData(value);
+      })
       .catch(console.error);
+    return () => {
+      active = false;
+    };
   }, [data]);
 
-  const iconMap = useMemo(
-    () => ({
-      zap: Zap,
-      clock: Clock,
-      shield: Shield,
-      wrench: Wrench,
-      video: Video,
-      cpu: Cpu,
-    }),
-    []
-  );
-
-  const totalPages = useMemo(
-    () => (data?.benchPages?.length ? data.benchPages.length : 0),
-    [data]
-  );
-
-  const safePage = useMemo(() => {
-    if (!totalPages) return 0;
-    return Math.min(Math.max(page, 0), totalPages - 1);
-  }, [page, totalPages]);
+  const pages = Array.isArray(data?.benchPages)
+    ? data.benchPages
+        .map((entry) => ({
+          games: Array.isArray(entry?.games)
+            ? entry.games.filter(
+                (game) =>
+                  game &&
+                  typeof game.gameTitle === "string" &&
+                  game.gameTitle.trim(),
+              )
+            : [],
+        }))
+        .filter((entry) => entry.games.length)
+    : [];
+  const safePage = Math.min(page, Math.max(0, pages.length - 1));
+  const games = pages[safePage]?.games || [];
 
   useEffect(() => {
     if (page !== safePage) setPage(safePage);
   }, [page, safePage]);
 
-  const pageGames = useMemo(() => {
-    if (!data?.benchPages?.length) return [];
-    return data.benchPages[safePage]?.games || [];
-  }, [data, safePage]);
-
-  const benchShouldRender = useMemo(() => {
-    const enabled = data?.benchEnabled !== false;
-    return enabled && totalPages > 0;
-  }, [data, totalPages]);
-
-  const gridClass = useMemo(() => {
-    const count = pageGames.length;
-    if (count === 1) return "grid grid-cols-1 gap-5";
-    if (count === 2) return "grid grid-cols-1 md:grid-cols-2 gap-5";
-    return "grid grid-cols-1 md:grid-cols-3 gap-5";
-  }, [pageGames.length]);
-
-  const containerClass = useMemo(() => {
-    const count = pageGames.length;
-    if (count === 1) return "max-w-xl";
-    if (count === 2) return "max-w-5xl";
-    return "w-full";
-  }, [pageGames.length]);
-
-  const canPrev = safePage > 0;
-  const canNext = safePage < totalPages - 1;
-
-  const calcPct = (before, after) => {
-    const b = Number(before || 0);
-    const a = Number(after || 0);
-    if (b <= 0 || a <= 0) return null;
-    const pct = ((a - b) / b) * 100;
-    if (!Number.isFinite(pct)) return null;
-    return Math.round(pct);
-  };
-
-  const calcFill = (before, after) => {
-    const b = Number(before || 0);
-    const a = Number(after || 0);
-    const m = Math.max(b, a, 1);
-    const bf = Math.max(0, Math.min(100, (b / m) * 100));
-    const af = Math.max(0, Math.min(100, (a / m) * 100));
-    return { bf, af };
-  };
-
-  const contentSwap = {
-    initial: { opacity: 0, scale: 0.98 },
-    animate: { opacity: 1, scale: 1 },
-    exit: { opacity: 0, scale: 0.98 },
-    transition: { duration: 0.25, ease: "easeOut" },
-  };
-
   if (!data) {
     return (
-      <section className="mx-auto max-w-[92rem] py-16 px-4 sm:px-6" aria-hidden="true">
-        <div className="ri-services-skeleton min-h-[980px] rounded-3xl border border-line-input bg-skeleton" />
+      <section
+        className="mx-auto max-w-[92rem] px-4 py-8 sm:px-6"
+        aria-hidden="true"
+      >
+        <div className="ri-services-skeleton min-h-[520px] rounded-2xl border border-line-input bg-skeleton sm:min-h-[380px]" />
       </section>
     );
   }
 
   const beforeLabel = data.benchBeforeLabel || "Before";
   const afterLabel = data.benchAfterLabel || "After Tune";
+  const showBenchmarks = data.benchEnabled !== false && games.length > 0;
+  const totalPages = pages.length;
+  const canPrev = safePage > 0;
+  const canNext = safePage < totalPages - 1;
   const badgeSuffix = data.benchBadgeSuffix || "FPS";
   const pagePrefix = data.benchPagePrefix || "Page";
-
-  const cards = data.cards?.length ? data.cards : CANONICAL_SERVICE_CARDS;
+  const gridClass =
+    games.length === 1
+      ? "grid grid-cols-1 gap-5"
+      : games.length === 2
+        ? "grid grid-cols-1 md:grid-cols-2 gap-5"
+        : "grid grid-cols-1 md:grid-cols-3 gap-5";
+  const containerClass =
+    games.length === 1
+      ? "max-w-xl"
+      : games.length === 2
+        ? "max-w-5xl"
+        : "w-full";
+  const calcPct = (before, after) => {
+    const b = positiveNumber(before);
+    const a = positiveNumber(after);
+    if (b === null || a === null) return null;
+    const percent = ((a - b) / b) * 100;
+    return Number.isFinite(percent) ? Math.round(percent) : null;
+  };
+  const calcFill = (before, after) => {
+    const b = positiveNumber(before) || 0;
+    const a = positiveNumber(after) || 0;
+    const maximum = Math.max(b, a, 1);
+    return { bf: (b / maximum) * 100, af: (a / maximum) * 100 };
+  };
+  const contentSwap = {
+    animate: { opacity: 1, scale: 1 },
+    exit: { opacity: 0, scale: 0.98 },
+    transition: { duration: 0.25, ease: "easeOut" },
+  };
 
   return (
-    <section className="mx-auto max-w-[92rem] pt-8 pb-16 px-4 sm:px-6">
-      <div className="ri-performance-overview grid gap-6 xl:grid-cols-[minmax(300px,0.82fr)_minmax(0,2.18fr)] xl:items-stretch">
+    <section
+      className="ri-services-section mx-auto max-w-[92rem] px-4 pt-6 pb-8 sm:px-6 sm:pb-10"
+      aria-labelledby="services-heading"
+    >
+      <div className="ri-performance-overview grid w-full gap-6 lg:grid-cols-[336px_minmax(0,1fr)] lg:items-stretch">
         <About initialData={initialAboutData} compact />
-
-        <div className="ri-services-benefits flex min-w-0 flex-col">
-          <div className="text-center xl:text-left">
-            {data.heading && (
-              <h3 className="ri-services-heading text-3xl sm:text-4xl font-bold tracking-tight text-info-text">
-                {data.heading}
-              </h3>
-            )}
-            {data.subheading && (
-              <p className="ri-services-subheading mt-2 text-ink-secondary text-sm sm:text-[15px]">
-                {data.subheading}
+        <div className="ri-services-benefit-column flex min-w-0 flex-col">
+          <div className="text-center">
+            <div>
+              <h2
+                id="services-heading"
+                className="ri-services-heading text-3xl font-bold tracking-tight text-info-text sm:text-4xl"
+              >
+                {data.heading || HOME_COPY.services.heading}
+              </h2>
+              <p className="ri-services-subheading mt-2 text-sm text-ink-secondary sm:text-[15px]">
+                {HOME_COPY.services.subheading}
               </p>
-            )}
+            </div>
           </div>
 
-          <div className="mt-5 grid flex-1 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {cards.map((card, i) => {
-              const canonical = CANONICAL_SERVICE_CARDS[i];
-              const title = canonical?.title ?? card.title;
-              const desc = canonical?.description ?? card.description;
-              const Icon = iconMap[canonical?.iconType ?? card.iconType] || HelpCircle;
+          <ul className="ri-services-benefits mt-3 grid auto-rows-fr grid-cols-2 gap-2 sm:grid-cols-3 lg:mt-auto lg:pt-3">
+            {HOME_COPY.services.cards.map((card, index) => {
+              const Icon = ICONS[card.iconType];
+              const customIcon = data.cards?.[index]?.customIcon;
               return (
-                <motion.div
-                  key={card._key || `svc-${i}`}
-                  className="ri-service-card rounded-2xl border border-line-input bg-panel p-4 min-h-[142px]"
-                  initial={{ opacity: 0, y: 14 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 0.35, delay: i * 0.04, ease: "easeOut" }}
+                <li
+                  key={card.iconType}
+                  className="ri-service-card flex items-center gap-2.5 rounded-[10px] border border-transparent p-3 sm:p-2.5 xl:justify-center"
                 >
-                  <div className="ri-service-icon-shell grid h-9 w-9 place-items-center rounded-lg border border-line-input bg-surface-input">
-                    {card.customIcon ? (
+                  <span className="ri-service-icon-shell grid h-7 w-7 shrink-0 place-items-center">
+                    {customIcon ? (
                       <img
-                        src={urlFor(card.customIcon).width(56).url()}
-                        alt={title ? `${title} icon` : "Service icon"}
-                        width={18}
-                        height={18}
+                        src={urlFor(customIcon).width(40).url()}
+                        alt=""
+                        width={20}
+                        height={20}
                         loading="lazy"
                         decoding="async"
-                        className="h-[18px] w-[18px] object-contain"
                       />
                     ) : (
-                      <Icon className="ri-service-icon h-[18px] w-[18px] text-accent" />
+                      <Icon
+                        className="ri-service-icon h-5 w-5 text-accent"
+                        aria-hidden="true"
+                      />
                     )}
+                  </span>
+                  <div className="min-w-0 xl:flex xl:items-center xl:gap-2">
+                    <h3 className="ri-service-title text-[13px] font-semibold leading-5 text-ink sm:text-sm xl:shrink-0">
+                      {card.title}
+                    </h3>
+                    <p className="ri-service-copy mt-0.5 hidden text-xs leading-[1.45] text-ink-secondary sm:block xl:mt-0 xl:text-left">
+                      {card.description}
+                    </p>
                   </div>
-                  <h4 className="ri-service-title mt-3 text-[17px] font-semibold tracking-[-0.01em] text-ink">
-                    {title}
-                  </h4>
-                  <p className="ri-service-copy mt-1.5 text-[13px] leading-relaxed text-ink-secondary">
-                    {desc}
-                  </p>
-                </motion.div>
+                </li>
               );
             })}
-          </div>
+          </ul>
         </div>
       </div>
 
-      {benchShouldRender && (
+      {showBenchmarks && (
         <>
           <div className="h-10" />
 
@@ -238,27 +211,22 @@ export default function Services({
 
             <div className="relative p-5 sm:p-6">
               <div className={gridClass}>
-                {pageGames.map((g, idx) => {
+                {games.map((g, idx) => {
                   const pct = g ? calcPct(g?.beforeFps, g?.afterFps) : null;
                   const { bf, af } = g
                     ? calcFill(g?.beforeFps, g?.afterFps)
                     : { bf: 0, af: 0 };
 
-                  const beforeNum =
-                    g && Number.isFinite(Number(g?.beforeFps))
-                      ? Number(g.beforeFps)
-                      : null;
-
-                  const afterNum =
-                    g && Number.isFinite(Number(g?.afterFps))
-                      ? Number(g.afterFps)
-                      : null;
+                  const beforeNum = positiveNumber(g?.beforeFps);
+                  const afterNum = positiveNumber(g?.afterFps);
 
                   const metricText =
                     g?.metricLabel || data?.benchMetricLabel || "Avg FPS";
 
                   return (
                     <motion.div
+                      role="article"
+                      aria-label={`${g.gameTitle} benchmark`}
                       layout
                       key={idx}
                       className={
@@ -276,7 +244,7 @@ export default function Services({
                         <AnimatePresence mode="wait">
                           <motion.div
                             key={`${safePage}-${idx}`}
-                            initial={contentSwap.initial}
+                            initial={false}
                             animate={contentSwap.animate}
                             exit={contentSwap.exit}
                             transition={contentSwap.transition}
@@ -335,7 +303,9 @@ export default function Services({
                                   "bg-surface-hover-accent text-accent ring-1 ring-line-accent shadow-glow-soft"
                                 }
                               >
-                                {pct === null ? "-" : `+${pct}% ${badgeSuffix}`}
+                                {pct === null
+                                  ? "-"
+                                  : `${pct > 0 ? "+" : ""}${pct}% ${badgeSuffix}`}
                               </span>
                             </div>
 
@@ -347,11 +317,7 @@ export default function Services({
                                       {beforeLabel}
                                     </span>
                                     <span className="ri-bench-number font-extrabold text-ink">
-                                      {beforeNum === null ? (
-                                        "-"
-                                      ) : (
-                                        <AnimatedNumber value={beforeNum} />
-                                      )}
+                                      {beforeNum === null ? "-" : beforeNum}
                                     </span>
                                   </div>
 
@@ -376,11 +342,7 @@ export default function Services({
                                       {afterLabel}
                                     </span>
                                     <span className="ri-bench-number font-extrabold text-ink">
-                                      {afterNum === null ? (
-                                        "-"
-                                      ) : (
-                                        <AnimatedNumber value={afterNum} />
-                                      )}
+                                      {afterNum === null ? "-" : afterNum}
                                     </span>
                                   </div>
 
@@ -419,7 +381,10 @@ export default function Services({
                                   { label: "CPU", value: g?.cpu || "-" },
                                   { label: "RAM", value: g?.ram || "-" },
                                 ].map((detail) => (
-                                  <div key={detail.label} className="flex flex-col px-1">
+                                  <div
+                                    key={detail.label}
+                                    className="flex flex-col px-1"
+                                  >
                                     <span className="ri-bench-hardware-label mb-1 text-[10px] font-bold uppercase tracking-wider text-ink-muted">
                                       {detail.label}
                                     </span>
@@ -452,7 +417,7 @@ export default function Services({
                   "transition hover:bg-surface-hover-accent active:scale-95 " +
                   (canPrev ? "" : "opacity-40 cursor-not-allowed")
                 }
-                aria-label="Previous page"
+                aria-label="Previous benchmark page"
               >
                 <ChevronLeft className="ri-bench-page-icon h-5 w-5 text-ink-secondary" />
               </button>
@@ -473,7 +438,7 @@ export default function Services({
                   "transition hover:bg-surface-hover-accent active:scale-95 " +
                   (canNext ? "" : "opacity-40 cursor-not-allowed")
                 }
-                aria-label="Next page"
+                aria-label="Next benchmark page"
               >
                 <ChevronRight className="ri-bench-page-icon h-5 w-5 text-ink-secondary" />
               </button>
