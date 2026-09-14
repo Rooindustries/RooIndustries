@@ -1,10 +1,6 @@
--- Preserve historical Auth ownership when tournament people are retired.
--- This migration alone does not retire users or change existing account roles.
 set lock_timeout = '5s';
 set statement_timeout = '120s';
 
--- Fail before changing roles when an older hosted schema lacks the recovery
--- prerequisite. Apply the reviewed forward repair; do not replay old history.
 do $$
 begin
   if to_regprocedure('public.roo_reclaim_referral_orphan_identity(text,uuid,text)') is null
@@ -26,9 +22,6 @@ alter table accounts.account_roles add constraint account_roles_role_check check
            'tourney_caster', 'tourney_owner', 'administrator', 'tourney_retired')
 );
 
--- tourney_retired carries only historical domain membership, never a username,
--- active tournament profile, credential, or permission to a tournament route.
--- Creator precedence remains identical for existing dual-role principals.
 create or replace function accounts.principal_domain(p_principal_id uuid)
 returns text language sql stable security definer set search_path = '' as $$
   select case
@@ -48,8 +41,6 @@ returns text language sql stable security definer set search_path = '' as $$
   end;
 $$;
 
--- Existing orphan-reclaim implementation, with the historical-domain marker
--- added to its active-account guard. All proof checks and audit behavior remain.
 create or replace function public.roo_reclaim_referral_orphan_identity(
   p_token_hash text,
   p_orphan_user_id uuid,

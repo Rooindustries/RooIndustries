@@ -1,14 +1,3 @@
--- Forward repair for an installation missing 20260717231518's orphan-reclaim
--- feature. The production predecessor was inspected read-only on 2026-09-14.
--- Its ordinary link intent accepts the exact active session without mandatory
--- reauthentication. Replaying the old migration verbatim would tighten that
--- policy; this repair retains optional link proof and requires proof for reclaim.
---
--- All changes are one atomic DO statement. Known complete installations are a
--- no-op, including their existing strict/optional link policy and retirement
--- guard. An incomplete feature, changed predecessor, or unknown RPC body requires
--- review before retrying. No Auth rows, account data, existing intents/grants,
--- newer finalization, domain-link, credential or tournament RPCs are rewritten.
 set lock_timeout = '5s';
 set statement_timeout = '120s';
 
@@ -129,9 +118,6 @@ begin
       raise exception 'Orphan-reclaim audit or unique proof binding is not protected' using errcode='55000';
     end if;
 
-    -- Hashes pin reviewed function bodies, not migration timestamp aliases.
-    -- The two creator bodies represent strict full history and this optional-link
-    -- repair. Both are preserved; an unreviewed newer body is never overwritten.
     for v_expected in select * from (values
       ('public.roo_create_oauth_intent(jsonb)',array['86c5544a9469f859a54bebcbe57333e5','893bb134511009c6e32d43353e8c7982']),
       ('public.roo_read_reauth_grant(text,uuid,text)',array['ba0b8b7b40dbb129e4f2c023e59e878d']),
@@ -152,8 +138,6 @@ begin
     return;
   end if;
 
-  -- Only the verified missing-feature predecessor may be extended. No later
-  -- known migration replaces these three constraints/RPC bodies in production.
   select * into v_function from pg_proc where oid='public.roo_create_oauth_intent(jsonb)'::regprocedure;
   if md5(v_function.prosrc)<>'956cddca92bf2afddedf171cdc02c97e'
      or not v_function.prosecdef or v_function.prorettype<>'jsonb'::regtype
@@ -175,9 +159,6 @@ begin
       using errcode='55000';
   end if;
 
-  -- This payload installs only absent feature objects and extends the checked
-  -- intent predecessor. Unlike the historical migration, ordinary link proof
-  -- remains optional. Existing rows receive only nullable binding columns.
   execute $feature$
 alter table accounts.reauth_grants
   add column if not exists bound_intent_id uuid

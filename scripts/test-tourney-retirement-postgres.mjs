@@ -1,8 +1,5 @@
 #!/usr/bin/env node
 
-// Requires a migrated, disposable local Supabase database supplied explicitly as
-// SUPABASE_TEST_DATABASE_URL. This script starts no services. Every migration and
-// fixture runs in a transaction that is rolled back, including successful tests.
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
@@ -153,7 +150,6 @@ async function proveRetirement(sql) {
   const sessionId = newId();
   await sql`insert into auth.sessions (id,user_id,created_at,updated_at)
     values (${sessionId},${orphan.id},now(),now())`;
-  // Supplying a negative id avoids advancing the nontransactional Auth sequence.
   const refreshId = -Number(BigInt(`0x${crypto.randomBytes(6).toString("hex")}`)) - 1;
   await sql`insert into auth.refresh_tokens (id,token,user_id,revoked,session_id,created_at,updated_at)
     values (${refreshId},${newId()},${orphan.id},false,${sessionId},now(),now())`;
@@ -194,8 +190,6 @@ async function proveRetirement(sql) {
   assert.equal((await sql`select principal_id from accounts.identity_links
     where domain='referral' and provider='discord' and provider_subject=${subject}`)[0].principal_id, creator.principal);
 
-  // Exercise the real finalization call that previously failed before the browser
-  // could reach password-based referral linking for a cross-domain identity.
   const signinHash = digest(newId());
   await sql`select public.roo_create_oauth_intent(${sql.json({
     action: "signin", expires_at: new Date(Date.now() + 600_000).toISOString(),
@@ -205,8 +199,6 @@ async function proveRetirement(sql) {
     ${signinHash},${source.id},'discord',null) result`;
   assert.equal(signin.completed, true);
 
-  // A valid failed link, recent authentication and bound recovery intent must
-  // still refuse the retired source; invalid proof would not test this guard.
   const originalIntent = newId();
   await sql`insert into accounts.oauth_intents (
       id,token_hash,flow,action,provider,target_user_id,principal_id,domain_subject,

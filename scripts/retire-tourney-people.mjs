@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// Manual cutover tool. Nothing here runs during a build or deployment.
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -79,11 +78,7 @@ export async function protectedState(sql) {
   return state;
 }
 
-// Caller holds a transaction. Compare all protected rows, not only their counts.
-// Principal/Auth records and creator login aliases are deliberately retained.
 export async function applySqlRetirement(sql) {
-  // Workers must finish before their receipts can be removed. These locks also
-  // stop new leases from racing the backup and retirement transaction.
   await sql`lock table tourney.external_operations,tourney.tourney_player_auth_operations,accounts.credential_operations in share row exclusive mode`;
   const pending = (await sql`select
     (select count(*) from tourney.external_operations where status <> 'applied')::int external,
@@ -104,9 +99,6 @@ export async function applySqlRetirement(sql) {
     from accounts.tourney_accounts where role in ${sql(PEOPLE_ROLES)}`;
   const principalIds = accounts.map(a => a.principal_id).filter(Boolean);
   if (principalIds.length) {
-    // Requires 20260914010000_preserve_retired_tourney_identity_domains.sql.
-    // Existing cross-domain social links must never be reclassified as orphan
-    // referral users or merged into another principal after profile deletion.
     await sql`insert into accounts.account_roles(user_id,principal_id,role,source_backend,backend_owner)
       select account.user_id,account.principal_id,'tourney_retired','supabase','supabase'
       from accounts.tourney_accounts account
@@ -125,8 +117,6 @@ export async function applySqlRetirement(sql) {
       exists(select 1 from accounts.account_roles where user_id=${account.user_id} and principal_id=${account.principal_id} and role='tourney_retired') marker`;
     if (!retired.marker || retired.domain !== account.domain) throw new Error("Historical account domain changed; retirement must roll back.");
   }
-  // Preserve team names, match results, and event configuration. Broadcast rows
-  // can contain staff camera URLs; audit actors are no longer needed publicly.
   if (await exists(sql, "tourney.tourney_bracket_entities")) await sql`delete from tourney.tourney_bracket_entities where entity_type='broadcast'`;
   for (const table of ["tourney.tourney_bracket_teams", "tourney.tourney_bracket_meta", "tourney.tourney_registration_config"]) {
     if (await exists(sql, table)) await sql`update ${sql(table)} set updated_by='retirement'`;
@@ -219,7 +209,6 @@ async function main() {
       if (apply) {
         await tx`set local lock_timeout='10s'`;
         await tx`select pg_advisory_xact_lock(hashtextextended('roo-tourney-retirement',0))`;
-        // Stop concurrent tournament and shared-account changes while backing up.
         await tx`lock table accounts.tourney_accounts,accounts.account_roles,accounts.login_aliases,accounts.principals,accounts.creator_profiles,auth.users in share row exclusive mode`;
         await tx`lock table tourney.tourney_players,tourney.account_snapshots in share row exclusive mode`;
         await tx`lock table tourney.external_operations,tourney.tourney_player_auth_operations,accounts.credential_operations in share row exclusive mode`;
@@ -228,7 +217,6 @@ async function main() {
       const inventory = await tx`select table_schema,table_name from information_schema.tables where table_type='BASE TABLE' and (table_schema='tourney' or (table_schema='migration' and table_name like 'tourney_%')) order by 1,2`;
       for (const { table_schema, table_name } of inventory) snapshot.tables[`${table_schema}.${table_name}`] = await rows(tx, `${table_schema}.${table_name}`);
       for (const table of ["accounts.tourney_accounts", "accounts.account_roles", "accounts.login_aliases", "accounts.discord_role_assignments", "accounts.oauth_intents"]) snapshot.tables[table] = await rows(tx, table);
-      // The private source-document mirror is another potential staff-data copy.
       const sourceCopies = await tx`select to_jsonb(t) data from migration.source_documents t where payload->>'_type'='tourneyAuthStore'`;
       snapshot.tables["migration.source_documents:tourneyAuthStore"] = sourceCopies.map(r => r.data);
       const manifest = await writeVerifiedBackup(directory, snapshot);

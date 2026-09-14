@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-// Run only against an explicitly supplied, migrated local Supabase fixture.
-// Every schema change and Auth fixture is rolled back, even when a case passes.
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";

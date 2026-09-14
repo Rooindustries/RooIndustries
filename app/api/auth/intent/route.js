@@ -10,8 +10,6 @@ import {
 } from "../../../../src/server/supabase/oauthIntents";
 import { clearNextSupabaseSession } from "../../../../src/server/supabase/serverSession";
 import { REF_SESSION_COOKIE } from "../../../../src/server/api/ref/auth";
-
-
 import {
   clearReauthCookie,
   readReauthToken,
@@ -24,7 +22,6 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const flows = new Set(["referral"]);
 const actions = new Set(["signin", "signup", "link", "reauth", "reclaim"]);
 const providers = new Set(["google", "discord"]);
 const reauthPurposes = new Set([
@@ -34,10 +31,8 @@ const reauthPurposes = new Set([
   "change_password",
 ]);
 
-const defaultPath = ({ action }) => action === "signup" ? "/referrals/register" : "/referrals/dashboard";
-
-const safeReturnPath = ({ action, flow, value }) => {
-  const fallback = defaultPath({ action, flow });
+const safeReturnPath = ({ action, value }) => {
+  const fallback = action === "signup" ? "/referrals/register" : "/referrals/dashboard";
   const path = String(value || fallback).trim();
   if (
     !/^\/(?!\/)[^\\\u0000-\u001f]*$/.test(path) ||
@@ -46,28 +41,14 @@ const safeReturnPath = ({ action, flow, value }) => {
   ) {
     return fallback;
   }
-  if (flow === "referral" && !path.startsWith("/referrals/")) return fallback;
-
+  if (!path.startsWith("/referrals/")) return fallback;
   if (action === "signup" && path !== fallback) return fallback;
-
   return path;
 };
 
 const noStore = (response) => {
   response.headers.set("Cache-Control", "private, no-store");
   return response;
-};
-
-const clearDomainSession = (response, flow) => {
-  response.cookies.set({
-    name: REF_SESSION_COOKIE,
-    value: "",
-    httpOnly: true,
-    maxAge: 0,
-    path: "/",
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-  });
 };
 
 const proofFailure = ({ action, body, status }) => {
@@ -103,7 +84,7 @@ export async function POST(request) {
   const action = String(payload.action || "").trim().toLowerCase();
   const flow = String(payload.flow || "").trim().toLowerCase();
   const provider = String(payload.provider || "").trim().toLowerCase();
-  if (!actions.has(action) || !flows.has(flow) || !providers.has(provider)) {
+  if (!actions.has(action) || flow !== "referral" || !providers.has(provider)) {
     return noStore(
       NextResponse.json(
         { ok: false, error: "OAuth request is invalid." },
@@ -111,19 +92,8 @@ export async function POST(request) {
       )
     );
   }
-  if (action === "reclaim" && flow !== "referral") {
-    return noStore(
-      NextResponse.json(
-        { ok: false, error: "Identity recovery is available only for creator accounts." },
-        { status: 400 }
-      )
-    );
-  }
-
-
   const returnPath = safeReturnPath({
     action,
-    flow,
     value: payload.returnPath,
   });
   const response = NextResponse.json({ ok: true });
@@ -204,7 +174,15 @@ export async function POST(request) {
       }
     } else {
       await clearNextSupabaseSession({ request, response }).catch(() => {});
-      clearDomainSession(response, flow);
+      response.cookies.set({
+        name: REF_SESSION_COOKIE,
+        value: "",
+        httpOnly: true,
+        maxAge: 0,
+        path: "/",
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+      });
     }
 
     const reauthPurpose = String(payload.reauthPurpose || "").trim().toLowerCase();
