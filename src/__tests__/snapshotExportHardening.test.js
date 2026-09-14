@@ -289,6 +289,7 @@ describe("encrypted export hardening", () => {
         SUPABASE_FULL_SNAPSHOT_SCHEMAS,
         validateFullLogicalSnapshot,
       } from ${JSON.stringify(moduleUrl("src/server/archive/snapshotContract.js"))};
+      import { verifyFullLogicalSnapshotRestore } from ${JSON.stringify(moduleUrl("scripts/lib/logical-snapshot-restore.mjs"))};
       const relations = Object.fromEntries(
         SUPABASE_FULL_REQUIRED_RELATIONS.map((relation) => [
           relation,
@@ -490,6 +491,43 @@ describe("encrypted export hardening", () => {
       } catch {
         malformedRejected = true;
       }
+      let restoreTransactions = 0;
+      const invalidRowsRejected = {};
+      const invalidRowsRestoreRejected = {};
+      for (const [name, rows] of [
+        ["null", [null]],
+        ["number", [1]],
+        ["boolean", [false]],
+        ["string", ["row"]],
+        ["array", [[]]],
+        ["mixed", [{ id: "valid-row" }, null]],
+      ]) {
+        const invalidRows = structuredClone(payload);
+        const text = JSON.stringify(rows);
+        invalidRows.full_logical.relationPayloads["auth.users"] = text;
+        invalidRows.full_logical.relationCounts["auth.users"] = rows.length;
+        invalidRows.full_logical.relationHashes["auth.users"] = hash(text);
+        invalidRowsRejected[name] = false;
+        try {
+          validateFullLogicalSnapshot(invalidRows, { hash });
+        } catch (error) {
+          invalidRowsRejected[name] = error.code === "SUPABASE_FULL_LOGICAL_SNAPSHOT_INVALID";
+        }
+        invalidRowsRestoreRejected[name] = false;
+        try {
+          await verifyFullLogicalSnapshotRestore({
+            payload: invalidRows,
+            sql: { begin() { restoreTransactions += 1; throw new Error("Unexpected restore transaction"); } },
+          });
+        } catch (error) {
+          invalidRowsRestoreRejected[name] = error.code === "SUPABASE_FULL_LOGICAL_SNAPSHOT_INVALID";
+        }
+      }
+      const nestedRow = structuredClone(payload);
+      const nestedText = JSON.stringify([{ id: "valid-row", note: null, values: [], metadata: { active: true } }]);
+      nestedRow.full_logical.relationPayloads["auth.users"] = nestedText;
+      nestedRow.full_logical.relationHashes["auth.users"] = hash(nestedText);
+      const nestedRowCount = validateFullLogicalSnapshot(nestedRow, { hash }).rowCount;
       process.stdout.write(JSON.stringify({
         relationCount: proof.relationCount,
         compactProfile: compactProof.contractProfile,
@@ -509,6 +547,10 @@ describe("encrypted export hardening", () => {
         missingMigrationRejected,
         countRejected,
         malformedRejected,
+        invalidRowsRejected,
+        invalidRowsRestoreRejected,
+        restoreTransactions,
+        nestedRowCount,
         numericExact: payload.full_logical.relationPayloads["auth.users"].includes(
           "9007199254740993"
         ),
@@ -531,6 +573,10 @@ describe("encrypted export hardening", () => {
       missingMigrationRejected: true,
       countRejected: true,
       malformedRejected: true,
+      invalidRowsRejected: { null: true, number: true, boolean: true, string: true, array: true, mixed: true },
+      invalidRowsRestoreRejected: { null: true, number: true, boolean: true, string: true, array: true, mixed: true },
+      restoreTransactions: 0,
+      nestedRowCount: 1,
       numericExact: true,
     });
     expect(result.relationCount).toBeGreaterThan(80);
