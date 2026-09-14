@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
+import { isValidNewPassword, NEW_PASSWORD_REQUIREMENT } from "../../lib/passwordPolicy.js";
 import { createSupabaseAdminClient } from "./adminClient.js";
 import { createSupabaseAuthClient } from "./authClient.js";
 
@@ -235,11 +236,10 @@ export const updateSupabaseAccountPassword = async ({
   const normalizedPassword = normalizePassword(password);
   const importedHash = String(passwordHash || "").trim();
   if (
-    normalizedPassword.length < 10 ||
-    normalizedPassword.length > 128 ||
+    !isValidNewPassword(normalizedPassword) ||
     (importedHash && !/^\$2[aby]\$/.test(importedHash))
   ) {
-    throw new Error("Password must be between 10 and 128 characters.");
+    throw new Error(NEW_PASSWORD_REQUIREMENT);
   }
   const account = await resolveSupabaseAccountAlias({ identifier, adminClient });
   if (!account?.user_id) return { updated: false };
@@ -821,6 +821,10 @@ export const createSupabaseCreatorAccount = async ({
   sourceHash = "",
   adminClient = createSupabaseAdminClient(),
 } = {}) => {
+  const normalizedPassword = normalizePassword(password);
+  if (normalizedPassword && !isValidNewPassword(normalizedPassword)) {
+    throw new Error(NEW_PASSWORD_REQUIREMENT);
+  }
   const email = normalizeIdentifier(referral?.creatorEmail);
   const code = normalizeIdentifier(referral?.slug?.current);
   const legacyId = String(referral?._id || "").trim();
@@ -865,7 +869,6 @@ export const createSupabaseCreatorAccount = async ({
       ...(Array.isArray(user.app_metadata?.roles) ? user.app_metadata.roles : []),
       "creator",
     ]);
-    const normalizedPassword = normalizePassword(password);
     const updated = await adminClient.auth.admin.updateUserById(requestedUserId, {
       ...(normalizedPassword ? { password: normalizedPassword } : {}),
       user_metadata: {
@@ -887,7 +890,7 @@ export const createSupabaseCreatorAccount = async ({
       email_confirm: true,
       ...(importedHash
         ? { password_hash: importedHash }
-        : { password: normalizePassword(password) }),
+        : { password: normalizedPassword }),
       user_metadata: {
         display_name: String(referral.name || code).trim(),
         migration_source: "roo-industries-website",
@@ -905,7 +908,7 @@ export const createSupabaseCreatorAccount = async ({
       // for credential changes, including retries from verifyRegistration.js.
       const currentUser = existingAuth.data.user;
       const { password_hash: _ignoredOnUpdate, ...updatable } = authAttributes;
-      const plaintext = normalizePassword(password);
+      const plaintext = normalizedPassword;
       // Auth creation may succeed before referral activation. A matching installed
       // fingerprint permits that metadata retry without plaintext; an unknown or
       // different digest still fails closed because a hash cannot update Auth.

@@ -125,6 +125,20 @@ describe("referral Supabase recovery", () => {
     expect(screen.getByRole("button", { name: "Update Password" })).toBeEnabled();
   });
 
+  test.each(["a".repeat(73), `${"🔒".repeat(18)}a`])(
+    "rejects an oversized reset password without using its reset token: %s", async (password) => {
+      const token = "a".repeat(64);
+      global.fetch = jest.fn();
+      renderReset(`/referrals/reset#token=${token}`);
+      fireEvent.change(await screen.findByLabelText("New Password"), { target: { value: password } });
+      fireEvent.change(screen.getByLabelText("Confirm Password"), { target: { value: password } });
+      fireEvent.click(screen.getByRole("button", { name: "Update Password" }));
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(window.sessionStorage.getItem("referral_reset_token")).toBe(token);
+      expect(screen.getByLabelText("New Password")).toHaveValue(password);
+    }
+  );
+
   test("renders the pending copy and polls until the password is updated", async () => {
     jest.useFakeTimers();
     global.fetch = jest
@@ -341,6 +355,20 @@ describe("referral signed-in password change outcomes", () => {
       "ref-change-confirm-password"
     );
   });
+
+  test.each(["a".repeat(73), `${"🔒".repeat(18)}a`])(
+    "rejects oversized new passwords before starting reauthentication: %s", async (password) => {
+      installFetch({ ok: true, json: async () => ({ ok: true }) });
+      renderChangePassword();
+      fireEvent.change(await screen.findByLabelText("Current Password"), { target: { value: "existing-password" } });
+      fireEvent.change(screen.getByLabelText("New Password"), { target: { value: password } });
+      fireEvent.change(screen.getByLabelText("Confirm Password"), { target: { value: password } });
+      global.fetch.mockClear();
+      fireEvent.click(screen.getByRole("button", { name: "Save Password" }));
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(screen.getByLabelText("New Password")).toHaveValue(password);
+    }
+  );
 
   test("renders the completed password copy", async () => {
     installFetch({

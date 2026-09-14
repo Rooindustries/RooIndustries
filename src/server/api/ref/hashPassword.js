@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import { isValidNewPassword, NEW_PASSWORD_REQUIREMENT } from "../../../lib/passwordPolicy.js";
 import { createDataClient as createClient } from "../../data/documentClient.js";
 import {
   clearReferralSessionCookie,
@@ -40,6 +41,10 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ ok: false });
 
   try {
+    const normalizedPassword = String(req.body?.password || "");
+    if (!isValidNewPassword(normalizedPassword)) {
+      return res.status(400).json({ ok: false, error: NEW_PASSWORD_REQUIREMENT });
+    }
     const session = await requireReferralSession(req, res);
     if (!session) return;
     const policy = resolveSupabaseRuntimePolicy();
@@ -51,14 +56,6 @@ export default async function handler(req, res) {
       });
     }
     const creatorId = session.referralId;
-    const { password } = req.body || {};
-    const normalizedPassword = String(password || "");
-
-    if (normalizedPassword.length < 10 || normalizedPassword.length > 128) {
-      return res
-        .status(400)
-        .json({ ok: false, error: "Use a password between 10 and 128 characters." });
-    }
     if (
       !(await requireRateLimit(res, {
         key: `ref-change-password:${getClientAddress(req)}`,

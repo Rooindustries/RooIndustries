@@ -125,6 +125,29 @@ describe("referral password change", () => {
     expect(mockDataClientOptions).toContainEqual({ allowLegacyFallback: false });
   });
 
+  test.each(["a".repeat(73), `${"é".repeat(36)}a`, `${"🔒".repeat(18)}a`])(
+    "rejects an oversized new password before consuming reauthentication: %s", async (password) => {
+      const response = createResponse();
+      await handler({ method: "POST", body: { password } }, response);
+      expect(response.statusCode).toBe(400);
+      expect(response.body.error).toContain("72 UTF-8 bytes");
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockConsumeReauthGrant).not.toHaveBeenCalled();
+      expect(mockUpdateSupabaseAccountPassword).not.toHaveBeenCalled();
+      expect(mockReconcileSupabaseCredentialSource).not.toHaveBeenCalled();
+      expect(mockPatch).not.toHaveBeenCalled();
+    }
+  );
+
+  test.each(["a".repeat(72), "é".repeat(36), "🔒".repeat(18)])(
+    "passes an accepted new password to credential installation unchanged: %s", async (password) => {
+      const response = createResponse();
+      await handler({ method: "POST", body: { password } }, response);
+      expect(response.statusCode).toBe(200);
+      expect(mockUpdateSupabaseAccountPassword).toHaveBeenCalledWith(expect.objectContaining({ password }));
+    }
+  );
+
   test("consumes every outstanding reset-token field in the credential saga", async () => {
     const response = createResponse();
     await handler(

@@ -55,7 +55,8 @@ describe("Supabase account compatibility", () => {
     );
   });
 
-  test("updates an existing Auth password with plaintext and stores only its hash", async () => {
+  test.each(["new-password-value", "a".repeat(72), "é".repeat(36), "🔒".repeat(18)])(
+    "updates an accepted Auth password unchanged: %s", async (password) => {
     const passwordHash = `$2b$12$${"a".repeat(53)}`;
     const updateUserById = jest.fn().mockResolvedValue({
       data: { user: { id: creatorAccount.user_id } },
@@ -90,7 +91,7 @@ describe("Supabase account compatibility", () => {
         adminClient,
         identifier: "creator@example.com",
         operationKey: "credential:test:plaintext",
-        password: "new-password-value",
+        password,
         passwordHash,
         sourceBackend: "supabase",
         sourceDocumentId: "referral.creator",
@@ -103,9 +104,48 @@ describe("Supabase account compatibility", () => {
       updated: true,
     });
     expect(updateUserById).toHaveBeenCalledWith(creatorAccount.user_id, {
-      password: "new-password-value",
+      password,
     });
   });
+
+  test.each(["a".repeat(73), `${"é".repeat(36)}a`, `${"🔒".repeat(18)}a`])(
+    "rejects oversized plaintext before any credential or Auth operation: %s", async (password) => {
+      const adminClient = {
+        rpc: jest.fn(),
+        auth: { admin: { getUserById: jest.fn(), createUser: jest.fn(), updateUserById: jest.fn() } },
+      };
+      await expect(updateSupabaseAccountPassword({ adminClient, password }))
+        .rejects.toThrow("72 UTF-8 bytes");
+      for (const credentialOptions of [{}, { passwordHash: `$2b$12$${"a".repeat(53)}` }, { authUserId: creatorAccount.user_id }]) {
+        await expect(createSupabaseCreatorAccount({
+          adminClient, password, ...credentialOptions,
+          referral: { _id: "referral.creator", creatorEmail: "creator@example.com", slug: { current: "creator" } },
+        })).rejects.toThrow("72 UTF-8 bytes");
+      }
+      expect(adminClient.rpc).not.toHaveBeenCalled();
+      expect(adminClient.auth.admin.getUserById).not.toHaveBeenCalled();
+      expect(adminClient.auth.admin.createUser).not.toHaveBeenCalled();
+      expect(adminClient.auth.admin.updateUserById).not.toHaveBeenCalled();
+    }
+  );
+
+  test.each(["a".repeat(72), "é".repeat(36), "🔒".repeat(18)])(
+    "creates a creator with the exact accepted plaintext: %s", async (password) => {
+      const adminClient = {
+        rpc: jest.fn(async (name) => ({ data: name === "roo_resolve_account_alias" ? null : creatorAccount, error: null })),
+        auth: { admin: {
+          getUserById: jest.fn().mockResolvedValue({ data: { user: null }, error: { status: 404 } }),
+          createUser: jest.fn().mockResolvedValue({ data: { user: { id: creatorAccount.user_id } }, error: null }),
+          deleteUser: jest.fn(),
+        } },
+      };
+      await createSupabaseCreatorAccount({
+        adminClient, password,
+        referral: { _id: "referral.creator", creatorEmail: "creator@example.com", slug: { current: "creator" } },
+      });
+      expect(adminClient.auth.admin.createUser).toHaveBeenCalledWith(expect.objectContaining({ password }));
+    }
+  );
 
   test("fails safely when the v2 checkpoint RPC is not migrated yet", async () => {
     const passwordHash = `$2b$12$${"b".repeat(53)}`;
@@ -181,7 +221,8 @@ describe("Supabase account compatibility", () => {
     );
   });
 
-  test("authenticates an imported bcrypt creator through an alias", async () => {
+  test.each(["valid-password", "a".repeat(128), "é".repeat(50)])(
+    "preserves existing login inputs without applying the new-password limit: %s", async (password) => {
     const adminClient = {
       rpc: jest.fn().mockResolvedValue({ data: creatorAccount, error: null }),
     };
@@ -199,7 +240,7 @@ describe("Supabase account compatibility", () => {
 
     const result = await authenticateSupabaseAccount({
       identifier: "CREATOR",
-      password: "valid-password",
+      password,
       requiredRoles: ["creator"],
       adminClient,
       authClient,
@@ -207,7 +248,7 @@ describe("Supabase account compatibility", () => {
     expect(result.ok).toBe(true);
     expect(authClient.auth.signInWithPassword).toHaveBeenCalledWith({
       email: "creator@example.com",
-      password: "valid-password",
+      password,
     });
   });
 
