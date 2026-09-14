@@ -252,6 +252,58 @@ describe("Supabase account compatibility", () => {
     });
   });
 
+  test.each(["a".repeat(73), `${"é".repeat(36)}a`, "🔒".repeat(19)])(
+    "does not rewrite an overlong legacy credential after rejected sign-in: %s", async (password) => {
+      const account = { ...creatorAccount, credential_status: "pending", credential_kind: "legacy_plaintext" };
+      const adminClient = {
+        rpc: jest.fn().mockResolvedValue({ data: account, error: null }),
+        auth: { admin: { updateUserById: jest.fn().mockResolvedValue({ error: null }) } },
+      };
+      const authClient = { auth: { signInWithPassword: jest.fn().mockResolvedValue({
+        data: null, error: { status: 500, code: "unexpected_failure" },
+      }) } };
+      const verifyLegacyPassword = jest.fn().mockResolvedValue(true);
+
+      const result = await authenticateSupabaseAccount({
+        identifier: "creator", password, requiredRoles: ["creator"],
+        adminClient, authClient, verifyLegacyPassword,
+      });
+
+      expect(result.ok).toBe(false);
+      expect(authClient.auth.signInWithPassword).toHaveBeenCalledTimes(1);
+      expect(authClient.auth.signInWithPassword).toHaveBeenCalledWith({ email: account.primary_email, password });
+      expect(verifyLegacyPassword).not.toHaveBeenCalled();
+      expect(adminClient.auth.admin.updateUserById).not.toHaveBeenCalled();
+      expect(adminClient.rpc.mock.calls.map(([name]) => name)).toEqual(["roo_resolve_account_alias"]);
+    }
+  );
+
+  test("retains legacy credential upgrades at the provider byte boundary", async () => {
+    const password = "🔒".repeat(18);
+    const account = { ...creatorAccount, credential_status: "pending", credential_kind: "legacy_plaintext" };
+    const adminClient = {
+      rpc: jest.fn().mockResolvedValue({ data: account, error: null }),
+      auth: { admin: { updateUserById: jest.fn().mockResolvedValue({ error: null }) } },
+    };
+    const authClient = { auth: { signInWithPassword: jest.fn()
+      .mockResolvedValueOnce({ data: null, error: { status: 400 } })
+      .mockResolvedValueOnce({ data: { user: { id: account.user_id }, session: { access_token: "session-token" } }, error: null }) } };
+    const verifyLegacyPassword = jest.fn().mockResolvedValue(true);
+
+    const result = await authenticateSupabaseAccount({
+      identifier: "creator", password, requiredRoles: ["creator"],
+      adminClient, authClient, verifyLegacyPassword,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(verifyLegacyPassword).toHaveBeenCalledWith({ account, password });
+    expect(adminClient.auth.admin.updateUserById).toHaveBeenCalledWith(account.user_id, { password });
+    expect(adminClient.rpc.mock.calls.map(([name]) => name)).toEqual([
+      "roo_resolve_account_alias", "roo_complete_credential_migration",
+    ]);
+    expect(authClient.auth.signInWithPassword).toHaveBeenCalledTimes(2);
+  });
+
   test("does not fall through to another role for a scoped login", async () => {
     const adminClient = {
       rpc: jest.fn().mockResolvedValue({ data: creatorAccount, error: null }),

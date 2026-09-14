@@ -184,6 +184,7 @@ export const authenticateSupabaseAccount = async ({
 
   const canUpgradeLegacy =
     result.error &&
+    Buffer.byteLength(normalizedPassword, "utf8") <= 72 &&
     account.credential_status === "pending" &&
     account.credential_kind === "legacy_plaintext" &&
     typeof verifyLegacyPassword === "function";

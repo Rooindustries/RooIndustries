@@ -201,6 +201,40 @@ describe("referral login API", () => {
     expect(mockDataClientOptions).toContainEqual({ allowLegacyFallback: false });
   });
 
+  test.each([
+    ["unavailable", "a".repeat(128)],
+    ["invalid_credentials", "a".repeat(73)],
+    ["unavailable", "é".repeat(37)],
+    ["invalid_credentials", "🔒".repeat(19)],
+  ])("offers recovery for an overlong failed sign-in regardless of account lookup: %s", async (reason, password) => {
+    process.env.DATA_PRIMARY_BACKEND = "supabase";
+    mockAuthenticateSupabaseAccount.mockResolvedValue({ ok: false, reason });
+    const res = createRes();
+
+    await login(createReq({ code: "creator-code", password }), res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe("This password exceeds the supported sign-in length. Use Forgot Password to choose a new password.");
+    expect(mockAuthenticateSupabaseAccount).toHaveBeenCalledWith(expect.objectContaining({ password }));
+    expect(mockPatch).not.toHaveBeenCalled();
+    expect(mockInstallLegacySupabaseSession).not.toHaveBeenCalled();
+    expect(res.headers["Set-Cookie"]).toBeUndefined();
+  });
+
+  test.each([
+    ["unavailable", 503, "Login is temporarily unavailable. Please try again shortly."],
+    ["invalid_credentials", 401, "Invalid login details. Use Forgot Password if you need to reset access."],
+  ])("retains the normal %s response for supported password lengths", async (reason, status, error) => {
+    process.env.DATA_PRIMARY_BACKEND = "supabase";
+    mockAuthenticateSupabaseAccount.mockResolvedValue({ ok: false, reason });
+    const res = createRes();
+
+    await login(createReq({ code: "creator-code", password: "🔒".repeat(18) }), res);
+
+    expect(res.statusCode).toBe(status);
+    expect(res.body).toEqual({ ok: false, error });
+  });
+
   test("links a pending Discord identity after creator password authentication", async () => {
     process.env.DATA_PRIMARY_BACKEND = "supabase";
     const pendingDiscordUser = {
@@ -428,7 +462,7 @@ describe("referral login API", () => {
     expect(mockInstallLegacySupabaseSession).toHaveBeenCalledTimes(1);
   });
 
-  test.each(["correct-password", "🔒".repeat(5)])("logs in with a referral code and existing password: %s", async (password) => {
+  test.each(["correct-password", "🔒".repeat(5), "a".repeat(128)])("logs in with a referral code and existing password: %s", async (password) => {
     const referral = await makeReferral(password);
     mockFetch.mockImplementation((query, params = {}) =>
       Promise.resolve(findReferralByIdentifier(referral, query, params.identifier))
