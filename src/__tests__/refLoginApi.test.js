@@ -202,20 +202,26 @@ describe("referral login API", () => {
   });
 
   test.each([
-    ["unavailable", "a".repeat(128)],
-    ["invalid_credentials", "a".repeat(73)],
-    ["unavailable", "é".repeat(37)],
-    ["invalid_credentials", "🔒".repeat(19)],
-  ])("offers recovery for an overlong failed sign-in regardless of account lookup: %s", async (reason, password) => {
-    process.env.DATA_PRIMARY_BACKEND = "supabase";
-    mockAuthenticateSupabaseAccount.mockResolvedValue({ ok: false, reason });
+    ["supabase", "a".repeat(128)],
+    ["supabase", "a".repeat(73)],
+    ["supabase", "é".repeat(37)],
+    ["supabase", "🔒".repeat(19)],
+    ["sanity", "a".repeat(128)],
+    ["sanity", "a".repeat(73)],
+    ["sanity", "é".repeat(37)],
+    ["sanity", "🔒".repeat(19)],
+  ])("offers recovery before account reads or credential migration for an overlong %s sign-in", async (backend, password) => {
+    process.env.DATA_PRIMARY_BACKEND = backend;
+    mockAuthenticateSupabaseAccount.mockResolvedValue({ ok: false, reason: "invalid_credentials" });
+    mockFetch.mockResolvedValue({ ...(await makeReferral()), creatorPassword: password });
     const res = createRes();
 
     await login(createReq({ code: "creator-code", password }), res);
 
     expect(res.statusCode).toBe(400);
     expect(res.body.error).toBe("This password exceeds the supported sign-in length. Use Forgot Password to choose a new password.");
-    expect(mockAuthenticateSupabaseAccount).toHaveBeenCalledWith(expect.objectContaining({ password }));
+    expect(mockAuthenticateSupabaseAccount).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
     expect(mockPatch).not.toHaveBeenCalled();
     expect(mockInstallLegacySupabaseSession).not.toHaveBeenCalled();
     expect(res.headers["Set-Cookie"]).toBeUndefined();
@@ -462,7 +468,7 @@ describe("referral login API", () => {
     expect(mockInstallLegacySupabaseSession).toHaveBeenCalledTimes(1);
   });
 
-  test.each(["correct-password", "🔒".repeat(5), "a".repeat(128)])("logs in with a referral code and existing password: %s", async (password) => {
+  test.each(["correct-password", "🔒".repeat(5), "🔒".repeat(18)])("logs in with a referral code and existing password: %s", async (password) => {
     const referral = await makeReferral(password);
     mockFetch.mockImplementation((query, params = {}) =>
       Promise.resolve(findReferralByIdentifier(referral, query, params.identifier))

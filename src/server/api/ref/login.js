@@ -80,6 +80,12 @@ export default async function handler(req, res) {
     if (!normalizedIdentifier || normalizedIdentifier.length > 254 || normalizedPassword.length > 128) {
       return res.status(400).json({ ok: false, error: "Invalid login request." });
     }
+    if (Buffer.byteLength(normalizedPassword, "utf8") > 72) {
+      return res.status(400).json({
+        ok: false,
+        error: "This password exceeds the supported sign-in length. Use Forgot Password to choose a new password.",
+      });
+    }
     const clientAddress = getClientAddress(req);
 
     if (
@@ -131,12 +137,6 @@ export default async function handler(req, res) {
         },
       });
       if (!result.ok) {
-        if (Buffer.byteLength(normalizedPassword, "utf8") > 72) {
-          return res.status(400).json({
-            ok: false,
-            error: "This password exceeds the supported sign-in length. Use Forgot Password to choose a new password.",
-          });
-        }
         return res.status(result.reason === "unavailable" ? 503 : 401).json({
           ok: false,
           error:

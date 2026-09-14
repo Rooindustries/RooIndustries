@@ -222,7 +222,7 @@ describe("Supabase account compatibility", () => {
   });
 
   test.each(["valid-password", "a".repeat(128), "é".repeat(50), "🔒".repeat(5)])(
-    "preserves existing login inputs without applying the new-password limit: %s", async (password) => {
+    "passes existing login inputs to Auth unchanged: %s", async (password) => {
     const adminClient = {
       rpc: jest.fn().mockResolvedValue({ data: creatorAccount, error: null }),
     };
