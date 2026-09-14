@@ -6,7 +6,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import postgres from "postgres";
-import { applySqlRetirement, protectedState, readDatabaseRowJson, writeVerifiedBackup } from "./retire-tourney-people.mjs";
+import { applySqlRetirement, protectedState, readDatabaseRowJson, readRetirementAccountRows, writeVerifiedBackup } from "./retire-tourney-people.mjs";
 
 const migrationUrl = new URL(
   "../supabase/migrations/20260914010000_preserve_retired_tourney_identity_domains.sql",
@@ -51,7 +51,7 @@ async function retirementState(sql) {
   for (const table of [
     ...tables.map(({ name }) => name),
     "accounts.tourney_accounts", "accounts.account_roles", "accounts.login_aliases",
-    "accounts.oauth_intents", "accounts.reauth_grants", "accounts.orphan_identity_reclaim_audit",
+    "accounts.discord_role_assignments", "accounts.oauth_intents", "accounts.reauth_grants", "accounts.orphan_identity_reclaim_audit",
   ]) {
     state[table] = await tableDigest(sql, table);
   }
@@ -106,6 +106,18 @@ async function createAccount(sql, { creator = false, tourneyRole = "" } = {}) {
              (${id},${principal},'tourney_email',${email},true)`;
   }
   return { id, principal, email, code, legacyId };
+}
+
+async function createLinkIntent(sql, account, flow) {
+  const grantHash = digest(newId());
+  await sql`select public.roo_create_reauth_grant(${account.id},${grantHash},'link_identity',null)`;
+  const [{ intent }] = await sql`select public.roo_create_oauth_intent(${sql.json({
+    action: "link", flow, provider: "discord", target_user_id: account.id,
+    domain_subject: account.legacyId, reauth_token_hash: grantHash,
+    expires_at: new Date(Date.now() + 600_000).toISOString(),
+    return_path: flow === "tourney" ? "/tourney" : "/referrals/dashboard", token_hash: digest(newId()),
+  })}) intent`;
+  return intent.id;
 }
 
 async function addIdentity(sql, account, provider = "discord") {
@@ -341,6 +353,74 @@ async function proveBackupPrecision(sql) {
   }
 }
 
+async function proveBackupScope(sql) {
+  const player = await createAccount(sql, { tourneyRole: "tourney_player" });
+  const shared = await createAccount(sql, { creator: true, tourneyRole: "tourney_caster" });
+  const unrelated = await createAccount(sql, { creator: true });
+  await sql`insert into accounts.account_roles (user_id,principal_id,role)
+    values (${unrelated.id},${unrelated.principal},'tourney_viewer'),
+           (${shared.id},${shared.principal},'tourney_retired')`;
+  await sql`insert into accounts.login_aliases (user_id,principal_id,alias_type,normalized_value,verified)
+    values (${unrelated.id},${unrelated.principal},'tourney_username',${unrelated.code},true)`;
+  for (const account of [player, shared, unrelated]) {
+    await sql`insert into accounts.discord_role_assignments
+      (user_id,principal_id,discord_user_id,guild_id,generation,status)
+      values (${account.id},${account.principal},${socialSubject()},'123456789012345678',9007199254740993,'applied')`;
+  }
+  for (const [flow, account] of [["tourney", shared], ["referral", unrelated]]) {
+    await createLinkIntent(sql, account, flow);
+  }
+  await sql`select public.roo_create_reauth_grant(${shared.id},${digest(newId())},'change_password',null)`;
+  const tables = ["accounts.tourney_accounts", "accounts.account_roles", "accounts.login_aliases",
+    "accounts.discord_role_assignments", "accounts.oauth_intents", "accounts.reauth_grants"];
+  const before = {};
+  for (const table of tables) {
+    before[table] = (await sql`select to_jsonb(t)::text data from ${sql(table)} t`).map(row => row.data);
+  }
+  const backup = await readRetirementAccountRows(sql);
+  assert.deepEqual(Object.keys(backup).sort(), [...tables].sort());
+  await applySqlRetirement(sql);
+  for (const table of tables) {
+    const after = new Set((await sql`select to_jsonb(t)::text data from ${sql(table)} t`).map(row => row.data));
+    const removed = before[table].filter(row => !after.has(row));
+    assert.ok(removed.length > 0, `${table} must exercise removed rows.`);
+    assert.deepEqual([...backup[table]].sort(), removed.sort(), `${table} backup must contain exactly the removed rows.`);
+  }
+  assert.ok(Object.values(await readRetirementAccountRows(sql)).every(rows => rows.length === 0));
+  const intentId = newId();
+  await sql`insert into accounts.oauth_intents (id,token_hash,flow,action,provider,return_path,expires_at)
+    values (${intentId},${digest(intentId)},'tourney','signin','discord','/tourney',now()+interval '10 minutes')`;
+  const withoutAccounts = await readRetirementAccountRows(sql);
+  assert.equal(withoutAccounts["accounts.oauth_intents"].length, 1);
+  assert.equal(JSON.parse(withoutAccounts["accounts.oauth_intents"][0]).id, intentId);
+  for (const table of tables.filter(table => table !== "accounts.oauth_intents")) {
+    assert.deepEqual(withoutAccounts[table], [], `${table} must exclude unrelated rows when no accounts retire.`);
+  }
+  await createLinkIntent(sql, shared, "tourney");
+  const boundWithoutAccounts = await readRetirementAccountRows(sql);
+  assert.equal(boundWithoutAccounts["accounts.oauth_intents"].length, 2);
+  assert.equal(boundWithoutAccounts["accounts.reauth_grants"].length, 1);
+  assert.equal((await applySqlRetirement(sql)).tournamentAccountsRemoved, 0);
+  assert.ok(Object.values(await readRetirementAccountRows(sql)).every(rows => rows.length === 0));
+}
+
+async function proveCrossFlowGuard(sql, dependency) {
+  const account = await createAccount(sql, { creator: true, tourneyRole: "tourney_caster" });
+  const intentId = await createLinkIntent(sql, account, "tourney");
+  const [intent] = await sql`select id,reauth_grant_id from accounts.oauth_intents where id=${intentId}`;
+  const referralId = newId();
+  await sql`insert into accounts.oauth_intents (
+    id,token_hash,flow,action,provider,target_user_id,principal_id,return_path,status,expires_at,
+    reauth_grant_id,recovery_for_intent_id
+  ) values (${referralId},${digest(referralId)},'referral',${dependency === "grant" ? "link" : "reclaim"},
+    'google',${account.id},${account.principal},'/referrals/dashboard','failed',now()+interval '10 minutes',
+    ${dependency === "grant" ? intent.reauth_grant_id : null},${dependency === "recovery" ? intent.id : null})`;
+  const before = await retirementState(sql);
+  await assert.rejects(sql.savepoint(tx => applySqlRetirement(tx)),
+    /Protected Auth, creator, or commerce records changed/);
+  assert.deepEqual(await retirementState(sql), before, `${dependency} dependency refusal changed rows.`);
+}
+
 async function main() {
   const url = localDatabaseUrl(String(process.env.SUPABASE_TEST_DATABASE_URL || "").trim());
   const migration = await fs.readFile(migrationUrl, "utf8");
@@ -350,6 +430,10 @@ async function main() {
     const schemaBefore = await migrationState(sql);
     await rolledBackCase(sql, migration, "protected row digests retain bigint precision", proveProtectedPrecision);
     await rolledBackCase(sql, migration, "backup JSON preserves PostgreSQL numeric values", proveBackupPrecision);
+    await rolledBackCase(sql, migration, "account backups contain exactly the retired rows", proveBackupScope);
+    for (const dependency of ["grant", "recovery"]) {
+      await rolledBackCase(sql, migration, `cross-flow ${dependency} dependency blocks retirement`, tx => proveCrossFlowGuard(tx, dependency));
+    }
     await rolledBackCase(sql, migration, "retirement preserves account and social identity ownership", proveRetirement);
     for (const [kind, statuses] of [
       ["external", ["pending", "processing", "retry", "dead_letter"]],
@@ -363,7 +447,7 @@ async function main() {
     }
     assert.deepEqual(await retirementState(sql), dataBefore, "A fixture persisted changes after rollback.");
     assert.equal(await migrationState(sql), schemaBefore, "The test migration persisted after rollback.");
-    console.log("PASS all 12 PostgreSQL retirement cases; database rows and migration definitions unchanged.");
+    console.log("PASS all 15 PostgreSQL retirement cases; database rows and migration definitions unchanged.");
   } finally {
     await sql.end();
   }

@@ -14,6 +14,8 @@ The apply path takes database locks while obtaining a consistent backup and clea
 
 The script removes native tournament profiles, staff/password snapshots, operational queues, tournament aliases and active tournament roles. It keeps verified Auth/principal mappings and a `tourney_retired` domain marker; that marker contains no username, recovery email or credential and grants no tournament login. Existing creator profiles/roles, Auth identities/sessions, account mappings and commerce records are checked for changes inside the transaction.
 
+Account backups contain only the rows retirement removes, including reauthentication grants bound to deleted tournament OAuth intents.
+
 SQL commits before the legacy Sanity staff document is cleared using its backed-up revision. `sql-completed.json` records that phase; `completed.json` records completion of both stores. If SQL fails, the legacy document is untouched. If a later legacy revision/write or receipt fails, preserve the backup and investigate the reported phase. A retry takes another verified backup in a fresh directory; it must not overwrite the previous backup or bypass revision checks.
 
 ## Regression checks

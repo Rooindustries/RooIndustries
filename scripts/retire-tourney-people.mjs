@@ -51,6 +51,35 @@ const validateLegacyAccounts = value => {
 const exists = async (sql, relation) => Boolean((await sql`select to_regclass(${relation}) relation`)[0].relation);
 export const readDatabaseRowJson = async (sql, relation) => (await sql`select to_jsonb(t)::text data from ${sql(relation)} t`).map(r => r.data);
 
+export async function readRetirementAccountRows(sql) {
+  const accounts = await sql`select principal_id,to_jsonb(t)::text data
+    from accounts.tourney_accounts t where role in ${sql(PEOPLE_ROLES)}`;
+  const principalIds = accounts.map(account => account.principal_id).filter(Boolean);
+  const tables = {
+    "accounts.tourney_accounts": accounts.map(account => account.data),
+    "accounts.account_roles": [],
+    "accounts.login_aliases": [],
+    "accounts.discord_role_assignments": [],
+    "accounts.oauth_intents": (await sql`select to_jsonb(t)::text data
+      from accounts.oauth_intents t where flow='tourney'`).map(row => row.data),
+    "accounts.reauth_grants": (await sql`select to_jsonb(t)::text data
+      from accounts.reauth_grants t where exists (
+        select 1 from accounts.oauth_intents intent where intent.id=t.bound_intent_id and intent.flow='tourney'
+      )`).map(row => row.data),
+  };
+  if (principalIds.length) {
+    tables["accounts.account_roles"] = (await sql`select to_jsonb(t)::text data
+      from accounts.account_roles t where principal_id in ${sql(principalIds)}
+      and role in ${sql(PEOPLE_ROLES)}`).map(row => row.data);
+    tables["accounts.login_aliases"] = (await sql`select to_jsonb(t)::text data
+      from accounts.login_aliases t where principal_id in ${sql(principalIds)}
+      and alias_type like 'tourney_%'`).map(row => row.data);
+    tables["accounts.discord_role_assignments"] = (await sql`select to_jsonb(t)::text data
+      from accounts.discord_role_assignments t where principal_id in ${sql(principalIds)}`).map(row => row.data);
+  }
+  return tables;
+}
+
 export function resolveRetirementSanityToken(env = {}, apply = false) {
   const writeToken = String(env.SANITY_WRITE_TOKEN || "").trim();
   const token = apply ? writeToken : writeToken || String(env.SANITY_READ_TOKEN || "").trim();
@@ -226,7 +255,7 @@ async function main() {
       const snapshot = { version: 1, project: PROJECT, sanityProject: SANITY_PROJECT, sanityDataset: SANITY_DATASET, createdAt: new Date().toISOString(), legacyDocuments, tables: {}, protected: await protectedState(tx) };
       const inventory = await tx`select table_schema,table_name from information_schema.tables where table_type='BASE TABLE' and (table_schema='tourney' or (table_schema='migration' and table_name like 'tourney_%')) order by 1,2`;
       for (const { table_schema, table_name } of inventory) snapshot.tables[`${table_schema}.${table_name}`] = await readDatabaseRowJson(tx, `${table_schema}.${table_name}`);
-      for (const table of ["accounts.tourney_accounts", "accounts.account_roles", "accounts.login_aliases", "accounts.discord_role_assignments", "accounts.oauth_intents"]) snapshot.tables[table] = await readDatabaseRowJson(tx, table);
+      Object.assign(snapshot.tables, await readRetirementAccountRows(tx));
       const sourceCopies = await tx`select to_jsonb(t)::text data from migration.source_documents t where payload->>'_type'='tourneyAuthStore'`;
       snapshot.tables["migration.source_documents:tourneyAuthStore"] = sourceCopies.map(r => r.data);
       const manifest = await writeVerifiedBackup(directory, snapshot);
