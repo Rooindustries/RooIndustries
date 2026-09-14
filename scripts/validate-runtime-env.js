@@ -251,14 +251,8 @@ const requiredChecks = [
     keys: ["RATE_LIMIT_HASH_SECRET"],
     label: "RATE_LIMIT_HASH_SECRET",
   },
-  {
-    keys: ["TOURNEY_SESSION_SECRET"],
-    label: "TOURNEY_SESSION_SECRET",
-  },
-  {
-    keys: ["TOURNEY_DATABASE_URL", "POSTGRES_URL"],
-    label: "TOURNEY_DATABASE_URL (or POSTGRES_URL fallback)",
-  },
+
+
   {
     keys: ["RESEND_API_KEY"],
     label: "RESEND_API_KEY",
@@ -461,28 +455,16 @@ const commercePrimaryBackend = normalizeBackend(
   getFirstValue(["COMMERCE_PRIMARY_BACKEND"]),
   primaryBackend
 );
-const tourneyDatabaseMode =
-  getFirstValue(["TOURNEY_DATABASE_MODE"]).toLowerCase() || "legacy";
-const tourneyMirrorEnabled = isEnabled("TOURNEY_MIRROR_ENABLED");
-const tourneyWritesPaused = isEnabled("TOURNEY_WRITES_PAUSED");
-const tourneyHardeningV4Enabled = isEnabled("TOURNEY_HARDENING_V4_ENABLED");
-const tourneyV4ActivationValue = getFirstValue([
-  "TOURNEY_V4_ACTIVATION_ENABLED",
-]).toLowerCase();
-const tourneyV4ActivationEnabled = TRUE_VALUES.has(tourneyV4ActivationValue);
-const tourneyFailoverGeneration =
-  getFirstValue(["TOURNEY_FAILOVER_GENERATION"]) || "0";
-const numericTourneyGeneration = /^\d+$/.test(tourneyFailoverGeneration)
-  ? Number(tourneyFailoverGeneration)
-  : Number.NaN;
-const tourneyV4ActivationTupleStaged =
-  tourneyDatabaseMode === "supabase" &&
-  tourneyMirrorEnabled &&
-  tourneyWritesPaused &&
-  tourneyFailoverGeneration === "1" &&
-  !tourneyHardeningV4Enabled;
-const tourneyV4ActivationStaged =
-  tourneyV4ActivationEnabled || tourneyV4ActivationTupleStaged;
+
+
+
+
+
+
+
+
+
+
 const contentCanaryPercent = numericPercent("SUPABASE_CONTENT_CANARY_PERCENT");
 const commerceCanaryPercent = numericPercent("SUPABASE_COMMERCE_CANARY_PERCENT");
 const authCanaryConfigured = Boolean(
@@ -603,64 +585,15 @@ if (
 const requireRuntimeKey = (key) => {
   if (!hasAny([key]) && !missing.includes(key)) missing.push(key);
 };
-const discordInventoryKeys = [
-  "DISCORD_BOT_TOKEN",
-  "DISCORD_GUILD_ID",
-  "DISCORD_PARTICIPANT_ROLE_ID",
-  "DISCORD_HOST_ROLE_ID",
-];
-if (
-  tourneyV4ActivationValue &&
-  !TRUE_VALUES.has(tourneyV4ActivationValue) &&
-  !FALSE_VALUES.has(tourneyV4ActivationValue)
-) {
-  supabaseConsistencyFailures.push(
-    "TOURNEY_V4_ACTIVATION_ENABLED must be an explicit boolean value."
-  );
-}
-if (socialAuthEnabled) {
-  discordInventoryKeys.forEach(requireRuntimeKey);
-}
-if (tourneyV4ActivationStaged) {
-  if (!tourneyV4ActivationEnabled) {
-    supabaseConsistencyFailures.push(
-      "The activation-ready v4 control tuple requires TOURNEY_V4_ACTIVATION_ENABLED=1."
-    );
-  }
-  // Activation staging requires the retired mirror. Reject re-staging without
-  // also telling the operator to enable a mirror that the retirement rule forbids.
-  if (!tourneyMirrorEnabled) {
-    supabaseConsistencyFailures.push(
-      "Tourney v4 activation is complete and cannot be re-staged: it required the retired legacy mirror. Set TOURNEY_V4_ACTIVATION_ENABLED=0."
-    );
-  } else if (
-    tourneyDatabaseMode !== "supabase" ||
-    !tourneyWritesPaused ||
-    tourneyFailoverGeneration !== "1" ||
-    tourneyHardeningV4Enabled
-  ) {
-    supabaseConsistencyFailures.push(
-      "Tourney v4 activation requires Supabase primary, mirroring enabled, writes paused, failover generation 1, and v4 hardening disabled until database activation completes."
-    );
-  }
-  discordInventoryKeys.forEach(requireRuntimeKey);
-}
+
+
+
+
 const migrationEndpointEnabled = isEnabled(
   "SUPABASE_MIGRATION_ENDPOINT_ENABLED"
 );
-const anySupabaseRuntimeEnabled =
-  primaryBackend === "supabase" ||
-  commercePrimaryBackend === "supabase" ||
-  tourneyDatabaseMode === "supabase" ||
-  contentCanaryPercent > 0 ||
-  commerceCanaryPercent > 0 ||
-  authCanaryConfigured ||
-  shadowWritesEnabled ||
-  socialAuthEnabled ||
-  licensingEnabled ||
-  supabaseDownloadsEnabled ||
-  tourneyMirrorEnabled;
-const tourneyNeedsSupabase = tourneyDatabaseMode === "supabase" || tourneyMirrorEnabled;
+const anySupabaseRuntimeEnabled = primaryBackend === "supabase" || commercePrimaryBackend === "supabase" || contentCanaryPercent > 0 || commerceCanaryPercent > 0 || authCanaryConfigured || shadowWritesEnabled || socialAuthEnabled || licensingEnabled || supabaseDownloadsEnabled;
+
 
 if (!/^[0-9]+$/.test(commerceFailoverGeneration)) {
   supabaseConsistencyFailures.push(
@@ -693,11 +626,7 @@ if (commercePrimaryBackend === "sanity") {
     );
   }
 }
-if (isProdBuild && isEnabled("TOURNEY_ALLOW_INSECURE_COOKIE")) {
-  supabaseConsistencyFailures.push(
-    "TOURNEY_ALLOW_INSECURE_COOKIE=1 is forbidden in production."
-  );
-}
+
 if (
   commerceFailoverGeneration === "0" &&
   !sanityConfiguration.readConfigured
@@ -717,30 +646,14 @@ if (obsoleteCanaryVariables.length > 0) {
     )}.`
   );
 }
-if (!["legacy", "supabase"].includes(tourneyDatabaseMode)) {
-  supabaseConsistencyFailures.push(
-    "TOURNEY_DATABASE_MODE must be legacy or supabase."
-  );
-}
-if (!/^[0-9]+$/.test(tourneyFailoverGeneration)) {
-  supabaseConsistencyFailures.push(
-    "TOURNEY_FAILOVER_GENERATION must be a non-negative integer."
-  );
-}
+
+
 // Migrations 20260726160000 and 20260726160500 retired Neon's capture triggers and
 // contracts. Re-enabling the mirror restores parity connections and egress, not
 // replication; reject it even when a legacy database URL remains configured.
-if (tourneyMirrorEnabled) {
-  supabaseConsistencyFailures.push(
-    "TOURNEY_MIRROR_ENABLED must be 0: the legacy Tourney mirror is retired, and re-enabling it restores Neon egress rather than replication."
-  );
-}
-if (tourneyNeedsSupabase && !hasAny(["SUPABASE_DATABASE_URL"])) {
-  missing.push("SUPABASE_DATABASE_URL");
-}
-if (tourneyMirrorEnabled && !hasAny(["TOURNEY_DATABASE_URL", "POSTGRES_URL"])) {
-  missing.push("TOURNEY_DATABASE_URL");
-}
+
+
+
 
 if (anySupabaseRuntimeEnabled) {
   const url = getFirstValue(["SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"]);
@@ -785,28 +698,12 @@ if (anySupabaseRuntimeEnabled) {
   }
 }
 
-const discordSnowflake = /^[0-9]{5,30}$/;
-const discordGuildId = getFirstValue(["DISCORD_GUILD_ID"]);
-const discordParticipantRoleId = getFirstValue(["DISCORD_PARTICIPANT_ROLE_ID"]);
-const discordHostRoleId = getFirstValue(["DISCORD_HOST_ROLE_ID"]);
-if (
-  [discordGuildId, discordParticipantRoleId, discordHostRoleId].some(
-    (value) => value && !discordSnowflake.test(value)
-  )
-) {
-  providerConsistencyFailures.push(
-    "Discord guild and managed role ids must be valid numeric snowflakes."
-  );
-}
-if (
-  discordParticipantRoleId &&
-  discordHostRoleId &&
-  discordParticipantRoleId === discordHostRoleId
-) {
-  providerConsistencyFailures.push(
-    "Discord Participant and Host roles must use different role ids."
-  );
-}
+
+
+
+
+
+
 
 if (primaryBackend === "supabase" && !cutoverEnabled) {
   supabaseConsistencyFailures.push(
@@ -818,54 +715,9 @@ if (commercePrimaryBackend === "supabase" && !commerceCutoverEnabled) {
     "Supabase commerce primary mode requires COMMERCE_CUTOVER_ENABLED=1."
   );
 }
-if (
-  tourneyDatabaseMode === "supabase" &&
-  !hasAny(["SUPABASE_DATABASE_URL"])
-) {
-  supabaseConsistencyFailures.push(
-    "Supabase Tourney mode requires SUPABASE_DATABASE_URL."
-  );
-}
-if (tourneyDatabaseMode === "supabase" && hasAny(["SUPABASE_DATABASE_URL"])) {
-  try {
-    const databaseUrlValue = getFirstValue(["SUPABASE_DATABASE_URL"]);
-    buildPostgresConnectionEnv(databaseUrlValue, {});
-    const databaseUrl = new URL(databaseUrlValue);
-    const apiUrl = new URL(
-      getFirstValue(["SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"])
-    );
-    const projectRef = apiUrl.hostname.split(".")[0];
-    const isSupabaseHost =
-      databaseUrl.hostname === `db.${projectRef}.supabase.co` ||
-      databaseUrl.hostname.endsWith(".pooler.supabase.com");
-    const identifiesProject =
-      databaseUrl.hostname === `db.${projectRef}.supabase.co` ||
-      databaseUrl.username.endsWith(`.${projectRef}`);
-    if (
-      !["postgres:", "postgresql:"].includes(databaseUrl.protocol) ||
-      !isSupabaseHost ||
-      !identifiesProject
-    ) {
-      throw new Error("wrong Supabase project database");
-    }
-  } catch {
-    supabaseConsistencyFailures.push(
-      "SUPABASE_DATABASE_URL must connect to the configured Supabase project, not the legacy Tourney database."
-    );
-  }
-}
-if (tourneyMirrorEnabled && hasAny(["TOURNEY_DATABASE_URL", "POSTGRES_URL"])) {
-  try {
-    buildPostgresConnectionEnv(
-      getFirstValue(["TOURNEY_DATABASE_URL", "POSTGRES_URL"]),
-      {}
-    );
-  } catch {
-    supabaseConsistencyFailures.push(
-      "TOURNEY_DATABASE_URL must use a supported PostgreSQL target and require TLS when hosted."
-    );
-  }
-}
+
+
+
 if (
   licensingEnabled &&
   getFirstValue(["APP_DEVICE_HASH_SECRET"]).length < 32
@@ -890,14 +742,7 @@ if (socialAuthEnabled !== publicSocialAuthEnabled) {
     "SUPABASE_SOCIAL_AUTH_ENABLED and NEXT_PUBLIC_SUPABASE_SOCIAL_AUTH_ENABLED must match."
   );
 }
-if (
-  tourneyDatabaseMode === "supabase" &&
-  (!socialAuthEnabled || !publicSocialAuthEnabled)
-) {
-  supabaseConsistencyFailures.push(
-    "Supabase Tourney mode requires Google and Discord social Auth to remain enabled."
-  );
-}
+
 if (
   socialAuthEnabled &&
   !isEnabled("SUPABASE_MANUAL_LINKING_ENABLED")

@@ -20,16 +20,9 @@ import {
   createReferralSessionCookie,
   REF_SESSION_COOKIE,
 } from "@/src/server/api/ref/auth";
-import {
-  TOURNEY_SESSION_COOKIE,
-  createTourneySessionToken,
-  getTourneyCookieOptions,
-} from "@/src/server/tourney/auth";
-import { isSupabaseTourneyDatabase } from "@/src/server/tourney/sqlClient";
-import {
-  queueTourneyDiscordAuthProjection,
-  resolveQueuedTourneyDiscordAuthProjectionAfterFinalizeFailure,
-} from "@/src/server/tourney/discordDesiredState";
+
+
+
 import {
   clearReauthCookie,
   createReauthToken,
@@ -52,7 +45,7 @@ export const dynamic = "force-dynamic";
 
 const flowDefaults = {
   referral: "/referrals/dashboard",
-  tourney: "/tourney",
+
 };
 
 const sessionPreservingActions = new Set(["link", "reauth", "merge", "reclaim"]);
@@ -73,8 +66,8 @@ const safeNextPath = (value, flow = "") => {
     return fallback;
   }
   if (flow === "referral" && !path.startsWith("/referrals/")) return fallback;
-  if (flow === "tourney" && !path.startsWith("/tourney")) return fallback;
-  if (flow === "tourney" && path === "/tourney/login") return fallback;
+
+
   return path;
 };
 
@@ -91,7 +84,7 @@ const setRedirect = (response, target) => {
 };
 
 const clearDomainCookie = (response, flow) => {
-  const name = flow === "tourney" ? TOURNEY_SESSION_COOKIE : REF_SESSION_COOKIE;
+  const name = REF_SESSION_COOKIE;
   response.cookies.set({
     name,
     value: "",
@@ -105,14 +98,12 @@ const clearDomainCookie = (response, flow) => {
 
 const errorTarget = ({ origin, flow, error }) => {
   const pathname =
-    flow === "tourney"
-      ? "/tourney/login"
-      : flow === "referral"
+    flow === "referral"
         ? "/referrals/login"
         : "/";
   const target = new URL(pathname, origin);
   target.searchParams.set(
-    flow === "tourney" ? "error" : flow === "referral" ? "oauth" : "auth_error",
+    flow === "referral" ? "oauth" : "auth_error",
     error
   );
   return target;
@@ -160,38 +151,13 @@ const referralSession = (account) => {
   });
 };
 
-const tourneySession = (account) => {
-  const role = String(account?.tourney_role || "").replace(/^tourney_/, "");
-  if (!account?.tourney_username || !["player", "viewer", "caster", "owner"].includes(role)) {
-    return null;
-  }
-  const value = createTourneySessionToken({
-    account: {
-      authBackend: "supabase",
-      role,
-      username: account.tourney_username,
-      version: String(account.credential_version || "1"),
-      ...(account.principal_id ? { principalId: account.principal_id } : {}),
-      ...(account.tourney_legacy_player_id || account.legacy_sanity_id
-        ? { playerId: account.tourney_legacy_player_id || account.legacy_sanity_id }
-        : {}),
-    },
-  });
-  return value
-    ? { name: TOURNEY_SESSION_COOKIE, value, ...getTourneyCookieOptions() }
-    : null;
-};
+
 
 const resolveRoleSession = async ({ flow, userId }) => {
   const account = await resolveSupabaseAccountByUserId({ userId });
   if (!account || account.status !== "active") return { error: "unlinked" };
-  if (flow === "tourney" && account.tourney_active === false) {
-    return {
-      account,
-      error: account.tourney_status === "removed" ? "suspended" : "awaiting_approval",
-    };
-  }
-  const cookie = flow === "tourney" ? tourneySession(account) : referralSession(account);
+
+  const cookie = referralSession(account);
   return cookie ? { account, cookie } : { account, error: "unlinked" };
 };
 
@@ -255,15 +221,7 @@ export async function GET(request) {
   const url = new URL(request.url);
   const response = NextResponse.redirect(new URL("/", url.origin), { status: 303 });
   const hintedFlow = normalizeFlow(url.searchParams.get("flow"));
-  if (hintedFlow === "tourney" && !isSupabaseTourneyDatabase(process.env)) {
-    return fail({
-      error: "oauth_temporarily_unavailable",
-      flow: hintedFlow,
-      preserveExistingSession: true,
-      request,
-      response,
-    });
-  }
+
   const intentId = String(url.searchParams.get("intent") || "").trim().toLowerCase();
   const validIntentId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(intentId)
     ? intentId
@@ -288,7 +246,7 @@ export async function GET(request) {
   }
 
   const flow = normalizeFlow(intent?.flow) || hintedFlow;
-  if (intentBindingInvalid || (validIntentId && !intent)) {
+  if (intentBindingInvalid || (validIntentId && !intent) || (intent && !normalizeFlow(intent.flow)) || (url.searchParams.has("flow") && !hintedFlow)) {
     return fail({ error: "invalid_intent", flow, request, response });
   }
   if (intent && (intent.status !== "pending" || Date.parse(intent.expires_at) <= Date.now())) {
@@ -301,16 +259,7 @@ export async function GET(request) {
     });
   }
 
-  if (flow === "tourney" && !isSupabaseTourneyDatabase(process.env)) {
-    return fail({
-      action: intent?.action,
-      error: "oauth_temporarily_unavailable",
-      flow,
-      preserveExistingSession: true,
-      request,
-      response,
-    });
-  }
+
 
   const code = String(url.searchParams.get("code") || "").trim();
   if (!code) {
@@ -452,25 +401,7 @@ export async function GET(request) {
       setRoleCookie(response, roleSession.cookie);
       target.searchParams.set("linked", intent.provider);
       target.searchParams.set("reclaimed", "1");
-      if (intent.provider === "discord") {
-        try {
-          const sync = await queueTourneyDiscordAuthProjection({
-            accountUserId,
-            accessToken: String(result.data.session.provider_token || ""),
-            attemptExternalWork: true,
-            claimedUserId: accountUserId,
-            commandId: `discord-orphan-reclaim:${validIntentId}:${accountUserId}`,
-            deferUntil: intent.expires_at,
-            intentId: validIntentId,
-            userId: accountUserId,
-          });
-          if (!sync.applied && !["not_linked", "not_configured"].includes(sync.reason)) {
-            target.searchParams.set("discord_role", "pending");
-          }
-        } catch {
-          target.searchParams.set("discord_role", "pending");
-        }
-      }
+
       return setRedirect(response, target);
     }
     target.searchParams.set(
@@ -495,41 +426,8 @@ export async function GET(request) {
       response,
     });
   }
-  const discordProjection = intent?.provider === "discord" &&
-    intent?.action !== "reclaim" && validIntentId
-    ? {
-        accountUserId,
-        claimedUserId,
-        commandId: `discord-oauth:${validIntentId}:${accountUserId}`,
-        deferUntil: intent.expires_at,
-        intentId: validIntentId,
-        userId: accountUserId,
-      }
-    : null;
-  if (discordProjection) {
-    try {
-      const queued = await queueTourneyDiscordAuthProjection({
-        ...discordProjection,
-        accessToken: String(result.data.session.provider_token || ""),
-        attemptExternalWork: false,
-      });
-      if (
-        !queued.applied &&
-        !["pending", "not_linked", "not_configured"].includes(queued.reason)
-      ) {
-        throw new Error("Discord OAuth projection was not durably queued.");
-      }
-    } catch {
-      return fail({
-        action: intent.action,
-        clearSupabaseSession: true,
-        error: "unavailable",
-        flow,
-        request,
-        response,
-      });
-    }
-  }
+
+
 
   if (!intent) {
     return completeLegacySignin({ request, response, result, url });
@@ -538,7 +436,7 @@ export async function GET(request) {
   let finalized;
   try {
     const reauthToken = intent.action === "reauth" ? createReauthToken() : "";
-    try {
+
       finalized = await finalizeOAuthIntent({
         provider: intent.provider,
         token,
@@ -547,22 +445,8 @@ export async function GET(request) {
           ? { reauthTokenHash: hashReauthToken(reauthToken) }
           : {}),
       });
-    } catch (error) {
-      if (!discordProjection) throw error;
-      const resolution = await resolveQueuedTourneyDiscordAuthProjectionAfterFinalizeFailure({
-        claimedUserId: discordProjection.claimedUserId,
-        commandId: discordProjection.commandId,
-        intentId: discordProjection.intentId,
-        userId: discordProjection.userId,
-      });
-      if (!resolution.finalized) throw error;
-      finalized = {
-        action: intent.action,
-        flow: intent.flow,
-        provider: intent.provider,
-        return_path: intent.return_path,
-      };
-    }
+
+    if (finalized.flow !== "referral") throw new Error("Unsupported account flow.");
     const returnPath = safeNextPath(finalized.return_path, finalized.flow);
     let target = new URL(returnPath, url.origin);
 
@@ -607,21 +491,19 @@ export async function GET(request) {
         if (
           finalized.action === "signin" &&
           PENDING_LINK_PROVIDERS.includes(finalized.provider) &&
-          ["referral", "tourney"].includes(finalized.flow) &&
+          ["referral"].includes(finalized.flow) &&
           (roleSession.error || "unlinked") === "unlinked"
         ) {
           const unlinkedTarget = new URL(
-            finalized.flow === "tourney" ? "/tourney/login" : "/referrals/login",
+            "/referrals/login",
             url.origin
           );
           unlinkedTarget.searchParams.set(
-            finalized.flow === "tourney" ? "error" : "oauth",
+            "oauth",
             "unlinked"
           );
           unlinkedTarget.searchParams.set("provider", finalized.provider);
-          if (finalized.flow === "tourney" && returnPath !== "/tourney") {
-            unlinkedTarget.searchParams.set("next", returnPath);
-          }
+
           response.cookies.set(
             createPendingDiscordLinkCookie({
               flow: finalized.flow,
@@ -646,7 +528,7 @@ export async function GET(request) {
       if (
         finalized.action === "signin" &&
         PENDING_LINK_PROVIDERS.includes(finalized.provider) &&
-        ["referral", "tourney"].includes(finalized.flow)
+        ["referral"].includes(finalized.flow)
       ) {
         response.cookies.set(
           clearPendingDiscordLinkCookie({
@@ -661,24 +543,7 @@ export async function GET(request) {
       }
     }
 
-    if (finalized.provider === "discord" && discordProjection) {
-      try {
-        const deferTourneySignup = finalized.flow === "tourney" &&
-          finalized.action === "signup";
-        const sync = deferTourneySignup
-          ? { applied: false, reason: "pending" }
-          : await queueTourneyDiscordAuthProjection({
-              ...discordProjection,
-              accessToken: String(result.data.session.provider_token || ""),
-              attemptExternalWork: true,
-            });
-        if (!sync.applied && !["not_linked", "not_configured"].includes(sync.reason)) {
-          target.searchParams.set("discord_role", "pending");
-        }
-      } catch {
-        target.searchParams.set("discord_role", "pending");
-      }
-    }
+
 
     response.cookies.set(clearOAuthIntentCookie(validIntentId));
     return setRedirect(response, target);

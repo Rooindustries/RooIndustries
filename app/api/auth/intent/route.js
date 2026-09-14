@@ -10,8 +10,8 @@ import {
 } from "../../../../src/server/supabase/oauthIntents";
 import { clearNextSupabaseSession } from "../../../../src/server/supabase/serverSession";
 import { REF_SESSION_COOKIE } from "../../../../src/server/api/ref/auth";
-import { TOURNEY_SESSION_COOKIE } from "../../../../src/server/tourney/auth";
-import { isSupabaseTourneyDatabase } from "../../../../src/server/tourney/sqlClient";
+
+
 import {
   clearReauthCookie,
   readReauthToken,
@@ -24,7 +24,7 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const flows = new Set(["referral", "tourney"]);
+const flows = new Set(["referral"]);
 const actions = new Set(["signin", "signup", "link", "reauth", "reclaim"]);
 const providers = new Set(["google", "discord"]);
 const reauthPurposes = new Set([
@@ -34,13 +34,7 @@ const reauthPurposes = new Set([
   "change_password",
 ]);
 
-const defaultPath = ({ action, flow }) => {
-  if (action === "signup") {
-    return flow === "referral" ? "/referrals/register" : "/tourney/register";
-  }
-  if (flow === "referral") return "/referrals/dashboard";
-  return "/tourney";
-};
+const defaultPath = ({ action }) => action === "signup" ? "/referrals/register" : "/referrals/dashboard";
 
 const safeReturnPath = ({ action, flow, value }) => {
   const fallback = defaultPath({ action, flow });
@@ -53,9 +47,9 @@ const safeReturnPath = ({ action, flow, value }) => {
     return fallback;
   }
   if (flow === "referral" && !path.startsWith("/referrals/")) return fallback;
-  if (flow === "tourney" && !path.startsWith("/tourney")) return fallback;
+
   if (action === "signup" && path !== fallback) return fallback;
-  if (flow === "tourney" && path === "/tourney/login") return fallback;
+
   return path;
 };
 
@@ -66,7 +60,7 @@ const noStore = (response) => {
 
 const clearDomainSession = (response, flow) => {
   response.cookies.set({
-    name: flow === "tourney" ? TOURNEY_SESSION_COOKIE : REF_SESSION_COOKIE,
+    name: REF_SESSION_COOKIE,
     value: "",
     httpOnly: true,
     maxAge: 0,
@@ -125,18 +119,7 @@ export async function POST(request) {
       )
     );
   }
-  if (flow === "tourney" && !isSupabaseTourneyDatabase(process.env)) {
-    return noStore(
-      NextResponse.json(
-        {
-          ok: false,
-          error: "Google and Discord sign-in are temporarily unavailable. Use your Tourney password.",
-          code: "TOURNEY_OAUTH_TEMPORARILY_UNAVAILABLE",
-        },
-        { status: 503 }
-      )
-    );
-  }
+
 
   const returnPath = safeReturnPath({
     action,
@@ -236,7 +219,7 @@ export async function POST(request) {
     const reauthToken = ["link", "reclaim"].includes(action)
       ? readReauthToken(request)
       : "";
-    // Link requires the exact active domain session; tourney username and role must match.
+    // Link requires the exact active referral session and creator identity.
     // Preserve optional reauth proof. Reclaim requires it because it releases an
     // identity held by another account.
     if (action === "reclaim" && !reauthToken) {

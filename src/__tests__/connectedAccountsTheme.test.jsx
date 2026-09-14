@@ -17,7 +17,7 @@ jest.mock("../components/SupabaseSocialLogin", () =>
   }
 );
 
-describe("Tourney connected accounts theme and layout", () => {
+describe("Referral connected accounts", () => {
   beforeEach(() => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
@@ -34,20 +34,7 @@ describe("Tourney connected accounts theme and layout", () => {
     jest.restoreAllMocks();
   });
 
-  test("uses dedicated Tourney controls instead of unstyled browser inputs", async () => {
-    const { container } = render(
-      <ConnectedAccounts flow="tourney" nextPath="/tourney" variant="tourney" />
-    );
 
-    await waitFor(() =>
-      expect(screen.getByText("Connected accounts")).toBeVisible()
-    );
-    expect(container.querySelector("section")).toHaveClass("tourney-connected-accounts");
-    // Being signed in is now sufficient to link, so the reauth box is absent
-    // unless a provider is held by an orphaned account and needs reclaiming.
-    expect(screen.queryByLabelText("Current password")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Confirm identity" })).toBeNull();
-  });
 
   test("lets a signed-in account link a provider without confirming a password", async () => {
     global.fetch = jest.fn().mockResolvedValue({
@@ -100,17 +87,7 @@ describe("Tourney connected accounts theme and layout", () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
-  test("styles the card and controls exclusively through active theme tokens", () => {
-    const source = fs.readFileSync(
-      path.join(process.cwd(), "app", "tourney", "TourneyShared.jsx"),
-      "utf8"
-    );
-    expect(source).toContain(".tourney-connected-reauth {");
-    expect(source).toContain("grid-template-columns: minmax(0, 1fr) auto;");
-    expect(source).toContain("border: 1px solid var(--tourney-border-accent);");
-    expect(source).toContain("background: var(--tourney-input);");
-    expect(source).toContain("color: var(--tourney-text);");
-  });
+
 
   test("requires a fresh unlink grant instead of reusing link confirmation", async () => {
     global.fetch = jest.fn().mockResolvedValue({
@@ -122,7 +99,7 @@ describe("Tourney connected accounts theme and layout", () => {
         unlinkableProviders: ["email", "discord"],
       }),
     });
-    render(<ConnectedAccounts flow="tourney" nextPath="/tourney" variant="tourney" />);
+    render(<ConnectedAccounts flow="referral" nextPath="/referrals/dashboard" />);
 
     await waitFor(() => expect(screen.getByLabelText("Unlink discord")).toBeVisible());
     fireEvent.click(screen.getByLabelText("Unlink discord"));
@@ -153,7 +130,7 @@ describe("Tourney connected accounts theme and layout", () => {
         ok: true,
         json: async () => ({ ...initial, providers: ["email"], unlinkableProviders: ["email"] }),
       });
-    render(<ConnectedAccounts flow="tourney" nextPath="/tourney" variant="tourney" />);
+    render(<ConnectedAccounts flow="referral" nextPath="/referrals/dashboard" />);
     await waitFor(() => expect(screen.getByLabelText("Unlink discord")).toBeVisible());
 
     fireEvent.change(screen.getByLabelText("Current password"), {
@@ -171,7 +148,7 @@ describe("Tourney connected accounts theme and layout", () => {
 
     expect(global.fetch).toHaveBeenNthCalledWith(
       4,
-      "/api/auth/identities?flow=tourney",
+      "/api/auth/identities?flow=referral",
       { cache: "no-store" }
     );
     expect(global.fetch).toHaveBeenCalledTimes(4);
