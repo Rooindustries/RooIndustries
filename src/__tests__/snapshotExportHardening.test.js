@@ -19,7 +19,7 @@ describe("encrypted export hardening", () => {
         generateSnapshotTransportKeyPair,
         openSnapshotTransportPayload,
         sealSnapshotTransportPayload,
-      } from ${JSON.stringify(moduleUrl("src/server/tourney/snapshotTransportCrypto.js"))};
+      } from ${JSON.stringify(moduleUrl("src/server/archive/snapshotTransportCrypto.js"))};
       const keys = generateSnapshotTransportKeyPair();
       const payload = Buffer.from("verified snapshot chunk");
       const metadata = {
@@ -288,7 +288,7 @@ describe("encrypted export hardening", () => {
         SUPABASE_FULL_SNAPSHOT_EXCLUDED_RELATIONS,
         SUPABASE_FULL_SNAPSHOT_SCHEMAS,
         validateFullLogicalSnapshot,
-      } from ${JSON.stringify(moduleUrl("src/server/tourney/snapshotContract.js"))};
+      } from ${JSON.stringify(moduleUrl("src/server/archive/snapshotContract.js"))};
       const relations = Object.fromEntries(
         SUPABASE_FULL_REQUIRED_RELATIONS.map((relation) => [
           relation,

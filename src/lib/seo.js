@@ -69,9 +69,9 @@ const routeMeta = {
     noindex: false,
   },
   "/tourney": {
-    title: "Overwatch Creator Tournament | Roo Industries",
+    title: "6v6 Legacy Series Winners | Roo Industries",
     description:
-      "Roo Industries Overwatch Creator Tournament event information, rules, roster and draft updates, charity details, giveaways, and bracket access for the 6v6 Legacy Series.",
+      "GetSkii’d are the 6v6 Legacy Series champions. See the final Overwatch tournament results. Stay tuned for the next chapter.",
     noindex: false,
   },
   "/booking": {
@@ -397,29 +397,6 @@ const buildFaqJsonLd = (items = []) => ({
     })),
 });
 
-const buildTourneyEventJsonLd = () => ({
-  "@context": "https://schema.org",
-  "@type": "Event",
-  "@id": `${siteUrl}/tourney#event`,
-  name: "Overwatch Creator Tournament: 6v6 Legacy Series",
-  description:
-    "Roo Industries Overwatch Creator Tournament with event information, rules, roster and draft updates, charity details, giveaways, and bracket access.",
-  url: `${siteUrl}/tourney`,
-  startDate: "2026-08-15",
-  endDate: "2026-08-16",
-  eventStatus: "https://schema.org/EventScheduled",
-  eventAttendanceMode: "https://schema.org/OnlineEventAttendanceMode",
-  location: {
-    "@type": "VirtualLocation",
-    url: `${siteUrl}/tourney`,
-  },
-  organizer: {
-    "@id": `${siteUrl}/#organization`,
-    name: SITE_NAME,
-    url: siteUrl,
-  },
-});
-
 module.exports = {
   SITE_NAME,
   SITE_URL: siteUrl,
@@ -432,5 +409,4 @@ module.exports = {
   buildHomePageJsonLd,
   buildOfferCatalogJsonLd,
   buildFaqJsonLd,
-  buildTourneyEventJsonLd,
 };
