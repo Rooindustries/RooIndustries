@@ -5926,7 +5926,7 @@ export const TourneyNav = ({ session, activeHref = "" }) => (
           </span>
         </a>
         <nav className="tourney-links tourney-conversion-nav" aria-label="PC optimization">
-          <a href="/#packages">Get your PC Optimized</a>
+          <a className="nav-cta" href="/#packages">Get your PC Optimized</a>
         </nav>
         <TourneyThemeToggle />
 

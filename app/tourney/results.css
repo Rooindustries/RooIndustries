@@ -270,14 +270,18 @@
 .tourney-nav .tourney-conversion-nav a {
   min-height: 42px;
   border-color: rgba(212, 175, 55, 0.6);
-  background: var(--gradient-gold-text);
-  color: #171003;
+  background-image: var(--gradient-nav-cta);
+  color: #fff;
   font-weight: 800;
   white-space: nowrap;
 }
 
 .tourney-nav .tourney-conversion-nav a:hover {
-  filter: brightness(1.08);
+  background-image: var(--gradient-nav-cta-hover);
+}
+
+html[data-theme="dark"] .tourney-nav .tourney-conversion-nav a {
+  color: var(--color-accent-contrast);
 }
 
 .tourney-nav .tourney-conversion-nav a:focus-visible {

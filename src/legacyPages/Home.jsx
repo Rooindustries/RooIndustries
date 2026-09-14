@@ -67,7 +67,7 @@ function DeferredSection({
       {isVisible ? (
         children
       ) : (
-        <div aria-hidden="true" className={fallbackClassName} />
+        <div aria-hidden="true" data-section-placeholder="" className={fallbackClassName} />
       )}
     </div>
   );
@@ -83,12 +83,12 @@ export default function Home({ initialData = null }) {
         location.hash ||
         ""
     );
-  const [forceEagerSections, setForceEagerSections] = useState(() =>
-    isHomeSectionHash(resolveSectionIntentHash()) ||
-    isHomeSectionHash(readPendingSectionTarget())
-  );
+  const [forceEagerSections, setForceEagerSections] = useState(false);
   // Render sections eagerly in low-perf mode to avoid React render bursts; content-visibility defers painting.
   const eagerAll = forceEagerSections || isLowPerf;
+  const sectionContentStyle = forceEagerSections
+    ? { contentVisibility: "visible" }
+    : undefined;
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -163,8 +163,8 @@ export default function Home({ initialData = null }) {
           rootMargin="240px 0px"
           eager={eagerAll}
         >
-          <Suspense fallback={<div className="min-h-[520px]" />}>
-            <div className="deferred-section-content">
+          <Suspense fallback={<div data-section-placeholder="" className="min-h-[520px]" />}>
+            <div className="deferred-section-content" style={sectionContentStyle}>
               <Services
                 initialData={initialData?.services || null}
                 initialAboutData={initialData?.about || null}
@@ -179,8 +179,8 @@ export default function Home({ initialData = null }) {
           rootMargin="300px 0px"
           eager={eagerAll}
         >
-          <Suspense fallback={<div className="min-h-[620px]" />}>
-            <div className="deferred-section-content">
+          <Suspense fallback={<div data-section-placeholder="" className="min-h-[620px]" />}>
+            <div className="deferred-section-content" style={sectionContentStyle}>
               <Packages
                 initialPackages={initialData?.packagesList || null}
                 initialSectionCopy={initialData?.packagesSettings || null}
@@ -198,7 +198,7 @@ export default function Home({ initialData = null }) {
           rootMargin="220px 0px"
           eager={eagerAll}
         >
-          <div className="deferred-section-content">
+          <div className="deferred-section-content" style={sectionContentStyle}>
             <HowItWorks initialData={initialData?.howItWorks || null} />
           </div>
         </DeferredSection>
@@ -221,7 +221,7 @@ export default function Home({ initialData = null }) {
         rootMargin="220px 0px"
         eager={eagerAll}
       >
-        <div className="deferred-section-content">
+        <div className="deferred-section-content" style={sectionContentStyle}>
           <SupportedGames initialData={initialData?.supportedGames || null} />
         </div>
       </DeferredSection>
@@ -231,8 +231,8 @@ export default function Home({ initialData = null }) {
           rootMargin="220px 0px"
           eager={eagerAll}
         >
-          <Suspense fallback={<div className="min-h-[380px]" />}>
-            <div className="deferred-section-content">
+          <Suspense fallback={<div data-section-placeholder="" className="min-h-[380px]" />}>
+            <div className="deferred-section-content" style={sectionContentStyle}>
               <Faq
                 compact
                 initialFaqCopy={initialData?.faqSettings || null}
@@ -247,7 +247,7 @@ export default function Home({ initialData = null }) {
         rootMargin="220px 0px"
         eager={eagerAll}
       >
-        <div className="deferred-section-content">
+        <div className="deferred-section-content" style={sectionContentStyle}>
           <ReferralBox />
         </div>
       </DeferredSection>
