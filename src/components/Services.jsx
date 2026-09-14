@@ -145,7 +145,7 @@ export default function Services({
 
   if (!data) {
     return (
-      <section className="mx-auto max-w-[92rem] py-16 px-4 sm:px-6" aria-hidden="true">
+      <section className="mx-auto max-w-[92rem] py-16 px-4 sm:px-6" aria-hidden="true" data-section-placeholder="">
         <div className="ri-services-skeleton min-h-[980px] rounded-3xl border border-line-input bg-skeleton" />
       </section>
     );
