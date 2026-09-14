@@ -243,7 +243,11 @@ const validRelationPayload = ({ rowsText, count, expectedHash, hash }) => {
   }
   try {
     const rows = JSON.parse(rowsText);
-    return Array.isArray(rows) && rows.length === count;
+    return Array.isArray(rows) &&
+      rows.length === count &&
+      rows.every((row) =>
+        row !== null && typeof row === "object" && !Array.isArray(row)
+      );
   } catch {
     return false;
   }

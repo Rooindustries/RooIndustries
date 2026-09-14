@@ -38,6 +38,7 @@
 .tourney-podium-finish {
   --podium-metal: #e5c66e;
   --podium-height: 174px;
+
   position: relative;
   grid-row: 1;
   min-width: 0;
@@ -48,11 +49,13 @@
 .tourney-podium-finish.is-silver {
   --podium-metal: #bdcada;
   --podium-height: 126px;
+
   grid-column: 1;
 }
 .tourney-podium-finish.is-bronze {
   --podium-metal: #d69a74;
   --podium-height: 104px;
+
   grid-column: 3;
 }
 
