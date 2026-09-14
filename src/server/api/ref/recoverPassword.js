@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import { isValidNewPassword, NEW_PASSWORD_REQUIREMENT } from "../../../lib/passwordPolicy.js";
 import crypto from "node:crypto";
 
 import { createDataClient as createClient } from "../../data/documentClient.js";
@@ -98,10 +99,10 @@ export default async function handler(req, res) {
 
   try {
     const normalizedPassword = String(req.body?.password || "");
-    if (normalizedPassword.length < 10 || normalizedPassword.length > 128) {
+    if (!isValidNewPassword(normalizedPassword)) {
       return res.status(400).json({
         ok: false,
-        error: "Use a password between 10 and 128 characters.",
+        error: NEW_PASSWORD_REQUIREMENT,
       });
     }
     if (

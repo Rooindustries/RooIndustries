@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import SupabaseSocialLogin from "./SupabaseSocialLogin";
+import { isValidNewPassword, NEW_PASSWORD_REQUIREMENT } from "../lib/passwordPolicy";
 
 const REFERRAL_SIGNUP_DRAFT = "referral_signup_draft";
 
@@ -47,6 +48,8 @@ export default function RefRegister() {
       .then((data) => {
         if (data?.authenticated && data?.emailVerified && data.email) {
           setEmail(data.email);
+          setPassword("");
+          setConfirm("");
           setSocialIdentity(data);
         }
       })
@@ -90,16 +93,14 @@ export default function RefRegister() {
     const trimmedEmail = email.trim().toLowerCase();
     const trimmedPaypalEmail = paypalEmail.trim().toLowerCase();
     const trimmedSlug = slug.trim().toLowerCase();
-    const trimmedPassword = password.trim();
-    const trimmedConfirm = confirm.trim();
 
     if (
       !trimmedDiscordUsername ||
       !trimmedEmail ||
       !trimmedPaypalEmail ||
       !trimmedSlug ||
-      (!socialIdentity && !trimmedPassword) ||
-      (!socialIdentity && !trimmedConfirm)
+      (!socialIdentity && !password) ||
+      (!socialIdentity && !confirm)
     ) {
       showToast("error", "Please fill in all fields.");
       return;
@@ -116,8 +117,13 @@ export default function RefRegister() {
       return;
     }
 
-    if (!socialIdentity && trimmedPassword !== trimmedConfirm) {
+    if (!socialIdentity && password !== confirm) {
       showToast("error", "Passwords do not match.");
+      return;
+    }
+
+    if ((!socialIdentity || password) && !isValidNewPassword(password)) {
+      showToast("error", NEW_PASSWORD_REQUIREMENT);
       return;
     }
 
@@ -166,7 +172,7 @@ export default function RefRegister() {
           email: trimmedEmail,
           paypalEmail: trimmedPaypalEmail,
           slug: trimmedSlug,
-          password: trimmedPassword,
+          password,
         }),
       });
 
@@ -319,11 +325,15 @@ export default function RefRegister() {
             name="password"
             type="password"
             minLength={10}
+            aria-describedby="ref-register-password-requirement"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Enter password"
             className="w-full p-4 mt-1 bg-surface-input border border-line-input rounded-xl outline-none focus:border-info-border transition text-base"
           />
+          <p id="ref-register-password-requirement" className="mt-2 text-xs text-ink-muted">
+            {NEW_PASSWORD_REQUIREMENT}
+          </p>
         </div> : null}
 
         {!socialIdentity ? <div>

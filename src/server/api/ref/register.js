@@ -5,6 +5,7 @@ import {
 } from "../../commerce/documentTypes.js";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import { isValidNewPassword, NEW_PASSWORD_REQUIREMENT } from "../../../lib/passwordPolicy.js";
 import { setReferralSessionCookie } from "./auth.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import { logSafeError } from "../../safeErrorLog.js";
@@ -120,6 +121,11 @@ export default async function handler(req, res) {
       password,
     } = req.body;
 
+    const normalizedPassword = String(password || "");
+    if (normalizedPassword && !isValidNewPassword(normalizedPassword)) {
+      return res.status(400).json({ ok: false, error: NEW_PASSWORD_REQUIREMENT });
+    }
+
     const clientAddress = getClientAddress(req);
     if (
       !(await requireRateLimit(res, {
@@ -147,7 +153,6 @@ export default async function handler(req, res) {
     const trimmedEmail = String(email).trim().toLowerCase();
     const trimmedPaypalEmail = String(paypalEmail).trim().toLowerCase();
     const trimmedSlug = String(slug).trim().toLowerCase();
-    const normalizedPassword = String(password || "");
 
     const socialUser = await getLegacySupabaseUser({ req, res }).catch(
       () => null
@@ -189,14 +194,10 @@ export default async function handler(req, res) {
         .status(400)
         .json({ ok: false, error: "Invalid PayPal email address" });
     }
-    if (
-      (!socialUser && normalizedPassword.length < 10) ||
-      normalizedPassword.length > 128 ||
-      (socialUser && normalizedPassword.length > 0 && normalizedPassword.length < 10)
-    ) {
+    if (!socialUser && !normalizedPassword) {
       return res.status(400).json({
         ok: false,
-        error: "Use a password between 10 and 128 characters.",
+        error: NEW_PASSWORD_REQUIREMENT,
       });
     }
 

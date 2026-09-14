@@ -55,7 +55,8 @@ describe("Supabase account compatibility", () => {
     );
   });
 
-  test("updates an existing Auth password with plaintext and stores only its hash", async () => {
+  test.each(["new-password-value", "a".repeat(72), "é".repeat(36), "🔒".repeat(18)])(
+    "updates an accepted Auth password unchanged: %s", async (password) => {
     const passwordHash = `$2b$12$${"a".repeat(53)}`;
     const updateUserById = jest.fn().mockResolvedValue({
       data: { user: { id: creatorAccount.user_id } },
@@ -90,7 +91,7 @@ describe("Supabase account compatibility", () => {
         adminClient,
         identifier: "creator@example.com",
         operationKey: "credential:test:plaintext",
-        password: "new-password-value",
+        password,
         passwordHash,
         sourceBackend: "supabase",
         sourceDocumentId: "referral.creator",
@@ -103,9 +104,48 @@ describe("Supabase account compatibility", () => {
       updated: true,
     });
     expect(updateUserById).toHaveBeenCalledWith(creatorAccount.user_id, {
-      password: "new-password-value",
+      password,
     });
   });
+
+  test.each(["a".repeat(73), `${"é".repeat(36)}a`, `${"🔒".repeat(18)}a`])(
+    "rejects oversized plaintext before any credential or Auth operation: %s", async (password) => {
+      const adminClient = {
+        rpc: jest.fn(),
+        auth: { admin: { getUserById: jest.fn(), createUser: jest.fn(), updateUserById: jest.fn() } },
+      };
+      await expect(updateSupabaseAccountPassword({ adminClient, password }))
+        .rejects.toThrow("72 UTF-8 bytes");
+      for (const credentialOptions of [{}, { passwordHash: `$2b$12$${"a".repeat(53)}` }, { authUserId: creatorAccount.user_id }]) {
+        await expect(createSupabaseCreatorAccount({
+          adminClient, password, ...credentialOptions,
+          referral: { _id: "referral.creator", creatorEmail: "creator@example.com", slug: { current: "creator" } },
+        })).rejects.toThrow("72 UTF-8 bytes");
+      }
+      expect(adminClient.rpc).not.toHaveBeenCalled();
+      expect(adminClient.auth.admin.getUserById).not.toHaveBeenCalled();
+      expect(adminClient.auth.admin.createUser).not.toHaveBeenCalled();
+      expect(adminClient.auth.admin.updateUserById).not.toHaveBeenCalled();
+    }
+  );
+
+  test.each(["a".repeat(72), "é".repeat(36), "🔒".repeat(18)])(
+    "creates a creator with the exact accepted plaintext: %s", async (password) => {
+      const adminClient = {
+        rpc: jest.fn(async (name) => ({ data: name === "roo_resolve_account_alias" ? null : creatorAccount, error: null })),
+        auth: { admin: {
+          getUserById: jest.fn().mockResolvedValue({ data: { user: null }, error: { status: 404 } }),
+          createUser: jest.fn().mockResolvedValue({ data: { user: { id: creatorAccount.user_id } }, error: null }),
+          deleteUser: jest.fn(),
+        } },
+      };
+      await createSupabaseCreatorAccount({
+        adminClient, password,
+        referral: { _id: "referral.creator", creatorEmail: "creator@example.com", slug: { current: "creator" } },
+      });
+      expect(adminClient.auth.admin.createUser).toHaveBeenCalledWith(expect.objectContaining({ password }));
+    }
+  );
 
   test("fails safely when the v2 checkpoint RPC is not migrated yet", async () => {
     const passwordHash = `$2b$12$${"b".repeat(53)}`;
@@ -181,7 +221,8 @@ describe("Supabase account compatibility", () => {
     );
   });
 
-  test("authenticates an imported bcrypt creator through an alias", async () => {
+  test.each(["valid-password", "a".repeat(128), "é".repeat(50), "🔒".repeat(5)])(
+    "passes existing login inputs to Auth unchanged: %s", async (password) => {
     const adminClient = {
       rpc: jest.fn().mockResolvedValue({ data: creatorAccount, error: null }),
     };
@@ -199,7 +240,7 @@ describe("Supabase account compatibility", () => {
 
     const result = await authenticateSupabaseAccount({
       identifier: "CREATOR",
-      password: "valid-password",
+      password,
       requiredRoles: ["creator"],
       adminClient,
       authClient,
@@ -207,8 +248,60 @@ describe("Supabase account compatibility", () => {
     expect(result.ok).toBe(true);
     expect(authClient.auth.signInWithPassword).toHaveBeenCalledWith({
       email: "creator@example.com",
-      password: "valid-password",
+      password,
     });
+  });
+
+  test.each(["a".repeat(73), `${"é".repeat(36)}a`, "🔒".repeat(19)])(
+    "does not rewrite an overlong legacy credential after rejected sign-in: %s", async (password) => {
+      const account = { ...creatorAccount, credential_status: "pending", credential_kind: "legacy_plaintext" };
+      const adminClient = {
+        rpc: jest.fn().mockResolvedValue({ data: account, error: null }),
+        auth: { admin: { updateUserById: jest.fn().mockResolvedValue({ error: null }) } },
+      };
+      const authClient = { auth: { signInWithPassword: jest.fn().mockResolvedValue({
+        data: null, error: { status: 500, code: "unexpected_failure" },
+      }) } };
+      const verifyLegacyPassword = jest.fn().mockResolvedValue(true);
+
+      const result = await authenticateSupabaseAccount({
+        identifier: "creator", password, requiredRoles: ["creator"],
+        adminClient, authClient, verifyLegacyPassword,
+      });
+
+      expect(result.ok).toBe(false);
+      expect(authClient.auth.signInWithPassword).toHaveBeenCalledTimes(1);
+      expect(authClient.auth.signInWithPassword).toHaveBeenCalledWith({ email: account.primary_email, password });
+      expect(verifyLegacyPassword).not.toHaveBeenCalled();
+      expect(adminClient.auth.admin.updateUserById).not.toHaveBeenCalled();
+      expect(adminClient.rpc.mock.calls.map(([name]) => name)).toEqual(["roo_resolve_account_alias"]);
+    }
+  );
+
+  test("retains legacy credential upgrades at the provider byte boundary", async () => {
+    const password = "🔒".repeat(18);
+    const account = { ...creatorAccount, credential_status: "pending", credential_kind: "legacy_plaintext" };
+    const adminClient = {
+      rpc: jest.fn().mockResolvedValue({ data: account, error: null }),
+      auth: { admin: { updateUserById: jest.fn().mockResolvedValue({ error: null }) } },
+    };
+    const authClient = { auth: { signInWithPassword: jest.fn()
+      .mockResolvedValueOnce({ data: null, error: { status: 400 } })
+      .mockResolvedValueOnce({ data: { user: { id: account.user_id }, session: { access_token: "session-token" } }, error: null }) } };
+    const verifyLegacyPassword = jest.fn().mockResolvedValue(true);
+
+    const result = await authenticateSupabaseAccount({
+      identifier: "creator", password, requiredRoles: ["creator"],
+      adminClient, authClient, verifyLegacyPassword,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(verifyLegacyPassword).toHaveBeenCalledWith({ account, password });
+    expect(adminClient.auth.admin.updateUserById).toHaveBeenCalledWith(account.user_id, { password });
+    expect(adminClient.rpc.mock.calls.map(([name]) => name)).toEqual([
+      "roo_resolve_account_alias", "roo_complete_credential_migration",
+    ]);
+    expect(authClient.auth.signInWithPassword).toHaveBeenCalledTimes(2);
   });
 
   test("does not fall through to another role for a scoped login", async () => {

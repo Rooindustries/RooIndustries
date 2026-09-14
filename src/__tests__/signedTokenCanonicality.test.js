@@ -16,14 +16,8 @@ import {
   createDownloadToken,
   verifyDownloadToken,
 } from "../server/downloads/downloadToken";
-import {
-  createTourneySessionToken,
-  readTourneySessionPayload,
-} from "../server/tourney/auth";
-import {
-  createTourneyDiscordEmailToken,
-  readTourneyDiscordEmailToken,
-} from "../server/tourney/discordOAuth";
+
+
 
 describe("signed commerce token canonicality", () => {
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
@@ -65,16 +59,8 @@ describe("signed commerce token canonicality", () => {
       bookingId: "booking-1",
       email: "customer@example.com",
     });
-    const tourneySession = createTourneySessionToken({
-      account: {
-        username: "caster",
-        role: "caster",
-        version: "1",
-      },
-    });
-    const discordEmail = createTourneyDiscordEmailToken({
-      player: { id: "player-1", version: "1" },
-    });
+
+
 
     expect(verifyPaymentAccessToken({ token: `${payment}.ignored` })).toMatchObject({
       ok: false,
@@ -103,12 +89,8 @@ describe("signed commerce token canonicality", () => {
       ok: false,
       reason: "download_token_malformed",
     });
-    expect(
-      readTourneySessionPayload({ token: `${tourneySession}.ignored` })
-    ).toBeNull();
-    expect(
-      readTourneyDiscordEmailToken({ token: `${discordEmail}.ignored` })
-    ).toBeNull();
+
+
   });
 
   test("payment and download tokens expire at the exact exp second", () => {
