@@ -48,6 +48,8 @@ export default function RefRegister() {
       .then((data) => {
         if (data?.authenticated && data?.emailVerified && data.email) {
           setEmail(data.email);
+          setPassword("");
+          setConfirm("");
           setSocialIdentity(data);
         }
       })

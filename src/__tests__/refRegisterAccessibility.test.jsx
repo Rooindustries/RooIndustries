@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 import RefRegister from "../components/RefRegister";
@@ -61,6 +61,42 @@ describe("referral registration accessibility", () => {
       expect(JSON.parse(request[1].body).password).toBe(password);
     });
   });
+
+  test.each(["short", "🔒".repeat(19), "valid-password"])(
+    "discards a typed password when a verified social identity arrives late: %s", async (password) => {
+      let resolveIdentity;
+      const identity = new Promise(resolve => { resolveIdentity = resolve; });
+      global.fetch = jest.fn((url) => {
+        if (url.startsWith("/api/auth/identities")) return identity;
+        return Promise.resolve({
+          ok: true,
+          json: async () => url === "/api/ref/register"
+            ? { ok: true, pendingVerification: true }
+            : { reason: "available" },
+        });
+      });
+      render(<MemoryRouter><RefRegister /></MemoryRouter>);
+      fillRegistration(password);
+      await act(async () => {
+        resolveIdentity({ ok: true, json: async () => ({
+          authenticated: true,
+          emailVerified: true,
+          email: "verified-creator@example.com",
+        }) });
+      });
+      expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Confirm Password")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Register" }));
+      await waitFor(() => {
+        const request = global.fetch.mock.calls.find(([url]) => url === "/api/ref/register");
+        expect(request).toBeDefined();
+        expect(JSON.parse(request[1].body)).toEqual(expect.objectContaining({
+          email: "verified-creator@example.com",
+          password: "",
+        }));
+      });
+    }
+  );
 
   test("announces validation errors immediately", () => {
     render(

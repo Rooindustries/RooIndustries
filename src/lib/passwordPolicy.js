@@ -6,5 +6,5 @@ export const NEW_PASSWORD_REQUIREMENT =
 
 export const isValidNewPassword = (password) =>
   typeof password === "string" &&
-  password.length >= 10 &&
+  Array.from(password).length >= 10 &&
   new TextEncoder().encode(password).byteLength <= 72;

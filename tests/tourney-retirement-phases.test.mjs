@@ -1,6 +1,23 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { completeRetirement } from '../scripts/retire-tourney-people.mjs';
+import { completeRetirement, resolveRetirementSanityToken } from '../scripts/retire-tourney-people.mjs';
+
+test('plan mode can use a read-only token and prefers a configured write token', () => {
+  assert.equal(resolveRetirementSanityToken({ SANITY_READ_TOKEN: 'read-token' }), 'read-token');
+  assert.equal(resolveRetirementSanityToken({ SANITY_WRITE_TOKEN: 'write-token', SANITY_READ_TOKEN: 'read-token' }), 'write-token');
+});
+
+test('apply mode requires a configured write token without falling back to a read token', () => {
+  for (const token of [undefined, '', '  ', '[SENSITIVE]']) {
+    assert.throws(() => resolveRetirementSanityToken({ SANITY_WRITE_TOKEN: token, SANITY_READ_TOKEN: 'read-token' }, true), /SANITY_WRITE_TOKEN/);
+  }
+  assert.equal(resolveRetirementSanityToken({ SANITY_WRITE_TOKEN: ' write-token ', SANITY_READ_TOKEN: 'read-token' }, true), 'write-token');
+});
+
+test('plan mode rejects missing or redacted credentials', () => {
+  assert.throws(() => resolveRetirementSanityToken({}), /private Sanity token/);
+  assert.throws(() => resolveRetirementSanityToken({ SANITY_READ_TOKEN: '[SENSITIVE]' }), /private Sanity token/);
+});
 
 const run = (failAt) => {
   const events = [];

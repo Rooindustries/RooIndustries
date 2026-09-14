@@ -139,7 +139,21 @@ describe("referral password change", () => {
     }
   );
 
-  test.each(["a".repeat(72), "é".repeat(36), "🔒".repeat(18)])(
+  test.each(["🔒".repeat(5), "🔒".repeat(9), `${"🔒".repeat(4)}abcde`])(
+    "rejects fewer than ten code points before consuming reauthentication: %s", async (password) => {
+      const response = createResponse();
+      await handler({ method: "POST", body: { password } }, response);
+      expect(response.statusCode).toBe(400);
+      expect(response.body.error).toContain("at least 10 characters");
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockConsumeReauthGrant).not.toHaveBeenCalled();
+      expect(mockUpdateSupabaseAccountPassword).not.toHaveBeenCalled();
+      expect(mockReconcileSupabaseCredentialSource).not.toHaveBeenCalled();
+      expect(mockPatch).not.toHaveBeenCalled();
+    }
+  );
+
+  test.each(["a".repeat(72), "é".repeat(36), "🔒".repeat(18), "🔒".repeat(10), `${"🔒".repeat(5)}abcde`])(
     "passes an accepted new password to credential installation unchanged: %s", async (password) => {
       const response = createResponse();
       await handler({ method: "POST", body: { password } }, response);

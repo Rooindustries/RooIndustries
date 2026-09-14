@@ -54,6 +54,17 @@ const validateLegacyAccounts = value => {
 const exists = async (sql, relation) => Boolean((await sql`select to_regclass(${relation}) relation`)[0].relation);
 const rows = async (sql, relation) => (await sql`select to_jsonb(t) data from ${sql(relation)} t`).map(r => r.data);
 
+export function resolveRetirementSanityToken(env = {}, apply = false) {
+  const writeToken = String(env.SANITY_WRITE_TOKEN || "").trim();
+  const token = apply ? writeToken : writeToken || String(env.SANITY_READ_TOKEN || "").trim();
+  if (!token || token === "[SENSITIVE]") {
+    throw new Error(apply
+      ? "SANITY_WRITE_TOKEN is required for --apply before backing up or retiring records."
+      : "Configure a real private Sanity token so the legacy staff copy can also be backed up.");
+  }
+  return token;
+}
+
 export async function protectedState(sql) {
   const state = {};
   for (const table of PROTECTED_TABLES) if (await exists(sql, table)) state[table] = rowDigest(await rows(sql, table));
@@ -186,8 +197,7 @@ async function main() {
   if (!(url.hostname === `db.${PROJECT}.supabase.co` || (url.hostname.endsWith(".pooler.supabase.com") && decodeURIComponent(url.username) === `postgres.${PROJECT}`))) {
     throw new Error("The database does not identify the Roo Industries project.");
   }
-  const sanityToken = env.SANITY_WRITE_TOKEN || env.SANITY_READ_TOKEN;
-  if (!sanityToken || sanityToken === "[SENSITIVE]") throw new Error("Configure a real private Sanity token so the legacy staff copy can also be backed up.");
+  const sanityToken = resolveRetirementSanityToken(env, apply);
   if (env.SANITY_PROJECT_ID !== SANITY_PROJECT || env.SANITY_DATASET !== SANITY_DATASET) {
     throw new Error("The legacy store does not identify the Roo Industries production dataset.");
   }

@@ -105,14 +105,14 @@ const createRes = () => ({
   },
 });
 
-const makeReferral = async () => ({
+const makeReferral = async (password = "correct-password") => ({
   _id: "ref_creator_1",
   _rev: "referral-revision-1",
   name: "Creator",
   slug: { current: "creator-code" },
   creatorEmail: "creator@example.com",
   paypalEmail: "payout@example.com",
-  creatorPassword: await bcrypt.hash("correct-password", 4),
+  creatorPassword: await bcrypt.hash(password, 4),
 });
 
 const findReferralByIdentifier = (referral, query, identifier) => {
@@ -428,15 +428,15 @@ describe("referral login API", () => {
     expect(mockInstallLegacySupabaseSession).toHaveBeenCalledTimes(1);
   });
 
-  test("logs in with a referral code", async () => {
-    const referral = await makeReferral();
+  test.each(["correct-password", "🔒".repeat(5)])("logs in with a referral code and existing password: %s", async (password) => {
+    const referral = await makeReferral(password);
     mockFetch.mockImplementation((query, params = {}) =>
       Promise.resolve(findReferralByIdentifier(referral, query, params.identifier))
     );
 
     const req = createReq({
       code: " CREATOR-CODE ",
-      password: "correct-password",
+      password,
       rememberMe: true,
     });
     const res = createRes();
@@ -659,10 +659,10 @@ describe("referral login API", () => {
     expect(res.headers["Set-Cookie"]).toBeUndefined();
   });
 
-  test("preserves a legacy password and upgrades its storage after login", async () => {
+  test.each(["correct-password", "🔒".repeat(5)])("preserves a legacy password and upgrades its storage after login: %s", async (password) => {
     const referral = {
       ...(await makeReferral()),
-      creatorPassword: "correct-password",
+      creatorPassword: password,
       passwordResetRequired: false,
     };
     mockFetch.mockImplementation((query, params = {}) =>
@@ -671,7 +671,7 @@ describe("referral login API", () => {
     const res = createRes();
 
     await login(
-      createReq({ code: "creator-code", password: "correct-password" }),
+      createReq({ code: "creator-code", password }),
       res
     );
 
@@ -686,7 +686,7 @@ describe("referral login API", () => {
     });
     expect(storedUpgrade.passwordStorageUpgradedAt).toEqual(expect.any(String));
     await expect(
-      bcrypt.compare("correct-password", storedUpgrade.creatorPassword)
+      bcrypt.compare(password, storedUpgrade.creatorPassword)
     ).resolves.toBe(true);
     expect(mockPatchCommit).toHaveBeenCalledWith({ visibility: "sync" });
   });
