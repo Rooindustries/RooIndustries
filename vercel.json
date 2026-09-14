@@ -2,37 +2,39 @@
   "framework": "nextjs",
   "functions": {
     "app/api/admin/commerce-readiness/route.js": {
-      "regions": ["dub1"]
+      "regions": [
+        "dub1"
+      ]
     },
     "app/api/bookingAvailability/route.js": {
-      "regions": ["dub1"]
+      "regions": [
+        "dub1"
+      ]
     },
     "app/api/holdSlot/route.js": {
-      "regions": ["dub1"]
+      "regions": [
+        "dub1"
+      ]
     },
     "app/api/releaseHold/route.js": {
-      "regions": ["dub1"]
+      "regions": [
+        "dub1"
+      ]
     },
     "app/api/payment/**/*": {
-      "regions": ["dub1"]
+      "regions": [
+        "dub1"
+      ]
     },
     "app/api/razorpay/**/*": {
-      "regions": ["dub1"]
+      "regions": [
+        "dub1"
+      ]
     },
     "app/api/ref/**/*": {
-      "regions": ["dub1"]
-    },
-    "app/api/tourney/**/*": {
-      "regions": ["dub1"]
-    },
-    "app/api/admin/tourney-*/route.js": {
-      "regions": ["dub1"]
-    },
-    "app/api/supabase/tourney-shadow/route.js": {
-      "regions": ["dub1"]
-    },
-    "app/tourney/**/*": {
-      "regions": ["dub1"]
+      "regions": [
+        "dub1"
+      ]
     }
   },
   "redirects": [

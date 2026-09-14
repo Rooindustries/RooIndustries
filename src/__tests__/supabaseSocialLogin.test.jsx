@@ -18,7 +18,7 @@ jest.mock("../lib/supabaseBrowser", () => ({
 describe("Supabase social login", () => {
   beforeEach(() => {
     process.env.NEXT_PUBLIC_SUPABASE_SOCIAL_AUTH_ENABLED = "1";
-    delete process.env.NEXT_PUBLIC_TOURNEY_PREVIEW_OAUTH_MOCK;
+    delete process.env.NEXT_PUBLIC_PREVIEW_READ_ONLY;
     jest.clearAllMocks();
     mockSignInWithOAuth.mockResolvedValue({ error: null });
     mockLinkIdentity.mockResolvedValue({ error: null });
@@ -40,11 +40,11 @@ describe("Supabase social login", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  test("shows disabled Tourney providers in side-effect-free previews", () => {
+  test("shows disabled providers in read-only previews", () => {
     process.env.NEXT_PUBLIC_SUPABASE_SOCIAL_AUTH_ENABLED = "0";
-    process.env.NEXT_PUBLIC_TOURNEY_PREVIEW_OAUTH_MOCK = "1";
+    process.env.NEXT_PUBLIC_PREVIEW_READ_ONLY = "1";
     render(
-      <SupabaseSocialLogin flow="tourney" nextPath="/tourney" variant="tourney" />
+      <SupabaseSocialLogin flow="referral" nextPath="/referrals/dashboard" />
     );
 
     expect(screen.getByRole("button", { name: "Continue with Google" })).toBeDisabled();
@@ -96,15 +96,15 @@ describe("Supabase social login", () => {
     render(
       <SupabaseSocialLogin
         action="link"
-        flow="tourney"
+        flow="referral"
         linkProof={{
           confirmed: true,
           expiresAt: "2099-01-01T00:00:00.000Z",
         }}
-        nextPath="/tourney"
+        nextPath="/referrals/dashboard"
         onProofConsumed={onProofConsumed}
         providerIds={["discord"]}
-        variant="tourney"
+
       />
     );
     fireEvent.click(screen.getByRole("button", { name: "Link Discord" }));
@@ -114,7 +114,7 @@ describe("Supabase social login", () => {
         options: {
           redirectTo:
             "http://localhost/auth/callback?intent=11111111-1111-4111-8111-111111111111",
-          scopes: "identify email guilds.join",
+          scopes: "identify email",
         },
       });
     });
@@ -187,13 +187,13 @@ describe("Supabase social login", () => {
     expect(mockLinkIdentity).not.toHaveBeenCalled();
   });
 
-  test("requests guild joining only for Tourney Discord OAuth", async () => {
+  test("requests identity scopes without joining a tournament guild", async () => {
     render(
       <SupabaseSocialLogin
-        flow="tourney"
-        nextPath="/tourney"
+        flow="referral"
+        nextPath="/referrals/dashboard"
         providerIds={["discord"]}
-        variant="tourney"
+
       />
     );
     fireEvent.click(screen.getByRole("button", { name: "Continue with Discord" }));
@@ -204,7 +204,7 @@ describe("Supabase social login", () => {
         options: {
           redirectTo:
             "http://localhost/auth/callback?intent=11111111-1111-4111-8111-111111111111",
-          scopes: "identify email guilds.join",
+          scopes: "identify email",
         },
       });
     });
@@ -225,13 +225,13 @@ describe("Supabase social login", () => {
     expect(saveDraft).toHaveBeenCalledTimes(1);
   });
 
-  test("renders the official provider marks in the Tourney treatment", () => {
+  test("renders provider marks with the referral styling", () => {
     const { container } = render(
-      <SupabaseSocialLogin flow="tourney" nextPath="/tourney" variant="tourney" />
+      <SupabaseSocialLogin flow="referral" nextPath="/referrals/dashboard" />
     );
     expect(container.querySelectorAll("svg")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Continue with Google" })).toHaveClass(
-      "cs-social-button"
+      "border-line-input"
     );
   });
 

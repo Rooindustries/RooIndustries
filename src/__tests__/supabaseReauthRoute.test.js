@@ -113,7 +113,7 @@ describe("Supabase reauthentication route", () => {
   test("verifies the real Auth login while binding the grant to the active session", async () => {
     const response = await POST(
       makeRequest({
-        flow: "tourney",
+        flow: "referral",
         password: "current-password",
         purpose: "link_identity",
         slot: "primary",

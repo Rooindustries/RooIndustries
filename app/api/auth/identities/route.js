@@ -19,13 +19,13 @@ import {
   createNextSupabaseSessionClient,
   getNextSupabaseUser,
 } from "../../../../src/server/supabase/serverSession";
-import { queueTourneyDiscordIdentityUnlinkProjection } from "../../../../src/server/tourney/discordDesiredState";
-import { isSupabaseTourneyDatabase } from "../../../../src/server/tourney/sqlClient";
+
+
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const allowedFlows = new Set(["referral", "tourney"]);
+const allowedFlows = new Set(["referral"]);
 const allProviders = new Set(["google", "discord"]);
 
 const noStore = (response) => {
@@ -41,17 +41,7 @@ const jsonFrom = (source, payload, status = 200) => {
   return noStore(response);
 };
 
-const hasFlowRole = (account, flow) => {
-  if (!account || account.status !== "active") return false;
-  if (flow === "referral") {
-    return (account.roles || []).includes("creator") && account.creator_active !== false;
-  }
-  return Boolean(
-    account.tourney_username &&
-      account.tourney_role &&
-      account.tourney_active !== false
-  );
-};
+const hasFlowRole = (account) => Boolean(account && account.status === "active" && (account.roles || []).includes("creator") && account.creator_active !== false);
 
 export async function GET(request) {
   const flow = String(new URL(request.url).searchParams.get("flow") || "")
@@ -179,55 +169,23 @@ export async function POST(request) {
     }
     const tokenHash = hashReauthToken(reauthToken);
     const admin = createSupabaseAdminClient();
-    const referralOnly = flow === "referral" && !hasFlowRole(account, "tourney");
-    if (!referralOnly && !isSupabaseTourneyDatabase(process.env)) {
-      return jsonFrom(response, {
-        ok: false,
-        error: "Connected-account changes are temporarily unavailable during Tournament fallback.",
-      }, 503);
-    }
-    if (referralOnly) {
-      const consumed = await admin.rpc("roo_consume_reauth_grant", {
-        p_token_hash: tokenHash,
-        p_user_id: user.id,
-        p_purpose: "unlink_identity",
-        p_provider: provider,
-      });
-      response.cookies.set(clearReauthCookie());
-      if (consumed.error) {
-        return jsonFrom(response, { ok: false, error: "Reauthentication expired. Confirm your identity again.", reauthRequired: true }, 409);
-      }
-      if (identity) {
-        const unlinked = await client.auth.unlinkIdentity(identity);
-        if (unlinked.error) throw unlinked.error;
-      }
-    }
-    if (referralOnly) {
-      const reconciled = await admin.rpc("roo_reconcile_auth_identity_links", {
-        p_user_id: user.id,
-      });
-      if (reconciled.error) throw reconciled.error;
-      return jsonFrom(response, { ok: true, provider });
-    }
-    const sessionExpiresAt = new Date(Number(session.expires_at || 0) * 1000);
-    if (!Number.isFinite(sessionExpiresAt.getTime()) || sessionExpiresAt <= new Date()) {
-      return jsonFrom(response, { ok: false, error: "Sign in again before unlinking an account." }, 401);
-    }
-    const command = await queueTourneyDiscordIdentityUnlinkProjection({
-      accessToken: session.access_token,
-      commandId: `identity-unlink:${provider}:${user.id}:${tokenHash.slice(0, 24)}`,
-      expiresAt: sessionExpiresAt.toISOString(),
-      identityId: identity?.identity_id || identity?.id || "already-unlinked",
-      provider,
-      reauthTokenHash: tokenHash,
-      userId: user.id,
+    const consumed = await admin.rpc("roo_consume_reauth_grant", {
+      p_token_hash: tokenHash,
+      p_user_id: user.id,
+      p_purpose: "unlink_identity",
+      p_provider: provider,
     });
     response.cookies.set(clearReauthCookie());
-    return jsonFrom(response, {
-      ok: true,
-      provider,
-      ...(command.syncPending ? { syncPending: true } : {}),
-    });
+    if (consumed.error) {
+      return jsonFrom(response, { ok: false, error: "Reauthentication expired. Confirm your identity again.", reauthRequired: true }, 409);
+    }
+    if (identity) {
+      const unlinked = await client.auth.unlinkIdentity(identity);
+      if (unlinked.error) throw unlinked.error;
+    }
+    const reconciled = await admin.rpc("roo_reconcile_auth_identity_links", { p_user_id: user.id });
+    if (reconciled.error) throw reconciled.error;
+    return jsonFrom(response, { ok: true, provider });
   } catch (error) {
     if (String(error?.code || "") === "42501") {
       return jsonFrom(response, {

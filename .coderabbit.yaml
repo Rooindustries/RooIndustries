@@ -1,2 +1,6 @@
 reviews:
   request_changes_workflow: true
+  auto_review:
+    base_branches:
+      - "^servi/archive-tourney-results$"
+      - "^servi/retire-tourney-api$"
