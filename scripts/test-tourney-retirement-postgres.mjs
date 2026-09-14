@@ -3,8 +3,10 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import postgres from "postgres";
-import { applySqlRetirement, protectedState } from "./retire-tourney-people.mjs";
+import { applySqlRetirement, protectedState, readDatabaseRowJson, writeVerifiedBackup } from "./retire-tourney-people.mjs";
 
 const migrationUrl = new URL(
   "../supabase/migrations/20260914010000_preserve_retired_tourney_identity_domains.sql",
@@ -278,6 +280,67 @@ async function rolledBackCase(sql, migration, name, callback) {
   console.log(`PASS ${name} (rolled back)`);
 }
 
+async function proveProtectedPrecision(sql) {
+  const account = await createAccount(sql, { creator: true });
+  const token = newId();
+  await sql`insert into auth.refresh_tokens (id,token,user_id,revoked,created_at,updated_at)
+    values ('-9007199254740992'::bigint,${token},${account.id},false,now(),now())`;
+  const before = await protectedState(sql);
+  assert.deepEqual(await protectedState(sql), before);
+  const exactBefore = await tableDigest(sql, "auth.refresh_tokens");
+  const [otherBefore] = await sql`select (to_jsonb(t)-'id')::text data from auth.refresh_tokens t where token=${token}`;
+  await sql`update auth.refresh_tokens set id='-9007199254740993'::bigint where token=${token}`;
+  const [otherAfter] = await sql`select (to_jsonb(t)-'id')::text data from auth.refresh_tokens t where token=${token}`;
+  assert.equal(otherAfter.data, otherBefore.data, "Only the large integer must change.");
+  assert.notEqual(await tableDigest(sql, "auth.refresh_tokens"), exactBefore);
+  assert.notEqual((await protectedState(sql))["auth.refresh_tokens"], before["auth.refresh_tokens"],
+    "The protection guard missed a one-unit change outside JavaScript's safe integer range.");
+  const changedAliases = await sql`update accounts.login_aliases set verified=false
+    where principal_id=${account.principal} and alias_type='email'`;
+  assert.equal(changedAliases.count, 1);
+  assert.notEqual((await protectedState(sql))["accounts.login_aliases"], before["accounts.login_aliases"],
+    "The filtered protection guard missed a changed login alias.");
+}
+
+async function proveBackupPrecision(sql) {
+  const account = await createAccount(sql);
+  const token = newId();
+  await sql`insert into auth.refresh_tokens (id,token,user_id,revoked,created_at,updated_at)
+    values ('-9007199254740993'::bigint,${token},${account.id},false,now(),now())`;
+  await sql`update auth.users set raw_user_meta_data=jsonb_build_object(
+    'large',9007199254740993::bigint,'precise',0.123456789012345678901234567891::numeric,
+    'nested',jsonb_build_array(9007199254740995::bigint,null,${'quote " and slash \\ and newline\n'}::text)
+  ) where id=${account.id}`;
+  const [expected] = await sql`select raw_user_meta_data::text data from auth.users where id=${account.id}`;
+  const tables = {
+    "auth.users": await readDatabaseRowJson(sql, "auth.users"),
+    "auth.refresh_tokens": await readDatabaseRowJson(sql, "auth.refresh_tokens"),
+    empty: [],
+  };
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "roo-retirement-precision-"));
+  try {
+    const manifest = await writeVerifiedBackup(directory, { version: 1, project: "local-fixture", legacyDocuments: [], tables });
+    const bytes = await fs.readFile(manifest.file);
+    assert.equal(manifest.sha256, digest(bytes));
+    assert.equal((await fs.stat(manifest.file)).mode & 0o777, 0o600);
+    assert.equal((await fs.stat(directory)).mode & 0o777, 0o700);
+    assert.equal(manifest.counts.empty, 0);
+    assert.equal(manifest.counts["auth.users"], tables["auth.users"].length);
+    const payload = bytes.toString("utf8");
+    const [backedToken] = await sql`select entry->>'id' id,jsonb_typeof(entry) kind
+      from jsonb_array_elements(${payload}::text::jsonb->'tables'->'auth.refresh_tokens') entry
+      where entry->>'token'=${token}`;
+    assert.equal(backedToken?.kind, "object", "Backups must retain object rows, not encoded row strings.");
+    assert.equal(backedToken.id, "-9007199254740993", "The backup rounded a PostgreSQL bigint.");
+    const [backedUser] = await sql`select (entry->'raw_user_meta_data')::text data
+      from jsonb_array_elements(${payload}::text::jsonb->'tables'->'auth.users') entry
+      where entry->>'id'=${account.id}`;
+    assert.equal(backedUser.data, expected.data, "The backup changed nested numbers or escaped text.");
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+}
+
 async function main() {
   const url = localDatabaseUrl(String(process.env.SUPABASE_TEST_DATABASE_URL || "").trim());
   const migration = await fs.readFile(migrationUrl, "utf8");
@@ -285,6 +348,8 @@ async function main() {
   try {
     const dataBefore = await retirementState(sql);
     const schemaBefore = await migrationState(sql);
+    await rolledBackCase(sql, migration, "protected row digests retain bigint precision", proveProtectedPrecision);
+    await rolledBackCase(sql, migration, "backup JSON preserves PostgreSQL numeric values", proveBackupPrecision);
     await rolledBackCase(sql, migration, "retirement preserves account and social identity ownership", proveRetirement);
     for (const [kind, statuses] of [
       ["external", ["pending", "processing", "retry", "dead_letter"]],
@@ -298,7 +363,7 @@ async function main() {
     }
     assert.deepEqual(await retirementState(sql), dataBefore, "A fixture persisted changes after rollback.");
     assert.equal(await migrationState(sql), schemaBefore, "The test migration persisted after rollback.");
-    console.log("PASS all 10 PostgreSQL retirement cases; database rows and migration definitions unchanged.");
+    console.log("PASS all 12 PostgreSQL retirement cases; database rows and migration definitions unchanged.");
   } finally {
     await sql.end();
   }

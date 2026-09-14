@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import postgres from "postgres";
@@ -36,11 +37,8 @@ const PROTECTED_TABLES = [
   "commerce.refunds", "commerce.coupons", "commerce.coupon_redemptions",
   "commerce.referral_ledger", "commerce.slot_claims", "commerce.slot_holds",
 ];
-const stable = value => Array.isArray(value) ? `[${value.map(stable).join(",")}]`
-  : value && typeof value === "object" ? `{${Object.keys(value).sort().map(k => `${JSON.stringify(k)}:${stable(value[k])}`).join(",")}}`
-    : JSON.stringify(value);
 const digest = value => crypto.createHash("sha256").update(value).digest("hex");
-const rowDigest = rows => digest(rows.map(stable).sort().join("\n"));
+const rowDigest = rows => digest(rows.sort().join("\n"));
 const validateLegacyAccounts = value => {
   const parsed = typeof value === "string" ? JSON.parse(value) : value;
   const rows = Array.isArray(parsed) ? parsed : parsed?.accounts;
@@ -51,7 +49,7 @@ const validateLegacyAccounts = value => {
   return rows;
 };
 const exists = async (sql, relation) => Boolean((await sql`select to_regclass(${relation}) relation`)[0].relation);
-const rows = async (sql, relation) => (await sql`select to_jsonb(t) data from ${sql(relation)} t`).map(r => r.data);
+export const readDatabaseRowJson = async (sql, relation) => (await sql`select to_jsonb(t)::text data from ${sql(relation)} t`).map(r => r.data);
 
 export function resolveRetirementSanityToken(env = {}, apply = false) {
   const writeToken = String(env.SANITY_WRITE_TOKEN || "").trim();
@@ -66,13 +64,13 @@ export function resolveRetirementSanityToken(env = {}, apply = false) {
 
 export async function protectedState(sql) {
   const state = {};
-  for (const table of PROTECTED_TABLES) if (await exists(sql, table)) state[table] = rowDigest(await rows(sql, table));
+  for (const table of PROTECTED_TABLES) if (await exists(sql, table)) state[table] = rowDigest(await readDatabaseRowJson(sql, table));
   for (const [table, column, prefix] of [
     ["accounts.account_roles", "role", "tourney_%"],
     ["accounts.login_aliases", "alias_type", "tourney_%"],
     ["accounts.oauth_intents", "flow", "tourney"],
   ]) if (await exists(sql, table)) {
-    const result = await sql`select to_jsonb(t) data from ${sql(table)} t where ${sql(column)} not like ${prefix}`;
+    const result = await sql`select to_jsonb(t)::text data from ${sql(table)} t where ${sql(column)} not like ${prefix}`;
     state[table] = rowDigest(result.map(r => r.data));
   }
   return state;
@@ -123,7 +121,7 @@ export async function applySqlRetirement(sql) {
   }
   await sql`update tourney.cutover_metadata set writes_paused=true,generation=generation+1,updated_at=now(),updated_by='retirement' where id='tourney'`;
   const after = await protectedState(sql);
-  if (stable(before) !== stable(after)) throw new Error("Protected Auth, creator, or commerce records changed; the transaction must roll back.");
+  if (!isDeepStrictEqual(before, after)) throw new Error("Protected Auth, creator, or commerce records changed; the transaction must roll back.");
   return { tournamentAccountsRemoved: accounts.length, protectedRecordsUnchanged: true };
 }
 
@@ -156,7 +154,7 @@ export async function completeRetirement({ commitSql, commitLegacy, recordPhase 
   }
 }
 
-async function writeVerifiedBackup(directory, snapshot) {
+export async function writeVerifiedBackup(directory, snapshot) {
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   directory = await fs.realpath(directory);
   try {
@@ -165,13 +163,25 @@ async function writeVerifiedBackup(directory, snapshot) {
   } catch (error) { if (!Number.isInteger(error.status)) throw error; }
   await fs.chmod(directory, 0o700);
   const file = path.join(directory, "tournament-private-backup.json");
-  const bytes = Buffer.from(JSON.stringify(snapshot));
+  const { tables, ...metadata } = snapshot;
+  const metadataJson = JSON.stringify(metadata).slice(1, -1);
+  const tablesJson = Object.entries(tables)
+    .map(([table, data]) => `${JSON.stringify(table)}:[${data.join(",")}]`).join(",");
+  const bytes = Buffer.from(`{${metadataJson ? metadataJson + "," : ""}"tables":{${tablesJson}}}`);
   const handle = await fs.open(file, "wx", 0o600);
   try { await handle.writeFile(bytes); await handle.sync(); } finally { await handle.close(); }
   const verified = await fs.readFile(file);
   if (digest(verified) !== digest(bytes)) throw new Error("Backup readback failed; no records may be deleted.");
+  const readback = JSON.parse(verified.toString("utf8"));
+  for (const [table, data] of Object.entries(tables)) {
+    const restored = readback.tables[table];
+    if (!Array.isArray(restored) || restored.length !== data.length ||
+      restored.some(row => !row || typeof row !== "object" || Array.isArray(row))) {
+      throw new Error("Backup contains invalid database rows; no records may be deleted.");
+    }
+  }
   const manifest = { file, bytes: bytes.length, sha256: digest(bytes), verifiedReadback: true,
-    counts: Object.fromEntries(Object.entries(snapshot.tables).map(([table, data]) => [table, data.length])) };
+    counts: Object.fromEntries(Object.entries(tables).map(([table, data]) => [table, data.length])) };
   await writeDurableJson(path.join(directory, "manifest.json"), manifest);
   await syncDirectory(path.dirname(directory));
   return manifest;
@@ -215,9 +225,9 @@ async function main() {
       }
       const snapshot = { version: 1, project: PROJECT, sanityProject: SANITY_PROJECT, sanityDataset: SANITY_DATASET, createdAt: new Date().toISOString(), legacyDocuments, tables: {}, protected: await protectedState(tx) };
       const inventory = await tx`select table_schema,table_name from information_schema.tables where table_type='BASE TABLE' and (table_schema='tourney' or (table_schema='migration' and table_name like 'tourney_%')) order by 1,2`;
-      for (const { table_schema, table_name } of inventory) snapshot.tables[`${table_schema}.${table_name}`] = await rows(tx, `${table_schema}.${table_name}`);
-      for (const table of ["accounts.tourney_accounts", "accounts.account_roles", "accounts.login_aliases", "accounts.discord_role_assignments", "accounts.oauth_intents"]) snapshot.tables[table] = await rows(tx, table);
-      const sourceCopies = await tx`select to_jsonb(t) data from migration.source_documents t where payload->>'_type'='tourneyAuthStore'`;
+      for (const { table_schema, table_name } of inventory) snapshot.tables[`${table_schema}.${table_name}`] = await readDatabaseRowJson(tx, `${table_schema}.${table_name}`);
+      for (const table of ["accounts.tourney_accounts", "accounts.account_roles", "accounts.login_aliases", "accounts.discord_role_assignments", "accounts.oauth_intents"]) snapshot.tables[table] = await readDatabaseRowJson(tx, table);
+      const sourceCopies = await tx`select to_jsonb(t)::text data from migration.source_documents t where payload->>'_type'='tourneyAuthStore'`;
       snapshot.tables["migration.source_documents:tourneyAuthStore"] = sourceCopies.map(r => r.data);
       const manifest = await writeVerifiedBackup(directory, snapshot);
       console.log(JSON.stringify({ mode: apply ? "apply" : "plan", backup: manifest, legacyStaffDocuments: legacyDocuments.length }, null, 2));
